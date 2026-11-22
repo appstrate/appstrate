@@ -254,7 +254,7 @@ export async function ensureSession(
       .returning({
         orgId: chatSessions.orgId,
         userId: chatSessions.userId,
-        skillMode: chatSessions.skillMode,
+        skillDiscovery: chatSessions.skillDiscovery,
         pinnedSkills: chatSessions.pinnedSkills,
         spaceId: chatSessions.spaceId,
         restricted: chatSessions.restricted,
@@ -277,7 +277,7 @@ export async function ensureSession(
     throw notFound("Chat session not found");
   }
   return {
-    selection: { skillMode: row.skillMode, pinnedSkills: row.pinnedSkills },
+    selection: { skillDiscovery: row.skillDiscovery, pinnedSkills: row.pinnedSkills },
     spaceId: row.spaceId,
     restricted: row.restricted,
   };

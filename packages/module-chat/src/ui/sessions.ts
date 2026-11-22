@@ -15,7 +15,6 @@ import {
 } from "@tanstack/react-query";
 import type { UIMessage } from "ai";
 import type { TokenUsage } from "@appstrate/core/token-usage";
-import type { ChatSkillMode } from "@appstrate/db/schema";
 import type { ChatSkillSelection } from "../skills.ts";
 import { errorStatus, jsonInit, type ChatTransport } from "./runtime-context.ts";
 import { chatPath } from "./chat-route.ts";
@@ -236,18 +235,19 @@ export async function loadHistory(
     if (errorStatus(error) === 404) return null;
     throw error;
   }
-  const { messages, skill_mode, pinned_skills, ...row } = (await res.json()) as SessionSummary & {
-    messages?: StoredMessage[];
-    skill_mode: ChatSkillMode;
-    pinned_skills: string[];
-    createdAt: string;
-    usage: TokenUsage;
-  };
+  const { messages, skill_discovery, pinned_skills, ...row } =
+    (await res.json()) as SessionSummary & {
+      messages?: StoredMessage[];
+      skill_discovery: boolean;
+      pinned_skills: string[];
+      createdAt: string;
+      usage: TokenUsage;
+    };
   return {
     ...row,
     // Row `id` LAST: a stray `id` inside a stored `content` must not win.
     messages: (messages ?? []).map((e) => ({ ...e.content, id: e.id }) as UIMessage),
-    skills: { skillMode: skill_mode, pinnedSkills: pinned_skills },
+    skills: { skillDiscovery: skill_discovery, pinnedSkills: pinned_skills },
   };
 }
 

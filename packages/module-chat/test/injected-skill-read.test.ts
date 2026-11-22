@@ -4,8 +4,8 @@
  * A chosen skill injected by a real caller-context build — listed and read
  * over a real MCP connection without claim — is readable through the real
  * `resources/read` with the bearer minted from that build's claim, no
- * hand-built claim. A strict turn holds no `skills:*`, so only the claim can
- * open the read.
+ * hand-built claim. A turn without discovery holds no `skills:*`, so only the
+ * claim can open the read.
  */
 
 import { beforeEach, describe, expect, it } from "bun:test";
@@ -60,13 +60,13 @@ beforeEach(async () => {
   expect(created.status).toBe(201);
 });
 
-/** A strict turn by `user`: the real block, then its bearer. */
-async function strictTurn(
+/** A turn without discovery by `user`: the real block, then its bearer. */
+async function discoveryOffTurn(
   user: { id: string; email: string; name: string },
   granted: string[],
   orgRole: "owner" | "guest",
 ) {
-  const permissions = turnPermissions(granted, { authoring: true, skillMode: "strict" });
+  const permissions = turnPermissions(granted, { authoring: true, skillDiscovery: false });
   const block = await buildCallerContextBlock(
     { get: (key: string) => ({ orgRole })[key as "orgRole"] } as never,
     {
@@ -82,7 +82,7 @@ async function strictTurn(
       user,
       capabilities: turnCapabilities((p) => permissions.includes(p), []),
       permissions,
-      skills: { skillMode: "strict", pinnedSkills: [SKILL_ID] },
+      skills: { skillDiscovery: false, pinnedSkills: [SKILL_ID] },
       // The caller's own permissions, no claim: what `chat-stream.ts` opens.
       openSkillsClient: () =>
         connectPlatformMcp({
@@ -149,9 +149,9 @@ async function readResource(headers: Record<string, string>, uri: string) {
   return { text: contents?.[0]?.text, error: envelope.error };
 }
 
-describe("a chosen skill injected in a strict turn, read back through `resources/read`", () => {
+describe("a chosen skill injected in a turn without discovery, read back through `resources/read`", () => {
   it("serves the author's injected draft, then 409s once the draft is edited", async () => {
-    const { block, permissions, bearer, unclaimed } = await strictTurn(
+    const { block, permissions, bearer, unclaimed } = await discoveryOffTurn(
       owner.user,
       ["chat:read", "chat:write", "mcp:read", "mcp:invoke", "skills:read", "skills:write"],
       "owner",
@@ -200,7 +200,7 @@ describe("a chosen skill injected in a strict turn, read back through `resources
       customRoleId: role.id,
     });
     const reader = { id: user.id, email: user.email, name: user.name };
-    const { block, bearer, unclaimed } = await strictTurn(reader, granted, "guest");
+    const { block, bearer, unclaimed } = await discoveryOffTurn(reader, granted, "guest");
     const uri = `skill://${owner.defaultSpaceId}/injectedread/tone/tone/SKILL.md`;
     expect(block.text).toContain(`<skill id="${SKILL_ID}" uri="${uri}" version="1.3.0">`);
     expect(block.injected.skills[SKILL_ID]).toEqual({
@@ -231,7 +231,7 @@ describe("one skill, the same bytes for the chat, an MCP client and `code sync`"
     });
     const headers = authHeaders({ ...owner, cookie: user.cookie });
     const reader = { id: user.id, email: user.email, name: user.name };
-    const { block, bearer } = await strictTurn(reader, granted, "guest");
+    const { block, bearer } = await discoveryOffTurn(reader, granted, "guest");
     const uri = injectedUri(block.text);
 
     // An MCP client: the entry, then every file it lists.
@@ -276,17 +276,17 @@ describe("one skill, the same bytes for the chat, an MCP client and `code sync`"
   });
 });
 
-describe("`list_skills` then `read_resource` in a manual turn, over the turn's own bearer", () => {
+describe("`read_resource` in a discovery turn, over the turn's own bearer", () => {
   type Tool = {
     name: string;
     execute: (id: string, params: unknown) => Promise<{ content: Array<{ text: string }> }>;
   };
 
-  /** The Pi tools of a manual turn by the owner, its bearer minted from the turn's set. */
-  async function manualTurn(authoring: boolean) {
+  /** The Pi tools of a discovery turn by the owner, its bearer minted from the turn's set. */
+  async function discoveryTurn(authoring: boolean) {
     const permissions = turnPermissions(
       ["chat:read", "chat:write", "mcp:read", "mcp:invoke", "skills:read", "skills:write"],
-      { authoring, skillMode: "manual" },
+      { authoring, skillDiscovery: true },
     );
     const turn = await buildPlatformMcpTools({
       url: platformMcpUrl("http://localhost", owner.orgId),
@@ -311,52 +311,38 @@ describe("`list_skills` then `read_resource` in a manual turn, over the turn's o
       turnBudget: { deadlineAt: Date.now() + 60_000, stepCount: () => 0 },
       fetch: ((input: RequestInfo | URL, init?: RequestInit) =>
         app.request(new Request(input, init))) as typeof fetch,
-      listsSkills: true,
     });
     const tools: Tool[] = [];
     const pi = { registerTool: (tool: Tool) => tools.push(tool) } as unknown as ExtensionAPI;
     for (const factory of turn.extensionFactories) factory(pi);
-    const tool = (name: string) => tools.find((t) => t.name === name)!;
     const call = async (name: string, params: unknown) =>
-      (await tool(name).execute("call", params)).content[0]!.text;
-    return { turn, call };
+      (await tools.find((t) => t.name === name)!.execute("call", params)).content[0]!.text;
+    return { turn, tools, call };
   }
 
-  it("lists the published skill and reads it at the listed URI", async () => {
+  it("reads the published skill at its URI", async () => {
     await seedPublishedVersion(SKILL_ID, "1.3.0", { content: skillMd("Published body.") });
-    const { turn, call } = await manualTurn(true);
+    const { turn, tools, call } = await discoveryTurn(true);
     try {
-      const listed = JSON.parse(await call("list_skills", {})) as Array<{
-        id: string;
-        uri: string;
-        version: string | null;
-      }>;
+      expect(tools.map((t) => t.name)).toContain("read_resource");
       const uri = `skill://${owner.defaultSpaceId}/injectedread/tone/tone/SKILL.md`;
-      expect(listed).toEqual([{ id: SKILL_ID, description: "Tone.", version: "1.3.0", uri }]);
       expect(await call("read_resource", { uri })).toContain("Published body.");
     } finally {
       await turn.close();
     }
   });
 
-  it("lists a draft only to a turn that may read it", async () => {
+  it("reads a draft only for a turn that may read it", async () => {
     const draftUri = `skill://${owner.defaultSpaceId}/injectedread/tone@draft/tone/SKILL.md`;
-    const authoring = await manualTurn(true);
+    const authoring = await discoveryTurn(true);
     try {
-      const drafts = JSON.parse(
-        await authoring.call("list_skills", { definition: "draft" }),
-      ) as Array<{
-        uri: string;
-      }>;
-      expect(drafts.map((d) => d.uri)).toEqual([draftUri]);
       expect(await authoring.call("read_resource", { uri: draftUri })).toContain("Draft body.");
     } finally {
       await authoring.turn.close();
     }
-    // Authoring off: the turn holds no package write, so it neither lists nor reads the draft.
-    const reading = await manualTurn(false);
+    // Authoring off: the turn holds no package write, so it cannot read the draft.
+    const reading = await discoveryTurn(false);
     try {
-      expect(JSON.parse(await reading.call("list_skills", { definition: "draft" }))).toEqual([]);
       const refused = await reading.call("read_resource", { uri: draftUri }).then(
         () => undefined,
         (e: unknown) => e,

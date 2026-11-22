@@ -133,7 +133,7 @@ describe("a conversation's seed", () => {
   const history: SessionHistory = {
     ...row("chs_1"),
     messages: [],
-    skills: { skillMode: "manual", pinnedSkills: ["@acme/tone"] },
+    skills: { skillDiscovery: true, pinnedSkills: ["@acme/tone"] },
     createdAt: "",
   };
 

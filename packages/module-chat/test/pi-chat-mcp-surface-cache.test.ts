@@ -229,7 +229,6 @@ function buildTurn(
   surface: string,
   surfaceKey: string | undefined,
   signal = new AbortController().signal,
-  listsSkills = false,
   pdfInput?: ReturnType<typeof createTurnPdfInput>,
   fileDelivery: FileDelivery = { image: true, pdf: true },
 ) {
@@ -243,7 +242,6 @@ function buildTurn(
     turnBudget: { deadlineAt: Date.now() + 10 * 60_000, stepCount: () => 0 },
     fetch: stub.fetch,
     ...(surfaceKey !== undefined ? { surfaceKey } : {}),
-    listsSkills,
     fileDelivery,
     pdfInput,
   });
@@ -645,7 +643,7 @@ describe("inline images from remote integration tools", () => {
   ] as const) {
     it(`explains a skipped image for ${name}`, async () => {
       const stub = mcpStub([block]);
-      const turn = await buildTurn(stub, "file-reader", undefined, undefined, false, undefined, {
+      const turn = await buildTurn(stub, "file-reader", undefined, undefined, undefined, {
         image: seesImages,
         pdf: seesImages,
       });
@@ -668,7 +666,7 @@ describe("temporary connector files", () => {
   it("hands the PDF to the current tool call, streams a receipt, and ignores relayed resource blocks", async () => {
     const pdf = createTurnPdfInput({ api: "openai-responses" }, { image: true, pdf: true });
     const added: string[] = [];
-    const turn = await buildTurn(mcpStub(), "file-reader", undefined, undefined, false, {
+    const turn = await buildTurn(mcpStub(), "file-reader", undefined, undefined, {
       ...pdf,
       add(file, id) {
         expect(file.data).toBe(btoa("%PDF-example"));
@@ -813,57 +811,6 @@ describe("read_resource", () => {
       );
       expect(String(invalid)).toContain("`uri` must be a non-empty string");
       expect(stub.count("resources/read")).toBe(before);
-    } finally {
-      await turn.close();
-    }
-  });
-});
-
-describe("list_skills", () => {
-  it("is registered only on a turn that lists skills", async () => {
-    const stub = mcpStub();
-    const plain = await buildTurn(stub, "alpha", undefined);
-    const listing = await buildTurn(stub, "alpha", undefined, undefined, true);
-    try {
-      const names = (turn: typeof plain) => register(turn.extensionFactories).map((t) => t.name);
-      expect(names(plain)).not.toContain("list_skills");
-      expect(names(listing)).toContain("list_skills");
-    } finally {
-      await plain.close();
-      await listing.close();
-    }
-  });
-
-  it("relays `skills/list` as each skill's id, description, version and uri, drafts on request", async () => {
-    const stub = mcpStub();
-    const turn = await buildTurn(stub, "alpha", undefined, undefined, true);
-    try {
-      const list = register(turn.extensionFactories).find((t) => t.name === "list_skills")!;
-      const published = await list.execute("call_1", {});
-      expect(JSON.parse(published.content[0]!.text)).toEqual([
-        {
-          id: "@acme/tone",
-          description: "Tone.",
-          version: "1.2.0",
-          uri: "skill://spc_1/acme/tone/tone/SKILL.md",
-        },
-      ]);
-      const drafts = await list.execute("call_2", { definition: "draft" });
-      expect(JSON.parse(drafts.content[0]!.text)).toEqual([
-        {
-          id: "@acme/tone",
-          description: "Tone.",
-          version: null,
-          uri: "skill://spc_1/acme/tone@draft/tone/SKILL.md",
-        },
-      ]);
-      expect(stub.count("skills/list")).toBe(2);
-      const invalid = await list.execute("call_3", { definition: "latest" }).then(
-        () => undefined,
-        (e: unknown) => e,
-      );
-      expect(String(invalid)).toContain('`definition` must be "published" or "draft"');
-      expect(stub.count("skills/list")).toBe(2);
     } finally {
       await turn.close();
     }

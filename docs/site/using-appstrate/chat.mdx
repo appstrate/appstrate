@@ -46,15 +46,10 @@ By default, a one-off agent the assistant composes runs on the organization's de
 
 ### Skills
 
-[Skills](/features/skills) give the assistant instructions for a domain. Each conversation has a skill mode, chosen in the composer:
+[Skills](/features/skills) give the assistant instructions for a domain. Each conversation has two skill settings, in the composer's skills panel:
 
-| Mode                | Behaviour                                                                      |
-| ------------------- | ------------------------------------------------------------------------------ |
-| Automatic (default) | The assistant sees the available skills and loads the ones that fit            |
-| Manual              | The skills you chose are loaded in full, and it can look for others if you ask |
-| Strict              | Only the skills you chose. It can neither list nor load any other              |
-
-Manual and strict take at most 5 skills, sharing a budget of 64,000 characters.
+- **Chosen skills**: tick the skills you want. Each one is loaded in full on every turn. You can choose at most 5, sharing a budget of 64,000 characters.
+- **Automatic discovery** (on by default): the assistant sees the other skills of the spaces the conversation can act in, one line each, and loads the one that fits. The skills you chose are not listed again. When it is off, the assistant has no access to any other skill: it cannot list, load, declare or write one, whatever your role. The skills you chose still apply.
 
 ## For administrators
 

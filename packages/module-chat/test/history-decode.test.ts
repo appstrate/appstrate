@@ -11,7 +11,7 @@ describe("loadHistory decode", () => {
     const request = requestAnswering(
       json({
         id: "chs_1",
-        skill_mode: "auto",
+        skill_discovery: true,
         pinned_skills: [],
         messages: [
           { id: "m1", content: { role: "user", parts: [{ type: "text", text: "hi" }] } },
@@ -32,14 +32,14 @@ describe("loadHistory decode", () => {
       json({
         id: "chs_1",
         messages: [],
-        skill_mode: "manual",
+        skill_discovery: false,
         pinned_skills: ["@scope/a", "@scope/b"],
       }),
     );
 
     const loaded = await loadHistory(transportOver(request), "chs_1");
     expect(loaded?.skills).toEqual({
-      skillMode: "manual",
+      skillDiscovery: false,
       pinnedSkills: ["@scope/a", "@scope/b"],
     });
   });

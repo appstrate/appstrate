@@ -22,16 +22,16 @@ const resolve = (selection: ChatSkillSelection, contents: SkillContent[] = []) =
   resolveChatSkills(selection, new Map(contents.map((skill) => [skill.packageId, skill])));
 
 describe("resolveChatSkills", () => {
-  it("auto: injects nothing and notices nothing — the chosen skills are kept but unused", () => {
-    expect(resolve({ skillMode: "auto", pinnedSkills: ["@a/one"] }, [content("@a/one")])).toEqual({
+  it("injects nothing when no skill is pinned", () => {
+    expect(resolve({ skillDiscovery: true, pinnedSkills: [] })).toEqual({
       chosen: [],
       notices: [],
     });
   });
 
-  for (const skillMode of ["manual", "strict"] as const) {
-    it(`${skillMode}: injects the chosen skills in their stored order`, () => {
-      const result = resolve({ skillMode, pinnedSkills: ["@a/first", "@z/last"] }, [
+  for (const skillDiscovery of [true, false]) {
+    it(`discovery ${skillDiscovery ? "on" : "off"}: injects the pinned skills in their stored order`, () => {
+      const result = resolve({ skillDiscovery, pinnedSkills: ["@a/first", "@z/last"] }, [
         content("@z/last"),
         content("@a/first"),
       ]);
@@ -41,7 +41,7 @@ describe("resolveChatSkills", () => {
   }
 
   it("notices a chosen skill that is not active here or could not be read", () => {
-    const result = resolve({ skillMode: "manual", pinnedSkills: ["@a/gone", "@z/gone"] });
+    const result = resolve({ skillDiscovery: true, pinnedSkills: ["@a/gone", "@z/gone"] });
     expect(result.chosen).toEqual([]);
     expect(result.notices).toHaveLength(2);
     expect(result.notices[0]).toContain("`@a/gone`");
@@ -52,7 +52,7 @@ describe("resolveChatSkills", () => {
   it("spends one budget across the chosen skills, in stored order", () => {
     const third = Math.floor(BUDGET / 3);
     const result = resolve(
-      { skillMode: "strict", pinnedSkills: ["@a/one", "@a/two", "@a/three"] },
+      { skillDiscovery: false, pinnedSkills: ["@a/one", "@a/two", "@a/three"] },
       [
         content("@a/one", "x".repeat(third * 2)),
         // Over what is left after `@a/one`, though under the budget on its own.
@@ -67,7 +67,7 @@ describe("resolveChatSkills", () => {
   });
 
   it("injects one long skill that fits the budget", () => {
-    const result = resolve({ skillMode: "manual", pinnedSkills: ["@a/art"] }, [
+    const result = resolve({ skillDiscovery: true, pinnedSkills: ["@a/art"] }, [
       content("@a/art", "a".repeat(19_735)),
     ]);
     expect(result.chosen.map((s) => s.packageId)).toEqual(["@a/art"]);
@@ -106,7 +106,7 @@ describe("parseSkillList", () => {
 describe("injectedSkills", () => {
   it("names exactly the injected definitions, never a noticed or over-budget one", () => {
     const result = resolve(
-      { skillMode: "strict", pinnedSkills: ["@a/mine", "@a/gone", "@a/big"] },
+      { skillDiscovery: false, pinnedSkills: ["@a/mine", "@a/gone", "@a/big"] },
       [
         {
           ...content("@a/mine"),
@@ -122,7 +122,7 @@ describe("injectedSkills", () => {
 
   it("notices a chosen skill the platform answered malformed, and names it nowhere", () => {
     const result = resolveChatSkills(
-      { skillMode: "manual", pinnedSkills: ["@a/odd"] },
+      { skillDiscovery: true, pinnedSkills: ["@a/odd"] },
       new Map([["@a/odd", null]]),
     );
     expect(result.notices).toEqual([
@@ -132,6 +132,6 @@ describe("injectedSkills", () => {
   });
 
   it("is empty when nothing is injected", () => {
-    expect(injectedSkills(resolve({ skillMode: "auto", pinnedSkills: ["@a/mine"] }))).toEqual({});
+    expect(injectedSkills(resolve({ skillDiscovery: true, pinnedSkills: [] }))).toEqual({});
   });
 });

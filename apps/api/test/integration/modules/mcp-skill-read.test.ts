@@ -193,15 +193,15 @@ beforeEach(async () => {
   await publish(TONE, "1.0.0");
 });
 
-/** The owner's permissions in the default space, as a strict turn narrows them. */
-async function strictTurnPermissions(): Promise<string[]> {
+/** The owner's permissions in the default space, as a turn without skill discovery narrows them. */
+async function discoveryOffTurnPermissions(): Promise<string[]> {
   const listed = await app.request("/api/spaces", {
     headers: { Cookie: owner.cookie, "X-Org-Id": owner.orgId },
   });
   const { data } = (await listed.json()) as { data: Array<{ id: string; permissions: string[] }> };
   const resolved = data.find((space) => space.id === owner.defaultSpaceId)!.permissions;
   expect(resolved).toContain("skills:read");
-  return turnPermissions(resolved, { authoring: false, skillMode: "strict" });
+  return turnPermissions(resolved, { authoring: false, skillDiscovery: false });
 }
 
 /** A claim entry before its space: `spaceId` overrides the space the claim is built for. */
@@ -346,12 +346,12 @@ describe("skill:// — a skill the chat turn injected", () => {
     });
   });
 
-  it("reads under a strict turn's own permissions, every skills:* stripped", async () => {
+  it("reads under a turn without discovery's own permissions, every skills:* stripped", async () => {
     const other = "@readskill/other";
     await seedSkill(other);
     await seedSpacePackage(owner.defaultSpaceId, other);
     await publish(other, "1.0.0");
-    const permissions = await strictTurnPermissions();
+    const permissions = await discoveryOffTurnPermissions();
     expect(permissions.some((permission) => permission.startsWith("skills:"))).toBe(false);
     const headers = turnHeaders({ [TONE]: PUBLISHED_1_0 }, { permissions });
 

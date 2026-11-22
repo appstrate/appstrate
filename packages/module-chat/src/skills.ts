@@ -4,7 +4,6 @@
 // prompt's single `cache_control` block.
 
 import { z } from "zod";
-import type { ChatSkillMode } from "@appstrate/db/schema";
 import type { InjectedSkill, InjectedSkills } from "@appstrate/core/chat-contract";
 
 export interface SkillHint {
@@ -56,20 +55,16 @@ export const MAX_PINNED_SKILLS = 5;
 
 /** Named as the `chat_sessions` columns, so a session row is a selection. */
 export interface ChatSkillSelection {
-  skillMode: ChatSkillMode;
-  /** Injected in `manual` and `strict`; kept but unused in `auto`. */
+  /** The model finds the other skills of the turn's spaces; off, the turn holds no `skills:*`. */
+  skillDiscovery: boolean;
+  /** Injected in full on every turn, whatever `skillDiscovery`. */
   pinnedSkills: string[];
 }
 
 export const DEFAULT_SKILL_SELECTION: ChatSkillSelection = {
-  skillMode: "auto",
+  skillDiscovery: true,
   pinnedSkills: [],
 };
-
-/** `manual` and `strict` inject the chosen skills; `auto` lists the space's. */
-export function injectsSkills(mode: ChatSkillMode): boolean {
-  return mode !== "auto";
-}
 
 interface ResolvedChatSkills {
   chosen: SkillContent[];
@@ -86,7 +81,6 @@ export function resolveChatSkills(
   contents: ReadonlyMap<string, SkillContent | null>,
 ): ResolvedChatSkills {
   const resolved: ResolvedChatSkills = { chosen: [], notices: [] };
-  if (!injectsSkills(selection.skillMode)) return resolved;
   let left = CHAT_SKILLS_CONTENT_BUDGET_CHARS;
   const tooLong = (length: number) =>
     `(${length} characters; the injected skills share ${CHAT_SKILLS_CONTENT_BUDGET_CHARS}, ${left} left).`;

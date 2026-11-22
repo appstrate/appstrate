@@ -27,7 +27,6 @@ import { logger } from "./logger.ts";
 import { reaches, type TurnCapabilities } from "./capabilities.ts";
 import {
   injectedSkills,
-  injectsSkills,
   resolveChatSkills,
   type ChatSkillSelection,
   type SkillContent,
@@ -87,11 +86,8 @@ const SKILLS_INJECTED_LEAD =
   "The user chose these skills for this conversation. Each is a procedure for YOU: follow it whenever it applies.";
 // Why this turn holds no `skills:*`: without it, a model reads the gap as a role
 // to fix and hunts through other operations.
-// `list_skills` is registered on a `manual` turn alone: the rule rides that mode's context.
-const SKILLS_MANUAL_NOTE =
-  "When the user asks for a skill not shown here, call `list_skills`, then load the one asked for with `read_resource` on its `uri`.";
-const SKILLS_STRICT_NOTE =
-  "This conversation is restricted to the skills the user chose (shown here, if any): that is why this turn holds no `skills:*` permission, whatever the user's role. Any listing therefore shows no skill, whatever the spaces hold — an empty result says nothing about it. The user lifts this restriction by switching this conversation's skill mode in the composer. Do not look for, list, load or write any other skill, and never change a role or a permission to reach one.";
+const SKILLS_DISCOVERY_OFF_NOTE =
+  "Skill discovery is off for this conversation: that is why this turn holds no `skills:*` permission, whatever the user's role. Only the skills the user chose (shown here, if any) are available. Any listing therefore shows no skill, whatever the spaces hold — an empty result says nothing about it. The user turns discovery back on in the skills panel of the composer. Do not look for, list, load or write any other skill, and never change a role or a permission to reach one.";
 
 /**
  * Instructions for an act the turn cannot perform are ABSENT rather than
@@ -294,14 +290,14 @@ function formatSkillsSection(opts: {
 }): RenderedContext {
   const skills = resolveChatSkills(opts.selection, opts.contents);
   const files = SKILLS_FILES[opts.capabilities.transport ? "tool" : "none"];
-  // A listed skill the turn cannot load is noise; `auto` lists, the others inject.
+  // A listed skill the turn cannot load is noise; a pinned one is injected, not listed.
+  const pinned = new Set(opts.selection.pinnedSkills);
   const listed =
-    opts.capabilities.readsSkills && !injectsSkills(opts.selection.skillMode) ? opts.catalogue : [];
+    opts.capabilities.readsSkills && opts.selection.skillDiscovery
+      ? opts.catalogue.filter((skill) => !pinned.has(skill.packageId))
+      : [];
   const groups: string[][] = [];
-  if (opts.selection.skillMode === "strict") groups.push([SKILLS_STRICT_NOTE]);
-  if (opts.selection.skillMode === "manual" && opts.capabilities.readsSkills) {
-    groups.push([SKILLS_MANUAL_NOTE]);
-  }
+  if (!opts.selection.skillDiscovery) groups.push([SKILLS_DISCOVERY_OFF_NOTE]);
   if (listed.length) groups.push(listed.map(skillLine));
   if (skills.chosen.length) {
     groups.push([
@@ -447,7 +443,7 @@ function entriesByPackage(
  */
 const SKILLS_READ_TIMEOUT_MS = 10_000;
 
-/** The chosen skills' contents and the `auto` catalogue of a turn. */
+/** The pinned skills' contents and the catalogue of a turn. */
 interface ChatSkillsRead {
   contents: Map<string, SkillContent | null>;
   catalogue: CatalogueSkill[];
@@ -459,7 +455,7 @@ interface ChatSkillsRead {
  * may read, else its published version. With `catalogue`, every such skill of
  * `spaces` is listed by its `uri` (one entry per package, the first space's); each of `chosen` is injected as the text
  * `resources/read` serves at its entry's URI. Read with the caller's own
- * permissions, even in `strict`, whose turn holds no `skills:*`. A chosen skill
+ * permissions, even with discovery off, whose turn holds no `skills:*`. A chosen skill
  * in neither list, or whose read is refused, is left out; a malformed answer (a
  * draft entry without `lock_version`, a `SKILL.md` served as a blob, or text
  * whose digest differs from the one its entry lists) is kept as `null`, for its
@@ -627,16 +623,15 @@ export async function buildCallerContextBlock(
       slug: c.get("orgSlug") ?? null,
     },
   };
-  const injects = injectsSkills(skills.skillMode);
   const turnSkills = await readChatSkills(
     args.openSkillsClient,
     args.spaces.map((space) => space.id),
     {
-      catalogue: capabilities.readsSkills && !injects,
+      catalogue: capabilities.readsSkills && skills.skillDiscovery,
       // The drafts the caller reads are the turn's only while the turn keeps the
       // caller's `skills:write` (the authoring switch drops it).
       catalogueDrafts: args.permissions.includes("skills:write"),
-      chosen: injects ? skills.pinnedSkills : [],
+      chosen: skills.pinnedSkills,
     },
   );
   const { text, injected } = formatCallerContext(identity, {

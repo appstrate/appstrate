@@ -27,7 +27,7 @@ import {
 import { Tooltip, TooltipContent, TooltipTrigger } from "@appstrate/ui/components/tooltip";
 import { attachUnavailableKey } from "./attachment-adapter.ts";
 import { canComposeInlineRuns } from "../capabilities.ts";
-import type { ChatSkillSelection } from "../skills.ts";
+import { DEFAULT_SKILL_SELECTION, type ChatSkillSelection } from "../skills.ts";
 import {
   limitAvailability,
   useConversationScope,
@@ -190,7 +190,7 @@ export function ComposerTools({
           transport={transport}
           selection={selection}
           onOpenPicker={() => setSkillsOpen(true)}
-          onResetMode={() => onSelectionChange({ ...selection, skillMode: "auto" })}
+          onReset={() => onSelectionChange(DEFAULT_SKILL_SELECTION)}
         />
       )}
     </div>

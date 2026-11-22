@@ -140,13 +140,13 @@ describe("the origin space of a new conversation", () => {
   });
 
   it("sends the skills only when the user changed them", () => {
-    expect("skill_mode" in turnBody({ ...base, creation: undefined })).toBe(false);
+    expect("skill_discovery" in turnBody({ ...base, creation: undefined })).toBe(false);
     expect(
       turnBody({
         ...base,
         creation: undefined,
-        skills: { skillMode: "auto", pinnedSkills: ["@acme/tone"] },
+        skills: { skillDiscovery: false, pinnedSkills: ["@acme/tone"] },
       }),
-    ).toMatchObject({ skill_mode: "auto", pinned_skills: ["@acme/tone"] });
+    ).toMatchObject({ skill_discovery: false, pinned_skills: ["@acme/tone"] });
   });
 });

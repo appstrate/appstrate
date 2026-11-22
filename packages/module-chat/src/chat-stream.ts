@@ -44,7 +44,6 @@ import { resolvePiChatModelBinding } from "./pi-chat/model-binding.ts";
 import { acquirePiChatSlot, chatCapacityError } from "./pi-chat/concurrency.ts";
 import { limitedConversationPermissions, turnPermissions } from "./turn-permissions.ts";
 import { buildSystemPrompt, buildCallerContextBlock, type ChatEnv } from "./prompt.ts";
-import { chatSkillModeValues } from "@appstrate/db/schema";
 import { scopedNameRegex } from "@appstrate/core/validation";
 import { DEFAULT_SKILL_SELECTION, MAX_PINNED_SKILLS, type ChatSkillSelection } from "./skills.ts";
 export type { ChatEnv } from "./prompt.ts";
@@ -132,7 +131,7 @@ export const CHAT_MESSAGE_MAX_BYTES = 256 * 1024;
 //   - any `file` part MUST reference an `upload://` or `appfile://` URI. That
 //     rejects inline `data:` bytes and arbitrary URLs in the chat channel
 //     (attachments flow only through the file store, never inline).
-//   - `skill_mode` and `pinned_skills` come together or not at all: the
+//   - `skill_discovery` and `pinned_skills` come together or not at all: the
 //     picker's selection, written onto the session row by this turn.
 //   - `.strict()`: an unknown field is a 400, never silently dropped.
 export const chatStreamSchema = z
@@ -182,7 +181,7 @@ export const chatStreamSchema = z
     /** Runs the inline runs this turn launches on its model and generation; absent = off. */
     inline_runs_use_chat_model: z.boolean().optional(),
     /** The conversation's skill selection; absent = the one stored on the session. */
-    skill_mode: z.enum(chatSkillModeValues).optional(),
+    skill_discovery: z.boolean().optional(),
     pinned_skills: z
       .array(
         z.string().regex(scopedNameRegex, { error: "Must be a package id in @scope/name form" }),
@@ -191,8 +190,8 @@ export const chatStreamSchema = z
       .optional(),
   })
   .strict()
-  .refine((body) => (body.skill_mode === undefined) === (body.pinned_skills === undefined), {
-    error: "skill_mode and pinned_skills are sent together",
+  .refine((body) => (body.skill_discovery === undefined) === (body.pinned_skills === undefined), {
+    error: "skill_discovery and pinned_skills are sent together",
     path: ["pinned_skills"],
   });
 
@@ -362,8 +361,11 @@ export async function handleChatStream(
   // The picker's selection rides the turn and is written in the same upsert, so
   // nothing is stored before the first message; without one the row's stands.
   const bodySkills: ChatSkillSelection | undefined =
-    body.skill_mode && body.pinned_skills
-      ? { skillMode: body.skill_mode, pinnedSkills: [...new Set(body.pinned_skills)].sort() }
+    body.skill_discovery !== undefined && body.pinned_skills
+      ? {
+          skillDiscovery: body.skill_discovery,
+          pinnedSkills: [...new Set(body.pinned_skills)].sort(),
+        }
       : undefined;
   // An ephemeral turn writes no row: it creates, so its origin is validated here.
   const ephemeralConversation = (): TurnConversation => {
@@ -465,12 +467,9 @@ export async function handleChatStream(
     );
     const permissions = turnPermissions(callerPermissions, {
       authoring: body.package_authoring !== false,
-      skillMode: conv.selection.skillMode,
+      skillDiscovery: conv.selection.skillDiscovery,
     });
     const capabilities = turnCapabilities((permission) => permissions.includes(permission), spaces);
-    // `auto` shows the whole catalogue in the context and `strict` lists nothing:
-    // only a `manual` turn lists the spaces' skills on the user's request.
-    const listsSkills = capabilities.readsSkills && conv.selection.skillMode === "manual";
     // A conversation acts in the spaces of its turn alone and records each one it acts in
     // (see `touchSessionSpace`; the origin space is touched by definition): a space a call names,
     // or the space of a file `read_resource` reads, before the call, refused outside the set;
@@ -503,7 +502,6 @@ export async function handleChatStream(
       organization,
       permissions,
       capabilities,
-      listsSkills,
     };
   });
   const phaseAStart = Date.now();
@@ -550,7 +548,7 @@ export async function handleChatStream(
           // over a connection of their own: the caller's permissions, not narrowed by
           // `turnPermissions`, and no claim — what the caller reads.
           // One in-process `initialize` plus the reads, only on a turn that lists
-          // (`auto` with `skills:read`) or injects skills; closed before the turn's
+          // (discovery with `skills:read`) or injects skills; closed before the turn's
           // connection opens.
           openSkillsClient: (signal) =>
             connectPlatformMcp({
@@ -581,7 +579,7 @@ export async function handleChatStream(
       (error: unknown) => ({ ok: false as const, error }),
     );
 
-  const [models, { permissions, capabilities, listsSkills, spaces, organization, scope }, stored] =
+  const [models, { permissions, capabilities, spaces, organization, scope }, stored] =
     await Promise.all([listModels(origin, inferenceHeaders, platformFetch), turn, historyFiles]);
   messages = withStoredHistoryFiles(messages, stored);
   let chosen;
@@ -913,7 +911,6 @@ export async function handleChatStream(
           // every hop, so the scoped bearer above is exactly as load-bearing.
           fetch: platformFetch,
           surfaceKey: platformMcpSurfaceKey(mcpUrl, permissions, spaces),
-          listsSkills,
           // The launch body's `modelId`, judged by the inline route like any explicit
           // one (it exists, the caller pays, admission). Never a tool argument.
           ...(body.inline_runs_use_chat_model === true

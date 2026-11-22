@@ -21,7 +21,7 @@ const app = getTestApp();
 
 interface SessionDto {
   id: string;
-  skill_mode: string;
+  skill_discovery: boolean;
   pinned_skills: string[];
 }
 
@@ -78,13 +78,13 @@ describe("chat session skills", () => {
     );
     expect(created.status).toBe(201);
     const fresh = (await created.json()) as SessionDto;
-    expect(fresh.skill_mode).toBe("auto");
+    expect(fresh.skill_discovery).toBe(true);
     expect(fresh.pinned_skills).toEqual([]);
 
     // Written by a turn in real use (`chat-stream-handler.test.ts`); here, the row.
     await db
       .update(chatSessions)
-      .set({ skillMode: "manual", pinnedSkills: ["@acme/a"] })
+      .set({ skillDiscovery: false, pinnedSkills: ["@acme/a"] })
       .where(eq(chatSessions.id, fresh.id));
 
     const list = (await (
@@ -93,11 +93,11 @@ describe("chat session skills", () => {
       data: SessionDto[];
     };
     const row = list.data.find((s) => s.id === fresh.id);
-    expect(row?.skill_mode).toBe("manual");
+    expect(row?.skill_discovery).toBe(false);
     expect(row?.pinned_skills).toEqual(["@acme/a"]);
 
     const detail = await getSession(fresh.id);
-    expect(detail.skill_mode).toBe("manual");
+    expect(detail.skill_discovery).toBe(false);
     expect(detail.pinned_skills).toEqual(["@acme/a"]);
   });
 });

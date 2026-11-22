@@ -168,10 +168,9 @@ describe("full persona invariants", () => {
     expect(noDispatch).toContain("the skills available");
   });
 
-  it("names no skills listing in the persona: `manual` turns learn `list_skills` from their context", () => {
-    // `listSkills` answers without the `skill://` URI `read_resource` takes, and
-    // `list_skills` exists on a `manual` turn alone, which the persona cannot tell.
-    for (const listing of ["listSkills", "listServedSkills", "list_skills"]) {
+  it("names no skills listing tool in the persona: the catalogue rides the turn's context", () => {
+    // Live operation names that answer without the `skill://` URI `read_resource` takes.
+    for (const listing of ["listSkills", "listServedSkills"]) {
       expect(FULL).not.toContain(listing);
     }
   });

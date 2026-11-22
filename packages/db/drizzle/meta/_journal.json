@@ -785,6 +785,13 @@
       "when": 1795251387821,
       "tag": "0111_org_package_offers",
       "breakpoints": true
+    },
+    {
+      "idx": 112,
+      "version": "7",
+      "when": 1795340000000,
+      "tag": "0112_chat_skill_discovery",
+      "breakpoints": true
     }
   ]
 }

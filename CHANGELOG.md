@@ -25,6 +25,16 @@ The platform MCP server replaces `search_operations`, `search_integration_tools`
 - A search whose `kinds` does not list `integration_tool` (an `integration` filter alone included) reads remote MCP catalogs from the cache only, so it contacts no server and sends no credential. A cold catalog's tools are listed by name, and the integration is named in `uncached`. `GET /api/credential-proxy/tools` takes the same choice as `catalogs=live|cached` (default `live`) and answers an `uncached` array.
 - `invoke_operation`, `call_integration_tool`, `run_and_wait`, `list_files`, `validate_package_file`, `import_package_file`, `get_runtime_capabilities` and `get_me` keep their names and arguments.
 
+### Chat skills
+
+The three skill modes of a chat conversation (`auto`, `manual`, `strict`) become two settings: the chosen skills (`pinned_skills`), always injected in full, and `skill_discovery`, whether the assistant may find other skills.
+
+- **BREAKING (chat API):** `skill_mode` is replaced by `skill_discovery` (boolean, default `true`) on the session objects and on the body of `POST /api/orgs/{orgId}/chat`. A turn sends `skill_discovery` and `pinned_skills` together or neither; a body that still carries `skill_mode` is a 400.
+- `skill_discovery: false` is the former `strict`: the turn holds no `skills:*`. With it on, the context lists the other skills of the turn's spaces, without the chosen ones.
+- The `list_skills` tool is removed: the catalogue is in the context and `read_resource` loads a skill by its `skill://` URI.
+- A conversation that was `manual` now sees the catalogue of its spaces' skills.
+- Data (migration 0112): `strict` conversations get `skill_discovery = false`; `auto` conversations lose their chosen skills, which were kept but unused and would otherwise be injected after the upgrade.
+
 ## [1.0.0-beta.70] - 2026-11-19
 
 The Apple Silicon CLI builds on the supported macOS 15 runner. Production upgrades directly from beta.68 using the [maintenance procedure](docs/deployment/BETA_69.md). The beta.69 tag stopped before CLI signing. Its client and operator changes are described below.

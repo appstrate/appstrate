@@ -207,7 +207,7 @@ describe("platform MCP surface key purity", () => {
     const withAuthoring = await handshake(caller, grant);
     const withoutAuthoring = await handshake(
       caller,
-      turnPermissions(grant, { authoring: false, skillMode: "auto" }),
+      turnPermissions(grant, { authoring: false, skillDiscovery: true }),
     );
     expect(withoutAuthoring.key).not.toBe(withAuthoring.key);
     expect(withoutAuthoring.instructions).not.toBe(withAuthoring.instructions);

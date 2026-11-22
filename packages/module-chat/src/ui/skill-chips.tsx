@@ -3,13 +3,14 @@
 /**
  * The skills the user chose for the conversation, as ONE pill in the composer's tool row. It shows
  * its count, or the name when there is a single skill; the tooltip lists the names. Removal
- * happens in the picker, which the pill opens; its X returns to the automatic mode.
+ * happens in the picker, which the pill opens; its X restores the default selection. With
+ * discovery off a lock replaces the book.
  */
 
-import { BookOpenIcon } from "lucide-react";
+import { BookOpenIcon, LockIcon } from "lucide-react";
 import { parseScopedName } from "@appstrate/core/naming";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@appstrate/ui/components/tooltip";
-import { injectsSkills, type ChatSkillSelection } from "../skills.ts";
+import type { ChatSkillSelection } from "../skills.ts";
 import { RemovableChip } from "./removable-chip.tsx";
 import { useChatHost, type ChatTransport } from "./runtime-context.ts";
 import { SkillsChip } from "./skills-picker.tsx";
@@ -20,12 +21,9 @@ interface LoadedSkill {
   name: string;
 }
 
-/**
- * What the conversation loads: the user's own pins, counted only in a mode that injects them
- * (`auto` keeps them but uses none). The catalogue is read only to name pins, so only when there are.
- */
+/** What the conversation loads: the user's pins. The catalogue is read only to name them, so only when there are. */
 function useLoadedSkills(transport: ChatTransport | undefined, selection: ChatSkillSelection) {
-  const pinnedIds = injectsSkills(selection.skillMode) ? selection.pinnedSkills : [];
+  const pinnedIds = selection.pinnedSkills;
   const catalogue = useSkillCatalogue(transport, pinnedIds.length > 0);
   const names = new Map((catalogue.data ?? []).map((s) => [s.packageId, s.display_name]));
   // Named by the package's bare name until the catalogue answers.
@@ -59,14 +57,16 @@ function SkillNameList({ skills }: { skills: readonly LoadedSkill[] }) {
 
 /**
  * The skills the user chose, in one pill: its body opens the picker, where they are removed; its X
- * returns to the automatic mode, which keeps them unused.
+ * restores the default selection (no pin, discovery on).
  */
 function PinnedPill({
   skills,
+  discovery,
   onOpen,
   onReset,
 }: {
   skills: readonly LoadedSkill[];
+  discovery: boolean;
   onOpen: () => void;
   onReset: () => void;
 }) {
@@ -75,13 +75,15 @@ function PinnedPill({
     <Tooltip>
       <TooltipTrigger asChild>
         <RemovableChip
-          icon={<BookOpenIcon />}
+          icon={discovery ? <BookOpenIcon /> : <LockIcon />}
           open={{
             onClick: onOpen,
-            label: t("skills.pinnedPillLabel", { skills: skillsSummary(skills, t) }),
+            label: t(discovery ? "skills.pinnedPillLabel" : "skills.pinnedLockedPillLabel", {
+              skills: skillsSummary(skills, t),
+            }),
             testId: "skill-pill-pinned",
           }}
-          removeLabel={t("skills.resetToAuto")}
+          removeLabel={t("skills.reset")}
           onRemove={onReset}
         >
           {pillText(skills, t)}
@@ -89,6 +91,7 @@ function PinnedPill({
       </TooltipTrigger>
       <TooltipContent side="top" className="max-w-72 text-xs">
         <SkillNameList skills={skills} />
+        {!discovery && <p className="mt-1">{t("skills.discoveryOffChip")}</p>}
       </TooltipContent>
     </Tooltip>
   );
@@ -98,18 +101,25 @@ interface SkillChipsProps {
   transport: ChatTransport | undefined;
   selection: ChatSkillSelection;
   onOpenPicker: () => void;
-  /** Back to the automatic mode: the pill's X. */
-  onResetMode: () => void;
+  /** Back to the default selection: the pill's X. */
+  onReset: () => void;
 }
 
 /**
- * The skill pill of the composer's tool row. While no skill is chosen, the picker's summary chip
- * stands in (drawn only off the automatic mode).
+ * The skill pill of the composer's tool row, drawn when the selection departs from the default.
+ * While no skill is pinned, the picker's summary chip stands in (drawn only with discovery off).
  */
-export function SkillChips({ transport, selection, onOpenPicker, onResetMode }: SkillChipsProps) {
+export function SkillChips({ transport, selection, onOpenPicker, onReset }: SkillChipsProps) {
   const pinned = useLoadedSkills(transport, selection);
   if (pinned.length === 0) {
-    return <SkillsChip selection={selection} onClick={onOpenPicker} onReset={onResetMode} />;
+    return <SkillsChip selection={selection} onClick={onOpenPicker} onReset={onReset} />;
   }
-  return <PinnedPill skills={pinned} onOpen={onOpenPicker} onReset={onResetMode} />;
+  return (
+    <PinnedPill
+      skills={pinned}
+      discovery={selection.skillDiscovery}
+      onOpen={onOpenPicker}
+      onReset={onReset}
+    />
+  );
 }

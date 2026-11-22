@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-/** The skills chip: the composer's entry to the picker while no skill is loaded. SSR only. */
+/** The skills chip: the composer's entry to the picker while no skill is pinned. SSR only. */
 
 import { describe, expect, it } from "bun:test";
 import { renderToStaticMarkup } from "react-dom/server";
@@ -19,16 +19,14 @@ function html(selection: ChatSkillSelection): string {
 }
 
 describe("SkillsChip", () => {
-  it("draws nothing in automatic mode, whatever pins are kept", () => {
-    expect(html({ skillMode: "auto", pinnedSkills: [] })).toBe("");
-    expect(html({ skillMode: "auto", pinnedSkills: ["@acme/a"] })).toBe("");
+  it("draws nothing while discovery is on", () => {
+    expect(html({ skillDiscovery: true, pinnedSkills: [] })).toBe("");
   });
 
-  it("draws the button and its X back to automatic off the automatic mode", () => {
-    for (const skillMode of ["manual", "strict"] as const) {
-      const out = html({ skillMode, pinnedSkills: [] });
-      expect(out).toContain("skills-picker-trigger");
-      expect(out).toContain('aria-label="skills.resetToAuto"');
-    }
+  it("draws the button and its X back to the default with discovery off", () => {
+    const out = html({ skillDiscovery: false, pinnedSkills: [] });
+    expect(out).toContain("skills-picker-trigger");
+    expect(out).toContain("skills.discoveryOffChip");
+    expect(out).toContain('aria-label="skills.reset"');
   });
 });

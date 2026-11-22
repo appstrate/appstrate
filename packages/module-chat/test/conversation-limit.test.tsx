@@ -126,7 +126,7 @@ describe("changing the limit of an existing conversation", () => {
         ...row,
         ...changes,
         messages: [],
-        skills: { skillMode: "auto", pinnedSkills: [] },
+        skills: { skillDiscovery: true, pinnedSkills: [] },
         createdAt: "",
       });
       qc.setQueryData<SessionsCache>(listKey, {
@@ -384,7 +384,7 @@ describe("the composer's limit chip", () => {
               <TooltipProvider>
                 <ComposerTools
                   transport={transportOf(() => ({ "X-Space-Id": "spc_a" }))}
-                  selection={{ skillMode: "auto", pinnedSkills: [] }}
+                  selection={{ skillDiscovery: true, pinnedSkills: [] }}
                   onSelectionChange={() => {}}
                   showPicker={false}
                   authorsPackages={false}
@@ -512,7 +512,7 @@ describe("the composer's attach button", () => {
             <TooltipProvider>
               <ComposerTools
                 transport={transport}
-                selection={{ skillMode: "auto", pinnedSkills: [] }}
+                selection={{ skillDiscovery: true, pinnedSkills: [] }}
                 onSelectionChange={() => {}}
                 showPicker={false}
                 authorsPackages={false}

@@ -32,7 +32,7 @@ const row: SessionSummary = {
 const detail: SessionHistory = {
   ...row,
   messages: [],
-  skills: { skillMode: "auto", pinnedSkills: [] },
+  skills: { skillDiscovery: true, pinnedSkills: [] },
   createdAt: "",
 };
 const list = (rows: SessionSummary[]): SessionsCache => ({

@@ -68,7 +68,7 @@ export function turnBody(args: {
     package_authoring: packageAuthoring,
     inline_runs_use_chat_model: inlineRunsUseChatModel,
     ...creation,
-    ...(skills && { skill_mode: skills.skillMode, pinned_skills: skills.pinnedSkills }),
+    ...(skills && { skill_discovery: skills.skillDiscovery, pinned_skills: skills.pinnedSkills }),
   };
 }
 

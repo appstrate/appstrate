@@ -116,8 +116,6 @@ export interface PiChatInput {
     headers: Record<string, string>;
     fetch?: typeof fetch;
     surfaceKey?: string;
-    /** Registers the `list_skills` tool (`manual` skill mode with `skills:read`). */
-    listsSkills?: boolean;
     /** The model the turn's inline runs launch on — see `BuildPlatformMcpToolsOptions`. */
     inlineRunModel?: InlineRunModel;
   };

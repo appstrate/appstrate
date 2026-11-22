@@ -370,7 +370,7 @@ describe("handleChatStream", () => {
       orgHalf?: ReadonlySet<string>;
       /** Earlier turns replayed ahead of the new user message. */
       history?: unknown[];
-      /** Extra body fields, e.g. the picker's `skill_mode` / `pinned_skills`. */
+      /** Extra body fields, e.g. the picker's `skill_discovery` / `pinned_skills`. */
       body?: Record<string, unknown>;
     },
   ): Promise<Response> {
@@ -1143,7 +1143,7 @@ describe("handleChatStream", () => {
     }
   });
 
-  it("without a selection in the body, keeps the stored one: strict injects and withholds `skills:read`", async () => {
+  it("without a selection in the body, keeps the stored one: discovery off injects the pinned skill and withholds `skills:*`", async () => {
     // Persona, context block and token must agree within one turn; all three
     // are wired from the one session-row read, which only this test can prove.
     const sessionId = mintSessionId();
@@ -1153,7 +1153,7 @@ describe("handleChatStream", () => {
       orgId: ctx.orgId,
       userId: ctx.user.id,
       title: null,
-      skillMode: "strict",
+      skillDiscovery: false,
       pinnedSkills: [PIN],
     });
 
@@ -1210,14 +1210,14 @@ describe("handleChatStream", () => {
     expect(input.system).toContain(
       `<skill id="${PIN}" uri="${uri}" version="1.0.0">\nAlways answer in haiku.\n</skill>`,
     );
-    // Strict lists no skill: the listed entry is injected, never a catalogue line.
+    // Discovery off lists no skill: the listed entry is injected, never a catalogue line.
     expect(input.system).not.toContain(`- \`${PIN}\``);
     // No skill tool is taught, and the token cannot reach one.
     // The injected skill's files stay readable; no loading or listing is taught.
     expect(input.system).toContain("read a file it references with `read_resource`");
     expect(input.system).not.toContain("LOAD IT BEFORE acting");
     expect(input.system).not.toContain("listSkills");
-    expect(input.system).toContain("This conversation is restricted to the skills the user chose");
+    expect(input.system).toContain("Skill discovery is off for this conversation");
     expect(await tokenPermissions(input)).toEqual([
       "chat:read",
       "chat:write",
@@ -1237,13 +1237,13 @@ describe("handleChatStream", () => {
     const { engine, calls } = scriptedEngine();
     const res = await postChat(sessionId, undefined, engine, {
       permissions: new Set(["mcp:read", "mcp:invoke", "skills:read"]),
-      body: { skill_mode: "strict", pinned_skills: ["@acme/z", "@acme/a", "@acme/z"] },
+      body: { skill_discovery: false, pinned_skills: ["@acme/z", "@acme/a", "@acme/z"] },
     });
     expect(res.status).toBe(200);
     await collectUiChunks(res);
 
     const [row] = await db.select().from(chatSessions).where(eq(chatSessions.id, sessionId));
-    expect(row?.skillMode).toBe("strict");
+    expect(row?.skillDiscovery).toBe(false);
     expect(row?.pinnedSkills).toEqual(["@acme/a", "@acme/z"]);
     expect(await tokenPermissions(calls[0]!)).toEqual([
       "chat:read",
@@ -1251,8 +1251,6 @@ describe("handleChatStream", () => {
       "mcp:invoke",
       "mcp:read",
     ]);
-    // `strict` lists no skill: `list_skills` is not registered.
-    expect(calls[0]!.platformMcp.listsSkills).toBe(false);
 
     await waitForAssistantPersist(sessionId);
   });
@@ -1264,42 +1262,50 @@ describe("handleChatStream", () => {
       orgId: ctx.orgId,
       userId: ctx.user.id,
       title: null,
-      skillMode: "strict",
+      skillDiscovery: false,
       pinnedSkills: ["@acme/a"],
     });
     const { engine, calls } = scriptedEngine();
     const res = await postChat(sessionId, undefined, engine, {
       permissions: new Set(["mcp:read", "mcp:invoke", "skills:read"]),
-      body: { skill_mode: "auto", pinned_skills: [] },
+      body: { skill_discovery: true, pinned_skills: [] },
     });
     expect(res.status).toBe(200);
     await collectUiChunks(res);
 
     const [row] = await db.select().from(chatSessions).where(eq(chatSessions.id, sessionId));
-    expect(row?.skillMode).toBe("auto");
+    expect(row?.skillDiscovery).toBe(true);
     expect(row?.pinnedSkills).toEqual([]);
     expect(await tokenPermissions(calls[0]!)).toContain("skills:read");
-    // `auto` shows the catalogue in the context: `list_skills` is not registered.
-    expect(calls[0]!.platformMcp.listsSkills).toBe(false);
 
     await waitForAssistantPersist(sessionId);
   });
 
-  it("refuses a skill mode without its skills, and the reverse", async () => {
-    for (const body of [{ skill_mode: "manual" }, { pinned_skills: ["@acme/a"] }]) {
+  it("refuses the discovery switch without the pinned skills, and the reverse", async () => {
+    for (const body of [{ skill_discovery: true }, { pinned_skills: ["@acme/a"] }]) {
       const res = await postChat(mintSessionId(), undefined, scriptedEngine().engine, { body });
       expect(res.status).toBe(400);
     }
   });
 
-  it("keeps `skills:read` on the token in manual, where the model may look for more", async () => {
+  it("answers 400 to a body field the turn does not know", async () => {
+    for (const body of [
+      { not_a_field: true },
+      { not_a_field: "x", skill_discovery: true, pinned_skills: [] },
+    ]) {
+      const res = await postChat(mintSessionId(), undefined, scriptedEngine().engine, { body });
+      expect(res.status).toBe(400);
+    }
+  });
+
+  it("keeps `skills:read` on the token with discovery on", async () => {
     const sessionId = mintSessionId();
     await db.insert(chatSessions).values({
       id: sessionId,
       orgId: ctx.orgId,
       userId: ctx.user.id,
       title: null,
-      skillMode: "manual",
+      skillDiscovery: true,
       pinnedSkills: [],
     });
     const { engine, calls } = scriptedEngine();
@@ -1316,9 +1322,6 @@ describe("handleChatStream", () => {
       "skills:read",
     ]);
     expect(calls[0]!.system).toContain("call `read_resource` with that URI verbatim");
-    // The model finds a skill the user asks for with `list_skills`, registered on this turn alone.
-    expect(calls[0]!.platformMcp.listsSkills).toBe(true);
-    expect(calls[0]!.system).toContain("call `list_skills`, then load the one asked for");
 
     await waitForAssistantPersist(sessionId);
   });
@@ -1328,13 +1331,11 @@ describe("handleChatStream", () => {
     // is the turn's own gate, not an empty fixture: neither the persona nor the
     // block names a skill.
     const sessionId = mintSessionId();
-    const PIN = "@acme/pinned-skill";
     await db.insert(chatSessions).values({
       id: sessionId,
       orgId: ctx.orgId,
       userId: ctx.user.id,
       title: null,
-      pinnedSkills: [PIN],
     });
     const skillReads: string[] = [];
     const uri = `skill://${ctx.defaultSpaceId}/acme/catalogued/catalogued/SKILL.md`;
@@ -1360,17 +1361,9 @@ describe("handleChatStream", () => {
     expect(skillReads).toEqual([]);
     const system = calls[0]!.system;
     expect(system).toContain(CONTEXT_ORG_MARKER);
-    for (const absent of [
-      "## Skills",
-      PIN,
-      "@acme/catalogued",
-      "read_resource",
-      "listSkills",
-      "list_skills",
-    ]) {
+    for (const absent of ["## Skills", "@acme/catalogued", "read_resource", "listSkills"]) {
       expect(system).not.toContain(absent);
     }
-    expect(calls[0]!.platformMcp.listsSkills).toBe(false);
 
     await waitForAssistantPersist(sessionId);
   });
@@ -2325,7 +2318,7 @@ describe("handleChatStream", () => {
             ],
           }));
 
-        it("lists one skill per package in auto, the first space in reach order winning, each with its own URI", async () => {
+        it("lists one skill per package, the first space in reach order winning, each with its own URI", async () => {
           // The server lists Beta's copy first: only the reach order decides.
           const { res, calls } = await turn(
             mintSessionId(),
@@ -2347,6 +2340,32 @@ describe("handleChatStream", () => {
           );
           expect(system).not.toContain(uriIn(spaceB, TONE));
           expect(system).not.toContain("<skill id=");
+        });
+
+        it("injects a pinned skill and lists the others of the turn's spaces, never the pinned one twice", async () => {
+          const read: string[] = [];
+          const { res, calls } = await turn(
+            mintSessionId(),
+            {
+              dispatch: skillsDispatch(
+                [
+                  [ctx.defaultSpaceId, TONE],
+                  [spaceB, ONLY_B],
+                ],
+                read,
+              ),
+              body: { skill_discovery: true, pinned_skills: [ONLY_B] },
+            },
+            reachWith([ctx.defaultSpaceId, spaceB]),
+          );
+          expect(res.status).toBe(200);
+          await collectUiChunks(res);
+          const system = calls[0]!.system;
+          expect(read).toEqual([uriIn(spaceB, ONLY_B)]);
+          expect(system).toContain(`<skill id="${ONLY_B}"`);
+          expect(system).toContain(`- \`${TONE}\``);
+          expect(system).not.toContain(`- \`${ONLY_B}\``);
+          expect(await tokenPermissions(calls[0]!)).toContain("skills:read");
         });
 
         it("reads no skill of a space outside the acting set, listed or chosen", async () => {
@@ -2374,7 +2393,7 @@ describe("handleChatStream", () => {
             mintSessionId(),
             {
               dispatch: skillsDispatch([[spaceB, ONLY_B]], read),
-              body: { skill_mode: "manual", pinned_skills: [ONLY_B] },
+              body: { skill_discovery: true, pinned_skills: [ONLY_B] },
             },
             reachWith([ctx.defaultSpaceId]),
           );
@@ -2395,7 +2414,7 @@ describe("handleChatStream", () => {
                 ],
                 read,
               ),
-              body: { skill_mode: "manual", pinned_skills: [ONLY_B] },
+              body: { skill_discovery: true, pinned_skills: [ONLY_B] },
             },
             reachWith([ctx.defaultSpaceId, spaceB]),
           );

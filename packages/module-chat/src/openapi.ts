@@ -8,7 +8,6 @@
  */
 
 import { scopedNameRegex } from "@appstrate/core/validation";
-import { chatSkillModeValues } from "@appstrate/db/schema";
 import { MAX_PINNED_SKILLS } from "./skills.ts";
 
 const problem = {
@@ -28,7 +27,7 @@ export const chatComponentSchemas = {
       "id",
       "generating",
       "unread",
-      "skill_mode",
+      "skill_discovery",
       "pinned_skills",
       "spaceId",
       "restricted",
@@ -49,17 +48,16 @@ export const chatComponentSchemas = {
         description:
           "Whether an assistant reply landed after the caller last read the conversation. Computed server-side; cleared via PUT /api/orgs/{orgId}/chat/sessions/{id}/read.",
       },
-      skill_mode: {
-        type: "string",
-        enum: [...chatSkillModeValues],
+      skill_discovery: {
+        type: "boolean",
         description:
-          "How turns use skills. `auto`: the skills of the spaces the conversation can act in (its origin space alone when it is limited) are listed and the assistant loads what fits. `manual`: the chosen skills (`pinned_skills`) are injected in full, and the assistant may still list and load others when asked. `strict`: the chosen skills are injected and the turn holds no `skills:*` permission, so it lists, loads, declares and writes no other. Written by the turn that carries it (POST /api/orgs/{orgId}/chat).",
+          "Whether the assistant may find skills beyond the pinned ones. On: the skills of the spaces the conversation can act in (its origin space alone when it is limited), minus the pinned ones, are listed in the context and the assistant loads what fits. Off: the turn holds no `skills:*` permission, so it lists, loads, declares and writes no other skill. Written by the turn that carries it (POST /api/orgs/{orgId}/chat).",
       },
       pinned_skills: {
         type: "array",
         items: { type: "string" },
         description:
-          "Package ids (`@scope/name`) chosen for this conversation, sorted. Injected in `manual` and `strict`; kept but unused in `auto`.",
+          "Package ids (`@scope/name`) pinned to this conversation, sorted. Injected in full on every turn, whatever `skill_discovery`.",
       },
       spaceId: {
         type: ["string", "null"],
@@ -427,11 +425,10 @@ export const chatPaths = {
                   description:
                     "Launches the inline runs of this turn on the turn's model and generation settings (`modelId` and `generation` of `POST /api/runs/inline`, judged like any explicit model); absent = off, they run on the default model. A saved agent's run keeps its own model.",
                 },
-                skill_mode: {
-                  type: "string",
-                  enum: [...chatSkillModeValues],
+                skill_discovery: {
+                  type: "boolean",
                   description:
-                    "The conversation's skill mode (see ChatSession `skill_mode`), written onto the session by this turn. Sent with `pinned_skills` or not at all; absent = the stored selection (`auto` for a new conversation).",
+                    "Whether the assistant may find skills beyond the pinned ones (see ChatSession `skill_discovery`), written onto the session by this turn. Sent with `pinned_skills` or not at all; absent = the stored selection (on, with no pinned skill, for a new conversation).",
                 },
                 pinned_skills: {
                   type: "array",
@@ -442,7 +439,7 @@ export const chatPaths = {
                     description: "`@scope/name` package id",
                   },
                   description:
-                    "The skills chosen for the conversation, written with `skill_mode`. Deduped server-side; the cap applies to the array as sent.",
+                    "The skills pinned to the conversation, written with `skill_discovery`. Deduped server-side; the cap applies to the array as sent.",
                 },
                 id: { type: "string", description: "Session id (the assistant-ui thread id)" },
               },

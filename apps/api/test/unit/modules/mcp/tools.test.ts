@@ -99,7 +99,7 @@ describe("mcp catalog", () => {
   });
 
   it("keeps the served-skill routes out: they serve `code sync` alone", () => {
-    // The chat lists skills with its `list_skills` tool, over the Skills extension.
+    // The chat lists skills through the Skills extension (`skills/list`).
     const operations = [...getCatalog().operations.keys()];
     expect(operations).not.toContain("listServedSkills");
     expect(operations).not.toContain("getServedSkillArchive");

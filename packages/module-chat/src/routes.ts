@@ -131,7 +131,7 @@ function toSessionDto(row: SessionRow, touchedSpaceIds: readonly string[]) {
     unread:
       row.lastAssistantSeq != null &&
       (row.lastReadSeq == null || row.lastReadSeq < row.lastAssistantSeq),
-    skill_mode: row.skillMode,
+    skill_discovery: row.skillDiscovery,
     pinned_skills: row.pinnedSkills,
     spaceId: row.spaceId,
     restricted: row.restricted,

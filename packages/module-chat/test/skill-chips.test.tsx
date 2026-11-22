@@ -2,7 +2,7 @@
 
 /**
  * The composer's skill pill: the user's pins in ONE pill, count or single name, and the picker's
- * chip while none is loaded. SSR only; the tooltip bodies are closed, so the texts are asserted
+ * chip while none is pinned. SSR only; the tooltip bodies are closed, so the texts are asserted
  * through the accessible names.
  */
 
@@ -24,12 +24,12 @@ const host = testHost({
 });
 
 const scoped = transportOf(() => ({ "X-Org-Id": "org_1", "X-Space-Id": "spc_a" }));
-const manual = (pinnedSkills: string[]): ChatSkillSelection => ({
-  skillMode: "manual",
+const pinned = (pinnedSkills: string[], skillDiscovery = true): ChatSkillSelection => ({
+  skillDiscovery,
   pinnedSkills,
 });
 
-function render(selection: ChatSkillSelection = manual([])): string {
+function render(selection: ChatSkillSelection = pinned([], false)): string {
   return renderToStaticMarkup(
     <QueryClientProvider client={new QueryClient()}>
       <ChatHostProvider value={host}>
@@ -41,7 +41,7 @@ function render(selection: ChatSkillSelection = manual([])): string {
               transport={scoped}
               selection={selection}
               onOpenPicker={() => {}}
-              onResetMode={() => {}}
+              onReset={() => {}}
             />
           </TooltipProvider>
         </ConversationScopeProvider>
@@ -52,7 +52,7 @@ function render(selection: ChatSkillSelection = manual([])): string {
 
 describe("SkillChips", () => {
   it("draws ONE pill for a single pinned skill, named by its bare package name", () => {
-    const html = render(manual(["@acme/policy"]));
+    const html = render(pinned(["@acme/policy"]));
     expect(html.match(/skill-pill-pinned/g)).toHaveLength(1);
     expect(html).toContain("policy");
     expect(html).toContain(
@@ -61,7 +61,7 @@ describe("SkillChips", () => {
   });
 
   it("counts several pinned skills in the one pill, with no per-skill chip nor « +N »", () => {
-    const html = render(manual(["@a/one", "@a/two", "@a/three", "@a/four"]));
+    const html = render(pinned(["@a/one", "@a/two", "@a/three", "@a/four"]));
     expect(html.match(/skill-pill-pinned/g)).toHaveLength(1);
     expect(html).toContain("skills.pinnedCount {&quot;n&quot;:4}");
     expect(html).toContain(
@@ -69,23 +69,26 @@ describe("SkillChips", () => {
     );
   });
 
-  it("draws nothing in automatic mode, even with pins kept from another mode", () => {
-    expect(render({ skillMode: "auto", pinnedSkills: ["@acme/b"] })).toBe("");
+  it("draws nothing on the default selection: no pin, discovery on", () => {
+    expect(render(pinned([]))).toBe("");
   });
 
-  it("draws the picker's chip, with its X back to automatic, when nothing is loaded off it", () => {
-    const html = render();
+  it("draws the pill for pins with discovery on, with a book and the locked label off", () => {
+    expect(render(pinned(["@acme/b"]))).not.toContain("pinnedLockedPillLabel");
+    const off = render(pinned(["@acme/b"], false));
+    expect(off).toContain("skills.pinnedLockedPillLabel");
+    expect(off.match(/skill-pill-pinned/g)).toHaveLength(1);
+  });
+
+  it("draws the picker's chip when nothing is pinned and discovery is off", () => {
+    const html = render(pinned([], false));
     expect(html).toContain('data-testid="skills-picker-trigger"');
-    expect(html).toContain('aria-label="skills.resetToAuto"');
+    expect(html).toContain('aria-label="skills.reset"');
   });
 
-  it("puts an X back to automatic on the pinned pill", () => {
-    const html = render(manual(["@acme/b"]));
+  it("puts an X restoring the default on the pinned pill", () => {
+    const html = render(pinned(["@acme/b"]));
     expect(html).toContain('data-testid="skill-pill-pinned"');
-    expect(html).toContain('aria-label="skills.resetToAuto"');
-  });
-
-  it("draws nothing when nothing is loaded on the default selection", () => {
-    expect(render({ skillMode: "auto", pinnedSkills: [] })).toBe("");
+    expect(html).toContain('aria-label="skills.reset"');
   });
 });

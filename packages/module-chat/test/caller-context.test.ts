@@ -85,7 +85,7 @@ const BASE_OPTS = {
   skills: DEFAULT_SKILL_SELECTION,
 } as const;
 
-/** A line of the `auto` catalogue: the published entry of `@<scope>/<name>`, or its draft. */
+/** A line of the catalogue: the published entry of `@<scope>/<name>`, or its draft. */
 const listedSkill = (packageId: string, description: string, version: string | null = null) => {
   const [scope, name] = packageId.slice(1).split("/");
   return {
@@ -110,7 +110,7 @@ describe("formatCallerContext", () => {
     }
   });
 
-  it("injects the chosen skills in full, in stored order, tagged with id and version, in manual and strict", () => {
+  it("injects the pinned skills in full, in stored order, tagged with id and version, with discovery on or off", () => {
     const raw = { user: { name: "Ada" }, org: { role: "member" } };
     const skillCatalogue = [listedSkill("@acme/pdf", "PDF")];
     const skillContents = new Map([
@@ -135,15 +135,15 @@ describe("formatCallerContext", () => {
         },
       ],
     ]);
-    // Strict turns hold no `skills:read`: the injected skills need no tool.
-    for (const [skillMode, permissions] of [
-      ["manual", BUILDER],
-      ["strict", BUILDER.filter((p) => p !== "skills:read")],
+    // A turn without discovery holds no `skills:read`: the injected skills need no tool.
+    for (const [skillDiscovery, permissions] of [
+      [true, BUILDER],
+      [false, BUILDER.filter((p) => p !== "skills:read")],
     ] as const) {
       const out = contextText(raw, {
         ...BASE_OPTS,
         capabilities: caps(permissions),
-        skills: { skillMode, pinnedSkills: ["@acme/mine", "@acme/zeta"] },
+        skills: { skillDiscovery, pinnedSkills: ["@acme/mine", "@acme/zeta"] },
         skillContents,
         skillCatalogue,
       });
@@ -156,12 +156,38 @@ describe("formatCallerContext", () => {
         '<skill id="@acme/zeta" uri="skill://space-1/acme/zeta/zeta/SKILL.md" version="1.0.0">\n---\nname: zeta\n---\nZeta body.\n</skill>',
       );
       expect(out.indexOf("@acme/mine")).toBeLessThan(out.indexOf("@acme/zeta"));
-      // No listing next to the chosen skills.
-      expect(out).not.toContain("@acme/pdf");
+      // The catalogue sits next to the pinned skills with discovery on, and nowhere without.
+      expect(out.includes("- `@acme/pdf`")).toBe(skillDiscovery);
     }
   });
 
-  it("lists the turn's skills in auto, and none when the turn cannot load one", () => {
+  it("lists the catalogue without the pinned skills, which are injected instead", () => {
+    const mine = {
+      packageId: "@acme/mine",
+      uri: "skill://space-1/acme/mine/mine/SKILL.md",
+      version: "1.0.0",
+      served: { definition: "published", version: "1.0.0" } as const,
+      content: "Mine body.",
+    };
+    const out = contextText(
+      { user: { name: "Ada" }, org: { role: "member" } },
+      {
+        ...BASE_OPTS,
+        skills: { skillDiscovery: true, pinnedSkills: ["@acme/mine"] },
+        skillContents: new Map([["@acme/mine", mine]]),
+        skillCatalogue: [
+          listedSkill("@acme/mine", "Mine", "1.0.0"),
+          listedSkill("@acme/pdf", "PDF", "1.0.0"),
+        ],
+      },
+    );
+    expect(out).toContain("- `@acme/pdf`");
+    expect(out).not.toContain("- `@acme/mine`");
+    expect(out.match(/@acme\/mine/g)).toHaveLength(1);
+    expect(out).toContain('<skill id="@acme/mine"');
+  });
+
+  it("lists the turn's skills with discovery on, and none when the turn cannot load one", () => {
     const raw = { user: { name: "Ada" }, org: { role: "member" } };
     const skillCatalogue = [listedSkill("@acme/pdf", "Reads PDFs.", "1.0.0")];
     const PDF_LINE = "- `@acme/pdf` (v1.0.0) `skill://space-1/acme/pdf/pdf/SKILL.md` — Reads PDFs.";
@@ -189,7 +215,7 @@ describe("formatCallerContext", () => {
   it("says a chosen skill could not be included", () => {
     const out = contextText(
       { user: { name: "Ada" }, org: { role: "member" } },
-      { ...BASE_OPTS, skills: { skillMode: "manual", pinnedSkills: ["@acme/gone"] } },
+      { ...BASE_OPTS, skills: { skillDiscovery: true, pinnedSkills: ["@acme/gone"] } },
     );
     expect(out).toContain("## Skills");
     expect(out).toContain(
@@ -198,73 +224,50 @@ describe("formatCallerContext", () => {
     expect(out).not.toContain("The user chose these skills");
   });
 
-  it("omits the heading entirely when nothing is chosen and nothing is listed", () => {
-    // `manual` always renders its `list_skills` rule to a turn holding `skills:read`.
+  it("omits the heading entirely when nothing is pinned and nothing is listed", () => {
     for (const capabilities of [caps(BUILDER), caps(WITHOUT_SKILLS)]) {
       const out = contextText(
         { user: { name: "Ada" }, org: { role: "member" } },
         {
           ...BASE_OPTS,
           capabilities,
-          skills: { skillMode: "auto", pinnedSkills: [] },
+          skills: { skillDiscovery: true, pinnedSkills: [] },
           skillCatalogue: [],
         },
       );
       expect(out).not.toContain("## Skills");
     }
-    const manual = contextText(
-      { user: { name: "Ada" }, org: { role: "member" } },
-      {
-        ...BASE_OPTS,
-        capabilities: caps(WITHOUT_SKILLS),
-        skills: { skillMode: "manual", pinnedSkills: [] },
-      },
-    );
-    expect(manual).not.toContain("## Skills");
   });
 
-  it("teaches a manual turn holding `skills:read` to list a skill it does not see, and no other turn", () => {
-    const rule =
-      "When the user asks for a skill not shown here, call `list_skills`, then load the one asked for with `read_resource` on its `uri`.";
-    const render = (skillMode: "auto" | "manual" | "strict", permissions: readonly string[]) =>
-      contextText(
-        { user: { name: "Ada" }, org: { role: "member" } },
-        { ...BASE_OPTS, capabilities: caps(permissions), skills: { skillMode, pinnedSkills: [] } },
-      );
-    expect(render("manual", BUILDER)).toContain(`## Skills\n\n${rule}`);
-    // `auto` lists the whole catalogue in the context; `strict` and a turn
-    // without `skills:read` hold no `list_skills`.
-    expect(render("auto", BUILDER)).not.toContain("list_skills");
-    expect(render("strict", WITHOUT_SKILLS)).not.toContain("list_skills");
-    expect(render("manual", WITHOUT_SKILLS)).not.toContain("list_skills");
-  });
-
-  it("tells a strict turn why it holds no skill permission, even with nothing chosen", () => {
-    const strict = (pinnedSkills: string[], permissions = BUILDER) =>
+  it("tells a turn without discovery why it holds no skill permission, even with nothing pinned", () => {
+    const off = (pinnedSkills: string[], permissions = BUILDER) =>
       contextText(
         { user: { name: "Ada" }, org: { role: "member" } },
         {
           ...BASE_OPTS,
           capabilities: caps(permissions.filter((p) => !p.startsWith("skills:"))),
-          skills: { skillMode: "strict", pinnedSkills },
+          skills: { skillDiscovery: false, pinnedSkills },
+          skillCatalogue: [listedSkill("@acme/pdf", "PDF")],
         },
       );
-    for (const out of [strict([]), strict(["@acme/gone"])]) {
+    for (const out of [off([]), off(["@acme/gone"])]) {
       expect(out).toContain("## Skills");
-      // The note is about the restriction; reading the files belongs to the leads.
+      // The note is about the missing permission; reading the files belongs to the leads.
       expect(out).not.toContain("read_resource");
-      expect(out).toContain("This conversation is restricted to the skills the user chose");
+      expect(out).toContain("Skill discovery is off for this conversation");
       expect(out).toContain("never change a role or a permission to reach one");
       // The two misreadings seen live: an empty listing as "not in the space",
       // and a role change as the way out.
       expect(out).toContain("an empty result says nothing about it");
-      expect(out).toContain("switching this conversation's skill mode in the composer");
+      expect(out).toContain("turns discovery back on in the skills panel of the composer");
+      // No catalogue without discovery.
+      expect(out).not.toContain("@acme/pdf");
     }
-    const manual = contextText(
+    const on = contextText(
       { user: { name: "Ada" }, org: { role: "member" } },
-      { ...BASE_OPTS, skills: { skillMode: "manual", pinnedSkills: ["@acme/gone"] } },
+      { ...BASE_OPTS, skills: { skillDiscovery: true, pinnedSkills: ["@acme/gone"] } },
     );
-    expect(manual).not.toContain("This conversation is restricted");
+    expect(on).not.toContain("Skill discovery is off");
   });
 
   describe("chosen skills", () => {
@@ -279,13 +282,13 @@ describe("formatCallerContext", () => {
     const MINE_BLOCK =
       '<skill id="@acme/mine" uri="skill://space-1/acme/mine/mine/SKILL.md" version="1.0.0">';
 
-    it("orders the strict note, the chosen skills, then the notices", () => {
+    it("orders the discovery note, the pinned skills, then the notices", () => {
       const out = contextText(
         { user: { name: "Ada" } },
         {
           ...BASE_OPTS,
           capabilities: caps(NO_SKILLS),
-          skills: { skillMode: "strict", pinnedSkills: ["@acme/gone", "@acme/mine"] },
+          skills: { skillDiscovery: false, pinnedSkills: ["@acme/gone", "@acme/mine"] },
           skillContents: new Map([["@acme/mine", mine()]]),
         },
       );
@@ -293,31 +296,31 @@ describe("formatCallerContext", () => {
         expect(out).toContain(text);
         return out.indexOf(text);
       };
-      expect(at("This conversation is restricted to the skills the user chose")).toBeLessThan(
+      expect(at("Skill discovery is off for this conversation")).toBeLessThan(
         at("The user chose these skills"),
       );
       expect(at(MINE_BLOCK)).toBeLessThan(at("`@acme/gone` was chosen"));
     });
 
-    it("names `read_resource` on the lead with the transport, in manual and strict, and none without", () => {
-      const render = (skillMode: "manual" | "strict", permissions: readonly string[]) =>
+    it("names `read_resource` on the lead with the transport, with discovery on or off, and none without", () => {
+      const render = (skillDiscovery: boolean, permissions: readonly string[]) =>
         contextText(
           { user: { name: "Ada" } },
           {
             ...BASE_OPTS,
             capabilities: caps(permissions),
-            skills: { skillMode, pinnedSkills: ["@acme/mine"] },
+            skills: { skillDiscovery, pinnedSkills: ["@acme/mine"] },
             skillContents: new Map([["@acme/mine", mine()]]),
           },
         );
       const files =
         "Only each SKILL.md is shown: read a file it references with `read_resource`, replacing `SKILL.md` in the skill's `uri` with the file's path; it serves the version injected here.";
-      for (const skillMode of ["manual", "strict"] as const) {
-        const tool = render(skillMode, NO_SKILLS);
+      for (const skillDiscovery of [true, false]) {
+        const tool = render(skillDiscovery, NO_SKILLS);
         expect(tool).toContain(`follow it whenever it applies. ${files}`);
         expect(tool).toContain(MINE_BLOCK);
         const none = render(
-          skillMode,
+          skillDiscovery,
           NO_SKILLS.filter((p) => p !== "mcp:read"),
         );
         expect(none).toContain("follow it whenever it applies. Only each SKILL.md is provided.");
@@ -337,7 +340,7 @@ describe("formatCallerContext", () => {
           {
             ...BASE_OPTS,
             now: new Date("2026-06-25T09:05:00.000Z"),
-            skills: { skillMode: "manual", pinnedSkills: ["@acme/mine", "@acme/other"] },
+            skills: { skillDiscovery: true, pinnedSkills: ["@acme/mine", "@acme/other"] },
             skillContents: new Map(contents),
           },
         );
@@ -575,11 +578,11 @@ describe("buildCallerContextBlock", () => {
         spaces: REACH,
         restricted: false,
         user,
-        // Strict: the turn holds no `skills:read`, the skills connection still reads.
+        // Discovery off: the turn holds no `skills:read`, the skills connection still reads.
         capabilities: caps(BUILDER.filter((permission) => permission !== "skills:read")),
         permissions: ["mcp:read", "mcp:invoke"],
         skills: {
-          skillMode: "strict",
+          skillDiscovery: false,
           pinnedSkills: ["@acme/a", "@acme/b", "@acme/c", "@acme/off", "@acme/other"],
         },
         openSkillsClient: skills.open,
@@ -624,7 +627,7 @@ describe("buildCallerContextBlock", () => {
       user,
       capabilities: caps(BUILDER),
       permissions: ["mcp:read", "mcp:invoke"],
-      skills: { skillMode: "manual", pinnedSkills: ["@acme/a"] },
+      skills: { skillDiscovery: true, pinnedSkills: ["@acme/a"] },
       openSkillsClient: NO_SKILLS,
     });
     expect(out).not.toContain("<skill");
@@ -646,7 +649,7 @@ describe("buildCallerContextBlock", () => {
         user,
         capabilities: caps(BUILDER),
         permissions: ["mcp:read", "mcp:invoke"],
-        skills: { skillMode: "manual", pinnedSkills: ["@acme/a"] },
+        skills: { skillDiscovery: true, pinnedSkills: ["@acme/a"] },
         openSkillsClient: skills.open,
       },
     );
@@ -673,7 +676,7 @@ describe("buildCallerContextBlock", () => {
         user,
         capabilities: caps(BUILDER),
         permissions: ["mcp:read", "mcp:invoke"],
-        skills: { skillMode: "manual", pinnedSkills: ["@acme/a"] },
+        skills: { skillDiscovery: true, pinnedSkills: ["@acme/a"] },
         openSkillsClient: skills.open,
       },
     );
@@ -702,7 +705,7 @@ describe("buildCallerContextBlock", () => {
         user,
         capabilities: caps(BUILDER),
         permissions: ["mcp:read", "mcp:invoke"],
-        skills: { skillMode: "manual", pinnedSkills: ["@acme/a"] },
+        skills: { skillDiscovery: true, pinnedSkills: ["@acme/a"] },
         openSkillsClient: skills.open,
       },
     );
@@ -711,7 +714,7 @@ describe("buildCallerContextBlock", () => {
     expect(injected).toEqual({ skills: {} });
   });
 
-  it("lists the turn's skills in auto over the skills connection, draft first, reading none", async () => {
+  it("lists the turn's skills over the skills connection, draft first, reading none when nothing is pinned", async () => {
     const skills = fakeSkillsClient({
       published: [
         skillEntry("skill://spc_1/acme/a/a/SKILL.md", "1.0.0"),
@@ -731,7 +734,7 @@ describe("buildCallerContextBlock", () => {
         capabilities: caps(BUILDER),
         // The turn keeps `skills:write`: it reads the drafts the caller reads.
         permissions: ["mcp:read", "mcp:invoke", "skills:read", "skills:write"],
-        skills: { skillMode: "auto", pinnedSkills: ["@acme/a"] },
+        skills: { skillDiscovery: true, pinnedSkills: [] },
         openSkillsClient: skills.open,
       },
     );
@@ -759,7 +762,7 @@ describe("buildCallerContextBlock", () => {
       user,
       capabilities: caps(BUILDER),
       permissions: ["mcp:read", "mcp:invoke", "skills:read"],
-      skills: { skillMode: "auto", pinnedSkills: [] },
+      skills: { skillDiscovery: true, pinnedSkills: [] },
       openSkillsClient: readOnly.open,
     });
     expect(readOnlyOut).toContain("- `@acme/a` (v1.0.0) `skill://spc_1/acme/a/a/SKILL.md` — A");
@@ -774,13 +777,46 @@ describe("buildCallerContextBlock", () => {
       user,
       capabilities: caps(BUILDER.filter((permission) => permission !== "skills:read")),
       permissions: ["mcp:read", "mcp:invoke"],
-      skills: { skillMode: "auto", pinnedSkills: ["@acme/a"] },
+      skills: { skillDiscovery: true, pinnedSkills: [] },
       openSkillsClient: async (signal) => {
         opened = true;
         return skills.open(signal);
       },
     });
     expect(opened).toBe(false);
+  });
+
+  it("reads the pinned skills and lists the others in the same turn, the pinned one in the catalogue never", async () => {
+    const A = "skill://spc_1/acme/a/a/SKILL.md";
+    const C = "skill://spc_1/acme/c/c/SKILL.md";
+    const skills = fakeSkillsClient({
+      published: [skillEntry(A, "1.0.0"), skillEntry(C, "2.0.0")],
+      texts: { [A]: "a body" },
+    });
+    const { text: out, injected } = await buildCallerContextBlock(
+      fakeContext({ orgRole: "member" }),
+      {
+        spaces: REACH,
+        restricted: false,
+        user,
+        capabilities: caps(BUILDER),
+        permissions: ["mcp:read", "mcp:invoke", "skills:read"],
+        skills: { skillDiscovery: true, pinnedSkills: ["@acme/a"] },
+        openSkillsClient: skills.open,
+      },
+    );
+    expect(skills.calls.sort()).toEqual([
+      "close",
+      `resources/read ${A}`,
+      "skills/list",
+      "skills/list draft",
+    ]);
+    expect(out).toContain(`<skill id="@acme/a" uri="${A}" version="1.0.0">\na body\n</skill>`);
+    expect(out).toContain(`- \`@acme/c\` (v2.0.0) \`${C}\``);
+    expect(out).not.toContain("- `@acme/a`");
+    expect(injected).toEqual({
+      skills: { "@acme/a": { definition: "published", version: "1.0.0", spaceId: "spc_1" } },
+    });
   });
 
   it("leaves out a chosen skill whose content read is refused", async () => {
@@ -794,7 +830,7 @@ describe("buildCallerContextBlock", () => {
       user,
       capabilities: caps(BUILDER),
       permissions: ["mcp:read", "mcp:invoke"],
-      skills: { skillMode: "manual", pinnedSkills: ["@acme/a"] },
+      skills: { skillDiscovery: true, pinnedSkills: ["@acme/a"] },
       openSkillsClient: skills.open,
     });
     expect(out).not.toContain("<skill");
