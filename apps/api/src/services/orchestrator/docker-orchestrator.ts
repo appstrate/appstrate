@@ -27,6 +27,11 @@ class DockerWorkloadHandle implements WorkloadHandle {
   ) {}
 }
 
+/** The platform's Docker endpoint speaks the API over TCP, not a unix socket. */
+function isTcpDockerSocket(dockerSocket: string): boolean {
+  return dockerSocket.startsWith("http://") || dockerSocket.startsWith("https://");
+}
+
 /**
  * Docker socket gating invariant (host-escape boundary).
  *
@@ -36,25 +41,77 @@ class DockerWorkloadHandle implements WorkloadHandle {
  * default (`nobody:nobody`, no socket bind). Extracted as a pure helper so
  * the gating decision is unit-testable without a Docker daemon.
  *
+ * When the platform's own Docker endpoint is TCP (`DOCKER_SOCKET` starting
+ * with `http://`/`https://` — e.g. the `appstrate-docker-proxy` socket proxy
+ * shipped commented in `docker-compose.yml`), no socket bind is granted at
+ * all: the sidecar reaches the same endpoint over `DOCKER_HOST`
+ * ({@link resolveSidecarDockerHost}), so the host socket file stays out of
+ * every container and the proxy's verb filtering applies to the sidecar's
+ * calls exactly as it does to the platform's.
+ *
  * Returns the `HostConfig`/`User` overrides to merge into the
- * `createContainer` options: the socket bind + `user: "0:0"` + the
- * low-port sysctl for the transparent egress plane when
- * integrations are present, otherwise an empty object (defaults apply).
+ * `createContainer` options: `user: "0:0"` + the low-port sysctl for the
+ * transparent egress plane, plus the socket bind unless the endpoint is
+ * TCP — an empty object (defaults apply) when there are no integrations.
  */
 export function sidecarSocketOverrides(
   spec: Pick<SidecarLaunchSpec, "integrations">,
-): { binds: string[]; user: string; sysctls: Record<string, string> } | Record<string, never> {
+  dockerSocket: string = getEnv().DOCKER_SOCKET,
+): { binds?: string[]; user: string; sysctls: Record<string, string> } | Record<string, never> {
   const hasIntegrations = spec.integrations !== undefined && spec.integrations.length > 0;
-  return hasIntegrations
-    ? {
-        binds: ["/var/run/docker.sock:/var/run/docker.sock"],
-        user: "0:0",
-        // Let the sidecar bind :53/:443/:80 on the per-run bridge for
-        // its transparent egress plane (DNS responder + SNI-passthrough).
-        // Netns-scoped sysctl, not a capability: `CapDrop: ["ALL"]` stays.
-        sysctls: { "net.ipv4.ip_unprivileged_port_start": "0" },
-      }
-    : {};
+  if (!hasIntegrations) return {};
+  return {
+    ...(isTcpDockerSocket(dockerSocket)
+      ? {}
+      : { binds: ["/var/run/docker.sock:/var/run/docker.sock"] }),
+    user: "0:0",
+    // Let the sidecar bind :53/:443/:80 on the per-run bridge for
+    // its transparent egress plane (DNS responder + SNI-passthrough).
+    // Netns-scoped sysctl, not a capability: `CapDrop: ["ALL"]` stays.
+    sysctls: { "net.ipv4.ip_unprivileged_port_start": "0" },
+  };
+}
+
+/**
+ * The `DOCKER_HOST` the sidecar's `docker` CLI should target, or undefined
+ * when the sidecar needs none.
+ *
+ * Only a TCP platform endpoint produces a value: the sidecar then talks to
+ * the same endpoint the platform does (the filtering socket proxy in the
+ * hardened compose topology) instead of a bind-mounted socket file. The
+ * unix-socket case binds `/var/run/docker.sock` instead, where the CLI's
+ * built-in default already points.
+ *
+ * The sidecar's CLI reads exactly `DOCKER_HOST` from its environment
+ * (`DOCKER_CLI_ENV_KEYS` in `runtime-pi/sidecar/integration-runtime-adapter-docker.ts`),
+ * so this value is injected as `DOCKER_HOST` into the sidecar env — never
+ * into the agent container's, whose env contract (`buildRuntimePiEnv`)
+ * stays free of Docker endpoints.
+ *
+ * When the platform itself is not on a Docker network (bare-metal platform
+ * process), a `localhost`/loopback endpoint would name the sidecar
+ * container, not the host — rewritten to `host.docker.internal`, which
+ * `createSidecar` maps to the host gateway on that same branch. When the
+ * platform IS on a network (the compose topology), the endpoint's hostname
+ * (e.g. `appstrate-docker-proxy`) resolves for the sidecar because it is
+ * attached to that same network just below.
+ */
+export function resolveSidecarDockerHost(
+  dockerSocket: string,
+  platformNetworkAttached: boolean,
+): string | undefined {
+  if (!isTcpDockerSocket(dockerSocket)) return undefined;
+  if (platformNetworkAttached) return dockerSocket;
+  try {
+    const url = new URL(dockerSocket);
+    if (!["localhost", "127.0.0.1", "[::1]", "::1"].includes(url.hostname)) return dockerSocket;
+    // Rebuilt rather than `url.href`'d: an empty path would grow a trailing
+    // slash the platform's own endpoint string never carried.
+    const path = url.pathname === "/" ? "" : `${url.pathname}${url.search}`;
+    return `http://host.docker.internal${url.port ? `:${url.port}` : ""}${path}`;
+  } catch {
+    return dockerSocket;
+  }
 }
 
 /**
@@ -313,13 +370,25 @@ export class DockerOrchestrator implements RunOrchestrator {
     // containerized run spawns its integrations as containers too.
     sidecarEnv.INTEGRATION_RUNTIME_ADAPTER = "docker";
 
+    // When the platform's Docker endpoint is TCP (the socket-proxy hardening
+    // path), the sidecar targets that same endpoint via DOCKER_HOST — its
+    // `docker` CLI reads it (DOCKER_CLI_ENV_KEYS) — instead of a socket
+    // bind (suppressed by sidecarSocketOverrides on this branch). The
+    // sidecar is attached to the platform's own network just below, so a
+    // compose-internal proxy hostname resolves for it exactly as it does
+    // for the platform container.
+    const sidecarDockerHost = resolveSidecarDockerHost(env.DOCKER_SOCKET, platformNetwork !== null);
+    if (sidecarDockerHost) sidecarEnv.DOCKER_HOST = sidecarDockerHost;
+
     // Create sidecar on egress network (primary) so it has DNS + internet.
     // Then connect to run network (internal) with "sidecar" alias for agent DNS.
     //
     // When the run declares AFPS integrations, the sidecar needs to spawn
     // per-integration runner containers (`appstrate-mcp-runner-{node,python,
-    // binary,bun,uv}`). It shells out to the Docker daemon via the mounted socket
-    // + `docker-cli` baked into the sidecar image. Running as root is the
+    // binary,bun,uv}`). It shells out to the Docker daemon — through the
+    // mounted socket, or over the TCP endpoint forwarded as DOCKER_HOST when
+    // the platform itself is hardened behind the socket proxy — using the
+    // `docker-cli` baked into the sidecar image. Running as root is the
     // simplest portable way to access the socket (group GIDs vary across
     // hosts: Docker Desktop on macOS exposes a 0-owned socket, Linux a
     // `docker`-group one, rootless Docker uses the calling UID). We only

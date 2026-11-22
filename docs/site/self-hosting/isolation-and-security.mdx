@@ -70,7 +70,7 @@ The platform, `PI_IMAGE` and `SIDECAR_IMAGE` change in lockstep. Deploy all thre
 The `docker` backend needs the Docker socket, and access to it is effectively root on the host. Harden around it:
 
 - Keep the socket owned by `root:docker` with mode `0660`, and run the platform container with the host's docker group (`group_add: ["${DOCKER_GID:-0}"]`, as the tier templates do).
-- The root `docker-compose.yml` ships a commented `appstrate-docker-proxy` service that filters Docker API verbs. Read its comment before enabling it: it narrows the reachable API surface but is not a security boundary, because container creation is itself a host-root primitive, and the platform needs a build whose Docker client can target a TCP `DOCKER_HOST`.
+- The root `docker-compose.yml` ships a commented `appstrate-docker-proxy` service that filters Docker API verbs. Read its comment before enabling it: it narrows the reachable API surface but is not a security boundary, because container creation is itself a host-root primitive. Switching to it means pointing `DOCKER_SOCKET` at the proxy's TCP endpoint (`http://appstrate-docker-proxy:2375`); a run that declares integrations then has its sidecar reach the same proxy over `DOCKER_HOST` instead of a socket bind, so the filtering covers the runner containers too.
 - For a stronger boundary, use a rootless or VM-isolated Docker daemon, or `RUN_ADAPTER=firecracker` (early preview).
 
 Run containers are siblings of the platform container, not children: there is no Docker-in-Docker.

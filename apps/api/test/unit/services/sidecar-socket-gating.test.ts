@@ -36,22 +36,26 @@ function fakeIntegration(id: string): IntegrationSpawnSpec {
 }
 
 describe("sidecarSocketOverrides — Docker socket gating", () => {
+  const UNIX_SOCKET = "/var/run/docker.sock";
+  const tcp = (host = "appstrate-docker-proxy:2375") => `http://${host}`;
+
   it("zero-integration run → no socket bind, no root user (defaults apply)", () => {
-    const overrides = sidecarSocketOverrides({ integrations: [] });
+    const overrides = sidecarSocketOverrides({ integrations: [] }, UNIX_SOCKET);
     expect(overrides).toEqual({});
     expect("binds" in overrides).toBe(false);
     expect("user" in overrides).toBe(false);
   });
 
   it("undefined integrations → no socket bind, no root user", () => {
-    const overrides = sidecarSocketOverrides({ integrations: undefined });
+    const overrides = sidecarSocketOverrides({ integrations: undefined }, UNIX_SOCKET);
     expect(overrides).toEqual({});
   });
 
   it("≥1-integration run → socket bind + user 0:0 + low-port sysctl (#779)", () => {
-    const overrides = sidecarSocketOverrides({
-      integrations: [fakeIntegration("@test/gmail-mcp")],
-    });
+    const overrides = sidecarSocketOverrides(
+      { integrations: [fakeIntegration("@test/gmail-mcp")] },
+      UNIX_SOCKET,
+    );
     expect(overrides).toEqual({
       binds: ["/var/run/docker.sock:/var/run/docker.sock"],
       user: "0:0",
@@ -60,9 +64,10 @@ describe("sidecarSocketOverrides — Docker socket gating", () => {
   });
 
   it("multiple integrations → socket bind + user 0:0 + sysctl (same as one)", () => {
-    const overrides = sidecarSocketOverrides({
-      integrations: [fakeIntegration("@test/a"), fakeIntegration("@test/b")],
-    });
+    const overrides = sidecarSocketOverrides(
+      { integrations: [fakeIntegration("@test/a"), fakeIntegration("@test/b")] },
+      UNIX_SOCKET,
+    );
     expect(overrides).toEqual({
       binds: ["/var/run/docker.sock:/var/run/docker.sock"],
       user: "0:0",
@@ -71,17 +76,41 @@ describe("sidecarSocketOverrides — Docker socket gating", () => {
   });
 
   it("sysctl grants only the netns low-port knob — no capability creep", () => {
-    const overrides = sidecarSocketOverrides({
-      integrations: [fakeIntegration("@test/x")],
-    }) as { sysctls: Record<string, string> };
+    const overrides = sidecarSocketOverrides(
+      { integrations: [fakeIntegration("@test/x")] },
+      UNIX_SOCKET,
+    ) as { sysctls: Record<string, string> };
     expect(Object.keys(overrides.sysctls)).toEqual(["net.ipv4.ip_unprivileged_port_start"]);
   });
 
   it("the only socket binds the host docker.sock — no other path is exposed", () => {
-    const overrides = sidecarSocketOverrides({
-      integrations: [fakeIntegration("@test/x")],
-    }) as { binds: string[] };
+    const overrides = sidecarSocketOverrides(
+      { integrations: [fakeIntegration("@test/x")] },
+      UNIX_SOCKET,
+    ) as { binds: string[] };
     expect(overrides.binds).toHaveLength(1);
     expect(overrides.binds[0]).toBe("/var/run/docker.sock:/var/run/docker.sock");
+  });
+
+  it("TCP endpoint (socket proxy) → no socket bind at all", () => {
+    const overrides = sidecarSocketOverrides({ integrations: [fakeIntegration("@test/x")] }, tcp());
+    expect("binds" in overrides).toBe(false);
+  });
+
+  it("TCP endpoint still keeps the low-port sysctl — the egress plane is orthogonal", () => {
+    const overrides = sidecarSocketOverrides(
+      { integrations: [fakeIntegration("@test/x")] },
+      tcp(),
+    ) as { user: string; sysctls: Record<string, string> };
+    expect(overrides.user).toBe("0:0");
+    expect(overrides.sysctls).toEqual({ "net.ipv4.ip_unprivileged_port_start": "0" });
+  });
+
+  it("https endpoint counts as TCP too", () => {
+    const overrides = sidecarSocketOverrides(
+      { integrations: [fakeIntegration("@test/x")] },
+      "https://docker.example.internal:2376",
+    );
+    expect("binds" in overrides).toBe(false);
   });
 });
