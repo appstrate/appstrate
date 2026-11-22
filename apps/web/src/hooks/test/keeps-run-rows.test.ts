@@ -22,9 +22,9 @@ const key = (
     undefined,
     overrides.status,
     undefined,
+    overrides.spaceKind,
     overrides.search ?? "",
     overrides.limit ?? 25,
-    overrides.spaceKind,
   );
 
 describe("keepsRunRows", () => {
@@ -56,6 +56,7 @@ describe("keepsRunRows", () => {
         "org_1",
         ACROSS_SPACES,
         "/runs",
+        undefined,
         undefined,
         undefined,
         undefined,

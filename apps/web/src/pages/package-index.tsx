@@ -149,7 +149,7 @@ function PackageIndexBody({
         items={shownItems}
         extraFilters={space.filter ? [space.filter] : undefined}
         spaceNarrowing={
-          space.narrowing
+          space.spaceIds !== undefined
             ? {
                 hiddenCount: (items?.length ?? 0) - (shownItems?.length ?? 0),
                 message:

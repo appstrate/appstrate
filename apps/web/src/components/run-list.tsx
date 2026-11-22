@@ -50,9 +50,10 @@ interface RunListProps {
    *
    * A render prop rather than props the page reads for itself: the columns live
    * here, and the bar's column menu has to name the same ones the table draws.
-   * The page still owns WHAT the bar says.
+   * The page still owns WHAT the bar says. `empty`: the list answered with no run, so what sits
+   * beside the empty state (a notice) can give way to it.
    */
-  toolbar?: (bar: { columns: ColumnMenuSpec }) => React.ReactNode;
+  toolbar?: (bar: { columns: ColumnMenuSpec; empty: boolean }) => React.ReactNode;
 }
 
 export function RunList({
@@ -116,7 +117,7 @@ export function RunList({
 
   return (
     <div>
-      {toolbar?.({ columns: menu })}
+      {toolbar?.({ columns: menu, empty: !isLoading && !failed && runs.length === 0 })}
 
       <RunsTable
         runs={runs}

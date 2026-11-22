@@ -27,7 +27,7 @@ export function HiddenRunsNotice({
       ? t("runs.hidden.both", { inFlight: inFlightText, unread: unreadText })
       : inFlight > 0
         ? inFlightText
-        : unreadText;
+        : t("runs.hidden.unreadOnly", { count: unread });
 
   return (
     <Alert

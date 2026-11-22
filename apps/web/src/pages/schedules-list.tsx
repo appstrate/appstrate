@@ -93,7 +93,7 @@ export function SchedulesListPage() {
   ).length;
   const emptyBody = showsTeamEmpty({
     readerFiltered: filtering,
-    narrowing: space.narrowing,
+    narrowing: spaceIds !== undefined,
     hiddenCount,
   }) ? (
     <SpaceFilterEmpty message={t("common:spaceFilter.empty.schedules")} showAll={space.showAll} />

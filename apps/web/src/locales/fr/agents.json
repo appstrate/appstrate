@@ -247,6 +247,8 @@
   "runs.hidden.inFlight_other": "{{count}} runs en cours",
   "runs.hidden.unread_one": "{{count}} non lu",
   "runs.hidden.unread_other": "{{count}} non lus",
+  "runs.hidden.unreadOnly_one": "{{count}} run non lu",
+  "runs.hidden.unreadOnly_other": "{{count}} runs non lus",
   "runs.hidden.both": "{{inFlight}} et {{unread}}",
   "runs.hidden.notice": "{{summary}} dans les espaces personnels.",
   "runs.hidden.show": "Afficher",

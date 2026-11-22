@@ -68,10 +68,11 @@ export function runListConditions(filters: { status?: RunStatus[]; search?: stri
  */
 const GLOBAL_RUN_KINDS = ["all", "package", "inline"] as const;
 
+type GlobalRunKind = (typeof GLOBAL_RUN_KINDS)[number];
+
 /** `?space_kind=`: narrows the caller's reach to team spaces or to personal ones. */
 const SPACE_KINDS = ["team", "personal"] as const;
 type SpaceKind = (typeof SPACE_KINDS)[number];
-type GlobalRunKind = (typeof GLOBAL_RUN_KINDS)[number];
 
 /** The filters `GET /api/runs` and `GET /api/orgs/{orgId}/runs` share. */
 export interface GlobalRunListFilters {

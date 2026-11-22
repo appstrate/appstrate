@@ -80,10 +80,11 @@ export interface FilterSpec {
   options: FilterOption[];
   onChange: (values: string[]) => void;
   /**
-   * The values are the screen's default, not the reader's choice: shown, so the row opens and says
-   * why the list is short, but they neither count as a filter the reader set nor show the reset.
+   * This dimension carries a screen default (ticked or not): while it is offered the row stays
+   * open, so the list's narrowing is explained and can be undone, but it never counts as a filter
+   * the reader set and never shows the reset.
    */
-  isDefault?: boolean;
+  hasDefault?: boolean;
 }
 
 /** Beyond this many, the button counts instead of naming. */

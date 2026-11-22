@@ -87,10 +87,10 @@ export function useRuns({
     kind,
     statusKey,
     unread,
+    // The key carries it only where the request does.
+    acrossSpaces ? spaceKind : undefined,
     search,
     limit,
-    // The key carries them only where the request does.
-    acrossSpaces ? spaceKind : undefined,
   );
 
   return useInfiniteQuery({

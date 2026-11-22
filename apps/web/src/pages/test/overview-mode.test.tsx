@@ -503,6 +503,7 @@ describe("the dashboard in the mode", () => {
         undefined,
         undefined,
         undefined,
+        undefined,
         15,
       ),
       {
@@ -569,6 +570,7 @@ describe("the dashboard in the mode", () => {
             "org_1",
             "spc_a",
             "/runs",
+            undefined,
             undefined,
             undefined,
             undefined,

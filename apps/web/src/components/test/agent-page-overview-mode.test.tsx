@@ -287,6 +287,7 @@ function seedRuns(
       status,
       undefined,
       undefined,
+      undefined,
       limit,
     );
   qc.setQueryData(key(undefined, 1), page(latest));

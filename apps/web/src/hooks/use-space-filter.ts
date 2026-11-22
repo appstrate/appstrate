@@ -10,10 +10,9 @@ import { useAdmittingSpaces } from "./use-overview-mode";
 /**
  * The space filter of a studio list in « Tous les espaces »: `?space=all` shows every space,
  * anything else the team spaces. `filter` is null where nothing is offered (see
- * `resolveSpaceFilter`); `spaceIds` is what narrows, `undefined` when nothing does (`narrowing` says so for a list that
- * asks the API by kind instead). Pushed to
- * history like the other filters, and deliberately not part of a page's `reset`: clearing the
- * reader's filters keeps the widening they chose.
+ * `resolveSpaceFilter`); `spaceIds` is what narrows, `undefined` when nothing does. The choice is
+ * pushed to history like the other filters, and is deliberately not part of a page's `reset`:
+ * clearing the reader's filters keeps the widening they chose.
  */
 export function useSpaceFilter(list: SpaceList, spanning: boolean) {
   const { t } = useTranslation("common");
@@ -32,7 +31,7 @@ export function useSpaceFilter(list: SpaceList, spanning: boolean) {
         label: t("spaceFilter.label"),
         options: [{ value: "team", label: t("spaceFilter.team") }],
         values: state.all ? [] : ["team"],
-        isDefault: !state.all,
+        hasDefault: true,
         onChange: (values) => setAll(!values.includes("team")),
       }
     : null;
@@ -40,7 +39,6 @@ export function useSpaceFilter(list: SpaceList, spanning: boolean) {
   return {
     filter,
     spaceIds: state.spaceIds,
-    narrowing: state.spaceIds !== undefined,
     showAll: () => setAll(true),
   };
 }

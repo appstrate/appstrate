@@ -16,7 +16,7 @@ interface FilterableSpace {
   personal: boolean;
 }
 
-export interface SpaceFilterState {
+interface SpaceFilterState {
   /** Whether the reader is offered the choice: spaces of both kinds admit the list. */
   offered: boolean;
   /** The reader chose every space (`?space=all`). */

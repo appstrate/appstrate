@@ -39,7 +39,8 @@ export function RunsPage() {
   const spaceFilter = useSpaceFilter("runs", spanning);
   // « Tout marquer comme lu » marks what the list shows: the working space, or each space
   // admitting the list that the space filter keeps.
-  const { spaceIds, narrowing } = spaceFilter;
+  const { spaceIds } = spaceFilter;
+  const narrowing = spaceIds !== undefined;
   const shownSpaces = spaceIds ? runSpaces.filter((s) => spaceIds.includes(s.id)) : runSpaces;
   // The API narrows by kind, so the URL never grows with the number of spaces.
   const spaceKind: SpaceKind | undefined = narrowing ? "team" : undefined;
@@ -90,6 +91,11 @@ export function RunsPage() {
   // for scope); the ticks themselves stay as ticked.
   const kind: RunKindFilter | undefined = kinds.length === 1 ? kinds[0] : undefined;
   const filtered = Boolean(search) || readerFiltered(filters);
+  const teamEmpty = showsTeamEmpty({
+    readerFiltered: filtered,
+    narrowing,
+    hiddenCount: hidden.total,
+  });
   const user = canSeeEveryRun && scopes.includes("me") ? "me" : undefined;
 
   return (
@@ -120,7 +126,7 @@ export function RunsPage() {
         spanning={spanning}
         spaceKind={spaceKind}
         search={search}
-        toolbar={({ columns }) => (
+        toolbar={({ columns, empty }) => (
           <>
             <ListToolbar
               search={{
@@ -132,17 +138,20 @@ export function RunsPage() {
               onReset={list.reset}
               columns={columns}
             />
-            <HiddenRunsNotice
-              inFlight={hidden.inFlight}
-              unread={hidden.unread}
-              showAll={spaceFilter.showAll}
-            />
+            {/* The team-empty state says the same and offers the same button. */}
+            {!(empty && teamEmpty) && (
+              <HiddenRunsNotice
+                inFlight={hidden.inFlight}
+                unread={hidden.unread}
+                showAll={spaceFilter.showAll}
+              />
+            )}
           </>
         )}
         // A filtered list that finds nothing ran out of matches: the way out is the filter. When
         // only the space filter narrows, the way out is every space.
         emptyState={
-          showsTeamEmpty({ readerFiltered: filtered, narrowing, hiddenCount: hidden.total }) ? (
+          teamEmpty ? (
             <SpaceFilterEmpty
               message={t("common:spaceFilter.empty.runs")}
               showAll={spaceFilter.showAll}

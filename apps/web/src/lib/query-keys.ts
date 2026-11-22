@@ -84,9 +84,9 @@ export const paginatedRunsKeys = {
     kind: string | null | undefined,
     status: string | null | undefined,
     unread: boolean | undefined,
+    spaceKind: SpaceKind | undefined,
     search: string | null | undefined,
     limit: number,
-    spaceKind?: SpaceKind,
   ) =>
     [
       "paginated-runs",
@@ -97,7 +97,7 @@ export const paginatedRunsKeys = {
       kind,
       status,
       unread,
-      // Before `search, limit`, which stay last: `placeholderData` keeps rows across a search change only (`keepsRunRows`).
+      // `search, limit` stay last: `placeholderData` keeps rows across a search change only (`keepsRunRows`).
       spaceKind,
       search,
       limit,

@@ -70,17 +70,17 @@ export function IntegrationsPage() {
 
   const space = useSpaceFilter("integrations", spanning);
   const { spaceIds } = space;
+  // The rows the space filter keeps, before the other filters: the gap to `active` is what it hides.
+  const inFilteredSpaces = useMemo(
+    () => active.filter((integration) => inSpaces(integration.space_ids, spaceIds)),
+    [active, spaceIds],
+  );
   const shown = useMemo(
-    () =>
-      filterIntegrations(
-        active.filter((integration) => inSpaces(integration.space_ids, spaceIds)),
-        { query, origins, sources },
-      ),
-    [active, query, origins, sources, spaceIds],
+    () => filterIntegrations(inFilteredSpaces, { query, origins, sources }),
+    [inFilteredSpaces, query, origins, sources],
   );
   const filtering = query.trim() !== "" || origins.length > 0 || sources.length > 0;
-  // Rows the space filter alone drops: what a team-only list hides, whatever the other filters.
-  const hiddenCount = active.length - active.filter((i) => inSpaces(i.space_ids, spaceIds)).length;
+  const hiddenCount = active.length - inFilteredSpaces.length;
 
   const allColumns = useIntegrationListColumns(connectionCount, spanning);
   const { columns, menu } = useColumnVisibility("integrations", allColumns);
@@ -109,7 +109,7 @@ export function IntegrationsPage() {
   ];
   const empty = showsTeamEmpty({
     readerFiltered: filtering,
-    narrowing: space.narrowing,
+    narrowing: spaceIds !== undefined,
     hiddenCount,
   }) ? (
     <SpaceFilterEmpty

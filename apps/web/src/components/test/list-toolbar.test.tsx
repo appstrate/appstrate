@@ -146,7 +146,7 @@ describe("a default value", () => {
     values: ["team"],
     options: [{ value: "team", label: "Espaces d’équipe" }],
     onChange: () => {},
-    isDefault: true,
+    hasDefault: true,
   };
 
   it("opens the row and counts, to say why the list is short", () => {
@@ -167,6 +167,16 @@ describe("a default value", () => {
     expect(filterRowOpen(null, false, [spaceFilter])).toBe(true);
     expect(filterRowOpen(null, false, filters())).toBe(false);
     expect(filterRowOpen(null, true, filters())).toBe(true);
+  });
+
+  it("stays open when the reader unticks the default", () => {
+    const unticked = { ...spaceFilter, values: [] };
+    expect(filterRowOpen(null, false, [unticked])).toBe(true);
+    expect(readerFiltered([spaceFilter])).toBe(false);
+    expect(readerFiltered([unticked])).toBe(false);
+    expect(render(<ListToolbar filters={[unticked]} onReset={() => {}} />)).toContain(
+      'aria-expanded="true"',
+    );
   });
 
   it("leaves the reader's choice in charge", () => {
