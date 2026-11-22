@@ -17,10 +17,10 @@ skills, whoever pinned them) and `skill_discovery` (default `true`).
 **Invariant**: a skill shown as loaded is injected in the model's context. The server is the only
 source of truth for the pins; the client never infers "loaded".
 
-| `skill_discovery` | The model sees                                                  | Skill tools on the turn                     |
-| ----------------- | --------------------------------------------------------------- | ------------------------------------------- |
-| `true`            | the pinned skills in full, the other skills of the space listed | `read_resource`                             |
-| `false`           | the pinned skills in full, nothing else                         | `read_resource` on the injected skills only |
+| `skill_discovery` | The model sees                                                  | Skill tools on the turn                              |
+| ----------------- | --------------------------------------------------------------- | ---------------------------------------------------- |
+| `true`            | the pinned skills in full, the other skills of the space listed | `read_resource` / `read`                             |
+| `false`           | the pinned skills in full, nothing else                         | `read_resource` / `read` on the injected skills only |
 
 **Discovery** is progressive disclosure, as in the Agent Skills spec: one line per skill (id,
 version, `skill://` URI, description) under `## Skills`, uncapped, minus the pinned skills. The
@@ -57,7 +57,7 @@ state. Changing discovery or the pins, or editing a pinned skill, may miss the c
 `chat_sessions` carries `skill_discovery boolean`, `pinned_skills text[]` (sorted, deduplicated, at
 most 5, no FK), `assistant_skills text[]` (the part of the pins the assistant made) and
 `skill_status jsonb` (`{ [packageId]: "injected" | "over_budget" | "unavailable" | "unreadable" }`).
-Migration 0113 enforces by CHECK constraint `assistant_skills ⊆ pinned_skills` and at most 5 pins;
+Migration 0112 enforces by CHECK constraint `assistant_skills ⊆ pinned_skills` and at most 5 pins;
 the application keeps `keys(skill_status) ⊆ pinned_skills`.
 
 Every session DTO carries `skill_discovery` and `skills: [{ id, source: "user" | "assistant",
@@ -90,8 +90,8 @@ changes included. Statuses:
 - 409 `chat_turn_in_flight`: a live turn holds the conversation; answered first, whatever else
   moved. Nothing written.
 
-An ephemeral turn applies the changes to the default selection. When a claim changes an existing
-row, the session-update signal tells the other clients.
+An ephemeral turn applies the changes to the default selection. The claim emits no signal itself;
+the turn's user-message write signals the row, which tells the other clients.
 
 ## Assistant loads pin
 
@@ -100,8 +100,8 @@ conversation injects for a skill goes through the turn's `SkillLoad`:
 
 - another URI (a file of the skill, another space's copy, a draft when the published version is
   injected, or the reverse) is a plain read;
-- a skill already pinned (injected, or loaded earlier in the turn) is a plain read: no re-pin, no
-  budget;
+- a skill already pinned is not pinned again: no re-pin, no budget. An injected one replays as a
+  receipt; one the turn left out (over budget, unavailable, unreadable) is a plain read;
 - else the load pins it, as `source: assistant`, when the cap (5) and the shared 64 000-character
   budget allow and the turn still holds the conversation. The budget share is reserved before the
   pin and released if it fails, so parallel tool calls never spend it twice.
@@ -149,7 +149,12 @@ as deltas:
   re-sending could remove a pin the assistant added since, so they are never re-sent and the session
   detail shows the truth.
 
-Freshness comes from the host's realtime session updates; there is no refetch at turn end.
+After each turn the client writes what the server accepted into the cached session detail and
+re-reads it (write, then invalidate). A turn with no answer drops its changes and re-reads. The
+host's realtime session updates cover the other clients.
+
+The assistant's load renders as a chip in the thread. It shows as loaded only when the tool result
+carries `skillPinned` (live and replayed); otherwise it reads "read for this message only".
 
 ## Commands
 
