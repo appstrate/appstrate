@@ -27,7 +27,7 @@ import { useTranslation } from "react-i18next";
 import { Check, Filter, PlusCircle, SlidersHorizontal, X } from "lucide-react";
 import { cn } from "@appstrate/ui/cn";
 import { toggleValue } from "../lib/toggle-value";
-import { filterRowOpen, readerFiltered } from "../lib/reader-filtered";
+import { filterRowOpen, readerFiltered } from "../lib/list-filters";
 import { TOOLBAR_UTILITY } from "../lib/toolbar-button";
 import { Badge } from "@appstrate/ui/components/badge";
 import { Button } from "@appstrate/ui/components/button";

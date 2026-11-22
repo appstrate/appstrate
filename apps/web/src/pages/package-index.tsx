@@ -32,7 +32,6 @@ import { CreationHandoffModal } from "../components/creation-handoff-modal";
 import { useIntegrationDetail } from "../hooks/use-integrations";
 import { useOverviewMode } from "../hooks/use-overview-mode";
 import { useSpaceFilter } from "../hooks/use-space-filter";
-import { inSpaces } from "../lib/space-filter";
 import { usePackageIndexActions } from "../hooks/use-package-index-actions";
 
 type IndexType = Extract<PackageType, "agent" | "skill">;
@@ -119,7 +118,8 @@ function PackageIndexBody({
   );
   const space = useSpaceFilter(type === "agent" ? "agents" : "skills", spanning);
   // The collection's own filters stay on the whole list; this one narrows the rows before them.
-  const shownItems = items?.filter((item) => inSpaces(item.spaceIds, space.spaceIds));
+  const narrowed = items && space.narrow(items, (item) => item.spaceIds);
+  const shownItems = narrowed?.rows;
   const words = presentation(type, t);
   const { canCreate, creation, importing, setImporting, createAction, actionsMenu } =
     usePackageIndexActions(type, words.create);
@@ -151,7 +151,7 @@ function PackageIndexBody({
         spaceNarrowing={
           space.mode === "team"
             ? {
-                hiddenCount: (items?.length ?? 0) - (shownItems?.length ?? 0),
+                hiddenCount: narrowed?.hiddenCount ?? 0,
                 message:
                   type === "agent"
                     ? t("common:spaceFilter.empty.agents")

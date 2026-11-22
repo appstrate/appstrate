@@ -135,9 +135,9 @@ describe("inSpaces", () => {
 });
 
 describe("showsTeamEmpty", () => {
-  const base = { readerFiltered: false, narrowing: true, hiddenCount: 3 };
+  const base = { readerFiltered: false, hiddenCount: 3 };
 
-  it("speaks when the default alone narrows and something is hidden", () => {
+  it("speaks when the team preset hides something and the reader filtered nothing", () => {
     expect(showsTeamEmpty(base)).toBe(true);
   });
 
@@ -145,9 +145,8 @@ describe("showsTeamEmpty", () => {
     expect(showsTeamEmpty({ ...base, hiddenCount: 0 })).toBe(false);
   });
 
-  it("stays quiet when the reader filtered or nothing narrows", () => {
+  it("stays quiet when the reader filtered", () => {
     expect(showsTeamEmpty({ ...base, readerFiltered: true })).toBe(false);
-    expect(showsTeamEmpty({ ...base, narrowing: false })).toBe(false);
   });
 });
 

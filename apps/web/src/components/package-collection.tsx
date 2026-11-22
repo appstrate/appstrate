@@ -22,7 +22,7 @@ import { CardGrid } from "./card-grid";
 import { PackageCard, PackageCardSkeleton } from "./package-card";
 import { PackagesTable } from "./packages-table";
 import { ListFooter, ListToolbar, type ColumnMenuSpec, type FilterSpec } from "./list-toolbar";
-import { readerFiltered } from "../lib/reader-filtered";
+import { readerFiltered } from "../lib/list-filters";
 import { showsTeamEmpty } from "../lib/space-filter";
 import { EmptyState, NoMatchState, SpaceFilterEmpty } from "./page-states";
 import { useSearchPlaceholder } from "../lib/search-placeholder";
@@ -75,7 +75,10 @@ export interface PackageCollectionProps {
    * catalogue says the organization's name where a page says "Personnalisé".
    */
   originLabels?: OriginLabels;
-  /** Dimensions the CALLER filters on. It has already narrowed `items`; the bar only draws these, next to the ones this component owns. */
+  /**
+   * Dimensions the CALLER filters on. It has already narrowed `items`; the bar
+   * only draws these, next to the ones this component owns.
+   */
   extraFilters?: FilterSpec[];
   /**
    * Given while the space filter narrows `items`: how many rows it hides, so an empty list that
@@ -184,7 +187,6 @@ export function PackageCollection({
     spaceNarrowing &&
     showsTeamEmpty({
       readerFiltered: filtering,
-      narrowing: true,
       hiddenCount: spaceNarrowing.hiddenCount,
     }) ? (
       <SpaceFilterEmpty message={spaceNarrowing.message} showAll={spaceNarrowing.showAll} />

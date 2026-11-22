@@ -12,7 +12,7 @@
 
 import { describe, it, expect } from "bun:test";
 import { KeysetListFooter, ListFooter, ListToolbar, type FilterSpec } from "../list-toolbar.tsx";
-import { filterRowOpen, readerFiltered } from "../../lib/reader-filtered.ts";
+import { filterRowOpen, readerFiltered } from "../../lib/list-filters.ts";
 import { toggleValue } from "../../lib/toggle-value.ts";
 import i18n, { i18nReady } from "../../i18n.ts";
 import { render } from "../../test/render.tsx";
@@ -144,7 +144,7 @@ describe("a default value", () => {
     id: "space",
     label: "Espaces",
     values: ["team"],
-    options: [{ value: "team", label: "Espaces d’équipe" }],
+    options: [{ value: "team", label: "Espaces d'équipe" }],
     onChange: () => {},
     defaultValues: ["team"],
   };

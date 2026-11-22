@@ -1,13 +1,13 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { useMemo, useState } from "react";
+import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Calendar, Plus } from "lucide-react";
 import { useAllSchedules } from "../hooks/use-schedules";
 import { useOverviewMode } from "../hooks/use-overview-mode";
 import { useSpaceFilter } from "../hooks/use-space-filter";
-import { inSpaces, showsTeamEmpty } from "../lib/space-filter";
-import { readerFiltered } from "../lib/reader-filtered";
+import { showsTeamEmpty } from "../lib/space-filter";
+import { readerFiltered } from "../lib/list-filters";
 import { useSpaceAction } from "../hooks/use-space-action";
 import { PageHeader } from "../components/page-header";
 import {
@@ -64,16 +64,15 @@ export function SchedulesListPage() {
   const query = list.search;
   const states = list.values("state", STATES);
   const space = useSpaceFilter("schedules", spanning);
-  const { spaceIds } = space;
-  const shown = useMemo(() => {
-    return (schedules ?? []).filter((schedule) => {
-      if (!inSpaces([schedule.spaceId], spaceIds)) return false;
-      const enabled = schedule.enabled ?? true;
-      const key = enabled ? "enabled" : "disabled";
-      if (states.length > 0 && !states.includes(key)) return false;
-      return matchesSearch(query, [schedule.name, schedule.agent_name]);
-    });
-  }, [schedules, query, states, spaceIds]);
+  const { rows: inFilteredSpaces, hiddenCount } = space.narrow(schedules ?? [], (schedule) => [
+    schedule.spaceId,
+  ]);
+  const shown = inFilteredSpaces.filter((schedule) => {
+    const enabled = schedule.enabled ?? true;
+    const key = enabled ? "enabled" : "disabled";
+    if (states.length > 0 && !states.includes(key)) return false;
+    return matchesSearch(query, [schedule.name, schedule.agent_name]);
+  });
 
   const filters: FilterSpec[] = [
     ...(space.filter ? [space.filter] : []),
@@ -89,12 +88,8 @@ export function SchedulesListPage() {
     },
   ];
   const filtering = query.trim() !== "" || readerFiltered(filters);
-  const hiddenCount = (schedules ?? []).filter(
-    (schedule) => !inSpaces([schedule.spaceId], spaceIds),
-  ).length;
   const emptyBody = showsTeamEmpty({
     readerFiltered: filtering,
-    narrowing: space.mode === "team",
     hiddenCount,
   }) ? (
     <SpaceFilterEmpty message={t("common:spaceFilter.empty.schedules")} showAll={space.showAll} />

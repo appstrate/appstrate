@@ -7,6 +7,7 @@ import { SpaceTile } from "../components/space-name";
 import type { SpaceList } from "../lib/space-lists";
 import { spaceLabel } from "../lib/space-label";
 import {
+  inSpaces,
   nextSpaceParam,
   resolveSpaceFilter,
   SPACE_PARAM,
@@ -54,11 +55,24 @@ export function useSpaceFilter(list: SpaceList, spanning: boolean) {
       }
     : null;
 
+  /**
+   * Keeps the rows in the narrowed spaces (`spaceIdsOf`: the spaces a row sits in). `hiddenCount`
+   * is what the team preset dropped, 0 in any other mode: only the preset's empty state reads it.
+   */
+  const narrow = <T,>(
+    rows: readonly T[],
+    spaceIdsOf: (row: T) => readonly string[] | undefined,
+  ): { rows: T[]; hiddenCount: number } => {
+    const kept = rows.filter((row) => inSpaces(spaceIdsOf(row), state.spaceIds));
+    return { rows: kept, hiddenCount: state.mode === "team" ? rows.length - kept.length : 0 };
+  };
+
   return {
     filter,
     mode: state.mode,
     spaceIds: state.spaceIds,
     runs: state.runs,
+    narrow,
     showAll: () => choose("all"),
   };
 }

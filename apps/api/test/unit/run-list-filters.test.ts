@@ -10,6 +10,11 @@ import {
   runSearchCondition,
 } from "../../src/lib/run-list-filters.ts";
 
+const parse = (query: Record<string, string>) =>
+  parseGlobalRunListQuery({
+    req: { query: (name?: string) => (name ? query[name] : query) },
+  } as unknown as Context<AppEnv>);
+
 describe("run list filters", () => {
   it("leaves an unfiltered request unfiltered", () => {
     expect(parseRunListFilters({})).toEqual({ status: undefined, search: undefined });
@@ -61,10 +66,6 @@ describe("run list filters", () => {
 });
 
 describe("space_kind filter", () => {
-  const parse = (query: Record<string, string>) =>
-    parseGlobalRunListQuery({
-      req: { query: (name?: string) => (name ? query[name] : query) },
-    } as unknown as Context<AppEnv>);
   it("reads absent and empty as no narrowing", () => {
     expect(parse({}).spaceKind).toBeUndefined();
     expect(parse({ space_kind: "" }).spaceKind).toBeUndefined();
@@ -82,10 +83,6 @@ describe("space_kind filter", () => {
 describe("spaceId filter", () => {
   const A = "spc_00000000-0000-4000-8000-000000000001";
   const B = "spc_00000000-0000-4000-8000-000000000002";
-  const parse = (query: Record<string, string>) =>
-    parseGlobalRunListQuery({
-      req: { query: (name?: string) => (name ? query[name] : query) },
-    } as unknown as Context<AppEnv>);
   const ids = (n: number) =>
     Array.from(
       { length: n },

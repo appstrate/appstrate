@@ -68,7 +68,6 @@ export function runListConditions(filters: { status?: RunStatus[]; search?: stri
  * parameter against it, so the tuple and the type cannot drift.
  */
 const GLOBAL_RUN_KINDS = ["all", "package", "inline"] as const;
-
 type GlobalRunKind = (typeof GLOBAL_RUN_KINDS)[number];
 
 /** `?space_kind=`: narrows the caller's reach to team spaces or to personal ones. */

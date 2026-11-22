@@ -2,11 +2,18 @@
 
 /**
  * The space filter of the studio lists in « Tous les espaces »: team spaces by default, every
- * space or a pick of spaces one click away. Pure, so the URL rule and the row rule are tested without a router.
+ * space or a pick of spaces one click away. Pure, so the URL rule and the row rule are tested
+ * without a router.
  */
 
 /** The kinds of space the run list narrows to (`space_kind`). */
 export type SpaceKind = "team" | "personal";
+
+/** What narrows the run list, which pages server side: the team kind or the picked ids, never both. */
+export interface RunSpaceScope {
+  spaceKind?: SpaceKind;
+  spaceIds?: string[];
+}
 
 /** The `space` URL parameter of the studio lists. */
 export const SPACE_PARAM = "space";
@@ -16,7 +23,10 @@ interface FilterableSpace {
   personal: boolean;
 }
 
-/** The value of the « Espaces d'équipe » preset in the filter: one tick that stands for every team space. */
+/**
+ * The value of the « Espaces d'équipe » preset in the filter: one tick that stands for every team
+ * space.
+ */
 export const TEAM_PRESET = "team";
 
 /** What the reader sees: the team preset, every space, or a pick of spaces. */
@@ -30,8 +40,7 @@ interface SpaceFilterState {
   mode: SpaceFilterMode;
   /** What narrows the client-side lists: the team spaces, the picked ones, `undefined` for every space. */
   spaceIds: string[] | undefined;
-  /** What narrows the run list, which pages server side: the team kind or the picked ids, never both. */
-  runs: { spaceKind?: SpaceKind; spaceIds?: string[] };
+  runs: RunSpaceScope;
 }
 
 /**
@@ -84,20 +93,18 @@ export function inSpaces(
 
 /**
  * Whether an empty list says « nothing in team spaces » (and offers every space): only when the
- * reader filtered nothing, the team preset narrows (`narrowing`: team mode; a pick is the reader's filter), and the narrowing hides something. Otherwise the
- * page's own empty state speaks: a list empty in every space must still offer its create button.
- * `hiddenCount` is what the filter drops (rows, or runs of personal spaces).
+ * reader filtered nothing and the team preset hides something. Otherwise the page's own empty
+ * state speaks: a list empty in every space must still offer its create button. `hiddenCount` is
+ * what the team preset drops (rows, or runs of personal spaces), 0 outside team mode.
  */
 export function showsTeamEmpty({
   readerFiltered,
-  narrowing,
   hiddenCount,
 }: {
   readerFiltered: boolean;
-  narrowing: boolean;
   hiddenCount: number;
 }): boolean {
-  return !readerFiltered && narrowing && hiddenCount > 0;
+  return !readerFiltered && hiddenCount > 0;
 }
 
 /** The URL with the `space` parameter set to `value` (see {@link nextSpaceParam}), or removed when `null`. */

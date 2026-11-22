@@ -98,9 +98,9 @@ export const paginatedRunsKeys = {
       kind,
       status,
       unread,
-      // `search, limit` stay last: `placeholderData` keeps rows across a search change only (`keepsRunRows`).
       spaceKind,
       spaceIds,
+      // `search, limit` stay last: `placeholderData` keeps rows across a search change only (`keepsRunRows`).
       search,
       limit,
     ] as const,

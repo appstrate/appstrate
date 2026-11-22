@@ -6,7 +6,7 @@ import { useUnreadRunCount, useMarkAllRunsRead } from "../hooks/use-run-reads";
 import { PageHeader } from "../components/page-header";
 import { NoMatchState, SpaceFilterEmpty } from "../components/page-states";
 import { ListToolbar, type FilterSpec } from "../components/list-toolbar";
-import { readerFiltered } from "../lib/reader-filtered";
+import { readerFiltered } from "../lib/list-filters";
 import { useSearchPlaceholder } from "../lib/search-placeholder";
 import { useListParams } from "../lib/list-params";
 import { RunList } from "../components/run-list";
@@ -38,20 +38,18 @@ export function RunsPage() {
   // « Tout marquer comme lu » marks what the list shows: the working space, or each space
   // admitting the list that the space filter keeps.
   const { spaceIds } = spaceFilter;
-  const narrowing = spaceFilter.mode === "team";
+  const teamPreset = spaceFilter.mode === "team";
   const shownSpaces = spaceIds ? runSpaces.filter((s) => spaceIds.includes(s.id)) : runSpaces;
-  // The team preset narrows by kind, so the URL never grows with the number of spaces; a pick is ids.
-  const { spaceKind, spaceIds: pickedSpaceIds } = spaceFilter.runs;
   // Runs of personal spaces, which the team default hides. A disabled query keeps serving its
-  // cached `data`: gate the figure on `narrowing`, not just the fetch.
+  // cached `data`: gate the figure on `teamPreset`, not just the fetch.
   const hiddenPage = useFirstRunsPage({
     spanning: true,
-    spaceKind: "personal",
+    spaces: { spaceKind: "personal" },
     limit: 1,
-    enabled: narrowing,
+    enabled: teamPreset,
   });
-  const hiddenCount = narrowing ? (hiddenPage.data?.total ?? 0) : 0;
-  const unreadCount = useUnreadRunCount({ spanning, spaceKind, spaceIds: pickedSpaceIds });
+  const hiddenCount = teamPreset ? (hiddenPage.data?.total ?? 0) : 0;
+  const unreadCount = useUnreadRunCount({ spanning, spaces: spaceFilter.runs });
   const markAllRead = useMarkAllRunsRead();
   const list = useListParams(FILTER_PARAMS);
   const searchPlaceholder = useSearchPlaceholder(t("common:nav.runs"));
@@ -99,7 +97,6 @@ export function RunsPage() {
   const filtered = Boolean(search) || readerFiltered(filters);
   const teamEmpty = showsTeamEmpty({
     readerFiltered: filtered,
-    narrowing,
     hiddenCount,
   });
   const user = canSeeEveryRun && scopes.includes("me") ? "me" : undefined;
@@ -130,8 +127,7 @@ export function RunsPage() {
         kind={kind}
         status={statuses}
         spanning={spanning}
-        spaceKind={spaceKind}
-        spaceIds={pickedSpaceIds}
+        spaces={spaceFilter.runs}
         search={search}
         toolbar={({ columns }) => (
           <ListToolbar

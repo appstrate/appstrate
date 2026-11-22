@@ -20,7 +20,7 @@ import { EmptyState, ErrorState } from "./page-states";
 import { useColumnVisibility } from "../stores/column-visibility-store";
 import type { EnrichedRun } from "@appstrate/shared-types";
 import type { RunStatus } from "@appstrate/core/run-status";
-import type { SpaceKind } from "../lib/space-filter";
+import type { RunSpaceScope } from "../lib/space-filter";
 import { KeysetListFooter, type ColumnMenuSpec } from "./list-toolbar";
 import { PlayCircle } from "lucide-react";
 
@@ -43,10 +43,8 @@ interface RunListProps {
   search?: string;
   /** Every space the reader reaches instead of the current one; each row then names its space. */
   spanning?: boolean;
-  /** With `spanning`: only team or personal spaces' runs (the runs page's space filter). */
-  spaceKind?: SpaceKind;
-  /** With `spanning`: only these spaces' runs (the runs page's space filter, a pick). */
-  spaceIds?: string[];
+  /** With `spanning`: only the runs of these spaces (the runs page's space filter). */
+  spaces?: RunSpaceScope;
   /**
    * The bar above the table.
    *
@@ -68,8 +66,7 @@ export function RunList({
   status,
   search,
   spanning = false,
-  spaceKind,
-  spaceIds,
+  spaces,
   toolbar,
 }: RunListProps) {
   const { t } = useTranslation(["agents"]);
@@ -100,8 +97,7 @@ export function RunList({
     kind,
     status,
     spanning,
-    spaceKind,
-    spaceIds,
+    spaces,
     search: querySearch || undefined,
   });
   const { data, isLoading, isError, error } = query;

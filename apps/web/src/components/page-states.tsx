@@ -151,7 +151,10 @@ export function NoMatchState({
   );
 }
 
-/** An empty list the space filter alone narrowed: the way out is every space, not a filter reset. `message` is the list's own sentence. */
+/**
+ * An empty list the space filter alone narrowed: the way out is every space, not a filter reset.
+ * `message` is the list's own sentence.
+ */
 export function SpaceFilterEmpty({ message, showAll }: { message: string; showAll: () => void }) {
   const { t } = useTranslation("common");
   return <NoMatchState message={message} onReset={showAll} resetLabel={t("spaceFilter.showAll")} />;

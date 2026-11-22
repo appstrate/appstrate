@@ -7,7 +7,7 @@
  * creating and importing choose their space in their own menu (`useSpaceAction`).
  */
 
-import { useMemo, useState } from "react";
+import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Boxes } from "lucide-react";
 import { PageHeader } from "../components/page-header";
@@ -42,8 +42,8 @@ import { useOrg } from "../hooks/use-org";
 import { useColumnVisibility } from "../stores/column-visibility-store";
 import { useOverviewMode } from "../hooks/use-overview-mode";
 import { useSpaceFilter } from "../hooks/use-space-filter";
-import { inSpaces, showsTeamEmpty } from "../lib/space-filter";
-import { readerFiltered } from "../lib/reader-filtered";
+import { showsTeamEmpty } from "../lib/space-filter";
+import { readerFiltered } from "../lib/list-filters";
 import { usePackageIndexActions } from "../hooks/use-package-index-actions";
 import { useSpaceLink } from "../hooks/use-current-space";
 import { IntegrationSourceLabel } from "../components/integration-source-label";
@@ -70,17 +70,12 @@ export function IntegrationsPage() {
   const query = list.search;
 
   const space = useSpaceFilter("integrations", spanning);
-  const { spaceIds } = space;
-  // The rows the space filter keeps, before the other filters: the gap to `active` is what it hides.
-  const inFilteredSpaces = useMemo(
-    () => active.filter((integration) => inSpaces(integration.space_ids, spaceIds)),
-    [active, spaceIds],
+  // The rows the space filter keeps, before the other filters.
+  const { rows: inFilteredSpaces, hiddenCount } = space.narrow(
+    active,
+    (integration) => integration.space_ids,
   );
-  const shown = useMemo(
-    () => filterIntegrations(inFilteredSpaces, { query, origins, sources }),
-    [inFilteredSpaces, query, origins, sources],
-  );
-  const hiddenCount = active.length - inFilteredSpaces.length;
+  const shown = filterIntegrations(inFilteredSpaces, { query, origins, sources });
 
   const allColumns = useIntegrationListColumns(connectionCount, spanning);
   const { columns, menu } = useColumnVisibility("integrations", allColumns);
@@ -110,7 +105,6 @@ export function IntegrationsPage() {
   const filtering = query.trim() !== "" || readerFiltered(filters);
   const empty = showsTeamEmpty({
     readerFiltered: filtering,
-    narrowing: space.mode === "team",
     hiddenCount,
   }) ? (
     <SpaceFilterEmpty
