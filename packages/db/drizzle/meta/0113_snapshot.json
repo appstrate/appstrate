@@ -10386,6 +10386,14 @@
         "chat_sessions_restricted_needs_space": {
           "name": "chat_sessions_restricted_needs_space",
           "value": "restricted = false OR space_id IS NOT NULL"
+        },
+        "chat_sessions_assistant_skills_pinned": {
+          "name": "chat_sessions_assistant_skills_pinned",
+          "value": "assistant_skills <@ pinned_skills"
+        },
+        "chat_sessions_pinned_skills_cap": {
+          "name": "chat_sessions_pinned_skills_cap",
+          "value": "cardinality(pinned_skills) <= 5"
         }
       },
       "isRLSEnabled": false

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * A chosen skill injected by a real caller-context build — listed and read
+ * A pinned skill injected by a real caller-context build — listed and read
  * over a real MCP connection without claim — is readable through the real
  * `resources/read` with the bearer minted from that build's claim, no
  * hand-built claim. A turn without discovery holds no `skills:*`, so only the
@@ -150,7 +150,7 @@ async function readResource(headers: Record<string, string>, uri: string) {
   return { text: contents?.[0]?.text, error: envelope.error };
 }
 
-describe("a chosen skill injected in a turn without discovery, read back through `resources/read`", () => {
+describe("a pinned skill injected in a turn without discovery, read back through `resources/read`", () => {
   it("serves the author's injected draft, then 409s once the draft is edited", async () => {
     const { block, permissions, bearer, unclaimed } = await discoveryOffTurn(
       owner.user,

@@ -24,9 +24,6 @@ import { persistUserMessage, persistAssistantMessage, ensureSession } from "../s
 import { db } from "@appstrate/db/client";
 import { sql } from "drizzle-orm";
 import type { UIMessage } from "ai";
-import type { ChatSkillChanges } from "../src/skills.ts";
-
-const NO_SKILL_CHANGES: ChatSkillChanges = { pin: [], unpin: [] };
 
 const app = getTestApp();
 
@@ -349,7 +346,7 @@ describe("ensureSession refuses a foreign session without writing to it", () => 
     // whose xmin never moves, and would be proving nothing.
     const id = await createSessionAs(owner);
     const before = await xminOf(id);
-    await ensureSession(id, owner.orgId, owner.user.id, [owner.defaultSpaceId], NO_SKILL_CHANGES);
+    await ensureSession(id, owner.orgId, owner.user.id, [owner.defaultSpaceId]);
     expect(await xminOf(id)).not.toBe(before);
   });
 
@@ -358,13 +355,7 @@ describe("ensureSession refuses a foreign session without writing to it", () => 
     const before = await xminOf(id);
 
     await expect(
-      ensureSession(
-        id,
-        stranger.orgId,
-        stranger.user.id,
-        [stranger.defaultSpaceId],
-        NO_SKILL_CHANGES,
-      ),
+      ensureSession(id, stranger.orgId, stranger.user.id, [stranger.defaultSpaceId]),
     ).rejects.toThrow(/not found/i);
 
     expect(await xminOf(id)).toBe(before);

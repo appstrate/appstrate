@@ -11,6 +11,7 @@ import { scopedNameRegex } from "@appstrate/core/validation";
 import {
   CHAT_SKILLS_CONTENT_BUDGET_CHARS,
   MAX_PINNED_SKILLS,
+  PINNED_SKILL_SOURCES,
   PINNED_SKILL_STATUSES,
 } from "./skills.ts";
 
@@ -77,9 +78,9 @@ export const chatComponentSchemas = {
             id: { type: "string", description: "`@scope/name` package id." },
             source: {
               type: "string",
-              enum: ["user", "assistant"],
+              enum: [...PINNED_SKILL_SOURCES],
               description:
-                "Who pinned it: the user (`pin_skills`), or the assistant by loading its SKILL.md. Naming an assistant's pin in `pin_skills` makes it the user's (an API-level rule: the dashboard's panel never sends a pin for a skill already pinned).",
+                "Who pinned it: the user (`pin_skills`), or the assistant by loading its SKILL.md. Naming an assistant's pin in `pin_skills` makes it the user's.",
             },
             status: {
               type: ["string", "null"],
@@ -90,7 +91,7 @@ export const chatComponentSchemas = {
         },
         maxItems: MAX_PINNED_SKILLS,
         description:
-          "The skills pinned to this conversation, sorted by id: injected in full on every turn, whatever `skill_discovery`. Changed by the turns that carry `pin_skills` / `unpin_skills`, and by the assistant loading a skill's SKILL.md.",
+          "The skills pinned to this conversation, sorted by id: injected in full on every turn, whatever `skill_discovery`. Changed by the turns that carry `pin_skills` / `unpin_skills` (written when the turn starts, past every refusal: a refused turn changes nothing), and by the assistant loading a skill's SKILL.md while the conversation has room and budget for it (a load that cannot pin is still read for that turn).",
       },
       spaceId: {
         type: ["string", "null"],
@@ -564,11 +565,11 @@ export const chatPaths = {
                 skill_discovery: {
                   type: "boolean",
                   description:
-                    "Whether the assistant may find skills beyond the pinned ones (see ChatSession `skill_discovery`), written onto the session by this turn; absent = the stored value (on, for a new conversation).",
+                    "Whether the assistant may find skills beyond the pinned ones (see ChatSession `skill_discovery`), written onto the session when this turn starts (a refused turn writes nothing); absent = the stored value (on, for a new conversation).",
                 },
                 pin_skills: {
                   ...skillIds,
-                  description: `Skills to pin to the conversation, on top of its stored pins (a change, never the whole set: a pin the assistant added in between stays). A skill the assistant pinned becomes the user's. More than ${MAX_PINNED_SKILLS} pins as a result is a 400 naming this field, and nothing is written.`,
+                  description: `Skills to pin to the conversation, on top of its stored pins (a change, never the whole set: a pin the assistant added in between stays). A skill the assistant pinned becomes the user's. Written when the turn starts, past every refusal: a refused turn writes nothing. More than ${MAX_PINNED_SKILLS} pins as a result is a 409 \`chat_skill_pin_limit\`, and nothing is written.`,
                 },
                 unpin_skills: {
                   ...skillIds,
@@ -602,7 +603,9 @@ export const chatPaths = {
         "404": { $ref: "#/components/responses/NotFound" },
         "409": {
           description:
-            "`org_deleting` — the organization's deletion is reserved, so no new metered usage is admitted. Refused whatever modules the deployment loads. Or `needs_reconnection` — the selected model's subscription credential is dead (revoked, or expired beyond refresh), so the turn is refused before inference starts rather than failing upstream. RFC 9457 problem+json. Or `model_credential_required`: the selected model has no organization credential and the caller has no usable personal credential for it. Or `chat_turn_scope_changed`: the conversation's limit, its origin space or its skill settings (another client's `pin_skills` / `unpin_skills` / `skill_discovery`) changed while the turn was starting; nothing but this turn's own skill changes was written, and sending the message again starts it with the new scope. Or `chat_turn_in_flight`: another turn of the conversation is running (a conversation runs one turn at a time); nothing but this turn's own skill changes was written, and the message can be sent again once that turn ends.",
+            "`org_deleting` — the organization's deletion is reserved, so no new metered usage is admitted. Refused whatever modules the deployment loads. Or `needs_reconnection` — the selected model's subscription credential is dead (revoked, or expired beyond refresh), so the turn is refused before inference starts rather than failing upstream. RFC 9457 problem+json. Or `model_credential_required`: the selected model has no organization credential and the caller has no usable personal credential for it. Or `chat_turn_scope_changed`: the conversation's limit, its origin space or its skill settings (another client's `pin_skills` / `unpin_skills` / `skill_discovery`) changed while the turn was starting; nothing was written, and sending the message again starts it with the new scope. Or `chat_turn_in_flight`: another turn of the conversation is running (a conversation runs one turn at a time); nothing was written, and the message can be sent again once that turn ends. Or `chat_skill_pin_limit`: the conversation's pins after this turn's `pin_skills` / `unpin_skills` would exceed " +
+            MAX_PINNED_SKILLS +
+            "; nothing was written, and the message can be sent again after unpinning a skill. Every refusal of a turn leaves its skill changes unwritten.",
           content: problem,
         },
         "429": {

@@ -28,7 +28,13 @@ import Redis from "ioredis";
 import { db } from "@appstrate/db/client";
 import { chatSessions } from "@appstrate/db/schema";
 import { notifySessionUpdate } from "./realtime.ts";
-import type { PinnedSkillStatus } from "./skills.ts";
+import { textArray, sortedIds, withoutIds } from "./persistence.ts";
+import {
+  applySkillChanges,
+  MAX_PINNED_SKILLS,
+  type ChatSkillChanges,
+  type PinnedSkillStatus,
+} from "./skills.ts";
 import {
   createResumableStreamContext,
   createInMemoryResumableStreamStore,
@@ -301,42 +307,67 @@ export interface TurnScope {
   skillDiscovery: boolean;
 }
 
+/** What a claiming turn writes into the conversation's skill columns. */
+export interface TurnSkillWrite {
+  /** The turn's `skill_discovery` / `pin_skills` / `unpin_skills`, applied to the pins compared. */
+  changes?: ChatSkillChanges;
+  /** The turn's verdict on each pin of the selection after `changes`: replaces `skill_status`. */
+  status?: Readonly<Record<string, PinnedSkillStatus>>;
+}
+
 /** What claiming a conversation for a turn answered: `claimed`, or why nothing was written. */
-type StreamClaim = "claimed" | "scope_changed" | "in_flight";
+type StreamClaim = "claimed" | "scope_changed" | "in_flight" | "pin_limit";
 
 /**
  * Mark a session's in-flight stream so a reloaded client can reconnect to it.
  * A conversation runs one turn at a time: the claim takes a free marker, or one
  * stale by {@link STALE_MARKER_MIN_AGE_MS} (its producer is gone), never a live
  * one. `updated_at` is stamped in the same statement: it is what tells a freshly
- * claimed turn from a marker whose producer died. Emits no signal: the caller's
- * user-message write does; on its failure `clearActiveStream` does.
+ * claimed turn from a marker whose producer died. Emits no signal of its own: the caller's
+ * user-message write, which follows it, signals the row (skill columns included); on its
+ * failure `clearActiveStream` does.
  *
  * Also a compare-and-set on the scope the turn read (its origin space, limit, pinned skills
  * and skill discovery): the turn's spaces, bearer and system prompt were computed from that read, and the
  * limit PATCH is refused only while a marker is set, so a change landing between the read and
  * this claim (another tab's limit or skill change) refuses the turn rather than letting it act
  * on a state it no longer matches. `scope_changed`: the scope moved (or the row is gone);
- * `in_flight`: another turn holds the conversation. Neither writes anything.
+ * `in_flight`: another turn holds the conversation; `pin_limit`: the turn's pins, applied to the
+ * row as it now stands, exceed {@link MAX_PINNED_SKILLS}. None of them writes anything.
  *
- * `skillStatus`, the turn's verdict on each of those pins, replaces `skill_status` in the same
- * statement: only a turn that claims records what it did with them, and it records them even
- * if it fails later.
+ * The turn's skill changes and its verdicts (`skills`) are written by this statement alone, so
+ * a refused turn changes no skill: `pinned_skills` = (compared − unpin) ∪ pin, a pin or unpin
+ * leaves `assistant_skills` (a skill the user pins is theirs), and `skill_status` is replaced
+ * by the verdicts, even if the turn fails later.
  */
 export async function setActiveStream(
   sessionId: string,
   streamId: string,
   scope: TurnScope,
-  skillStatus: Readonly<Record<string, PinnedSkillStatus>>,
+  skills: TurnSkillWrite = {},
 ): Promise<StreamClaim> {
   const staleBefore = new Date(Date.now() - STALE_MARKER_MIN_AGE_MS);
+  const changes = skills.changes ?? { pin: [], unpin: [] };
+  const repins = changes.pin.length > 0 || changes.unpin.length > 0;
+  const pinned = repins
+    ? sortedIds(
+        sql`array_cat(${withoutIds(chatSessions.pinnedSkills, changes.unpin)}, ${textArray(changes.pin)})`,
+      )
+    : undefined;
   const claimed = await db
     .update(chatSessions)
     .set({
       activeStreamId: streamId,
       updatedAt: new Date(),
-      // Keyed by the pins compared below: kept to the row's own pins by construction.
-      skillStatus: { ...skillStatus },
+      skillStatus: skills.status ?? {},
+      ...(changes.skillDiscovery !== undefined && { skillDiscovery: changes.skillDiscovery }),
+      ...(pinned && {
+        pinnedSkills: pinned,
+        assistantSkills: withoutIds(chatSessions.assistantSkills, [
+          ...changes.unpin,
+          ...changes.pin,
+        ]),
+      }),
     })
     .where(
       and(
@@ -344,7 +375,8 @@ export async function setActiveStream(
         eq(chatSessions.restricted, scope.restricted),
         sql`${chatSessions.spaceId} IS NOT DISTINCT FROM ${scope.spaceId}`,
         eq(chatSessions.skillDiscovery, scope.skillDiscovery),
-        sql`${chatSessions.pinnedSkills} = ARRAY(SELECT e FROM jsonb_array_elements_text(${JSON.stringify(scope.pinnedSkills)}::jsonb) WITH ORDINALITY AS t(e, n) ORDER BY n)`,
+        sql`${chatSessions.pinnedSkills} = ${textArray(scope.pinnedSkills)}`,
+        pinned && sql`cardinality(${pinned}) <= ${MAX_PINNED_SKILLS}`,
         or(isNull(chatSessions.activeStreamId), lt(chatSessions.updatedAt, staleBefore)),
       ),
     )
@@ -366,10 +398,18 @@ export async function setActiveStream(
   // A live turn holding the conversation is the answer, whatever else moved meanwhile: waiting
   // for it, not resending at once, is what the caller must do.
   if (row.activeStreamId !== null && row.updatedAt >= staleBefore) return "in_flight";
+  // Resending would hit the cap again: the same answer as the check made before the claim.
+  if (repins && applySkillChanges(row.pinnedSkills, changes).length > MAX_PINNED_SKILLS) {
+    return "pin_limit";
+  }
+  // The marker cleared between the two statements, or the scope moved: told apart here.
+  const samePins =
+    row.pinnedSkills.length === scope.pinnedSkills.length &&
+    row.pinnedSkills.every((id, i) => id === scope.pinnedSkills[i]);
   return row.spaceId === scope.spaceId &&
     row.restricted === scope.restricted &&
     row.skillDiscovery === scope.skillDiscovery &&
-    row.pinnedSkills.join("\n") === scope.pinnedSkills.join("\n")
+    samePins
     ? "in_flight"
     : "scope_changed";
 }

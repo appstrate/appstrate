@@ -3,9 +3,10 @@
 /**
  * The assistant loading a skill's `SKILL.md` pins it to a persisted conversation, through
  * `read_resource` and the platform `read` tool alike: the text for this turn, a receipt in the
- * replay, the pin on the row. A refused load (cap, budget) marks nothing; an ephemeral turn and
- * a skill's other files read as before. The handler side (the turn's injected set and budget,
- * the next turn's injection) is in `chat-stream-handler.test.ts`.
+ * replay, the pin on the row. A pin that cannot be made (cap, budget, turn released) leaves the
+ * read a plain one, with a note; an ephemeral turn and a skill's other files read as before. The
+ * handler side (the turn's injected set and budget, the next turn's injection) is in
+ * `chat-stream-handler.test.ts`; the turn's budget bookkeeping in `skills.test.ts`.
  */
 
 import { beforeEach, describe, expect, it } from "bun:test";
@@ -19,7 +20,12 @@ import { buildPlatformMcpTools } from "../src/pi-chat/mcp-tools.ts";
 import { PiChatUiStreamMapper } from "../src/pi-chat/ui-stream-mapper.ts";
 import { pinAssistantSkill } from "../src/persistence.ts";
 import { mintSessionId } from "../src/session-id.ts";
-import { MAX_PINNED_SKILLS, turnSkillLoad, type SkillLoad } from "../src/skills.ts";
+import {
+  MAX_PINNED_SKILLS,
+  turnSkillLoad,
+  type PinnedSkillStatus,
+  type SkillLoad,
+} from "../src/skills.ts";
 import { inertTurnSpaces } from "./turn-spaces.ts";
 
 const MCP_URL = "http://127.0.0.1:1/api/mcp/o/org_1?renders_cards=true";
@@ -125,7 +131,7 @@ describe("assistant skill load", () => {
   });
 
   /** A conversation the turn `STREAM` holds, with `pinned` (and their statuses) stored. */
-  async function seed(pinned: string[] = [], skillStatus: Record<string, string> = {}) {
+  async function seed(pinned: string[] = [], skillStatus: Record<string, PinnedSkillStatus> = {}) {
     await db.insert(chatSessions).values({
       id: sessionId,
       orgId: ctx.orgId,
@@ -150,23 +156,22 @@ describe("assistant skill load", () => {
   }
 
   /** The persisted turn's load: the conversation injects `SKILL` from `SKILL_MD`. */
-  const persistedLoad = (budgetLeft = 64_000, injected: string[] = []) =>
+  const persistedLoad = (
+    budgetLeft = 64_000,
+    turn: { pinned?: string[]; injected?: string[] } = {},
+  ) =>
     turnSkillLoad({
       uris: new Map([[SKILL, SKILL_MD]]),
-      injected,
+      pinned: turn.pinned ?? [],
+      injected: turn.injected ?? [],
       budgetLeft,
-      pin: (id) => pinAssistantSkill(sessionId, STREAM, id),
+      pin: (id, append) => pinAssistantSkill(sessionId, STREAM, id, append),
     });
-
-  const refusalOf = (work: Promise<unknown>) =>
-    work.then(
-      () => "no refusal",
-      (error: unknown) => String(error),
-    );
 
   const RECEIPT = JSON.stringify(
     JSON.stringify({ uri: SKILL_MD, skill: SKILL, pinned: true }),
   ).slice(1, -1);
+  const NOT_PINNED = "read for this turn but not pinned";
 
   for (const name of ["read_resource", "read"]) {
     it(`${name}: pins the skill, returns its text this turn and replays a receipt`, async () => {
@@ -204,9 +209,9 @@ describe("assistant skill load", () => {
     }
   });
 
-  it("reads a skill the turn already injected without a write, and replays a receipt too", async () => {
+  it("reads a skill the turn injected without a write, and replays a receipt while it is pinned", async () => {
     await seed([SKILL]);
-    const turn = await tools(persistedLoad(64_000, [SKILL]));
+    const turn = await tools(persistedLoad(64_000, { pinned: [SKILL], injected: [SKILL] }));
     try {
       const result = await turn.tool("read_resource").execute("call_1", { uri: SKILL_MD });
       expect(JSON.stringify(result.content)).toContain("Always answer in haiku.");
@@ -220,6 +225,35 @@ describe("assistant skill load", () => {
     }
   });
 
+  for (const [label, turnState] of [
+    ["injected at the turn's start", { pinned: [SKILL], injected: [SKILL] }],
+    ["pinned by this turn's own load", {}],
+  ] as const) {
+    it(`re-reads plainly a skill ${label} that another tab unpinned meanwhile, never re-pinning it`, async () => {
+      await seed(turnState.pinned ? [...turnState.pinned] : []);
+      const turn = await tools(
+        persistedLoad(64_000, {
+          pinned: turnState.pinned ? [...turnState.pinned] : [],
+          injected: turnState.injected ? [...turnState.injected] : [],
+        }),
+      );
+      try {
+        await turn.tool("read_resource").execute("call_1", { uri: SKILL_MD });
+        await db
+          .update(chatSessions)
+          .set({ pinnedSkills: [], assistantSkills: [], skillStatus: {} })
+          .where(eq(chatSessions.id, sessionId));
+        const result = await turn.tool("read_resource").execute("call_2", { uri: SKILL_MD });
+        const replay = replayed("read_resource", result);
+        expect(replay).toContain("Always answer in haiku.");
+        expect(replay).not.toContain(RECEIPT);
+        expect(await row()).toEqual({ pinnedSkills: [], assistantSkills: [], skillStatus: {} });
+      } finally {
+        await turn.close();
+      }
+    });
+  }
+
   it("reads another definition of the skill plainly, its text kept in the replay", async () => {
     await seed();
     const turn = await tools(persistedLoad());
@@ -232,13 +266,16 @@ describe("assistant skill load", () => {
     }
   });
 
-  it("refuses the load of a pin left out over budget when it still does not fit, marking nothing", async () => {
+  it("reads plainly a pin the turn left out over budget: no pin, no budget, no note", async () => {
     await seed([SKILL], { [SKILL]: "over_budget" });
-    const turn = await tools(persistedLoad(TEXT.length - 1));
+    const turn = await tools(persistedLoad(0, { pinned: [SKILL] }));
     try {
-      expect(
-        await refusalOf(turn.tool("read_resource").execute("call_1", { uri: SKILL_MD })),
-      ).toContain("does not fit");
+      const result = await turn.tool("read_resource").execute("call_1", { uri: SKILL_MD });
+      expect(JSON.stringify(result.content)).toContain("Always answer in haiku.");
+      expect(JSON.stringify(result.content)).not.toContain(NOT_PINNED);
+      const replay = replayed("read_resource", result);
+      expect(replay).toContain("Always answer in haiku.");
+      expect(replay).not.toContain(RECEIPT);
       expect(await row()).toEqual({
         pinnedSkills: [SKILL],
         assistantSkills: [],
@@ -249,52 +286,53 @@ describe("assistant skill load", () => {
     }
   });
 
-  it("refuses a load when the conversation already pins five skills, marking nothing", async () => {
-    const five = ["@acme/a", "@acme/b", "@acme/c", "@acme/d", "@acme/e"];
-    await seed(five);
-    const turn = await tools(persistedLoad());
-    try {
-      const refused = await refusalOf(
-        turn.tool("read_resource").execute("call_1", { uri: SKILL_MD }),
-      );
-      expect(refused).toContain("already pins 5 skills");
-      expect(refused).toContain("skills panel");
-      expect(await row()).toEqual({ pinnedSkills: five, assistantSkills: [], skillStatus: {} });
-    } finally {
-      await turn.close();
-    }
-  });
-
-  it("refuses a load over the budget the turn has left, marking nothing", async () => {
-    await seed();
-    const turn = await tools(persistedLoad(TEXT.length - 1));
-    try {
-      expect(await refusalOf(turn.tool("read").execute("call_1", { uri: SKILL_MD }))).toContain(
-        "does not fit",
-      );
-      expect(await row()).toEqual({ pinnedSkills: [], assistantSkills: [], skillStatus: {} });
-    } finally {
-      await turn.close();
-    }
-  });
-
-  it("refuses a load landing after the turn lost the conversation, marking nothing", async () => {
-    await seed();
-    // Stopped, or taken over by another turn.
-    await db
-      .update(chatSessions)
-      .set({ activeStreamId: "strm_next" })
-      .where(eq(chatSessions.id, sessionId));
-    const turn = await tools(persistedLoad());
-    try {
-      expect(
-        await refusalOf(turn.tool("read_resource").execute("call_1", { uri: SKILL_MD })),
-      ).toContain("no longer holds the conversation");
-      expect(await row()).toEqual({ pinnedSkills: [], assistantSkills: [], skillStatus: {} });
-    } finally {
-      await turn.close();
-    }
-  });
+  const FIVE = ["@acme/a", "@acme/b", "@acme/c", "@acme/d", "@acme/e"];
+  for (const [label, setup, budgetLeft, says] of [
+    [
+      "the conversation already pins five skills",
+      () => seed(FIVE),
+      64_000,
+      "already pins 5 skills",
+    ],
+    [
+      "its text is over the budget the turn has left",
+      () => seed(),
+      TEXT.length - 1,
+      "does not fit",
+    ],
+    [
+      "the turn lost the conversation",
+      async () => {
+        await seed();
+        // Stopped, or taken over by another turn.
+        await db
+          .update(chatSessions)
+          .set({ activeStreamId: "strm_next" })
+          .where(eq(chatSessions.id, sessionId));
+      },
+      64_000,
+      "no longer holds the conversation",
+    ],
+  ] as const) {
+    it(`returns the text with a note, pinning nothing, when ${label}`, async () => {
+      await setup();
+      const before = await row();
+      const turn = await tools(persistedLoad(budgetLeft));
+      try {
+        const result = await turn.tool("read_resource").execute("call_1", { uri: SKILL_MD });
+        const shown = JSON.stringify(result.content);
+        expect(shown).toContain("Always answer in haiku.");
+        expect(shown).toContain(NOT_PINNED);
+        expect(shown).toContain(says);
+        const replay = replayed("read_resource", result);
+        expect(replay).toContain("Always answer in haiku.");
+        expect(replay).not.toContain(RECEIPT);
+        expect(await row()).toEqual(before);
+      } finally {
+        await turn.close();
+      }
+    });
+  }
 
   it("keeps an ephemeral turn's load a plain read, and a skill's other files unchanged", async () => {
     await seed();
@@ -334,25 +372,83 @@ describe("pinAssistantSkill", () => {
     });
   }
 
-  it("marks injected a skill already pinned, at the cap, keeping its source", async () => {
+  async function stored() {
+    const [found] = await db.select().from(chatSessions).where(eq(chatSessions.id, sessionId));
+    return found;
+  }
+
+  it("never writes a skill already pinned, even at the cap, and reports it", async () => {
     const five = ["@acme/a", "@acme/b", "@acme/c", "@acme/d", SKILL];
     await seed(five);
-    expect(await pinAssistantSkill(sessionId, STREAM, SKILL)).toBe("pinned");
-    const [found] = await db.select().from(chatSessions).where(eq(chatSessions.id, sessionId));
-    expect(found?.pinnedSkills).toEqual(five);
-    expect(found?.assistantSkills).toEqual([]);
-    expect(found?.skillStatus).toEqual({ [SKILL]: "injected" });
+    expect(await pinAssistantSkill(sessionId, STREAM, SKILL, true)).toBe("already_pinned");
+    expect(await stored()).toMatchObject({
+      pinnedSkills: five,
+      assistantSkills: [],
+      skillStatus: {},
+    });
+  });
+
+  it("only checks without `append`, whoever holds the conversation", async () => {
+    await seed([SKILL]);
+    expect(await pinAssistantSkill(sessionId, "strm_other", SKILL, false)).toBe("already_pinned");
+    expect(await pinAssistantSkill(sessionId, STREAM, "@acme/x", false)).toBe("not_pinned");
+    expect(await stored()).toMatchObject({ pinnedSkills: [SKILL], assistantSkills: [] });
   });
 
   it("lets exactly one of two concurrent pins take the last place", async () => {
     await seed(["@acme/a", "@acme/b", "@acme/c", "@acme/d"]);
     const outcomes = await Promise.all([
-      pinAssistantSkill(sessionId, STREAM, "@acme/x"),
-      pinAssistantSkill(sessionId, STREAM, "@acme/y"),
+      pinAssistantSkill(sessionId, STREAM, "@acme/x", true),
+      pinAssistantSkill(sessionId, STREAM, "@acme/y", true),
     ]);
     expect(outcomes.sort()).toEqual(["full", "pinned"]);
-    const [found] = await db.select().from(chatSessions).where(eq(chatSessions.id, sessionId));
+    const found = await stored();
     expect(found?.pinnedSkills).toHaveLength(MAX_PINNED_SKILLS);
     expect(found?.assistantSkills).toHaveLength(1);
+  });
+});
+
+describe("chat_sessions skill constraints", () => {
+  let ctx: TestContext;
+
+  beforeEach(async () => {
+    await truncateAll();
+    ctx = await createTestContext({ orgSlug: "skillchecks" });
+  });
+
+  const insert = (pinnedSkills: string[], assistantSkills: string[]) =>
+    db.insert(chatSessions).values({
+      id: mintSessionId(),
+      orgId: ctx.orgId,
+      userId: ctx.user.id,
+      title: null,
+      pinnedSkills,
+      assistantSkills,
+    });
+
+  /** The constraint a write broke, as the driver reports it (postgres.js or PGlite). */
+  const violated = (work: Promise<unknown>) =>
+    work.then(
+      () => "none",
+      (error: unknown) => {
+        const cause = (error as { cause?: Record<string, unknown> }).cause ?? {};
+        return String(cause.constraint_name ?? cause.constraint ?? error);
+      },
+    );
+
+  it("refuses an assistant pin that is not a pin", async () => {
+    expect(await violated(insert(["@acme/a"], ["@acme/b"]))).toContain(
+      "chat_sessions_assistant_skills_pinned",
+    );
+  });
+
+  it(`refuses more than ${MAX_PINNED_SKILLS} pins`, async () => {
+    const six = ["@acme/a", "@acme/b", "@acme/c", "@acme/d", "@acme/e", "@acme/f"];
+    expect(await violated(insert(six, []))).toContain("chat_sessions_pinned_skills_cap");
+  });
+
+  it("accepts the cap, with the assistant's pins among them", async () => {
+    const five = ["@acme/a", "@acme/b", "@acme/c", "@acme/d", "@acme/e"];
+    expect(await violated(insert(five, ["@acme/c"]))).toBe("none");
   });
 });

@@ -565,28 +565,42 @@ function keepsSkillText(uri: unknown, resources: readonly object[]): boolean {
   );
 }
 
+type Receipts = NonNullable<PiToolResult["persistedContent"]>;
+
 /**
- * The replay of a read that returned, as text, the `SKILL.md` a persisted conversation injects
- * for its skill ({@link SkillLoad}): the file receipts of the read, the pinned `SKILL.md`'s own
- * replaced by a short pin receipt, whether this read pinned it or the turn had injected it
- * already — later turns inject it from the system prompt, so the replay must not again.
- * Undefined for any other read, which keeps its usual replay. Throws the load's refusal, which
- * the model reads.
+ * The content and replay of a resource read. A read of the `SKILL.md` a persisted conversation
+ * injects for its skill ({@link SkillLoad}) that the database confirms pinned replays a short
+ * pin receipt in place of its text, since later turns inject it from the system prompt; one left
+ * unpinned stays a plain read, with the note the load gave the model. `lead` is the call's own
+ * text, kept ahead of the receipts.
  */
-async function pinnedSkillReplay(
+async function resourceReadResult(
   uri: unknown,
   resources: readonly { uri: string }[],
-  receipts: NonNullable<PiToolResult["persistedContent"]>,
+  live: { content: PiToolResult["content"]; receipts: Receipts },
   skillLoad: SkillLoad | undefined,
-): Promise<PiToolResult["persistedContent"]> {
-  if (!skillLoad || typeof uri !== "string") return undefined;
+  lead: Receipts = [],
+): Promise<Pick<PiToolResult, "content" | "persistedContent">> {
   const index = resources.findIndex((resource) => resource.uri === uri);
   const text = (resources[index] as { text?: unknown } | undefined)?.text;
-  if (typeof text !== "string" || !(await skillLoad(uri, text))) return undefined;
-  const skill = parseSkillUri(uri)?.packageId;
-  return receipts.map((receipt, i) =>
-    i === index ? { type: "text", text: JSON.stringify({ uri, skill, pinned: true }) } : receipt,
-  );
+  const load =
+    skillLoad && typeof uri === "string" && typeof text === "string"
+      ? await skillLoad(uri, text)
+      : undefined;
+  if (load?.pinned) {
+    const skill = parseSkillUri(uri as string)?.packageId;
+    const receipt = { type: "text" as const, text: JSON.stringify({ uri, skill, pinned: true }) };
+    return {
+      content: live.content,
+      persistedContent: [...lead, ...live.receipts.map((r, i) => (i === index ? receipt : r))],
+    };
+  }
+  const content = load?.note
+    ? [...live.content, { type: "text" as const, text: load.note }]
+    : live.content;
+  return keepsSkillText(uri, resources)
+    ? { content }
+    : { content, persistedContent: [...lead, ...live.receipts] };
 }
 
 /** Generic forwarding Pi tool: verbatim `tools/call` → adapted Pi result. */
@@ -661,22 +675,19 @@ function makeForwardExtension(
               scope,
             );
             const file = await liveResources(resources, opts, toolCallId);
-            const pinned =
-              toolName === "read"
-                ? await pinnedSkillReplay(args.uri, resources, file.receipts, opts.skillLoad)
-                : undefined;
             const metaText = meta.content.flatMap((block) =>
               block.type === "text" ? [block] : [],
             );
             return withTurnBudgetNote(
               {
                 ...meta,
-                content: [...meta.content, ...file.content],
-                ...(pinned
-                  ? { persistedContent: [...metaText, ...pinned] }
-                  : keepsSkillText(args.uri, resources)
-                    ? {}
-                    : { persistedContent: [...metaText, ...file.receipts] }),
+                ...(await resourceReadResult(
+                  args.uri,
+                  resources,
+                  { content: [...meta.content, ...file.content], receipts: file.receipts },
+                  toolName === "read" ? opts.skillLoad : undefined,
+                  metaText,
+                )),
               },
               turnBudget,
             );
@@ -743,17 +754,11 @@ function makeReadResourceExtension(
         if (fileSpace && organization.spaces.some((space) => space.id === fileSpace)) {
           await organization.touch(fileSpace);
         }
-        const { content, receipts } = await liveResources(result.contents, opts, toolCallId);
-        const pinned = await pinnedSkillReplay(uri, result.contents, receipts, opts.skillLoad);
+        const live = await liveResources(result.contents, opts, toolCallId);
         return withTurnBudgetNote(
           {
-            content,
             details: { uri },
-            ...(pinned
-              ? { persistedContent: pinned }
-              : keepsSkillText(uri, result.contents)
-                ? {}
-                : { persistedContent: receipts }),
+            ...(await resourceReadResult(uri, result.contents, live, opts.skillLoad)),
           },
           turnBudget,
         );

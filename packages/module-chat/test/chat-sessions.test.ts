@@ -25,7 +25,6 @@ import {
 } from "../../../apps/api/test/helpers/auth.ts";
 import { seedApiKey, seedSpace, seedSpaceMember } from "../../../apps/api/test/helpers/seed.ts";
 import { deleteOrganization } from "../../../apps/api/src/services/organizations.ts";
-import type { ChatSkillChanges } from "../src/skills.ts";
 import { ensureSession, touchSessionSpace, writingOriginSpace } from "../src/persistence.ts";
 import { mintMcpLoopbackToken } from "../src/loopback-auth.ts";
 import { orgPermissions } from "../../../apps/api/src/lib/permissions.ts";
@@ -38,9 +37,6 @@ import {
 } from "@appstrate/core/permissions";
 import { createChatRouter } from "../src/routes.ts";
 import { buildChatPlatformDeps } from "../src/platform-services.ts";
-
-/** A turn that changes no skill (`ensureSession` takes the changes of every turn). */
-const NO_SKILL_CHANGES: ChatSkillChanges = { pin: [], unpin: [] };
 
 const app = getTestApp();
 
@@ -852,34 +848,22 @@ describe("ensureSession", () => {
     await truncateAll();
     const ctx = await createTestContext({ orgSlug: "ensurevisible" });
     const other = (await seedSpace({ orgId: ctx.orgId, name: "Other" })).id;
-    await ensureSession("chs_org_visible", ctx.orgId, ctx.user.id, [], NO_SKILL_CHANGES);
+    await ensureSession("chs_org_visible", ctx.orgId, ctx.user.id, []);
     await touch("chs_org_visible", other);
 
     await expect(
-      ensureSession(
-        "chs_org_visible",
-        ctx.orgId,
-        ctx.user.id,
-        [ctx.defaultSpaceId],
-        NO_SKILL_CHANGES,
-      ),
+      ensureSession("chs_org_visible", ctx.orgId, ctx.user.id, [ctx.defaultSpaceId]),
     ).rejects.toMatchObject({ status: 404 });
-    await ensureSession(
-      "chs_org_visible",
-      ctx.orgId,
-      ctx.user.id,
-      [ctx.defaultSpaceId, other],
-      NO_SKILL_CHANGES,
-    );
+    await ensureSession("chs_org_visible", ctx.orgId, ctx.user.id, [ctx.defaultSpaceId, other]);
   });
 
   it("refuses a session id that belongs to another author, and changes nothing for them", async () => {
     await truncateAll();
     const ctx = await createTestContext({ orgSlug: "ensureowner" });
     const stranger = await memberContext(ctx, "member", "operator");
-    await ensureSession("chs_owned", ctx.orgId, ctx.user.id, [], NO_SKILL_CHANGES);
+    await ensureSession("chs_owned", ctx.orgId, ctx.user.id, []);
     await expect(
-      ensureSession("chs_owned", ctx.orgId, stranger.user.id, [], NO_SKILL_CHANGES, () => ({
+      ensureSession("chs_owned", ctx.orgId, stranger.user.id, [], () => ({
         spaceId: ctx.defaultSpaceId,
         restricted: true,
       })),
@@ -895,35 +879,19 @@ describe("ensureSession", () => {
     const other = (await seedSpace({ orgId: ctx.orgId, name: "Other" })).id;
     const readable = [ctx.defaultSpaceId, other];
 
-    const created = await ensureSession(
-      "chs_origin",
-      ctx.orgId,
-      ctx.user.id,
-      readable,
-      NO_SKILL_CHANGES,
-      () => ({
-        spaceId: other,
-        restricted: true,
-      }),
-    );
+    const created = await ensureSession("chs_origin", ctx.orgId, ctx.user.id, readable, () => ({
+      spaceId: other,
+      restricted: true,
+    }));
     expect(created).toMatchObject({ spaceId: other, restricted: true });
     // An existing conversation keeps its own, whatever a later turn carries.
-    const again = await ensureSession(
-      "chs_origin",
-      ctx.orgId,
-      ctx.user.id,
-      readable,
-      NO_SKILL_CHANGES,
-      () => ({
-        spaceId: ctx.defaultSpaceId,
-        restricted: false,
-      }),
-    );
+    const again = await ensureSession("chs_origin", ctx.orgId, ctx.user.id, readable, () => ({
+      spaceId: ctx.defaultSpaceId,
+      restricted: false,
+    }));
     expect(again).toMatchObject({ spaceId: other, restricted: true });
     // The overview has none.
-    expect(
-      await ensureSession("chs_overview", ctx.orgId, ctx.user.id, readable, NO_SKILL_CHANGES),
-    ).toMatchObject({
+    expect(await ensureSession("chs_overview", ctx.orgId, ctx.user.id, readable)).toMatchObject({
       spaceId: null,
       restricted: false,
     });
@@ -937,17 +905,10 @@ describe("touchSessionSpace", () => {
     await truncateAll();
     const ctx = await createTestContext({ orgSlug: "touchorigin" });
     const other = (await seedSpace({ orgId: ctx.orgId, name: "Other" })).id;
-    await ensureSession(
-      "chs_touch",
-      ctx.orgId,
-      ctx.user.id,
-      [ctx.defaultSpaceId, other],
-      NO_SKILL_CHANGES,
-      () => ({
-        spaceId: ctx.defaultSpaceId,
-        restricted: false,
-      }),
-    );
+    await ensureSession("chs_touch", ctx.orgId, ctx.user.id, [ctx.defaultSpaceId, other], () => ({
+      spaceId: ctx.defaultSpaceId,
+      restricted: false,
+    }));
     const session = {
       id: "chs_touch",
       orgId: ctx.orgId,

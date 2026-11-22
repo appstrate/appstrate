@@ -9,7 +9,7 @@
 import { z } from "zod";
 
 const chatSkillCommandSchema = z.object({
-  /** `@scope/name`: what `pinned_skills` holds. */
+  /** `@scope/name`: what `pin_skills` names. */
   id: z.string(),
   /** The skill's frontmatter `name`: what the user types after `/`. */
   name: z.string(),

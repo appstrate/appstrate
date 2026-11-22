@@ -33,7 +33,6 @@ import {
   type SQL,
   type SQLWrapper,
 } from "drizzle-orm";
-import type { PgUpdateSetSource } from "drizzle-orm/pg-core";
 import { isForeignKeyViolation } from "@appstrate/db/errors";
 import { db } from "@appstrate/db/client";
 import {
@@ -48,13 +47,7 @@ import { invalidRequest, notFound } from "@appstrate/core/api-errors";
 import { uiMessageTitleText } from "./message-text.ts";
 import { AGENT_PROMPT_PART_TYPE, agentPromptDataSchema } from "./agent-prompt.ts";
 import { notifySessionUpdate } from "./realtime.ts";
-import {
-  applySkillChanges,
-  MAX_PINNED_SKILLS,
-  type ChatSkillChanges,
-  type ChatSkillSelection,
-  type SkillPinOutcome,
-} from "./skills.ts";
+import { MAX_PINNED_SKILLS, type ChatSkillSelection, type SkillPinOutcome } from "./skills.ts";
 import type { FileUIPart, UIMessage } from "ai";
 
 /**
@@ -216,7 +209,7 @@ export interface TurnConversation {
 type ConversationOriginRequest = () => { spaceId: string; restricted: boolean } | undefined;
 
 /** `values` as a `text[]` literal: drizzle would spread a bare array into a parameter list. */
-function textArray(values: readonly string[]): SQL {
+export function textArray(values: readonly string[]): SQL {
   return values.length === 0
     ? sql`'{}'::text[]`
     : sql`ARRAY[${sql.join(
@@ -226,46 +219,19 @@ function textArray(values: readonly string[]): SQL {
 }
 
 /** `ids` without `removed`, order kept. */
-function withoutIds(ids: SQLWrapper, removed: readonly string[]): SQL {
+export function withoutIds(ids: SQLWrapper, removed: readonly string[]): SQL {
   return sql`ARRAY(SELECT u FROM unnest(${ids}) AS u WHERE u <> ALL(${textArray(removed)}))`;
 }
 
 /** `ids` sorted (bytewise, as JS sorts the ASCII package ids) and deduped. */
-function sortedIds(ids: SQL): SQL {
+export function sortedIds(ids: SQL): SQL {
   return sql`ARRAY(SELECT DISTINCT u COLLATE "C" FROM unnest(${ids}) AS u ORDER BY 1)`;
 }
 
 /**
- * What a turn's skill changes write onto an existing row, each column computed from the row as
- * it stands when the statement runs, so a pin the assistant added in between is never lost:
- * `pinned_skills` = (stored − unpin) ∪ pin; a pin leaves `assistant_skills` (re-pinned by the
- * user, it is theirs), an unpin leaves all three columns. `pinned` is the resulting set.
- */
-function skillChangesSet(changes: ChatSkillChanges): {
-  set: PgUpdateSetSource<typeof chatSessions>;
-  pinned?: SQL;
-} {
-  const set: PgUpdateSetSource<typeof chatSessions> = {};
-  if (changes.skillDiscovery !== undefined) set.skillDiscovery = changes.skillDiscovery;
-  if (changes.pin.length === 0 && changes.unpin.length === 0) return { set };
-  const pinned = sortedIds(
-    sql`array_cat(${withoutIds(chatSessions.pinnedSkills, changes.unpin)}, ${textArray(changes.pin)})`,
-  );
-  set.pinnedSkills = pinned;
-  set.assistantSkills = withoutIds(chatSessions.assistantSkills, [
-    ...changes.unpin,
-    ...changes.pin,
-  ]);
-  set.skillStatus = sql`${chatSessions.skillStatus} - ${textArray(changes.unpin)}`;
-  return { set, pinned };
-}
-
-/**
- * Create the session row if it does not exist yet (idempotent). The client
- * mints the id; the stream route creates the row through here, applying the
- * turn's skill `changes` in the same statement (see {@link skillChangesSet}). A
- * result over {@link MAX_PINNED_SKILLS} pins refuses the turn with a 400 naming
- * `pin_skills`, nothing written. The
+ * Create the session row if it does not exist yet (idempotent), with the default skill
+ * selection: a turn's skill changes are written by its claim alone (`setActiveStream`), so a
+ * refused turn writes none. The client mints the id. The
  * `origin` request (origin space and limit) is called ONLY when this call creates the row:
  * an existing conversation keeps its own and the request is never evaluated. A turn naming an
  * origin runs in a transaction that evaluates it once the row is known to be new (a refusal
@@ -281,7 +247,6 @@ export async function ensureSession(
    * space it touched is among them.
    */
   readable: readonly string[],
-  changes: ChatSkillChanges,
   origin?: ConversationOriginRequest,
 ): Promise<TurnConversation> {
   // The id is client-minted, so a caller could send an id that already belongs
@@ -303,30 +268,18 @@ export async function ensureSession(
   // below already says 404. One round trip AND no write.
   //
   // 404, not 403, so we don't reveal that the id exists for someone else.
-  const owned = and(
-    eq(chatSessions.orgId, orgId),
-    eq(chatSessions.userId, userId),
-    sessionVisible(readable),
-  );
-  const { set, pinned } = skillChangesSet(changes);
   const upsert = (client: ChatDbClient) =>
     client
       .insert(chatSessions)
-      .values({
-        id,
-        orgId,
-        userId,
-        title: null,
-        ...(changes.skillDiscovery !== undefined && { skillDiscovery: changes.skillDiscovery }),
-        // The schema caps `pin` at the limit, so a new row never exceeds it.
-        pinnedSkills: applySkillChanges([], changes),
-      })
+      .values({ id, orgId, userId, title: null })
       .onConflictDoUpdate({
         target: chatSessions.id,
-        // `updatedAt` stays either way, so a pin never reorders the sidebar.
-        set: Object.keys(set).length > 0 ? set : { id: sql`${chatSessions.id}` },
-        // Over the cap, the owner's row is not written either: told apart from a foreign row below.
-        setWhere: pinned ? and(owned, sql`cardinality(${pinned}) <= ${MAX_PINNED_SKILLS}`) : owned,
+        set: { id: sql`${chatSessions.id}` },
+        setWhere: and(
+          eq(chatSessions.orgId, orgId),
+          eq(chatSessions.userId, userId),
+          sessionVisible(readable),
+        ),
       })
       .returning({
         orgId: chatSessions.orgId,
@@ -350,24 +303,9 @@ export async function ensureSession(
         }),
       )
     : (await upsert(db))[0];
-  if (!row && pinned) {
-    const [own] = await db
-      .select({ id: chatSessions.id })
-      .from(chatSessions)
-      .where(and(eq(chatSessions.id, id), owned))
-      .limit(1);
-    if (own) {
-      throw invalidRequest(
-        `A conversation pins at most ${MAX_PINNED_SKILLS} skills: unpin one before pinning another.`,
-        "pin_skills",
-      );
-    }
-  }
   if (!row || row.orgId !== orgId || row.userId !== userId) {
     throw notFound("Chat session not found");
   }
-  // The other tabs of an existing conversation show its skills: they re-read on this signal.
-  if (!row.created && Object.keys(set).length > 0) notifySessionUpdate(id, orgId, userId);
   return {
     selection: { skillDiscovery: row.skillDiscovery, pinnedSkills: row.pinnedSkills },
     spaceId: row.spaceId,
@@ -376,47 +314,53 @@ export async function ensureSession(
 }
 
 /**
- * Pin `packageId` to the conversation as the assistant's (its `SKILL.md` was just loaded by the
- * turn holding `streamId`): appended to `pinned_skills` and `assistant_skills`, its status
- * `injected`, in ONE statement guarded on the cap and on the turn still holding the conversation,
- * so neither a concurrent change nor a load landing after the turn was stopped or taken over
- * writes anything. A skill already pinned keeps its source and is only marked injected.
- * `full`: the conversation already pins {@link MAX_PINNED_SKILLS} skills (a lost race included);
- * `released`: the turn no longer holds it.
+ * Pin `packageId` to the conversation as the assistant's (`append`, its `SKILL.md` was just read
+ * by the turn holding `streamId`), or only check that it is pinned (`append: false`). The append
+ * is ONE statement guarded on the cap and on the turn still holding the conversation: appended
+ * to `pinned_skills` and `assistant_skills`, its status `injected`. A skill already pinned is
+ * never written: `already_pinned`, whoever pinned it. `full` covers a lost race on the cap.
  */
 export async function pinAssistantSkill(
   sessionId: string,
   streamId: string,
   packageId: string,
+  append: boolean,
 ): Promise<SkillPinOutcome> {
   const already = sql`${packageId}::text = ANY(${chatSessions.pinnedSkills})`;
-  const [row] = await db
-    .update(chatSessions)
-    .set({
-      pinnedSkills: sql`CASE WHEN ${already} THEN ${chatSessions.pinnedSkills} ELSE ${sortedIds(
-        sql`array_append(${chatSessions.pinnedSkills}, ${packageId}::text)`,
-      )} END`,
-      assistantSkills: sql`CASE WHEN ${already} THEN ${chatSessions.assistantSkills} ELSE array_append(${chatSessions.assistantSkills}, ${packageId}::text) END`,
-      skillStatus: sql`${chatSessions.skillStatus} || jsonb_build_object(${packageId}::text, 'injected')`,
-    })
-    .where(
-      and(
-        eq(chatSessions.id, sessionId),
-        eq(chatSessions.activeStreamId, streamId),
-        or(already, sql`cardinality(${chatSessions.pinnedSkills}) < ${MAX_PINNED_SKILLS}`),
-      ),
-    )
-    .returning({ orgId: chatSessions.orgId, userId: chatSessions.userId });
-  if (row) {
-    notifySessionUpdate(sessionId, row.orgId, row.userId);
-    return "pinned";
+  if (append) {
+    const [row] = await db
+      .update(chatSessions)
+      .set({
+        pinnedSkills: sortedIds(
+          sql`array_append(${chatSessions.pinnedSkills}, ${packageId}::text)`,
+        ),
+        assistantSkills: sortedIds(
+          sql`array_append(${chatSessions.assistantSkills}, ${packageId}::text)`,
+        ),
+        skillStatus: sql`${chatSessions.skillStatus} || jsonb_build_object(${packageId}::text, 'injected')`,
+      })
+      .where(
+        and(
+          eq(chatSessions.id, sessionId),
+          eq(chatSessions.activeStreamId, streamId),
+          sql`NOT ${already}`,
+          sql`cardinality(${chatSessions.pinnedSkills}) < ${MAX_PINNED_SKILLS}`,
+        ),
+      )
+      .returning({ orgId: chatSessions.orgId, userId: chatSessions.userId });
+    if (row) {
+      notifySessionUpdate(sessionId, row.orgId, row.userId);
+      return "pinned";
+    }
   }
-  const [held] = await db
-    .select({ id: chatSessions.id })
+  const [row] = await db
+    .select({ pinned: sql<boolean>`${already}`, activeStreamId: chatSessions.activeStreamId })
     .from(chatSessions)
-    .where(and(eq(chatSessions.id, sessionId), eq(chatSessions.activeStreamId, streamId)))
+    .where(eq(chatSessions.id, sessionId))
     .limit(1);
-  return held ? "full" : "released";
+  if (row?.pinned) return "already_pinned";
+  if (!append) return "not_pinned";
+  return row?.activeStreamId === streamId ? "full" : "released";
 }
 
 /** Most recent message id in a session — the one a new message follows, or null. */

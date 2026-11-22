@@ -78,16 +78,18 @@ export const chatSessions = pgTable(
       .array()
       .notNull()
       .default(sql`'{}'::text[]`),
-    // The part of `pinned_skills` the assistant pinned by loading a skill's SKILL.md; every
-    // write keeps it a subset of `pinned_skills`.
+    // The part of `pinned_skills` the assistant pinned by loading a skill's SKILL.md
+    // (`chat_sessions_assistant_skills_pinned`).
     assistantSkills: text("assistant_skills")
       .array()
       .notNull()
       .default(sql`'{}'::text[]`),
-    // `{ [packageId]: "injected" | "over_budget" | "unavailable" | "unreadable" }`: what the last
-    // turn that claimed the conversation did with each pin it evaluated. Keys ⊆ `pinned_skills`;
-    // a pin without an entry has not been evaluated yet.
-    skillStatus: jsonb("skill_status").$type<Record<string, string>>().notNull().default({}),
+    // What the last turn that claimed the conversation did with each pin it evaluated. Keys ⊆
+    // `pinned_skills`; a pin without an entry has not been evaluated yet.
+    skillStatus: jsonb("skill_status")
+      .$type<Partial<Record<string, ChatSkillStatus>>>()
+      .notNull()
+      .default({}),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },
@@ -95,6 +97,9 @@ export const chatSessions = pgTable(
     index("idx_chat_sessions_org_user").on(table.orgId, table.userId),
     index("idx_chat_sessions_space_user").on(table.spaceId, table.userId),
     check("chat_sessions_restricted_needs_space", sql`restricted = false OR space_id IS NOT NULL`),
+    check("chat_sessions_assistant_skills_pinned", sql`assistant_skills <@ pinned_skills`),
+    // The chat module's `MAX_PINNED_SKILLS`: every pin is injected in full on every turn.
+    check("chat_sessions_pinned_skills_cap", sql`cardinality(pinned_skills) <= 5`),
     // Referenced target of the composite tenant-integrity FK on
     // `llm_usage(chat_session_id, org_id)`: Postgres needs a unique index
     // covering exactly these columns for the FK to attach. Trivially valid —
@@ -209,4 +214,5 @@ export const chatMessages = pgTable(
     // Not UNIQUE: `seq` is the PRIMARY KEY, so the pair is unique already.
     index("idx_chat_messages_session_seq").on(table.sessionId, table.seq),
   ],
-);
+); /** What a turn did with a pinned skill (`chat_sessions.skill_status`). */
+export type ChatSkillStatus = "injected" | "over_budget" | "unavailable" | "unreadable";

@@ -51,11 +51,12 @@ import {
 import { buildSystemPrompt, buildCallerContextBlock, type ChatEnv } from "./prompt.ts";
 import { scopedNameRegex } from "@appstrate/core/validation";
 import {
-  applySkillChanges,
   DEFAULT_SKILL_SELECTION,
   MAX_PINNED_SKILLS,
+  selectionAfter,
   turnSkillLoad,
   type ChatSkillChanges,
+  type ChatSkillSelection,
   type PinnedSkillStatus,
 } from "./skills.ts";
 export type { ChatEnv } from "./prompt.ts";
@@ -72,7 +73,12 @@ import {
   touchSessionSpace,
 } from "./persistence.ts";
 import { registerStopController, unregisterStopController } from "./stop-registry.ts";
-import { setActiveStream, clearActiveStream, type TurnScope } from "./resumable.ts";
+import {
+  setActiveStream,
+  clearActiveStream,
+  type TurnScope,
+  type TurnSkillWrite,
+} from "./resumable.ts";
 import {
   actingSpaces,
   conversationOrigin,
@@ -148,7 +154,7 @@ export const CHAT_MESSAGE_MAX_BYTES = 256 * 1024;
 //   - an `agent-prompt` part (`agent-prompt.ts`) is a user message's, at most one, and its data
 //     parses; `handleChatStream` resolves it.
 //   - `pin_skills` / `unpin_skills` are deltas against the stored pins, never a full set, so a
-//     stale client cannot drop a pin the assistant added (`ensureSession` applies them).
+//     stale client cannot drop a pin the assistant added (the claim writes them).
 //   - `.strict()`: an unknown field is a 400, never silently dropped.
 const skillIdsSchema = z
   .array(z.string().regex(scopedNameRegex, { error: "Must be a package id in @scope/name form" }))
@@ -231,6 +237,14 @@ function logAndMarkStreamError(error: unknown, requestId: string): string {
   return clientTurnErrorMarker(shown);
 }
 
+/** The turn's pins would exceed {@link MAX_PINNED_SKILLS}: refused before the claim, and by it. */
+function pinLimitError() {
+  return conflict(
+    "chat_skill_pin_limit",
+    `A conversation pins at most ${MAX_PINNED_SKILLS} skills: unpin one before pinning another.`,
+  );
+}
+
 /**
  * Claim the conversation for this turn: set its in-flight marker, before anything
  * of the turn is written — its attachments, its touched spaces, its user message.
@@ -257,16 +271,17 @@ function logAndMarkStreamError(error: unknown, requestId: string): string {
  * controller is registered a few statements later. What is briefly true is the
  * DTO's `generating` flag, and that is simply the truth: the turn has started.
  *
- * The claim also records the turn's verdict on each pin (`skill_status`), so a refused turn
- * records none.
+ * The claim also writes the turn's skill changes and its verdict on each pin (`skills`), so a
+ * refused turn writes neither.
  */
 export async function claimTurn(
   sessionId: string,
   streamId: string,
   scope: TurnScope,
-  skillStatus: Readonly<Record<string, PinnedSkillStatus>>,
+  skills: TurnSkillWrite = {},
 ): Promise<void> {
-  const claim = await setActiveStream(sessionId, streamId, scope, skillStatus);
+  const claim = await setActiveStream(sessionId, streamId, scope, skills);
+  if (claim === "pin_limit") throw pinLimitError();
   if (claim === "scope_changed") {
     throw conflict(
       "chat_turn_scope_changed",
@@ -389,8 +404,8 @@ export async function handleChatStream(
   // materialized into the session, and attaching the join in the same tick is
   // what keeps a rejection from ever going unhandled.
   //
-  // The panel's changes ride the turn and are applied in the same upsert, so
-  // nothing is stored before the first message; without any the row's stand.
+  // The panel's changes ride the turn: it works with them from the start, and its claim writes
+  // them, so a refused turn writes none.
   const skillChanges: ChatSkillChanges = {
     ...(body.skill_discovery !== undefined && { skillDiscovery: body.skill_discovery }),
     pin: body.pin_skills ?? [],
@@ -401,25 +416,22 @@ export async function handleChatStream(
   const ephemeralConversation = (): TurnConversation => {
     const created = originRequest?.();
     return {
-      selection: {
-        skillDiscovery: skillChanges.skillDiscovery ?? DEFAULT_SKILL_SELECTION.skillDiscovery,
-        pinnedSkills: applySkillChanges(DEFAULT_SKILL_SELECTION.pinnedSkills, skillChanges),
-      },
+      selection: DEFAULT_SKILL_SELECTION,
       spaceId: created?.spaceId ?? null,
       restricted: created?.restricted ?? false,
     };
   };
-  const conversation: Promise<TurnConversation> =
+  // `stored` is the selection as read, which the claim compares; `selection` the one the turn
+  // works with. Over the cap, the turn is refused here, before anything is written.
+  const conversation: Promise<TurnConversation & { stored: ChatSkillSelection }> = (
     sessionId && lastMessage?.id
-      ? ensureSession(
-          sessionId,
-          orgId,
-          user.id,
-          readableSpaceIds(reachable),
-          skillChanges,
-          originRequest,
-        )
-      : Promise.resolve(ephemeralConversation());
+      ? ensureSession(sessionId, orgId, user.id, readableSpaceIds(reachable), originRequest)
+      : Promise.resolve(ephemeralConversation())
+  ).then((conv) => {
+    const selection = selectionAfter(conv.selection, skillChanges);
+    if (selection.pinnedSkills.length > MAX_PINNED_SKILLS) throw pinLimitError();
+    return { ...conv, stored: conv.selection, selection };
+  });
   // The earlier turns' files, read once the row is known to be the caller's. An ephemeral
   // turn has no stored row, so its history carries no file.
   const historyIds = messages
@@ -541,8 +553,8 @@ export async function handleChatStream(
       scope: {
         spaceId: conv.spaceId,
         restricted: conv.restricted,
-        pinnedSkills: conv.selection.pinnedSkills,
-        skillDiscovery: conv.selection.skillDiscovery,
+        pinnedSkills: conv.stored.pinnedSkills,
+        skillDiscovery: conv.stored.skillDiscovery,
       },
       originSpace,
       restricted: conv.restricted,
@@ -633,8 +645,11 @@ export async function handleChatStream(
       (error: unknown) => ({ ok: false as const, error }),
     );
 
-  const [models, { permissions, capabilities, spaces, organization, scope, openCaller }, stored] =
-    await Promise.all([listModels(origin, inferenceHeaders, platformFetch), turn, historyStored]);
+  const [
+    models,
+    { skills: turnSelection, permissions, capabilities, spaces, organization, scope, openCaller },
+    stored,
+  ] = await Promise.all([listModels(origin, inferenceHeaders, platformFetch), turn, historyStored]);
   messages = withStoredAgentPromptTexts(
     withStoredHistoryFiles(messages, stored.files),
     stored.launches,
@@ -781,15 +796,17 @@ export async function handleChatStream(
   // (in `finalize` below). Generation runs through a resumable producer that drains to
   // completion independently of the client, so leaving the conversation mid-inference
   // cannot drop messages. Every refusal before this point (the admission gate, the model
-  // binding, capacity) and the claim's own refusal write no message, marker or skill status
-  // into the conversation. The turn's skill changes are the exception: `ensureSession` applied
-  // them at the top of the handler, so they stand even when the turn is refused.
+  // binding, capacity) and the claim's own refusal write no message, marker, skill change or
+  // skill status into the conversation.
   const claimedSessionId = sessionId && lastMessage?.id ? sessionId : undefined;
   let claimTurnMs = 0;
   if (claimedSessionId) {
     const claimStart = Date.now();
     try {
-      await claimTurn(claimedSessionId, streamId, scope, skillStatus);
+      await claimTurn(claimedSessionId, streamId, scope, {
+        changes: skillChanges,
+        status: skillStatus,
+      });
     } catch (err) {
       // The slot is reserved but generation has not started, so neither `finalize`
       // nor `failCleanup` (below) owns it yet.
@@ -991,9 +1008,11 @@ export async function handleChatStream(
             ? {
                 skillLoad: turnSkillLoad({
                   uris: skillUris,
+                  pinned: turnSelection.pinnedSkills,
                   injected: Object.keys(injectedSkills.skills),
                   budgetLeft: skillBudgetLeft,
-                  pin: (packageId) => pinAssistantSkill(chatSessionId, streamId, packageId),
+                  pin: (packageId, append) =>
+                    pinAssistantSkill(chatSessionId, streamId, packageId, append),
                 }),
               }
             : {}),

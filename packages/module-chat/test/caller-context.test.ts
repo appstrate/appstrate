@@ -265,7 +265,7 @@ describe("formatCallerContext", () => {
     expect(noTransport).not.toContain("## Skills");
   });
 
-  it("says a chosen skill could not be included", () => {
+  it("says a pinned skill could not be included", () => {
     const out = contextText(
       { user: { name: "Ada" }, org: { role: "member" } },
       { ...BASE_OPTS, skills: { skillDiscovery: true, pinnedSkills: ["@acme/gone"] } },
@@ -321,7 +321,7 @@ describe("formatCallerContext", () => {
     expect(on).not.toContain("Skill discovery is off");
   });
 
-  describe("chosen skills", () => {
+  describe("pinned skills", () => {
     const NO_SKILLS = BUILDER.filter((p) => !p.startsWith("skills:"));
     const mine = (content = "Mine body.") => ({
       packageId: "@acme/mine",
@@ -611,7 +611,7 @@ describe("buildCallerContextBlock", () => {
     expect(await build({ orgRole: "owner" })).not.toContain("role preview");
   });
 
-  it("resolves the chosen skills over the skills connection, draft first", async () => {
+  it("resolves the pinned skills over the skills connection, draft first", async () => {
     const A = "skill://spc_1/acme/a@draft/a/SKILL.md";
     const B = "skill://spc_1/acme/b@draft/b/SKILL.md";
     const C = "skill://spc_1/acme/c/c/SKILL.md";
@@ -673,7 +673,7 @@ describe("buildCallerContextBlock", () => {
     });
   });
 
-  it("leaves the chosen skills out, unreadable, when the skills connection cannot open", async () => {
+  it("leaves the pinned skills out, unreadable, when the skills connection cannot open", async () => {
     const out = await blockText(fakeContext({ orgRole: "member" }), {
       spaces: REACH,
       restricted: false,
@@ -735,7 +735,7 @@ describe("buildCallerContextBlock", () => {
     });
   });
 
-  it("gives a chosen skill whose SKILL.md is served as a blob its could-not-be-read notice", async () => {
+  it("gives a pinned skill whose SKILL.md is served as a blob its could-not-be-read notice", async () => {
     const A = "skill://spc_1/acme/a/a/SKILL.md";
     const skills = fakeSkillsClient({
       published: [skillEntry(A, "1.0.0")],
@@ -760,7 +760,7 @@ describe("buildCallerContextBlock", () => {
     expect(injected).toEqual({ skills: {} });
   });
 
-  it("gives a chosen skill whose SKILL.md differs from its listed digest its could-not-be-read notice", async () => {
+  it("gives a pinned skill whose SKILL.md differs from its listed digest its could-not-be-read notice", async () => {
     // The draft is saved between `skills/list` (lock_version 7) and `resources/read`:
     // the text read is the next draft, which the claim's lock_version does not name.
     const A = "skill://spc_1/acme/a@draft/a/SKILL.md";
@@ -793,7 +793,7 @@ describe("buildCallerContextBlock", () => {
     expect(injected).toEqual({ skills: {} });
   });
 
-  it("gives a chosen published skill whose SKILL.md differs from its listed digest its could-not-be-read notice", async () => {
+  it("gives a pinned published skill whose SKILL.md differs from its listed digest its could-not-be-read notice", async () => {
     const A = "skill://spc_1/acme/a/a/SKILL.md";
     const skills = fakeSkillsClient({
       published: [skillEntry(A, "1.0.0")],
@@ -993,7 +993,7 @@ describe("buildCallerContextBlock", () => {
     });
   });
 
-  it("leaves out, unreadable, a chosen skill whose content read is refused", async () => {
+  it("leaves out, unreadable, a pinned skill whose content read is refused", async () => {
     const skills = fakeSkillsClient({
       published: [skillEntry("skill://spc_1/acme/a/a/SKILL.md", "1.0.0")],
       texts: {},

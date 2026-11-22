@@ -6363,12 +6363,12 @@ export interface components {
             unread: boolean;
             /** @description Whether the assistant may find skills beyond the pinned ones. On: the skills of the spaces the conversation can act in (its origin space alone when it is limited), minus the pinned ones, are listed in the context and the assistant loads what fits. Off: the turn holds no `skills:*` permission, so it lists, loads, declares and writes no other skill. Written by the turn that carries it (POST /api/orgs/{orgId}/chat). */
             skill_discovery: boolean;
-            /** @description The skills pinned to this conversation, sorted by id: injected in full on every turn, whatever `skill_discovery`. Changed by the turns that carry `pin_skills` / `unpin_skills`, and by the assistant loading a skill's SKILL.md. */
+            /** @description The skills pinned to this conversation, sorted by id: injected in full on every turn, whatever `skill_discovery`. Changed by the turns that carry `pin_skills` / `unpin_skills` (written when the turn starts, past every refusal: a refused turn changes nothing), and by the assistant loading a skill's SKILL.md while the conversation has room and budget for it (a load that cannot pin is still read for that turn). */
             skills: {
                 /** @description `@scope/name` package id. */
                 id: string;
                 /**
-                 * @description Who pinned it: the user (`pin_skills`), or the assistant by loading its SKILL.md. Naming an assistant's pin in `pin_skills` makes it the user's (an API-level rule: the dashboard's panel never sends a pin for a skill already pinned).
+                 * @description Who pinned it: the user (`pin_skills`), or the assistant by loading its SKILL.md. Naming an assistant's pin in `pin_skills` makes it the user's.
                  * @enum {string}
                  */
                 source: "user" | "assistant";
@@ -21068,9 +21068,9 @@ export interface operations {
                     package_authoring?: boolean;
                     /** @description Launches the inline runs of this turn on the turn's model and generation settings (`modelId` and `generation` of `POST /api/runs/inline`, judged like any explicit model); absent = off, they run on the default model. A saved agent's run keeps its own model. */
                     inline_runs_use_chat_model?: boolean;
-                    /** @description Whether the assistant may find skills beyond the pinned ones (see ChatSession `skill_discovery`), written onto the session by this turn; absent = the stored value (on, for a new conversation). */
+                    /** @description Whether the assistant may find skills beyond the pinned ones (see ChatSession `skill_discovery`), written onto the session when this turn starts (a refused turn writes nothing); absent = the stored value (on, for a new conversation). */
                     skill_discovery?: boolean;
-                    /** @description Skills to pin to the conversation, on top of its stored pins (a change, never the whole set: a pin the assistant added in between stays). A skill the assistant pinned becomes the user's. More than 5 pins as a result is a 400 naming this field, and nothing is written. */
+                    /** @description Skills to pin to the conversation, on top of its stored pins (a change, never the whole set: a pin the assistant added in between stays). A skill the assistant pinned becomes the user's. Written when the turn starts, past every refusal: a refused turn writes nothing. More than 5 pins as a result is a 409 `chat_skill_pin_limit`, and nothing is written. */
                     pin_skills?: string[];
                     /** @description Skills to unpin from the conversation, whoever pinned them. Applied before `pin_skills`; unpinning a skill that is not pinned changes nothing. */
                     unpin_skills?: string[];
@@ -21104,7 +21104,7 @@ export interface operations {
             };
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
-            /** @description `org_deleting` — the organization's deletion is reserved, so no new metered usage is admitted. Refused whatever modules the deployment loads. Or `needs_reconnection` — the selected model's subscription credential is dead (revoked, or expired beyond refresh), so the turn is refused before inference starts rather than failing upstream. RFC 9457 problem+json. Or `model_credential_required`: the selected model has no organization credential and the caller has no usable personal credential for it. Or `chat_turn_scope_changed`: the conversation's limit, its origin space or its skill settings (another client's `pin_skills` / `unpin_skills` / `skill_discovery`) changed while the turn was starting; nothing but this turn's own skill changes was written, and sending the message again starts it with the new scope. Or `chat_turn_in_flight`: another turn of the conversation is running (a conversation runs one turn at a time); nothing but this turn's own skill changes was written, and the message can be sent again once that turn ends. */
+            /** @description `org_deleting` — the organization's deletion is reserved, so no new metered usage is admitted. Refused whatever modules the deployment loads. Or `needs_reconnection` — the selected model's subscription credential is dead (revoked, or expired beyond refresh), so the turn is refused before inference starts rather than failing upstream. RFC 9457 problem+json. Or `model_credential_required`: the selected model has no organization credential and the caller has no usable personal credential for it. Or `chat_turn_scope_changed`: the conversation's limit, its origin space or its skill settings (another client's `pin_skills` / `unpin_skills` / `skill_discovery`) changed while the turn was starting; nothing was written, and sending the message again starts it with the new scope. Or `chat_turn_in_flight`: another turn of the conversation is running (a conversation runs one turn at a time); nothing was written, and the message can be sent again once that turn ends. Or `chat_skill_pin_limit`: the conversation's pins after this turn's `pin_skills` / `unpin_skills` would exceed 5; nothing was written, and the message can be sent again after unpinning a skill. Every refusal of a turn leaves its skill changes unwritten. */
             409: {
                 headers: {
                     [name: string]: unknown;

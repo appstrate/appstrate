@@ -38,7 +38,7 @@ export async function readChatCommands(
         ? readSkillsOver(client, signal, spaces, {
             catalogue: true,
             drafts: opts.drafts,
-            chosen: [],
+            pinned: [],
           }).then(({ catalogue }) =>
             catalogue.map((skill): ChatSkillCommand => ({
               id: skill.packageId,

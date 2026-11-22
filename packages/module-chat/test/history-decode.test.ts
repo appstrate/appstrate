@@ -39,7 +39,6 @@ describe("loadHistory decode", () => {
 
     const loaded = await loadHistory(transportOver(request), "chs_1");
     expect(loaded?.skills).toEqual({ skillDiscovery: false, pins } as never);
-    expect("pinned_skills" in (loaded ?? {})).toBe(false);
   });
 
   it("reports a conversation the caller does not have (404) as null, not as an empty one", async () => {

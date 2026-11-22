@@ -158,9 +158,5 @@ describe("the origin space of a new conversation", () => {
       unpin_skills: ["@acme/old"],
     });
     expect(keys({ pin: [], unpin: ["@acme/old"] })).toEqual(["unpin_skills"]);
-    // Never the full set.
-    expect(keys({ skillDiscovery: true, pin: ["@acme/a"], unpin: [] })).not.toContain(
-      "pinned_skills",
-    );
   });
 });

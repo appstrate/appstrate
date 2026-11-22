@@ -87,7 +87,7 @@ const SKILLS_FILES = {
 const SKILLS_INJECTED_LEAD =
   "These skills are pinned to this conversation, by the user or by your own earlier load. Each is a procedure for YOU: follow it whenever it applies.";
 // Loading a listed skill pins it (`turnSkillLoad`): told once, ahead of the listing it applies to.
-const SKILLS_LISTED_LEAD = `Loading one of these skills (reading its SKILL.md at the URI shown, with \`read_resource\` or \`read\`) pins it to the conversation: later turns show it in full here. A conversation pins at most ${MAX_PINNED_SKILLS} skills, which share one budget; a load refused for either reason says so, and the user can unpin a skill in the skills panel of the composer.`;
+const SKILLS_LISTED_LEAD = `Loading one of these skills (reading its SKILL.md at the URI shown, with \`read_resource\` or \`read\`) pins it to the conversation: later turns show it in full here. A conversation pins at most ${MAX_PINNED_SKILLS} skills, which share one budget; a load past either limit is still read for this turn, but not pinned, and says so; the user can unpin a skill in the skills panel of the composer.`;
 // Why this turn holds no `skills:*`: without it, a model reads the gap as a role
 // to fix and hunts through other operations.
 const SKILLS_DISCOVERY_OFF_NOTE =
@@ -312,10 +312,10 @@ function formatSkillsSection(opts: {
   const groups: string[][] = [];
   if (!opts.selection.skillDiscovery) groups.push([SKILLS_DISCOVERY_OFF_NOTE]);
   if (listed.length) groups.push([SKILLS_LISTED_LEAD, ...listed.map(skillLine)]);
-  if (skills.chosen.length) {
+  if (skills.injected.length) {
     groups.push([
       `${SKILLS_INJECTED_LEAD} ${files}`,
-      ...skills.chosen.flatMap((s) => ["", skillBlock(s)]),
+      ...skills.injected.flatMap((s) => ["", skillBlock(s)]),
     ]);
   }
   if (skills.notices.length) groups.push(skills.notices);
@@ -343,7 +343,7 @@ type CallerContextOpts = {
   /** The TURN's set (post-`turnPermissions`): the authoring toggle narrows it. */
   permissions: readonly string[];
   skills: ChatSkillSelection;
-  /** The chosen skills active here, read by {@link buildCallerContextBlock}. */
+  /** The pinned skills active here, read by {@link buildCallerContextBlock}. */
   skillContents?: ReadonlyMap<string, SkillContent | null>;
   /** The catalogue of the turn's skills, listed by {@link buildCallerContextBlock} with discovery on. */
   skillCatalogue?: readonly CatalogueSkill[];
@@ -474,9 +474,9 @@ export interface ChatSkillsRead {
  * is the caller's draft when `skills/list` lists it among the drafts the caller
  * may read, else its published version; without, its published version. One definition per
  * skill for the catalogue, the injection and `uris` alike. With `catalogue`, every such skill of
- * `spaces` is listed by its `uri` (one entry per package, the first space's); each of `chosen` is injected as the text
+ * `spaces` is listed by its `uri` (one entry per package, the first space's); each of `pinned` is injected as the text
  * `resources/read` serves at its entry's URI. Read with the caller's own
- * permissions, even with discovery off, whose turn holds no `skills:*`. A chosen skill
+ * permissions, even with discovery off, whose turn holds no `skills:*`. A pinned skill
  * in neither list is left out (unavailable); one whose read failed — the connection, a
  * `skills/list` it may be missing from, its `resources/read` — or answered malformed (a
  * draft entry without `lock_version`, a `SKILL.md` served as a blob, or text
@@ -489,7 +489,7 @@ async function readChatSkills(
   spaces: readonly string[],
   opts: SkillsReadOptions,
 ): Promise<ChatSkillsRead> {
-  if (!opts.catalogue && opts.chosen.length === 0) {
+  if (!opts.catalogue && opts.pinned.length === 0) {
     return { contents: new Map(), catalogue: [], uris: new Map() };
   }
   const signal = AbortSignal.timeout(CALLER_READ_TIMEOUT_MS);
@@ -501,7 +501,7 @@ async function readChatSkills(
       err: String(err),
     });
     return {
-      contents: new Map(opts.chosen.map((id) => [id, null])),
+      contents: new Map(opts.pinned.map((id) => [id, null])),
       catalogue: [],
       uris: new Map(),
     };
@@ -520,7 +520,7 @@ interface SkillsReadOptions {
    * draft URI. Only when the turn itself reads them (see `buildCallerContextBlock`).
    */
   drafts: boolean;
-  chosen: readonly string[];
+  pinned: readonly string[];
 }
 
 /**
@@ -576,7 +576,7 @@ export async function readSkillsOver(
     });
   }
   await Promise.all(
-    opts.chosen.map(async (id) => {
+    opts.pinned.map(async (id) => {
       const entry = injectedFrom.get(id);
       if (!entry) {
         // Missing from a listing that failed is not known to be unavailable.
@@ -586,7 +586,7 @@ export async function readSkillsOver(
       const content = await client.readResource({ uri: entry.uri }, { signal }).then(
         ({ contents }) => contents.find((item) => item.uri === entry.uri),
         (err: unknown) => {
-          logger.warn("resources/read of a chosen skill failed — left out", {
+          logger.warn("resources/read of a pinned skill failed — left out", {
             uri: entry.uri,
             err: String(err),
           });
@@ -706,7 +706,7 @@ export async function buildCallerContextBlock(
     {
       catalogue: capabilities.readsSkills && skills.skillDiscovery,
       drafts: args.drafts,
-      chosen: skills.pinnedSkills,
+      pinned: skills.pinnedSkills,
     },
   );
   const { injected, ...rendered } = formatCallerContext(identity, {

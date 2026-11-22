@@ -1,10 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
 
-// Which skills a chat turn injects. Pure: the result sits in the system
-// prompt's single `cache_control` block.
+// Which skills a chat turn injects (the result sits in the system prompt's single
+// `cache_control` block), and what the assistant's reads of them pin.
 
 import { z } from "zod";
 import type { InjectedSkill, InjectedSkills } from "@appstrate/core/chat-contract";
+import { logger } from "./logger.ts";
 
 /** A skill's `SKILL.md` as injected: as the MCP Skills extension serves it at `uri`. */
 export interface SkillContent {
@@ -17,10 +18,10 @@ export interface SkillContent {
   served: InjectedSkill;
 }
 
-/** The characters the chosen skills' SKILL.md bodies may take in one turn, all skills together. */
+/** The characters the pinned skills' SKILL.md bodies may take in one turn, all skills together. */
 export const CHAT_SKILLS_CONTENT_BUDGET_CHARS = 64_000;
 
-/** Every chosen skill is injected in full on every turn: a context-budget bound. */
+/** Every pinned skill is injected in full on every turn: a context-budget bound. */
 export const MAX_PINNED_SKILLS = 5;
 
 /** Named as the `chat_sessions` columns, so a session row is a selection. */
@@ -41,12 +42,10 @@ export const PINNED_SKILL_STATUSES = [
 export type PinnedSkillStatus = (typeof PINNED_SKILL_STATUSES)[number];
 
 /** Who pinned a skill: the user (panel, `/` citation) or the assistant (loading its `SKILL.md`). */
-export type PinnedSkillSource = "user" | "assistant";
+export const PINNED_SKILL_SOURCES = ["user", "assistant"] as const;
+export type PinnedSkillSource = (typeof PINNED_SKILL_SOURCES)[number];
 
-/**
- * A pin as the session DTOs carry it (`skills`). `status` is the verdict of the last turn that
- * claimed the conversation; `null` until a turn evaluates the pin.
- */
+/** A pin as the session DTOs carry it (`skills`); `status` is `null` until a claiming turn evaluates it. */
 export interface PinnedSkill {
   id: string;
   source: PinnedSkillSource;
@@ -64,7 +63,7 @@ export interface ChatSkillChanges {
   unpin: readonly string[];
 }
 
-/** `pinned` after `changes`: unpins out, pins in, sorted and deduped. The server applies the same rule in SQL. */
+/** `pinned` after `changes`: unpins out, pins in, sorted and deduped. The claim applies the same rule in SQL. */
 export function applySkillChanges(
   pinned: readonly string[],
   changes: Pick<ChatSkillChanges, "pin" | "unpin">,
@@ -73,31 +72,42 @@ export function applySkillChanges(
   return [...new Set([...pinned.filter((id) => !unpin.has(id)), ...changes.pin])].sort();
 }
 
+/** The selection a turn carrying `changes` works with, before its claim writes it. */
+export function selectionAfter(
+  stored: ChatSkillSelection,
+  changes: ChatSkillChanges,
+): ChatSkillSelection {
+  return {
+    skillDiscovery: changes.skillDiscovery ?? stored.skillDiscovery,
+    pinnedSkills: applySkillChanges(stored.pinnedSkills, changes),
+  };
+}
+
 export const DEFAULT_SKILL_SELECTION: ChatSkillSelection = {
   skillDiscovery: true,
   pinnedSkills: [],
 };
 
 interface ResolvedChatSkills {
-  chosen: SkillContent[];
+  injected: SkillContent[];
   notices: string[];
-  /** Each pin's verdict, in stored order: what the turn's claim writes to `skill_status`. */
+  /** Each pin's verdict: what the turn's claim writes to `skill_status`. */
   statuses: Record<string, PinnedSkillStatus>;
-  /** The characters of the shared budget the chosen skills leave: what an assistant load may take. */
+  /** The characters of the shared budget the injected skills leave: what an assistant load may take. */
   left: number;
 }
 
 /**
- * The skills to inject: the chosen ones in stored order (sorted and deduped by
- * `ensureSession`), out of one budget. `contents` holds the chosen skills found here: read, or
- * `null` when their read failed or answered malformed; a skill absent from it is in no listing.
+ * The skills to inject: the pinned ones in stored order, out of one budget. `contents` holds the
+ * pins found here: read, or `null` when their read failed or answered malformed; a skill absent
+ * from it is in no listing.
  */
 export function resolveChatSkills(
   selection: ChatSkillSelection,
   contents: ReadonlyMap<string, SkillContent | null>,
 ): ResolvedChatSkills {
   const resolved: ResolvedChatSkills = {
-    chosen: [],
+    injected: [],
     notices: [],
     statuses: {},
     left: CHAT_SKILLS_CONTENT_BUDGET_CHARS,
@@ -125,7 +135,7 @@ export function resolveChatSkills(
     } else {
       resolved.statuses[id] = "injected";
       resolved.left -= skill.content.length;
-      resolved.chosen.push(skill);
+      resolved.injected.push(skill);
     }
   }
   return resolved;
@@ -136,20 +146,29 @@ export function resolveChatSkills(
  * definitions injected, never a skill that only got a notice.
  */
 export function injectedSkills(resolved: ResolvedChatSkills): InjectedSkills["skills"] {
-  return Object.fromEntries(resolved.chosen.map(({ packageId, served }) => [packageId, served]));
+  return Object.fromEntries(resolved.injected.map(({ packageId, served }) => [packageId, served]));
 }
 
 const pinnedSkillStatusSchema = z.enum(PINNED_SKILL_STATUSES);
 
-/** The pins of a session row as its DTOs carry them (`skills`), sorted by id. */
+/** The pins of a session row as its DTOs carry them (`skills`); every write stores them sorted. */
 export function pinnedSkillsOf(row: {
+  id: string;
   pinnedSkills: readonly string[];
   assistantSkills: readonly string[];
   skillStatus: Readonly<Record<string, unknown>>;
 }): PinnedSkill[] {
   const assistant = new Set(row.assistantSkills);
-  return [...row.pinnedSkills].sort().map((id) => {
-    const status = pinnedSkillStatusSchema.safeParse(row.skillStatus[id]);
+  return row.pinnedSkills.map((id) => {
+    const stored = row.skillStatus[id];
+    const status = pinnedSkillStatusSchema.safeParse(stored);
+    if (stored !== undefined && !status.success) {
+      logger.warn("chat session stores a skill status outside the enum", {
+        sessionId: row.id,
+        skill: id,
+        status: String(stored),
+      });
+    }
     return {
       id,
       source: assistant.has(id) ? "assistant" : "user",
@@ -158,70 +177,104 @@ export function pinnedSkillsOf(row: {
   });
 }
 
-/** What pinning a skill the assistant loads answered (`pinAssistantSkill`). */
-export type SkillPinOutcome = "pinned" | "full" | "released";
+/**
+ * What `pinAssistantSkill` answered for a skill: `pinned` by this call, `already_pinned`, or
+ * left unpinned because the conversation is `full`, the turn `released` it, or (a check that
+ * appends nothing) the skill is `not_pinned`.
+ */
+export type SkillPinOutcome = "pinned" | "already_pinned" | "full" | "released" | "not_pinned";
 
 /**
- * The assistant's read of a skill file `uri` that answered `text`, in a persisted turn. True when
- * it is the `SKILL.md` this conversation injects for its skill (the URI the turn's listing gives)
- * and the skill is now a pin: injected already (system prompt, or an earlier load), or pinned by
- * this read, so later turns inject it from the system prompt. False for any other read, which
- * stays a plain one. Throws the refusal the model reads, with nothing marked, when the text does
- * not fit the budget the turn has left, the conversation already pins {@link MAX_PINNED_SKILLS}
- * skills, or the turn no longer holds the conversation.
+ * What a read of a skill's `SKILL.md` did to the conversation's pins: `pinned` when the database
+ * confirms the skill pinned now (its replay is a receipt), else a plain read, with the `note`
+ * the model is told when a pin it attempted was refused.
  */
-export type SkillLoad = (uri: string, text: string) => Promise<boolean>;
+export interface SkillLoadResult {
+  pinned: boolean;
+  note?: string;
+}
 
-const refusalLead = (packageId: string) => `The skill \`${packageId}\` was not loaded:`;
-const PIN_REFUSALS: Record<Exclude<SkillPinOutcome, "pinned">, (packageId: string) => string> = {
-  full: (packageId) =>
-    `${refusalLead(packageId)} this conversation already pins ${MAX_PINNED_SKILLS} skills, the most it holds. Nothing was pinned. Tell the user: they can unpin a skill in the skills panel of the composer, then ask again.`,
-  released: (packageId) =>
-    `${refusalLead(packageId)} this turn no longer holds the conversation (it was stopped or another turn started). Nothing was pinned.`,
+/**
+ * The assistant's read of a skill file `uri` that answered `text`, in a persisted turn: undefined
+ * unless it is the `SKILL.md` this conversation injects for its skill. Never throws: a refused pin
+ * leaves the read a plain one.
+ */
+export type SkillLoad = (uri: string, text: string) => Promise<SkillLoadResult | undefined>;
+
+const UNPIN_HINT =
+  "Tell the user: they can unpin a skill in the skills panel of the composer to make room.";
+const notPinned = (packageId: string, why: string): SkillLoadResult => ({
+  pinned: false,
+  note: `The skill \`${packageId}\` was read for this turn but not pinned to the conversation: ${why} Later turns will not have it unless it is read again.`,
+});
+const PIN_REFUSALS: Record<"full" | "released" | "failed", string> = {
+  full: `this conversation already pins ${MAX_PINNED_SKILLS} skills, the most it holds. ${UNPIN_HINT}`,
+  released: "this turn no longer holds the conversation (it was stopped or another turn started).",
+  failed: "the pin could not be recorded.",
 };
+const PLAIN_READ: SkillLoadResult = { pinned: false };
 
 /**
  * The turn's {@link SkillLoad}. `uris` maps each skill the turn can see to the `SKILL.md` URI its
- * injection would use; `injected` and `budgetLeft` are what the system prompt injected and left.
- * A load reserves its share of the budget before `pin` is awaited, and a parallel read of the
- * same skill waits for that load, so concurrent tool calls never spend the budget twice; a
- * refused pin gives the reservation back.
+ * injection would use; `pinned` and `injected` are the turn's pins and those its system prompt
+ * injected, `budgetLeft` what it left. A pin of the turn (injected or not) is never pinned again
+ * and spends no budget: an injected one, or one this turn pinned, gets a receipt only while
+ * `pin(id, false)` still finds it pinned. A new load reserves its share of the budget before its
+ * pin is awaited, and a parallel read of the same skill waits for it, so concurrent tool calls
+ * never spend the budget twice; a refused pin gives the reservation back.
  */
 export function turnSkillLoad(opts: {
   uris: ReadonlyMap<string, string>;
+  pinned: Iterable<string>;
   injected: Iterable<string>;
   budgetLeft: number;
-  pin: (packageId: string) => Promise<SkillPinOutcome>;
+  pin: (packageId: string, append: boolean) => Promise<SkillPinOutcome>;
 }): SkillLoad {
-  const loads = new Map<string, Promise<void>>(
-    [...opts.injected].map((id) => [id, Promise.resolve()]),
-  );
+  const pinnedAtStart = new Set(opts.pinned);
+  // The skills whose text this turn's context holds: what a re-read gets a receipt for.
+  const held = new Set(opts.injected);
+  const inFlight = new Map<string, Promise<SkillLoadResult>>();
   let left = opts.budgetLeft;
-  return async (uri, text) => {
+  const load: SkillLoad = async (uri, text) => {
     const packageId = [...opts.uris].find(([, injectedAt]) => injectedAt === uri)?.[0];
-    if (packageId === undefined) return false;
-    const pending = loads.get(packageId);
+    if (packageId === undefined) return undefined;
+    const pending = inFlight.get(packageId);
     if (pending) {
       await pending;
-      return true;
+      return load(uri, text);
     }
+    if (held.has(packageId)) {
+      const outcome = await opts.pin(packageId, false).catch((error: unknown) => {
+        logger.warn("chat skill pin check failed", { packageId, error: String(error) });
+        return "not_pinned" as const;
+      });
+      return { pinned: outcome === "already_pinned" };
+    }
+    if (pinnedAtStart.has(packageId)) return PLAIN_READ;
     if (text.length > left) {
-      throw new Error(
-        `${refusalLead(packageId)} its SKILL.md (${text.length} characters) does not fit the ${left} characters left of the ${CHAT_SKILLS_CONTENT_BUDGET_CHARS} the conversation's skills share. Nothing was pinned. Tell the user: they can unpin a skill in the skills panel of the composer to make room.`,
+      return notPinned(
+        packageId,
+        `its SKILL.md (${text.length} characters) does not fit the ${left} characters left of the ${CHAT_SKILLS_CONTENT_BUDGET_CHARS} the conversation's skills share. ${UNPIN_HINT}`,
       );
     }
     left -= text.length;
-    const load = opts.pin(packageId).then((outcome) => {
-      if (outcome !== "pinned") throw new Error(PIN_REFUSALS[outcome](packageId));
-    });
-    loads.set(packageId, load);
-    try {
-      await load;
-    } catch (error) {
-      left += text.length;
-      loads.delete(packageId);
-      throw error;
-    }
-    return true;
+    const attempt = opts
+      .pin(packageId, true)
+      .catch((error: unknown) => {
+        logger.warn("chat assistant skill pin failed", { packageId, error: String(error) });
+        return "failed" as const;
+      })
+      .then((outcome): SkillLoadResult => {
+        inFlight.delete(packageId);
+        if (outcome === "pinned" || outcome === "already_pinned") {
+          held.add(packageId);
+          return { pinned: true };
+        }
+        left += text.length;
+        return outcome === "not_pinned" ? PLAIN_READ : notPinned(packageId, PIN_REFUSALS[outcome]);
+      });
+    inFlight.set(packageId, attempt);
+    return attempt;
   };
+  return load;
 }
