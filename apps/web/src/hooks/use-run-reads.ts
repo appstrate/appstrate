@@ -18,15 +18,28 @@ import { invalidateNotificationQueries } from "./use-notifications";
 
 /**
  * The caller's unread runs in the space — the Runs badge; `enabled: false` where it is not shown.
- * `spanning`: in every space the reader reaches instead, narrowed to `spaceKind` when given (the
+ * `spanning`: in every space the reader reaches instead, narrowed to `spaceKind` or `spaceIds` when given (the
  * runs page; the sidebar badge passes none and counts every space).
  */
 export function useUnreadRunCount({
   enabled = true,
   spanning = false,
   spaceKind,
-}: { enabled?: boolean; spanning?: boolean; spaceKind?: SpaceKind } = {}): number {
-  const { data } = useFirstRunsPage({ unread: true, limit: 1, enabled, spanning, spaceKind });
+  spaceIds,
+}: {
+  enabled?: boolean;
+  spanning?: boolean;
+  spaceKind?: SpaceKind;
+  spaceIds?: string[];
+} = {}): number {
+  const { data } = useFirstRunsPage({
+    unread: true,
+    limit: 1,
+    enabled,
+    spanning,
+    spaceKind,
+    spaceIds,
+  });
   return data?.total ?? 0;
 }
 

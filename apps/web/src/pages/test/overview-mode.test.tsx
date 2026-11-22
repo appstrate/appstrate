@@ -504,6 +504,7 @@ describe("the dashboard in the mode", () => {
         undefined,
         undefined,
         undefined,
+        undefined,
         15,
       ),
       {
@@ -529,7 +530,7 @@ describe("the dashboard in the mode", () => {
     expect(asked("agents")).toEqual([["agents", "org_1", "across-spaces"]]);
     expect(asked("schedules")).toEqual([["schedules", "org_1", "across-spaces"]]);
     const runRequests = asked("paginated-runs").map(
-      ([, orgId, scope, endpoint, , , status, , , , limit]) => ({
+      ([, orgId, scope, endpoint, , , status, , , , , limit]) => ({
         orgId,
         scope,
         endpoint,
@@ -570,6 +571,7 @@ describe("the dashboard in the mode", () => {
             "org_1",
             "spc_a",
             "/runs",
+            undefined,
             undefined,
             undefined,
             undefined,

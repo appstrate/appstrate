@@ -1821,6 +1821,7 @@ export async function listGlobalRuns(
     unread = false,
     ownOnly = false,
     spaceKind,
+    spaceIds,
     actor = null,
   } = options;
 
@@ -1843,6 +1844,8 @@ export async function listGlobalRuns(
       );
     conditions.push(inArray(runs.spaceId, kindOfSpace));
   }
+  // Same: an id outside the reach matches nothing the reach allows.
+  if (spaceIds) conditions.push(inArray(runs.spaceId, spaceIds));
   if (chatSessionId) {
     conditions.push(eq(runs.chatSessionId, chatSessionId));
     conditions.push(

@@ -3,6 +3,7 @@
 import { describe, it, expect } from "bun:test";
 import {
   inSpaces,
+  nextSpaceParam,
   resolveSpaceFilter,
   showsTeamEmpty,
   withAllSpaces,
@@ -14,45 +15,101 @@ const team2 = { id: "spc_team2", personal: false };
 const mine = { id: "spc_me", personal: true };
 
 describe("resolveSpaceFilter", () => {
-  it("narrows to the team spaces when the parameter is absent", () => {
+  it("defaults to the team preset when the parameter is absent", () => {
     expect(resolveSpaceFilter(null, [team, mine, team2])).toEqual({
       offered: true,
-      all: false,
+      preset: true,
+      mode: "team",
       spaceIds: ["spc_team", "spc_team2"],
+      runs: { spaceKind: "team" },
     });
   });
 
   it("does not narrow on `all`", () => {
     expect(resolveSpaceFilter("all", [team, mine])).toEqual({
       offered: true,
-      all: true,
+      preset: true,
+      mode: "all",
       spaceIds: undefined,
+      runs: {},
     });
   });
 
-  it("treats any other value as absent: a URL is user input", () => {
-    expect(resolveSpaceFilter("everything", [team, mine]).spaceIds).toEqual(["spc_team"]);
-    expect(resolveSpaceFilter("", [team, mine]).spaceIds).toEqual(["spc_team"]);
+  it("narrows to exactly the picked spaces, the run list by id", () => {
+    expect(resolveSpaceFilter("spc_me,spc_team2", [team, mine, team2])).toEqual({
+      offered: true,
+      preset: true,
+      mode: "custom",
+      spaceIds: ["spc_me", "spc_team2"],
+      runs: { spaceIds: ["spc_me", "spc_team2"] },
+    });
   });
 
-  it("offers nothing without a team space", () => {
-    const state = resolveSpaceFilter(null, [mine]);
-    expect(state.offered).toBe(false);
-    expect(state.spaceIds).toBeUndefined();
+  it("drops ids of spaces that do not admit the list, and repeated ones", () => {
+    const state = resolveSpaceFilter("spc_gone,spc_me,spc_me,garbage", [team, mine]);
+    expect(state.mode).toBe("custom");
+    expect(state.spaceIds).toEqual(["spc_me"]);
   });
 
-  it("offers nothing without a personal space", () => {
+  it("reads a pick left empty, or any garbage, as absent: a URL is user input", () => {
+    for (const raw of ["spc_gone", "everything", "", ","]) {
+      const state = resolveSpaceFilter(raw, [team, mine]);
+      expect(state.mode, raw).toBe("team");
+      expect(state.spaceIds, raw).toEqual(["spc_team"]);
+    }
+  });
+
+  it("has no preset without a personal space: every space is the default", () => {
     const state = resolveSpaceFilter(null, [team, team2]);
-    expect(state.offered).toBe(false);
-    expect(state.spaceIds).toBeUndefined();
+    expect(state).toEqual({
+      offered: true,
+      preset: false,
+      mode: "all",
+      spaceIds: undefined,
+      runs: {},
+    });
+    expect(resolveSpaceFilter("spc_team2", [team, team2]).mode).toBe("custom");
   });
 
-  it("offers nothing when no space admits the list", () => {
-    expect(resolveSpaceFilter(null, [])).toEqual({
+  it("has no preset without a team space", () => {
+    const state = resolveSpaceFilter(null, [mine, { id: "spc_me2", personal: true }]);
+    expect(state.offered).toBe(true);
+    expect(state.preset).toBe(false);
+    expect(state.mode).toBe("all");
+  });
+
+  it("offers nothing with fewer than two spaces", () => {
+    expect(resolveSpaceFilter(null, [mine])).toMatchObject({ offered: false, mode: "all" });
+    expect(resolveSpaceFilter("spc_me", [mine])).toMatchObject({
       offered: false,
-      all: false,
+      mode: "all",
       spaceIds: undefined,
     });
+    expect(resolveSpaceFilter(null, [])).toMatchObject({ offered: false, spaceIds: undefined });
+  });
+});
+
+describe("nextSpaceParam", () => {
+  it("ticking the preset goes back to team: the parameter is removed", () => {
+    // From all (nothing ticked) and from a pick (the preset joins the picked ids).
+    expect(nextSpaceParam(["team"], true)).toBeNull();
+    expect(nextSpaceParam(["spc_a", "team"], true)).toBeNull();
+  });
+
+  it("unticking the preset widens to every space", () => {
+    expect(nextSpaceParam([], true)).toBe("all");
+  });
+
+  it("ticking spaces from all picks them", () => {
+    expect(nextSpaceParam(["spc_a"], true)).toBe("spc_a");
+    expect(nextSpaceParam(["spc_a", "spc_b"], true)).toBe("spc_a,spc_b");
+  });
+
+  it("unticking down to nothing goes back to every space", () => {
+    expect(nextSpaceParam([], true)).toBe("all");
+    // Without the preset, every space is the default: no parameter.
+    expect(nextSpaceParam([], false)).toBeNull();
+    expect(nextSpaceParam(["spc_a"], false)).toBe("spc_a");
   });
 });
 
@@ -95,22 +152,22 @@ describe("showsTeamEmpty", () => {
 });
 
 describe("withSpaceChoice", () => {
-  it("writes space=all when the default is unticked, keeping the other parameters", () => {
-    const next = withSpaceChoice(new URLSearchParams("status=failed&q=x"), true);
-    expect(next.get("space")).toBe("all");
+  it("writes the value, keeping the other parameters", () => {
+    const next = withSpaceChoice(new URLSearchParams("status=failed&q=x"), "spc_a,spc_b");
+    expect(next.get("space")).toBe("spc_a,spc_b");
     expect(next.get("status")).toBe("failed");
     expect(next.get("q")).toBe("x");
   });
 
-  it("removes the parameter when the default is ticked, keeping the other parameters", () => {
-    const next = withSpaceChoice(new URLSearchParams("space=all&kind=inline"), false);
+  it("removes the parameter on null, keeping the other parameters", () => {
+    const next = withSpaceChoice(new URLSearchParams("space=all&kind=inline"), null);
     expect(next.has("space")).toBe(false);
     expect(next.get("kind")).toBe("inline");
   });
 
   it("does not mutate the URL it was given", () => {
     const prev = new URLSearchParams("a=1");
-    withSpaceChoice(prev, true);
+    withSpaceChoice(prev, "all");
     expect(prev.has("space")).toBe(false);
   });
 });

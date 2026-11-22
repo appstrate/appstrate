@@ -110,7 +110,7 @@ function PackageIndexBody({
 }) {
   const { t } = useTranslation(["agents", "settings", "common"]);
   const [creating, setCreating] = useState<{ integrationId: string | null } | null>(null);
-  const list = useListParams(["origin", "activity"]);
+  const list = useListParams(["origin", "activity", "space"]);
   const [view, setView] = useListView(type);
   const { columns, menu } = useColumnVisibility(
     `packages-${type}`,
@@ -149,7 +149,7 @@ function PackageIndexBody({
         items={shownItems}
         extraFilters={space.filter ? [space.filter] : undefined}
         spaceNarrowing={
-          space.spaceIds !== undefined
+          space.mode === "team"
             ? {
                 hiddenCount: (items?.length ?? 0) - (shownItems?.length ?? 0),
                 message:

@@ -12,6 +12,7 @@ const key = (
     search?: string;
     limit?: number;
     spaceKind?: "team" | "personal";
+    spaceIds?: string;
   } = {},
 ) =>
   paginatedRunsKeys.list(
@@ -23,6 +24,7 @@ const key = (
     overrides.status,
     undefined,
     overrides.spaceKind,
+    overrides.spaceIds,
     overrides.search ?? "",
     overrides.limit ?? 25,
   );
@@ -46,6 +48,11 @@ describe("keepsRunRows", () => {
     ).toBe(true);
   });
 
+  it("drops the rows when the picked spaces change", () => {
+    expect(keepsRunRows(key({ spaceIds: "spc_a" }), key({ spaceIds: "spc_a,spc_b" }))).toBe(false);
+    expect(keepsRunRows(key({ spaceIds: "spc_a" }), key())).toBe(false);
+  });
+
   it("drops the rows when a filter changes", () => {
     expect(keepsRunRows(key(), key({ status: "failed" }))).toBe(false);
   });
@@ -56,6 +63,7 @@ describe("keepsRunRows", () => {
         "org_1",
         ACROSS_SPACES,
         "/runs",
+        undefined,
         undefined,
         undefined,
         undefined,

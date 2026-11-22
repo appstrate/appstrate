@@ -31,6 +31,7 @@ function failedQuery(data: ListEnvelope<EnrichedRun> | undefined): QueryClient {
     undefined,
     undefined,
     undefined,
+    undefined,
     25,
   );
   if (data) queryClient.setQueryData(key, { pages: [data], pageParams: [undefined] });

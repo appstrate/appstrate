@@ -56,6 +56,8 @@ import {
 export interface FilterOption {
   value: string;
   label: string;
+  /** Drawn before the label, in the menu and on the button's badges (a space's tile). */
+  icon?: ReactNode;
 }
 
 /** What the "Colonnes" menu needs: what there is, what is hidden, how to flip one. */
@@ -80,11 +82,11 @@ export interface FilterSpec {
   options: FilterOption[];
   onChange: (values: string[]) => void;
   /**
-   * This dimension carries a screen default (ticked or not): while it is offered the row stays
-   * open, so the list's narrowing is explained and can be undone, but it never counts as a filter
-   * the reader set and never shows the reset.
+   * The values the screen starts on; its presence means the dimension carries a default (ticked
+   * or not). While it is offered the row stays open, so the list's narrowing is explained and can
+   * be undone, and the values it holds (or none) never count as a filter the reader set.
    */
-  hasDefault?: boolean;
+  defaultValues?: readonly string[];
 }
 
 /** Beyond this many, the button counts instead of naming. */
@@ -124,8 +126,9 @@ function FacetedFilter({ filter }: { filter: FilterSpec }) {
                   <Badge
                     key={option.value}
                     variant="secondary"
-                    className="rounded-sm px-1 font-normal"
+                    className="gap-1 rounded-sm px-1 font-normal"
                   >
+                    {option.icon}
                     {option.label}
                   </Badge>
                 ))
@@ -157,7 +160,8 @@ function FacetedFilter({ filter }: { filter: FilterSpec }) {
                     >
                       <Check className="text-primary-foreground size-3.5" />
                     </div>
-                    <span>{option.label}</span>
+                    {option.icon}
+                    <span className="truncate">{option.label}</span>
                   </CommandItem>
                 );
               })}

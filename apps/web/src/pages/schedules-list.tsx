@@ -7,6 +7,7 @@ import { useAllSchedules } from "../hooks/use-schedules";
 import { useOverviewMode } from "../hooks/use-overview-mode";
 import { useSpaceFilter } from "../hooks/use-space-filter";
 import { inSpaces, showsTeamEmpty } from "../lib/space-filter";
+import { readerFiltered } from "../lib/reader-filtered";
 import { useSpaceAction } from "../hooks/use-space-action";
 import { PageHeader } from "../components/page-header";
 import {
@@ -59,7 +60,7 @@ export function SchedulesListPage() {
   //
   // The state still rides in the URL, like the runs page: a filtered list is
   // what people paste to each other, whoever does the filtering.
-  const list = useListParams(["state"]);
+  const list = useListParams(["state", "space"]);
   const query = list.search;
   const states = list.values("state", STATES);
   const space = useSpaceFilter("schedules", spanning);
@@ -87,13 +88,13 @@ export function SchedulesListPage() {
       ],
     },
   ];
-  const filtering = query.trim() !== "" || states.length > 0;
+  const filtering = query.trim() !== "" || readerFiltered(filters);
   const hiddenCount = (schedules ?? []).filter(
     (schedule) => !inSpaces([schedule.spaceId], spaceIds),
   ).length;
   const emptyBody = showsTeamEmpty({
     readerFiltered: filtering,
-    narrowing: spaceIds !== undefined,
+    narrowing: space.mode === "team",
     hiddenCount,
   }) ? (
     <SpaceFilterEmpty message={t("common:spaceFilter.empty.schedules")} showAll={space.showAll} />

@@ -2,9 +2,18 @@
 
 import type { FilterSpec } from "../components/list-toolbar";
 
-/** Whether the reader filtered: some filter they set (not one carrying a screen default) holds a value. */
+function sameValues(a: readonly string[], b: readonly string[]): boolean {
+  return a.length === b.length && a.every((value) => b.includes(value));
+}
+
+/**
+ * Whether the reader filtered: some filter holds values other than the screen's own default (the
+ * default ticked, or unticked to none, is not a filter the reader set).
+ */
 export function readerFiltered(filters: readonly FilterSpec[]): boolean {
-  return filters.some((filter) => !filter.hasDefault && filter.values.length > 0);
+  return filters.some(
+    (filter) => filter.values.length > 0 && !sameValues(filter.values, filter.defaultValues ?? []),
+  );
 }
 
 /**
@@ -18,5 +27,5 @@ export function filterRowOpen(
   startedActive: boolean,
   filters: readonly FilterSpec[],
 ): boolean {
-  return choice ?? (startedActive || filters.some((f) => f.hasDefault));
+  return choice ?? (startedActive || filters.some((f) => f.defaultValues !== undefined));
 }

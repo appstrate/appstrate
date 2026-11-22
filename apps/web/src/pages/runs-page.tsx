@@ -16,7 +16,7 @@ import { usePermissions } from "../hooks/use-permissions";
 import { useRunStatusFilter } from "../hooks/use-run-status-filter";
 import { useAdmittingSpaces, useOverviewMode } from "../hooks/use-overview-mode";
 import { useSpaceFilter } from "../hooks/use-space-filter";
-import { showsTeamEmpty, type SpaceKind } from "../lib/space-filter";
+import { showsTeamEmpty } from "../lib/space-filter";
 import { useHiddenRuns } from "../hooks/use-hidden-runs";
 import { HiddenRunsNotice } from "../components/hidden-runs-notice";
 
@@ -29,7 +29,7 @@ const KINDS = ["package", "inline"] as const;
 const SCOPES = ["me"] as const;
 
 /** The query parameters this screen filters on, and nothing else. */
-const FILTER_PARAMS = ["user", "kind", "status", "q"] as const;
+const FILTER_PARAMS = ["user", "kind", "status", "q", "space"] as const;
 
 /** `?status=failed,timeout` — the wire shape the endpoint takes. */
 export function RunsPage() {
@@ -40,12 +40,12 @@ export function RunsPage() {
   // « Tout marquer comme lu » marks what the list shows: the working space, or each space
   // admitting the list that the space filter keeps.
   const { spaceIds } = spaceFilter;
-  const narrowing = spaceIds !== undefined;
+  const narrowing = spaceFilter.mode === "team";
   const shownSpaces = spaceIds ? runSpaces.filter((s) => spaceIds.includes(s.id)) : runSpaces;
-  // The API narrows by kind, so the URL never grows with the number of spaces.
-  const spaceKind: SpaceKind | undefined = narrowing ? "team" : undefined;
+  // The team preset narrows by kind, so the URL never grows with the number of spaces; a pick is ids.
+  const { spaceKind, spaceIds: pickedSpaceIds } = spaceFilter.runs;
   const hidden = useHiddenRuns(narrowing);
-  const unreadCount = useUnreadRunCount({ spanning, spaceKind });
+  const unreadCount = useUnreadRunCount({ spanning, spaceKind, spaceIds: pickedSpaceIds });
   const markAllRead = useMarkAllRunsRead();
   const list = useListParams(FILTER_PARAMS);
   const searchPlaceholder = useSearchPlaceholder(t("common:nav.runs"));
@@ -125,6 +125,7 @@ export function RunsPage() {
         status={statuses}
         spanning={spanning}
         spaceKind={spaceKind}
+        spaceIds={pickedSpaceIds}
         search={search}
         toolbar={({ columns, empty }) => (
           <>

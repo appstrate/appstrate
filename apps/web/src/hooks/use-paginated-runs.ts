@@ -28,6 +28,8 @@ interface UseRunsOptions {
   spanning?: boolean;
   /** Narrows an org-wide list to team or personal spaces (`space_kind`); ignored off the org-wide route. */
   spaceKind?: SpaceKind;
+  /** Narrows an org-wide list to these spaces (`spaceId`, comma-separated); ignored off the org-wide route. */
+  spaceIds?: string[];
   enabled?: boolean;
   limit?: number;
 }
@@ -61,6 +63,7 @@ export function useRuns({
   unread,
   spanning,
   spaceKind,
+  spaceIds,
   enabled = true,
   limit = RUNS_PAGE_SIZE,
 }: UseRunsOptions) {
@@ -72,6 +75,7 @@ export function useRuns({
 
   const statusKey = status && status.length > 0 ? status.join(",") : undefined;
   const statusQuery = status && status.length > 0 ? status : undefined;
+  const spaceIdsQuery = spaceIds && spaceIds.length > 0 ? spaceIds : undefined;
 
   const endpoint = scheduleId
     ? `/schedules/${scheduleId}/runs`
@@ -89,6 +93,7 @@ export function useRuns({
     unread,
     // The key carries it only where the request does.
     acrossSpaces ? spaceKind : undefined,
+    acrossSpaces ? spaceIdsQuery?.join(",") : undefined,
     search,
     limit,
   );
@@ -107,6 +112,7 @@ export function useRuns({
           unread,
           acrossOrgId: scope.acrossOrgId,
           spaceKind,
+          spaceIds: spaceIdsQuery,
           limit,
           startingAfter: pageParam,
         },
@@ -174,6 +180,7 @@ export async function fetchRunPage(
     unread,
     acrossOrgId,
     spaceKind,
+    spaceIds,
     limit,
     startingAfter,
   }: RunPageRequest,
@@ -199,7 +206,10 @@ export async function fetchRunPage(
   };
   if (acrossOrgId) {
     const { data } = await client.GET("/api/orgs/{orgId}/runs", {
-      params: { path: { orgId: acrossOrgId }, query: { ...query, space_kind: spaceKind } },
+      params: {
+        path: { orgId: acrossOrgId },
+        query: { ...query, space_kind: spaceKind, spaceId: spaceIds },
+      },
       signal,
     });
     return data!;

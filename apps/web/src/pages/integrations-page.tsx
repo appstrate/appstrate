@@ -43,6 +43,7 @@ import { useColumnVisibility } from "../stores/column-visibility-store";
 import { useOverviewMode } from "../hooks/use-overview-mode";
 import { useSpaceFilter } from "../hooks/use-space-filter";
 import { inSpaces, showsTeamEmpty } from "../lib/space-filter";
+import { readerFiltered } from "../lib/reader-filtered";
 import { usePackageIndexActions } from "../hooks/use-package-index-actions";
 import { useSpaceLink } from "../hooks/use-current-space";
 import { IntegrationSourceLabel } from "../components/integration-source-label";
@@ -58,7 +59,7 @@ export function IntegrationsPage() {
   const connectionCount = useConnectionCounts();
   const linkInSpace = useSpaceLink();
   const [view, setView] = useListView("integrations");
-  const list = useListParams(["origin", "source"]);
+  const list = useListParams(["origin", "source", "space"]);
   const searchPlaceholder = useSearchPlaceholder(t("integrations.title"));
   const { canCreate, creation, importing, setImporting, createAction, actionsMenu } =
     usePackageIndexActions("integration", t("integrations.create"));
@@ -79,7 +80,6 @@ export function IntegrationsPage() {
     () => filterIntegrations(inFilteredSpaces, { query, origins, sources }),
     [inFilteredSpaces, query, origins, sources],
   );
-  const filtering = query.trim() !== "" || origins.length > 0 || sources.length > 0;
   const hiddenCount = active.length - inFilteredSpaces.length;
 
   const allColumns = useIntegrationListColumns(connectionCount, spanning);
@@ -107,9 +107,10 @@ export function IntegrationsPage() {
       })),
     },
   ];
+  const filtering = query.trim() !== "" || readerFiltered(filters);
   const empty = showsTeamEmpty({
     readerFiltered: filtering,
-    narrowing: spaceIds !== undefined,
+    narrowing: space.mode === "team",
     hiddenCount,
   }) ? (
     <SpaceFilterEmpty

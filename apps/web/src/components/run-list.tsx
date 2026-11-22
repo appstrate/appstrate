@@ -45,6 +45,8 @@ interface RunListProps {
   spanning?: boolean;
   /** With `spanning`: only team or personal spaces' runs (the runs page's space filter). */
   spaceKind?: SpaceKind;
+  /** With `spanning`: only these spaces' runs (the runs page's space filter, a pick). */
+  spaceIds?: string[];
   /**
    * The bar above the table.
    *
@@ -68,6 +70,7 @@ export function RunList({
   search,
   spanning = false,
   spaceKind,
+  spaceIds,
   toolbar,
 }: RunListProps) {
   const { t } = useTranslation(["agents"]);
@@ -99,6 +102,7 @@ export function RunList({
     status,
     spanning,
     spaceKind,
+    spaceIds,
     search: querySearch || undefined,
   });
   const { data, isLoading, isError, error } = query;

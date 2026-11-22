@@ -347,6 +347,26 @@ describe("GET /api/orgs/{orgId}/runs", () => {
       expect(bad.status).toBe(400);
     });
 
+    it("narrows to the picked spaces with spaceId, never widening", async () => {
+      const personal = await personalSpaceOf(member);
+      const personalRun = await seedSpaceRun(personal, member.user.id);
+      const pick = (...spaceIds: string[]) => `?spaceId=${spaceIds.join(",")}`;
+      expect(ids(await list(session(member), pick(un)))).toEqual(sorted(r.unOwner!, r.unMember!));
+      expect(ids(await list(session(member), pick(personal)))).toEqual([personalRun]);
+      expect(ids(await list(session(member), pick(un, personal)))).toEqual(
+        sorted(r.unOwner!, r.unMember!, personalRun),
+      );
+      // Privé is not reached: an empty page, never a leak.
+      const unreached = await list(session(member), pick(prive));
+      expect(unreached.data).toEqual([]);
+      expect(unreached.total).toBe(0);
+      // Combined with space_kind, both must hold.
+      const combined = await list(session(member), `${pick(un, personal)}&space_kind=personal`);
+      expect(ids(combined)).toEqual([personalRun]);
+      const bad = await app.request(path("?spaceId=nope"), { headers: session(member) });
+      expect(bad.status).toBe(400);
+    });
+
     it("applies space_kind on GET /api/runs from a team space", async () => {
       const headers = { Cookie: member.cookie, "X-Org-Id": owner.orgId, "X-Space-Id": un };
       const get = async (query: string) => {

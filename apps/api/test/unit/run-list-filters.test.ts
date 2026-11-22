@@ -78,3 +78,33 @@ describe("space_kind filter", () => {
     expect(() => parse({ space_kind: "Team" })).toThrow();
   });
 });
+
+describe("spaceId filter", () => {
+  const A = "spc_00000000-0000-4000-8000-000000000001";
+  const B = "spc_00000000-0000-4000-8000-000000000002";
+  const parse = (query: Record<string, string>) =>
+    parseGlobalRunListQuery({
+      req: { query: (name?: string) => (name ? query[name] : query) },
+    } as unknown as Context<AppEnv>);
+  const ids = (n: number) =>
+    Array.from(
+      { length: n },
+      (_, i) => `spc_00000000-0000-4000-8000-${String(i).padStart(12, "0")}`,
+    );
+  it("reads absent and empty as no narrowing", () => {
+    expect(parse({}).spaceIds).toBeUndefined();
+    expect(parse({ spaceId: "" }).spaceIds).toBeUndefined();
+  });
+  it("accepts one or several ids and collapses a repeated one", () => {
+    expect(parse({ spaceId: A }).spaceIds).toEqual([A]);
+    expect(parse({ spaceId: `${A}, ${B},${A}` }).spaceIds).toEqual([A, B]);
+  });
+  it("rejects a malformed member instead of dropping it", () => {
+    expect(() => parse({ spaceId: `${A},nope` })).toThrow();
+    expect(() => parse({ spaceId: `${A},` })).toThrow();
+  });
+  it("caps the list at 100 ids", () => {
+    expect(parse({ spaceId: ids(100).join(",") }).spaceIds).toHaveLength(100);
+    expect(() => parse({ spaceId: ids(101).join(",") })).toThrow();
+  });
+});

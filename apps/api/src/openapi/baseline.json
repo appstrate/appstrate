@@ -3292,6 +3292,23 @@
             "description": "Narrow the list to the runs of team spaces (`team`) or of personal spaces (`personal`) among the spaces the caller reaches. It only narrows, never widens: when no reached space matches, the page is empty (`total: 0`). Omit (or send an empty value) for every reached space. Any value outside the enum is rejected with `400`."
           },
           {
+            "name": "spaceId",
+            "in": "query",
+            "required": false,
+            "style": "form",
+            "explode": false,
+            "schema": {
+              "type": "array",
+              "maxItems": 100,
+              "items": {
+                "type": "string",
+                "pattern": "^spc_[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+              },
+              "example": ["spc_0b5c7e1a-3f2d-4c6b-9a18-7d4e2f1c5b30"]
+            },
+            "description": "Narrow the list to the runs of these spaces, comma-separated on the wire (`spaceId=spc_a,spc_b`). It only narrows, never widens: a space the caller does not reach matches nothing, so when none is reached the page is empty (`total: 0`). Composes with `space_kind`. A value that is not a space id, or more than 100 ids, is rejected with `400`. Omit (or send an empty value) for every reached space."
+          },
+          {
             "name": "packageId",
             "in": "query",
             "schema": {
@@ -3454,6 +3471,23 @@
               "enum": ["team", "personal"]
             },
             "description": "Narrow the list to the runs of team spaces (`team`) or of personal spaces (`personal`) among the spaces the caller reaches. It only narrows, never widens: when no reached space matches, the page is empty (`total: 0`). Omit (or send an empty value) for every reached space. Any value outside the enum is rejected with `400`."
+          },
+          {
+            "name": "spaceId",
+            "in": "query",
+            "required": false,
+            "style": "form",
+            "explode": false,
+            "schema": {
+              "type": "array",
+              "maxItems": 100,
+              "items": {
+                "type": "string",
+                "pattern": "^spc_[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+              },
+              "example": ["spc_0b5c7e1a-3f2d-4c6b-9a18-7d4e2f1c5b30"]
+            },
+            "description": "Narrow the list to the runs of these spaces, comma-separated on the wire (`spaceId=spc_a,spc_b`). It only narrows, never widens: a space the caller does not reach matches nothing, so when none is reached the page is empty (`total: 0`). Composes with `space_kind`. A value that is not a space id, or more than 100 ids, is rejected with `400`. Omit (or send an empty value) for every reached space."
           },
           {
             "name": "packageId",

@@ -146,7 +146,7 @@ describe("a default value", () => {
     values: ["team"],
     options: [{ value: "team", label: "Espaces d’équipe" }],
     onChange: () => {},
-    hasDefault: true,
+    defaultValues: ["team"],
   };
 
   it("opens the row and counts, to say why the list is short", () => {
@@ -182,6 +182,19 @@ describe("a default value", () => {
   it("leaves the reader's choice in charge", () => {
     expect(filterRowOpen(false, true, [spaceFilter])).toBe(false);
     expect(filterRowOpen(true, false, filters())).toBe(true);
+  });
+
+  it("counts a custom pick as the reader's filter, with the reset", () => {
+    const picked = { ...spaceFilter, values: ["spc_a"] };
+    expect(readerFiltered([picked])).toBe(true);
+    expect(render(<ListToolbar filters={[picked]} onReset={() => {}} />)).toContain(
+      "Réinitialiser",
+    );
+  });
+
+  it("is a default as a set: the same values in another order are not a filter", () => {
+    const two = { ...spaceFilter, defaultValues: ["a", "b"], values: ["b", "a"] };
+    expect(readerFiltered([two])).toBe(false);
   });
 
   it("shows the reset once the reader filters something besides it", () => {
