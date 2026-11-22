@@ -5,7 +5,7 @@
  * atomic chip) and in the sent bubble (`DirectiveText`, the text part of a user message).
  */
 
-import { useRef, type MouseEvent } from "react";
+import { useRef, type MouseEvent, type ReactNode } from "react";
 import { BookOpenIcon, XIcon } from "lucide-react";
 import type { DirectiveChipProps } from "@assistant-ui/react-lexical";
 import { useLexicalComposerContext } from "@lexical/react/LexicalComposerContext";
@@ -16,8 +16,18 @@ import { $removeDirectiveChip } from "./directive-chip-remove.ts";
 import { DirectiveAgentGlyph } from "./agent-glyph.tsx";
 import { useChatHost } from "./runtime-context.ts";
 
-/** 1em tall, on the text's baseline (a descender's depth below it): centred with the letters. */
-const CHIP_GLYPH = "mr-1 inline-flex size-[1em] shrink-0 align-[-0.125em]";
+/**
+ * A 1em square on the text's baseline, whatever it holds. Its content is absolutely positioned, so
+ * the square has no in-flow content and its bottom margin edge is its baseline: the glyph's, the
+ * tile's and the X's own font and baselines cannot move it. The flex child centres the content.
+ */
+function ChipSlot({ className, children }: { className?: string; children: ReactNode }) {
+  return (
+    <span className={cn("relative inline-block size-[1em] shrink-0 align-[-0.125em]", className)}>
+      <span className="absolute inset-0 flex items-center justify-center">{children}</span>
+    </span>
+  );
+}
 
 interface ChipProps {
   directiveType: string;
@@ -41,27 +51,31 @@ export function DirectiveChip({ directiveType, directiveId, label, remove }: Chi
       // grew taller than the line. `box-decoration-clone` keeps the border on each wrapped piece.
       className="group/chip bg-muted text-foreground mx-0.5 rounded-md border box-decoration-clone px-1.5"
     >
-      {directiveType === AGENT_DIRECTIVE ? (
-        <DirectiveAgentGlyph promptName={directiveId} label={label} className={CHIP_GLYPH} />
-      ) : (
-        <BookOpenIcon className={cn("text-muted-foreground", CHIP_GLYPH)} aria-hidden="true" />
-      )}
+      <ChipSlot className="mr-1">
+        {directiveType === AGENT_DIRECTIVE ? (
+          <DirectiveAgentGlyph promptName={directiveId} label={label} className="size-full" />
+        ) : (
+          <BookOpenIcon className="text-muted-foreground size-full" aria-hidden="true" />
+        )}
+      </ChipSlot>
       <span>{label}</span>
       {remove && (
-        // Not a tab stop: the chip sits in a textbox, where Tab must reach the next control and the
-        // keyboard already deletes a chip (Backspace on the atomic node). Pointer and touch only.
-        <button
-          type="button"
-          tabIndex={-1}
-          data-testid="directive-chip-remove"
-          aria-label={remove.label}
-          // The editor keeps the focus and the caret: the press must not take them.
-          onMouseDown={(event: MouseEvent) => event.preventDefault()}
-          onClick={() => ref.current && remove.onRemove(ref.current)}
-          className="text-muted-foreground hover:bg-foreground/10 hover:text-foreground desktop-pointer:opacity-0 desktop-pointer:group-hover/chip:opacity-100 desktop-pointer:focus-within:opacity-100 relative -mr-0.5 ml-1 inline-flex size-[1em] items-center justify-center rounded-full align-[-0.125em] before:absolute before:-inset-2 before:content-['']"
-        >
-          <XIcon className="size-3" aria-hidden="true" />
-        </button>
+        <ChipSlot className="ml-1">
+          {/* Not a tab stop: the chip sits in a textbox, where Tab must reach the next control and the
+              keyboard already deletes a chip (Backspace on the atomic node). Pointer and touch only. */}
+          <button
+            type="button"
+            tabIndex={-1}
+            data-testid="directive-chip-remove"
+            aria-label={remove.label}
+            // The editor keeps the focus and the caret: the press must not take them.
+            onMouseDown={(event: MouseEvent) => event.preventDefault()}
+            onClick={() => ref.current && remove.onRemove(ref.current)}
+            className="text-muted-foreground hover:bg-foreground/10 hover:text-foreground desktop-pointer:opacity-0 desktop-pointer:group-hover/chip:opacity-100 desktop-pointer:focus-within:opacity-100 relative flex size-full items-center justify-center rounded-full before:absolute before:-inset-2 before:content-['']"
+          >
+            <XIcon className="size-3" aria-hidden="true" />
+          </button>
+        </ChipSlot>
       )}
     </span>
   );
