@@ -9,7 +9,9 @@
  * later turn carries it too, and the server reads it only on the turn that creates the
  * conversation. Afterwards the limit is the server's, changed by a PATCH
  * (refused while a turn generates): every reader projects it while it is pending, and a success
- * writes it into the session detail and every list row. The origin is immutable once set: a conversation without one
+ * writes it into the session detail and every list row. A PATCH finding no session (404) on a
+ * conversation new in this mount means its first turn failed before creating one: the change goes
+ * back into the draft, not an error. The origin is immutable once set: a conversation without one
  * takes it only by being limited to it.
  */
 
@@ -17,7 +19,7 @@ import { useCallback, useMemo, useState } from "react";
 import { useMutation, useMutationState, useQueryClient } from "@tanstack/react-query";
 import type { ConversationCreation } from "./chat-route.ts";
 import type { ConversationScope } from "./conversation-scope.ts";
-import type { ChatTransport } from "./runtime-context.ts";
+import { errorStatus, type ChatTransport } from "./runtime-context.ts";
 import { useLatest } from "./use-latest.ts";
 import {
   patchSessionsCache,
@@ -131,14 +133,27 @@ export function useConversationLimit({
   const isPending = pending !== undefined;
   const { mutate } = useMutation({
     mutationKey: limitMutationKey(transport?.orgId),
-    mutationFn: ({ id: sessionId, ...patch }: LimitChange) =>
-      setSessionLimit(transport!, sessionId, patch),
-    onSuccess: (_, change) => {
+    // Resolves whether the conversation exists: a 404 on one this mount never loaded is a first
+    // turn that created nothing, an outcome to absorb rather than an error to toast.
+    mutationFn: async ({ id: sessionId, ...patch }: LimitChange) => {
+      try {
+        await setSessionLimit(transport!, sessionId, patch);
+        return true;
+      } catch (error) {
+        if (!persistedAtMount && errorStatus(error) === 404) return false;
+        throw error;
+      }
+    },
+    onSuccess: (exists, change) => {
       setDraft((prev) => ({
-        ...prev,
         spaceId: change.spaceId ?? prev.spaceId,
         restricted: change.restricted,
+        under: exists ? prev.under : selectedSpaceId,
       }));
+      if (!exists) {
+        setSent(false);
+        return;
+      }
       queryClient.setQueryData<SessionHistory | null>(
         detailKey,
         (row) => row && limitedRow(row, change),
