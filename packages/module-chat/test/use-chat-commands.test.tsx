@@ -16,7 +16,9 @@ import { requestAnswering, transportOf, transportOver } from "./fake-request.ts"
 import { conversationScope, testHost } from "./test-host.ts";
 
 const commands = {
-  skills: [{ id: "@acme/tone", name: "tone", description: "Adjusts tone", version: "1.2.0" }],
+  skills: [
+    { id: "@acme/tone", name: "tone", description: "Adjusts tone", version: "1.2.0", bytes: 120 },
+  ],
   agents: [
     {
       name: "run-report",
@@ -55,7 +57,7 @@ describe("fetchChatCommands", () => {
   });
 
   it("keeps a draft skill's null version", async () => {
-    const draft = { id: "@acme/wip", name: "wip", description: "", version: null };
+    const draft = { id: "@acme/wip", name: "wip", description: "", version: null, bytes: null };
     const request = requestAnswering(() => Response.json({ skills: [draft], agents: [] }));
     expect((await fetchChatCommands(transportOver(request), undefined, true)).skills).toEqual([
       draft,

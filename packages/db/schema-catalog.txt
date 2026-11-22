@@ -47,7 +47,6 @@ column chat_session_spaces.org_id uuid not null
 column chat_session_spaces.session_id text not null
 column chat_session_spaces.space_id text not null
 column chat_sessions.active_stream_id text
-column chat_sessions.assistant_skills text[] not null default '{}'::text[]
 column chat_sessions.created_at timestamp with time zone not null default now()
 column chat_sessions.id text not null
 column chat_sessions.last_assistant_seq bigint
@@ -727,7 +726,6 @@ constraint chat_messages uq_chat_messages_session_message UNIQUE (session_id, me
 constraint chat_session_spaces chat_session_spaces_session_id_space_id_pk PRIMARY KEY (session_id, space_id)
 constraint chat_session_spaces chat_session_spaces_session_org_fk FOREIGN KEY (session_id, org_id) REFERENCES chat_sessions(id, org_id) ON DELETE CASCADE
 constraint chat_session_spaces chat_session_spaces_space_org_fk FOREIGN KEY (space_id, org_id) REFERENCES spaces(id, org_id) ON DELETE CASCADE
-constraint chat_sessions chat_sessions_assistant_skills_pinned CHECK ((assistant_skills <@ pinned_skills))
 constraint chat_sessions chat_sessions_org_id_organizations_id_fk FOREIGN KEY (org_id) REFERENCES organizations(id) ON DELETE CASCADE
 constraint chat_sessions chat_sessions_pinned_skills_cap CHECK ((cardinality(pinned_skills) <= 5))
 constraint chat_sessions chat_sessions_pkey PRIMARY KEY (id)

@@ -78,16 +78,10 @@ export const chatSessions = pgTable(
       .array()
       .notNull()
       .default(sql`'{}'::text[]`),
-    // The part of `pinned_skills` the assistant pinned by loading a skill's SKILL.md
-    // (`chat_sessions_assistant_skills_pinned`).
-    assistantSkills: text("assistant_skills")
-      .array()
-      .notNull()
-      .default(sql`'{}'::text[]`),
-    // What the last turn that claimed the conversation did with each pin it evaluated. Keys ⊆
-    // `pinned_skills`; a pin without an entry has not been evaluated yet.
+    // What the last turn that claimed the conversation did with each pin it evaluated. A pin
+    // without an entry has not been evaluated yet; a key no longer pinned is ignored.
     skillStatus: jsonb("skill_status")
-      .$type<Partial<Record<string, ChatSkillStatus>>>()
+      .$type<Partial<Record<string, ChatSkillStatusEntry>>>()
       .notNull()
       .default({}),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
@@ -97,7 +91,6 @@ export const chatSessions = pgTable(
     index("idx_chat_sessions_org_user").on(table.orgId, table.userId),
     index("idx_chat_sessions_space_user").on(table.spaceId, table.userId),
     check("chat_sessions_restricted_needs_space", sql`restricted = false OR space_id IS NOT NULL`),
-    check("chat_sessions_assistant_skills_pinned", sql`assistant_skills <@ pinned_skills`),
     // The chat module's `MAX_PINNED_SKILLS`: every pin is injected in full on every turn.
     check("chat_sessions_pinned_skills_cap", sql`cardinality(pinned_skills) <= 5`),
     // Referenced target of the composite tenant-integrity FK on
@@ -224,3 +217,9 @@ export const chatSkillStatusValues = [
   "unreadable",
 ] as const;
 export type ChatSkillStatus = (typeof chatSkillStatusValues)[number];
+
+/** A turn's verdict on one pin; `chars`: its SKILL.md length, when the turn read it. */
+export interface ChatSkillStatusEntry {
+  status: ChatSkillStatus;
+  chars?: number | null;
+}

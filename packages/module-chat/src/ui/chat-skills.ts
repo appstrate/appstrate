@@ -10,8 +10,6 @@ import { SKILL_DIRECTIVE, directivesOf } from "../directives.ts";
 import {
   DEFAULT_SKILL_SELECTION,
   MAX_PINNED_SKILLS,
-  applySkillChanges,
-  type ChatSkillChanges,
   type ChatSkillStatus,
   type PinnedSkill,
 } from "../skills.ts";
@@ -28,6 +26,22 @@ export const DEFAULT_STORED_SKILLS: StoredSkills = {
   skillDiscovery: DEFAULT_SKILL_SELECTION.skillDiscovery,
   pins: [],
 };
+
+/** The user's changes to the stored skills, not yet sent. */
+export interface ChatSkillChanges {
+  skillDiscovery?: boolean;
+  pin: readonly string[];
+  unpin: readonly string[];
+}
+
+/** `pinned` after `changes`: unpins out, pins in, sorted and deduped. */
+export function applySkillChanges(
+  pinned: readonly string[],
+  changes: Pick<ChatSkillChanges, "pin" | "unpin">,
+): string[] {
+  const unpin = new Set(changes.unpin);
+  return [...new Set([...pinned.filter((id) => !unpin.has(id)), ...changes.pin])].sort();
+}
 
 export const NO_SKILL_CHANGES: ChatSkillChanges = { pin: [], unpin: [] };
 
@@ -130,8 +144,7 @@ export function withAppliedChanges(stored: StoredSkills, changes: ChatSkillChang
     skillDiscovery: changes.skillDiscovery ?? stored.skillDiscovery,
     pins: applySkillChanges([...byId.keys()], changes).map((id): PinnedSkill => {
       const held = byId.get(id);
-      if (!held) return { id, source: "user", status: null };
-      return changes.pin.includes(id) ? { ...held, source: "user" } : held;
+      return held ?? { id, status: null, chars: null };
     }),
   };
 }
@@ -180,7 +193,7 @@ type SkillRefusal = Exclude<ChatSkillStatus, "injected">;
  */
 export type SkillRowState =
   | { kind: "cited" | "next" | "unpin" | "off" }
-  | { kind: "loaded"; source: PinnedSkill["source"] }
+  | { kind: "loaded" }
   | { kind: "refused"; reason: SkillRefusal };
 
 export function skillRowState(
@@ -193,9 +206,7 @@ export function skillRowState(
   if (skills.pending.has(id)) return { kind: "next" };
   const pin = skills.stored.get(id);
   if (!pin || pin.status === null) return { kind: "next" };
-  return pin.status === "injected"
-    ? { kind: "loaded", source: pin.source }
-    : { kind: "refused", reason: pin.status };
+  return pin.status === "injected" ? { kind: "loaded" } : { kind: "refused", reason: pin.status };
 }
 
 /** Whether a row's skill is in the model's context, or will be on the next turn. */
@@ -224,6 +235,7 @@ export function skillPickerRows(
         name: parseScopedName(id)?.name ?? id,
         description: "",
         version: null,
+        bytes: null,
       },
       available: false,
     })),

@@ -22,7 +22,7 @@ import {
 import type { SessionHistory } from "../src/ui/sessions.ts";
 import { createSkillChanges, writeAcceptedSkills } from "../src/ui/use-conversation-skills.ts";
 
-const assistantPin: PinnedSkill = { id: "@a/x", source: "assistant", status: "injected" };
+const assistantPin: PinnedSkill = { id: "@a/x", status: "injected", chars: null };
 
 /** The store over a server state that accepted turns update, as the hook's cache write does. */
 function conversation(stored: StoredSkills = DEFAULT_STORED_SKILLS) {
@@ -54,7 +54,7 @@ describe("skill changes across a turn", () => {
     expect(store.take()).toEqual({ pin: ["@a/new"], unpin: [] });
     store.answered("accepted");
     expect(store.get()).toEqual(NO_SKILL_LAYERS);
-    expect(server.stored.pins).toEqual([{ id: "@a/new", source: "user", status: null }]);
+    expect(server.stored.pins).toEqual([{ id: "@a/new", status: null, chars: null }]);
     // Shown as loaded with the next message until the realtime read brings the verdict.
     expect(row("@a/new")).toEqual({ kind: "next" });
     expect(store.take()).toBeUndefined();
@@ -111,7 +111,7 @@ describe("skill changes across a turn", () => {
     expect(accepted).toEqual([]);
     expect(unanswered()).toBe(1);
     // The detail is the truth until it is read again: the server may or may not have unpinned it.
-    expect(row("@a/x")).toEqual({ kind: "loaded", source: "assistant" });
+    expect(row("@a/x")).toEqual({ kind: "loaded" });
     expect(store.take()).toBeUndefined();
   });
 
@@ -159,7 +159,7 @@ describe("skill changes across a turn", () => {
     server.stored = { skillDiscovery: true, pins: [assistantPin] };
     // The queue sends the next message: nothing of the first turn rides with it.
     expect(store.take()).toBeUndefined();
-    expect(row("@a/x")).toEqual({ kind: "loaded", source: "assistant" });
+    expect(row("@a/x")).toEqual({ kind: "loaded" });
   });
 
   it("a queued turn sent while the previous one still streams takes only its own changes", () => {
@@ -244,23 +244,23 @@ describe("writeAcceptedSkills", () => {
     const { qc, server, observer, flush, pins, unsubscribe } = observedDetail(detail([]));
     void observer.refetch();
     // The claim applies the change, then the turn answers 2xx.
-    server.row = detail([{ id: "@a/new", source: "user", status: "injected" }]);
+    server.row = detail([{ id: "@a/new", status: "injected", chars: null }]);
     writeAcceptedSkills(qc, KEY, sent);
     await flush();
-    expect(pins()).toEqual([{ id: "@a/new", source: "user", status: "injected" }]);
+    expect(pins()).toEqual([{ id: "@a/new", status: "injected", chars: null }]);
     unsubscribe();
   });
 
   it("the verdict of a read started after the claim wins over the write", async () => {
     const { qc, server, observer, flush, pins, unsubscribe } = observedDetail(detail([]));
     // The claim's signal makes the realtime read the detail, which already holds the verdict.
-    server.row = detail([{ id: "@a/new", source: "user", status: "over_budget" }]);
+    server.row = detail([{ id: "@a/new", status: "over_budget", chars: null }]);
     void observer.refetch();
     writeAcceptedSkills(qc, KEY, sent);
     // Until the read lands, the write shows the pin as not judged yet.
-    expect(pins()).toEqual([{ id: "@a/new", source: "user", status: null }]);
+    expect(pins()).toEqual([{ id: "@a/new", status: null, chars: null }]);
     await flush();
-    expect(pins()).toEqual([{ id: "@a/new", source: "user", status: "over_budget" }]);
+    expect(pins()).toEqual([{ id: "@a/new", status: "over_budget", chars: null }]);
     expect(qc.getQueryState(KEY)!.isInvalidated).toBe(false);
     unsubscribe();
   });

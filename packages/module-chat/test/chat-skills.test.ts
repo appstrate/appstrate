@@ -25,11 +25,11 @@ import {
   type StoredSkills,
 } from "../src/ui/chat-skills.ts";
 
-const pin = (
-  id: string,
-  status: PinnedSkill["status"] = "injected",
-  source: PinnedSkill["source"] = "user",
-): PinnedSkill => ({ id, source, status });
+const pin = (id: string, status: PinnedSkill["status"] = "injected"): PinnedSkill => ({
+  id,
+  status,
+  chars: null,
+});
 const stored = (pins: PinnedSkill[] = [], skillDiscovery = true): StoredSkills => ({
   skillDiscovery,
   pins,
@@ -84,7 +84,7 @@ describe("mergeSkillChanges", () => {
 });
 
 describe("changePin", () => {
-  const base = stored([pin("@a/held", "injected", "assistant")]);
+  const base = stored([pin("@a/held", "injected")]);
 
   it("records a pin the server lacks and an unpin of one it holds", () => {
     expect(changePin(NO_SKILL_CHANGES, "@a/new", true, base)).toEqual(changes({ pin: ["@a/new"] }));
@@ -145,9 +145,9 @@ describe("resetSkillChanges", () => {
 });
 
 describe("withAppliedChanges", () => {
-  it("applies the changes as the server does: unpins out, new pins unjudged, a re-pin the user's", () => {
+  it("applies the changes as the server does: unpins out, new pins unjudged, a re-pin kept as held", () => {
     const before = stored(
-      [pin("@a/auto", "injected", "assistant"), pin("@a/old"), pin("@a/kept", "over_budget")],
+      [pin("@a/auto", "injected"), pin("@a/old"), pin("@a/kept", "over_budget")],
       true,
     );
     expect(
@@ -157,7 +157,7 @@ describe("withAppliedChanges", () => {
       ),
     ).toEqual(
       stored(
-        [pin("@a/auto", "injected", "user"), pin("@a/kept", "over_budget"), pin("@a/new", null)],
+        [pin("@a/auto", "injected"), pin("@a/kept", "over_budget"), pin("@a/new", null)],
         false,
       ),
     );
@@ -188,10 +188,9 @@ describe("skillRowState", () => {
   const skills = conversationSkills(
     stored([
       pin("@a/mine"),
-      pin("@a/assistant", "injected", "assistant"),
       pin("@a/unseen", null),
       pin("@a/big", "over_budget"),
-      pin("@a/gone", "unavailable", "assistant"),
+      pin("@a/gone", "unavailable"),
       pin("@a/broken", "unreadable"),
       pin("@a/dropped"),
     ]),
@@ -199,9 +198,8 @@ describe("skillRowState", () => {
   );
   const state = (id: string, cited: string[] = []) => skillRowState(skills, id, new Set(cited));
 
-  it("reads each pin as the server reported it, with its source", () => {
-    expect(state("@a/mine")).toEqual({ kind: "loaded", source: "user" });
-    expect(state("@a/assistant")).toEqual({ kind: "loaded", source: "assistant" });
+  it("reads each pin as the server reported it", () => {
+    expect(state("@a/mine")).toEqual({ kind: "loaded" });
     expect(state("@a/unseen")).toEqual({ kind: "next" });
     expect(state("@a/big")).toEqual({ kind: "refused", reason: "over_budget" });
     expect(state("@a/gone")).toEqual({ kind: "refused", reason: "unavailable" });
@@ -210,7 +208,7 @@ describe("skillRowState", () => {
 
   it("is next for a pending pin even over a stored verdict: the re-check postdates it", () => {
     const repinned = conversationSkills(
-      stored([pin("@a/x", "injected", "assistant")]),
+      stored([pin("@a/x", "injected")]),
       local({ pin: ["@a/x"] }),
     );
     expect(skillRowState(repinned, "@a/x", new Set())).toEqual({ kind: "next" });
@@ -236,7 +234,6 @@ describe("skillRowState", () => {
     const removes = (id: string, cited: string[] = []) =>
       removesFromContext(skills, id, state(id, cited));
     expect(removes("@a/mine")).toBe(true);
-    expect(removes("@a/assistant")).toBe(true);
     expect(removes("@a/pending")).toBe(false);
     expect(removes("@a/mine", ["@a/mine"])).toBe(false);
     expect(removes("@a/dropped")).toBe(false);
@@ -251,13 +248,12 @@ describe("skillRowState", () => {
     expect(loadsSkill(state("@a/big"))).toBe(false);
     expect(loadsSkill(state("@a/other"))).toBe(false);
     expect(loadsSkill(state("@a/unseen"))).toBe(true);
-    expect(loadsSkill(state("@a/assistant"))).toBe(true);
     expect(loadsSkill(state("@a/x", ["@a/x"]))).toBe(true);
   });
 });
 
 describe("skillPickerRows", () => {
-  const tone = { id: "@acme/tone", name: "Tone", description: "", version: "1.0.0" };
+  const tone = { id: "@acme/tone", name: "Tone", description: "", version: "1.0.0", bytes: 120 };
 
   it("lists the catalogue as available rows, in its order", () => {
     const pdf = { ...tone, id: "@acme/pdf" };
@@ -271,11 +267,11 @@ describe("skillPickerRows", () => {
     expect(skillPickerRows([tone], ["@acme/gone", "@acme/tone", "@z/deleted"])).toEqual([
       { skill: tone, available: true },
       {
-        skill: { id: "@acme/gone", name: "gone", description: "", version: null },
+        skill: { id: "@acme/gone", name: "gone", description: "", version: null, bytes: null },
         available: false,
       },
       {
-        skill: { id: "@z/deleted", name: "deleted", description: "", version: null },
+        skill: { id: "@z/deleted", name: "deleted", description: "", version: null, bytes: null },
         available: false,
       },
     ]);
@@ -284,7 +280,7 @@ describe("skillPickerRows", () => {
   it("still lists dead pins when the catalogue is empty", () => {
     expect(skillPickerRows([], ["@acme/gone"])).toEqual([
       {
-        skill: { id: "@acme/gone", name: "gone", description: "", version: null },
+        skill: { id: "@acme/gone", name: "gone", description: "", version: null, bytes: null },
         available: false,
       },
     ]);
@@ -328,7 +324,7 @@ describe("effectiveSkills", () => {
 describe("canResetSkills", () => {
   const skills = (skillDiscovery: boolean, pinned: string[]) =>
     conversationSkills(
-      { skillDiscovery, pins: pinned.map((id) => ({ id, source: "user", status: "injected" })) },
+      { skillDiscovery, pins: pinned.map((id) => ({ id, status: "injected", chars: null })) },
       NO_SKILL_LAYERS,
     );
   const on = skills(true, ["@acme/a"]);

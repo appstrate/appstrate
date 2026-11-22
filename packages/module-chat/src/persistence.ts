@@ -21,18 +21,7 @@
  * here, because `deterministicMessageId` hashes it.
  */
 
-import {
-  and,
-  desc,
-  eq,
-  inArray,
-  isNull,
-  ne,
-  or,
-  sql,
-  type SQL,
-  type SQLWrapper,
-} from "drizzle-orm";
+import { and, desc, eq, inArray, isNull, ne, or, sql, type SQL } from "drizzle-orm";
 import { isForeignKeyViolation } from "@appstrate/db/errors";
 import { db } from "@appstrate/db/client";
 import {
@@ -47,10 +36,9 @@ import {
 import { toPgSafe } from "@appstrate/db/pg-safe";
 import { invalidRequest, notFound } from "@appstrate/core/api-errors";
 import { uiMessageTitleText } from "./message-text.ts";
-import { agentPromptOfParts } from "./agent-prompt.ts";
+import { AGENT_PROMPT_PART_TYPE, agentPromptOfParts } from "./agent-prompt.ts";
 import { notifySessionUpdate } from "./realtime.ts";
-import { MAX_PINNED_SKILLS, type ChatSkillSelection, type PinnedSkill } from "./skills.ts";
-import type { SkillPinOutcome } from "./skill-load.ts";
+import type { ChatSkillSelection, PinnedSkill } from "./skills.ts";
 import type { FileUIPart, UIMessage } from "ai";
 
 /**
@@ -211,30 +199,10 @@ export interface TurnConversation {
 /** The origin space and limit a conversation is created with; throws the 400 for an invalid one. */
 type ConversationOriginRequest = () => { spaceId: string; restricted: boolean } | undefined;
 
-/** `values` as a `text[]` literal: drizzle would spread a bare array into a parameter list. */
-export function textArray(values: readonly string[]): SQL {
-  return values.length === 0
-    ? sql`'{}'::text[]`
-    : sql`ARRAY[${sql.join(
-        values.map((value) => sql`${value}`),
-        sql`, `,
-      )}]::text[]`;
-}
-
-/** `ids` without `removed`, order kept. */
-export function withoutIds(ids: SQLWrapper, removed: readonly string[]): SQL {
-  return sql`ARRAY(SELECT u FROM unnest(${ids}) AS u WHERE u <> ALL(${textArray(removed)}))`;
-}
-
-/** `ids` sorted (bytewise, as JS sorts the ASCII package ids) and deduped. */
-export function sortedIds(ids: SQL): SQL {
-  return sql`ARRAY(SELECT DISTINCT u COLLATE "C" FROM unnest(${ids}) AS u ORDER BY 1)`;
-}
-
 /**
- * Create the session row if it does not exist yet (idempotent), with the default skill
- * selection: a turn's skill changes are written by its claim alone (`setActiveStream`). The
- * client mints the id. The
+ * Create the session row if it does not exist yet (idempotent). The client mints the id. The
+ * `selection` (the composer's buffered skill settings) is written only by the insert: an
+ * existing conversation keeps its own, changed by the skills PATCH alone. The
  * `origin` request (origin space and limit) is called ONLY when this call creates the row:
  * an existing conversation keeps its own and the request is never evaluated. A turn naming an
  * origin runs in a transaction that evaluates it once the row is known to be new (a refusal
@@ -250,6 +218,7 @@ export async function ensureSession(
    * space it touched is among them.
    */
   readable: readonly string[],
+  selection?: Partial<ChatSkillSelection>,
   origin?: ConversationOriginRequest,
 ): Promise<TurnConversation> {
   // The id is client-minted, so a caller could send an id that already belongs
@@ -274,7 +243,7 @@ export async function ensureSession(
   const upsert = (client: ChatDbClient) =>
     client
       .insert(chatSessions)
-      .values({ id, orgId, userId, title: null })
+      .values({ id, orgId, userId, title: null, ...selection })
       .onConflictDoUpdate({
         target: chatSessions.id,
         set: { id: sql`${chatSessions.id}` },
@@ -316,60 +285,30 @@ export async function ensureSession(
   };
 }
 
-const pinnedSql = (packageId: string) =>
-  sql<boolean>`${packageId}::text = ANY(${chatSessions.pinnedSkills})`;
-
 /**
- * Pin `packageId` to the conversation as the assistant's: its `SKILL.md` was just read by the turn
- * holding `streamId`. ONE statement guarded on the cap and on the turn still holding the
- * conversation: appended to `pinned_skills` and `assistant_skills`, its status `injected`. A
- * skill already pinned is never written, and answers `pinned` whoever pinned it. Otherwise refused
- * as `full` (a lost race on the cap) or `released` (the turn no longer holds the conversation).
+ * Write a session's skill settings (the skills PATCH): `pinnedSkills` replaces the set, dropping
+ * the `skill_status` of every skill it no longer holds (a new pin has none until a turn evaluates
+ * it). Leaves `updated_at`, so a pin never reorders the sidebar. A turn in flight keeps what it
+ * read; the next one reads this. Returns the row, or undefined when it is gone.
  */
-export async function pinAssistantSkill(
+export async function updateSessionSkills(
   sessionId: string,
-  streamId: string,
-  packageId: string,
-): Promise<SkillPinOutcome> {
+  change: Partial<ChatSkillSelection>,
+): Promise<typeof chatSessions.$inferSelect | undefined> {
+  const { pinnedSkills, skillDiscovery } = change;
   const [row] = await db
     .update(chatSessions)
     .set({
-      pinnedSkills: sortedIds(sql`array_append(${chatSessions.pinnedSkills}, ${packageId}::text)`),
-      assistantSkills: sortedIds(
-        sql`array_append(${chatSessions.assistantSkills}, ${packageId}::text)`,
-      ),
-      skillStatus: sql`${chatSessions.skillStatus} || jsonb_build_object(${packageId}::text, 'injected')`,
+      ...(skillDiscovery !== undefined && { skillDiscovery }),
+      ...(pinnedSkills !== undefined && {
+        pinnedSkills,
+        // The pins ride as one jsonb parameter: drizzle would spread a bare array into a list.
+        skillStatus: sql`(SELECT coalesce(jsonb_object_agg(key, value), '{}'::jsonb) FROM jsonb_each(${chatSessions.skillStatus}) WHERE key IN (SELECT jsonb_array_elements_text(${JSON.stringify(pinnedSkills)}::jsonb)))`,
+      }),
     })
-    .where(
-      and(
-        eq(chatSessions.id, sessionId),
-        eq(chatSessions.activeStreamId, streamId),
-        sql`NOT ${pinnedSql(packageId)}`,
-        sql`cardinality(${chatSessions.pinnedSkills}) < ${MAX_PINNED_SKILLS}`,
-      ),
-    )
-    .returning({ orgId: chatSessions.orgId, userId: chatSessions.userId });
-  if (row) {
-    notifySessionUpdate(sessionId, row.orgId, row.userId);
-    return "pinned";
-  }
-  const [current] = await db
-    .select({ pinned: pinnedSql(packageId), activeStreamId: chatSessions.activeStreamId })
-    .from(chatSessions)
     .where(eq(chatSessions.id, sessionId))
-    .limit(1);
-  if (current?.pinned) return "pinned";
-  return current?.activeStreamId === streamId ? "full" : "released";
-}
-
-/** Whether `packageId` is pinned to the conversation now, whoever pinned it. */
-export async function isSkillPinned(sessionId: string, packageId: string): Promise<boolean> {
-  const [row] = await db
-    .select({ pinned: pinnedSql(packageId) })
-    .from(chatSessions)
-    .where(eq(chatSessions.id, sessionId))
-    .limit(1);
-  return row?.pinned === true;
+    .returning();
+  return row;
 }
 
 const CHAT_SKILL_STATUSES: ReadonlySet<unknown> = new Set(chatSkillStatusValues);
@@ -377,24 +316,25 @@ const isChatSkillStatus = (value: unknown): value is ChatSkillStatus =>
   CHAT_SKILL_STATUSES.has(value);
 
 /**
- * The pins of a session row as its DTOs carry them (`skills`); every write stores them sorted.
- * `skill_status` is jsonb, which no CHECK holds to the enum: a stored value outside
- * `chatSkillStatusValues` reads as `null` (not evaluated), never as an off-contract status. Here,
- * not in `skills.ts`: the narrowing needs the values at run time, which the browser-safe
- * `skills.ts` cannot import from `@appstrate/db/schema`.
+ * The pins of a session row as its DTOs carry them (`pins`); every write stores them sorted.
+ * `skill_status` is jsonb, which no CHECK holds to the contract: an entry off it reads as not
+ * evaluated (`null`), a `chars` that is not a non-negative integer as `null`. Here, not in
+ * `skills.ts`: the narrowing needs the values at run time, which the browser-safe `skills.ts`
+ * cannot import from `@appstrate/db/schema`.
  */
 export function pinnedSkillsOf(row: {
   pinnedSkills: readonly string[];
-  assistantSkills: readonly string[];
   skillStatus: Readonly<Record<string, unknown>>;
 }): PinnedSkill[] {
-  const assistant = new Set(row.assistantSkills);
   return row.pinnedSkills.map((id) => {
-    const status = row.skillStatus[id];
+    const entry = row.skillStatus[id] as { status?: unknown; chars?: unknown } | null | undefined;
+    const status = entry && typeof entry === "object" ? entry.status : undefined;
+    if (!isChatSkillStatus(status)) return { id, status: null, chars: null };
+    const chars = entry!.chars;
     return {
       id,
-      source: assistant.has(id) ? "assistant" : "user",
-      status: isChatSkillStatus(status) ? status : null,
+      status,
+      chars: typeof chars === "number" && Number.isSafeInteger(chars) && chars >= 0 ? chars : null,
     };
   });
 }
@@ -521,7 +461,7 @@ export async function storedAgentPromptTexts(
       and(
         eq(chatMessages.sessionId, sessionId),
         inArray(chatMessages.messageId, [...messageIds]),
-        sql`${chatMessages.content}->'parts' @> '[{"type":"data-agent-prompt"}]'::jsonb`,
+        sql`${chatMessages.content}->'parts' @> ${JSON.stringify([{ type: AGENT_PROMPT_PART_TYPE }])}::jsonb`,
       ),
     );
   const texts = new Map<string, string>();

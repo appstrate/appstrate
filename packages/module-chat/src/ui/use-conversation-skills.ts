@@ -9,7 +9,6 @@
 
 import { useCallback, useMemo, useState, useSyncExternalStore } from "react";
 import { useQuery, useQueryClient, type QueryClient } from "@tanstack/react-query";
-import type { ChatSkillChanges } from "../skills.ts";
 import {
   DEFAULT_STORED_SKILLS,
   NO_SKILL_CHANGES,
@@ -22,6 +21,7 @@ import {
   mergeSkillChanges,
   resetSkillChanges,
   withAppliedChanges,
+  type ChatSkillChanges,
   type ConversationSkills,
   type SkillLayers,
   type StoredSkills,

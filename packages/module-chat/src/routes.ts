@@ -47,6 +47,8 @@ import {
   type requireModulePermission,
 } from "@appstrate/core/permissions";
 import { conflict, forbidden, invalidRequest, notFound } from "@appstrate/core/api-errors";
+import { scopedNameRegex } from "@appstrate/core/validation";
+import { MAX_PINNED_SKILLS } from "./skills.ts";
 import { listResponse, parseListLimit } from "@appstrate/core/list-query";
 import { readJsonBody } from "@appstrate/core/request-body";
 import { setCursorLinkHeader } from "@appstrate/core/pagination-link";
@@ -64,6 +66,7 @@ import { logger } from "./logger.ts";
 import {
   createSession,
   pinnedSkillsOf,
+  updateSessionSkills,
   sessionVisible,
   touchedSpaceIds,
   touchedUnder,
@@ -117,6 +120,22 @@ export const updateSessionSchema = z
     path: ["spaceId"],
   });
 
+/** The skills PATCH: `pins` replaces the whole set. */
+export const updateSessionSkillsSchema = z
+  .object({
+    pins: z
+      .array(
+        z.string().regex(scopedNameRegex, { error: "Must be a package id in @scope/name form" }),
+      )
+      .max(MAX_PINNED_SKILLS, { error: `At most ${MAX_PINNED_SKILLS} skills` })
+      .optional(),
+    skill_discovery: z.boolean().optional(),
+  })
+  .strict()
+  .refine((body) => body.pins !== undefined || body.skill_discovery !== undefined, {
+    error: "pins or skill_discovery is required",
+  });
+
 type SessionRow = typeof chatSessions.$inferSelect;
 type MessageRow = typeof chatMessages.$inferSelect;
 
@@ -136,7 +155,7 @@ function toSessionDto(row: SessionRow, touchedSpaceIds: readonly string[]) {
       row.lastAssistantSeq != null &&
       (row.lastReadSeq == null || row.lastReadSeq < row.lastAssistantSeq),
     skill_discovery: row.skillDiscovery,
-    skills: pinnedSkillsOf(row),
+    pins: pinnedSkillsOf(row),
     spaceId: row.spaceId,
     restricted: row.restricted,
     space_ids: touchedSpaceIds,
@@ -305,6 +324,12 @@ export function createChatRouter(deps: ChatPlatformDeps) {
   router.post("/api/orgs/:orgId/chat/sessions", rateLimited(30), ...actingGuards, handlers.create);
   router.get("/api/orgs/:orgId/chat/sessions/:id", guard("chat:read"), handlers.get);
   router.patch("/api/orgs/:orgId/chat/sessions/:id", guard("chat:write"), handlers.update);
+  router.patch(
+    "/api/orgs/:orgId/chat/sessions/:id/skills",
+    rateLimited(60),
+    guard("chat:write"),
+    handlers.updateSkills,
+  );
   router.put(
     "/api/orgs/:orgId/chat/sessions/:id/read",
     rateLimited(120),
@@ -546,6 +571,21 @@ function createSessionHandlers(deps: ChatPlatformDeps) {
       }
       notifySessionUpdate(session.id, session.orgId, session.userId);
       return c.body(null, 204);
+    },
+
+    // PATCH …/sessions/:id/skills — the pins (full set) and the discovery switch. Allowed while a
+    // turn runs: that turn keeps what it read, the next one reads this.
+    updateSkills: async (c: Context<ChatEnv>) => {
+      const session = await getOwnedSession(c.req.param("id")!, sessionScope(c));
+      const { pins, skill_discovery } = await readJsonBody(c, updateSessionSkillsSchema);
+      const row = await updateSessionSkills(session.id, {
+        ...(pins !== undefined && { pinnedSkills: [...new Set(pins)].sort() }),
+        ...(skill_discovery !== undefined && { skillDiscovery: skill_discovery }),
+      });
+      if (!row) throw notFound("Chat session not found");
+      notifySessionUpdate(row.id, row.orgId, row.userId);
+      const [dto] = await toSessionDtos([row]);
+      return c.json(dto);
     },
 
     // PUT …/sessions/:id/read — mark the session read (idempotent).

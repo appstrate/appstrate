@@ -83,7 +83,6 @@ const BASE_OPTS = {
   restricted: false,
   permissions: ["agents:read", "mcp:invoke"],
   skills: DEFAULT_SKILL_SELECTION,
-  persists: true,
 } as const;
 
 /** A line of the catalogue: the published entry of `@<scope>/<name>`, or its draft. */
@@ -150,9 +149,7 @@ describe("formatCallerContext", () => {
         skillCatalogue,
       });
       expect(out.split("## Skills")).toHaveLength(2);
-      expect(out).toContain(
-        "These skills are pinned to this conversation, by the user or by your own earlier load.",
-      );
+      expect(out).toContain("The user pinned these skills to this conversation.");
       expect(out).toContain(
         '<skill id="@acme/mine" uri="skill://space-1/acme/mine/mine/SKILL.md" version="1.0.0">\nMine body.\n</skill>',
       );
@@ -191,7 +188,7 @@ describe("formatCallerContext", () => {
     expect(out).toContain('<skill id="@acme/mine"');
   });
 
-  it("teaches that loading a listed skill pins it, and hands the claim each pin's verdict and the budget left", () => {
+  it("teaches that a load is a read that pins nothing, and hands the claim each pin's verdict and size", () => {
     const mine = {
       packageId: "@acme/mine",
       uri: "skill://space-1/acme/mine/mine/SKILL.md",
@@ -209,31 +206,17 @@ describe("formatCallerContext", () => {
       },
     );
     expect(rendered.text).toContain(
-      "Loading one of these skills (reading its SKILL.md at the URI shown, with `read_resource` or `read`) pins it to the conversation",
+      "Load one of these skills when it applies by reading its SKILL.md at the URI shown, with `read_resource` or `read`.",
     );
-    expect(rendered.text.indexOf("pins it to the conversation")).toBeLessThan(
+    expect(rendered.text).toContain("only the user pins a skill");
+    expect(rendered.text).not.toContain("pins it to the conversation");
+    expect(rendered.text.indexOf("Load one of these skills")).toBeLessThan(
       rendered.text.indexOf("- `@acme/pdf`"),
     );
-    expect(rendered.skillStatus).toEqual({ "@acme/gone": "unavailable", "@acme/mine": "injected" });
-    expect(rendered.skillBudgetLeft).toBe(64_000 - "Mine body.".length);
-  });
-
-  it("promises no pin to an ephemeral turn, whose loads are plain reads", () => {
-    const out = contextText(
-      { user: { name: "Ada" }, org: { role: "member" } },
-      {
-        ...BASE_OPTS,
-        persists: false,
-        skills: { skillDiscovery: true, pinnedSkills: [] },
-        skillCatalogue: [listedSkill("@acme/pdf", "PDF", "1.0.0")],
-      },
-    );
-    expect(out).toContain(
-      "Load one of these skills by reading its SKILL.md at the URI shown, with `read_resource` or `read`. This conversation is not saved, so a load serves this turn only and pins nothing.",
-    );
-    expect(out).not.toContain("pins it to the conversation");
-    expect(out).not.toContain("unpin a skill");
-    expect(out).toContain("- `@acme/pdf`");
+    expect(rendered.skillStatus).toEqual({
+      "@acme/gone": { status: "unavailable", chars: null },
+      "@acme/mine": { status: "injected", chars: "Mine body.".length },
+    });
   });
 
   it("lists no pin, even one that did not fit the budget: its notice says why", () => {
@@ -367,7 +350,7 @@ describe("formatCallerContext", () => {
         return out.indexOf(text);
       };
       expect(at("Skill discovery is off for this conversation")).toBeLessThan(
-        at("These skills are pinned to this conversation"),
+        at("The user pinned these skills to this conversation"),
       );
       expect(at(MINE_BLOCK)).toBeLessThan(at("`@acme/gone` is pinned"));
     });
@@ -621,7 +604,6 @@ describe("buildCallerContextBlock", () => {
         capabilities: caps(BUILDER),
         permissions: ["mcp:read"],
         skills: DEFAULT_SKILL_SELECTION,
-        persists: true,
         drafts: true,
         openSkillsClient: NO_SKILLS,
       });
@@ -659,7 +641,6 @@ describe("buildCallerContextBlock", () => {
           skillDiscovery: false,
           pinnedSkills: ["@acme/a", "@acme/b", "@acme/c", "@acme/off", "@acme/other"],
         },
-        persists: true,
         drafts: true,
         openSkillsClient: skills.open,
       },
@@ -702,7 +683,6 @@ describe("buildCallerContextBlock", () => {
       capabilities: caps(BUILDER),
       permissions: ["mcp:read", "mcp:invoke"],
       skills: { skillDiscovery: true, pinnedSkills: ["@acme/a"] },
-      persists: true,
       drafts: true,
       openSkillsClient: NO_SKILLS,
     });
@@ -722,7 +702,6 @@ describe("buildCallerContextBlock", () => {
         capabilities: caps(BUILDER),
         permissions: ["mcp:read", "mcp:invoke", "skills:read"],
         skills: { skillDiscovery: true, pinnedSkills: ["@acme/a", "@acme/b", "@acme/gone"] },
-        persists: true,
         drafts: true,
         openSkillsClient: fakeSkillsClient(opts).open,
       });
@@ -733,18 +712,10 @@ describe("buildCallerContextBlock", () => {
       texts: { [A]: "a body", [D]: "d body" },
     });
     expect(both.skillStatus).toEqual({
-      "@acme/a": "injected",
-      "@acme/b": "unreadable",
-      "@acme/gone": "unavailable",
+      "@acme/a": { status: "injected", chars: "a body".length },
+      "@acme/b": { status: "unreadable", chars: null },
+      "@acme/gone": { status: "unavailable", chars: null },
     });
-    // What a load must read to pin each listed skill: its draft before its published version.
-    expect(both.skillUris).toEqual(
-      new Map([
-        ["@acme/a", A],
-        ["@acme/b", B],
-        ["@acme/d", D],
-      ]),
-    );
     // A failed listing may be the one a pin is missing from: unknown, so unreadable.
     const listFailed = await block({
       published: [skillEntry(A, "1.0.0")],
@@ -752,9 +723,9 @@ describe("buildCallerContextBlock", () => {
       listFails: "published",
     });
     expect(listFailed.skillStatus).toEqual({
-      "@acme/a": "unreadable",
-      "@acme/b": "unreadable",
-      "@acme/gone": "unreadable",
+      "@acme/a": { status: "unreadable", chars: null },
+      "@acme/b": { status: "unreadable", chars: null },
+      "@acme/gone": { status: "unreadable", chars: null },
     });
     // A failed draft listing hides which pin has a draft: none is injected from its published
     // version in its place.
@@ -764,9 +735,9 @@ describe("buildCallerContextBlock", () => {
       listFails: "draft",
     });
     expect(draftsFailed.skillStatus).toEqual({
-      "@acme/a": "unreadable",
-      "@acme/b": "unreadable",
-      "@acme/gone": "unreadable",
+      "@acme/a": { status: "unreadable", chars: null },
+      "@acme/b": { status: "unreadable", chars: null },
+      "@acme/gone": { status: "unreadable", chars: null },
     });
     expect(draftsFailed.injected).toEqual({ skills: {} });
     expect(draftsFailed.text).not.toContain("<skill ");
@@ -788,7 +759,6 @@ describe("buildCallerContextBlock", () => {
         capabilities: caps(BUILDER),
         permissions: ["mcp:read", "mcp:invoke"],
         skills: { skillDiscovery: true, pinnedSkills: ["@acme/a"] },
-        persists: true,
         drafts: true,
         openSkillsClient: skills.open,
       },
@@ -817,7 +787,6 @@ describe("buildCallerContextBlock", () => {
         capabilities: caps(BUILDER),
         permissions: ["mcp:read", "mcp:invoke"],
         skills: { skillDiscovery: true, pinnedSkills: ["@acme/a"] },
-        persists: true,
         drafts: true,
         openSkillsClient: skills.open,
       },
@@ -848,7 +817,6 @@ describe("buildCallerContextBlock", () => {
         capabilities: caps(BUILDER),
         permissions: ["mcp:read", "mcp:invoke"],
         skills: { skillDiscovery: true, pinnedSkills: ["@acme/a"] },
-        persists: true,
         drafts: true,
         openSkillsClient: skills.open,
       },
@@ -873,15 +841,17 @@ describe("buildCallerContextBlock", () => {
       capabilities: caps(BUILDER),
       permissions: ["mcp:read", "mcp:invoke", "skills:read"],
       skills: { skillDiscovery: true, pinnedSkills: ["@acme/a", "@acme/gone"] },
-      persists: true,
       drafts: false,
       openSkillsClient: skills.open,
     });
     expect(skills.calls).not.toContain("skills/list draft");
-    expect(block.skillStatus).toEqual({ "@acme/a": "injected", "@acme/gone": "unavailable" });
+    expect(block.skillStatus).toEqual({
+      "@acme/a": { status: "injected", chars: "a body".length },
+      "@acme/gone": { status: "unavailable", chars: null },
+    });
   });
 
-  it("lists, injects and pins one definition per skill: the draft only on a turn that works on drafts", async () => {
+  it("lists and injects one definition per skill: the draft only on a turn that works on drafts", async () => {
     const A = "skill://spc_1/acme/a/a/SKILL.md";
     const A_DRAFT = "skill://spc_1/acme/a@draft/a/SKILL.md";
     const B = "skill://spc_1/acme/b/b/SKILL.md";
@@ -894,7 +864,6 @@ describe("buildCallerContextBlock", () => {
         capabilities: caps(BUILDER),
         permissions: ["mcp:read", "mcp:invoke", "skills:read", ...(drafts ? ["skills:write"] : [])],
         skills: { skillDiscovery: true, pinnedSkills: ["@acme/a"] },
-        persists: true,
         drafts,
         openSkillsClient: fakeSkillsClient({
           published: [skillEntry(A, "1.0.0"), skillEntry(B, "1.0.0")],
@@ -902,28 +871,15 @@ describe("buildCallerContextBlock", () => {
           texts: { [A]: "a published", [A_DRAFT]: "a draft" },
         }).open,
       });
-    // Authoring off: the published version everywhere, so a load of the listed URI pins the
-    // definition later turns inject.
+    // Authoring off: the published version everywhere.
     const published = await build(false);
     expect(published.text).toContain("a published");
     expect(published.text).not.toContain("a draft");
     expect(published.text).toContain(`- \`@acme/b\` (v1.0.0) \`${B}\``);
-    expect(published.skillUris).toEqual(
-      new Map([
-        ["@acme/a", A],
-        ["@acme/b", B],
-      ]),
-    );
     // Working on drafts: the draft everywhere.
     const drafted = await build(true);
     expect(drafted.text).toContain("a draft");
     expect(drafted.text).toContain(`- \`@acme/b\` \`${B_DRAFT}\``);
-    expect(drafted.skillUris).toEqual(
-      new Map([
-        ["@acme/a", A_DRAFT],
-        ["@acme/b", B_DRAFT],
-      ]),
-    );
   });
 
   it("lists the turn's skills over the skills connection, draft first, reading none when nothing is pinned", async () => {
@@ -947,7 +903,6 @@ describe("buildCallerContextBlock", () => {
         // The turn keeps `skills:write`: it reads the drafts the caller reads.
         permissions: ["mcp:read", "mcp:invoke", "skills:read", "skills:write"],
         skills: { skillDiscovery: true, pinnedSkills: [] },
-        persists: true,
         drafts: true,
         openSkillsClient: skills.open,
       },
@@ -977,7 +932,6 @@ describe("buildCallerContextBlock", () => {
       capabilities: caps(BUILDER),
       permissions: ["mcp:read", "mcp:invoke", "skills:read"],
       skills: { skillDiscovery: true, pinnedSkills: [] },
-      persists: true,
       drafts: false,
       openSkillsClient: readOnly.open,
     });
@@ -994,7 +948,6 @@ describe("buildCallerContextBlock", () => {
       capabilities: caps(BUILDER.filter((permission) => permission !== "skills:read")),
       permissions: ["mcp:read", "mcp:invoke"],
       skills: { skillDiscovery: true, pinnedSkills: [] },
-      persists: true,
       drafts: true,
       openSkillsClient: async (signal) => {
         opened = true;
@@ -1020,7 +973,6 @@ describe("buildCallerContextBlock", () => {
         capabilities: caps(BUILDER),
         permissions: ["mcp:read", "mcp:invoke", "skills:read"],
         skills: { skillDiscovery: true, pinnedSkills: ["@acme/a"] },
-        persists: true,
         drafts: true,
         openSkillsClient: skills.open,
       },
@@ -1051,7 +1003,6 @@ describe("buildCallerContextBlock", () => {
       capabilities: caps(BUILDER),
       permissions: ["mcp:read", "mcp:invoke"],
       skills: { skillDiscovery: true, pinnedSkills: ["@acme/a"] },
-      persists: true,
       drafts: true,
       openSkillsClient: skills.open,
     });

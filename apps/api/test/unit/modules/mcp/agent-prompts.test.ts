@@ -260,4 +260,35 @@ describe("agent prompts — prompts/get", () => {
       expect(error.message).toContain(`Invalid prompt name: ${name}`);
     }
   });
+
+  it("answers a failing agent read with an internal error, not invalid params", async () => {
+    const fake = fakeDispatch({ spc_a: [{ id: "@acme/reader", version: "1.0.0" }] });
+    for (const failure of [
+      (request: Request) =>
+        new URL(request.url).pathname === "/api/agents"
+          ? fake.dispatch(request)
+          : Promise.resolve(Response.json({ code: "boom" }, { status: 503 })),
+      (request: Request) =>
+        new URL(request.url).pathname === "/api/agents"
+          ? fake.dispatch(request)
+          : Promise.reject(new Error("socket closed")),
+    ]) {
+      const prompts = buildAgentPromptProvider({
+        origin: "http://localhost:3000",
+        authHeaders: new Headers({ authorization: "Bearer test" }),
+        dispatchIn: (spaceId) => (request) => {
+          request.headers.set("x-space-id", spaceId);
+          return failure(request);
+        },
+        spaces: [space("spc_a", "Alpha")],
+        namesSpace: true,
+      });
+      const error = await Promise.resolve(prompts.get("run-reader", {}, noExtra)).then(
+        () => undefined,
+        (rejection: unknown) => rejection,
+      );
+      if (!(error instanceof McpError)) throw new Error("expected an McpError");
+      expect(error.code).toBe(ErrorCode.InternalError);
+    }
+  });
 });

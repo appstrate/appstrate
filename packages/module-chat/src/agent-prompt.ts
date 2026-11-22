@@ -7,10 +7,14 @@ import { z } from "zod";
 
 export const AGENT_PROMPT_PART_TYPE = "data-agent-prompt";
 
-export const agentPromptDataSchema = z.strictObject({
+/** What the browser sends on its new message: never a `text`, which the turn alone resolves. */
+export const clientAgentPromptDataSchema = z.strictObject({
   name: z.string().min(1).max(64),
   title: z.string().min(1).max(200),
-  /** Written by the turn that resolves it; absent on what the browser sends. */
+});
+
+/** The stored shape, which a replayed history carries back: the turn replaces its `text`. */
+export const agentPromptDataSchema = clientAgentPromptDataSchema.extend({
   text: z.string().optional(),
 });
 

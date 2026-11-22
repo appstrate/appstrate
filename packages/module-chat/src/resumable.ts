@@ -26,15 +26,8 @@
 import { and, eq, isNotNull, isNull, lt, or, sql } from "drizzle-orm";
 import Redis from "ioredis";
 import { db } from "@appstrate/db/client";
-import { chatSessions, type ChatSkillStatus } from "@appstrate/db/schema";
+import { chatSessions, type ChatSkillStatusEntry } from "@appstrate/db/schema";
 import { notifySessionUpdate } from "./realtime.ts";
-import { textArray, sortedIds, withoutIds } from "./persistence.ts";
-import {
-  applySkillChanges,
-  MAX_PINNED_SKILLS,
-  type ChatSkillChanges,
-  type ChatSkillSelection,
-} from "./skills.ts";
 import {
   createResumableStreamContext,
   createInMemoryResumableStreamStore,
@@ -300,64 +293,38 @@ export async function sweepStaleActiveStreams(): Promise<number> {
 export const STALE_MARKER_MIN_AGE_MS = CHAT_TURN_DEADLINE_MS + 60_000;
 
 /** What a turn read of its conversation and acts on: the claim compares the row against it. */
-export type TurnScope = { spaceId: string | null; restricted: boolean } & ChatSkillSelection;
-
-/** What a claiming turn writes: its skill `changes`, and its verdict on each resulting pin. */
-export interface TurnSkillWrite {
-  changes: ChatSkillChanges;
-  status: Readonly<Record<string, ChatSkillStatus>>;
+export interface TurnScope {
+  spaceId: string | null;
+  restricted: boolean;
 }
 
 /** What claiming a conversation for a turn answered: `claimed`, or why nothing was written. */
-type StreamClaim = "claimed" | "scope_changed" | "in_flight" | "pin_limit";
-
-const sameIds = (a: readonly string[], b: readonly string[]) =>
-  a.length === b.length && a.every((id, i) => id === b[i]);
+type StreamClaim = "claimed" | "scope_changed" | "in_flight";
 
 /**
  * Claim a session for a turn: set its in-flight marker (free, or stale by
- * {@link STALE_MARKER_MIN_AGE_MS}) and `updated_at`, compare-and-set on the `scope` the turn read.
- * Answers `claimed`, `scope_changed`, `in_flight` or `pin_limit` (the pins over
- * {@link MAX_PINNED_SKILLS} on the row as it now stands). Alone writes the turn's skill changes (a
- * pin or unpin leaves `assistant_skills`) and its verdicts as `skill_status`: a refused turn
- * writes none. Emits no signal: the caller's next write does, or `clearActiveStream`.
+ * {@link STALE_MARKER_MIN_AGE_MS}) and `updated_at`, compare-and-set on the `scope` the turn read
+ * (its origin space and limit: the limit PATCH is refused only while a marker is set, so a change
+ * landing between the read and this claim refuses the turn). Writes the turn's verdict on each pin
+ * it read as `skill_status`; a refused claim writes nothing. Answers `claimed`, `scope_changed`
+ * (the scope moved, or the row is gone) or `in_flight` (another turn holds the conversation).
+ * Emits no signal: the caller's next write does, or `clearActiveStream`.
  */
 export async function setActiveStream(
   sessionId: string,
   streamId: string,
   scope: TurnScope,
-  skills: TurnSkillWrite,
+  skillStatus: Readonly<Record<string, ChatSkillStatusEntry>>,
 ): Promise<StreamClaim> {
   const staleBefore = new Date(Date.now() - STALE_MARKER_MIN_AGE_MS);
-  const { changes } = skills;
-  const repins = changes.pin.length > 0 || changes.unpin.length > 0;
-  const pinned = repins
-    ? sortedIds(
-        sql`array_cat(${withoutIds(chatSessions.pinnedSkills, changes.unpin)}, ${textArray(changes.pin)})`,
-      )
-    : undefined;
   const claimed = await db
     .update(chatSessions)
-    .set({
-      activeStreamId: streamId,
-      updatedAt: new Date(),
-      skillStatus: skills.status,
-      ...(changes.skillDiscovery !== undefined && { skillDiscovery: changes.skillDiscovery }),
-      ...(pinned && {
-        pinnedSkills: pinned,
-        assistantSkills: withoutIds(chatSessions.assistantSkills, [
-          ...changes.unpin,
-          ...changes.pin,
-        ]),
-      }),
-    })
+    .set({ activeStreamId: streamId, updatedAt: new Date(), skillStatus })
     .where(
       and(
         eq(chatSessions.id, sessionId),
         eq(chatSessions.restricted, scope.restricted),
         sql`${chatSessions.spaceId} IS NOT DISTINCT FROM ${scope.spaceId}`,
-        eq(chatSessions.skillDiscovery, scope.skillDiscovery),
-        sql`${chatSessions.pinnedSkills} = ${textArray(scope.pinnedSkills)}`,
         or(isNull(chatSessions.activeStreamId), lt(chatSessions.updatedAt, staleBefore)),
       ),
     )
@@ -369,8 +336,6 @@ export async function setActiveStream(
       updatedAt: chatSessions.updatedAt,
       spaceId: chatSessions.spaceId,
       restricted: chatSessions.restricted,
-      pinnedSkills: chatSessions.pinnedSkills,
-      skillDiscovery: chatSessions.skillDiscovery,
     })
     .from(chatSessions)
     .where(eq(chatSessions.id, sessionId))
@@ -378,14 +343,8 @@ export async function setActiveStream(
   if (!row) return "scope_changed";
   // A live turn holding the conversation wins over a moved scope: the caller must wait, not resend.
   if (row.activeStreamId !== null && row.updatedAt >= staleBefore) return "in_flight";
-  if (repins && applySkillChanges(row.pinnedSkills, changes).length > MAX_PINNED_SKILLS) {
-    return "pin_limit";
-  }
   // The marker cleared between the two statements, or the scope moved: told apart here.
-  return row.spaceId === scope.spaceId &&
-    row.restricted === scope.restricted &&
-    row.skillDiscovery === scope.skillDiscovery &&
-    sameIds(row.pinnedSkills, scope.pinnedSkills)
+  return row.spaceId === scope.spaceId && row.restricted === scope.restricted
     ? "in_flight"
     : "scope_changed";
 }

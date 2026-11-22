@@ -39,6 +39,7 @@ export async function readChatCommands(
                 name: skill.name,
                 description: skill.description,
                 version: skill.version,
+                bytes: skill.bytes,
               })),
             )
           : [],

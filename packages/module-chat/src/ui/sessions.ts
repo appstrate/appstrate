@@ -236,10 +236,10 @@ export async function loadHistory(
     if (errorStatus(error) === 404) return null;
     throw error;
   }
-  const { messages, skill_discovery, skills, ...row } = (await res.json()) as SessionSummary & {
+  const { messages, skill_discovery, pins, ...row } = (await res.json()) as SessionSummary & {
     messages?: StoredMessage[];
     skill_discovery: boolean;
-    skills: PinnedSkill[];
+    pins: PinnedSkill[];
     createdAt: string;
     usage: TokenUsage;
   };
@@ -247,7 +247,7 @@ export async function loadHistory(
     ...row,
     // Row `id` LAST: a stray `id` inside a stored `content` must not win.
     messages: (messages ?? []).map((e) => ({ ...e.content, id: e.id }) as UIMessage),
-    skills: { skillDiscovery: skill_discovery, pins: skills },
+    skills: { skillDiscovery: skill_discovery, pins },
   };
 }
 

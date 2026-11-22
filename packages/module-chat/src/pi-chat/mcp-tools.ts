@@ -54,7 +54,6 @@ import { isRasterImageMime, normalizeMime } from "@appstrate/core/mime";
 import type { FileDelivery } from "../file-input.ts";
 import type { TurnPdfInput } from "./native-pdf.ts";
 import { platformMcpSurfaceCache, type PlatformMcpSurface } from "./mcp-surface-cache.ts";
-import type { SkillLoad } from "../skill-load.ts";
 
 const RUN_AND_WAIT_TOOL = "run_and_wait";
 const READ_RESOURCE_TOOL = "read_resource";
@@ -87,12 +86,6 @@ interface PiToolResult {
    * contract), so a replay walks the stored text under the scope the live call had.
    */
   relayed?: true;
-  /**
-   * A read of a skill's `SKILL.md` that left the skill pinned to the conversation. Persisted
-   * beside `connectOffers` (same contract), so the chat's skill chip reads it live and on replay:
-   * absent, the read served its text for this turn only, and the chip claims no load.
-   */
-  skillPinned?: true;
 }
 
 /**
@@ -324,8 +317,6 @@ type BuildPlatformMcpToolsOptions = {
   inlineRunModel?: InlineRunModel;
   fileDelivery: FileDelivery;
   pdfInput?: TurnPdfInput;
-  /** Pins the skills whose SKILL.md the assistant loads; absent (an ephemeral turn), loads are plain reads. */
-  skillLoad?: SkillLoad;
 };
 
 /**
@@ -571,44 +562,6 @@ function keepsSkillText(uri: unknown, resources: readonly object[]): boolean {
   );
 }
 
-type Receipts = NonNullable<PiToolResult["persistedContent"]>;
-
-/**
- * The content and replay of a resource read. A skill load that pins ({@link SkillLoad}, rule in
- * `turnSkillLoad`) replays a short receipt in place of its text and carries
- * {@link PiToolResult.skillPinned}; any other read is plain, with the load's note if any. `lead`
- * is the call's own text, kept ahead of the receipts.
- */
-async function resourceReadResult(
-  uri: unknown,
-  resources: readonly { uri: string }[],
-  live: { content: PiToolResult["content"]; receipts: Receipts },
-  skillLoad: SkillLoad | undefined,
-  lead: Receipts = [],
-): Promise<Pick<PiToolResult, "content" | "persistedContent" | "skillPinned">> {
-  const index = resources.findIndex((resource) => resource.uri === uri);
-  const text = (resources[index] as { text?: unknown } | undefined)?.text;
-  const load =
-    skillLoad && typeof uri === "string" && typeof text === "string"
-      ? await skillLoad(uri, text)
-      : undefined;
-  if (load?.pinned) {
-    const skill = parseSkillUri(uri as string)?.packageId;
-    const receipt = { type: "text" as const, text: JSON.stringify({ uri, skill, loaded: true }) };
-    return {
-      content: live.content,
-      persistedContent: [...lead, ...live.receipts.map((r, i) => (i === index ? receipt : r))],
-      skillPinned: true,
-    };
-  }
-  const content = load?.note
-    ? [...live.content, { type: "text" as const, text: load.note }]
-    : live.content;
-  return keepsSkillText(uri, resources)
-    ? { content }
-    : { content, persistedContent: [...lead, ...live.receipts] };
-}
-
 /** Generic forwarding Pi tool: verbatim `tools/call` → adapted Pi result. */
 function makeForwardExtension(
   tool: { name: string; description?: string; inputSchema: unknown },
@@ -681,19 +634,18 @@ function makeForwardExtension(
               scope,
             );
             const file = await liveResources(resources, opts, toolCallId);
-            const metaText = meta.content.flatMap((block) =>
-              block.type === "text" ? [block] : [],
-            );
             return withTurnBudgetNote(
               {
                 ...meta,
-                ...(await resourceReadResult(
-                  args.uri,
-                  resources,
-                  { content: [...meta.content, ...file.content], receipts: file.receipts },
-                  toolName === "read" ? opts.skillLoad : undefined,
-                  metaText,
-                )),
+                content: [...meta.content, ...file.content],
+                ...(keepsSkillText(args.uri, resources)
+                  ? {}
+                  : {
+                      persistedContent: [
+                        ...meta.content.flatMap((block) => (block.type === "text" ? [block] : [])),
+                        ...file.receipts,
+                      ],
+                    }),
               },
               turnBudget,
             );
@@ -760,11 +712,12 @@ function makeReadResourceExtension(
         if (fileSpace && organization.spaces.some((space) => space.id === fileSpace)) {
           await organization.touch(fileSpace);
         }
-        const live = await liveResources(result.contents, opts, toolCallId);
+        const { content, receipts } = await liveResources(result.contents, opts, toolCallId);
         return withTurnBudgetNote(
           {
+            content,
             details: { uri },
-            ...(await resourceReadResult(uri, result.contents, live, opts.skillLoad)),
+            ...(keepsSkillText(uri, result.contents) ? {} : { persistedContent: receipts }),
           },
           turnBudget,
         );

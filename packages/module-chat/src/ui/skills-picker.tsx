@@ -52,7 +52,7 @@ function rowCaption(state: SkillRowState, t: ChatTranslate): string | null {
     case "unpin":
       return t("skills.state.unpin");
     case "loaded":
-      return state.source === "assistant" ? t("skills.state.assistant") : null;
+      return null;
     case "refused":
       return t(REFUSAL_KEY[state.reason]);
     case "off":

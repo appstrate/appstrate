@@ -26,7 +26,7 @@ import {
 import { setActiveStream } from "../src/resumable.ts";
 import { registerStopController, unregisterStopController } from "../src/stop-registry.ts";
 
-import { NO_SKILL_WRITE, UNLIMITED_SCOPE } from "./turn-claim.ts";
+import { NO_SKILL_STATUS, UNLIMITED_SCOPE } from "./turn-claim.ts";
 
 const app = getTestApp();
 
@@ -64,7 +64,7 @@ describe("POST /api/orgs/:orgId/chat/sessions/:id/stop", () => {
     const controller = new AbortController();
     registerStopController(streamId, controller);
     registered.push(streamId);
-    await setActiveStream(sessionId, streamId, UNLIMITED_SCOPE, NO_SKILL_WRITE);
+    await setActiveStream(sessionId, streamId, UNLIMITED_SCOPE, NO_SKILL_STATUS);
     return { sessionId, controller };
   }
 

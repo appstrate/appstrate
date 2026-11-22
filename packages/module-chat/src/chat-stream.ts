@@ -26,7 +26,11 @@ import { readJsonBody } from "@appstrate/core/request-body";
 import { withByteCap } from "@appstrate/core/safe-json";
 import { isAttachmentUri, parseFileUri } from "@appstrate/core/file-uri";
 import { logger } from "./logger.ts";
-import { AGENT_PROMPT_PART_TYPE, agentPromptDataSchema } from "./agent-prompt.ts";
+import {
+  AGENT_PROMPT_PART_TYPE,
+  agentPromptDataSchema,
+  clientAgentPromptDataSchema,
+} from "./agent-prompt.ts";
 import { resolveAgentPrompt, withStoredAgentPromptTexts } from "./agent-launch.ts";
 import { notifySessionUpdate } from "./realtime.ts";
 import { listModels, pickModel } from "./llm.ts";
@@ -34,6 +38,7 @@ import { actingOrgRole, callerMcpOpener, dispatchFetch, platformMcpUrl } from ".
 import { platformMcpSurfaceKey } from "./pi-chat/mcp-surface-cache.ts";
 import { selfOrigin } from "./self.ts";
 import type { ChatUsageRecord } from "@appstrate/core/chat-contract";
+import type { ChatSkillStatusEntry } from "@appstrate/db/schema";
 import { mintLoopbackToken, mintMcpLoopbackToken } from "./loopback-auth.ts";
 import {
   materializeUserAttachments,
@@ -50,14 +55,7 @@ import {
 } from "./turn-permissions.ts";
 import { buildSystemPrompt, buildCallerContextBlock, type ChatEnv } from "./prompt.ts";
 import { scopedNameRegex } from "@appstrate/core/validation";
-import {
-  DEFAULT_SKILL_SELECTION,
-  MAX_PINNED_SKILLS,
-  selectionAfter,
-  type ChatSkillChanges,
-  type ChatSkillSelection,
-} from "./skills.ts";
-import { turnSkillLoad } from "./skill-load.ts";
+import { DEFAULT_SKILL_SELECTION, MAX_PINNED_SKILLS, type ChatSkillSelection } from "./skills.ts";
 export type { ChatEnv } from "./prompt.ts";
 import { finalizeChatStream } from "./finalize-stream.ts";
 import {
@@ -66,19 +64,12 @@ import {
   type TurnConversation,
   persistUserMessage,
   persistAssistantMessage,
-  pinAssistantSkill,
-  isSkillPinned,
   storedFileParts,
   storedAgentPromptTexts,
   touchSessionSpace,
 } from "./persistence.ts";
 import { registerStopController, unregisterStopController } from "./stop-registry.ts";
-import {
-  setActiveStream,
-  clearActiveStream,
-  type TurnScope,
-  type TurnSkillWrite,
-} from "./resumable.ts";
+import { setActiveStream, clearActiveStream, type TurnScope } from "./resumable.ts";
 import {
   actingSpaces,
   conversationOrigin,
@@ -152,7 +143,8 @@ export const CHAT_MESSAGE_MAX_BYTES = 256 * 1024;
 //     rejects inline `data:` bytes and arbitrary URLs in the chat channel
 //     (attachments flow only through the file store, never inline).
 //   - an `agent-prompt` part (`agent-prompt.ts`) is a user message's, at most one, and its data
-//     parses; `handleChatStream` resolves it.
+//     parses: `{ name, title }` on the new message, the stored shape on a replayed one (whose
+//     `text` the turn replaces); `handleChatStream` resolves it.
 //   - `.strict()`: an unknown field is a 400, never silently dropped.
 const skillIdsSchema = z
   .array(z.string().regex(scopedNameRegex, { error: "Must be a package id in @scope/name form" }))
@@ -181,12 +173,14 @@ export const chatStreamSchema = z
             const type =
               part && typeof part === "object" ? (part as { type?: unknown }).type : null;
             if (type === AGENT_PROMPT_PART_TYPE) {
-              const parsed = agentPromptDataSchema.safeParse((part as { data?: unknown }).data);
+              const shape =
+                i === messages.length - 1 ? clientAgentPromptDataSchema : agentPromptDataSchema;
+              const parsed = shape.safeParse((part as { data?: unknown }).data);
               if (role !== "user" || ++launches > 1 || !parsed.success) {
                 ctx.addIssue({
                   code: "custom",
                   message:
-                    "A user message carries at most one agent launch, { name, title } (and the text a stored one holds).",
+                    "A user message carries at most one agent launch: { name, title } on the new message (and the text a stored one holds).",
                   path: [i, "parts", j, "data"],
                 });
               }
@@ -217,12 +211,12 @@ export const chatStreamSchema = z
     package_authoring: z.boolean().optional(),
     /** Runs the inline runs this turn launches on its model and generation; absent = off. */
     inline_runs_use_chat_model: z.boolean().optional(),
-    /** The conversation's skill discovery switch; absent = the one stored on the session. */
+    /**
+     * The skill settings of a conversation this turn creates (or of an ephemeral turn): honoured
+     * only then, a 409 on an existing one, whose settings the skills PATCH changes.
+     */
+    pins: skillIdsSchema.optional(),
     skill_discovery: z.boolean().optional(),
-    /** Skills to pin to the conversation, on top of the stored ones. */
-    pin_skills: skillIdsSchema.optional(),
-    /** Skills to unpin from the conversation, whoever pinned them. */
-    unpin_skills: skillIdsSchema.optional(),
   })
   .strict();
 
@@ -233,14 +227,6 @@ function logAndMarkStreamError(error: unknown, requestId: string): string {
     ...turnErrorLogIds(requestId, shown),
   });
   return clientTurnErrorMarker(shown);
-}
-
-/** The turn's pins would exceed {@link MAX_PINNED_SKILLS}: refused before the claim, and by it. */
-function pinLimitError() {
-  return conflict(
-    "chat_skill_pin_limit",
-    `A conversation pins at most ${MAX_PINNED_SKILLS} skills: unpin one before pinning another.`,
-  );
 }
 
 /**
@@ -273,14 +259,13 @@ export async function claimTurn(
   sessionId: string,
   streamId: string,
   scope: TurnScope,
-  skills: TurnSkillWrite,
+  skillStatus: Readonly<Record<string, ChatSkillStatusEntry>>,
 ): Promise<void> {
-  const claim = await setActiveStream(sessionId, streamId, scope, skills);
-  if (claim === "pin_limit") throw pinLimitError();
+  const claim = await setActiveStream(sessionId, streamId, scope, skillStatus);
   if (claim === "scope_changed") {
     throw conflict(
       "chat_turn_scope_changed",
-      "The conversation's limit or skill settings changed while this turn was starting. Send the message again.",
+      "The conversation's limit changed while this turn was starting. Send the message again.",
     );
   }
   if (claim === "in_flight") {
@@ -399,33 +384,34 @@ export async function handleChatStream(
   // materialized into the session, and attaching the join in the same tick is
   // what keeps a rejection from ever going unhandled.
   //
-  // The panel's changes ride the turn, and its claim writes them (`setActiveStream`).
-  const skillChanges: ChatSkillChanges = {
+  // The composer's buffered skill settings, for a conversation this turn creates: the insert
+  // writes them; an existing conversation keeps its own, like its origin space and limit.
+  const bodySkills: Partial<ChatSkillSelection> = {
+    ...(body.pins !== undefined && { pinnedSkills: [...new Set(body.pins)].sort() }),
     ...(body.skill_discovery !== undefined && { skillDiscovery: body.skill_discovery }),
-    pin: body.pin_skills ?? [],
-    unpin: body.unpin_skills ?? [],
   };
+  const asksSkills = Object.keys(bodySkills).length > 0;
   // An ephemeral turn writes no row: it creates, so its origin is validated here, and its
-  // changes apply to the default selection.
+  // skill settings apply to the defaults.
   const ephemeralConversation = (): TurnConversation => {
     const created = originRequest?.();
     return {
-      selection: DEFAULT_SKILL_SELECTION,
+      selection: { ...DEFAULT_SKILL_SELECTION, ...bodySkills },
       spaceId: created?.spaceId ?? null,
       restricted: created?.restricted ?? false,
     };
   };
-  // `stored` is the selection as read, which the claim compares; `selection` the one the turn
-  // works with. Over the cap, the turn is refused here, before anything is written.
-  const conversation: Promise<TurnConversation & { stored: ChatSkillSelection }> = (
+  const conversation: Promise<TurnConversation> =
     sessionId && lastMessage?.id
-      ? ensureSession(sessionId, orgId, user.id, readableSpaceIds(reachable), originRequest)
-      : Promise.resolve(ephemeralConversation())
-  ).then((conv) => {
-    const selection = selectionAfter(conv.selection, skillChanges);
-    if (selection.pinnedSkills.length > MAX_PINNED_SKILLS) throw pinLimitError();
-    return { ...conv, stored: conv.selection, selection };
-  });
+      ? ensureSession(
+          sessionId,
+          orgId,
+          user.id,
+          readableSpaceIds(reachable),
+          asksSkills ? bodySkills : undefined,
+          originRequest,
+        )
+      : Promise.resolve(ephemeralConversation());
   // The earlier turns' files, read once the row is known to be the caller's. An ephemeral
   // turn has no stored row, so its history carries no file.
   const historyIds = messages
@@ -544,12 +530,7 @@ export async function handleChatStream(
         restricted: conv.restricted,
       }),
       // As read: the claim compares the row against it (`claimTurn`).
-      scope: {
-        spaceId: conv.spaceId,
-        restricted: conv.restricted,
-        pinnedSkills: conv.stored.pinnedSkills,
-        skillDiscovery: conv.stored.skillDiscovery,
-      },
+      scope: { spaceId: conv.spaceId, restricted: conv.restricted },
       originSpace,
       restricted: conv.restricted,
       spaces,
@@ -608,7 +589,6 @@ export async function handleChatStream(
           capabilities,
           permissions,
           skills,
-          persists: chatSessionId !== null,
           drafts: skillDrafts,
           // Read before the turn's claim exists: over the caller's own connection, opened only
           // when the turn lists or injects skills.
@@ -622,11 +602,8 @@ export async function handleChatStream(
       (error: unknown) => ({ ok: false as const, error }),
     );
 
-  const [
-    models,
-    { skills: turnSelection, permissions, capabilities, spaces, organization, scope, openCaller },
-    stored,
-  ] = await Promise.all([listModels(origin, inferenceHeaders, platformFetch), turn, historyStored]);
+  const [models, { permissions, capabilities, spaces, organization, scope, openCaller }, stored] =
+    await Promise.all([listModels(origin, inferenceHeaders, platformFetch), turn, historyStored]);
   messages = withStoredAgentPromptTexts(
     withStoredHistoryFiles(messages, stored.files),
     stored.launches,
@@ -704,13 +681,7 @@ export async function handleChatStream(
   // Join phase B. This is the one place its failure is allowed to surface.
   const contextResult = await contextBlockPromise;
   if (!contextResult.ok) throw contextResult.error;
-  const {
-    text: contextBlock,
-    injected: injectedSkills,
-    skillStatus,
-    skillBudgetLeft,
-    skillUris,
-  } = contextResult;
+  const { text: contextBlock, injected: injectedSkills, skillStatus } = contextResult;
 
   // Assemble the system prompt: the tool-grounding prompt, with no inline MCP
   // instructions — the engine's own MCP handshake delivers them.
@@ -775,10 +746,7 @@ export async function handleChatStream(
   if (claimedSessionId) {
     const claimStart = Date.now();
     try {
-      await claimTurn(claimedSessionId, streamId, scope, {
-        changes: skillChanges,
-        status: skillStatus,
-      });
+      await claimTurn(claimedSessionId, streamId, scope, skillStatus);
     } catch (err) {
       // The slot is reserved but generation has not started, so neither `finalize`
       // nor `failCleanup` (below) owns it yet.
@@ -974,20 +942,6 @@ export async function handleChatStream(
           // every hop, so the scoped bearer above is exactly as load-bearing.
           fetch: platformFetch,
           surfaceKey: platformMcpSurfaceKey(mcpUrl, permissions, spaces),
-          // A persisted conversation pins the skills the assistant loads, out of what this
-          // prompt left of the budget; an ephemeral turn's loads are plain reads.
-          ...(chatSessionId
-            ? {
-                skillLoad: turnSkillLoad({
-                  uris: skillUris,
-                  pinned: turnSelection.pinnedSkills,
-                  injected: Object.keys(injectedSkills.skills),
-                  budgetLeft: skillBudgetLeft,
-                  pin: (packageId) => pinAssistantSkill(chatSessionId, streamId, packageId),
-                  isPinned: (packageId) => isSkillPinned(chatSessionId, packageId),
-                }),
-              }
-            : {}),
           // The launch body's `modelId`, judged by the inline route like any explicit
           // one (it exists, the caller pays, admission). Never a tool argument.
           ...(body.inline_runs_use_chat_model === true

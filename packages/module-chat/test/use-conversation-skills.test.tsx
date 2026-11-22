@@ -67,7 +67,7 @@ function heldDetails() {
               title: null,
               messages: [],
               skill_discovery: true,
-              skills: server.pins,
+              pins: server.pins,
             }),
           ),
         ),
@@ -117,7 +117,7 @@ describe("useConversationSkills", () => {
     expect(reads()).toBe(0);
     await act(async () => result.current.actions.setPin("@a/new", true));
     expect(await take(result)).toEqual({ pin: ["@a/new"], unpin: [] });
-    server.pins = [{ id: "@a/new", source: "user", status: "over_budget" }];
+    server.pins = [{ id: "@a/new", status: "over_budget", chars: null }];
     await act(async () => result.current.answered("accepted"));
     expect(row(result.current, "@a/new")).toEqual({ kind: "next" });
     expect(await take(result)).toBeUndefined();
@@ -135,12 +135,12 @@ describe("useConversationSkills", () => {
     await act(async () => result.current.actions.setPin("@a/new", true));
     await take(result);
     // The server applied the claim, but the turn's answer never arrived.
-    server.pins = [{ id: "@a/new", source: "user", status: "injected" }];
+    server.pins = [{ id: "@a/new", status: "injected", chars: null }];
     await act(async () => result.current.answered("unanswered"));
     expect(reads()).toBe(1);
     expect(row(result.current, "@a/new")).toEqual({ kind: "off" });
     await release();
-    expect(row(result.current, "@a/new")).toEqual({ kind: "loaded", source: "user" });
+    expect(row(result.current, "@a/new")).toEqual({ kind: "loaded" });
     expect(await take(result)).toBeUndefined();
     await unmount();
   });

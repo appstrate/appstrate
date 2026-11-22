@@ -52,15 +52,14 @@ By default, a one-off agent the assistant composes runs on the organization's de
   - no caption: a skill you pinned that the last turn loaded;
   - "Cited in the message": named in the message you are typing, so locked until you remove the mention;
   - "Loaded with the next message": not sent with a turn yet;
-  - "Loaded by the assistant": the assistant pinned it itself;
   - "Removed on the next message": you unchecked it and have not sent a message since;
   - "Not loaded" with the reason: skill budget exceeded, unavailable or unreadable.
 
-  A skill that is not loaded stays pinned and is not counted as loaded. Uncheck any pinned skill, including one the assistant pinned, to remove it from the conversation: it leaves the context from the next message on ("Unchecking removes it from the context from the next message."), and earlier turns are unchanged.
+  A skill that is not loaded stays pinned and is not counted as loaded. Uncheck any pinned skill to remove it from the conversation: it leaves the context from the next message on ("Unchecking removes it from the context from the next message."), and earlier turns are unchanged.
 
 - **Automatic discovery** (on by default): the assistant sees the other skills of the spaces the conversation can act in, one line each, and loads the one that fits. The skills you pinned are not listed again. When it is off, the assistant has no access to any other skill: it cannot list, load, declare or write one, whatever your role. The skills you pinned still apply.
 
-A skill the assistant loads this way is pinned to the conversation and stays pinned on every later turn, shown in the thread as a chip. The chip says the skill is loaded only when it was pinned; a skill the assistant read without pinning shows "Read for this message only". A conversation holds at most 5 pinned skills, whoever pinned them, sharing a budget of 64,000 characters. Beyond that the assistant still reads the skill for that message, but it is not pinned and is not loaded on later turns; uncheck a skill to make room. Pinning a sixth skill yourself is refused and the message is not sent.
+A skill the assistant loads this way is not pinned: its text stays in the conversation's history, shown in the thread as a chip. Only you pin a skill. A conversation holds at most 5 pinned skills, sharing a budget of 64,000 characters; pinning a sixth is refused, so uncheck a skill to make room.
 
 ## For administrators
 

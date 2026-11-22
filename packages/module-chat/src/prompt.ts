@@ -28,13 +28,11 @@ import { withCallerClient } from "./platform-mcp.ts";
 import { reaches, type TurnCapabilities } from "./capabilities.ts";
 import {
   injectedSkills,
-  MAX_PINNED_SKILLS,
   resolveChatSkills,
   type ChatSkillSelection,
   type SkillContent,
 } from "./skills.ts";
-import { UNPIN_HINT } from "./skill-load.ts";
-import type { ChatSkillStatus } from "@appstrate/db/schema";
+import type { ChatSkillStatusEntry } from "@appstrate/db/schema";
 
 type InjectedSkillMap = InjectedSkills["skills"];
 
@@ -87,15 +85,12 @@ const SKILLS_FILES = {
   none: "Only each SKILL.md is provided.",
 };
 const SKILLS_INJECTED_LEAD =
-  "These skills are pinned to this conversation, by the user or by your own earlier load. Each is a procedure for YOU: follow it whenever it applies.";
+  "The user pinned these skills to this conversation. Each is a procedure for YOU: follow it whenever it applies.";
 // How to load a listed skill, told once, ahead of the listing it applies to. A skill is listed only
 // when the turn `readsSkills`, which implies the transport, so `read_resource` and `read` are
-// both declared. Only a persisted turn pins a load (`turnSkillLoad`); an ephemeral one reads.
-const SKILLS_LOAD = "reading its SKILL.md at the URI shown, with `read_resource` or `read`";
-const SKILLS_LISTED_LEAD = {
-  persisted: `Loading one of these skills (${SKILLS_LOAD}) pins it to the conversation: later turns show it in full here. A conversation pins at most ${MAX_PINNED_SKILLS} skills, which share one budget; a load past either limit is still read for this turn, but not pinned, and says so. ${UNPIN_HINT}`,
-  ephemeral: `Load one of these skills by ${SKILLS_LOAD}. This conversation is not saved, so a load serves this turn only and pins nothing.`,
-};
+// both declared.
+const SKILLS_LISTED_LEAD =
+  "Load one of these skills when it applies by reading its SKILL.md at the URI shown, with `read_resource` or `read`. A load serves the conversation as long as its text stays in the history; only the user pins a skill, in the skills panel of the composer, to have it shown here on every turn.";
 // Why this turn holds no `skills:*`: without it, a model reads the gap as a role
 // to fix and hunts through other operations.
 const SKILLS_DISCOVERY_OFF_NOTE =
@@ -264,6 +259,8 @@ interface CatalogueSkill {
   /** The published version; `null` for a draft. */
   version: string | null;
   uri: string;
+  /** The listed UTF-8 size of its `SKILL.md`; `null` when the entry lists no files. */
+  bytes: number | null;
 }
 
 /** `` - `@scope/name` (v1.2.0) `skill://…/SKILL.md` — desc ``, minus the parts that say nothing. */
@@ -288,19 +285,17 @@ function skillBlock(skill: SkillContent): string {
   return `<skill id="${skill.packageId}" uri="${skill.uri}"${served}>\n${skill.content.trim()}\n</skill>`;
 }
 
-/** A rendered block, the skills it injected, each pin's verdict and the budget left for a load. */
+/** A rendered block, the skills it injected and each pin's verdict. */
 interface RenderedContext {
   text: string;
   injected: InjectedSkillMap;
-  skillStatus: Record<string, ChatSkillStatus>;
-  skillBudgetLeft: number;
+  skillStatus: Record<string, ChatSkillStatusEntry>;
 }
 
 /** `## Skills`, or "": the skills section `formatCallerContext` appends after the identity lines. */
 function formatSkillsSection(opts: {
   selection: ChatSkillSelection;
   capabilities: TurnCapabilities;
-  persists: boolean;
   catalogue: readonly CatalogueSkill[];
   contents: ReadonlyMap<string, SkillContent | null>;
 }): RenderedContext {
@@ -315,8 +310,7 @@ function formatSkillsSection(opts: {
   const groups: string[][] = [];
   if (!opts.selection.skillDiscovery) groups.push([SKILLS_DISCOVERY_OFF_NOTE]);
   if (listed.length) {
-    const lead = SKILLS_LISTED_LEAD[opts.persists ? "persisted" : "ephemeral"];
-    groups.push([lead, ...listed.map(skillLine)]);
+    groups.push([SKILLS_LISTED_LEAD, ...listed.map(skillLine)]);
   }
   if (skills.injected.length) {
     groups.push([
@@ -333,7 +327,6 @@ function formatSkillsSection(opts: {
     text,
     injected: injectedSkills(skills),
     skillStatus: skills.statuses,
-    skillBudgetLeft: skills.left,
   };
 }
 
@@ -349,8 +342,6 @@ type CallerContextOpts = {
   /** The TURN's set (post-`turnPermissions`): the authoring toggle narrows it. */
   permissions: readonly string[];
   skills: ChatSkillSelection;
-  /** The turn persists to a conversation, so a skill it loads is pinned (else ephemeral). */
-  persists: boolean;
   /** The pinned skills active here, read by {@link buildCallerContextBlock}. */
   skillContents?: ReadonlyMap<string, SkillContent | null>;
   /** The catalogue of the turn's skills, listed by {@link buildCallerContextBlock} with discovery on. */
@@ -365,7 +356,6 @@ export function formatCallerContext(
   const skills = formatSkillsSection({
     selection: opts.skills,
     capabilities: opts.capabilities,
-    persists: opts.persists,
     catalogue: opts.skillCatalogue ?? [],
     contents: opts.skillContents ?? new Map(),
   });
@@ -466,13 +456,11 @@ function entriesByPackage(
 interface ChatSkillsRead {
   contents: Map<string, SkillContent | null>;
   catalogue: CatalogueSkill[];
-  /** Each listed skill's `SKILL.md` URI as a pin injects it. */
-  uris: Map<string, string>;
 }
 
 /**
  * The turn's skills over the MCP Skills extension (SEP-2640), with the caller's own permissions:
- * one definition per skill (see `turnUsesDrafts`) for the catalogue, the injection and `uris`. A
+ * one definition per skill (see `turnUsesDrafts`) for the catalogue and the injection. A
  * pin no listing holds is left out (unavailable), one whose read failed or answered malformed is
  * kept as `null` (unreadable). The connection opens only when there is something to read.
  */
@@ -482,7 +470,7 @@ async function readChatSkills(
   opts: SkillsReadOptions,
 ): Promise<ChatSkillsRead> {
   if (!opts.catalogue && opts.pinned.length === 0) {
-    return { contents: new Map(), catalogue: [], uris: new Map() };
+    return { contents: new Map(), catalogue: [] };
   }
   return withCallerClient(
     openSkillsClient,
@@ -494,7 +482,6 @@ async function readChatSkills(
       return {
         contents: new Map(opts.pinned.map((id) => [id, null])),
         catalogue: [],
-        uris: new Map(),
       };
     },
   );
@@ -539,7 +526,6 @@ export async function readSkillsOver(
   const read: ChatSkillsRead = {
     contents: new Map(),
     catalogue: [],
-    uris: new Map([...injectedFrom].map(([packageId, entry]) => [packageId, entry.uri])),
   };
   if (opts.catalogue) {
     // A draft stands for its package's published version: one line per skill.
@@ -552,6 +538,10 @@ export async function readSkillsOver(
         description: entry.frontmatter.description,
         version: served?.definition === "published" ? served.version : null,
         uri: entry.uri,
+        bytes:
+          entry.resources === "dynamic"
+            ? null
+            : (entry.resources.find((resource) => resource.uri === entry.uri)?.size ?? null),
       };
     });
   }
@@ -658,16 +648,12 @@ export async function buildCallerContextBlock(
     capabilities: TurnCapabilities;
     permissions: readonly string[];
     skills: ChatSkillSelection;
-    /** The turn persists to a conversation (not ephemeral): a skill it loads is pinned. */
-    persists: boolean;
     /** See `turnUsesDrafts`. */
     drafts: boolean;
     /** Opened only when the turn lists or injects skills, under `signal`; closed once they are read. */
     openSkillsClient: (signal: AbortSignal) => Promise<ChatSkillsClient>;
   },
-): Promise<
-  Omit<RenderedContext, "injected"> & { injected: InjectedSkills; skillUris: Map<string, string> }
-> {
+): Promise<Omit<RenderedContext, "injected"> & { injected: InjectedSkills }> {
   const { user, locale, capabilities, skills } = args;
   // The persona's while previewing: this block tells the model what the caller
   // may do, and every operation it names is checked against the persona.
@@ -697,10 +683,9 @@ export async function buildCallerContextBlock(
     origin: args.origin,
     restricted: args.restricted,
     skills,
-    persists: args.persists,
     skillContents: turnSkills.contents,
     skillCatalogue: turnSkills.catalogue,
   });
   // What `resources/read` serves without `skills:*`: each skill in the space its URI names.
-  return { ...rendered, injected: { skills: injected }, skillUris: turnSkills.uris };
+  return { ...rendered, injected: { skills: injected } };
 }

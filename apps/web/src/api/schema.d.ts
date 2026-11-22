@@ -3147,7 +3147,7 @@ export interface paths {
         put?: never;
         /**
          * Run a conversational turn (streaming)
-         * @description Receives the running thread (AI SDK UIMessages) and streams the assistant turn (UIMessage stream over SSE). Inference runs on the org's configured models: API-key models are routed through the llm-proxy (key injected server-side), OAuth-subscription models are called natively at the provider's own base URL with the access token held in memory. Either way usage is metered server-side; tool calls dispatch through the organization MCP endpoint, each space-acting call naming its `space_id` and decided in that space under the caller's role there; every space a call names, and the space of a file `read_resource` reads or one attached from the file gallery when it is a space of the turn, is recorded on the conversation before the act (its own uploads, stored in the caller's personal space, record none; a call reads any other file by id in the space it names only), and every space disclosed by a search or a configuration refusal is recorded before its result is shown. The conversation stays openable only while the caller reaches all of them with `chat:read`; a call can name only a space of the acting set (the reachable spaces where the caller holds `chat:write`, `chat:read` and `mcp:read` together). A limited conversation (`restricted`) acts in its origin space alone, and is refused (403) once the caller can no longer act there. The space of a request that names none (a default, never a pin): the only space the turn can act in (a limited conversation); a space the user names; for an inline run, a new package or a direct integration tool call, the caller's personal space first, whatever their role there; for any other act, the conversation's origin space; otherwise the assistant asks. When the space so chosen cannot serve the request, the assistant stops and asks: it never activates, connects or switches space on its own. `spaceId` and `restricted` set the origin and the limit, and are read only when this turn creates the conversation — an existing one keeps its own. Ignores `X-Space-Id`; admitted when the acting set is not empty. A credential confined to spaces (pinned to one, or carrying a space allowlist, such as the bearer of a chat turn) is refused (403). A user message may carry one `data-agent-prompt` part, `{ name, title }`: a launch of an agent from the composer's menu (`listChatCommands`). The turn resolves `name` with `prompts/get` (the message text as its `request`) over the caller's own connection in the turn's spaces, before persisting the message (a name the server does not serve is a 400, nothing written), stores the launch instructions it returns in the part's `data.text`, and shows the model that text in place of the message's own on this turn and every later one. Message persistence is server-owned: the user turn is persisted before inference and the assistant turn when the stream finalizes (survives client disconnect). Rate limited (20/min per caller). Not invocable over MCP (streaming).
+         * @description Receives the running thread (AI SDK UIMessages) and streams the assistant turn (UIMessage stream over SSE). Inference runs on the org's configured models: API-key models are routed through the llm-proxy (key injected server-side), OAuth-subscription models are called natively at the provider's own base URL with the access token held in memory. Either way usage is metered server-side; tool calls dispatch through the organization MCP endpoint, each space-acting call naming its `space_id` and decided in that space under the caller's role there; every space a call names, and the space of a file `read_resource` reads or one attached from the file gallery when it is a space of the turn, is recorded on the conversation before the act (its own uploads, stored in the caller's personal space, record none; a call reads any other file by id in the space it names only), and every space disclosed by a search or a configuration refusal is recorded before its result is shown. The conversation stays openable only while the caller reaches all of them with `chat:read`; a call can name only a space of the acting set (the reachable spaces where the caller holds `chat:write`, `chat:read` and `mcp:read` together). A limited conversation (`restricted`) acts in its origin space alone, and is refused (403) once the caller can no longer act there. The space of a request that names none (a default, never a pin): the only space the turn can act in (a limited conversation); a space the user names; for an inline run, a new package or a direct integration tool call, the caller's personal space first, whatever their role there; for any other act, the conversation's origin space; otherwise the assistant asks. When the space so chosen cannot serve the request, the assistant stops and asks: it never activates, connects or switches space on its own. `spaceId` and `restricted` set the origin and the limit, and are read only when this turn creates the conversation — an existing one keeps its own. Ignores `X-Space-Id`; admitted when the acting set is not empty. A credential confined to spaces (pinned to one, or carrying a space allowlist, such as the bearer of a chat turn) is refused (403). A user message may carry one `data-agent-prompt` part, `{ name, title }` on the new message (a `text` there is a 400): a launch of an agent from the composer's menu (`listChatCommands`). The turn resolves `name` with `prompts/get` (the message text as its `request`) over the caller's own connection in the turn's spaces, before persisting the message (a name the server does not serve is a 400, nothing written), stores the launch instructions it returns in the part's `data.text`, and shows the model that text in place of the message's own on this turn and every later one. Message persistence is server-owned: the user turn is persisted before inference and the assistant turn when the stream finalizes (survives client disconnect). Rate limited (20/min per caller). Not invocable over MCP (streaming).
          */
         post: operations["streamChat"];
         delete?: never;
@@ -3240,6 +3240,26 @@ export interface paths {
         options?: never;
         head?: never;
         patch?: never;
+        trace?: never;
+    };
+    "/api/orgs/{orgId}/chat/sessions/{id}/skills": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /**
+         * Set a chat session's pinned skills or skill discovery
+         * @description `pins` replaces the whole set of pinned skills (deduplicated and sorted, at most 5); a pin it drops loses its status, a new one has none until a turn evaluates it. `skill_discovery` sets the discovery switch. At least one of the two. Allowed while a turn is running: that turn keeps the skills it started with, and the next turn reads these. Never reorders the conversation list.
+         */
+        patch: operations["updateChatSessionSkills"];
         trace?: never;
     };
     "/api/orgs/{orgId}/chat/sessions/{id}/stop": {
@@ -6323,13 +6343,15 @@ export interface components {
         ChatCommands: {
             /** @description The skills the caller can read in the spaces asked, one per package (the first space's). Empty without `skills:read`. */
             skills: {
-                /** @description `@scope/name`: what `pin_skills` names. */
+                /** @description `@scope/name`: what `pins` names. */
                 id: string;
                 /** @description The skill's `SKILL.md` frontmatter `name`. */
                 name: string;
                 description: string;
                 /** @description The published version; null for a draft. */
                 version: string | null;
+                /** @description The listed UTF-8 size of its SKILL.md: an upper bound on the characters it would take of the pins' 64000-character budget (equal for ASCII text). Null when the server lists no file sizes. */
+                bytes: number | null;
             }[];
             /** @description The agents the caller can launch, as launch prompts. Empty when the caller cannot run agents. */
             agents: {
@@ -6361,22 +6383,19 @@ export interface components {
             generating: boolean;
             /** @description Whether an assistant reply landed after the caller last read the conversation. Computed server-side; cleared via PUT /api/orgs/{orgId}/chat/sessions/{id}/read. */
             unread: boolean;
-            /** @description Whether the assistant may find skills beyond the pinned ones. On: the skills of the spaces the conversation can act in (its origin space alone when it is limited), minus the pinned ones, are listed in the context and the assistant loads what fits. Off: the turn holds no `skills:*` permission, so it lists, loads, declares and writes no other skill. Written by the turn that carries it (POST /api/orgs/{orgId}/chat). */
+            /** @description Whether the assistant may find skills beyond the pinned ones. On: the skills of the spaces the conversation can act in (its origin space alone when it is limited), minus the pinned ones, are listed in the context and the assistant loads what fits. Off: the turn holds no `skills:*` permission, so it lists, loads, declares and writes no other skill. Set by PATCH /api/orgs/{orgId}/chat/sessions/{id}/skills, or by the turn that creates the conversation. */
             skill_discovery: boolean;
-            /** @description The skills pinned to this conversation, sorted by id: injected in full on every turn, whatever `skill_discovery`. Changed by the turns that carry `pin_skills` / `unpin_skills` (written when the turn starts, past every refusal: a refused turn changes nothing), and by the assistant loading a skill's SKILL.md while the conversation has room and budget for it (a load that cannot pin is still read for that turn). */
-            skills: {
+            /** @description The skills the user pinned to this conversation, sorted by id: injected in full on every turn, whatever `skill_discovery`. Set by PATCH /api/orgs/{orgId}/chat/sessions/{id}/skills, or by the turn that creates the conversation. The assistant reading a skill's SKILL.md pins nothing. */
+            pins: {
                 /** @description `@scope/name` package id. */
                 id: string;
                 /**
-                 * @description Who pinned it: the user (`pin_skills`), or the assistant by loading its SKILL.md. Naming an assistant's pin in `pin_skills` makes it the user's.
-                 * @enum {string}
-                 */
-                source: "user" | "assistant";
-                /**
-                 * @description What the last turn that claimed the conversation (the turn's start, past every refusal) did with it — recorded even if that turn failed afterwards: `injected` (in the assistant's context), or left out — `over_budget` (the pinned skills share a 64000-character budget), `unavailable` (in no skill listing the turn read: removed, deactivated or out of reach), `unreadable` (its read failed, or its SKILL.md was not the text listed). Null until a turn evaluates it.
+                 * @description What the last turn that claimed the conversation (the turn's start, past every refusal) did with it — recorded even if that turn failed afterwards: `injected` (in the assistant's context), or left out — `over_budget` (the pinned skills share a 64000-character budget, spent in pin order), `unavailable` (in no skill listing the turn read: removed, deactivated or out of reach), `unreadable` (its read failed, or its SKILL.md was not the text listed). Null until a turn evaluates it.
                  * @enum {string|null}
                  */
                 status: "injected" | "over_budget" | "unavailable" | "unreadable" | null;
+                /** @description The characters its SKILL.md takes of the 64000-character budget, as that turn read it (with `injected` and `over_budget`); null otherwise. */
+                chars: number | null;
             }[];
             /** @description The origin space: the space selected when the conversation was created, null when it was created from the overview or that space was deleted (the conversation is then detached and no longer limited). Not an owner: lists, filters and opening do not depend on it. It is the space of an act that names none (other than an inline run, a new package or a direct integration tool call, which go to the caller's personal space first), and the space a limited conversation is confined to. */
             spaceId: string | null;
@@ -21068,12 +21087,10 @@ export interface operations {
                     package_authoring?: boolean;
                     /** @description Launches the inline runs of this turn on the turn's model and generation settings (`modelId` and `generation` of `POST /api/runs/inline`, judged like any explicit model); absent = off, they run on the default model. A saved agent's run keeps its own model. */
                     inline_runs_use_chat_model?: boolean;
-                    /** @description Whether the assistant may find skills beyond the pinned ones (see ChatSession `skill_discovery`), written onto the session when this turn starts (a refused turn writes nothing); absent = the stored value (on, for a new conversation). */
+                    /** @description The pins of a conversation this turn creates (see ChatSession `pins`), written with its row; also honoured by an ephemeral turn (no `id`). Naming it for an existing conversation is a 409 `chat_skills_use_patch`: use PATCH /api/orgs/{orgId}/chat/sessions/{id}/skills. */
+                    pins?: string[];
+                    /** @description The discovery switch of a conversation this turn creates (see ChatSession `skill_discovery`); absent = on. Same rule as `pins`: a 409 `chat_skills_use_patch` for an existing conversation. */
                     skill_discovery?: boolean;
-                    /** @description Skills to pin to the conversation, on top of its stored pins (a change, never the whole set: a pin the assistant added in between stays). A skill the assistant pinned becomes the user's. Written when the turn starts, past every refusal: a refused turn writes nothing. More than 5 pins as a result is a 409 `chat_skill_pin_limit`, and nothing is written. */
-                    pin_skills?: string[];
-                    /** @description Skills to unpin from the conversation, whoever pinned them. Applied before `pin_skills`; unpinning a skill that is not pinned changes nothing. */
-                    unpin_skills?: string[];
                     /** @description Session id (the assistant-ui thread id) */
                     id?: string;
                 };
@@ -21104,7 +21121,7 @@ export interface operations {
             };
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
-            /** @description `org_deleting` — the organization's deletion is reserved, so no new metered usage is admitted. Refused whatever modules the deployment loads. Or `needs_reconnection` — the selected model's subscription credential is dead (revoked, or expired beyond refresh), so the turn is refused before inference starts rather than failing upstream. RFC 9457 problem+json. Or `model_credential_required`: the selected model has no organization credential and the caller has no usable personal credential for it. Or `chat_turn_scope_changed`: the conversation's limit, its origin space or its skill settings (another client's `pin_skills` / `unpin_skills` / `skill_discovery`) changed while the turn was starting; nothing was written, and sending the message again starts it with the new scope. Or `chat_turn_in_flight`: another turn of the conversation is running (a conversation runs one turn at a time); nothing was written, and the message can be sent again once that turn ends. Or `chat_skill_pin_limit`: the conversation's pins after this turn's `pin_skills` / `unpin_skills` would exceed 5; nothing was written, and the message can be sent again after unpinning a skill. Every refusal of a turn leaves its skill changes unwritten. */
+            /** @description `org_deleting` — the organization's deletion is reserved, so no new metered usage is admitted. Refused whatever modules the deployment loads. Or `needs_reconnection` — the selected model's subscription credential is dead (revoked, or expired beyond refresh), so the turn is refused before inference starts rather than failing upstream. RFC 9457 problem+json. Or `model_credential_required`: the selected model has no organization credential and the caller has no usable personal credential for it. Or `chat_turn_scope_changed`: the conversation's limit (or its origin space) changed while the turn was starting; nothing was written, and sending the message again starts it with the new scope. Or `chat_turn_in_flight`: another turn of the conversation is running (a conversation runs one turn at a time); nothing was written, and the message can be sent again once that turn ends. Or `chat_skills_use_patch`: the body names `pins` or `skill_discovery` for a conversation that already exists; nothing was written, and its skills change through PATCH /api/orgs/{orgId}/chat/sessions/{id}/skills. */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -21373,6 +21390,45 @@ export interface operations {
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
             /** @description Rate limited (120/min per caller) */
+            429: components["responses"]["RateLimited"];
+        };
+    };
+    updateChatSessionSkills: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Organization ID. */
+                orgId: components["parameters"]["OrgIdPath"];
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** @description The full set of pinned skills. */
+                    pins?: string[];
+                    skill_discovery?: boolean;
+                };
+            };
+        };
+        responses: {
+            /** @description The session, as updated */
+            200: {
+                headers: {
+                    "Request-Id": components["headers"]["RequestId"];
+                    "Appstrate-Version": components["headers"]["AppstrateVersion"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ChatSession"];
+                };
+            };
+            400: components["responses"]["ValidationError"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            /** @description Rate limited (60/min per caller) */
             429: components["responses"]["RateLimited"];
         };
     };

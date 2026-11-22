@@ -109,15 +109,33 @@ async function nameAgents(ctx: AgentPromptContext): Promise<NamedAgent[]> {
   return named;
 }
 
-/** The agent's launch contract at its latest published version, or `null` when it has none. */
+/**
+ * The agent's launch contract at its latest published version, or `null` when it has none or the
+ * route refuses it (4xx); a 5xx or a failed dispatch throws an `InternalError`.
+ */
 async function resolveAgent(
   ctx: AgentPromptContext,
   agent: NamedAgent,
 ): Promise<AgentLaunchView | null> {
-  const response = await dispatchGet(
-    readingIn(ctx, agent.spaceId),
-    `/api/packages/agents/${encodePackageIdPath(agent.packageId)}?version=latest`,
-  );
+  let response: Response;
+  try {
+    response = await dispatchGet(
+      readingIn(ctx, agent.spaceId),
+      `/api/packages/agents/${encodePackageIdPath(agent.packageId)}?version=latest`,
+    );
+  } catch (err) {
+    throw new McpError(ErrorCode.InternalError, `Could not read agent "${agent.packageId}".`, {
+      cause: String(err),
+    });
+  }
+  // A 5xx says nothing about the agent: an internal error the client may retry, never the
+  // invalid-params answer that means "not an agent you can launch".
+  if (response.status >= 500) {
+    throw new McpError(
+      ErrorCode.InternalError,
+      `Could not read agent "${agent.packageId}" (HTTP ${response.status}).`,
+    );
+  }
   if (!response.ok) return null;
   const body = (await response.json()) as {
     display_name?: unknown;

@@ -1,7 +1,7 @@
 # Skills in the chat
 
 Implements issue #1309 (replaces the earlier attempts #851, #1126 and #1165); the
-server-owned pins (sources, statuses, deltas, assistant loads) are #2356.
+server-owned pins and their statuses are #2356.
 
 ## Problem
 
@@ -11,8 +11,8 @@ native skill directory is not an option.
 
 ## Model
 
-Each conversation has two skill settings, stored on `chat_sessions`: `pinned_skills` (the pinned
-skills, whoever pinned them) and `skill_discovery` (default `true`).
+Each conversation has two skill settings, stored on `chat_sessions`: `pinned_skills` (the skills the user
+pinned) and `skill_discovery` (default `true`).
 
 **Invariant**: a skill shown as loaded is injected in the model's context. The server is the only
 source of truth for the pins; the client never infers "loaded".
@@ -55,13 +55,14 @@ state. Changing discovery or the pins, or editing a pinned skill, may miss the c
 ## Stored state
 
 `chat_sessions` carries `skill_discovery boolean`, `pinned_skills text[]` (sorted, deduplicated, at
-most 5, no FK), `assistant_skills text[]` (the part of the pins the assistant made) and
-`skill_status jsonb` (`{ [packageId]: "injected" | "over_budget" | "unavailable" | "unreadable" }`).
-Migration 0112 enforces by CHECK constraint `assistant_skills ⊆ pinned_skills` and at most 5 pins;
-the application keeps `keys(skill_status) ⊆ pinned_skills`.
+most 5 by CHECK constraint, no FK) and `skill_status jsonb`
+(`{ [packageId]: { status: "injected" | "over_budget" | "unavailable" | "unreadable", chars } }`,
+`chars` the `SKILL.md` length the turn read, `null` when it read none). Only the user pins: a
+`SKILL.md` read by the assistant is a plain read whose text stays in the history.
 
-Every session DTO carries `skill_discovery` and `skills: [{ id, source: "user" | "assistant",
-status }]`, sorted by id; `status` is null for a pin no claimed turn has evaluated.
+Every session DTO carries `skill_discovery` and `pins: [{ id, status, chars }]`, sorted by id;
+`status` and `chars` are null for a pin no claimed turn has evaluated. An entry off that shape reads
+as not evaluated.
 
 ### Statuses
 
@@ -73,63 +74,37 @@ claim has written them already.
 
 ## Writes
 
-**Skill changes are written only by the turn's claim**, a compare-and-set on what the turn read
-(origin space, limit, `skill_discovery`, the pins its prompt was built from). The request's
-`pin_skills`, `unpin_skills` and `skill_discovery` are applied in that same UPDATE, each column
-computed from the row as the statement finds it: pins = (stored − unpin) ∪ pin, a pin leaves
-`assistant_skills`, an unpin leaves all three columns. A client that read the session before the
-assistant pinned therefore cannot drop that pin, and re-applying the same changes changes nothing.
+`PATCH /api/orgs/{orgId}/chat/sessions/{id}/skills` sets the selection: `{ pins?, skill_discovery? }`,
+strict, at least one field, `pins` at most 5. `pins` replaces the whole set (deduped, sorted) and
+drops the `skill_status` entries of the pins it removes. It answers the session object (200),
+leaves `updatedAt` alone (a pin never reorders the sidebar) and signals the owner's other clients.
+It is allowed while a turn runs and applies from the next turn: the claim no longer compares the
+selection.
 
-So a turn refused before the claim (400, 402, 403, 404, 409, 429, 5xx) writes nothing, its skill
-changes included. Statuses:
+`POST /api/orgs/{orgId}/chat` takes `pins` and `skill_discovery` only on the turn that creates the
+conversation, written by the INSERT, or on an ephemeral turn, over the default selection. An existing
+conversation ignores them, as it ignores `spaceId` and `restricted`: its pins change through the PATCH.
 
-- 409 `chat_skill_pin_limit`: the changes would leave more than 5 pins, including when another
-  client's change left no room before the claim. Nothing written.
-- 409 `chat_turn_scope_changed`: another client changed the pins, discovery, limit or origin
-  between the turn's read and its claim. Nothing written; the resend reads the new state.
-- 409 `chat_turn_in_flight`: a live turn holds the conversation; answered first, whatever else
-  moved. Nothing written.
+The claim is a compare-and-set on the origin space and the limit alone:
 
-An ephemeral turn applies the changes to the default selection. The claim emits no signal itself;
-the turn's user-message write signals the row, which tells the other clients.
+- 409 `chat_turn_scope_changed`: the limit or origin moved between the turn's read and its claim.
+  Nothing written; the resend reads the new state.
+- 409 `chat_turn_in_flight`: a live turn holds the conversation; answered first. Nothing written.
 
-## Assistant loads pin
-
-A persisted turn's `read_resource` (and the platform `read` tool) that answers the `SKILL.md` the
-conversation injects for a skill goes through the turn's `SkillLoad`:
-
-- another URI (a file of the skill, another space's copy, a draft when the published version is
-  injected, or the reverse) is a plain read;
-- a skill already pinned is not pinned again: no re-pin, no budget. An injected one replays as a
-  receipt; one the turn left out (over budget, unavailable, unreadable) is a plain read;
-- else the load pins it, as `source: assistant`, when the cap (5) and the shared 64 000-character
-  budget allow and the turn still holds the conversation. The budget share is reserved before the
-  pin and released if it fails, so parallel tool calls never spend it twice.
-
-If the pin cannot be made (cap, budget, the turn stopped or taken over), the read is not refused:
-the model gets the text for this turn plus a note that it was not pinned, and nothing is written.
-
-When the database confirms the pin, the history keeps the receipt
-`{"uri","skill":"@scope/name","loaded":true}` in place of the `SKILL.md` text (a past event, not
-the pin's current state: the system prompt's skills section says what is loaded now): a replay never
-re-injects the body, and later turns inject it from the system prompt, where summarization cannot
-drop it. An unpinned read keeps its text. An ephemeral turn has no `SkillLoad`: its loads are
-plain reads.
+The claim emits no signal itself; the turn's user-message write signals the row.
 
 Rejected: a `chat_session_skills` table (a replace-on-write set read with the session row needs
 none); a third setting for a listing tool distinct from discovery (`listSkills` and `resources/read`
 on a skill the turn did not inject both answer to `skills:read`, so discovery is one switch);
 `GET /api/me/context?skills=<ids>` (a new surface whose only answer was "active or not", which the
-listing gives); a `PUT /api/chat/sessions/{id}/skills` per click (it had to create the row for a
-fresh conversation, make the send wait for it, and handle a write failing before the chat exists).
+listing gives); skill changes riding with the next message as deltas (a request with no answer left
+the client unable to know what was applied); assistant loads that pin (a pin the user never chose,
+sharing the cap and the budget).
 
 ## Wire contract
 
-`POST /api/orgs/{orgId}/chat` takes `skill_discovery`, `pin_skills` and `unpin_skills` (each
-optional, at most 5 ids): changes, never a full set. Absent, the stored selection stands (discovery
-on, no pin, for a new conversation). Nothing is written before the first message: choosing creates
-no conversation, no sidebar row, no navigation. A change on an existing conversation not followed by
-a message is lost on reload, as a model choice is.
+A fresh conversation's first `POST /chat` carries its selection (absent: discovery on, no pin), so
+choosing creates no conversation, no sidebar row, no navigation. Every later change is a `PATCH`.
 
 ## UI
 
@@ -137,33 +112,21 @@ The skills panel and the `/` menu both read `GET /api/orgs/{orgId}/chat/commands
 `package_authoring`), so neither offers a definition the turn would not inject. The panel has one
 checkbox per skill, active except a skill cited in the draft (checked, locked: `aria-disabled`, still
 focusable so its reason is read out), and the discovery switch. It is mounted when `canPinSkills`
-holds (`chat:write` ∧ `skills:read`) and the session read succeeded. Any pin, the assistant's
-included, can be unchecked. Each row shows the pin's real state and source (pinned by the user, by
-the assistant, cited in the draft, or not loaded with its reason).
+holds (`chat:write` ∧ `skills:read`) and the session read succeeded. Any pin can be
+unchecked. Each row shows the pin's real state (cited in the draft, loaded, or not loaded with its
+reason).
 
-The client state is the session DTO plus the user's local changes, which ride with the next message
-as deltas:
-
-- a 2xx applies them;
-- a refusal keeps them for the next message;
-- a request with no answer drops them: the client cannot know whether the server applied them, and
-  re-sending could remove a pin the assistant added since, so they are never re-sent and the session
-  detail shows the truth.
-
-After each turn the client writes what the server accepted into the cached session detail and
-re-reads it (write, then invalidate). A turn with no answer drops its changes and re-reads. The
-host's realtime session updates cover the other clients.
-
-The assistant's load renders as a chip in the thread. It shows as loaded only when the tool result
-carries `skillPinned` (live and replayed); otherwise it reads "read for this message only".
+The client state is the session DTO. A new conversation's choices ride with its first message; on
+an existing one each change is a `PATCH`, and the host's realtime session updates cover the other
+clients. The assistant's `SKILL.md` read renders as a chip in the thread, as a read.
 
 ## Commands
 
 The composer's `/` menu (#2173) lists the skills the conversation can pin and the agents the caller
 can launch, read as an MCP client reads the platform server (`skills/list`, `prompts/list`) over one
 connection of the caller's own: `GET /api/orgs/{orgId}/chat/commands` (`?spaceId=` reads one space,
-as a limited conversation). `/<skill>` is only the composer adding the id to the turn's
-`pin_skills`: no backend path of its own, no one-turn injection. The skills half takes
+as a limited conversation). `/<skill>` is only the composer adding the id to the
+conversation's pins: no backend path of its own, no one-turn injection. The skills half takes
 `package_authoring` (boolean, absent = on, as on `POST /chat`) and lists a skill's draft under
 `turnUsesDrafts` alone.
 

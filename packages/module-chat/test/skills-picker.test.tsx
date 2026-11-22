@@ -24,7 +24,7 @@ const host = testHost({ actingSpaceIds: ["spc_a"] });
 
 const transport = transportOf(() => ({ "X-Org-Id": "org_1", "X-Space-Id": "spc_a" }));
 
-const userPin = (id: string): PinnedSkill => ({ id, source: "user", status: "injected" });
+const userPin = (id: string): PinnedSkill => ({ id, status: "injected", chars: null });
 
 const NO_ACTIONS: Pick<SkillActions, "setPin" | "setDiscovery"> = {
   setPin() {},
@@ -224,7 +224,7 @@ describe("SkillsPicker", () => {
   });
 
   it("names a row's checkbox by its skill alone; the caption and description describe it", () => {
-    const html = render(true, [{ id: "@a/big", source: "user", status: "over_budget" }]);
+    const html = render(true, [{ id: "@a/big", status: "over_budget", chars: null }]);
     const box = html.match(/<button[^>]*data-testid="skill-pin-@a\/big"[^>]*>/)![0];
     const labelledBy = box.match(/aria-labelledby="([^"]+)"/)![1];
     const describedBy = box.match(/aria-describedby="([^"]+)"/)![1];
@@ -237,17 +237,12 @@ describe("SkillsPicker", () => {
     );
   });
 
-  it("lets every server pin be unchecked, the assistant's included", () => {
+  it("lets every server pin be unchecked, a refused one included", () => {
     const pins: PinnedSkill[] = [
       userPin("@a/mine"),
-      { id: "@a/assistant", source: "assistant", status: "injected" },
-      { id: "@a/big", source: "user", status: "over_budget" },
+      { id: "@a/big", status: "over_budget", chars: null },
     ];
-    expect(toggleRows(pins, [], ["@a/mine", "@a/assistant", "@a/big"])).toEqual([
-      "-@a/mine",
-      "-@a/assistant",
-      "-@a/big",
-    ]);
+    expect(toggleRows(pins, [], ["@a/mine", "@a/big"])).toEqual(["-@a/mine", "-@a/big"]);
   });
 
   describe("a row says what the server reported of its skill", () => {
@@ -263,15 +258,8 @@ describe("SkillsPicker", () => {
       expect(caption(html, "@a/mine")).toBeUndefined();
     });
 
-    it("an assistant's injected pin: checked, enabled, « Chargée par l'assistant »", () => {
-      const html = render(true, [{ id: "@a/auto", source: "assistant", status: "injected" }]);
-      expect(box(html, "@a/auto")).toContain('aria-checked="true"');
-      expect(box(html, "@a/auto")).not.toContain(`aria-disabled="true"`);
-      expect(caption(html, "@a/auto")).toBe("skills.state.assistant");
-    });
-
     it("a pin no turn evaluated yet, and a pending pin: checked, loaded with the next message", () => {
-      const html = render(true, [{ id: "@a/unseen", source: "user", status: null }], [], {
+      const html = render(true, [{ id: "@a/unseen", status: null, chars: null }], [], {
         pin: ["@a/pending"],
         unpin: [],
       });
@@ -302,7 +290,7 @@ describe("SkillsPicker", () => {
 
     for (const reason of ["over_budget", "unavailable", "unreadable"] as const) {
       it(`a pin the last turn refused (${reason}): checked, enabled, not loaded and why`, () => {
-        const html = render(true, [{ id: "@a/ref", source: "user", status: reason }]);
+        const html = render(true, [{ id: "@a/ref", status: reason, chars: null }]);
         expect(box(html, "@a/ref")).toContain('aria-checked="true"');
         expect(box(html, "@a/ref")).not.toContain(`aria-disabled="true"`);
         expect(caption(html, "@a/ref")).toBe(`skills.state.refused.${reason}`);
@@ -312,7 +300,7 @@ describe("SkillsPicker", () => {
     it("a refused pin the catalogue no longer lists gives its reason once", () => {
       const html = render(
         true,
-        [{ id: "@a/gone", source: "user", status: "unavailable" }],
+        [{ id: "@a/gone", status: "unavailable", chars: null }],
         [],
         NO_SKILL_CHANGES,
         ["@a/gone"],
@@ -322,11 +310,7 @@ describe("SkillsPicker", () => {
     });
 
     it("only the draft locks: a cited row is the one locked", () => {
-      const html = render(
-        true,
-        [{ id: "@a/auto", source: "assistant", status: "injected" }],
-        ["@a/cited"],
-      );
+      const html = render(true, [{ id: "@a/auto", status: "injected", chars: null }], ["@a/cited"]);
       expect(box(html, "@a/cited")).toContain(`aria-disabled="true"`);
       expect(caption(html, "@a/cited")).toBe("skills.cited");
       expect(box(html, "@a/auto")).not.toContain(`aria-disabled="true"`);

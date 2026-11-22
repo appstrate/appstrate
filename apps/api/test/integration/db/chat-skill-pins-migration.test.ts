@@ -2,8 +2,8 @@
 
 /**
  * Migration `0112_chat_skill_pins` — the three chat skill modes (`auto` | `manual` | `strict`)
- * folded into `skill_discovery` + `pinned_skills`, with `assistant_skills` and `skill_status`
- * added under two CHECKs.
+ * folded into `skill_discovery` + `pinned_skills`, with `skill_status` added and the pins capped
+ * by a CHECK.
  *
  * The tier-0 harness replays the chain against an empty database, where an UPDATE that fires on
  * every row and one that fires on none look the same. The stake is a conversation's pins: fold
@@ -51,11 +51,6 @@ async function inPre0112Schema(body: (tx: Tx) => Promise<void>): Promise<void> {
         sql.raw(`ALTER TABLE "chat_sessions" DROP CONSTRAINT "chat_sessions_pinned_skills_cap"`),
       );
       await tx.execute(
-        sql.raw(
-          `ALTER TABLE "chat_sessions" DROP CONSTRAINT "chat_sessions_assistant_skills_pinned"`,
-        ),
-      );
-      await tx.execute(
         sql.raw(`CREATE TYPE "public"."chat_skill_mode" AS ENUM('auto', 'manual', 'strict')`),
       );
       await tx.execute(
@@ -64,7 +59,6 @@ async function inPre0112Schema(body: (tx: Tx) => Promise<void>): Promise<void> {
         ),
       );
       await tx.execute(sql.raw(`ALTER TABLE "chat_sessions" DROP COLUMN "skill_status"`));
-      await tx.execute(sql.raw(`ALTER TABLE "chat_sessions" DROP COLUMN "assistant_skills"`));
       await tx.execute(sql.raw(`ALTER TABLE "chat_sessions" DROP COLUMN "skill_discovery"`));
       await body(tx);
       throw new Rollback();
@@ -104,14 +98,13 @@ async function seedSession(
 interface SkillColumns {
   skill_discovery: boolean;
   pinned_skills: string[];
-  assistant_skills: string[];
   skill_status: unknown;
 }
 
 async function skillColumnsOf(tx: Tx, id: string): Promise<SkillColumns> {
   const rows = rowsOf<SkillColumns>(
     await tx.execute(sql`
-      SELECT "skill_discovery", "pinned_skills", "assistant_skills", "skill_status"
+      SELECT "skill_discovery", "pinned_skills", "skill_status"
       FROM "chat_sessions" WHERE "id" = ${id}
     `),
   );
@@ -137,7 +130,7 @@ describe("migration 0112 — fold the chat skill modes into pins and discovery",
     ctx = await createTestContext({ orgSlug: "chat-skill-pins" });
   });
 
-  it("maps each mode to its pins and discovery, every pin the user's with no status", async () => {
+  it("maps each mode to its pins and discovery, every pin with no status", async () => {
     await inPre0112Schema(async (tx) => {
       const autoPinned = await seedSession(tx, ctx, "auto", PINS);
       const autoEmpty = await seedSession(tx, ctx, "auto", []);
@@ -146,7 +139,7 @@ describe("migration 0112 — fold the chat skill modes into pins and discovery",
 
       await replayMigration(tx);
 
-      const unattributed = { assistant_skills: [], skill_status: {} };
+      const unattributed = { skill_status: {} };
       // `auto` kept its pins unused: injecting them after the upgrade would change the chat.
       expect(await skillColumnsOf(tx, autoPinned)).toEqual({
         skill_discovery: true,
@@ -172,7 +165,7 @@ describe("migration 0112 — fold the chat skill modes into pins and discovery",
     });
   });
 
-  it("drops `skill_mode` and its enum, and installs both CHECKs", async () => {
+  it("drops `skill_mode` and its enum, and installs the pin cap", async () => {
     await inPre0112Schema(async (tx) => {
       await replayMigration(tx);
 
@@ -188,12 +181,9 @@ describe("migration 0112 — fold the chat skill modes into pins and discovery",
         await tx.execute(sql`SELECT 1 FROM pg_type WHERE typname = 'chat_skill_mode'`),
       );
       expect(types).toHaveLength(0);
-      expect(await constraintNames(tx)).toEqual(
-        expect.arrayContaining([
-          "chat_sessions_assistant_skills_pinned",
-          "chat_sessions_pinned_skills_cap",
-        ]),
-      );
+      const constraints = await constraintNames(tx);
+      expect(constraints).toContain("chat_sessions_pinned_skills_cap");
+      expect(constraints).not.toContain("chat_sessions_assistant_skills_pinned");
     });
   });
 });

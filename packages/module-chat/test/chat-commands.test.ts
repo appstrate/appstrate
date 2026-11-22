@@ -37,7 +37,7 @@ const skillEntry = (spaceId: string, name: string, draft = false) => {
       description: `${name} skill`,
       ...(draft ? {} : { metadata: { version: "1.0.0" } }),
     },
-    resources: [{ uri, digest, size: 1 }],
+    resources: [{ uri, digest, size: name.length * 100 }],
     ...(draft ? { _meta: { "dev.appstrate/lock_version": 1 } } : {}),
   };
 };
@@ -173,8 +173,15 @@ describe("GET /api/orgs/:orgId/chat/commands", () => {
     const body = chatCommandsSchema.parse(await res.json());
     expect(body).toEqual({
       skills: [
-        { id: "@acme/refunds", name: "refunds", description: "refunds skill", version: "1.0.0" },
-        { id: "@acme/tone", name: "tone", description: "tone skill", version: "1.0.0" },
+        {
+          id: "@acme/refunds",
+          name: "refunds",
+          description: "refunds skill",
+          version: "1.0.0",
+          // The listed size of its SKILL.md: no read per skill.
+          bytes: 700,
+        },
+        { id: "@acme/tone", name: "tone", description: "tone skill", version: "1.0.0", bytes: 400 },
       ],
       agents: [
         {

@@ -9,17 +9,26 @@ import {
   jsonRpcErrorOf,
   type AppstrateMcpClient,
 } from "@appstrate/mcp-transport";
-import { invalidRequest } from "@appstrate/core/api-errors";
+import { badGateway, invalidRequest } from "@appstrate/core/api-errors";
 import { agentPromptOfParts } from "./agent-prompt.ts";
 import { uiMessageText } from "./message-text.ts";
 import { withCallerClient } from "./platform-mcp.ts";
+import { logger } from "./logger.ts";
 
 const AGENT_LAUNCH_MAX_BYTES = 64 * 1024;
 
 /**
+ * Characters of earlier launch texts replayed to the model on a later turn, the most recent first:
+ * the order of one launch's own cap ({@link AGENT_LAUNCH_MAX_BYTES}), so a thread keeps about one
+ * full launch of context however many it holds. Older ones are replaced by a stub.
+ */
+export const AGENT_LAUNCH_REPLAY_BUDGET_CHARS = 64_000;
+
+/**
  * `message` with its agent-prompt part's `text` set to what `prompts/get` answers for its name and
  * the typed request, whatever the browser sent (no part, no connection). An unknown or
- * unlaunchable name, or instructions over {@link AGENT_LAUNCH_MAX_BYTES}, is a 400. The cap counts
+ * unlaunchable name, or instructions over {@link AGENT_LAUNCH_MAX_BYTES}, is a 400; a platform
+ * server that fails to answer (an internal error, or no connection) is a 502. The cap counts
  * the instructions as rendered, the agent's text with the user's request in it, so its message
  * names both.
  */
@@ -31,23 +40,37 @@ export async function resolveAgentPrompt(
   if (!launch) return message;
   const { part } = launch;
   const { name, title } = launch.data;
-  const text = await withCallerClient(openCaller, async (client, signal) => {
-    const request = uiMessageText(message.parts, { omitAgent: true });
-    try {
-      const result = await client.getPrompt({ name, arguments: { request } }, { signal });
-      return result.messages
-        .flatMap((entry) => (entry.content.type === "text" ? [entry.content.text] : []))
-        .join("\n\n");
-    } catch (err) {
-      // The server answers one `-32602` for a name it does not serve and for one it cannot launch
-      // (a `ProtocolError` over HTTP, an `McpError` over an in-process pair).
-      const code = jsonRpcErrorOf(err)?.code ?? (err instanceof McpError ? err.code : undefined);
-      if (code === ErrorCode.InvalidParams) {
-        throw invalidRequest(`"${name}" is not an agent this conversation can launch.`, "messages");
+  const text = await withCallerClient(
+    openCaller,
+    async (client, signal) => {
+      const request = uiMessageText(message.parts, { omitAgent: true });
+      try {
+        const result = await client.getPrompt({ name, arguments: { request } }, { signal });
+        return result.messages
+          .flatMap((entry) => (entry.content.type === "text" ? [entry.content.text] : []))
+          .join("\n\n");
+      } catch (err) {
+        // The server answers one `-32602` for a name it does not serve and for one it cannot launch
+        // (a `ProtocolError` over HTTP, an `McpError` over an in-process pair).
+        const code = jsonRpcErrorOf(err)?.code ?? (err instanceof McpError ? err.code : undefined);
+        if (code === ErrorCode.InvalidParams) {
+          throw invalidRequest(
+            `"${name}" is not an agent this conversation can launch.`,
+            "messages",
+          );
+        }
+        if (code === ErrorCode.InternalError) {
+          logger.warn("prompts/get failed — agent launch refused", { name, err: String(err) });
+          throw badGateway("The platform's MCP server could not read the agent.");
+        }
+        throw err;
       }
-      throw err;
-    }
-  });
+    },
+    (err) => {
+      logger.warn("agent launch connection unavailable", { name, err: String(err) });
+      throw badGateway("The platform's MCP server could not be reached.");
+    },
+  );
   if (Buffer.byteLength(text) > AGENT_LAUNCH_MAX_BYTES) {
     throw invalidRequest(
       `The launch instructions of "${name}" exceed ${AGENT_LAUNCH_MAX_BYTES / 1024} KB. They include your request: a shorter one may fit.`,
@@ -64,20 +87,44 @@ export async function resolveAgentPrompt(
   } as UIMessage;
 }
 
+/** What the model reads in place of a launch whose text fell out of the replay budget. */
+function droppedLaunchText(name: string, title: string): string {
+  return `[The agent "${title}" (${name}) was launched here earlier. Its launch instructions were dropped from this history to bound its size; launch it again if it is needed.]`;
+}
+
 /**
  * The thread with every earlier launch's text taken from its stored row (`stored`, by message id),
  * never from the browser; the last one's comes from {@link resolveAgentPrompt}. A launch with no
- * stored text shows the model what the user typed.
+ * stored text shows the model what the user typed. Earlier texts are kept most recent first within
+ * {@link AGENT_LAUNCH_REPLAY_BUDGET_CHARS}; each older one is replaced by a short stub naming the
+ * agent. A pure function of the thread and the stored rows, so the replay is the same on every
+ * turn until a new launch arrives and the prompt cache holds.
  */
 export function withStoredAgentPromptTexts(
   messages: UIMessage[],
   stored: ReadonlyMap<string, string>,
 ): UIMessage[] {
+  let remaining = AGENT_LAUNCH_REPLAY_BUDGET_CHARS;
+  const texts = new Map<number, string>();
+  for (let index = messages.length - 2; index >= 0; index--) {
+    const message = messages[index]!;
+    const launch = message.role === "user" ? agentPromptOfParts(message.parts) : null;
+    const full = launch ? stored.get(message.id) : undefined;
+    if (!launch || !full) continue;
+    if (full.length <= remaining) {
+      remaining -= full.length;
+      texts.set(index, full);
+    } else {
+      // Once one launch does not fit, no older one is kept: the budget never skips back.
+      remaining = 0;
+      texts.set(index, droppedLaunchText(launch.data.name, launch.data.title));
+    }
+  }
   return messages.map((message, index) => {
     const launch = message.role === "user" ? agentPromptOfParts(message.parts) : null;
     if (!launch) return message;
     const { name, title } = launch.data;
-    const text = index === messages.length - 1 ? undefined : stored.get(message.id);
+    const text = texts.get(index);
     return {
       ...message,
       parts: message.parts.map((part) =>

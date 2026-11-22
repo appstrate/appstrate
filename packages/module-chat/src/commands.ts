@@ -10,6 +10,11 @@ const chatSkillCommandSchema = z.object({
   description: z.string(),
   /** `null` for a draft. */
   version: z.string().nullable(),
+  /**
+   * The listed UTF-8 size of its `SKILL.md`: an upper bound on the characters it takes of the
+   * pins' shared budget (equal for ASCII text); `null` when the server lists no sizes.
+   */
+  bytes: z.number().int().nonnegative().nullable(),
 });
 
 const chatAgentCommandSchema = z.object({

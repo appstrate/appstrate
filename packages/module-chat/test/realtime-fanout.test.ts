@@ -24,7 +24,7 @@ import { initRealtime } from "../../../apps/api/src/services/realtime.ts";
 import { notifySessionUpdate } from "../src/realtime.ts";
 import { claimTurn, persistClaimedUserMessage } from "../src/chat-stream.ts";
 
-import { NO_SKILL_WRITE, UNLIMITED_SCOPE } from "./turn-claim.ts";
+import { NO_SKILL_STATUS, UNLIMITED_SCOPE } from "./turn-claim.ts";
 const app = getTestApp();
 
 /** Let the PG LISTEN dispatcher register/deliver. */
@@ -80,6 +80,26 @@ describe("chat_session_update SSE fan-out", () => {
     expect(data.userId).toBe(session.userId);
   });
 
+  it("signals the owner when the skills PATCH writes the row", async () => {
+    const session = await createSession(ctx);
+    const res = await openStream(ctx);
+    await wait();
+
+    const patched = await app.request(`/api/orgs/${ctx.orgId}/chat/sessions/${session.id}/skills`, {
+      method: "PATCH",
+      headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
+      body: JSON.stringify({ pins: ["@acme/a"] }),
+    });
+    expect(patched.status).toBe(200);
+
+    const events = await collectSSEEvents(res.body!, 1, {
+      timeoutMs: 3000,
+      ignoreEvents: ["ping"],
+    });
+    const frame = events.find((e) => e.event === "chat_session_update");
+    expect((JSON.parse(frame!.data) as { sessionId: string }).sessionId).toBe(session.id);
+  });
+
   it("signals a claimed turn once, not once per statement", async () => {
     // Every frame is a refetch of the conversation list on each of the owner's
     // open pages. The claim marks the session generating and then writes the
@@ -88,7 +108,7 @@ describe("chat_session_update SSE fan-out", () => {
     const res = await openStream(ctx);
     await wait();
 
-    await claimTurn(session.id, "strm_1", UNLIMITED_SCOPE, NO_SKILL_WRITE);
+    await claimTurn(session.id, "strm_1", UNLIMITED_SCOPE, NO_SKILL_STATUS);
     await persistClaimedUserMessage(session.id, "strm_1", {
       id: "u1",
       role: "user",

@@ -863,7 +863,7 @@ describe("ensureSession", () => {
     const stranger = await memberContext(ctx, "member", "operator");
     await ensureSession("chs_owned", ctx.orgId, ctx.user.id, []);
     await expect(
-      ensureSession("chs_owned", ctx.orgId, stranger.user.id, [], () => ({
+      ensureSession("chs_owned", ctx.orgId, stranger.user.id, [], undefined, () => ({
         spaceId: ctx.defaultSpaceId,
         restricted: true,
       })),
@@ -879,17 +879,25 @@ describe("ensureSession", () => {
     const other = (await seedSpace({ orgId: ctx.orgId, name: "Other" })).id;
     const readable = [ctx.defaultSpaceId, other];
 
-    const created = await ensureSession("chs_origin", ctx.orgId, ctx.user.id, readable, () => ({
-      spaceId: other,
-      restricted: true,
-    }));
-    expect(created).toMatchObject({ spaceId: other, restricted: true });
+    const created = await ensureSession(
+      "chs_origin",
+      ctx.orgId,
+      ctx.user.id,
+      readable,
+      undefined,
+      () => ({ spaceId: other, restricted: true }),
+    );
+    expect(created).toMatchObject({ spaceId: other, restricted: true, created: true });
     // An existing conversation keeps its own, whatever a later turn carries.
-    const again = await ensureSession("chs_origin", ctx.orgId, ctx.user.id, readable, () => ({
-      spaceId: ctx.defaultSpaceId,
-      restricted: false,
-    }));
-    expect(again).toMatchObject({ spaceId: other, restricted: true });
+    const again = await ensureSession(
+      "chs_origin",
+      ctx.orgId,
+      ctx.user.id,
+      readable,
+      undefined,
+      () => ({ spaceId: ctx.defaultSpaceId, restricted: false }),
+    );
+    expect(again).toMatchObject({ spaceId: other, restricted: true, created: false });
     // The overview has none.
     expect(await ensureSession("chs_overview", ctx.orgId, ctx.user.id, readable)).toMatchObject({
       spaceId: null,
@@ -898,6 +906,28 @@ describe("ensureSession", () => {
     // Nothing is recorded as touched by an origin space.
     expect(await touchedBy("chs_origin")).toEqual([]);
   });
+
+  it("writes the skill selection only when it creates the row", async () => {
+    await truncateAll();
+    const ctx = await createTestContext({ orgSlug: "ensureskills" });
+    const created = await ensureSession("chs_skills", ctx.orgId, ctx.user.id, [], {
+      pinnedSkills: ["@acme/a"],
+      skillDiscovery: false,
+    });
+    expect(created).toMatchObject({
+      created: true,
+      selection: { pinnedSkills: ["@acme/a"], skillDiscovery: false },
+    });
+    // An existing conversation keeps its own: the skills PATCH alone changes it.
+    const again = await ensureSession("chs_skills", ctx.orgId, ctx.user.id, [], {
+      pinnedSkills: ["@acme/b"],
+      skillDiscovery: true,
+    });
+    expect(again).toMatchObject({
+      created: false,
+      selection: { pinnedSkills: ["@acme/a"], skillDiscovery: false },
+    });
+  });
 });
 
 describe("touchSessionSpace", () => {
@@ -905,10 +935,14 @@ describe("touchSessionSpace", () => {
     await truncateAll();
     const ctx = await createTestContext({ orgSlug: "touchorigin" });
     const other = (await seedSpace({ orgId: ctx.orgId, name: "Other" })).id;
-    await ensureSession("chs_touch", ctx.orgId, ctx.user.id, [ctx.defaultSpaceId, other], () => ({
-      spaceId: ctx.defaultSpaceId,
-      restricted: false,
-    }));
+    await ensureSession(
+      "chs_touch",
+      ctx.orgId,
+      ctx.user.id,
+      [ctx.defaultSpaceId, other],
+      undefined,
+      () => ({ spaceId: ctx.defaultSpaceId, restricted: false }),
+    );
     const session = {
       id: "chs_touch",
       orgId: ctx.orgId,

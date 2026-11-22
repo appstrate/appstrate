@@ -27,14 +27,14 @@ describe("loadHistory decode", () => {
     ] as never);
   });
 
-  it("carries the session's skills as the server reports them: source and verdict per pin", async () => {
+  it("carries the session's skills as the server reports them: verdict and size per pin", async () => {
     const pins = [
-      { id: "@scope/a", source: "assistant", status: "injected" },
-      { id: "@scope/b", source: "user", status: "over_budget" },
-      { id: "@scope/c", source: "user", status: null },
+      { id: "@scope/a", status: "injected", chars: null },
+      { id: "@scope/b", status: "over_budget", chars: null },
+      { id: "@scope/c", status: null, chars: null },
     ];
     const request = requestAnswering(
-      json({ id: "chs_1", messages: [], skill_discovery: false, skills: pins }),
+      json({ id: "chs_1", messages: [], skill_discovery: false, pins }),
     );
 
     const loaded = await loadHistory(transportOver(request), "chs_1");

@@ -7,7 +7,7 @@
  */
 
 import { DefaultChatTransport, type UIMessage } from "ai";
-import type { ChatSkillChanges } from "../skills.ts";
+import { applySkillChanges, type ChatSkillChanges } from "./chat-skills.ts";
 import type { ModelGenerationSettings } from "@appstrate/core/model-generation";
 import { actsIn, type ChatTransport } from "./runtime-context.ts";
 
@@ -69,9 +69,10 @@ export function turnBody(args: {
     package_authoring: packageAuthoring,
     inline_runs_use_chat_model: inlineRunsUseChatModel,
     ...creation,
-    ...(skills?.skillDiscovery !== undefined && { skill_discovery: skills.skillDiscovery }),
-    ...(skills && skills.pin.length > 0 && { pin_skills: skills.pin }),
-    ...(skills && skills.unpin.length > 0 && { unpin_skills: skills.unpin }),
+    // The server takes skill settings only on the turn that creates the conversation.
+    ...(creation &&
+      skills?.skillDiscovery !== undefined && { skill_discovery: skills.skillDiscovery }),
+    ...(creation && skills && skills.pin.length > 0 && { pins: applySkillChanges([], skills) }),
   };
 }
 
