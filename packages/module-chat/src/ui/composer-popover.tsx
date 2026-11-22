@@ -7,7 +7,7 @@
  * `composer-commands.ts`.
  */
 
-import { useEffect, useMemo, useRef } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   ComposerPrimitive,
   unstable_useTriggerPopoverScopeContext as useTriggerPopoverScope,
@@ -20,7 +20,7 @@ import { AGENT_DIRECTIVE } from "../directives.ts";
 import { AgentGlyph } from "./agent-glyph.tsx";
 import type { AgentAppearance } from "./agent-appearance.ts";
 import { MAX_PINNED_SKILLS } from "../skills.ts";
-import { commandList, searchCommands, slashMatch } from "./composer-commands.ts";
+import { commandList, noCommandMatch, searchCommands, slashMatch } from "./composer-commands.ts";
 import { useChatHost, useChatTransport } from "./runtime-context.ts";
 import { usePinnedSkills } from "./pinned-skills.ts";
 import { useChatCommands } from "./use-chat-commands.ts";
@@ -54,26 +54,57 @@ export function CommandPopover() {
   );
   const failed = commands.isError;
   const matcher = (text: string, _char: string, cursor: number) =>
-    slashMatch(text, cursor, (query) => !!list && searchCommands(list.items, query).length === 0);
+    slashMatch(text, cursor, (query) => noCommandMatch(list, query));
+  // The menu's notices (loading, error, cap) are announced from one region outside the listbox,
+  // which may hold only options: it stays mounted so a screen reader hears each change.
+  const [notice, setNotice] = useState("");
   return (
-    <ComposerPrimitive.TriggerPopover
-      char="/"
-      adapter={adapter}
-      matcher={matcher}
-      isLoading={!list && !failed}
-      aria-label={t("slash.label")}
-      data-testid="slash-menu"
-      className="bg-popover text-popover-foreground absolute inset-x-0 bottom-full z-30 mb-2 max-h-72 overflow-y-auto overscroll-contain rounded-xl border p-1 shadow-md"
-    >
-      <ComposerPrimitive.TriggerPopover.Directive />
-      <Entries capped={list?.capped ?? []} failed={failed} />
-    </ComposerPrimitive.TriggerPopover>
+    <>
+      <ComposerPrimitive.TriggerPopover
+        char="/"
+        adapter={adapter}
+        matcher={matcher}
+        isLoading={!list && !failed}
+        aria-label={t("slash.label")}
+        data-testid="slash-menu"
+        className="bg-popover text-popover-foreground absolute inset-x-0 bottom-full z-30 mb-2 max-h-72 overflow-y-auto overscroll-contain rounded-xl border p-1 shadow-md"
+      >
+        <ComposerPrimitive.TriggerPopover.Directive />
+        <Entries capped={list?.capped ?? []} failed={failed} onNotice={setNotice} />
+      </ComposerPrimitive.TriggerPopover>
+      <p role="status" aria-live="polite" data-testid="slash-status" className="sr-only">
+        {notice}
+      </p>
+    </>
   );
 }
 
-function Entries({ capped, failed }: { capped: readonly TriggerItem[]; failed: boolean }) {
+function Entries({
+  capped,
+  failed,
+  onNotice,
+}: {
+  capped: readonly TriggerItem[];
+  failed: boolean;
+  /** Hands the notice to the live region outside the popover, which this scope cannot reach. */
+  onNotice: (text: string) => void;
+}) {
   const { t } = useChatHost();
   const { open, items, query, isLoading } = useTriggerPopoverScope();
+  const notice = !open
+    ? null
+    : items.length === 0 && isLoading
+      ? { text: t("slash.loading"), className: "text-muted-foreground text-sm py-2" }
+      : items.length === 0 && failed
+        ? { text: t("slash.error"), className: "text-destructive text-sm py-2" }
+        : searchCommands(capped, query).length > 0
+          ? {
+              text: t("skills.chosenMax", { max: MAX_PINNED_SKILLS }),
+              className: "text-muted-foreground text-xs py-1.5",
+            }
+          : null;
+  const announced = notice?.text ?? "";
+  useEffect(() => onNotice(announced), [onNotice, announced]);
   // Closed, the popover renders its children without its listbox: nothing of ours shows.
   if (!open) return null;
   const skills = items.filter((item) => item.type !== AGENT_DIRECTIVE);
@@ -81,37 +112,22 @@ function Entries({ capped, failed }: { capped: readonly TriggerItem[]; failed: b
   // Two listed skills of one name: their package id tells them apart.
   const names = skills.map((skill) => skill.label);
   const homonyms = new Set(names.filter((name, i) => names.indexOf(name) !== i));
-  const refused = searchCommands(capped, query).length > 0;
   return (
     <>
-      {items.length === 0 && isLoading && (
-        <p role="status" className="text-muted-foreground px-2 py-2 text-sm">
-          {t("slash.loading")}
+      {notice && (
+        // Seen here, heard from the live region beside the listbox.
+        <p aria-hidden="true" className={cn("px-2", notice.className)}>
+          {notice.text}
         </p>
       )}
-      {items.length === 0 && failed && (
-        <p role="alert" className="text-destructive px-2 py-2 text-sm">
-          {t("slash.error")}
-        </p>
-      )}
-      {refused && (
-        <p role="status" className="text-muted-foreground px-2 py-1.5 text-xs">
-          {t("skills.chosenMax", { max: MAX_PINNED_SKILLS })}
-        </p>
-      )}
-      <ComposerPrimitive.TriggerPopoverItems aria-label={t("slash.label")}>
-        {() => (
-          <>
-            <Section heading={t("slash.skills")} items={skills} from={0} homonyms={homonyms} />
-            <Section
-              heading={t("slash.agents")}
-              items={agents}
-              from={skills.length}
-              homonyms={homonyms}
-            />
-          </>
-        )}
-      </ComposerPrimitive.TriggerPopoverItems>
+      {/* The listbox carries the menu's name; each section is a group named by its heading. */}
+      <Section heading={t("slash.skills")} items={skills} from={0} homonyms={homonyms} />
+      <Section
+        heading={t("slash.agents")}
+        items={agents}
+        from={skills.length}
+        homonyms={homonyms}
+      />
     </>
   );
 }

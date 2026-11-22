@@ -7,7 +7,6 @@
  */
 
 import { BookOpenIcon, LockIcon } from "lucide-react";
-import { parseScopedName } from "@appstrate/core/naming";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@appstrate/ui/components/tooltip";
 import {
   canResetSkills,
@@ -17,70 +16,39 @@ import {
   type ConversationSkills,
 } from "./chat-skills.ts";
 import { RemovableChip } from "./removable-chip.tsx";
+import {
+  namedSkill,
+  skillsSummary,
+  verdictsSummary,
+  type LoadedSkill,
+  type SkillNames,
+} from "./skills-summary.ts";
 import { useChatHost, type ChatTransport, type ChatTranslate } from "./runtime-context.ts";
+import { useChangeAnnouncement } from "./use-change-announcement.ts";
 import { useChatCommands } from "./use-chat-commands.ts";
-
-interface LoadedSkill {
-  packageId: string;
-  name: string;
-}
 
 /**
  * The conversation's skills (pins and the draft's citations) split into those it loads and the
- * pins the last turn left out, and the server's last verdicts alone for the live region: `null`
- * until the catalogue names them, so a name swap is never read out.
+ * pins the last turn left out, and what the live region reads of the server's last verdicts.
  */
 function useSkillsByLoad(
   transport: ChatTransport | undefined,
   skills: ConversationSkills,
   cited: readonly string[],
+  t: ChatTranslate,
 ) {
   const effective = effectiveSkills(skills.pinned, cited);
   const catalogue = useChatCommands(transport, effective.ids.length > 0);
-  const names = new Map((catalogue.data?.skills ?? []).map((s) => [s.id, s.name]));
-  const named = (id: string): LoadedSkill => ({
-    packageId: id,
-    name: names.get(id) ?? parseScopedName(id)?.name ?? id,
-  });
+  const names: SkillNames | null = catalogue.data
+    ? new Map(catalogue.data.skills.map((s) => [s.id, s.name]))
+    : null;
+  const named = (id: string) => namedSkill(names ?? new Map(), id);
   const loads = (id: string) => loadsSkill(skillRowState(skills, id, effective.cited));
-  const judged = [...skills.stored.values()].filter((pin) => pin.status !== null);
-  const injected = judged.filter((pin) => pin.status === "injected").map((pin) => named(pin.id));
   return {
     loaded: effective.ids.filter(loads).map(named),
     refused: effective.ids.filter((id) => !loads(id)).map(named),
-    verdicts: catalogue.data
-      ? { loaded: injected, refused: judged.length - injected.length }
-      : null,
+    verdicts: verdictsSummary(skills, names, t),
   };
-}
-
-/**
- * The single skill's name, how many skills (`countKey`: the pill says « pinned », an accessible
- * name « skills »), or how many are not loaded when none is. The tooltip lists them.
- */
-function skillsSummary(
-  skills: readonly LoadedSkill[],
-  refused: number,
-  t: ChatTranslate,
-  countKey: "skills.count" | "skills.pinnedCount" = "skills.count",
-): string {
-  if (skills.length === 0) return t("skills.notLoadedCount", { count: refused });
-  return skills.length === 1 ? skills[0]!.name : t(countKey, { count: skills.length });
-}
-
-/** What the live region reads out: the skills the last turn loaded, then how many it left out. */
-function liveSummary(
-  verdicts: { loaded: readonly LoadedSkill[]; refused: number } | null,
-  t: ChatTranslate,
-): string {
-  if (!verdicts) return "";
-  const { loaded, refused } = verdicts;
-  if (loaded.length === 0) return refused === 0 ? "" : skillsSummary(loaded, refused, t);
-  if (refused === 0) return skillsSummary(loaded, 0, t);
-  return t("skills.liveSummary", {
-    loaded: skillsSummary(loaded, 0, t),
-    refused: t("skills.notLoadedCount", { count: refused }),
-  });
 }
 
 function SkillNameList({ skills }: { skills: readonly LoadedSkill[] }) {
@@ -189,7 +157,9 @@ interface SkillChipsProps {
 /** The skill pill, or with no pin the picker's summary chip (drawn only with discovery off). */
 export function SkillChips({ transport, skills, cited, onOpenPicker, onReset }: SkillChipsProps) {
   const { t } = useChatHost();
-  const { loaded, refused, verdicts } = useSkillsByLoad(transport, skills, cited);
+  const { loaded, refused, verdicts } = useSkillsByLoad(transport, skills, cited, t);
+  // The verdicts found on opening the conversation are not news: only a later change is read out.
+  const announced = useChangeAnnouncement(verdicts ?? "", verdicts !== null);
   return (
     <>
       {loaded.length === 0 && refused.length === 0 ? (
@@ -205,7 +175,7 @@ export function SkillChips({ transport, skills, cited, onOpenPicker, onReset }: 
       )}
       {/* Always mounted, so a verdict landing after a turn is read out. */}
       <span aria-live="polite" data-testid="skill-pill-live" className="sr-only">
-        {liveSummary(verdicts, t)}
+        {announced}
       </span>
     </>
   );

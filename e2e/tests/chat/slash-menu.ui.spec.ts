@@ -79,9 +79,11 @@ test("filters, selects with the keyboard or the mouse, and never sends while ope
 
   // Arrow keys move the highlight.
   await page.keyboard.type(" /");
-  const first = await input.getAttribute("aria-activedescendant");
+  await expect(menu.getByRole("option")).toHaveCount(3);
+  await expect(input).toHaveAttribute("aria-activedescendant", /.+/);
+  const first = (await input.getAttribute("aria-activedescendant"))!;
   await page.keyboard.press("ArrowDown");
-  expect(await input.getAttribute("aria-activedescendant")).not.toBe(first);
+  await expect(input).not.toHaveAttribute("aria-activedescendant", first);
 
   // Escape closes and keeps the text.
   await page.keyboard.press("Escape");
@@ -215,11 +217,15 @@ test("Enter and Tab inside a /token wait for the commands instead of sending it"
   await page.goto("/chat");
   const input = composer(page);
   await input.fill("/tone");
+  // The menu is open on its loading notice before the keys, and still after them: they were the
+  // popover's, so the field kept its text and nothing left.
+  const menu = page.getByTestId("slash-menu");
+  await expect(menu).toContainText("Chargement…");
   await page.keyboard.press("Enter");
   await page.keyboard.press("Tab");
-  await page.waitForTimeout(300);
-  expect(sent).toEqual([]);
+  await expect(menu).toContainText("Chargement…");
   await expect(input).toContainText("/tone");
+  expect(sent).toEqual([]);
 
   release();
   await expect(page.getByRole("option", { name: /tone/ })).toBeVisible();

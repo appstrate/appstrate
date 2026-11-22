@@ -72,7 +72,7 @@ describe("ResourceReadTool", () => {
     html.match(/<span[^>]*data-testid="skill-load-live"[^>]*>([^<]*)</);
   const caption = (html: string) =>
     html.match(/<span[^>]*data-testid="skill-load-state"[^>]*>([^<]*)</);
-  const receipt = JSON.stringify({ uri: SKILL_MD, skill: "@acme/tone", pinned: true });
+  const receipt = JSON.stringify({ uri: SKILL_MD, skill: "@acme/tone", loaded: true });
 
   it("draws a pinned load as the user's skill chip, naming it in the live region", () => {
     const html = render({
@@ -93,7 +93,7 @@ describe("ResourceReadTool", () => {
     expect(caption(html)).toBeNull();
   });
 
-  it("never says loaded for a read the server did not pin: read for this message only", () => {
+  it("never says loaded for a read the server did not pin: read, not pinned", () => {
     const note =
       "The skill `@acme/tone` was read for this turn but not pinned to the conversation.";
     const html = render({

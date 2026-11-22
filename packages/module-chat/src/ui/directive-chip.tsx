@@ -4,11 +4,12 @@
 
 import { useRef, type MouseEvent, type ReactNode } from "react";
 import { BookOpenIcon, XIcon } from "lucide-react";
+import { defaultDirectiveFormatter } from "@assistant-ui/core";
 import type { DirectiveChipProps } from "@assistant-ui/react-lexical";
 import { useLexicalComposerContext } from "@lexical/react/LexicalComposerContext";
 import { $getNearestNodeFromDOMNode } from "lexical";
 import { cn } from "@appstrate/ui/cn";
-import { AGENT_DIRECTIVE, directiveSegments } from "../directives.ts";
+import { AGENT_DIRECTIVE, SKILL_DIRECTIVE, directiveSegments } from "../directives.ts";
 import { $removeDirectiveChip } from "./directive-chip-remove.ts";
 import { DirectiveAgentGlyph } from "./agent-glyph.tsx";
 import { useChatHost } from "./runtime-context.ts";
@@ -72,10 +73,22 @@ export function DirectiveChip({ directiveType, directiveId, label, remove, class
   );
 }
 
-/** The composer's chip: the X removes its node, found through its DOM (no node key is given). */
+/**
+ * The composer's chip: the X removes its node, found through its DOM (no node key is given). The
+ * editor turns any `:word[…]` into a directive node — a restored or pasted draft too — so a type
+ * that is neither a skill nor an agent is drawn as the text it was, never as a skill's chip (the
+ * send and a sent bubble read it as text as well).
+ */
 export function ComposerDirectiveChip({ directiveType, directiveId, label }: DirectiveChipProps) {
   const [editor] = useLexicalComposerContext();
   const { t } = useChatHost();
+  if (directiveType !== SKILL_DIRECTIVE && directiveType !== AGENT_DIRECTIVE) {
+    return (
+      <span data-directive-type={directiveType}>
+        {defaultDirectiveFormatter.serialize({ type: directiveType, label, id: directiveId })}
+      </span>
+    );
+  }
   return (
     <DirectiveChip
       directiveType={directiveType}

@@ -77,7 +77,7 @@ test("the panel reports each pin's state and source, and an unchecked assistant 
                       text: JSON.stringify({
                         uri: skillMd("auto"),
                         skill: "@acme/auto",
-                        pinned: true,
+                        loaded: true,
                       }),
                     },
                   ],
@@ -126,8 +126,9 @@ test("the panel reports each pin's state and source, and an unchecked assistant 
   await expect(loads.nth(0).getByTestId("skill-load-live")).toHaveText("Compétence auto chargée");
   await expect(loads.nth(0).getByTestId("skill-load-state")).toHaveCount(0);
   await expect(loads.nth(1)).toHaveAttribute("data-state", "readOnly");
-  await expect(loads.nth(1).getByTestId("skill-load-state")).toHaveText(
-    "Lue pour ce message seulement",
+  await expect(loads.nth(1).getByTestId("skill-load-state")).toHaveText("Lue, non épinglée");
+  await expect(loads.nth(1).getByTestId("skill-load-live")).toHaveText(
+    "Compétence pdf lue, non épinglée",
   );
   await expect(loads.nth(1)).not.toContainText("chargée");
   await expect(loads.nth(1)).not.toContainText("not pinned");

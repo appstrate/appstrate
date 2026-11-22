@@ -152,6 +152,8 @@ export function Thread({
           // the chat the one flat white screen in the product.
           className="bg-canvas flex h-full flex-col"
           style={{ ["--thread-max-width" as string]: "42rem" }}
+          // Lets a control inside find this thread's own composer (`ScrollToBottom`).
+          data-chat-thread=""
         >
           {/* Register the rich tool cards (these render nothing themselves). */}
           <InvokeOperationToolUI />
@@ -292,11 +294,13 @@ function ScrollToBottom() {
   return (
     <ThreadPrimitive.ScrollToBottom asChild>
       <Button
-        // Where the composer auto-focuses, it takes the focus back when the thread scrolls down.
-        onClick={() => {
+        // Where the composer auto-focuses, it takes the focus back when the thread scrolls down:
+        // this thread's composer, found from the button, not the first one in the document.
+        onClick={(event) => {
           if (shouldAutofocusComposer())
-            document
-              .querySelector<HTMLElement>("[data-aui-composer-type=thread] [contenteditable]")
+            event.currentTarget
+              .closest("[data-chat-thread]")
+              ?.querySelector<HTMLElement>("[data-aui-composer-type=thread] [contenteditable]")
               ?.focus({ preventScroll: true });
         }}
         type="button"

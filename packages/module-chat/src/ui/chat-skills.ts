@@ -4,7 +4,7 @@
 
 import { parseScopedName } from "@appstrate/core/naming";
 import { asRecordOrNull } from "@appstrate/core/safe-json";
-import { parseSkillUri } from "@appstrate/core/skill-uri";
+import { parseSkillUri } from "@appstrate/core/skill-address";
 import type { ChatSkillCommand } from "../commands.ts";
 import { SKILL_DIRECTIVE, directivesOf } from "../directives.ts";
 import {

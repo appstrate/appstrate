@@ -83,6 +83,19 @@ export function searchCommands(items: readonly TriggerItem[], query: string): Tr
     .map(({ item }) => item);
 }
 
+/**
+ * The menu has nothing to show for `query`: no offered entry and no capped skill matches it. A
+ * capped match keeps the menu open, to say why that skill cannot be added, and keeps Enter from
+ * sending the `/token`. While the commands load (`list` null) the menu stays open.
+ */
+export function noCommandMatch(list: CommandList | null, query: string): boolean {
+  return (
+    list !== null &&
+    searchCommands(list.items, query).length === 0 &&
+    searchCommands(list.capped, query).length === 0
+  );
+}
+
 /** A `/` starting a word, up to the cursor; not while `closed` (no match: Enter sends `/usr`). */
 export function slashMatch(
   text: string,

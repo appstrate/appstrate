@@ -5,7 +5,12 @@
 import { describe, expect, it } from "bun:test";
 import type { ChatCommands } from "../src/commands.ts";
 import { serializeDirective } from "../src/directives.ts";
-import { commandList, searchCommands, slashMatch } from "../src/ui/composer-commands.ts";
+import {
+  commandList,
+  noCommandMatch,
+  searchCommands,
+  slashMatch,
+} from "../src/ui/composer-commands.ts";
 
 const commands: ChatCommands = {
   skills: [
@@ -107,6 +112,28 @@ describe("searchCommands", () => {
 
   it("matches nothing for an unknown name", () => {
     expect(ids("zzz")).toEqual([]);
+  });
+});
+
+describe("noCommandMatch", () => {
+  it("keeps the menu open for a skill held back by the cap, so the menu says why", () => {
+    const pinned = ["@acme/tone", "@other/tone", "@x/a", "@x/b", "@x/c"];
+    const list = commandList(commands, { ...ctx, pinned, running: true });
+    // At the cap nothing offered matches `pdf`: both pdf skills are held back.
+    expect(searchCommands(list.items, "pdf")).toEqual([]);
+    expect(searchCommands(list.capped, "pdf").map((i) => i.id)).toEqual([
+      "@acme/pdf",
+      "@acme/pdf-tools",
+    ]);
+    expect(noCommandMatch(list, "pdf")).toBe(false);
+    expect(slashMatch("/pdf", 4, (q) => noCommandMatch(list, q))?.query).toBe("pdf");
+  });
+
+  it("closes when neither an entry nor a capped skill matches, and stays open while loading", () => {
+    const list = commandList(commands, ctx);
+    expect(noCommandMatch(list, "usr")).toBe(true);
+    expect(noCommandMatch(list, "tone")).toBe(false);
+    expect(noCommandMatch(null, "usr")).toBe(false);
   });
 });
 

@@ -12,6 +12,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { TooltipProvider } from "@appstrate/ui/components/tooltip";
 
 import { SkillChips } from "../src/ui/skill-chips.tsx";
+import { verdictsSummary } from "../src/ui/skills-summary.ts";
 import { ConversationScopeProvider } from "../src/ui/conversation-scope.ts";
 import { ChatHostProvider } from "../src/ui/runtime-context.ts";
 import { transportOf } from "./fake-request.ts";
@@ -101,6 +102,7 @@ describe("SkillChips", () => {
 
   describe("the live region", () => {
     const live = (html: string) => html.match(/data-testid="skill-pill-live"[^>]*>([^<]*)</)![1];
+    const names = new Map([["@acme/a", "Alpha"]]);
     const verdicts = conversationSkills(
       {
         skillDiscovery: true,
@@ -113,25 +115,29 @@ describe("SkillChips", () => {
       NO_SKILL_LAYERS,
     );
 
-    it("announces the last turn's verdicts in one polite region, joined through i18n", () => {
+    it("is one polite region, silent on the verdicts the conversation opens on", () => {
       const html = render(verdicts, { client: withCatalogue() });
       expect(html.match(/aria-live=/g)).toHaveLength(1);
-      expect(live(html)).toBe(
-        "skills.liveSummary {&quot;loaded&quot;:&quot;skills.count {\\&quot;count\\&quot;:2}&quot;,&quot;refused&quot;:&quot;skills.notLoadedCount {\\&quot;count\\&quot;:1}&quot;}",
+      expect(live(html)).toBe("");
+    });
+
+    it("summarises the last turn's verdicts, joined through i18n", () => {
+      expect(verdictsSummary(verdicts, names, host.t)).toBe(
+        'skills.liveSummary {"loaded":"skills.count {\\"count\\":2}","refused":"skills.notLoadedCount {\\"count\\":1}"}',
       );
     });
 
-    it("stays empty until the catalogue names the skills, so a name swap is never read out", () => {
-      expect(live(render(verdicts))).toBe("");
+    it("has nothing to say until the catalogue names the skills, so a name swap is never read out", () => {
+      expect(verdictsSummary(verdicts, null, host.t)).toBeNull();
       const single = conversationSkills(
         { skillDiscovery: true, pins: [{ id: "@acme/a", source: "user", status: "injected" }] },
         NO_SKILL_LAYERS,
       );
-      expect(live(render(single, { client: withCatalogue() }))).toBe("Alpha");
+      expect(verdictsSummary(single, names, host.t)).toBe("Alpha");
     });
 
     it("reads out server verdicts only, never a local toggle, a pending pin or a citation", () => {
-      const before = live(render(verdicts, { client: withCatalogue() }));
+      const before = verdictsSummary(verdicts, names, host.t);
       const toggled = conversationSkills(
         {
           skillDiscovery: true,
@@ -139,14 +145,12 @@ describe("SkillChips", () => {
         },
         { ...NO_SKILL_LAYERS, local: { pin: ["@acme/new"], unpin: ["@acme/a"] } },
       );
-      expect(live(render(toggled, { client: withCatalogue(), cited: ["@acme/cited"] }))).toBe(
-        before,
-      );
+      expect(verdictsSummary(toggled, names, host.t)).toBe(before);
       const unjudged = conversationSkills(
         { skillDiscovery: true, pins: [{ id: "@acme/a", source: "user", status: null }] },
         NO_SKILL_LAYERS,
       );
-      expect(live(render(unjudged, { client: withCatalogue() }))).toBe("");
+      expect(verdictsSummary(unjudged, names, host.t)).toBe("");
     });
   });
 
