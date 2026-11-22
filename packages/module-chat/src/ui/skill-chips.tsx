@@ -1,17 +1,22 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * The skills the user chose for the conversation, as ONE pill in the composer's tool row. It shows
- * its count, or the name when there is a single skill; the tooltip lists the names. Removal
- * happens in the picker, which the pill opens; its X restores the default selection. With
- * discovery off a lock replaces the book.
+ * The skills the conversation loads, as ONE pill in the composer's tool row. It shows its count, or
+ * the name when there is a single skill; the tooltip lists the names, then the pins the last turn
+ * left out (never counted as loaded). Removal happens in the picker, which the pill opens; its X
+ * restores the default selection. With discovery off a lock replaces the book.
  */
 
 import { BookOpenIcon, LockIcon } from "lucide-react";
 import { parseScopedName } from "@appstrate/core/naming";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@appstrate/ui/components/tooltip";
-import type { ChatSkillSelection } from "../skills.ts";
-import { canResetSkills, effectiveSkills } from "./chat-skills.ts";
+import {
+  canResetSkills,
+  effectiveSkills,
+  loadsSkill,
+  skillRowState,
+  type ConversationSkills,
+} from "./chat-skills.ts";
 import { RemovableChip } from "./removable-chip.tsx";
 import { useChatHost, type ChatTransport } from "./runtime-context.ts";
 import { SkillsChip } from "./skills-picker.tsx";
@@ -24,20 +29,29 @@ interface LoadedSkill {
   name: string;
 }
 
-/** What the conversation loads: the user's pins and the skills the draft cites. The catalogue is read only to name them, so only when there are. */
-function useLoadedSkills(
+/**
+ * The conversation's skills split by what the server reported: those it loads (pins and the
+ * draft's citations) and the pins the last turn left out. The catalogue is read only to name
+ * them, so only when there are.
+ */
+function useSkillsByLoad(
   transport: ChatTransport | undefined,
-  selection: ChatSkillSelection,
+  skills: ConversationSkills,
   cited: readonly string[],
 ) {
-  const pinnedIds = effectiveSkills(selection.pinnedSkills, cited).ids;
-  const catalogue = useChatCommands(transport, pinnedIds.length > 0);
+  const effective = effectiveSkills(skills.pinned, cited);
+  const catalogue = useChatCommands(transport, effective.ids.length > 0);
   const names = new Map((catalogue.data?.skills ?? []).map((s) => [s.id, s.name]));
   // Named by the package's bare name until the catalogue answers.
-  return pinnedIds.map((id): LoadedSkill => ({
+  const named = (id: string): LoadedSkill => ({
     packageId: id,
     name: names.get(id) ?? parseScopedName(id)?.name ?? id,
-  }));
+  });
+  const loads = (id: string) => loadsSkill(skillRowState(skills, id, effective.cited));
+  return {
+    loaded: effective.ids.filter(loads).map(named),
+    refused: effective.ids.filter((id) => !loads(id)).map(named),
+  };
 }
 
 type Translate = ReturnType<typeof useChatHost>["t"];
@@ -62,17 +76,31 @@ function SkillNameList({ skills }: { skills: readonly LoadedSkill[] }) {
   );
 }
 
+/** The pins the last turn left out, under the loaded ones: pinned, not in the model's context. */
+function RefusedSkillList({ skills }: { skills: readonly LoadedSkill[] }) {
+  const { t } = useChatHost();
+  if (skills.length === 0) return null;
+  return (
+    <div className="mt-1">
+      <p className="font-medium">{t("skills.state.notLoaded")}</p>
+      <SkillNameList skills={skills} />
+    </div>
+  );
+}
+
 /**
  * The skills the user chose, in one pill: its body opens the picker, where they are removed; its X
  * restores the default selection (no pin, discovery on).
  */
 function PinnedPill({
   skills,
+  refused,
   discovery,
   onOpen,
   onReset,
 }: {
   skills: readonly LoadedSkill[];
+  refused: readonly LoadedSkill[];
   discovery: boolean;
   onOpen: () => void;
   /** Absent when there is nothing to restore (only cited skills, discovery on). */
@@ -99,6 +127,7 @@ function PinnedPill({
       </TooltipTrigger>
       <TooltipContent side="top" className="max-w-72 text-xs">
         <SkillNameList skills={skills} />
+        <RefusedSkillList skills={refused} />
         {!discovery && <p className="mt-1">{t("skills.discoveryOffChip")}</p>}
       </TooltipContent>
     </Tooltip>
@@ -107,7 +136,7 @@ function PinnedPill({
 
 interface SkillChipsProps {
   transport: ChatTransport | undefined;
-  selection: ChatSkillSelection;
+  skills: ConversationSkills;
   /** The skills the composer's draft cites: counted and named like the pinned ones. */
   cited?: readonly string[];
   onOpenPicker: () => void;
@@ -117,25 +146,28 @@ interface SkillChipsProps {
 
 /**
  * The skill pill of the composer's tool row, drawn when the selection departs from the default.
- * While no skill is pinned, the picker's summary chip stands in (drawn only with discovery off).
+ * While no skill loads, the picker's summary chip stands in (drawn only with discovery off).
  */
 export function SkillChips({
   transport,
-  selection,
+  skills,
   cited = NO_CITED,
   onOpenPicker,
   onReset,
 }: SkillChipsProps) {
-  const pinned = useLoadedSkills(transport, selection, cited);
-  if (pinned.length === 0) {
-    return <SkillsChip selection={selection} onClick={onOpenPicker} onReset={onReset} />;
+  const { loaded, refused } = useSkillsByLoad(transport, skills, cited);
+  if (loaded.length === 0) {
+    return (
+      <SkillsChip discovery={skills.skillDiscovery} onClick={onOpenPicker} onReset={onReset} />
+    );
   }
   return (
     <PinnedPill
-      skills={pinned}
-      discovery={selection.skillDiscovery}
+      skills={loaded}
+      refused={refused}
+      discovery={skills.skillDiscovery}
       onOpen={onOpenPicker}
-      onReset={canResetSkills(selection, cited) ? onReset : undefined}
+      onReset={canResetSkills(skills, cited) ? onReset : undefined}
     />
   );
 }

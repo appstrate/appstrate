@@ -42,6 +42,14 @@ import {
 import { useSessions, useSessionDetail } from "../src/ui/use-sessions.ts";
 import { transportOf, transportOver } from "./fake-request.ts";
 import { conversationScope, testHost } from "./test-host.ts";
+import {
+  DEFAULT_STORED_SKILLS,
+  NO_SKILL_CHANGES,
+  conversationSkills,
+} from "../src/ui/chat-skills.ts";
+
+const NO_SKILLS = conversationSkills(DEFAULT_STORED_SKILLS, NO_SKILL_CHANGES);
+const NO_SKILL_ACTIONS = { togglePin() {}, setDiscovery() {}, reset() {} };
 
 /** The assistant-ui runtime the attach button reads. */
 function Runtime({ children }: { children: ReactNode }) {
@@ -126,7 +134,7 @@ describe("changing the limit of an existing conversation", () => {
         ...row,
         ...changes,
         messages: [],
-        skills: { skillDiscovery: true, pinnedSkills: [] },
+        skills: DEFAULT_STORED_SKILLS,
         createdAt: "",
       });
       qc.setQueryData<SessionsCache>(listKey, {
@@ -420,8 +428,8 @@ describe("the composer's limit chip", () => {
               <TooltipProvider>
                 <ComposerTools
                   transport={transportOf(() => ({ "X-Space-Id": "spc_a" }))}
-                  selection={{ skillDiscovery: true, pinnedSkills: [] }}
-                  onSelectionChange={() => {}}
+                  skills={NO_SKILLS}
+                  skillActions={NO_SKILL_ACTIONS}
                   showPicker={false}
                   authorsPackages={false}
                 />
@@ -548,8 +556,8 @@ describe("the composer's attach button", () => {
             <TooltipProvider>
               <ComposerTools
                 transport={transport}
-                selection={{ skillDiscovery: true, pinnedSkills: [] }}
-                onSelectionChange={() => {}}
+                skills={NO_SKILLS}
+                skillActions={NO_SKILL_ACTIONS}
                 showPicker={false}
                 authorsPackages={false}
               />

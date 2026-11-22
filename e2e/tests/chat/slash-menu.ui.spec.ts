@@ -182,10 +182,12 @@ test("a skill chip pins the skill with the message that carries it", async ({
   const sent = page.waitForRequest(chatPost(chat));
   await page.keyboard.press("Enter");
   const body = (await sent).postDataJSON() as {
-    pinned_skills?: string[];
+    pin_skills?: string[];
+    unpin_skills?: string[];
     messages: { parts: { type: string; text?: string }[] }[];
   };
-  expect(body.pinned_skills).toEqual(["@acme/tone"]);
+  expect(body.pin_skills).toEqual(["@acme/tone"]);
+  expect(body.unpin_skills).toBeUndefined();
   expect(body.messages.at(-1)!.parts).toEqual([
     { type: "text", text: ":skill[tone]{name=@acme/tone} make it shorter" },
   ]);

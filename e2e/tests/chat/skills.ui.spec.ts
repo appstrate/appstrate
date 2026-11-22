@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Skills in the chat, from the browser: the picker's chosen skills and discovery switch
- * stay in the page — nothing is written, no conversation is created — until a
- * message carries them.
+ * Skills in the chat, from the browser: the picker's changes (pins, discovery switch) stay in the
+ * page — nothing is written, no conversation is created — until a message carries them, as
+ * changes and never as a full set.
  */
 
 import type { Page } from "@playwright/test";
@@ -16,7 +16,7 @@ async function openSkillsPicker(page: Page) {
   await page.getByRole("menuitem", { name: /Compétences|Skills/ }).click();
 }
 
-test("carries the chosen skills and discovery with the first message, and writes nothing before", async ({
+test("carries the skill changes and discovery with the first message, and writes nothing before", async ({
   authedPage: page,
   apiClient,
   browserCtx,
@@ -74,10 +74,9 @@ test("carries the chosen skills and discovery with the first message, and writes
   await page.route(`**${chat}`, (route) => route.fulfill({ status: 503, body: "" }));
   await page.getByRole("textbox", { name: "Message Appstrate…", exact: true }).fill("bonjour");
   await page.keyboard.press("Enter");
-  const body = (await sent).postDataJSON() as {
-    skill_discovery?: boolean;
-    pinned_skills?: string[];
-  };
+  const body = (await sent).postDataJSON() as Record<string, unknown>;
   expect(body.skill_discovery).toBe(false);
-  expect(body.pinned_skills).toEqual([packageId]);
+  expect(body.pin_skills).toEqual([packageId]);
+  expect(body.unpin_skills).toBeUndefined();
+  expect(body.pinned_skills).toBeUndefined();
 });

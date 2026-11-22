@@ -4,12 +4,7 @@
 
 import { describe, expect, it } from "bun:test";
 import { serializeDirective } from "../src/directives.ts";
-import {
-  draftIssue,
-  mergePinned,
-  namesAgent,
-  sendWithDirectives,
-} from "../src/ui/directive-send.ts";
+import { draftIssue, namesAgent, sendWithDirectives } from "../src/ui/directive-send.ts";
 
 const skill = (name: string) =>
   serializeDirective({ type: "skill", label: name, id: `@acme/${name}` });
@@ -92,18 +87,6 @@ describe("draftIssue", () => {
     expect(draftIssue(`${skill("e")}`, pinned)).toBeNull();
     expect(draftIssue(`${skill("e")} ${skill("f")}`, pinned)).toBe("pins");
     expect(draftIssue(`${skill("a")} ${skill("b")}`, pinned)).toBeNull();
-  });
-});
-
-describe("mergePinned", () => {
-  it("adds the new skills after the pinned ones, and is the same array when none is new", () => {
-    const pinned = ["@acme/a"];
-    expect(mergePinned(pinned, ["@acme/a"])).toBe(pinned);
-    expect(mergePinned(pinned, ["@acme/b", "@acme/b", "@acme/a"])).toEqual(["@acme/a", "@acme/b"]);
-  });
-
-  it("leaves the cap to draftIssue: it adds every skill it is handed", () => {
-    expect(mergePinned(["a", "b", "c", "d"], ["e", "f"])).toEqual(["a", "b", "c", "d", "e", "f"]);
   });
 });
 

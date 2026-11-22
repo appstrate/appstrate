@@ -16,7 +16,12 @@ import { ConversationScopeProvider } from "../src/ui/conversation-scope.ts";
 import { ChatHostProvider } from "../src/ui/runtime-context.ts";
 import { transportOf } from "./fake-request.ts";
 import { conversationScope, testHost } from "./test-host.ts";
-import type { ChatSkillSelection } from "../src/skills.ts";
+import type { PinnedSkill } from "../src/skills.ts";
+import {
+  NO_SKILL_CHANGES,
+  conversationSkills,
+  type ConversationSkills,
+} from "../src/ui/chat-skills.ts";
 
 const host = testHost({
   t: (key, options) => (options ? `${key} ${JSON.stringify(options)}` : key),
@@ -24,12 +29,17 @@ const host = testHost({
 });
 
 const scoped = transportOf(() => ({ "X-Org-Id": "org_1", "X-Space-Id": "spc_a" }));
-const pinned = (pinnedSkills: string[], skillDiscovery = true): ChatSkillSelection => ({
-  skillDiscovery,
-  pinnedSkills,
-});
+const pinned = (
+  ids: string[],
+  skillDiscovery = true,
+  status: PinnedSkill["status"] = "injected",
+): ConversationSkills =>
+  conversationSkills(
+    { skillDiscovery, pins: ids.map((id) => ({ id, source: "user", status })) },
+    NO_SKILL_CHANGES,
+  );
 
-function render(selection: ChatSkillSelection = pinned([], false)): string {
+function render(skills: ConversationSkills = pinned([], false)): string {
   return renderToStaticMarkup(
     <QueryClientProvider client={new QueryClient()}>
       <ChatHostProvider value={host}>
@@ -39,7 +49,7 @@ function render(selection: ChatSkillSelection = pinned([], false)): string {
           <TooltipProvider>
             <SkillChips
               transport={scoped}
-              selection={selection}
+              skills={skills}
               onOpenPicker={() => {}}
               onReset={() => {}}
             />
@@ -84,6 +94,34 @@ describe("SkillChips", () => {
     const html = render(pinned([], false));
     expect(html).toContain('data-testid="skills-picker-trigger"');
     expect(html).toContain('aria-label="skills.reset"');
+  });
+
+  it("never counts a pin the last turn refused as loaded", () => {
+    const skills = conversationSkills(
+      {
+        skillDiscovery: true,
+        pins: [
+          { id: "@a/one", source: "user", status: "injected" },
+          { id: "@a/big", source: "user", status: "over_budget" },
+        ],
+      },
+      NO_SKILL_CHANGES,
+    );
+    const html = render(skills);
+    expect(html.match(/skill-pill-pinned/g)).toHaveLength(1);
+    expect(html).toContain(
+      'aria-label="skills.pinnedPillLabel {&quot;skills&quot;:&quot;one&quot;}"',
+    );
+    // Only refused pins: no pill, the picker's chip stands in (none with discovery on).
+    expect(render(pinned(["@a/big"], true, "unavailable"))).toBe("");
+  });
+
+  it("counts a pin the server has not evaluated yet and a pending one: the next turn loads them", () => {
+    const skills = conversationSkills(
+      { skillDiscovery: true, pins: [{ id: "@a/one", source: "assistant", status: null }] },
+      { pin: ["@a/two"], unpin: [] },
+    );
+    expect(render(skills)).toContain("skills.pinnedCount {&quot;n&quot;:2}");
   });
 
   it("puts an X restoring the default on the pinned pill", () => {

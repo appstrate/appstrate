@@ -7,7 +7,7 @@
  */
 
 import { DefaultChatTransport, type UIMessage } from "ai";
-import type { ChatSkillSelection } from "../skills.ts";
+import type { ChatSkillChanges } from "../skills.ts";
 import type { ModelGenerationSettings } from "@appstrate/core/model-generation";
 import { actsIn, type ChatTransport } from "./runtime-context.ts";
 
@@ -36,8 +36,9 @@ export interface ConversationCreation {
 }
 
 /**
- * The body of a turn: the messages, the generation settings, the authoring switch, the skills the
- * user changed (nothing changed = nothing sent) and, on the turn that creates the conversation,
+ * The body of a turn: the messages, the generation settings, the authoring switch, what the user
+ * changed in the skills since the server's state it last read (each field only when it carries
+ * something; never a full set) and, on the turn that creates the conversation,
  * its origin space and limit (`creation`; the server ignores them for an existing conversation).
  */
 export function turnBody(args: {
@@ -47,7 +48,7 @@ export function turnBody(args: {
   generation: ModelGenerationSettings;
   packageAuthoring: boolean;
   inlineRunsUseChatModel: boolean;
-  skills: ChatSkillSelection | undefined;
+  skills: ChatSkillChanges | undefined;
   creation: ConversationCreation | undefined;
 }) {
   const {
@@ -68,7 +69,9 @@ export function turnBody(args: {
     package_authoring: packageAuthoring,
     inline_runs_use_chat_model: inlineRunsUseChatModel,
     ...creation,
-    ...(skills && { skill_discovery: skills.skillDiscovery, pinned_skills: skills.pinnedSkills }),
+    ...(skills?.skillDiscovery !== undefined && { skill_discovery: skills.skillDiscovery }),
+    ...(skills && skills.pin.length > 0 && { pin_skills: skills.pin }),
+    ...(skills && skills.unpin.length > 0 && { unpin_skills: skills.unpin }),
   };
 }
 

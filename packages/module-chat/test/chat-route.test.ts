@@ -139,14 +139,28 @@ describe("the origin space of a new conversation", () => {
     expect("restricted" in body).toBe(false);
   });
 
-  it("sends the skills only when the user changed them", () => {
-    expect("skill_discovery" in turnBody({ ...base, creation: undefined })).toBe(false);
+  it("sends the skill changes only, each field when it carries something", () => {
+    const keys = (skills: Parameters<typeof turnBody>[0]["skills"]) =>
+      Object.keys(turnBody({ ...base, creation: undefined, skills })).filter((key) =>
+        /skill/.test(key),
+      );
+    expect(keys(undefined)).toEqual([]);
+    expect(keys({ pin: [], unpin: [] })).toEqual([]);
     expect(
       turnBody({
         ...base,
         creation: undefined,
-        skills: { skillDiscovery: false, pinnedSkills: ["@acme/tone"] },
+        skills: { skillDiscovery: false, pin: ["@acme/tone"], unpin: ["@acme/old"] },
       }),
-    ).toMatchObject({ skill_discovery: false, pinned_skills: ["@acme/tone"] });
+    ).toMatchObject({
+      skill_discovery: false,
+      pin_skills: ["@acme/tone"],
+      unpin_skills: ["@acme/old"],
+    });
+    expect(keys({ pin: [], unpin: ["@acme/old"] })).toEqual(["unpin_skills"]);
+    // Never the full set.
+    expect(keys({ skillDiscovery: true, pin: ["@acme/a"], unpin: [] })).not.toContain(
+      "pinned_skills",
+    );
   });
 });

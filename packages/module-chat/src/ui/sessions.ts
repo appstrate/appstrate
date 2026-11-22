@@ -15,7 +15,8 @@ import {
 } from "@tanstack/react-query";
 import type { UIMessage } from "ai";
 import type { TokenUsage } from "@appstrate/core/token-usage";
-import type { ChatSkillSelection } from "../skills.ts";
+import type { PinnedSkill } from "../skills.ts";
+import type { StoredSkills } from "./chat-skills.ts";
 import { errorStatus, jsonInit, type ChatTransport } from "./runtime-context.ts";
 import { chatPath } from "./chat-route.ts";
 
@@ -213,7 +214,7 @@ interface StoredMessage {
 /** A conversation as the detail route serves it: its row, history, skill selection and usage. */
 export interface SessionHistory extends SessionSummary {
   messages: UIMessage[];
-  skills: ChatSkillSelection;
+  skills: StoredSkills;
   createdAt: string;
   /** Tokens of every model call metered for the conversation's turns. */
   usage: TokenUsage;
@@ -235,19 +236,18 @@ export async function loadHistory(
     if (errorStatus(error) === 404) return null;
     throw error;
   }
-  const { messages, skill_discovery, pinned_skills, ...row } =
-    (await res.json()) as SessionSummary & {
-      messages?: StoredMessage[];
-      skill_discovery: boolean;
-      pinned_skills: string[];
-      createdAt: string;
-      usage: TokenUsage;
-    };
+  const { messages, skill_discovery, skills, ...row } = (await res.json()) as SessionSummary & {
+    messages?: StoredMessage[];
+    skill_discovery: boolean;
+    skills: PinnedSkill[];
+    createdAt: string;
+    usage: TokenUsage;
+  };
   return {
     ...row,
     // Row `id` LAST: a stray `id` inside a stored `content` must not win.
     messages: (messages ?? []).map((e) => ({ ...e.content, id: e.id }) as UIMessage),
-    skills: { skillDiscovery: skill_discovery, pinnedSkills: pinned_skills },
+    skills: { skillDiscovery: skill_discovery, pins: skills },
   };
 }
 
@@ -265,8 +265,8 @@ export function sessionQuery(transport: ChatTransport | null | undefined, id: st
   });
 }
 
-/** What seeds a conversation's runtime: its stored messages and skill selection. */
-export type SessionSeed = Pick<SessionHistory, "messages" | "skills">;
+/** What seeds a conversation's runtime: its stored messages. */
+export type SessionSeed = Pick<SessionHistory, "messages">;
 
 /**
  * The seed of conversation `id` (`null`: no such conversation), read through the conversation's
@@ -284,7 +284,7 @@ export function sessionSeedQuery(
       ? async (): Promise<SessionSeed | null> => {
           // A cached entry has an observer, which the session signal keeps fresh.
           const history = await queryClient.fetchQuery(sessionQuery(transport, id));
-          return history && { messages: history.messages, skills: history.skills };
+          return history && { messages: history.messages };
         }
       : skipToken,
     staleTime: Infinity,

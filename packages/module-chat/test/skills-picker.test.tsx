@@ -16,23 +16,38 @@ import { SkillsPickerPanel } from "../src/ui/skills-picker.tsx";
 import { transportOf } from "./fake-request.ts";
 import { conversationScope, testHost } from "./test-host.ts";
 import type { ReactElement, ReactNode } from "react";
-import { MAX_PINNED_SKILLS, type ChatSkillSelection } from "../src/skills.ts";
+import { MAX_PINNED_SKILLS, type ChatSkillChanges, type PinnedSkill } from "../src/skills.ts";
+import { NO_SKILL_CHANGES, conversationSkills } from "../src/ui/chat-skills.ts";
+import type { SkillActions } from "../src/ui/use-conversation-skills.ts";
 
 const host = testHost({ actingSpaceIds: ["spc_a"] });
 
 const transport = transportOf(() => ({ "X-Org-Id": "org_1", "X-Space-Id": "spc_a" }));
 
+const userPin = (id: string): PinnedSkill => ({ id, source: "user", status: "injected" });
+
+const NO_ACTIONS: Pick<SkillActions, "togglePin" | "setDiscovery"> = {
+  togglePin() {},
+  setDiscovery() {},
+};
+
 function render(
   skillDiscovery: boolean,
-  pinnedSkills: string[] = [],
+  pins: string[] | PinnedSkill[] = [],
   cited: string[] = [],
+  changes: ChatSkillChanges = NO_SKILL_CHANGES,
+  /** Ids the catalogue does not list (dead pins). */
+  unlisted: string[] = [],
 ): string {
+  const stored = pins.map((pin) => (typeof pin === "string" ? userPin(pin) : pin));
   const qc = new QueryClient();
   const skill = (id: string, name: string) => ({ id, name, description: "", version: null });
   qc.setQueryData(["packages", "chat-commands", "org_1", null], {
     skills: [
       skill("@acme/free", "Free"),
-      ...[...pinnedSkills, ...cited].map((id) => skill(id, id)),
+      ...[...stored.map((pin) => pin.id), ...cited, ...changes.pin]
+        .filter((id) => !unlisted.includes(id))
+        .map((id) => skill(id, id)),
     ],
     agents: [],
   });
@@ -45,8 +60,8 @@ function render(
           <TooltipProvider>
             <SkillsPickerPanel
               transport={transport}
-              selection={{ skillDiscovery, pinnedSkills }}
-              onChange={() => {}}
+              skills={conversationSkills({ skillDiscovery, pins: stored }, changes)}
+              actions={NO_ACTIONS}
               cited={cited}
             />
           </TooltipProvider>
@@ -72,13 +87,13 @@ function findElement(node: ReactNode, match: (props: Record<string, unknown>) =>
 }
 
 /** Calls the discovery switch's change handler, with the panel's hooks run inside a render. */
-function toggleDiscovery(selection: ChatSkillSelection, next: boolean): ChatSkillSelection[] {
-  const emitted: ChatSkillSelection[] = [];
+function toggleDiscovery(skillDiscovery: boolean, next: boolean): boolean[] {
+  const emitted: boolean[] = [];
   function Probe() {
     const tree = SkillsPickerPanel({
       transport,
-      selection,
-      onChange: (s) => emitted.push(s),
+      skills: conversationSkills({ skillDiscovery, pins: [] }, NO_SKILL_CHANGES),
+      actions: { ...NO_ACTIONS, setDiscovery: (on) => emitted.push(on) },
     });
     const sw = findElement(
       tree,
@@ -102,13 +117,9 @@ function toggleDiscovery(selection: ChatSkillSelection, next: boolean): ChatSkil
 }
 
 describe("SkillsPicker", () => {
-  it("emits the selection with the new discovery value, pins kept", () => {
-    expect(toggleDiscovery({ skillDiscovery: true, pinnedSkills: ["@a/one"] }, false)).toEqual([
-      { skillDiscovery: false, pinnedSkills: ["@a/one"] },
-    ]);
-    expect(toggleDiscovery({ skillDiscovery: false, pinnedSkills: [] }, true)).toEqual([
-      { skillDiscovery: true, pinnedSkills: [] },
-    ]);
+  it("hands the new discovery value to the conversation's changes", () => {
+    expect(toggleDiscovery(true, false)).toEqual([false]);
+    expect(toggleDiscovery(false, true)).toEqual([true]);
   });
 
   for (const discovery of [true, false]) {
@@ -161,23 +172,24 @@ describe("SkillsPicker", () => {
     );
   });
 
-  it("does nothing when a cited skill is toggled: the chip in the message is what drops it", () => {
-    const emitted: ChatSkillSelection[] = [];
+  /** Toggles each row of `ids` through the rendered tree; returns the ids the panel handed on. */
+  function toggleRows(pins: PinnedSkill[], cited: string[], ids: string[]): string[] {
+    const toggled: string[] = [];
     // Rows exist only once the catalogue answers: seed it, then toggle through the rendered tree.
     const qc = new QueryClient();
     const skill = (id: string) => ({ id, name: id, description: "", version: null });
     qc.setQueryData(["packages", "chat-commands", "org_1", null], {
-      skills: [skill("@a/one"), skill("@a/two")],
+      skills: ids.map(skill),
       agents: [],
     });
     function Toggle() {
       const tree = SkillsPickerPanel({
         transport,
-        selection: { skillDiscovery: true, pinnedSkills: ["@a/one"] },
-        onChange: (sel) => emitted.push(sel),
-        cited: ["@a/one", "@a/two"],
+        skills: conversationSkills({ skillDiscovery: true, pins }, NO_SKILL_CHANGES),
+        actions: { ...NO_ACTIONS, togglePin: (id) => toggled.push(id) },
+        cited,
       });
-      for (const id of ["@a/one", "@a/two"]) {
+      for (const id of ids) {
         const box = findElement(tree, (props) => props["data-testid"] === `skill-pin-${id}`);
         (box!.props.onCheckedChange as () => void)();
       }
@@ -194,6 +206,92 @@ describe("SkillsPicker", () => {
         </ChatHostProvider>
       </QueryClientProvider>,
     );
-    expect(emitted).toEqual([]);
+    return toggled;
+  }
+
+  it("does nothing when a cited skill is toggled: the chip in the message is what drops it", () => {
+    expect(toggleRows([userPin("@a/one")], ["@a/one", "@a/two"], ["@a/one", "@a/two"])).toEqual([]);
+  });
+
+  it("lets every server pin be unchecked, the assistant's included", () => {
+    const pins: PinnedSkill[] = [
+      userPin("@a/mine"),
+      { id: "@a/assistant", source: "assistant", status: "injected" },
+      { id: "@a/big", source: "user", status: "over_budget" },
+    ];
+    expect(toggleRows(pins, [], ["@a/mine", "@a/assistant", "@a/big"])).toEqual([
+      "@a/mine",
+      "@a/assistant",
+      "@a/big",
+    ]);
+  });
+
+  describe("a row says what the server reported of its skill", () => {
+    const box = (html: string, id: string) =>
+      html.match(new RegExp(`<button[^>]*data-testid="skill-pin-${id}"[^>]*>`))![0];
+    const caption = (html: string, id: string) =>
+      html.match(new RegExp(`data-testid="skill-pin-state-${id}"[^>]*>([^<]*)<`))?.[1];
+
+    it("a user's injected pin: checked, enabled, no caption", () => {
+      const html = render(true, ["@a/mine"]);
+      expect(box(html, "@a/mine")).toContain('aria-checked="true"');
+      expect(box(html, "@a/mine")).not.toContain(` disabled=""`);
+      expect(caption(html, "@a/mine")).toBeUndefined();
+    });
+
+    it("an assistant's injected pin: checked, enabled, « Chargée par l'assistant »", () => {
+      const html = render(true, [{ id: "@a/auto", source: "assistant", status: "injected" }]);
+      expect(box(html, "@a/auto")).toContain('aria-checked="true"');
+      expect(box(html, "@a/auto")).not.toContain(` disabled=""`);
+      expect(caption(html, "@a/auto")).toBe("skills.state.assistant");
+    });
+
+    it("a pin no turn evaluated yet, and a pending pin: checked, loaded with the next message", () => {
+      const html = render(true, [{ id: "@a/unseen", source: "user", status: null }], [], {
+        pin: ["@a/pending"],
+        unpin: [],
+      });
+      expect(caption(html, "@a/unseen")).toBe("skills.state.next");
+      expect(box(html, "@a/pending")).toContain('aria-checked="true"');
+      expect(caption(html, "@a/pending")).toBe("skills.state.next");
+    });
+
+    for (const reason of ["over_budget", "unavailable", "unreadable"] as const) {
+      it(`a pin the last turn refused (${reason}): checked, enabled, not loaded and why`, () => {
+        const html = render(true, [{ id: "@a/ref", source: "user", status: reason }]);
+        expect(box(html, "@a/ref")).toContain('aria-checked="true"');
+        expect(box(html, "@a/ref")).not.toContain(` disabled=""`);
+        expect(caption(html, "@a/ref")).toBe(`skills.state.refused.${reason}`);
+      });
+    }
+
+    it("a refused pin the catalogue no longer lists gives its reason once", () => {
+      const html = render(
+        true,
+        [{ id: "@a/gone", source: "user", status: "unavailable" }],
+        [],
+        NO_SKILL_CHANGES,
+        ["@a/gone"],
+      );
+      expect(caption(html, "@a/gone")).toBe("skills.state.refused.unavailable");
+      expect(html).not.toContain("skills.unavailable");
+    });
+
+    it("a server pin the user unchecked: unchecked, no caption", () => {
+      const html = render(true, ["@a/mine"], [], { pin: [], unpin: ["@a/mine"] });
+      expect(box(html, "@a/mine")).toContain('aria-checked="false"');
+      expect(caption(html, "@a/mine")).toBeUndefined();
+    });
+
+    it("only the draft locks: a cited row is the one disabled", () => {
+      const html = render(
+        true,
+        [{ id: "@a/auto", source: "assistant", status: "injected" }],
+        ["@a/cited"],
+      );
+      expect(box(html, "@a/cited")).toContain(` disabled=""`);
+      expect(caption(html, "@a/cited")).toBe("skills.cited");
+      expect(box(html, "@a/auto")).not.toContain(` disabled=""`);
+    });
   });
 });

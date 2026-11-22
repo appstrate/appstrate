@@ -4,7 +4,13 @@
 
 import { describe, expect, it } from "bun:test";
 import { MAX_PINNED_SKILLS } from "../src/skills.ts";
-import { canResetSkills, citedSkillIds, effectiveSkills } from "../src/ui/chat-skills.ts";
+import {
+  canResetSkills,
+  citedSkillIds,
+  conversationSkills,
+  effectiveSkills,
+  NO_SKILL_CHANGES,
+} from "../src/ui/chat-skills.ts";
 import { draftIssue } from "../src/ui/directive-send.ts";
 import { commandList } from "../src/ui/composer-commands.ts";
 
@@ -50,16 +56,21 @@ describe("effectiveSkills", () => {
 });
 
 describe("canResetSkills", () => {
-  const on = { skillDiscovery: true, pinnedSkills: ["@acme/a"] };
+  const skills = (skillDiscovery: boolean, pinned: string[]) =>
+    conversationSkills(
+      { skillDiscovery, pins: pinned.map((id) => ({ id, source: "user", status: "injected" })) },
+      NO_SKILL_CHANGES,
+    );
+  const on = skills(true, ["@acme/a"]);
 
   it("is true for a pinned skill the draft does not cite, or with discovery off", () => {
     expect(canResetSkills(on, [])).toBe(true);
     expect(canResetSkills(on, ["@acme/b"])).toBe(true);
-    expect(canResetSkills({ skillDiscovery: false, pinnedSkills: [] }, ["@acme/a"])).toBe(true);
+    expect(canResetSkills(skills(false, []), ["@acme/a"])).toBe(true);
   });
 
   it("is false when only cited skills are held: nothing visible would change", () => {
     expect(canResetSkills(on, ["@acme/a"])).toBe(false);
-    expect(canResetSkills({ skillDiscovery: true, pinnedSkills: [] }, ["@acme/a"])).toBe(false);
+    expect(canResetSkills(skills(true, []), ["@acme/a"])).toBe(false);
   });
 });

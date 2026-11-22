@@ -26,15 +26,6 @@ export function draftIssue(text: string, pinned: readonly string[]): DraftIssue 
   return effectiveSkills(pinned, citedSkillIds(text)).overCap ? "pins" : null;
 }
 
-/** `pinned`, then the skills not in it yet; `pinned` itself when nothing joins. The cap is `draftIssue`'s. */
-export function mergePinned(
-  pinned: readonly string[],
-  skills: readonly string[],
-): readonly string[] {
-  const added = skills.filter((id, i) => !pinned.includes(id) && skills.indexOf(id) === i);
-  return added.length === 0 ? pinned : [...pinned, ...added];
-}
-
 /** Whether a text launches an agent: such a draft is not queued behind a running turn. */
 export function namesAgent(text: string): boolean {
   return directivesOf(text).some((d) => d.type === AGENT_DIRECTIVE);

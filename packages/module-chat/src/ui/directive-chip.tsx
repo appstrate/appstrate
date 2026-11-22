@@ -2,7 +2,8 @@
 
 /**
  * A skill or an agent named in a message, drawn as an inline chip: in the composer (the editor's
- * atomic chip) and in the sent bubble (`DirectiveText`, the text part of a user message).
+ * atomic chip), in the sent bubble (`DirectiveText`, the text part of a user message) and in an
+ * assistant message, for a skill the assistant loaded (`skill-load.tsx`).
  */
 
 import { useRef, type MouseEvent, type ReactNode } from "react";
@@ -36,9 +37,11 @@ interface ChipProps {
   label: string;
   /** In the composer only: deletes the chip. */
   remove?: { label: string; onRemove: (chip: HTMLElement) => void };
+  /** A state drawn on the chip (an assistant's load still running, or refused). */
+  className?: string;
 }
 
-export function DirectiveChip({ directiveType, directiveId, label, remove }: ChipProps) {
+export function DirectiveChip({ directiveType, directiveId, label, remove, className }: ChipProps) {
   const ref = useRef<HTMLSpanElement>(null);
   return (
     <span
@@ -49,7 +52,10 @@ export function DirectiveChip({ directiveType, directiveId, label, remove }: Chi
       // the line's and its box (the font's content area, borders paint outside the line box) is
       // centred on the line. A flex chip aligned on its first child's baseline (icon, tile) and
       // grew taller than the line. `box-decoration-clone` keeps the border on each wrapped piece.
-      className="group/chip bg-muted text-foreground mx-0.5 rounded-md border box-decoration-clone px-1.5"
+      className={cn(
+        "group/chip bg-muted text-foreground mx-0.5 rounded-md border box-decoration-clone px-1.5",
+        className,
+      )}
     >
       <ChipSlot className="mr-1">
         {directiveType === AGENT_DIRECTIVE ? (

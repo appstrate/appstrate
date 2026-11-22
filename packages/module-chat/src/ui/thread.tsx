@@ -48,6 +48,7 @@ import {
   ImportPackageFileToolUI,
   RunAndWaitToolUI,
 } from "./tool-uis.tsx";
+import { ReadResourceToolUI, ReadToolUI } from "./skill-load.tsx";
 import { parseResume, INTEGRATION_RESUME_MARKER } from "./auth-offer.ts";
 import { IntegrationIcon } from "./integration-icon.tsx";
 import {
@@ -158,6 +159,8 @@ export function Thread({
           <SearchToolUI />
           <DescribeToolUI />
           <ImportPackageFileToolUI />
+          <ReadResourceToolUI />
+          <ReadToolUI />
 
           {/* Empty: composer centered mid-screen for a strong first impression.
           Non-empty: classic scrollable transcript with a sticky footer. */}

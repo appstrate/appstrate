@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
-// Skill picker: the conversation's chosen skills and the discovery switch. Controlled;
-// nothing is written here — the next turn carries the selection.
+// Skill picker: the conversation's skills and the discovery switch. Controlled; nothing is
+// written here — the next turn carries the changes. Each row says what the server reported of
+// its skill: only the server says a skill is loaded.
 
 import type { ReactNode } from "react";
 import { LockIcon } from "lucide-react";
@@ -10,8 +11,15 @@ import { Skeleton } from "@appstrate/ui/components/skeleton";
 import { Switch } from "@appstrate/ui/components/switch";
 import { Popover, PopoverAnchor, PopoverContent } from "@appstrate/ui/components/popover";
 import { cn } from "@appstrate/ui/cn";
-import { MAX_PINNED_SKILLS, type ChatSkillSelection } from "../skills.ts";
-import { effectiveSkills, skillPickerRows, togglePinned } from "./chat-skills.ts";
+import { MAX_PINNED_SKILLS } from "../skills.ts";
+import {
+  effectiveSkills,
+  skillPickerRows,
+  skillRowState,
+  type ConversationSkills,
+  type SkillRowState,
+} from "./chat-skills.ts";
+import type { SkillActions } from "./use-conversation-skills.ts";
 import { useChatCommands } from "./use-chat-commands.ts";
 import { RemovableChip } from "./removable-chip.tsx";
 import { useChatHost, type ChatTransport } from "./runtime-context.ts";
@@ -20,8 +28,8 @@ const NO_CITED: readonly string[] = [];
 
 interface SkillsPickerProps {
   transport: ChatTransport | undefined;
-  selection: ChatSkillSelection;
-  onChange: (selection: ChatSkillSelection) => void;
+  skills: ConversationSkills;
+  actions: Pick<SkillActions, "togglePin" | "setDiscovery">;
   /** Opened from the composer's settings menu or a skills chip, never by a trigger of its own. */
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -37,16 +45,16 @@ interface SkillsPickerProps {
  * default selection.
  */
 export function SkillsChip({
-  selection,
+  discovery,
   onClick,
   onReset,
 }: {
-  selection: ChatSkillSelection;
+  discovery: boolean;
   onClick: () => void;
   onReset: () => void;
 }) {
   const { t } = useChatHost();
-  if (selection.skillDiscovery) return null;
+  if (discovery) return null;
   return (
     <RemovableChip
       icon={<LockIcon />}
@@ -60,13 +68,31 @@ export function SkillsChip({
   );
 }
 
+type Translate = ReturnType<typeof useChatHost>["t"];
+
+/** A row's caption: what the server reported of its skill; none for a skill the user's pin loaded. */
+function rowCaption(state: SkillRowState, t: Translate): string | null {
+  switch (state.kind) {
+    case "cited":
+      return t("skills.cited");
+    case "next":
+      return t("skills.state.next");
+    case "loaded":
+      return state.source === "assistant" ? t("skills.state.assistant") : null;
+    case "refused":
+      return t(`skills.state.refused.${state.reason}`);
+    case "off":
+      return null;
+  }
+}
+
 /** The popover's body: the discovery switch and the skill list. Exported to be rendered without the popover's portal. */
 export function SkillsPickerPanel({
   transport,
-  selection,
-  onChange,
+  skills: conversation,
+  actions,
   cited = NO_CITED,
-}: Pick<SkillsPickerProps, "transport" | "selection" | "onChange" | "cited">) {
+}: Pick<SkillsPickerProps, "transport" | "skills" | "actions" | "cited">) {
   const { t } = useChatHost();
   const catalogue = useChatCommands(transport, true);
   const skills = catalogue.data?.skills ?? [];
@@ -74,16 +100,14 @@ export function SkillsPickerPanel({
   // as "nothing".
   const loading = catalogue.isLoading;
 
-  const pinned = selection.pinnedSkills;
-  const effective = effectiveSkills(pinned, cited);
-  const pinnedSet = new Set(effective.ids);
+  const effective = effectiveSkills(conversation.pinned, cited);
   const atPinCap = effective.atCap;
   const rows = skillPickerRows(skills, effective.ids);
 
   const togglePin = (packageId: string) => {
     // A cited skill is the message's: only removing its chip drops it.
     if (effective.cited.has(packageId)) return;
-    onChange({ ...selection, pinnedSkills: togglePinned(pinned, packageId) });
+    actions.togglePin(packageId);
   };
 
   return (
@@ -97,12 +121,12 @@ export function SkillsPickerPanel({
         <Switch
           id="skills-discovery"
           data-testid="skills-discovery"
-          checked={selection.skillDiscovery}
-          onCheckedChange={(skillDiscovery) => onChange({ ...selection, skillDiscovery })}
+          checked={conversation.skillDiscovery}
+          onCheckedChange={actions.setDiscovery}
         />
       </div>
       <p className="text-muted-foreground mt-1.5 shrink-0 px-1 text-[0.7rem] leading-snug">
-        {t(selection.skillDiscovery ? "skills.discovery.hintOn" : "skills.discovery.hintOff")}
+        {t(conversation.skillDiscovery ? "skills.discovery.hintOn" : "skills.discovery.hintOff")}
       </p>
 
       <div className="mt-3 min-h-0 flex-1 overflow-y-auto border-t pt-2">
@@ -132,14 +156,18 @@ export function SkillsPickerPanel({
             // By row: a package id's `@` and `/` break selectors, and a slug
             // of it can collide (`@a-b/c`, `@a/b-c`).
             const id = `skills-pin-${index}`;
-            const checked = pinnedSet.has(skill.id);
-            const isCited = effective.cited.has(skill.id);
+            const state = skillRowState(conversation, skill.id, effective.cited);
+            const checked = state.kind !== "off";
+            const isCited = state.kind === "cited";
             const inert = (!checked && atPinCap) || isCited;
+            const caption = rowCaption(state, t);
+            const refused = state.kind === "refused";
             return (
               <div key={skill.id} className="flex items-start gap-2 rounded-md p-1">
                 <Checkbox
                   id={id}
                   data-testid={`skill-pin-${skill.id}`}
+                  data-state-kind={state.kind}
                   checked={checked}
                   disabled={inert}
                   data-cited={isCited || undefined}
@@ -158,22 +186,30 @@ export function SkillsPickerPanel({
                       </span>
                     )}
                   </span>
-                  {isCited && (
-                    <span className="text-muted-foreground block text-[0.7rem] leading-snug">
-                      {t("skills.cited")}
+                  {caption && (
+                    // Inside the label: the checkbox's name says why it is locked or not loaded.
+                    <span
+                      data-testid={`skill-pin-state-${skill.id}`}
+                      className={cn(
+                        "block text-[0.7rem] leading-snug",
+                        refused ? "text-warning" : "text-muted-foreground",
+                      )}
+                    >
+                      {caption}
                     </span>
                   )}
-                  {available ? (
-                    skill.description && (
-                      <span className="text-muted-foreground line-clamp-2 text-[0.7rem] leading-snug">
-                        {skill.description}
-                      </span>
-                    )
-                  ) : (
-                    <span className="text-muted-foreground text-[0.7rem] leading-snug italic">
-                      {t("skills.unavailable")}
-                    </span>
-                  )}
+                  {available
+                    ? skill.description && (
+                        <span className="text-muted-foreground line-clamp-2 text-[0.7rem] leading-snug">
+                          {skill.description}
+                        </span>
+                      )
+                    : // A refusal already says it is not loaded, and why.
+                      !refused && (
+                        <span className="text-muted-foreground text-[0.7rem] leading-snug italic">
+                          {t("skills.unavailable")}
+                        </span>
+                      )}
                 </label>
               </div>
             );
@@ -186,8 +222,8 @@ export function SkillsPickerPanel({
 
 export function SkillsPicker({
   transport,
-  selection,
-  onChange,
+  skills,
+  actions,
   open,
   onOpenChange,
   cited,
@@ -207,12 +243,7 @@ export function SkillsPicker({
         data-testid="skills-picker-popover"
         className="flex max-h-[min(26rem,var(--radix-popover-content-available-height))] w-[min(23rem,calc(100vw-1.5rem))] flex-col p-3"
       >
-        <SkillsPickerPanel
-          transport={transport}
-          selection={selection}
-          onChange={onChange}
-          cited={cited}
-        />
+        <SkillsPickerPanel transport={transport} skills={skills} actions={actions} cited={cited} />
       </PopoverContent>
     </Popover>
   );

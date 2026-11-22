@@ -27,7 +27,8 @@ import {
 import { Tooltip, TooltipContent, TooltipTrigger } from "@appstrate/ui/components/tooltip";
 import { attachUnavailableKey } from "./attachment-adapter.ts";
 import { canComposeInlineRuns } from "../capabilities.ts";
-import { DEFAULT_SKILL_SELECTION, type ChatSkillSelection } from "../skills.ts";
+import type { ConversationSkills } from "./chat-skills.ts";
+import type { SkillActions } from "./use-conversation-skills.ts";
 import {
   limitAvailability,
   useConversationScope,
@@ -55,8 +56,8 @@ const LIMIT_REASON_KEY: Record<LimitUnavailableReason, string> = {
 
 export interface ComposerToolsProps {
   transport: ChatTransport | undefined;
-  selection: ChatSkillSelection;
-  onSelectionChange: (selection: ChatSkillSelection) => void;
+  skills: ConversationSkills;
+  skillActions: SkillActions;
   /** The skills picker is offered (`skills:read` + a readable conversation). */
   showPicker: boolean;
   /** The caller may author packages: the creation-mode switch is offered. */
@@ -65,8 +66,8 @@ export interface ComposerToolsProps {
 
 export function ComposerTools({
   transport,
-  selection,
-  onSelectionChange,
+  skills,
+  skillActions,
   showPicker,
   authorsPackages,
 }: ComposerToolsProps) {
@@ -190,10 +191,10 @@ export function ComposerTools({
       {showPicker && (
         <SkillChips
           transport={transport}
-          selection={selection}
+          skills={skills}
           cited={cited}
           onOpenPicker={() => setSkillsOpen(true)}
-          onReset={() => onSelectionChange(DEFAULT_SKILL_SELECTION)}
+          onReset={skillActions.reset}
         />
       )}
     </div>
@@ -203,8 +204,8 @@ export function ComposerTools({
   return (
     <SkillsPicker
       transport={transport}
-      selection={selection}
-      onChange={onSelectionChange}
+      skills={skills}
+      actions={skillActions}
       cited={cited}
       open={skillsOpen}
       onOpenChange={setSkillsOpen}
