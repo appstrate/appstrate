@@ -28,6 +28,7 @@ import { registerStopController, unregisterStopController } from "../src/stop-re
 
 /** The scope of a session created with no origin space and no limit. */
 const UNLIMITED = { spaceId: null, restricted: false, pinnedSkills: [], skillDiscovery: true };
+const NO_SKILLS = { changes: { pin: [], unpin: [] }, status: {} };
 
 const app = getTestApp();
 
@@ -65,7 +66,7 @@ describe("POST /api/orgs/:orgId/chat/sessions/:id/stop", () => {
     const controller = new AbortController();
     registerStopController(streamId, controller);
     registered.push(streamId);
-    await setActiveStream(sessionId, streamId, UNLIMITED, {});
+    await setActiveStream(sessionId, streamId, UNLIMITED, NO_SKILLS);
     return { sessionId, controller };
   }
 

@@ -12,13 +12,13 @@
 import { beforeEach, describe, expect, it } from "bun:test";
 import { eq } from "drizzle-orm";
 import type { ExtensionAPI } from "@appstrate/runner-pi";
-import { db } from "@appstrate/db/client";
+import { db, isEmbeddedDb } from "@appstrate/db/client";
 import { chatSessions } from "@appstrate/db/schema";
 import { truncateAll } from "../../../apps/api/test/helpers/db.ts";
 import { createTestContext, type TestContext } from "../../../apps/api/test/helpers/auth.ts";
 import { buildPlatformMcpTools } from "../src/pi-chat/mcp-tools.ts";
 import { PiChatUiStreamMapper } from "../src/pi-chat/ui-stream-mapper.ts";
-import { pinAssistantSkill } from "../src/persistence.ts";
+import { isSkillPinned, pinAssistantSkill } from "../src/persistence.ts";
 import { mintSessionId } from "../src/session-id.ts";
 import {
   MAX_PINNED_SKILLS,
@@ -165,7 +165,8 @@ describe("assistant skill load", () => {
       pinned: turn.pinned ?? [],
       injected: turn.injected ?? [],
       budgetLeft,
-      pin: (id, append) => pinAssistantSkill(sessionId, STREAM, id, append),
+      pin: (id) => pinAssistantSkill(sessionId, STREAM, id),
+      isPinned: (id) => isSkillPinned(sessionId, id),
     });
 
   const RECEIPT = JSON.stringify(
@@ -380,7 +381,7 @@ describe("pinAssistantSkill", () => {
   it("never writes a skill already pinned, even at the cap, and reports it", async () => {
     const five = ["@acme/a", "@acme/b", "@acme/c", "@acme/d", SKILL];
     await seed(five);
-    expect(await pinAssistantSkill(sessionId, STREAM, SKILL, true)).toBe("already_pinned");
+    expect(await pinAssistantSkill(sessionId, STREAM, SKILL)).toBe("already_pinned");
     expect(await stored()).toMatchObject({
       pinnedSkills: five,
       assistantSkills: [],
@@ -388,24 +389,40 @@ describe("pinAssistantSkill", () => {
     });
   });
 
-  it("only checks without `append`, whoever holds the conversation", async () => {
+  it("refuses a turn that no longer holds the conversation, and a full one", async () => {
+    await seed(["@acme/a", "@acme/b", "@acme/c", "@acme/d"]);
+    expect(await pinAssistantSkill(sessionId, "strm_other", "@acme/x")).toBe("released");
+    expect(await pinAssistantSkill(sessionId, STREAM, "@acme/x")).toBe("pinned");
+    expect(await pinAssistantSkill(sessionId, STREAM, "@acme/y")).toBe("full");
+    expect(await stored()).toMatchObject({
+      pinnedSkills: ["@acme/a", "@acme/b", "@acme/c", "@acme/d", "@acme/x"],
+      assistantSkills: ["@acme/x"],
+    });
+  });
+
+  it("checks a pin without writing, whoever holds the conversation", async () => {
     await seed([SKILL]);
-    expect(await pinAssistantSkill(sessionId, "strm_other", SKILL, false)).toBe("already_pinned");
-    expect(await pinAssistantSkill(sessionId, STREAM, "@acme/x", false)).toBe("not_pinned");
+    expect(await isSkillPinned(sessionId, SKILL)).toBe(true);
+    expect(await isSkillPinned(sessionId, "@acme/x")).toBe(false);
+    expect(await isSkillPinned(mintSessionId(), SKILL)).toBe(false);
     expect(await stored()).toMatchObject({ pinnedSkills: [SKILL], assistantSkills: [] });
   });
 
-  it("lets exactly one of two concurrent pins take the last place", async () => {
-    await seed(["@acme/a", "@acme/b", "@acme/c", "@acme/d"]);
-    const outcomes = await Promise.all([
-      pinAssistantSkill(sessionId, STREAM, "@acme/x", true),
-      pinAssistantSkill(sessionId, STREAM, "@acme/y", true),
-    ]);
-    expect(outcomes.sort()).toEqual(["full", "pinned"]);
-    const found = await stored();
-    expect(found?.pinnedSkills).toHaveLength(MAX_PINNED_SKILLS);
-    expect(found?.assistantSkills).toHaveLength(1);
-  });
+  // PGlite serializes every statement on one connection: only Postgres runs the two concurrently.
+  it.skipIf(isEmbeddedDb)(
+    "lets exactly one of two concurrent pins take the last place",
+    async () => {
+      await seed(["@acme/a", "@acme/b", "@acme/c", "@acme/d"]);
+      const outcomes = await Promise.all([
+        pinAssistantSkill(sessionId, STREAM, "@acme/x"),
+        pinAssistantSkill(sessionId, STREAM, "@acme/y"),
+      ]);
+      expect(outcomes.sort()).toEqual(["full", "pinned"]);
+      const found = await stored();
+      expect(found?.pinnedSkills).toHaveLength(MAX_PINNED_SKILLS);
+      expect(found?.assistantSkills).toHaveLength(1);
+    },
+  );
 });
 
 describe("chat_sessions skill constraints", () => {

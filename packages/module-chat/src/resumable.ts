@@ -310,9 +310,9 @@ export interface TurnScope {
 /** What a claiming turn writes into the conversation's skill columns. */
 export interface TurnSkillWrite {
   /** The turn's `skill_discovery` / `pin_skills` / `unpin_skills`, applied to the pins compared. */
-  changes?: ChatSkillChanges;
+  changes: ChatSkillChanges;
   /** The turn's verdict on each pin of the selection after `changes`: replaces `skill_status`. */
-  status?: Readonly<Record<string, PinnedSkillStatus>>;
+  status: Readonly<Record<string, PinnedSkillStatus>>;
 }
 
 /** What claiming a conversation for a turn answered: `claimed`, or why nothing was written. */
@@ -344,10 +344,10 @@ export async function setActiveStream(
   sessionId: string,
   streamId: string,
   scope: TurnScope,
-  skills: TurnSkillWrite = {},
+  skills: TurnSkillWrite,
 ): Promise<StreamClaim> {
   const staleBefore = new Date(Date.now() - STALE_MARKER_MIN_AGE_MS);
-  const changes = skills.changes ?? { pin: [], unpin: [] };
+  const { changes } = skills;
   const repins = changes.pin.length > 0 || changes.unpin.length > 0;
   const pinned = repins
     ? sortedIds(
@@ -359,7 +359,7 @@ export async function setActiveStream(
     .set({
       activeStreamId: streamId,
       updatedAt: new Date(),
-      skillStatus: skills.status ?? {},
+      skillStatus: skills.status,
       ...(changes.skillDiscovery !== undefined && { skillDiscovery: changes.skillDiscovery }),
       ...(pinned && {
         pinnedSkills: pinned,

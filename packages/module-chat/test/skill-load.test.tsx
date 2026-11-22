@@ -1,20 +1,24 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * A skill the assistant loads (`read_resource`, or the forwarded `read`, on its `SKILL.md`) is drawn with the user's skill
- * chip: live, after a reload (the persisted receipt), still running, and refused. Any other read
- * keeps the generic tool row. SSR only.
+ * A skill the assistant reads (`read_resource`, or the forwarded `read`, on its `SKILL.md`) is
+ * drawn with the user's skill chip, said loaded only when the result carries `skillPinned`; a read
+ * the server did not pin, a running one and a failed one each say so. Any other read keeps the
+ * generic tool row. SSR only.
  */
 
 import { describe, expect, it } from "bun:test";
 import { renderToStaticMarkup } from "react-dom/server";
 
 import { ChatHostProvider } from "../src/ui/runtime-context.ts";
-import { skillLoadOf } from "../src/ui/chat-skills.ts";
+import { skillLoadOf, skillLoadState } from "../src/ui/chat-skills.ts";
 import { ResourceReadTool } from "../src/ui/skill-load.tsx";
 import { testHost } from "./test-host.ts";
 
 const SKILL_MD = "skill://spc_a/acme/tone/brand-tone/SKILL.md";
+const host = testHost({
+  t: (key, options) => (options?.name ? `${key} name=${String(options.name)}` : key),
+});
 
 function render(part: {
   toolName?: string;
@@ -25,7 +29,7 @@ function render(part: {
 }): string {
   const props = { type: "tool-call", toolCallId: "call_1", toolName: "read_resource", ...part };
   return renderToStaticMarkup(
-    <ChatHostProvider value={testHost()}>
+    <ChatHostProvider value={host}>
       <ResourceReadTool {...(props as unknown as Parameters<typeof ResourceReadTool>[0])} />
     </ChatHostProvider>,
   );
@@ -48,45 +52,81 @@ describe("skillLoadOf", () => {
   });
 });
 
+describe("skillLoadState", () => {
+  it("claims a load only for a successful read the server pinned", () => {
+    expect(skillLoadState("success", { content: [], skillPinned: true })).toBe("loaded");
+    expect(skillLoadState("success", { content: [{ type: "text", text: "Body" }] })).toBe(
+      "readOnly",
+    );
+    expect(skillLoadState("success", { content: [], skillPinned: "true" })).toBe("readOnly");
+    expect(skillLoadState("success", undefined)).toBe("readOnly");
+    expect(skillLoadState("error", { skillPinned: true })).toBe("refused");
+    expect(skillLoadState("running", undefined)).toBe("running");
+    expect(skillLoadState("pending", undefined)).toBe("running");
+  });
+});
+
 describe("ResourceReadTool", () => {
   const chip = (html: string) => html.match(/<span[^>]*data-testid="directive-chip"[^>]*>/)?.[0];
+  const live = (html: string) =>
+    html.match(/<span[^>]*data-testid="skill-load-live"[^>]*>([^<]*)</);
+  const caption = (html: string) =>
+    html.match(/<span[^>]*data-testid="skill-load-state"[^>]*>([^<]*)</);
+  const receipt = JSON.stringify({ uri: SKILL_MD, skill: "@acme/tone", pinned: true });
 
-  it("draws a loaded skill as the user's skill chip", () => {
+  it("draws a pinned load as the user's skill chip, naming it in the live region", () => {
     const html = render({
       args: { uri: SKILL_MD },
-      result: { content: [{ type: "text", text: "---\nname: brand-tone\n---\nBody" }] },
+      result: { content: [{ type: "text", text: receipt }], skillPinned: true },
       status: { type: "complete" },
     });
     expect(html).toContain('data-phase="success"');
+    expect(html).toContain('data-state="loaded"');
     expect(chip(html)).toContain('data-directive-type="skill"');
+    expect(chip(html)).not.toContain("border-dashed");
     expect(html).toContain(">brand-tone<");
-    expect(html).toContain("skills.load.done");
     expect(html).not.toContain("animate-pulse");
-    const state = html.match(/<span[^>]*data-testid="skill-load-state"[^>]*>/)![0];
-    expect(state).toContain('aria-live="polite"');
-    expect(state).toContain("sr-only");
+    const region = live(html)!;
+    expect(region[0]).toContain('aria-live="polite"');
+    expect(region[0]).toContain("sr-only");
+    expect(region[1]).toBe("skills.load.live.loaded name=brand-tone");
+    expect(caption(html)).toBeNull();
   });
 
-  it("draws the same chip after a reload, from the persisted receipt", () => {
-    const receipt = JSON.stringify({ uri: SKILL_MD, skill: "@acme/tone", pinned: true });
+  it("never says loaded for a read the server did not pin: read for this message only", () => {
+    const note =
+      "The skill `@acme/tone` was read for this turn but not pinned to the conversation.";
     const html = render({
       args: { uri: SKILL_MD },
-      result: { content: [{ type: "text", text: receipt }] },
+      result: {
+        content: [
+          { type: "text", text: "---\nname: brand-tone\n---\nBody" },
+          { type: "text", text: note },
+        ],
+      },
       status: { type: "complete" },
     });
     expect(html).toContain('data-phase="success"');
-    expect(html).toContain(">brand-tone<");
+    expect(html).toContain('data-state="readOnly"');
+    expect(chip(html)).toContain("border-dashed");
+    expect(live(html)![1]).toBe("skills.load.live.readOnly name=brand-tone");
+    const shown = caption(html)!;
+    expect(shown[1]).toBe("skills.load.readOnly");
+    expect(shown[0]).toContain('aria-hidden="true"');
+    expect(html).not.toContain("skills.load.live.loaded");
+    expect(html).not.toContain(note);
   });
 
   it("marks a load still running as pending", () => {
     const html = render({ args: { uri: SKILL_MD }, status: { type: "running" } });
     expect(html).toContain('data-phase="running"');
     expect(chip(html)).toContain("motion-safe:animate-pulse");
-    expect(html).toContain("skills.load.running");
+    expect(live(html)![1]).toBe("skills.load.live.running name=brand-tone");
+    expect(caption(html)).toBeNull();
   });
 
-  it("mutes a refused load and says so in the user's language, never the model's error", () => {
-    const refusal = "This conversation already pins 5 skills; the user can unpin one.";
+  it("mutes a failed read and says so in the user's language, never the model's error", () => {
+    const refusal = "The skill could not be read.";
     const html = render({
       args: { uri: SKILL_MD },
       result: { error: refusal },
@@ -95,9 +135,8 @@ describe("ResourceReadTool", () => {
     });
     expect(html).toContain('data-phase="error"');
     expect(chip(html)).toContain("border-dashed");
-    const state = html.match(/<span[^>]*data-testid="skill-load-state"[^>]*>([^<]*)</)!;
-    expect(state[1]).toBe("skills.load.refused");
-    expect(state[0]).not.toContain("sr-only");
+    expect(live(html)![1]).toBe("skills.load.live.refused name=brand-tone");
+    expect(caption(html)![1]).toBe("skills.load.refused");
     expect(html).not.toContain(refusal);
   });
 
@@ -116,10 +155,10 @@ describe("ResourceReadTool", () => {
     const skill = render({
       toolName: "read",
       args: { uri: SKILL_MD, space_id: "spc_a" },
-      result: { content: [{ type: "text", text: "loaded" }] },
+      result: { content: [{ type: "text", text: "meta" }], skillPinned: true },
       status: { type: "complete" },
     });
-    expect(skill).toContain('data-phase="success"');
+    expect(skill).toContain('data-state="loaded"');
     expect(skill).toContain(">brand-tone<");
     const file = render({
       toolName: "read",

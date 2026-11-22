@@ -214,5 +214,13 @@ export const chatMessages = pgTable(
     // Not UNIQUE: `seq` is the PRIMARY KEY, so the pair is unique already.
     index("idx_chat_messages_session_seq").on(table.sessionId, table.seq),
   ],
-); /** What a turn did with a pinned skill (`chat_sessions.skill_status`). */
-export type ChatSkillStatus = "injected" | "over_budget" | "unavailable" | "unreadable";
+);
+
+/** What a turn did with a pinned skill (`chat_sessions.skill_status`): `injected`, or why it left it out. */
+export const chatSkillStatusValues = [
+  "injected",
+  "over_budget",
+  "unavailable",
+  "unreadable",
+] as const;
+export type ChatSkillStatus = (typeof chatSkillStatusValues)[number];

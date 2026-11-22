@@ -39,9 +39,22 @@ const pinned = (
     NO_SKILL_LAYERS,
   );
 
-function render(skills: ConversationSkills = pinned([], false)): string {
+/** A client whose catalogue already answered, naming `@acme/a` « Alpha ». */
+function withCatalogue(): QueryClient {
+  const qc = new QueryClient();
+  qc.setQueryData(["packages", "chat-commands", "org_1", null, true], {
+    skills: [{ id: "@acme/a", name: "Alpha", description: "", version: null }],
+    agents: [],
+  });
+  return qc;
+}
+
+function render(
+  skills: ConversationSkills = pinned([], false),
+  { client = new QueryClient(), cited }: { client?: QueryClient; cited?: string[] } = {},
+): string {
   return renderToStaticMarkup(
-    <QueryClientProvider client={new QueryClient()}>
+    <QueryClientProvider client={client}>
       <ChatHostProvider value={host}>
         <ConversationScopeProvider
           value={conversationScope({ originSpaceId: "spc_a", restricted: false })}
@@ -50,6 +63,7 @@ function render(skills: ConversationSkills = pinned([], false)): string {
             <SkillChips
               transport={scoped}
               skills={skills}
+              {...(cited && { cited })}
               onOpenPicker={() => {}}
               onReset={() => {}}
             />
@@ -85,9 +99,9 @@ describe("SkillChips", () => {
     );
   });
 
-  it("announces the loaded skills and the pins left out in one polite live region", () => {
+  describe("the live region", () => {
     const live = (html: string) => html.match(/data-testid="skill-pill-live"[^>]*>([^<]*)</)![1];
-    const skills = conversationSkills(
+    const verdicts = conversationSkills(
       {
         skillDiscovery: true,
         pins: [
@@ -98,11 +112,42 @@ describe("SkillChips", () => {
       },
       NO_SKILL_LAYERS,
     );
-    const html = render(skills);
-    expect(html.match(/aria-live=/g)).toHaveLength(1);
-    expect(live(html)).toBe(
-      "skills.count {&quot;count&quot;:2}, skills.notLoadedCount {&quot;count&quot;:1}",
-    );
+
+    it("announces the last turn's verdicts in one polite region, joined through i18n", () => {
+      const html = render(verdicts, { client: withCatalogue() });
+      expect(html.match(/aria-live=/g)).toHaveLength(1);
+      expect(live(html)).toBe(
+        "skills.liveSummary {&quot;loaded&quot;:&quot;skills.count {\\&quot;count\\&quot;:2}&quot;,&quot;refused&quot;:&quot;skills.notLoadedCount {\\&quot;count\\&quot;:1}&quot;}",
+      );
+    });
+
+    it("stays empty until the catalogue names the skills, so a name swap is never read out", () => {
+      expect(live(render(verdicts))).toBe("");
+      const single = conversationSkills(
+        { skillDiscovery: true, pins: [{ id: "@acme/a", source: "user", status: "injected" }] },
+        NO_SKILL_LAYERS,
+      );
+      expect(live(render(single, { client: withCatalogue() }))).toBe("Alpha");
+    });
+
+    it("reads out server verdicts only, never a local toggle, a pending pin or a citation", () => {
+      const before = live(render(verdicts, { client: withCatalogue() }));
+      const toggled = conversationSkills(
+        {
+          skillDiscovery: true,
+          pins: [...verdicts.stored.values()],
+        },
+        { ...NO_SKILL_LAYERS, local: { pin: ["@acme/new"], unpin: ["@acme/a"] } },
+      );
+      expect(live(render(toggled, { client: withCatalogue(), cited: ["@acme/cited"] }))).toBe(
+        before,
+      );
+      const unjudged = conversationSkills(
+        { skillDiscovery: true, pins: [{ id: "@acme/a", source: "user", status: null }] },
+        NO_SKILL_LAYERS,
+      );
+      expect(live(render(unjudged, { client: withCatalogue() }))).toBe("");
+    });
   });
 
   it("draws the pill for pins with discovery on, with a book and the locked label off", () => {

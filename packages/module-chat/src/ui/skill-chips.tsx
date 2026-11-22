@@ -1,10 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * The skills the conversation loads, as ONE pill in the composer's tool row. It shows its count, or
- * the name when there is a single skill; the tooltip lists the names, then the pins the last turn
- * left out (never counted as loaded). Removal happens in the picker, which the pill opens; its X
- * restores the default selection. With discovery off a lock replaces the book.
+ * The skills the conversation loads, as ONE pill in the composer's tool row: their count, or the
+ * single name; the tooltip lists them, then the pins the last turn left out. The pill opens the
+ * picker, its X restores the default selection; with discovery off a lock replaces the book.
  */
 
 import { BookOpenIcon, LockIcon } from "lucide-react";
@@ -29,9 +28,9 @@ interface LoadedSkill {
 }
 
 /**
- * The conversation's skills split by what the server reported: those it loads (pins and the
- * draft's citations) and the pins the last turn left out. The catalogue is read only to name
- * them, so only when there are.
+ * The conversation's skills (pins and the draft's citations) split into those it loads and the
+ * pins the last turn left out, and the server's last verdicts alone for the live region: `null`
+ * until the catalogue names them, so a name swap is never read out.
  */
 function useSkillsByLoad(
   transport: ChatTransport | undefined,
@@ -41,15 +40,19 @@ function useSkillsByLoad(
   const effective = effectiveSkills(skills.pinned, cited);
   const catalogue = useChatCommands(transport, effective.ids.length > 0);
   const names = new Map((catalogue.data?.skills ?? []).map((s) => [s.id, s.name]));
-  // Named by the package's bare name until the catalogue answers.
   const named = (id: string): LoadedSkill => ({
     packageId: id,
     name: names.get(id) ?? parseScopedName(id)?.name ?? id,
   });
   const loads = (id: string) => loadsSkill(skillRowState(skills, id, effective.cited));
+  const judged = [...skills.stored.values()].filter((pin) => pin.status !== null);
+  const injected = judged.filter((pin) => pin.status === "injected").map((pin) => named(pin.id));
   return {
     loaded: effective.ids.filter(loads).map(named),
     refused: effective.ids.filter((id) => !loads(id)).map(named),
+    verdicts: catalogue.data
+      ? { loaded: injected, refused: judged.length - injected.length }
+      : null,
   };
 }
 
@@ -65,11 +68,19 @@ function skillsSummary(skills: readonly LoadedSkill[], refused: number, t: ChatT
   return skills.length === 1 ? skills[0]!.name : t("skills.count", { count: skills.length });
 }
 
-/** What the live region reads out: the loaded skills, then how many pins are not loaded. */
-function liveSummary(skills: readonly LoadedSkill[], refused: number, t: ChatTranslate): string {
-  if (skills.length === 0) return refused === 0 ? "" : skillsSummary(skills, refused, t);
-  const loaded = skillsSummary(skills, 0, t);
-  return refused === 0 ? loaded : `${loaded}, ${t("skills.notLoadedCount", { count: refused })}`;
+/** What the live region reads out: the skills the last turn loaded, then how many it left out. */
+function liveSummary(
+  verdicts: { loaded: readonly LoadedSkill[]; refused: number } | null,
+  t: ChatTranslate,
+): string {
+  if (!verdicts) return "";
+  const { loaded, refused } = verdicts;
+  if (loaded.length === 0) return refused === 0 ? "" : skillsSummary(loaded, refused, t);
+  if (refused === 0) return skillsSummary(loaded, 0, t);
+  return t("skills.liveSummary", {
+    loaded: skillsSummary(loaded, 0, t),
+    refused: t("skills.notLoadedCount", { count: refused }),
+  });
 }
 
 function SkillNameList({ skills }: { skills: readonly LoadedSkill[] }) {
@@ -82,7 +93,7 @@ function SkillNameList({ skills }: { skills: readonly LoadedSkill[] }) {
   );
 }
 
-/** The pins the last turn left out, under the loaded ones: pinned, not in the model's context. */
+/** The pins the last turn left out, under the loaded ones. */
 function RefusedSkillList({ skills }: { skills: readonly LoadedSkill[] }) {
   const { t } = useChatHost();
   if (skills.length === 0) return null;
@@ -94,10 +105,6 @@ function RefusedSkillList({ skills }: { skills: readonly LoadedSkill[] }) {
   );
 }
 
-/**
- * The skills the user chose, in one pill: its body opens the picker, where they are removed; its X
- * restores the default selection (no pin, discovery on).
- */
 function PinnedPill({
   skills,
   refused,
@@ -109,7 +116,7 @@ function PinnedPill({
   refused: readonly LoadedSkill[];
   discovery: boolean;
   onOpen: () => void;
-  /** Absent when there is nothing to restore (only cited skills, discovery on). */
+  /** Absent when there is nothing to restore. */
   onReset?: () => void;
 }) {
   const { t } = useChatHost();
@@ -144,18 +151,14 @@ function PinnedPill({
 interface SkillChipsProps {
   transport: ChatTransport | undefined;
   skills: ConversationSkills;
-  /** The skills the composer's draft cites: counted and named like the pinned ones. */
+  /** The skills the composer's draft cites, counted like the pinned ones. */
   cited?: readonly string[];
   onOpenPicker: () => void;
   /** Back to the default selection: the pill's X. */
   onReset: () => void;
 }
 
-/**
- * The skill pill of the composer's tool row, drawn when the selection departs from the default:
- * with pins, even when the last turn left every one out. With no pin at all, the picker's summary
- * chip stands in (drawn only with discovery off).
- */
+/** The skill pill, or with no pin the picker's summary chip (drawn only with discovery off). */
 export function SkillChips({
   transport,
   skills,
@@ -164,7 +167,7 @@ export function SkillChips({
   onReset,
 }: SkillChipsProps) {
   const { t } = useChatHost();
-  const { loaded, refused } = useSkillsByLoad(transport, skills, cited);
+  const { loaded, refused, verdicts } = useSkillsByLoad(transport, skills, cited);
   return (
     <>
       {loaded.length === 0 && refused.length === 0 ? (
@@ -180,7 +183,7 @@ export function SkillChips({
       )}
       {/* Always mounted, so a verdict landing after a turn is read out. */}
       <span aria-live="polite" data-testid="skill-pill-live" className="sr-only">
-        {liveSummary(loaded, refused.length, t)}
+        {liveSummary(verdicts, t)}
       </span>
     </>
   );

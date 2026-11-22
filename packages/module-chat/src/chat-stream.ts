@@ -68,6 +68,7 @@ import {
   persistUserMessage,
   persistAssistantMessage,
   pinAssistantSkill,
+  isSkillPinned,
   storedFileParts,
   storedAgentPromptTexts,
   touchSessionSpace,
@@ -278,7 +279,7 @@ export async function claimTurn(
   sessionId: string,
   streamId: string,
   scope: TurnScope,
-  skills: TurnSkillWrite = {},
+  skills: TurnSkillWrite,
 ): Promise<void> {
   const claim = await setActiveStream(sessionId, streamId, scope, skills);
   if (claim === "pin_limit") throw pinLimitError();
@@ -1011,8 +1012,8 @@ export async function handleChatStream(
                   pinned: turnSelection.pinnedSkills,
                   injected: Object.keys(injectedSkills.skills),
                   budgetLeft: skillBudgetLeft,
-                  pin: (packageId, append) =>
-                    pinAssistantSkill(chatSessionId, streamId, packageId, append),
+                  pin: (packageId) => pinAssistantSkill(chatSessionId, streamId, packageId),
+                  isPinned: (packageId) => isSkillPinned(chatSessionId, packageId),
                 }),
               }
             : {}),

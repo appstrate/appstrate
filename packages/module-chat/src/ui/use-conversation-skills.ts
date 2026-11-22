@@ -1,14 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * A conversation's skills: the server's (the session detail, which the host's realtime refreshes
- * whenever a turn's claim or the assistant changes them) with the user's changes on top, in two
- * layers (`SkillLayers`). Only the changes are sent, with the next turn. The server writes them
- * with the turn's claim, so the turn's answer decides their fate:
- * - a 2xx: written into the cached detail, out of the layers;
- * - a refusal (any other status): nothing was written, they ride with the next turn;
- * - no answer at all: the client cannot know whether the server applied them, and re-sending could
- *   drop a pin the assistant re-added since, so they are dropped and the detail shows the truth.
+ * A conversation's skills: the session detail (kept fresh by the host's realtime) with the user's
+ * changes on top. The server writes the changes with the turn's claim, so the turn's answer decides
+ * their fate: a 2xx writes them into the cached detail; a refusal keeps them for the next turn; no
+ * answer drops them (re-sending could drop a pin the assistant re-added) and re-reads the detail.
  */
 
 import { useCallback, useMemo, useState, useSyncExternalStore } from "react";
@@ -36,9 +32,8 @@ import type { ChatTransport } from "./runtime-context.ts";
 import { useLatest } from "./use-latest.ts";
 
 /**
- * The user's changes outside React: the transport takes and settles them at request time, between
- * renders. `host.accepted` writes what an accepted turn sent into the server state BEFORE the store
- * drops it, so no render shows the change neither applied nor pending.
+ * The user's changes outside React, taken and settled by the transport between renders.
+ * `host.accepted` writes what was sent BEFORE the store drops it: no render shows it in neither.
  */
 export function createSkillChanges(host: {
   accepted: (sent: ChatSkillChanges) => void;
@@ -58,10 +53,7 @@ export function createSkillChanges(host: {
     },
     change: (apply: (local: ChatSkillChanges, inFlight: ChatSkillChanges) => ChatSkillChanges) =>
       set({ ...layers, local: apply(layers.local, layers.inFlight) }),
-    /**
-     * The changes the turn being sent carries, `undefined` when none. An unanswered turn's changes
-     * stay with it (one request at a time makes that theoretical; merging loses nothing).
-     */
+    /** The changes the turn being sent carries, `undefined` when none. */
     take: (): ChatSkillChanges | undefined => {
       const inFlight = mergeSkillChanges(layers.inFlight, layers.local);
       set({ inFlight, local: NO_SKILL_CHANGES });
@@ -81,8 +73,9 @@ export function createSkillChanges(host: {
 }
 
 /**
- * Writes what an accepted turn sent into the cached session detail; `false` when none is cached.
- * An older read still in flight is cancelled first, so it cannot land over the write.
+ * Writes what an accepted turn sent into the cached session detail, then re-reads it: whatever
+ * read is in flight, older or newer than the claim, the verdict the server holds lands last (the
+ * write is idempotent). `false` when no detail is cached.
  */
 export function writeAcceptedSkills(
   queryClient: QueryClient,
@@ -90,11 +83,11 @@ export function writeAcceptedSkills(
   sent: ChatSkillChanges,
 ): boolean {
   if (!queryClient.getQueryData(queryKey)) return false;
-  void queryClient.cancelQueries({ queryKey, exact: true });
   queryClient.setQueryData<SessionHistory | null>(
     queryKey,
     (row) => row && { ...row, skills: withAppliedChanges(row.skills, sent) },
   );
+  void queryClient.invalidateQueries({ queryKey, exact: true });
   return true;
 }
 
@@ -132,8 +125,7 @@ export function useConversationSkills({
   enabled: boolean;
 }): ConversationSkillsState {
   const queryClient = useQueryClient();
-  // A conversation created in this mount is read once a turn may have created it (no speculative
-  // 404); from then on the host's realtime keeps the detail fresh.
+  // A conversation created in this mount is read once a turn may have created it (no 404).
   const [exists, setExists] = useState(persisted);
   const detail = useQuery({
     ...sessionQuery(transport, id),
@@ -157,7 +149,6 @@ export function useConversationSkills({
         }
       },
       unanswered: () => {
-        // The turn may have created the conversation and written the changes: read what it holds.
         setExists(true);
         void queryClient.invalidateQueries({ queryKey: detailKey(), exact: true });
       },

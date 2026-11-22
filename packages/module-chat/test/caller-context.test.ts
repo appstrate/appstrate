@@ -733,6 +733,20 @@ describe("buildCallerContextBlock", () => {
       "@acme/b": "unreadable",
       "@acme/gone": "unreadable",
     });
+    // A failed draft listing hides which pin has a draft: none is injected from its published
+    // version in its place.
+    const draftsFailed = await block({
+      published: [skillEntry(A, "1.0.0"), skillEntry(B, "1.0.0")],
+      texts: { [A]: "a body", [B]: "b body" },
+      listFails: "draft",
+    });
+    expect(draftsFailed.skillStatus).toEqual({
+      "@acme/a": "unreadable",
+      "@acme/b": "unreadable",
+      "@acme/gone": "unreadable",
+    });
+    expect(draftsFailed.injected).toEqual({ skills: {} });
+    expect(draftsFailed.text).not.toContain("<skill ");
   });
 
   it("gives a pinned skill whose SKILL.md is served as a blob its could-not-be-read notice", async () => {

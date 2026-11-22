@@ -313,54 +313,60 @@ export async function ensureSession(
   };
 }
 
+const pinnedSql = (packageId: string) =>
+  sql<boolean>`${packageId}::text = ANY(${chatSessions.pinnedSkills})`;
+
 /**
- * Pin `packageId` to the conversation as the assistant's (`append`, its `SKILL.md` was just read
- * by the turn holding `streamId`), or only check that it is pinned (`append: false`). The append
- * is ONE statement guarded on the cap and on the turn still holding the conversation: appended
- * to `pinned_skills` and `assistant_skills`, its status `injected`. A skill already pinned is
- * never written: `already_pinned`, whoever pinned it. `full` covers a lost race on the cap.
+ * Pin `packageId` to the conversation as the assistant's: its `SKILL.md` was just read by the turn
+ * holding `streamId`. ONE statement guarded on the cap and on the turn still holding the
+ * conversation: appended to `pinned_skills` and `assistant_skills`, its status `injected`. A
+ * skill already pinned is never written: `already_pinned`, whoever pinned it. Otherwise refused
+ * as `full` (a lost race on the cap) or `released` (the turn no longer holds the conversation).
  */
 export async function pinAssistantSkill(
   sessionId: string,
   streamId: string,
   packageId: string,
-  append: boolean,
 ): Promise<SkillPinOutcome> {
-  const already = sql`${packageId}::text = ANY(${chatSessions.pinnedSkills})`;
-  if (append) {
-    const [row] = await db
-      .update(chatSessions)
-      .set({
-        pinnedSkills: sortedIds(
-          sql`array_append(${chatSessions.pinnedSkills}, ${packageId}::text)`,
-        ),
-        assistantSkills: sortedIds(
-          sql`array_append(${chatSessions.assistantSkills}, ${packageId}::text)`,
-        ),
-        skillStatus: sql`${chatSessions.skillStatus} || jsonb_build_object(${packageId}::text, 'injected')`,
-      })
-      .where(
-        and(
-          eq(chatSessions.id, sessionId),
-          eq(chatSessions.activeStreamId, streamId),
-          sql`NOT ${already}`,
-          sql`cardinality(${chatSessions.pinnedSkills}) < ${MAX_PINNED_SKILLS}`,
-        ),
-      )
-      .returning({ orgId: chatSessions.orgId, userId: chatSessions.userId });
-    if (row) {
-      notifySessionUpdate(sessionId, row.orgId, row.userId);
-      return "pinned";
-    }
-  }
   const [row] = await db
-    .select({ pinned: sql<boolean>`${already}`, activeStreamId: chatSessions.activeStreamId })
+    .update(chatSessions)
+    .set({
+      pinnedSkills: sortedIds(sql`array_append(${chatSessions.pinnedSkills}, ${packageId}::text)`),
+      assistantSkills: sortedIds(
+        sql`array_append(${chatSessions.assistantSkills}, ${packageId}::text)`,
+      ),
+      skillStatus: sql`${chatSessions.skillStatus} || jsonb_build_object(${packageId}::text, 'injected')`,
+    })
+    .where(
+      and(
+        eq(chatSessions.id, sessionId),
+        eq(chatSessions.activeStreamId, streamId),
+        sql`NOT ${pinnedSql(packageId)}`,
+        sql`cardinality(${chatSessions.pinnedSkills}) < ${MAX_PINNED_SKILLS}`,
+      ),
+    )
+    .returning({ orgId: chatSessions.orgId, userId: chatSessions.userId });
+  if (row) {
+    notifySessionUpdate(sessionId, row.orgId, row.userId);
+    return "pinned";
+  }
+  const [current] = await db
+    .select({ pinned: pinnedSql(packageId), activeStreamId: chatSessions.activeStreamId })
     .from(chatSessions)
     .where(eq(chatSessions.id, sessionId))
     .limit(1);
-  if (row?.pinned) return "already_pinned";
-  if (!append) return "not_pinned";
-  return row?.activeStreamId === streamId ? "full" : "released";
+  if (current?.pinned) return "already_pinned";
+  return current?.activeStreamId === streamId ? "full" : "released";
+}
+
+/** Whether `packageId` is pinned to the conversation now, whoever pinned it. */
+export async function isSkillPinned(sessionId: string, packageId: string): Promise<boolean> {
+  const [row] = await db
+    .select({ pinned: pinnedSql(packageId) })
+    .from(chatSessions)
+    .where(eq(chatSessions.id, sessionId))
+    .limit(1);
+  return row?.pinned === true;
 }
 
 /** Most recent message id in a session — the one a new message follows, or null. */

@@ -1,13 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
 
-/**
- * The skill picker's pure rules. The server holds the conversation's skills (`StoredSkills`); the
- * client holds only what the user changed (`ChatSkillChanges`): the changes the turn being sent
- * carries, and those made since. It sends changes, never a full set: a stale client cannot drop a
- * pin the server added.
- */
+// The skill picker's pure rules. The server holds the skills; the client sends only the user's
+// changes, never a full set: a stale client cannot drop a pin the server added.
 
 import { parseScopedName } from "@appstrate/core/naming";
+import { asRecordOrNull } from "@appstrate/core/safe-json";
 import { parseSkillUri } from "@appstrate/core/skill-uri";
 import type { ChatSkillCommand } from "../commands.ts";
 import { SKILL_DIRECTIVE, directivesOf } from "../directives.ts";
@@ -19,11 +16,11 @@ import {
   type PinnedSkill,
   type PinnedSkillStatus,
 } from "../skills.ts";
+import type { ToolPhase } from "./tool-result.ts";
 
 /** A conversation's skills as the session routes serve them (`skill_discovery`, `skills`). */
 export interface StoredSkills {
   skillDiscovery: boolean;
-  /** Sorted by id. */
   pins: readonly PinnedSkill[];
 }
 
@@ -40,11 +37,7 @@ export function hasSkillChanges(changes: ChatSkillChanges): boolean {
   return changes.skillDiscovery !== undefined || changes.pin.length > 0 || changes.unpin.length > 0;
 }
 
-/**
- * The user's changes in two layers over the server's skills: `inFlight`, carried by the turn being
- * sent and not answered yet, and `local`, made since (against the server's skills with `inFlight`
- * applied, so undoing an in-flight change is an ordinary change).
- */
+/** `inFlight`: carried by the unanswered turn; `local`: made since, over `inFlight` applied. */
 export interface SkillLayers {
   inFlight: ChatSkillChanges;
   local: ChatSkillChanges;
@@ -70,11 +63,11 @@ export function mergeSkillChanges(
 /** The conversation's skills as the composer shows them: the server's, the user's changes applied. */
 export interface ConversationSkills {
   skillDiscovery: boolean;
-  /** Pinned once the changes apply, sorted: with the draft's citations, what the cap counts. */
+  /** Pinned once the changes apply, sorted. */
   pinned: readonly string[];
-  /** The server's pins with the in-flight changes applied, by id: source and last verdict. */
+  /** The server's pins with `inFlight` applied, by id. */
   stored: ReadonlyMap<string, PinnedSkill>;
-  /** Pinned by a change the server has not applied yet: the next turn loads them. */
+  /** Pinned by a change the server has not applied yet. */
   pending: ReadonlySet<string>;
 }
 
@@ -92,10 +85,7 @@ export function conversationSkills(stored: StoredSkills, layers: SkillLayers): C
 const without = (ids: readonly string[], id: string) => ids.filter((other) => other !== id);
 const withId = (ids: readonly string[], id: string) => (ids.includes(id) ? ids : [...ids, id]);
 
-/**
- * `changes` with `id` pinned (`on`) or unpinned, from the panel. `base` is what the changes apply
- * to: a change it already shows is not recorded.
- */
+/** `changes` with `id` pinned (`on`) or unpinned; a change `base` already shows is not recorded. */
 export function changePin(
   changes: ChatSkillChanges,
   id: string,
@@ -126,18 +116,12 @@ export function changeDiscovery(
   return on === base.skillDiscovery ? rest : { ...rest, skillDiscovery: on };
 }
 
-/**
- * `changes` with a skill the sent message cites pinned. Recorded whatever the server holds: a
- * citation is the user's act (it makes an assistant's pin theirs), and a pin is idempotent.
- */
+/** `changes` with a cited skill pinned whatever the server holds: the pin becomes the user's. */
 export function citeSkill(changes: ChatSkillChanges, id: string): ChatSkillChanges {
   return { ...changes, pin: withId(changes.pin, id), unpin: without(changes.unpin, id) };
 }
 
-/**
- * `stored` once the server applied `changes`, as it does: unpins out, pins in (a pin of the
- * assistant's makes it the user's), a new pin not judged by any turn yet.
- */
+/** `stored` once the server applied `changes`: a re-pin becomes the user's, a new pin is unjudged. */
 export function withAppliedChanges(stored: StoredSkills, changes: ChatSkillChanges): StoredSkills {
   const byId = new Map(stored.pins.map((pin) => [pin.id, pin]));
   return {
@@ -162,7 +146,6 @@ export function resetSkillChanges(
   );
 }
 
-/** No skill cited: the default of the components that take the draft's citations. */
 export const NO_CITED_SKILLS: readonly string[] = [];
 
 /** The package ids of the skills a draft cites with a skill directive, each once. */
@@ -172,40 +155,27 @@ export function citedSkillIds(draft: string): string[] {
   ];
 }
 
-/**
- * Whether restoring the default selection changes anything the user can see: a pinned skill the
- * draft does not cite (a cited one stays checked by its chip), or discovery off.
- */
+/** Whether restoring the default selection changes anything visible (a cited pin stays checked). */
 export function canResetSkills(skills: ConversationSkills, cited: readonly string[]): boolean {
   return !skills.skillDiscovery || skills.pinned.some((id) => !cited.includes(id));
 }
 
-/**
- * The skills the conversation will load: the pinned ones and those the draft cites (sending pins
- * them). The ONE place the pin cap is counted: the panel, the pill, the `/` menu and the send all
- * read it.
- */
+/** The pinned skills and those the draft cites: the ONE place the pin cap is counted. */
 export function effectiveSkills(pinned: readonly string[], cited: readonly string[]) {
   const ids = [...new Set([...pinned, ...cited])];
   return {
     ids,
-    /** Cited in the draft: the composer holds them, the panel cannot uncheck them. */
     cited: new Set(cited),
     atCap: ids.length >= MAX_PINNED_SKILLS,
     overCap: ids.length > MAX_PINNED_SKILLS,
   };
 }
 
-/** Why the last turn left a pin out of its context. */
 type SkillRefusal = Exclude<PinnedSkillStatus, "injected">;
 
 /**
- * What a picker row shows, the server's word first: only it says a skill is loaded.
- * - `cited`: the draft cites it; checked and locked, the chip in the message is what drops it.
- * - `next`: the next turn loads it (a pin the user added, or one no turn evaluated yet).
- * - `loaded`: the last turn injected it, pinned by `source`.
- * - `refused`: pinned, but the last turn left it out, for `reason`.
- * - `off`: not pinned.
+ * What a picker row shows; only the server says a skill is loaded. `cited`: locked by the draft;
+ * `next`: no turn judged it yet; `loaded` / `refused`: the last turn's verdict; `off`: not pinned.
  */
 export type SkillRowState =
   | { kind: "cited" | "next" | "off" }
@@ -219,7 +189,6 @@ export function skillRowState(
 ): SkillRowState {
   if (cited.has(id)) return { kind: "cited" };
   if (!skills.pinned.includes(id)) return { kind: "off" };
-  // A pending pin is the user's latest word: the stored verdict predates it.
   if (skills.pending.has(id)) return { kind: "next" };
   const pin = skills.stored.get(id);
   if (!pin || pin.status === null) return { kind: "next" };
@@ -233,11 +202,7 @@ export function loadsSkill(state: SkillRowState): boolean {
   return state.kind !== "off" && state.kind !== "refused";
 }
 
-/**
- * A choosable picker row: the catalogue, then every pin missing from it
- * (`available: false`, named by its package's bare name), so a dead pin can
- * still be removed.
- */
+/** The catalogue's rows, then every pin missing from it (`available: false`), so it can be removed. */
 export function skillPickerRows(
   catalogue: readonly ChatSkillCommand[],
   pinned: readonly string[],
@@ -258,20 +223,23 @@ export function skillPickerRows(
   ];
 }
 
-/** The `SKILL.md` that defines a skill: the file whose read loads it. */
 const SKILL_DEFINITION = "SKILL.md";
 
-/**
- * The skill a resource read (`read_resource`, or the forwarded `read`) loads, named by its served
- * frontmatter `name`: the assistant loads a skill by reading its `SKILL.md`. `null` when the read
- * names anything else.
- */
+/** The skill a read of its `SKILL.md` loads (`read_resource` or `read`); `null` for any other read. */
 export function skillLoadOf(
   args: Record<string, unknown> | undefined,
 ): { packageId: string; name: string } | null {
   const uri = args?.uri;
   const address = typeof uri === "string" ? parseSkillUri(uri) : null;
   if (!address || address.path !== SKILL_DEFINITION) return null;
-  // The served frontmatter `name`: what the `/` menu inserts, so the user's chip reads the same.
   return { packageId: address.packageId, name: address.name };
+}
+
+/** What a `SKILL.md` read did: `loaded` only when its result carries the server's `skillPinned`. */
+export type SkillLoadState = "running" | "loaded" | "readOnly" | "refused";
+
+export function skillLoadState(phase: ToolPhase, result: unknown): SkillLoadState {
+  if (phase === "error") return "refused";
+  if (phase !== "success") return "running";
+  return asRecordOrNull(result)?.skillPinned === true ? "loaded" : "readOnly";
 }

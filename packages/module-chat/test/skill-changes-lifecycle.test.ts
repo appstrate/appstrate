@@ -7,7 +7,7 @@
  */
 
 import { describe, expect, it } from "bun:test";
-import { QueryClient } from "@tanstack/react-query";
+import { QueryClient, QueryObserver } from "@tanstack/react-query";
 import type { ChatSkillChanges, PinnedSkill } from "../src/skills.ts";
 import {
   DEFAULT_STORED_SKILLS,
@@ -212,21 +212,56 @@ describe("writeAcceptedSkills", () => {
     expect(qc.getQueryData(KEY)).toBeUndefined();
   });
 
-  it("an older read in flight cannot land over the write", async () => {
+  /**
+   * The detail as the host's realtime keeps it: observed (so an invalidation refetches), each read
+   * answering the server's state when it started, held until `flush`.
+   */
+  function observedDetail(initial: SessionHistory) {
     const qc = new QueryClient();
-    qc.setQueryData(KEY, detail([]));
-    let answer!: (row: SessionHistory) => void;
-    const older = qc
-      .fetchQuery({
-        queryKey: KEY,
-        queryFn: () => new Promise<SessionHistory>((resolve) => (answer = resolve)),
-        staleTime: 0,
-      })
-      .catch(() => {});
+    qc.setQueryData(KEY, initial);
+    const server = { row: initial };
+    const held: (() => void)[] = [];
+    const observer = new QueryObserver(qc, {
+      queryKey: KEY,
+      queryFn: () => {
+        const answer = server.row;
+        return new Promise<SessionHistory>((resolve) => held.push(() => resolve(answer)));
+      },
+      staleTime: Infinity,
+    });
+    const unsubscribe = observer.subscribe(() => {});
+    const flush = async () => {
+      while (held.length > 0) {
+        held.shift()!();
+        await new Promise((resolve) => setTimeout(resolve, 0));
+      }
+    };
+    const pins = () => qc.getQueryData<SessionHistory>(KEY)!.skills.pins;
+    return { qc, server, observer, flush, pins, unsubscribe };
+  }
+
+  it("a read started before the claim cannot land over the write: the detail is read again", async () => {
+    const { qc, server, observer, flush, pins, unsubscribe } = observedDetail(detail([]));
+    void observer.refetch();
+    // The claim applies the change, then the turn answers 2xx.
+    server.row = detail([{ id: "@a/new", source: "user", status: "injected" }]);
     writeAcceptedSkills(qc, KEY, sent);
-    // The read started before the claim answers with the state before the turn.
-    answer(detail([]));
-    await older;
-    expect(qc.getQueryData<SessionHistory>(KEY)!.skills.pins.map((p) => p.id)).toEqual(["@a/new"]);
+    await flush();
+    expect(pins()).toEqual([{ id: "@a/new", source: "user", status: "injected" }]);
+    unsubscribe();
+  });
+
+  it("the verdict of a read started after the claim wins over the write", async () => {
+    const { qc, server, observer, flush, pins, unsubscribe } = observedDetail(detail([]));
+    // The claim's signal makes the realtime read the detail, which already holds the verdict.
+    server.row = detail([{ id: "@a/new", source: "user", status: "over_budget" }]);
+    void observer.refetch();
+    writeAcceptedSkills(qc, KEY, sent);
+    // Until the read lands, the write shows the pin as not judged yet.
+    expect(pins()).toEqual([{ id: "@a/new", source: "user", status: null }]);
+    await flush();
+    expect(pins()).toEqual([{ id: "@a/new", source: "user", status: "over_budget" }]);
+    expect(qc.getQueryState(KEY)!.isInvalidated).toBe(false);
+    unsubscribe();
   });
 });

@@ -87,6 +87,12 @@ interface PiToolResult {
    * contract), so a replay walks the stored text under the scope the live call had.
    */
   relayed?: true;
+  /**
+   * A read of a skill's `SKILL.md` that left the skill pinned to the conversation. Persisted
+   * beside `connectOffers` (same contract), so the chat's skill chip reads it live and on replay:
+   * absent, the read served its text for this turn only, and the chip claims no load.
+   */
+  skillPinned?: true;
 }
 
 /**
@@ -571,8 +577,8 @@ type Receipts = NonNullable<PiToolResult["persistedContent"]>;
  * The content and replay of a resource read. A read of the `SKILL.md` a persisted conversation
  * injects for its skill ({@link SkillLoad}) that the database confirms pinned replays a short
  * pin receipt in place of its text, since later turns inject it from the system prompt; one left
- * unpinned stays a plain read, with the note the load gave the model. `lead` is the call's own
- * text, kept ahead of the receipts.
+ * unpinned stays a plain read, with the note the load gave the model. Only a pinned one carries
+ * {@link PiToolResult.skillPinned}. `lead` is the call's own text, kept ahead of the receipts.
  */
 async function resourceReadResult(
   uri: unknown,
@@ -580,7 +586,7 @@ async function resourceReadResult(
   live: { content: PiToolResult["content"]; receipts: Receipts },
   skillLoad: SkillLoad | undefined,
   lead: Receipts = [],
-): Promise<Pick<PiToolResult, "content" | "persistedContent">> {
+): Promise<Pick<PiToolResult, "content" | "persistedContent" | "skillPinned">> {
   const index = resources.findIndex((resource) => resource.uri === uri);
   const text = (resources[index] as { text?: unknown } | undefined)?.text;
   const load =
@@ -593,6 +599,7 @@ async function resourceReadResult(
     return {
       content: live.content,
       persistedContent: [...lead, ...live.receipts.map((r, i) => (i === index ? receipt : r))],
+      skillPinned: true,
     };
   }
   const content = load?.note

@@ -3,7 +3,8 @@
 /**
  * The skills the server reports for a conversation, from the browser: each panel row says whether
  * its skill is in the model's context, who pinned it and, when the last turn left it out, why; a
- * skill the assistant loaded shows in its message as the user's skill chip. The session detail and
+ * skill the assistant read shows in its message as the user's skill chip, said loaded only when
+ * the server pinned it. The session detail and
  * the commands are mocked, so the states are checked without a model; the turn is refused (503)
  * after its body is read.
  */
@@ -68,7 +69,7 @@ test("the panel reports each pin's state and source, and an unchecked assistant 
                 toolCallId: "call_auto",
                 state: "output-available",
                 input: { uri: skillMd("auto") },
-                // What a reload serves: the receipt, never the skill's body.
+                // What a reload serves of a pinned load: the receipt and the pin flag.
                 output: {
                   content: [
                     {
@@ -80,14 +81,31 @@ test("the panel reports each pin's state and source, and an unchecked assistant 
                       }),
                     },
                   ],
+                  skillPinned: true,
+                },
+              },
+              {
+                // Past the pin cap the server still serves the read, with a note for the model.
+                type: "tool-read_resource",
+                toolCallId: "call_unpinned",
+                state: "output-available",
+                input: { uri: skillMd("pdf") },
+                output: {
+                  content: [
+                    { type: "text", text: "---\nname: pdf\n---\nBody" },
+                    {
+                      type: "text",
+                      text: "The skill `@acme/pdf` was read for this turn but not pinned to the conversation.",
+                    },
+                  ],
                 },
               },
               {
                 type: "tool-read_resource",
-                toolCallId: "call_refused",
+                toolCallId: "call_failed",
                 state: "output-error",
-                input: { uri: skillMd("pdf") },
-                errorText: "This conversation already pins 5 skills.",
+                input: { uri: skillMd("gone") },
+                errorText: "Resource not found: the skill could not be read.",
               },
             ],
           },
@@ -99,18 +117,26 @@ test("the panel reports each pin's state and source, and an unchecked assistant 
 
   await page.goto(`/chat/${id}`);
 
-  // The assistant's loads are drawn as skill chips, the refused one muted and said not loaded in
-  // the user's language (the model-facing error is never shown).
+  // The assistant's reads are drawn as skill chips, said loaded only when the server pinned them;
+  // the model-facing note and error are never shown.
   const loads = page.getByTestId("skill-load");
-  await expect(loads).toHaveCount(2);
-  await expect(loads.nth(0)).toHaveAttribute("data-phase", "success");
+  await expect(loads).toHaveCount(3);
+  await expect(loads.nth(0)).toHaveAttribute("data-state", "loaded");
   await expect(loads.nth(0).getByTestId("directive-chip")).toHaveText("auto");
-  await expect(loads.nth(1)).toHaveAttribute("data-phase", "error");
-  await expect(loads.nth(1).getByTestId("skill-load-state")).toHaveText("Non chargée");
-  await expect(loads.nth(1)).not.toContainText("already pins");
+  await expect(loads.nth(0).getByTestId("skill-load-live")).toHaveText("Compétence auto chargée");
+  await expect(loads.nth(0).getByTestId("skill-load-state")).toHaveCount(0);
+  await expect(loads.nth(1)).toHaveAttribute("data-state", "readOnly");
+  await expect(loads.nth(1).getByTestId("skill-load-state")).toHaveText(
+    "Lue pour ce message seulement",
+  );
+  await expect(loads.nth(1)).not.toContainText("chargée");
+  await expect(loads.nth(1)).not.toContainText("not pinned");
+  await expect(loads.nth(2)).toHaveAttribute("data-state", "refused");
+  await expect(loads.nth(2).getByTestId("skill-load-state")).toHaveText("Non chargée");
+  await expect(loads.nth(2)).not.toContainText("could not be read");
 
-  // The pill counts only what is loaded: `big`, pinned but over budget, is left out (`pdf` is a
-  // refused load, never a pin).
+  // The pill counts only what is loaded: `big`, pinned but over budget, is left out (`pdf` and
+  // `gone` were reads, never pins).
   await expect(page.getByTestId("skill-pill-pinned")).toHaveText(/^\s*2 ajoutées\s*$/);
 
   await openSkillsPicker(page);

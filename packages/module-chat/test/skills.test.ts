@@ -118,13 +118,12 @@ describe("applySkillChanges", () => {
 });
 
 describe("pinnedSkillsOf", () => {
-  it("gives each pin its source and status, null when unknown", () => {
+  it("gives each pin its source and status, null until evaluated", () => {
     expect(
       pinnedSkillsOf({
-        id: "chs_1",
         pinnedSkills: ["@a/a", "@a/m", "@a/z"],
         assistantSkills: ["@a/m"],
-        skillStatus: { "@a/a": "over_budget", "@a/m": "injected", "@a/z": "bogus" },
+        skillStatus: { "@a/a": "over_budget", "@a/m": "injected" },
       }),
     ).toEqual([
       { id: "@a/a", source: "user", status: "over_budget" },
@@ -153,18 +152,24 @@ describe("selectionAfter", () => {
 describe("turnSkillLoad", () => {
   const uri = (id: string) => `skill://space-1/${id.slice(1)}/${id.split("/")[1]}/SKILL.md`;
   const IDS = ["@a/in", "@a/left", "@a/new", "@a/next"];
-  type Pin = (id: string, append: boolean) => Promise<SkillPinOutcome>;
-  /** A loader over `IDS` (`@a/in` injected, `@a/left` pinned but left out), each pin call recorded. */
-  const loader = (calls: string[], opts: { budgetLeft?: number; pin?: Pin } = {}) =>
+  type Pin = (id: string) => Promise<SkillPinOutcome>;
+  /** A loader over `IDS` (`@a/in` injected, `@a/left` pinned but left out), each call recorded. */
+  const loader = (
+    calls: string[],
+    opts: { budgetLeft?: number; pin?: Pin; isPinned?: boolean } = {},
+  ) =>
     turnSkillLoad({
       uris: new Map(IDS.map((id) => [id, uri(id)])),
       pinned: ["@a/in", "@a/left"],
       injected: ["@a/in"],
       budgetLeft: opts.budgetLeft ?? 100,
-      pin: async (id, append) => {
-        calls.push(`${append ? "pin" : "check"} ${id}`);
-        if (opts.pin) return opts.pin(id, append);
-        return append ? "pinned" : "already_pinned";
+      pin: async (id) => {
+        calls.push(`pin ${id}`);
+        return opts.pin ? opts.pin(id) : "pinned";
+      },
+      isPinned: async (id) => {
+        calls.push(`check ${id}`);
+        return opts.isPinned ?? true;
       },
     });
 
@@ -177,7 +182,7 @@ describe("turnSkillLoad", () => {
 
   it("reads plainly, without a pin, a skill unpinned since the turn injected it", async () => {
     const calls: string[] = [];
-    const load = loader(calls, { pin: async () => "not_pinned" });
+    const load = loader(calls, { isPinned: false });
     expect(await load(uri("@a/in"), "x")).toEqual({ pinned: false });
     expect(calls).toEqual(["check @a/in"]);
   });
@@ -217,8 +222,8 @@ describe("turnSkillLoad", () => {
     const outcomes: Array<SkillPinOutcome | Error> = ["full", "released", new Error("db down")];
     const load = loader(calls, {
       budgetLeft: 10,
-      pin: async (_id, append) => {
-        const next = append ? outcomes.shift() : "already_pinned";
+      pin: async () => {
+        const next = outcomes.shift();
         if (next instanceof Error) throw next;
         return next ?? "pinned";
       },
@@ -239,8 +244,7 @@ describe("turnSkillLoad", () => {
     const gate = new Promise<void>((resolve) => (release = resolve));
     const load = loader(calls, {
       budgetLeft: 100,
-      pin: async (_id, append) => {
-        if (!append) return "already_pinned";
+      pin: async () => {
         await gate;
         return "pinned";
       },

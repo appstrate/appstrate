@@ -3,7 +3,9 @@
 -- claimed the conversation did with each pin (`skill_status`). DDL only: an existing pin
 -- reads as the user's, with no status until its next turn. Two CHECKs keep the assistant's pins
 -- among the pins and the pins within the chat's cap of 5 (every API write already did).
--- Rollback: drop both constraints, then both columns.
+-- Rollback: drop both constraints, then both columns. Rolling back the code alone, keeping
+-- this schema, needs `chat_sessions_assistant_skills_pinned` dropped first: the previous code
+-- writes whole pin sets, so one leaving out an assistant's pin fails with 23514 (a 500).
 
 ALTER TABLE "chat_sessions" ADD COLUMN "assistant_skills" text[] DEFAULT '{}'::text[] NOT NULL;--> statement-breakpoint
 ALTER TABLE "chat_sessions" ADD COLUMN "skill_status" jsonb DEFAULT '{}'::jsonb NOT NULL;--> statement-breakpoint

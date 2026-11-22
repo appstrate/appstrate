@@ -41,6 +41,7 @@ import { logger } from "../src/logger.ts";
 
 /** The scope of a session created with no origin space and no limit. */
 const UNLIMITED = { spaceId: null, restricted: false, pinnedSkills: [], skillDiscovery: true };
+const NO_SKILLS = { changes: { pin: [], unpin: [] }, status: {} };
 
 const app = getTestApp();
 
@@ -105,7 +106,7 @@ describe("GET /api/orgs/:orgId/chat/sessions/:id/stream — stale marker", () =>
   it("clears a marker whose producer is gone, once, and answers 204", async () => {
     const sessionId = await createSession();
     // A stream id no producer ever recorded under, old enough to be stale.
-    await setActiveStream(sessionId, "dead", UNLIMITED, {});
+    await setActiveStream(sessionId, "dead", UNLIMITED, NO_SKILLS);
     await ageMarker(sessionId);
     expect(await markerOf(sessionId)).toBe("dead");
 
@@ -129,7 +130,7 @@ describe("GET /api/orgs/:orgId/chat/sessions/:id/stream — stale marker", () =>
     // is written (with a fresh `updated_at`) but `context.run()` has not landed
     // yet, so the store has no recording either. Indistinguishable from a
     // crash except by age — and this one is young.
-    await setActiveStream(sessionId, "just-claimed", UNLIMITED, {});
+    await setActiveStream(sessionId, "just-claimed", UNLIMITED, NO_SKILLS);
 
     const res = await resume(sessionId);
     expect(res.status).toBe(204);
@@ -149,8 +150,8 @@ describe("GET /api/orgs/:orgId/chat/sessions/:id/stream — stale marker", () =>
     const a = await createSession();
     const b = await createSession();
     const idle = await createSession();
-    await setActiveStream(a, "dead-a", UNLIMITED, {});
-    await setActiveStream(b, "dead-b", UNLIMITED, {});
+    await setActiveStream(a, "dead-a", UNLIMITED, NO_SKILLS);
+    await setActiveStream(b, "dead-b", UNLIMITED, NO_SKILLS);
 
     expect(await sweepStaleActiveStreams()).toBe(2);
     expect(await markerOf(a)).toBeNull();
@@ -162,7 +163,7 @@ describe("GET /api/orgs/:orgId/chat/sessions/:id/stream — stale marker", () =>
 
   it("init() sweeps on the in-memory tier and NOT on the Redis tier", async () => {
     const sessionId = await createSession();
-    await setActiveStream(sessionId, "dead-boot", UNLIMITED, {});
+    await setActiveStream(sessionId, "dead-boot", UNLIMITED, NO_SKILLS);
     const base = buildModuleInitContext();
     try {
       // Redis configured: another replica may own this turn. Hands off.

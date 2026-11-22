@@ -3,8 +3,8 @@
 // Which skills a chat turn injects (the result sits in the system prompt's single
 // `cache_control` block), and what the assistant's reads of them pin.
 
-import { z } from "zod";
 import type { InjectedSkill, InjectedSkills } from "@appstrate/core/chat-contract";
+import type { ChatSkillStatus } from "@appstrate/db/schema";
 import { logger } from "./logger.ts";
 
 /** A skill's `SKILL.md` as injected: as the MCP Skills extension serves it at `uri`. */
@@ -33,13 +33,7 @@ export interface ChatSkillSelection {
 }
 
 /** Why a turn left a pinned skill out of its context; `injected` when it did not. */
-export const PINNED_SKILL_STATUSES = [
-  "injected",
-  "over_budget",
-  "unavailable",
-  "unreadable",
-] as const;
-export type PinnedSkillStatus = (typeof PINNED_SKILL_STATUSES)[number];
+export type PinnedSkillStatus = ChatSkillStatus;
 
 /** Who pinned a skill: the user (panel, `/` citation) or the assistant (loading its `SKILL.md`). */
 export const PINNED_SKILL_SOURCES = ["user", "assistant"] as const;
@@ -149,40 +143,25 @@ export function injectedSkills(resolved: ResolvedChatSkills): InjectedSkills["sk
   return Object.fromEntries(resolved.injected.map(({ packageId, served }) => [packageId, served]));
 }
 
-const pinnedSkillStatusSchema = z.enum(PINNED_SKILL_STATUSES);
-
 /** The pins of a session row as its DTOs carry them (`skills`); every write stores them sorted. */
 export function pinnedSkillsOf(row: {
-  id: string;
   pinnedSkills: readonly string[];
   assistantSkills: readonly string[];
-  skillStatus: Readonly<Record<string, unknown>>;
+  skillStatus: Readonly<Partial<Record<string, ChatSkillStatus>>>;
 }): PinnedSkill[] {
   const assistant = new Set(row.assistantSkills);
-  return row.pinnedSkills.map((id) => {
-    const stored = row.skillStatus[id];
-    const status = pinnedSkillStatusSchema.safeParse(stored);
-    if (stored !== undefined && !status.success) {
-      logger.warn("chat session stores a skill status outside the enum", {
-        sessionId: row.id,
-        skill: id,
-        status: String(stored),
-      });
-    }
-    return {
-      id,
-      source: assistant.has(id) ? "assistant" : "user",
-      status: status.success ? status.data : null,
-    };
-  });
+  return row.pinnedSkills.map((id) => ({
+    id,
+    source: assistant.has(id) ? "assistant" : "user",
+    status: row.skillStatus[id] ?? null,
+  }));
 }
 
 /**
  * What `pinAssistantSkill` answered for a skill: `pinned` by this call, `already_pinned`, or
- * left unpinned because the conversation is `full`, the turn `released` it, or (a check that
- * appends nothing) the skill is `not_pinned`.
+ * left unpinned because the conversation is `full` or the turn `released` it.
  */
-export type SkillPinOutcome = "pinned" | "already_pinned" | "full" | "released" | "not_pinned";
+export type SkillPinOutcome = "pinned" | "already_pinned" | "full" | "released";
 
 /**
  * What a read of a skill's `SKILL.md` did to the conversation's pins: `pinned` when the database
@@ -219,7 +198,7 @@ const PLAIN_READ: SkillLoadResult = { pinned: false };
  * injection would use; `pinned` and `injected` are the turn's pins and those its system prompt
  * injected, `budgetLeft` what it left. A pin of the turn (injected or not) is never pinned again
  * and spends no budget: an injected one, or one this turn pinned, gets a receipt only while
- * `pin(id, false)` still finds it pinned. A new load reserves its share of the budget before its
+ * `isPinned(id)` still finds it pinned. A new load reserves its share of the budget before its
  * pin is awaited, and a parallel read of the same skill waits for it, so concurrent tool calls
  * never spend the budget twice; a refused pin gives the reservation back.
  */
@@ -228,7 +207,8 @@ export function turnSkillLoad(opts: {
   pinned: Iterable<string>;
   injected: Iterable<string>;
   budgetLeft: number;
-  pin: (packageId: string, append: boolean) => Promise<SkillPinOutcome>;
+  pin: (packageId: string) => Promise<SkillPinOutcome>;
+  isPinned: (packageId: string) => Promise<boolean>;
 }): SkillLoad {
   const pinnedAtStart = new Set(opts.pinned);
   // The skills whose text this turn's context holds: what a re-read gets a receipt for.
@@ -244,11 +224,11 @@ export function turnSkillLoad(opts: {
       return load(uri, text);
     }
     if (held.has(packageId)) {
-      const outcome = await opts.pin(packageId, false).catch((error: unknown) => {
+      const pinned = await opts.isPinned(packageId).catch((error: unknown) => {
         logger.warn("chat skill pin check failed", { packageId, error: String(error) });
-        return "not_pinned" as const;
+        return false;
       });
-      return { pinned: outcome === "already_pinned" };
+      return { pinned };
     }
     if (pinnedAtStart.has(packageId)) return PLAIN_READ;
     if (text.length > left) {
@@ -259,7 +239,7 @@ export function turnSkillLoad(opts: {
     }
     left -= text.length;
     const attempt = opts
-      .pin(packageId, true)
+      .pin(packageId)
       .catch((error: unknown) => {
         logger.warn("chat assistant skill pin failed", { packageId, error: String(error) });
         return "failed" as const;
@@ -271,7 +251,7 @@ export function turnSkillLoad(opts: {
           return { pinned: true };
         }
         left += text.length;
-        return outcome === "not_pinned" ? PLAIN_READ : notPinned(packageId, PIN_REFUSALS[outcome]);
+        return notPinned(packageId, PIN_REFUSALS[outcome]);
       });
     inFlight.set(packageId, attempt);
     return attempt;

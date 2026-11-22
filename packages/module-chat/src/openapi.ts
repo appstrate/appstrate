@@ -12,8 +12,8 @@ import {
   CHAT_SKILLS_CONTENT_BUDGET_CHARS,
   MAX_PINNED_SKILLS,
   PINNED_SKILL_SOURCES,
-  PINNED_SKILL_STATUSES,
 } from "./skills.ts";
+import { chatSkillStatusValues } from "@appstrate/db/schema";
 
 const problem = {
   "application/problem+json": { schema: { $ref: "#/components/schemas/ProblemDetail" } },
@@ -84,7 +84,7 @@ export const chatComponentSchemas = {
             },
             status: {
               type: ["string", "null"],
-              enum: [...PINNED_SKILL_STATUSES, null],
+              enum: [...chatSkillStatusValues, null],
               description: `What the last turn that claimed the conversation (the turn's start, past every refusal) did with it — recorded even if that turn failed afterwards: \`injected\` (in the assistant's context), or left out — \`over_budget\` (the pinned skills share a ${CHAT_SKILLS_CONTENT_BUDGET_CHARS}-character budget), \`unavailable\` (in no skill listing the turn read: removed, deactivated or out of reach), \`unreadable\` (its read failed, or its SKILL.md was not the text listed). Null until a turn evaluates it.`,
             },
           },

@@ -24,6 +24,7 @@ import { initRealtime } from "../../../apps/api/src/services/realtime.ts";
 import { notifySessionUpdate } from "../src/realtime.ts";
 import { claimTurn, persistClaimedUserMessage } from "../src/chat-stream.ts";
 
+const NO_SKILLS = { changes: { pin: [], unpin: [] }, status: {} };
 const app = getTestApp();
 
 /** Let the PG LISTEN dispatcher register/deliver. */
@@ -91,7 +92,7 @@ describe("chat_session_update SSE fan-out", () => {
       session.id,
       "strm_1",
       { spaceId: null, restricted: false, pinnedSkills: [], skillDiscovery: true },
-      {},
+      NO_SKILLS,
     );
     await persistClaimedUserMessage(session.id, "strm_1", {
       id: "u1",

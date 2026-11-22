@@ -1,24 +1,39 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * A skill the assistant loaded (a read of its `SKILL.md`), drawn with the chip a user message
- * draws for a cited skill. A failed read only says the skill is not loaded: its error is written
- * for the model. Any other read keeps the generic tool row.
+ * A skill the assistant read (its `SKILL.md`), drawn with the chip a user message draws for a
+ * cited skill. It says "loaded" only when the server pinned it ({@link skillLoadState}); a read it
+ * did not pin, or a failed one, is muted and captioned. A failed read's error is written for the
+ * model, never shown. Any other read keeps the generic tool row.
  */
 
 import { makeAssistantToolUI, type ToolCallMessagePartProps } from "@assistant-ui/react";
 import { SKILL_DIRECTIVE } from "../directives.ts";
-import { skillLoadOf } from "./chat-skills.ts";
+import { skillLoadOf, skillLoadState, type SkillLoadState } from "./chat-skills.ts";
 import { DirectiveChip } from "./directive-chip.tsx";
 import { useChatHost } from "./runtime-context.ts";
 import { ToolFallback } from "./tool-fallback.tsx";
-import { deriveToolPhase, type ToolPhase } from "./tool-result.ts";
+import { deriveToolPhase } from "./tool-result.ts";
 
-const STATE_KEY: Record<ToolPhase, string> = {
-  pending: "skills.load.running",
-  running: "skills.load.running",
-  success: "skills.load.done",
-  error: "skills.load.refused",
+/** What the live region reads out, naming the skill. */
+const LIVE_KEY: Record<SkillLoadState, string> = {
+  running: "skills.load.live.running",
+  loaded: "skills.load.live.loaded",
+  readOnly: "skills.load.live.readOnly",
+  refused: "skills.load.live.refused",
+};
+
+/** The caption shown under the chip, beside its name: only for a skill left unpinned. */
+const CAPTION_KEY: Partial<Record<SkillLoadState, string>> = {
+  readOnly: "skills.load.readOnly",
+  refused: "skills.load.refused",
+};
+
+const CHIP_CLASS: Record<SkillLoadState, string | undefined> = {
+  running: "motion-safe:animate-pulse",
+  loaded: undefined,
+  readOnly: "border-dashed",
+  refused: "text-muted-foreground border-dashed bg-transparent",
 };
 
 type ResourceReadProps = ToolCallMessagePartProps<Record<string, unknown>, unknown>;
@@ -32,30 +47,29 @@ function SkillLoad({
 }) {
   const { t } = useChatHost();
   const phase = deriveToolPhase(props);
-  const failed = phase === "error";
+  const state = skillLoadState(phase, props.result);
+  const caption = CAPTION_KEY[state];
   return (
-    <div data-testid="skill-load" data-phase={phase} className="my-1.5 text-sm">
+    <div data-testid="skill-load" data-phase={phase} data-state={state} className="my-1.5 text-sm">
       <DirectiveChip
         directiveType={SKILL_DIRECTIVE}
         directiveId={skill.packageId}
         label={skill.name}
-        className={
-          failed
-            ? "text-muted-foreground border-dashed bg-transparent"
-            : phase === "success"
-              ? undefined
-              : "motion-safe:animate-pulse"
-        }
+        className={CHIP_CLASS[state]}
       />
-      {/* One live region, present from the start: its text changes as the load lands. A failure
-          is shown; the other states are for screen readers only. */}
-      <span
-        aria-live="polite"
-        data-testid="skill-load-state"
-        className={failed ? "text-muted-foreground mt-1 block text-xs" : "sr-only"}
-      >
-        {t(STATE_KEY[phase])}
+      {/* Present from the start, so the outcome is read out when it lands. */}
+      <span aria-live="polite" data-testid="skill-load-live" className="sr-only">
+        {t(LIVE_KEY[state], { name: skill.name })}
       </span>
+      {caption && (
+        <span
+          aria-hidden="true"
+          data-testid="skill-load-state"
+          className="text-muted-foreground mt-1 block text-xs"
+        >
+          {t(caption)}
+        </span>
+      )}
     </div>
   );
 }

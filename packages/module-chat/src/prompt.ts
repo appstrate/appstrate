@@ -478,7 +478,7 @@ export interface ChatSkillsRead {
  * `resources/read` serves at its entry's URI. Read with the caller's own
  * permissions, even with discovery off, whose turn holds no `skills:*`. A pinned skill
  * in neither list is left out (unavailable); one whose read failed — the connection, a
- * `skills/list` it may be missing from, its `resources/read` — or answered malformed (a
+ * `skills/list` it may be missing from, the draft listing, its `resources/read` — or answered malformed (a
  * draft entry without `lock_version`, a `SKILL.md` served as a blob, or text
  * whose digest differs from the one its entry lists) is kept as `null` (unreadable). `uris`
  * gives each listed skill the `SKILL.md` URI its injection takes: the one an assistant load
@@ -533,7 +533,7 @@ export async function readSkillsOver(
   spaces: readonly string[],
   opts: SkillsReadOptions,
 ): Promise<ChatSkillsRead> {
-  let listFailed = false;
+  const failed = { published: false, draft: false };
   const list = (meta?: Record<string, unknown>) =>
     client.listSkills(meta ? { meta, signal } : { signal }).then(
       ({ skills }) => entriesByPackage(skills, spaces),
@@ -542,7 +542,7 @@ export async function readSkillsOver(
           definition: meta ? "draft" : "published",
           err: String(err),
         });
-        listFailed = true;
+        failed[meta ? "draft" : "published"] = true;
         return new Map<string, ListedSkillEntry>();
       },
     );
@@ -577,10 +577,16 @@ export async function readSkillsOver(
   }
   await Promise.all(
     opts.pinned.map(async (id) => {
+      // Without the draft listing, a pin's draft (what the panel offers) is unknown: its
+      // published version is not injected in its place.
+      if (failed.draft) {
+        read.contents.set(id, null);
+        return;
+      }
       const entry = injectedFrom.get(id);
       if (!entry) {
         // Missing from a listing that failed is not known to be unavailable.
-        if (listFailed) read.contents.set(id, null);
+        if (failed.published) read.contents.set(id, null);
         return;
       }
       const content = await client.readResource({ uri: entry.uri }, { signal }).then(
