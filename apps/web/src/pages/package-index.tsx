@@ -148,6 +148,18 @@ function PackageIndexBody({
         tableId={`packages-${type}`}
         items={shownItems}
         extraFilters={space.filter ? [space.filter] : undefined}
+        spaceNarrowing={
+          space.narrowing
+            ? {
+                hiddenCount: (items?.length ?? 0) - (shownItems?.length ?? 0),
+                message:
+                  type === "agent"
+                    ? t("common:spaceFilter.empty.agents")
+                    : t("common:spaceFilter.empty.skills"),
+                showAll: space.showAll,
+              }
+            : undefined
+        }
         isLoading={isLoading}
         error={error}
         holds={type}

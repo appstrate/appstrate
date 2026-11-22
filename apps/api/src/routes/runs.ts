@@ -244,10 +244,8 @@ export async function respondScopedRunList(
 
 /** The global run list over `grants`: `GET /api/runs` and `GET /api/orgs/{orgId}/runs`. */
 export async function respondRunList(c: Context<AppEnv>, orgId: string, grants: SpaceGrant[]) {
-  const { spaceIds, ...filters } = parseGlobalRunListQuery(c);
-  // Only narrows: an unreached id matches no grant, and no grant left reads nothing.
-  const reached = spaceIds ? grants.filter((grant) => spaceIds.includes(grant.spaceId)) : grants;
-  const result = await listGlobalRuns(orgId, reached, { ...filters, actor: getActor(c) });
+  const filters = parseGlobalRunListQuery(c);
+  const result = await listGlobalRuns(orgId, grants, { ...filters, actor: getActor(c) });
   setCursorLinkHeader({ c, hasMore: result.hasMore, lastId: result.data.at(-1)?.id });
   return c.json(result);
 }

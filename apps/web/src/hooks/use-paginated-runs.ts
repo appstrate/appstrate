@@ -6,6 +6,7 @@ import { client } from "../api/client";
 import { useListScope } from "./use-org-scope";
 import { usePermissions } from "./use-permissions";
 import { paginatedRunsKeys } from "../lib/query-keys";
+import type { SpaceKind } from "../lib/space-filter";
 import { keysetPaging } from "@appstrate/ui/keyset-paging";
 import type { EnrichedRun, ListEnvelope } from "@appstrate/shared-types";
 import type { RunStatus } from "@appstrate/core/run-status";
@@ -25,8 +26,8 @@ interface UseRunsOptions {
   unread?: boolean;
   /** Every space the reader reaches (`GET /api/orgs/{orgId}/runs`); ignored for a schedule's list. */
   spanning?: boolean;
-  /** Narrows an org-wide list to these spaces (`spaceId`); ignored off the org-wide route. */
-  spaceIds?: readonly string[];
+  /** Narrows an org-wide list to team or personal spaces (`space_kind`); ignored off the org-wide route. */
+  spaceKind?: SpaceKind;
   enabled?: boolean;
   limit?: number;
 }
@@ -59,7 +60,7 @@ export function useRuns({
   search,
   unread,
   spanning,
-  spaceIds,
+  spaceKind,
   enabled = true,
   limit = RUNS_PAGE_SIZE,
 }: UseRunsOptions) {
@@ -89,7 +90,7 @@ export function useRuns({
     search,
     limit,
     // The key carries them only where the request does.
-    acrossSpaces ? spaceIds : undefined,
+    acrossSpaces ? spaceKind : undefined,
   );
 
   return useInfiniteQuery({
@@ -105,7 +106,7 @@ export function useRuns({
           search,
           unread,
           acrossOrgId: scope.acrossOrgId,
-          spaceIds,
+          spaceKind,
           limit,
           startingAfter: pageParam,
         },
@@ -172,7 +173,7 @@ export async function fetchRunPage(
     search,
     unread,
     acrossOrgId,
-    spaceIds,
+    spaceKind,
     limit,
     startingAfter,
   }: RunPageRequest,
@@ -198,11 +199,7 @@ export async function fetchRunPage(
   };
   if (acrossOrgId) {
     const { data } = await client.GET("/api/orgs/{orgId}/runs", {
-      params: {
-        path: { orgId: acrossOrgId },
-        // An array: the client serializes it comma-separated (`QUERY_SERIALIZER`).
-        query: { ...query, spaceId: spaceIds?.length ? [...spaceIds] : undefined },
-      },
+      params: { path: { orgId: acrossOrgId }, query: { ...query, space_kind: spaceKind } },
       signal,
     });
     return data!;

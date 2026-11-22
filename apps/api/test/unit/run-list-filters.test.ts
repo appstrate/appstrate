@@ -1,10 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { describe, expect, it } from "bun:test";
+import type { Context } from "hono";
 import { PgDialect } from "drizzle-orm/pg-core";
+import type { AppEnv } from "../../src/types/index.ts";
 import {
+  parseGlobalRunListQuery,
   parseRunListFilters,
-  parseSpaceIdFilter,
   runSearchCondition,
 } from "../../src/lib/run-list-filters.ts";
 
@@ -58,26 +60,21 @@ describe("run list filters", () => {
   });
 });
 
-describe("spaceId filter", () => {
-  const a = "spc_00000000-0000-4000-8000-00000000000a";
-  const b = "spc_00000000-0000-4000-8000-00000000000b";
+describe("space_kind filter", () => {
+  const parse = (query: Record<string, string>) =>
+    parseGlobalRunListQuery({
+      req: { query: (name?: string) => (name ? query[name] : query) },
+    } as unknown as Context<AppEnv>);
   it("reads absent and empty as no narrowing", () => {
-    expect(parseSpaceIdFilter(undefined)).toBeUndefined();
-    expect(parseSpaceIdFilter("")).toBeUndefined();
+    expect(parse({}).spaceKind).toBeUndefined();
+    expect(parse({ space_kind: "" }).spaceKind).toBeUndefined();
   });
-  it("accepts one id or several, and collapses duplicates", () => {
-    expect(parseSpaceIdFilter(a)).toEqual([a]);
-    expect(parseSpaceIdFilter(`${a}, ${b}`)).toEqual([a, b]);
-    expect(parseSpaceIdFilter(`${a},${b},${a}`)).toEqual([a, b]);
+  it("accepts the two kinds", () => {
+    expect(parse({ space_kind: "team" }).spaceKind).toBe("team");
+    expect(parse({ space_kind: "personal" }).spaceKind).toBe("personal");
   });
-  it("rejects a malformed member for the whole list", () => {
-    expect(() => parseSpaceIdFilter(`${a},nope`)).toThrow();
-    expect(() => parseSpaceIdFilter(`${a},`)).toThrow();
-  });
-  it("bounds the number of ids", () => {
-    const id = (n: number) => `spc_00000000-0000-4000-8000-${n.toString(16).padStart(12, "0")}`;
-    const many = (n: number) => Array.from({ length: n }, (_, i) => id(i)).join(",");
-    expect(parseSpaceIdFilter(many(100))).toHaveLength(100);
-    expect(() => parseSpaceIdFilter(many(101))).toThrow();
+  it("rejects any other value instead of widening the list", () => {
+    expect(() => parse({ space_kind: "all" })).toThrow();
+    expect(() => parse({ space_kind: "Team" })).toThrow();
   });
 });

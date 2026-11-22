@@ -4,16 +4,12 @@ import type { Context } from "hono";
 import { z } from "zod";
 import { eq, ilike, inArray, or, type SQL } from "drizzle-orm";
 import { runs } from "@appstrate/db/schema";
-import { SPACE_ID_RE } from "@appstrate/db/ids";
 import { runStatusValues, type RunStatus } from "@appstrate/core/run-status";
 import { parseListLimit } from "@appstrate/core/list-query";
 import type { AppEnv } from "../types/index.ts";
 import { invalidRequest } from "./errors.ts";
 import { closedSet, packageIdFilter, parseStrictQuery } from "./list-query.ts";
 import { likeContains } from "./like-pattern.ts";
-
-/** Bounds `?spaceId=`: the list becomes an `IN (...)` over the caller's grants. */
-const MAX_SPACE_ID_FILTER = 100;
 
 /** `runs.run_number` is an int4: a larger number names no run, and binding it overflows. */
 const MAX_RUN_NUMBER = 2_147_483_647;
@@ -38,24 +34,6 @@ export function parseRunListFilters(query: { status?: string; q?: string }): {
     throw invalidRequest(`status must be one of: ${runStatusValues.join(", ")}`, "status");
   }
   return { status: parts ? ([...new Set(parts)] as RunStatus[]) : undefined, search };
-}
-
-/**
- * `?spaceId=`: one space id or several separated by commas, as `status` is.
- * Empty reads as absent. A malformed id is a 400 for the whole list; a
- * well-formed one the caller does not reach is the route's to ignore.
- */
-export function parseSpaceIdFilter(raw: string | undefined): string[] | undefined {
-  if (!raw) return undefined;
-  const parts = raw.split(",").map((part) => part.trim());
-  if (parts.some((part) => !SPACE_ID_RE.test(part))) {
-    throw invalidRequest("spaceId must be one or more comma-separated space ids", "spaceId");
-  }
-  const ids = [...new Set(parts)];
-  if (ids.length > MAX_SPACE_ID_FILTER) {
-    throw invalidRequest(`spaceId accepts at most ${MAX_SPACE_ID_FILTER} ids`, "spaceId");
-  }
-  return ids;
 }
 
 /**
@@ -89,6 +67,10 @@ export function runListConditions(filters: { status?: RunStatus[]; search?: stri
  * parameter against it, so the tuple and the type cannot drift.
  */
 const GLOBAL_RUN_KINDS = ["all", "package", "inline"] as const;
+
+/** `?space_kind=`: narrows the caller's reach to team spaces or to personal ones. */
+const SPACE_KINDS = ["team", "personal"] as const;
+type SpaceKind = (typeof SPACE_KINDS)[number];
 type GlobalRunKind = (typeof GLOBAL_RUN_KINDS)[number];
 
 /** The filters `GET /api/runs` and `GET /api/orgs/{orgId}/runs` share. */
@@ -117,6 +99,8 @@ export interface GlobalRunListFilters {
   unread?: boolean;
   /** `?user=me`: the actor's own runs in every space, even where they read all. */
   ownOnly?: boolean;
+  /** Only the runs of team spaces or of personal ones (a space with an owner); narrows the reach, never widens it. */
+  spaceKind?: SpaceKind;
 }
 
 const runListQuerySchema = z
@@ -130,8 +114,7 @@ const runListQuerySchema = z
     start_date: z.string().optional(),
     end_date: z.string().optional(),
     chat_session_id: z.string().optional(),
-    // Checked by `parseSpaceIdFilter`.
-    spaceId: z.string().optional(),
+    space_kind: closedSet(SPACE_KINDS),
     packageId: packageIdFilter,
     // Checked by `parseListLimit` (anything but 1..100 is a 400).
     limit: z.string().optional(),
@@ -151,12 +134,11 @@ function parseDate(raw: string | undefined, name: string): Date | undefined {
  * The query of `GET /api/runs` and `GET /api/orgs/{orgId}/runs`. Strict: an
  * unknown parameter is a 400, as is a value outside a closed set. Keyset-paged:
  * `startingAfter` is the last run id of the previous page; `limit` is 20 when
- * absent. `spaceIds` is not a service filter: the route applies it to the
- * caller's grants (`respondRunList`), so it only narrows their reach.
+ * absent.
  */
 export function parseGlobalRunListQuery(
   c: Context<AppEnv>,
-): GlobalRunListFilters & { limit: number; spaceIds?: string[] } {
+): GlobalRunListFilters & { limit: number } {
   const query = parseStrictQuery(c, runListQuerySchema);
   const { status, search } = parseRunListFilters({ status: query.status, q: query.q });
   return {
@@ -174,6 +156,6 @@ export function parseGlobalRunListQuery(
     endDate: parseDate(query.end_date, "end_date"),
     chatSessionId: query.chat_session_id || undefined,
     packageId: query.packageId,
-    spaceIds: parseSpaceIdFilter(query.spaceId),
+    spaceKind: query.space_kind,
   };
 }

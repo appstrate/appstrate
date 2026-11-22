@@ -42,7 +42,7 @@ import { useOrg } from "../hooks/use-org";
 import { useColumnVisibility } from "../stores/column-visibility-store";
 import { useOverviewMode } from "../hooks/use-overview-mode";
 import { useSpaceFilter } from "../hooks/use-space-filter";
-import { inSpaces } from "../lib/space-filter";
+import { inSpaces, showsTeamEmpty } from "../lib/space-filter";
 import { usePackageIndexActions } from "../hooks/use-package-index-actions";
 import { useSpaceLink } from "../hooks/use-current-space";
 import { IntegrationSourceLabel } from "../components/integration-source-label";
@@ -79,6 +79,8 @@ export function IntegrationsPage() {
     [active, query, origins, sources, spaceIds],
   );
   const filtering = query.trim() !== "" || origins.length > 0 || sources.length > 0;
+  // Rows the space filter alone drops: what a team-only list hides, whatever the other filters.
+  const hiddenCount = active.length - active.filter((i) => inSpaces(i.space_ids, spaceIds)).length;
 
   const allColumns = useIntegrationListColumns(connectionCount, spanning);
   const { columns, menu } = useColumnVisibility("integrations", allColumns);
@@ -105,10 +107,17 @@ export function IntegrationsPage() {
       })),
     },
   ];
-  const empty = filtering ? (
+  const empty = showsTeamEmpty({
+    readerFiltered: filtering,
+    narrowing: space.narrowing,
+    hiddenCount,
+  }) ? (
+    <SpaceFilterEmpty
+      message={t("common:spaceFilter.empty.integrations")}
+      showAll={space.showAll}
+    />
+  ) : filtering ? (
     <NoMatchState message={t("integrations.empty.filtered")} onReset={list.reset} />
-  ) : spaceIds ? (
-    <SpaceFilterEmpty showAll={space.showAll} />
   ) : (
     <EmptyState
       icon={Boxes}

@@ -1,7 +1,13 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { describe, it, expect } from "bun:test";
-import { hiddenSpaceIds, inSpaces, resolveSpaceFilter, withAllSpaces } from "../space-filter.ts";
+import {
+  inSpaces,
+  resolveSpaceFilter,
+  showsTeamEmpty,
+  withAllSpaces,
+  withSpaceChoice,
+} from "../space-filter.ts";
 
 const team = { id: "spc_team", personal: false };
 const team2 = { id: "spc_team2", personal: false };
@@ -71,13 +77,41 @@ describe("inSpaces", () => {
   });
 });
 
-describe("hiddenSpaceIds", () => {
-  it("is the admitting spaces the filter drops", () => {
-    expect(hiddenSpaceIds([team, mine, team2], ["spc_team", "spc_team2"])).toEqual(["spc_me"]);
+describe("showsTeamEmpty", () => {
+  const base = { readerFiltered: false, narrowing: true, hiddenCount: 3 };
+
+  it("speaks when the default alone narrows and something is hidden", () => {
+    expect(showsTeamEmpty(base)).toBe(true);
   });
 
-  it("is empty when nothing narrows", () => {
-    expect(hiddenSpaceIds([team, mine], undefined)).toEqual([]);
+  it("stays quiet when nothing exists elsewhere: the page's own empty state wins", () => {
+    expect(showsTeamEmpty({ ...base, hiddenCount: 0 })).toBe(false);
+  });
+
+  it("stays quiet when the reader filtered or nothing narrows", () => {
+    expect(showsTeamEmpty({ ...base, readerFiltered: true })).toBe(false);
+    expect(showsTeamEmpty({ ...base, narrowing: false })).toBe(false);
+  });
+});
+
+describe("withSpaceChoice", () => {
+  it("writes space=all when the default is unticked, keeping the other parameters", () => {
+    const next = withSpaceChoice(new URLSearchParams("status=failed&q=x"), true);
+    expect(next.get("space")).toBe("all");
+    expect(next.get("status")).toBe("failed");
+    expect(next.get("q")).toBe("x");
+  });
+
+  it("removes the parameter when the default is ticked, keeping the other parameters", () => {
+    const next = withSpaceChoice(new URLSearchParams("space=all&kind=inline"), false);
+    expect(next.has("space")).toBe(false);
+    expect(next.get("kind")).toBe("inline");
+  });
+
+  it("does not mutate the URL it was given", () => {
+    const prev = new URLSearchParams("a=1");
+    withSpaceChoice(prev, true);
+    expect(prev.has("space")).toBe(false);
   });
 });
 

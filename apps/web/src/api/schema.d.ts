@@ -22220,8 +22220,8 @@ export interface operations {
                 end_date?: string;
                 /** @description Return only runs launched from this chat session. */
                 chat_session_id?: string;
-                /** @description Narrow the list to these spaces: one or several space ids, comma-separated on the wire (`spaceId=spc_a,spc_b`). It only narrows the caller's reach, never widens it: an id of a space the caller does not read runs in is ignored, indistinguishably from one that does not exist, and when none of the listed ids is reached the page is empty (`total: 0`), never the unfiltered list. Omit (or send an empty value) for every space the caller reaches. A value that is not a space id, or more than 100 ids, is rejected with `400`. */
-                spaceId?: string[];
+                /** @description Narrow the list to the runs of team spaces (`team`) or of personal spaces (`personal`) among the spaces the caller reaches. It only narrows, never widens: when no reached space matches, the page is empty (`total: 0`). Omit (or send an empty value) for every reached space. Any value outside the enum is rejected with `400`. */
+                space_kind?: "team" | "personal";
                 /** @description Return only the runs of this agent (`@scope/name`). A package the caller cannot read yields an empty page, not a refusal. A value that is not a package id is rejected with `400`; an empty value reads as absent. */
                 packageId?: string;
                 /** @description Free-text filter, combined with every other filter. Matches the agent the run executed (scope and name, as stamped on the run) and the error it ended on, case-insensitively and anywhere in the value. A query of digits (optionally prefixed with `#`) also matches the run number. Longer than 200 characters is rejected with `400`. */
@@ -25778,8 +25778,8 @@ export interface operations {
                 end_date?: string;
                 /** @description Return only runs launched from this chat session. */
                 chat_session_id?: string;
-                /** @description Narrow the list to these spaces: one or several space ids, comma-separated on the wire (`spaceId=spc_a,spc_b`). It only narrows the caller's reach, never widens it: an id of a space the caller does not read runs in is ignored, indistinguishably from one that does not exist, and when none of the listed ids is reached the page is empty (`total: 0`), never the unfiltered list. Omit (or send an empty value) for every space the caller reaches. A value that is not a space id, or more than 100 ids, is rejected with `400`. */
-                spaceId?: string[];
+                /** @description Narrow the list to the runs of team spaces (`team`) or of personal spaces (`personal`) among the spaces the caller reaches. It only narrows, never widens: when no reached space matches, the page is empty (`total: 0`). Omit (or send an empty value) for every reached space. Any value outside the enum is rejected with `400`. */
+                space_kind?: "team" | "personal";
                 /** @description Return only the runs of this agent (`@scope/name`). A package the caller cannot read yields an empty page, not a refusal. A value that is not a package id is rejected with `400`; an empty value reads as absent. */
                 packageId?: string;
                 /** @description Free-text filter, combined with every other filter. Matches the agent the run executed (scope and name, as stamped on the run) and the error it ended on, case-insensitively and anywhere in the value. A query of digits (optionally prefixed with `#`) also matches the run number. Longer than 200 characters is rejected with `400`. */

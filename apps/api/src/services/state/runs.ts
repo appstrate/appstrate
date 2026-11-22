@@ -9,6 +9,7 @@ import {
   or,
   asc,
   desc,
+  isNotNull,
   isNull,
   inArray,
   count,
@@ -31,6 +32,7 @@ import {
   endUsers,
   apiKeys,
   schedules,
+  spaces,
   llmUsage,
   organizations,
   files,
@@ -1818,6 +1820,7 @@ export async function listGlobalRuns(
     search,
     unread = false,
     ownOnly = false,
+    spaceKind,
     actor = null,
   } = options;
 
@@ -1827,6 +1830,19 @@ export async function listGlobalRuns(
   if (startDate) conditions.push(gte(runs.startedAt, startDate));
   if (endDate) conditions.push(lte(runs.startedAt, endDate));
   if (packageId) conditions.push(eq(runs.packageId, packageId));
+  if (spaceKind) {
+    // One more AND on top of the reach: it can only narrow. A personal space has an owner.
+    const kindOfSpace = db
+      .select({ id: spaces.id })
+      .from(spaces)
+      .where(
+        and(
+          eq(spaces.orgId, orgId),
+          spaceKind === "personal" ? isNotNull(spaces.ownerUserId) : isNull(spaces.ownerUserId),
+        ),
+      );
+    conditions.push(inArray(runs.spaceId, kindOfSpace));
+  }
   if (chatSessionId) {
     conditions.push(eq(runs.chatSessionId, chatSessionId));
     conditions.push(

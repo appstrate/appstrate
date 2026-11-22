@@ -12,7 +12,7 @@
 
 import { describe, it, expect } from "bun:test";
 import { KeysetListFooter, ListFooter, ListToolbar, type FilterSpec } from "../list-toolbar.tsx";
-import { readerFiltered } from "../../lib/reader-filtered.ts";
+import { filterRowOpen, readerFiltered } from "../../lib/reader-filtered.ts";
 import { toggleValue } from "../../lib/toggle-value.ts";
 import i18n, { i18nReady } from "../../i18n.ts";
 import { render } from "../../test/render.tsx";
@@ -160,6 +160,18 @@ describe("a default value", () => {
     const html = render(<ListToolbar filters={[spaceFilter]} onReset={() => {}} />);
     expect(html).not.toContain("Réinitialiser");
     expect(readerFiltered([spaceFilter])).toBe(false);
+  });
+
+  it("opens a row that was shut at first render once the default appears", () => {
+    // « Tous les espaces » turned on while on the page: nothing was active at first render.
+    expect(filterRowOpen(null, false, [spaceFilter])).toBe(true);
+    expect(filterRowOpen(null, false, filters())).toBe(false);
+    expect(filterRowOpen(null, true, filters())).toBe(true);
+  });
+
+  it("leaves the reader's choice in charge", () => {
+    expect(filterRowOpen(false, true, [spaceFilter])).toBe(false);
+    expect(filterRowOpen(true, false, filters())).toBe(true);
   });
 
   it("shows the reset once the reader filters something besides it", () => {

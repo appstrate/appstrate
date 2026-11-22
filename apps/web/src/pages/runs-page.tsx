@@ -16,7 +16,8 @@ import { usePermissions } from "../hooks/use-permissions";
 import { useRunStatusFilter } from "../hooks/use-run-status-filter";
 import { useAdmittingSpaces, useOverviewMode } from "../hooks/use-overview-mode";
 import { useSpaceFilter } from "../hooks/use-space-filter";
-import { hiddenSpaceIds } from "../lib/space-filter";
+import { showsTeamEmpty, type SpaceKind } from "../lib/space-filter";
+import { useHiddenRuns } from "../hooks/use-hidden-runs";
 import { HiddenRunsNotice } from "../components/hidden-runs-notice";
 
 /**
@@ -38,10 +39,12 @@ export function RunsPage() {
   const spaceFilter = useSpaceFilter("runs", spanning);
   // « Tout marquer comme lu » marks what the list shows: the working space, or each space
   // admitting the list that the space filter keeps.
-  const { spaceIds } = spaceFilter;
+  const { spaceIds, narrowing } = spaceFilter;
   const shownSpaces = spaceIds ? runSpaces.filter((s) => spaceIds.includes(s.id)) : runSpaces;
-  const hiddenIds = hiddenSpaceIds(runSpaces, spaceIds);
-  const unreadCount = useUnreadRunCount({ spanning, spaceIds });
+  // The API narrows by kind, so the URL never grows with the number of spaces.
+  const spaceKind: SpaceKind | undefined = narrowing ? "team" : undefined;
+  const hidden = useHiddenRuns(narrowing);
+  const unreadCount = useUnreadRunCount({ spanning, spaceKind });
   const markAllRead = useMarkAllRunsRead();
   const list = useListParams(FILTER_PARAMS);
   const searchPlaceholder = useSearchPlaceholder(t("common:nav.runs"));
@@ -86,6 +89,7 @@ export function RunsPage() {
   // The endpoint takes ONE kind, so "both ticked" is "no kind parameter" (same
   // for scope); the ticks themselves stay as ticked.
   const kind: RunKindFilter | undefined = kinds.length === 1 ? kinds[0] : undefined;
+  const filtered = Boolean(search) || readerFiltered(filters);
   const user = canSeeEveryRun && scopes.includes("me") ? "me" : undefined;
 
   return (
@@ -114,7 +118,7 @@ export function RunsPage() {
         kind={kind}
         status={statuses}
         spanning={spanning}
-        spaceIds={spaceIds}
+        spaceKind={spaceKind}
         search={search}
         toolbar={({ columns }) => (
           <>
@@ -128,16 +132,23 @@ export function RunsPage() {
               onReset={list.reset}
               columns={columns}
             />
-            <HiddenRunsNotice hiddenIds={hiddenIds} showAll={spaceFilter.showAll} />
+            <HiddenRunsNotice
+              inFlight={hidden.inFlight}
+              unread={hidden.unread}
+              showAll={spaceFilter.showAll}
+            />
           </>
         )}
         // A filtered list that finds nothing ran out of matches: the way out is the filter. When
         // only the space filter narrows, the way out is every space.
         emptyState={
-          search || readerFiltered(filters) ? (
+          showsTeamEmpty({ readerFiltered: filtered, narrowing, hiddenCount: hidden.total }) ? (
+            <SpaceFilterEmpty
+              message={t("common:spaceFilter.empty.runs")}
+              showAll={spaceFilter.showAll}
+            />
+          ) : filtered ? (
             <NoMatchState message={t("runs.emptyFiltered")} onReset={list.reset} />
-          ) : spaceIds ? (
-            <SpaceFilterEmpty showAll={spaceFilter.showAll} />
           ) : undefined
         }
       />

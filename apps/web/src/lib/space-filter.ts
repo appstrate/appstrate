@@ -5,6 +5,12 @@
  * space one click away. Pure, so the URL rule and the row rule are tested without a router.
  */
 
+/** The kinds of space the run list narrows to (`space_kind`). */
+export type SpaceKind = "team" | "personal";
+
+/** The `space` URL parameter of the studio lists. */
+export const SPACE_PARAM = "space";
+
 interface FilterableSpace {
   id: string;
   personal: boolean;
@@ -43,13 +49,30 @@ export function inSpaces(
   return !!rowSpaceIds?.some((id) => spaceIds.includes(id));
 }
 
-/** The admitting spaces the filter drops: what a narrowed list hides. Empty when not narrowing. */
-export function hiddenSpaceIds(
-  admitting: readonly { id: string }[],
-  spaceIds: readonly string[] | undefined,
-): string[] {
-  if (!spaceIds) return [];
-  return admitting.map((space) => space.id).filter((id) => !spaceIds.includes(id));
+/**
+ * Whether an empty list says « nothing in team spaces » (and offers every space): only when the
+ * reader filtered nothing, the default narrows, and the narrowing hides something. Otherwise the
+ * page's own empty state speaks: a list empty in every space must still offer its create button.
+ * `hiddenCount` is what the filter drops (rows, or runs of personal spaces).
+ */
+export function showsTeamEmpty({
+  readerFiltered,
+  narrowing,
+  hiddenCount,
+}: {
+  readerFiltered: boolean;
+  narrowing: boolean;
+  hiddenCount: number;
+}): boolean {
+  return !readerFiltered && narrowing && hiddenCount > 0;
+}
+
+/** The URL after the reader ticks (`all` false: team spaces) or unticks the default: `space=all` or no `space`. */
+export function withSpaceChoice(prev: URLSearchParams, all: boolean): URLSearchParams {
+  const next = new URLSearchParams(prev);
+  if (all) next.set(SPACE_PARAM, "all");
+  else next.delete(SPACE_PARAM);
+  return next;
 }
 
 /** A list path widened to every space (`?space=all`) when `spanning`: a count across spaces opens the list it counted. */

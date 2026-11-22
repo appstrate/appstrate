@@ -7,7 +7,12 @@ import { ACROSS_SPACES, paginatedRunsKeys } from "../../lib/query-keys.ts";
 import { keepsRunRows } from "../use-paginated-runs.ts";
 
 const key = (
-  overrides: { status?: string; search?: string; limit?: number; spaceIds?: string[] } = {},
+  overrides: {
+    status?: string;
+    search?: string;
+    limit?: number;
+    spaceKind?: "team" | "personal";
+  } = {},
 ) =>
   paginatedRunsKeys.list(
     "org_1",
@@ -19,7 +24,7 @@ const key = (
     undefined,
     overrides.search ?? "",
     overrides.limit ?? 25,
-    overrides.spaceIds,
+    overrides.spaceKind,
   );
 
 describe("keepsRunRows", () => {
@@ -31,12 +36,12 @@ describe("keepsRunRows", () => {
     expect(keepsRunRows(key({ search: "rap" }), key({ search: "rapport" }))).toBe(true);
   });
 
-  it("drops the rows when the spaces change, and keeps them while searching within them", () => {
-    expect(keepsRunRows(key({ spaceIds: ["spc_a"] }), key())).toBe(false);
+  it("drops the rows when the space kind changes, and keeps them while searching within it", () => {
+    expect(keepsRunRows(key({ spaceKind: "team" }), key())).toBe(false);
     expect(
       keepsRunRows(
-        key({ spaceIds: ["spc_a"], search: "r" }),
-        key({ spaceIds: ["spc_a"], search: "ra" }),
+        key({ spaceKind: "team", search: "r" }),
+        key({ spaceKind: "team", search: "ra" }),
       ),
     ).toBe(true);
   });

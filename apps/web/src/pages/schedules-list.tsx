@@ -6,7 +6,7 @@ import { Calendar, Plus } from "lucide-react";
 import { useAllSchedules } from "../hooks/use-schedules";
 import { useOverviewMode } from "../hooks/use-overview-mode";
 import { useSpaceFilter } from "../hooks/use-space-filter";
-import { inSpaces } from "../lib/space-filter";
+import { inSpaces, showsTeamEmpty } from "../lib/space-filter";
 import { useSpaceAction } from "../hooks/use-space-action";
 import { PageHeader } from "../components/page-header";
 import {
@@ -88,10 +88,17 @@ export function SchedulesListPage() {
     },
   ];
   const filtering = query.trim() !== "" || states.length > 0;
-  const emptyBody = filtering ? (
+  const hiddenCount = (schedules ?? []).filter(
+    (schedule) => !inSpaces([schedule.spaceId], spaceIds),
+  ).length;
+  const emptyBody = showsTeamEmpty({
+    readerFiltered: filtering,
+    narrowing: space.narrowing,
+    hiddenCount,
+  }) ? (
+    <SpaceFilterEmpty message={t("common:spaceFilter.empty.schedules")} showAll={space.showAll} />
+  ) : filtering ? (
     <NoMatchState message={t("schedules.noMatch")} onReset={list.reset} />
-  ) : spaceIds ? (
-    <SpaceFilterEmpty showAll={space.showAll} />
   ) : (
     <EmptyState
       message={spanning ? t("schedules.emptyAcross") : t("schedules.empty")}

@@ -14,6 +14,7 @@ import type { QueryClient } from "@tanstack/react-query";
 import { SidebarProvider } from "@appstrate/ui/components/sidebar";
 import { reporter } from "../../test/agent-detail.ts";
 import { installFakeStorage } from "../../test/fake-storage.ts";
+import { paginatedRunsKeys } from "../../lib/query-keys.ts";
 
 installFakeStorage({
   __APP_CONFIG__: { features: {}, trustedOrigins: [] },
@@ -493,8 +494,7 @@ describe("the dashboard in the mode", () => {
   const seed = (queryClient: QueryClient) => {
     queryClient.setQueryData(["agents", "org_1", "across-spaces"], AGENTS);
     queryClient.setQueryData(
-      [
-        "paginated-runs",
+      paginatedRunsKeys.list(
         "org_1",
         "across-spaces",
         "/runs",
@@ -504,7 +504,7 @@ describe("the dashboard in the mode", () => {
         undefined,
         undefined,
         15,
-      ],
+      ),
       {
         pages: [
           {
@@ -528,7 +528,7 @@ describe("the dashboard in the mode", () => {
     expect(asked("agents")).toEqual([["agents", "org_1", "across-spaces"]]);
     expect(asked("schedules")).toEqual([["schedules", "org_1", "across-spaces"]]);
     const runRequests = asked("paginated-runs").map(
-      ([, orgId, scope, endpoint, , , status, , , limit]) => ({
+      ([, orgId, scope, endpoint, , , status, , , , limit]) => ({
         orgId,
         scope,
         endpoint,
@@ -565,8 +565,7 @@ describe("the dashboard in the mode", () => {
         queryClient.setQueryData(["agents", "org_1", "spc_a"], [agent(["spc_a"])]);
         queryClient.setQueryData(["schedules", "org_1", "spc_a"], []);
         queryClient.setQueryData(
-          [
-            "paginated-runs",
+          paginatedRunsKeys.list(
             "org_1",
             "spc_a",
             "/runs",
@@ -576,7 +575,7 @@ describe("the dashboard in the mode", () => {
             undefined,
             undefined,
             15,
-          ],
+          ),
           {
             pages: [{ object: "list", hasMore: false, data: [], total: 0 }],
             pageParams: [undefined],

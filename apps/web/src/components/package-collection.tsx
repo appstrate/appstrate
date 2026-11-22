@@ -23,6 +23,7 @@ import { PackageCard, PackageCardSkeleton } from "./package-card";
 import { PackagesTable } from "./packages-table";
 import { ListFooter, ListToolbar, type ColumnMenuSpec, type FilterSpec } from "./list-toolbar";
 import { readerFiltered } from "../lib/reader-filtered";
+import { showsTeamEmpty } from "../lib/space-filter";
 import { EmptyState, NoMatchState, SpaceFilterEmpty } from "./page-states";
 import { useSearchPlaceholder } from "../lib/search-placeholder";
 import type { ListState } from "../lib/list-params";
@@ -74,12 +75,13 @@ export interface PackageCollectionProps {
    * catalogue says the organization's name where a page says "Personnalisé".
    */
   originLabels?: OriginLabels;
-  /**
-   * Dimensions the CALLER filters on. It has already narrowed `items`; the bar
-   * only draws these, next to the ones this component owns. One that `isDefault`s and holds a
-   * value (the space filter) narrows without the reader asking: its empty list offers to widen.
-   */
+  /** Dimensions the CALLER filters on. It has already narrowed `items`; the bar only draws these, next to the ones this component owns. */
   extraFilters?: FilterSpec[];
+  /**
+   * Given while the space filter narrows `items`: how many rows it hides, so an empty list that
+   * hides some offers to widen (`showsTeamEmpty`) instead of the page's own empty state.
+   */
+  spaceNarrowing?: { hiddenCount: number; message: string; showAll: () => void };
   /** Whether an agent card offers its run button. A catalogue's cannot. */
   cardRun?: boolean;
   /** The list spans several spaces: each card names its row's spaces. */
@@ -113,6 +115,7 @@ export function PackageCollection({
   activityFilter = true,
   originLabels,
   extraFilters = NO_FILTERS,
+  spaceNarrowing,
   cardRun = true,
   spanning = false,
   actions,
@@ -171,24 +174,27 @@ export function PackageCollection({
   ];
   const filtering =
     Boolean(query) || origins.length > 0 || activities.length > 0 || readerFiltered(extraFilters);
-  const narrowedByDefault = extraFilters.find(
-    (filter) => filter.isDefault && filter.values.length > 0,
-  );
 
   // An empty list, a search that matched nothing, and a request that failed are
   // three different sentences, and the body says whichever applies IN PLACE —
   // the bar and the count above and below it never move. An early return above
   // the toolbar would cost an empty list its bar and make it re-offer the
   // page's own actions as unlabelled icons.
-  const emptyBody = filtering ? (
-    <NoMatchState message={t("list.noMatch")} onReset={list.reset} />
-  ) : narrowedByDefault ? (
-    <SpaceFilterEmpty showAll={() => narrowedByDefault.onChange([])} />
-  ) : (
-    <EmptyState message={emptyMessage} hint={emptyHint} icon={emptyIcon} compact>
-      {emptyAction}
-    </EmptyState>
-  );
+  const emptyBody =
+    spaceNarrowing &&
+    showsTeamEmpty({
+      readerFiltered: filtering,
+      narrowing: true,
+      hiddenCount: spaceNarrowing.hiddenCount,
+    }) ? (
+      <SpaceFilterEmpty message={spaceNarrowing.message} showAll={spaceNarrowing.showAll} />
+    ) : filtering ? (
+      <NoMatchState message={t("list.noMatch")} onReset={list.reset} />
+    ) : (
+      <EmptyState message={emptyMessage} hint={emptyHint} icon={emptyIcon} compact>
+        {emptyAction}
+      </EmptyState>
+    );
 
   const placeholder = cardPlaceholder ?? (
     <PackageCardSkeleton
