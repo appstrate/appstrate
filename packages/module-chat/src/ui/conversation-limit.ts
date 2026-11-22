@@ -2,17 +2,13 @@
 
 /**
  * The open conversation's origin space and limit (`ConversationScope`), and what its first turn
- * carries. Before the first message the conversation does not exist: its origin is the space the
- * host has selected (or, without one, the space the user limits it to) and its limit a local
- * choice, both sent with that message: the draft. Once that message is sent the draft stops
- * following the selection and stands for the conversation until a session row is known; every
- * later turn carries it too, and the server reads it only on the turn that creates the
- * conversation. Afterwards the limit is the server's, changed by a PATCH
- * (refused while a turn generates): every reader projects it while it is pending, and a success
- * writes it into the session detail and every list row. A PATCH finding no session (404) on a
- * conversation new in this mount means its first turn failed before creating one: the change goes
- * back into the draft, not an error. The origin is immutable once set: a conversation without one
- * takes it only by being limited to it.
+ * carries. Before the first message the draft (the selected space as origin, a local limit) is
+ * the conversation's scope and the first message sends it; once sent it stops following the
+ * selection and every later turn carries it too (the server reads it only on the turn that
+ * creates the conversation). Then the limit is the server's row, changed by a PATCH (refused
+ * while a turn generates): readers project it while pending, a success writes it into the detail
+ * and every list row, and a 404 sends it back to the draft. The origin is immutable once set: a
+ * conversation without one takes it only by being limited to it.
  */
 
 import { useCallback, useMemo, useState } from "react";
@@ -22,6 +18,7 @@ import type { ConversationScope } from "./conversation-scope.ts";
 import { errorStatus, type ChatTransport } from "./runtime-context.ts";
 import { useLatest } from "./use-latest.ts";
 import {
+  dropSessionFromLists,
   patchSessionsCache,
   sessionQueryKey,
   SESSIONS_QUERY_KEY,
@@ -133,8 +130,9 @@ export function useConversationLimit({
   const isPending = pending !== undefined;
   const { mutate } = useMutation({
     mutationKey: limitMutationKey(transport?.orgId),
-    // Resolves whether the conversation exists: a 404 on one this mount never loaded is a first
-    // turn that created nothing, an outcome to absorb rather than an error to toast.
+    // Resolves whether the session was found. A 404 on a conversation new in this mount means
+    // there is none to change (its first turn created none, or it was deleted since): the change
+    // stays in the draft and the next message (re)creates the conversation with it.
     mutationFn: async ({ id: sessionId, ...patch }: LimitChange) => {
       try {
         await setSessionLimit(transport!, sessionId, patch);
@@ -144,22 +142,24 @@ export function useConversationLimit({
         throw error;
       }
     },
-    onSuccess: (exists, change) => {
+    onSuccess: (found, limitChange) => {
       setDraft((prev) => ({
-        spaceId: change.spaceId ?? prev.spaceId,
-        restricted: change.restricted,
-        under: exists ? prev.under : selectedSpaceId,
+        spaceId: limitChange.spaceId ?? prev.spaceId,
+        restricted: limitChange.restricted,
+        under: found ? prev.under : selectedSpaceId,
       }));
-      if (!exists) {
+      if (!found) {
         setSent(false);
+        // An optimistic row of the failed turn must not be read back as `stored`.
+        void dropSessionFromLists(queryClient, limitChange.id);
         return;
       }
       queryClient.setQueryData<SessionHistory | null>(
         detailKey,
-        (row) => row && limitedRow(row, change),
+        (row) => row && limitedRow(row, limitChange),
       );
       queryClient.setQueriesData<SessionsCache>({ queryKey: SESSIONS_QUERY_KEY }, (cache) =>
-        patchSessionsCache(cache, (rows) => rows.map((row) => limitedRow(row, change))),
+        patchSessionsCache(cache, (rows) => rows.map((row) => limitedRow(row, limitChange))),
       );
     },
   });
