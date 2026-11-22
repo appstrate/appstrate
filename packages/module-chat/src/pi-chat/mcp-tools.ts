@@ -54,7 +54,7 @@ import { isRasterImageMime, normalizeMime } from "@appstrate/core/mime";
 import type { FileDelivery } from "../file-input.ts";
 import type { TurnPdfInput } from "./native-pdf.ts";
 import { platformMcpSurfaceCache, type PlatformMcpSurface } from "./mcp-surface-cache.ts";
-import type { SkillLoad } from "../skills.ts";
+import type { SkillLoad } from "../skill-load.ts";
 
 const RUN_AND_WAIT_TOOL = "run_and_wait";
 const READ_RESOURCE_TOOL = "read_resource";

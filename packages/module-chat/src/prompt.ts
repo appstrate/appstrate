@@ -30,10 +30,10 @@ import {
   injectedSkills,
   MAX_PINNED_SKILLS,
   resolveChatSkills,
-  UNPIN_HINT,
   type ChatSkillSelection,
   type SkillContent,
 } from "./skills.ts";
+import { UNPIN_HINT } from "./skill-load.ts";
 import type { ChatSkillStatus } from "@appstrate/db/schema";
 
 type InjectedSkillMap = InjectedSkills["skills"];

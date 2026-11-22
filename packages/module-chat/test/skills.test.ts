@@ -8,11 +8,10 @@ import {
   pinnedSkillsOf,
   resolveChatSkills,
   selectionAfter,
-  turnSkillLoad,
   type ChatSkillSelection,
-  type SkillPinOutcome,
   type SkillContent,
 } from "../src/skills.ts";
+import { turnSkillLoad, type SkillPinOutcome } from "../src/skill-load.ts";
 
 const content = (id: string, body = `# ${id}`): SkillContent => ({
   packageId: id,

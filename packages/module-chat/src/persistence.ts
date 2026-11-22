@@ -47,7 +47,8 @@ import { invalidRequest, notFound } from "@appstrate/core/api-errors";
 import { uiMessageTitleText } from "./message-text.ts";
 import { agentPromptOfParts } from "./agent-prompt.ts";
 import { notifySessionUpdate } from "./realtime.ts";
-import { MAX_PINNED_SKILLS, type ChatSkillSelection, type SkillPinOutcome } from "./skills.ts";
+import { MAX_PINNED_SKILLS, type ChatSkillSelection } from "./skills.ts";
+import type { SkillPinOutcome } from "./skill-load.ts";
 import type { FileUIPart, UIMessage } from "ai";
 
 /**

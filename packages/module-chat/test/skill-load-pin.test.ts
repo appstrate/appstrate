@@ -20,7 +20,8 @@ import { buildPlatformMcpTools } from "../src/pi-chat/mcp-tools.ts";
 import { PiChatUiStreamMapper } from "../src/pi-chat/ui-stream-mapper.ts";
 import { isSkillPinned, pinAssistantSkill } from "../src/persistence.ts";
 import { mintSessionId } from "../src/session-id.ts";
-import { MAX_PINNED_SKILLS, turnSkillLoad, type SkillLoad } from "../src/skills.ts";
+import { MAX_PINNED_SKILLS } from "../src/skills.ts";
+import { turnSkillLoad, type SkillLoad } from "../src/skill-load.ts";
 import { inertTurnSpaces } from "./turn-spaces.ts";
 
 const MCP_URL = "http://127.0.0.1:1/api/mcp/o/org_1?renders_cards=true";

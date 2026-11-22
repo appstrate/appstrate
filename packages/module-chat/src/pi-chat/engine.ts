@@ -48,7 +48,7 @@ import { turnErrorLogIds } from "../turn-error.ts";
 import { PiChatUiStreamMapper } from "./ui-stream-mapper.ts";
 import type { AgentSessionEvent, PiUsage } from "./pi-events.ts";
 import { buildPlatformMcpTools, type TurnSpaces } from "./mcp-tools.ts";
-import type { SkillLoad } from "../skills.ts";
+import type { SkillLoad } from "../skill-load.ts";
 import { releaseOnClose, type PiChatSlot } from "./concurrency.ts";
 import { createStepCapController, type PiChatSession } from "./turn-control.ts";
 import {

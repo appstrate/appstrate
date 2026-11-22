@@ -54,10 +54,10 @@ import {
   DEFAULT_SKILL_SELECTION,
   MAX_PINNED_SKILLS,
   selectionAfter,
-  turnSkillLoad,
   type ChatSkillChanges,
   type ChatSkillSelection,
 } from "./skills.ts";
+import { turnSkillLoad } from "./skill-load.ts";
 export type { ChatEnv } from "./prompt.ts";
 import { finalizeChatStream } from "./finalize-stream.ts";
 import {
