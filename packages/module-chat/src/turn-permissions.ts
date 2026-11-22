@@ -27,11 +27,8 @@ export function turnPermissions(
 }
 
 /**
- * Whether a turn works on the caller's skill drafts: package authoring on and the caller holds
- * `skills:write`, whatever discovery. Then every skill it lists, injects or pins is the caller's
- * draft when there is one, otherwise its published version. One predicate for the turn
- * (`chat-stream.ts`) and the composer's commands (`GET …/chat/commands`), so a skill the panel
- * offers is the definition the turn injects.
+ * Whether a turn (and the composer's commands) works on drafts: authoring on and `skills:write`
+ * held. Every skill it lists, injects or pins is then the caller's draft when one exists.
  */
 export function turnUsesDrafts(
   callerPermissions: ReadonlySet<string>,

@@ -20,7 +20,7 @@ export interface Directive {
   id: string;
 }
 
-export type TextSegment = { kind: "text"; text: string } | ({ kind: "directive" } & Directive);
+type TextSegment = { kind: "text"; text: string } | ({ kind: "directive" } & Directive);
 
 function isKnown(type: string): type is Directive["type"] {
   return type === SKILL_DIRECTIVE || type === AGENT_DIRECTIVE;

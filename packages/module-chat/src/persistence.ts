@@ -45,7 +45,7 @@ import {
 import { toPgSafe } from "@appstrate/db/pg-safe";
 import { invalidRequest, notFound } from "@appstrate/core/api-errors";
 import { uiMessageTitleText } from "./message-text.ts";
-import { AGENT_PROMPT_PART_TYPE, agentPromptDataSchema } from "./agent-prompt.ts";
+import { agentPromptOfParts } from "./agent-prompt.ts";
 import { notifySessionUpdate } from "./realtime.ts";
 import { MAX_PINNED_SKILLS, type ChatSkillSelection, type SkillPinOutcome } from "./skills.ts";
 import type { FileUIPart, UIMessage } from "ai";
@@ -230,8 +230,8 @@ export function sortedIds(ids: SQL): SQL {
 
 /**
  * Create the session row if it does not exist yet (idempotent), with the default skill
- * selection: a turn's skill changes are written by its claim alone (`setActiveStream`), so a
- * refused turn writes none. The client mints the id. The
+ * selection: a turn's skill changes are written by its claim alone (`setActiveStream`). The
+ * client mints the id. The
  * `origin` request (origin space and limit) is called ONLY when this call creates the row:
  * an existing conversation keeps its own and the request is never evaluated. A turn naming an
  * origin runs in a transaction that evaluates it once the row is known to be new (a refusal
@@ -320,7 +320,7 @@ const pinnedSql = (packageId: string) =>
  * Pin `packageId` to the conversation as the assistant's: its `SKILL.md` was just read by the turn
  * holding `streamId`. ONE statement guarded on the cap and on the turn still holding the
  * conversation: appended to `pinned_skills` and `assistant_skills`, its status `injected`. A
- * skill already pinned is never written: `already_pinned`, whoever pinned it. Otherwise refused
+ * skill already pinned is never written, and answers `pinned` whoever pinned it. Otherwise refused
  * as `full` (a lost race on the cap) or `released` (the turn no longer holds the conversation).
  */
 export async function pinAssistantSkill(
@@ -355,7 +355,7 @@ export async function pinAssistantSkill(
     .from(chatSessions)
     .where(eq(chatSessions.id, sessionId))
     .limit(1);
-  if (current?.pinned) return "already_pinned";
+  if (current?.pinned) return "pinned";
   return current?.activeStreamId === streamId ? "full" : "released";
 }
 
@@ -496,11 +496,8 @@ export async function storedAgentPromptTexts(
     );
   const texts = new Map<string, string>();
   for (const row of rows) {
-    const launch = row.content.parts.find(
-      (part) => (part as { type?: unknown }).type === AGENT_PROMPT_PART_TYPE,
-    );
-    const data = agentPromptDataSchema.safeParse((launch as { data?: unknown } | undefined)?.data);
-    if (data.success && data.data.text) texts.set(row.messageId, data.data.text);
+    const text = agentPromptOfParts(row.content.parts)?.data.text;
+    if (text) texts.set(row.messageId, text);
   }
   return texts;
 }

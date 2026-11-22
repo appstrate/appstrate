@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-// Which skills a chat turn injects (the result sits in the system prompt's single
-// `cache_control` block), and what the assistant's reads of them pin.
+// Which skills a chat turn injects, and what the assistant's reads of them pin.
 
 import type { InjectedSkill, InjectedSkills } from "@appstrate/core/chat-contract";
 import type { ChatSkillStatus } from "@appstrate/db/schema";
@@ -28,29 +27,23 @@ export const MAX_PINNED_SKILLS = 5;
 export interface ChatSkillSelection {
   /** The model finds the other skills of the turn's spaces; off, the turn holds no `skills:*`. */
   skillDiscovery: boolean;
-  /** Injected in full on every turn, whatever `skillDiscovery`. */
   pinnedSkills: string[];
 }
 
-/** Why a turn left a pinned skill out of its context; `injected` when it did not. */
-export type PinnedSkillStatus = ChatSkillStatus;
+export type { ChatSkillStatus };
 
 /** Who pinned a skill: the user (panel, `/` citation) or the assistant (loading its `SKILL.md`). */
 export const PINNED_SKILL_SOURCES = ["user", "assistant"] as const;
-export type PinnedSkillSource = (typeof PINNED_SKILL_SOURCES)[number];
+type PinnedSkillSource = (typeof PINNED_SKILL_SOURCES)[number];
 
 /** A pin as the session DTOs carry it (`skills`); `status` is `null` until a claiming turn evaluates it. */
 export interface PinnedSkill {
   id: string;
   source: PinnedSkillSource;
-  status: PinnedSkillStatus | null;
+  status: ChatSkillStatus | null;
 }
 
-/**
- * What a turn changes in the stored selection (`skill_discovery`, `pin_skills`, `unpin_skills` on
- * `POST /chat`): deltas against the server's state, never a full set, so a stale client cannot
- * drop a pin the server added.
- */
+/** A turn's change to the stored selection: deltas, never a full set, so a stale client drops no pin. */
 export interface ChatSkillChanges {
   skillDiscovery?: boolean;
   pin: readonly string[];
@@ -85,17 +78,12 @@ export const DEFAULT_SKILL_SELECTION: ChatSkillSelection = {
 interface ResolvedChatSkills {
   injected: SkillContent[];
   notices: string[];
-  /** Each pin's verdict: what the turn's claim writes to `skill_status`. */
-  statuses: Record<string, PinnedSkillStatus>;
+  statuses: Record<string, ChatSkillStatus>;
   /** The characters of the shared budget the injected skills leave: what an assistant load may take. */
   left: number;
 }
 
-/**
- * The skills to inject: the pinned ones in stored order, out of one budget. `contents` holds the
- * pins found here: read, or `null` when their read failed or answered malformed; a skill absent
- * from it is in no listing.
- */
+/** The pins to inject, in stored order, out of one budget; `contents` maps each listed pin to its read (`null`: unreadable). */
 export function resolveChatSkills(
   selection: ChatSkillSelection,
   contents: ReadonlyMap<string, SkillContent | null>,
@@ -157,30 +145,19 @@ export function pinnedSkillsOf(row: {
   }));
 }
 
-/**
- * What `pinAssistantSkill` answered for a skill: `pinned` by this call, `already_pinned`, or
- * left unpinned because the conversation is `full` or the turn `released` it.
- */
-export type SkillPinOutcome = "pinned" | "already_pinned" | "full" | "released";
+/** `pinned` (now or already), else refused: the conversation is `full`, or the turn `released` it. */
+export type SkillPinOutcome = "pinned" | "full" | "released";
 
-/**
- * What a read of a skill's `SKILL.md` did to the conversation's pins: `pinned` when the database
- * confirms the skill pinned now (its replay is a receipt), else a plain read, with the `note`
- * the model is told when a pin it attempted was refused.
- */
-export interface SkillLoadResult {
+/** What a read of a skill's `SKILL.md` did to its pin (see {@link turnSkillLoad}); `note` tells the model a pin was refused. */
+interface SkillLoadResult {
   pinned: boolean;
   note?: string;
 }
 
-/**
- * The assistant's read of a skill file `uri` that answered `text`, in a persisted turn: undefined
- * unless it is the `SKILL.md` this conversation injects for its skill. Never throws: a refused pin
- * leaves the read a plain one.
- */
+/** A read of `uri` answering `text`: undefined unless it is a skill's injected `SKILL.md`; never throws. */
 export type SkillLoad = (uri: string, text: string) => Promise<SkillLoadResult | undefined>;
 
-const UNPIN_HINT =
+export const UNPIN_HINT =
   "Tell the user: they can unpin a skill in the skills panel of the composer to make room.";
 const notPinned = (packageId: string, why: string): SkillLoadResult => ({
   pinned: false,
@@ -194,13 +171,11 @@ const PIN_REFUSALS: Record<"full" | "released" | "failed", string> = {
 const PLAIN_READ: SkillLoadResult = { pinned: false };
 
 /**
- * The turn's {@link SkillLoad}. `uris` maps each skill the turn can see to the `SKILL.md` URI its
- * injection would use; `pinned` and `injected` are the turn's pins and those its system prompt
- * injected, `budgetLeft` what it left. A pin of the turn (injected or not) is never pinned again
- * and spends no budget: an injected one, or one this turn pinned, gets a receipt only while
- * `isPinned(id)` still finds it pinned. A new load reserves its share of the budget before its
- * pin is awaited, and a parallel read of the same skill waits for it, so concurrent tool calls
- * never spend the budget twice; a refused pin gives the reservation back.
+ * The turn's {@link SkillLoad}; `uris` maps each visible skill to its injected `SKILL.md` URI. A
+ * re-read pin is never pinned again nor spends budget: an injected one (or one this turn pinned)
+ * replays as a receipt while `isPinned` holds; one left out is a plain read. A new load reserves
+ * its budget before its pin is awaited (a parallel read of it waits), so the budget is never
+ * spent twice; a refused pin gives it back.
  */
 export function turnSkillLoad(opts: {
   uris: ReadonlyMap<string, string>;
@@ -210,13 +185,14 @@ export function turnSkillLoad(opts: {
   pin: (packageId: string) => Promise<SkillPinOutcome>;
   isPinned: (packageId: string) => Promise<boolean>;
 }): SkillLoad {
+  const packageByUri = new Map([...opts.uris].map(([packageId, uri]) => [uri, packageId]));
   const pinnedAtStart = new Set(opts.pinned);
   // The skills whose text this turn's context holds: what a re-read gets a receipt for.
   const held = new Set(opts.injected);
   const inFlight = new Map<string, Promise<SkillLoadResult>>();
   let left = opts.budgetLeft;
   const load: SkillLoad = async (uri, text) => {
-    const packageId = [...opts.uris].find(([, injectedAt]) => injectedAt === uri)?.[0];
+    const packageId = packageByUri.get(uri);
     if (packageId === undefined) return undefined;
     const pending = inFlight.get(packageId);
     if (pending) {
@@ -246,7 +222,7 @@ export function turnSkillLoad(opts: {
       })
       .then((outcome): SkillLoadResult => {
         inFlight.delete(packageId);
-        if (outcome === "pinned" || outcome === "already_pinned") {
+        if (outcome === "pinned") {
           held.add(packageId);
           return { pinned: true };
         }

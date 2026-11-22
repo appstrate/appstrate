@@ -47,6 +47,38 @@ export function actingOrgRole(c: Context<ChatEnv>): string {
 }
 
 /**
+ * Deadline of a read over the caller's own MCP connection (the turn's skills, the composer's
+ * commands, an agent launch's prompt), connection included: the preamble runs before the turn's
+ * abort controller exists, and a client disconnect never cancels a turn, so the read carries its
+ * own bound. Past it, a turn goes on with the skills read so far left out, each with its notice.
+ */
+const CALLER_READ_TIMEOUT_MS = 10_000;
+
+/**
+ * `use` over a caller connection opened by `openCaller` under {@link CALLER_READ_TIMEOUT_MS},
+ * always closed after. A failed connect rethrows, or answers `unreachable(err)` when given.
+ */
+export async function withCallerClient<C extends { close(): Promise<unknown> }, T>(
+  openCaller: (signal: AbortSignal) => Promise<C>,
+  use: (client: C, signal: AbortSignal) => Promise<T>,
+  unreachable?: (err: unknown) => T,
+): Promise<T> {
+  const signal = AbortSignal.timeout(CALLER_READ_TIMEOUT_MS);
+  let client: C;
+  try {
+    client = await openCaller(signal);
+  } catch (err) {
+    if (!unreachable) throw err;
+    return unreachable(err);
+  }
+  try {
+    return await use(client, signal);
+  } finally {
+    await client.close().catch(() => {});
+  }
+}
+
+/**
  * A connection of the CALLER to the platform MCP server, opened on demand: the bearer carries the
  * caller's own `permissions` over `spaces` and no claim of a turn (no injected skills, no
  * session), so it reads what the caller reads. Used for what is read before a turn's own claim

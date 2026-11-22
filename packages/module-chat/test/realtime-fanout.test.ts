@@ -24,7 +24,7 @@ import { initRealtime } from "../../../apps/api/src/services/realtime.ts";
 import { notifySessionUpdate } from "../src/realtime.ts";
 import { claimTurn, persistClaimedUserMessage } from "../src/chat-stream.ts";
 
-const NO_SKILLS = { changes: { pin: [], unpin: [] }, status: {} };
+import { NO_SKILL_WRITE, UNLIMITED_SCOPE } from "./turn-claim.ts";
 const app = getTestApp();
 
 /** Let the PG LISTEN dispatcher register/deliver. */
@@ -88,12 +88,7 @@ describe("chat_session_update SSE fan-out", () => {
     const res = await openStream(ctx);
     await wait();
 
-    await claimTurn(
-      session.id,
-      "strm_1",
-      { spaceId: null, restricted: false, pinnedSkills: [], skillDiscovery: true },
-      NO_SKILLS,
-    );
+    await claimTurn(session.id, "strm_1", UNLIMITED_SCOPE, NO_SKILL_WRITE);
     await persistClaimedUserMessage(session.id, "strm_1", {
       id: "u1",
       role: "user",

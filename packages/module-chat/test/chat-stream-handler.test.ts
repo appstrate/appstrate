@@ -33,6 +33,7 @@ import {
   chatSessionSpaces,
   files,
   uploads,
+  type ChatSkillStatus,
 } from "@appstrate/db/schema";
 import { uploadStream } from "@appstrate/db/storage";
 import { createUpload } from "../../../apps/api/src/services/uploads.ts";
@@ -76,7 +77,7 @@ import {
 import { buildStructuredPiTurn } from "../src/pi-chat/structured-session.ts";
 import { loadAttachmentImages } from "../src/pi-chat/attachment-inputs.ts";
 import { reachableSpace } from "./reachable-space.ts";
-import { CHAT_SKILLS_CONTENT_BUDGET_CHARS, type PinnedSkillStatus } from "../src/skills.ts";
+import { CHAT_SKILLS_CONTENT_BUDGET_CHARS } from "../src/skills.ts";
 import { buildPlatformMcpTools } from "../src/pi-chat/mcp-tools.ts";
 import { PiChatUiStreamMapper } from "../src/pi-chat/ui-stream-mapper.ts";
 import { spaceIdRefusal } from "@appstrate/core/mcp-spaces";
@@ -1307,7 +1308,7 @@ describe("handleChatStream", () => {
     skills: {
       pinned: string[];
       assistant?: string[];
-      status?: Record<string, PinnedSkillStatus>;
+      status?: Record<string, ChatSkillStatus>;
     },
   ) {
     await db.insert(chatSessions).values({
@@ -1362,7 +1363,7 @@ describe("handleChatStream", () => {
       assistantSkills: ["@acme/b"],
       skillStatus: { "@acme/b": "unavailable", "@acme/c": "unavailable" } as Record<
         string,
-        PinnedSkillStatus
+        ChatSkillStatus
       >,
     };
     for (const messageId of ["u1", "u2"]) {
@@ -1508,7 +1509,7 @@ describe("handleChatStream", () => {
     const stored = {
       pinned: ["@acme/a", "@acme/b"],
       assistant: ["@acme/a"],
-      status: { "@acme/a": "injected", "@acme/b": "injected" } as Record<string, PinnedSkillStatus>,
+      status: { "@acme/a": "injected", "@acme/b": "injected" } as Record<string, ChatSkillStatus>,
     };
     const changes = { unpin_skills: ["@acme/a"], pin_skills: ["@acme/c"], skill_discovery: false };
 

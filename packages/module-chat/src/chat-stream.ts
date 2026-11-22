@@ -33,7 +33,7 @@ import { listModels, pickModel } from "./llm.ts";
 import { actingOrgRole, callerMcpOpener, dispatchFetch, platformMcpUrl } from "./platform-mcp.ts";
 import { platformMcpSurfaceKey } from "./pi-chat/mcp-surface-cache.ts";
 import { selfOrigin } from "./self.ts";
-import type { ChatUsageRecord, InjectedSkills } from "@appstrate/core/chat-contract";
+import type { ChatUsageRecord } from "@appstrate/core/chat-contract";
 import { mintLoopbackToken, mintMcpLoopbackToken } from "./loopback-auth.ts";
 import {
   materializeUserAttachments,
@@ -57,7 +57,6 @@ import {
   turnSkillLoad,
   type ChatSkillChanges,
   type ChatSkillSelection,
-  type PinnedSkillStatus,
 } from "./skills.ts";
 export type { ChatEnv } from "./prompt.ts";
 import { finalizeChatStream } from "./finalize-stream.ts";
@@ -154,8 +153,6 @@ export const CHAT_MESSAGE_MAX_BYTES = 256 * 1024;
 //     (attachments flow only through the file store, never inline).
 //   - an `agent-prompt` part (`agent-prompt.ts`) is a user message's, at most one, and its data
 //     parses; `handleChatStream` resolves it.
-//   - `pin_skills` / `unpin_skills` are deltas against the stored pins, never a full set, so a
-//     stale client cannot drop a pin the assistant added (the claim writes them).
 //   - `.strict()`: an unknown field is a 400, never silently dropped.
 const skillIdsSchema = z
   .array(z.string().regex(scopedNameRegex, { error: "Must be a package id in @scope/name form" }))
@@ -271,9 +268,6 @@ function pinLimitError() {
  * and `POST …/stop` looks the id up in the stop registry, where this turn's
  * controller is registered a few statements later. What is briefly true is the
  * DTO's `generating` flag, and that is simply the truth: the turn has started.
- *
- * The claim also writes the turn's skill changes and its verdict on each pin (`skills`), so a
- * refused turn writes neither.
  */
 export async function claimTurn(
   sessionId: string,
@@ -405,8 +399,7 @@ export async function handleChatStream(
   // materialized into the session, and attaching the join in the same tick is
   // what keeps a rejection from ever going unhandled.
   //
-  // The panel's changes ride the turn: it works with them from the start, and its claim writes
-  // them, so a refused turn writes none.
+  // The panel's changes ride the turn, and its claim writes them (`setActiveStream`).
   const skillChanges: ChatSkillChanges = {
     ...(body.skill_discovery !== undefined && { skillDiscovery: body.skill_discovery }),
     pin: body.pin_skills ?? [],
@@ -539,7 +532,7 @@ export async function handleChatStream(
     };
     return {
       skills: conv.selection,
-      // Whether the turn works on the caller's drafts (see `buildCallerContextBlock`).
+      // See `turnUsesDrafts`.
       skillDrafts: turnUsesDrafts(callerPermissions, {
         authoring: body.package_authoring !== false,
       }),
@@ -591,14 +584,7 @@ export async function handleChatStream(
   const phaseBStart = Date.now();
   let phaseBMs = 0;
   const contextBlockPromise: Promise<
-    | {
-        ok: true;
-        block: string;
-        injectedSkills: InjectedSkills;
-        skillStatus: Record<string, PinnedSkillStatus>;
-        skillBudgetLeft: number;
-        skillUris: Map<string, string>;
-      }
+    | ({ ok: true } & Awaited<ReturnType<typeof buildCallerContextBlock>>)
     | { ok: false; error: unknown }
   > = turn
     .then(
@@ -623,26 +609,15 @@ export async function handleChatStream(
           permissions,
           skills,
           drafts: skillDrafts,
-          // The turn's skills are read before the claim naming them exists, so
-          // over a connection of the caller's own: not narrowed by `turnPermissions`, and no
-          // claim — what the caller reads.
-          // One in-process `initialize` plus the reads, only on a turn that lists
-          // (discovery with `skills:read`) or injects skills; closed before the turn's
-          // connection opens.
+          // Read before the turn's claim exists: over the caller's own connection, opened only
+          // when the turn lists or injects skills.
           openSkillsClient: openCaller,
         }).finally(() => {
           phaseBMs = Date.now() - phaseBStart;
         }),
     )
     .then(
-      ({ text, injected, skillStatus, skillBudgetLeft, skillUris }) => ({
-        ok: true as const,
-        block: text,
-        injectedSkills: injected,
-        skillStatus,
-        skillBudgetLeft,
-        skillUris,
-      }),
+      (rendered) => ({ ok: true as const, ...rendered }),
       (error: unknown) => ({ ok: false as const, error }),
     );
 
@@ -729,8 +704,8 @@ export async function handleChatStream(
   const contextResult = await contextBlockPromise;
   if (!contextResult.ok) throw contextResult.error;
   const {
-    block: contextBlock,
-    injectedSkills,
+    text: contextBlock,
+    injected: injectedSkills,
     skillStatus,
     skillBudgetLeft,
     skillUris,
@@ -751,10 +726,6 @@ export async function handleChatStream(
   // Which credential the turn spends. One engine drives them both.
   const credentialMode = isSubscription ? "oauth2" : "api-key";
 
-  // Resolve the new turn's agent launch, if it carries one: `prompts/get` over the caller's
-  // connection in the turn's spaces, a read that changes nothing. Its answer is written into the
-  // part before the turn is persisted, so the thread, the model and every replay share it. Before
-  // the slot and the claim, so a refused launch has nothing to undo.
   if (lastMessage) {
     lastMessage = await resolveAgentPrompt(lastMessage, openCaller);
     messages[messages.length - 1] = lastMessage;
@@ -797,8 +768,7 @@ export async function handleChatStream(
   // (in `finalize` below). Generation runs through a resumable producer that drains to
   // completion independently of the client, so leaving the conversation mid-inference
   // cannot drop messages. Every refusal before this point (the admission gate, the model
-  // binding, capacity) and the claim's own refusal write no message, marker, skill change or
-  // skill status into the conversation.
+  // binding, capacity) and the claim's own refusal write nothing into the conversation.
   const claimedSessionId = sessionId && lastMessage?.id ? sessionId : undefined;
   let claimTurnMs = 0;
   if (claimedSessionId) {

@@ -26,9 +26,7 @@ import {
 import { setActiveStream } from "../src/resumable.ts";
 import { registerStopController, unregisterStopController } from "../src/stop-registry.ts";
 
-/** The scope of a session created with no origin space and no limit. */
-const UNLIMITED = { spaceId: null, restricted: false, pinnedSkills: [], skillDiscovery: true };
-const NO_SKILLS = { changes: { pin: [], unpin: [] }, status: {} };
+import { NO_SKILL_WRITE, UNLIMITED_SCOPE } from "./turn-claim.ts";
 
 const app = getTestApp();
 
@@ -66,7 +64,7 @@ describe("POST /api/orgs/:orgId/chat/sessions/:id/stop", () => {
     const controller = new AbortController();
     registerStopController(streamId, controller);
     registered.push(streamId);
-    await setActiveStream(sessionId, streamId, UNLIMITED, NO_SKILLS);
+    await setActiveStream(sessionId, streamId, UNLIMITED_SCOPE, NO_SKILL_WRITE);
     return { sessionId, controller };
   }
 

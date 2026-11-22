@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import type { UIMessage } from "ai";
-import { AGENT_PROMPT_PART_TYPE, agentPromptDataSchema } from "./agent-prompt.ts";
+import { agentPromptOfParts } from "./agent-prompt.ts";
 import { readableDirectives } from "./directives.ts";
 
 /**
@@ -34,14 +34,13 @@ export function uiMessageText(parts: unknown[] | undefined, options?: { omitAgen
  */
 export function withModelText(message: UIMessage): UIMessage {
   if (message.role !== "user") return message;
-  const launch = message.parts.find((part) => part.type === AGENT_PROMPT_PART_TYPE);
-  const data = agentPromptDataSchema.safeParse((launch as { data?: unknown } | undefined)?.data);
-  if (!launch || !data.success || data.data.text === undefined) return withReadableText(message);
-  const text = { type: "text" as const, text: data.data.text };
+  const launch = agentPromptOfParts(message.parts);
+  if (launch?.data.text === undefined) return withReadableText(message);
+  const text = { type: "text" as const, text: launch.data.text };
   return {
     ...message,
     parts: message.parts.flatMap((part): UIMessage["parts"] =>
-      part === launch ? [text] : part.type === "text" ? [] : [part],
+      part === launch.part ? [text] : part.type === "text" ? [] : [part],
     ),
   };
 }
@@ -65,9 +64,5 @@ function withReadableText(message: UIMessage): UIMessage {
 export function uiMessageTitleText(parts: unknown[] | undefined): string {
   const typed = uiMessageText(parts);
   if (typed) return typed;
-  const launch = (parts ?? []).find(
-    (part) => (part as { type?: unknown } | null)?.type === AGENT_PROMPT_PART_TYPE,
-  );
-  const data = agentPromptDataSchema.safeParse((launch as { data?: unknown } | undefined)?.data);
-  return data.success ? data.data.title : "";
+  return agentPromptOfParts(parts)?.data.title ?? "";
 }

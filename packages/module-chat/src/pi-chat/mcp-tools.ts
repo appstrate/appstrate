@@ -574,11 +574,10 @@ function keepsSkillText(uri: unknown, resources: readonly object[]): boolean {
 type Receipts = NonNullable<PiToolResult["persistedContent"]>;
 
 /**
- * The content and replay of a resource read. A read of the `SKILL.md` a persisted conversation
- * injects for its skill ({@link SkillLoad}) that the database confirms pinned replays a short
- * pin receipt in place of its text, since later turns inject it from the system prompt; one left
- * unpinned stays a plain read, with the note the load gave the model. Only a pinned one carries
- * {@link PiToolResult.skillPinned}. `lead` is the call's own text, kept ahead of the receipts.
+ * The content and replay of a resource read. A skill load that pins ({@link SkillLoad}, rule in
+ * `turnSkillLoad`) replays a short receipt in place of its text and carries
+ * {@link PiToolResult.skillPinned}; any other read is plain, with the load's note if any. `lead`
+ * is the call's own text, kept ahead of the receipts.
  */
 async function resourceReadResult(
   uri: unknown,

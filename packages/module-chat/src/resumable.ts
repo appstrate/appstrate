@@ -26,14 +26,14 @@
 import { and, eq, isNotNull, isNull, lt, or, sql } from "drizzle-orm";
 import Redis from "ioredis";
 import { db } from "@appstrate/db/client";
-import { chatSessions } from "@appstrate/db/schema";
+import { chatSessions, type ChatSkillStatus } from "@appstrate/db/schema";
 import { notifySessionUpdate } from "./realtime.ts";
 import { textArray, sortedIds, withoutIds } from "./persistence.ts";
 import {
   applySkillChanges,
   MAX_PINNED_SKILLS,
   type ChatSkillChanges,
-  type PinnedSkillStatus,
+  type ChatSkillSelection,
 } from "./skills.ts";
 import {
   createResumableStreamContext,
@@ -300,45 +300,27 @@ export async function sweepStaleActiveStreams(): Promise<number> {
 export const STALE_MARKER_MIN_AGE_MS = CHAT_TURN_DEADLINE_MS + 60_000;
 
 /** What a turn read of its conversation and acts on: the claim compares the row against it. */
-export interface TurnScope {
-  spaceId: string | null;
-  restricted: boolean;
-  pinnedSkills: readonly string[];
-  skillDiscovery: boolean;
-}
+export type TurnScope = { spaceId: string | null; restricted: boolean } & ChatSkillSelection;
 
-/** What a claiming turn writes into the conversation's skill columns. */
+/** What a claiming turn writes: its skill `changes`, and its verdict on each resulting pin. */
 export interface TurnSkillWrite {
-  /** The turn's `skill_discovery` / `pin_skills` / `unpin_skills`, applied to the pins compared. */
   changes: ChatSkillChanges;
-  /** The turn's verdict on each pin of the selection after `changes`: replaces `skill_status`. */
-  status: Readonly<Record<string, PinnedSkillStatus>>;
+  status: Readonly<Record<string, ChatSkillStatus>>;
 }
 
 /** What claiming a conversation for a turn answered: `claimed`, or why nothing was written. */
 type StreamClaim = "claimed" | "scope_changed" | "in_flight" | "pin_limit";
 
+const sameIds = (a: readonly string[], b: readonly string[]) =>
+  a.length === b.length && a.every((id, i) => id === b[i]);
+
 /**
- * Mark a session's in-flight stream so a reloaded client can reconnect to it.
- * A conversation runs one turn at a time: the claim takes a free marker, or one
- * stale by {@link STALE_MARKER_MIN_AGE_MS} (its producer is gone), never a live
- * one. `updated_at` is stamped in the same statement: it is what tells a freshly
- * claimed turn from a marker whose producer died. Emits no signal of its own: the caller's
- * user-message write, which follows it, signals the row (skill columns included); on its
- * failure `clearActiveStream` does.
- *
- * Also a compare-and-set on the scope the turn read (its origin space, limit, pinned skills
- * and skill discovery): the turn's spaces, bearer and system prompt were computed from that read, and the
- * limit PATCH is refused only while a marker is set, so a change landing between the read and
- * this claim (another tab's limit or skill change) refuses the turn rather than letting it act
- * on a state it no longer matches. `scope_changed`: the scope moved (or the row is gone);
- * `in_flight`: another turn holds the conversation; `pin_limit`: the turn's pins, applied to the
- * row as it now stands, exceed {@link MAX_PINNED_SKILLS}. None of them writes anything.
- *
- * The turn's skill changes and its verdicts (`skills`) are written by this statement alone, so
- * a refused turn changes no skill: `pinned_skills` = (compared − unpin) ∪ pin, a pin or unpin
- * leaves `assistant_skills` (a skill the user pins is theirs), and `skill_status` is replaced
- * by the verdicts, even if the turn fails later.
+ * Claim a session for a turn: set its in-flight marker (free, or stale by
+ * {@link STALE_MARKER_MIN_AGE_MS}) and `updated_at`, compare-and-set on the `scope` the turn read.
+ * Answers `claimed`, `scope_changed`, `in_flight` or `pin_limit` (the pins over
+ * {@link MAX_PINNED_SKILLS} on the row as it now stands). Alone writes the turn's skill changes (a
+ * pin or unpin leaves `assistant_skills`) and its verdicts as `skill_status`: a refused turn
+ * writes none. Emits no signal: the caller's next write does, or `clearActiveStream`.
  */
 export async function setActiveStream(
   sessionId: string,
@@ -376,7 +358,6 @@ export async function setActiveStream(
         sql`${chatSessions.spaceId} IS NOT DISTINCT FROM ${scope.spaceId}`,
         eq(chatSessions.skillDiscovery, scope.skillDiscovery),
         sql`${chatSessions.pinnedSkills} = ${textArray(scope.pinnedSkills)}`,
-        pinned && sql`cardinality(${pinned}) <= ${MAX_PINNED_SKILLS}`,
         or(isNull(chatSessions.activeStreamId), lt(chatSessions.updatedAt, staleBefore)),
       ),
     )
@@ -395,21 +376,16 @@ export async function setActiveStream(
     .where(eq(chatSessions.id, sessionId))
     .limit(1);
   if (!row) return "scope_changed";
-  // A live turn holding the conversation is the answer, whatever else moved meanwhile: waiting
-  // for it, not resending at once, is what the caller must do.
+  // A live turn holding the conversation wins over a moved scope: the caller must wait, not resend.
   if (row.activeStreamId !== null && row.updatedAt >= staleBefore) return "in_flight";
-  // Resending would hit the cap again: the same answer as the check made before the claim.
   if (repins && applySkillChanges(row.pinnedSkills, changes).length > MAX_PINNED_SKILLS) {
     return "pin_limit";
   }
   // The marker cleared between the two statements, or the scope moved: told apart here.
-  const samePins =
-    row.pinnedSkills.length === scope.pinnedSkills.length &&
-    row.pinnedSkills.every((id, i) => id === scope.pinnedSkills[i]);
   return row.spaceId === scope.spaceId &&
     row.restricted === scope.restricted &&
     row.skillDiscovery === scope.skillDiscovery &&
-    samePins
+    sameIds(row.pinnedSkills, scope.pinnedSkills)
     ? "in_flight"
     : "scope_changed";
 }

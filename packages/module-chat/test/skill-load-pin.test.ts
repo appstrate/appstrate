@@ -13,19 +13,14 @@ import { beforeEach, describe, expect, it } from "bun:test";
 import { eq } from "drizzle-orm";
 import type { ExtensionAPI } from "@appstrate/runner-pi";
 import { db, isEmbeddedDb } from "@appstrate/db/client";
-import { chatSessions } from "@appstrate/db/schema";
+import { chatSessions, type ChatSkillStatus } from "@appstrate/db/schema";
 import { truncateAll } from "../../../apps/api/test/helpers/db.ts";
 import { createTestContext, type TestContext } from "../../../apps/api/test/helpers/auth.ts";
 import { buildPlatformMcpTools } from "../src/pi-chat/mcp-tools.ts";
 import { PiChatUiStreamMapper } from "../src/pi-chat/ui-stream-mapper.ts";
 import { isSkillPinned, pinAssistantSkill } from "../src/persistence.ts";
 import { mintSessionId } from "../src/session-id.ts";
-import {
-  MAX_PINNED_SKILLS,
-  turnSkillLoad,
-  type PinnedSkillStatus,
-  type SkillLoad,
-} from "../src/skills.ts";
+import { MAX_PINNED_SKILLS, turnSkillLoad, type SkillLoad } from "../src/skills.ts";
 import { inertTurnSpaces } from "./turn-spaces.ts";
 
 const MCP_URL = "http://127.0.0.1:1/api/mcp/o/org_1?renders_cards=true";
@@ -131,7 +126,7 @@ describe("assistant skill load", () => {
   });
 
   /** A conversation the turn `STREAM` holds, with `pinned` (and their statuses) stored. */
-  async function seed(pinned: string[] = [], skillStatus: Record<string, PinnedSkillStatus> = {}) {
+  async function seed(pinned: string[] = [], skillStatus: Record<string, ChatSkillStatus> = {}) {
     await db.insert(chatSessions).values({
       id: sessionId,
       orgId: ctx.orgId,
@@ -378,10 +373,10 @@ describe("pinAssistantSkill", () => {
     return found;
   }
 
-  it("never writes a skill already pinned, even at the cap, and reports it", async () => {
+  it("never writes a skill already pinned, even at the cap, and reports it pinned", async () => {
     const five = ["@acme/a", "@acme/b", "@acme/c", "@acme/d", SKILL];
     await seed(five);
-    expect(await pinAssistantSkill(sessionId, STREAM, SKILL)).toBe("already_pinned");
+    expect(await pinAssistantSkill(sessionId, STREAM, SKILL)).toBe("pinned");
     expect(await stored()).toMatchObject({
       pinnedSkills: five,
       assistantSkills: [],

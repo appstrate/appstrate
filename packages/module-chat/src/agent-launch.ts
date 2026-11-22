@@ -1,10 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-/**
- * Resolving an agent launch of the composer (`agent-prompt.ts`): the platform MCP server's
- * `prompts/get` turns the named prompt and the user's request into the launch instructions the
- * model is shown for the message.
- */
+// A composer agent launch (`agent-prompt.ts`), resolved into its instructions by `prompts/get`.
 
 import type { UIMessage } from "ai";
 import {
@@ -14,47 +10,42 @@ import {
   type AppstrateMcpClient,
 } from "@appstrate/mcp-transport";
 import { invalidRequest } from "@appstrate/core/api-errors";
-import { AGENT_PROMPT_PART_TYPE, agentPromptDataSchema } from "./agent-prompt.ts";
+import { agentPromptOfParts } from "./agent-prompt.ts";
 import { uiMessageText } from "./message-text.ts";
-import { CALLER_READ_TIMEOUT_MS } from "./prompt.ts";
+import { withCallerClient } from "./platform-mcp.ts";
 
-/** Ceiling on the launch text stored with a message, in bytes. */
 const AGENT_LAUNCH_MAX_BYTES = 64 * 1024;
 
 /**
- * `message` with its agent-prompt part resolved: `data.text` is what `prompts/get` returns for
- * the part's name and the typed text as `request`, whatever the browser sent. A message without
- * the part is returned as it is, and no connection is opened. An unknown or unlaunchable name is
- * a 400, as is one whose instructions exceed {@link AGENT_LAUNCH_MAX_BYTES}; the connection is closed
- * before returning.
+ * `message` with its agent-prompt part's `text` set to what `prompts/get` answers for its name and
+ * the typed request, whatever the browser sent (no part, no connection). An unknown or
+ * unlaunchable name, or instructions over {@link AGENT_LAUNCH_MAX_BYTES}, is a 400.
  */
 export async function resolveAgentPrompt(
   message: UIMessage,
   openCaller: (signal: AbortSignal) => Promise<AppstrateMcpClient>,
 ): Promise<UIMessage> {
-  const part = message.parts.find((candidate) => candidate.type === AGENT_PROMPT_PART_TYPE);
-  if (!part) return message;
-  const { name, title } = agentPromptDataSchema.parse((part as { data?: unknown }).data);
-  const signal = AbortSignal.timeout(CALLER_READ_TIMEOUT_MS);
-  const client = await openCaller(signal);
-  let text: string;
-  try {
+  const launch = agentPromptOfParts(message.parts);
+  if (!launch) return message;
+  const { part } = launch;
+  const { name, title } = launch.data;
+  const text = await withCallerClient(openCaller, async (client, signal) => {
     const request = uiMessageText(message.parts, { omitAgent: true });
-    const result = await client.getPrompt({ name, arguments: { request } }, { signal });
-    text = result.messages
-      .flatMap((entry) => (entry.content.type === "text" ? [entry.content.text] : []))
-      .join("\n\n");
-  } catch (err) {
-    // The server answers one `-32602` for a name it does not serve and for one it cannot launch
-    // (a `ProtocolError` over HTTP, an `McpError` over an in-process pair).
-    const code = jsonRpcErrorOf(err)?.code ?? (err instanceof McpError ? err.code : undefined);
-    if (code === ErrorCode.InvalidParams) {
-      throw invalidRequest(`"${name}" is not an agent this conversation can launch.`, "messages");
+    try {
+      const result = await client.getPrompt({ name, arguments: { request } }, { signal });
+      return result.messages
+        .flatMap((entry) => (entry.content.type === "text" ? [entry.content.text] : []))
+        .join("\n\n");
+    } catch (err) {
+      // The server answers one `-32602` for a name it does not serve and for one it cannot launch
+      // (a `ProtocolError` over HTTP, an `McpError` over an in-process pair).
+      const code = jsonRpcErrorOf(err)?.code ?? (err instanceof McpError ? err.code : undefined);
+      if (code === ErrorCode.InvalidParams) {
+        throw invalidRequest(`"${name}" is not an agent this conversation can launch.`, "messages");
+      }
+      throw err;
     }
-    throw err;
-  } finally {
-    await client.close().catch(() => {});
-  }
+  });
   if (Buffer.byteLength(text) > AGENT_LAUNCH_MAX_BYTES) {
     throw invalidRequest(
       `The launch instructions of "${name}" exceed ${AGENT_LAUNCH_MAX_BYTES / 1024} KB.`,
@@ -72,28 +63,24 @@ export async function resolveAgentPrompt(
 }
 
 /**
- * The thread with the launch text of every message before the last taken from its stored row
- * (`stored`, by message id) and never from the browser, whose copy of a resolved launch holds
- * `{ name, title }` only and could hold anything: a client-sent `text` is dropped from every
- * message here (the last one's comes from {@link resolveAgentPrompt}). An earlier launch with no
- * stored text shows the model what the user typed alone.
+ * The thread with every earlier launch's text taken from its stored row (`stored`, by message id),
+ * never from the browser; the last one's comes from {@link resolveAgentPrompt}. A launch with no
+ * stored text shows the model what the user typed.
  */
 export function withStoredAgentPromptTexts(
   messages: UIMessage[],
   stored: ReadonlyMap<string, string>,
 ): UIMessage[] {
   return messages.map((message, index) => {
-    if (message.role !== "user" || !message.parts.some((p) => p.type === AGENT_PROMPT_PART_TYPE)) {
-      return message;
-    }
+    const launch = message.role === "user" ? agentPromptOfParts(message.parts) : null;
+    if (!launch) return message;
+    const { name, title } = launch.data;
     const text = index === messages.length - 1 ? undefined : stored.get(message.id);
     return {
       ...message,
-      parts: message.parts.map((part) => {
-        if (part.type !== AGENT_PROMPT_PART_TYPE) return part;
-        const { name, title } = agentPromptDataSchema.parse((part as { data?: unknown }).data);
-        return { ...part, data: { name, title, ...(text ? { text } : {}) } };
-      }),
+      parts: message.parts.map((part) =>
+        part === launch.part ? { ...part, data: { name, title, ...(text ? { text } : {}) } } : part,
+      ),
     } as UIMessage;
   });
 }

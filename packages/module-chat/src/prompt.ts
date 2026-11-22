@@ -24,15 +24,17 @@ import type { PrincipalKind, ReachableSpaceGrant } from "@appstrate/core/module"
 import type { InjectedSkills } from "@appstrate/core/chat-contract";
 import { platformToolName } from "@appstrate/core/integration";
 import { logger } from "./logger.ts";
+import { withCallerClient } from "./platform-mcp.ts";
 import { reaches, type TurnCapabilities } from "./capabilities.ts";
 import {
   injectedSkills,
   MAX_PINNED_SKILLS,
   resolveChatSkills,
+  UNPIN_HINT,
   type ChatSkillSelection,
-  type PinnedSkillStatus,
   type SkillContent,
 } from "./skills.ts";
+import type { ChatSkillStatus } from "@appstrate/db/schema";
 
 type InjectedSkillMap = InjectedSkills["skills"];
 
@@ -87,7 +89,7 @@ const SKILLS_FILES = {
 const SKILLS_INJECTED_LEAD =
   "These skills are pinned to this conversation, by the user or by your own earlier load. Each is a procedure for YOU: follow it whenever it applies.";
 // Loading a listed skill pins it (`turnSkillLoad`): told once, ahead of the listing it applies to.
-const SKILLS_LISTED_LEAD = `Loading one of these skills (reading its SKILL.md at the URI shown, with \`read_resource\` or \`read\`) pins it to the conversation: later turns show it in full here. A conversation pins at most ${MAX_PINNED_SKILLS} skills, which share one budget; a load past either limit is still read for this turn, but not pinned, and says so; the user can unpin a skill in the skills panel of the composer.`;
+const SKILLS_LISTED_LEAD = `Loading one of these skills (reading its SKILL.md at the URI shown, with \`read_resource\` or \`read\`) pins it to the conversation: later turns show it in full here. A conversation pins at most ${MAX_PINNED_SKILLS} skills, which share one budget; a load past either limit is still read for this turn, but not pinned, and says so. ${UNPIN_HINT}`;
 // Why this turn holds no `skills:*`: without it, a model reads the gap as a role
 // to fix and hunts through other operations.
 const SKILLS_DISCOVERY_OFF_NOTE =
@@ -249,9 +251,8 @@ export function normalizeChatLocale(raw: string | undefined): string {
 }
 
 /** A skill of the catalogue: an entry of `skills/list`, loaded by its `uri`. */
-export interface CatalogueSkill {
+interface CatalogueSkill {
   packageId: string;
-  /** The `SKILL.md` frontmatter `name`. */
   name: string;
   description: string;
   /** The published version; `null` for a draft. */
@@ -281,15 +282,11 @@ function skillBlock(skill: SkillContent): string {
   return `<skill id="${skill.packageId}" uri="${skill.uri}"${served}>\n${skill.content.trim()}\n</skill>`;
 }
 
-/**
- * A rendered block (or section) and the skills it injected, which the turn's MCP bearer names,
- * with each pin's verdict (`skill_status`, written by the claim) and the budget left for an
- * assistant load.
- */
+/** A rendered block, the skills it injected, each pin's verdict and the budget left for a load. */
 interface RenderedContext {
   text: string;
   injected: InjectedSkillMap;
-  skillStatus: Record<string, PinnedSkillStatus>;
+  skillStatus: Record<string, ChatSkillStatus>;
   skillBudgetLeft: number;
 }
 
@@ -302,8 +299,7 @@ function formatSkillsSection(opts: {
 }): RenderedContext {
   const skills = resolveChatSkills(opts.selection, opts.contents);
   const files = SKILLS_FILES[opts.capabilities.transport ? "tool" : "none"];
-  // A listed skill the turn cannot load is noise. A pin is never listed: injected, it is shown in
-  // full; left out (over budget, unreadable, unavailable), its notice says why.
+  // A listed skill the turn cannot load is noise; a pin is never listed (shown, or noticed).
   const pinned = new Set(opts.selection.pinnedSkills);
   const listed =
     opts.capabilities.readsSkills && opts.selection.skillDiscovery
@@ -453,16 +449,8 @@ function entriesByPackage(
   return new Map([...byPackage].map(([packageId, { entry }]) => [packageId, entry]));
 }
 
-/**
- * Deadline of a read over the caller's own MCP connection (the turn's skills, the composer's
- * commands, an agent launch's prompt), connection included: the preamble runs before the turn's
- * abort controller exists, and a client disconnect never cancels a turn, so the read carries its
- * own bound. Past it, a turn goes on with the skills read so far left out, each with its notice.
- */
-export const CALLER_READ_TIMEOUT_MS = 10_000;
-
 /** The pinned skills' contents and the catalogue of a turn. */
-export interface ChatSkillsRead {
+interface ChatSkillsRead {
   contents: Map<string, SkillContent | null>;
   catalogue: CatalogueSkill[];
   /** Each listed skill's `SKILL.md` URI as a pin injects it. */
@@ -470,19 +458,10 @@ export interface ChatSkillsRead {
 }
 
 /**
- * The skills of a turn, read over the MCP Skills extension (SEP-2640): with `drafts`, a skill
- * is the caller's draft when `skills/list` lists it among the drafts the caller
- * may read, else its published version; without, its published version. One definition per
- * skill for the catalogue, the injection and `uris` alike. With `catalogue`, every such skill of
- * `spaces` is listed by its `uri` (one entry per package, the first space's); each of `pinned` is injected as the text
- * `resources/read` serves at its entry's URI. Read with the caller's own
- * permissions, even with discovery off, whose turn holds no `skills:*`. A pinned skill
- * in neither list is left out (unavailable); one whose read failed — the connection, a
- * `skills/list` it may be missing from, the draft listing, its `resources/read` — or answered malformed (a
- * draft entry without `lock_version`, a `SKILL.md` served as a blob, or text
- * whose digest differs from the one its entry lists) is kept as `null` (unreadable). `uris`
- * gives each listed skill the `SKILL.md` URI its injection takes: the one an assistant load
- * must read to pin it. The connection is opened only when there is something to read.
+ * The turn's skills over the MCP Skills extension (SEP-2640), with the caller's own permissions:
+ * one definition per skill (see `turnUsesDrafts`) for the catalogue, the injection and `uris`. A
+ * pin no listing holds is left out (unavailable), one whose read failed or answered malformed is
+ * kept as `null` (unreadable). The connection opens only when there is something to read.
  */
 async function readChatSkills(
   openSkillsClient: (signal: AbortSignal) => Promise<ChatSkillsClient>,
@@ -492,41 +471,30 @@ async function readChatSkills(
   if (!opts.catalogue && opts.pinned.length === 0) {
     return { contents: new Map(), catalogue: [], uris: new Map() };
   }
-  const signal = AbortSignal.timeout(CALLER_READ_TIMEOUT_MS);
-  let client: ChatSkillsClient;
-  try {
-    client = await openSkillsClient(signal);
-  } catch (err) {
-    logger.warn("skills connection unavailable — the turn's skills left out", {
-      err: String(err),
-    });
-    return {
-      contents: new Map(opts.pinned.map((id) => [id, null])),
-      catalogue: [],
-      uris: new Map(),
-    };
-  }
-  try {
-    return await readSkillsOver(client, signal, spaces, opts);
-  } finally {
-    await client.close().catch(() => {});
-  }
+  return withCallerClient(
+    openSkillsClient,
+    (client, signal) => readSkillsOver(client, signal, spaces, opts),
+    (err) => {
+      logger.warn("skills connection unavailable — the turn's skills left out", {
+        err: String(err),
+      });
+      return {
+        contents: new Map(opts.pinned.map((id) => [id, null])),
+        catalogue: [],
+        uris: new Map(),
+      };
+    },
+  );
 }
 
 interface SkillsReadOptions {
   catalogue: boolean;
-  /**
-   * The drafts the caller reads stand for their skills: listed, injected and pinned at their
-   * draft URI. Only when the turn itself reads them (see `buildCallerContextBlock`).
-   */
+  /** See `turnUsesDrafts`. */
   drafts: boolean;
   pinned: readonly string[];
 }
 
-/**
- * {@link readChatSkills} over a connection the caller owns, left open: the composer's commands
- * read the catalogue and the agents over one.
- */
+/** {@link readChatSkills} over a connection the caller owns and closes. */
 export async function readSkillsOver(
   client: ChatSkillsClient,
   signal: AbortSignal,
@@ -546,8 +514,7 @@ export async function readSkillsOver(
         return new Map<string, ListedSkillEntry>();
       },
     );
-  // A turn not working on drafts never asks for them: one hop fewer, and a failing draft list
-  // cannot turn a pin missing from the published one into an unreadable one.
+  // Drafts are never asked for unused: a failing draft list would make missing pins unreadable.
   const [published, usedDrafts] = await Promise.all([
     list(),
     opts.drafts
@@ -577,8 +544,7 @@ export async function readSkillsOver(
   }
   await Promise.all(
     opts.pinned.map(async (id) => {
-      // Without the draft listing, a pin's draft (what the panel offers) is unknown: its
-      // published version is not injected in its place.
+      // Without the draft listing a pin's draft is unknown: never its published version instead.
       if (failed.draft) {
         read.contents.set(id, null);
         return;
@@ -604,9 +570,8 @@ export async function readSkillsOver(
         return;
       }
       const served = servedAs(entry, usedDrafts.has(id));
-      // A `SKILL.md` served as a blob is not a skill's text, and text that is
-      // not the listed `SKILL.md` (a draft saved between the list and the
-      // read) is not the definition the claim pins: both get their own notice.
+      // A blob, or text that is not the listed `SKILL.md` (a draft saved between the list and the
+      // read), is not the definition the claim pins.
       read.contents.set(
         id,
         served &&
@@ -680,13 +645,7 @@ export async function buildCallerContextBlock(
     capabilities: TurnCapabilities;
     permissions: readonly string[];
     skills: ChatSkillSelection;
-    /**
-     * The turn works on the caller's drafts: package authoring on and the caller holds
-     * `skills:write`. Then every skill it lists, injects or pins is the caller's draft when there
-     * is one: the turn reads a listed draft with `skills:write`, and an injected one through its
-     * claim even with discovery off. Off, every one is the published version, so a load of a
-     * listed URI is the definition later turns inject.
-     */
+    /** See `turnUsesDrafts`. */
     drafts: boolean;
     /** Opened only when the turn lists or injects skills, under `signal`; closed once they are read. */
     openSkillsClient: (signal: AbortSignal) => Promise<ChatSkillsClient>;
