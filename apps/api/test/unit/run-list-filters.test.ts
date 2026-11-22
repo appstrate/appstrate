@@ -2,7 +2,11 @@
 
 import { describe, expect, it } from "bun:test";
 import { PgDialect } from "drizzle-orm/pg-core";
-import { parseRunListFilters, runSearchCondition } from "../../src/lib/run-list-filters.ts";
+import {
+  parseRunListFilters,
+  parseSpaceIdFilter,
+  runSearchCondition,
+} from "../../src/lib/run-list-filters.ts";
 
 describe("run list filters", () => {
   it("leaves an unfiltered request unfiltered", () => {
@@ -51,5 +55,29 @@ describe("run list filters", () => {
     }
     const largest = new PgDialect().sqlToQuery(runSearchCondition("2147483647"));
     expect(largest.params.at(-1)).toBe(2147483647);
+  });
+});
+
+describe("spaceId filter", () => {
+  const a = "spc_00000000-0000-4000-8000-00000000000a";
+  const b = "spc_00000000-0000-4000-8000-00000000000b";
+  it("reads absent and empty as no narrowing", () => {
+    expect(parseSpaceIdFilter(undefined)).toBeUndefined();
+    expect(parseSpaceIdFilter("")).toBeUndefined();
+  });
+  it("accepts one id or several, and collapses duplicates", () => {
+    expect(parseSpaceIdFilter(a)).toEqual([a]);
+    expect(parseSpaceIdFilter(`${a}, ${b}`)).toEqual([a, b]);
+    expect(parseSpaceIdFilter(`${a},${b},${a}`)).toEqual([a, b]);
+  });
+  it("rejects a malformed member for the whole list", () => {
+    expect(() => parseSpaceIdFilter(`${a},nope`)).toThrow();
+    expect(() => parseSpaceIdFilter(`${a},`)).toThrow();
+  });
+  it("bounds the number of ids", () => {
+    const id = (n: number) => `spc_00000000-0000-4000-8000-${n.toString(16).padStart(12, "0")}`;
+    const many = (n: number) => Array.from({ length: n }, (_, i) => id(i)).join(",");
+    expect(parseSpaceIdFilter(many(100))).toHaveLength(100);
+    expect(() => parseSpaceIdFilter(many(101))).toThrow();
   });
 });

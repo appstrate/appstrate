@@ -15,6 +15,7 @@ import {
 import { STD_RESPONSE_HEADERS, REQUEST_ID_ONLY_HEADERS } from "../headers.ts";
 import { MAX_CONNECTIONS_PER_INTEGRATION } from "@appstrate/core/integration";
 import { connectionIdSetJsonSchema } from "./integrations.ts";
+import { SPACE_ID_RE } from "@appstrate/db/ids";
 import { MAX_WAIT_SECONDS } from "../../lib/run-wait-limits.ts";
 import { terminalRunStatusValues } from "@appstrate/core/run-status";
 import { FILE_BY_ID_READ, ORG_READ_REACH, packageIdFilterParameter } from "../parameters.ts";
@@ -104,6 +105,20 @@ const runListQueryParameters = [
     in: "query",
     schema: { type: "string" },
     description: "Return only runs launched from this chat session.",
+  },
+  {
+    name: "spaceId",
+    in: "query",
+    required: false,
+    description:
+      "Narrow the list to these spaces: one or several space ids, comma-separated on the wire (`spaceId=spc_a,spc_b`). It only narrows the caller's reach, never widens it: an id of a space the caller does not read runs in is ignored, indistinguishably from one that does not exist, and when none of the listed ids is reached the page is empty (`total: 0`), never the unfiltered list. Omit (or send an empty value) for every space the caller reaches. A value that is not a space id, or more than 100 ids, is rejected with `400`.",
+    style: "form",
+    explode: false,
+    schema: {
+      type: "array",
+      items: { type: "string", pattern: SPACE_ID_RE.source },
+      maxItems: 100,
+    },
   },
   packageIdFilterParameter("runs", "page"),
   { $ref: "#/components/parameters/RunSearch" },

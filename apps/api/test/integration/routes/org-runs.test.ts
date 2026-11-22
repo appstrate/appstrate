@@ -256,6 +256,42 @@ describe("GET /api/orgs/{orgId}/runs", () => {
     expect(bad.status).toBe(400);
   });
 
+  it("narrows to the listed spaces with spaceId, ignoring any it does not reach", async () => {
+    const nowhere = "spc_00000000-0000-4000-8000-000000000000";
+    const inUn = ids(await list(session(member), `?spaceId=${un}`));
+    expect(inUn).toEqual(sorted(r.unOwner!, r.unMember!));
+    expect(await list(session(member), `?spaceId=${un},${nowhere},${ferme}`)).toMatchObject({
+      total: 2,
+    });
+    const both = await list(session(member), `?spaceId=${un},${deux}`);
+    expect(ids(both)).toEqual(sorted(r.unOwner!, r.unMember!, r.deuxMember!));
+    // A space not reached, or none reached: an empty page, never the full list.
+    for (const query of [`?spaceId=${ferme}`, `?spaceId=${nowhere},${prive}`]) {
+      const page = await list(session(member), query);
+      expect(page.data).toEqual([]);
+      expect(page.total).toBe(0);
+    }
+    expect((await list(session(member), "?spaceId=")).total).toBe(4);
+    const bad = await app.request(path("?spaceId=nope"), { headers: session(member) });
+    expect(bad.status).toBe(400);
+  });
+
+  it("applies spaceId on GET /api/runs: its own space kept, a foreign one yields nothing", async () => {
+    const headers = (ctx: TestContext) => ({
+      Cookie: ctx.cookie,
+      "X-Org-Id": ctx.orgId,
+      "X-Space-Id": un,
+    });
+    const get = async (query: string) => {
+      const res = await app.request(`/api/runs${query}`, { headers: headers(member) });
+      expect(res.status, await res.clone().text()).toBe(200);
+      return (await res.json()) as RunPage;
+    };
+    expect((await get("")).total).toBe(2);
+    expect((await get(`?spaceId=${un}`)).total).toBe(2);
+    expect((await get(`?spaceId=${deux}`)).total).toBe(0);
+  });
+
   it("serves a guest its own runs where it holds a row", async () => {
     const guestUser = await createTestUser();
     await addOrgMember(owner.orgId, guestUser.id, "guest");
