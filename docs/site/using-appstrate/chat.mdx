@@ -48,8 +48,10 @@ By default, a one-off agent the assistant composes runs on the organization's de
 
 [Skills](/features/skills) give the assistant instructions for a domain. Each conversation has two skill settings, in the composer's skills panel:
 
-- **Chosen skills**: tick the skills you want. Each one is loaded in full on every turn. You can choose at most 5, sharing a budget of 64,000 characters.
-- **Automatic discovery** (on by default): the assistant sees the other skills of the spaces the conversation can act in, one line each, and loads the one that fits. The skills you chose are not listed again. When it is off, the assistant has no access to any other skill: it cannot list, load, declare or write one, whatever your role. The skills you chose still apply.
+- **Pinned skills**: a checked skill is loaded in full on every turn. Each row says where it stands: "Cité dans le message" (named in the message you are typing, so locked until you remove the mention), "Chargée au prochain message" (not yet sent with a turn), "Chargée par l'assistant" (the assistant loaded it itself) or "Non chargée" with the reason (size budget exceeded, skill unavailable or unreadable). Uncheck any pinned skill to remove it from the conversation.
+- **Automatic discovery** (on by default): the assistant sees the other skills of the spaces the conversation can act in, one line each, and loads the one that fits. The skills you pinned are not listed again. When it is off, the assistant has no access to any other skill: it cannot list, load, declare or write one, whatever your role. The skills you pinned still apply.
+
+A skill the assistant loads this way is pinned to the conversation and stays loaded on later turns, shown as a chip in the thread. A conversation holds at most 5 pinned skills, whoever pinned them, sharing a budget of 64,000 characters. Beyond that the assistant's load is refused and it is told so; uncheck one to make room.
 
 ## For administrators
 
@@ -62,5 +64,5 @@ By default, a one-off agent the assistant composes runs on the organization's de
 
 Type `/` in the composer to open the list of commands: the skills the conversation can read and the agents you can launch, in the spaces the conversation acts in (the origin space alone when it is limited to it). The list is the one the Appstrate MCP server serves to any client, with your own permissions, and it shows skills even when automatic discovery is off.
 
-- **A skill** is pinned to the conversation, like ticking it in the skills panel: it stays loaded on every later turn until you remove it there. Pinning is refused at the limit of 5 chosen skills.
+- **A skill** is pinned to the conversation, like ticking it in the skills panel: it stays loaded on every later turn until you remove it there. Pinning is refused at the limit of 5 pinned skills.
 - **An agent** asks the assistant to run it. Type what you want after the command; the assistant builds the run's input from it, asks for what is missing, then launches the agent. Each launch is a metered run. The conversation shows what you typed, and the assistant is given the launch instructions the server returns, which are kept with the message and reused on every later turn.

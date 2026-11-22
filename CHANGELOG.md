@@ -27,13 +27,17 @@ The platform MCP server replaces `search_operations`, `search_integration_tools`
 
 ### Chat skills
 
-The three skill modes of a chat conversation (`auto`, `manual`, `strict`) become two settings: the chosen skills (`pinned_skills`), always injected in full, and `skill_discovery`, whether the assistant may find other skills.
+The three skill modes of a chat conversation (`auto`, `manual`, `strict`) become two settings: the pinned skills, injected in full, and `skill_discovery`, whether the assistant may find other skills. The server owns the pinned set and reports what each pin does (#2356).
 
-- **BREAKING (chat API):** `skill_mode` is replaced by `skill_discovery` (boolean, default `true`) on the session objects and on the body of `POST /api/orgs/{orgId}/chat`. A turn sends `skill_discovery` and `pinned_skills` together or neither; a body that still carries `skill_mode` is a 400.
-- `skill_discovery: false` is the former `strict`: the turn holds no `skills:*`. With it on, the context lists the other skills of the turn's spaces, without the chosen ones.
+- **BREAKING (chat API):** `skill_mode` is replaced by `skill_discovery` (boolean, default `true`), and `pinned_skills` by `skills: [{ id, source, status }]` (sorted by `id`) on the session objects. `source` is `user` or `assistant`; `status` is `injected`, `over_budget`, `unavailable` or `unreadable`, computed by the turn that claims the conversation, and `null` until a turn has evaluated the pin.
+- **BREAKING (chat API):** `POST /api/orgs/{orgId}/chat` takes `skill_discovery`, `pin_skills` and `unpin_skills` (at most 5 scoped names each) in place of a full set: deltas against the stored pins, applied atomically and idempotent. More than 5 pins is a 400 and nothing is written. A body that still carries `pinned_skills` or `skill_mode` is a 400.
+- When the assistant loads a skill's `SKILL.md` (`read_resource` or `read`) in a saved conversation, it pins it (`source: assistant`): at most 5 pins, 64 000 characters shared with the other injected skills, an explicit refusal to the model otherwise. Later turns inject it from the system prompt; the history keeps a short receipt instead of the text. An ephemeral turn reads without pinning.
+- `skill_discovery: false` is the former `strict`: the turn holds no `skills:*`. With it on, the context lists the other skills of the turn's spaces, without the pinned ones.
 - The `list_skills` tool is removed: the catalogue is in the context and `read_resource` loads a skill by its `skill://` URI.
+- The skills panel shows each pin's real state and source (cited in the message, loaded on the next message, loaded by the assistant, not loaded and why); the assistant's load renders as a chip in the thread.
 - A conversation that was `manual` now sees the catalogue of its spaces' skills.
 - Data (migration 0112): `strict` conversations get `skill_discovery = false`; `auto` conversations lose their chosen skills, which were kept but unused and would otherwise be injected after the upgrade.
+- Schema (migration 0113): `chat_sessions` gains `assistant_skills` and `skill_status` (DDL only, no data rewrite).
 
 ### Chat commands
 
