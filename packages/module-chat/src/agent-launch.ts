@@ -19,7 +19,7 @@ import { uiMessageText } from "./message-text.ts";
 import { CALLER_READ_TIMEOUT_MS } from "./prompt.ts";
 
 /** Ceiling on the launch text stored with a message, in bytes. */
-export const AGENT_LAUNCH_MAX_BYTES = 64 * 1024;
+const AGENT_LAUNCH_MAX_BYTES = 64 * 1024;
 
 /**
  * `message` with its agent-prompt part resolved: `data.text` is what `prompts/get` returns for
@@ -39,7 +39,7 @@ export async function resolveAgentPrompt(
   const client = await openCaller(signal);
   let text: string;
   try {
-    const request = uiMessageText(message.parts);
+    const request = uiMessageText(message.parts, { omitAgent: true });
     const result = await client.getPrompt({ name, arguments: { request } }, { signal });
     text = result.messages
       .flatMap((entry) => (entry.content.type === "text" ? [entry.content.text] : []))

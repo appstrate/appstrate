@@ -7,6 +7,8 @@
  * it with `useSyncExternalStore` (no setState in effects) and tests need no DOM.
  */
 
+import { draftIssue, namesAgent } from "./directive-send.ts";
+
 export interface QueueSnapshot {
   readonly items: readonly string[];
   /** The user pressed Stop during the current turn: its queue is held, not auto-sent. */
@@ -19,16 +21,26 @@ export function joinQueued(items: readonly string[]): string {
 }
 
 /**
- * Whether the draft can join the queue: a turn runs, it is text alone, and it launches no agent
- * (the queue sends plain text, so a chosen agent would be dropped and its chip left behind).
+ * Whether the draft can join the queue: a turn runs, it is text alone, and it names no agent
+ * (a queued message is sent after the turn, as one message with the others: no agent launch
+ * waits in a queue, and none is started by surprise). Skills it names are pinned when it is sent.
  */
 export function canQueueDraft(input: {
   running: boolean;
   text: string;
   hasAttachments: boolean;
-  hasAgent: boolean;
+  /** The messages already queued, and the pinned skills their skills join when sent. */
+  queued: readonly string[];
+  pinned: readonly string[];
 }): boolean {
-  return input.running && !input.hasAttachments && !input.hasAgent && input.text.trim() !== "";
+  return (
+    input.running &&
+    !input.hasAttachments &&
+    input.text.trim() !== "" &&
+    !namesAgent(input.text) &&
+    // The queue is sent as one message: its skills together must fit the cap.
+    draftIssue(joinQueued([...input.queued, input.text]), input.pinned) !== "pins"
+  );
 }
 
 export type FlushDecision = "send" | "hold" | "none";

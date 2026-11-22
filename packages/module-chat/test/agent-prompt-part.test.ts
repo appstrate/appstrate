@@ -1,73 +1,17 @@
 // SPDX-License-Identifier: Apache-2.0
 
-/** An agent launch from the composer: how it rides on a send, and how a message shows it. */
+/** An agent launch carried by a message: how a retry names it, and how a message shows it. */
 
 import { describe, expect, it } from "bun:test";
 import {
-  agentOfRunConfig,
-  agentOnlyContent,
   agentPromptOf,
   precedingUserMessage,
   retryContent,
-  agentRunConfig,
   hasBubbleContent,
-  messageWithAgentPrompt,
 } from "../src/ui/agent-prompt-part.ts";
+import { sendWithDirectives } from "../src/ui/directive-send.ts";
 
 const agent = { name: "run-report", title: "Weekly report" };
-
-describe("the composer's run config", () => {
-  it("round-trips the chosen agent, and is empty when none is chosen", () => {
-    expect(agentOfRunConfig(agentRunConfig(agent))).toEqual(agent);
-    expect(agentRunConfig(null)).toEqual({});
-    expect(agentOfRunConfig({})).toBeNull();
-    expect(agentOfRunConfig(undefined)).toBeNull();
-  });
-
-  it("reads nothing out of a malformed config", () => {
-    expect(agentOfRunConfig({ custom: { agentPrompt: { name: "x" } } })).toBeNull();
-    expect(agentOfRunConfig({ custom: { agentPrompt: "run-report" } })).toBeNull();
-  });
-});
-
-describe("messageWithAgentPrompt", () => {
-  const message = {
-    role: "user",
-    parts: [
-      { type: "text", text: "for Q3" },
-      { type: "file", url: "appfile://f1", mediaType: "text/csv" },
-    ],
-  };
-
-  it("adds the agent prompt part, name and title, to the text and file parts", () => {
-    expect(messageWithAgentPrompt(message, agentRunConfig(agent))).toEqual({
-      role: "user",
-      parts: [
-        { type: "text", text: "for Q3" },
-        { type: "file", url: "appfile://f1", mediaType: "text/csv" },
-        { type: "data-agent-prompt", data: agent },
-      ],
-    });
-    expect(message.parts).toHaveLength(2);
-  });
-
-  it("sends a message without an agent as it is", () => {
-    expect(messageWithAgentPrompt(message, {})).toBe(message);
-    expect(messageWithAgentPrompt(message, undefined)).toBe(message);
-    expect(messageWithAgentPrompt(undefined, agentRunConfig(agent))).toBeUndefined();
-  });
-
-  it("leaves a message that carries no parts as it is", () => {
-    const textOnly = { text: "hello" };
-    expect(messageWithAgentPrompt(textOnly, agentRunConfig(agent))).toBe(textOnly);
-  });
-});
-
-describe("agentOnlyContent", () => {
-  it("is one native data part, which the runtime sends as data-agent-prompt", () => {
-    expect(agentOnlyContent(agent)).toEqual([{ type: "data", name: "agent-prompt", data: agent }]);
-  });
-});
 
 describe("what a user message shows of its agent", () => {
   const launch = { name: "run-report", title: "Weekly report", text: "LAUNCH INSTRUCTIONS" };
@@ -132,10 +76,15 @@ describe("retryContent", () => {
     expect(retryContent("retry", null)).toEqual([{ type: "text", text: "retry" }]);
   });
 
-  it("names the agent the failed turn launched, as a native data part", () => {
+  it("leads the request with the directive of the agent the failed turn launched", () => {
     expect(retryContent("retry", agent)).toEqual([
-      { type: "text", text: "retry" },
-      { type: "data", name: "agent-prompt", data: agent },
+      { type: "text", text: ":agent[Weekly report]{name=run-report} retry" },
     ]);
+  });
+
+  it("is sent as the agent prompt part again: the send reads the directive back", () => {
+    const [text] = retryContent("retry", agent);
+    const { message } = sendWithDirectives({ role: "user", parts: [text] });
+    expect(message.parts.at(-1)).toEqual({ type: "data-agent-prompt", data: agent });
   });
 });

@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * A user message that launched an agent, through the real assistant-ui runtime (SSR): the agent is
- * a chip above the bubble, from a live message or one replayed from history, and the launch text
- * the server wrote into the part is never shown.
+ * A user message that names an agent or a skill, through the real assistant-ui runtime (SSR): each
+ * is a chip inline in the text, from a live message or one replayed from history, and the launch
+ * text the server wrote into the part is never shown.
  */
 
 import { describe, expect, it } from "bun:test";
@@ -55,43 +55,44 @@ function render(parts: UIMessage["parts"]): string {
 }
 
 const LAUNCH = "LAUNCH-INSTRUCTIONS-FROM-THE-SERVER";
+const AGENT = ":agent[Weekly report]{name=run-report}";
+const SKILL = ":skill[tone]{name=@acme/tone}";
 const prompt = {
   type: "data-agent-prompt" as const,
   // As a replayed message holds it: the server's `text` is in the stored part.
   data: { name: "run-report", title: "Weekly report", text: LAUNCH },
 };
-const BUBBLE = "rounded-2xl";
 
-describe("a user message that launched an agent", () => {
-  it("draws the agent's title as a chip above the text, and never the launch text", () => {
-    const html = render([{ type: "text", text: "for Q3" }, prompt]);
-    expect(html).toContain('data-testid="agent-prompt-chip"');
+describe("a user message that names an agent or a skill", () => {
+  it("draws each as a chip inside the text, where it was typed, and never the launch text", () => {
+    const html = render([{ type: "text", text: `${AGENT} for Q3 in the ${SKILL} style` }, prompt]);
+    expect(html.match(/data-testid="directive-chip"/g)).toHaveLength(2);
+    expect(html).toContain('data-directive-type="agent"');
+    expect(html).toContain('data-directive-type="skill"');
     expect(html).toContain("Weekly report");
-    expect(html).toContain("for Q3");
+    expect(html).toContain("for Q3 in the");
     expect(html).not.toContain(LAUNCH);
-    expect(html.indexOf("agent-prompt-chip")).toBeLessThan(html.indexOf("for Q3"));
+    // The directive syntax is never shown.
+    expect(html).not.toContain(":agent[");
+    expect(html).not.toContain("run-report");
+    expect(html.indexOf("Weekly report")).toBeLessThan(html.indexOf("for Q3"));
   });
 
-  it("draws the chip alone, with no empty bubble, when nothing was typed", () => {
-    const html = render([prompt]);
+  it("draws an agent chip alone in its bubble", () => {
+    const html = render([{ type: "text", text: AGENT }, prompt]);
     expect(html).toContain("Weekly report");
+    expect(html).toContain("rounded-2xl");
+  });
+
+  it("draws no bubble for a replayed launch with no text at all", () => {
+    const html = render([prompt]);
     expect(html).not.toContain(LAUNCH);
-    expect(html).not.toContain(BUBBLE);
+    expect(html).not.toContain("rounded-2xl");
   });
 
   it("draws an ordinary message as before: a bubble, no chip", () => {
-    const html = render([{ type: "text", text: "hello" }]);
-    expect(html).toContain("hello");
-    expect(html).toContain(BUBBLE);
-    expect(html).not.toContain("agent-prompt-chip");
-  });
-
-  it("draws no chip for a part that carries no usable title", () => {
-    const html = render([
-      { type: "text", text: "hello" },
-      { type: "data-agent-prompt", data: {} },
-    ]);
-    expect(html).toContain("hello");
-    expect(html).not.toContain("agent-prompt-chip");
+    const html = render([{ type: "text", text: "hello :smile[x]" }]);
+    expect(html).toContain("hello :smile[x]");
+    expect(html).not.toContain("directive-chip");
   });
 });

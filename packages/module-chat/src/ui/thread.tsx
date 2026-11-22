@@ -24,7 +24,6 @@ import {
 import {
   AlertTriangleIcon,
   ArrowDownIcon,
-  BotIcon,
   CheckIcon,
   CopyIcon,
   ListPlusIcon,
@@ -88,7 +87,6 @@ import {
 } from "./touch-targets.ts";
 import {
   ASSISTANT_MESSAGE_CLASS,
-  COMPOSER_INPUT_CLASS,
   DISCLAIMER_CLASS,
   NOTE_TEXT_CLASS,
   READING_TEXT_CLASS,
@@ -104,20 +102,18 @@ import {
   type QueueSnapshot,
 } from "./message-queue.ts";
 import {
-  agentOfRunConfig,
-  agentOnlyContent,
   agentPromptOf,
   precedingUserMessage,
   retryContent,
-  agentRunConfig,
   hasBubbleContent,
-  type AgentChip,
 } from "./agent-prompt-part.ts";
-import { AgentPromptChip } from "./agent-prompt-chip.tsx";
-import { RemovableChip } from "./removable-chip.tsx";
-import { SlashMenuList } from "./slash-menu.tsx";
-import { isComposingKey, typedSendPlan } from "./slash-menu.ts";
-import { useSlashMenu } from "./use-slash-menu.ts";
+import { DirectiveText } from "./directive-chip.tsx";
+import { draftIssue } from "./directive-send.ts";
+import { readableDirectives } from "../directives.ts";
+import { ComposerEditor } from "./composer-input.tsx";
+import { CommandPopover, CommandTriggers } from "./composer-popover.tsx";
+import { usePinnedSkills } from "./pinned-skills.ts";
+import { MAX_PINNED_SKILLS } from "../skills.ts";
 
 export function Thread({
   composerTools,
@@ -293,6 +289,13 @@ function ScrollToBottom() {
   return (
     <ThreadPrimitive.ScrollToBottom asChild>
       <Button
+        // Where the composer auto-focuses, it takes the focus back when the thread scrolls down.
+        onClick={() => {
+          if (shouldAutofocusComposer())
+            document
+              .querySelector<HTMLElement>("[data-aui-composer-type=thread] [contenteditable]")
+              ?.focus({ preventScroll: true });
+        }}
         type="button"
         variant="outline"
         size="icon"
@@ -579,8 +582,8 @@ function QueuedMessages({
         {items.map((text, index) => (
           // Texts may repeat and the list only ever shrinks or appends: the index is the identity.
           <li key={index} className="text-muted-foreground flex items-center gap-1 text-xs">
-            <span className="min-w-0 flex-1 truncate" title={text}>
-              {text}
+            <span className="min-w-0 flex-1 truncate" title={readableDirectives(text)}>
+              <DirectiveText text={text} />
             </span>
             <IconButton
               label={t("composer.queue.edit")}
@@ -607,6 +610,8 @@ function QueuedMessages({
   );
 }
 
+const NO_PINS: readonly string[] = [];
+
 function Composer({
   tools,
   slot,
@@ -621,17 +626,9 @@ function Composer({
   queue: MessageQueue;
 }) {
   const { can, t, modelLabel } = useChatHost();
-  const aui = useAui();
   const composer = unstable_useComposerInput();
   const running = useAuiState((s) => s.thread.isRunning);
   const hasAttachments = useAuiState((s) => s.composer.attachments.length > 0);
-  // The agent chosen from the `/` menu rides on the composer's run config: it belongs to the next
-  // send of this composer alone (see `agent-prompt-part.ts`), and a send clears it.
-  const runConfig = useAuiState((s) => s.composer.runConfig);
-  const agent = React.useMemo(() => agentOfRunConfig(runConfig), [runConfig]);
-  const setAgent = (next: AgentChip | null) => aui.composer().setRunConfig(agentRunConfig(next));
-  useAuiEvent("composer.send", () => setAgent(null));
-  const menu = useSlashMenu({ text: composer.value, setText: composer.setText, running, setAgent });
   // On a phone the composer rests as one line (attach, field, send) until it is touched; from then
   // on, or with a draft, a file or a turn running, it shows its tools. From `md` up it never rests.
   const autofocus = shouldAutofocusComposer();
@@ -640,35 +637,30 @@ function Composer({
   // The turn carries the limit and its files go to its spaces: none leaves before the change lands.
   const limitPending = useConversationScope().pending;
   // Only text is queued: attachments stay in the composer until the next real send.
+  const pinned = usePinnedSkills() ?? NO_PINS;
+  const queued = React.useSyncExternalStore(queue.subscribe, queue.getSnapshot, queue.getSnapshot);
   const canQueue = canQueueDraft({
     running,
     text: composer.value,
     hasAttachments,
-    hasAgent: agent !== null,
+    queued: queued.items,
+    pinned,
   });
   const enqueue = () => {
     if (canQueue && queue.add(composer.value)) composer.setText("");
   };
-  // An agent alone is a message the composer would not send (nothing typed): the thread does.
-  const agentOnly = agent !== null && !running && composer.value.trim() === "" && !hasAttachments;
-  const sendAgentOnly = (chip: AgentChip) => {
-    if (limitPending) return;
-    // The composer path cannot send this: it refuses an empty draft, so the agent prompt part
-    // goes through the thread instead (there is nothing else to carry: no text, no files).
-    aui.thread().append({ role: "user", content: agentOnlyContent(chip) });
-    setAgent(null);
+  // What the draft names must be sendable: one agent, skills within the cap.
+  // While a turn runs the draft joins the queue, which is sent as one message: the cap counts it all.
+  const issue = draftIssue(
+    running ? joinQueued([...queued.items, composer.value]) : composer.value,
+    pinned,
+  );
+  const blocked = limitPending || issue !== null;
+  // Enter queues while a turn runs and sends otherwise, as the Send button does.
+  const enter = () => {
+    if (running) enqueue();
+    else if (!blocked) composer.send();
   };
-  // `/name text` typed in one go: the choice is applied as the menu would, then the rest is sent.
-  const typed = menu.typed;
-  const sendTyped = () => {
-    if (!typed || limitPending) return;
-    const choice = menu.choose(typed.entry, typed.rest);
-    const plan = typedSendPlan(choice, typed.rest, hasAttachments);
-    if (plan === "agent-only" && choice.kind === "agent") sendAgentOnly(choice.agent);
-    else if (plan === "send") aui.composer().send();
-  };
-  // What replaces the composer's own send when it would do nothing or the wrong thing.
-  const submit = typed ? sendTyped : agentOnly && agent ? () => sendAgentOnly(agent) : null;
   React.useEffect(() => {
     if (!takesDraft(initialDraft, { seeded: draftSeededRef.current, typed: composer.value }))
       return;
@@ -683,130 +675,89 @@ function Composer({
       </p>
     );
   }
-  // No focus ring on the box: the app's global `textarea:focus` ring is too
-  // intense here. min-h-9 + px-0 override the global `textarea { min-h-80px }`
-  // base rule (utilities beat the base layer) for a compact, Codex-like field.
   return (
     <ComposerPrimitive.Root
       className="group/composer bg-card relative flex w-full flex-col gap-1 rounded-xl border px-3 py-2 shadow-sm"
       data-rest={rest ? "" : undefined}
       onClick={() => setTouched(true)}
       onSubmit={(e) => {
-        if (limitPending) e.preventDefault();
+        if (blocked) e.preventDefault();
       }}
     >
-      {/* Pending attachments, above the input. `empty:hidden` collapses the row
+      <CommandTriggers>
+        {/* Pending attachments, above the input. `empty:hidden` collapses the row
           (and its gap) when nothing is attached. */}
-      <QueuedMessages
-        queue={queue}
-        running={running}
-        composerEmpty={composer.value.trim() === ""}
-        onEdit={composer.setText}
-      />
-      {menu.open && (
-        <SlashMenuList
-          entries={menu.entries}
-          status={menu.status}
-          refused={menu.refused}
-          active={menu.active}
-          listId={menu.listId}
-          onChoose={menu.onChoose}
-          onHover={menu.onHover}
+        <QueuedMessages
+          queue={queue}
+          running={running}
+          composerEmpty={composer.value.trim() === ""}
+          onEdit={composer.setText}
         />
-      )}
-      <div className="flex flex-wrap gap-1.5 empty:hidden">
-        {agent && (
-          <RemovableChip
-            icon={<BotIcon />}
-            removeLabel={t("composer.agentChip.remove", { title: agent.title })}
-            onRemove={() => setAgent(null)}
-            data-testid="composer-agent-chip"
-          >
-            {agent.title}
-          </RemovableChip>
-        )}
-        <ComposerPrimitive.Attachments components={{ Attachment: ComposerAttachmentChip }} />
-      </div>
-      <ComposerAttachmentError />
-      <DraftContextNotice />
-      <div className="chat-composer-grid" data-rest={rest ? "" : undefined}>
-        <div className="min-w-0 [grid-area:tools]">{tools}</div>
-        <ComposerPrimitive.Input
-          rows={1}
-          // A phone would open its keyboard on arrival and never show the resting composer.
-          autoFocus={autofocus}
-          unstable_focusOnRunStart={autofocus}
-          unstable_focusOnScrollToBottom={autofocus}
-          unstable_focusOnThreadSwitched={autofocus}
-          // Escape closes the menu, it does not stop the turn.
-          cancelOnEscape={!menu.open}
-          onFocus={() => setTouched(true)}
-          {...menu.inputProps}
-          aria-label={t("composer.placeholder")}
-          enterKeyHint="send"
-          addAttachmentOnPaste
-          placeholder={
-            modelLabel
-              ? t("composer.placeholderModel", { model: modelLabel })
-              : t("composer.placeholder")
-          }
-          onKeyDown={(e) => {
-            if (menu.onKeyDown(e)) return;
-            const plainEnter = e.key === "Enter" && !e.shiftKey && !e.ctrlKey && !e.metaKey;
-            if (submit && plainEnter && !isComposingKey(e)) {
-              e.preventDefault();
-              submit();
-              return;
-            }
-            // While the agent answers the primitive ignores Enter; it queues instead.
-            if (!running || e.key !== "Enter" || e.shiftKey || e.ctrlKey || e.metaKey) return;
-            if (isComposingKey(e)) return;
-            e.preventDefault();
-            enqueue();
-          }}
-          className={COMPOSER_INPUT_CLASS}
-        />
-        <div className="max-w-full min-w-0 justify-self-end [grid-area:model] max-md:group-data-[rest]/composer:hidden">
-          {slot}
+        <CommandPopover />
+        <div className="flex flex-wrap gap-1.5 empty:hidden">
+          <ComposerPrimitive.Attachments components={{ Attachment: ComposerAttachmentChip }} />
         </div>
-        <div className="flex items-center gap-2 [grid-area:send]">
-          <ContextGauge className="max-md:group-data-[rest]/composer:hidden" />
-          <ThreadPrimitive.If running={false}>
-            {submit ? (
-              <SendButton label={t("composer.send")} disabled={limitPending} onClick={submit} />
-            ) : (
-              <ComposerPrimitive.Send asChild disabled={limitPending}>
+        <ComposerAttachmentError />
+        <DraftContextNotice />
+        <div className="chat-composer-grid" data-rest={rest ? "" : undefined}>
+          <div className="min-w-0 [grid-area:tools]">{tools}</div>
+          <ComposerEditor
+            label={t("composer.placeholder")}
+            placeholder={
+              modelLabel
+                ? t("composer.placeholderModel", { model: modelLabel })
+                : t("composer.placeholder")
+            }
+            // A phone would open its keyboard on arrival and never show the resting composer.
+            autofocus={autofocus}
+            onFocus={() => setTouched(true)}
+            onEnter={enter}
+          />
+          <div className="max-w-full min-w-0 justify-self-end [grid-area:model] max-md:group-data-[rest]/composer:hidden">
+            {slot}
+          </div>
+          <div className="flex items-center gap-2 [grid-area:send]">
+            <ContextGauge className="max-md:group-data-[rest]/composer:hidden" />
+            <ThreadPrimitive.If running={false}>
+              <ComposerPrimitive.Send asChild disabled={blocked}>
                 <SendButton label={t("composer.send")} />
               </ComposerPrimitive.Send>
-            )}
-          </ThreadPrimitive.If>
-          <ThreadPrimitive.If running>
-            <Button
-              type="button"
-              size="icon"
-              variant="outline"
-              className={COMPOSER_BUTTON_CLASS}
-              aria-label={t("composer.queue.add")}
-              title={t("composer.queue.add")}
-              disabled={!canQueue}
-              onClick={enqueue}
-            >
-              <ListPlusIcon />
-            </Button>
-            <ComposerPrimitive.Cancel asChild>
+            </ThreadPrimitive.If>
+            <ThreadPrimitive.If running>
               <Button
                 type="button"
                 size="icon"
-                variant="secondary"
+                variant="outline"
                 className={COMPOSER_BUTTON_CLASS}
-                aria-label={t("composer.stop")}
+                aria-label={t("composer.queue.add")}
+                title={t("composer.queue.add")}
+                disabled={!canQueue}
+                onClick={enqueue}
               >
-                <SquareIcon className="fill-current" />
+                <ListPlusIcon />
               </Button>
-            </ComposerPrimitive.Cancel>
-          </ThreadPrimitive.If>
+              <ComposerPrimitive.Cancel asChild>
+                <Button
+                  type="button"
+                  size="icon"
+                  variant="secondary"
+                  className={COMPOSER_BUTTON_CLASS}
+                  aria-label={t("composer.stop")}
+                >
+                  <SquareIcon className="fill-current" />
+                </Button>
+              </ComposerPrimitive.Cancel>
+            </ThreadPrimitive.If>
+          </div>
         </div>
-      </div>
+        {issue && (
+          <p role="status" className={cn(NOTE_TEXT_CLASS, "text-destructive")}>
+            {issue === "agents"
+              ? t("composer.oneAgentOnly")
+              : t("skills.chosenMax", { max: MAX_PINNED_SKILLS })}
+          </p>
+        )}
+      </CommandTriggers>
     </ComposerPrimitive.Root>
   );
 }
@@ -828,8 +779,14 @@ function SendButton({ label, ...props }: React.ComponentProps<typeof Button> & {
 
 // ─── User message (bubble only — no edit/branch on a single-path thread) ─────
 
+/** The user's text, with the skills and agents it names as chips. */
+function UserText({ text }: { text: string }) {
+  return <DirectiveText text={text} />;
+}
+
 /** Module-level: assistant-ui memoizes each part on these members' identity. */
 const USER_PART_COMPONENTS = {
+  Text: UserText,
   File: FileAttachmentPart,
 } satisfies React.ComponentProps<typeof MessagePrimitive.Parts>["components"];
 
@@ -854,7 +811,6 @@ export function UserMessage() {
   });
   const resume = resumeText ? parseResume(resumeText) : null;
   // Plain values from the selectors, never a derived object. See `turn-error-state.ts`.
-  const agentTitle = useAuiState(({ message }) => agentPromptOf(message)?.title ?? null);
   const hasBubble = useAuiState(({ message }) => hasBubbleContent(message));
 
   if (resume) {
@@ -877,11 +833,6 @@ export function UserMessage() {
 
   return (
     <MessagePrimitive.Root className="group flex w-full max-w-(--thread-max-width) flex-col items-end py-2">
-      {agentTitle !== null && (
-        <div className="mb-1 flex max-w-[80%] justify-end">
-          <AgentPromptChip title={agentTitle} />
-        </div>
-      )}
       {/* Sent attachments render ABOVE the bubble, in their own right-aligned
           wrap-row. They live on `message.attachments` (the converter's file-part
           routing), not in the bubble's Parts. Guarded so an attachment-less

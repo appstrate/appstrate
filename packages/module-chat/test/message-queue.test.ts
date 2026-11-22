@@ -80,14 +80,34 @@ describe("createMessageQueue", () => {
 });
 
 describe("canQueueDraft", () => {
-  const draft = { running: true, text: "more", hasAttachments: false, hasAgent: false };
+  const draft = {
+    running: true,
+    text: "more",
+    hasAttachments: false,
+    queued: [] as string[],
+    pinned: [] as string[],
+  };
 
   it("queues the text typed while a turn runs", () => {
     expect(canQueueDraft(draft)).toBe(true);
   });
 
-  it("does not queue with an agent chosen: the queue would drop it and leave the chip", () => {
-    expect(canQueueDraft({ ...draft, hasAgent: true })).toBe(false);
+  it("does not queue a draft that names an agent: no launch waits in a queue", () => {
+    expect(canQueueDraft({ ...draft, text: ":agent[Report]{name=run-report} for Q3" })).toBe(false);
+  });
+
+  it("refuses a draft whose skills, with the queued ones, would pass the pin cap", () => {
+    const sk = (n: string) => `:skill[${n}]{name=@acme/${n}}`;
+    const pinned = ["@acme/a", "@acme/b", "@acme/c"];
+    const queued = [sk("d")];
+    expect(canQueueDraft({ ...draft, pinned, queued, text: sk("e") })).toBe(true);
+    expect(canQueueDraft({ ...draft, pinned, queued, text: `${sk("e")} ${sk("f")}` })).toBe(false);
+    // A skill already pinned or queued takes no room.
+    expect(canQueueDraft({ ...draft, pinned, queued, text: `${sk("a")} ${sk("d")}` })).toBe(true);
+  });
+
+  it("queues a draft that names a skill: it is pinned when the queue is sent", () => {
+    expect(canQueueDraft({ ...draft, text: "use :skill[tone]{name=@acme/tone}" })).toBe(true);
   });
 
   it("does not queue blank text, files, or outside a running turn", () => {

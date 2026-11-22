@@ -2587,6 +2587,60 @@ describe("handleChatStream", () => {
       expect(gets).toEqual([{ name: "run-summarizer", arguments: { request: "" } }]);
     });
 
+    it("keeps the directives as typed, and resolves the request with them read as /label, the agent's own left out", async () => {
+      const sessionId = mintSessionId();
+      const gets: Array<Record<string, unknown>> = [];
+      const { engine, calls } = scriptedEngine();
+      const typed =
+        ":agent[Summarizer]{name=run-summarizer} résume en suivant :skill[tone]{name=@acme/tone}";
+      const res = await postChat(sessionId, undefined, engine, {
+        dispatch: promptsDispatch(gets),
+        parts: [{ type: "text", text: typed }, launchPart()],
+      });
+      expect(res.status).toBe(200);
+      await collectUiChunks(res);
+      await waitForAssistantPersist(sessionId);
+
+      expect(gets).toEqual([
+        { name: "run-summarizer", arguments: { request: "résume en suivant /tone" } },
+      ]);
+      const [user] = await rowsOf(sessionId);
+      expect(user!.parts[0]).toEqual({ type: "text", text: typed });
+      const { api, provider, id } = calls[0]!.modelBinding.model;
+      const turn = buildStructuredPiTurn(
+        calls[0]!.messages,
+        { api, provider, model: id },
+        { estimateTokens: () => 1, baseTokens: 0, fileDelivery: { image: false, pdf: false } },
+      );
+      expect(turn.prompt).toBe(LAUNCH("résume en suivant /tone").trim());
+      expect(turn.prompt).not.toContain(":skill[");
+      const [session] = await db.select().from(chatSessions).where(eq(chatSessions.id, sessionId));
+      expect(session?.title).toBe("/Summarizer résume en suivant /tone");
+    });
+
+    it("shows the model a skill directive as /label, never as the composer's syntax", async () => {
+      const sessionId = mintSessionId();
+      const { engine, calls } = scriptedEngine();
+      const res = await postChat(sessionId, undefined, engine, {
+        parts: [{ type: "text", text: "reformule avec :skill[tone]{name=@acme/tone} stp" }],
+      });
+      expect(res.status).toBe(200);
+      await collectUiChunks(res);
+      await waitForAssistantPersist(sessionId);
+      const { api, provider, id } = calls[0]!.modelBinding.model;
+      const turn = buildStructuredPiTurn(
+        calls[0]!.messages,
+        { api, provider, model: id },
+        { estimateTokens: () => 1, baseTokens: 0, fileDelivery: { image: false, pdf: false } },
+      );
+      expect(turn.prompt).toBe("reformule avec /tone stp");
+      // The stored row keeps what was typed: the thread draws the chip from it.
+      const [user] = await rowsOf(sessionId);
+      expect((user!.parts[0] as { text: string }).text).toBe(
+        "reformule avec :skill[tone]{name=@acme/tone} stp",
+      );
+    });
+
     it("answers 400 to a name the server does not serve, writing nothing and freeing the conversation", async () => {
       const sessionId = mintSessionId();
       const { engine, calls } = scriptedEngine();

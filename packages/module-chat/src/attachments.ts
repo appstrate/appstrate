@@ -24,7 +24,7 @@ import { parseFileUri, UPLOAD_URI_PREFIX } from "@appstrate/core/file-uri";
 import { formatBytes } from "@appstrate/core/format";
 import { isImageMime } from "@appstrate/core/mime";
 import type { FileDelivery } from "./file-input.ts";
-import { withAgentPromptText } from "./message-text.ts";
+import { withModelText } from "./message-text.ts";
 import { UNNAMED_FILE } from "./ui/run-events.ts";
 
 /** Is `part` an ai-SDK `file` part? */
@@ -85,7 +85,7 @@ function imageNote(
  * part (the {@link attachmentTextBlock}) so the model sees the attachment as
  * text it can act on. Messages without file parts are returned unchanged (no
  * copy). A message carrying a resolved agent launch shows its launch instructions in place of its text
- * (`withAgentPromptText`). Used when projecting the thread into the engine's transcript so the
+ * (`withModelText`). Used when projecting the thread into the engine's transcript so the
  * model-facing serialization lives in one place.
  */
 export function messagesWithAttachmentsAsText(
@@ -93,7 +93,7 @@ export function messagesWithAttachmentsAsText(
   context?: AttachmentContext,
 ): UIMessage[] {
   return messages.map((sent) => {
-    const message = withAgentPromptText(sent);
+    const message = withModelText(sent);
     const parts = message.parts;
     if (message.role !== "user" || !parts?.some(isFileUIPart)) return message;
     return {

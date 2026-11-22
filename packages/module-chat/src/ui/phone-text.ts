@@ -2,9 +2,13 @@
 
 // A landscape phone can cross md. Keep both editable fields at 1rem at every width.
 
-/** The composer's `<textarea>`: compact, borderless, inside the composer card. */
+/**
+ * The composer's editor (a Lexical content-editable in a scrolling wrapper): compact, borderless,
+ * inside the composer card. The library draws no styles of its own: the field and its placeholder
+ * are styled through their `aui-lexical-*` classes.
+ */
 export const COMPOSER_INPUT_CLASS =
-  "placeholder:text-muted-foreground [grid-area:input] max-h-40 min-h-10 desktop-pointer:min-h-9 w-full resize-none border-0 bg-transparent px-0 py-1 text-base shadow-none outline-none focus:ring-0 focus-visible:ring-0 focus-visible:outline-none";
+  "relative [grid-area:input] max-h-40 w-full px-0 text-base [&_.aui-lexical-input]:min-h-10 desktop-pointer:[&_.aui-lexical-input]:min-h-9 [&_.aui-lexical-input]:py-1 [&_.aui-lexical-input]:break-words [&_.aui-lexical-input]:whitespace-pre-wrap [&_.aui-lexical-input]:outline-none [&_.aui-lexical-placeholder]:text-muted-foreground [&_.aui-lexical-placeholder]:pointer-events-none [&_.aui-lexical-placeholder]:absolute [&_.aui-lexical-placeholder]:inset-x-0 [&_.aui-lexical-placeholder]:top-1 [&_.aui-lexical-placeholder]:truncate";
 
 /** Running text a phone reads (a hint, a state, a message): 16 px, the dense size from `md`. */
 export const READING_TEXT_CLASS = "text-base md:text-sm";

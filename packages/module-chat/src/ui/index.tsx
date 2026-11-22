@@ -114,8 +114,8 @@ import { DEFAULT_SKILL_SELECTION, type ChatSkillSelection } from "../skills.ts";
 import { canAuthorPackages, canPinSkills } from "../capabilities.ts";
 import { createChatAttachmentAdapter } from "./attachment-adapter.ts";
 import { shouldReconcileHistory } from "./history-reconcile.ts";
-import { messageWithAgentPrompt } from "./agent-prompt-part.ts";
-import { SkillSelectionProvider } from "./use-slash-menu.ts";
+import { mergePinned, sendWithDirectives } from "./directive-send.ts";
+import { PinnedSkillsProvider } from "./pinned-skills.ts";
 
 // Tab visibility as an external store — the mark-read effect must not fire
 // while the tab is hidden: SSE-driven invalidations refetch the list even in
@@ -565,10 +565,20 @@ const Conversation = memo(function Conversation({
     [transport, skills, chooseSkills, showPicker, authorsPackages],
   );
 
-  // The `/` menu pins skills through the same change the panel makes.
-  const skillControl = useMemo(
-    () => (showPicker ? { selection: skills, onChange: chooseSkills } : null),
-    [showPicker, skills, chooseSkills],
+  // The `/` menu lists skills only where the panel can change the selection, and a send pins
+  // the skills its text names through the same change the panel makes.
+  const pinnedSkills = showPicker ? skills.pinnedSkills : null;
+  const getSkills = useLatest(skills);
+  const getShowPicker = useLatest(showPicker);
+  const pinSkills = useCallback(
+    (ids: readonly string[]) => {
+      if (!getShowPicker()) return;
+      // The ref first: a change not rendered yet is still the selection.
+      const current = chosenSkillsRef.current ?? getSkills();
+      const pinned = mergePinned(current.pinnedSkills, ids);
+      if (pinned !== current.pinnedSkills) chooseSkills({ ...current, pinnedSkills: [...pinned] });
+    },
+    [getShowPicker, getSkills, chooseSkills],
   );
 
   if (persistedAtMount && history.isPending) {
@@ -588,7 +598,7 @@ const Conversation = memo(function Conversation({
   }
   return (
     <ConversationScopeProvider value={scope}>
-      <SkillSelectionProvider value={skillControl}>
+      <PinnedSkillsProvider value={pinnedSkills}>
         <ConversationInner
           id={id}
           transport={transport}
@@ -597,10 +607,11 @@ const Conversation = memo(function Conversation({
           composerTools={tools}
           composerSlot={composerSlot}
           getChosenSkills={getChosenSkills}
+          pinSkills={pinSkills}
           getCreation={getCreation}
           {...rest}
         />
-      </SkillSelectionProvider>
+      </PinnedSkillsProvider>
     </ConversationScopeProvider>
   );
 });
@@ -643,6 +654,7 @@ function ConversationInner({
   serverGenerating,
   serverUpdatedAt,
   getChosenSkills,
+  pinSkills,
   getCreation,
 }: Omit<
   ConversationProps,
@@ -651,6 +663,8 @@ function ConversationInner({
   composerTools: React.ReactNode;
   initialMessages: UIMessage[];
   getChosenSkills: () => ChatSkillSelection | undefined;
+  /** Pins the skills a sent message names, before its request is built. */
+  pinSkills: (ids: readonly string[]) => void;
   /** The origin space and limit the turn being sent creates the conversation with. */
   getCreation: () => ConversationCreation | undefined;
 }) {
@@ -872,12 +886,16 @@ function ConversationInner({
     if (transport) void stopSession(transport, id).catch(() => {});
     return chat.stop();
   }, [chat, transport, id, messageQueue]);
-  // The runtime sends a composer's run config as the request metadata: an agent chosen in the
-  // composer joins the message there (see `agent-prompt-part.ts`).
+  // The skills and the agent a message names take effect as it is sent: the pins are set before
+  // the request is built (the turn reads `getChosenSkills` then), the agent joins the message.
   const { sendMessage } = chat;
   const send = useCallback<typeof sendMessage>(
-    (message, options) => sendMessage(messageWithAgentPrompt(message, options?.metadata), options),
-    [sendMessage],
+    (message, options) => {
+      const sent = sendWithDirectives(message);
+      pinSkills(sent.skills);
+      return sendMessage(sent.message, options);
+    },
+    [sendMessage, pinSkills],
   );
   const chatWithServerStop = useMemo(
     () => ({ ...chat, stop, sendMessage: send }),
