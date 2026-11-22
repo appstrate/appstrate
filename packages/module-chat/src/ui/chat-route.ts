@@ -7,7 +7,7 @@
  */
 
 import { DefaultChatTransport, type UIMessage } from "ai";
-import { applySkillChanges, type ChatSkillChanges } from "./chat-skills.ts";
+import type { SkillSelection } from "./chat-skills.ts";
 import type { ModelGenerationSettings } from "@appstrate/core/model-generation";
 import { actsIn, type ChatTransport } from "./runtime-context.ts";
 
@@ -36,10 +36,9 @@ export interface ConversationCreation {
 }
 
 /**
- * The body of a turn: the messages, the generation settings, the authoring switch, what the user
- * changed in the skills since the server's state it last read (each field only when it carries
- * something; never a full set) and, on the turn that creates the conversation,
- * its origin space and limit (`creation`; the server ignores them for an existing conversation).
+ * The body of a turn: the messages, the generation settings, the authoring switch and, on the
+ * turn that creates the conversation, its origin space, limit and skills (`creation`, `skills`;
+ * the server ignores them for an existing conversation, whose skills change by PATCH).
  */
 export function turnBody(args: {
   body: object | undefined;
@@ -48,7 +47,7 @@ export function turnBody(args: {
   generation: ModelGenerationSettings;
   packageAuthoring: boolean;
   inlineRunsUseChatModel: boolean;
-  skills: ChatSkillChanges | undefined;
+  skills: SkillSelection | undefined;
   creation: ConversationCreation | undefined;
 }) {
   const {
@@ -69,31 +68,21 @@ export function turnBody(args: {
     package_authoring: packageAuthoring,
     inline_runs_use_chat_model: inlineRunsUseChatModel,
     ...creation,
-    // The server takes skill settings only on the turn that creates the conversation.
-    ...(creation &&
-      skills?.skillDiscovery !== undefined && { skill_discovery: skills.skillDiscovery }),
-    ...(creation && skills && skills.pin.length > 0 && { pins: applySkillChanges([], skills) }),
+    ...(creation && skills && { skill_discovery: skills.skillDiscovery }),
+    ...(creation && skills && skills.pins.length > 0 && { pins: [...skills.pins] }),
   };
 }
-
-/**
- * How the server answered a turn's POST: a 2xx, another status, or no answer at all (the request
- * failed before any response: whether the server acted on it is unknown).
- */
-export type TurnAnswer = "accepted" | "refused" | "unanswered";
 
 /**
  * The transport of a conversation's turns. `useChat` keeps the first transport it sees for an id,
  * so everything it sends is read at request time: the route (a conversation can mount before the
  * host's transport is ready), the headers and the body. Resume targets the per-session stream
- * endpoint (the chat id is the conversation id). `answered` learns how the server answered each
- * turn's POST.
+ * endpoint (the chat id is the conversation id).
  */
 export function createTurnTransport(read: {
   getTransport: () => ChatTransport | undefined;
   headers: () => Record<string, string>;
   body: (request: { id: string; messages: UIMessage[]; body: object | undefined }) => object;
-  answered: (answer: TurnAnswer) => void;
 }): DefaultChatTransport<UIMessage> {
   // A turn needs the organization's route: without the host's transport there is nowhere to send it.
   const transport = (): ChatTransport => {
@@ -104,20 +93,9 @@ export function createTurnTransport(read: {
   return new DefaultChatTransport<UIMessage>({
     credentials: "include",
     headers: read.headers,
-    // The global read per call, not captured: the turn's POST is the one request that answers.
-    // (`typeof fetch` also names runtime extras, such as Bun's `preconnect`, the SDK never calls.)
-    fetch: (async (input: RequestInfo | URL, init?: RequestInit) => {
-      const turn = init?.method === "POST";
-      let response: Response;
-      try {
-        response = await globalThis.fetch(input, init);
-      } catch (error) {
-        if (turn) read.answered("unanswered");
-        throw error;
-      }
-      if (turn) read.answered(response.ok ? "accepted" : "refused");
-      return response;
-    }) as typeof fetch,
+    // The global read per call, not captured at construction.
+    fetch: ((input: RequestInfo | URL, init?: RequestInit) =>
+      globalThis.fetch(input, init)) as typeof fetch,
     prepareSendMessagesRequest: (request) => ({
       api: chatPath(transport()),
       body: read.body(request),

@@ -6,7 +6,7 @@
  */
 
 import { afterEach, describe, expect, it } from "bun:test";
-import { createTurnTransport, type TurnAnswer } from "../src/ui/chat-route.ts";
+import { createTurnTransport } from "../src/ui/chat-route.ts";
 import type { ChatTransport } from "../src/ui/runtime-context.ts";
 import { transportOver } from "./fake-request.ts";
 
@@ -15,14 +15,13 @@ afterEach(() => {
   globalThis.fetch = realFetch;
 });
 
-/** `status` answers every request; `null` fails it before any response. */
-function capture(status: number | null = 200): string[] {
+/** Records every request's URL and answers it. */
+function capture(): string[] {
   const urls: string[] = [];
   globalThis.fetch = Object.assign(
     async (input: RequestInfo | URL) => {
       urls.push(String(input));
-      if (status === null) throw new TypeError("Failed to fetch");
-      return new Response("", { status });
+      return new Response("");
     },
     { preconnect: realFetch.preconnect },
   );
@@ -36,7 +35,6 @@ describe("the turn transport", () => {
       getTransport: () => host.transport,
       headers: () => ({}),
       body: ({ id }) => ({ id }),
-      answered: () => {},
     });
     // The host's transport arrives after the conversation's was built.
     host.transport = transportOver(async () => new Response());
@@ -52,34 +50,5 @@ describe("the turn transport", () => {
     await turns.reconnectToStream({ chatId: "chs_1" });
 
     expect(urls).toEqual(["/api/orgs/org_1/chat", "/api/orgs/org_1/chat/sessions/chs_1/stream"]);
-  });
-
-  it("reports how the server answered the turn, and nothing for the resume", async () => {
-    for (const [status, answer] of [
-      [200, "accepted"],
-      [409, "refused"],
-      [503, "refused"],
-      [null, "unanswered"],
-    ] as const) {
-      const answers: TurnAnswer[] = [];
-      const turns = createTurnTransport({
-        getTransport: () => transportOver(async () => new Response()),
-        headers: () => ({}),
-        body: ({ id }) => ({ id }),
-        answered: (ok) => answers.push(ok),
-      });
-      capture(status);
-      await turns
-        .sendMessages({
-          chatId: "chs_1",
-          messages: [],
-          trigger: "submit-message",
-          messageId: undefined,
-          abortSignal: undefined,
-        })
-        .catch(() => {});
-      await turns.reconnectToStream({ chatId: "chs_1" }).catch(() => {});
-      expect(answers).toEqual([answer]);
-    }
   });
 });

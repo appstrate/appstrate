@@ -113,7 +113,12 @@ import { draftIssue } from "./directive-send.ts";
 import { readableDirectives } from "../directives.ts";
 import { ComposerEditor } from "./composer-input.tsx";
 import { CommandPopover, CommandTriggers } from "./composer-popover.tsx";
-import { usePinnedSkills } from "./pinned-skills.ts";
+import {
+  DraftSkillsProvider,
+  useConversationSkillsContext,
+  useDraftSkillsOf,
+} from "./use-conversation-skills.ts";
+import { pinIds } from "./chat-skills.ts";
 import { MAX_PINNED_SKILLS } from "../skills.ts";
 
 export function Thread({
@@ -617,8 +622,6 @@ function QueuedMessages({
   );
 }
 
-const NO_PINS: readonly string[] = [];
-
 function Composer({
   tools,
   slot,
@@ -640,11 +643,18 @@ function Composer({
   // on, or with a draft, a file or a turn running, it shows its tools. From `md` up it never rests.
   const autofocus = shouldAutofocusComposer();
   const [touched, setTouched] = React.useState(false);
-  const rest = !touched && composer.value === "" && !hasAttachments && !running;
+  // The runtime's text, not the input's value: a draft restored on reload holds it before any input.
+  const draft = useAuiState((s) => s.composer.text);
+  const rest = !touched && draft === "" && !hasAttachments && !running;
   // The turn carries the limit and its files go to its spaces: none leaves before the change lands.
   const limitPending = useConversationScope().pending;
   // Only text is queued: attachments stay in the composer until the next real send.
-  const pinned = usePinnedSkills() ?? NO_PINS;
+  const conversationSkills = useConversationSkillsContext()?.skills ?? null;
+  const draftSkills = useDraftSkillsOf(conversationSkills, draft);
+  const pinned = React.useMemo(
+    () => (conversationSkills ? pinIds(conversationSkills) : []),
+    [conversationSkills],
+  );
   const queued = React.useSyncExternalStore(queue.subscribe, queue.getSnapshot, queue.getSnapshot);
   // What the draft names must be sendable: one agent, skills within the cap.
   // While a turn runs the draft joins the queue, which is sent as one message: the cap counts it all.
@@ -685,80 +695,82 @@ function Composer({
         if (blocked) e.preventDefault();
       }}
     >
-      <CommandTriggers>
-        {/* Pending attachments, above the input. `empty:hidden` collapses the row
+      <DraftSkillsProvider value={draftSkills}>
+        <CommandTriggers>
+          {/* Pending attachments, above the input. `empty:hidden` collapses the row
           (and its gap) when nothing is attached. */}
-        <QueuedMessages
-          queue={queue}
-          running={running}
-          composerEmpty={composer.value.trim() === ""}
-          onEdit={composer.setText}
-        />
-        <CommandPopover />
-        <div className="flex flex-wrap gap-1.5 empty:hidden">
-          <ComposerPrimitive.Attachments components={{ Attachment: ComposerAttachmentChip }} />
-        </div>
-        <ComposerAttachmentError />
-        <DraftContextNotice />
-        <div className="chat-composer-grid" data-rest={rest ? "" : undefined}>
-          <div className="min-w-0 [grid-area:tools]">{tools}</div>
-          <ComposerEditor
-            label={t("composer.placeholder")}
-            placeholder={
-              modelLabel
-                ? t("composer.placeholderModel", { model: modelLabel })
-                : t("composer.placeholder")
-            }
-            // A phone would open its keyboard on arrival and never show the resting composer.
-            autofocus={autofocus}
-            onFocus={() => setTouched(true)}
-            onEnter={enter}
+          <QueuedMessages
+            queue={queue}
+            running={running}
+            composerEmpty={composer.value.trim() === ""}
+            onEdit={composer.setText}
           />
-          <div className="max-w-full min-w-0 justify-self-end [grid-area:model] max-md:group-data-[rest]/composer:hidden">
-            {slot}
+          <CommandPopover />
+          <div className="flex flex-wrap gap-1.5 empty:hidden">
+            <ComposerPrimitive.Attachments components={{ Attachment: ComposerAttachmentChip }} />
           </div>
-          <div className="flex items-center gap-2 [grid-area:send]">
-            <ContextGauge className="max-md:group-data-[rest]/composer:hidden" />
-            <ThreadPrimitive.If running={false}>
-              <ComposerPrimitive.Send asChild disabled={blocked}>
-                <SendButton label={t("composer.send")} />
-              </ComposerPrimitive.Send>
-            </ThreadPrimitive.If>
-            <ThreadPrimitive.If running>
-              <Button
-                type="button"
-                size="icon"
-                variant="outline"
-                className={COMPOSER_BUTTON_CLASS}
-                aria-label={t("composer.queue.add")}
-                title={t("composer.queue.add")}
-                disabled={!canQueue}
-                onClick={enqueue}
-              >
-                <ListPlusIcon />
-              </Button>
-              <ComposerPrimitive.Cancel asChild>
+          <ComposerAttachmentError />
+          <DraftContextNotice />
+          <div className="chat-composer-grid" data-rest={rest ? "" : undefined}>
+            <div className="min-w-0 [grid-area:tools]">{tools}</div>
+            <ComposerEditor
+              label={t("composer.placeholder")}
+              placeholder={
+                modelLabel
+                  ? t("composer.placeholderModel", { model: modelLabel })
+                  : t("composer.placeholder")
+              }
+              // A phone would open its keyboard on arrival and never show the resting composer.
+              autofocus={autofocus}
+              onFocus={() => setTouched(true)}
+              onEnter={enter}
+            />
+            <div className="max-w-full min-w-0 justify-self-end [grid-area:model] max-md:group-data-[rest]/composer:hidden">
+              {slot}
+            </div>
+            <div className="flex items-center gap-2 [grid-area:send]">
+              <ContextGauge className="max-md:group-data-[rest]/composer:hidden" />
+              <ThreadPrimitive.If running={false}>
+                <ComposerPrimitive.Send asChild disabled={blocked}>
+                  <SendButton label={t("composer.send")} />
+                </ComposerPrimitive.Send>
+              </ThreadPrimitive.If>
+              <ThreadPrimitive.If running>
                 <Button
                   type="button"
                   size="icon"
-                  variant="secondary"
+                  variant="outline"
                   className={COMPOSER_BUTTON_CLASS}
-                  aria-label={t("composer.stop")}
+                  aria-label={t("composer.queue.add")}
+                  title={t("composer.queue.add")}
+                  disabled={!canQueue}
+                  onClick={enqueue}
                 >
-                  <SquareIcon className="fill-current" />
+                  <ListPlusIcon />
                 </Button>
-              </ComposerPrimitive.Cancel>
-            </ThreadPrimitive.If>
+                <ComposerPrimitive.Cancel asChild>
+                  <Button
+                    type="button"
+                    size="icon"
+                    variant="secondary"
+                    className={COMPOSER_BUTTON_CLASS}
+                    aria-label={t("composer.stop")}
+                  >
+                    <SquareIcon className="fill-current" />
+                  </Button>
+                </ComposerPrimitive.Cancel>
+              </ThreadPrimitive.If>
+            </div>
           </div>
-        </div>
-        {issue && (
-          <p role="status" className={cn(NOTE_TEXT_CLASS, "text-destructive")}>
-            {issue === "agents"
-              ? t("composer.oneAgentOnly")
-              : t("skills.chosenMax", { max: MAX_PINNED_SKILLS })}
-          </p>
-        )}
-      </CommandTriggers>
+          {issue && (
+            <p role="status" className={cn(NOTE_TEXT_CLASS, "text-destructive")}>
+              {issue === "agents"
+                ? t("composer.oneAgentOnly")
+                : t("skills.chosenMax", { max: MAX_PINNED_SKILLS })}
+            </p>
+          )}
+        </CommandTriggers>
+      </DraftSkillsProvider>
     </ComposerPrimitive.Root>
   );
 }

@@ -1,63 +1,79 @@
 // SPDX-License-Identifier: Apache-2.0
 
-// Skill picker: the conversation's skills and the discovery switch. Controlled; nothing is
-// written here — the next turn carries the changes. Each row says what the server reported of
-// its skill: only the server says a skill is loaded.
+// Skill picker: the conversation's skills and the discovery switch. Controlled: a change goes to
+// the conversation's state (a PATCH once the server holds the row). Each pinned row is loaded,
+// or not loaded with the server's reason; only the server says a skill is loaded.
 
 import type { ReactNode } from "react";
 import { Checkbox } from "@appstrate/ui/components/checkbox";
+import { Progress } from "@appstrate/ui/components/progress";
 import { Skeleton } from "@appstrate/ui/components/skeleton";
 import { Switch } from "@appstrate/ui/components/switch";
 import { Popover, PopoverAnchor, PopoverContent } from "@appstrate/ui/components/popover";
 import { cn } from "@appstrate/ui/cn";
 import { MAX_PINNED_SKILLS } from "../skills.ts";
 import {
-  effectiveSkills,
-  removesFromContext,
+  exceedsBudget,
+  skillBudget,
   skillPickerRows,
   skillRowState,
-  type ConversationSkills,
-  type SkillRowState,
+  type SkillBudget,
+  type SkillRefusal,
+  type StoredSkills,
 } from "./chat-skills.ts";
-import type { SkillActions } from "./use-conversation-skills.ts";
+import type { ConversationSkillsState, DraftSkills } from "./use-conversation-skills.ts";
 import { useChatCommands } from "./use-chat-commands.ts";
-import { useChatHost, type ChatTransport, type ChatTranslate } from "./runtime-context.ts";
+import { useChatHost, type ChatTransport } from "./runtime-context.ts";
 
 interface SkillsPickerProps {
   transport: ChatTransport | undefined;
-  skills: ConversationSkills;
-  actions: Pick<SkillActions, "setPin" | "setDiscovery">;
+  skills: StoredSkills;
+  actions: Pick<ConversationSkillsState, "setPin" | "setDiscovery">;
   /** Opened from the composer's settings menu or a skills chip, never by a trigger of its own. */
   open: boolean;
   onOpenChange: (open: boolean) => void;
   /** The skills the composer's draft cites: checked here, and held by the message, not the panel. */
-  cited: readonly string[];
+  draft: DraftSkills;
   /** The popover anchors to this: the composer's tools row. */
   children: ReactNode;
 }
 
-const REFUSAL_KEY: Record<Extract<SkillRowState, { kind: "refused" }>["reason"], string> = {
+const REFUSAL_KEY: Record<SkillRefusal, string> = {
   over_budget: "skills.state.refused.over_budget",
   unavailable: "skills.state.refused.unavailable",
   unreadable: "skills.state.refused.unreadable",
 };
 
-/** A row's caption: what the server reported of its skill; none for a skill the user's pin loaded. */
-function rowCaption(state: SkillRowState, t: ChatTranslate): string | null {
-  switch (state.kind) {
-    case "cited":
-      return t("skills.cited");
-    case "next":
-      return t("skills.state.next");
-    case "unpin":
-      return t("skills.state.unpin");
-    case "loaded":
-      return null;
-    case "refused":
-      return t(REFUSAL_KEY[state.reason]);
-    case "off":
-      return null;
-  }
+const NOTE_CLASS = "text-muted-foreground px-1 text-[0.7rem] leading-snug";
+
+/** The pins' share of the budget, as text and a bar; warned once it is past the limit. */
+function BudgetGauge({ budget }: { budget: SkillBudget }) {
+  const { t, lang } = useChatHost();
+  const format = new Intl.NumberFormat(lang);
+  const over = budget.used > budget.max;
+  return (
+    <div data-testid="skills-budget" data-over={over || undefined} className="mt-2 px-1">
+      <div className="flex items-baseline justify-between gap-2 text-[0.7rem]">
+        <span className="text-muted-foreground">{t("skills.budget.label")}</span>
+        <span className={cn("tabular-nums", over && "text-warning")}>
+          {t("skills.budget.counts", {
+            used: format.format(budget.used),
+            max: format.format(budget.max),
+          })}
+        </span>
+      </div>
+      <Progress
+        aria-hidden
+        value={Math.min(budget.used, budget.max)}
+        max={budget.max}
+        className="mt-1 h-1.5"
+        indicatorClassName={over ? "bg-warning" : undefined}
+      />
+      {over && (
+        <p className="text-warning mt-1 text-[0.7rem] leading-snug">{t("skills.budget.over")}</p>
+      )}
+    </div>
+  );
 }
 
 /** The popover's body: the discovery switch and the skill list. Exported to be rendered without the popover's portal. */
@@ -65,8 +81,8 @@ export function SkillsPickerPanel({
   transport,
   skills: conversation,
   actions,
-  cited,
-}: Pick<SkillsPickerProps, "transport" | "skills" | "actions" | "cited">) {
+  draft,
+}: Pick<SkillsPickerProps, "transport" | "skills" | "actions" | "draft">) {
   const { t } = useChatHost();
   const catalogue = useChatCommands(transport, true);
   const skills = catalogue.data?.skills ?? [];
@@ -74,9 +90,16 @@ export function SkillsPickerPanel({
   // as "nothing".
   const loading = catalogue.isLoading;
 
-  const effective = effectiveSkills(conversation.pinned, cited);
+  const { effective } = draft;
   const atPinCap = effective.atCap;
   const rows = skillPickerRows(skills, effective.ids);
+  const bytes = new Map(skills.map((skill) => [skill.id, skill.bytes]));
+  const budget = skillBudget(conversation, effective, (id) => bytes.get(id) ?? null);
+  const states = conversation.pins.map((pin) => skillRowState(conversation, pin.id));
+  const someLoaded = conversation.pins.some(
+    (pin, i) => states[i]!.kind === "loaded" && !effective.cited.has(pin.id),
+  );
+  const somePending = states.some((state) => state.kind === "pending");
 
   const togglePin = (packageId: string, checked: boolean) => {
     // A cited skill is the message's: only removing its chip drops it. Past the cap, nothing pins.
@@ -99,16 +122,18 @@ export function SkillsPickerPanel({
           onCheckedChange={actions.setDiscovery}
         />
       </div>
-      <p className="text-muted-foreground mt-1.5 shrink-0 px-1 text-[0.7rem] leading-snug">
+      <p className={cn(NOTE_CLASS, "mt-1.5 shrink-0")}>
         {t(conversation.skillDiscovery ? "skills.discovery.hintOn" : "skills.discovery.hintOff")}
       </p>
+
+      <BudgetGauge budget={budget} />
 
       <div className="mt-3 min-h-0 flex-1 overflow-y-auto border-t pt-2">
         <div className="text-muted-foreground px-1 py-1 text-[0.65rem] font-semibold tracking-wider uppercase">
           {t("skills.chooseHeading")}
         </div>
         {atPinCap && (
-          <p className="text-muted-foreground px-1 pb-1 text-[0.7rem] leading-snug">
+          <p className={cn(NOTE_CLASS, "pb-1")}>
             {t("skills.chosenMax", { max: MAX_PINNED_SKILLS })}
           </p>
         )}
@@ -132,15 +157,21 @@ export function SkillsPickerPanel({
             const id = `skills-pin-${index}`;
             const nameId = `${id}-name`;
             const detailsId = `${id}-details`;
-            const state = skillRowState(conversation, skill.id, effective.cited);
-            const checked = state.kind !== "off" && state.kind !== "unpin";
-            const isCited = state.kind === "cited";
+            const state = skillRowState(conversation, skill.id);
+            const isCited = effective.cited.has(skill.id);
+            const checked = state.kind !== "off" || isCited;
             // Not `disabled`: a locked row stays focusable, so its reason is still read out.
             const inert = (!checked && atPinCap) || isCited;
-            const caption = rowCaption(state, t);
             const refused = state.kind === "refused";
-            const hint = removesFromContext(conversation, skill.id, state);
-            const hasDetails = !!caption || hint || (available ? !!skill.description : !refused);
+            // A refusal says why the skill is out, even for a cited one; else the lock's reason.
+            const caption = refused
+              ? t(REFUSAL_KEY[state.reason])
+              : isCited
+                ? t("skills.cited")
+                : null;
+            const overBudget = !checked && exceedsBudget(budget, skill.bytes);
+            const hasDetails =
+              !!caption || overBudget || (available ? !!skill.description : !refused);
             return (
               <div key={skill.id} className="flex items-start gap-2 rounded-md p-1">
                 <Checkbox
@@ -182,12 +213,12 @@ export function SkillsPickerPanel({
                         {caption}
                       </span>
                     )}
-                    {hint && (
+                    {overBudget && (
                       <span
-                        data-testid={`skill-pin-hint-${skill.id}`}
-                        className="text-muted-foreground block text-[0.7rem] leading-snug"
+                        data-testid={`skill-pin-budget-${skill.id}`}
+                        className="text-warning block text-[0.7rem] leading-snug"
                       >
-                        {t("skills.uncheckHint")}
+                        {t("skills.budget.wouldExceed")}
                       </span>
                     )}
                     {available && skill.description && (
@@ -208,6 +239,20 @@ export function SkillsPickerPanel({
           })
         )}
       </div>
+      {(someLoaded || somePending) && (
+        <div className="shrink-0 border-t pt-2">
+          {someLoaded && (
+            <p data-testid="skills-uncheck-hint" className={NOTE_CLASS}>
+              {t("skills.uncheckHint")}
+            </p>
+          )}
+          {somePending && (
+            <p data-testid="skills-pending-note" className={NOTE_CLASS}>
+              {t("skills.pendingNote")}
+            </p>
+          )}
+        </div>
+      )}
     </>
   );
 }
@@ -218,7 +263,7 @@ export function SkillsPicker({
   actions,
   open,
   onOpenChange,
-  cited,
+  draft,
   children,
 }: SkillsPickerProps) {
   const { t } = useChatHost();
@@ -233,9 +278,9 @@ export function SkillsPicker({
         collisionPadding={12}
         aria-label={t("skills.title")}
         data-testid="skills-picker-popover"
-        className="flex max-h-[min(26rem,var(--radix-popover-content-available-height))] w-[min(23rem,calc(100vw-1.5rem))] flex-col p-3"
+        className="flex max-h-[min(28rem,var(--radix-popover-content-available-height))] w-[min(23rem,calc(100vw-1.5rem))] flex-col p-3"
       >
-        <SkillsPickerPanel transport={transport} skills={skills} actions={actions} cited={cited} />
+        <SkillsPickerPanel transport={transport} skills={skills} actions={actions} draft={draft} />
       </PopoverContent>
     </Popover>
   );

@@ -3,252 +3,116 @@
 /** The skill picker's pure rules. */
 
 import { describe, expect, it } from "bun:test";
-import { MAX_PINNED_SKILLS, type ChatSkillChanges, type PinnedSkill } from "../src/skills.ts";
 import {
-  NO_SKILL_CHANGES,
-  NO_SKILL_LAYERS,
+  CHAT_SKILLS_CONTENT_BUDGET_CHARS,
+  MAX_PINNED_SKILLS,
+  type PinnedSkill,
+} from "../src/skills.ts";
+import {
   canResetSkills,
-  changeDiscovery,
-  changePin,
   citedSkillIds,
-  conversationSkills,
   effectiveSkills,
-  hasSkillChanges,
+  exceedsBudget,
   loadsSkill,
-  mergeSkillChanges,
-  resetSkillChanges,
-  withAppliedChanges,
-  citeSkill,
+  selectionOf,
+  skillBudget,
   skillPickerRows,
-  removesFromContext,
   skillRowState,
+  withPin,
+  withSelection,
   type StoredSkills,
 } from "../src/ui/chat-skills.ts";
 
-const pin = (id: string, status: PinnedSkill["status"] = "injected"): PinnedSkill => ({
-  id,
-  status,
-  chars: null,
-});
+const pin = (
+  id: string,
+  status: PinnedSkill["status"] = "injected",
+  chars: number | null = null,
+): PinnedSkill => ({ id, status, chars });
 const stored = (pins: PinnedSkill[] = [], skillDiscovery = true): StoredSkills => ({
   skillDiscovery,
   pins,
 });
-const changes = (c: Partial<ChatSkillChanges> = {}): ChatSkillChanges => ({
-  ...NO_SKILL_CHANGES,
-  ...c,
-});
 
-const local = (c: Partial<ChatSkillChanges>) => ({ ...NO_SKILL_LAYERS, local: changes(c) });
-
-describe("conversationSkills", () => {
-  it("applies the changes to the server's pins and discovery", () => {
-    const skills = conversationSkills(
-      stored([pin("@a/held"), pin("@a/dropped")], true),
-      local({ pin: ["@a/new"], unpin: ["@a/dropped"], skillDiscovery: false }),
-    );
-    expect(skills.pinned).toEqual(["@a/held", "@a/new"]);
-    expect(skills.skillDiscovery).toBe(false);
-    expect(skills.stored.get("@a/held")).toEqual(pin("@a/held"));
-  });
-
-  it("is the server's state when nothing changed", () => {
-    const skills = conversationSkills(stored([pin("@a/x")], false), NO_SKILL_LAYERS);
-    expect(skills.pinned).toEqual(["@a/x"]);
-    expect(skills.skillDiscovery).toBe(false);
-  });
-
-  it("layers the local changes over the in-flight ones, both pending until applied", () => {
-    const skills = conversationSkills(stored([pin("@a/held")], true), {
-      inFlight: changes({ pin: ["@a/sent"], skillDiscovery: false }),
-      local: changes({ pin: ["@a/later"], unpin: ["@a/sent"] }),
+describe("withSelection", () => {
+  it("writes the full set: kept pins keep their verdict, new ones have none, sorted", () => {
+    const base = stored([pin("@a/kept", "over_budget", 70_000), pin("@a/dropped")]);
+    expect(
+      withSelection(base, { skillDiscovery: false, pins: ["@a/new", "@a/kept", "@a/new"] }),
+    ).toEqual({
+      skillDiscovery: false,
+      pins: [pin("@a/kept", "over_budget", 70_000), pin("@a/new", null)],
     });
-    expect(skills.pinned).toEqual(["@a/held", "@a/later"]);
-    expect(skills.skillDiscovery).toBe(false);
-    expect([...skills.pending].sort()).toEqual(["@a/later", "@a/sent"]);
+  });
+
+  it("round-trips the server's state through its selection", () => {
+    const base = stored([pin("@a/x"), pin("@a/y", null)], false);
+    expect(withSelection(base, selectionOf(base))).toEqual(base);
   });
 });
 
-describe("mergeSkillChanges", () => {
-  it("keeps both sides' changes, the newer winning where both decide", () => {
-    expect(
-      mergeSkillChanges(
-        changes({ pin: ["@a/x", "@a/y"], unpin: ["@a/z"], skillDiscovery: false }),
-        changes({ unpin: ["@a/x"], pin: ["@a/z"] }),
-      ),
-    ).toEqual(changes({ pin: ["@a/y", "@a/z"], unpin: ["@a/x"], skillDiscovery: false }));
-    expect(
-      mergeSkillChanges(changes({ skillDiscovery: false }), changes({ skillDiscovery: true })),
-    ).toEqual(changes({ skillDiscovery: true }));
-  });
-});
-
-describe("changePin", () => {
-  const base = stored([pin("@a/held", "injected")]);
-
-  it("records a pin the server lacks and an unpin of one it holds", () => {
-    expect(changePin(NO_SKILL_CHANGES, "@a/new", true, base)).toEqual(changes({ pin: ["@a/new"] }));
-    expect(changePin(NO_SKILL_CHANGES, "@a/held", false, base)).toEqual(
-      changes({ unpin: ["@a/held"] }),
-    );
-  });
-
-  it("cancels a pending change instead of recording its opposite", () => {
-    const pending = changes({ pin: ["@a/new"] });
-    expect(changePin(pending, "@a/new", false, base)).toEqual(NO_SKILL_CHANGES);
-    const unpinned = changes({ unpin: ["@a/held"] });
-    // Re-checking an assistant's pin does not re-pin it as the user's.
-    expect(changePin(unpinned, "@a/held", true, base)).toEqual(NO_SKILL_CHANGES);
-  });
-
-  it("records the undo of an in-flight change: made over the server's state with it applied", () => {
-    const sentPin = withAppliedChanges(base, changes({ pin: ["@a/new"] }));
-    expect(changePin(NO_SKILL_CHANGES, "@a/new", false, sentPin)).toEqual(
-      changes({ unpin: ["@a/new"] }),
-    );
-    const sentUnpin = withAppliedChanges(base, changes({ unpin: ["@a/held"] }));
-    expect(changePin(NO_SKILL_CHANGES, "@a/held", true, sentUnpin)).toEqual(
-      changes({ pin: ["@a/held"] }),
-    );
-  });
-
-  it("never sends a full set: the server's other pins are not named", () => {
-    const many = stored([pin("@a/1"), pin("@a/2"), pin("@a/3")]);
-    expect(changePin(NO_SKILL_CHANGES, "@a/2", false, many)).toEqual(changes({ unpin: ["@a/2"] }));
-  });
-});
-
-describe("changeDiscovery", () => {
-  const base = stored([], true);
-
-  it("records a departure from the server and drops a return to it", () => {
-    const off = changeDiscovery(NO_SKILL_CHANGES, false, base);
-    expect(off).toEqual(changes({ skillDiscovery: false }));
-    expect(changeDiscovery(off, true, base)).toEqual(NO_SKILL_CHANGES);
-  });
-
-  it("records a return to the server's value that undoes the turn in flight", () => {
-    const sent = withAppliedChanges(base, changes({ skillDiscovery: false }));
-    expect(changeDiscovery(NO_SKILL_CHANGES, true, sent)).toEqual(
-      changes({ skillDiscovery: true }),
-    );
-  });
-});
-
-describe("resetSkillChanges", () => {
-  it("unpins every pin and turns discovery back on", () => {
-    const base = stored([pin("@a/held")], false);
-    expect(resetSkillChanges(changes({ pin: ["@a/new"] }), ["@a/held", "@a/new"], base)).toEqual(
-      changes({ skillDiscovery: true, unpin: ["@a/held"] }),
-    );
-  });
-});
-
-describe("withAppliedChanges", () => {
-  it("applies the changes as the server does: unpins out, new pins unjudged, a re-pin kept as held", () => {
-    const before = stored(
-      [pin("@a/auto", "injected"), pin("@a/old"), pin("@a/kept", "over_budget")],
-      true,
-    );
-    expect(
-      withAppliedChanges(
-        before,
-        changes({ pin: ["@a/new", "@a/auto"], unpin: ["@a/old"], skillDiscovery: false }),
-      ),
-    ).toEqual(
-      stored(
-        [pin("@a/auto", "injected"), pin("@a/kept", "over_budget"), pin("@a/new", null)],
-        false,
-      ),
-    );
-  });
-});
-
-describe("citeSkill", () => {
-  it("records the pin whatever the server holds, and cancels an unpin", () => {
-    expect(citeSkill(NO_SKILL_CHANGES, "@a/held")).toEqual(changes({ pin: ["@a/held"] }));
-    expect(citeSkill(changes({ unpin: ["@a/held"] }), "@a/held")).toEqual(
-      changes({ pin: ["@a/held"] }),
-    );
-    expect(citeSkill(changes({ pin: ["@a/held"] }), "@a/held")).toEqual(
-      changes({ pin: ["@a/held"] }),
-    );
-  });
-});
-
-describe("hasSkillChanges", () => {
-  it("is false for no change, true for any field carrying one", () => {
-    expect(hasSkillChanges(NO_SKILL_CHANGES)).toBe(false);
-    expect(hasSkillChanges(changes({ skillDiscovery: true }))).toBe(true);
-    expect(hasSkillChanges(changes({ unpin: ["@a/x"] }))).toBe(true);
+describe("withPin", () => {
+  it("adds a pin once, sorted, and removes one", () => {
+    const s = { skillDiscovery: true, pins: ["@a/b"] };
+    expect(withPin(s, "@a/a", true).pins).toEqual(["@a/a", "@a/b"]);
+    expect(withPin(s, "@a/b", true).pins).toEqual(["@a/b"]);
+    expect(withPin(s, "@a/b", false).pins).toEqual([]);
   });
 });
 
 describe("skillRowState", () => {
-  const skills = conversationSkills(
-    stored([
-      pin("@a/mine"),
-      pin("@a/unseen", null),
-      pin("@a/big", "over_budget"),
-      pin("@a/gone", "unavailable"),
-      pin("@a/broken", "unreadable"),
-      pin("@a/dropped"),
-    ]),
-    local({ pin: ["@a/pending"], unpin: ["@a/dropped"] }),
-  );
-  const state = (id: string, cited: string[] = []) => skillRowState(skills, id, new Set(cited));
+  const skills = stored([
+    pin("@a/mine"),
+    pin("@a/unseen", null),
+    pin("@a/big", "over_budget"),
+    pin("@a/gone", "unavailable"),
+    pin("@a/broken", "unreadable"),
+  ]);
+  const state = (id: string) => skillRowState(skills, id);
 
-  it("reads each pin as the server reported it", () => {
+  it("reads each pin as the server reported it, pending until a turn judged it", () => {
     expect(state("@a/mine")).toEqual({ kind: "loaded" });
-    expect(state("@a/unseen")).toEqual({ kind: "next" });
+    expect(state("@a/unseen")).toEqual({ kind: "pending" });
     expect(state("@a/big")).toEqual({ kind: "refused", reason: "over_budget" });
     expect(state("@a/gone")).toEqual({ kind: "refused", reason: "unavailable" });
     expect(state("@a/broken")).toEqual({ kind: "refused", reason: "unreadable" });
-  });
-
-  it("is next for a pending pin even over a stored verdict: the re-check postdates it", () => {
-    const repinned = conversationSkills(
-      stored([pin("@a/x", "injected")]),
-      local({ pin: ["@a/x"] }),
-    );
-    expect(skillRowState(repinned, "@a/x", new Set())).toEqual({ kind: "next" });
-  });
-
-  it("is next for a pending pin, off for an unpinned one or a skill never pinned", () => {
-    expect(state("@a/pending")).toEqual({ kind: "next" });
     expect(state("@a/other")).toEqual({ kind: "off" });
   });
 
-  it("is unpin for a server pin unchecked since, and loads nothing", () => {
-    expect(state("@a/dropped")).toEqual({ kind: "unpin" });
-    expect(loadsSkill(state("@a/dropped"))).toBe(false);
-    expect([...skills.unpinning]).toEqual(["@a/dropped"]);
+  it("never counts a refused pin as loaded, even cited; a cited skill not pinned loads", () => {
+    expect(loadsSkill(state("@a/big"), true)).toBe(false);
+    expect(loadsSkill(state("@a/other"), false)).toBe(false);
+    expect(loadsSkill(state("@a/other"), true)).toBe(true);
+    expect(loadsSkill(state("@a/unseen"), false)).toBe(true);
+  });
+});
+
+describe("skillBudget", () => {
+  const skills = stored([
+    pin("@a/loaded", "injected", 10_000),
+    pin("@a/new", null),
+    pin("@a/big", "over_budget", 90_000),
+  ]);
+  const bytes = new Map([
+    ["@a/new", 3_000],
+    ["@a/cited", 2_000],
+    ["@a/candidate", 60_000],
+  ]);
+  const of = (id: string) => bytes.get(id) ?? null;
+
+  it("sums a loaded pin's chars and the listed size of a pending or cited skill, never a refused one", () => {
+    const budget = skillBudget(
+      skills,
+      effectiveSkills(["@a/loaded", "@a/new", "@a/big"], ["@a/cited"]),
+      of,
+    );
+    expect(budget).toEqual({ used: 15_000, max: CHAT_SKILLS_CONTENT_BUDGET_CHARS });
   });
 
-  it("is off again once a pending pin is unchecked: nothing was held", () => {
-    const undone = conversationSkills(stored([]), local({ pin: [], unpin: ["@a/new"] }));
-    expect(skillRowState(undone, "@a/new", new Set())).toEqual({ kind: "off" });
-  });
-
-  it("says unchecking removes a server pin from the context, not a pending or cited one", () => {
-    const removes = (id: string, cited: string[] = []) =>
-      removesFromContext(skills, id, state(id, cited));
-    expect(removes("@a/mine")).toBe(true);
-    expect(removes("@a/pending")).toBe(false);
-    expect(removes("@a/mine", ["@a/mine"])).toBe(false);
-    expect(removes("@a/dropped")).toBe(false);
-  });
-
-  it("is cited for a skill the draft cites, whatever the server says", () => {
-    expect(state("@a/big", ["@a/big"])).toEqual({ kind: "cited" });
-    expect(state("@a/other", ["@a/other"])).toEqual({ kind: "cited" });
-  });
-
-  it("never counts a refused pin as loaded", () => {
-    expect(loadsSkill(state("@a/big"))).toBe(false);
-    expect(loadsSkill(state("@a/other"))).toBe(false);
-    expect(loadsSkill(state("@a/unseen"))).toBe(true);
-    expect(loadsSkill(state("@a/x", ["@a/x"]))).toBe(true);
+  it("warns before pinning a skill that would take the total past the budget", () => {
+    const budget = skillBudget(skills, effectiveSkills(["@a/loaded"], []), of);
+    expect(exceedsBudget(budget, of("@a/candidate"))).toBe(true);
+    expect(exceedsBudget(budget, of("@a/new"))).toBe(false);
+    expect(exceedsBudget(budget, null)).toBe(false);
   });
 });
 
@@ -322,21 +186,9 @@ describe("effectiveSkills", () => {
 });
 
 describe("canResetSkills", () => {
-  const skills = (skillDiscovery: boolean, pinned: string[]) =>
-    conversationSkills(
-      { skillDiscovery, pins: pinned.map((id) => ({ id, status: "injected", chars: null })) },
-      NO_SKILL_LAYERS,
-    );
-  const on = skills(true, ["@acme/a"]);
-
-  it("is true for a pinned skill the draft does not cite, or with discovery off", () => {
-    expect(canResetSkills(on, [])).toBe(true);
-    expect(canResetSkills(on, ["@acme/b"])).toBe(true);
-    expect(canResetSkills(skills(false, []), ["@acme/a"])).toBe(true);
-  });
-
-  it("is false when only cited skills are held: nothing visible would change", () => {
-    expect(canResetSkills(on, ["@acme/a"])).toBe(false);
-    expect(canResetSkills(skills(true, []), ["@acme/a"])).toBe(false);
+  it("is true with a pin or with discovery off, false on the default selection", () => {
+    expect(canResetSkills(stored([pin("@acme/a")]))).toBe(true);
+    expect(canResetSkills(stored([], false))).toBe(true);
+    expect(canResetSkills(stored())).toBe(false);
   });
 });

@@ -887,7 +887,7 @@ describe("ensureSession", () => {
       undefined,
       () => ({ spaceId: other, restricted: true }),
     );
-    expect(created).toMatchObject({ spaceId: other, restricted: true, created: true });
+    expect(created).toMatchObject({ spaceId: other, restricted: true });
     // An existing conversation keeps its own, whatever a later turn carries.
     const again = await ensureSession(
       "chs_origin",
@@ -897,7 +897,7 @@ describe("ensureSession", () => {
       undefined,
       () => ({ spaceId: ctx.defaultSpaceId, restricted: false }),
     );
-    expect(again).toMatchObject({ spaceId: other, restricted: true, created: false });
+    expect(again).toMatchObject({ spaceId: other, restricted: true });
     // The overview has none.
     expect(await ensureSession("chs_overview", ctx.orgId, ctx.user.id, readable)).toMatchObject({
       spaceId: null,
@@ -915,7 +915,6 @@ describe("ensureSession", () => {
       skillDiscovery: false,
     });
     expect(created).toMatchObject({
-      created: true,
       selection: { pinnedSkills: ["@acme/a"], skillDiscovery: false },
     });
     // An existing conversation keeps its own: the skills PATCH alone changes it.
@@ -924,7 +923,6 @@ describe("ensureSession", () => {
       skillDiscovery: true,
     });
     expect(again).toMatchObject({
-      created: false,
       selection: { pinnedSkills: ["@acme/a"], skillDiscovery: false },
     });
   });

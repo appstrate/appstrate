@@ -27,8 +27,7 @@ import {
 import { Tooltip, TooltipContent, TooltipTrigger } from "@appstrate/ui/components/tooltip";
 import { attachUnavailableKey } from "./attachment-adapter.ts";
 import { canComposeInlineRuns } from "../capabilities.ts";
-import type { ConversationSkills } from "./chat-skills.ts";
-import type { SkillActions } from "./use-conversation-skills.ts";
+import { useConversationSkillsContext, useDraftSkills } from "./use-conversation-skills.ts";
 import {
   limitAvailability,
   useConversationScope,
@@ -44,7 +43,6 @@ import { useChatHost, type ChatTransport } from "./runtime-context.ts";
 import { RemovableChip } from "./removable-chip.tsx";
 import { sentenceWithNode } from "./sentence-with-name.tsx";
 import { SkillChips } from "./skill-chips.tsx";
-import { useCitedSkills } from "./pinned-skills.ts";
 import { SkillsPicker } from "./skills-picker.tsx";
 import { COMPOSER_TOOL_BUTTON_CLASS } from "./touch-targets.ts";
 
@@ -56,23 +54,16 @@ const LIMIT_REASON_KEY: Record<LimitUnavailableReason, string> = {
 
 export interface ComposerToolsProps {
   transport: ChatTransport | undefined;
-  skills: ConversationSkills;
-  skillActions: SkillActions;
-  /** The skills picker is offered (`skills:read` + a readable conversation). */
-  showPicker: boolean;
   /** The caller may author packages: the creation-mode switch is offered. */
   authorsPackages: boolean;
 }
 
-export function ComposerTools({
-  transport,
-  skills,
-  skillActions,
-  showPicker,
-  authorsPackages,
-}: ComposerToolsProps) {
+export function ComposerTools({ transport, authorsPackages }: ComposerToolsProps) {
   const { t, can } = useChatHost();
-  const cited = useCitedSkills();
+  // Offered with `skills:read` on a readable conversation: the context is null otherwise.
+  const conversation = useConversationSkillsContext();
+  const showPicker = conversation !== null;
+  const draft = useDraftSkills();
   const scope = useConversationScope();
   const origin = useSpaceName(scope.originSpaceId);
   const creationMode = usePackageAuthoringEnabled();
@@ -188,25 +179,25 @@ export function ComposerTools({
             : t("composer.limitChip.generic")}
         </RemovableChip>
       )}
-      {showPicker && (
+      {conversation && (
         <SkillChips
           transport={transport}
-          skills={skills}
-          cited={cited}
+          skills={conversation.skills}
+          draft={draft}
           onOpenPicker={() => setSkillsOpen(true)}
-          onReset={skillActions.reset}
+          onReset={conversation.reset}
         />
       )}
     </div>
   );
 
-  if (!showPicker) return cluster;
+  if (!conversation) return cluster;
   return (
     <SkillsPicker
       transport={transport}
-      skills={skills}
-      actions={skillActions}
-      cited={cited}
+      skills={conversation.skills}
+      actions={conversation}
+      draft={draft}
       open={skillsOpen}
       onOpenChange={setSkillsOpen}
     >

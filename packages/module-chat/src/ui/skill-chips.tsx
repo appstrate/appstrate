@@ -8,13 +8,8 @@
 
 import { BookOpenIcon, LockIcon } from "lucide-react";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@appstrate/ui/components/tooltip";
-import {
-  canResetSkills,
-  effectiveSkills,
-  loadsSkill,
-  skillRowState,
-  type ConversationSkills,
-} from "./chat-skills.ts";
+import { canResetSkills, loadsSkill, skillRowState, type StoredSkills } from "./chat-skills.ts";
+import type { DraftSkills } from "./use-conversation-skills.ts";
 import { RemovableChip } from "./removable-chip.tsx";
 import {
   namedSkill,
@@ -33,17 +28,16 @@ import { useChatCommands } from "./use-chat-commands.ts";
  */
 function useSkillsByLoad(
   transport: ChatTransport | undefined,
-  skills: ConversationSkills,
-  cited: readonly string[],
+  skills: StoredSkills,
+  { effective }: DraftSkills,
   t: ChatTranslate,
 ) {
-  const effective = effectiveSkills(skills.pinned, cited);
   const catalogue = useChatCommands(transport, effective.ids.length > 0);
   const names: SkillNames | null = catalogue.data
     ? new Map(catalogue.data.skills.map((s) => [s.id, s.name]))
     : null;
   const named = (id: string) => namedSkill(names ?? new Map(), id);
-  const loads = (id: string) => loadsSkill(skillRowState(skills, id, effective.cited));
+  const loads = (id: string) => loadsSkill(skillRowState(skills, id), effective.cited.has(id));
   return {
     loaded: effective.ids.filter(loads).map(named),
     refused: effective.ids.filter((id) => !loads(id)).map(named),
@@ -146,18 +140,18 @@ function SkillsChip({
 
 interface SkillChipsProps {
   transport: ChatTransport | undefined;
-  skills: ConversationSkills;
+  skills: StoredSkills;
   /** The skills the composer's draft cites, counted like the pinned ones. */
-  cited: readonly string[];
+  draft: DraftSkills;
   onOpenPicker: () => void;
   /** Back to the default selection: the pill's X. */
   onReset: () => void;
 }
 
 /** The skill pill, or with no pin the picker's summary chip (drawn only with discovery off). */
-export function SkillChips({ transport, skills, cited, onOpenPicker, onReset }: SkillChipsProps) {
+export function SkillChips({ transport, skills, draft, onOpenPicker, onReset }: SkillChipsProps) {
   const { t } = useChatHost();
-  const { loaded, refused, verdicts } = useSkillsByLoad(transport, skills, cited, t);
+  const { loaded, refused, verdicts } = useSkillsByLoad(transport, skills, draft, t);
   // The verdicts found on opening the conversation are not news: only a later change is read out.
   const announced = useChangeAnnouncement(verdicts ?? "", verdicts !== null);
   return (
@@ -170,7 +164,7 @@ export function SkillChips({ transport, skills, cited, onOpenPicker, onReset }: 
           refused={refused}
           discovery={skills.skillDiscovery}
           onOpen={onOpenPicker}
-          onReset={canResetSkills(skills, cited) ? onReset : undefined}
+          onReset={canResetSkills(skills) ? onReset : undefined}
         />
       )}
       {/* Always mounted, so a verdict landing after a turn is read out. */}

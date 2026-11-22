@@ -11,6 +11,7 @@ import {
   searchCommands,
   slashMatch,
 } from "../src/ui/composer-commands.ts";
+import { citedSkillIds, effectiveSkills } from "../src/ui/chat-skills.ts";
 
 const commands: ChatCommands = {
   skills: [
@@ -30,7 +31,12 @@ const commands: ChatCommands = {
     },
   ],
 };
-const ctx = { pinned: [] as string[], running: false, draft: "" };
+/** The menu's context over `pinned` and the skills `draft` cites, as the composer computes it. */
+const skillsOf = (pinned: string[], draft = "") => ({
+  pinned,
+  effective: effectiveSkills(pinned, citedSkillIds(draft)),
+});
+const ctx = { skills: skillsOf([]), running: false, draft: "" };
 
 describe("commandList", () => {
   it("lists skills by name then agents by title, ids being the package id and the prompt name", () => {
@@ -55,7 +61,7 @@ describe("commandList", () => {
   });
 
   it("lists no skill where the selection cannot be changed", () => {
-    expect(commandList(commands, { ...ctx, pinned: null }).items.map((i) => i.type)).toEqual([
+    expect(commandList(commands, { ...ctx, skills: null }).items.map((i) => i.type)).toEqual([
       "agent",
     ]);
   });
@@ -77,15 +83,18 @@ describe("commandList", () => {
     const draft = serializeDirective({ type: "skill", label: "tone", id: "@other/tone" });
     const list = commandList(commands, {
       ...ctx,
-      pinned: ["@x/1", "@x/2", "@x/3", "@acme/tone"],
+      skills: skillsOf(["@x/1", "@x/2", "@x/3", "@acme/tone"], draft),
       draft,
     });
-    // Pinned or already in the draft: still offered, marked added. Any other is capped.
+    // Pinned or already in the draft: still offered, marked as such. Any other is capped.
     expect(list.items.filter((i) => i.type === "skill").map((i) => i.id)).toEqual([
       "@acme/tone",
       "@other/tone",
     ]);
-    expect(list.items.find((i) => i.id === "@acme/tone")?.metadata?.added).toBe(true);
+    const meta = (id: string) => list.items.find((i) => i.id === id)?.metadata;
+    expect(meta("@acme/tone")).toMatchObject({ pinned: true, cited: false });
+    // Only cited in the draft: never « already pinned ».
+    expect(meta("@other/tone")).toMatchObject({ pinned: false, cited: true });
     expect(list.capped.map((i) => i.id)).toEqual(["@acme/pdf", "@acme/pdf-tools"]);
   });
 });
@@ -118,7 +127,7 @@ describe("searchCommands", () => {
 describe("noCommandMatch", () => {
   it("keeps the menu open for a skill held back by the cap, so the menu says why", () => {
     const pinned = ["@acme/tone", "@other/tone", "@x/a", "@x/b", "@x/c"];
-    const list = commandList(commands, { ...ctx, pinned, running: true });
+    const list = commandList(commands, { ...ctx, skills: skillsOf(pinned), running: true });
     // At the cap nothing offered matches `pdf`: both pdf skills are held back.
     expect(searchCommands(list.items, "pdf")).toEqual([]);
     expect(searchCommands(list.capped, "pdf").map((i) => i.id)).toEqual([

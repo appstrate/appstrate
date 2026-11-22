@@ -41,15 +41,8 @@ import {
 } from "../src/ui/sessions.ts";
 import { useSessions, useSessionDetail } from "../src/ui/use-sessions.ts";
 import { transportOf, transportOver } from "./fake-request.ts";
+import { DEFAULT_STORED_SKILLS } from "../src/ui/chat-skills.ts";
 import { conversationScope, testHost } from "./test-host.ts";
-import {
-  DEFAULT_STORED_SKILLS,
-  NO_SKILL_LAYERS,
-  conversationSkills,
-} from "../src/ui/chat-skills.ts";
-
-const NO_SKILLS = conversationSkills(DEFAULT_STORED_SKILLS, NO_SKILL_LAYERS);
-const NO_SKILL_ACTIONS = { setPin() {}, setDiscovery() {}, reset() {} };
 
 /** The assistant-ui runtime the attach button reads. */
 function Runtime({ children }: { children: ReactNode }) {
@@ -428,9 +421,6 @@ describe("the composer's limit chip", () => {
               <TooltipProvider>
                 <ComposerTools
                   transport={transportOf(() => ({ "X-Space-Id": "spc_a" }))}
-                  skills={NO_SKILLS}
-                  skillActions={NO_SKILL_ACTIONS}
-                  showPicker={false}
                   authorsPackages={false}
                 />
               </TooltipProvider>
@@ -554,13 +544,7 @@ describe("the composer's attach button", () => {
         <ChatTransportProvider value={transport}>
           <Runtime>
             <TooltipProvider>
-              <ComposerTools
-                transport={transport}
-                skills={NO_SKILLS}
-                skillActions={NO_SKILL_ACTIONS}
-                showPicker={false}
-                authorsPackages={false}
-              />
+              <ComposerTools transport={transport} authorsPackages={false} />
             </TooltipProvider>
           </Runtime>
         </ChatTransportProvider>

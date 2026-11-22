@@ -1,8 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * `useConversationSkills` mounted for real over a real `QueryClient`: what an accepted turn shows
- * before the conversation's detail was ever read, and the re-read an unanswered turn triggers.
+ * `useConversationSkills` mounted for real over a real `QueryClient` and a fake server: a change
+ * to an existing conversation is a PATCH of the full set, written into the cached detail before it
+ * lands and rolled back on a failure; concurrent changes are sent one after the other, each over
+ * the previous; a new conversation keeps its selection locally and its first turn carries it.
  * There is no DOM harness in this repo; a hook rendering nothing needs only the few globals
  * react-dom's client touches, installed for this file and removed after it.
  */
@@ -11,9 +13,9 @@ import { afterAll, beforeAll, describe, expect, it } from "bun:test";
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import type { PinnedSkill } from "../src/skills.ts";
-import { skillRowState } from "../src/ui/chat-skills.ts";
-import type { ChatTransport } from "../src/ui/runtime-context.ts";
+import { MAX_PINNED_SKILLS, type PinnedSkill } from "../src/skills.ts";
+import { pinIds } from "../src/ui/chat-skills.ts";
+import { sessionQueryKey, type SessionHistory } from "../src/ui/sessions.ts";
 import {
   useConversationSkills,
   type ConversationSkillsState,
@@ -53,95 +55,245 @@ afterAll(() => {
   globals.IS_REACT_ACT_ENVIRONMENT = saved.act;
 });
 
-/** A detail request held until `release`, answering the server's state at that moment. */
-function heldDetails() {
-  const server = { pins: [] as PinnedSkill[] };
-  const held: (() => void)[] = [];
-  const transport: ChatTransport = transportOver(
-    (path) =>
-      new Promise<Response>((resolve) =>
-        held.push(() =>
-          resolve(
-            Response.json({
-              id: path.split("/").pop(),
-              title: null,
-              messages: [],
-              skill_discovery: true,
-              pins: server.pins,
-            }),
-          ),
-        ),
-      ),
-  );
-  const release = () =>
-    act(async () => {
-      for (const answer of held.splice(0)) answer();
-      // The response body, then the query's batched notification.
-      await new Promise((resolve) => setTimeout(resolve, 10));
-    });
-  return { server, transport, release, reads: () => held.length };
+const ID = "chs_c";
+
+class Problem extends Error {
+  constructor(readonly status: number) {
+    super(`API Error: ${status}`);
+  }
 }
 
-async function mount(transport: ChatTransport, persisted: boolean) {
+interface Row {
+  skill_discovery: boolean;
+  pins: PinnedSkill[];
+}
+
+/**
+ * The session routes over `row` (`null`: no session yet). A PATCH waits while `hold` is on, until
+ * `release`; `fail` makes the next PATCH answer 500.
+ */
+function fakeServer(initial: Row | null) {
+  const server = {
+    row: initial,
+    patches: [] as { pins: string[]; skill_discovery: boolean }[],
+    reads: 0,
+    hold: false,
+    fail: false,
+    held: [] as (() => void)[],
+  };
+  const transport = transportOver(async (_path, init) => {
+    if (init?.method === "PATCH") {
+      const body = JSON.parse(String(init.body)) as (typeof server.patches)[number];
+      server.patches.push(body);
+      if (server.hold) await new Promise<void>((resolve) => server.held.push(resolve));
+      if (server.fail) {
+        server.fail = false;
+        throw new Problem(500);
+      }
+      const row = server.row;
+      if (!row) throw new Problem(404);
+      server.row = {
+        skill_discovery: body.skill_discovery,
+        pins: body.pins.map(
+          (id) => row.pins.find((pin) => pin.id === id) ?? { id, status: null, chars: null },
+        ),
+      };
+      return Response.json({ id: ID, title: null, ...server.row });
+    }
+    server.reads += 1;
+    if (!server.row) throw new Problem(404);
+    return Response.json({ id: ID, title: null, messages: [], ...server.row });
+  });
+  return { server, transport };
+}
+
+/** Lets the requests, the query notifications and the mutation queue run. */
+const settle = () => act(async () => void (await new Promise((r) => setTimeout(r, 15))));
+
+async function mount(
+  transport: ReturnType<typeof fakeServer>["transport"],
+  persisted: boolean,
+  enabled = true,
+) {
+  const client = new QueryClient();
   const result = { current: undefined as unknown as ConversationSkillsState };
   function Probe() {
-    result.current = useConversationSkills({ transport, id: "chs_c", persisted, enabled: true });
+    result.current = useConversationSkills({ transport, id: ID, persisted, enabled });
     return null;
   }
   const root: Root = createRoot(container());
   await act(async () =>
     root.render(
-      <QueryClientProvider client={new QueryClient()}>
+      <QueryClientProvider client={client}>
         <Probe />
       </QueryClientProvider>,
     ),
   );
-  return { result, unmount: () => act(async () => root.unmount()) };
+  await settle();
+  const cached = () =>
+    client.getQueryData<SessionHistory | null>(sessionQueryKey("org_1", ID))?.skills;
+  /** The host's realtime on the conversation's session signal. */
+  const signal = () =>
+    act(
+      async () => void (await client.invalidateQueries({ queryKey: sessionQueryKey("org_1", ID) })),
+    );
+  return { result, cached, signal, unmount: () => act(async () => root.unmount()) };
 }
 
-/** The transport's take, which settles the store: inside `act` like any update. */
-async function take(state: { current: ConversationSkillsState }) {
-  let taken: ReturnType<ConversationSkillsState["takeChanges"]>;
-  await act(async () => void (taken = state.current.takeChanges()));
-  return taken;
-}
+const pin = (id: string, status: PinnedSkill["status"] = "injected"): PinnedSkill => ({
+  id,
+  status,
+  chars: status === "injected" ? 100 : null,
+});
 
-const row = (state: ConversationSkillsState, id: string) =>
-  skillRowState(state.skills, id, new Set());
-
-describe("useConversationSkills", () => {
-  it("accepted on an uncached detail shows the sent pin, then reads the detail's verdict", async () => {
-    const { server, transport, release, reads } = heldDetails();
-    const { result, unmount } = await mount(transport, false);
-    // A conversation new in this mount: nothing is read before a turn may have created it.
-    expect(reads()).toBe(0);
-    await act(async () => result.current.actions.setPin("@a/new", true));
-    expect(await take(result)).toEqual({ pin: ["@a/new"], unpin: [] });
-    server.pins = [{ id: "@a/new", status: "over_budget", chars: null }];
-    await act(async () => result.current.answered("accepted"));
-    expect(row(result.current, "@a/new")).toEqual({ kind: "next" });
-    expect(await take(result)).toBeUndefined();
-    expect(reads()).toBe(1);
-    await release();
-    expect(row(result.current, "@a/new")).toEqual({ kind: "refused", reason: "over_budget" });
+describe("useConversationSkills on a conversation the server holds", () => {
+  it("writes a change into the cached detail before the PATCH answers, the full set sent", async () => {
+    const { server, transport } = fakeServer({ skill_discovery: true, pins: [pin("@a/kept")] });
+    const { result, cached, unmount } = await mount(transport, true);
+    expect(result.current.held).toBe(true);
+    server.hold = true;
+    await act(async () => result.current.setPin("@a/new", true));
+    await settle();
+    // Optimistic: shown and cached at once, the new pin with no verdict yet.
+    expect(result.current.skills.pins).toEqual([pin("@a/kept"), pin("@a/new", null)]);
+    expect(cached()?.pins.map((p) => p.id)).toEqual(["@a/kept", "@a/new"]);
+    expect(server.patches).toEqual([{ pins: ["@a/kept", "@a/new"], skill_discovery: true }]);
+    server.hold = false;
+    await act(async () => server.held.splice(0).forEach((go) => go()));
+    await settle();
+    expect(pinIds(result.current.skills)).toEqual(["@a/kept", "@a/new"]);
+    // Settled: the detail is read again, the server's word last.
+    expect(server.reads).toBe(2);
     await unmount();
   });
 
-  it("unanswered drops the changes and reads the detail again", async () => {
-    const { server, transport, release, reads } = heldDetails();
+  it("rolls the cached detail back when the PATCH fails", async () => {
+    const { server, transport } = fakeServer({ skill_discovery: true, pins: [pin("@a/kept")] });
+    const { result, cached, unmount } = await mount(transport, true);
+    server.fail = true;
+    await act(async () => result.current.setDiscovery(false));
+    await settle();
+    expect(result.current.skills.skillDiscovery).toBe(true);
+    expect(cached()?.skillDiscovery).toBe(true);
+    expect(server.row?.skill_discovery).toBe(true);
+    await unmount();
+  });
+
+  it("sends concurrent changes one after the other, each over the previous: none is lost", async () => {
+    const { server, transport } = fakeServer({ skill_discovery: true, pins: [] });
     const { result, unmount } = await mount(transport, true);
-    expect(reads()).toBe(1);
-    await release();
-    await act(async () => result.current.actions.setPin("@a/new", true));
-    await take(result);
-    // The server applied the claim, but the turn's answer never arrived.
-    server.pins = [{ id: "@a/new", status: "injected", chars: null }];
-    await act(async () => result.current.answered("unanswered"));
-    expect(reads()).toBe(1);
-    expect(row(result.current, "@a/new")).toEqual({ kind: "off" });
-    await release();
-    expect(row(result.current, "@a/new")).toEqual({ kind: "loaded" });
-    expect(await take(result)).toBeUndefined();
+    server.hold = true;
+    await act(async () => {
+      result.current.setPin("@a/one", true);
+      result.current.setPin("@a/two", true);
+    });
+    await settle();
+    // The second waits for the first; both show meanwhile.
+    expect(server.patches).toHaveLength(1);
+    expect(pinIds(result.current.skills)).toEqual(["@a/one", "@a/two"]);
+    for (let i = 0; i < 2; i += 1) {
+      await act(async () => server.held.splice(0).forEach((go) => go()));
+      await settle();
+    }
+    expect(server.patches.map((p) => p.pins)).toEqual([["@a/one"], ["@a/one", "@a/two"]]);
+    expect(server.row?.pins.map((p) => p.id)).toEqual(["@a/one", "@a/two"]);
+    expect(pinIds(result.current.skills)).toEqual(["@a/one", "@a/two"]);
+    await unmount();
+  });
+
+  it("pins the skills a message cites before it resolves, and sends nothing when all are pinned", async () => {
+    const { server, transport } = fakeServer({ skill_discovery: true, pins: [pin("@a/kept")] });
+    const { result, unmount } = await mount(transport, true);
+    await act(async () => result.current.pinCited(["@a/kept"]));
+    expect(server.patches).toEqual([]);
+    let resolved = false;
+    server.hold = true;
+    let sent: Promise<void> = Promise.resolve();
+    await act(async () => {
+      sent = result.current.pinCited(["@a/cited", "@a/kept"]).then(() => void (resolved = true));
+    });
+    await settle();
+    expect(resolved).toBe(false);
+    await act(async () => server.held.splice(0).forEach((go) => go()));
+    await act(async () => sent);
+    expect(resolved).toBe(true);
+    expect(server.patches).toEqual([{ pins: ["@a/cited", "@a/kept"], skill_discovery: true }]);
+    await unmount();
+  });
+
+  it("pins nothing past the cap, and nothing at all where the panel is not offered", async () => {
+    const full = Array.from({ length: MAX_PINNED_SKILLS }, (_, i) => pin(`@a/${i}`));
+    const { server, transport } = fakeServer({ skill_discovery: true, pins: full });
+    const { result, unmount } = await mount(transport, true);
+    await act(async () => result.current.pinCited(["@a/extra"]));
+    expect(server.patches).toEqual([]);
+    await unmount();
+    const off = await mount(fakeServer({ skill_discovery: true, pins: [] }).transport, true, false);
+    await act(async () => off.result.current.setPin("@a/x", true));
+    expect(pinIds(off.result.current.skills)).toEqual([]);
+    expect(off.result.current.takeForTurn()).toBeUndefined();
+    await off.unmount();
+  });
+
+  it("takes no selection for a turn: the server holds its pins", async () => {
+    const { transport } = fakeServer({ skill_discovery: false, pins: [pin("@a/kept")] });
+    const { result, unmount } = await mount(transport, true);
+    expect(result.current.takeForTurn()).toBeUndefined();
+    await unmount();
+  });
+});
+
+describe("useConversationSkills on a new conversation", () => {
+  it("keeps the selection locally, and the first turn carries it with the cited skills", async () => {
+    const { server, transport } = fakeServer(null);
+    const { result, unmount } = await mount(transport, false);
+    expect(server.reads).toBe(0);
+    await act(async () => {
+      result.current.setPin("@a/picked", true);
+      result.current.setDiscovery(false);
+    });
+    await act(async () => result.current.pinCited(["@a/cited"]));
+    expect(server.patches).toEqual([]);
+    expect(result.current.held).toBe(false);
+    expect(pinIds(result.current.skills)).toEqual(["@a/cited", "@a/picked"]);
+    let taken: ReturnType<ConversationSkillsState["takeForTurn"]>;
+    await act(async () => void (taken = result.current.takeForTurn()));
+    expect(taken).toEqual({ skillDiscovery: false, pins: ["@a/cited", "@a/picked"] });
+    await unmount();
+  });
+
+  it("reads the detail once the first turn left; from then on the detail is the truth", async () => {
+    const { server, transport } = fakeServer(null);
+    const { result, signal, unmount } = await mount(transport, false);
+    await act(async () => result.current.setPin("@a/picked", true));
+    await act(async () => void result.current.takeForTurn());
+    await settle();
+    // Read before the turn created the row: the local selection still shows.
+    expect(server.reads).toBe(1);
+    expect(result.current.held).toBe(false);
+    expect(pinIds(result.current.skills)).toEqual(["@a/picked"]);
+    // The turn creates the row with what it carried, the server judges it and signals it.
+    server.row = { skill_discovery: true, pins: [pin("@a/picked", "over_budget")] };
+    await signal();
+    await settle();
+    expect(result.current.held).toBe(true);
+    expect(result.current.skills.pins).toEqual([pin("@a/picked", "over_budget")]);
+    expect(result.current.takeForTurn()).toBeUndefined();
+    await unmount();
+  });
+
+  it("keeps a change locally when its PATCH finds no session: the first turn created none", async () => {
+    const { server, transport } = fakeServer(null);
+    const { result, unmount } = await mount(transport, false);
+    await act(async () => void result.current.takeForTurn());
+    await settle();
+    await act(async () => result.current.setPin("@a/later", true));
+    await settle();
+    expect(server.patches).toHaveLength(1);
+    expect(pinIds(result.current.skills)).toEqual(["@a/later"]);
+    let taken: ReturnType<ConversationSkillsState["takeForTurn"]>;
+    await act(async () => void (taken = result.current.takeForTurn()));
+    expect(taken?.pins).toEqual(["@a/later"]);
     await unmount();
   });
 });

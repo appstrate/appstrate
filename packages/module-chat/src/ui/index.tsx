@@ -114,8 +114,11 @@ import { canAuthorPackages, canPinSkills } from "../capabilities.ts";
 import { createChatAttachmentAdapter } from "./attachment-adapter.ts";
 import { shouldReconcileHistory } from "./history-reconcile.ts";
 import { sendWithDirectives } from "./directive-send.ts";
-import { useConversationSkills, type ConversationSkillsState } from "./use-conversation-skills.ts";
-import { PinnedSkillsProvider } from "./pinned-skills.ts";
+import {
+  ConversationSkillsProvider,
+  useConversationSkills,
+  type ConversationSkillsState,
+} from "./use-conversation-skills.ts";
 
 // Tab visibility as an external store — the mark-read effect must not fire
 // while the tab is hidden: SSE-driven invalidations refetch the list even in
@@ -541,30 +544,17 @@ const Conversation = memo(function Conversation({
   // No picker on a failed read: it would show the defaults, and a change would
   // send them over the stored choice.
   const showPicker = canPinSkills && !history.isError;
-  // The server's skills with the user's changes on top; only the changes ride with a turn.
+  // The session detail's skills once the server holds the row, a local selection before.
   const conversationSkills = useConversationSkills({
     transport,
     id,
     persisted: persistedAtMount,
     enabled: showPicker,
   });
-  const { skills, actions: skillActions } = conversationSkills;
   const tools = useMemo(
-    () => (
-      <ComposerTools
-        transport={transport}
-        skills={skills}
-        skillActions={skillActions}
-        showPicker={showPicker}
-        authorsPackages={authorsPackages}
-      />
-    ),
-    [transport, skills, skillActions, showPicker, authorsPackages],
+    () => <ComposerTools transport={transport} authorsPackages={authorsPackages} />,
+    [transport, authorsPackages],
   );
-
-  // The `/` menu lists skills only where the panel can change the selection, and a send pins
-  // the skills its text names through the same change the panel makes.
-  const pinnedSkills = showPicker ? skills.pinned : null;
 
   if (persistedAtMount && history.isPending) {
     return (
@@ -583,7 +573,8 @@ const Conversation = memo(function Conversation({
   }
   return (
     <ConversationScopeProvider value={scope}>
-      <PinnedSkillsProvider value={pinnedSkills}>
+      {/* The panel, the `/` menu's skills and the thread's pin action, where the selection can change. */}
+      <ConversationSkillsProvider value={showPicker ? conversationSkills : null}>
         <ConversationInner
           id={id}
           transport={transport}
@@ -595,7 +586,7 @@ const Conversation = memo(function Conversation({
           getCreation={getCreation}
           {...rest}
         />
-      </PinnedSkillsProvider>
+      </ConversationSkillsProvider>
     </ConversationScopeProvider>
   );
 });
@@ -645,15 +636,15 @@ function ConversationInner({
 > & {
   composerTools: React.ReactNode;
   initialMessages: UIMessage[];
-  /** The skill changes a turn carries, and how the server answered it. */
-  turnSkills: Pick<ConversationSkillsState, "pinCited" | "takeChanges" | "answered">;
+  /** The skills a first turn creates the conversation with, and the pins a sent message cites. */
+  turnSkills: Pick<ConversationSkillsState, "pinCited" | "takeForTurn">;
   /** The origin space and limit the turn being sent creates the conversation with. */
   getCreation: () => ConversationCreation | undefined;
 }) {
   const queryClient = useQueryClient();
   const { t, attachTarget } = useChatHost();
   const scope = useConversationScope();
-  const { pinCited, takeChanges: takeSkillChanges, answered: skillsAnswered } = turnSkills;
+  const { pinCited, takeForTurn } = turnSkills;
   // File attachments: the composer stages picked files through the HOST uploader, into the
   // caller's personal space, as `upload://` file parts the server materializes into durable
   // files of the conversation.
@@ -712,13 +703,12 @@ function ConversationInner({
             generation: getCompatibleGenerationSettings(),
             packageAuthoring: getPackageAuthoringEnabled(),
             inlineRunsUseChatModel: getInlineRunModelEnabled(),
-            skills: takeSkillChanges(),
+            skills: takeForTurn(),
             creation: getCreation(),
           });
         },
-        answered: skillsAnswered,
       }),
-    [buildHeaders, takeSkillChanges, skillsAnswered, getCreation, getTransport],
+    [buildHeaders, takeForTurn, getCreation, getTransport],
   );
 
   const chat = useChat({
@@ -870,13 +860,13 @@ function ConversationInner({
     if (transport) void stopSession(transport, id).catch(() => {});
     return chat.stop();
   }, [chat, transport, id, messageQueue]);
-  // The skills and the agent a message names take effect as it is sent: the pins are set before
-  // the request is built (the turn takes the skill changes then), the agent joins the message.
+  // The skills and the agent a message names take effect as it is sent: the cited skills are
+  // pinned before the turn starts (so it reads them), the agent joins the message.
   const { sendMessage } = chat;
   const send = useCallback<typeof sendMessage>(
-    (message, options) => {
+    async (message, options) => {
       const sent = sendWithDirectives(message);
-      pinCited(sent.skills);
+      await pinCited(sent.skills);
       return sendMessage(sent.message, options);
     },
     [sendMessage, pinCited],

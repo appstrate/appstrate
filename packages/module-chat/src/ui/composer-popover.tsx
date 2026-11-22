@@ -7,7 +7,7 @@
  * `composer-commands.ts`.
  */
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import {
   ComposerPrimitive,
   unstable_useTriggerPopoverScopeContext as useTriggerPopoverScope,
@@ -20,28 +20,47 @@ import { AGENT_DIRECTIVE } from "../directives.ts";
 import { AgentGlyph } from "./agent-glyph.tsx";
 import type { AgentAppearance } from "./agent-appearance.ts";
 import { MAX_PINNED_SKILLS } from "../skills.ts";
+import { pinIds } from "./chat-skills.ts";
 import { commandList, noCommandMatch, searchCommands, slashMatch } from "./composer-commands.ts";
 import { useChatHost, useChatTransport } from "./runtime-context.ts";
-import { usePinnedSkills } from "./pinned-skills.ts";
+import { useConversationSkillsContext, useDraftSkills } from "./use-conversation-skills.ts";
 import { useChatCommands } from "./use-chat-commands.ts";
 
 /** Wraps the composer: the popover and the editor find each other through it. */
 export const CommandTriggers = ComposerPrimitive.TriggerPopoverRoot;
 
+interface MenuNotice {
+  text: string;
+  className: string;
+}
+
+/** What the menu shows around its listbox: whether it is open, and its notice. */
+interface MenuState {
+  open: boolean;
+  notice: MenuNotice | null;
+}
+
+const CLOSED: MenuState = { open: false, notice: null };
+
 /** The menu, inside the composer card (it opens above it). */
 export function CommandPopover() {
   const { can, t } = useChatHost();
   const transport = useChatTransport() ?? undefined;
-  const pinned = usePinnedSkills();
+  const conversation = useConversationSkillsContext();
+  const { effective } = useDraftSkills();
   const draft = useAuiState((s) => s.composer.text);
   const running = useAuiState((s) => s.thread.isRunning);
   const writes = can("chat:write");
   // Read once the draft holds a `/` (the route's own guard: the caller may write the chat).
   const commands = useChatCommands(transport, writes && draft.includes("/"));
   const { data } = commands;
+  const skills = useMemo(
+    () => conversation && { pinned: pinIds(conversation.skills), effective },
+    [conversation, effective],
+  );
   const list = useMemo(
-    () => (data ? commandList(data, { pinned, running, draft }) : null),
-    [data, pinned, running, draft],
+    () => (data ? commandList(data, { skills, running, draft }) : null),
+    [data, skills, running, draft],
   );
   const adapter = useMemo<TriggerAdapter>(
     () => ({
@@ -55,11 +74,25 @@ export function CommandPopover() {
   const failed = commands.isError;
   const matcher = (text: string, _char: string, cursor: number) =>
     slashMatch(text, cursor, (query) => noCommandMatch(list, query));
-  // The menu's notices (loading, error, cap) are announced from one region outside the listbox,
-  // which may hold only options: it stays mounted so a screen reader hears each change.
-  const [notice, setNotice] = useState("");
+  // The listbox may hold only options: the card around it draws the notice, from a live region
+  // that stays mounted so a screen reader hears each change.
+  const [menu, setMenu] = useState<MenuState>(CLOSED);
+  const { notice } = menu;
   return (
-    <>
+    <div
+      className={cn(
+        menu.open &&
+          "bg-popover text-popover-foreground absolute inset-x-0 bottom-full z-30 mb-2 flex flex-col overflow-hidden rounded-xl border shadow-md",
+      )}
+    >
+      <p
+        role="status"
+        aria-live="polite"
+        data-testid="slash-status"
+        className={notice ? cn("px-3 pt-1", notice.className) : "sr-only"}
+      >
+        {notice?.text ?? ""}
+      </p>
       <ComposerPrimitive.TriggerPopover
         char="/"
         adapter={adapter}
@@ -67,31 +100,28 @@ export function CommandPopover() {
         isLoading={!list && !failed}
         aria-label={t("slash.label")}
         data-testid="slash-menu"
-        className="bg-popover text-popover-foreground absolute inset-x-0 bottom-full z-30 mb-2 max-h-72 overflow-y-auto overscroll-contain rounded-xl border p-1 shadow-md"
+        className="max-h-72 overflow-y-auto overscroll-contain p-1"
       >
         <ComposerPrimitive.TriggerPopover.Directive />
-        <Entries capped={list?.capped ?? []} failed={failed} onNotice={setNotice} />
+        <Entries capped={list?.capped ?? []} failed={failed} onMenu={setMenu} />
       </ComposerPrimitive.TriggerPopover>
-      <p role="status" aria-live="polite" data-testid="slash-status" className="sr-only">
-        {notice}
-      </p>
-    </>
+    </div>
   );
 }
 
 function Entries({
   capped,
   failed,
-  onNotice,
+  onMenu,
 }: {
   capped: readonly TriggerItem[];
   failed: boolean;
-  /** Hands the notice to the live region outside the popover, which this scope cannot reach. */
-  onNotice: (text: string) => void;
+  /** Hands the menu's state to the card around the listbox, which this scope cannot reach. */
+  onMenu: (menu: MenuState) => void;
 }) {
   const { t } = useChatHost();
   const { open, items, query, isLoading } = useTriggerPopoverScope();
-  const notice = !open
+  const notice: MenuNotice | null = !open
     ? null
     : items.length === 0 && isLoading
       ? { text: t("slash.loading"), className: "text-muted-foreground text-sm py-2" }
@@ -103,8 +133,13 @@ function Entries({
               className: "text-muted-foreground text-xs py-1.5",
             }
           : null;
-  const announced = notice?.text ?? "";
-  useEffect(() => onNotice(announced), [onNotice, announced]);
+  const text = notice?.text;
+  const className = notice?.className;
+  // Before paint: the card appears with the listbox, never a frame after it.
+  useLayoutEffect(
+    () => onMenu({ open, notice: text ? { text, className: className ?? "" } : null }),
+    [onMenu, open, text, className],
+  );
   // Closed, the popover renders its children without its listbox: nothing of ours shows.
   if (!open) return null;
   const skills = items.filter((item) => item.type !== AGENT_DIRECTIVE);
@@ -114,12 +149,6 @@ function Entries({
   const homonyms = new Set(names.filter((name, i) => names.indexOf(name) !== i));
   return (
     <>
-      {notice && (
-        // Seen here, heard from the live region beside the listbox.
-        <p aria-hidden="true" className={cn("px-2", notice.className)}>
-          {notice.text}
-        </p>
-      )}
       {/* The listbox carries the menu's name; each section is a group named by its heading. */}
       <Section heading={t("slash.skills")} items={skills} from={0} homonyms={homonyms} />
       <Section
@@ -211,10 +240,12 @@ function Row({ item, index, homonym }: { item: TriggerItem; index: number; homon
               {item.description}
             </span>
           </span>
-          {item.metadata?.added === true && (
+          {(item.metadata?.pinned === true || item.metadata?.cited === true) && (
             <>
               <CheckIcon className="text-primary mt-0.5 size-4 shrink-0" />
-              <span className="sr-only">{t("slash.pinned")}</span>
+              <span className="sr-only">
+                {t(item.metadata.pinned === true ? "slash.pinned" : "slash.cited")}
+              </span>
             </>
           )}
         </>

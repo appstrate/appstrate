@@ -16,7 +16,7 @@ import {
 import type { UIMessage } from "ai";
 import type { TokenUsage } from "@appstrate/core/token-usage";
 import type { PinnedSkill } from "../skills.ts";
-import type { StoredSkills } from "./chat-skills.ts";
+import type { SkillSelection, StoredSkills } from "./chat-skills.ts";
 import { errorStatus, jsonInit, type ChatTransport } from "./runtime-context.ts";
 import { chatPath } from "./chat-route.ts";
 
@@ -205,6 +205,24 @@ export async function stopSession(transport: ChatTransport, id: string): Promise
   await transport.request(chatPath(transport, `/sessions/${id}/stop`), { method: "POST" });
 }
 
+/** The session's skills as a session DTO carries them. */
+function storedSkillsOf(dto: { skill_discovery: boolean; pins: PinnedSkill[] }): StoredSkills {
+  return { skillDiscovery: dto.skill_discovery, pins: dto.pins };
+}
+
+/** Replace the conversation's pins (the full set) and its discovery switch; the server's result. */
+export async function updateSessionSkills(
+  transport: ChatTransport,
+  id: string,
+  selection: SkillSelection,
+): Promise<StoredSkills> {
+  const res = await transport.request(
+    chatPath(transport, `/sessions/${id}/skills`),
+    jsonInit("PATCH", { pins: selection.pins, skill_discovery: selection.skillDiscovery }),
+  );
+  return storedSkillsOf((await res.json()) as { skill_discovery: boolean; pins: PinnedSkill[] });
+}
+
 /** A stored message node as returned by `GET /sessions/:id`. */
 interface StoredMessage {
   id: string;
@@ -247,7 +265,7 @@ export async function loadHistory(
     ...row,
     // Row `id` LAST: a stray `id` inside a stored `content` must not win.
     messages: (messages ?? []).map((e) => ({ ...e.content, id: e.id }) as UIMessage),
-    skills: { skillDiscovery: skill_discovery, pins },
+    skills: storedSkillsOf({ skill_discovery, pins }),
   };
 }
 

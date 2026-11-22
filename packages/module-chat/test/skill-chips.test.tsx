@@ -19,10 +19,21 @@ import { transportOf } from "./fake-request.ts";
 import { conversationScope, testHost } from "./test-host.ts";
 import type { PinnedSkill } from "../src/skills.ts";
 import {
-  NO_SKILL_LAYERS,
-  conversationSkills,
-  type ConversationSkills,
+  citedSkillIds,
+  effectiveSkills,
+  pinIds,
+  type StoredSkills,
 } from "../src/ui/chat-skills.ts";
+
+const stored = (pins: PinnedSkill[], skillDiscovery = true): StoredSkills => ({
+  skillDiscovery,
+  pins,
+});
+const pin = (id: string, status: PinnedSkill["status"] = "injected"): PinnedSkill => ({
+  id,
+  status,
+  chars: null,
+});
 
 const host = testHost({
   t: (key, options) => (options ? `${key} ${JSON.stringify(options)}` : key),
@@ -34,10 +45,10 @@ const pinned = (
   ids: string[],
   skillDiscovery = true,
   status: PinnedSkill["status"] = "injected",
-): ConversationSkills =>
-  conversationSkills(
-    { skillDiscovery, pins: ids.map((id) => ({ id, source: "user", status })) },
-    NO_SKILL_LAYERS,
+): StoredSkills =>
+  stored(
+    ids.map((id) => pin(id, status)),
+    skillDiscovery,
   );
 
 /** A client whose catalogue already answered, naming `@acme/a` « Alpha ». */
@@ -51,9 +62,10 @@ function withCatalogue(): QueryClient {
 }
 
 function render(
-  skills: ConversationSkills = pinned([], false),
-  { client = new QueryClient(), cited }: { client?: QueryClient; cited?: string[] } = {},
+  skills: StoredSkills = pinned([], false),
+  { client = new QueryClient(), draft = "" }: { client?: QueryClient; draft?: string } = {},
 ): string {
+  const cited = citedSkillIds(draft);
   return renderToStaticMarkup(
     <QueryClientProvider client={client}>
       <ChatHostProvider value={host}>
@@ -64,7 +76,7 @@ function render(
             <SkillChips
               transport={scoped}
               skills={skills}
-              cited={cited ?? []}
+              draft={{ cited, effective: effectiveSkills(pinIds(skills), cited) }}
               onOpenPicker={() => {}}
               onReset={() => {}}
             />
@@ -103,17 +115,7 @@ describe("SkillChips", () => {
   describe("the live region", () => {
     const live = (html: string) => html.match(/data-testid="skill-pill-live"[^>]*>([^<]*)</)![1];
     const names = new Map([["@acme/a", "Alpha"]]);
-    const verdicts = conversationSkills(
-      {
-        skillDiscovery: true,
-        pins: [
-          { id: "@acme/a", source: "user", status: "injected" },
-          { id: "@acme/b", source: "user", status: "injected" },
-          { id: "@acme/big", source: "user", status: "over_budget" },
-        ],
-      },
-      NO_SKILL_LAYERS,
-    );
+    const verdicts = stored([pin("@acme/a"), pin("@acme/b"), pin("@acme/big", "over_budget")]);
 
     it("is one polite region, silent on the verdicts the conversation opens on", () => {
       const html = render(verdicts, { client: withCatalogue() });
@@ -129,28 +131,15 @@ describe("SkillChips", () => {
 
     it("has nothing to say until the catalogue names the skills, so a name swap is never read out", () => {
       expect(verdictsSummary(verdicts, null, host.t)).toBeNull();
-      const single = conversationSkills(
-        { skillDiscovery: true, pins: [{ id: "@acme/a", source: "user", status: "injected" }] },
-        NO_SKILL_LAYERS,
-      );
+      const single = stored([pin("@acme/a")]);
       expect(verdictsSummary(single, names, host.t)).toBe("Alpha");
     });
 
-    it("reads out server verdicts only, never a local toggle, a pending pin or a citation", () => {
+    it("reads out verdicts only, never a pin no turn judged yet", () => {
       const before = verdictsSummary(verdicts, names, host.t);
-      const toggled = conversationSkills(
-        {
-          skillDiscovery: true,
-          pins: [...verdicts.stored.values()],
-        },
-        { ...NO_SKILL_LAYERS, local: { pin: ["@acme/new"], unpin: ["@acme/a"] } },
-      );
-      expect(verdictsSummary(toggled, names, host.t)).toBe(before);
-      const unjudged = conversationSkills(
-        { skillDiscovery: true, pins: [{ id: "@acme/a", source: "user", status: null }] },
-        NO_SKILL_LAYERS,
-      );
-      expect(verdictsSummary(unjudged, names, host.t)).toBe("");
+      const added = stored([...verdicts.pins, pin("@acme/new", null)]);
+      expect(verdictsSummary(added, names, host.t)).toBe(before);
+      expect(verdictsSummary(stored([pin("@acme/a", null)]), names, host.t)).toBe("");
     });
   });
 
@@ -169,17 +158,7 @@ describe("SkillChips", () => {
   });
 
   it("never counts a pin the last turn refused as loaded", () => {
-    const skills = conversationSkills(
-      {
-        skillDiscovery: true,
-        pins: [
-          { id: "@a/one", source: "user", status: "injected" },
-          { id: "@a/big", source: "user", status: "over_budget" },
-        ],
-      },
-      NO_SKILL_LAYERS,
-    );
-    const html = render(skills);
+    const html = render(stored([pin("@a/one"), pin("@a/big", "over_budget")]));
     expect(html.match(/skill-pill-pinned/g)).toHaveLength(1);
     expect(html).toContain(
       'aria-label="skills.pinnedPillLabel {&quot;skills&quot;:&quot;one&quot;}"',
@@ -191,12 +170,11 @@ describe("SkillChips", () => {
     expect(refusedOnly).toContain('aria-label="skills.reset"');
   });
 
-  it("counts a pin the server has not evaluated yet and a pending one: the next turn loads them", () => {
-    const skills = conversationSkills(
-      { skillDiscovery: true, pins: [{ id: "@a/one", source: "assistant", status: null }] },
-      { ...NO_SKILL_LAYERS, local: { pin: ["@a/two"], unpin: [] } },
+  it("counts a pin no turn judged yet and a skill the draft cites: the next turn loads them", () => {
+    const draft = ":skill[two]{name=@a/two}";
+    expect(render(stored([pin("@a/one", null)]), { draft })).toContain(
+      "skills.pinnedCount {&quot;count&quot;:2}",
     );
-    expect(render(skills)).toContain("skills.pinnedCount {&quot;count&quot;:2}");
   });
 
   it("puts an X restoring the default on the pinned pill", () => {

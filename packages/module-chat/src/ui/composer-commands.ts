@@ -5,11 +5,11 @@
 import type { TriggerItem } from "@assistant-ui/core";
 import type { ChatCommands } from "../commands.ts";
 import { AGENT_DIRECTIVE, SKILL_DIRECTIVE, directivesOf } from "../directives.ts";
-import { citedSkillIds, effectiveSkills } from "./chat-skills.ts";
+import type { EffectiveSkills } from "./chat-skills.ts";
 
 interface CommandContext {
-  /** `null`: the selection cannot be changed here, so no skill is listed. */
-  pinned: readonly string[] | null;
+  /** The pins, and those with the draft's citations; `null`: no skill is listed here. */
+  skills: { pinned: readonly string[]; effective: EffectiveSkills } | null;
   /** A turn runs: the draft will be queued, so no agent is offered. */
   running: boolean;
   draft: string;
@@ -21,24 +21,39 @@ export interface CommandList {
   capped: TriggerItem[];
 }
 
-/** Skills then agents; no agent once the draft names one, no new skill past the cap. */
-export function commandList(
+/** The skills offered (into the result), those past the cap into `capped`. */
+function skillItems(
   commands: ChatCommands,
-  { pinned, running, draft }: CommandContext,
-): CommandList {
-  const named = directivesOf(draft);
-  const { ids, atCap } = effectiveSkills(pinned ?? [], citedSkillIds(draft));
-  const list: CommandList = { items: [], capped: [] };
-  for (const skill of pinned === null ? [] : commands.skills) {
+  { pinned, effective }: NonNullable<CommandContext["skills"]>,
+  capped: TriggerItem[],
+): TriggerItem[] {
+  const offered: TriggerItem[] = [];
+  for (const skill of commands.skills) {
+    const isPinned = pinned.includes(skill.id);
     const item: TriggerItem = {
       id: skill.id,
       type: SKILL_DIRECTIVE,
       label: skill.name,
       description: skill.description,
-      metadata: { version: skill.version, added: ids.includes(skill.id) },
+      metadata: {
+        version: skill.version,
+        pinned: isPinned,
+        cited: !isPinned && effective.cited.has(skill.id),
+      },
     };
-    (ids.includes(skill.id) || !atCap ? list.items : list.capped).push(item);
+    (effective.ids.includes(skill.id) || !effective.atCap ? offered : capped).push(item);
   }
+  return offered;
+}
+
+/** Skills then agents; no agent once the draft names one, no new skill past the cap. */
+export function commandList(
+  commands: ChatCommands,
+  { skills, running, draft }: CommandContext,
+): CommandList {
+  const named = directivesOf(draft);
+  const list: CommandList = { items: [], capped: [] };
+  if (skills) list.items.push(...skillItems(commands, skills, list.capped));
   if (!running && !named.some((d) => d.type === AGENT_DIRECTIVE)) {
     for (const agent of commands.agents) {
       list.items.push({

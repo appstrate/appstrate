@@ -3,7 +3,7 @@
 // The skill pill's texts (`skill-chips.tsx`): its summary, and what its live region reads.
 
 import { parseScopedName } from "@appstrate/core/naming";
-import type { ConversationSkills } from "./chat-skills.ts";
+import type { StoredSkills } from "./chat-skills.ts";
 import type { ChatTranslate } from "./runtime-context.ts";
 
 export interface LoadedSkill {
@@ -18,17 +18,17 @@ export function namedSkill(names: SkillNames, id: string): LoadedSkill {
 }
 
 /**
- * What the live region reads of the server's last verdicts alone (never a local toggle, a pending
- * pin or a citation): the skills it loaded, then how many it left out. `null` until the catalogue
- * names them (`names`), so a name swap is never read out.
+ * What the live region reads of the pins' verdicts alone (never a pin no turn judged yet, nor a
+ * citation): the skills loaded, then how many were left out. `null` until the catalogue names
+ * them (`names`), so a name swap is never read out.
  */
 export function verdictsSummary(
-  skills: ConversationSkills,
+  skills: StoredSkills,
   names: SkillNames | null,
   t: ChatTranslate,
 ): string | null {
   if (!names) return null;
-  const judged = [...skills.stored.values()].filter((pin) => pin.status !== null);
+  const judged = skills.pins.filter((pin) => pin.status !== null);
   const loaded = judged
     .filter((pin) => pin.status === "injected")
     .map((pin) => namedSkill(names, pin.id));

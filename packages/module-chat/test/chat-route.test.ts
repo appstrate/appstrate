@@ -139,13 +139,18 @@ describe("the origin space of a new conversation", () => {
     expect("restricted" in body).toBe(false);
   });
 
-  it("sends the skill settings on the turn that creates the conversation only", () => {
-    const skills = { skillDiscovery: false, pin: ["@acme/tone", "@acme/a"], unpin: [] };
+  it("sends the skill selection on the turn that creates the conversation only", () => {
+    const skills = { skillDiscovery: false, pins: ["@acme/a", "@acme/tone"] };
     const keys = (body: object) => Object.keys(body).filter((key) => /skill|pins/.test(key));
     expect(keys(turnBody({ ...base, creation: undefined, skills }))).toEqual([]);
     const creation = { spaceId: "spc_a", restricted: false };
     expect(keys(turnBody({ ...base, creation, skills: undefined }))).toEqual([]);
-    expect(keys(turnBody({ ...base, creation, skills: { pin: [], unpin: [] } }))).toEqual([]);
+    expect(
+      turnBody({ ...base, creation, skills: { skillDiscovery: true, pins: [] } }),
+    ).toMatchObject({ skill_discovery: true });
+    expect(
+      keys(turnBody({ ...base, creation, skills: { skillDiscovery: true, pins: [] } })),
+    ).toEqual(["skill_discovery"]);
     expect(turnBody({ ...base, creation, skills })).toMatchObject({
       skill_discovery: false,
       pins: ["@acme/a", "@acme/tone"],

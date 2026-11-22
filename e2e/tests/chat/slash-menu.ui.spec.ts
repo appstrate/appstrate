@@ -12,8 +12,14 @@ import { test, expect } from "../../fixtures/browser.fixture.ts";
 
 const commands = {
   skills: [
-    { id: "@acme/tone", name: "tone", description: "Adjusts the tone of a text", version: "1.2.0" },
-    { id: "@acme/pdf", name: "pdf", description: "Reads PDF files", version: null },
+    {
+      id: "@acme/tone",
+      name: "tone",
+      description: "Adjusts the tone of a text",
+      version: "1.2.0",
+      bytes: 1200,
+    },
+    { id: "@acme/pdf", name: "pdf", description: "Reads PDF files", version: null, bytes: null },
   ],
   agents: [
     {
@@ -167,7 +173,7 @@ test("an agent chip is a message of its own: its text part and its prompt part, 
   await expect(input.getByTestId("directive-chip")).toHaveCount(0);
 });
 
-test("a skill chip pins the skill with the message that carries it", async ({
+test("a skill chip pins the skill with the first message, which creates the conversation", async ({
   authedPage: page,
   browserCtx,
 }) => {
@@ -184,15 +190,52 @@ test("a skill chip pins the skill with the message that carries it", async ({
   const sent = page.waitForRequest(chatPost(chat));
   await page.keyboard.press("Enter");
   const body = (await sent).postDataJSON() as {
-    pin_skills?: string[];
-    unpin_skills?: string[];
+    pins?: string[];
+    skill_discovery?: boolean;
     messages: { parts: { type: string; text?: string }[] }[];
   };
-  expect(body.pin_skills).toEqual(["@acme/tone"]);
-  expect(body.unpin_skills).toBeUndefined();
+  expect(body.pins).toEqual(["@acme/tone"]);
+  expect(body.skill_discovery).toBe(true);
   expect(body.messages.at(-1)!.parts).toEqual([
     { type: "text", text: ":skill[tone]{name=@acme/tone} make it shorter" },
   ]);
+});
+
+test("a skill chip in an existing conversation is pinned by a PATCH before the message leaves", async ({
+  authedPage: page,
+  orgOnlyClient,
+  browserCtx,
+}) => {
+  const orgId = browserCtx.org.orgId;
+  const chat = `/api/orgs/${orgId}/chat`;
+  const created = await orgOnlyClient.post(`/orgs/${orgId}/chat/sessions`, { title: "Cited" });
+  expect(created.status()).toBe(201);
+  const { id } = (await created.json()) as { id: string };
+  await mockCommands(page, orgId);
+  await page.route(`**${chat}`, (route) => route.fulfill({ status: 503, body: "" }));
+  const order: string[] = [];
+  page.on("request", (req) => {
+    const path = new URL(req.url()).pathname;
+    if (req.method() === "PATCH" && path === `${chat}/sessions/${id}/skills`) order.push("patch");
+    if (chatPost(chat)(req)) order.push("post");
+  });
+
+  await page.goto(`/chat/${id}`);
+  const input = composer(page);
+  await input.fill("/tone");
+  await expect(page.getByRole("option", { name: /tone/ })).toBeVisible();
+  await page.keyboard.press("Enter");
+  await page.keyboard.type("make it shorter");
+  const patched = page.waitForRequest(
+    (req) => req.method() === "PATCH" && req.url().endsWith(`/sessions/${id}/skills`),
+  );
+  const sent = page.waitForRequest(chatPost(chat));
+  await page.keyboard.press("Enter");
+  expect((await patched).postDataJSON()).toEqual({ pins: ["@acme/tone"], skill_discovery: true });
+  const body = (await sent).postDataJSON() as Record<string, unknown>;
+  // An existing conversation's skills change by PATCH only: the turn carries none.
+  expect(body.pins).toBeUndefined();
+  expect(order).toEqual(["patch", "post"]);
 });
 
 // The popover's own loading hold (assistant-ui) keeps Enter and Tab from sending a `/token` while
@@ -219,11 +262,12 @@ test("Enter and Tab inside a /token wait for the commands instead of sending it"
   await input.fill("/tone");
   // The menu is open on its loading notice before the keys, and still after them: they were the
   // popover's, so the field kept its text and nothing left.
-  const menu = page.getByTestId("slash-menu");
-  await expect(menu).toContainText("Chargement…");
+  // The notice sits beside the listbox, which holds only options.
+  const notice = page.getByTestId("slash-status");
+  await expect(notice).toHaveText("Chargement…");
   await page.keyboard.press("Enter");
   await page.keyboard.press("Tab");
-  await expect(menu).toContainText("Chargement…");
+  await expect(notice).toHaveText("Chargement…");
   await expect(input).toContainText("/tone");
   expect(sent).toEqual([]);
 
