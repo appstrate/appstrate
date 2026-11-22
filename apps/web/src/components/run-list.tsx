@@ -42,6 +42,8 @@ interface RunListProps {
   search?: string;
   /** Every space the reader reaches instead of the current one; each row then names its space. */
   spanning?: boolean;
+  /** With `spanning`: only these spaces' runs (the runs page's space filter). */
+  spaceIds?: readonly string[];
   /**
    * The bar above the table.
    *
@@ -63,6 +65,7 @@ export function RunList({
   status,
   search,
   spanning = false,
+  spaceIds,
   toolbar,
 }: RunListProps) {
   const { t } = useTranslation(["agents"]);
@@ -93,6 +96,7 @@ export function RunList({
     kind,
     status,
     spanning,
+    spaceIds,
     search: querySearch || undefined,
   });
   const { data, isLoading, isError, error } = query;

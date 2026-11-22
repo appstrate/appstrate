@@ -27,6 +27,7 @@ import { useTranslation } from "react-i18next";
 import { Check, Filter, PlusCircle, SlidersHorizontal, X } from "lucide-react";
 import { cn } from "@appstrate/ui/cn";
 import { toggleValue } from "../lib/toggle-value";
+import { readerFiltered } from "../lib/reader-filtered";
 import { TOOLBAR_UTILITY } from "../lib/toolbar-button";
 import { Badge } from "@appstrate/ui/components/badge";
 import { Button } from "@appstrate/ui/components/button";
@@ -78,6 +79,11 @@ export interface FilterSpec {
   values: string[];
   options: FilterOption[];
   onChange: (values: string[]) => void;
+  /**
+   * The values are the screen's default, not the reader's choice: shown, so the row opens and says
+   * why the list is short, but they neither count as a filter the reader set nor show the reset.
+   */
+  isDefault?: boolean;
 }
 
 /** Beyond this many, the button counts instead of naming. */
@@ -251,6 +257,7 @@ export function ListToolbar({
   actions?: ReactNode;
 }) {
   const { t } = useTranslation("common");
+  // Defaults count too: the badge and the open row are what explain a short list.
   const activeCount = filters.reduce((total, filter) => total + filter.values.length, 0);
 
   // Only the FIRST render decides: closing the row afterwards is the reader's call and is not
@@ -296,7 +303,7 @@ export function ListToolbar({
           {filters.map((filter) => (
             <FacetedFilter key={filter.id} filter={filter} />
           ))}
-          {activeCount > 0 && onReset && (
+          {readerFiltered(filters) && onReset && (
             <Button variant="ghost" size="sm" className="h-8 gap-1.5 px-2.5" onClick={onReset}>
               <X />
               {t("toolbar.reset")}

@@ -5,12 +5,20 @@ import { useTranslation } from "react-i18next";
 import { Calendar, Plus } from "lucide-react";
 import { useAllSchedules } from "../hooks/use-schedules";
 import { useOverviewMode } from "../hooks/use-overview-mode";
+import { useSpaceFilter } from "../hooks/use-space-filter";
+import { inSpaces } from "../lib/space-filter";
 import { useSpaceAction } from "../hooks/use-space-action";
 import { PageHeader } from "../components/page-header";
-import { EmptyState, EmptyStateAction, ErrorState, NoMatchState } from "../components/page-states";
+import {
+  EmptyState,
+  EmptyStateAction,
+  ErrorState,
+  NoMatchState,
+  SpaceFilterEmpty,
+} from "../components/page-states";
 import { SchedulesTable } from "../components/schedules-table";
 import { useScheduleColumns } from "../components/schedule-columns";
-import { ListFooter, ListToolbar } from "../components/list-toolbar";
+import { ListFooter, ListToolbar, type FilterSpec } from "../components/list-toolbar";
 import { useColumnVisibility } from "../stores/column-visibility-store";
 import { useSearchPlaceholder } from "../lib/search-placeholder";
 import { useListParams } from "../lib/list-params";
@@ -54,18 +62,36 @@ export function SchedulesListPage() {
   const list = useListParams(["state"]);
   const query = list.search;
   const states = list.values("state", STATES);
+  const space = useSpaceFilter("schedules", spanning);
+  const { spaceIds } = space;
   const shown = useMemo(() => {
     return (schedules ?? []).filter((schedule) => {
+      if (!inSpaces([schedule.spaceId], spaceIds)) return false;
       const enabled = schedule.enabled ?? true;
       const key = enabled ? "enabled" : "disabled";
       if (states.length > 0 && !states.includes(key)) return false;
       return matchesSearch(query, [schedule.name, schedule.agent_name]);
     });
-  }, [schedules, query, states]);
+  }, [schedules, query, states, spaceIds]);
 
+  const filters: FilterSpec[] = [
+    ...(space.filter ? [space.filter] : []),
+    {
+      id: "state",
+      label: t("providers.col.state"),
+      values: states,
+      onChange: list.setValues("state"),
+      options: [
+        { value: "enabled", label: t("schedule.statusActive", { ns: "agents" }) },
+        { value: "disabled", label: t("schedule.statusDisabled", { ns: "agents" }) },
+      ],
+    },
+  ];
   const filtering = query.trim() !== "" || states.length > 0;
   const emptyBody = filtering ? (
     <NoMatchState message={t("schedules.noMatch")} onReset={list.reset} />
+  ) : spaceIds ? (
+    <SpaceFilterEmpty showAll={space.showAll} />
   ) : (
     <EmptyState
       message={spanning ? t("schedules.emptyAcross") : t("schedules.empty")}
@@ -88,18 +114,7 @@ export function SchedulesListPage() {
 
       <ListToolbar
         search={{ value: query, onChange: list.setSearch, placeholder }}
-        filters={[
-          {
-            id: "state",
-            label: t("providers.col.state"),
-            values: states,
-            onChange: list.setValues("state"),
-            options: [
-              { value: "enabled", label: t("schedule.statusActive", { ns: "agents" }) },
-              { value: "disabled", label: t("schedule.statusDisabled", { ns: "agents" }) },
-            ],
-          },
-        ]}
+        filters={filters}
         onReset={list.reset}
         columns={menu}
       />

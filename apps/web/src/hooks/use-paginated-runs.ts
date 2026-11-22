@@ -25,6 +25,8 @@ interface UseRunsOptions {
   unread?: boolean;
   /** Every space the reader reaches (`GET /api/orgs/{orgId}/runs`); ignored for a schedule's list. */
   spanning?: boolean;
+  /** Narrows an org-wide list to these spaces (`spaceId`); ignored off the org-wide route. */
+  spaceIds?: readonly string[];
   enabled?: boolean;
   limit?: number;
 }
@@ -57,6 +59,7 @@ export function useRuns({
   search,
   unread,
   spanning,
+  spaceIds,
   enabled = true,
   limit = RUNS_PAGE_SIZE,
 }: UseRunsOptions) {
@@ -85,6 +88,8 @@ export function useRuns({
     unread,
     search,
     limit,
+    // The key carries them only where the request does.
+    acrossSpaces ? spaceIds : undefined,
   );
 
   return useInfiniteQuery({
@@ -100,6 +105,7 @@ export function useRuns({
           search,
           unread,
           acrossOrgId: scope.acrossOrgId,
+          spaceIds,
           limit,
           startingAfter: pageParam,
         },
@@ -166,6 +172,7 @@ export async function fetchRunPage(
     search,
     unread,
     acrossOrgId,
+    spaceIds,
     limit,
     startingAfter,
   }: RunPageRequest,
@@ -191,7 +198,11 @@ export async function fetchRunPage(
   };
   if (acrossOrgId) {
     const { data } = await client.GET("/api/orgs/{orgId}/runs", {
-      params: { path: { orgId: acrossOrgId }, query },
+      params: {
+        path: { orgId: acrossOrgId },
+        // An array: the client serializes it comma-separated (`QUERY_SERIALIZER`).
+        query: { ...query, spaceId: spaceIds?.length ? [...spaceIds] : undefined },
+      },
       signal,
     });
     return data!;

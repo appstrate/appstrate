@@ -130,10 +130,13 @@ export function EmptyState({
 export function NoMatchState({
   message,
   onReset,
+  resetLabel,
   compact = true,
 }: {
   message: string;
   onReset?: () => void;
+  /** The button's words; « Tout effacer » unless the way out is not a filter reset. */
+  resetLabel?: string;
   compact?: boolean;
 }) {
   const { t } = useTranslation("common");
@@ -141,10 +144,22 @@ export function NoMatchState({
     <EmptyState message={message} icon={SearchX} compact={compact}>
       {onReset && (
         <Button variant="outline" size="sm" onClick={onReset}>
-          {t("toolbar.clearAll")}
+          {resetLabel ?? t("toolbar.clearAll")}
         </Button>
       )}
     </EmptyState>
+  );
+}
+
+/** An empty list the space filter alone narrowed: the way out is every space, not a filter reset. */
+export function SpaceFilterEmpty({ showAll }: { showAll: () => void }) {
+  const { t } = useTranslation("common");
+  return (
+    <NoMatchState
+      message={t("spaceFilter.emptyTeam")}
+      onReset={showAll}
+      resetLabel={t("spaceFilter.showAll")}
+    />
   );
 }
 

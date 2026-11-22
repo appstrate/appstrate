@@ -31,6 +31,8 @@ import { CreatePackageModal } from "../components/create-package-modal";
 import { CreationHandoffModal } from "../components/creation-handoff-modal";
 import { useIntegrationDetail } from "../hooks/use-integrations";
 import { useOverviewMode } from "../hooks/use-overview-mode";
+import { useSpaceFilter } from "../hooks/use-space-filter";
+import { inSpaces } from "../lib/space-filter";
 import { usePackageIndexActions } from "../hooks/use-package-index-actions";
 
 type IndexType = Extract<PackageType, "agent" | "skill">;
@@ -115,6 +117,9 @@ function PackageIndexBody({
     usePackageColumns(type, spanning),
     type === "agent" ? AGENT_HIDDEN_COLUMNS : undefined,
   );
+  const space = useSpaceFilter(type === "agent" ? "agents" : "skills", spanning);
+  // The collection's own filters stay on the whole list; this one narrows the rows before them.
+  const shownItems = items?.filter((item) => inSpaces(item.spaceIds, space.spaceIds));
   const words = presentation(type, t);
   const { canCreate, creation, importing, setImporting, createAction, actionsMenu } =
     usePackageIndexActions(type, words.create);
@@ -141,7 +146,8 @@ function PackageIndexBody({
         columns={columns}
         columnMenu={menu}
         tableId={`packages-${type}`}
-        items={items}
+        items={shownItems}
+        extraFilters={space.filter ? [space.filter] : undefined}
         isLoading={isLoading}
         error={error}
         holds={type}

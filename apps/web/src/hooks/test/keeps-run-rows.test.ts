@@ -6,7 +6,9 @@ import { describe, it, expect } from "bun:test";
 import { ACROSS_SPACES, paginatedRunsKeys } from "../../lib/query-keys.ts";
 import { keepsRunRows } from "../use-paginated-runs.ts";
 
-const key = (overrides: { status?: string; search?: string; limit?: number } = {}) =>
+const key = (
+  overrides: { status?: string; search?: string; limit?: number; spaceIds?: string[] } = {},
+) =>
   paginatedRunsKeys.list(
     "org_1",
     "spc_1",
@@ -17,6 +19,7 @@ const key = (overrides: { status?: string; search?: string; limit?: number } = {
     undefined,
     overrides.search ?? "",
     overrides.limit ?? 25,
+    overrides.spaceIds,
   );
 
 describe("keepsRunRows", () => {
@@ -26,6 +29,16 @@ describe("keepsRunRows", () => {
 
   it("keeps the rows while the search changes, so typing never flashes a skeleton", () => {
     expect(keepsRunRows(key({ search: "rap" }), key({ search: "rapport" }))).toBe(true);
+  });
+
+  it("drops the rows when the spaces change, and keeps them while searching within them", () => {
+    expect(keepsRunRows(key({ spaceIds: ["spc_a"] }), key())).toBe(false);
+    expect(
+      keepsRunRows(
+        key({ spaceIds: ["spc_a"], search: "r" }),
+        key({ spaceIds: ["spc_a"], search: "ra" }),
+      ),
+    ).toBe(true);
   });
 
   it("drops the rows when a filter changes", () => {

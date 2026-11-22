@@ -18,8 +18,13 @@ import { packageCardItem } from "../lib/package-card-item";
 import { packageDetailPath } from "../lib/package-paths";
 import { useListView } from "../stores/list-view-store";
 import { DataTable } from "../components/data-table";
-import { ListFooter, ListToolbar } from "../components/list-toolbar";
-import { EmptyState, EmptyStateAction, NoMatchState } from "../components/page-states";
+import { ListFooter, ListToolbar, type FilterSpec } from "../components/list-toolbar";
+import {
+  EmptyState,
+  EmptyStateAction,
+  NoMatchState,
+  SpaceFilterEmpty,
+} from "../components/page-states";
 import { CreationHandoffModal } from "../components/creation-handoff-modal";
 import { ImportModal } from "../components/import-modal";
 import { SpaceLibraryHint } from "../components/space-library-hint";
@@ -36,6 +41,8 @@ import { usePackageList } from "../hooks/use-packages";
 import { useOrg } from "../hooks/use-org";
 import { useColumnVisibility } from "../stores/column-visibility-store";
 import { useOverviewMode } from "../hooks/use-overview-mode";
+import { useSpaceFilter } from "../hooks/use-space-filter";
+import { inSpaces } from "../lib/space-filter";
 import { usePackageIndexActions } from "../hooks/use-package-index-actions";
 import { useSpaceLink } from "../hooks/use-current-space";
 import { IntegrationSourceLabel } from "../components/integration-source-label";
@@ -61,16 +68,47 @@ export function IntegrationsPage() {
   const sources = list.values("source", INTEGRATION_SOURCES);
   const query = list.search;
 
+  const space = useSpaceFilter("integrations", spanning);
+  const { spaceIds } = space;
   const shown = useMemo(
-    () => filterIntegrations(active, { query, origins, sources }),
-    [active, query, origins, sources],
+    () =>
+      filterIntegrations(
+        active.filter((integration) => inSpaces(integration.space_ids, spaceIds)),
+        { query, origins, sources },
+      ),
+    [active, query, origins, sources, spaceIds],
   );
   const filtering = query.trim() !== "" || origins.length > 0 || sources.length > 0;
 
   const allColumns = useIntegrationListColumns(connectionCount, spanning);
   const { columns, menu } = useColumnVisibility("integrations", allColumns);
+  const filters: FilterSpec[] = [
+    ...(space.filter ? [space.filter] : []),
+    {
+      id: "origin",
+      label: t("integrations.filter.origin"),
+      values: origins,
+      onChange: list.setValues("origin"),
+      options: [
+        { value: "custom", label: t("catalogue.sourceOrg", { name: orgName }) },
+        { value: "system", label: t("catalogue.sourceSystem") },
+      ],
+    },
+    {
+      id: "source",
+      label: t("integrations.col.source"),
+      values: sources,
+      onChange: list.setValues("source"),
+      options: INTEGRATION_SOURCES.map((source) => ({
+        value: source,
+        label: t(`integrations.source.${source}`),
+      })),
+    },
+  ];
   const empty = filtering ? (
     <NoMatchState message={t("integrations.empty.filtered")} onReset={list.reset} />
+  ) : spaceIds ? (
+    <SpaceFilterEmpty showAll={space.showAll} />
   ) : (
     <EmptyState
       icon={Boxes}
@@ -94,28 +132,7 @@ export function IntegrationsPage() {
 
       <ListToolbar
         search={{ value: query, onChange: list.setSearch, placeholder: searchPlaceholder }}
-        filters={[
-          {
-            id: "origin",
-            label: t("integrations.filter.origin"),
-            values: origins,
-            onChange: list.setValues("origin"),
-            options: [
-              { value: "custom", label: t("catalogue.sourceOrg", { name: orgName }) },
-              { value: "system", label: t("catalogue.sourceSystem") },
-            ],
-          },
-          {
-            id: "source",
-            label: t("integrations.col.source"),
-            values: sources,
-            onChange: list.setValues("source"),
-            options: INTEGRATION_SOURCES.map((source) => ({
-              value: source,
-              label: t(`integrations.source.${source}`),
-            })),
-          },
-        ]}
+        filters={filters}
         onReset={list.reset}
         columns={view === "table" ? menu : undefined}
         actions={<ListViewTabs view={view} onChange={setView} />}

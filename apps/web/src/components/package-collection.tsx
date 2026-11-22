@@ -22,7 +22,8 @@ import { CardGrid } from "./card-grid";
 import { PackageCard, PackageCardSkeleton } from "./package-card";
 import { PackagesTable } from "./packages-table";
 import { ListFooter, ListToolbar, type ColumnMenuSpec, type FilterSpec } from "./list-toolbar";
-import { EmptyState, NoMatchState } from "./page-states";
+import { readerFiltered } from "../lib/reader-filtered";
+import { EmptyState, NoMatchState, SpaceFilterEmpty } from "./page-states";
 import { useSearchPlaceholder } from "../lib/search-placeholder";
 import type { ListState } from "../lib/list-params";
 import type { ListView } from "../stores/list-view-store";
@@ -75,7 +76,8 @@ export interface PackageCollectionProps {
   originLabels?: OriginLabels;
   /**
    * Dimensions the CALLER filters on. It has already narrowed `items`; the bar
-   * only draws these, next to the ones this component owns.
+   * only draws these, next to the ones this component owns. One that `isDefault`s and holds a
+   * value (the space filter) narrows without the reader asking: its empty list offers to widen.
    */
   extraFilters?: FilterSpec[];
   /** Whether an agent card offers its run button. A catalogue's cannot. */
@@ -168,10 +170,10 @@ export function PackageCollection({
     ...extraFilters,
   ];
   const filtering =
-    Boolean(query) ||
-    origins.length > 0 ||
-    activities.length > 0 ||
-    extraFilters.some((filter) => filter.values.length > 0);
+    Boolean(query) || origins.length > 0 || activities.length > 0 || readerFiltered(extraFilters);
+  const narrowedByDefault = extraFilters.find(
+    (filter) => filter.isDefault && filter.values.length > 0,
+  );
 
   // An empty list, a search that matched nothing, and a request that failed are
   // three different sentences, and the body says whichever applies IN PLACE —
@@ -180,6 +182,8 @@ export function PackageCollection({
   // page's own actions as unlabelled icons.
   const emptyBody = filtering ? (
     <NoMatchState message={t("list.noMatch")} onReset={list.reset} />
+  ) : narrowedByDefault ? (
+    <SpaceFilterEmpty showAll={() => narrowedByDefault.onChange([])} />
   ) : (
     <EmptyState message={emptyMessage} hint={emptyHint} icon={emptyIcon} compact>
       {emptyAction}
