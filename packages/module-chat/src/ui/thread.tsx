@@ -104,7 +104,6 @@ import {
   type QueueSnapshot,
 } from "./message-queue.ts";
 import {
-  AGENT_PROMPT_NAME,
   agentOfRunConfig,
   agentOnlyContent,
   agentPromptOf,
@@ -117,6 +116,7 @@ import {
 import { AgentPromptChip } from "./agent-prompt-chip.tsx";
 import { RemovableChip } from "./removable-chip.tsx";
 import { SlashMenuList } from "./slash-menu.tsx";
+import { isComposingKey, typedSendPlan } from "./slash-menu.ts";
 import { useSlashMenu } from "./use-slash-menu.ts";
 
 export function Thread({
@@ -651,13 +651,24 @@ function Composer({
   };
   // An agent alone is a message the composer would not send (nothing typed): the thread does.
   const agentOnly = agent !== null && !running && composer.value.trim() === "" && !hasAttachments;
-  const sendAgentOnly = () => {
-    if (!agent || limitPending) return;
+  const sendAgentOnly = (chip: AgentChip) => {
+    if (limitPending) return;
     // The composer path cannot send this: it refuses an empty draft, so the agent prompt part
     // goes through the thread instead (there is nothing else to carry: no text, no files).
-    aui.thread().append({ role: "user", content: agentOnlyContent(agent) });
+    aui.thread().append({ role: "user", content: agentOnlyContent(chip) });
     setAgent(null);
   };
+  // `/name text` typed in one go: the choice is applied as the menu would, then the rest is sent.
+  const typed = menu.typed;
+  const sendTyped = () => {
+    if (!typed || limitPending) return;
+    const choice = menu.choose(typed.entry, typed.rest);
+    const plan = typedSendPlan(choice, typed.rest, hasAttachments);
+    if (plan === "agent-only" && choice.kind === "agent") sendAgentOnly(choice.agent);
+    else if (plan === "send") aui.composer().send();
+  };
+  // What replaces the composer's own send when it would do nothing or the wrong thing.
+  const submit = typed ? sendTyped : agentOnly && agent ? () => sendAgentOnly(agent) : null;
   React.useEffect(() => {
     if (!takesDraft(initialDraft, { seeded: draftSeededRef.current, typed: composer.value }))
       return;
@@ -695,6 +706,8 @@ function Composer({
       {menu.open && (
         <SlashMenuList
           entries={menu.entries}
+          status={menu.status}
+          refused={menu.refused}
           active={menu.active}
           listId={menu.listId}
           onChoose={menu.onChoose}
@@ -740,14 +753,14 @@ function Composer({
           onKeyDown={(e) => {
             if (menu.onKeyDown(e)) return;
             const plainEnter = e.key === "Enter" && !e.shiftKey && !e.ctrlKey && !e.metaKey;
-            if (agentOnly && plainEnter && !e.nativeEvent.isComposing) {
+            if (submit && plainEnter && !isComposingKey(e)) {
               e.preventDefault();
-              sendAgentOnly();
+              submit();
               return;
             }
             // While the agent answers the primitive ignores Enter; it queues instead.
             if (!running || e.key !== "Enter" || e.shiftKey || e.ctrlKey || e.metaKey) return;
-            if (e.nativeEvent.isComposing) return;
+            if (isComposingKey(e)) return;
             e.preventDefault();
             enqueue();
           }}
@@ -759,12 +772,8 @@ function Composer({
         <div className="flex items-center gap-2 [grid-area:send]">
           <ContextGauge className="max-md:group-data-[rest]/composer:hidden" />
           <ThreadPrimitive.If running={false}>
-            {agentOnly ? (
-              <SendButton
-                label={t("composer.send")}
-                disabled={limitPending}
-                onClick={sendAgentOnly}
-              />
+            {submit ? (
+              <SendButton label={t("composer.send")} disabled={limitPending} onClick={submit} />
             ) : (
               <ComposerPrimitive.Send asChild disabled={limitPending}>
                 <SendButton label={t("composer.send")} />
@@ -822,8 +831,6 @@ function SendButton({ label, ...props }: React.ComponentProps<typeof Button> & {
 /** Module-level: assistant-ui memoizes each part on these members' identity. */
 const USER_PART_COMPONENTS = {
   File: FileAttachmentPart,
-  // The agent prompt is drawn as a chip above the bubble; its part, `text` included, draws nothing.
-  data: { by_name: { [AGENT_PROMPT_NAME]: () => null } },
 } satisfies React.ComponentProps<typeof MessagePrimitive.Parts>["components"];
 
 export function UserMessage() {
@@ -951,8 +958,6 @@ export function MessageError() {
   // `useSyncExternalStore`'s getSnapshot. See `turn-error-state.ts`.
   const message = useAuiState((s) => s.message);
   const aui = useAui();
-  const asked = useAuiState((s) => precedingUserMessage(s.thread.messages, s.message.id));
-  const retryAgent = React.useMemo(() => (asked ? agentPromptOf(asked) : null), [asked]);
   const errorState = React.useMemo(
     () => turnErrorState(message, t, can, personalModelCredentials),
     [message, t, can, personalModelCredentials],
@@ -976,13 +981,19 @@ export function MessageError() {
                   type="button"
                   variant="outline"
                   size="sm"
-                  onClick={() =>
+                  onClick={() => {
                     // The retry names the agent the failed turn launched, or the launch is lost.
+                    // Read at the click: a selector on the thread would run on every chunk.
+                    const asked = precedingUserMessage(
+                      aui.thread().getState().messages,
+                      message.id,
+                    );
+                    const agent = asked ? agentPromptOf(asked) : null;
                     aui.thread().append({
                       role: "user",
-                      content: retryContent(t("turn.retryPrompt"), retryAgent),
-                    })
-                  }
+                      content: retryContent(t("turn.retryPrompt"), agent),
+                    });
+                  }}
                 >
                   <RotateCcwIcon />
                   {t("common:btn.retry")}

@@ -22,15 +22,19 @@ export async function fetchChatCommands(
   return chatCommandsSchema.parse(await res.json());
 }
 
-/** Read only when `wanted` and the caller may write the chat (the route's guard). */
+/**
+ * Read only when `wanted` and the caller may write the chat (the route's guard). Freshness: the
+ * key sits under the shell's `["packages"]` prefix, so a package write made here refreshes it, and
+ * a 5 s stale time makes the menu (which turns `wanted` on at each `/`) refetch what a write
+ * elsewhere changed; the route's 60/min limit is far from that rate.
+ */
 export function useChatCommands(transport: ChatTransport | undefined, wanted: boolean) {
   const { can } = useChatHost();
   const spaceId = limitedSpaceOf(useConversationScope());
   return useQuery({
-    // Under the shell's `["packages"]` prefix, so a package write it refreshes reaches this entry.
     queryKey: ["packages", "chat-commands", transport?.orgId, spaceId ?? null],
     queryFn: () => fetchChatCommands(transport!, spaceId),
     enabled: wanted && !!transport && can("chat:write"),
-    staleTime: 30_000,
+    staleTime: 5_000,
   });
 }

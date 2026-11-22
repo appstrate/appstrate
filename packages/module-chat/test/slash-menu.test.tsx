@@ -67,6 +67,8 @@ interface Probed {
   texts: string[];
   agents: AgentChip[];
   input: Record<string, unknown>;
+  refused: boolean;
+  status: string;
 }
 
 /** Renders the menu's hook for `text` and presses `key` once; reports what it did. */
@@ -89,6 +91,8 @@ function press(
     texts: [],
     agents: [],
     input: {},
+    refused: false,
+    status: "",
   };
   const selection = { skillDiscovery: true, pinnedSkills: options.pinned ?? [] };
   const control =
@@ -102,10 +106,14 @@ function press(
       running: options.running ?? false,
       setAgent: (agent) => out.agents.push(agent),
     });
-    out.open = menu.open;
+    // What the menu was when the key came; a handler that changes state re-renders the probe.
+    if (out.handled === null) out.open = menu.open;
     out.input = menu.inputProps;
+    out.refused = menu.refused;
+    out.status = menu.status;
     out.names = menu.entries.map((e) => (e.kind === "skill" ? e.skill.name : e.agent.name));
-    if (key) {
+    // Once: a state change the handler makes re-renders the probe, and it must not press again.
+    if (key && out.handled === null) {
       out.handled = menu.onKeyDown({
         key,
         shiftKey: false,
@@ -138,11 +146,31 @@ describe("the / menu", () => {
   it("names the listbox and its active option on the input while open, nothing while closed", () => {
     const open = press("/", null);
     expect(open.input["aria-haspopup"]).toBe("listbox");
+    expect(open.input.role).toBe("combobox");
+    expect(open.input["aria-expanded"]).toBe(true);
     expect(open.input["aria-controls"]).toBeString();
     expect(String(open.input["aria-activedescendant"])).toStartWith(
       String(open.input["aria-controls"]),
     );
     expect(press("hello", null).input).toEqual({});
+  });
+
+  it("closes on Escape for the draft it was pressed on, and keeps the text", () => {
+    const out = press("/to", "Escape");
+    expect(out.handled).toBe(true);
+    expect(out.prevented).toBe(true);
+    expect(out.texts).toEqual([]);
+  });
+
+  it("keeps Escape for the menu while a turn runs: the composer is told not to stop it", () => {
+    // The composer sets `cancelOnEscape={!open}`: with the menu open, Escape does not cancel.
+    const out = press("/to", "Escape", { running: true });
+    expect(out.open).toBe(true);
+    expect(out.handled).toBe(true);
+  });
+
+  it("reads the commands from the first slash, so a command typed in one go finds its entry", () => {
+    expect(press("/tone make it shorter", null).open).toBe(false);
   });
 
   it("closes on a draft with no match, and Enter is then left to send the text as typed", () => {
@@ -190,6 +218,9 @@ describe("the / menu", () => {
     expect(out.open).toBe(true);
     expect(out.pinned).toEqual([]);
     expect(out.texts).toEqual([]);
+    // Said, not silent: the live region carries the cap message for this draft.
+    expect(out.refused).toBe(true);
+    expect(press("/to", null, { pinned: full }).refused).toBe(false);
   });
 
   it("makes an agent the composer's chip and strips the token", () => {
@@ -249,10 +280,52 @@ describe("SlashMenuList", () => {
     expect(html.match(/<div id="menu-2" role="option" aria-selected="true"/)).not.toBeNull();
   });
 
-  it("says that an agent starts a billed run, and a skill does not", () => {
+  it("shows an agent by its title and its command name, with no description", () => {
     const html = list(0);
-    expect(html.match(/slash\.agentRun/g)).toHaveLength(1);
+    expect(html).toContain("Weekly report");
+    expect(html).toContain("/run-report");
+    expect(html).not.toContain("Builds the report");
+    // The billed-run notice is the Agents heading's, once.
+    expect(html.match(/slash\.agents/g)).toHaveLength(1);
     expect(html).toContain("v1.2.0");
+  });
+
+  it("shows the package id of skills that share a name, and only of those", () => {
+    const twin = { id: "@other/tone", name: "tone", description: "Another", version: null };
+    const both = { ...commands, skills: [...commands.skills, twin] };
+    const html = renderToStaticMarkup(
+      <ChatHostProvider value={testHost()}>
+        <SlashMenuList
+          entries={slashEntries(both, "", { pinned: [], running: false, canPin: true })}
+          active={0}
+          listId="menu"
+          onChoose={() => {}}
+          onHover={() => {}}
+        />
+      </ChatHostProvider>,
+    );
+    expect(html).toContain("@acme/tone");
+    expect(html).toContain("@other/tone");
+    expect(html).not.toContain("@acme/pdf");
+  });
+
+  it("shows a loading row, then an error row, instead of an empty menu", () => {
+    const row = (status: "loading" | "error") =>
+      renderToStaticMarkup(
+        <ChatHostProvider value={testHost()}>
+          <SlashMenuList
+            entries={[]}
+            status={status}
+            active={0}
+            listId="menu"
+            onChoose={() => {}}
+            onHover={() => {}}
+          />
+        </ChatHostProvider>,
+      );
+    expect(row("loading")).toContain("slash.loading");
+    expect(row("error")).toContain("slash.error");
+    expect(row("error")).not.toContain('role="listbox"');
   });
 
   it("shows a pinned skill as added, and disables the unpinned ones at the cap with the cap message", () => {

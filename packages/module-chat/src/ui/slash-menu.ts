@@ -7,6 +7,7 @@
 
 import type { ChatAgentCommand, ChatCommands, ChatSkillCommand } from "../commands.ts";
 import { MAX_PINNED_SKILLS } from "../skills.ts";
+import { agentPromptDataSchema } from "../agent-prompt.ts";
 import type { AgentChip } from "./agent-prompt-part.ts";
 import { togglePinned } from "./chat-skills.ts";
 
@@ -31,11 +32,30 @@ export interface SlashContext {
   canPin: boolean;
 }
 
-function matches(query: string, ...fields: string[]): boolean {
-  return fields.some((field) => field.toLowerCase().includes(query));
+/** 0 exact, 1 prefix, 2 substring of `name`; 3 a substring of `other`; `null`: no match. */
+function rank(query: string, name: string, other: string): number | null {
+  const n = name.toLowerCase();
+  if (n === query) return 0;
+  if (n.startsWith(query)) return 1;
+  if (n.includes(query)) return 2;
+  return other.toLowerCase().includes(query) ? 3 : null;
 }
 
-/** Skills, then agents, those matching `query` (case-insensitive) on their name or description / title. */
+/** The matching `items`, best rank first (the listed order within a rank). */
+function ranked<T>(items: readonly T[], rankOf: (item: T) => number | null): T[] {
+  return items
+    .flatMap((item, index) => {
+      const r = rankOf(item);
+      return r === null ? [] : [{ item, r, index }];
+    })
+    .sort((x, y) => x.r - y.r || x.index - y.index)
+    .map(({ item }) => item);
+}
+
+/**
+ * Skills, then agents, those matching `query` (case-insensitive), each section ranked: exact
+ * name, name prefix, name substring, then description (skills) or title (agents).
+ */
 export function slashEntries(
   commands: ChatCommands,
   query: string,
@@ -43,23 +63,66 @@ export function slashEntries(
 ): SlashEntry[] {
   const q = query.toLowerCase();
   const skills = canPin
-    ? commands.skills
-        .filter((skill) => matches(q, skill.name, skill.description))
-        .map((skill): SlashEntry => {
+    ? ranked(commands.skills, (skill) => rank(q, skill.name, skill.description)).map(
+        (skill): SlashEntry => {
           const state = pinned.includes(skill.id)
             ? "pinned"
             : pinned.length >= MAX_PINNED_SKILLS
               ? "capped"
               : "free";
           return { kind: "skill", skill, state };
-        })
+        },
+      )
     : [];
   const agents = running
     ? []
-    : commands.agents
-        .filter((agent) => matches(q, agent.name, agent.title))
-        .map((agent): SlashEntry => ({ kind: "agent", agent }));
+    : ranked(commands.agents, (agent) => rank(q, agent.name, agent.title)).map(
+        (agent): SlashEntry => ({ kind: "agent", agent }),
+      );
   return [...skills, ...agents];
+}
+
+/**
+ * A draft that starts with `/<name>` then whitespace or its end, where `<name>` is exactly the
+ * name of ONE listed skill or agent (a homonym is ambiguous: plain text): the entry, and the rest
+ * of the draft, which is the message. The composer is the only parser of a command.
+ */
+export function parseTypedCommand(
+  text: string,
+  commands: ChatCommands,
+  { pinned, running, canPin }: SlashContext,
+): { entry: SlashEntry; rest: string } | null {
+  const match = /^\/(\S+)(?:\s+([\s\S]*))?$/.exec(text);
+  if (!match) return null;
+  const exact = slashEntries(commands, match[1]!, { pinned, running, canPin }).filter(
+    (entry) => (entry.kind === "skill" ? entry.skill.name : entry.agent.name) === match[1],
+  );
+  return exact.length === 1 ? { entry: exact[0]!, rest: match[2] ?? "" } : null;
+}
+
+/**
+ * What sending a typed command does once its choice is applied (`rest` is the draft left):
+ * `stay` when nothing is sent (the pin was refused, or only a skill was named), `agent-only` for
+ * an agent named alone (the composer sends no empty draft), `send` for a message to send.
+ */
+export function typedSendPlan(
+  choice: SlashChoice,
+  rest: string,
+  hasAttachments: boolean,
+): "stay" | "agent-only" | "send" {
+  if (choice.kind === "refuse") return "stay";
+  if (rest.trim() !== "" || hasAttachments) return "send";
+  return choice.kind === "agent" ? "agent-only" : "stay";
+}
+
+/** Escape closes the menu for the draft it was pressed on only: any other text forgets it. */
+export function dismissalFor(dismissed: string | null, text: string): string | null {
+  return dismissed === text ? dismissed : null;
+}
+
+/** An IME keydown (Safari confirms a composition with keyCode 229): it is not the menu's. */
+export function isComposingKey(event: { keyCode: number; nativeEvent: { isComposing: boolean } }) {
+  return event.nativeEvent.isComposing || event.keyCode === 229;
 }
 
 /** What a key does to an open menu of `count` (> 0) entries; `null`: the key is not the menu's. */
@@ -95,7 +158,12 @@ export type SlashChoice =
 
 export function slashChoice(entry: SlashEntry, pinned: readonly string[]): SlashChoice {
   if (entry.kind === "agent") {
-    return { kind: "agent", agent: { name: entry.agent.name, title: entry.agent.title } };
+    // A title past the part's limit would make the server refuse the whole message.
+    const max = agentPromptDataSchema.shape.title.maxLength ?? entry.agent.title.length;
+    return {
+      kind: "agent",
+      agent: { name: entry.agent.name, title: entry.agent.title.slice(0, max) },
+    };
   }
   if (entry.state === "pinned") return { kind: "close" };
   if (entry.state === "capped") return { kind: "refuse" };

@@ -6,6 +6,7 @@
 -- column dropped in this file; the second rewrites a surviving column, but the only
 -- thing it reads ("these pins were inactive") lives in `skill_mode`, which is dropped
 -- below, so a later operator script would have nothing to read.
+-- Rollback: the old modes cannot be rebuilt and the `auto` pins are gone; restore a backup.
 
 ALTER TABLE "chat_sessions" ADD COLUMN "skill_discovery" boolean DEFAULT true NOT NULL;--> statement-breakpoint
 UPDATE "chat_sessions" SET "skill_discovery" = false WHERE "skill_mode" = 'strict';--> statement-breakpoint

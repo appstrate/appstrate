@@ -209,6 +209,62 @@ describe("GET /api/orgs/:orgId/chat/commands", () => {
     expect(body.skills.map((skill) => skill.id)).toEqual(["@acme/tone"]);
   });
 
+  it("narrows a `spaceId` read to the limited conversation's grants and gates drafts on `skills:write`", async () => {
+    const seen: Seen = { spaceIds: [], permissions: [], methods: [] };
+    const drafts: unknown[] = [];
+    const dispatch = mcpDispatch(seen, { skills: { spc_a: ["tone"] }, prompts: [] });
+    const spy: ChatPlatformDeps["dispatch"] = async (req) => {
+      const clone = req.clone();
+      const message = (await clone.json()) as { method: string; params?: { _meta?: unknown } };
+      if (message.method === "skills/list" && message.params?._meta)
+        drafts.push(message.params._meta);
+      return dispatch(req);
+    };
+    // The org-level half is dropped for a limited read; the space-level grants stay.
+    const reach = [withPerms(spaceA, "skills:read", "skills:write", "agents:write")];
+    const app = (() => {
+      const deps = {
+        dispatch: spy,
+        rateLimit: () => async (_c: unknown, next: () => Promise<void>) => next(),
+        reachableSpaces: async () => ({
+          spaces: reach,
+          confined: false,
+          orgPermissions: ["agents:write"],
+        }),
+      } as unknown as ChatPlatformDeps;
+      const hono = new Hono<ChatEnv>();
+      hono.onError((error, c) => errorHandler(error, c as never));
+      hono.use("*", async (c, next) => {
+        c.set("orgId", "org_1");
+        c.set("user", { id: "usr_1", email: "a@b.test", name: "A" });
+        c.set("requestId", "req_test");
+        return next();
+      });
+      hono.route("/", createChatRouter(deps));
+      return hono;
+    })();
+    await get(app, "?spaceId=spc_a");
+    expect(seen.permissions[0]).toContain("skills:write");
+    expect(seen.permissions[0]).not.toContain("agents:write");
+    expect(drafts).toHaveLength(1);
+    // Without `skills:write` the drafts are still read (the turn does too) but never listed.
+    const readOnly = appFor(
+      [withPerms(spaceA, "skills:read")],
+      mcpDispatch(seen, { skills: { spc_a: ["tone"] }, prompts: [] }),
+    );
+    expect(chatCommandsSchema.parse(await (await get(readOnly)).json()).skills).toHaveLength(1);
+  });
+
+  it("answers 502 when the MCP server cannot be reached, not an empty list", async () => {
+    const app = appFor(
+      [withPerms(spaceA, "skills:read")],
+      async () => new Response("down", { status: 500 }),
+    );
+    const res = await get(app);
+    expect(res.status).toBe(502);
+    expect(((await res.json()) as { code: string }).code).toBe("bad_gateway");
+  });
+
   it("is refused without an acting space", async () => {
     const app = appFor([viewer], mcpDispatch({ spaceIds: [], permissions: [], methods: [] }));
     expect((await get(app)).status).toBe(403);

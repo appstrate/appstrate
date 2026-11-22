@@ -45,12 +45,13 @@ test("filters, selects with the keyboard or the mouse, and never sends while ope
   const menu = page.getByTestId("slash-menu");
   await expect(menu.getByRole("listbox")).toBeVisible();
   await expect(menu.getByRole("group", { name: "Compétences" })).toBeVisible();
-  await expect(menu.getByRole("group", { name: "Agents" })).toBeVisible();
+  // The billed-run notice is the Agents heading's, once.
+  await expect(
+    menu.getByRole("group", { name: /Agents · lancent une exécution facturée/ }),
+  ).toBeVisible();
   await expect(menu.getByRole("option")).toHaveCount(3);
-  // An agent says it starts a billed run.
-  await expect(menu.getByRole("option", { name: /Weekly report/ })).toContainText(
-    "Lance une exécution facturée",
-  );
+  // An agent shows its title and command name, no description.
+  await expect(menu.getByRole("option", { name: /Weekly report/ })).toContainText("/run-report");
 
   // The text after the slash filters, case-insensitively; the input keeps the focus.
   await input.fill("/TON");
@@ -144,4 +145,26 @@ test("an agent becomes a chip and the message carries its prompt part", async ({
   // The thread shows the chip at once; the chip leaves the composer.
   await expect(page.getByTestId("agent-prompt-chip")).toContainText("Weekly report");
   await expect(chip).toBeHidden();
+});
+
+test("a command typed in one go pins the skill and sends the rest as the text", async ({
+  authedPage: page,
+  browserCtx,
+}) => {
+  const chat = `/api/orgs/${browserCtx.org.orgId}/chat`;
+  await mockCommands(page, browserCtx.org.orgId);
+  await page.route(`**${chat}`, (route) => route.fulfill({ status: 503, body: "" }));
+
+  await page.goto("/chat");
+  await composer(page).fill("/tone make it shorter");
+  const sent = page.waitForRequest(
+    (req) => req.method() === "POST" && new URL(req.url()).pathname === chat,
+  );
+  await page.keyboard.press("Enter");
+  const body = (await sent).postDataJSON() as {
+    pinned_skills?: string[];
+    messages: { parts: { type: string; text?: string }[] }[];
+  };
+  expect(body.pinned_skills).toEqual(["@acme/tone"]);
+  expect(body.messages.at(-1)!.parts).toEqual([{ type: "text", text: "make it shorter" }]);
 });

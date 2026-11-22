@@ -19,7 +19,7 @@
  */
 
 import type { Context } from "hono";
-import { safeValidateUIMessages, type UIMessage, type UIMessageChunk } from "ai";
+import { safeValidateUIMessages, type FileUIPart, type UIMessage, type UIMessageChunk } from "ai";
 import { z } from "zod";
 import { invalidRequest, conflict, forbidden } from "@appstrate/core/api-errors";
 import { readJsonBody } from "@appstrate/core/request-body";
@@ -27,7 +27,7 @@ import { withByteCap } from "@appstrate/core/safe-json";
 import { isAttachmentUri, parseFileUri } from "@appstrate/core/file-uri";
 import { logger } from "./logger.ts";
 import { AGENT_PROMPT_PART_TYPE, agentPromptDataSchema } from "./agent-prompt.ts";
-import { resolveAgentPrompt } from "./agent-launch.ts";
+import { resolveAgentPrompt, withStoredAgentPromptTexts } from "./agent-launch.ts";
 import { notifySessionUpdate } from "./realtime.ts";
 import { listModels, pickModel } from "./llm.ts";
 import { actingOrgRole, callerMcpOpener, dispatchFetch, platformMcpUrl } from "./platform-mcp.ts";
@@ -56,6 +56,7 @@ import {
   persistUserMessage,
   persistAssistantMessage,
   storedFileParts,
+  storedAgentPromptTexts,
   touchSessionSpace,
 } from "./persistence.ts";
 import { registerStopController, unregisterStopController } from "./stop-registry.ts";
@@ -405,15 +406,16 @@ export async function handleChatStream(
       : Promise.resolve(ephemeralConversation());
   // The earlier turns' files, read once the row is known to be the caller's. An ephemeral
   // turn has no stored row, so its history carries no file.
-  const historyFiles = conversation.then(() =>
+  const historyIds = messages
+    .slice(0, -1)
+    .flatMap((message) => (typeof message.id === "string" ? [message.id] : []));
+  const historyStored = conversation.then(async () =>
     sessionId && lastMessage?.id
-      ? storedFileParts(
-          sessionId,
-          messages
-            .slice(0, -1)
-            .flatMap((message) => (typeof message.id === "string" ? [message.id] : [])),
-        )
-      : new Map(),
+      ? {
+          files: await storedFileParts(sessionId, historyIds),
+          launches: await storedAgentPromptTexts(sessionId, historyIds),
+        }
+      : { files: new Map<string, FileUIPart[]>(), launches: new Map<string, string>() },
   );
 
   const origin = selfOrigin();
@@ -460,7 +462,7 @@ export async function handleChatStream(
   const modelId = c.req.header("X-Model-Id") ?? body.modelId;
 
   // Flipping a switch changes the system prompt and, through the narrowed token, the
-  // MCP tool descriptors on the same turn: one prompt-cache miss. The skill mode, the
+  // MCP tool descriptors on the same turn: one prompt-cache miss. The skill selection, the
   // origin space and the limit live on the session row, so the turn's scope follows its upsert.
   const turn = conversation.then((conv) => {
     // The origin space, while the caller can still act there.
@@ -581,8 +583,11 @@ export async function handleChatStream(
     );
 
   const [models, { permissions, capabilities, spaces, organization, scope, openCaller }, stored] =
-    await Promise.all([listModels(origin, inferenceHeaders, platformFetch), turn, historyFiles]);
-  messages = withStoredHistoryFiles(messages, stored);
+    await Promise.all([listModels(origin, inferenceHeaders, platformFetch), turn, historyStored]);
+  messages = withStoredAgentPromptTexts(
+    withStoredHistoryFiles(messages, stored.files),
+    stored.launches,
+  );
   let chosen;
   try {
     chosen = pickModel(models, modelId);
@@ -673,6 +678,15 @@ export async function handleChatStream(
   // Which credential the turn spends. One engine drives them both.
   const credentialMode = isSubscription ? "oauth2" : "api-key";
 
+  // Resolve the new turn's agent launch, if it carries one: `prompts/get` over the caller's
+  // connection in the turn's spaces, a read that changes nothing. Its answer is written into the
+  // part before the turn is persisted, so the thread, the model and every replay share it. Before
+  // the slot and the claim, so a refused launch has nothing to undo.
+  if (lastMessage) {
+    lastMessage = await resolveAgentPrompt(lastMessage, openCaller);
+    messages[messages.length - 1] = lastMessage;
+  }
+
   // Resolve the model binding and reserve capacity before the user message or
   // the active-stream marker is written, so a dead credential, an unsupported
   // family or a saturated process leaves no half-written turn behind. Once
@@ -724,21 +738,6 @@ export async function handleChatStream(
       throw err;
     }
     claimTurnMs = Date.now() - claimStart;
-  }
-
-  // Resolve the new turn's agent launch, if it carries one: `prompts/get` over the caller's
-  // connection in the turn's spaces, its answer written into the part before the turn is
-  // persisted, so the thread, the model and every replay share it. After the claim, like the
-  // attachments, and undone the same way: a refused launch leaves nothing behind.
-  if (lastMessage) {
-    try {
-      lastMessage = await resolveAgentPrompt(lastMessage, openCaller);
-    } catch (err) {
-      slot.release();
-      if (claimedSessionId) await clearActiveStream(claimedSessionId, streamId).catch(() => {});
-      throw err;
-    }
-    messages[messages.length - 1] = lastMessage;
   }
 
   // Materialize the new turn's composer attachments into durable, session-scoped

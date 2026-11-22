@@ -90,6 +90,7 @@ const listedSkill = (packageId: string, description: string, version: string | n
   const [scope, name] = packageId.slice(1).split("/");
   return {
     packageId,
+    name,
     description,
     version,
     uri: `skill://space-1/${scope}/${name}${version ? "" : "@draft"}/${name}/SKILL.md`,
@@ -185,6 +186,28 @@ describe("formatCallerContext", () => {
     expect(out).not.toContain("- `@acme/mine`");
     expect(out.match(/@acme\/mine/g)).toHaveLength(1);
     expect(out).toContain('<skill id="@acme/mine"');
+  });
+
+  it("keeps a pinned skill that did not fit the budget in the catalogue, with its notice", () => {
+    const huge = {
+      packageId: "@acme/huge",
+      uri: "skill://space-1/acme/huge/huge/SKILL.md",
+      version: "1.0.0",
+      served: { definition: "published", version: "1.0.0" } as const,
+      content: "x".repeat(64_001),
+    };
+    const out = contextText(
+      { user: { name: "Ada" }, org: { role: "member" } },
+      {
+        ...BASE_OPTS,
+        skills: { skillDiscovery: true, pinnedSkills: ["@acme/huge"] },
+        skillContents: new Map([["@acme/huge", huge]]),
+        skillCatalogue: [listedSkill("@acme/huge", "Huge", "1.0.0")],
+      },
+    );
+    expect(out).toContain("- `@acme/huge`");
+    expect(out).toContain("does not fit");
+    expect(out).not.toContain('<skill id="@acme/huge"');
   });
 
   it("lists the turn's skills with discovery on, and none when the turn cannot load one", () => {

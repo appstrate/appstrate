@@ -3,10 +3,12 @@
 /**
  * What `GET /api/orgs/:orgId/chat/commands` answers: the composer's `/` menu, read as an MCP
  * client reads the platform server (`skills/list`, `prompts/list`) over one connection of the
- * caller's own, closed before the answer.
+ * caller's own, closed before the answer. A server that cannot be reached is a 502; a half that
+ * fails to read is left empty, as the turn tolerates it.
  */
 
 import type { AppstrateMcpClient } from "@appstrate/mcp-transport";
+import { badGateway } from "@appstrate/core/api-errors";
 import { logger } from "./logger.ts";
 import { CALLER_READ_TIMEOUT_MS, readSkillsOver } from "./prompt.ts";
 import type { ChatAgentCommand, ChatCommands, ChatSkillCommand } from "./commands.ts";
@@ -26,10 +28,9 @@ export async function readChatCommands(
   try {
     client = await openCaller(signal);
   } catch (err) {
-    logger.warn("commands connection unavailable — the composer's commands left empty", {
-      err: String(err),
-    });
-    return { skills: [], agents: [] };
+    // An unreachable server is not "nothing to offer": the composer must not read it as such.
+    logger.warn("commands connection unavailable", { err: String(err) });
+    throw badGateway("The platform's MCP server could not be reached.");
   }
   try {
     const [skills, agents] = await Promise.all([

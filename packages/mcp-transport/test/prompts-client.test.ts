@@ -149,6 +149,39 @@ describe("AppstrateMcpClient prompts", () => {
     }
   });
 
+  it("refuses a listing that never ends within 64 pages", async () => {
+    let n = 0;
+    const client = await createMcpHttpClient("http://mcp.test/mcp", {
+      era: "legacy",
+      fetch: pagedFetch(() => ({ prompts: [PROMPT], nextCursor: `c${n++}` })),
+    });
+    try {
+      await expect(client.listPrompts()).rejects.toThrow("did not end within 64 pages");
+    } finally {
+      await client.close();
+    }
+  });
+
+  it("refuses a prompts/get result that is not a prompt", async () => {
+    const server = promptsFetch(prompts);
+    const client = await createMcpHttpClient("http://mcp.test/mcp", {
+      era: "legacy",
+      fetch: (async (input: string | URL | Request, init?: RequestInit) => {
+        const request =
+          input instanceof Request ? new Request(input, init) : new Request(String(input), init);
+        const text = await request.clone().text();
+        const message = text ? (JSON.parse(text) as Record<string, unknown>) : {};
+        if (message.method !== "prompts/get") return server(request);
+        return Response.json({ jsonrpc: "2.0", id: message.id, result: { messages: "nope" } });
+      }) as typeof fetch,
+    });
+    try {
+      await expect(client.getPrompt({ name: "run-demo" })).rejects.toThrow("not a prompt");
+    } finally {
+      await client.close();
+    }
+  });
+
   it("fails its calls once closed", async () => {
     const pair = await createInProcessPair([], { prompts });
     const client = wrapClient(pair.client, pair);

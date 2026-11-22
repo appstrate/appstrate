@@ -123,6 +123,21 @@ defaults, and a change would send them over the stored choice. The panel is
 controlled: the conversation holds the selection, seeded from the session
 detail, and sends only what the user changed.
 
+## Commands
+
+The composer's `/` menu (#2173) lists the skills the conversation can pin and the agents the
+caller can launch, read as an MCP client reads the platform server (`skills/list`,
+`prompts/list`) over one connection of the caller's own: `GET /api/orgs/{orgId}/chat/commands`
+(`?spaceId=` reads one space, as a limited conversation). `/<skill>` is only the composer
+adding the id to `pinned_skills`: no backend path of its own, no one-turn injection.
+
+An agent launch is a `data-agent-prompt` part (`{ name, title }`) in the last user message. The
+turn resolves it with `prompts/get` (the typed text as `request`) before taking the slot and the
+claim, and stores the returned instructions in the part's `data.text`, capped at 64 KB. The model
+reads that text in place of the typed text; a later turn takes it from the stored
+`chat_messages` row by message id, never from the browser's copy, and never asks the server
+again. Nothing parses `/run-…` out of the text.
+
 ## Out of scope
 
 - Platform-provided skills the chat indexes by default, and the `unlisted`
@@ -131,7 +146,5 @@ detail, and sends only what the user changed.
   `authors`, a web recipe on composing), and the `@appstrate` scope must be
   reserved at package creation first — today the JSON create route accepts
   any `@scope`, so a new system id can collide with an organization package.
-- A `/skill` mention that loads a body into one message (#1309 open question
-  5): pinning a skill covers it; propose it on its own if usage asks.
 - Per-space default selection inherited by new sessions.
 - `resolved_skill_versions` on runs and `dependency_overrides` (#1165).

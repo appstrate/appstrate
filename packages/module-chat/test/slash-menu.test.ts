@@ -5,7 +5,16 @@
 import { describe, expect, it } from "bun:test";
 import { MAX_PINNED_SKILLS } from "../src/skills.ts";
 import type { ChatCommands } from "../src/commands.ts";
-import { slashChoice, slashEntries, slashKey, slashQuery } from "../src/ui/slash-menu.ts";
+import {
+  dismissalFor,
+  isComposingKey,
+  parseTypedCommand,
+  slashChoice,
+  slashEntries,
+  slashKey,
+  slashQuery,
+  typedSendPlan,
+} from "../src/ui/slash-menu.ts";
 
 const commands: ChatCommands = {
   skills: [
@@ -130,5 +139,131 @@ describe("slashChoice", () => {
       kind: "agent",
       agent: { name: "run-report", title: "Weekly report" },
     });
+  });
+});
+
+describe("ranking", () => {
+  const collision: ChatCommands = {
+    skills: [
+      { id: "@a/reader", name: "reader", description: "Opens a pdf and reads it", version: null },
+      { id: "@a/pdf-tools", name: "pdf-tools", description: "Tools", version: null },
+      { id: "@a/my-pdf", name: "my-pdf", description: "Mine", version: null },
+      { id: "@a/pdf", name: "pdf", description: "Reads PDF files", version: null },
+    ],
+    agents: [],
+  };
+  const order = (query: string) =>
+    slashEntries(collision, query, idle).map((e) => (e.kind === "skill" ? e.skill.name : ""));
+
+  it("puts the exact name first, then name prefix, name substring, then description", () => {
+    expect(order("pdf")).toEqual(["pdf", "pdf-tools", "my-pdf", "reader"]);
+  });
+
+  it("makes /pdf pick the skill named pdf: it is the first entry Enter takes", () => {
+    expect(order("pdf")[0]).toBe("pdf");
+  });
+
+  it("ranks agents by name, then title", () => {
+    const agents: ChatCommands = {
+      skills: [],
+      agents: [
+        { name: "run-other", title: "Report builder", description: "" },
+        { name: "run-report", title: "Weekly", description: "" },
+      ],
+    };
+    expect(
+      slashEntries(agents, "report", idle).map((e) => e.kind === "agent" && e.agent.name),
+    ).toEqual(["run-report", "run-other"]);
+  });
+});
+
+describe("parseTypedCommand", () => {
+  const parse = (text: string, ctx = idle) => parseTypedCommand(text, commands, ctx);
+
+  it("takes a skill named exactly, and the rest of the draft as the message", () => {
+    const typed = parse("/tone make it shorter")!;
+    expect(typed.entry.kind === "skill" && typed.entry.skill.id).toBe("@acme/tone");
+    expect(typed.rest).toBe("make it shorter");
+  });
+
+  it("takes an agent named exactly, alone or with text", () => {
+    expect(parse("/run-report")!.rest).toBe("");
+    const typed = parse("/run-report for Q3\nplease")!;
+    expect(typed.entry.kind).toBe("agent");
+    expect(typed.rest).toBe("for Q3\nplease");
+  });
+
+  it("is plain text unless the token is exactly one name", () => {
+    expect(parse("/ton hello")).toBeNull();
+    expect(parse("/Tone hello")).toBeNull();
+    expect(parse("/nothing hello")).toBeNull();
+    expect(parse("tone hello")).toBeNull();
+    expect(parse("hello /tone")).toBeNull();
+  });
+
+  it("is plain text when two listed names collide", () => {
+    const twins: ChatCommands = {
+      skills: [
+        { id: "@a/tone", name: "tone", description: "", version: null },
+        { id: "@b/tone", name: "tone", description: "", version: null },
+      ],
+      agents: [],
+    };
+    expect(parseTypedCommand("/tone hi", twins, idle)).toBeNull();
+  });
+
+  it("offers no agent while a turn runs, and no skill where none can be pinned", () => {
+    expect(parse("/run-report hi", { ...idle, running: true })).toBeNull();
+    expect(parse("/tone hi", { ...idle, canPin: false })).toBeNull();
+  });
+});
+
+describe("typedSendPlan", () => {
+  const agent = { kind: "agent", agent: { name: "run-report", title: "Report" } } as const;
+  const pin = { kind: "pin", pinned: ["@a/b"] } as const;
+
+  it("sends the rest, with the chosen agent chip riding on the send (the send clears it)", () => {
+    expect(typedSendPlan(agent, "for Q3", false)).toBe("send");
+    expect(typedSendPlan(pin, "make it shorter", false)).toBe("send");
+    expect(typedSendPlan(pin, "", true)).toBe("send");
+  });
+
+  it("sends an agent named alone through the thread, and only pins a skill named alone", () => {
+    expect(typedSendPlan(agent, "  ", false)).toBe("agent-only");
+    expect(typedSendPlan(pin, "", false)).toBe("stay");
+    expect(typedSendPlan({ kind: "close" }, "", false)).toBe("stay");
+  });
+
+  it("sends nothing when the pin is refused at the cap", () => {
+    expect(typedSendPlan({ kind: "refuse" }, "make it shorter", false)).toBe("stay");
+  });
+});
+
+describe("dismissalFor", () => {
+  it("holds for the draft Escape was pressed on, and forgets it on any other text", () => {
+    expect(dismissalFor("/", "/")).toBe("/");
+    expect(dismissalFor("/", "/to")).toBeNull();
+    // So typing `/` again, after leaving it, reopens the menu.
+    expect(dismissalFor(dismissalFor("/", "hello"), "/")).toBeNull();
+    expect(dismissalFor(null, "/")).toBeNull();
+  });
+});
+
+describe("isComposingKey", () => {
+  it("is an IME key by isComposing or by Safari's keyCode 229", () => {
+    expect(isComposingKey({ keyCode: 13, nativeEvent: { isComposing: true } })).toBe(true);
+    expect(isComposingKey({ keyCode: 229, nativeEvent: { isComposing: false } })).toBe(true);
+    expect(isComposingKey({ keyCode: 13, nativeEvent: { isComposing: false } })).toBe(false);
+  });
+});
+
+describe("an agent title past the part's limit", () => {
+  it("is cut to the limit, not left to make the server refuse the message", () => {
+    const long: ChatCommands = {
+      skills: [],
+      agents: [{ name: "run-long", title: "x".repeat(300), description: "" }],
+    };
+    const choice = slashChoice(slashEntries(long, "", idle)[0]!, []);
+    expect(choice.kind === "agent" && choice.agent.title).toHaveLength(200);
   });
 });

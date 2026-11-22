@@ -422,7 +422,7 @@ export const chatPaths = {
       tags: ["Chat"],
       summary: "List the composer's commands",
       description:
-        "The skills a conversation can pin and the agents the caller can launch, read as an MCP client reads the platform server (`skills/list`, `prompts/list`) with the caller's own permissions: in every space the caller can act in, or, with `?spaceId=`, in that space alone (a conversation limited to it). An agent is launched by a user message carrying a `data-agent-prompt` part (see `streamChat`). A half that cannot be read is empty. Ignores `X-Space-Id`; admitted when the acting set is not empty. A credential confined to spaces is refused (403).",
+        "The skills a conversation can pin and the agents the caller can launch, read as an MCP client reads the platform server (`skills/list`, `prompts/list`) with the caller's own permissions: in every space the caller can act in, or, with `?spaceId=`, in that space alone (a conversation limited to it). An agent is launched by a user message carrying a `data-agent-prompt` part (see `streamChat`). A half that cannot be read is empty; a server that cannot be reached is a 502. Rate limited (60/min per caller). Ignores `X-Space-Id`; admitted when the acting set is not empty. A credential confined to spaces is refused (403).",
       parameters: [
         { $ref: "#/components/parameters/OrgIdPath" },
         {
@@ -443,6 +443,15 @@ export const chatPaths = {
         },
         "400": { $ref: "#/components/responses/ValidationError" },
         "403": { $ref: "#/components/responses/Forbidden" },
+        "429": {
+          $ref: "#/components/responses/RateLimited",
+          description: "Rate limited (60/min per caller)",
+        },
+        "502": {
+          description:
+            "`bad_gateway` — the platform's MCP server could not be reached, so the commands are unknown (not empty). RFC 9457 problem+json. A half that fails to read is empty in a 200.",
+          content: problem,
+        },
       },
     },
   },
@@ -531,7 +540,7 @@ export const chatPaths = {
         "400": {
           $ref: "#/components/responses/ValidationError",
           description:
-            "No enabled model configured, or invalid body — including a message that is not a valid AI SDK UIMessage, or a last message whose JSON exceeds 256 KB.",
+            "No enabled model configured, or invalid body — including a message that is not a valid AI SDK UIMessage, a last message whose JSON exceeds 256 KB, a malformed or repeated `data-agent-prompt` part, an agent name the server does not serve, or launch instructions over 64 KB.",
         },
         "402": {
           description:

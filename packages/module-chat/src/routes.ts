@@ -325,7 +325,7 @@ export function createChatRouter(deps: ChatPlatformDeps) {
   );
 
   // The composer's `/` menu: the skills and agents of the spaces a turn would act in.
-  router.get("/api/orgs/:orgId/chat/commands", ...actingGuards, async (c) => {
+  router.get("/api/orgs/:orgId/chat/commands", rateLimited(60), ...actingGuards, async (c) => {
     const reachable = c.get("reachable");
     const spaceId = c.req.query("spaceId");
     if (spaceId !== undefined && !canActIn(reachable, spaceId)) {

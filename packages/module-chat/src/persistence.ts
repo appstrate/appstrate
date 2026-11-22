@@ -34,6 +34,7 @@ import {
 import { toPgSafe } from "@appstrate/db/pg-safe";
 import { invalidRequest, notFound } from "@appstrate/core/api-errors";
 import { uiMessageTitleText } from "./message-text.ts";
+import { AGENT_PROMPT_PART_TYPE, agentPromptDataSchema } from "./agent-prompt.ts";
 import { notifySessionUpdate } from "./realtime.ts";
 import type { ChatSkillSelection } from "./skills.ts";
 import type { FileUIPart, UIMessage } from "ai";
@@ -386,6 +387,37 @@ export async function storedFileParts(
       ),
     ]),
   );
+}
+
+/**
+ * The resolved launch instructions of the session's stored messages among `messageIds` that
+ * carry an agent launch (`agent-prompt.ts`), by message id: what `prompts/get` answered when the
+ * turn was sent, the one source of an earlier message's launch text.
+ */
+export async function storedAgentPromptTexts(
+  sessionId: string,
+  messageIds: readonly string[],
+): Promise<Map<string, string>> {
+  if (!messageIds.length) return new Map();
+  const rows = await db
+    .select({ messageId: chatMessages.messageId, content: chatMessages.content })
+    .from(chatMessages)
+    .where(
+      and(
+        eq(chatMessages.sessionId, sessionId),
+        inArray(chatMessages.messageId, [...messageIds]),
+        sql`${chatMessages.content}->'parts' @> '[{"type":"data-agent-prompt"}]'::jsonb`,
+      ),
+    );
+  const texts = new Map<string, string>();
+  for (const row of rows) {
+    const launch = row.content.parts.find(
+      (part) => (part as { type?: unknown }).type === AGENT_PROMPT_PART_TYPE,
+    );
+    const data = agentPromptDataSchema.safeParse((launch as { data?: unknown } | undefined)?.data);
+    if (data.success && data.data.text) texts.set(row.messageId, data.data.text);
+  }
+  return texts;
 }
 
 /**

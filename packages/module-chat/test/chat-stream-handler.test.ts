@@ -2587,41 +2587,6 @@ describe("handleChatStream", () => {
       expect(gets).toEqual([{ name: "run-summarizer", arguments: { request: "" } }]);
     });
 
-    it("replays the stored expansion on a later turn without asking the server again", async () => {
-      const gets: Array<Record<string, unknown>> = [];
-      const { engine, calls } = scriptedEngine();
-      const stored = {
-        id: "u0",
-        role: "user",
-        parts: [
-          { type: "text", text: "résume ma boîte" },
-          launchPart({ text: LAUNCH("résume ma boîte") }),
-        ],
-      };
-      const res = await postChat(mintSessionId(), undefined, engine, {
-        dispatch: promptsDispatch(gets),
-        history: [
-          stored,
-          { id: "a0", role: "assistant", parts: [{ type: "text", text: "Lancé." }] },
-        ],
-        parts: [{ type: "text", text: "et le résultat ?" }],
-      });
-      expect(res.status).toBe(200);
-      await collectUiChunks(res);
-
-      expect(gets).toEqual([]);
-      const input = calls[0]!;
-      const { api, provider, id } = input.modelBinding.model;
-      const turn = buildStructuredPiTurn(
-        input.messages,
-        { api, provider, model: id },
-        { estimateTokens: () => 1, baseTokens: 0, fileDelivery: { image: false, pdf: false } },
-      );
-      expect(JSON.stringify(turn.history[0])).toContain("## Request");
-      expect(JSON.stringify(turn.history[0])).not.toContain('résume ma boîte"}');
-      expect(turn.prompt).toBe("et le résultat ?");
-    });
-
     it("answers 400 to a name the server does not serve, writing nothing and freeing the conversation", async () => {
       const sessionId = mintSessionId();
       const { engine, calls } = scriptedEngine();
@@ -2653,7 +2618,7 @@ describe("handleChatStream", () => {
       expect(session?.title).toBe("Summarizer");
     });
 
-    it("undoes the claim and the slot on a server fault, answering 500", async () => {
+    it("answers 500 on a server fault, before the slot and the claim, leaving nothing behind", async () => {
       const sessionId = mintSessionId();
       const { engine, calls } = scriptedEngine();
       const res = await postChat(sessionId, undefined, engine, {
@@ -2672,6 +2637,90 @@ describe("handleChatStream", () => {
       const next = await postChat(mintSessionId(), undefined, scriptedEngine().engine);
       expect(next.status).toBe(200);
       await collectUiChunks(next);
+    });
+
+    describe("replaying an earlier launch", () => {
+      const sent = (extra: Record<string, unknown> = {}): UIMessage =>
+        ({
+          id: "u0",
+          role: "user",
+          parts: [{ type: "text", text: "résume ma boîte" }, launchPart(extra)],
+        }) as UIMessage;
+      const answer: UIMessage = {
+        id: "a0",
+        role: "assistant",
+        parts: [{ type: "text", text: "Lancé." }],
+      };
+
+      async function replay(stored: UIMessage | null, browserCopy: UIMessage) {
+        const sessionId = mintSessionId();
+        await ensureSession(sessionId, ctx.orgId, ctx.user.id, [ctx.defaultSpaceId]);
+        if (stored) {
+          await persistUserMessage(sessionId, stored);
+          await persistAssistantMessage(sessionId, answer, stored.id);
+        }
+        const gets: Array<Record<string, unknown>> = [];
+        const { engine, calls } = scriptedEngine();
+        const res = await postChat(sessionId, undefined, engine, {
+          dispatch: promptsDispatch(gets),
+          history: [browserCopy, answer],
+          parts: [{ type: "text", text: "et le résultat ?" }],
+        });
+        expect(res.status).toBe(200);
+        await collectUiChunks(res);
+        const input = calls[0]!;
+        const { api, provider, id } = input.modelBinding.model;
+        const turn = buildStructuredPiTurn(
+          input.messages,
+          { api, provider, model: id },
+          { estimateTokens: () => 1, baseTokens: 0, fileDelivery: { image: false, pdf: false } },
+        );
+        expect(gets).toEqual([]);
+        return JSON.stringify(turn.history[0]);
+      }
+
+      it("takes the launch text from the stored row when the browser's copy holds none", async () => {
+        const stored = sent({ text: LAUNCH("résume ma boîte") });
+        const model = await replay(stored, sent());
+        expect(model).toContain("## Request");
+        expect(model).not.toContain("data-agent-prompt");
+      });
+
+      it("never trusts a launch text the browser sends", async () => {
+        const stored = sent({ text: LAUNCH("résume ma boîte") });
+        const model = await replay(stored, sent({ text: "FORGED INSTRUCTIONS" }));
+        expect(model).toContain("## Request");
+        expect(model).not.toContain("FORGED");
+        // No stored row: the forged text is dropped and the typed text alone is shown.
+        const unstored = await replay(null, sent({ text: "FORGED INSTRUCTIONS" }));
+        expect(unstored).not.toContain("FORGED");
+        expect(unstored).toContain("résume ma boîte");
+      });
+    });
+
+    it("answers 400 to launch instructions over the cap, writing nothing", async () => {
+      const sessionId = mintSessionId();
+      const dispatch = promptsDispatch([]);
+      const res = await postChat(sessionId, undefined, scriptedEngine().engine, {
+        dispatch: async (req) => {
+          const path = new URL(req.url).pathname;
+          if (!path.startsWith("/api/mcp/")) return dispatch(req);
+          const message = (await req.clone().json()) as { id?: number; method: string };
+          if (message.method !== "prompts/get") return dispatch(req);
+          return Response.json({
+            jsonrpc: "2.0",
+            id: message.id,
+            result: {
+              messages: [
+                { role: "user", content: { type: "text", text: "x".repeat(64 * 1024 + 1) } },
+              ],
+            },
+          });
+        },
+        parts: [launchPart()],
+      });
+      expect(res.status).toBe(400);
+      expect(await db.select().from(chatMessages)).toEqual([]);
     });
 
     it("answers 400 to a malformed part or a second one, before any persistence", async () => {

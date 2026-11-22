@@ -244,7 +244,7 @@ export function normalizeChatLocale(raw: string | undefined): string {
   return /^[a-z]{2}$/.test(primary) ? primary : "fr";
 }
 
-/** A skill of the `auto` catalogue: an entry of `skills/list`, loaded by its `uri`. */
+/** A skill of the catalogue: an entry of `skills/list`, loaded by its `uri`. */
 export interface CatalogueSkill {
   packageId: string;
   /** The `SKILL.md` frontmatter `name`. */
@@ -292,11 +292,12 @@ function formatSkillsSection(opts: {
 }): RenderedContext {
   const skills = resolveChatSkills(opts.selection, opts.contents);
   const files = SKILLS_FILES[opts.capabilities.transport ? "tool" : "none"];
-  // A listed skill the turn cannot load is noise; a pinned one is injected, not listed.
-  const pinned = new Set(opts.selection.pinnedSkills);
+  // A listed skill the turn cannot load is noise; an injected one is shown in full, not listed.
+  // A pinned skill left out (over budget, unreadable) is not injected: it stays listed.
+  const injected = new Set(skills.chosen.map((skill) => skill.packageId));
   const listed =
     opts.capabilities.readsSkills && opts.selection.skillDiscovery
-      ? opts.catalogue.filter((skill) => !pinned.has(skill.packageId))
+      ? opts.catalogue.filter((skill) => !injected.has(skill.packageId))
       : [];
   const groups: string[][] = [];
   if (!opts.selection.skillDiscovery) groups.push([SKILLS_DISCOVERY_OFF_NOTE]);
@@ -329,7 +330,7 @@ type CallerContextOpts = {
   skills: ChatSkillSelection;
   /** The chosen skills active here, read by {@link buildCallerContextBlock}. */
   skillContents?: ReadonlyMap<string, SkillContent | null>;
-  /** The `auto` catalogue, listed by {@link buildCallerContextBlock}. */
+  /** The catalogue of the turn's skills, listed by {@link buildCallerContextBlock} with discovery on. */
   skillCatalogue?: readonly CatalogueSkill[];
 };
 
