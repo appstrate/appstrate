@@ -11,10 +11,12 @@ import { Switch } from "@appstrate/ui/components/switch";
 import { Popover, PopoverAnchor, PopoverContent } from "@appstrate/ui/components/popover";
 import { cn } from "@appstrate/ui/cn";
 import { MAX_PINNED_SKILLS, type ChatSkillSelection } from "../skills.ts";
-import { skillPickerRows, togglePinned } from "./chat-skills.ts";
+import { effectiveSkills, skillPickerRows, togglePinned } from "./chat-skills.ts";
 import { useChatCommands } from "./use-chat-commands.ts";
 import { RemovableChip } from "./removable-chip.tsx";
 import { useChatHost, type ChatTransport } from "./runtime-context.ts";
+
+const NO_CITED: readonly string[] = [];
 
 interface SkillsPickerProps {
   transport: ChatTransport | undefined;
@@ -23,6 +25,8 @@ interface SkillsPickerProps {
   /** Opened from the composer's settings menu or a skills chip, never by a trigger of its own. */
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  /** The skills the composer's draft cites: checked here, and held by the message, not the panel. */
+  cited?: readonly string[];
   /** The popover anchors to this: the composer's tools row. */
   children: ReactNode;
 }
@@ -61,7 +65,8 @@ export function SkillsPickerPanel({
   transport,
   selection,
   onChange,
-}: Pick<SkillsPickerProps, "transport" | "selection" | "onChange">) {
+  cited = NO_CITED,
+}: Pick<SkillsPickerProps, "transport" | "selection" | "onChange" | "cited">) {
   const { t } = useChatHost();
   const catalogue = useChatCommands(transport, true);
   const skills = catalogue.data?.skills ?? [];
@@ -70,11 +75,14 @@ export function SkillsPickerPanel({
   const loading = catalogue.isLoading;
 
   const pinned = selection.pinnedSkills;
-  const pinnedSet = new Set(pinned);
-  const atPinCap = pinned.length >= MAX_PINNED_SKILLS;
-  const rows = skillPickerRows(skills, pinned);
+  const effective = effectiveSkills(pinned, cited);
+  const pinnedSet = new Set(effective.ids);
+  const atPinCap = effective.atCap;
+  const rows = skillPickerRows(skills, effective.ids);
 
   const togglePin = (packageId: string) => {
+    // A cited skill is the message's: only removing its chip drops it.
+    if (effective.cited.has(packageId)) return;
     onChange({ ...selection, pinnedSkills: togglePinned(pinned, packageId) });
   };
 
@@ -125,7 +133,8 @@ export function SkillsPickerPanel({
             // of it can collide (`@a-b/c`, `@a/b-c`).
             const id = `skills-pin-${index}`;
             const checked = pinnedSet.has(skill.id);
-            const inert = !checked && atPinCap;
+            const isCited = effective.cited.has(skill.id);
+            const inert = (!checked && atPinCap) || isCited;
             return (
               <div key={skill.id} className="flex items-start gap-2 rounded-md p-1">
                 <Checkbox
@@ -133,6 +142,7 @@ export function SkillsPickerPanel({
                   data-testid={`skill-pin-${skill.id}`}
                   checked={checked}
                   disabled={inert}
+                  data-cited={isCited || undefined}
                   onCheckedChange={() => togglePin(skill.id)}
                   className="mt-0.5 shrink-0"
                 />
@@ -148,6 +158,11 @@ export function SkillsPickerPanel({
                       </span>
                     )}
                   </span>
+                  {isCited && (
+                    <span className="text-muted-foreground block text-[0.7rem] leading-snug">
+                      {t("skills.cited")}
+                    </span>
+                  )}
                   {available ? (
                     skill.description && (
                       <span className="text-muted-foreground line-clamp-2 text-[0.7rem] leading-snug">
@@ -175,6 +190,7 @@ export function SkillsPicker({
   onChange,
   open,
   onOpenChange,
+  cited,
   children,
 }: SkillsPickerProps) {
   const { t } = useChatHost();
@@ -191,7 +207,12 @@ export function SkillsPicker({
         data-testid="skills-picker-popover"
         className="flex max-h-[min(26rem,var(--radix-popover-content-available-height))] w-[min(23rem,calc(100vw-1.5rem))] flex-col p-3"
       >
-        <SkillsPickerPanel transport={transport} selection={selection} onChange={onChange} />
+        <SkillsPickerPanel
+          transport={transport}
+          selection={selection}
+          onChange={onChange}
+          cited={cited}
+        />
       </PopoverContent>
     </Popover>
   );

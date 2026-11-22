@@ -10,7 +10,7 @@
 
 import { AGENT_PROMPT_PART_TYPE, agentPromptDataSchema } from "../agent-prompt.ts";
 import { AGENT_DIRECTIVE, SKILL_DIRECTIVE, directivesOf } from "../directives.ts";
-import { MAX_PINNED_SKILLS } from "../skills.ts";
+import { citedSkillIds, effectiveSkills } from "./chat-skills.ts";
 
 /** Why a draft cannot be sent as it is, `null` when it can. */
 export type DraftIssue = "agents" | "pins";
@@ -23,11 +23,7 @@ export type DraftIssue = "agents" | "pins";
 export function draftIssue(text: string, pinned: readonly string[]): DraftIssue | null {
   const named = directivesOf(text);
   if (named.filter((d) => d.type === AGENT_DIRECTIVE).length > 1) return "agents";
-  const skills = new Set([
-    ...pinned,
-    ...named.filter((d) => d.type === SKILL_DIRECTIVE).map((d) => d.id),
-  ]);
-  return skills.size > MAX_PINNED_SKILLS ? "pins" : null;
+  return effectiveSkills(pinned, citedSkillIds(text)).overCap ? "pins" : null;
 }
 
 /** `pinned`, then the skills not in it yet; `pinned` itself when nothing joins. The cap is `draftIssue`'s. */

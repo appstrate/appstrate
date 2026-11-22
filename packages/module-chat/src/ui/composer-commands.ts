@@ -8,7 +8,7 @@
 import type { TriggerItem } from "@assistant-ui/core";
 import type { ChatCommands } from "../commands.ts";
 import { AGENT_DIRECTIVE, SKILL_DIRECTIVE, directivesOf } from "../directives.ts";
-import { MAX_PINNED_SKILLS } from "../skills.ts";
+import { effectiveSkills } from "./chat-skills.ts";
 
 export interface CommandContext {
   /** The conversation's pinned skills; `null`: its selection cannot be changed here, no skill is listed. */
@@ -37,10 +37,10 @@ export function commandList(
   { pinned, running, draft }: CommandContext,
 ): CommandList {
   const named = directivesOf(draft);
-  const taken = new Set([
-    ...(pinned ?? []),
-    ...named.filter((d) => d.type === SKILL_DIRECTIVE).map((d) => d.id),
-  ]);
+  const { ids, atCap } = effectiveSkills(
+    pinned ?? [],
+    named.flatMap((d) => (d.type === SKILL_DIRECTIVE ? [d.id] : [])),
+  );
   const list: CommandList = { items: [], capped: [] };
   for (const skill of pinned === null ? [] : commands.skills) {
     const item: TriggerItem = {
@@ -48,9 +48,9 @@ export function commandList(
       type: SKILL_DIRECTIVE,
       label: skill.name,
       description: skill.description,
-      metadata: { version: skill.version, added: taken.has(skill.id) },
+      metadata: { version: skill.version, added: ids.includes(skill.id) },
     };
-    (taken.has(skill.id) || taken.size < MAX_PINNED_SKILLS ? list.items : list.capped).push(item);
+    (ids.includes(skill.id) || !atCap ? list.items : list.capped).push(item);
   }
   if (!running && !named.some((d) => d.type === AGENT_DIRECTIVE)) {
     for (const agent of commands.agents) {

@@ -135,6 +135,7 @@
   "skills.pinnedLockedPillLabel": "Ajoutées, sans découverte : {{skills}}. Choisir les compétences",
   "skills.title": "Compétences de la conversation",
   "skills.chooseHeading": "Compétences",
+  "skills.cited": "Cité dans le message",
   "skills.chosenMax": "Maximum atteint : {{max}} compétences.",
   "skills.loading": "Chargement des compétences…",
   "skills.empty": "Aucune compétence disponible dans vos espaces.",

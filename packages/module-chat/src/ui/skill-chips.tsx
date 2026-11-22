@@ -11,19 +11,26 @@ import { BookOpenIcon, LockIcon } from "lucide-react";
 import { parseScopedName } from "@appstrate/core/naming";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@appstrate/ui/components/tooltip";
 import type { ChatSkillSelection } from "../skills.ts";
+import { canResetSkills, effectiveSkills } from "./chat-skills.ts";
 import { RemovableChip } from "./removable-chip.tsx";
 import { useChatHost, type ChatTransport } from "./runtime-context.ts";
 import { SkillsChip } from "./skills-picker.tsx";
 import { useChatCommands } from "./use-chat-commands.ts";
+
+const NO_CITED: readonly string[] = [];
 
 interface LoadedSkill {
   packageId: string;
   name: string;
 }
 
-/** What the conversation loads: the user's pins. The catalogue is read only to name them, so only when there are. */
-function useLoadedSkills(transport: ChatTransport | undefined, selection: ChatSkillSelection) {
-  const pinnedIds = selection.pinnedSkills;
+/** What the conversation loads: the user's pins and the skills the draft cites. The catalogue is read only to name them, so only when there are. */
+function useLoadedSkills(
+  transport: ChatTransport | undefined,
+  selection: ChatSkillSelection,
+  cited: readonly string[],
+) {
+  const pinnedIds = effectiveSkills(selection.pinnedSkills, cited).ids;
   const catalogue = useChatCommands(transport, pinnedIds.length > 0);
   const names = new Map((catalogue.data?.skills ?? []).map((s) => [s.id, s.name]));
   // Named by the package's bare name until the catalogue answers.
@@ -68,7 +75,8 @@ function PinnedPill({
   skills: readonly LoadedSkill[];
   discovery: boolean;
   onOpen: () => void;
-  onReset: () => void;
+  /** Absent when there is nothing to restore (only cited skills, discovery on). */
+  onReset?: () => void;
 }) {
   const { t } = useChatHost();
   return (
@@ -100,6 +108,8 @@ function PinnedPill({
 interface SkillChipsProps {
   transport: ChatTransport | undefined;
   selection: ChatSkillSelection;
+  /** The skills the composer's draft cites: counted and named like the pinned ones. */
+  cited?: readonly string[];
   onOpenPicker: () => void;
   /** Back to the default selection: the pill's X. */
   onReset: () => void;
@@ -109,8 +119,14 @@ interface SkillChipsProps {
  * The skill pill of the composer's tool row, drawn when the selection departs from the default.
  * While no skill is pinned, the picker's summary chip stands in (drawn only with discovery off).
  */
-export function SkillChips({ transport, selection, onOpenPicker, onReset }: SkillChipsProps) {
-  const pinned = useLoadedSkills(transport, selection);
+export function SkillChips({
+  transport,
+  selection,
+  cited = NO_CITED,
+  onOpenPicker,
+  onReset,
+}: SkillChipsProps) {
+  const pinned = useLoadedSkills(transport, selection, cited);
   if (pinned.length === 0) {
     return <SkillsChip selection={selection} onClick={onOpenPicker} onReset={onReset} />;
   }
@@ -119,7 +135,7 @@ export function SkillChips({ transport, selection, onOpenPicker, onReset }: Skil
       skills={pinned}
       discovery={selection.skillDiscovery}
       onOpen={onOpenPicker}
-      onReset={onReset}
+      onReset={canResetSkills(selection, cited) ? onReset : undefined}
     />
   );
 }

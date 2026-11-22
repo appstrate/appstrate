@@ -22,11 +22,18 @@ const host = testHost({ actingSpaceIds: ["spc_a"] });
 
 const transport = transportOf(() => ({ "X-Org-Id": "org_1", "X-Space-Id": "spc_a" }));
 
-function render(skillDiscovery: boolean, pinnedSkills: string[] = []): string {
+function render(
+  skillDiscovery: boolean,
+  pinnedSkills: string[] = [],
+  cited: string[] = [],
+): string {
   const qc = new QueryClient();
   const skill = (id: string, name: string) => ({ id, name, description: "", version: null });
   qc.setQueryData(["packages", "chat-commands", "org_1", null], {
-    skills: [skill("@acme/free", "Free"), ...pinnedSkills.map((id) => skill(id, id))],
+    skills: [
+      skill("@acme/free", "Free"),
+      ...[...pinnedSkills, ...cited].map((id) => skill(id, id)),
+    ],
     agents: [],
   });
   return renderToStaticMarkup(
@@ -40,6 +47,7 @@ function render(skillDiscovery: boolean, pinnedSkills: string[] = []): string {
               transport={transport}
               selection={{ skillDiscovery, pinnedSkills }}
               onChange={() => {}}
+              cited={cited}
             />
           </TooltipProvider>
         </ConversationScopeProvider>
@@ -131,5 +139,61 @@ describe("SkillsPicker", () => {
     const below = render(true, full.slice(1));
     expect(below).not.toContain("skills.chosenMax");
     expect(pin(below)).not.toContain(` disabled=""`);
+  });
+
+  it("shows a cited skill checked and disabled, with its hint, even if not pinned", () => {
+    const html = render(true, [], ["@acme/cited"]);
+    const box = html.match(/<button[^>]*data-testid="skill-pin-@acme\/cited"[^>]*>/)![0];
+    expect(box).toContain('aria-checked="true"');
+    expect(box).toContain(` disabled=""`);
+    expect(html).toContain("skills.cited");
+    // An uncited skill is untouched.
+    const free = html.match(/<button[^>]*data-testid="skill-pin-@acme\/free"[^>]*>/)![0];
+    expect(free).not.toContain(` disabled=""`);
+  });
+
+  it("counts the cited skills with the pinned ones against the cap", () => {
+    const pinned = Array.from({ length: MAX_PINNED_SKILLS - 1 }, (_, i) => `@acme/own-${i}`);
+    const html = render(true, pinned, ["@acme/cited"]);
+    expect(html).toContain("skills.chosenMax");
+    expect(html.match(/<button[^>]*data-testid="skill-pin-@acme\/free"[^>]*>/)![0]).toContain(
+      ` disabled=""`,
+    );
+  });
+
+  it("does nothing when a cited skill is toggled: the chip in the message is what drops it", () => {
+    const emitted: ChatSkillSelection[] = [];
+    // Rows exist only once the catalogue answers: seed it, then toggle through the rendered tree.
+    const qc = new QueryClient();
+    const skill = (id: string) => ({ id, name: id, description: "", version: null });
+    qc.setQueryData(["packages", "chat-commands", "org_1", null], {
+      skills: [skill("@a/one"), skill("@a/two")],
+      agents: [],
+    });
+    function Toggle() {
+      const tree = SkillsPickerPanel({
+        transport,
+        selection: { skillDiscovery: true, pinnedSkills: ["@a/one"] },
+        onChange: (sel) => emitted.push(sel),
+        cited: ["@a/one", "@a/two"],
+      });
+      for (const id of ["@a/one", "@a/two"]) {
+        const box = findElement(tree, (props) => props["data-testid"] === `skill-pin-${id}`);
+        (box!.props.onCheckedChange as () => void)();
+      }
+      return null;
+    }
+    renderToStaticMarkup(
+      <QueryClientProvider client={qc}>
+        <ChatHostProvider value={host}>
+          <ConversationScopeProvider
+            value={conversationScope({ originSpaceId: "spc_a", restricted: false })}
+          >
+            <Toggle />
+          </ConversationScopeProvider>
+        </ChatHostProvider>
+      </QueryClientProvider>,
+    );
+    expect(emitted).toEqual([]);
   });
 });

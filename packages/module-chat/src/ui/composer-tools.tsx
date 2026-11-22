@@ -43,6 +43,7 @@ import { useChatHost, type ChatTransport } from "./runtime-context.ts";
 import { RemovableChip } from "./removable-chip.tsx";
 import { sentenceWithNode } from "./sentence-with-name.tsx";
 import { SkillChips } from "./skill-chips.tsx";
+import { useCitedSkills } from "./pinned-skills.ts";
 import { SkillsPicker } from "./skills-picker.tsx";
 import { COMPOSER_TOOL_BUTTON_CLASS } from "./touch-targets.ts";
 
@@ -70,6 +71,7 @@ export function ComposerTools({
   authorsPackages,
 }: ComposerToolsProps) {
   const { t, can } = useChatHost();
+  const cited = useCitedSkills();
   const scope = useConversationScope();
   const origin = useSpaceName(scope.originSpaceId);
   const creationMode = usePackageAuthoringEnabled();
@@ -189,6 +191,7 @@ export function ComposerTools({
         <SkillChips
           transport={transport}
           selection={selection}
+          cited={cited}
           onOpenPicker={() => setSkillsOpen(true)}
           onReset={() => onSelectionChange(DEFAULT_SKILL_SELECTION)}
         />
@@ -202,6 +205,7 @@ export function ComposerTools({
       transport={transport}
       selection={selection}
       onChange={onSelectionChange}
+      cited={cited}
       open={skillsOpen}
       onOpenChange={setSkillsOpen}
     >
