@@ -7,12 +7,14 @@
  * pasted files as attachments and the phone's no-focus-grab rule (`run-start-focus.ts`).
  */
 
-import { useEffect, type ClipboardEvent } from "react";
+import { useEffect, useState, type ClipboardEvent } from "react";
 import { useAui } from "@assistant-ui/react";
 import { LexicalComposerInput } from "@assistant-ui/react-lexical";
 import { useLexicalComposerContext } from "@lexical/react/LexicalComposerContext";
 import { mergeRegister } from "@lexical/utils";
 import { COMMAND_PRIORITY_HIGH, KEY_ENTER_COMMAND } from "lexical";
+import { useChatTransport } from "./runtime-context.ts";
+import { useChatCommands } from "./use-chat-commands.ts";
 import { ComposerDirectiveChip } from "./directive-chip.tsx";
 import { COMPOSER_INPUT_CLASS } from "./phone-text.ts";
 import { shouldBlurAfterRunStart } from "./run-start-focus.ts";
@@ -88,6 +90,10 @@ export function ComposerEditor({
   onEnter: () => void;
 }) {
   const aui = useAui();
+  // Read as soon as the field is focused (the `/` menu reads the same cache entry), so the first
+  // `/` rarely waits; while it does, the popover itself holds Enter and Tab.
+  const [armed, setArmed] = useState(false);
+  useChatCommands(useChatTransport() ?? undefined, armed);
   const addPastedFiles = (event: ClipboardEvent) => {
     const files = Array.from(event.clipboardData?.files ?? []);
     if (!aui.thread().getState().capabilities.attachments || files.length === 0) return;
@@ -107,7 +113,10 @@ export function ComposerEditor({
       submitMode="none"
       directiveChip={ComposerDirectiveChip}
       onPaste={addPastedFiles}
-      onFocus={onFocus}
+      onFocus={() => {
+        setArmed(true);
+        onFocus();
+      }}
       className={COMPOSER_INPUT_CLASS}
     >
       <KeysPlugin onEnter={onEnter} autofocus={autofocus} />

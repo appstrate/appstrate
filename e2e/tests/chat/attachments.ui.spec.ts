@@ -44,7 +44,7 @@ test("sends image pixels and the PDF to the configured provider and reloads the 
       await page.goto("/chat");
       await pickModel(page, modelId);
       const message = page.getByRole("textbox", { name: "Message Appstrate…", exact: true });
-      await expect(message).toHaveAttribute("placeholder", new RegExp(modelId));
+      await expect(message).toHaveAttribute("aria-placeholder", new RegExp(modelId));
       const choosing = page.waitForEvent("filechooser");
       await page.getByRole("button", { name: /^Joindre des fichiers/ }).click();
       await (

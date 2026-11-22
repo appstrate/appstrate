@@ -51,6 +51,6 @@ test("retrying a failed turn sends the retry prompt, keeps the draft and throws 
 
   await expect.poll(() => bodies.length).toBe(2);
   expect(lastUserText(bodies[1]!)).toBe(retryPrompt);
-  await expect(composer).toHaveValue("brouillon");
+  await expect(composer).toHaveText("brouillon");
   expect(pageErrors).toEqual([]);
 });

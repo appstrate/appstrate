@@ -15,7 +15,16 @@ const commands = {
     { id: "@acme/tone", name: "tone", description: "Adjusts the tone of a text", version: "1.2.0" },
     { id: "@acme/pdf", name: "pdf", description: "Reads PDF files", version: null },
   ],
-  agents: [{ name: "run-report", title: "Weekly report", description: "Builds the weekly report" }],
+  agents: [
+    {
+      name: "run-report",
+      title: "Weekly report",
+      description: "Builds the weekly report",
+      packageId: "@acme/report",
+      icon: null,
+      color: null,
+    },
+  ],
 };
 
 async function mockCommands(page: Page, orgId: string) {
@@ -47,7 +56,7 @@ test("filters, selects with the keyboard or the mouse, and never sends while ope
   await input.fill("/");
 
   const menu = page.getByTestId("slash-menu");
-  await expect(menu.getByRole("group", { name: "Compétences" })).toBeVisible();
+  await expect(menu.getByRole("group", { name: "Compétences", exact: true })).toBeVisible();
   // The billed-run notice is the Agents heading's, once.
   await expect(
     menu.getByRole("group", { name: /Agents · lancent une exécution facturée/ }),
@@ -85,7 +94,9 @@ test("filters, selects with the keyboard or the mouse, and never sends while ope
   await menu.getByRole("option", { name: /pdf/ }).click();
   await expect(input.getByTestId("directive-chip")).toHaveText(["tone", "pdf"]);
 
-  // The chip is atomic: one Backspace removes it whole.
+  // The chip is atomic: the space the menu leaves after it goes first, then one Backspace removes
+  // the chip whole.
+  await page.keyboard.press("Backspace");
   await page.keyboard.press("Backspace");
   await expect(input.getByTestId("directive-chip")).toHaveText(["tone"]);
 });
@@ -122,6 +133,8 @@ test("an agent chip is a message of its own: its text part and its prompt part, 
   await page.goto("/chat");
   const input = composer(page);
   await input.fill("/run");
+  // The menu fills once the commands are read: a key sent before then is the field's own.
+  await expect(page.getByRole("option", { name: /Weekly report/ })).toBeVisible();
   await page.keyboard.press("Tab");
   const chip = input.getByTestId("directive-chip");
   await expect(chip).toHaveText("Weekly report");
@@ -132,6 +145,7 @@ test("an agent chip is a message of its own: its text part and its prompt part, 
     0,
   );
   await page.keyboard.press("Escape");
+  await page.keyboard.press("Backspace");
   await page.keyboard.press("Backspace");
   await page.keyboard.press("Backspace");
 
@@ -162,6 +176,7 @@ test("a skill chip pins the skill with the message that carries it", async ({
   await page.goto("/chat");
   const input = composer(page);
   await input.fill("/tone");
+  await expect(page.getByRole("option", { name: /tone/ })).toBeVisible();
   await page.keyboard.press("Enter");
   await page.keyboard.type("make it shorter");
   const sent = page.waitForRequest(chatPost(chat));
@@ -174,4 +189,39 @@ test("a skill chip pins the skill with the message that carries it", async ({
   expect(body.messages.at(-1)!.parts).toEqual([
     { type: "text", text: ":skill[tone]{name=@acme/tone} make it shorter" },
   ]);
+});
+
+// The popover's own loading hold (assistant-ui) keeps Enter and Tab from sending a `/token` while
+// the commands load; this guards it across library upgrades.
+test("Enter and Tab inside a /token wait for the commands instead of sending it", async ({
+  authedPage: page,
+  browserCtx,
+}) => {
+  const chat = `/api/orgs/${browserCtx.org.orgId}/chat`;
+  let release: () => void = () => {};
+  const gate = new Promise<void>((resolve) => (release = resolve));
+  await page.route(`**/api/orgs/${browserCtx.org.orgId}/chat/commands*`, async (route) => {
+    await gate;
+    await route.fulfill({ json: commands });
+  });
+  await page.route(`**${chat}`, (route) => route.fulfill({ status: 503, body: "" }));
+  const sent: string[] = [];
+  page.on("request", (req) => {
+    if (chatPost(chat)(req)) sent.push(req.url());
+  });
+
+  await page.goto("/chat");
+  const input = composer(page);
+  await input.fill("/tone");
+  await page.keyboard.press("Enter");
+  await page.keyboard.press("Tab");
+  await page.waitForTimeout(300);
+  expect(sent).toEqual([]);
+  await expect(input).toContainText("/tone");
+
+  release();
+  await expect(page.getByRole("option", { name: /tone/ })).toBeVisible();
+  await page.keyboard.press("Enter");
+  await expect(input.getByTestId("directive-chip")).toHaveText("tone");
+  expect(sent).toEqual([]);
 });
