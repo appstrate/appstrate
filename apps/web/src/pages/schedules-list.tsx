@@ -1,16 +1,25 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { useMemo, useState } from "react";
+import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Calendar, Plus } from "lucide-react";
 import { useAllSchedules } from "../hooks/use-schedules";
 import { useOverviewMode } from "../hooks/use-overview-mode";
+import { useSpaceFilter } from "../hooks/use-space-filter";
+import { showsTeamEmpty } from "../lib/space-filter";
+import { readerFiltered } from "../lib/list-filters";
 import { useSpaceAction } from "../hooks/use-space-action";
 import { PageHeader } from "../components/page-header";
-import { EmptyState, EmptyStateAction, ErrorState, NoMatchState } from "../components/page-states";
+import {
+  EmptyState,
+  EmptyStateAction,
+  ErrorState,
+  NoMatchState,
+  SpaceFilterEmpty,
+} from "../components/page-states";
 import { SchedulesTable } from "../components/schedules-table";
 import { useScheduleColumns } from "../components/schedule-columns";
-import { ListFooter, ListToolbar } from "../components/list-toolbar";
+import { ListFooter, ListToolbar, type FilterSpec } from "../components/list-toolbar";
 import { useColumnVisibility } from "../stores/column-visibility-store";
 import { useSearchPlaceholder } from "../lib/search-placeholder";
 import { useListParams } from "../lib/list-params";
@@ -51,20 +60,40 @@ export function SchedulesListPage() {
   //
   // The state still rides in the URL, like the runs page: a filtered list is
   // what people paste to each other, whoever does the filtering.
-  const list = useListParams(["state"]);
+  const list = useListParams(["state", "space"]);
   const query = list.search;
   const states = list.values("state", STATES);
-  const shown = useMemo(() => {
-    return (schedules ?? []).filter((schedule) => {
-      const enabled = schedule.enabled ?? true;
-      const key = enabled ? "enabled" : "disabled";
-      if (states.length > 0 && !states.includes(key)) return false;
-      return matchesSearch(query, [schedule.name, schedule.agent_name]);
-    });
-  }, [schedules, query, states]);
+  const space = useSpaceFilter("schedules", spanning);
+  const { rows: inFilteredSpaces, hiddenCount } = space.narrow(schedules ?? [], (schedule) => [
+    schedule.spaceId,
+  ]);
+  const shown = inFilteredSpaces.filter((schedule) => {
+    const enabled = schedule.enabled ?? true;
+    const key = enabled ? "enabled" : "disabled";
+    if (states.length > 0 && !states.includes(key)) return false;
+    return matchesSearch(query, [schedule.name, schedule.agent_name]);
+  });
 
-  const filtering = query.trim() !== "" || states.length > 0;
-  const emptyBody = filtering ? (
+  const filters: FilterSpec[] = [
+    ...(space.filter ? [space.filter] : []),
+    {
+      id: "state",
+      label: t("providers.col.state"),
+      values: states,
+      onChange: list.setValues("state"),
+      options: [
+        { value: "enabled", label: t("schedule.statusActive", { ns: "agents" }) },
+        { value: "disabled", label: t("schedule.statusDisabled", { ns: "agents" }) },
+      ],
+    },
+  ];
+  const filtering = query.trim() !== "" || readerFiltered(filters);
+  const emptyBody = showsTeamEmpty({
+    readerFiltered: filtering,
+    hiddenCount,
+  }) ? (
+    <SpaceFilterEmpty message={t("common:spaceFilter.empty.schedules")} showAll={space.showAll} />
+  ) : filtering ? (
     <NoMatchState message={t("schedules.noMatch")} onReset={list.reset} />
   ) : (
     <EmptyState
@@ -88,18 +117,7 @@ export function SchedulesListPage() {
 
       <ListToolbar
         search={{ value: query, onChange: list.setSearch, placeholder }}
-        filters={[
-          {
-            id: "state",
-            label: t("providers.col.state"),
-            values: states,
-            onChange: list.setValues("state"),
-            options: [
-              { value: "enabled", label: t("schedule.statusActive", { ns: "agents" }) },
-              { value: "disabled", label: t("schedule.statusDisabled", { ns: "agents" }) },
-            ],
-          },
-        ]}
+        filters={filters}
         onReset={list.reset}
         columns={menu}
       />

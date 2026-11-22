@@ -10,6 +10,7 @@ import type { AppEnv } from "../types/index.ts";
 import { invalidRequest } from "./errors.ts";
 import { closedSet, packageIdFilter, parseStrictQuery } from "./list-query.ts";
 import { likeContains } from "./like-pattern.ts";
+import { assertSpaceId } from "./ids.ts";
 
 /** `runs.run_number` is an int4: a larger number names no run, and binding it overflows. */
 const MAX_RUN_NUMBER = 2_147_483_647;
@@ -69,6 +70,28 @@ export function runListConditions(filters: { status?: RunStatus[]; search?: stri
 const GLOBAL_RUN_KINDS = ["all", "package", "inline"] as const;
 type GlobalRunKind = (typeof GLOBAL_RUN_KINDS)[number];
 
+/** `?space_kind=`: narrows the caller's reach to team spaces or to personal ones. */
+const SPACE_KINDS = ["team", "personal"] as const;
+type SpaceKind = (typeof SPACE_KINDS)[number];
+
+/** More ids than a reader can tick: the UI sends what was ticked, the bound keeps the `IN` list small. */
+const MAX_SPACE_IDS = 100;
+
+/**
+ * `?spaceId=spc_a,spc_b`: each member must be a space id, a repeated one collapses, an empty value
+ * reads as absent. A malformed member is a 400 for the whole list, never dropped, because dropping
+ * one widens an answer the caller reads as narrowed.
+ */
+function parseSpaceIdFilter(raw: string | undefined): string[] | undefined {
+  if (!raw) return undefined;
+  const ids = [...new Set(raw.split(",").map((part) => part.trim()))];
+  if (ids.length > MAX_SPACE_IDS) {
+    throw invalidRequest(`spaceId takes at most ${MAX_SPACE_IDS} space ids`, "spaceId");
+  }
+  for (const id of ids) assertSpaceId(id, "spaceId");
+  return ids;
+}
+
 /** The filters `GET /api/runs` and `GET /api/orgs/{orgId}/runs` share. */
 export interface GlobalRunListFilters {
   limit?: number;
@@ -95,6 +118,10 @@ export interface GlobalRunListFilters {
   unread?: boolean;
   /** `?user=me`: the actor's own runs in every space, even where they read all. */
   ownOnly?: boolean;
+  /** Only the runs of team spaces or of personal ones (a space with an owner); narrows the reach, never widens it. */
+  spaceKind?: SpaceKind;
+  /** Only the runs of these spaces; an id the caller does not reach matches nothing. */
+  spaceIds?: string[];
 }
 
 const runListQuerySchema = z
@@ -108,6 +135,9 @@ const runListQuerySchema = z
     start_date: z.string().optional(),
     end_date: z.string().optional(),
     chat_session_id: z.string().optional(),
+    space_kind: closedSet(SPACE_KINDS),
+    // Checked by `parseSpaceIdFilter`.
+    spaceId: z.string().optional(),
     packageId: packageIdFilter,
     // Checked by `parseListLimit` (anything but 1..100 is a 400).
     limit: z.string().optional(),
@@ -149,5 +179,7 @@ export function parseGlobalRunListQuery(
     endDate: parseDate(query.end_date, "end_date"),
     chatSessionId: query.chat_session_id || undefined,
     packageId: query.packageId,
+    spaceKind: query.space_kind,
+    spaceIds: parseSpaceIdFilter(query.spaceId),
   };
 }

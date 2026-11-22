@@ -23,6 +23,7 @@ import { RowSpaceName, RunRow } from "../components/run-row";
 import { scheduleLabel, scheduleNextRunAt } from "../lib/schedule-options";
 import { agentCardItem } from "../lib/package-card-item";
 import { spacesWhere } from "../lib/space-lists";
+import { withAllSpaces } from "../lib/space-filter";
 import { useSpaceLink } from "../hooks/use-current-space";
 import { useChatCan } from "../modules/chat/use-chat-runtime";
 import { useCanReach } from "../hooks/use-can-reach";
@@ -53,12 +54,22 @@ export interface DashboardData {
   agentName: (run: EnrichedRun) => string;
 }
 
-function SectionHeading({ title, href, action }: { title: string; href: string; action: string }) {
+function SectionHeading({
+  title,
+  href,
+  action,
+  spanning,
+}: {
+  title: string;
+  href: string;
+  action: string;
+  spanning: boolean;
+}) {
   return (
     <div className="mb-3 flex items-center justify-between gap-4">
       <h2 className="text-base font-semibold tracking-tight">{title}</h2>
       <Link
-        to={href}
+        to={withAllSpaces(href, spanning)}
         className="text-muted-foreground hover:text-primary inline-flex items-center gap-1 text-xs font-medium transition-colors"
       >
         {action}
@@ -435,6 +446,7 @@ export function DashboardContent(data: DashboardData) {
               title={t("dashboard.recentAgents")}
               href="/agents"
               action={t("dashboard.allAgents")}
+              spanning={data.spanning}
             />
             <RecentAgents agents={data.agents} spanning={data.spanning} />
           </section>
@@ -457,6 +469,7 @@ export function DashboardContent(data: DashboardData) {
                 title={t("dashboard.recentRuns")}
                 href="/runs"
                 action={t("dashboard.seeAll")}
+                spanning={data.spanning}
               />
               <RecentRuns
                 runs={data.runs}
@@ -472,6 +485,7 @@ export function DashboardContent(data: DashboardData) {
                 title={t("dashboard.upcomingSchedules")}
                 href="/schedules"
                 action={t("common:nav.schedules")}
+                spanning={data.spanning}
               />
               <UpcomingSchedules
                 schedules={metrics.upcomingSchedules}

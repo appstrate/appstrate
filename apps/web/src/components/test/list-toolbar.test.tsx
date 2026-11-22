@@ -12,6 +12,7 @@
 
 import { describe, it, expect } from "bun:test";
 import { KeysetListFooter, ListFooter, ListToolbar, type FilterSpec } from "../list-toolbar.tsx";
+import { filterRowOpen, readerFiltered } from "../../lib/list-filters.ts";
 import { toggleValue } from "../../lib/toggle-value.ts";
 import i18n, { i18nReady } from "../../i18n.ts";
 import { render } from "../../test/render.tsx";
@@ -135,6 +136,71 @@ describe("the reset", () => {
     // read the same committed location.
     const html = render(<ListToolbar filters={filters({ status: ["failed"] })} />);
     expect(html).not.toContain("Réinitialiser");
+  });
+});
+
+describe("a default value", () => {
+  const spaceFilter: FilterSpec = {
+    id: "space",
+    label: "Espaces",
+    values: ["team"],
+    options: [{ value: "team", label: "Espaces d'équipe" }],
+    onChange: () => {},
+    defaultValues: ["team"],
+  };
+
+  it("opens the row and counts, to say why the list is short", () => {
+    const html = render(<ListToolbar filters={[spaceFilter]} onReset={() => {}} />);
+    expect(html).toContain('aria-expanded="true"');
+    expect(html).toContain("Espaces");
+    expect(html).toMatch(/>1</);
+  });
+
+  it("is not a filter the reader set: no reset", () => {
+    const html = render(<ListToolbar filters={[spaceFilter]} onReset={() => {}} />);
+    expect(html).not.toContain("Réinitialiser");
+    expect(readerFiltered([spaceFilter])).toBe(false);
+  });
+
+  it("opens a row that was shut at first render once the default appears", () => {
+    // « Tous les espaces » turned on while on the page: nothing was active at first render.
+    expect(filterRowOpen(null, false, [spaceFilter])).toBe(true);
+    expect(filterRowOpen(null, false, filters())).toBe(false);
+    expect(filterRowOpen(null, true, filters())).toBe(true);
+  });
+
+  it("stays open when the reader unticks the default", () => {
+    const unticked = { ...spaceFilter, values: [] };
+    expect(filterRowOpen(null, false, [unticked])).toBe(true);
+    expect(readerFiltered([spaceFilter])).toBe(false);
+    expect(readerFiltered([unticked])).toBe(false);
+    expect(render(<ListToolbar filters={[unticked]} onReset={() => {}} />)).toContain(
+      'aria-expanded="true"',
+    );
+  });
+
+  it("leaves the reader's choice in charge", () => {
+    expect(filterRowOpen(false, true, [spaceFilter])).toBe(false);
+    expect(filterRowOpen(true, false, filters())).toBe(true);
+  });
+
+  it("counts a custom pick as the reader's filter, with the reset", () => {
+    const picked = { ...spaceFilter, values: ["spc_a"] };
+    expect(readerFiltered([picked])).toBe(true);
+    expect(render(<ListToolbar filters={[picked]} onReset={() => {}} />)).toContain(
+      "Réinitialiser",
+    );
+  });
+
+  it("is a default as a set: the same values in another order are not a filter", () => {
+    const two = { ...spaceFilter, defaultValues: ["a", "b"], values: ["b", "a"] };
+    expect(readerFiltered([two])).toBe(false);
+  });
+
+  it("shows the reset once the reader filters something besides it", () => {
+    const all = [spaceFilter, ...filters({ status: ["failed"] })];
+    expect(readerFiltered(all)).toBe(true);
+    expect(render(<ListToolbar filters={all} onReset={() => {}} />)).toContain("Réinitialiser");
   });
 });
 
