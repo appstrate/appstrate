@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { describe, it, expect } from "bun:test";
-import { inSpaces, resolveSpaceFilter } from "../space-filter.ts";
+import { hiddenSpaceIds, inSpaces, resolveSpaceFilter, withAllSpaces } from "../space-filter.ts";
 
 const team = { id: "spc_team", personal: false };
 const team2 = { id: "spc_team2", personal: false };
@@ -68,5 +68,25 @@ describe("inSpaces", () => {
   it("drops a row with no space when narrowing", () => {
     expect(inSpaces(undefined, ["spc_team"])).toBe(false);
     expect(inSpaces([], ["spc_team"])).toBe(false);
+  });
+});
+
+describe("hiddenSpaceIds", () => {
+  it("is the admitting spaces the filter drops", () => {
+    expect(hiddenSpaceIds([team, mine, team2], ["spc_team", "spc_team2"])).toEqual(["spc_me"]);
+  });
+
+  it("is empty when nothing narrows", () => {
+    expect(hiddenSpaceIds([team, mine], undefined)).toEqual([]);
+  });
+});
+
+describe("withAllSpaces", () => {
+  it("leaves the link alone when not spanning", () => {
+    expect(withAllSpaces("/runs", false)).toBe("/runs");
+  });
+
+  it("adds the parameter when spanning", () => {
+    expect(withAllSpaces("/runs", true)).toBe("/runs?space=all");
   });
 });

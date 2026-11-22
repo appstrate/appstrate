@@ -16,6 +16,8 @@ import { usePermissions } from "../hooks/use-permissions";
 import { useRunStatusFilter } from "../hooks/use-run-status-filter";
 import { useAdmittingSpaces, useOverviewMode } from "../hooks/use-overview-mode";
 import { useSpaceFilter } from "../hooks/use-space-filter";
+import { hiddenSpaceIds } from "../lib/space-filter";
+import { HiddenRunsNotice } from "../components/hidden-runs-notice";
 
 /**
  * Filters live in the URL (a filtered list is a link) and each takes SEVERAL
@@ -38,6 +40,7 @@ export function RunsPage() {
   // admitting the list that the space filter keeps.
   const { spaceIds } = spaceFilter;
   const shownSpaces = spaceIds ? runSpaces.filter((s) => spaceIds.includes(s.id)) : runSpaces;
+  const hiddenIds = hiddenSpaceIds(runSpaces, spaceIds);
   const unreadCount = useUnreadRunCount({ spanning, spaceIds });
   const markAllRead = useMarkAllRunsRead();
   const list = useListParams(FILTER_PARAMS);
@@ -114,16 +117,19 @@ export function RunsPage() {
         spaceIds={spaceIds}
         search={search}
         toolbar={({ columns }) => (
-          <ListToolbar
-            search={{
-              value: search,
-              onChange: list.setSearch,
-              placeholder: searchPlaceholder,
-            }}
-            filters={filters}
-            onReset={list.reset}
-            columns={columns}
-          />
+          <>
+            <ListToolbar
+              search={{
+                value: search,
+                onChange: list.setSearch,
+                placeholder: searchPlaceholder,
+              }}
+              filters={filters}
+              onReset={list.reset}
+              columns={columns}
+            />
+            <HiddenRunsNotice hiddenIds={hiddenIds} showAll={spaceFilter.showAll} />
+          </>
         )}
         // A filtered list that finds nothing ran out of matches: the way out is the filter. When
         // only the space filter narrows, the way out is every space.

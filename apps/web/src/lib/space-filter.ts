@@ -42,3 +42,17 @@ export function inSpaces(
   if (!spaceIds) return true;
   return !!rowSpaceIds?.some((id) => spaceIds.includes(id));
 }
+
+/** The admitting spaces the filter drops: what a narrowed list hides. Empty when not narrowing. */
+export function hiddenSpaceIds(
+  admitting: readonly { id: string }[],
+  spaceIds: readonly string[] | undefined,
+): string[] {
+  if (!spaceIds) return [];
+  return admitting.map((space) => space.id).filter((id) => !spaceIds.includes(id));
+}
+
+/** A list path widened to every space (`?space=all`) when `spanning`: a count across spaces opens the list it counted. */
+export function withAllSpaces(path: string, spanning: boolean): string {
+  return spanning ? `${path}?space=all` : path;
+}
