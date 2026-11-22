@@ -61,9 +61,9 @@ import { clearActiveStream, getResumableContext, STALE_MARKER_MIN_AGE_MS } from 
 import { mintSessionId } from "./session-id.ts";
 import { notifySessionUpdate } from "./realtime.ts";
 import { logger } from "./logger.ts";
-import { pinnedSkillsOf } from "./skills.ts";
 import {
   createSession,
+  pinnedSkillsOf,
   sessionVisible,
   touchedSpaceIds,
   touchedUnder,

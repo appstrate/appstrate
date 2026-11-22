@@ -130,17 +130,3 @@ export function resolveChatSkills(
 export function injectedSkills(resolved: ResolvedChatSkills): InjectedSkills["skills"] {
   return Object.fromEntries(resolved.injected.map(({ packageId, served }) => [packageId, served]));
 }
-
-/** The pins of a session row as its DTOs carry them (`skills`); every write stores them sorted. */
-export function pinnedSkillsOf(row: {
-  pinnedSkills: readonly string[];
-  assistantSkills: readonly string[];
-  skillStatus: Readonly<Partial<Record<string, ChatSkillStatus>>>;
-}): PinnedSkill[] {
-  const assistant = new Set(row.assistantSkills);
-  return row.pinnedSkills.map((id) => ({
-    id,
-    source: assistant.has(id) ? "assistant" : "user",
-    status: row.skillStatus[id] ?? null,
-  }));
-}

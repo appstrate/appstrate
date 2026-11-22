@@ -1723,7 +1723,7 @@ describe("handleChatStream", () => {
       .where(eq(chatMessages.sessionId, sessionId))
       .orderBy(asc(chatMessages.seq));
     const history = stored.map(({ messageId, content }) => ({ id: messageId, ...content }));
-    expect(JSON.stringify(history)).toContain('\\"pinned\\":true');
+    expect(JSON.stringify(history)).toContain('\\"loaded\\":true');
 
     const second = scriptedEngine();
     const next = await postChat(sessionId, undefined, second.engine, {
@@ -3241,6 +3241,10 @@ describe("handleChatStream", () => {
         parts: [launchPart()],
       });
       expect(res.status).toBe(400);
+      // The rendered instructions carry the user's request: the message names it, not the agent alone.
+      expect(((await res.json()) as { detail: string }).detail).toContain(
+        "They include your request: a shorter one may fit.",
+      );
       expect(await db.select().from(chatMessages)).toEqual([]);
     });
 

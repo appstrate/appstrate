@@ -39,15 +39,17 @@ import {
   chatMessages,
   chatSessions,
   chatSessionSpaces,
+  chatSkillStatusValues,
   files,
   type ChatMessageContent,
+  type ChatSkillStatus,
 } from "@appstrate/db/schema";
 import { toPgSafe } from "@appstrate/db/pg-safe";
 import { invalidRequest, notFound } from "@appstrate/core/api-errors";
 import { uiMessageTitleText } from "./message-text.ts";
 import { agentPromptOfParts } from "./agent-prompt.ts";
 import { notifySessionUpdate } from "./realtime.ts";
-import { MAX_PINNED_SKILLS, type ChatSkillSelection } from "./skills.ts";
+import { MAX_PINNED_SKILLS, type ChatSkillSelection, type PinnedSkill } from "./skills.ts";
 import type { SkillPinOutcome } from "./skill-load.ts";
 import type { FileUIPart, UIMessage } from "ai";
 
@@ -368,6 +370,33 @@ export async function isSkillPinned(sessionId: string, packageId: string): Promi
     .where(eq(chatSessions.id, sessionId))
     .limit(1);
   return row?.pinned === true;
+}
+
+const CHAT_SKILL_STATUSES: ReadonlySet<unknown> = new Set(chatSkillStatusValues);
+const isChatSkillStatus = (value: unknown): value is ChatSkillStatus =>
+  CHAT_SKILL_STATUSES.has(value);
+
+/**
+ * The pins of a session row as its DTOs carry them (`skills`); every write stores them sorted.
+ * `skill_status` is jsonb, which no CHECK holds to the enum: a stored value outside
+ * `chatSkillStatusValues` reads as `null` (not evaluated), never as an off-contract status. Here,
+ * not in `skills.ts`: the narrowing needs the values at run time, which the browser-safe
+ * `skills.ts` cannot import from `@appstrate/db/schema`.
+ */
+export function pinnedSkillsOf(row: {
+  pinnedSkills: readonly string[];
+  assistantSkills: readonly string[];
+  skillStatus: Readonly<Record<string, unknown>>;
+}): PinnedSkill[] {
+  const assistant = new Set(row.assistantSkills);
+  return row.pinnedSkills.map((id) => {
+    const status = row.skillStatus[id];
+    return {
+      id,
+      source: assistant.has(id) ? "assistant" : "user",
+      status: isChatSkillStatus(status) ? status : null,
+    };
+  });
 }
 
 /** Most recent message id in a session — the one a new message follows, or null. */

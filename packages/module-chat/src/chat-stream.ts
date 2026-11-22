@@ -608,6 +608,7 @@ export async function handleChatStream(
           capabilities,
           permissions,
           skills,
+          persists: chatSessionId !== null,
           drafts: skillDrafts,
           // Read before the turn's claim exists: over the caller's own connection, opened only
           // when the turn lists or injects skills.

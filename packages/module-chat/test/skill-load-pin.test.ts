@@ -166,7 +166,7 @@ describe("assistant skill load", () => {
     });
 
   const RECEIPT = JSON.stringify(
-    JSON.stringify({ uri: SKILL_MD, skill: SKILL, pinned: true }),
+    JSON.stringify({ uri: SKILL_MD, skill: SKILL, loaded: true }),
   ).slice(1, -1);
   const NOT_PINNED = "read for this turn but not pinned";
 

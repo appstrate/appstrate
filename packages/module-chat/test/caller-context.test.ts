@@ -83,6 +83,7 @@ const BASE_OPTS = {
   restricted: false,
   permissions: ["agents:read", "mcp:invoke"],
   skills: DEFAULT_SKILL_SELECTION,
+  persists: true,
 } as const;
 
 /** A line of the catalogue: the published entry of `@<scope>/<name>`, or its draft. */
@@ -215,6 +216,24 @@ describe("formatCallerContext", () => {
     );
     expect(rendered.skillStatus).toEqual({ "@acme/gone": "unavailable", "@acme/mine": "injected" });
     expect(rendered.skillBudgetLeft).toBe(64_000 - "Mine body.".length);
+  });
+
+  it("promises no pin to an ephemeral turn, whose loads are plain reads", () => {
+    const out = contextText(
+      { user: { name: "Ada" }, org: { role: "member" } },
+      {
+        ...BASE_OPTS,
+        persists: false,
+        skills: { skillDiscovery: true, pinnedSkills: [] },
+        skillCatalogue: [listedSkill("@acme/pdf", "PDF", "1.0.0")],
+      },
+    );
+    expect(out).toContain(
+      "Load one of these skills by reading its SKILL.md at the URI shown, with `read_resource` or `read`. This conversation is not saved, so a load serves this turn only and pins nothing.",
+    );
+    expect(out).not.toContain("pins it to the conversation");
+    expect(out).not.toContain("unpin a skill");
+    expect(out).toContain("- `@acme/pdf`");
   });
 
   it("lists no pin, even one that did not fit the budget: its notice says why", () => {
@@ -602,6 +621,7 @@ describe("buildCallerContextBlock", () => {
         capabilities: caps(BUILDER),
         permissions: ["mcp:read"],
         skills: DEFAULT_SKILL_SELECTION,
+        persists: true,
         drafts: true,
         openSkillsClient: NO_SKILLS,
       });
@@ -639,6 +659,7 @@ describe("buildCallerContextBlock", () => {
           skillDiscovery: false,
           pinnedSkills: ["@acme/a", "@acme/b", "@acme/c", "@acme/off", "@acme/other"],
         },
+        persists: true,
         drafts: true,
         openSkillsClient: skills.open,
       },
@@ -681,6 +702,7 @@ describe("buildCallerContextBlock", () => {
       capabilities: caps(BUILDER),
       permissions: ["mcp:read", "mcp:invoke"],
       skills: { skillDiscovery: true, pinnedSkills: ["@acme/a"] },
+      persists: true,
       drafts: true,
       openSkillsClient: NO_SKILLS,
     });
@@ -700,6 +722,7 @@ describe("buildCallerContextBlock", () => {
         capabilities: caps(BUILDER),
         permissions: ["mcp:read", "mcp:invoke", "skills:read"],
         skills: { skillDiscovery: true, pinnedSkills: ["@acme/a", "@acme/b", "@acme/gone"] },
+        persists: true,
         drafts: true,
         openSkillsClient: fakeSkillsClient(opts).open,
       });
@@ -765,6 +788,7 @@ describe("buildCallerContextBlock", () => {
         capabilities: caps(BUILDER),
         permissions: ["mcp:read", "mcp:invoke"],
         skills: { skillDiscovery: true, pinnedSkills: ["@acme/a"] },
+        persists: true,
         drafts: true,
         openSkillsClient: skills.open,
       },
@@ -793,6 +817,7 @@ describe("buildCallerContextBlock", () => {
         capabilities: caps(BUILDER),
         permissions: ["mcp:read", "mcp:invoke"],
         skills: { skillDiscovery: true, pinnedSkills: ["@acme/a"] },
+        persists: true,
         drafts: true,
         openSkillsClient: skills.open,
       },
@@ -823,6 +848,7 @@ describe("buildCallerContextBlock", () => {
         capabilities: caps(BUILDER),
         permissions: ["mcp:read", "mcp:invoke"],
         skills: { skillDiscovery: true, pinnedSkills: ["@acme/a"] },
+        persists: true,
         drafts: true,
         openSkillsClient: skills.open,
       },
@@ -847,6 +873,7 @@ describe("buildCallerContextBlock", () => {
       capabilities: caps(BUILDER),
       permissions: ["mcp:read", "mcp:invoke", "skills:read"],
       skills: { skillDiscovery: true, pinnedSkills: ["@acme/a", "@acme/gone"] },
+      persists: true,
       drafts: false,
       openSkillsClient: skills.open,
     });
@@ -867,6 +894,7 @@ describe("buildCallerContextBlock", () => {
         capabilities: caps(BUILDER),
         permissions: ["mcp:read", "mcp:invoke", "skills:read", ...(drafts ? ["skills:write"] : [])],
         skills: { skillDiscovery: true, pinnedSkills: ["@acme/a"] },
+        persists: true,
         drafts,
         openSkillsClient: fakeSkillsClient({
           published: [skillEntry(A, "1.0.0"), skillEntry(B, "1.0.0")],
@@ -919,6 +947,7 @@ describe("buildCallerContextBlock", () => {
         // The turn keeps `skills:write`: it reads the drafts the caller reads.
         permissions: ["mcp:read", "mcp:invoke", "skills:read", "skills:write"],
         skills: { skillDiscovery: true, pinnedSkills: [] },
+        persists: true,
         drafts: true,
         openSkillsClient: skills.open,
       },
@@ -948,6 +977,7 @@ describe("buildCallerContextBlock", () => {
       capabilities: caps(BUILDER),
       permissions: ["mcp:read", "mcp:invoke", "skills:read"],
       skills: { skillDiscovery: true, pinnedSkills: [] },
+      persists: true,
       drafts: false,
       openSkillsClient: readOnly.open,
     });
@@ -964,6 +994,7 @@ describe("buildCallerContextBlock", () => {
       capabilities: caps(BUILDER.filter((permission) => permission !== "skills:read")),
       permissions: ["mcp:read", "mcp:invoke"],
       skills: { skillDiscovery: true, pinnedSkills: [] },
+      persists: true,
       drafts: true,
       openSkillsClient: async (signal) => {
         opened = true;
@@ -989,6 +1020,7 @@ describe("buildCallerContextBlock", () => {
         capabilities: caps(BUILDER),
         permissions: ["mcp:read", "mcp:invoke", "skills:read"],
         skills: { skillDiscovery: true, pinnedSkills: ["@acme/a"] },
+        persists: true,
         drafts: true,
         openSkillsClient: skills.open,
       },
@@ -1019,6 +1051,7 @@ describe("buildCallerContextBlock", () => {
       capabilities: caps(BUILDER),
       permissions: ["mcp:read", "mcp:invoke"],
       skills: { skillDiscovery: true, pinnedSkills: ["@acme/a"] },
+      persists: true,
       drafts: true,
       openSkillsClient: skills.open,
     });

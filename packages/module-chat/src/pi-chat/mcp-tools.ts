@@ -594,7 +594,7 @@ async function resourceReadResult(
       : undefined;
   if (load?.pinned) {
     const skill = parseSkillUri(uri as string)?.packageId;
-    const receipt = { type: "text" as const, text: JSON.stringify({ uri, skill, pinned: true }) };
+    const receipt = { type: "text" as const, text: JSON.stringify({ uri, skill, loaded: true }) };
     return {
       content: live.content,
       persistedContent: [...lead, ...live.receipts.map((r, i) => (i === index ? receipt : r))],

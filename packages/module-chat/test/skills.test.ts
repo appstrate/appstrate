@@ -5,7 +5,6 @@ import {
   applySkillChanges,
   CHAT_SKILLS_CONTENT_BUDGET_CHARS as BUDGET,
   injectedSkills,
-  pinnedSkillsOf,
   resolveChatSkills,
   selectionAfter,
   type ChatSkillSelection,
@@ -113,22 +112,6 @@ describe("applySkillChanges", () => {
     const changes = { pin: ["@a/b"], unpin: ["@a/a"] };
     const once = applySkillChanges(["@a/a"], changes);
     expect(applySkillChanges(once, changes)).toEqual(once);
-  });
-});
-
-describe("pinnedSkillsOf", () => {
-  it("gives each pin its source and status, null until evaluated", () => {
-    expect(
-      pinnedSkillsOf({
-        pinnedSkills: ["@a/a", "@a/m", "@a/z"],
-        assistantSkills: ["@a/m"],
-        skillStatus: { "@a/a": "over_budget", "@a/m": "injected" },
-      }),
-    ).toEqual([
-      { id: "@a/a", source: "user", status: "over_budget" },
-      { id: "@a/m", source: "assistant", status: "injected" },
-      { id: "@a/z", source: "user", status: null },
-    ]);
   });
 });
 

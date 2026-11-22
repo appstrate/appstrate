@@ -16,8 +16,35 @@ import {
 import { eq } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
 import { chatSessions } from "@appstrate/db/schema";
+import { pinnedSkillsOf } from "../src/persistence.ts";
 
 const app = getTestApp();
+
+describe("pinnedSkillsOf", () => {
+  it("gives each pin its source and status, null until evaluated", () => {
+    expect(
+      pinnedSkillsOf({
+        pinnedSkills: ["@a/a", "@a/m", "@a/z"],
+        assistantSkills: ["@a/m"],
+        skillStatus: { "@a/a": "over_budget", "@a/m": "injected" },
+      }),
+    ).toEqual([
+      { id: "@a/a", source: "user", status: "over_budget" },
+      { id: "@a/m", source: "assistant", status: "injected" },
+      { id: "@a/z", source: "user", status: null },
+    ]);
+  });
+
+  it("reads a stored status outside the enum as not evaluated", () => {
+    expect(
+      pinnedSkillsOf({
+        pinnedSkills: ["@a/a", "@a/b", "@a/c"],
+        assistantSkills: [],
+        skillStatus: { "@a/a": "loaded", "@a/b": 1, "@a/c": { injected: true } },
+      }).map((pin) => pin.status),
+    ).toEqual([null, null, null]);
+  });
+});
 
 interface SessionDto {
   id: string;

@@ -19,7 +19,9 @@ const AGENT_LAUNCH_MAX_BYTES = 64 * 1024;
 /**
  * `message` with its agent-prompt part's `text` set to what `prompts/get` answers for its name and
  * the typed request, whatever the browser sent (no part, no connection). An unknown or
- * unlaunchable name, or instructions over {@link AGENT_LAUNCH_MAX_BYTES}, is a 400.
+ * unlaunchable name, or instructions over {@link AGENT_LAUNCH_MAX_BYTES}, is a 400. The cap counts
+ * the instructions as rendered, the agent's text with the user's request in it, so its message
+ * names both.
  */
 export async function resolveAgentPrompt(
   message: UIMessage,
@@ -48,7 +50,7 @@ export async function resolveAgentPrompt(
   });
   if (Buffer.byteLength(text) > AGENT_LAUNCH_MAX_BYTES) {
     throw invalidRequest(
-      `The launch instructions of "${name}" exceed ${AGENT_LAUNCH_MAX_BYTES / 1024} KB.`,
+      `The launch instructions of "${name}" exceed ${AGENT_LAUNCH_MAX_BYTES / 1024} KB. They include your request: a shorter one may fit.`,
       "messages",
     );
   }

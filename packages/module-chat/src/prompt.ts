@@ -88,8 +88,14 @@ const SKILLS_FILES = {
 };
 const SKILLS_INJECTED_LEAD =
   "These skills are pinned to this conversation, by the user or by your own earlier load. Each is a procedure for YOU: follow it whenever it applies.";
-// Loading a listed skill pins it (`turnSkillLoad`): told once, ahead of the listing it applies to.
-const SKILLS_LISTED_LEAD = `Loading one of these skills (reading its SKILL.md at the URI shown, with \`read_resource\` or \`read\`) pins it to the conversation: later turns show it in full here. A conversation pins at most ${MAX_PINNED_SKILLS} skills, which share one budget; a load past either limit is still read for this turn, but not pinned, and says so. ${UNPIN_HINT}`;
+// How to load a listed skill, told once, ahead of the listing it applies to. A skill is listed only
+// when the turn `readsSkills`, which implies the transport, so `read_resource` and `read` are
+// both declared. Only a persisted turn pins a load (`turnSkillLoad`); an ephemeral one reads.
+const SKILLS_LOAD = "reading its SKILL.md at the URI shown, with `read_resource` or `read`";
+const SKILLS_LISTED_LEAD = {
+  persisted: `Loading one of these skills (${SKILLS_LOAD}) pins it to the conversation: later turns show it in full here. A conversation pins at most ${MAX_PINNED_SKILLS} skills, which share one budget; a load past either limit is still read for this turn, but not pinned, and says so. ${UNPIN_HINT}`,
+  ephemeral: `Load one of these skills by ${SKILLS_LOAD}. This conversation is not saved, so a load serves this turn only and pins nothing.`,
+};
 // Why this turn holds no `skills:*`: without it, a model reads the gap as a role
 // to fix and hunts through other operations.
 const SKILLS_DISCOVERY_OFF_NOTE =
@@ -294,6 +300,7 @@ interface RenderedContext {
 function formatSkillsSection(opts: {
   selection: ChatSkillSelection;
   capabilities: TurnCapabilities;
+  persists: boolean;
   catalogue: readonly CatalogueSkill[];
   contents: ReadonlyMap<string, SkillContent | null>;
 }): RenderedContext {
@@ -307,7 +314,10 @@ function formatSkillsSection(opts: {
       : [];
   const groups: string[][] = [];
   if (!opts.selection.skillDiscovery) groups.push([SKILLS_DISCOVERY_OFF_NOTE]);
-  if (listed.length) groups.push([SKILLS_LISTED_LEAD, ...listed.map(skillLine)]);
+  if (listed.length) {
+    const lead = SKILLS_LISTED_LEAD[opts.persists ? "persisted" : "ephemeral"];
+    groups.push([lead, ...listed.map(skillLine)]);
+  }
   if (skills.injected.length) {
     groups.push([
       `${SKILLS_INJECTED_LEAD} ${files}`,
@@ -339,6 +349,8 @@ type CallerContextOpts = {
   /** The TURN's set (post-`turnPermissions`): the authoring toggle narrows it. */
   permissions: readonly string[];
   skills: ChatSkillSelection;
+  /** The turn persists to a conversation, so a skill it loads is pinned (else ephemeral). */
+  persists: boolean;
   /** The pinned skills active here, read by {@link buildCallerContextBlock}. */
   skillContents?: ReadonlyMap<string, SkillContent | null>;
   /** The catalogue of the turn's skills, listed by {@link buildCallerContextBlock} with discovery on. */
@@ -353,6 +365,7 @@ export function formatCallerContext(
   const skills = formatSkillsSection({
     selection: opts.skills,
     capabilities: opts.capabilities,
+    persists: opts.persists,
     catalogue: opts.skillCatalogue ?? [],
     contents: opts.skillContents ?? new Map(),
   });
@@ -645,6 +658,8 @@ export async function buildCallerContextBlock(
     capabilities: TurnCapabilities;
     permissions: readonly string[];
     skills: ChatSkillSelection;
+    /** The turn persists to a conversation (not ephemeral): a skill it loads is pinned. */
+    persists: boolean;
     /** See `turnUsesDrafts`. */
     drafts: boolean;
     /** Opened only when the turn lists or injects skills, under `signal`; closed once they are read. */
@@ -682,6 +697,7 @@ export async function buildCallerContextBlock(
     origin: args.origin,
     restricted: args.restricted,
     skills,
+    persists: args.persists,
     skillContents: turnSkills.contents,
     skillCatalogue: turnSkills.catalogue,
   });

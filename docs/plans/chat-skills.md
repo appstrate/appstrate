@@ -110,7 +110,8 @@ If the pin cannot be made (cap, budget, the turn stopped or taken over), the rea
 the model gets the text for this turn plus a note that it was not pinned, and nothing is written.
 
 When the database confirms the pin, the history keeps the receipt
-`{"uri","skill":"@scope/name","pinned":true}` in place of the `SKILL.md` text: a replay never
+`{"uri","skill":"@scope/name","loaded":true}` in place of the `SKILL.md` text (a past event, not
+the pin's current state: the system prompt's skills section says what is loaded now): a replay never
 re-injects the body, and later turns inject it from the system prompt, where summarization cannot
 drop it. An unpinned read keeps its text. An ephemeral turn has no `SkillLoad`: its loads are
 plain reads.

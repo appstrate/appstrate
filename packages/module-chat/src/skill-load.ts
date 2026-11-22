@@ -22,7 +22,7 @@ export const UNPIN_HINT =
   "Tell the user: they can unpin a skill in the skills panel of the composer to make room.";
 const notPinned = (packageId: string, why: string): SkillLoadResult => ({
   pinned: false,
-  note: `The skill \`${packageId}\` was read for this turn but not pinned to the conversation: ${why} Later turns will not have it unless it is read again.`,
+  note: `The skill \`${packageId}\` was read for this turn but not pinned to the conversation: ${why} Its text stays in this conversation's history, which summarization may drop, but the system prompt will not inject it on later turns.`,
 });
 const PIN_REFUSALS: Record<"full" | "released" | "failed", string> = {
   full: `this conversation already pins ${MAX_PINNED_SKILLS} skills, the most it holds. ${UNPIN_HINT}`,
