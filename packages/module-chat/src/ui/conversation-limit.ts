@@ -4,11 +4,12 @@
  * The open conversation's origin space and limit (`ConversationScope`), and what its first turn
  * carries. Before the first message the draft (the selected space as origin, a local limit) is
  * the conversation's scope and the first message sends it; once sent it stops following the
- * selection and every later turn carries it too (the server reads it only on the turn that
+ * selection and the draft carries every later turn too (the server reads it only on the turn that
  * creates the conversation). Then the limit is the server's row, changed by a PATCH (refused
  * while a turn generates): readers project it while pending, a success writes it into the detail
- * and every list row, and a 404 sends it back to the draft. The origin is immutable once set: a
- * conversation without one takes it only by being limited to it.
+ * and every list row, and a 404 (no session: its first turn created none, or it was deleted
+ * since) sends the change back to the draft, which follows the selection again. The origin is
+ * immutable once set: a conversation without one takes it only by being limited to it.
  */
 
 import { useCallback, useMemo, useState } from "react";
@@ -103,8 +104,7 @@ export function useConversationLimit({
   getCreation: () => ConversationCreation | undefined;
 } {
   const queryClient = useQueryClient();
-  // The first message was sent in this mount: the conversation exists, and a retry after a failed
-  // first turn carries the same draft.
+  // The first message was sent in this mount.
   const [sent, setSent] = useState(false);
   // Until then a draft belongs to the current selection: changing space resets its origin and limit.
   const initialDraft = { spaceId: selectedSpaceId ?? null, restricted: !!selectedSpaceId };
@@ -130,9 +130,6 @@ export function useConversationLimit({
   const isPending = pending !== undefined;
   const { mutate } = useMutation({
     mutationKey: limitMutationKey(transport?.orgId),
-    // Resolves whether the session was found. A 404 on a conversation new in this mount means
-    // there is none to change (its first turn created none, or it was deleted since): the change
-    // stays in the draft and the next message (re)creates the conversation with it.
     mutationFn: async ({ id: sessionId, ...patch }: LimitChange) => {
       try {
         await setSessionLimit(transport!, sessionId, patch);
@@ -143,17 +140,22 @@ export function useConversationLimit({
       }
     },
     onSuccess: (found, limitChange) => {
-      setDraft((prev) => ({
-        spaceId: limitChange.spaceId ?? prev.spaceId,
-        restricted: limitChange.restricted,
-        under: found ? prev.under : selectedSpaceId,
-      }));
       if (!found) {
         setSent(false);
+        setDraft({
+          spaceId: limitChange.spaceId ?? selectedSpaceId ?? null,
+          restricted: limitChange.restricted,
+          under: selectedSpaceId,
+        });
         // An optimistic row of the failed turn must not be read back as `stored`.
         void dropSessionFromLists(queryClient, limitChange.id);
         return;
       }
+      setDraft((prev) => ({
+        ...prev,
+        spaceId: limitChange.spaceId ?? prev.spaceId,
+        restricted: limitChange.restricted,
+      }));
       queryClient.setQueryData<SessionHistory | null>(
         detailKey,
         (row) => row && limitedRow(row, limitChange),

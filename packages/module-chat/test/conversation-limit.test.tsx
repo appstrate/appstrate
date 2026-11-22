@@ -262,7 +262,7 @@ describe("changing the limit of a conversation created in this mount", () => {
     expect(seen).toMatchObject({ originSpaceId: "spc_b", restricted: true, pending: true });
   });
 
-  it("carries the first message's value on every later turn, whatever is selected since", () => {
+  it("stops following the selection once the first message is sent", () => {
     const qc = new QueryClient();
     const taken: unknown[] = [];
     let seen!: ConversationScope;

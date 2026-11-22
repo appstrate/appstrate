@@ -45,7 +45,6 @@ test("lifting the limit after a failed first turn shows no error and the retry c
   expect(turns[1]!.spaceId).toBeTruthy();
   expect(turns[1]!.restricted).toBeUndefined();
 
-  // Belt and braces: the `turns[1]` checks above are what discriminate.
   await expect(chip).toHaveCount(0);
   await expect(page.locator("[data-sonner-toast]")).toHaveCount(0);
 
