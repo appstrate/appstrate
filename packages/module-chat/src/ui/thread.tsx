@@ -871,10 +871,11 @@ export function MessageError() {
             ) : null}
             {errorState.retryable ? (
               <ThreadPrimitive.If running={false}>
+                {/* In a message, `composer` is its edit composer, not the user's draft. */}
                 <ThreadPrimitive.Suggestion
                   prompt={t("turn.retryPrompt")}
-                  method="replace"
-                  autoSend
+                  send
+                  clearComposer={false}
                   asChild
                 >
                   <Button type="button" variant="outline" size="sm">
