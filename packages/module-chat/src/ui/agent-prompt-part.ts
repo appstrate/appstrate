@@ -1,25 +1,14 @@
 // SPDX-License-Identifier: Apache-2.0
 
-/**
- * An agent launch carried by a user message: how a message's agent prompt part is read back (live
- * or replayed from history). The send writes the part from the message's agent directive
- * (`directive-send.ts`).
- */
-
 import { AGENT_PROMPT_PART_TYPE, agentPromptOfParts } from "../agent-prompt.ts";
 import { AGENT_DIRECTIVE, serializeDirective } from "../directives.ts";
 
-/** What the browser sends of an agent prompt (the server adds the launch text). */
 interface AgentChip {
   name: string;
   title: string;
 }
 
-/**
- * The content of a retry: its request, led by the directive of the agent the failed turn launched
- * (the retry asks the model to check the state first, so the launch is named again, not silently
- * repeated). The send turns the directive into the agent prompt part, as for any message.
- */
+/** A retry's content: its request led by the directive of the agent the failed turn launched. */
 export function retryContent(text: string, agent: AgentChip | null) {
   const named = agent
     ? serializeDirective({ type: AGENT_DIRECTIVE, label: agent.title, id: agent.name })
@@ -56,7 +45,6 @@ function partsOf(message: MessageLike): readonly PartLike[] {
 
 /** The agent a user message launches, `null` when it launches none. Never the launch text. */
 export function agentPromptOf(message: MessageLike): AgentChip | null {
-  // The runtime's shape read as the stored one.
   const parts = partsOf(message).map((part) =>
     isAgentPromptPart(part) ? { ...part, type: AGENT_PROMPT_PART_TYPE } : part,
   );

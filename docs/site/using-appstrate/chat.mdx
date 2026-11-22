@@ -49,17 +49,15 @@ By default, a one-off agent the assistant composes runs on the organization's de
 [Skills](/features/skills) give the assistant instructions for a domain. Each conversation has two skill settings, in the composer's skills panel:
 
 - **Pinned skills**: a checked skill is pinned to the conversation, and each turn tries to load it in full. Each row shows whether the last message actually loaded it:
-  - no caption: a skill you pinned that the last turn loaded;
+  - no caption: loaded, or not yet evaluated;
   - "Cited in the message": named in the message you are typing, so locked until you remove the mention;
-  - "Loaded with the next message": not sent with a turn yet;
-  - "Removed on the next message": you unchecked it and have not sent a message since;
   - "Not loaded" with the reason: skill budget exceeded, unavailable or unreadable.
 
-  A skill that is not loaded stays pinned and is not counted as loaded. Uncheck any pinned skill to remove it from the conversation: it leaves the context from the next message on ("Unchecking removes it from the context from the next message."), and earlier turns are unchanged.
+  A skill that is not loaded stays pinned and is not counted as loaded. A gauge shows the pinned skills' share of the 64,000-character budget and warns before a pin would exceed it. Changes apply from the next message, as a line at the foot of the panel says, even while a reply is being written. Uncheck any pinned skill to remove it from the conversation: it leaves the context from the next message on, and earlier turns are unchanged.
 
 - **Automatic discovery** (on by default): the assistant sees the other skills of the spaces the conversation can act in, one line each, and loads the one that fits. The skills you pinned are not listed again. When it is off, the assistant has no access to any other skill: it cannot list, load, declare or write one, whatever your role. The skills you pinned still apply.
 
-A skill the assistant loads this way is not pinned: its text stays in the conversation's history, shown in the thread as a chip. Only you pin a skill. A conversation holds at most 5 pinned skills, sharing a budget of 64,000 characters; pinning a sixth is refused, so uncheck a skill to make room.
+A skill the assistant reads this way is not pinned: it serves that message and its text stays in the conversation's history, shown in the thread as a "Read for this message" chip with a "Pin" action. Only you pin a skill. A conversation holds at most 5 pinned skills, sharing a budget of 64,000 characters; pinning a sixth is refused, so uncheck a skill to make room.
 
 ## For administrators
 
@@ -73,4 +71,4 @@ A skill the assistant loads this way is not pinned: its text stays in the conver
 Type `/` in the composer to open the list of commands: the skills the conversation can read and the agents you can launch, in the spaces the conversation acts in (the origin space alone when it is limited to it). The list is the one the Appstrate MCP server serves to any client, with your own permissions, and it shows skills even when automatic discovery is off.
 
 - **A skill** is pinned to the conversation, like ticking it in the skills panel: it stays pinned on every later turn until you remove it there. Pinning is refused at the limit of 5 pinned skills.
-- **An agent** asks the assistant to run it. Type what you want after the command; the assistant builds the run's input from it, asks for what is missing, then launches the agent. Each launch is a metered run. The conversation shows what you typed, and the assistant is given the launch instructions the server returns, which are kept with the message and reused on every later turn.
+- **An agent** asks the assistant to run it. Type what you want after the command; the assistant builds the run's input from it, asks for what is missing, then launches the agent. Each launch is a metered run. The conversation shows what you typed, and the assistant is given the launch instructions the server returns, which are kept with the message. Later turns replay the most recent launch instructions within a 64,000-character budget; older ones are replaced by a short note, and you can launch the agent again. If the platform's MCP server cannot answer, the launch fails with a gateway error (502) and nothing is sent.

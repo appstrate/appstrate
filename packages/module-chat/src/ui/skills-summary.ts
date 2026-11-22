@@ -17,11 +17,7 @@ export function namedSkill(names: SkillNames, id: string): LoadedSkill {
   return { packageId: id, name: names.get(id) ?? parseScopedName(id)?.name ?? id };
 }
 
-/**
- * What the live region reads of the pins' verdicts alone (never a pin no turn judged yet, nor a
- * citation): the skills loaded, then how many were left out. `null` until the catalogue names
- * them (`names`), so a name swap is never read out.
- */
+/** What the live region reads of the pins' verdicts: skills loaded, then how many were left out. `null` until `names` is known. */
 export function verdictsSummary(
   skills: StoredSkills,
   names: SkillNames | null,
@@ -41,10 +37,7 @@ export function verdictsSummary(
   });
 }
 
-/**
- * The single skill's name, how many skills (`countKey`: the pill says « pinned », an accessible
- * name « skills »), or how many are not loaded when none is. The tooltip lists them.
- */
+/** The single skill's name, a count (`countKey` picks « pinned » or « skills »), or the not-loaded count. */
 export function skillsSummary(
   skills: readonly LoadedSkill[],
   refused: number,

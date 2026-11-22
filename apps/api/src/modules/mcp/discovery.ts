@@ -89,7 +89,6 @@ export interface AgentHit {
   display_name: string;
   description: string;
   published: boolean;
-  /** The agent's chosen icon (`@appstrate/core/appearance` grammar), `null` when none. */
   icon: string | null;
   color: string | null;
 }

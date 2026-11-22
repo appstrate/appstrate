@@ -1,10 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * The skills and agents a user message names, as the composer's `/` menu writes them into the text:
- * assistant-ui's directive syntax, `:skill[label]{name=@scope/name}` and `:agent[title]{name=run-…}`.
- * Parsed by the library's own formatter, the one the composer uses to draw the chips, so the browser
- * and the server read the same text the same way (the formatter has no React in it).
+ * The skills and agents a user message names, in assistant-ui's directive syntax
+ * (`:skill[label]{name=@scope/name}`, `:agent[title]{name=run-…}`), parsed by the formatter the
+ * composer draws its chips with, so browser and server read the same text.
  */
 
 import { defaultDirectiveFormatter } from "@assistant-ui/core";
@@ -55,11 +54,7 @@ export function directivesOf(text: string): Directive[] {
   );
 }
 
-/**
- * `text` as a person or the model reads it: each directive is `/label`, or gone with `omitAgent`
- * for an agent (the launch is the agent's own instructions: its name is no part of the request).
- * The one place a directive becomes plain text.
- */
+/** `text` as read by a person or the model: directives become `/label` (agents dropped with `omitAgent`). */
 export function readableDirectives(text: string, { omitAgent = false } = {}): string {
   return directiveSegments(text)
     .map((segment) =>

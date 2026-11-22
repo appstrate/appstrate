@@ -20,16 +20,11 @@ export function joinQueued(items: readonly string[]): string {
   return items.join("\n\n");
 }
 
-/**
- * Whether the draft can join the queue: a turn runs, it is text alone, and it names no agent
- * (a queued message is sent after the turn, as one message with the others: no agent launch
- * waits in a queue, and none is started by surprise). Skills it names are pinned when it is sent.
- */
+/** Whether the draft can join the queue: a turn runs, text alone, no agent launch (none waits in a queue). */
 export function canQueueDraft(input: {
   running: boolean;
   text: string;
   hasAttachments: boolean;
-  /** `draftIssue` of the queue with the draft joined: they are sent as one message. */
   issue: DraftIssue | null;
 }): boolean {
   return (

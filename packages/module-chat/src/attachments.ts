@@ -84,9 +84,8 @@ function imageNote(
  * Return a copy of the thread with every file part replaced by a compact text
  * part (the {@link attachmentTextBlock}) so the model sees the attachment as
  * text it can act on. Messages without file parts are returned unchanged (no
- * copy). A message carrying a resolved agent launch shows its launch instructions in place of its text
- * (`withModelText`). Used when projecting the thread into the engine's transcript so the
- * model-facing serialization lives in one place.
+ * copy). A resolved agent launch replaces the text (`withModelText`). Used when projecting the
+ * thread into the engine's transcript so the model-facing serialization lives in one place.
  */
 export function messagesWithAttachmentsAsText(
   messages: UIMessage[],

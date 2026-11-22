@@ -1,17 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
-/**
- * The `_meta` an Appstrate platform server puts on each agent launch prompt of `prompts/list`.
- * MCP's own `icons` field takes image URLs; an agent's icon is a token of the
- * `@appstrate/core/appearance` grammar (`lucide:bot`), so it travels here, under a reverse-DNS
- * key like the other `dev.appstrate/*` markers. Shared by the server that writes it
- * (`apps/api`'s mcp module) and the client that reads it (`@appstrate/module-chat`).
- */
-
-/** `_meta` key of an agent launch prompt. */
+/** `_meta` key of an agent launch prompt (MCP's `icons` takes URLs; an agent's icon is a token). */
 export const AGENT_PROMPT_META_KEY = "dev.appstrate/agent";
 
-/** Payload of {@link AGENT_PROMPT_META_KEY}; `icon`/`color` are `null` when the agent chose none. */
+/** Payload of {@link AGENT_PROMPT_META_KEY}. */
 export interface AgentPromptMeta {
   /** `@scope/name`: the seed of the agent's derived colour. */
   packageId: string;

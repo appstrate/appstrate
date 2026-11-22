@@ -17,20 +17,14 @@ import { logger } from "./logger.ts";
 
 const AGENT_LAUNCH_MAX_BYTES = 64 * 1024;
 
-/**
- * Characters of earlier launch texts replayed to the model on a later turn, the most recent first:
- * the order of one launch's own cap ({@link AGENT_LAUNCH_MAX_BYTES}), so a thread keeps about one
- * full launch of context however many it holds. Older ones are replaced by a stub.
- */
+/** Characters of earlier launch texts replayed on a later turn, most recent first; older ones become a stub. */
 export const AGENT_LAUNCH_REPLAY_BUDGET_CHARS = 64_000;
 
 /**
- * `message` with its agent-prompt part's `text` set to what `prompts/get` answers for its name and
- * the typed request, whatever the browser sent (no part, no connection). An unknown or
- * unlaunchable name, or instructions over {@link AGENT_LAUNCH_MAX_BYTES}, is a 400; a platform
- * server that fails to answer (an internal error, or no connection) is a 502. The cap counts
- * the instructions as rendered, the agent's text with the user's request in it, so its message
- * names both.
+ * `message` with its agent-prompt part's `text` set to what `prompts/get` answers, whatever the
+ * browser sent. An unknown or unlaunchable name, or instructions over
+ * {@link AGENT_LAUNCH_MAX_BYTES} (counted as rendered, request included), is a 400; a platform
+ * server that fails to answer is a 502.
  */
 export async function resolveAgentPrompt(
   message: UIMessage,
@@ -93,12 +87,9 @@ function droppedLaunchText(name: string, title: string): string {
 }
 
 /**
- * The thread with every earlier launch's text taken from its stored row (`stored`, by message id),
- * never from the browser; the last one's comes from {@link resolveAgentPrompt}. A launch with no
- * stored text shows the model what the user typed. Earlier texts are kept most recent first within
- * {@link AGENT_LAUNCH_REPLAY_BUDGET_CHARS}; each older one is replaced by a short stub naming the
- * agent. A pure function of the thread and the stored rows, so the replay is the same on every
- * turn until a new launch arrives and the prompt cache holds.
+ * The thread with each earlier launch's text taken from its stored row (`stored`, by message id),
+ * never from the browser, most recent first within {@link AGENT_LAUNCH_REPLAY_BUDGET_CHARS}; older
+ * ones become a stub. Pure in the thread and the rows, so the replay is stable and the prompt cache holds.
  */
 export function withStoredAgentPromptTexts(
   messages: UIMessage[],
