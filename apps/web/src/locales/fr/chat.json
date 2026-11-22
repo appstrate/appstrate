@@ -144,6 +144,8 @@
   "skills.error": "Les compétences n'ont pas pu être chargées.",
   "skills.unavailable": "Indisponible pour cette conversation : décochez-la pour la retirer.",
   "skills.state.next": "Chargée au prochain message",
+  "skills.state.unpin": "Retirée au prochain message",
+  "skills.uncheckHint": "Décocher la retire du contexte à partir du prochain message.",
   "skills.state.assistant": "Chargée par l'assistant",
   "skills.state.refused.over_budget": "Non chargée : budget de compétences dépassé",
   "skills.state.refused.unavailable": "Non chargée : indisponible",

@@ -20,6 +20,7 @@ import {
   withAppliedChanges,
   citeSkill,
   skillPickerRows,
+  removesFromContext,
   skillRowState,
   type StoredSkills,
 } from "../src/ui/chat-skills.ts";
@@ -217,8 +218,28 @@ describe("skillRowState", () => {
 
   it("is next for a pending pin, off for an unpinned one or a skill never pinned", () => {
     expect(state("@a/pending")).toEqual({ kind: "next" });
-    expect(state("@a/dropped")).toEqual({ kind: "off" });
     expect(state("@a/other")).toEqual({ kind: "off" });
+  });
+
+  it("is unpin for a server pin unchecked since, and loads nothing", () => {
+    expect(state("@a/dropped")).toEqual({ kind: "unpin" });
+    expect(loadsSkill(state("@a/dropped"))).toBe(false);
+    expect([...skills.unpinning]).toEqual(["@a/dropped"]);
+  });
+
+  it("is off again once a pending pin is unchecked: nothing was held", () => {
+    const undone = conversationSkills(stored([]), local({ pin: [], unpin: ["@a/new"] }));
+    expect(skillRowState(undone, "@a/new", new Set())).toEqual({ kind: "off" });
+  });
+
+  it("says unchecking removes a server pin from the context, not a pending or cited one", () => {
+    const removes = (id: string, cited: string[] = []) =>
+      removesFromContext(skills, id, state(id, cited));
+    expect(removes("@a/mine")).toBe(true);
+    expect(removes("@a/assistant")).toBe(true);
+    expect(removes("@a/pending")).toBe(false);
+    expect(removes("@a/mine", ["@a/mine"])).toBe(false);
+    expect(removes("@a/dropped")).toBe(false);
   });
 
   it("is cited for a skill the draft cites, whatever the server says", () => {

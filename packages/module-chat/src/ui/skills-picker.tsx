@@ -13,6 +13,7 @@ import { cn } from "@appstrate/ui/cn";
 import { MAX_PINNED_SKILLS } from "../skills.ts";
 import {
   effectiveSkills,
+  removesFromContext,
   skillPickerRows,
   skillRowState,
   type ConversationSkills,
@@ -48,6 +49,8 @@ function rowCaption(state: SkillRowState, t: ChatTranslate): string | null {
       return t("skills.cited");
     case "next":
       return t("skills.state.next");
+    case "unpin":
+      return t("skills.state.unpin");
     case "loaded":
       return state.source === "assistant" ? t("skills.state.assistant") : null;
     case "refused":
@@ -130,13 +133,14 @@ export function SkillsPickerPanel({
             const nameId = `${id}-name`;
             const detailsId = `${id}-details`;
             const state = skillRowState(conversation, skill.id, effective.cited);
-            const checked = state.kind !== "off";
+            const checked = state.kind !== "off" && state.kind !== "unpin";
             const isCited = state.kind === "cited";
             // Not `disabled`: a locked row stays focusable, so its reason is still read out.
             const inert = (!checked && atPinCap) || isCited;
             const caption = rowCaption(state, t);
             const refused = state.kind === "refused";
-            const hasDetails = !!caption || (available ? !!skill.description : !refused);
+            const hint = removesFromContext(conversation, skill.id, state);
+            const hasDetails = !!caption || hint || (available ? !!skill.description : !refused);
             return (
               <div key={skill.id} className="flex items-start gap-2 rounded-md p-1">
                 <Checkbox
@@ -176,6 +180,14 @@ export function SkillsPickerPanel({
                         )}
                       >
                         {caption}
+                      </span>
+                    )}
+                    {hint && (
+                      <span
+                        data-testid={`skill-pin-hint-${skill.id}`}
+                        className="text-muted-foreground block text-[0.7rem] leading-snug"
+                      >
+                        {t("skills.uncheckHint")}
                       </span>
                     )}
                     {available && skill.description && (

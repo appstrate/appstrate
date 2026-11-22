@@ -144,6 +144,8 @@
   "skills.error": "Skills could not be loaded.",
   "skills.unavailable": "Unavailable for this conversation: uncheck to remove it.",
   "skills.state.next": "Loaded with the next message",
+  "skills.state.unpin": "Removed on the next message",
+  "skills.uncheckHint": "Unchecking removes it from the context from the next message.",
   "skills.state.assistant": "Loaded by the assistant",
   "skills.state.refused.over_budget": "Not loaded: skill budget exceeded",
   "skills.state.refused.unavailable": "Not loaded: unavailable",

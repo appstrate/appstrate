@@ -280,6 +280,26 @@ describe("SkillsPicker", () => {
       expect(caption(html, "@a/pending")).toBe("skills.state.next");
     });
 
+    it("a server pin carries the uncheck hint through aria-describedby; a pending pin does not", () => {
+      const html = render(true, ["@a/mine"], [], { pin: ["@a/pending"], unpin: [] });
+      const describedBy = box(html, "@a/mine").match(/aria-describedby="([^"]*)"/)![1]!;
+      const details = html.match(new RegExp(`id="${describedBy}"[^>]*>(.*?)</label>`))![1]!;
+      expect(details).toContain('data-testid="skill-pin-hint-@a/mine"');
+      expect(details).toContain("skills.uncheckHint");
+      expect(html).not.toContain('data-testid="skill-pin-hint-@a/pending"');
+    });
+
+    it("a cited row gets no hint", () => {
+      expect(render(true, ["@a/mine"], ["@a/mine"])).not.toContain("skill-pin-hint-");
+    });
+
+    it("a server pin unchecked since: unchecked, « Retirée au prochain message », no hint", () => {
+      const html = render(true, ["@a/mine"], [], { pin: [], unpin: ["@a/mine"] });
+      expect(box(html, "@a/mine")).toContain('aria-checked="false"');
+      expect(caption(html, "@a/mine")).toBe("skills.state.unpin");
+      expect(html).not.toContain("skill-pin-hint-");
+    });
+
     for (const reason of ["over_budget", "unavailable", "unreadable"] as const) {
       it(`a pin the last turn refused (${reason}): checked, enabled, not loaded and why`, () => {
         const html = render(true, [{ id: "@a/ref", source: "user", status: reason }]);
@@ -299,12 +319,6 @@ describe("SkillsPicker", () => {
       );
       expect(caption(html, "@a/gone")).toBe("skills.state.refused.unavailable");
       expect(html).not.toContain("skills.unavailable");
-    });
-
-    it("a server pin the user unchecked: unchecked, no caption", () => {
-      const html = render(true, ["@a/mine"], [], { pin: [], unpin: ["@a/mine"] });
-      expect(box(html, "@a/mine")).toContain('aria-checked="false"');
-      expect(caption(html, "@a/mine")).toBeUndefined();
     });
 
     it("only the draft locks: a cited row is the one locked", () => {

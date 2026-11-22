@@ -131,10 +131,10 @@ describe("skill changes across a turn", () => {
     store.take();
     toggle("@a/new");
     expect(store.get().local).toEqual({ pin: [], unpin: ["@a/new"] });
-    expect(row("@a/new")).toEqual({ kind: "off" });
+    expect(row("@a/new")).toEqual({ kind: "unpin" });
     store.answered("accepted");
     expect(server.stored.pins.map((p) => p.id)).toEqual(["@a/new"]);
-    expect(row("@a/new")).toEqual({ kind: "off" });
+    expect(row("@a/new")).toEqual({ kind: "unpin" });
     expect(store.take()).toEqual({ pin: [], unpin: ["@a/new"] });
   });
 

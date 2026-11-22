@@ -68,6 +68,8 @@ export interface ConversationSkills {
   stored: ReadonlyMap<string, PinnedSkill>;
   /** Pinned by a change the server has not applied yet. */
   pending: ReadonlySet<string>;
+  /** Held by the server and unchecked since: removed by the next turn. */
+  unpinning: ReadonlySet<string>;
 }
 
 export function conversationSkills(stored: StoredSkills, layers: SkillLayers): ConversationSkills {
@@ -78,6 +80,7 @@ export function conversationSkills(stored: StoredSkills, layers: SkillLayers): C
     pinned: applySkillChanges([...byId.keys()], layers.local),
     stored: byId,
     pending: new Set([...layers.inFlight.pin, ...layers.local.pin]),
+    unpinning: new Set(layers.local.unpin.filter((id) => byId.has(id))),
   };
 }
 
@@ -172,10 +175,11 @@ type SkillRefusal = Exclude<ChatSkillStatus, "injected">;
 
 /**
  * What a picker row shows; only the server says a skill is loaded. `cited`: locked by the draft;
- * `next`: no turn judged it yet; `loaded` / `refused`: the last turn's verdict; `off`: not pinned.
+ * `next`: no turn judged it yet; `loaded` / `refused`: the last turn's verdict; `unpin`: held, unchecked, removed by
+ * the next turn; `off`: not pinned.
  */
 export type SkillRowState =
-  | { kind: "cited" | "next" | "off" }
+  | { kind: "cited" | "next" | "unpin" | "off" }
   | { kind: "loaded"; source: PinnedSkill["source"] }
   | { kind: "refused"; reason: SkillRefusal };
 
@@ -185,7 +189,7 @@ export function skillRowState(
   cited: ReadonlySet<string>,
 ): SkillRowState {
   if (cited.has(id)) return { kind: "cited" };
-  if (!skills.pinned.includes(id)) return { kind: "off" };
+  if (!skills.pinned.includes(id)) return { kind: skills.unpinning.has(id) ? "unpin" : "off" };
   if (skills.pending.has(id)) return { kind: "next" };
   const pin = skills.stored.get(id);
   if (!pin || pin.status === null) return { kind: "next" };
@@ -196,7 +200,13 @@ export function skillRowState(
 
 /** Whether a row's skill is in the model's context, or will be on the next turn. */
 export function loadsSkill(state: SkillRowState): boolean {
-  return state.kind !== "off" && state.kind !== "refused";
+  return state.kind !== "off" && state.kind !== "unpin" && state.kind !== "refused";
+}
+
+/** Whether a checked row's pin is the server's, so unchecking it removes it from the context. */
+export function removesFromContext(skills: ConversationSkills, id: string, state: SkillRowState) {
+  const held = state.kind === "next" || state.kind === "loaded" || state.kind === "refused";
+  return held && skills.stored.has(id) && !skills.pending.has(id);
 }
 
 /** The catalogue's rows, then every pin missing from it (`available: false`), so it can be removed. */
