@@ -4,13 +4,16 @@
  * The open conversation's origin space and limit (`ConversationScope`), and what its first turn
  * carries. Before the first message the conversation does not exist: its origin is the space the
  * host has selected (or, without one, the space the user limits it to) and its limit a local
- * choice, both sent with that message. Afterwards the limit is the server's, changed by a PATCH
+ * choice, both sent with that message: the draft. Once that message is sent the draft stops
+ * following the selection and stands for the conversation until a session row is known; every
+ * later turn carries it too, and the server reads it only on the turn that creates the
+ * conversation. Afterwards the limit is the server's, changed by a PATCH
  * (refused while a turn generates): every reader projects it while it is pending, and a success
  * writes it into the session detail and every list row. The origin is immutable once set: a conversation without one
  * takes it only by being limited to it.
  */
 
-import { useCallback, useMemo, useRef, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import { useMutation, useMutationState, useQueryClient } from "@tanstack/react-query";
 import type { ConversationCreation } from "./chat-route.ts";
 import type { ConversationScope } from "./conversation-scope.ts";
@@ -101,28 +104,24 @@ export function useConversationLimit({
   getCreation: () => ConversationCreation | undefined;
 } {
   const queryClient = useQueryClient();
-  const [created, setCreated] = useState<Limit | null>(null);
-  // Frozen at the first message: a retry after a failed first turn keeps it. Every later turn
-  // carries it too, and the server reads it only on the turn that creates the conversation.
-  const frozen = useRef<Limit | null>(null);
-  // A draft belongs to the current selection. Changing space resets both its origin and limit.
+  // The first message was sent in this mount: the conversation exists, and a retry after a failed
+  // first turn carries the same draft.
+  const [sent, setSent] = useState(false);
+  // Until then a draft belongs to the current selection: changing space resets its origin and limit.
   const initialDraft = { spaceId: selectedSpaceId ?? null, restricted: !!selectedSpaceId };
   const [draft, setDraft] = useState({ ...initialDraft, under: selectedSpaceId });
-  const exists = persistedAtMount || created !== null;
+  const exists = persistedAtMount || sent;
   if (!exists && draft.under !== selectedSpaceId)
     setDraft({ ...initialDraft, under: selectedSpaceId });
-  const current = stored ?? created ?? { spaceId: null, restricted: false };
+  const current = stored ?? (sent ? draft : { spaceId: null, restricted: false });
 
-  // Read at request time: the turn's transport outlives the render that built it. What it
-  // freezes is what the scope shows, so the first message carries what the composer said.
+  // Read at request time: the turn's transport outlives the render that built it, so the first
+  // message carries what the composer said.
   const getLatest = useLatest(draft);
   const getCreation = useCallback((): ConversationCreation | undefined => {
     if (persistedAtMount) return undefined;
-    if (!frozen.current) {
-      frozen.current = getLatest();
-      setCreated(frozen.current);
-    }
-    return creationFields(frozen.current);
+    setSent(true);
+    return creationFields(getLatest());
   }, [persistedAtMount, getLatest]);
 
   const detailKey = sessionQueryKey(transport?.orgId, id);
@@ -135,10 +134,11 @@ export function useConversationLimit({
     mutationFn: ({ id: sessionId, ...patch }: LimitChange) =>
       setSessionLimit(transport!, sessionId, patch),
     onSuccess: (_, change) => {
-      setCreated(
-        (prev) =>
-          prev && { spaceId: change.spaceId ?? prev.spaceId, restricted: change.restricted },
-      );
+      setDraft((prev) => ({
+        ...prev,
+        spaceId: change.spaceId ?? prev.spaceId,
+        restricted: change.restricted,
+      }));
       queryClient.setQueryData<SessionHistory | null>(
         detailKey,
         (row) => row && limitedRow(row, change),
