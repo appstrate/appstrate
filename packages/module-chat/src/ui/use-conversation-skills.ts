@@ -3,10 +3,10 @@
 /**
  * A conversation's skills: the server's (the session detail, which the host's realtime keeps
  * fresh) with what the user changed since applied on top. Only the changes are sent, with the next
- * turn. A turn the server accepted (a 2xx) applied them in its first statement, so once it has
- * ended and the detail has been read again, what it sent is dropped; a turn refused or failed
- * without an answer keeps them for the next one (they are idempotent). A change made while the
- * turn ran always rides with the next one.
+ * turn. A turn the server accepted (a 2xx) applied them in its first statement, so they leave what
+ * the next turn sends the moment it ends, and stay displayed until the detail is read again; a
+ * turn refused or failed without an answer keeps them for the next one (they are idempotent). A
+ * change made while the turn ran always rides with the next one.
  */
 
 import { useCallback, useMemo, useState, useSyncExternalStore } from "react";
@@ -20,71 +20,159 @@ import {
   citeSkill,
   conversationSkills,
   hasSkillChanges,
+  layerSkillChanges,
   resetSkillChanges,
   subtractSkillChanges,
   type ConversationSkills,
   type SkillChangeBase,
 } from "./chat-skills.ts";
-import { sessionQuery, sessionQueryKey } from "./sessions.ts";
+import { sessionQuery } from "./sessions.ts";
 import type { ChatTransport } from "./runtime-context.ts";
 import { useLatest } from "./use-latest.ts";
 
 /** A turn that took the changes: its own object, so two turns sending equal changes never mix. */
 interface SentTurn {
-  readonly sent: ChatSkillChanges | undefined;
-  accepted: boolean;
+  readonly sent: ChatSkillChanges;
+  /** `null` until the server answers; accepted on a 2xx. */
+  accepted: boolean | null;
+  /** The sent ids (and `discovery`) no change has touched since: what acceptance applied for good. */
+  readonly untouched: Set<string>;
+}
+
+/** What the server accepted and a re-read has not shown yet: displayed, never sent again. */
+interface AppliedTurn {
+  readonly applied: ChatSkillChanges;
 }
 
 /** An ended turn: whether the server accepted it, and what to do once the detail was read again. */
 export interface EndedTurn {
   accepted: boolean;
-  settle: () => void;
+  /** `read`: the detail was read again, so the server's state now shows what it applied. */
+  settle: (read: boolean) => void;
+}
+
+const DISCOVERY = "discovery";
+
+/** The ids (and `discovery`) whose side differs between two sets of changes. */
+function touched(before: ChatSkillChanges, after: ChatSkillChanges): string[] {
+  const ids = new Set([...before.pin, ...before.unpin, ...after.pin, ...after.unpin]);
+  const side = (c: ChatSkillChanges, id: string) =>
+    c.pin.includes(id) ? "pin" : c.unpin.includes(id) ? "unpin" : null;
+  return [
+    ...[...ids].filter((id) => side(before, id) !== side(after, id)),
+    ...(before.skillDiscovery !== after.skillDiscovery ? [DISCOVERY] : []),
+  ];
 }
 
 /**
- * The user's changes and the turn carrying them, outside React: the transport reads and marks them
+ * The user's changes and the turns carrying them, outside React: the transport reads and marks them
  * at request time, between renders.
+ *
+ * - `pending`: what the next turn sends.
+ * - an accepted turn's sent entries leave `pending` the moment it ends (a queued turn sent right
+ *   then must not send them again: the server applied them, and the assistant may have re-pinned a
+ *   skill the user unpinned) and stay displayed as `applied` until the detail is read again. An
+ *   entry the user changed while the turn ran stays in `pending`.
+ * - a refused turn, or one that failed without an answer, leaves `pending` as it is.
  */
 export function createSkillChanges() {
-  let changes: ChatSkillChanges = NO_SKILL_CHANGES;
+  let pending: ChatSkillChanges = NO_SKILL_CHANGES;
+  let applied: AppliedTurn[] = [];
   let turn: SentTurn | null = null;
+  let view: ChatSkillChanges = NO_SKILL_CHANGES;
   const listeners = new Set<() => void>();
-  const set = (next: ChatSkillChanges) => {
-    changes = next;
+  /** `top` over everything applied and not read back yet. */
+  const layered = (top: ChatSkillChanges) =>
+    layerSkillChanges(
+      applied.reduce((under, a) => layerSkillChanges(under, a.applied), NO_SKILL_CHANGES),
+      top,
+    );
+  const publish = () => {
+    view = layered(pending);
     for (const listener of listeners) listener();
   };
+  /** Closes the turn: an accepted one moves what it applied for good out of `pending`. */
+  const close = (closing: SentTurn) => {
+    if (turn === closing) turn = null;
+    if (!closing.accepted) return;
+    const { sent, untouched } = closing;
+    const done: ChatSkillChanges = {
+      ...(sent.skillDiscovery !== undefined &&
+        untouched.has(DISCOVERY) && { skillDiscovery: sent.skillDiscovery }),
+      pin: sent.pin.filter((id) => untouched.has(id)),
+      unpin: sent.unpin.filter((id) => untouched.has(id)),
+    };
+    pending = subtractSkillChanges(pending, done);
+    applied = [...applied, { applied: done }];
+  };
   return {
-    get: () => changes,
+    /** What the panel shows: `pending` over what was applied and not read back yet. */
+    get: () => view,
+    /** What the next turn sends. */
+    pending: () => pending,
     subscribe: (listener: () => void) => {
       listeners.add(listener);
       return () => void listeners.delete(listener);
     },
-    /** Applies a change; `inFlight` is what the running turn sent, which a change may undo. */
+    /**
+     * Applies a change to `pending`. `inFlight` is what the server is applying or applied without a
+     * read showing it yet (the turn in flight, then what accepted turns applied): a change may undo
+     * it. `shown` is what the panel shows.
+     */
     change: (
-      apply: (current: ChatSkillChanges, inFlight: ChatSkillChanges | null) => ChatSkillChanges,
-    ) => set(apply(changes, turn?.sent ?? null)),
+      apply: (
+        current: ChatSkillChanges,
+        inFlight: ChatSkillChanges | null,
+        shown: ChatSkillChanges,
+      ) => ChatSkillChanges,
+    ) => {
+      const inFlight = turn
+        ? layered(turn.sent)
+        : applied.length
+          ? layered(NO_SKILL_CHANGES)
+          : null;
+      const next = apply(pending, inFlight, view);
+      if (turn) for (const id of touched(pending, next)) turn.untouched.delete(id);
+      pending = next;
+      publish();
+    },
     /** The changes the turn being sent carries (a copy), `undefined` when none. */
     take: (): ChatSkillChanges | undefined => {
-      const sent = hasSkillChanges(changes)
-        ? { ...changes, pin: [...changes.pin], unpin: [...changes.unpin] }
-        : undefined;
-      turn = { sent, accepted: false };
-      return sent;
+      // A turn still open has had its answer: a new request leaves only after it.
+      if (turn) close(turn);
+      const sent = { ...pending, pin: [...pending.pin], unpin: [...pending.unpin] };
+      turn = {
+        sent,
+        accepted: null,
+        untouched: new Set([
+          ...sent.pin,
+          ...sent.unpin,
+          ...(sent.skillDiscovery !== undefined ? [DISCOVERY] : []),
+        ]),
+      };
+      publish();
+      return hasSkillChanges(sent) ? sent : undefined;
     },
-    /** The server answered the turn being sent: accepted when 2xx. */
+    /** The server answered the turn being sent: accepted on a 2xx, refused otherwise. */
     answered: (accepted: boolean) => {
       if (turn) turn.accepted = accepted;
     },
-    /** The turn ended; `null` when no turn was sent in this mount (a resumed one). */
+    /**
+     * A turn ended. `null` when no turn was sent in this mount (a resumed one). A turn sent but not
+     * answered yet is one the queue sent since: it stays open.
+     */
     end: (): EndedTurn | null => {
       const ended = turn;
-      if (!ended) return null;
+      if (ended && ended.accepted !== null) close(ended);
+      const awaiting = applied;
+      if (!ended && awaiting.length === 0) return null;
+      publish();
       return {
-        accepted: ended.accepted,
-        settle: () => {
-          // A turn sent since is in flight now.
-          if (turn === ended) turn = null;
-          if (ended.accepted && ended.sent) set(subtractSkillChanges(changes, ended.sent));
+        accepted: ended?.accepted === true || awaiting.length > 0,
+        settle: (read) => {
+          if (!read) return;
+          applied = applied.filter((a) => !awaiting.includes(a));
+          publish();
         },
       };
     },
@@ -107,7 +195,7 @@ export interface ConversationSkillsState {
   takeChanges: () => ChatSkillChanges | undefined;
   /** The server answered the turn being sent: accepted when 2xx. */
   answered: (accepted: boolean) => void;
-  /** The turn ended: read the detail again, then drop what an accepted turn sent. */
+  /** The turn ended: read the detail again, then stop displaying what accepted turns applied. */
   settle: () => void;
 }
 
@@ -140,9 +228,17 @@ export function useConversationSkills({
   const [store] = useState(createSkillChanges);
   const changes = useSyncExternalStore(store.subscribe, store.get, store.get);
   const update = useCallback(
-    (apply: (current: ChatSkillChanges, base: SkillChangeBase) => ChatSkillChanges) => {
+    (
+      apply: (
+        current: ChatSkillChanges,
+        base: SkillChangeBase,
+        shown: ChatSkillChanges,
+      ) => ChatSkillChanges,
+    ) => {
       if (!getEnabled()) return;
-      store.change((current, inFlight) => apply(current, { stored: getStored(), inFlight }));
+      store.change((current, inFlight, shown) =>
+        apply(current, { stored: getStored(), inFlight }, shown),
+      );
     },
     [store, getEnabled, getStored],
   );
@@ -150,16 +246,17 @@ export function useConversationSkills({
   const skills = useMemo(() => conversationSkills(stored, changes), [stored, changes]);
 
   const actions = useMemo<SkillActions>(() => {
-    const pinnedBy = (current: ChatSkillChanges, base: SkillChangeBase) =>
-      conversationSkills(base.stored, current).pinned;
+    // What the panel shows is what the user acts on.
+    const pinnedBy = (base: SkillChangeBase, shown: ChatSkillChanges) =>
+      conversationSkills(base.stored, shown).pinned;
     return {
       togglePin: (packageId) =>
-        update((current, base) =>
-          changePin(current, packageId, !pinnedBy(current, base).includes(packageId), base),
+        update((current, base, shown) =>
+          changePin(current, packageId, !pinnedBy(base, shown).includes(packageId), base),
         ),
       setDiscovery: (on) => update((current, base) => changeDiscovery(current, on, base)),
       reset: () =>
-        update((current, base) => resetSkillChanges(current, pinnedBy(current, base), base)),
+        update((current, base, shown) => resetSkillChanges(current, pinnedBy(base, shown), base)),
     };
   }, [update]);
 
@@ -173,14 +270,13 @@ export function useConversationSkills({
     if (!ended || !transport) return;
     if (ended.accepted) setExists(true);
     // The turn may have pinned a skill (the assistant's load) and judged each pin: read the detail
-    // again, sharing a refetch the realtime signal already started; inactive included, so a
-    // conversation created in this mount is read before its observer is enabled.
-    void queryClient
-      .invalidateQueries(
-        { queryKey: sessionQueryKey(transport.orgId, id), refetchType: "all" },
-        { cancelRefetch: false },
-      )
-      .then(ended.settle);
+    // again. `fetchQuery` shares a read the realtime signal already started, and reads a
+    // conversation created in this mount, whose observer is not enabled yet (an invalidation
+    // skips a disabled query). Until a read lands, what the turn applied stays displayed.
+    void queryClient.fetchQuery({ ...sessionQuery(transport, id), staleTime: 0 }).then(
+      (row) => ended.settle(row !== null),
+      () => ended.settle(false),
+    );
   }, [store, queryClient, transport, id]);
 
   return {

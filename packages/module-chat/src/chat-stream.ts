@@ -266,7 +266,7 @@ export async function claimTurn(
   if (claim === "scope_changed") {
     throw conflict(
       "chat_turn_scope_changed",
-      "The conversation's limit or pinned skills changed while this turn was starting. Send the message again.",
+      "The conversation's limit or skill settings changed while this turn was starting. Send the message again.",
     );
   }
   if (claim === "in_flight") {
@@ -522,6 +522,8 @@ export async function handleChatStream(
     };
     return {
       skills: conv.selection,
+      // Whether the turn works on the caller's drafts (see `buildCallerContextBlock`).
+      skillDrafts: body.package_authoring !== false && callerPermissions.has("skills:write"),
       // The caller's own connection over the turn's spaces (see `callerMcpOpener`): the turn's
       // skills and an agent launch's prompt are read through it.
       openCaller: callerMcpOpener(c, platformFetch, {
@@ -534,6 +536,7 @@ export async function handleChatStream(
         spaceId: conv.spaceId,
         restricted: conv.restricted,
         pinnedSkills: conv.selection.pinnedSkills,
+        skillDiscovery: conv.selection.skillDiscovery,
       },
       originSpace,
       restricted: conv.restricted,
@@ -579,27 +582,38 @@ export async function handleChatStream(
       }
     | { ok: false; error: unknown }
   > = turn
-    .then(({ skills, permissions, capabilities, spaces, originSpace, restricted, openCaller }) =>
-      buildCallerContextBlock(c, {
-        spaces,
-        origin: originSpace,
-        restricted,
-        user,
-        // UI language forwarded by the client; validated/defaulted in the builder.
-        locale: c.req.header("X-Chat-Locale"),
-        capabilities,
-        permissions,
+    .then(
+      ({
         skills,
-        // The turn's skills are read before the claim naming them exists, so
-        // over a connection of the caller's own: not narrowed by `turnPermissions`, and no
-        // claim — what the caller reads.
-        // One in-process `initialize` plus the reads, only on a turn that lists
-        // (discovery with `skills:read`) or injects skills; closed before the turn's
-        // connection opens.
-        openSkillsClient: openCaller,
-      }).finally(() => {
-        phaseBMs = Date.now() - phaseBStart;
-      }),
+        skillDrafts,
+        permissions,
+        capabilities,
+        spaces,
+        originSpace,
+        restricted,
+        openCaller,
+      }) =>
+        buildCallerContextBlock(c, {
+          spaces,
+          origin: originSpace,
+          restricted,
+          user,
+          // UI language forwarded by the client; validated/defaulted in the builder.
+          locale: c.req.header("X-Chat-Locale"),
+          capabilities,
+          permissions,
+          skills,
+          drafts: skillDrafts,
+          // The turn's skills are read before the claim naming them exists, so
+          // over a connection of the caller's own: not narrowed by `turnPermissions`, and no
+          // claim — what the caller reads.
+          // One in-process `initialize` plus the reads, only on a turn that lists
+          // (discovery with `skills:read`) or injects skills; closed before the turn's
+          // connection opens.
+          openSkillsClient: openCaller,
+        }).finally(() => {
+          phaseBMs = Date.now() - phaseBStart;
+        }),
     )
     .then(
       ({ text, injected, skillStatus, skillBudgetLeft, skillUris }) => ({

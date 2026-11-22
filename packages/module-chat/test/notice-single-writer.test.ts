@@ -43,7 +43,7 @@ import { reconcileChatRun, runNoticeMessageId } from "../src/run-reconcile.ts";
 import { setActiveStream, STALE_MARKER_MIN_AGE_MS, type TurnScope } from "../src/resumable.ts";
 
 /** The scope of a session created with no origin space and no limit. */
-const UNLIMITED = { spaceId: null, restricted: false, pinnedSkills: [] };
+const UNLIMITED = { spaceId: null, restricted: false, pinnedSkills: [], skillDiscovery: true };
 
 let ctx: TestContext;
 let packageId: string;
@@ -283,8 +283,8 @@ describe("persistNotice single-writer guard", () => {
     const claim = (scope: TurnScope) => claimTurn(sessionId, "strm_scope", scope, {});
 
     for (const read of [
-      { spaceId: ctx.defaultSpaceId, restricted: false, pinnedSkills: [] },
-      { spaceId: null, restricted: false, pinnedSkills: [] },
+      { spaceId: ctx.defaultSpaceId, restricted: false, pinnedSkills: [], skillDiscovery: true },
+      { spaceId: null, restricted: false, pinnedSkills: [], skillDiscovery: true },
     ]) {
       await expect(claim(read)).rejects.toMatchObject({
         status: 409,
@@ -299,7 +299,12 @@ describe("persistNotice single-writer guard", () => {
     expect(await messageIds(sessionId)).toEqual([]);
 
     // The scope as stored: claimed.
-    await claim({ spaceId: ctx.defaultSpaceId, restricted: true, pinnedSkills: [] });
+    await claim({
+      spaceId: ctx.defaultSpaceId,
+      restricted: true,
+      pinnedSkills: [],
+      skillDiscovery: true,
+    });
     expect(await activeStreamId(sessionId)).toBe("strm_scope");
   });
 
@@ -327,6 +332,52 @@ describe("persistNotice single-writer guard", () => {
       code: "chat_turn_in_flight",
     });
     expect(await activeStreamId(sessionId)).toBe("strm_first");
+  });
+
+  it("answers in-flight while a live turn holds the conversation, though its skills moved since", async () => {
+    // Waiting for the live turn is the caller's move: a resend at once would only meet it again.
+    const sessionId = await createSession();
+    await claimTurn(sessionId, "strm_first", UNLIMITED, {});
+    await db
+      .update(chatSessions)
+      .set({ pinnedSkills: ["@acme/a"], skillDiscovery: false })
+      .where(eq(chatSessions.id, sessionId));
+    await expect(claimTurn(sessionId, "strm_second", UNLIMITED, {})).rejects.toMatchObject({
+      status: 409,
+      code: "chat_turn_in_flight",
+    });
+    expect(await activeStreamId(sessionId)).toBe("strm_first");
+  });
+
+  it("refuses the claim when the skill settings moved since the turn read them", async () => {
+    for (const moved of [
+      { skillDiscovery: false },
+      { pinnedSkills: ["@acme/a"] },
+      // Same set, other order: never stored so, but the compare keeps the order it was read in.
+      { pinnedSkills: ["@acme/b", "@acme/a"] },
+    ]) {
+      const sessionId = await createSession();
+      await db.update(chatSessions).set(moved).where(eq(chatSessions.id, sessionId));
+      const read = { ...UNLIMITED, pinnedSkills: moved.pinnedSkills ? ["@acme/a", "@acme/b"] : [] };
+      await expect(claimTurn(sessionId, "strm_moved", read, {})).rejects.toMatchObject({
+        status: 409,
+        code: "chat_turn_scope_changed",
+      });
+      expect(await activeStreamId(sessionId)).toBeNull();
+    }
+    // The settings as stored, in their stored order: claimed.
+    const sessionId = await createSession();
+    await db
+      .update(chatSessions)
+      .set({ pinnedSkills: ["@acme/a", "@acme/b"], skillDiscovery: false })
+      .where(eq(chatSessions.id, sessionId));
+    await claimTurn(
+      sessionId,
+      "strm_same",
+      { ...UNLIMITED, pinnedSkills: ["@acme/a", "@acme/b"], skillDiscovery: false },
+      {},
+    );
+    expect(await activeStreamId(sessionId)).toBe("strm_same");
   });
 
   it("takes over a stale marker, whose producer is gone", async () => {

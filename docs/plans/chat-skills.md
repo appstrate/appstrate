@@ -24,10 +24,8 @@ only source of truth for the pins; the client never infers "loaded".
 
 **Discovery** is progressive disclosure, as in the Agent Skills spec: one line per
 skill (id, version, `skill://` URI, description) under `## Skills`, the
-entries of `skills/list` (the draft's entry first when the turn itself may
-read it: it keeps the caller's `skills:write`, which the authoring switch
-drops; otherwise the published entry, so every URI listed is one the turn's
-`read_resource` reads), uncapped, minus the pinned skills (those are injected);
+entries of `skills/list` (the draft's entry first on a turn that works on drafts, see
+"One definition per skill" below; otherwise the published entry), uncapped, minus the pinned skills (those are injected);
 the model loads a body on demand with the chat's `read_resource`
 tool, `resources/read` on the platform MCP server at that URI (a file of the
 skill: the URI with `SKILL.md` replaced by the file's path). `resources/read`
@@ -50,10 +48,19 @@ definition; else `skills:read`; else refused. On that connection:
 
 - `skills/list`, the space's ACTIVE skills at their published definition, and
   `skills/list` with `_meta` `dev.appstrate/definition: "draft"`, the drafts
-  the caller may read. A chosen skill takes its draft entry when there is one,
-  else its published entry; a skill in neither list gets a notice.
+  the caller may read. On a turn that works on drafts a chosen skill takes its draft entry
+  when there is one, else its published entry; a skill in neither list gets a notice.
 - `resources/read` of each chosen skill's `SKILL.md` gives the content, the
   bytes every MCP client and `appstrate code sync` get at that URI.
+
+**One definition per skill.** A turn works on drafts when package authoring is on and the
+caller holds `skills:write` (`skillDrafts` in `chat-stream.ts`, the `drafts` argument of
+`buildCallerContextBlock`), whatever discovery. Then the catalogue, the injected pins and the
+URIs an assistant load must read to pin (`skillUris`) all take the caller's draft when there is
+one; otherwise all take the published version. The turn can read each: a listed draft with the
+`skills:write` it keeps, an injected one through its claim even with discovery off. So a load
+of a listed URI always pins the definition later turns inject. With authoring off, a pinned
+skill the caller has a draft of is injected at its published version.
 
 The injected `SKILL.md`s share one budget, `CHAT_SKILLS_CONTENT_BUDGET_CHARS`
 (64 000, `packages/module-chat/src/skills.ts`), spent in stored order: what
@@ -118,18 +125,19 @@ conversation writes exactly those verdicts in the claim's own UPDATE (`claimTurn
 cap) writes none; a turn that fails AFTER its claim (the engine, the stream) has written them
 already, and they stand.
 
-The claim is a compare-and-set on what the turn read: origin space, limit, and the
-`pinned_skills` its prompt was built from (`TurnScope`). A pin change from another tab landing
-between the turn's upsert and its claim refuses the turn with 409 `chat_turn_scope_changed`;
-the resend reads the new pins. So the verdicts always describe the row's own pins.
+The claim is a compare-and-set on what the turn read: origin space, limit, `skill_discovery`
+and the `pinned_skills` its prompt was built from, in order (`TurnScope`). A skill change from
+another tab landing between the turn's upsert and its claim refuses the turn with 409
+`chat_turn_scope_changed`; the resend reads the new state. So the verdicts always describe the
+row's own pins. A live turn holding the conversation answers `chat_turn_in_flight` first,
+whatever else moved.
 
 ### Assistant loads pin
 
 A persisted turn's `read_resource` (and the platform `read` tool, through the same
 `pinnedSkillReplay` helper) that answers text goes through the turn's `SkillLoad`
 (`turnSkillLoad`, built in `chat-stream.ts` from the injected set, the budget left and
-`skillUris` — each listed skill's `SKILL.md` URI as a pin would inject it, its draft before its
-published version — threaded to `buildPlatformMcpTools` as `skillLoad`):
+`skillUris` — each listed skill's `SKILL.md` URI as a pin would inject it — threaded to `buildPlatformMcpTools` as `skillLoad`):
 
 - a URI that is not the `SKILL.md` the conversation injects for its skill (a file of the skill,
   another space's copy, a draft read when the published version is injected, or the reverse) is

@@ -298,6 +298,7 @@ export interface TurnScope {
   spaceId: string | null;
   restricted: boolean;
   pinnedSkills: readonly string[];
+  skillDiscovery: boolean;
 }
 
 /** What claiming a conversation for a turn answered: `claimed`, or why nothing was written. */
@@ -311,8 +312,8 @@ type StreamClaim = "claimed" | "scope_changed" | "in_flight";
  * claimed turn from a marker whose producer died. Emits no signal: the caller's
  * user-message write does; on its failure `clearActiveStream` does.
  *
- * Also a compare-and-set on the scope the turn read (its origin space, limit and pinned
- * skills): the turn's spaces, bearer and system prompt were computed from that read, and the
+ * Also a compare-and-set on the scope the turn read (its origin space, limit, pinned skills
+ * and skill discovery): the turn's spaces, bearer and system prompt were computed from that read, and the
  * limit PATCH is refused only while a marker is set, so a change landing between the read and
  * this claim (another tab's limit or skill change) refuses the turn rather than letting it act
  * on a state it no longer matches. `scope_changed`: the scope moved (or the row is gone);
@@ -342,7 +343,8 @@ export async function setActiveStream(
         eq(chatSessions.id, sessionId),
         eq(chatSessions.restricted, scope.restricted),
         sql`${chatSessions.spaceId} IS NOT DISTINCT FROM ${scope.spaceId}`,
-        sql`${chatSessions.pinnedSkills} = ARRAY(SELECT jsonb_array_elements_text(${JSON.stringify(scope.pinnedSkills)}::jsonb))`,
+        eq(chatSessions.skillDiscovery, scope.skillDiscovery),
+        sql`${chatSessions.pinnedSkills} = ARRAY(SELECT e FROM jsonb_array_elements_text(${JSON.stringify(scope.pinnedSkills)}::jsonb) WITH ORDINALITY AS t(e, n) ORDER BY n)`,
         or(isNull(chatSessions.activeStreamId), lt(chatSessions.updatedAt, staleBefore)),
       ),
     )
@@ -350,16 +352,23 @@ export async function setActiveStream(
   if (claimed.length > 0) return "claimed";
   const [row] = await db
     .select({
+      activeStreamId: chatSessions.activeStreamId,
+      updatedAt: chatSessions.updatedAt,
       spaceId: chatSessions.spaceId,
       restricted: chatSessions.restricted,
       pinnedSkills: chatSessions.pinnedSkills,
+      skillDiscovery: chatSessions.skillDiscovery,
     })
     .from(chatSessions)
     .where(eq(chatSessions.id, sessionId))
     .limit(1);
-  return row &&
-    row.spaceId === scope.spaceId &&
+  if (!row) return "scope_changed";
+  // A live turn holding the conversation is the answer, whatever else moved meanwhile: waiting
+  // for it, not resending at once, is what the caller must do.
+  if (row.activeStreamId !== null && row.updatedAt >= staleBefore) return "in_flight";
+  return row.spaceId === scope.spaceId &&
     row.restricted === scope.restricted &&
+    row.skillDiscovery === scope.skillDiscovery &&
     row.pinnedSkills.join("\n") === scope.pinnedSkills.join("\n")
     ? "in_flight"
     : "scope_changed";

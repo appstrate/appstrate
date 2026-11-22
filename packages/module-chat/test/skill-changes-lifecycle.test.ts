@@ -2,12 +2,13 @@
 
 /**
  * The lifecycle of the user's skill changes (`createSkillChanges`, the state machine behind
- * `useConversationSkills`): taken by a turn, dropped once an accepted turn has ended and the detail
- * was read again, kept when the turn was refused, never losing a change made while it ran.
+ * `useConversationSkills`): taken by a turn; out of what the next turn sends the moment an accepted
+ * turn ends, displayed until the detail is read again; kept when the turn was refused; a change
+ * made while the turn ran always kept.
  */
 
 import { describe, expect, it } from "bun:test";
-import type { ChatSkillChanges, PinnedSkill } from "../src/skills.ts";
+import type { PinnedSkill } from "../src/skills.ts";
 import {
   NO_SKILL_CHANGES,
   changePin,
@@ -17,21 +18,23 @@ import {
 } from "../src/ui/chat-skills.ts";
 import { createSkillChanges } from "../src/ui/use-conversation-skills.ts";
 
+type Store = ReturnType<typeof createSkillChanges>;
+
 const stored = (pins: PinnedSkill[]): StoredSkills => ({ skillDiscovery: true, pins });
 const assistantPin: PinnedSkill = { id: "@a/x", source: "assistant", status: "injected" };
 
-/** Toggles `id` from the panel against `server`, as the hook does. */
-function toggle(store: ReturnType<typeof createSkillChanges>, server: StoredSkills, id: string) {
-  store.change((current, inFlight) =>
-    changePin(current, id, !conversationSkills(server, current).pinned.includes(id), {
+/** Toggles `id` from the panel against `server`, as the hook does: on what the panel shows. */
+function toggle(store: Store, server: StoredSkills, id: string) {
+  store.change((current, inFlight, shown) =>
+    changePin(current, id, !conversationSkills(server, shown).pinned.includes(id), {
       stored: server,
       inFlight,
     }),
   );
 }
 
-/** One turn: take, answer, end, settle (the re-read done). */
-function turn(store: ReturnType<typeof createSkillChanges>, accepted: boolean) {
+/** One turn: take, answer, end. */
+function turn(store: Store, accepted: boolean) {
   const sent = store.take();
   store.answered(accepted);
   const ended = store.end()!;
@@ -39,71 +42,93 @@ function turn(store: ReturnType<typeof createSkillChanges>, accepted: boolean) {
 }
 
 describe("skill changes across a turn", () => {
-  it("drops what an accepted turn sent once it has ended and the detail was read", () => {
+  it("an accepted turn's changes leave the send at once and the display after the re-read", () => {
     const store = createSkillChanges();
     toggle(store, stored([]), "@a/new");
     const { sent, ended } = turn(store, true);
     expect(sent).toEqual({ pin: ["@a/new"], unpin: [] });
     expect(ended.accepted).toBe(true);
+    expect(store.pending()).toEqual(NO_SKILL_CHANGES);
     // Until the re-read the change still shows.
     expect(store.get().pin).toEqual(["@a/new"]);
-    ended.settle();
+    ended.settle(true);
     expect(store.get()).toEqual(NO_SKILL_CHANGES);
   });
 
   it("keeps the changes of a turn refused or failed without an answer", () => {
     const store = createSkillChanges();
     toggle(store, stored([]), "@a/new");
-    turn(store, false).ended.settle();
-    expect(store.get().pin).toEqual(["@a/new"]);
-
-    // No answer at all (a network failure): `answered` is never called.
-    store.take();
-    store.end()!.settle();
+    turn(store, false).ended.settle(true);
+    expect(store.pending().pin).toEqual(["@a/new"]);
     expect(store.get().pin).toEqual(["@a/new"]);
   });
 
   it("keeps a change made while the turn ran", () => {
     const store = createSkillChanges();
     toggle(store, stored([]), "@a/new");
-    const sent = store.take();
-    store.answered(true);
+    store.take();
     toggle(store, stored([]), "@a/later");
-    store.end()!.settle();
-    expect(sent!.pin).toEqual(["@a/new"]);
-    expect(store.get().pin).toEqual(["@a/later"]);
-  });
-
-  it("never lets the settling of one turn clear the turn sent after it, even with equal changes", () => {
-    const store = createSkillChanges();
-    toggle(store, stored([]), "@a/new");
-    const first = turn(store, false).ended;
-    // A second turn sends the same (kept) changes before the first one's re-read lands.
-    const second = store.take();
-    first.settle();
-    expect(second).toEqual({ pin: ["@a/new"], unpin: [] });
-    // The second turn is still in flight: unchecking now records the undo it must carry.
-    toggle(store, stored([]), "@a/new");
-    expect(store.get()).toEqual({ pin: [], unpin: ["@a/new"] });
     store.answered(true);
-    store.end()!.settle();
-    expect(store.get()).toEqual({ pin: [], unpin: ["@a/new"] });
+    store.end()!.settle(true);
+    expect(store.pending().pin).toEqual(["@a/later"]);
   });
 
-  it("never replays an unpin the server applied, when the assistant re-pins the skill in that turn", () => {
+  it("keeps an entry the user re-recorded during the turn, even equal to what was sent", () => {
+    const store = createSkillChanges();
+    const server = stored([]);
+    toggle(store, server, "@a/new");
+    store.take();
+    // Unchecked, then checked again while the turn ran: the same `pin` as sent, but the user's
+    // latest act, not what the turn applied.
+    toggle(store, server, "@a/new");
+    toggle(store, server, "@a/new");
+    expect(store.pending()).toEqual({ pin: ["@a/new"], unpin: [] });
+    store.answered(true);
+    store.end()!.settle(true);
+    expect(store.pending()).toEqual({ pin: ["@a/new"], unpin: [] });
+  });
+
+  it("never resends an accepted turn's unpin from a turn queued between its end and the re-read", () => {
     const store = createSkillChanges();
     toggle(store, stored([assistantPin]), "@a/x");
     const { sent, ended } = turn(store, true);
     expect(sent).toEqual({ pin: [], unpin: ["@a/x"] });
-    // The turn applied the unpin, then the assistant loaded the skill again: the re-read holds it.
-    ended.settle();
-    expect(store.get()).toEqual(NO_SKILL_CHANGES);
+    // The queue sends the next message at once, before the re-read lands.
     expect(store.take()).toBeUndefined();
+    // The turn applied the unpin, then the assistant loaded the skill again: the re-read holds it.
+    ended.settle(true);
     const after = conversationSkills(stored([assistantPin]), store.get());
     expect(skillRowState(after, "@a/x", new Set())).toEqual({
       kind: "loaded",
       source: "assistant",
     });
+  });
+
+  it("a queued turn sent before the previous one is ended leaves it to that turn's end", () => {
+    const store = createSkillChanges();
+    toggle(store, stored([assistantPin]), "@a/x");
+    store.take();
+    store.answered(true);
+    // The queue's request leaves first; the accepted turn's unpin is not sent again.
+    expect(store.take()).toBeUndefined();
+    const ended = store.end()!;
+    expect(ended.accepted).toBe(true);
+    ended.settle(true);
+    expect(store.get()).toEqual(NO_SKILL_CHANGES);
+  });
+
+  it("keeps displaying what an accepted turn applied while the re-read fails", () => {
+    const store = createSkillChanges();
+    toggle(store, stored([]), "@a/new");
+    const { ended } = turn(store, true);
+    ended.settle(false);
+    expect(store.pending()).toEqual(NO_SKILL_CHANGES);
+    expect(store.get().pin).toEqual(["@a/new"]);
+    // The next turn's re-read clears it.
+    store.take();
+    store.answered(true);
+    store.end()!.settle(true);
+    expect(store.get()).toEqual(NO_SKILL_CHANGES);
   });
 
   it("re-checking during an in-flight unpin records the pin and shows it as next", () => {
@@ -112,9 +137,8 @@ describe("skill changes across a turn", () => {
     toggle(store, server, "@a/x");
     store.take();
     toggle(store, server, "@a/x");
-    const current: ChatSkillChanges = store.get();
-    expect(current).toEqual({ pin: ["@a/x"], unpin: [] });
-    expect(skillRowState(conversationSkills(server, current), "@a/x", new Set())).toEqual({
+    expect(store.pending()).toEqual({ pin: ["@a/x"], unpin: [] });
+    expect(skillRowState(conversationSkills(server, store.get()), "@a/x", new Set())).toEqual({
       kind: "next",
     });
   });

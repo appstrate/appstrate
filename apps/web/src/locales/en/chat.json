@@ -153,7 +153,7 @@
   "skills.notLoadedCount_other": "{{count}} not loaded",
   "skills.load.running": "Loading the skill",
   "skills.load.done": "Skill loaded",
-  "skills.load.refused": "Not loaded: the conversation is full or the skill budget is exceeded",
+  "skills.load.refused": "Not loaded",
   "skills.pinnedPillLabel": "Added: {{skills}}. Choose skills",
   "skills.count": "{{n}} skills",
   "skills.pinnedCount": "{{n}} added",

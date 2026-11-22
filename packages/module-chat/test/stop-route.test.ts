@@ -27,7 +27,7 @@ import { setActiveStream } from "../src/resumable.ts";
 import { registerStopController, unregisterStopController } from "../src/stop-registry.ts";
 
 /** The scope of a session created with no origin space and no limit. */
-const UNLIMITED = { spaceId: null, restricted: false, pinnedSkills: [] };
+const UNLIMITED = { spaceId: null, restricted: false, pinnedSkills: [], skillDiscovery: true };
 
 const app = getTestApp();
 

@@ -602,6 +602,7 @@ describe("buildCallerContextBlock", () => {
         capabilities: caps(BUILDER),
         permissions: ["mcp:read"],
         skills: DEFAULT_SKILL_SELECTION,
+        drafts: true,
         openSkillsClient: NO_SKILLS,
       });
     expect(await build({ orgRole: "owner", viewAs: { orgRole: "member" } })).toContain(
@@ -638,6 +639,7 @@ describe("buildCallerContextBlock", () => {
           skillDiscovery: false,
           pinnedSkills: ["@acme/a", "@acme/b", "@acme/c", "@acme/off", "@acme/other"],
         },
+        drafts: true,
         openSkillsClient: skills.open,
       },
     );
@@ -679,6 +681,7 @@ describe("buildCallerContextBlock", () => {
       capabilities: caps(BUILDER),
       permissions: ["mcp:read", "mcp:invoke"],
       skills: { skillDiscovery: true, pinnedSkills: ["@acme/a"] },
+      drafts: true,
       openSkillsClient: NO_SKILLS,
     });
     expect(out).not.toContain("<skill");
@@ -697,6 +700,7 @@ describe("buildCallerContextBlock", () => {
         capabilities: caps(BUILDER),
         permissions: ["mcp:read", "mcp:invoke", "skills:read"],
         skills: { skillDiscovery: true, pinnedSkills: ["@acme/a", "@acme/b", "@acme/gone"] },
+        drafts: true,
         openSkillsClient: fakeSkillsClient(opts).open,
       });
     // `@acme/b`'s `resources/read` fails; `@acme/gone` is listed nowhere.
@@ -747,6 +751,7 @@ describe("buildCallerContextBlock", () => {
         capabilities: caps(BUILDER),
         permissions: ["mcp:read", "mcp:invoke"],
         skills: { skillDiscovery: true, pinnedSkills: ["@acme/a"] },
+        drafts: true,
         openSkillsClient: skills.open,
       },
     );
@@ -774,6 +779,7 @@ describe("buildCallerContextBlock", () => {
         capabilities: caps(BUILDER),
         permissions: ["mcp:read", "mcp:invoke"],
         skills: { skillDiscovery: true, pinnedSkills: ["@acme/a"] },
+        drafts: true,
         openSkillsClient: skills.open,
       },
     );
@@ -803,12 +809,57 @@ describe("buildCallerContextBlock", () => {
         capabilities: caps(BUILDER),
         permissions: ["mcp:read", "mcp:invoke"],
         skills: { skillDiscovery: true, pinnedSkills: ["@acme/a"] },
+        drafts: true,
         openSkillsClient: skills.open,
       },
     );
     expect(out).not.toContain("another body");
     expect(out).toContain("`@acme/a` is pinned to this conversation but could not be read.");
     expect(injected).toEqual({ skills: {} });
+  });
+
+  it("lists, injects and pins one definition per skill: the draft only on a turn that works on drafts", async () => {
+    const A = "skill://spc_1/acme/a/a/SKILL.md";
+    const A_DRAFT = "skill://spc_1/acme/a@draft/a/SKILL.md";
+    const B = "skill://spc_1/acme/b/b/SKILL.md";
+    const B_DRAFT = "skill://spc_1/acme/b@draft/b/SKILL.md";
+    const build = (drafts: boolean) =>
+      buildCallerContextBlock(fakeContext({ orgRole: "member" }), {
+        spaces: REACH,
+        restricted: false,
+        user,
+        capabilities: caps(BUILDER),
+        permissions: ["mcp:read", "mcp:invoke", "skills:read", ...(drafts ? ["skills:write"] : [])],
+        skills: { skillDiscovery: true, pinnedSkills: ["@acme/a"] },
+        drafts,
+        openSkillsClient: fakeSkillsClient({
+          published: [skillEntry(A, "1.0.0"), skillEntry(B, "1.0.0")],
+          drafts: [skillEntry(A_DRAFT, null, 3), skillEntry(B_DRAFT, null, 4)],
+          texts: { [A]: "a published", [A_DRAFT]: "a draft" },
+        }).open,
+      });
+    // Authoring off: the published version everywhere, so a load of the listed URI pins the
+    // definition later turns inject.
+    const published = await build(false);
+    expect(published.text).toContain("a published");
+    expect(published.text).not.toContain("a draft");
+    expect(published.text).toContain(`- \`@acme/b\` (v1.0.0) \`${B}\``);
+    expect(published.skillUris).toEqual(
+      new Map([
+        ["@acme/a", A],
+        ["@acme/b", B],
+      ]),
+    );
+    // Working on drafts: the draft everywhere.
+    const drafted = await build(true);
+    expect(drafted.text).toContain("a draft");
+    expect(drafted.text).toContain(`- \`@acme/b\` \`${B_DRAFT}\``);
+    expect(drafted.skillUris).toEqual(
+      new Map([
+        ["@acme/a", A_DRAFT],
+        ["@acme/b", B_DRAFT],
+      ]),
+    );
   });
 
   it("lists the turn's skills over the skills connection, draft first, reading none when nothing is pinned", async () => {
@@ -832,6 +883,7 @@ describe("buildCallerContextBlock", () => {
         // The turn keeps `skills:write`: it reads the drafts the caller reads.
         permissions: ["mcp:read", "mcp:invoke", "skills:read", "skills:write"],
         skills: { skillDiscovery: true, pinnedSkills: [] },
+        drafts: true,
         openSkillsClient: skills.open,
       },
     );
@@ -860,6 +912,7 @@ describe("buildCallerContextBlock", () => {
       capabilities: caps(BUILDER),
       permissions: ["mcp:read", "mcp:invoke", "skills:read"],
       skills: { skillDiscovery: true, pinnedSkills: [] },
+      drafts: false,
       openSkillsClient: readOnly.open,
     });
     expect(readOnlyOut).toContain("- `@acme/a` (v1.0.0) `skill://spc_1/acme/a/a/SKILL.md` — A");
@@ -875,6 +928,7 @@ describe("buildCallerContextBlock", () => {
       capabilities: caps(BUILDER.filter((permission) => permission !== "skills:read")),
       permissions: ["mcp:read", "mcp:invoke"],
       skills: { skillDiscovery: true, pinnedSkills: [] },
+      drafts: true,
       openSkillsClient: async (signal) => {
         opened = true;
         return skills.open(signal);
@@ -899,6 +953,7 @@ describe("buildCallerContextBlock", () => {
         capabilities: caps(BUILDER),
         permissions: ["mcp:read", "mcp:invoke", "skills:read"],
         skills: { skillDiscovery: true, pinnedSkills: ["@acme/a"] },
+        drafts: true,
         openSkillsClient: skills.open,
       },
     );
@@ -928,6 +983,7 @@ describe("buildCallerContextBlock", () => {
       capabilities: caps(BUILDER),
       permissions: ["mcp:read", "mcp:invoke"],
       skills: { skillDiscovery: true, pinnedSkills: ["@acme/a"] },
+      drafts: true,
       openSkillsClient: skills.open,
     });
     expect(out).not.toContain("<skill");

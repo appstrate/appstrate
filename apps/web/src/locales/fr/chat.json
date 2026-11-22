@@ -153,7 +153,7 @@
   "skills.notLoadedCount_other": "{{count}} non chargées",
   "skills.load.running": "Chargement de la compétence",
   "skills.load.done": "Compétence chargée",
-  "skills.load.refused": "Non chargée : la conversation est pleine ou le budget de compétences est dépassé",
+  "skills.load.refused": "Non chargée",
   "skills.pinnedPillLabel": "Ajoutées : {{skills}}. Choisir les compétences",
   "skills.count": "{{n}} compétences",
   "skills.pinnedCount": "{{n}} ajoutées",

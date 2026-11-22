@@ -84,6 +84,7 @@ async function discoveryOffTurn(
       permissions,
       skills: { skillDiscovery: false, pinnedSkills: [SKILL_ID] },
       // The caller's own permissions, no claim: what `chat-stream.ts` opens.
+      drafts: true,
       openSkillsClient: () =>
         connectPlatformMcp({
           url: platformMcpUrl("http://localhost", owner.orgId),

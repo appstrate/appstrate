@@ -303,7 +303,7 @@ function formatSkillsSection(opts: {
   const skills = resolveChatSkills(opts.selection, opts.contents);
   const files = SKILLS_FILES[opts.capabilities.transport ? "tool" : "none"];
   // A listed skill the turn cannot load is noise. A pin is never listed: injected, it is shown in
-  // full; left out (over budget, unreadable), its notice says why, and a load could not pin it.
+  // full; left out (over budget, unreadable, unavailable), its notice says why.
   const pinned = new Set(opts.selection.pinnedSkills);
   const listed =
     opts.capabilities.readsSkills && opts.selection.skillDiscovery
@@ -470,9 +470,10 @@ export interface ChatSkillsRead {
 }
 
 /**
- * The skills of a turn, read over the MCP Skills extension (SEP-2640): a skill
+ * The skills of a turn, read over the MCP Skills extension (SEP-2640): with `drafts`, a skill
  * is the caller's draft when `skills/list` lists it among the drafts the caller
- * may read, else its published version. With `catalogue`, every such skill of
+ * may read, else its published version; without, its published version. One definition per
+ * skill for the catalogue, the injection and `uris` alike. With `catalogue`, every such skill of
  * `spaces` is listed by its `uri` (one entry per package, the first space's); each of `chosen` is injected as the text
  * `resources/read` serves at its entry's URI. Read with the caller's own
  * permissions, even with discovery off, whose turn holds no `skills:*`. A chosen skill
@@ -481,10 +482,7 @@ export interface ChatSkillsRead {
  * draft entry without `lock_version`, a `SKILL.md` served as a blob, or text
  * whose digest differs from the one its entry lists) is kept as `null` (unreadable). `uris`
  * gives each listed skill the `SKILL.md` URI its injection takes: the one an assistant load
- * must read to pin it. The catalogue names a draft only with `catalogueDrafts` (the turn
- * itself may read the drafts the caller reads), so every URI it lists is one the
- * turn's `read_resource` reads. The connection is opened only when there is
- * something to read.
+ * must read to pin it. The connection is opened only when there is something to read.
  */
 async function readChatSkills(
   openSkillsClient: (signal: AbortSignal) => Promise<ChatSkillsClient>,
@@ -517,7 +515,11 @@ async function readChatSkills(
 
 interface SkillsReadOptions {
   catalogue: boolean;
-  catalogueDrafts: boolean;
+  /**
+   * The drafts the caller reads stand for their skills: listed, injected and pinned at their
+   * draft URI. Only when the turn itself reads them (see `buildCallerContextBlock`).
+   */
+  drafts: boolean;
   chosen: readonly string[];
 }
 
@@ -548,8 +550,9 @@ export async function readSkillsOver(
     list(),
     list({ [SKILL_DEFINITION_META_KEY]: "draft" }),
   ]);
-  // What a chosen skill is injected from (its draft, else its published version), for every skill.
-  const injectedFrom = new Map([...published, ...drafts]);
+  // The one definition the turn lists, injects and pins for each skill.
+  const usedDrafts = opts.drafts ? drafts : new Map<string, ListedSkillEntry>();
+  const injectedFrom = new Map([...published, ...usedDrafts]);
   const read: ChatSkillsRead = {
     contents: new Map(),
     catalogue: [],
@@ -557,11 +560,9 @@ export async function readSkillsOver(
   };
   if (opts.catalogue) {
     // A draft stands for its package's published version: one line per skill.
-    const catalogueDrafts = opts.catalogueDrafts ? drafts : new Map<string, ListedSkillEntry>();
-    const listed = new Map([...published, ...catalogueDrafts]);
-    read.catalogue = [...listed.keys()].sort().map((packageId) => {
-      const entry = listed.get(packageId)!;
-      const served = servedAs(entry, catalogueDrafts.has(packageId));
+    read.catalogue = [...injectedFrom.keys()].sort().map((packageId) => {
+      const entry = injectedFrom.get(packageId)!;
+      const served = servedAs(entry, usedDrafts.has(packageId));
       return {
         packageId,
         name: entry.frontmatter.name,
@@ -593,7 +594,7 @@ export async function readSkillsOver(
         read.contents.set(id, null);
         return;
       }
-      const served = servedAs(entry, drafts.has(id));
+      const served = servedAs(entry, usedDrafts.has(id));
       // A `SKILL.md` served as a blob is not a skill's text, and text that is
       // not the listed `SKILL.md` (a draft saved between the list and the
       // read) is not the definition the claim pins: both get their own notice.
@@ -670,6 +671,14 @@ export async function buildCallerContextBlock(
     capabilities: TurnCapabilities;
     permissions: readonly string[];
     skills: ChatSkillSelection;
+    /**
+     * The turn works on the caller's drafts: package authoring on and the caller holds
+     * `skills:write`. Then every skill it lists, injects or pins is the caller's draft when there
+     * is one: the turn reads a listed draft with `skills:write`, and an injected one through its
+     * claim even with discovery off. Off, every one is the published version, so a load of a
+     * listed URI is the definition later turns inject.
+     */
+    drafts: boolean;
     /** Opened only when the turn lists or injects skills, under `signal`; closed once they are read. */
     openSkillsClient: (signal: AbortSignal) => Promise<ChatSkillsClient>;
   },
@@ -693,9 +702,7 @@ export async function buildCallerContextBlock(
     args.spaces.map((space) => space.id),
     {
       catalogue: capabilities.readsSkills && skills.skillDiscovery,
-      // The drafts the caller reads are the turn's only while the turn keeps the
-      // caller's `skills:write` (the authoring switch drops it).
-      catalogueDrafts: args.permissions.includes("skills:write"),
+      drafts: args.drafts,
       chosen: skills.pinnedSkills,
     },
   );

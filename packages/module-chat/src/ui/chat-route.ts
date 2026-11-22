@@ -80,7 +80,7 @@ export function turnBody(args: {
  * so everything it sends is read at request time: the route (a conversation can mount before the
  * host's transport is ready), the headers and the body. Resume targets the per-session stream
  * endpoint (the chat id is the conversation id). `answered` learns whether the server accepted a
- * turn (a 2xx); a request that failed without an answer reports nothing.
+ * turn: a 2xx, or refused (any other status, or a request that failed without an answer).
  */
 export function createTurnTransport(read: {
   getTransport: () => ChatTransport | undefined;
@@ -100,8 +100,15 @@ export function createTurnTransport(read: {
     // The global read per call, not captured: the turn's POST is the one request that answers.
     // (`typeof fetch` also names runtime extras, such as Bun's `preconnect`, the SDK never calls.)
     fetch: (async (input: RequestInfo | URL, init?: RequestInit) => {
-      const response = await globalThis.fetch(input, init);
-      if (init?.method === "POST") read.answered(response.ok);
+      const turn = init?.method === "POST";
+      let response: Response;
+      try {
+        response = await globalThis.fetch(input, init);
+      } catch (error) {
+        if (turn) read.answered(false);
+        throw error;
+      }
+      if (turn) read.answered(response.ok);
       return response;
     }) as typeof fetch,
     prepareSendMessagesRequest: (request) => ({

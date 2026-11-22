@@ -37,7 +37,7 @@ export async function readChatCommands(
       opts.readsSkills
         ? readSkillsOver(client, signal, spaces, {
             catalogue: true,
-            catalogueDrafts: opts.catalogueDrafts,
+            drafts: opts.catalogueDrafts,
             chosen: [],
           }).then(({ catalogue }) =>
             catalogue.map((skill): ChatSkillCommand => ({

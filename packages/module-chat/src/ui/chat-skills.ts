@@ -119,21 +119,31 @@ export function citeSkill(changes: ChatSkillChanges, id: string): ChatSkillChang
   return { ...changes, pin: withId(changes.pin, id), unpin: without(changes.unpin, id) };
 }
 
-/**
- * `changes` without what a turn sent and the server accepted (a 2xx: it applied them in its first
- * statement), each entry by value. A change made while the turn ran stays.
- */
+/** `changes` without each entry of `removed`, by value. */
 export function subtractSkillChanges(
   changes: ChatSkillChanges,
-  sent: ChatSkillChanges,
+  removed: ChatSkillChanges,
 ): ChatSkillChanges {
   const { skillDiscovery, ...rest } = changes;
   return {
     ...rest,
     ...(skillDiscovery !== undefined &&
-      skillDiscovery !== sent.skillDiscovery && { skillDiscovery }),
-    pin: changes.pin.filter((id) => !sent.pin.includes(id)),
-    unpin: changes.unpin.filter((id) => !sent.unpin.includes(id)),
+      skillDiscovery !== removed.skillDiscovery && { skillDiscovery }),
+    pin: changes.pin.filter((id) => !removed.pin.includes(id)),
+    unpin: changes.unpin.filter((id) => !removed.unpin.includes(id)),
+  };
+}
+
+/** `under`, then `over` applied on top of it: an id in `over` takes `over`'s side. */
+export function layerSkillChanges(
+  under: ChatSkillChanges,
+  over: ChatSkillChanges,
+): ChatSkillChanges {
+  const skillDiscovery = over.skillDiscovery ?? under.skillDiscovery;
+  return {
+    ...(skillDiscovery !== undefined && { skillDiscovery }),
+    pin: [...new Set([...under.pin.filter((id) => !over.unpin.includes(id)), ...over.pin])],
+    unpin: [...new Set([...under.unpin.filter((id) => !over.pin.includes(id)), ...over.unpin])],
   };
 }
 

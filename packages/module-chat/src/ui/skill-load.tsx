@@ -5,8 +5,8 @@
  * a skill is a read of its `SKILL.md`, by the chat's `read_resource` or the platform's forwarded
  * `read`; the server pins the skill to the conversation when the read succeeds and refuses it
  * (pins full, budget spent) with an error. Pi's `details` never reach the UI, so everything is
- * read from the call's input and state; the error is written for the model, so a failed load says
- * it in the user's language instead. Any other read keeps the generic tool row.
+ * read from the call's input and state. A failed read says only that the skill is not loaded:
+ * its error, written for the model, may come from anything (a refusal, a stopped turn, a fault). Any other read keeps the generic tool row.
  */
 
 import { makeAssistantToolUI, type ToolCallMessagePartProps } from "@assistant-ui/react";

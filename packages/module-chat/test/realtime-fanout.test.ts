@@ -90,7 +90,7 @@ describe("chat_session_update SSE fan-out", () => {
     await claimTurn(
       session.id,
       "strm_1",
-      { spaceId: null, restricted: false, pinnedSkills: [] },
+      { spaceId: null, restricted: false, pinnedSkills: [], skillDiscovery: true },
       {},
     );
     await persistClaimedUserMessage(session.id, "strm_1", {

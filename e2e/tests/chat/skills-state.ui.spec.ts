@@ -104,9 +104,7 @@ test("the panel reports each pin's state and source, and an unchecked assistant 
   await expect(loads.nth(0)).toHaveAttribute("data-phase", "success");
   await expect(loads.nth(0).getByTestId("directive-chip")).toHaveText("auto");
   await expect(loads.nth(1)).toHaveAttribute("data-phase", "error");
-  await expect(loads.nth(1).getByTestId("skill-load-state")).toHaveText(
-    "Non chargée : la conversation est pleine ou le budget de compétences est dépassé",
-  );
+  await expect(loads.nth(1).getByTestId("skill-load-state")).toHaveText("Non chargée");
   await expect(loads.nth(1)).not.toContainText("already pins");
 
   // The pill counts only what is loaded: the refused pin is left out.

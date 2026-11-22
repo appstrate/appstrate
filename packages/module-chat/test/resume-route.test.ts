@@ -40,7 +40,7 @@ import {
 import { logger } from "../src/logger.ts";
 
 /** The scope of a session created with no origin space and no limit. */
-const UNLIMITED = { spaceId: null, restricted: false, pinnedSkills: [] };
+const UNLIMITED = { spaceId: null, restricted: false, pinnedSkills: [], skillDiscovery: true };
 
 const app = getTestApp();
 
