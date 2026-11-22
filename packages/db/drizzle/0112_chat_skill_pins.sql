@@ -1,0 +1,30 @@
+-- Chat skills: the three skill modes (auto | manual | strict) become two settings,
+-- `pinned_skills` (always injected) and `skill_discovery` (the model may find others), and
+-- the server records who pinned each skill (`assistant_skills`, the part of `pinned_skills`
+-- the assistant pinned by loading a SKILL.md) and what the last turn that claimed the
+-- conversation did with each pin (`skill_status`).
+-- Fold of `skill_mode`: strict -> discovery off. auto -> no pins: its pins were kept but
+-- unused, and would otherwise be injected overnight.
+-- Both UPDATEs live here, not in a script under scripts/migration/: the first folds a
+-- column dropped in this file; the second rewrites a surviving column, but the only
+-- thing it reads ("these pins were inactive") lives in `skill_mode`, which is dropped
+-- below, so a later operator script would have nothing to read.
+-- Every surviving pin reads as the user's, with no status until its next turn. Two CHECKs
+-- keep the assistant's pins among the pins and the pins within the chat's cap of 5 (every
+-- API write already did). `pinned_skills` predates this file, so the cap CHECK scans
+-- existing rows; `auto` rows are emptied above, `manual`/`strict` rows keep their pins.
+-- Preflight, expected 0 (otherwise this migration fails and applies nothing):
+--   SELECT count(*) FROM chat_sessions
+--   WHERE skill_mode <> 'auto' AND cardinality(pinned_skills) > 5;
+-- Rollback: the old modes cannot be rebuilt and the `auto` pins are gone; restore a backup.
+-- The previous code reads `skill_mode`, dropped here, so it cannot run on this schema.
+
+ALTER TABLE "chat_sessions" ADD COLUMN "skill_discovery" boolean DEFAULT true NOT NULL;--> statement-breakpoint
+ALTER TABLE "chat_sessions" ADD COLUMN "assistant_skills" text[] DEFAULT '{}'::text[] NOT NULL;--> statement-breakpoint
+ALTER TABLE "chat_sessions" ADD COLUMN "skill_status" jsonb DEFAULT '{}'::jsonb NOT NULL;--> statement-breakpoint
+UPDATE "chat_sessions" SET "skill_discovery" = false WHERE "skill_mode" = 'strict';--> statement-breakpoint
+UPDATE "chat_sessions" SET "pinned_skills" = '{}' WHERE "skill_mode" = 'auto' AND "pinned_skills" <> '{}';--> statement-breakpoint
+ALTER TABLE "chat_sessions" DROP COLUMN "skill_mode";--> statement-breakpoint
+DROP TYPE "public"."chat_skill_mode";--> statement-breakpoint
+ALTER TABLE "chat_sessions" ADD CONSTRAINT "chat_sessions_assistant_skills_pinned" CHECK (assistant_skills <@ pinned_skills);--> statement-breakpoint
+ALTER TABLE "chat_sessions" ADD CONSTRAINT "chat_sessions_pinned_skills_cap" CHECK (cardinality(pinned_skills) <= 5);

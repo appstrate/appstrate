@@ -790,14 +790,7 @@
       "idx": 112,
       "version": "7",
       "when": 1795340000000,
-      "tag": "0112_chat_skill_discovery",
-      "breakpoints": true
-    },
-    {
-      "idx": 113,
-      "version": "7",
-      "when": 1795430000000,
-      "tag": "0113_chat_skill_sources",
+      "tag": "0112_chat_skill_pins",
       "breakpoints": true
     }
   ]
