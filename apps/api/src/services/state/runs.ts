@@ -1756,7 +1756,7 @@ interface ScopedRunListOptions {
   actor?: Actor | null;
   status?: RunStatus[];
   search?: string;
-  /** Caller's run-read predicate; absent for callers with runs:read-all. */
+  /** Caller's run-read predicate (`runVisibilityFilter`); absent = no narrowing. */
   visibility?: SQL;
   canReadAgentInput?: boolean;
 }
