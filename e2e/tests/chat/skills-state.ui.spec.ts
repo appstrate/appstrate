@@ -137,7 +137,7 @@ test("the panel reports each pin's state and source, and an unchecked assistant 
 
   // The pill counts only what is loaded: `big`, pinned but over budget, is left out (`pdf` and
   // `gone` were reads, never pins).
-  await expect(page.getByTestId("skill-pill-pinned")).toHaveText(/^\s*2 ajoutées\s*$/);
+  await expect(page.getByTestId("skill-pill-pinned")).toHaveText(/^\s*2 épinglées\s*$/);
 
   await openSkillsPicker(page);
   const popover = page.getByTestId("skills-picker-popover");

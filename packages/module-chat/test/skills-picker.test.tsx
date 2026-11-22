@@ -26,8 +26,8 @@ const transport = transportOf(() => ({ "X-Org-Id": "org_1", "X-Space-Id": "spc_a
 
 const userPin = (id: string): PinnedSkill => ({ id, source: "user", status: "injected" });
 
-const NO_ACTIONS: Pick<SkillActions, "togglePin" | "setDiscovery"> = {
-  togglePin() {},
+const NO_ACTIONS: Pick<SkillActions, "setPin" | "setDiscovery"> = {
+  setPin() {},
   setDiscovery() {},
 };
 
@@ -97,6 +97,7 @@ function toggleDiscovery(skillDiscovery: boolean, next: boolean): boolean[] {
       transport,
       skills: conversationSkills({ skillDiscovery, pins: [] }, NO_SKILL_LAYERS),
       actions: { ...NO_ACTIONS, setDiscovery: (on) => emitted.push(on) },
+      cited: [],
     });
     const sw = findElement(
       tree,
@@ -175,7 +176,7 @@ describe("SkillsPicker", () => {
     );
   });
 
-  /** Toggles each row of `ids` through the rendered tree; returns the ids the panel handed on. */
+  /** Toggles each row of `ids` through the rendered tree; returns what the panel handed on (`±id`). */
   function toggleRows(pins: PinnedSkill[], cited: string[], ids: string[]): string[] {
     const toggled: string[] = [];
     // Rows exist only once the catalogue answers: seed it, then toggle through the rendered tree.
@@ -189,7 +190,7 @@ describe("SkillsPicker", () => {
       const tree = SkillsPickerPanel({
         transport,
         skills: conversationSkills({ skillDiscovery: true, pins }, NO_SKILL_LAYERS),
-        actions: { ...NO_ACTIONS, togglePin: (id) => toggled.push(id) },
+        actions: { ...NO_ACTIONS, setPin: (id, on) => toggled.push(`${on ? "+" : "-"}${id}`) },
         cited,
       });
       for (const id of ids) {
@@ -218,7 +219,8 @@ describe("SkillsPicker", () => {
 
   it("pins nothing past the cap, and still lets a pin be unchecked there", () => {
     const full = Array.from({ length: MAX_PINNED_SKILLS }, (_, i) => userPin(`@a/own-${i}`));
-    expect(toggleRows(full, [], ["@a/extra", "@a/own-0"])).toEqual(["@a/own-0"]);
+    expect(toggleRows(full, [], ["@a/extra", "@a/own-0"])).toEqual(["-@a/own-0"]);
+    expect(toggleRows([], [], ["@a/extra"])).toEqual(["+@a/extra"]);
   });
 
   it("names a row's checkbox by its skill alone; the caption and description describe it", () => {
@@ -242,9 +244,9 @@ describe("SkillsPicker", () => {
       { id: "@a/big", source: "user", status: "over_budget" },
     ];
     expect(toggleRows(pins, [], ["@a/mine", "@a/assistant", "@a/big"])).toEqual([
-      "@a/mine",
-      "@a/assistant",
-      "@a/big",
+      "-@a/mine",
+      "-@a/assistant",
+      "-@a/big",
     ]);
   });
 

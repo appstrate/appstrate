@@ -5,7 +5,6 @@
 // its skill: only the server says a skill is loaded.
 
 import type { ReactNode } from "react";
-import { LockIcon } from "lucide-react";
 import { Checkbox } from "@appstrate/ui/components/checkbox";
 import { Skeleton } from "@appstrate/ui/components/skeleton";
 import { Switch } from "@appstrate/ui/components/switch";
@@ -13,7 +12,6 @@ import { Popover, PopoverAnchor, PopoverContent } from "@appstrate/ui/components
 import { cn } from "@appstrate/ui/cn";
 import { MAX_PINNED_SKILLS } from "../skills.ts";
 import {
-  NO_CITED_SKILLS,
   effectiveSkills,
   skillPickerRows,
   skillRowState,
@@ -22,49 +20,19 @@ import {
 } from "./chat-skills.ts";
 import type { SkillActions } from "./use-conversation-skills.ts";
 import { useChatCommands } from "./use-chat-commands.ts";
-import { RemovableChip } from "./removable-chip.tsx";
 import { useChatHost, type ChatTransport, type ChatTranslate } from "./runtime-context.ts";
 
 interface SkillsPickerProps {
   transport: ChatTransport | undefined;
   skills: ConversationSkills;
-  actions: Pick<SkillActions, "togglePin" | "setDiscovery">;
+  actions: Pick<SkillActions, "setPin" | "setDiscovery">;
   /** Opened from the composer's settings menu or a skills chip, never by a trigger of its own. */
   open: boolean;
   onOpenChange: (open: boolean) => void;
   /** The skills the composer's draft cites: checked here, and held by the message, not the panel. */
-  cited?: readonly string[];
+  cited: readonly string[];
   /** The popover anchors to this: the composer's tools row. */
   children: ReactNode;
-}
-
-/**
- * The entry to the picker in the composer's tool row while no skill is pinned (drawn by
- * `SkillChips`): drawn only with discovery off, it reopens the picker, and its X restores the
- * default selection.
- */
-export function SkillsChip({
-  discovery,
-  onClick,
-  onReset,
-}: {
-  discovery: boolean;
-  onClick: () => void;
-  onReset: () => void;
-}) {
-  const { t } = useChatHost();
-  if (discovery) return null;
-  return (
-    <RemovableChip
-      icon={<LockIcon />}
-      open={{ onClick, label: t("skills.discoveryOffChip"), testId: "skills-picker-trigger" }}
-      removeLabel={t("skills.reset")}
-      onRemove={onReset}
-      className="shrink-0"
-    >
-      {t("skills.discoveryOffChip")}
-    </RemovableChip>
-  );
 }
 
 const REFUSAL_KEY: Record<Extract<SkillRowState, { kind: "refused" }>["reason"], string> = {
@@ -94,7 +62,7 @@ export function SkillsPickerPanel({
   transport,
   skills: conversation,
   actions,
-  cited = NO_CITED_SKILLS,
+  cited,
 }: Pick<SkillsPickerProps, "transport" | "skills" | "actions" | "cited">) {
   const { t } = useChatHost();
   const catalogue = useChatCommands(transport, true);
@@ -110,7 +78,7 @@ export function SkillsPickerPanel({
   const togglePin = (packageId: string, checked: boolean) => {
     // A cited skill is the message's: only removing its chip drops it. Past the cap, nothing pins.
     if (effective.cited.has(packageId) || (!checked && atPinCap)) return;
-    actions.togglePin(packageId);
+    actions.setPin(packageId, !checked);
   };
 
   return (

@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-// The skill picker's pure rules. The server holds the skills; the client sends only the user's
-// changes, never a full set: a stale client cannot drop a pin the server added.
+// The skill picker's pure rules. A turn sends the user's changes: see `ChatSkillChanges`.
 
 import { parseScopedName } from "@appstrate/core/naming";
 import { asRecordOrNull } from "@appstrate/core/safe-json";
@@ -13,8 +12,8 @@ import {
   MAX_PINNED_SKILLS,
   applySkillChanges,
   type ChatSkillChanges,
+  type ChatSkillStatus,
   type PinnedSkill,
-  type PinnedSkillStatus,
 } from "../skills.ts";
 import type { ToolPhase } from "./tool-result.ts";
 
@@ -116,7 +115,7 @@ export function changeDiscovery(
   return on === base.skillDiscovery ? rest : { ...rest, skillDiscovery: on };
 }
 
-/** `changes` with a cited skill pinned whatever the server holds: the pin becomes the user's. */
+/** `changes` with a cited skill pinned, even one held (unlike `changePin`): it becomes the user's. */
 export function citeSkill(changes: ChatSkillChanges, id: string): ChatSkillChanges {
   return { ...changes, pin: withId(changes.pin, id), unpin: without(changes.unpin, id) };
 }
@@ -146,8 +145,6 @@ export function resetSkillChanges(
   );
 }
 
-export const NO_CITED_SKILLS: readonly string[] = [];
-
 /** The package ids of the skills a draft cites with a skill directive, each once. */
 export function citedSkillIds(draft: string): string[] {
   return [
@@ -160,7 +157,7 @@ export function canResetSkills(skills: ConversationSkills, cited: readonly strin
   return !skills.skillDiscovery || skills.pinned.some((id) => !cited.includes(id));
 }
 
-/** The pinned skills and those the draft cites: the ONE place the pin cap is counted. */
+/** The pinned skills and those the draft cites: the client's one place the pin cap is counted. */
 export function effectiveSkills(pinned: readonly string[], cited: readonly string[]) {
   const ids = [...new Set([...pinned, ...cited])];
   return {
@@ -171,7 +168,7 @@ export function effectiveSkills(pinned: readonly string[], cited: readonly strin
   };
 }
 
-type SkillRefusal = Exclude<PinnedSkillStatus, "injected">;
+type SkillRefusal = Exclude<ChatSkillStatus, "injected">;
 
 /**
  * What a picker row shows; only the server says a skill is loaded. `cited`: locked by the draft;

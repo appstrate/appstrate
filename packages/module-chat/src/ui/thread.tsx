@@ -642,22 +642,16 @@ function Composer({
   // Only text is queued: attachments stay in the composer until the next real send.
   const pinned = usePinnedSkills() ?? NO_PINS;
   const queued = React.useSyncExternalStore(queue.subscribe, queue.getSnapshot, queue.getSnapshot);
-  const canQueue = canQueueDraft({
-    running,
-    text: composer.value,
-    hasAttachments,
-    queued: queued.items,
-    pinned,
-  });
-  const enqueue = () => {
-    if (canQueue && queue.add(composer.value)) composer.setText("");
-  };
   // What the draft names must be sendable: one agent, skills within the cap.
   // While a turn runs the draft joins the queue, which is sent as one message: the cap counts it all.
   const issue = draftIssue(
     running ? joinQueued([...queued.items, composer.value]) : composer.value,
     pinned,
   );
+  const canQueue = canQueueDraft({ running, text: composer.value, hasAttachments, issue });
+  const enqueue = () => {
+    if (canQueue && queue.add(composer.value)) composer.setText("");
+  };
   const blocked = limitPending || issue !== null;
   // Enter queues while a turn runs and sends otherwise, as the Send button does.
   const enter = () => {
@@ -846,9 +840,7 @@ export function UserMessage() {
         </div>
       </MessagePrimitive.If>
       {/* The text bubble. Guarded on content so an attachment-only or agent-only message (no
-          text part) doesn't paint an empty grey pill. A white card on the canvas, like every
-          other surface in the thread (the composer, the tool cards): `bg-muted` was a hollow on
-          white and reads as a smudge on grey — 3 points of luminance from the page. */}
+          text part) doesn't paint an empty grey pill. A white card, like the thread's other surfaces. */}
       {hasBubble && (
         <div className={USER_MESSAGE_CLASS}>
           <MessagePrimitive.Parts components={USER_PART_COMPONENTS} />

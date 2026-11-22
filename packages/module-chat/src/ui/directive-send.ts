@@ -1,40 +1,26 @@
 // SPDX-License-Identifier: Apache-2.0
 
-/**
- * What sending a message does with the skills and the agent it names. The text keeps the
- * directives as typed (the bubble draws them as chips); the send reads them: each skill joins the
- * conversation's pinned skills, and the agent becomes the message's agent prompt part, which the
- * server resolves with `prompts/get`. A directive carries no authority of its own: the selection
- * and the part are what the server validates.
- */
+// What a send does with the directives it keeps in its text: each skill is pinned, the agent
+// becomes the agent prompt part. The server validates both; a directive carries no authority.
 
 import { AGENT_PROMPT_PART_TYPE, agentPromptDataSchema } from "../agent-prompt.ts";
-import { AGENT_DIRECTIVE, SKILL_DIRECTIVE, directivesOf } from "../directives.ts";
+import { AGENT_DIRECTIVE, directivesOf } from "../directives.ts";
 import { citedSkillIds, effectiveSkills } from "./chat-skills.ts";
 
-/** Why a draft cannot be sent as it is, `null` when it can. */
 export type DraftIssue = "agents" | "pins";
 
-/**
- * At most one agent per message (it starts one metered run), and no more skills than the
- * selection has room for. The menu offers neither past its limit; this catches a directive pasted
- * in, and the composer then keeps the draft and says why.
- */
+/** Why a draft cannot be sent, `null` when it can: one agent per message, skills within the cap. */
 export function draftIssue(text: string, pinned: readonly string[]): DraftIssue | null {
-  const named = directivesOf(text);
-  if (named.filter((d) => d.type === AGENT_DIRECTIVE).length > 1) return "agents";
+  if (directivesOf(text).filter((d) => d.type === AGENT_DIRECTIVE).length > 1) return "agents";
   return effectiveSkills(pinned, citedSkillIds(text)).overCap ? "pins" : null;
 }
 
-/** Whether a text launches an agent: such a draft is not queued behind a running turn. */
+/** Whether a text launches an agent. */
 export function namesAgent(text: string): boolean {
   return directivesOf(text).some((d) => d.type === AGENT_DIRECTIVE);
 }
 
-/**
- * The message a send hands the chat, and the skills it names. The first agent directive joins the
- * message as its agent prompt part, unless it carries one already (a replayed launch).
- */
+/** The message with its first agent as the agent prompt part (unless replayed), and its skills. */
 export function sendWithDirectives<M>(message: M): { message: M; skills: string[] } {
   const parts = (message as { parts?: unknown } | undefined)?.parts;
   if (!Array.isArray(parts)) return { message, skills: [] };
@@ -43,9 +29,8 @@ export function sendWithDirectives<M>(message: M): { message: M; skills: string[
       part?.type === "text" && typeof part.text === "string" ? [part.text] : [],
     )
     .join("");
-  const named = directivesOf(text);
-  const skills = [...new Set(named.flatMap((d) => (d.type === SKILL_DIRECTIVE ? [d.id] : [])))];
-  const agent = named.find((d) => d.type === AGENT_DIRECTIVE);
+  const skills = citedSkillIds(text);
+  const agent = directivesOf(text).find((d) => d.type === AGENT_DIRECTIVE);
   const launched = parts.some(
     (part: { type?: unknown } | null) => part?.type === AGENT_PROMPT_PART_TYPE,
   );

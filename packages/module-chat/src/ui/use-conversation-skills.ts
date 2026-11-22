@@ -92,7 +92,7 @@ export function writeAcceptedSkills(
 }
 
 export interface SkillActions {
-  togglePin: (packageId: string) => void;
+  setPin: (packageId: string, on: boolean) => void;
   setDiscovery: (on: boolean) => void;
   /** Back to the default selection: discovery on, no pin. */
   reset: () => void;
@@ -169,10 +169,7 @@ export function useConversationSkills({
     const pinnedOver = (local: ChatSkillChanges, base: StoredSkills) =>
       conversationSkills(base, { ...NO_SKILL_LAYERS, local }).pinned;
     return {
-      togglePin: (packageId) =>
-        update((local, base) =>
-          changePin(local, packageId, !pinnedOver(local, base).includes(packageId), base),
-        ),
+      setPin: (packageId, on) => update((local, base) => changePin(local, packageId, on, base)),
       setDiscovery: (on) => update((local, base) => changeDiscovery(local, on, base)),
       reset: () => update((local, base) => resetSkillChanges(local, pinnedOver(local, base), base)),
     };

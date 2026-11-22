@@ -3,13 +3,16 @@
 /** The skill picker's pure rules. */
 
 import { describe, expect, it } from "bun:test";
-import type { ChatSkillChanges, PinnedSkill } from "../src/skills.ts";
+import { MAX_PINNED_SKILLS, type ChatSkillChanges, type PinnedSkill } from "../src/skills.ts";
 import {
   NO_SKILL_CHANGES,
   NO_SKILL_LAYERS,
+  canResetSkills,
   changeDiscovery,
   changePin,
+  citedSkillIds,
   conversationSkills,
+  effectiveSkills,
   hasSkillChanges,
   loadsSkill,
   mergeSkillChanges,
@@ -268,5 +271,55 @@ describe("skillPickerRows", () => {
 
   it("has no rows for an empty catalogue and no pins", () => {
     expect(skillPickerRows([], [])).toEqual([]);
+  });
+});
+
+const sk = (n: string) => `:skill[${n}]{name=@acme/${n}}`;
+
+describe("citedSkillIds", () => {
+  it("lists the skills a draft cites, once each, ignoring agents and plain text", () => {
+    expect(citedSkillIds(`${sk("a")} x ${sk("b")} ${sk("a")} :agent[R]{name=run-r} /c`)).toEqual([
+      "@acme/a",
+      "@acme/b",
+    ]);
+    expect(citedSkillIds("nothing")).toEqual([]);
+  });
+});
+
+describe("effectiveSkills", () => {
+  it("is pinned then cited, a skill once, with the cited flag", () => {
+    const e = effectiveSkills(["@acme/a", "@acme/b"], ["@acme/b", "@acme/c"]);
+    expect(e.ids).toEqual(["@acme/a", "@acme/b", "@acme/c"]);
+    expect([...e.cited]).toEqual(["@acme/b", "@acme/c"]);
+  });
+
+  it("counts the union against the cap", () => {
+    const pinned = Array.from({ length: MAX_PINNED_SKILLS - 1 }, (_, i) => `@x/${i}`);
+    expect(effectiveSkills(pinned, []).atCap).toBe(false);
+    expect(effectiveSkills(pinned, ["@acme/a"]).atCap).toBe(true);
+    expect(effectiveSkills(pinned, ["@acme/a"]).overCap).toBe(false);
+    expect(effectiveSkills(pinned, ["@acme/a", "@acme/b"]).overCap).toBe(true);
+    // Already pinned: no room taken.
+    expect(effectiveSkills(pinned, ["@x/0"]).atCap).toBe(false);
+  });
+});
+
+describe("canResetSkills", () => {
+  const skills = (skillDiscovery: boolean, pinned: string[]) =>
+    conversationSkills(
+      { skillDiscovery, pins: pinned.map((id) => ({ id, source: "user", status: "injected" })) },
+      NO_SKILL_LAYERS,
+    );
+  const on = skills(true, ["@acme/a"]);
+
+  it("is true for a pinned skill the draft does not cite, or with discovery off", () => {
+    expect(canResetSkills(on, [])).toBe(true);
+    expect(canResetSkills(on, ["@acme/b"])).toBe(true);
+    expect(canResetSkills(skills(false, []), ["@acme/a"])).toBe(true);
+  });
+
+  it("is false when only cited skills are held: nothing visible would change", () => {
+    expect(canResetSkills(on, ["@acme/a"])).toBe(false);
+    expect(canResetSkills(skills(true, []), ["@acme/a"])).toBe(false);
   });
 });

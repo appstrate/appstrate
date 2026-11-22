@@ -63,7 +63,7 @@ function render(
             <SkillChips
               transport={scoped}
               skills={skills}
-              {...(cited && { cited })}
+              cited={cited ?? []}
               onOpenPicker={() => {}}
               onReset={() => {}}
             />
@@ -160,6 +160,7 @@ describe("SkillChips", () => {
   it("draws the picker's chip when nothing is pinned and discovery is off", () => {
     const html = render(pinned([], false));
     expect(html).toContain('data-testid="skills-picker-trigger"');
+    expect(html).toContain("skills.discoveryOffChip");
     expect(html).toContain('aria-label="skills.reset"');
   });
 

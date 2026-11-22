@@ -1,46 +1,33 @@
 // SPDX-License-Identifier: Apache-2.0
 
-/**
- * The composer's `/` menu as pure rules: what it lists for the draft, how a query ranks it, and
- * when the text before the cursor opens it. The popover (`composer-popover.tsx`) only draws it.
- */
+// The composer's `/` menu as pure rules; `composer-popover.tsx` only draws it.
 
 import type { TriggerItem } from "@assistant-ui/core";
 import type { ChatCommands } from "../commands.ts";
 import { AGENT_DIRECTIVE, SKILL_DIRECTIVE, directivesOf } from "../directives.ts";
-import { effectiveSkills } from "./chat-skills.ts";
+import { citedSkillIds, effectiveSkills } from "./chat-skills.ts";
 
-export interface CommandContext {
-  /** The conversation's pinned skills; `null`: its selection cannot be changed here, no skill is listed. */
+interface CommandContext {
+  /** `null`: the selection cannot be changed here, so no skill is listed. */
   pinned: readonly string[] | null;
-  /** A turn is running: what is typed is queued as plain text, so no agent is launched. */
+  /** A turn runs: the draft will be queued, so no agent is offered. */
   running: boolean;
-  /** The draft: the skills and the agent it already names count against the cap and the one agent. */
   draft: string;
 }
 
 export interface CommandList {
-  /** What the menu offers, skills then agents. */
   items: TriggerItem[];
-  /** Skills that would be a sixth pin: not offered, the menu says why. */
+  /** Skills past the pin cap: not offered, the menu says why. */
   capped: TriggerItem[];
 }
 
-/**
- * Skills (their package id is the item id, the name the label), then agents (prompt name as id,
- * title as label). A skill the selection and the draft do not hold yet is capped once they hold
- * {@link MAX_PINNED_SKILLS}; at most one agent per message, so none is offered once the draft
- * names one.
- */
+/** Skills then agents; no agent once the draft names one, no new skill past the cap. */
 export function commandList(
   commands: ChatCommands,
   { pinned, running, draft }: CommandContext,
 ): CommandList {
   const named = directivesOf(draft);
-  const { ids, atCap } = effectiveSkills(
-    pinned ?? [],
-    named.flatMap((d) => (d.type === SKILL_DIRECTIVE ? [d.id] : [])),
-  );
+  const { ids, atCap } = effectiveSkills(pinned ?? [], citedSkillIds(draft));
   const list: CommandList = { items: [], capped: [] };
   for (const skill of pinned === null ? [] : commands.skills) {
     const item: TriggerItem = {
@@ -68,9 +55,8 @@ export function commandList(
   return list;
 }
 
-/** 0 exact, 1 prefix, 2 substring of a name; 3 a substring of the description; `null`: no match. */
+/** 0 exact, 1 prefix, 2 substring of a name (an agent's prompt name too), 3 of the description. */
 function rank(query: string, item: TriggerItem): number | null {
-  // An agent is also typed by its prompt name (`run-…`).
   const names = [item.label, ...(item.type === AGENT_DIRECTIVE ? [item.id] : [])].map((n) =>
     n.toLowerCase(),
   );
@@ -97,11 +83,7 @@ export function searchCommands(items: readonly TriggerItem[], query: string): Tr
     .map(({ item }) => item);
 }
 
-/**
- * Where the trigger opens: a `/` that starts a word, up to the cursor. Not while `closed`: nothing
- * matches the query, so Enter sends the text (`/usr`, a path) instead of waiting on a menu with
- * nothing in it.
- */
+/** A `/` starting a word, up to the cursor; not while `closed` (no match: Enter sends `/usr`). */
 export function slashMatch(
   text: string,
   cursor: number,

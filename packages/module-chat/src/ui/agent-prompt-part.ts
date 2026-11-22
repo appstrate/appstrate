@@ -6,11 +6,11 @@
  * (`directive-send.ts`).
  */
 
-import { AGENT_PROMPT_PART_TYPE, agentPromptDataSchema } from "../agent-prompt.ts";
+import { AGENT_PROMPT_PART_TYPE, agentPromptOfParts } from "../agent-prompt.ts";
 import { AGENT_DIRECTIVE, serializeDirective } from "../directives.ts";
 
 /** What the browser sends of an agent prompt (the server adds the launch text). */
-export interface AgentChip {
+interface AgentChip {
   name: string;
   title: string;
 }
@@ -56,12 +56,12 @@ function partsOf(message: MessageLike): readonly PartLike[] {
 
 /** The agent a user message launches, `null` when it launches none. Never the launch text. */
 export function agentPromptOf(message: MessageLike): AgentChip | null {
-  for (const part of partsOf(message)) {
-    if (!isAgentPromptPart(part)) continue;
-    const parsed = agentPromptDataSchema.safeParse(part.data);
-    return parsed.success ? { name: parsed.data.name, title: parsed.data.title } : null;
-  }
-  return null;
+  // The runtime's shape read as the stored one.
+  const parts = partsOf(message).map((part) =>
+    isAgentPromptPart(part) ? { ...part, type: AGENT_PROMPT_PART_TYPE } : part,
+  );
+  const launch = agentPromptOfParts(parts);
+  return launch && { name: launch.data.name, title: launch.data.title };
 }
 
 /** The user message the turn `messageId` answers: the nearest one before it. */

@@ -115,7 +115,7 @@ describe("useConversationSkills", () => {
     const { result, unmount } = await mount(transport, false);
     // A conversation new in this mount: nothing is read before a turn may have created it.
     expect(reads()).toBe(0);
-    await act(async () => result.current.actions.togglePin("@a/new"));
+    await act(async () => result.current.actions.setPin("@a/new", true));
     expect(await take(result)).toEqual({ pin: ["@a/new"], unpin: [] });
     server.pins = [{ id: "@a/new", source: "user", status: "over_budget" }];
     await act(async () => result.current.answered("accepted"));
@@ -132,7 +132,7 @@ describe("useConversationSkills", () => {
     const { result, unmount } = await mount(transport, true);
     expect(reads()).toBe(1);
     await release();
-    await act(async () => result.current.actions.togglePin("@a/new"));
+    await act(async () => result.current.actions.setPin("@a/new", true));
     await take(result);
     // The server applied the claim, but the turn's answer never arrived.
     server.pins = [{ id: "@a/new", source: "user", status: "injected" }];

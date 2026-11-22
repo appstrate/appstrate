@@ -7,7 +7,7 @@
  * it with `useSyncExternalStore` (no setState in effects) and tests need no DOM.
  */
 
-import { draftIssue, namesAgent } from "./directive-send.ts";
+import { namesAgent, type DraftIssue } from "./directive-send.ts";
 
 export interface QueueSnapshot {
   readonly items: readonly string[];
@@ -29,17 +29,15 @@ export function canQueueDraft(input: {
   running: boolean;
   text: string;
   hasAttachments: boolean;
-  /** The messages already queued, and the pinned skills their skills join when sent. */
-  queued: readonly string[];
-  pinned: readonly string[];
+  /** `draftIssue` of the queue with the draft joined: they are sent as one message. */
+  issue: DraftIssue | null;
 }): boolean {
   return (
     input.running &&
     !input.hasAttachments &&
     input.text.trim() !== "" &&
     !namesAgent(input.text) &&
-    // The queue is sent as one message: its skills together must fit the cap.
-    draftIssue(joinQueued([...input.queued, input.text]), input.pinned) !== "pins"
+    input.issue !== "pins"
   );
 }
 

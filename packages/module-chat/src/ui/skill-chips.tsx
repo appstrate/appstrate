@@ -10,7 +10,6 @@ import { BookOpenIcon, LockIcon } from "lucide-react";
 import { parseScopedName } from "@appstrate/core/naming";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@appstrate/ui/components/tooltip";
 import {
-  NO_CITED_SKILLS,
   canResetSkills,
   effectiveSkills,
   loadsSkill,
@@ -19,7 +18,6 @@ import {
 } from "./chat-skills.ts";
 import { RemovableChip } from "./removable-chip.tsx";
 import { useChatHost, type ChatTransport, type ChatTranslate } from "./runtime-context.ts";
-import { SkillsChip } from "./skills-picker.tsx";
 import { useChatCommands } from "./use-chat-commands.ts";
 
 interface LoadedSkill {
@@ -56,16 +54,18 @@ function useSkillsByLoad(
   };
 }
 
-/** The pill's text: the count of several skills, the name of a single one, or how many are not loaded when none is. */
-function pillText(skills: readonly LoadedSkill[], refused: number, t: ChatTranslate): string {
+/**
+ * The single skill's name, how many skills (`countKey`: the pill says « pinned », an accessible
+ * name « skills »), or how many are not loaded when none is. The tooltip lists them.
+ */
+function skillsSummary(
+  skills: readonly LoadedSkill[],
+  refused: number,
+  t: ChatTranslate,
+  countKey: "skills.count" | "skills.pinnedCount" = "skills.count",
+): string {
   if (skills.length === 0) return t("skills.notLoadedCount", { count: refused });
-  return skills.length === 1 ? skills[0]!.name : t("skills.pinnedCount", { count: skills.length });
-}
-
-/** What the accessible name says of the skills: the single name, or how many. The tooltip lists them. */
-function skillsSummary(skills: readonly LoadedSkill[], refused: number, t: ChatTranslate): string {
-  if (skills.length === 0) return t("skills.notLoadedCount", { count: refused });
-  return skills.length === 1 ? skills[0]!.name : t("skills.count", { count: skills.length });
+  return skills.length === 1 ? skills[0]!.name : t(countKey, { count: skills.length });
 }
 
 /** What the live region reads out: the skills the last turn loaded, then how many it left out. */
@@ -136,7 +136,7 @@ function PinnedPill({
           removeLabel={t("skills.reset")}
           onRemove={onReset}
         >
-          {pillText(skills, refused.length, t)}
+          {skillsSummary(skills, refused.length, t, "skills.pinnedCount")}
         </RemovableChip>
       </TooltipTrigger>
       <TooltipContent side="top" className="max-w-72 text-xs">
@@ -148,24 +148,46 @@ function PinnedPill({
   );
 }
 
+/**
+ * The picker's entry while no skill is pinned: drawn only with discovery off, it reopens the
+ * picker, and its X restores the default selection.
+ */
+function SkillsChip({
+  discovery,
+  onClick,
+  onReset,
+}: {
+  discovery: boolean;
+  onClick: () => void;
+  onReset: () => void;
+}) {
+  const { t } = useChatHost();
+  if (discovery) return null;
+  return (
+    <RemovableChip
+      icon={<LockIcon />}
+      open={{ onClick, label: t("skills.discoveryOffChip"), testId: "skills-picker-trigger" }}
+      removeLabel={t("skills.reset")}
+      onRemove={onReset}
+      className="shrink-0"
+    >
+      {t("skills.discoveryOffChip")}
+    </RemovableChip>
+  );
+}
+
 interface SkillChipsProps {
   transport: ChatTransport | undefined;
   skills: ConversationSkills;
   /** The skills the composer's draft cites, counted like the pinned ones. */
-  cited?: readonly string[];
+  cited: readonly string[];
   onOpenPicker: () => void;
   /** Back to the default selection: the pill's X. */
   onReset: () => void;
 }
 
 /** The skill pill, or with no pin the picker's summary chip (drawn only with discovery off). */
-export function SkillChips({
-  transport,
-  skills,
-  cited = NO_CITED_SKILLS,
-  onOpenPicker,
-  onReset,
-}: SkillChipsProps) {
+export function SkillChips({ transport, skills, cited, onOpenPicker, onReset }: SkillChipsProps) {
   const { t } = useChatHost();
   const { loaded, refused, verdicts } = useSkillsByLoad(transport, skills, cited);
   return (

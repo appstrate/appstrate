@@ -49,7 +49,7 @@ import {
 } from "../src/ui/chat-skills.ts";
 
 const NO_SKILLS = conversationSkills(DEFAULT_STORED_SKILLS, NO_SKILL_LAYERS);
-const NO_SKILL_ACTIONS = { togglePin() {}, setDiscovery() {}, reset() {} };
+const NO_SKILL_ACTIONS = { setPin() {}, setDiscovery() {}, reset() {} };
 
 /** The assistant-ui runtime the attach button reads. */
 function Runtime({ children }: { children: ReactNode }) {
