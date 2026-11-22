@@ -12,7 +12,7 @@ import { Popover, PopoverAnchor, PopoverContent } from "@appstrate/ui/components
 import { cn } from "@appstrate/ui/cn";
 import { MAX_PINNED_SKILLS, type ChatSkillSelection } from "../skills.ts";
 import { skillPickerRows, togglePinned } from "./chat-skills.ts";
-import { useSkillCatalogue } from "./use-skill-catalogue.ts";
+import { useChatCommands } from "./use-chat-commands.ts";
 import { RemovableChip } from "./removable-chip.tsx";
 import { useChatHost, type ChatTransport } from "./runtime-context.ts";
 
@@ -63,8 +63,8 @@ export function SkillsPickerPanel({
   onChange,
 }: Pick<SkillsPickerProps, "transport" | "selection" | "onChange">) {
   const { t } = useChatHost();
-  const catalogue = useSkillCatalogue(transport, true);
-  const skills = catalogue.data ?? [];
+  const catalogue = useChatCommands(transport, true);
+  const skills = catalogue.data?.skills ?? [];
   // `isLoading`, not `isPending`: a disabled query stays pending forever, and unreadable reads
   // as "nothing".
   const loading = catalogue.isLoading;
@@ -124,16 +124,16 @@ export function SkillsPickerPanel({
             // By row: a package id's `@` and `/` break selectors, and a slug
             // of it can collide (`@a-b/c`, `@a/b-c`).
             const id = `skills-pin-${index}`;
-            const checked = pinnedSet.has(skill.packageId);
+            const checked = pinnedSet.has(skill.id);
             const inert = !checked && atPinCap;
             return (
-              <div key={skill.packageId} className="flex items-start gap-2 rounded-md p-1">
+              <div key={skill.id} className="flex items-start gap-2 rounded-md p-1">
                 <Checkbox
                   id={id}
-                  data-testid={`skill-pin-${skill.packageId}`}
+                  data-testid={`skill-pin-${skill.id}`}
                   checked={checked}
                   disabled={inert}
-                  onCheckedChange={() => togglePin(skill.packageId)}
+                  onCheckedChange={() => togglePin(skill.id)}
                   className="mt-0.5 shrink-0"
                 />
                 <label
@@ -141,9 +141,7 @@ export function SkillsPickerPanel({
                   className={cn("min-w-0 flex-1 cursor-pointer", inert && "opacity-50")}
                 >
                   <span className="flex items-baseline gap-1.5">
-                    <span className="truncate text-xs font-medium">
-                      {skill.display_name ?? skill.packageId}
-                    </span>
+                    <span className="truncate text-xs font-medium">{skill.name}</span>
                     {skill.version && (
                       <span className="text-muted-foreground shrink-0 text-[0.65rem]">
                         v{skill.version}

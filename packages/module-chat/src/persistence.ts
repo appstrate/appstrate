@@ -33,7 +33,7 @@ import {
 } from "@appstrate/db/schema";
 import { toPgSafe } from "@appstrate/db/pg-safe";
 import { invalidRequest, notFound } from "@appstrate/core/api-errors";
-import { uiMessageText } from "./message-text.ts";
+import { uiMessageTitleText } from "./message-text.ts";
 import { notifySessionUpdate } from "./realtime.ts";
 import type { ChatSkillSelection } from "./skills.ts";
 import type { FileUIPart, UIMessage } from "ai";
@@ -624,7 +624,7 @@ async function touchSession(
  */
 function titleCandidate(message: UIMessage): string | null {
   if (message.role !== "user") return null;
-  return titleFromText(uiMessageText(message.parts));
+  return titleFromText(uiMessageTitleText(message.parts));
 }
 
 const TITLE_HEAD = 57;
@@ -677,7 +677,7 @@ async function deriveTitle(client: ChatDbClient, sessionId: string): Promise<str
   for (const row of rows) {
     const content = row.content as { role?: string; parts?: unknown[] };
     if (content?.role !== "user" || !Array.isArray(content.parts)) continue;
-    const title = titleFromText(uiMessageText(content.parts));
+    const title = titleFromText(uiMessageTitleText(content.parts));
     if (title !== null) return title;
   }
   return null;

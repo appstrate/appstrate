@@ -35,6 +35,14 @@ The three skill modes of a chat conversation (`auto`, `manual`, `strict`) become
 - A conversation that was `manual` now sees the catalogue of its spaces' skills.
 - Data (migration 0112): `strict` conversations get `skill_discovery = false`; `auto` conversations lose their chosen skills, which were kept but unused and would otherwise be injected after the upgrade.
 
+### Chat commands
+
+The composer's `/` menu lists the skills a conversation can pin and the agents the caller can launch, read through the platform MCP server.
+
+- New `GET /api/orgs/{orgId}/chat/commands` (optional `spaceId`, a space the caller can act in, to read one space alone): `{ skills: [{ id, name, description, version }], agents: [{ name, title, description }] }`, read with the caller's own permissions over `skills/list` and `prompts/list` on one connection closed before the answer. A half that cannot be read is empty.
+- A user message of `POST /api/orgs/{orgId}/chat` may carry one `data-agent-prompt` part, `{ name, title }`, to launch an agent. The turn resolves `name` with `prompts/get` (the message text as `request`) before persisting the message and stores the launch instructions in the part's `data.text`; the model reads that text in place of the typed text, on that turn and on every replay. An unknown name, a second part or a malformed one is a 400 and nothing is written.
+- `@appstrate/mcp-transport`: `AppstrateMcpClient` gains `listPrompts` (every page, bounded, a repeated cursor throws) and `getPrompt`.
+
 ## [1.0.0-beta.70] - 2026-11-19
 
 The Apple Silicon CLI builds on the supported macOS 15 runner. Production upgrades directly from beta.68 using the [maintenance procedure](docs/deployment/BETA_69.md). The beta.69 tag stopped before CLI signing. Its client and operator changes are described below.

@@ -52,6 +52,9 @@ import { readJsonBody } from "@appstrate/core/request-body";
 import { setCursorLinkHeader } from "@appstrate/core/pagination-link";
 import { UI_MESSAGE_STREAM_HEADERS } from "ai";
 import { handleChatStream } from "./chat-stream.ts";
+import { readChatCommands } from "./chat-commands.ts";
+import { callerMcpOpener, dispatchFetch } from "./platform-mcp.ts";
+import { limitedConversationPermissions } from "./turn-permissions.ts";
 import type { ChatEnv } from "./prompt.ts";
 import { stopStream } from "./stop-registry.ts";
 import { clearActiveStream, getResumableContext, STALE_MARKER_MIN_AGE_MS } from "./resumable.ts";
@@ -320,6 +323,38 @@ export function createChatRouter(deps: ChatPlatformDeps) {
     guard("chat:write"),
     handlers.stop,
   );
+
+  // The composer's `/` menu: the skills and agents of the spaces a turn would act in.
+  router.get("/api/orgs/:orgId/chat/commands", ...actingGuards, async (c) => {
+    const reachable = c.get("reachable");
+    const spaceId = c.req.query("spaceId");
+    if (spaceId !== undefined && !canActIn(reachable, spaceId)) {
+      throw invalidRequest("spaceId must be a space this conversation can act in", "spaceId");
+    }
+    // A space asked for stands for a conversation limited to it, whose grants are narrowed alike.
+    const spaces = actingSpaces(reachable).filter(
+      (space) => spaceId === undefined || space.id === spaceId,
+    );
+    const union = spaces.flatMap((space) => space.permissions);
+    const permissions = new Set(
+      spaceId === undefined
+        ? union
+        : limitedConversationPermissions(union, c.get("reachableOrgHalf")),
+    );
+    const commands = await readChatCommands(
+      callerMcpOpener(c, dispatchFetch(deps), {
+        permissions,
+        spaces,
+        restricted: spaceId !== undefined,
+      }),
+      spaces.map((space) => space.id),
+      {
+        readsSkills: permissions.has("skills:read"),
+        catalogueDrafts: permissions.has("skills:write"),
+      },
+    );
+    return c.json(commands);
+  });
 
   // POST …/chat — the conversational loop (AI SDK UIMessage stream).
   // 20/min: every call fans out into metered LLM traffic. The server is the

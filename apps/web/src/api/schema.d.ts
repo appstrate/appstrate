@@ -3147,9 +3147,29 @@ export interface paths {
         put?: never;
         /**
          * Run a conversational turn (streaming)
-         * @description Receives the running thread (AI SDK UIMessages) and streams the assistant turn (UIMessage stream over SSE). Inference runs on the org's configured models: API-key models are routed through the llm-proxy (key injected server-side), OAuth-subscription models are called natively at the provider's own base URL with the access token held in memory. Either way usage is metered server-side; tool calls dispatch through the organization MCP endpoint, each space-acting call naming its `space_id` and decided in that space under the caller's role there; every space a call names, and the space of a file `read_resource` reads or one attached from the file gallery when it is a space of the turn, is recorded on the conversation before the act (its own uploads, stored in the caller's personal space, record none; a call reads any other file by id in the space it names only), and every space disclosed by a search or a configuration refusal is recorded before its result is shown. The conversation stays openable only while the caller reaches all of them with `chat:read`; a call can name only a space of the acting set (the reachable spaces where the caller holds `chat:write`, `chat:read` and `mcp:read` together). A limited conversation (`restricted`) acts in its origin space alone, and is refused (403) once the caller can no longer act there. The space of a request that names none (a default, never a pin): the only space the turn can act in (a limited conversation); a space the user names; for an inline run, a new package or a direct integration tool call, the caller's personal space first, whatever their role there; for any other act, the conversation's origin space; otherwise the assistant asks. When the space so chosen cannot serve the request, the assistant stops and asks: it never activates, connects or switches space on its own. `spaceId` and `restricted` set the origin and the limit, and are read only when this turn creates the conversation — an existing one keeps its own. Ignores `X-Space-Id`; admitted when the acting set is not empty. A credential confined to spaces (pinned to one, or carrying a space allowlist, such as the bearer of a chat turn) is refused (403). Message persistence is server-owned: the user turn is persisted before inference and the assistant turn when the stream finalizes (survives client disconnect). Rate limited (20/min per caller). Not invocable over MCP (streaming).
+         * @description Receives the running thread (AI SDK UIMessages) and streams the assistant turn (UIMessage stream over SSE). Inference runs on the org's configured models: API-key models are routed through the llm-proxy (key injected server-side), OAuth-subscription models are called natively at the provider's own base URL with the access token held in memory. Either way usage is metered server-side; tool calls dispatch through the organization MCP endpoint, each space-acting call naming its `space_id` and decided in that space under the caller's role there; every space a call names, and the space of a file `read_resource` reads or one attached from the file gallery when it is a space of the turn, is recorded on the conversation before the act (its own uploads, stored in the caller's personal space, record none; a call reads any other file by id in the space it names only), and every space disclosed by a search or a configuration refusal is recorded before its result is shown. The conversation stays openable only while the caller reaches all of them with `chat:read`; a call can name only a space of the acting set (the reachable spaces where the caller holds `chat:write`, `chat:read` and `mcp:read` together). A limited conversation (`restricted`) acts in its origin space alone, and is refused (403) once the caller can no longer act there. The space of a request that names none (a default, never a pin): the only space the turn can act in (a limited conversation); a space the user names; for an inline run, a new package or a direct integration tool call, the caller's personal space first, whatever their role there; for any other act, the conversation's origin space; otherwise the assistant asks. When the space so chosen cannot serve the request, the assistant stops and asks: it never activates, connects or switches space on its own. `spaceId` and `restricted` set the origin and the limit, and are read only when this turn creates the conversation — an existing one keeps its own. Ignores `X-Space-Id`; admitted when the acting set is not empty. A credential confined to spaces (pinned to one, or carrying a space allowlist, such as the bearer of a chat turn) is refused (403). A user message may carry one `data-agent-prompt` part, `{ name, title }`: a launch of an agent from the composer's menu (`listChatCommands`). The turn resolves `name` with `prompts/get` (the message text as its `request`) over the caller's own connection in the turn's spaces, before persisting the message (a name the server does not serve is a 400, nothing written), stores the launch instructions it returns in the part's `data.text`, and shows the model that text in place of the message's own on this turn and every later one. Message persistence is server-owned: the user turn is persisted before inference and the assistant turn when the stream finalizes (survives client disconnect). Rate limited (20/min per caller). Not invocable over MCP (streaming).
          */
         post: operations["streamChat"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/orgs/{orgId}/chat/commands": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List the composer's commands
+         * @description The skills a conversation can pin and the agents the caller can launch, read as an MCP client reads the platform server (`skills/list`, `prompts/list`) with the caller's own permissions: in every space the caller can act in, or, with `?spaceId=`, in that space alone (a conversation limited to it). An agent is launched by a user message carrying a `data-agent-prompt` part (see `streamChat`). A half that cannot be read is empty. Ignores `X-Space-Id`; admitted when the acting set is not empty. A credential confined to spaces is refused (403).
+         */
+        get: operations["listChatCommands"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -6298,6 +6318,26 @@ export interface components {
         /** @description A catalog plan the org can upgrade into — an `BillingPlan` whose `id` is narrowed to a checkout target. */
         BillingUpgradePlan: components["schemas"]["BillingPlan"] & {
             id: components["schemas"]["BillingCheckoutPlanId"];
+        };
+        /** @description What the composer's `/` menu offers, as the platform MCP server serves it to the caller (`skills/list`, `prompts/list`). */
+        ChatCommands: {
+            /** @description The skills the caller can read in the spaces asked, one per package (the first space's). Empty without `skills:read`. */
+            skills: {
+                /** @description `@scope/name`: what `pinned_skills` holds. */
+                id: string;
+                /** @description The skill's `SKILL.md` frontmatter `name`. */
+                name: string;
+                description: string;
+                /** @description The published version; null for a draft. */
+                version: string | null;
+            }[];
+            /** @description The agents the caller can launch, as launch prompts. Empty when the caller cannot run agents. */
+            agents: {
+                /** @description The prompt name (`run-<agent>`): what a `data-agent-prompt` part names. */
+                name: string;
+                title: string;
+                description: string;
+            }[];
         };
         ChatMessage: {
             /** @description Server-generated message id */
@@ -21063,6 +21103,36 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetail"];
                 };
             };
+        };
+    };
+    listChatCommands: {
+        parameters: {
+            query?: {
+                /** @description Read the commands in this space alone; it must be a space the caller can act in (else a 400 naming `spaceId`). */
+                spaceId?: string;
+            };
+            header?: never;
+            path: {
+                /** @description Organization ID. */
+                orgId: components["parameters"]["OrgIdPath"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The commands */
+            200: {
+                headers: {
+                    "Request-Id": components["headers"]["RequestId"];
+                    "Appstrate-Version": components["headers"]["AppstrateVersion"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ChatCommands"];
+                };
+            };
+            400: components["responses"]["ValidationError"];
+            403: components["responses"]["Forbidden"];
         };
     };
     listChatSessions: {

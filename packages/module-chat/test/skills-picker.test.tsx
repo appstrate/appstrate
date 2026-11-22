@@ -24,13 +24,11 @@ const transport = transportOf(() => ({ "X-Org-Id": "org_1", "X-Space-Id": "spc_a
 
 function render(skillDiscovery: boolean, pinnedSkills: string[] = []): string {
   const qc = new QueryClient();
-  qc.setQueryData(
-    ["packages", "skills", { consumer: "chat" }, ["spc_a"]],
-    [
-      { packageId: "@acme/free", display_name: "Free", version: null },
-      ...pinnedSkills.map((packageId) => ({ packageId, display_name: packageId, version: null })),
-    ],
-  );
+  const skill = (id: string, name: string) => ({ id, name, description: "", version: null });
+  qc.setQueryData(["packages", "chat-commands", "org_1", null], {
+    skills: [skill("@acme/free", "Free"), ...pinnedSkills.map((id) => skill(id, id))],
+    agents: [],
+  });
   return renderToStaticMarkup(
     <QueryClientProvider client={qc}>
       <ChatHostProvider value={host}>

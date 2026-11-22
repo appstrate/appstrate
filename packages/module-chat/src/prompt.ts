@@ -245,8 +245,10 @@ export function normalizeChatLocale(raw: string | undefined): string {
 }
 
 /** A skill of the `auto` catalogue: an entry of `skills/list`, loaded by its `uri`. */
-interface CatalogueSkill {
+export interface CatalogueSkill {
   packageId: string;
+  /** The `SKILL.md` frontmatter `name`. */
+  name: string;
   description: string;
   /** The published version; `null` for a draft. */
   version: string | null;
@@ -436,15 +438,15 @@ function entriesByPackage(
 }
 
 /**
- * Deadline of a turn's skills read, connection included: the preamble runs
- * before the turn's abort controller exists, and a client disconnect never
- * cancels a turn, so the read carries its own bound. Past it, the turn goes on
- * with the skills read so far left out, each with its notice.
+ * Deadline of a read over the caller's own MCP connection (the turn's skills, the composer's
+ * commands, an agent launch's prompt), connection included: the preamble runs before the turn's
+ * abort controller exists, and a client disconnect never cancels a turn, so the read carries its
+ * own bound. Past it, a turn goes on with the skills read so far left out, each with its notice.
  */
-const SKILLS_READ_TIMEOUT_MS = 10_000;
+export const CALLER_READ_TIMEOUT_MS = 10_000;
 
 /** The pinned skills' contents and the catalogue of a turn. */
-interface ChatSkillsRead {
+export interface ChatSkillsRead {
   contents: Map<string, SkillContent | null>;
   catalogue: CatalogueSkill[];
 }
@@ -467,11 +469,10 @@ interface ChatSkillsRead {
 async function readChatSkills(
   openSkillsClient: (signal: AbortSignal) => Promise<ChatSkillsClient>,
   spaces: readonly string[],
-  opts: { catalogue: boolean; catalogueDrafts: boolean; chosen: readonly string[] },
+  opts: SkillsReadOptions,
 ): Promise<ChatSkillsRead> {
-  const read: ChatSkillsRead = { contents: new Map(), catalogue: [] };
-  if (!opts.catalogue && opts.chosen.length === 0) return read;
-  const signal = AbortSignal.timeout(SKILLS_READ_TIMEOUT_MS);
+  if (!opts.catalogue && opts.chosen.length === 0) return { contents: new Map(), catalogue: [] };
+  const signal = AbortSignal.timeout(CALLER_READ_TIMEOUT_MS);
   let client: ChatSkillsClient;
   try {
     client = await openSkillsClient(signal);
@@ -479,79 +480,100 @@ async function readChatSkills(
     logger.warn("skills connection unavailable — the turn's skills left out", {
       err: String(err),
     });
-    return read;
+    return { contents: new Map(), catalogue: [] };
   }
   try {
-    const list = (meta?: Record<string, unknown>) =>
-      client.listSkills(meta ? { meta, signal } : { signal }).then(
-        ({ skills }) => entriesByPackage(skills, spaces),
-        (err: unknown) => {
-          logger.warn("skills/list failed — its skills left out of the turn", {
-            definition: meta ? "draft" : "published",
-            err: String(err),
-          });
-          return new Map<string, ListedSkillEntry>();
-        },
-      );
-    const [published, drafts] = await Promise.all([
-      list(),
-      list({ [SKILL_DEFINITION_META_KEY]: "draft" }),
-    ]);
-    if (opts.catalogue) {
-      // A draft stands for its package's published version: one line per skill.
-      const catalogueDrafts = opts.catalogueDrafts ? drafts : new Map<string, ListedSkillEntry>();
-      const listed = new Map([...published, ...catalogueDrafts]);
-      read.catalogue = [...listed.keys()].sort().map((packageId) => {
-        const entry = listed.get(packageId)!;
-        const served = servedAs(entry, catalogueDrafts.has(packageId));
-        return {
-          packageId,
-          description: entry.frontmatter.description,
-          version: served?.definition === "published" ? served.version : null,
-          uri: entry.uri,
-        };
-      });
-    }
-    await Promise.all(
-      opts.chosen.map(async (id) => {
-        const entry = drafts.get(id) ?? published.get(id);
-        if (!entry) return;
-        const content = await client.readResource({ uri: entry.uri }, { signal }).then(
-          ({ contents }) => contents.find((item) => item.uri === entry.uri),
-          (err: unknown) => {
-            logger.warn("resources/read of a chosen skill failed — left out", {
-              uri: entry.uri,
-              err: String(err),
-            });
-            return undefined;
-          },
-        );
-        if (!content) return;
-        const served = servedAs(entry, drafts.has(id));
-        // A `SKILL.md` served as a blob is not a skill's text, and text that is
-        // not the listed `SKILL.md` (a draft saved between the list and the
-        // read) is not the definition the claim pins: both get their own notice.
-        read.contents.set(
-          id,
-          served &&
-            "text" in content &&
-            typeof content.text === "string" &&
-            isListedSkillMd(entry, content.text)
-            ? {
-                packageId: id,
-                version: served.definition === "published" ? served.version : null,
-                uri: entry.uri,
-                content: content.text,
-                served,
-              }
-            : null,
-        );
-      }),
-    );
-    return read;
+    return await readSkillsOver(client, signal, spaces, opts);
   } finally {
     await client.close().catch(() => {});
   }
+}
+
+interface SkillsReadOptions {
+  catalogue: boolean;
+  catalogueDrafts: boolean;
+  chosen: readonly string[];
+}
+
+/**
+ * {@link readChatSkills} over a connection the caller owns, left open: the composer's commands
+ * read the catalogue and the agents over one.
+ */
+export async function readSkillsOver(
+  client: ChatSkillsClient,
+  signal: AbortSignal,
+  spaces: readonly string[],
+  opts: SkillsReadOptions,
+): Promise<ChatSkillsRead> {
+  const read: ChatSkillsRead = { contents: new Map(), catalogue: [] };
+  const list = (meta?: Record<string, unknown>) =>
+    client.listSkills(meta ? { meta, signal } : { signal }).then(
+      ({ skills }) => entriesByPackage(skills, spaces),
+      (err: unknown) => {
+        logger.warn("skills/list failed — its skills left out of the turn", {
+          definition: meta ? "draft" : "published",
+          err: String(err),
+        });
+        return new Map<string, ListedSkillEntry>();
+      },
+    );
+  const [published, drafts] = await Promise.all([
+    list(),
+    list({ [SKILL_DEFINITION_META_KEY]: "draft" }),
+  ]);
+  if (opts.catalogue) {
+    // A draft stands for its package's published version: one line per skill.
+    const catalogueDrafts = opts.catalogueDrafts ? drafts : new Map<string, ListedSkillEntry>();
+    const listed = new Map([...published, ...catalogueDrafts]);
+    read.catalogue = [...listed.keys()].sort().map((packageId) => {
+      const entry = listed.get(packageId)!;
+      const served = servedAs(entry, catalogueDrafts.has(packageId));
+      return {
+        packageId,
+        name: entry.frontmatter.name,
+        description: entry.frontmatter.description,
+        version: served?.definition === "published" ? served.version : null,
+        uri: entry.uri,
+      };
+    });
+  }
+  await Promise.all(
+    opts.chosen.map(async (id) => {
+      const entry = drafts.get(id) ?? published.get(id);
+      if (!entry) return;
+      const content = await client.readResource({ uri: entry.uri }, { signal }).then(
+        ({ contents }) => contents.find((item) => item.uri === entry.uri),
+        (err: unknown) => {
+          logger.warn("resources/read of a chosen skill failed — left out", {
+            uri: entry.uri,
+            err: String(err),
+          });
+          return undefined;
+        },
+      );
+      if (!content) return;
+      const served = servedAs(entry, drafts.has(id));
+      // A `SKILL.md` served as a blob is not a skill's text, and text that is
+      // not the listed `SKILL.md` (a draft saved between the list and the
+      // read) is not the definition the claim pins: both get their own notice.
+      read.contents.set(
+        id,
+        served &&
+          "text" in content &&
+          typeof content.text === "string" &&
+          isListedSkillMd(entry, content.text)
+          ? {
+              packageId: id,
+              version: served.definition === "published" ? served.version : null,
+              uri: entry.uri,
+              content: content.text,
+              served,
+            }
+          : null,
+      );
+    }),
+  );
+  return read;
 }
 
 /** Whether `text` is the `SKILL.md` its entry lists: its UTF-8 bytes have the listed `digest`. */

@@ -4,7 +4,6 @@ import { describe, expect, it } from "bun:test";
 import {
   CHAT_SKILLS_CONTENT_BUDGET_CHARS as BUDGET,
   injectedSkills,
-  parseSkillList,
   resolveChatSkills,
   type ChatSkillSelection,
   type SkillContent,
@@ -72,34 +71,6 @@ describe("resolveChatSkills", () => {
     ]);
     expect(result.chosen.map((s) => s.packageId)).toEqual(["@a/art"]);
     expect(result.notices).toEqual([]);
-  });
-});
-
-describe("parseSkillList", () => {
-  it("projects each row of the listing and drops a malformed one", () => {
-    expect(
-      parseSkillList({
-        object: "list",
-        data: [
-          { id: "@acme/tone", name: "Tone", description: "Adjusts tone", version: "1.2.0" },
-          { id: "@acme/bare", name: "@acme/bare", description: null, version: null },
-          { id: 42 },
-        ],
-      }),
-    ).toEqual([
-      {
-        packageId: "@acme/tone",
-        display_name: "Tone",
-        description: "Adjusts tone",
-        version: "1.2.0",
-      },
-      { packageId: "@acme/bare", display_name: "@acme/bare", description: null, version: null },
-    ]);
-  });
-
-  it("reads an unreadable body as no skills", () => {
-    expect(parseSkillList(null)).toEqual([]);
-    expect(parseSkillList({ data: "nope" })).toEqual([]);
   });
 });
 

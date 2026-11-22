@@ -3,38 +3,7 @@
 // Which skills a chat turn injects. Pure: the result sits in the system
 // prompt's single `cache_control` block.
 
-import { z } from "zod";
 import type { InjectedSkill, InjectedSkills } from "@appstrate/core/chat-contract";
-
-export interface SkillHint {
-  packageId: string;
-  display_name?: string | null;
-  description?: string | null;
-  version?: string | null;
-}
-
-/** The fields read off a row of `GET /api/packages/skills`. */
-const skillListRowSchema = z.object({
-  id: z.string(),
-  name: z.string(),
-  description: z.string().nullable(),
-  version: z.string().nullable(),
-});
-
-/**
- * `GET /api/packages/skills`: the space's ACTIVE skills, uncapped — what the
- * picker offers, and what a chosen skill must be in to be injected. A malformed
- * row is dropped.
- */
-export function parseSkillList(body: unknown): SkillHint[] {
-  const data = (body as { data?: unknown } | null)?.data;
-  return (Array.isArray(data) ? data : []).flatMap((row) => {
-    const parsed = skillListRowSchema.safeParse(row);
-    if (!parsed.success) return [];
-    const { id, name, description, version } = parsed.data;
-    return [{ packageId: id, display_name: name, description, version }];
-  });
-}
 
 /** A skill's `SKILL.md` as injected: as the MCP Skills extension serves it at `uri`. */
 export interface SkillContent {

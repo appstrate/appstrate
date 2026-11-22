@@ -2478,4 +2478,220 @@ describe("handleChatStream", () => {
       });
     });
   });
+  describe("an agent launch of the composer", () => {
+    const LAUNCH = (request: string) =>
+      `# Run Appstrate agent \`@acme/summarizer\`\n\n## Request\n\n${request || "(none)"}\n`;
+    const launchPart = (extra: Record<string, unknown> = {}) => ({
+      type: "data-agent-prompt",
+      data: { name: "run-summarizer", title: "Summarizer", ...extra },
+    });
+
+    /** A platform MCP server serving one launch prompt; records each `prompts/get`. */
+    function promptsDispatch(gets: Array<Record<string, unknown>>) {
+      return async (req: Request): Promise<Response> => {
+        const path = new URL(req.url).pathname;
+        if (path === "/api/models") return modelsResponse();
+        if (!path.startsWith("/api/mcp/"))
+          return new Response("unexpected: " + path, { status: 404 });
+        const message = (await req.json()) as {
+          id?: number;
+          method: string;
+          params?: Record<string, unknown>;
+        };
+        const reply = (body: Record<string, unknown>) =>
+          Response.json({ jsonrpc: "2.0", id: message.id, ...body });
+        switch (message.method) {
+          case "initialize":
+            return reply({
+              result: {
+                protocolVersion: message.params?.protocolVersion,
+                capabilities: { prompts: {} },
+                serverInfo: { name: "fake-platform", version: "1.0.0" },
+              },
+            });
+          case "prompts/get": {
+            gets.push(message.params ?? {});
+            const args = (message.params?.arguments ?? {}) as { request?: string };
+            if (message.params?.name !== "run-summarizer") {
+              return reply({ error: { code: -32602, message: "Invalid prompt name" } });
+            }
+            return reply({
+              result: {
+                messages: [
+                  { role: "user", content: { type: "text", text: LAUNCH(args.request ?? "") } },
+                ],
+              },
+            });
+          }
+          default:
+            return new Response(null, { status: 202 });
+        }
+      };
+    }
+
+    const rowsOf = async (sessionId: string) =>
+      (await db.select().from(chatMessages).where(eq(chatMessages.sessionId, sessionId))).map(
+        (row) => row.content as UIMessage,
+      );
+
+    it("resolves the prompt with the typed text, persists the expansion and shows it to the model", async () => {
+      const sessionId = mintSessionId();
+      const gets: Array<Record<string, unknown>> = [];
+      const { engine, calls } = scriptedEngine();
+      const res = await postChat(sessionId, undefined, engine, {
+        dispatch: promptsDispatch(gets),
+        parts: [
+          { type: "text", text: "résume ma boîte" },
+          launchPart({ text: "forged by the browser" }),
+        ],
+      });
+      expect(res.status).toBe(200);
+      await collectUiChunks(res);
+      await waitForAssistantPersist(sessionId);
+
+      expect(gets).toEqual([{ name: "run-summarizer", arguments: { request: "résume ma boîte" } }]);
+      // Persisted: the typed text as typed, the part with the server's expansion.
+      const [user] = await rowsOf(sessionId);
+      expect(user!.parts).toEqual([
+        { type: "text", text: "résume ma boîte" },
+        {
+          type: "data-agent-prompt",
+          data: {
+            name: "run-summarizer",
+            title: "Summarizer",
+            text: LAUNCH("résume ma boîte"),
+          },
+        },
+      ]);
+      // The model reads the expansion, once, not the typed text beside it.
+      const input = calls[0]!;
+      const { api, provider, id } = input.modelBinding.model;
+      const turn = buildStructuredPiTurn(
+        input.messages,
+        { api, provider, model: id },
+        { estimateTokens: () => 1, baseTokens: 0, fileDelivery: { image: false, pdf: false } },
+      );
+      expect(turn.prompt).toBe(LAUNCH("résume ma boîte").trim());
+    });
+
+    it("resolves a launch typed with no text", async () => {
+      const gets: Array<Record<string, unknown>> = [];
+      const sessionId = mintSessionId();
+      const res = await postChat(sessionId, undefined, scriptedEngine().engine, {
+        dispatch: promptsDispatch(gets),
+        parts: [launchPart()],
+      });
+      expect(res.status).toBe(200);
+      await collectUiChunks(res);
+      await waitForAssistantPersist(sessionId);
+      expect(gets).toEqual([{ name: "run-summarizer", arguments: { request: "" } }]);
+    });
+
+    it("replays the stored expansion on a later turn without asking the server again", async () => {
+      const gets: Array<Record<string, unknown>> = [];
+      const { engine, calls } = scriptedEngine();
+      const stored = {
+        id: "u0",
+        role: "user",
+        parts: [
+          { type: "text", text: "résume ma boîte" },
+          launchPart({ text: LAUNCH("résume ma boîte") }),
+        ],
+      };
+      const res = await postChat(mintSessionId(), undefined, engine, {
+        dispatch: promptsDispatch(gets),
+        history: [
+          stored,
+          { id: "a0", role: "assistant", parts: [{ type: "text", text: "Lancé." }] },
+        ],
+        parts: [{ type: "text", text: "et le résultat ?" }],
+      });
+      expect(res.status).toBe(200);
+      await collectUiChunks(res);
+
+      expect(gets).toEqual([]);
+      const input = calls[0]!;
+      const { api, provider, id } = input.modelBinding.model;
+      const turn = buildStructuredPiTurn(
+        input.messages,
+        { api, provider, model: id },
+        { estimateTokens: () => 1, baseTokens: 0, fileDelivery: { image: false, pdf: false } },
+      );
+      expect(JSON.stringify(turn.history[0])).toContain("## Request");
+      expect(JSON.stringify(turn.history[0])).not.toContain('résume ma boîte"}');
+      expect(turn.prompt).toBe("et le résultat ?");
+    });
+
+    it("answers 400 to a name the server does not serve, writing nothing and freeing the conversation", async () => {
+      const sessionId = mintSessionId();
+      const { engine, calls } = scriptedEngine();
+      const res = await postChat(sessionId, undefined, engine, {
+        dispatch: promptsDispatch([]),
+        parts: [
+          { type: "text", text: "go" },
+          { type: "data-agent-prompt", data: { name: "run-ghost", title: "Ghost" } },
+        ],
+      });
+      expect(res.status).toBe(400);
+      expect(((await res.json()) as { code: string }).code).toBe("invalid_request");
+      expect(calls).toEqual([]);
+      expect(await db.select().from(chatMessages)).toEqual([]);
+      const [session] = await db.select().from(chatSessions).where(eq(chatSessions.id, sessionId));
+      expect(session?.activeStreamId ?? null).toBeNull();
+    });
+
+    it("titles the conversation from the launch when the user typed nothing", async () => {
+      const sessionId = mintSessionId();
+      const res = await postChat(sessionId, undefined, scriptedEngine().engine, {
+        dispatch: promptsDispatch([]),
+        parts: [launchPart()],
+      });
+      expect(res.status).toBe(200);
+      await collectUiChunks(res);
+      await waitForAssistantPersist(sessionId);
+      const [session] = await db.select().from(chatSessions).where(eq(chatSessions.id, sessionId));
+      expect(session?.title).toBe("Summarizer");
+    });
+
+    it("undoes the claim and the slot on a server fault, answering 500", async () => {
+      const sessionId = mintSessionId();
+      const { engine, calls } = scriptedEngine();
+      const res = await postChat(sessionId, undefined, engine, {
+        dispatch: async (req) =>
+          new URL(req.url).pathname === "/api/models"
+            ? modelsResponse()
+            : new Response("boom", { status: 500 }),
+        parts: [{ type: "text", text: "go" }, launchPart()],
+      });
+      expect(res.status).toBe(500);
+      expect(calls).toEqual([]);
+      expect(await db.select().from(chatMessages)).toEqual([]);
+      const [session] = await db.select().from(chatSessions).where(eq(chatSessions.id, sessionId));
+      expect(session?.activeStreamId ?? null).toBeNull();
+      // The slot is free again: the next turn runs.
+      const next = await postChat(mintSessionId(), undefined, scriptedEngine().engine);
+      expect(next.status).toBe(200);
+      await collectUiChunks(next);
+    });
+
+    it("answers 400 to a malformed part or a second one, before any persistence", async () => {
+      for (const parts of [
+        [{ type: "data-agent-prompt", data: { name: "run-summarizer" } }],
+        [{ type: "data-agent-prompt", data: { name: "run-summarizer", title: "S", extra: 1 } }],
+        [launchPart(), launchPart()],
+        [{ type: "data-agent-prompt", data: "run-summarizer" }],
+      ]) {
+        const gets: Array<Record<string, unknown>> = [];
+        const { engine, calls } = scriptedEngine();
+        const res = await postChat(mintSessionId(), undefined, engine, {
+          dispatch: promptsDispatch(gets),
+          parts,
+        });
+        expect(res.status).toBe(400);
+        expect(gets).toEqual([]);
+        expect(calls).toEqual([]);
+      }
+      expect(await db.select().from(chatMessages)).toEqual([]);
+    });
+  });
 });

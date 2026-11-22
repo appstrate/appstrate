@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * The skill selection the session DTOs carry back, and the listing the picker
- * reads. A turn writes the selection (`chat-stream-handler.test.ts`).
+ * The skill selection the session DTOs carry back. A turn writes the selection
+ * (`chat-stream-handler.test.ts`).
  */
 
 import { describe, it, expect, beforeEach } from "bun:test";
@@ -42,34 +42,6 @@ describe("chat session skills", () => {
     expect(res.status).toBe(200);
     return (await res.json()) as SessionDto;
   }
-
-  it("reads the picker's four fields off the real skills listing", async () => {
-    // `parseSkillList` reads these four fields; this keeps it on the real route.
-    const created = await app.request("/api/packages/skills", {
-      method: "POST",
-      headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
-      body: JSON.stringify({
-        manifest: {
-          name: "@chatskills/tone",
-          version: "1.2.0",
-          type: "skill",
-          schema_version: "0.1",
-          display_name: "Tone",
-          description: "Adjusts tone.",
-        },
-        content: '---\nname: tone\ndescription: "Adjusts tone."\n---\n\nBody.',
-      }),
-    });
-    expect(created.status).toBe(201);
-    const list = await app.request("/api/packages/skills", json());
-    const rows = ((await list.json()) as { data: Record<string, unknown>[] }).data;
-    expect(rows.find((row) => row.id === "@chatskills/tone")).toMatchObject({
-      id: "@chatskills/tone",
-      name: "Tone",
-      description: "Adjusts tone.",
-      version: "1.2.0",
-    });
-  });
 
   it("carries the stored selection on the create, list and detail routes", async () => {
     const created = await app.request(

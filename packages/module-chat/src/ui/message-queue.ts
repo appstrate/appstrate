@@ -18,6 +18,19 @@ export function joinQueued(items: readonly string[]): string {
   return items.join("\n\n");
 }
 
+/**
+ * Whether the draft can join the queue: a turn runs, it is text alone, and it launches no agent
+ * (the queue sends plain text, so a chosen agent would be dropped and its chip left behind).
+ */
+export function canQueueDraft(input: {
+  running: boolean;
+  text: string;
+  hasAttachments: boolean;
+  hasAgent: boolean;
+}): boolean {
+  return input.running && !input.hasAttachments && !input.hasAgent && input.text.trim() !== "";
+}
+
 export type FlushDecision = "send" | "hold" | "none";
 
 /**

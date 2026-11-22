@@ -26,11 +26,12 @@ import { readJsonBody } from "@appstrate/core/request-body";
 import { withByteCap } from "@appstrate/core/safe-json";
 import { isAttachmentUri, parseFileUri } from "@appstrate/core/file-uri";
 import { logger } from "./logger.ts";
+import { AGENT_PROMPT_PART_TYPE, agentPromptDataSchema } from "./agent-prompt.ts";
+import { resolveAgentPrompt } from "./agent-launch.ts";
 import { notifySessionUpdate } from "./realtime.ts";
 import { listModels, pickModel } from "./llm.ts";
-import { platformMcpUrl } from "./platform-mcp.ts";
+import { actingOrgRole, callerMcpOpener, dispatchFetch, platformMcpUrl } from "./platform-mcp.ts";
 import { platformMcpSurfaceKey } from "./pi-chat/mcp-surface-cache.ts";
-import { connectPlatformMcp } from "./pi-chat/mcp-tools.ts";
 import { selfOrigin } from "./self.ts";
 import type { ChatUsageRecord, InjectedSkills } from "@appstrate/core/chat-contract";
 import { mintLoopbackToken, mintMcpLoopbackToken } from "./loopback-auth.ts";
@@ -131,6 +132,8 @@ export const CHAT_MESSAGE_MAX_BYTES = 256 * 1024;
 //   - any `file` part MUST reference an `upload://` or `appfile://` URI. That
 //     rejects inline `data:` bytes and arbitrary URLs in the chat channel
 //     (attachments flow only through the file store, never inline).
+//   - an `agent-prompt` part (`agent-prompt.ts`) is a user message's, at most one, and its data
+//     parses; `handleChatStream` resolves it.
 //   - `skill_discovery` and `pinned_skills` come together or not at all: the
 //     picker's selection, written onto the session row by this turn.
 //   - `.strict()`: an unknown field is a 400, never silently dropped.
@@ -152,10 +155,23 @@ export const chatStreamSchema = z
           }
           const parts = (message as { parts?: unknown }).parts;
           if (!Array.isArray(parts)) return;
+          let launches = 0;
           parts.forEach((part, j) => {
-            if (!part || typeof part !== "object" || (part as { type?: unknown }).type !== "file") {
+            const type =
+              part && typeof part === "object" ? (part as { type?: unknown }).type : null;
+            if (type === AGENT_PROMPT_PART_TYPE) {
+              const parsed = agentPromptDataSchema.safeParse((part as { data?: unknown }).data);
+              if (role !== "user" || ++launches > 1 || !parsed.success) {
+                ctx.addIssue({
+                  code: "custom",
+                  message:
+                    "A user message carries at most one agent launch, { name, title } (and the text a stored one holds).",
+                  path: [i, "parts", j, "data"],
+                });
+              }
               return;
             }
+            if (type !== "file") return;
             const url = (part as { url?: unknown }).url;
             if (!isAttachmentUri(url)) {
               ctx.addIssue({
@@ -317,7 +333,7 @@ export async function handleChatStream(
   // While a preview is on, the turn is answered as the persona; the real role
   // stays on the context for identity and audit.
   const persona = c.get("viewAs");
-  const orgRole = persona?.orgRole ?? c.get("orgRole") ?? "member";
+  const orgRole = actingOrgRole(c);
   const body = await readJsonBody(c, chatStreamSchema);
   // The client sends its selected history branch along with the new message.
   const validated = await safeValidateUIMessages({ messages: body.messages.slice(-1) });
@@ -411,8 +427,7 @@ export async function handleChatStream(
   // loopback socket to it. That is why `CHAT_SELF_ORIGIN` must actually resolve
   // on this host, and why the binding needs a bearer *minter* (see below) rather
   // than a header captured once.
-  const platformFetch: typeof fetch = ((input: RequestInfo | URL, init?: RequestInit) =>
-    deps.dispatch(new Request(input, init))) as typeof fetch;
+  const platformFetch = dispatchFetch(deps);
 
   // The proxy surfaces are bearer-only (cookies refused — CSRF model):
   // inference loopback calls carry a short-lived token only this process
@@ -493,12 +508,18 @@ export async function handleChatStream(
     };
     return {
       skills: conv.selection,
+      // The caller's own connection over the turn's spaces (see `callerMcpOpener`): the turn's
+      // skills and an agent launch's prompt are read through it.
+      openCaller: callerMcpOpener(c, platformFetch, {
+        permissions: callerPermissions,
+        spaces,
+        restricted: conv.restricted,
+      }),
       // As read: the claim compares the row against it (`claimTurn`).
       scope: { spaceId: conv.spaceId, restricted: conv.restricted },
       originSpace,
       restricted: conv.restricted,
       spaces,
-      callerPermissions,
       organization,
       permissions,
       capabilities,
@@ -532,54 +553,34 @@ export async function handleChatStream(
   const contextBlockPromise: Promise<
     { ok: true; block: string; injectedSkills: InjectedSkills } | { ok: false; error: unknown }
   > = turn
-    .then(
-      ({ skills, permissions, capabilities, spaces, originSpace, restricted, callerPermissions }) =>
-        buildCallerContextBlock(c, {
-          spaces,
-          origin: originSpace,
-          restricted,
-          user,
-          // UI language forwarded by the client; validated/defaulted in the builder.
-          locale: c.req.header("X-Chat-Locale"),
-          capabilities,
-          permissions,
-          skills,
-          // The turn's skills are read before the claim naming them exists, so
-          // over a connection of their own: the caller's permissions, not narrowed by
-          // `turnPermissions`, and no claim — what the caller reads.
-          // One in-process `initialize` plus the reads, only on a turn that lists
-          // (discovery with `skills:read`) or injects skills; closed before the turn's
-          // connection opens.
-          openSkillsClient: (signal) =>
-            connectPlatformMcp({
-              signal,
-              url: platformMcpUrl(origin, orgId),
-              headers: {
-                Authorization: `Bearer ${mintMcpLoopbackToken({
-                  userId: user.id,
-                  email: user.email,
-                  name: user.name,
-                  orgId,
-                  orgRole,
-                  permissions: [...callerPermissions],
-                  viewAs: persona,
-                  spaceIds: spaces.map((space) => space.id),
-                  restricted,
-                })}`,
-                "x-org-id": orgId,
-              },
-              fetch: platformFetch,
-            }),
-        }).finally(() => {
-          phaseBMs = Date.now() - phaseBStart;
-        }),
+    .then(({ skills, permissions, capabilities, spaces, originSpace, restricted, openCaller }) =>
+      buildCallerContextBlock(c, {
+        spaces,
+        origin: originSpace,
+        restricted,
+        user,
+        // UI language forwarded by the client; validated/defaulted in the builder.
+        locale: c.req.header("X-Chat-Locale"),
+        capabilities,
+        permissions,
+        skills,
+        // The turn's skills are read before the claim naming them exists, so
+        // over a connection of the caller's own: not narrowed by `turnPermissions`, and no
+        // claim — what the caller reads.
+        // One in-process `initialize` plus the reads, only on a turn that lists
+        // (discovery with `skills:read`) or injects skills; closed before the turn's
+        // connection opens.
+        openSkillsClient: openCaller,
+      }).finally(() => {
+        phaseBMs = Date.now() - phaseBStart;
+      }),
     )
     .then(
       ({ text, injected }) => ({ ok: true as const, block: text, injectedSkills: injected }),
       (error: unknown) => ({ ok: false as const, error }),
     );
 
-  const [models, { permissions, capabilities, spaces, organization, scope }, stored] =
+  const [models, { permissions, capabilities, spaces, organization, scope, openCaller }, stored] =
     await Promise.all([listModels(origin, inferenceHeaders, platformFetch), turn, historyFiles]);
   messages = withStoredHistoryFiles(messages, stored);
   let chosen;
@@ -723,6 +724,21 @@ export async function handleChatStream(
       throw err;
     }
     claimTurnMs = Date.now() - claimStart;
+  }
+
+  // Resolve the new turn's agent launch, if it carries one: `prompts/get` over the caller's
+  // connection in the turn's spaces, its answer written into the part before the turn is
+  // persisted, so the thread, the model and every replay share it. After the claim, like the
+  // attachments, and undone the same way: a refused launch leaves nothing behind.
+  if (lastMessage) {
+    try {
+      lastMessage = await resolveAgentPrompt(lastMessage, openCaller);
+    } catch (err) {
+      slot.release();
+      if (claimedSessionId) await clearActiveStream(claimedSessionId, streamId).catch(() => {});
+      throw err;
+    }
+    messages[messages.length - 1] = lastMessage;
   }
 
   // Materialize the new turn's composer attachments into durable, session-scoped

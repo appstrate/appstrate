@@ -114,6 +114,8 @@ import { DEFAULT_SKILL_SELECTION, type ChatSkillSelection } from "../skills.ts";
 import { canAuthorPackages, canPinSkills } from "../capabilities.ts";
 import { createChatAttachmentAdapter } from "./attachment-adapter.ts";
 import { shouldReconcileHistory } from "./history-reconcile.ts";
+import { messageWithAgentPrompt } from "./agent-prompt-part.ts";
+import { SkillSelectionProvider } from "./use-slash-menu.ts";
 
 // Tab visibility as an external store — the mark-read effect must not fire
 // while the tab is hidden: SSE-driven invalidations refetch the list even in
@@ -563,6 +565,12 @@ const Conversation = memo(function Conversation({
     [transport, skills, chooseSkills, showPicker, authorsPackages],
   );
 
+  // The `/` menu pins skills through the same change the panel makes.
+  const skillControl = useMemo(
+    () => (showPicker ? { selection: skills, onChange: chooseSkills } : null),
+    [showPicker, skills, chooseSkills],
+  );
+
   if (persistedAtMount && history.isPending) {
     return (
       <ConversationSkeleton
@@ -580,17 +588,19 @@ const Conversation = memo(function Conversation({
   }
   return (
     <ConversationScopeProvider value={scope}>
-      <ConversationInner
-        id={id}
-        transport={transport}
-        isPersisted={persistedAtMount}
-        initialMessages={initialMessages}
-        composerTools={tools}
-        composerSlot={composerSlot}
-        getChosenSkills={getChosenSkills}
-        getCreation={getCreation}
-        {...rest}
-      />
+      <SkillSelectionProvider value={skillControl}>
+        <ConversationInner
+          id={id}
+          transport={transport}
+          isPersisted={persistedAtMount}
+          initialMessages={initialMessages}
+          composerTools={tools}
+          composerSlot={composerSlot}
+          getChosenSkills={getChosenSkills}
+          getCreation={getCreation}
+          {...rest}
+        />
+      </SkillSelectionProvider>
     </ConversationScopeProvider>
   );
 });
@@ -862,7 +872,17 @@ function ConversationInner({
     if (transport) void stopSession(transport, id).catch(() => {});
     return chat.stop();
   }, [chat, transport, id, messageQueue]);
-  const chatWithServerStop = useMemo(() => ({ ...chat, stop }), [chat, stop]);
+  // The runtime sends a composer's run config as the request metadata: an agent chosen in the
+  // composer joins the message there (see `agent-prompt-part.ts`).
+  const { sendMessage } = chat;
+  const send = useCallback<typeof sendMessage>(
+    (message, options) => sendMessage(messageWithAgentPrompt(message, options?.metadata), options),
+    [sendMessage],
+  );
+  const chatWithServerStop = useMemo(
+    () => ({ ...chat, stop, sendMessage: send }),
+    [chat, stop, send],
+  );
 
   const runtime = useAISDKRuntime(chatWithServerStop, { adapters: { attachments } });
 

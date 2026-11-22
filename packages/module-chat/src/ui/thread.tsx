@@ -24,6 +24,7 @@ import {
 import {
   AlertTriangleIcon,
   ArrowDownIcon,
+  BotIcon,
   CheckIcon,
   CopyIcon,
   ListPlusIcon,
@@ -96,11 +97,27 @@ import {
   USER_MESSAGE_CLASS,
 } from "./phone-text.ts";
 import {
+  canQueueDraft,
   flushDecision,
   joinQueued,
   type MessageQueue,
   type QueueSnapshot,
 } from "./message-queue.ts";
+import {
+  AGENT_PROMPT_NAME,
+  agentOfRunConfig,
+  agentOnlyContent,
+  agentPromptOf,
+  precedingUserMessage,
+  retryContent,
+  agentRunConfig,
+  hasBubbleContent,
+  type AgentChip,
+} from "./agent-prompt-part.ts";
+import { AgentPromptChip } from "./agent-prompt-chip.tsx";
+import { RemovableChip } from "./removable-chip.tsx";
+import { SlashMenuList } from "./slash-menu.tsx";
+import { useSlashMenu } from "./use-slash-menu.ts";
 
 export function Thread({
   composerTools,
@@ -604,9 +621,17 @@ function Composer({
   queue: MessageQueue;
 }) {
   const { can, t, modelLabel } = useChatHost();
+  const aui = useAui();
   const composer = unstable_useComposerInput();
   const running = useAuiState((s) => s.thread.isRunning);
   const hasAttachments = useAuiState((s) => s.composer.attachments.length > 0);
+  // The agent chosen from the `/` menu rides on the composer's run config: it belongs to the next
+  // send of this composer alone (see `agent-prompt-part.ts`), and a send clears it.
+  const runConfig = useAuiState((s) => s.composer.runConfig);
+  const agent = React.useMemo(() => agentOfRunConfig(runConfig), [runConfig]);
+  const setAgent = (next: AgentChip | null) => aui.composer().setRunConfig(agentRunConfig(next));
+  useAuiEvent("composer.send", () => setAgent(null));
+  const menu = useSlashMenu({ text: composer.value, setText: composer.setText, running, setAgent });
   // On a phone the composer rests as one line (attach, field, send) until it is touched; from then
   // on, or with a draft, a file or a turn running, it shows its tools. From `md` up it never rests.
   const autofocus = shouldAutofocusComposer();
@@ -615,9 +640,23 @@ function Composer({
   // The turn carries the limit and its files go to its spaces: none leaves before the change lands.
   const limitPending = useConversationScope().pending;
   // Only text is queued: attachments stay in the composer until the next real send.
-  const canQueue = running && !hasAttachments && composer.value.trim() !== "";
+  const canQueue = canQueueDraft({
+    running,
+    text: composer.value,
+    hasAttachments,
+    hasAgent: agent !== null,
+  });
   const enqueue = () => {
     if (canQueue && queue.add(composer.value)) composer.setText("");
+  };
+  // An agent alone is a message the composer would not send (nothing typed): the thread does.
+  const agentOnly = agent !== null && !running && composer.value.trim() === "" && !hasAttachments;
+  const sendAgentOnly = () => {
+    if (!agent || limitPending) return;
+    // The composer path cannot send this: it refuses an empty draft, so the agent prompt part
+    // goes through the thread instead (there is nothing else to carry: no text, no files).
+    aui.thread().append({ role: "user", content: agentOnlyContent(agent) });
+    setAgent(null);
   };
   React.useEffect(() => {
     if (!takesDraft(initialDraft, { seeded: draftSeededRef.current, typed: composer.value }))
@@ -638,7 +677,7 @@ function Composer({
   // base rule (utilities beat the base layer) for a compact, Codex-like field.
   return (
     <ComposerPrimitive.Root
-      className="group/composer bg-card flex w-full flex-col gap-1 rounded-xl border px-3 py-2 shadow-sm"
+      className="group/composer bg-card relative flex w-full flex-col gap-1 rounded-xl border px-3 py-2 shadow-sm"
       data-rest={rest ? "" : undefined}
       onClick={() => setTouched(true)}
       onSubmit={(e) => {
@@ -653,7 +692,26 @@ function Composer({
         composerEmpty={composer.value.trim() === ""}
         onEdit={composer.setText}
       />
+      {menu.open && (
+        <SlashMenuList
+          entries={menu.entries}
+          active={menu.active}
+          listId={menu.listId}
+          onChoose={menu.onChoose}
+          onHover={menu.onHover}
+        />
+      )}
       <div className="flex flex-wrap gap-1.5 empty:hidden">
+        {agent && (
+          <RemovableChip
+            icon={<BotIcon />}
+            removeLabel={t("composer.agentChip.remove", { title: agent.title })}
+            onRemove={() => setAgent(null)}
+            data-testid="composer-agent-chip"
+          >
+            {agent.title}
+          </RemovableChip>
+        )}
         <ComposerPrimitive.Attachments components={{ Attachment: ComposerAttachmentChip }} />
       </div>
       <ComposerAttachmentError />
@@ -667,7 +725,10 @@ function Composer({
           unstable_focusOnRunStart={autofocus}
           unstable_focusOnScrollToBottom={autofocus}
           unstable_focusOnThreadSwitched={autofocus}
+          // Escape closes the menu, it does not stop the turn.
+          cancelOnEscape={!menu.open}
           onFocus={() => setTouched(true)}
+          {...menu.inputProps}
           aria-label={t("composer.placeholder")}
           enterKeyHint="send"
           addAttachmentOnPaste
@@ -677,6 +738,13 @@ function Composer({
               : t("composer.placeholder")
           }
           onKeyDown={(e) => {
+            if (menu.onKeyDown(e)) return;
+            const plainEnter = e.key === "Enter" && !e.shiftKey && !e.ctrlKey && !e.metaKey;
+            if (agentOnly && plainEnter && !e.nativeEvent.isComposing) {
+              e.preventDefault();
+              sendAgentOnly();
+              return;
+            }
             // While the agent answers the primitive ignores Enter; it queues instead.
             if (!running || e.key !== "Enter" || e.shiftKey || e.ctrlKey || e.metaKey) return;
             if (e.nativeEvent.isComposing) return;
@@ -691,16 +759,17 @@ function Composer({
         <div className="flex items-center gap-2 [grid-area:send]">
           <ContextGauge className="max-md:group-data-[rest]/composer:hidden" />
           <ThreadPrimitive.If running={false}>
-            <ComposerPrimitive.Send asChild disabled={limitPending}>
-              <Button
-                type="button"
-                size="icon"
-                className={COMPOSER_BUTTON_CLASS}
-                aria-label={t("composer.send")}
-              >
-                <SendHorizontalIcon />
-              </Button>
-            </ComposerPrimitive.Send>
+            {agentOnly ? (
+              <SendButton
+                label={t("composer.send")}
+                disabled={limitPending}
+                onClick={sendAgentOnly}
+              />
+            ) : (
+              <ComposerPrimitive.Send asChild disabled={limitPending}>
+                <SendButton label={t("composer.send")} />
+              </ComposerPrimitive.Send>
+            )}
           </ThreadPrimitive.If>
           <ThreadPrimitive.If running>
             <Button
@@ -733,9 +802,31 @@ function Composer({
   );
 }
 
+/** The send button; as the child of `ComposerPrimitive.Send` it receives that primitive's handlers. */
+function SendButton({ label, ...props }: React.ComponentProps<typeof Button> & { label: string }) {
+  return (
+    <Button
+      type="button"
+      size="icon"
+      className={COMPOSER_BUTTON_CLASS}
+      aria-label={label}
+      {...props}
+    >
+      <SendHorizontalIcon />
+    </Button>
+  );
+}
+
 // ─── User message (bubble only — no edit/branch on a single-path thread) ─────
 
-function UserMessage() {
+/** Module-level: assistant-ui memoizes each part on these members' identity. */
+const USER_PART_COMPONENTS = {
+  File: FileAttachmentPart,
+  // The agent prompt is drawn as a chip above the bubble; its part, `text` included, draws nothing.
+  data: { by_name: { [AGENT_PROMPT_NAME]: () => null } },
+} satisfies React.ComponentProps<typeof MessagePrimitive.Parts>["components"];
+
+export function UserMessage() {
   // The OAuth auto-resume turn (oauth-connect-card) is a real user message — it
   // drives the model to continue — but showing its raw text as a bubble is
   // noise. Detect the marker prefix and render a discreet "connected" notice
@@ -755,6 +846,9 @@ function UserMessage() {
     return null;
   });
   const resume = resumeText ? parseResume(resumeText) : null;
+  // Plain values from the selectors, never a derived object. See `turn-error-state.ts`.
+  const agentTitle = useAuiState(({ message }) => agentPromptOf(message)?.title ?? null);
+  const hasBubble = useAuiState(({ message }) => hasBubbleContent(message));
 
   if (resume) {
     return (
@@ -776,6 +870,11 @@ function UserMessage() {
 
   return (
     <MessagePrimitive.Root className="group flex w-full max-w-(--thread-max-width) flex-col items-end py-2">
+      {agentTitle !== null && (
+        <div className="mb-1 flex max-w-[80%] justify-end">
+          <AgentPromptChip title={agentTitle} />
+        </div>
+      )}
       {/* Sent attachments render ABOVE the bubble, in their own right-aligned
           wrap-row. They live on `message.attachments` (the converter's file-part
           routing), not in the bubble's Parts. Guarded so an attachment-less
@@ -785,16 +884,15 @@ function UserMessage() {
           <MessagePrimitive.Attachments components={{ Attachment: SentAttachmentChip }} />
         </div>
       </MessagePrimitive.If>
-      {/* The text bubble. Guarded on content so an attachment-only message (no
-          text part) doesn't paint an empty grey pill. */}
-      <MessagePrimitive.If hasContent>
-        {/* A white card on the canvas, like every other surface in the thread
-            (the composer, the tool cards). `bg-muted` was a hollow on white and
-            reads as a smudge on grey — 3 points of luminance from the page. */}
+      {/* The text bubble. Guarded on content so an attachment-only or agent-only message (no
+          text part) doesn't paint an empty grey pill. A white card on the canvas, like every
+          other surface in the thread (the composer, the tool cards): `bg-muted` was a hollow on
+          white and reads as a smudge on grey — 3 points of luminance from the page. */}
+      {hasBubble && (
         <div className={USER_MESSAGE_CLASS}>
-          <MessagePrimitive.Parts components={{ File: FileAttachmentPart }} />
+          <MessagePrimitive.Parts components={USER_PART_COMPONENTS} />
         </div>
-      </MessagePrimitive.If>
+      )}
     </MessagePrimitive.Root>
   );
 }
@@ -852,6 +950,9 @@ export function MessageError() {
   // Select a plain field, never a derived object: this selector IS
   // `useSyncExternalStore`'s getSnapshot. See `turn-error-state.ts`.
   const message = useAuiState((s) => s.message);
+  const aui = useAui();
+  const asked = useAuiState((s) => precedingUserMessage(s.thread.messages, s.message.id));
+  const retryAgent = React.useMemo(() => (asked ? agentPromptOf(asked) : null), [asked]);
   const errorState = React.useMemo(
     () => turnErrorState(message, t, can, personalModelCredentials),
     [message, t, can, personalModelCredentials],
@@ -871,17 +972,21 @@ export function MessageError() {
             ) : null}
             {errorState.retryable ? (
               <ThreadPrimitive.If running={false}>
-                <ThreadPrimitive.Suggestion
-                  prompt={t("turn.retryPrompt")}
-                  method="replace"
-                  autoSend
-                  asChild
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() =>
+                    // The retry names the agent the failed turn launched, or the launch is lost.
+                    aui.thread().append({
+                      role: "user",
+                      content: retryContent(t("turn.retryPrompt"), retryAgent),
+                    })
+                  }
                 >
-                  <Button type="button" variant="outline" size="sm">
-                    <RotateCcwIcon />
-                    {t("common:btn.retry")}
-                  </Button>
-                </ThreadPrimitive.Suggestion>
+                  <RotateCcwIcon />
+                  {t("common:btn.retry")}
+                </Button>
               </ThreadPrimitive.If>
             ) : null}
           </div>

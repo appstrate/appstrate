@@ -57,3 +57,10 @@ By default, a one-off agent the assistant composes runs on the organization's de
 - Inference goes through the platform's LLM proxy: the model's key is injected server-side and the usage is metered like any run. With the billing module, a chat can stop on an exhausted quota.
 - The assistant drives the platform through the same [MCP tools](/using-appstrate/mcp-clients#the-tools) an external client gets, which enforce your permissions on every call.
 - Developers can reach the same surface over the API: `POST /api/orgs/{orgId}/chat` and `/api/orgs/{orgId}/chat/sessions`. See the [API reference](/api).
+
+### Commands
+
+Type `/` in the composer to open the list of commands: the skills the conversation can read and the agents you can launch, in the spaces the conversation acts in (the origin space alone when it is limited to it). The list is the one the Appstrate MCP server serves to any client, with your own permissions, and it shows skills even when automatic discovery is off.
+
+- **A skill** is pinned to the conversation, like ticking it in the skills panel: it stays loaded on every later turn until you remove it there. Pinning is refused at the limit of 5 chosen skills.
+- **An agent** asks the assistant to run it. Type what you want after the command; the assistant builds the run's input from it, asks for what is missing, then launches the agent. Each launch is a metered run. The conversation shows what you typed, and the assistant is given the launch instructions the server returns, which are kept with the message and reused on every later turn.

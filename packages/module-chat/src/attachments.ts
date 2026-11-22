@@ -24,6 +24,7 @@ import { parseFileUri, UPLOAD_URI_PREFIX } from "@appstrate/core/file-uri";
 import { formatBytes } from "@appstrate/core/format";
 import { isImageMime } from "@appstrate/core/mime";
 import type { FileDelivery } from "./file-input.ts";
+import { withAgentPromptText } from "./message-text.ts";
 import { UNNAMED_FILE } from "./ui/run-events.ts";
 
 /** Is `part` an ai-SDK `file` part? */
@@ -83,13 +84,16 @@ function imageNote(
  * Return a copy of the thread with every file part replaced by a compact text
  * part (the {@link attachmentTextBlock}) so the model sees the attachment as
  * text it can act on. Messages without file parts are returned unchanged (no
- * copy). Used when projecting the thread into the engine's transcript so the model-facing serialization lives in one place.
+ * copy). A message carrying a resolved agent launch shows its launch instructions in place of its text
+ * (`withAgentPromptText`). Used when projecting the thread into the engine's transcript so the
+ * model-facing serialization lives in one place.
  */
 export function messagesWithAttachmentsAsText(
   messages: UIMessage[],
   context?: AttachmentContext,
 ): UIMessage[] {
-  return messages.map((message) => {
+  return messages.map((sent) => {
+    const message = withAgentPromptText(sent);
     const parts = message.parts;
     if (message.role !== "user" || !parts?.some(isFileUIPart)) return message;
     return {
@@ -100,7 +104,7 @@ export function messagesWithAttachmentsAsText(
               type: "text" as const,
               text: [
                 attachmentTextBlock(part, imageNote(message, part, context)),
-                message === messages[messages.length - 1] && part.mediaType === "application/pdf"
+                sent === messages[messages.length - 1] && part.mediaType === "application/pdf"
                   ? context?.pdfReceipts?.get(part.url)
                   : undefined,
               ]

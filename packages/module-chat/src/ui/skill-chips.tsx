@@ -14,7 +14,7 @@ import type { ChatSkillSelection } from "../skills.ts";
 import { RemovableChip } from "./removable-chip.tsx";
 import { useChatHost, type ChatTransport } from "./runtime-context.ts";
 import { SkillsChip } from "./skills-picker.tsx";
-import { useSkillCatalogue } from "./use-skill-catalogue.ts";
+import { useChatCommands } from "./use-chat-commands.ts";
 
 interface LoadedSkill {
   packageId: string;
@@ -24,8 +24,8 @@ interface LoadedSkill {
 /** What the conversation loads: the user's pins. The catalogue is read only to name them, so only when there are. */
 function useLoadedSkills(transport: ChatTransport | undefined, selection: ChatSkillSelection) {
   const pinnedIds = selection.pinnedSkills;
-  const catalogue = useSkillCatalogue(transport, pinnedIds.length > 0);
-  const names = new Map((catalogue.data ?? []).map((s) => [s.packageId, s.display_name]));
+  const catalogue = useChatCommands(transport, pinnedIds.length > 0);
+  const names = new Map((catalogue.data?.skills ?? []).map((s) => [s.id, s.name]));
   // Named by the package's bare name until the catalogue answers.
   return pinnedIds.map((id): LoadedSkill => ({
     packageId: id,
