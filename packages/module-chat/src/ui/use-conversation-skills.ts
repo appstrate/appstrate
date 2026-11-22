@@ -3,11 +3,13 @@
 /**
  * A conversation's skills: the server's (the session detail, which the host's realtime keeps
  * fresh) with what the user changed since applied on top. Only the changes are sent, with the next
- * turn; once that turn has ended and the detail has been read again, each change the server shows
- * is dropped. A change made while the turn ran is not: it rides with the next one.
+ * turn. A turn the server accepted (a 2xx) applied them in its first statement, so once it has
+ * ended and the detail has been read again, what it sent is dropped; a turn refused or failed
+ * without an answer keeps them for the next one (they are idempotent). A change made while the
+ * turn ran always rides with the next one.
  */
 
-import { useCallback, useMemo, useRef, useState } from "react";
+import { useCallback, useMemo, useState, useSyncExternalStore } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import type { ChatSkillChanges } from "../skills.ts";
 import {
@@ -15,16 +17,79 @@ import {
   NO_SKILL_CHANGES,
   changeDiscovery,
   changePin,
+  citeSkill,
   conversationSkills,
   hasSkillChanges,
   resetSkillChanges,
-  settleSkillChanges,
+  subtractSkillChanges,
   type ConversationSkills,
   type SkillChangeBase,
 } from "./chat-skills.ts";
-import { sessionQuery } from "./sessions.ts";
+import { sessionQuery, sessionQueryKey } from "./sessions.ts";
 import type { ChatTransport } from "./runtime-context.ts";
 import { useLatest } from "./use-latest.ts";
+
+/** A turn that took the changes: its own object, so two turns sending equal changes never mix. */
+interface SentTurn {
+  readonly sent: ChatSkillChanges | undefined;
+  accepted: boolean;
+}
+
+/** An ended turn: whether the server accepted it, and what to do once the detail was read again. */
+export interface EndedTurn {
+  accepted: boolean;
+  settle: () => void;
+}
+
+/**
+ * The user's changes and the turn carrying them, outside React: the transport reads and marks them
+ * at request time, between renders.
+ */
+export function createSkillChanges() {
+  let changes: ChatSkillChanges = NO_SKILL_CHANGES;
+  let turn: SentTurn | null = null;
+  const listeners = new Set<() => void>();
+  const set = (next: ChatSkillChanges) => {
+    changes = next;
+    for (const listener of listeners) listener();
+  };
+  return {
+    get: () => changes,
+    subscribe: (listener: () => void) => {
+      listeners.add(listener);
+      return () => void listeners.delete(listener);
+    },
+    /** Applies a change; `inFlight` is what the running turn sent, which a change may undo. */
+    change: (
+      apply: (current: ChatSkillChanges, inFlight: ChatSkillChanges | null) => ChatSkillChanges,
+    ) => set(apply(changes, turn?.sent ?? null)),
+    /** The changes the turn being sent carries (a copy), `undefined` when none. */
+    take: (): ChatSkillChanges | undefined => {
+      const sent = hasSkillChanges(changes)
+        ? { ...changes, pin: [...changes.pin], unpin: [...changes.unpin] }
+        : undefined;
+      turn = { sent, accepted: false };
+      return sent;
+    },
+    /** The server answered the turn being sent: accepted when 2xx. */
+    answered: (accepted: boolean) => {
+      if (turn) turn.accepted = accepted;
+    },
+    /** The turn ended; `null` when no turn was sent in this mount (a resumed one). */
+    end: (): EndedTurn | null => {
+      const ended = turn;
+      if (!ended) return null;
+      return {
+        accepted: ended.accepted,
+        settle: () => {
+          // A turn sent since is in flight now.
+          if (turn === ended) turn = null;
+          if (ended.accepted && ended.sent) set(subtractSkillChanges(changes, ended.sent));
+        },
+      };
+    },
+  };
+}
 
 export interface SkillActions {
   togglePin: (packageId: string) => void;
@@ -40,7 +105,9 @@ export interface ConversationSkillsState {
   pinCited: (ids: readonly string[]) => void;
   /** The changes the turn being sent carries, `undefined` when none; marks them in flight. */
   takeChanges: () => ChatSkillChanges | undefined;
-  /** The turn ended: read the detail again, then drop what the server shows of what the turn sent. */
+  /** The server answered the turn being sent: accepted when 2xx. */
+  answered: (accepted: boolean) => void;
+  /** The turn ended: read the detail again, then drop what an accepted turn sent. */
   settle: () => void;
 }
 
@@ -58,33 +125,26 @@ export function useConversationSkills({
   enabled: boolean;
 }): ConversationSkillsState {
   const queryClient = useQueryClient();
-  // A conversation created in this mount is not read before its first turn has settled (no
-  // speculative 404): `settle` reads it then, and this observer shows what that read cached.
+  // A conversation created in this mount is read once its first turn was accepted (no
+  // speculative 404); from then on the host's realtime keeps the detail fresh.
+  const [exists, setExists] = useState(persisted);
   const detail = useQuery({
     ...sessionQuery(transport, id),
-    enabled: persisted,
+    enabled: exists,
     select: (row) => row?.skills,
   });
   const stored = detail.data ?? DEFAULT_STORED_SKILLS;
   const getStored = useLatest(stored);
   const getEnabled = useLatest(enabled);
 
-  const [changes, setChanges] = useState<ChatSkillChanges>(NO_SKILL_CHANGES);
-  // The transport reads the changes at request time, a change not rendered yet included.
-  const changesRef = useRef(changes);
-  // What the turn in flight sent: a change undoing one of these must reach the server.
-  const inFlight = useRef<ChatSkillChanges | null>(null);
+  const [store] = useState(createSkillChanges);
+  const changes = useSyncExternalStore(store.subscribe, store.get, store.get);
   const update = useCallback(
-    (change: (current: ChatSkillChanges, base: SkillChangeBase) => ChatSkillChanges) => {
+    (apply: (current: ChatSkillChanges, base: SkillChangeBase) => ChatSkillChanges) => {
       if (!getEnabled()) return;
-      const next = change(changesRef.current, {
-        stored: getStored(),
-        inFlight: inFlight.current,
-      });
-      changesRef.current = next;
-      setChanges(next);
+      store.change((current, inFlight) => apply(current, { stored: getStored(), inFlight }));
     },
-    [getEnabled, getStored],
+    [store, getEnabled, getStored],
   );
 
   const skills = useMemo(() => conversationSkills(stored, changes), [stored, changes]);
@@ -104,39 +164,31 @@ export function useConversationSkills({
   }, [update]);
 
   const pinCited = useCallback(
-    (ids: readonly string[]) =>
-      update((current, base) =>
-        ids.reduce((next, packageId) => changePin(next, packageId, true, base), current),
-      ),
+    (ids: readonly string[]) => update((current) => ids.reduce(citeSkill, current)),
     [update],
   );
 
-  const takeChanges = useCallback(() => {
-    const sent = hasSkillChanges(changesRef.current) ? changesRef.current : undefined;
-    inFlight.current = sent ?? null;
-    return sent;
-  }, []);
-
   const settle = useCallback(() => {
-    if (!transport) return;
-    const sent = inFlight.current;
+    const ended = store.end();
+    if (!ended || !transport) return;
+    if (ended.accepted) setExists(true);
+    // The turn may have pinned a skill (the assistant's load) and judged each pin: read the detail
+    // again, sharing a refetch the realtime signal already started; inactive included, so a
+    // conversation created in this mount is read before its observer is enabled.
     void queryClient
-      // Read even when nothing was sent: the turn may have pinned a skill (the assistant's load)
-      // and judged each pin. Forced: the detail pins `staleTime: Infinity`.
-      .fetchQuery({ ...sessionQuery(transport, id), staleTime: 0 })
-      .then((row) => {
-        if (!sent) return;
-        // A turn sent since carries these changes too: it stays in flight.
-        if (inFlight.current === sent) inFlight.current = null;
-        if (!row) return;
-        const next = settleSkillChanges(changesRef.current, sent, row.skills);
-        changesRef.current = next;
-        setChanges(next);
-      })
-      .catch(() => {
-        // Kept: the changes are idempotent, the next turn sends them again.
-      });
-  }, [queryClient, transport, id]);
+      .invalidateQueries(
+        { queryKey: sessionQueryKey(transport.orgId, id), refetchType: "all" },
+        { cancelRefetch: false },
+      )
+      .then(ended.settle);
+  }, [store, queryClient, transport, id]);
 
-  return { skills, actions, pinCited, takeChanges, settle };
+  return {
+    skills,
+    actions,
+    pinCited,
+    takeChanges: store.take,
+    answered: store.answered,
+    settle,
+  };
 }

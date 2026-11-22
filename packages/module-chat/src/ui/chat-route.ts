@@ -79,12 +79,14 @@ export function turnBody(args: {
  * The transport of a conversation's turns. `useChat` keeps the first transport it sees for an id,
  * so everything it sends is read at request time: the route (a conversation can mount before the
  * host's transport is ready), the headers and the body. Resume targets the per-session stream
- * endpoint (the chat id is the conversation id).
+ * endpoint (the chat id is the conversation id). `answered` learns whether the server accepted a
+ * turn (a 2xx); a request that failed without an answer reports nothing.
  */
 export function createTurnTransport(read: {
   getTransport: () => ChatTransport | undefined;
   headers: () => Record<string, string>;
   body: (request: { id: string; messages: UIMessage[]; body: object | undefined }) => object;
+  answered: (accepted: boolean) => void;
 }): DefaultChatTransport<UIMessage> {
   // A turn needs the organization's route: without the host's transport there is nowhere to send it.
   const transport = (): ChatTransport => {
@@ -95,6 +97,13 @@ export function createTurnTransport(read: {
   return new DefaultChatTransport<UIMessage>({
     credentials: "include",
     headers: read.headers,
+    // The global read per call, not captured: the turn's POST is the one request that answers.
+    // (`typeof fetch` also names runtime extras, such as Bun's `preconnect`, the SDK never calls.)
+    fetch: (async (input: RequestInfo | URL, init?: RequestInit) => {
+      const response = await globalThis.fetch(input, init);
+      if (init?.method === "POST") read.answered(response.ok);
+      return response;
+    }) as typeof fetch,
     prepareSendMessagesRequest: (request) => ({
       api: chatPath(transport()),
       body: read.body(request),

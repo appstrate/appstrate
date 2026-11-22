@@ -40,10 +40,10 @@ import { describeRequiresPostgres } from "../../../apps/api/test/helpers/tier.ts
 import { persistNotice, persistUserMessage } from "../src/persistence.ts";
 import { claimTurn, persistClaimedUserMessage } from "../src/chat-stream.ts";
 import { reconcileChatRun, runNoticeMessageId } from "../src/run-reconcile.ts";
-import { setActiveStream, STALE_MARKER_MIN_AGE_MS } from "../src/resumable.ts";
+import { setActiveStream, STALE_MARKER_MIN_AGE_MS, type TurnScope } from "../src/resumable.ts";
 
 /** The scope of a session created with no origin space and no limit. */
-const UNLIMITED = { spaceId: null, restricted: false };
+const UNLIMITED = { spaceId: null, restricted: false, pinnedSkills: [] };
 
 let ctx: TestContext;
 let packageId: string;
@@ -280,12 +280,11 @@ describe("persistNotice single-writer guard", () => {
       .update(chatSessions)
       .set({ spaceId: ctx.defaultSpaceId, restricted: true })
       .where(eq(chatSessions.id, sessionId));
-    const claim = (scope: { spaceId: string | null; restricted: boolean }) =>
-      claimTurn(sessionId, "strm_scope", scope, {});
+    const claim = (scope: TurnScope) => claimTurn(sessionId, "strm_scope", scope, {});
 
     for (const read of [
-      { spaceId: ctx.defaultSpaceId, restricted: false },
-      { spaceId: null, restricted: false },
+      { spaceId: ctx.defaultSpaceId, restricted: false, pinnedSkills: [] },
+      { spaceId: null, restricted: false, pinnedSkills: [] },
     ]) {
       await expect(claim(read)).rejects.toMatchObject({
         status: 409,
@@ -300,7 +299,7 @@ describe("persistNotice single-writer guard", () => {
     expect(await messageIds(sessionId)).toEqual([]);
 
     // The scope as stored: claimed.
-    await claim({ spaceId: ctx.defaultSpaceId, restricted: true });
+    await claim({ spaceId: ctx.defaultSpaceId, restricted: true, pinnedSkills: [] });
     expect(await activeStreamId(sessionId)).toBe("strm_scope");
   });
 
@@ -311,9 +310,10 @@ describe("persistNotice single-writer guard", () => {
       .update(chatSessions)
       .set({ spaceId: ctx.defaultSpaceId, restricted: false })
       .where(eq(chatSessions.id, sessionId));
-    await expect(
-      claimTurn(sessionId, "strm_origin", { spaceId: null, restricted: false }, {}),
-    ).rejects.toMatchObject({ status: 409, code: "chat_turn_scope_changed" });
+    await expect(claimTurn(sessionId, "strm_origin", UNLIMITED, {})).rejects.toMatchObject({
+      status: 409,
+      code: "chat_turn_scope_changed",
+    });
     expect(await activeStreamId(sessionId)).toBeNull();
   });
 

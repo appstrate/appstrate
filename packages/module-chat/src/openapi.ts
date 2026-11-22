@@ -8,7 +8,11 @@
  */
 
 import { scopedNameRegex } from "@appstrate/core/validation";
-import { MAX_PINNED_SKILLS, PINNED_SKILL_STATUSES } from "./skills.ts";
+import {
+  CHAT_SKILLS_CONTENT_BUDGET_CHARS,
+  MAX_PINNED_SKILLS,
+  PINNED_SKILL_STATUSES,
+} from "./skills.ts";
 
 const problem = {
   "application/problem+json": { schema: { $ref: "#/components/schemas/ProblemDetail" } },
@@ -75,13 +79,12 @@ export const chatComponentSchemas = {
               type: "string",
               enum: ["user", "assistant"],
               description:
-                "Who pinned it: the user (`pin_skills`), or the assistant by loading its SKILL.md. A user pin of an assistant's skill makes it the user's.",
+                "Who pinned it: the user (`pin_skills`), or the assistant by loading its SKILL.md. Naming an assistant's pin in `pin_skills` makes it the user's (an API-level rule: the dashboard's panel never sends a pin for a skill already pinned).",
             },
             status: {
               type: ["string", "null"],
               enum: [...PINNED_SKILL_STATUSES, null],
-              description:
-                "What the last turn that started in the conversation did with it: `injected` (in the assistant's context), or left out — `over_budget` (the pinned skills share a 64 000-character budget), `unavailable` (removed, deactivated or out of reach), `unreadable` (its SKILL.md could not be read as listed). Null until a turn evaluates it.",
+              description: `What the last turn that claimed the conversation (the turn's start, past every refusal) did with it — recorded even if that turn failed afterwards: \`injected\` (in the assistant's context), or left out — \`over_budget\` (the pinned skills share a ${CHAT_SKILLS_CONTENT_BUDGET_CHARS}-character budget), \`unavailable\` (in no skill listing the turn read: removed, deactivated or out of reach), \`unreadable\` (its read failed, or its SKILL.md was not the text listed). Null until a turn evaluates it.`,
             },
           },
         },
@@ -592,7 +595,7 @@ export const chatPaths = {
         "404": { $ref: "#/components/responses/NotFound" },
         "409": {
           description:
-            "`org_deleting` — the organization's deletion is reserved, so no new metered usage is admitted. Refused whatever modules the deployment loads. Or `needs_reconnection` — the selected model's subscription credential is dead (revoked, or expired beyond refresh), so the turn is refused before inference starts rather than failing upstream. RFC 9457 problem+json. Or `model_credential_required`: the selected model has no organization credential and the caller has no usable personal credential for it. Or `chat_turn_scope_changed`: the conversation's limit (or its origin space) changed while the turn was starting; nothing was written, and sending the message again starts it with the new scope. Or `chat_turn_in_flight`: another turn of the conversation is running (a conversation runs one turn at a time); nothing was written, and the message can be sent again once that turn ends.",
+            "`org_deleting` — the organization's deletion is reserved, so no new metered usage is admitted. Refused whatever modules the deployment loads. Or `needs_reconnection` — the selected model's subscription credential is dead (revoked, or expired beyond refresh), so the turn is refused before inference starts rather than failing upstream. RFC 9457 problem+json. Or `model_credential_required`: the selected model has no organization credential and the caller has no usable personal credential for it. Or `chat_turn_scope_changed`: the conversation's limit, its origin space or its pinned skills (another client's `pin_skills` / `unpin_skills`) changed while the turn was starting; nothing but this turn's own skill changes was written, and sending the message again starts it with the new scope. Or `chat_turn_in_flight`: another turn of the conversation is running (a conversation runs one turn at a time); nothing was written, and the message can be sent again once that turn ends.",
           content: problem,
         },
         "429": {

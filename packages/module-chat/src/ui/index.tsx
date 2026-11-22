@@ -646,14 +646,19 @@ function ConversationInner({
   composerTools: React.ReactNode;
   initialMessages: UIMessage[];
   /** The skill changes a turn carries, and their settling once it ends. */
-  turnSkills: Pick<ConversationSkillsState, "pinCited" | "takeChanges" | "settle">;
+  turnSkills: Pick<ConversationSkillsState, "pinCited" | "takeChanges" | "answered" | "settle">;
   /** The origin space and limit the turn being sent creates the conversation with. */
   getCreation: () => ConversationCreation | undefined;
 }) {
   const queryClient = useQueryClient();
   const { t, attachTarget } = useChatHost();
   const scope = useConversationScope();
-  const { pinCited, takeChanges: takeSkillChanges, settle: settleSkills } = turnSkills;
+  const {
+    pinCited,
+    takeChanges: takeSkillChanges,
+    answered: skillsAnswered,
+    settle: settleSkills,
+  } = turnSkills;
   // File attachments: the composer stages picked files through the HOST uploader, into the
   // caller's personal space, as `upload://` file parts the server materializes into durable
   // files of the conversation.
@@ -716,8 +721,9 @@ function ConversationInner({
             creation: getCreation(),
           });
         },
+        answered: skillsAnswered,
       }),
-    [buildHeaders, takeSkillChanges, getCreation, getTransport],
+    [buildHeaders, takeSkillChanges, skillsAnswered, getCreation, getTransport],
   );
 
   const chat = useChat({

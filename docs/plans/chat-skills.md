@@ -108,33 +108,53 @@ evaluated yet.
 ### Statuses
 
 `resolveChatSkills` (pure) gives each pin its verdict next to the injected skills and the
-notices, and the budget the injected ones leave. The turn that claims the conversation writes
-exactly those verdicts in the claim's own UPDATE (`claimTurn` → `setActiveStream`), filtered
-to the pins the row still holds; a turn refused before the claim (admission gate, model
-binding, capacity, cap) writes none.
+notices, and the budget the injected ones leave: `injected`; `over_budget`; `unavailable` — in
+neither `skills/list` (published, drafts) of the turn's spaces, both answered; `unreadable` —
+any read that failed (the connection, its deadline, a failed `skills/list` the pin may be
+missing from, a refused or failed `resources/read`) or answered malformed (a blob, a digest
+other than the listed one, a draft without `lock_version`). The turn that claims the
+conversation writes exactly those verdicts in the claim's own UPDATE (`claimTurn` →
+`setActiveStream`). A turn refused before the claim (admission gate, model binding, capacity,
+cap) writes none; a turn that fails AFTER its claim (the engine, the stream) has written them
+already, and they stand.
+
+The claim is a compare-and-set on what the turn read: origin space, limit, and the
+`pinned_skills` its prompt was built from (`TurnScope`). A pin change from another tab landing
+between the turn's upsert and its claim refuses the turn with 409 `chat_turn_scope_changed`;
+the resend reads the new pins. So the verdicts always describe the row's own pins.
 
 ### Assistant loads pin
 
 A persisted turn's `read_resource` (and the platform `read` tool, through the same
-`pinnedSkillReceipt` helper) on a skill's `SKILL.md` that answers text goes through the turn's
-`SkillLoad` (`turnSkillLoad`, built in `chat-stream.ts` from the injected set and the budget
-left, threaded to `buildPlatformMcpTools` as `skillLoad`):
+`pinnedSkillReplay` helper) that answers text goes through the turn's `SkillLoad`
+(`turnSkillLoad`, built in `chat-stream.ts` from the injected set, the budget left and
+`skillUris` — each listed skill's `SKILL.md` URI as a pin would inject it, its draft before its
+published version — threaded to `buildPlatformMcpTools` as `skillLoad`):
 
+- a URI that is not the `SKILL.md` the conversation injects for its skill (a file of the skill,
+  another space's copy, a draft read when the published version is injected, or the reverse) is
+  a plain read, its text kept in the replay;
 - a skill this turn already injected (system prompt, or an earlier load) is read with no write;
 - a text longer than the budget left this turn (64 000 minus the injected pins and the skills
-  loaded this turn) throws a refusal, nothing marked;
+  loaded this turn) throws a refusal, nothing marked. The share is reserved before the pin is
+  awaited and given back when it is refused, and a parallel read of the same skill waits for
+  that load, so Pi's parallel tool calls never spend the budget twice;
 - else `pinAssistantSkill` appends it to `pinned_skills` + `assistant_skills` and marks it
   `injected`, in one UPDATE guarded on `cardinality(pinned_skills) < 5` (a skill the user
-  already pinned keeps its source); no row = the cap refusal, a lost race included.
+  already pinned keeps its source) and on `active_stream_id` still being this turn's stream:
+  `full` (the cap, a lost race included) or `released` (the turn was stopped or taken over)
+  refuse the load and write nothing.
 
-Both the first and the last case return the text for this turn and persist a receipt
-(`{"uri","skill":"@scope/name","pinned":true}`): the skill is a pin either way, so a replay never
+The last two cases that succeed return the text for this turn and persist the read's receipts,
+the `SKILL.md`'s own replaced by `{"uri","skill":"@scope/name","pinned":true}` (the other files a
+`read` embedded keep their usual receipts): the skill is a pin either way, so a replay never
 re-injects the body and the next turns inject it from the system prompt, where summarization
 cannot drop it.
 
 The refusals tell the model what happened and that the user can unpin a skill in the skills
-panel. An ephemeral turn has no `SkillLoad`: its loads are plain reads. A skill's other files
-read as before. The `## Skills` listing opens with the rule (loading pins, cap 5, one budget).
+panel. An ephemeral turn has no `SkillLoad`: its loads are plain reads. The `## Skills` listing
+opens with the rule (loading pins, cap 5, one budget) and never lists a pin: an injected one is
+shown in full, one left out has its notice.
 
 Rejected: a `chat_session_skills` table (a replace-on-write set read with the
 session row needs none); a third setting for a listing tool distinct from
@@ -149,7 +169,9 @@ a pin leaves `assistant_skills` (the user's now), an unpin leaves all three colu
 client that read the session before the assistant pinned cannot drop that pin, and re-sending
 the same changes changes nothing. More than 5 pins as a result is a 400 naming `pin_skills`,
 nothing written (the cap rides the conflict arm's `WHERE`). An ephemeral turn applies the
-changes to the default selection. Absent, the stored selection stands (discovery on, no
+changes to the default selection. The changes are applied before the admission gate and the
+claim, so a refused turn may still have written them; when they change an existing row, the
+session-update signal tells the other tabs. Absent, the stored selection stands (discovery on, no
 pinned skill, for a new conversation). Nothing is written before the first message: choosing creates
 no conversation, no sidebar row, no navigation, and there is no write to wait
 for or to fail. A change made on an existing conversation and not followed by a

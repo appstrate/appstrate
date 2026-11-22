@@ -62,7 +62,9 @@ describe("ResourceReadTool", () => {
     expect(html).toContain(">brand-tone<");
     expect(html).toContain("skills.load.done");
     expect(html).not.toContain("animate-pulse");
-    expect(html).not.toContain("skill-load-refusal");
+    const state = html.match(/<span[^>]*data-testid="skill-load-state"[^>]*>/)![0];
+    expect(state).toContain('aria-live="polite"');
+    expect(state).toContain("sr-only");
   });
 
   it("draws the same chip after a reload, from the persisted receipt", () => {
@@ -79,11 +81,11 @@ describe("ResourceReadTool", () => {
   it("marks a load still running as pending", () => {
     const html = render({ args: { uri: SKILL_MD }, status: { type: "running" } });
     expect(html).toContain('data-phase="running"');
-    expect(chip(html)).toContain("animate-pulse");
+    expect(chip(html)).toContain("motion-safe:animate-pulse");
     expect(html).toContain("skills.load.running");
   });
 
-  it("mutes a refused load and gives the refusal", () => {
+  it("mutes a refused load and says so in the user's language, never the model's error", () => {
     const refusal = "This conversation already pins 5 skills; the user can unpin one.";
     const html = render({
       args: { uri: SKILL_MD },
@@ -93,8 +95,10 @@ describe("ResourceReadTool", () => {
     });
     expect(html).toContain('data-phase="error"');
     expect(chip(html)).toContain("border-dashed");
-    expect(html).toContain("skills.load.refused");
-    expect(html).toContain(refusal);
+    const state = html.match(/<span[^>]*data-testid="skill-load-state"[^>]*>([^<]*)</)!;
+    expect(state[1]).toBe("skills.load.refused");
+    expect(state[0]).not.toContain("sr-only");
+    expect(html).not.toContain(refusal);
   });
 
   it("keeps the generic tool row for any other resource", () => {

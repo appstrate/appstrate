@@ -87,11 +87,11 @@ const SKILLS_FILES = {
 const SKILLS_INJECTED_LEAD =
   "These skills are pinned to this conversation, by the user or by your own earlier load. Each is a procedure for YOU: follow it whenever it applies.";
 // Loading a listed skill pins it (`turnSkillLoad`): told once, ahead of the listing it applies to.
-const SKILLS_LISTED_LEAD = `Loading one of these skills (its SKILL.md, with \`read_resource\`) pins it to the conversation: later turns show it in full here. A conversation pins at most ${MAX_PINNED_SKILLS} skills, which share one budget; a load refused for either reason says so, and the user can unpin a skill in the skills panel of the composer.`;
+const SKILLS_LISTED_LEAD = `Loading one of these skills (reading its SKILL.md at the URI shown, with \`read_resource\` or \`read\`) pins it to the conversation: later turns show it in full here. A conversation pins at most ${MAX_PINNED_SKILLS} skills, which share one budget; a load refused for either reason says so, and the user can unpin a skill in the skills panel of the composer.`;
 // Why this turn holds no `skills:*`: without it, a model reads the gap as a role
 // to fix and hunts through other operations.
 const SKILLS_DISCOVERY_OFF_NOTE =
-  "Skill discovery is off for this conversation: that is why this turn holds no `skills:*` permission, whatever the user's role. Only the skills the user chose (shown here, if any) are available. Any listing therefore shows no skill, whatever the spaces hold — an empty result says nothing about it. The user turns discovery back on in the skills panel of the composer. Do not look for, list, load or write any other skill, and never change a role or a permission to reach one.";
+  "Skill discovery is off for this conversation: that is why this turn holds no `skills:*` permission, whatever the user's role. Only the skills pinned to this conversation (shown here, if any) are available. Any listing therefore shows no skill, whatever the spaces hold — an empty result says nothing about it. The user turns discovery back on in the skills panel of the composer. Do not look for, list, load or write any other skill, and never change a role or a permission to reach one.";
 
 /**
  * Instructions for an act the turn cannot perform are ABSENT rather than
@@ -302,12 +302,12 @@ function formatSkillsSection(opts: {
 }): RenderedContext {
   const skills = resolveChatSkills(opts.selection, opts.contents);
   const files = SKILLS_FILES[opts.capabilities.transport ? "tool" : "none"];
-  // A listed skill the turn cannot load is noise; an injected one is shown in full, not listed.
-  // A pinned skill left out (over budget, unreadable) is not injected: it stays listed.
-  const injected = new Set(skills.chosen.map((skill) => skill.packageId));
+  // A listed skill the turn cannot load is noise. A pin is never listed: injected, it is shown in
+  // full; left out (over budget, unreadable), its notice says why, and a load could not pin it.
+  const pinned = new Set(opts.selection.pinnedSkills);
   const listed =
     opts.capabilities.readsSkills && opts.selection.skillDiscovery
-      ? opts.catalogue.filter((skill) => !injected.has(skill.packageId))
+      ? opts.catalogue.filter((skill) => !pinned.has(skill.packageId))
       : [];
   const groups: string[][] = [];
   if (!opts.selection.skillDiscovery) groups.push([SKILLS_DISCOVERY_OFF_NOTE]);
@@ -465,6 +465,8 @@ export const CALLER_READ_TIMEOUT_MS = 10_000;
 export interface ChatSkillsRead {
   contents: Map<string, SkillContent | null>;
   catalogue: CatalogueSkill[];
+  /** Each listed skill's `SKILL.md` URI as a pin injects it. */
+  uris: Map<string, string>;
 }
 
 /**
@@ -474,10 +476,12 @@ export interface ChatSkillsRead {
  * `spaces` is listed by its `uri` (one entry per package, the first space's); each of `chosen` is injected as the text
  * `resources/read` serves at its entry's URI. Read with the caller's own
  * permissions, even with discovery off, whose turn holds no `skills:*`. A chosen skill
- * in neither list, or whose read is refused, is left out; a malformed answer (a
+ * in neither list is left out (unavailable); one whose read failed — the connection, a
+ * `skills/list` it may be missing from, its `resources/read` — or answered malformed (a
  * draft entry without `lock_version`, a `SKILL.md` served as a blob, or text
- * whose digest differs from the one its entry lists) is kept as `null`, for its
- * own notice. The catalogue names a draft only with `catalogueDrafts` (the turn
+ * whose digest differs from the one its entry lists) is kept as `null` (unreadable). `uris`
+ * gives each listed skill the `SKILL.md` URI its injection takes: the one an assistant load
+ * must read to pin it. The catalogue names a draft only with `catalogueDrafts` (the turn
  * itself may read the drafts the caller reads), so every URI it lists is one the
  * turn's `read_resource` reads. The connection is opened only when there is
  * something to read.
@@ -487,7 +491,9 @@ async function readChatSkills(
   spaces: readonly string[],
   opts: SkillsReadOptions,
 ): Promise<ChatSkillsRead> {
-  if (!opts.catalogue && opts.chosen.length === 0) return { contents: new Map(), catalogue: [] };
+  if (!opts.catalogue && opts.chosen.length === 0) {
+    return { contents: new Map(), catalogue: [], uris: new Map() };
+  }
   const signal = AbortSignal.timeout(CALLER_READ_TIMEOUT_MS);
   let client: ChatSkillsClient;
   try {
@@ -496,7 +502,11 @@ async function readChatSkills(
     logger.warn("skills connection unavailable — the turn's skills left out", {
       err: String(err),
     });
-    return { contents: new Map(), catalogue: [] };
+    return {
+      contents: new Map(opts.chosen.map((id) => [id, null])),
+      catalogue: [],
+      uris: new Map(),
+    };
   }
   try {
     return await readSkillsOver(client, signal, spaces, opts);
@@ -521,7 +531,7 @@ export async function readSkillsOver(
   spaces: readonly string[],
   opts: SkillsReadOptions,
 ): Promise<ChatSkillsRead> {
-  const read: ChatSkillsRead = { contents: new Map(), catalogue: [] };
+  let listFailed = false;
   const list = (meta?: Record<string, unknown>) =>
     client.listSkills(meta ? { meta, signal } : { signal }).then(
       ({ skills }) => entriesByPackage(skills, spaces),
@@ -530,6 +540,7 @@ export async function readSkillsOver(
           definition: meta ? "draft" : "published",
           err: String(err),
         });
+        listFailed = true;
         return new Map<string, ListedSkillEntry>();
       },
     );
@@ -537,6 +548,13 @@ export async function readSkillsOver(
     list(),
     list({ [SKILL_DEFINITION_META_KEY]: "draft" }),
   ]);
+  // What a chosen skill is injected from (its draft, else its published version), for every skill.
+  const injectedFrom = new Map([...published, ...drafts]);
+  const read: ChatSkillsRead = {
+    contents: new Map(),
+    catalogue: [],
+    uris: new Map([...injectedFrom].map(([packageId, entry]) => [packageId, entry.uri])),
+  };
   if (opts.catalogue) {
     // A draft stands for its package's published version: one line per skill.
     const catalogueDrafts = opts.catalogueDrafts ? drafts : new Map<string, ListedSkillEntry>();
@@ -555,8 +573,12 @@ export async function readSkillsOver(
   }
   await Promise.all(
     opts.chosen.map(async (id) => {
-      const entry = drafts.get(id) ?? published.get(id);
-      if (!entry) return;
+      const entry = injectedFrom.get(id);
+      if (!entry) {
+        // Missing from a listing that failed is not known to be unavailable.
+        if (listFailed) read.contents.set(id, null);
+        return;
+      }
       const content = await client.readResource({ uri: entry.uri }, { signal }).then(
         ({ contents }) => contents.find((item) => item.uri === entry.uri),
         (err: unknown) => {
@@ -567,7 +589,10 @@ export async function readSkillsOver(
           return undefined;
         },
       );
-      if (!content) return;
+      if (!content) {
+        read.contents.set(id, null);
+        return;
+      }
       const served = servedAs(entry, drafts.has(id));
       // A `SKILL.md` served as a blob is not a skill's text, and text that is
       // not the listed `SKILL.md` (a draft saved between the list and the
@@ -648,7 +673,9 @@ export async function buildCallerContextBlock(
     /** Opened only when the turn lists or injects skills, under `signal`; closed once they are read. */
     openSkillsClient: (signal: AbortSignal) => Promise<ChatSkillsClient>;
   },
-): Promise<Omit<RenderedContext, "injected"> & { injected: InjectedSkills }> {
+): Promise<
+  Omit<RenderedContext, "injected"> & { injected: InjectedSkills; skillUris: Map<string, string> }
+> {
   const { user, locale, capabilities, skills } = args;
   // The persona's while previewing: this block tells the model what the caller
   // may do, and every operation it names is checked against the persona.
@@ -684,5 +711,5 @@ export async function buildCallerContextBlock(
     skillCatalogue: turnSkills.catalogue,
   });
   // What `resources/read` serves without `skills:*`: each skill in the space its URI names.
-  return { ...rendered, injected: { skills: injected } };
+  return { ...rendered, injected: { skills: injected }, skillUris: turnSkills.uris };
 }

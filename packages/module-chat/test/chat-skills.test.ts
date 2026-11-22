@@ -12,7 +12,8 @@ import {
   hasSkillChanges,
   loadsSkill,
   resetSkillChanges,
-  settleSkillChanges,
+  subtractSkillChanges,
+  citeSkill,
   skillPickerRows,
   skillRowState,
   type StoredSkills,
@@ -111,26 +112,28 @@ describe("resetSkillChanges", () => {
   });
 });
 
-describe("settleSkillChanges", () => {
-  it("drops each sent change the server now shows", () => {
+describe("subtractSkillChanges", () => {
+  it("drops every sent entry by value, whatever the server shows", () => {
     const sent = changes({ pin: ["@a/new"], unpin: ["@a/old"], skillDiscovery: false });
-    expect(settleSkillChanges(sent, sent, stored([pin("@a/new")], false))).toEqual(
-      NO_SKILL_CHANGES,
-    );
+    expect(subtractSkillChanges(sent, sent)).toEqual(NO_SKILL_CHANGES);
   });
 
-  it("keeps a change made during the turn, and a sent one the server did not apply", () => {
-    const sent = changes({ pin: ["@a/new", "@a/refused"] });
-    const now = changes({ pin: ["@a/new", "@a/refused", "@a/later"], skillDiscovery: false });
-    expect(settleSkillChanges(now, sent, stored([pin("@a/new")]))).toEqual(
-      changes({ pin: ["@a/refused", "@a/later"], skillDiscovery: false }),
-    );
+  it("keeps a change made during the turn, the undo of a sent one included", () => {
+    const sent = changes({ pin: ["@a/new"], skillDiscovery: false });
+    const now = changes({ pin: ["@a/later"], unpin: ["@a/new"], skillDiscovery: true });
+    expect(subtractSkillChanges(now, sent)).toEqual(now);
   });
+});
 
-  it("keeps the undo of a sent change made while the turn ran", () => {
-    const sent = changes({ pin: ["@a/new"] });
-    const undone = changes({ unpin: ["@a/new"] });
-    expect(settleSkillChanges(undone, sent, stored([pin("@a/new")]))).toEqual(undone);
+describe("citeSkill", () => {
+  it("records the pin whatever the server holds, and cancels an unpin", () => {
+    expect(citeSkill(NO_SKILL_CHANGES, "@a/held")).toEqual(changes({ pin: ["@a/held"] }));
+    expect(citeSkill(changes({ unpin: ["@a/held"] }), "@a/held")).toEqual(
+      changes({ pin: ["@a/held"] }),
+    );
+    expect(citeSkill(changes({ pin: ["@a/held"] }), "@a/held")).toEqual(
+      changes({ pin: ["@a/held"] }),
+    );
   });
 });
 
@@ -164,6 +167,14 @@ describe("skillRowState", () => {
     expect(state("@a/big")).toEqual({ kind: "refused", reason: "over_budget" });
     expect(state("@a/gone")).toEqual({ kind: "refused", reason: "unavailable" });
     expect(state("@a/broken")).toEqual({ kind: "refused", reason: "unreadable" });
+  });
+
+  it("is next for a pending pin even over a stored verdict: the re-check postdates it", () => {
+    const repinned = conversationSkills(stored([pin("@a/x", "injected", "assistant")]), {
+      pin: ["@a/x"],
+      unpin: [],
+    });
+    expect(skillRowState(repinned, "@a/x", new Set())).toEqual({ kind: "next" });
   });
 
   it("is next for a pending pin, off for an unpinned one or a skill never pinned", () => {

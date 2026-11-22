@@ -186,8 +186,8 @@ export function SkillsPickerPanel({
                       </span>
                     )}
                   </span>
+                  {/* Inside the label, so the checkbox's name says why it is locked or not loaded. */}
                   {caption && (
-                    // Inside the label: the checkbox's name says why it is locked or not loaded.
                     <span
                       data-testid={`skill-pin-state-${skill.id}`}
                       className={cn(
@@ -198,18 +198,17 @@ export function SkillsPickerPanel({
                       {caption}
                     </span>
                   )}
-                  {available
-                    ? skill.description && (
-                        <span className="text-muted-foreground line-clamp-2 text-[0.7rem] leading-snug">
-                          {skill.description}
-                        </span>
-                      )
-                    : // A refusal already says it is not loaded, and why.
-                      !refused && (
-                        <span className="text-muted-foreground text-[0.7rem] leading-snug italic">
-                          {t("skills.unavailable")}
-                        </span>
-                      )}
+                  {available && skill.description && (
+                    <span className="text-muted-foreground line-clamp-2 text-[0.7rem] leading-snug">
+                      {skill.description}
+                    </span>
+                  )}
+                  {/* A pin the catalogue no longer lists; a refusal already says why it is out. */}
+                  {!available && !refused && (
+                    <span className="text-muted-foreground text-[0.7rem] leading-snug italic">
+                      {t("skills.unavailable")}
+                    </span>
+                  )}
                 </label>
               </div>
             );

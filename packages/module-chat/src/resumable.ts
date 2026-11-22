@@ -293,6 +293,13 @@ export async function sweepStaleActiveStreams(): Promise<number> {
  */
 export const STALE_MARKER_MIN_AGE_MS = CHAT_TURN_DEADLINE_MS + 60_000;
 
+/** What a turn read of its conversation and acts on: the claim compares the row against it. */
+export interface TurnScope {
+  spaceId: string | null;
+  restricted: boolean;
+  pinnedSkills: readonly string[];
+}
+
 /** What claiming a conversation for a turn answered: `claimed`, or why nothing was written. */
 type StreamClaim = "claimed" | "scope_changed" | "in_flight";
 
@@ -304,21 +311,21 @@ type StreamClaim = "claimed" | "scope_changed" | "in_flight";
  * claimed turn from a marker whose producer died. Emits no signal: the caller's
  * user-message write does; on its failure `clearActiveStream` does.
  *
- * Also a compare-and-set on the scope the turn read (its origin space and limit):
- * the turn's spaces and bearer were computed from that read, and the limit PATCH
- * is refused only while a marker is set, so a change landing between the read and
- * this claim refuses the turn rather than letting it act with a reach it no
- * longer has. `scope_changed`: the scope moved (or the row is gone);
+ * Also a compare-and-set on the scope the turn read (its origin space, limit and pinned
+ * skills): the turn's spaces, bearer and system prompt were computed from that read, and the
+ * limit PATCH is refused only while a marker is set, so a change landing between the read and
+ * this claim (another tab's limit or skill change) refuses the turn rather than letting it act
+ * on a state it no longer matches. `scope_changed`: the scope moved (or the row is gone);
  * `in_flight`: another turn holds the conversation. Neither writes anything.
  *
- * `skillStatus`, the turn's verdict on each pin it evaluated, replaces `skill_status` in the
- * same statement, kept to the pins the row still holds: only a turn that claims records what
- * it did with them.
+ * `skillStatus`, the turn's verdict on each of those pins, replaces `skill_status` in the same
+ * statement: only a turn that claims records what it did with them, and it records them even
+ * if it fails later.
  */
 export async function setActiveStream(
   sessionId: string,
   streamId: string,
-  scope: { spaceId: string | null; restricted: boolean },
+  scope: TurnScope,
   skillStatus: Readonly<Record<string, PinnedSkillStatus>>,
 ): Promise<StreamClaim> {
   const staleBefore = new Date(Date.now() - STALE_MARKER_MIN_AGE_MS);
@@ -327,24 +334,33 @@ export async function setActiveStream(
     .set({
       activeStreamId: streamId,
       updatedAt: new Date(),
-      skillStatus: sql`(SELECT coalesce(jsonb_object_agg(key, value), '{}'::jsonb) FROM jsonb_each(${JSON.stringify(skillStatus)}::jsonb) WHERE key = ANY(${chatSessions.pinnedSkills}))`,
+      // Keyed by the pins compared below: kept to the row's own pins by construction.
+      skillStatus: { ...skillStatus },
     })
     .where(
       and(
         eq(chatSessions.id, sessionId),
         eq(chatSessions.restricted, scope.restricted),
         sql`${chatSessions.spaceId} IS NOT DISTINCT FROM ${scope.spaceId}`,
+        sql`${chatSessions.pinnedSkills} = ARRAY(SELECT jsonb_array_elements_text(${JSON.stringify(scope.pinnedSkills)}::jsonb))`,
         or(isNull(chatSessions.activeStreamId), lt(chatSessions.updatedAt, staleBefore)),
       ),
     )
     .returning({ id: chatSessions.id });
   if (claimed.length > 0) return "claimed";
   const [row] = await db
-    .select({ spaceId: chatSessions.spaceId, restricted: chatSessions.restricted })
+    .select({
+      spaceId: chatSessions.spaceId,
+      restricted: chatSessions.restricted,
+      pinnedSkills: chatSessions.pinnedSkills,
+    })
     .from(chatSessions)
     .where(eq(chatSessions.id, sessionId))
     .limit(1);
-  return row && row.spaceId === scope.spaceId && row.restricted === scope.restricted
+  return row &&
+    row.spaceId === scope.spaceId &&
+    row.restricted === scope.restricted &&
+    row.pinnedSkills.join("\n") === scope.pinnedSkills.join("\n")
     ? "in_flight"
     : "scope_changed";
 }

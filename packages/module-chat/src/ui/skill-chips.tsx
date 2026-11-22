@@ -56,13 +56,15 @@ function useSkillsByLoad(
 
 type Translate = ReturnType<typeof useChatHost>["t"];
 
-/** The pill's text: the count of several skills, the name of a single one. */
-function pillText(skills: readonly LoadedSkill[], t: Translate): string {
+/** The pill's text: the count of several skills, the name of a single one, or how many are not loaded when none is. */
+function pillText(skills: readonly LoadedSkill[], refused: number, t: Translate): string {
+  if (skills.length === 0) return t("skills.notLoadedCount", { count: refused });
   return skills.length === 1 ? skills[0]!.name : t("skills.pinnedCount", { n: skills.length });
 }
 
 /** What the accessible name says of the skills: the single name, or how many. The tooltip lists them. */
-function skillsSummary(skills: readonly LoadedSkill[], t: Translate): string {
+function skillsSummary(skills: readonly LoadedSkill[], refused: number, t: Translate): string {
+  if (skills.length === 0) return t("skills.notLoadedCount", { count: refused });
   return skills.length === 1 ? skills[0]!.name : t("skills.count", { n: skills.length });
 }
 
@@ -82,7 +84,7 @@ function RefusedSkillList({ skills }: { skills: readonly LoadedSkill[] }) {
   if (skills.length === 0) return null;
   return (
     <div className="mt-1">
-      <p className="font-medium">{t("skills.state.notLoaded")}</p>
+      <p className="font-medium">{t("skills.state.notLoaded", { count: skills.length })}</p>
       <SkillNameList skills={skills} />
     </div>
   );
@@ -115,14 +117,14 @@ function PinnedPill({
           open={{
             onClick: onOpen,
             label: t(discovery ? "skills.pinnedPillLabel" : "skills.pinnedLockedPillLabel", {
-              skills: skillsSummary(skills, t),
+              skills: skillsSummary(skills, refused.length, t),
             }),
             testId: "skill-pill-pinned",
           }}
           removeLabel={t("skills.reset")}
           onRemove={onReset}
         >
-          {pillText(skills, t)}
+          {pillText(skills, refused.length, t)}
         </RemovableChip>
       </TooltipTrigger>
       <TooltipContent side="top" className="max-w-72 text-xs">
@@ -145,8 +147,9 @@ interface SkillChipsProps {
 }
 
 /**
- * The skill pill of the composer's tool row, drawn when the selection departs from the default.
- * While no skill loads, the picker's summary chip stands in (drawn only with discovery off).
+ * The skill pill of the composer's tool row, drawn when the selection departs from the default:
+ * with pins, even when the last turn left every one out. With no pin at all, the picker's summary
+ * chip stands in (drawn only with discovery off).
  */
 export function SkillChips({
   transport,
@@ -156,7 +159,7 @@ export function SkillChips({
   onReset,
 }: SkillChipsProps) {
   const { loaded, refused } = useSkillsByLoad(transport, skills, cited);
-  if (loaded.length === 0) {
+  if (loaded.length === 0 && refused.length === 0) {
     return (
       <SkillsChip discovery={skills.skillDiscovery} onClick={onOpenPicker} onReset={onReset} />
     );

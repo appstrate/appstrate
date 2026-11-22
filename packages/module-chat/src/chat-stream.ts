@@ -68,7 +68,7 @@ import {
   touchSessionSpace,
 } from "./persistence.ts";
 import { registerStopController, unregisterStopController } from "./stop-registry.ts";
-import { setActiveStream, clearActiveStream } from "./resumable.ts";
+import { setActiveStream, clearActiveStream, type TurnScope } from "./resumable.ts";
 import {
   actingSpaces,
   conversationOrigin,
@@ -259,14 +259,14 @@ function logAndMarkStreamError(error: unknown, requestId: string): string {
 export async function claimTurn(
   sessionId: string,
   streamId: string,
-  scope: { spaceId: string | null; restricted: boolean },
+  scope: TurnScope,
   skillStatus: Readonly<Record<string, PinnedSkillStatus>>,
 ): Promise<void> {
   const claim = await setActiveStream(sessionId, streamId, scope, skillStatus);
   if (claim === "scope_changed") {
     throw conflict(
       "chat_turn_scope_changed",
-      "The conversation's limit changed while this turn was starting. Send the message again.",
+      "The conversation's limit or pinned skills changed while this turn was starting. Send the message again.",
     );
   }
   if (claim === "in_flight") {
@@ -530,7 +530,11 @@ export async function handleChatStream(
         restricted: conv.restricted,
       }),
       // As read: the claim compares the row against it (`claimTurn`).
-      scope: { spaceId: conv.spaceId, restricted: conv.restricted },
+      scope: {
+        spaceId: conv.spaceId,
+        restricted: conv.restricted,
+        pinnedSkills: conv.selection.pinnedSkills,
+      },
       originSpace,
       restricted: conv.restricted,
       spaces,
@@ -571,6 +575,7 @@ export async function handleChatStream(
         injectedSkills: InjectedSkills;
         skillStatus: Record<string, PinnedSkillStatus>;
         skillBudgetLeft: number;
+        skillUris: Map<string, string>;
       }
     | { ok: false; error: unknown }
   > = turn
@@ -597,12 +602,13 @@ export async function handleChatStream(
       }),
     )
     .then(
-      ({ text, injected, skillStatus, skillBudgetLeft }) => ({
+      ({ text, injected, skillStatus, skillBudgetLeft, skillUris }) => ({
         ok: true as const,
         block: text,
         injectedSkills: injected,
         skillStatus,
         skillBudgetLeft,
+        skillUris,
       }),
       (error: unknown) => ({ ok: false as const, error }),
     );
@@ -686,7 +692,13 @@ export async function handleChatStream(
   // Join phase B. This is the one place its failure is allowed to surface.
   const contextResult = await contextBlockPromise;
   if (!contextResult.ok) throw contextResult.error;
-  const { block: contextBlock, injectedSkills, skillStatus, skillBudgetLeft } = contextResult;
+  const {
+    block: contextBlock,
+    injectedSkills,
+    skillStatus,
+    skillBudgetLeft,
+    skillUris,
+  } = contextResult;
 
   // Assemble the system prompt: the tool-grounding prompt, with no inline MCP
   // instructions — the engine's own MCP handshake delivers them.
@@ -749,7 +761,9 @@ export async function handleChatStream(
   // (in `finalize` below). Generation runs through a resumable producer that drains to
   // completion independently of the client, so leaving the conversation mid-inference
   // cannot drop messages. Every refusal before this point (the admission gate, the model
-  // binding, capacity) and the claim's own refusal write nothing into the conversation.
+  // binding, capacity) and the claim's own refusal write no message, marker or skill status
+  // into the conversation. The turn's skill changes are the exception: `ensureSession` applied
+  // them at the top of the handler, so they stand even when the turn is refused.
   const claimedSessionId = sessionId && lastMessage?.id ? sessionId : undefined;
   let claimTurnMs = 0;
   if (claimedSessionId) {
@@ -956,9 +970,10 @@ export async function handleChatStream(
           ...(chatSessionId
             ? {
                 skillLoad: turnSkillLoad({
+                  uris: skillUris,
                   injected: Object.keys(injectedSkills.skills),
                   budgetLeft: skillBudgetLeft,
-                  pin: (packageId) => pinAssistantSkill(chatSessionId, packageId),
+                  pin: (packageId) => pinAssistantSkill(chatSessionId, streamId, packageId),
                 }),
               }
             : {}),

@@ -15,12 +15,12 @@ afterEach(() => {
   globalThis.fetch = realFetch;
 });
 
-function capture(): string[] {
+function capture(status = 200): string[] {
   const urls: string[] = [];
   globalThis.fetch = Object.assign(
     async (input: RequestInfo | URL) => {
       urls.push(String(input));
-      return new Response("");
+      return new Response("", { status });
     },
     { preconnect: realFetch.preconnect },
   );
@@ -34,6 +34,7 @@ describe("the turn transport", () => {
       getTransport: () => host.transport,
       headers: () => ({}),
       body: ({ id }) => ({ id }),
+      answered: () => {},
     });
     // The host's transport arrives after the conversation's was built.
     host.transport = transportOver(async () => new Response());
@@ -49,5 +50,32 @@ describe("the turn transport", () => {
     await turns.reconnectToStream({ chatId: "chs_1" });
 
     expect(urls).toEqual(["/api/orgs/org_1/chat", "/api/orgs/org_1/chat/sessions/chs_1/stream"]);
+  });
+
+  it("reports whether the server accepted the turn, and nothing for the resume", async () => {
+    for (const [status, accepted] of [
+      [200, true],
+      [503, false],
+    ] as const) {
+      const answers: boolean[] = [];
+      const turns = createTurnTransport({
+        getTransport: () => transportOver(async () => new Response()),
+        headers: () => ({}),
+        body: ({ id }) => ({ id }),
+        answered: (ok) => answers.push(ok),
+      });
+      capture(status);
+      await turns
+        .sendMessages({
+          chatId: "chs_1",
+          messages: [],
+          trigger: "submit-message",
+          messageId: undefined,
+          abortSignal: undefined,
+        })
+        .catch(() => {});
+      await turns.reconnectToStream({ chatId: "chs_1" }).catch(() => {});
+      expect(answers).toEqual([accepted]);
+    }
   });
 });

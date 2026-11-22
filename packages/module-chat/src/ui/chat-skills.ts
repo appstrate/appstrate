@@ -11,6 +11,7 @@ import { parseSkillUri } from "@appstrate/core/skill-uri";
 import type { ChatSkillCommand } from "../commands.ts";
 import { SKILL_DIRECTIVE, directivesOf } from "../directives.ts";
 import {
+  DEFAULT_SKILL_SELECTION,
   MAX_PINNED_SKILLS,
   applySkillChanges,
   type ChatSkillChanges,
@@ -26,7 +27,10 @@ export interface StoredSkills {
 }
 
 /** A conversation the server does not hold yet: discovery on, no pin. */
-export const DEFAULT_STORED_SKILLS: StoredSkills = { skillDiscovery: true, pins: [] };
+export const DEFAULT_STORED_SKILLS: StoredSkills = {
+  skillDiscovery: DEFAULT_SKILL_SELECTION.skillDiscovery,
+  pins: DEFAULT_SKILL_SELECTION.pinnedSkills.map((id) => ({ id, source: "user", status: null })),
+};
 
 export const NO_SKILL_CHANGES: ChatSkillChanges = { pin: [], unpin: [] };
 
@@ -42,6 +46,8 @@ export interface ConversationSkills {
   pinned: readonly string[];
   /** The server's pins, by id: their source and the verdict of the last turn. */
   stored: ReadonlyMap<string, PinnedSkill>;
+  /** Pinned by a change the server has not applied yet: the next turn loads them. */
+  pending: ReadonlySet<string>;
 }
 
 export function conversationSkills(
@@ -53,6 +59,7 @@ export function conversationSkills(
     skillDiscovery: changes.skillDiscovery ?? stored.skillDiscovery,
     pinned: applySkillChanges([...byId.keys()], changes),
     stored: byId,
+    pending: new Set(changes.pin),
   };
 }
 
@@ -69,7 +76,7 @@ export interface SkillChangeBase {
 const without = (ids: readonly string[], id: string) => ids.filter((other) => other !== id);
 const withId = (ids: readonly string[], id: string) => (ids.includes(id) ? ids : [...ids, id]);
 
-/** `changes` with `id` pinned (`on`) or unpinned. */
+/** `changes` with `id` pinned (`on`) or unpinned, from the panel. */
 export function changePin(
   changes: ChatSkillChanges,
   id: string,
@@ -105,28 +112,28 @@ export function changeDiscovery(
 }
 
 /**
- * `changes` once the server answered after the turn that sent `sent`: each change it sent that
- * `stored` (read after that turn) shows is dropped. A change made since, or one the server did not
- * apply, stays and rides with the next turn: the changes are idempotent.
+ * `changes` with a skill the sent message cites pinned. Recorded whatever the server holds: a
+ * citation is the user's act (it makes an assistant's pin theirs), and a pin is idempotent.
  */
-export function settleSkillChanges(
+export function citeSkill(changes: ChatSkillChanges, id: string): ChatSkillChanges {
+  return { ...changes, pin: withId(changes.pin, id), unpin: without(changes.unpin, id) };
+}
+
+/**
+ * `changes` without what a turn sent and the server accepted (a 2xx: it applied them in its first
+ * statement), each entry by value. A change made while the turn ran stays.
+ */
+export function subtractSkillChanges(
   changes: ChatSkillChanges,
   sent: ChatSkillChanges,
-  stored: StoredSkills,
 ): ChatSkillChanges {
-  const held = new Set(stored.pins.map((pin) => pin.id));
-  const pin = changes.pin.filter((id) => !(sent.pin.includes(id) && held.has(id)));
-  const unpin = changes.unpin.filter((id) => !(sent.unpin.includes(id) && !held.has(id)));
   const { skillDiscovery, ...rest } = changes;
-  const settled =
-    skillDiscovery !== undefined &&
-    sent.skillDiscovery === skillDiscovery &&
-    stored.skillDiscovery === skillDiscovery;
   return {
     ...rest,
-    ...(skillDiscovery !== undefined && !settled && { skillDiscovery }),
-    pin,
-    unpin,
+    ...(skillDiscovery !== undefined &&
+      skillDiscovery !== sent.skillDiscovery && { skillDiscovery }),
+    pin: changes.pin.filter((id) => !sent.pin.includes(id)),
+    unpin: changes.unpin.filter((id) => !sent.unpin.includes(id)),
   };
 }
 
@@ -196,6 +203,8 @@ export function skillRowState(
 ): SkillRowState {
   if (cited.has(id)) return { kind: "cited" };
   if (!skills.pinned.includes(id)) return { kind: "off" };
+  // A pending pin is the user's latest word: the stored verdict predates it.
+  if (skills.pending.has(id)) return { kind: "next" };
   const pin = skills.stored.get(id);
   if (!pin || pin.status === null) return { kind: "next" };
   return pin.status === "injected"
@@ -237,9 +246,9 @@ export function skillPickerRows(
 const SKILL_DEFINITION = "SKILL.md";
 
 /**
- * The skill a resource read (`read_resource`, or the forwarded `read`) loads: the assistant loads
- * a skill by reading its `SKILL.md`. Named
- * by its served frontmatter `name`, `null` when it reads anything but a skill's `SKILL.md`.
+ * The skill a resource read (`read_resource`, or the forwarded `read`) loads, named by its served
+ * frontmatter `name`: the assistant loads a skill by reading its `SKILL.md`. `null` when the read
+ * names anything else.
  */
 export function skillLoadOf(
   args: Record<string, unknown> | undefined,

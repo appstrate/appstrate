@@ -53,6 +53,7 @@ import {
   MAX_PINNED_SKILLS,
   type ChatSkillChanges,
   type ChatSkillSelection,
+  type SkillPinOutcome,
 } from "./skills.ts";
 import type { FileUIPart, UIMessage } from "ai";
 
@@ -280,7 +281,7 @@ export async function ensureSession(
    * space it touched is among them.
    */
   readable: readonly string[],
-  changes: ChatSkillChanges = { pin: [], unpin: [] },
+  changes: ChatSkillChanges,
   origin?: ConversationOriginRequest,
 ): Promise<TurnConversation> {
   // The id is client-minted, so a caller could send an id that already belongs
@@ -365,6 +366,8 @@ export async function ensureSession(
   if (!row || row.orgId !== orgId || row.userId !== userId) {
     throw notFound("Chat session not found");
   }
+  // The other tabs of an existing conversation show its skills: they re-read on this signal.
+  if (!row.created && Object.keys(set).length > 0) notifySessionUpdate(id, orgId, userId);
   return {
     selection: { skillDiscovery: row.skillDiscovery, pinnedSkills: row.pinnedSkills },
     spaceId: row.spaceId,
@@ -373,13 +376,19 @@ export async function ensureSession(
 }
 
 /**
- * Pin `packageId` to the conversation as the assistant's (its `SKILL.md` was just loaded):
- * appended to `pinned_skills` and `assistant_skills`, its status `injected`, in ONE statement
- * guarded on the cap, so a concurrent change cannot push the set past it. A skill already
- * pinned keeps its source and is only marked injected. False when the conversation already
- * pins {@link MAX_PINNED_SKILLS} skills (a lost race included): nothing is written.
+ * Pin `packageId` to the conversation as the assistant's (its `SKILL.md` was just loaded by the
+ * turn holding `streamId`): appended to `pinned_skills` and `assistant_skills`, its status
+ * `injected`, in ONE statement guarded on the cap and on the turn still holding the conversation,
+ * so neither a concurrent change nor a load landing after the turn was stopped or taken over
+ * writes anything. A skill already pinned keeps its source and is only marked injected.
+ * `full`: the conversation already pins {@link MAX_PINNED_SKILLS} skills (a lost race included);
+ * `released`: the turn no longer holds it.
  */
-export async function pinAssistantSkill(sessionId: string, packageId: string): Promise<boolean> {
+export async function pinAssistantSkill(
+  sessionId: string,
+  streamId: string,
+  packageId: string,
+): Promise<SkillPinOutcome> {
   const already = sql`${packageId}::text = ANY(${chatSessions.pinnedSkills})`;
   const [row] = await db
     .update(chatSessions)
@@ -393,13 +402,21 @@ export async function pinAssistantSkill(sessionId: string, packageId: string): P
     .where(
       and(
         eq(chatSessions.id, sessionId),
+        eq(chatSessions.activeStreamId, streamId),
         or(already, sql`cardinality(${chatSessions.pinnedSkills}) < ${MAX_PINNED_SKILLS}`),
       ),
     )
     .returning({ orgId: chatSessions.orgId, userId: chatSessions.userId });
-  if (!row) return false;
-  notifySessionUpdate(sessionId, row.orgId, row.userId);
-  return true;
+  if (row) {
+    notifySessionUpdate(sessionId, row.orgId, row.userId);
+    return "pinned";
+  }
+  const [held] = await db
+    .select({ id: chatSessions.id })
+    .from(chatSessions)
+    .where(and(eq(chatSessions.id, sessionId), eq(chatSessions.activeStreamId, streamId)))
+    .limit(1);
+  return held ? "full" : "released";
 }
 
 /** Most recent message id in a session — the one a new message follows, or null. */

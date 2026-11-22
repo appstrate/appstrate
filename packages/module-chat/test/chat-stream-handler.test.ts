@@ -67,6 +67,7 @@ import { turnCapabilities } from "../src/capabilities.ts";
 import { chatLoopbackStrategy } from "../src/loopback-auth.ts";
 import { platformMcpSurfaceKey } from "../src/pi-chat/mcp-surface-cache.ts";
 import { _resetChatEnvForTests } from "../src/env.ts";
+import type { ChatSkillChanges } from "../src/skills.ts";
 import { ensureSession, persistAssistantMessage, persistUserMessage } from "../src/persistence.ts";
 import {
   createFileFromStream,
@@ -77,7 +78,12 @@ import { buildStructuredPiTurn } from "../src/pi-chat/structured-session.ts";
 import { loadAttachmentImages } from "../src/pi-chat/attachment-inputs.ts";
 import { reachableSpace } from "./reachable-space.ts";
 import { CHAT_SKILLS_CONTENT_BUDGET_CHARS } from "../src/skills.ts";
+import { buildPlatformMcpTools } from "../src/pi-chat/mcp-tools.ts";
+import { PiChatUiStreamMapper } from "../src/pi-chat/ui-stream-mapper.ts";
 import { spaceIdRefusal } from "@appstrate/core/mcp-spaces";
+
+/** A turn that changes no skill (`ensureSession` takes the changes of every turn). */
+const NO_SKILL_CHANGES: ChatSkillChanges = { pin: [], unpin: [] };
 
 // The chat handler reads the system model registry; the HTTP harness initializes it at boot.
 initSystemModelProviderKeys();
@@ -583,7 +589,7 @@ describe("handleChatStream", () => {
         ctx.orgId,
         ctx.user.id,
         [ctx.defaultSpaceId],
-        undefined,
+        NO_SKILL_CHANGES,
         () => ({
           spaceId: ctx.defaultSpaceId,
           restricted: false,
@@ -606,7 +612,13 @@ describe("handleChatStream", () => {
 
     it("while another turn is live answers chat_turn_in_flight and leaves that turn's marker", async () => {
       const sessionId = mintSessionId();
-      await ensureSession(sessionId, ctx.orgId, ctx.user.id, [ctx.defaultSpaceId]);
+      await ensureSession(
+        sessionId,
+        ctx.orgId,
+        ctx.user.id,
+        [ctx.defaultSpaceId],
+        NO_SKILL_CHANGES,
+      );
       const { res, requests, calls } = await refusedTurn(sessionId, async () => {
         await db
           .update(chatSessions)
@@ -749,7 +761,7 @@ describe("handleChatStream", () => {
       });
       // The stored row was migrated while the tab retained the result of its authorized read.
       const sessionId = mintSessionId();
-      await ensureSession(sessionId, ctx.orgId, ctx.user.id, [scope.spaceId]);
+      await ensureSession(sessionId, ctx.orgId, ctx.user.id, [scope.spaceId], NO_SKILL_CHANGES);
       await persistUserMessage(sessionId, question);
       await persistAssistantMessage(
         sessionId,
@@ -819,7 +831,7 @@ describe("handleChatStream", () => {
     };
     const answer: UIMessage = { id: "a0", role: "assistant", parts: [text("Un point.")] };
     const sessionId = mintSessionId();
-    await ensureSession(sessionId, ctx.orgId, ctx.user.id, [scope.spaceId]);
+    await ensureSession(sessionId, ctx.orgId, ctx.user.id, [scope.spaceId], NO_SKILL_CHANGES);
     await persistUserMessage(sessionId, question);
     await persistAssistantMessage(sessionId, answer, question.id);
 
@@ -897,10 +909,17 @@ describe("handleChatStream", () => {
 
     // A conversation limited to the default space, which already holds an earlier upload.
     const sessionId = mintSessionId();
-    await ensureSession(sessionId, ctx.orgId, ctx.user.id, [ctx.defaultSpaceId], undefined, () => ({
-      spaceId: ctx.defaultSpaceId,
-      restricted: true,
-    }));
+    await ensureSession(
+      sessionId,
+      ctx.orgId,
+      ctx.user.id,
+      [ctx.defaultSpaceId],
+      NO_SKILL_CHANGES,
+      () => ({
+        spaceId: ctx.defaultSpaceId,
+        restricted: true,
+      }),
+    );
     const earlier = await resolveChatAttachment({
       orgId: ctx.orgId,
       userId: ctx.user.id,
@@ -1236,6 +1255,8 @@ describe("handleChatStream", () => {
   /** The skills the platform MCP server lists in the default space, each served as `text`. */
   function listedSkillsDispatch(
     skills: Array<{ id: string; text: string; listedText?: string }>,
+    /** Runs on each `skills/list`: inside the turn's preamble, between its upsert and its claim. */
+    onList?: () => Promise<void>,
   ): (req: Request) => Promise<Response> {
     const uriOf = (id: string) =>
       `skill://${ctx.defaultSpaceId}/${id.slice(1)}/${id.split("/")[1]}/SKILL.md`;
@@ -1255,7 +1276,10 @@ describe("handleChatStream", () => {
             capabilities: { resources: {}, extensions: { "io.modelcontextprotocol/skills": {} } },
             serverInfo: { name: "fake-platform", version: "1.0.0" },
           });
+        case "tools/list":
+          return result({ tools: [] });
         case "skills/list": {
+          await onList?.();
           const meta = message.params?._meta as Record<string, unknown> | undefined;
           if (meta?.[SKILL_DEFINITION_META_KEY] === "draft") return result({ skills: [] });
           return result({
@@ -1319,6 +1343,7 @@ describe("handleChatStream", () => {
     const { engine, calls } = scriptedEngine();
     const res = await postChat(sessionId, undefined, engine, {
       permissions: SKILL_TURN_PERMISSIONS,
+      dispatch: listedSkillsDispatch([]),
       body: { skill_discovery: false, pin_skills: ["@acme/z", "@acme/a", "@acme/z"] },
     });
     expect(res.status).toBe(200);
@@ -1328,7 +1353,7 @@ describe("handleChatStream", () => {
       skillDiscovery: false,
       pinnedSkills: ["@acme/a", "@acme/z"],
       assistantSkills: [],
-      // Listed nowhere: the claim records each pin's verdict.
+      // Listed nowhere (both listings answered): the claim records each pin's verdict.
       skillStatus: { "@acme/a": "unavailable", "@acme/z": "unavailable" },
     });
     expect(await tokenPermissions(calls[0]!)).toEqual([
@@ -1341,7 +1366,7 @@ describe("handleChatStream", () => {
     await waitForAssistantPersist(sessionId);
   });
 
-  it("applies the changes against the stored pins, idempotently: a stale client keeps the assistant's pin", async () => {
+  it("applies the changes against the stored pins idempotently, and a turn without changes leaves the pins as stored", async () => {
     const sessionId = mintSessionId();
     await seedSkillSession(sessionId, {
       pinned: ["@acme/a", "@acme/b"],
@@ -1358,6 +1383,7 @@ describe("handleChatStream", () => {
       const res = await postChat(sessionId, undefined, scriptedEngine().engine, {
         permissions: SKILL_TURN_PERMISSIONS,
         messageId,
+        dispatch: listedSkillsDispatch([]),
         body: { pin_skills: ["@acme/c"], unpin_skills: ["@acme/a"] },
       });
       expect(res.status).toBe(200);
@@ -1365,10 +1391,11 @@ describe("handleChatStream", () => {
       await waitForAssistantPersist(sessionId);
       expect(await sessionSkills(sessionId)).toEqual(expected);
     }
-    // A client that read the session before the assistant pinned sends no change for it.
+    // A turn carrying no pin change, the assistant's pin `@acme/b` included, keeps every pin.
     const res = await postChat(sessionId, undefined, scriptedEngine().engine, {
       permissions: SKILL_TURN_PERMISSIONS,
       messageId: "u3",
+      dispatch: listedSkillsDispatch([]),
       body: { skill_discovery: true },
     });
     expect(res.status).toBe(200);
@@ -1491,41 +1518,165 @@ describe("handleChatStream", () => {
     }
   });
 
-  it("pins the skill the assistant loads, and the next turn injects it from the system prompt", async () => {
+  it("records the dropped pin's status nowhere when a turn refused after its upsert unpinned it", async () => {
+    const sessionId = mintSessionId();
+    await seedSkillSession(sessionId, {
+      pinned: ["@acme/a", "@acme/b"],
+      assistant: ["@acme/a"],
+      status: { "@acme/a": "injected", "@acme/b": "injected" },
+    });
+    const previousCap = process.env.CHAT_PI_MAX_CONCURRENCY;
+    process.env.CHAT_PI_MAX_CONCURRENCY = "1";
+    _resetChatEnvForTests();
+    const heldSlot = acquirePiChatSlot();
+    try {
+      const res = await postChat(sessionId, undefined, scriptedEngine().engine, {
+        permissions: SKILL_TURN_PERMISSIONS,
+        body: { unpin_skills: ["@acme/a"] },
+      });
+      expect(res.status).toBe(429);
+      // The change stands (`ensureSession` applied it); the refused turn recorded no verdict.
+      expect(await sessionSkills(sessionId)).toEqual({
+        skillDiscovery: true,
+        pinnedSkills: ["@acme/b"],
+        assistantSkills: [],
+        skillStatus: { "@acme/b": "injected" },
+      });
+    } finally {
+      heldSlot?.release();
+      if (previousCap === undefined) delete process.env.CHAT_PI_MAX_CONCURRENCY;
+      else process.env.CHAT_PI_MAX_CONCURRENCY = previousCap;
+      _resetChatEnvForTests();
+    }
+  });
+
+  it("refuses the claim with 409 `chat_turn_scope_changed` when the pins moved after the turn read them", async () => {
+    const sessionId = mintSessionId();
+    await seedSkillSession(sessionId, { pinned: ["@acme/a"] });
+    let moved = false;
+    const dispatch = listedSkillsDispatch([{ id: "@acme/a", text: "A." }], async () => {
+      if (moved) return;
+      moved = true;
+      // Another tab's `pin_skills`, landing while this turn's prompt is built.
+      await db
+        .update(chatSessions)
+        .set({ pinnedSkills: ["@acme/a", "@acme/b"] })
+        .where(eq(chatSessions.id, sessionId));
+    });
+    let engineCalls = 0;
+    const res = await postChat(
+      sessionId,
+      undefined,
+      () => {
+        engineCalls += 1;
+        throw new Error("a refused claim never starts the engine");
+      },
+      { permissions: SKILL_TURN_PERMISSIONS, dispatch },
+    );
+    expect(res.status).toBe(409);
+    expect(await res.json()).toMatchObject({ code: "chat_turn_scope_changed" });
+    expect(engineCalls).toBe(0);
+    const [row] = await db.select().from(chatSessions).where(eq(chatSessions.id, sessionId));
+    expect(row?.activeStreamId).toBeNull();
+    expect(row?.skillStatus).toEqual({});
+    expect(
+      await db.select().from(chatMessages).where(eq(chatMessages.sessionId, sessionId)),
+    ).toEqual([]);
+  });
+
+  it("pins the skill the assistant loads in a turn; the next turn injects it from the system prompt and replays only a receipt", async () => {
     const sessionId = mintSessionId();
     const SKILL = "@acme/tone";
     const TEXT = "Always answer in haiku.";
+    const URI = `skill://${ctx.defaultSpaceId}/acme/tone/tone/SKILL.md`;
     const dispatch = listedSkillsDispatch([{ id: SKILL, text: TEXT }]);
-    const first = scriptedEngine();
-    const res = await postChat(sessionId, undefined, first.engine, {
+
+    // Turn 1: the model calls `read_resource` on the listed SKILL.md, through the real tool
+    // layer the engine builds, and the result reaches the stream through the real mapper.
+    const loaded: PiChatInput[] = [];
+    const loadingEngine: ChatEngine = (input) => {
+      loaded.push(input);
+      const stream = new ReadableStream<UIMessageChunk>({
+        async start(controller) {
+          const { surfaceKey: _cached, ...platformMcp } = input.platformMcp;
+          const tools = await buildPlatformMcpTools({
+            ...platformMcp,
+            writeChunk: () => {},
+            signal: new AbortController().signal,
+            turnBudget: { deadlineAt: Date.now() + 60_000, stepCount: () => 0 },
+            fileDelivery: { image: true, pdf: true },
+          });
+          const registered: Array<{
+            name: string;
+            execute: (id: string, params: unknown) => Promise<unknown>;
+          }> = [];
+          for (const factory of tools.extensionFactories) {
+            factory({ registerTool: (tool: never) => registered.push(tool) } as never);
+          }
+          const read = registered.find((tool) => tool.name === "read_resource")!;
+          const result = await read.execute("call_skill", { uri: URI });
+          await tools.close();
+          const mapper = new PiChatUiStreamMapper();
+          for (const chunk of [
+            { type: "start", messageId: "asst_load" },
+            {
+              type: "tool-input-available",
+              toolCallId: "call_skill",
+              toolName: "read_resource",
+              input: { uri: URI },
+            },
+            ...mapper.map({
+              type: "tool_execution_end",
+              toolCallId: "call_skill",
+              result,
+              isError: false,
+            } as never),
+            { type: "finish", messageMetadata: { appstrate: { turn: TURN_META } } },
+          ] as UIMessageChunk[]) {
+            controller.enqueue(chunk);
+          }
+          controller.close();
+        },
+      });
+      return createUIMessageStreamResponse({
+        stream: releaseOnClose(stream, () => input.slot.release()),
+      });
+    };
+    const first = await postChat(sessionId, undefined, loadingEngine, {
       permissions: SKILL_TURN_PERMISSIONS,
       dispatch,
     });
-    expect(res.status).toBe(200);
-    await collectUiChunks(res);
+    expect(first.status).toBe(200);
+    await collectUiChunks(first);
     await waitForAssistantPersist(sessionId);
-    // Listed, not injected: the turn's load (what `read_resource` calls) pins it.
-    const load = first.calls[0]!.platformMcp.skillLoad!;
-    expect(await load(SKILL, TEXT)).toBe("pinned");
-    expect(await load(SKILL, TEXT)).toBe("read");
+    expect(loaded[0]!.system).not.toContain(TEXT);
     expect(await sessionSkills(sessionId)).toMatchObject({
       pinnedSkills: [SKILL],
       assistantSkills: [SKILL],
       skillStatus: { [SKILL]: "injected" },
     });
 
+    // Turn 2 replays the stored thread, as the client re-sends it.
+    const stored = await db
+      .select({ messageId: chatMessages.messageId, content: chatMessages.content })
+      .from(chatMessages)
+      .where(eq(chatMessages.sessionId, sessionId))
+      .orderBy(asc(chatMessages.seq));
+    const history = stored.map(({ messageId, content }) => ({ id: messageId, ...content }));
+    expect(JSON.stringify(history)).toContain('\\"pinned\\":true');
+
     const second = scriptedEngine();
     const next = await postChat(sessionId, undefined, second.engine, {
       permissions: SKILL_TURN_PERMISSIONS,
       messageId: "u2",
+      history,
       dispatch,
     });
     expect(next.status).toBe(200);
     await collectUiChunks(next);
     expect(second.calls[0]!.system).toContain(`<skill id="${SKILL}"`);
     expect(second.calls[0]!.system).toContain(TEXT);
-    // Injected now: a load of it is a plain read.
-    expect(await second.calls[0]!.platformMcp.skillLoad!(SKILL, TEXT)).toBe("read");
+    expect(JSON.stringify(second.calls[0]!.messages)).not.toContain(TEXT);
 
     await waitForAssistantPersist(sessionId);
   });
@@ -2178,7 +2329,7 @@ describe("handleChatStream", () => {
           ctx.orgId,
           ctx.user.id,
           [ctx.defaultSpaceId, spaceB],
-          undefined,
+          NO_SKILL_CHANGES,
           () => ({
             spaceId: ctx.defaultSpaceId,
             restricted: false,
@@ -2208,7 +2359,13 @@ describe("handleChatStream", () => {
 
       it("does not validate them on a turn of an existing conversation", async () => {
         const sessionId = mintSessionId();
-        await ensureSession(sessionId, ctx.orgId, ctx.user.id, [ctx.defaultSpaceId]);
+        await ensureSession(
+          sessionId,
+          ctx.orgId,
+          ctx.user.id,
+          [ctx.defaultSpaceId],
+          NO_SKILL_CHANGES,
+        );
         const { engine } = scriptedEngine();
         // Outside the acting set and a limit without a space: refused when creating, ignored here.
         const res = await postChat(sessionId, undefined, engine, {
@@ -2372,7 +2529,7 @@ describe("handleChatStream", () => {
 
       it("is refused with a 403, before anything runs, once the author can no longer act in the origin space", async () => {
         const sessionId = mintSessionId();
-        await ensureSession(sessionId, ctx.orgId, ctx.user.id, [spaceB], undefined, () => ({
+        await ensureSession(sessionId, ctx.orgId, ctx.user.id, [spaceB], NO_SKILL_CHANGES, () => ({
           spaceId: spaceB,
           restricted: true,
         }));
@@ -2397,7 +2554,7 @@ describe("handleChatStream", () => {
 
     it("refuses a turn on a conversation that touched a space its author no longer reads", async () => {
       const sessionId = mintSessionId();
-      await ensureSession(sessionId, ctx.orgId, ctx.user.id, []);
+      await ensureSession(sessionId, ctx.orgId, ctx.user.id, [], NO_SKILL_CHANGES);
       await db.insert(chatSessionSpaces).values({ sessionId, spaceId: spaceB, orgId: ctx.orgId });
 
       const lostBeta = [{ ...reach[0]! }, { ...reach[1]!, permissions: ["mcp:read"] }];
@@ -2966,7 +3123,13 @@ describe("handleChatStream", () => {
 
       async function replay(stored: UIMessage | null, browserCopy: UIMessage) {
         const sessionId = mintSessionId();
-        await ensureSession(sessionId, ctx.orgId, ctx.user.id, [ctx.defaultSpaceId]);
+        await ensureSession(
+          sessionId,
+          ctx.orgId,
+          ctx.user.id,
+          [ctx.defaultSpaceId],
+          NO_SKILL_CHANGES,
+        );
         if (stored) {
           await persistUserMessage(sessionId, stored);
           await persistAssistantMessage(sessionId, answer, stored.id);

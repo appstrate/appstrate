@@ -5,17 +5,17 @@
  * a skill is a read of its `SKILL.md`, by the chat's `read_resource` or the platform's forwarded
  * `read`; the server pins the skill to the conversation when the read succeeds and refuses it
  * (pins full, budget spent) with an error. Pi's `details` never reach the UI, so everything is
- * read from the call's input and state. Any other read keeps the generic tool row.
+ * read from the call's input and state; the error is written for the model, so a failed load says
+ * it in the user's language instead. Any other read keeps the generic tool row.
  */
 
 import { makeAssistantToolUI, type ToolCallMessagePartProps } from "@assistant-ui/react";
-import { unwrapMcpResult } from "@appstrate/core/mcp-result";
 import { SKILL_DIRECTIVE } from "../directives.ts";
 import { skillLoadOf } from "./chat-skills.ts";
 import { DirectiveChip } from "./directive-chip.tsx";
 import { useChatHost } from "./runtime-context.ts";
 import { ToolFallback } from "./tool-fallback.tsx";
-import { deriveToolPhase, extractErrorMessage, type ToolPhase } from "./tool-result.ts";
+import { deriveToolPhase, type ToolPhase } from "./tool-result.ts";
 
 const STATE_KEY: Record<ToolPhase, string> = {
   pending: "skills.load.running",
@@ -35,30 +35,30 @@ function SkillLoad({
 }) {
   const { t } = useChatHost();
   const phase = deriveToolPhase(props);
-  const refusal = phase === "error" ? extractErrorMessage(unwrapMcpResult(props.result)) : null;
+  const failed = phase === "error";
   return (
     <div data-testid="skill-load" data-phase={phase} className="my-1.5 text-sm">
-      <span className="sr-only">{t(STATE_KEY[phase])}</span>
       <DirectiveChip
         directiveType={SKILL_DIRECTIVE}
         directiveId={skill.packageId}
         label={skill.name}
         className={
-          phase === "error"
+          failed
             ? "text-muted-foreground border-dashed bg-transparent"
             : phase === "success"
               ? undefined
-              : "animate-pulse"
+              : "motion-safe:animate-pulse"
         }
       />
-      {refusal && (
-        <p
-          className="text-muted-foreground mt-1 text-xs break-words"
-          data-testid="skill-load-refusal"
-        >
-          {refusal}
-        </p>
-      )}
+      {/* One live region, present from the start: its text changes as the load lands. A failure
+          is shown; the other states are for screen readers only. */}
+      <span
+        aria-live="polite"
+        data-testid="skill-load-state"
+        className={failed ? "text-muted-foreground mt-1 block text-xs" : "sr-only"}
+      >
+        {t(STATE_KEY[phase])}
+      </span>
     </div>
   );
 }

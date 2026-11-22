@@ -112,8 +112,11 @@ describe("SkillChips", () => {
     expect(html).toContain(
       'aria-label="skills.pinnedPillLabel {&quot;skills&quot;:&quot;one&quot;}"',
     );
-    // Only refused pins: no pill, the picker's chip stands in (none with discovery on).
-    expect(render(pinned(["@a/big"], true, "unavailable"))).toBe("");
+    // Only refused pins: the pill stays, counting what is not loaded, with the reset.
+    const refusedOnly = render(pinned(["@a/big", "@a/gone"], true, "unavailable"));
+    expect(refusedOnly.match(/skill-pill-pinned/g)).toHaveLength(1);
+    expect(refusedOnly).toContain("skills.notLoadedCount {&quot;count&quot;:2}");
+    expect(refusedOnly).toContain('aria-label="skills.reset"');
   });
 
   it("counts a pin the server has not evaluated yet and a pending one: the next turn loads them", () => {

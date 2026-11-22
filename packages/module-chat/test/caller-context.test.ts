@@ -208,7 +208,7 @@ describe("formatCallerContext", () => {
       },
     );
     expect(rendered.text).toContain(
-      "Loading one of these skills (its SKILL.md, with `read_resource`) pins it to the conversation",
+      "Loading one of these skills (reading its SKILL.md at the URI shown, with `read_resource` or `read`) pins it to the conversation",
     );
     expect(rendered.text.indexOf("pins it to the conversation")).toBeLessThan(
       rendered.text.indexOf("- `@acme/pdf`"),
@@ -217,7 +217,7 @@ describe("formatCallerContext", () => {
     expect(rendered.skillBudgetLeft).toBe(64_000 - "Mine body.".length);
   });
 
-  it("keeps a pinned skill that did not fit the budget in the catalogue, with its notice", () => {
+  it("lists no pin, even one that did not fit the budget: its notice says why", () => {
     const huge = {
       packageId: "@acme/huge",
       uri: "skill://space-1/acme/huge/huge/SKILL.md",
@@ -234,7 +234,8 @@ describe("formatCallerContext", () => {
         skillCatalogue: [listedSkill("@acme/huge", "Huge", "1.0.0")],
       },
     );
-    expect(out).toContain("- `@acme/huge`");
+    expect(out).not.toContain("- `@acme/huge`");
+    expect(out).not.toContain("pins it to the conversation");
     expect(out).toContain("does not fit");
     expect(out).not.toContain('<skill id="@acme/huge"');
   });
@@ -270,9 +271,7 @@ describe("formatCallerContext", () => {
       { ...BASE_OPTS, skills: { skillDiscovery: true, pinnedSkills: ["@acme/gone"] } },
     );
     expect(out).toContain("## Skills");
-    expect(out).toContain(
-      "`@acme/gone` was chosen for this conversation but is not available here",
-    );
+    expect(out).toContain("`@acme/gone` is pinned to this conversation but is not available here");
     expect(out).not.toContain("These skills are pinned to this conversation");
   });
 
@@ -351,7 +350,7 @@ describe("formatCallerContext", () => {
       expect(at("Skill discovery is off for this conversation")).toBeLessThan(
         at("These skills are pinned to this conversation"),
       );
-      expect(at(MINE_BLOCK)).toBeLessThan(at("`@acme/gone` was chosen"));
+      expect(at(MINE_BLOCK)).toBeLessThan(at("`@acme/gone` is pinned"));
     });
 
     it("names `read_resource` on the lead with the transport, with discovery on or off, and none without", () => {
@@ -543,6 +542,7 @@ function fakeSkillsClient(opts: {
   texts: Record<string, string>;
   savedAfterList?: Record<string, string>;
   blobs?: Record<string, string>;
+  listFails?: "published";
 }) {
   const calls: string[] = [];
   const signals: (AbortSignal | undefined)[] = [];
@@ -564,6 +564,7 @@ function fakeSkillsClient(opts: {
       signals.push(options?.signal);
       const draft = options?.meta?.[SKILL_DEFINITION_META_KEY] === "draft";
       calls.push(draft ? "skills/list draft" : "skills/list");
+      if (!draft && opts.listFails === "published") throw new Error("skills/list failed");
       return { skills: listed(draft ? (opts.drafts ?? []) : opts.published) };
     },
     readResource: async ({ uri }, options) => {
@@ -657,13 +658,11 @@ describe("buildCallerContextBlock", () => {
       `<skill id="@acme/a" uri="${A}" definition="draft">\na draft body\n</skill>`,
     );
     expect(out).toContain(`<skill id="@acme/c" uri="${C}" version="2.0.0">\nc body\n</skill>`);
-    expect(out).toContain("`@acme/off` was chosen for this conversation but is not available here");
-    expect(out).toContain(
-      "`@acme/other` was chosen for this conversation but is not available here",
-    );
+    expect(out).toContain("`@acme/off` is pinned to this conversation but is not available here");
+    expect(out).toContain("`@acme/other` is pinned to this conversation but is not available here");
     // The claim pins the draft to its entry's `lock_version`; a malformed entry is not injected.
     expect(out).not.toContain("b draft body");
-    expect(out).toContain("`@acme/b` was chosen for this conversation but could not be read.");
+    expect(out).toContain("`@acme/b` is pinned to this conversation but could not be read.");
     expect(injected).toEqual({
       skills: {
         "@acme/a": { definition: "draft", lockVersion: 7, spaceId: "spc_1" },
@@ -672,7 +671,7 @@ describe("buildCallerContextBlock", () => {
     });
   });
 
-  it("leaves the chosen skills out when the skills connection cannot open", async () => {
+  it("leaves the chosen skills out, unreadable, when the skills connection cannot open", async () => {
     const out = await blockText(fakeContext({ orgRole: "member" }), {
       spaces: REACH,
       restricted: false,
@@ -683,7 +682,53 @@ describe("buildCallerContextBlock", () => {
       openSkillsClient: NO_SKILLS,
     });
     expect(out).not.toContain("<skill");
-    expect(out).toContain("`@acme/a` was chosen for this conversation but is not available here");
+    expect(out).toContain("`@acme/a` is pinned to this conversation but could not be read.");
+  });
+
+  it("tells a pin missing from every listing (unavailable) from one whose read failed (unreadable)", async () => {
+    const A = "skill://spc_1/acme/a/a/SKILL.md";
+    const B = "skill://spc_1/acme/b/b/SKILL.md";
+    const D = "skill://spc_1/acme/d@draft/d/SKILL.md";
+    const block = (opts: Parameters<typeof fakeSkillsClient>[0]) =>
+      buildCallerContextBlock(fakeContext({ orgRole: "member" }), {
+        spaces: REACH,
+        restricted: false,
+        user,
+        capabilities: caps(BUILDER),
+        permissions: ["mcp:read", "mcp:invoke", "skills:read"],
+        skills: { skillDiscovery: true, pinnedSkills: ["@acme/a", "@acme/b", "@acme/gone"] },
+        openSkillsClient: fakeSkillsClient(opts).open,
+      });
+    // `@acme/b`'s `resources/read` fails; `@acme/gone` is listed nowhere.
+    const both = await block({
+      published: [skillEntry(A, "1.0.0"), skillEntry(B, "1.0.0")],
+      drafts: [skillEntry(D, null, 2)],
+      texts: { [A]: "a body", [D]: "d body" },
+    });
+    expect(both.skillStatus).toEqual({
+      "@acme/a": "injected",
+      "@acme/b": "unreadable",
+      "@acme/gone": "unavailable",
+    });
+    // What a load must read to pin each listed skill: its draft before its published version.
+    expect(both.skillUris).toEqual(
+      new Map([
+        ["@acme/a", A],
+        ["@acme/b", B],
+        ["@acme/d", D],
+      ]),
+    );
+    // A failed listing may be the one a pin is missing from: unknown, so unreadable.
+    const listFailed = await block({
+      published: [skillEntry(A, "1.0.0")],
+      texts: { [A]: "a body" },
+      listFails: "published",
+    });
+    expect(listFailed.skillStatus).toEqual({
+      "@acme/a": "unreadable",
+      "@acme/b": "unreadable",
+      "@acme/gone": "unreadable",
+    });
   });
 
   it("gives a chosen skill whose SKILL.md is served as a blob its could-not-be-read notice", async () => {
@@ -706,7 +751,7 @@ describe("buildCallerContextBlock", () => {
       },
     );
     expect(out).not.toContain("<skill");
-    expect(out).toContain("`@acme/a` was chosen for this conversation but could not be read.");
+    expect(out).toContain("`@acme/a` is pinned to this conversation but could not be read.");
     expect(injected).toEqual({ skills: {} });
   });
 
@@ -738,7 +783,7 @@ describe("buildCallerContextBlock", () => {
     ]);
     expect(out).not.toContain("<skill");
     expect(out).not.toContain("saved again");
-    expect(out).toContain("`@acme/a` was chosen for this conversation but could not be read.");
+    expect(out).toContain("`@acme/a` is pinned to this conversation but could not be read.");
     expect(injected).toEqual({ skills: {} });
   });
 
@@ -762,7 +807,7 @@ describe("buildCallerContextBlock", () => {
       },
     );
     expect(out).not.toContain("another body");
-    expect(out).toContain("`@acme/a` was chosen for this conversation but could not be read.");
+    expect(out).toContain("`@acme/a` is pinned to this conversation but could not be read.");
     expect(injected).toEqual({ skills: {} });
   });
 
@@ -871,7 +916,7 @@ describe("buildCallerContextBlock", () => {
     });
   });
 
-  it("leaves out a chosen skill whose content read is refused", async () => {
+  it("leaves out, unreadable, a chosen skill whose content read is refused", async () => {
     const skills = fakeSkillsClient({
       published: [skillEntry("skill://spc_1/acme/a/a/SKILL.md", "1.0.0")],
       texts: {},
@@ -886,7 +931,7 @@ describe("buildCallerContextBlock", () => {
       openSkillsClient: skills.open,
     });
     expect(out).not.toContain("<skill");
-    expect(out).toContain("`@acme/a` was chosen for this conversation but is not available here");
+    expect(out).toContain("`@acme/a` is pinned to this conversation but could not be read.");
     expect(skills.calls).toContain("close");
   });
 });
