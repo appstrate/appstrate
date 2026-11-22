@@ -2,9 +2,12 @@
 
 import { describe, expect, it } from "bun:test";
 import {
+  applySkillChanges,
   CHAT_SKILLS_CONTENT_BUDGET_CHARS as BUDGET,
   injectedSkills,
+  pinnedSkillsOf,
   resolveChatSkills,
+  turnSkillLoad,
   type ChatSkillSelection,
   type SkillContent,
 } from "../src/skills.ts";
@@ -25,6 +28,8 @@ describe("resolveChatSkills", () => {
     expect(resolve({ skillDiscovery: true, pinnedSkills: [] })).toEqual({
       chosen: [],
       notices: [],
+      statuses: {},
+      left: BUDGET,
     });
   });
 
@@ -71,6 +76,98 @@ describe("resolveChatSkills", () => {
     ]);
     expect(result.chosen.map((s) => s.packageId)).toEqual(["@a/art"]);
     expect(result.notices).toEqual([]);
+  });
+});
+
+describe("resolveChatSkills statuses", () => {
+  it("gives each pin its verdict and the budget the injected ones leave", () => {
+    const result = resolveChatSkills(
+      { skillDiscovery: true, pinnedSkills: ["@a/big", "@a/gone", "@a/odd", "@a/ok", "@a/over"] },
+      new Map<string, SkillContent | null>([
+        ["@a/big", content("@a/big", "x".repeat(BUDGET - 10))],
+        ["@a/odd", null],
+        ["@a/ok", content("@a/ok", "y".repeat(4))],
+        ["@a/over", content("@a/over", "z".repeat(7))],
+      ]),
+    );
+    expect(result.statuses).toEqual({
+      "@a/big": "injected",
+      "@a/gone": "unavailable",
+      "@a/odd": "unreadable",
+      "@a/ok": "injected",
+      "@a/over": "over_budget",
+    });
+    expect(result.left).toBe(6);
+  });
+});
+
+describe("applySkillChanges", () => {
+  it("drops the unpins, adds the pins, sorted and deduped", () => {
+    expect(
+      applySkillChanges(["@a/c", "@a/a"], { pin: ["@a/b", "@a/a"], unpin: ["@a/c", "@a/x"] }),
+    ).toEqual(["@a/a", "@a/b"]);
+  });
+
+  it("is idempotent", () => {
+    const changes = { pin: ["@a/b"], unpin: ["@a/a"] };
+    const once = applySkillChanges(["@a/a"], changes);
+    expect(applySkillChanges(once, changes)).toEqual(once);
+  });
+});
+
+describe("pinnedSkillsOf", () => {
+  it("sorts the pins and gives each its source and status, null when unknown", () => {
+    expect(
+      pinnedSkillsOf({
+        pinnedSkills: ["@a/z", "@a/m", "@a/a"],
+        assistantSkills: ["@a/m"],
+        skillStatus: { "@a/a": "over_budget", "@a/m": "injected", "@a/z": "bogus" },
+      }),
+    ).toEqual([
+      { id: "@a/a", source: "user", status: "over_budget" },
+      { id: "@a/m", source: "assistant", status: "injected" },
+      { id: "@a/z", source: "user", status: null },
+    ]);
+  });
+});
+
+describe("turnSkillLoad", () => {
+  const loader = (pinned: string[], full = false, budgetLeft = 100) =>
+    turnSkillLoad({
+      injected: ["@a/in"],
+      budgetLeft,
+      pin: async (id) => {
+        if (full) return false;
+        pinned.push(id);
+        return true;
+      },
+    });
+
+  it("reads a skill the turn already injected without pinning it", async () => {
+    const pinned: string[] = [];
+    expect(await loader(pinned)("@a/in", "x".repeat(1_000))).toBe("read");
+    expect(pinned).toEqual([]);
+  });
+
+  it("pins a new skill, then reads it again plainly, out of the budget left", async () => {
+    const pinned: string[] = [];
+    const load = loader(pinned);
+    expect(await load("@a/new", "x".repeat(60))).toBe("pinned");
+    expect(await load("@a/new", "x".repeat(60))).toBe("read");
+    await expect(load("@a/next", "y".repeat(41))).rejects.toThrow(/40 characters left/);
+    expect(pinned).toEqual(["@a/new"]);
+  });
+
+  it("refuses a skill over the budget left without pinning it", async () => {
+    const pinned: string[] = [];
+    await expect(loader(pinned, false, 5)("@a/new", "x".repeat(6))).rejects.toThrow(
+      /does not fit.*skills panel/,
+    );
+    expect(pinned).toEqual([]);
+  });
+
+  it("refuses when the conversation already pins the most skills", async () => {
+    await expect(loader([], true)("@a/new", "x")).rejects.toThrow(/already pins 5 skills.*unpin/);
   });
 });
 

@@ -54,6 +54,7 @@ import { isRasterImageMime, normalizeMime } from "@appstrate/core/mime";
 import type { FileDelivery } from "../file-input.ts";
 import type { TurnPdfInput } from "./native-pdf.ts";
 import { platformMcpSurfaceCache, type PlatformMcpSurface } from "./mcp-surface-cache.ts";
+import type { SkillLoad } from "../skills.ts";
 
 const RUN_AND_WAIT_TOOL = "run_and_wait";
 const READ_RESOURCE_TOOL = "read_resource";
@@ -317,6 +318,8 @@ type BuildPlatformMcpToolsOptions = {
   inlineRunModel?: InlineRunModel;
   fileDelivery: FileDelivery;
   pdfInput?: TurnPdfInput;
+  /** Pins the skills whose SKILL.md the assistant loads; absent (an ephemeral turn), loads are plain reads. */
+  skillLoad?: SkillLoad;
 };
 
 /**
@@ -562,6 +565,30 @@ function keepsSkillText(uri: unknown, resources: readonly object[]): boolean {
   );
 }
 
+/**
+ * The replay of a persisted turn's read of a skill's `SKILL.md` as text ({@link SkillLoad}): a
+ * receipt, whether the load pinned it or the turn had injected it already. Either way it is a
+ * pin, so later turns inject it from the system prompt and the replay must not again. Undefined
+ * for any other read. Throws the load's refusal, which the model reads.
+ */
+async function pinnedSkillReceipt(
+  uri: unknown,
+  resources: readonly object[],
+  skillLoad: SkillLoad | undefined,
+): Promise<PiToolResult["persistedContent"]> {
+  if (!skillLoad || typeof uri !== "string") return undefined;
+  const address = parseSkillUri(uri);
+  if (address?.path !== "SKILL.md") return undefined;
+  const text = resources.find(
+    (resource): resource is { uri: string; text: string } =>
+      (resource as { uri?: unknown }).uri === uri &&
+      typeof (resource as { text?: unknown }).text === "string",
+  )?.text;
+  if (text === undefined) return undefined;
+  await skillLoad(address.packageId, text);
+  return [{ type: "text", text: JSON.stringify({ uri, skill: address.packageId, pinned: true }) }];
+}
+
 /** Generic forwarding Pi tool: verbatim `tools/call` → adapted Pi result. */
 function makeForwardExtension(
   tool: { name: string; description?: string; inputSchema: unknown },
@@ -633,19 +660,23 @@ function makeForwardExtension(
               { ...result, content: result.content.filter((block) => block.type !== "resource") },
               scope,
             );
+            const pinned =
+              toolName === "read"
+                ? await pinnedSkillReceipt(args.uri, resources, opts.skillLoad)
+                : undefined;
             const file = await liveResources(resources, opts, toolCallId);
+            const metaText = meta.content.flatMap((block) =>
+              block.type === "text" ? [block] : [],
+            );
             return withTurnBudgetNote(
               {
                 ...meta,
                 content: [...meta.content, ...file.content],
-                ...(keepsSkillText(args.uri, resources)
-                  ? {}
-                  : {
-                      persistedContent: [
-                        ...meta.content.flatMap((block) => (block.type === "text" ? [block] : [])),
-                        ...file.receipts,
-                      ],
-                    }),
+                ...(pinned
+                  ? { persistedContent: [...metaText, ...pinned] }
+                  : keepsSkillText(args.uri, resources)
+                    ? {}
+                    : { persistedContent: [...metaText, ...file.receipts] }),
               },
               turnBudget,
             );
@@ -712,12 +743,17 @@ function makeReadResourceExtension(
         if (fileSpace && organization.spaces.some((space) => space.id === fileSpace)) {
           await organization.touch(fileSpace);
         }
+        const pinned = await pinnedSkillReceipt(uri, result.contents, opts.skillLoad);
         const { content, receipts } = await liveResources(result.contents, opts, toolCallId);
         return withTurnBudgetNote(
           {
             content,
             details: { uri },
-            ...(keepsSkillText(uri, result.contents) ? {} : { persistedContent: receipts }),
+            ...(pinned
+              ? { persistedContent: pinned }
+              : keepsSkillText(uri, result.contents)
+                ? {}
+                : { persistedContent: receipts }),
           },
           turnBudget,
         );

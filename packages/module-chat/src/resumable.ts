@@ -28,6 +28,7 @@ import Redis from "ioredis";
 import { db } from "@appstrate/db/client";
 import { chatSessions } from "@appstrate/db/schema";
 import { notifySessionUpdate } from "./realtime.ts";
+import type { PinnedSkillStatus } from "./skills.ts";
 import {
   createResumableStreamContext,
   createInMemoryResumableStreamStore,
@@ -309,16 +310,25 @@ type StreamClaim = "claimed" | "scope_changed" | "in_flight";
  * this claim refuses the turn rather than letting it act with a reach it no
  * longer has. `scope_changed`: the scope moved (or the row is gone);
  * `in_flight`: another turn holds the conversation. Neither writes anything.
+ *
+ * `skillStatus`, the turn's verdict on each pin it evaluated, replaces `skill_status` in the
+ * same statement, kept to the pins the row still holds: only a turn that claims records what
+ * it did with them.
  */
 export async function setActiveStream(
   sessionId: string,
   streamId: string,
   scope: { spaceId: string | null; restricted: boolean },
+  skillStatus: Readonly<Record<string, PinnedSkillStatus>>,
 ): Promise<StreamClaim> {
   const staleBefore = new Date(Date.now() - STALE_MARKER_MIN_AGE_MS);
   const claimed = await db
     .update(chatSessions)
-    .set({ activeStreamId: streamId, updatedAt: new Date() })
+    .set({
+      activeStreamId: streamId,
+      updatedAt: new Date(),
+      skillStatus: sql`(SELECT coalesce(jsonb_object_agg(key, value), '{}'::jsonb) FROM jsonb_each(${JSON.stringify(skillStatus)}::jsonb) WHERE key = ANY(${chatSessions.pinnedSkills}))`,
+    })
     .where(
       and(
         eq(chatSessions.id, sessionId),

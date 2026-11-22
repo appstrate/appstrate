@@ -78,6 +78,16 @@ export const chatSessions = pgTable(
       .array()
       .notNull()
       .default(sql`'{}'::text[]`),
+    // The part of `pinned_skills` the assistant pinned by loading a skill's SKILL.md; every
+    // write keeps it a subset of `pinned_skills`.
+    assistantSkills: text("assistant_skills")
+      .array()
+      .notNull()
+      .default(sql`'{}'::text[]`),
+    // `{ [packageId]: "injected" | "over_budget" | "unavailable" | "unreadable" }`: what the last
+    // turn that claimed the conversation did with each pin it evaluated. Keys ⊆ `pinned_skills`;
+    // a pin without an entry has not been evaluated yet.
+    skillStatus: jsonb("skill_status").$type<Record<string, string>>().notNull().default({}),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },

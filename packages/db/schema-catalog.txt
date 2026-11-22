@@ -47,6 +47,7 @@ column chat_session_spaces.org_id uuid not null
 column chat_session_spaces.session_id text not null
 column chat_session_spaces.space_id text not null
 column chat_sessions.active_stream_id text
+column chat_sessions.assistant_skills text[] not null default '{}'::text[]
 column chat_sessions.created_at timestamp with time zone not null default now()
 column chat_sessions.id text not null
 column chat_sessions.last_assistant_seq bigint
@@ -55,6 +56,7 @@ column chat_sessions.org_id uuid not null
 column chat_sessions.pinned_skills text[] not null default '{}'::text[]
 column chat_sessions.restricted boolean not null default false
 column chat_sessions.skill_discovery boolean not null default true
+column chat_sessions.skill_status jsonb not null default '{}'::jsonb
 column chat_sessions.space_id text
 column chat_sessions.title text
 column chat_sessions.updated_at timestamp with time zone not null default now()

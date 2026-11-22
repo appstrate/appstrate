@@ -48,6 +48,7 @@ import { turnErrorLogIds } from "../turn-error.ts";
 import { PiChatUiStreamMapper } from "./ui-stream-mapper.ts";
 import type { AgentSessionEvent, PiUsage } from "./pi-events.ts";
 import { buildPlatformMcpTools, type TurnSpaces } from "./mcp-tools.ts";
+import type { SkillLoad } from "../skills.ts";
 import { releaseOnClose, type PiChatSlot } from "./concurrency.ts";
 import { createStepCapController, type PiChatSession } from "./turn-control.ts";
 import {
@@ -118,6 +119,8 @@ export interface PiChatInput {
     surfaceKey?: string;
     /** The model the turn's inline runs launch on — see `BuildPlatformMcpToolsOptions`. */
     inlineRunModel?: InlineRunModel;
+    /** Pins the skills the assistant loads — see `BuildPlatformMcpToolsOptions`. */
+    skillLoad?: SkillLoad;
   };
   /** Aborts when the turn is explicitly stopped (decoupled from client disconnect). */
   abortSignal: AbortSignal;

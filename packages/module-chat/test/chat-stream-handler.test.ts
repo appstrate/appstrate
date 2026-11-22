@@ -76,6 +76,7 @@ import {
 import { buildStructuredPiTurn } from "../src/pi-chat/structured-session.ts";
 import { loadAttachmentImages } from "../src/pi-chat/attachment-inputs.ts";
 import { reachableSpace } from "./reachable-space.ts";
+import { CHAT_SKILLS_CONTENT_BUDGET_CHARS } from "../src/skills.ts";
 import { spaceIdRefusal } from "@appstrate/core/mcp-spaces";
 
 // The chat handler reads the system model registry; the HTTP harness initializes it at boot.
@@ -370,7 +371,7 @@ describe("handleChatStream", () => {
       orgHalf?: ReadonlySet<string>;
       /** Earlier turns replayed ahead of the new user message. */
       history?: unknown[];
-      /** Extra body fields, e.g. the picker's `skill_discovery` / `pinned_skills`. */
+      /** Extra body fields, e.g. the panel's `skill_discovery` / `pin_skills` / `unpin_skills`. */
       body?: Record<string, unknown>;
     },
   ): Promise<Response> {
@@ -1232,19 +1233,104 @@ describe("handleChatStream", () => {
     await waitForAssistantPersist(sessionId);
   });
 
-  it("writes the body's selection on the row it creates, and runs the turn on it", async () => {
+  /** The skills the platform MCP server lists in the default space, each served as `text`. */
+  function listedSkillsDispatch(
+    skills: Array<{ id: string; text: string; listedText?: string }>,
+  ): (req: Request) => Promise<Response> {
+    const uriOf = (id: string) =>
+      `skill://${ctx.defaultSpaceId}/${id.slice(1)}/${id.split("/")[1]}/SKILL.md`;
+    return async (req) => {
+      if (!new URL(req.url).pathname.startsWith("/api/mcp/")) return scriptedDispatch()(req);
+      const message = (await req.json()) as {
+        id?: number;
+        method: string;
+        params?: Record<string, unknown>;
+      };
+      const result = (value: unknown) =>
+        Response.json({ jsonrpc: "2.0", id: message.id, result: value });
+      switch (message.method) {
+        case "initialize":
+          return result({
+            protocolVersion: message.params?.protocolVersion,
+            capabilities: { resources: {}, extensions: { "io.modelcontextprotocol/skills": {} } },
+            serverInfo: { name: "fake-platform", version: "1.0.0" },
+          });
+        case "skills/list": {
+          const meta = message.params?._meta as Record<string, unknown> | undefined;
+          if (meta?.[SKILL_DEFINITION_META_KEY] === "draft") return result({ skills: [] });
+          return result({
+            skills: skills.map(({ id, text, listedText }) => ({
+              uri: uriOf(id),
+              frontmatter: {
+                name: id.split("/")[1],
+                description: id,
+                metadata: { version: "1.0.0" },
+              },
+              // A digest of other text than the one served: the read is `unreadable`.
+              resources: [
+                { uri: uriOf(id), digest: sha256(listedText ?? text), size: text.length },
+              ],
+            })),
+          });
+        }
+        case "resources/read": {
+          const uri = message.params?.uri as string;
+          const skill = skills.find(({ id }) => uriOf(id) === uri)!;
+          return result({ contents: [{ uri, mimeType: "text/markdown", text: skill.text }] });
+        }
+        default:
+          return new Response(null, { status: 202 });
+      }
+    };
+  }
+
+  const SKILL_TURN_PERMISSIONS = new Set(["mcp:read", "mcp:invoke", "skills:read"]);
+
+  async function sessionSkills(sessionId: string) {
+    const [row] = await db
+      .select({
+        skillDiscovery: chatSessions.skillDiscovery,
+        pinnedSkills: chatSessions.pinnedSkills,
+        assistantSkills: chatSessions.assistantSkills,
+        skillStatus: chatSessions.skillStatus,
+      })
+      .from(chatSessions)
+      .where(eq(chatSessions.id, sessionId));
+    return row;
+  }
+
+  async function seedSkillSession(
+    sessionId: string,
+    skills: { pinned: string[]; assistant?: string[]; status?: Record<string, string> },
+  ) {
+    await db.insert(chatSessions).values({
+      id: sessionId,
+      orgId: ctx.orgId,
+      userId: ctx.user.id,
+      title: null,
+      pinnedSkills: skills.pinned,
+      assistantSkills: skills.assistant ?? [],
+      skillStatus: skills.status ?? {},
+    });
+  }
+
+  it("applies the body's skill changes on the row it creates, and runs the turn on them", async () => {
     const sessionId = mintSessionId();
     const { engine, calls } = scriptedEngine();
     const res = await postChat(sessionId, undefined, engine, {
-      permissions: new Set(["mcp:read", "mcp:invoke", "skills:read"]),
-      body: { skill_discovery: false, pinned_skills: ["@acme/z", "@acme/a", "@acme/z"] },
+      permissions: SKILL_TURN_PERMISSIONS,
+      body: { skill_discovery: false, pin_skills: ["@acme/z", "@acme/a", "@acme/z"] },
     });
     expect(res.status).toBe(200);
     await collectUiChunks(res);
 
-    const [row] = await db.select().from(chatSessions).where(eq(chatSessions.id, sessionId));
-    expect(row?.skillDiscovery).toBe(false);
-    expect(row?.pinnedSkills).toEqual(["@acme/a", "@acme/z"]);
+    expect(await sessionSkills(sessionId)).toEqual({
+      skillDiscovery: false,
+      pinnedSkills: ["@acme/a", "@acme/z"],
+      assistantSkills: [],
+      // Listed nowhere: the claim records each pin's verdict.
+      skillStatus: { "@acme/a": "unavailable", "@acme/z": "unavailable" },
+    });
     expect(await tokenPermissions(calls[0]!)).toEqual([
       "chat:read",
       "chat:write",
@@ -1255,43 +1341,215 @@ describe("handleChatStream", () => {
     await waitForAssistantPersist(sessionId);
   });
 
-  it("lets the body's selection replace the stored one", async () => {
+  it("applies the changes against the stored pins, idempotently: a stale client keeps the assistant's pin", async () => {
     const sessionId = mintSessionId();
-    await db.insert(chatSessions).values({
-      id: sessionId,
-      orgId: ctx.orgId,
-      userId: ctx.user.id,
-      title: null,
-      skillDiscovery: false,
-      pinnedSkills: ["@acme/a"],
+    await seedSkillSession(sessionId, {
+      pinned: ["@acme/a", "@acme/b"],
+      assistant: ["@acme/b"],
+      status: { "@acme/a": "injected", "@acme/b": "injected" },
     });
-    const { engine, calls } = scriptedEngine();
-    const res = await postChat(sessionId, undefined, engine, {
-      permissions: new Set(["mcp:read", "mcp:invoke", "skills:read"]),
-      body: { skill_discovery: true, pinned_skills: [] },
+    const expected = {
+      skillDiscovery: true,
+      pinnedSkills: ["@acme/b", "@acme/c"],
+      assistantSkills: ["@acme/b"],
+      skillStatus: { "@acme/b": "unavailable", "@acme/c": "unavailable" },
+    };
+    for (const messageId of ["u1", "u2"]) {
+      const res = await postChat(sessionId, undefined, scriptedEngine().engine, {
+        permissions: SKILL_TURN_PERMISSIONS,
+        messageId,
+        body: { pin_skills: ["@acme/c"], unpin_skills: ["@acme/a"] },
+      });
+      expect(res.status).toBe(200);
+      await collectUiChunks(res);
+      await waitForAssistantPersist(sessionId);
+      expect(await sessionSkills(sessionId)).toEqual(expected);
+    }
+    // A client that read the session before the assistant pinned sends no change for it.
+    const res = await postChat(sessionId, undefined, scriptedEngine().engine, {
+      permissions: SKILL_TURN_PERMISSIONS,
+      messageId: "u3",
+      body: { skill_discovery: true },
     });
     expect(res.status).toBe(200);
     await collectUiChunks(res);
-
-    const [row] = await db.select().from(chatSessions).where(eq(chatSessions.id, sessionId));
-    expect(row?.skillDiscovery).toBe(true);
-    expect(row?.pinnedSkills).toEqual([]);
-    expect(await tokenPermissions(calls[0]!)).toContain("skills:read");
+    expect(await sessionSkills(sessionId)).toEqual(expected);
 
     await waitForAssistantPersist(sessionId);
   });
 
-  it("refuses the discovery switch without the pinned skills, and the reverse", async () => {
-    for (const body of [{ skill_discovery: true }, { pinned_skills: ["@acme/a"] }]) {
-      const res = await postChat(mintSessionId(), undefined, scriptedEngine().engine, { body });
-      expect(res.status).toBe(400);
+  it("makes a skill the user pins theirs, though the assistant pinned it", async () => {
+    const sessionId = mintSessionId();
+    await seedSkillSession(sessionId, { pinned: ["@acme/b"], assistant: ["@acme/b"] });
+    const res = await postChat(sessionId, undefined, scriptedEngine().engine, {
+      permissions: SKILL_TURN_PERMISSIONS,
+      body: { pin_skills: ["@acme/b"] },
+    });
+    expect(res.status).toBe(200);
+    await collectUiChunks(res);
+    expect(await sessionSkills(sessionId)).toMatchObject({
+      pinnedSkills: ["@acme/b"],
+      assistantSkills: [],
+    });
+
+    await waitForAssistantPersist(sessionId);
+  });
+
+  it("refuses changes that leave more than five pins with a 400 naming `pin_skills`, writing nothing", async () => {
+    const sessionId = mintSessionId();
+    const five = ["@acme/a", "@acme/b", "@acme/c", "@acme/d", "@acme/e"];
+    await seedSkillSession(sessionId, {
+      pinned: five,
+      assistant: ["@acme/e"],
+      status: { "@acme/a": "injected" },
+    });
+    const before = await sessionSkills(sessionId);
+    let engineCalls = 0;
+    const res = await postChat(
+      sessionId,
+      undefined,
+      () => {
+        engineCalls += 1;
+        throw new Error("a refused turn never starts");
+      },
+      {
+        permissions: SKILL_TURN_PERMISSIONS,
+        body: { pin_skills: ["@acme/f"], skill_discovery: false },
+      },
+    );
+    expect(res.status).toBe(400);
+    expect(JSON.stringify(await res.json())).toContain("pin_skills");
+    expect(engineCalls).toBe(0);
+    expect(await sessionSkills(sessionId)).toEqual(before);
+    expect(
+      await db.select().from(chatMessages).where(eq(chatMessages.sessionId, sessionId)),
+    ).toEqual([]);
+
+    // Swapping one for another stays within the cap.
+    const swapped = await postChat(sessionId, undefined, scriptedEngine().engine, {
+      permissions: SKILL_TURN_PERMISSIONS,
+      body: { pin_skills: ["@acme/f"], unpin_skills: ["@acme/e"] },
+    });
+    expect(swapped.status).toBe(200);
+    await collectUiChunks(swapped);
+    expect((await sessionSkills(sessionId))?.pinnedSkills).toEqual([
+      "@acme/a",
+      "@acme/b",
+      "@acme/c",
+      "@acme/d",
+      "@acme/f",
+    ]);
+
+    await waitForAssistantPersist(sessionId);
+  });
+
+  it("records each pin's verdict at the claim: injected, over budget, unavailable, unreadable", async () => {
+    const sessionId = mintSessionId();
+    await seedSkillSession(sessionId, {
+      pinned: ["@acme/big", "@acme/gone", "@acme/odd", "@acme/over"],
+      // Replaced whole by the claim: a stale verdict does not survive.
+      status: { "@acme/gone": "injected" },
+    });
+    const res = await postChat(sessionId, undefined, scriptedEngine().engine, {
+      permissions: SKILL_TURN_PERMISSIONS,
+      dispatch: listedSkillsDispatch([
+        { id: "@acme/big", text: "x".repeat(CHAT_SKILLS_CONTENT_BUDGET_CHARS - 10) },
+        { id: "@acme/odd", text: "served", listedText: "listed" },
+        { id: "@acme/over", text: "y".repeat(20) },
+      ]),
+    });
+    expect(res.status).toBe(200);
+    await collectUiChunks(res);
+    expect((await sessionSkills(sessionId))?.skillStatus).toEqual({
+      "@acme/big": "injected",
+      "@acme/gone": "unavailable",
+      "@acme/odd": "unreadable",
+      "@acme/over": "over_budget",
+    });
+
+    await waitForAssistantPersist(sessionId);
+  });
+
+  it("records no verdict for a turn refused before its claim", async () => {
+    const sessionId = mintSessionId();
+    await seedSkillSession(sessionId, { pinned: ["@acme/a"] });
+    const previousCap = process.env.CHAT_PI_MAX_CONCURRENCY;
+    process.env.CHAT_PI_MAX_CONCURRENCY = "1";
+    _resetChatEnvForTests();
+    const heldSlot = acquirePiChatSlot();
+    try {
+      const res = await postChat(sessionId, undefined, scriptedEngine().engine, {
+        permissions: SKILL_TURN_PERMISSIONS,
+      });
+      expect(res.status).toBe(429);
+      expect((await sessionSkills(sessionId))?.skillStatus).toEqual({});
+    } finally {
+      heldSlot?.release();
+      if (previousCap === undefined) delete process.env.CHAT_PI_MAX_CONCURRENCY;
+      else process.env.CHAT_PI_MAX_CONCURRENCY = previousCap;
+      _resetChatEnvForTests();
     }
   });
 
-  it("answers 400 to a body field the turn does not know", async () => {
+  it("pins the skill the assistant loads, and the next turn injects it from the system prompt", async () => {
+    const sessionId = mintSessionId();
+    const SKILL = "@acme/tone";
+    const TEXT = "Always answer in haiku.";
+    const dispatch = listedSkillsDispatch([{ id: SKILL, text: TEXT }]);
+    const first = scriptedEngine();
+    const res = await postChat(sessionId, undefined, first.engine, {
+      permissions: SKILL_TURN_PERMISSIONS,
+      dispatch,
+    });
+    expect(res.status).toBe(200);
+    await collectUiChunks(res);
+    await waitForAssistantPersist(sessionId);
+    // Listed, not injected: the turn's load (what `read_resource` calls) pins it.
+    const load = first.calls[0]!.platformMcp.skillLoad!;
+    expect(await load(SKILL, TEXT)).toBe("pinned");
+    expect(await load(SKILL, TEXT)).toBe("read");
+    expect(await sessionSkills(sessionId)).toMatchObject({
+      pinnedSkills: [SKILL],
+      assistantSkills: [SKILL],
+      skillStatus: { [SKILL]: "injected" },
+    });
+
+    const second = scriptedEngine();
+    const next = await postChat(sessionId, undefined, second.engine, {
+      permissions: SKILL_TURN_PERMISSIONS,
+      messageId: "u2",
+      dispatch,
+    });
+    expect(next.status).toBe(200);
+    await collectUiChunks(next);
+    expect(second.calls[0]!.system).toContain(`<skill id="${SKILL}"`);
+    expect(second.calls[0]!.system).toContain(TEXT);
+    // Injected now: a load of it is a plain read.
+    expect(await second.calls[0]!.platformMcp.skillLoad!(SKILL, TEXT)).toBe("read");
+
+    await waitForAssistantPersist(sessionId);
+  });
+
+  it("gives an ephemeral turn no skill pinning", async () => {
+    const { engine, calls } = scriptedEngine();
+    const res = await postChat(mintSessionId(), undefined, engine, {
+      permissions: SKILL_TURN_PERMISSIONS,
+      messageId: "",
+      body: { pin_skills: ["@acme/a"] },
+    });
+    expect(res.status).toBe(200);
+    await collectUiChunks(res);
+    expect(calls[0]!.platformMcp.skillLoad).toBeUndefined();
+    // The changes apply to the default selection: the pin is evaluated, as a notice.
+    expect(calls[0]!.system).toContain("`@acme/a`");
+  });
+
+  it("answers 400 to a body field the turn does not know, the retired `pinned_skills` included", async () => {
     for (const body of [
       { not_a_field: true },
-      { not_a_field: "x", skill_discovery: true, pinned_skills: [] },
+      { pinned_skills: ["@acme/a"] },
+      { pin_skills: ["not-a-package-id"] },
+      { unpin_skills: ["@a/1", "@a/2", "@a/3", "@a/4", "@a/5", "@a/6"] },
     ]) {
       const res = await postChat(mintSessionId(), undefined, scriptedEngine().engine, { body });
       expect(res.status).toBe(400);
@@ -2354,7 +2612,7 @@ describe("handleChatStream", () => {
                 ],
                 read,
               ),
-              body: { skill_discovery: true, pinned_skills: [ONLY_B] },
+              body: { pin_skills: [ONLY_B] },
             },
             reachWith([ctx.defaultSpaceId, spaceB]),
           );
@@ -2393,7 +2651,7 @@ describe("handleChatStream", () => {
             mintSessionId(),
             {
               dispatch: skillsDispatch([[spaceB, ONLY_B]], read),
-              body: { skill_discovery: true, pinned_skills: [ONLY_B] },
+              body: { pin_skills: [ONLY_B] },
             },
             reachWith([ctx.defaultSpaceId]),
           );
@@ -2414,7 +2672,7 @@ describe("handleChatStream", () => {
                 ],
                 read,
               ),
-              body: { skill_discovery: true, pinned_skills: [ONLY_B] },
+              body: { pin_skills: [ONLY_B] },
             },
             reachWith([ctx.defaultSpaceId, spaceB]),
           );

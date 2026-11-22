@@ -1,6 +1,7 @@
 # Skills in the chat
 
-Implements issue #1309 (replaces the earlier attempts #851, #1126 and #1165).
+Implements issue #1309 (replaces the earlier attempts #851, #1126 and #1165); the
+server-owned pins (sources, statuses, deltas, assistant loads) are #2356.
 
 ## Problem
 
@@ -11,7 +12,10 @@ native skill directory is not an option.
 ## Model
 
 Each conversation has two skill settings, stored on `chat_sessions`:
-`pinned_skills` (the chosen skills) and `skill_discovery` (default `true`).
+`pinned_skills` (the pinned skills, whoever pinned them) and `skill_discovery` (default `true`).
+
+**Invariant**: a skill shown as loaded is injected in the model's context. The server is the
+only source of truth for the pins; the client never infers "loaded".
 
 | `skill_discovery` | The model sees                                                  | Skill tools on the turn                     |
 | ----------------- | --------------------------------------------------------------- | ------------------------------------------- |
@@ -86,25 +90,70 @@ may miss the cache once.
 
 - `skill_discovery boolean NOT NULL DEFAULT true`;
 - `pinned_skills text[] NOT NULL DEFAULT '{}'` — sorted, deduplicated, at most
-  5, no FK.
+  5, no FK;
+- `assistant_skills text[] NOT NULL DEFAULT '{}'` — the part of `pinned_skills` the assistant
+  pinned (migration 0113);
+- `skill_status jsonb NOT NULL DEFAULT '{}'` — `{ [packageId]: "injected" | "over_budget" |
+"unavailable" | "unreadable" }`, the verdict of the last turn that claimed the conversation
+  on each pin it evaluated (a digest mismatch is `unreadable`).
 
+Every write keeps `assistant_skills ⊆ pinned_skills` and `keys(skill_status) ⊆ pinned_skills`.
 `ChatSkillSelection` carries the column names (`skillDiscovery`, `pinnedSkills`), so
 a session row is a selection.
+
+Every session DTO carries `skill_discovery` and `skills: [{ id, source: "user" | "assistant",
+status }]`, sorted by id (`pinnedSkillsOf`); `status` is null for a pin no claimed turn has
+evaluated yet.
+
+### Statuses
+
+`resolveChatSkills` (pure) gives each pin its verdict next to the injected skills and the
+notices, and the budget the injected ones leave. The turn that claims the conversation writes
+exactly those verdicts in the claim's own UPDATE (`claimTurn` → `setActiveStream`), filtered
+to the pins the row still holds; a turn refused before the claim (admission gate, model
+binding, capacity, cap) writes none.
+
+### Assistant loads pin
+
+A persisted turn's `read_resource` (and the platform `read` tool, through the same
+`pinnedSkillReceipt` helper) on a skill's `SKILL.md` that answers text goes through the turn's
+`SkillLoad` (`turnSkillLoad`, built in `chat-stream.ts` from the injected set and the budget
+left, threaded to `buildPlatformMcpTools` as `skillLoad`):
+
+- a skill this turn already injected (system prompt, or an earlier load) is read with no write;
+- a text longer than the budget left this turn (64 000 minus the injected pins and the skills
+  loaded this turn) throws a refusal, nothing marked;
+- else `pinAssistantSkill` appends it to `pinned_skills` + `assistant_skills` and marks it
+  `injected`, in one UPDATE guarded on `cardinality(pinned_skills) < 5` (a skill the user
+  already pinned keeps its source); no row = the cap refusal, a lost race included.
+
+Both the first and the last case return the text for this turn and persist a receipt
+(`{"uri","skill":"@scope/name","pinned":true}`): the skill is a pin either way, so a replay never
+re-injects the body and the next turns inject it from the system prompt, where summarization
+cannot drop it.
+
+The refusals tell the model what happened and that the user can unpin a skill in the skills
+panel. An ephemeral turn has no `SkillLoad`: its loads are plain reads. A skill's other files
+read as before. The `## Skills` listing opens with the rule (loading pins, cap 5, one budget).
 
 Rejected: a `chat_session_skills` table (a replace-on-write set read with the
 session row needs none); a third setting for a listing tool distinct from
 discovery: `listSkills` and `resources/read` on a skill the turn did not inject both answer to
 `skills:read` alone, so discovery is one switch.
 
-The selection rides the turn: `POST /api/chat` takes `skill_discovery` and
-`pinned_skills` (both or neither), and `ensureSession` writes them in the
-upsert that creates or claims the row, before the turn's grants are derived
-from them. Absent, the stored selection stands (discovery on, no chosen skill, for a new
-conversation). Nothing is written before the first message: choosing creates
+The selection rides the turn as CHANGES, never a full set: `POST /api/orgs/{orgId}/chat` takes
+`skill_discovery`, `pin_skills` and `unpin_skills` (each optional, at most 5 ids), and
+`ensureSession` applies them in the upsert that creates or claims the row, each column
+computed from the row as the statement finds it — `pinned_skills` = (stored − unpin) ∪ pin,
+a pin leaves `assistant_skills` (the user's now), an unpin leaves all three columns — so a
+client that read the session before the assistant pinned cannot drop that pin, and re-sending
+the same changes changes nothing. More than 5 pins as a result is a 400 naming `pin_skills`,
+nothing written (the cap rides the conflict arm's `WHERE`). An ephemeral turn applies the
+changes to the default selection. Absent, the stored selection stands (discovery on, no
+pinned skill, for a new conversation). Nothing is written before the first message: choosing creates
 no conversation, no sidebar row, no navigation, and there is no write to wait
 for or to fail. A change made on an existing conversation and not followed by a
-message is lost on reload — as a model choice is. Every session DTO carries both
-fields. There is no chat-specific skill listing: the picker reads
+message is lost on reload — as a model choice is. There is no chat-specific skill listing: the picker reads
 `GET /api/packages/skills`.
 
 Rejected: `GET /api/me/context?skills=<ids>` resolving the chosen skills by
@@ -118,10 +167,11 @@ chat exists — all for a choice the next turn carries anyway.
 
 UI: a skills panel in the composer — one checkbox per skill, always active,
 and the discovery switch. Mounted when `canPinSkills` holds (`chat:write` ∧
-`skills:read`) and the session read succeeded — a failed read would show the
-defaults, and a change would send them over the stored choice. The panel is
-controlled: the conversation holds the selection, seeded from the session
-detail, and sends only what the user changed.
+`skills:read`) and the session read succeeded. The client state is the session
+DTO plus its local changes; it sends the changes and drops them once the turn
+that carried them ended and the session detail was read again. Each row shows
+the pin's real state and source (loaded by the user, by the assistant, cited in
+the draft, or not loaded with its reason).
 
 ## Commands
 
@@ -129,7 +179,7 @@ The composer's `/` menu (#2173) lists the skills the conversation can pin and th
 caller can launch, read as an MCP client reads the platform server (`skills/list`,
 `prompts/list`) over one connection of the caller's own: `GET /api/orgs/{orgId}/chat/commands`
 (`?spaceId=` reads one space, as a limited conversation). `/<skill>` is only the composer
-adding the id to `pinned_skills`: no backend path of its own, no one-turn injection.
+adding the id to the turn's `pin_skills`: no backend path of its own, no one-turn injection.
 
 An agent launch is a `data-agent-prompt` part (`{ name, title }`) in the last user message. The
 turn resolves it with `prompts/get` (the typed text as `request`) before taking the slot and the

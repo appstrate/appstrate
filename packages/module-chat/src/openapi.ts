@@ -8,7 +8,7 @@
  */
 
 import { scopedNameRegex } from "@appstrate/core/validation";
-import { MAX_PINNED_SKILLS } from "./skills.ts";
+import { MAX_PINNED_SKILLS, PINNED_SKILL_STATUSES } from "./skills.ts";
 
 const problem = {
   "application/problem+json": { schema: { $ref: "#/components/schemas/ProblemDetail" } },
@@ -17,6 +17,17 @@ const problem = {
 const stdHeaders = {
   "Request-Id": { $ref: "#/components/headers/RequestId" },
   "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
+} as const;
+
+/** A list of `@scope/name` package ids, as `pin_skills` and `unpin_skills` carry them. */
+const skillIds = {
+  type: "array",
+  maxItems: MAX_PINNED_SKILLS,
+  items: {
+    type: "string",
+    pattern: scopedNameRegex.source,
+    description: "`@scope/name` package id",
+  },
 } as const;
 
 export const chatComponentSchemas = {
@@ -28,7 +39,7 @@ export const chatComponentSchemas = {
       "generating",
       "unread",
       "skill_discovery",
-      "pinned_skills",
+      "skills",
       "spaceId",
       "restricted",
       "space_ids",
@@ -53,11 +64,30 @@ export const chatComponentSchemas = {
         description:
           "Whether the assistant may find skills beyond the pinned ones. On: the skills of the spaces the conversation can act in (its origin space alone when it is limited), minus the pinned ones, are listed in the context and the assistant loads what fits. Off: the turn holds no `skills:*` permission, so it lists, loads, declares and writes no other skill. Written by the turn that carries it (POST /api/orgs/{orgId}/chat).",
       },
-      pinned_skills: {
+      skills: {
         type: "array",
-        items: { type: "string" },
+        items: {
+          type: "object",
+          required: ["id", "source", "status"],
+          properties: {
+            id: { type: "string", description: "`@scope/name` package id." },
+            source: {
+              type: "string",
+              enum: ["user", "assistant"],
+              description:
+                "Who pinned it: the user (`pin_skills`), or the assistant by loading its SKILL.md. A user pin of an assistant's skill makes it the user's.",
+            },
+            status: {
+              type: ["string", "null"],
+              enum: [...PINNED_SKILL_STATUSES, null],
+              description:
+                "What the last turn that started in the conversation did with it: `injected` (in the assistant's context), or left out — `over_budget` (the pinned skills share a 64 000-character budget), `unavailable` (removed, deactivated or out of reach), `unreadable` (its SKILL.md could not be read as listed). Null until a turn evaluates it.",
+            },
+          },
+        },
+        maxItems: MAX_PINNED_SKILLS,
         description:
-          "Package ids (`@scope/name`) pinned to this conversation, sorted. Injected in full on every turn, whatever `skill_discovery`.",
+          "The skills pinned to this conversation, sorted by id: injected in full on every turn, whatever `skill_discovery`. Changed by the turns that carry `pin_skills` / `unpin_skills`, and by the assistant loading a skill's SKILL.md.",
       },
       spaceId: {
         type: ["string", "null"],
@@ -103,7 +133,7 @@ export const chatComponentSchemas = {
           type: "object",
           required: ["id", "name", "description", "version"],
           properties: {
-            id: { type: "string", description: "`@scope/name`: what `pinned_skills` holds." },
+            id: { type: "string", description: "`@scope/name`: what `pin_skills` names." },
             name: { type: "string", description: "The skill's `SKILL.md` frontmatter `name`." },
             description: { type: "string" },
             version: {
@@ -524,18 +554,16 @@ export const chatPaths = {
                 skill_discovery: {
                   type: "boolean",
                   description:
-                    "Whether the assistant may find skills beyond the pinned ones (see ChatSession `skill_discovery`), written onto the session by this turn. Sent with `pinned_skills` or not at all; absent = the stored selection (on, with no pinned skill, for a new conversation).",
+                    "Whether the assistant may find skills beyond the pinned ones (see ChatSession `skill_discovery`), written onto the session by this turn; absent = the stored value (on, for a new conversation).",
                 },
-                pinned_skills: {
-                  type: "array",
-                  maxItems: MAX_PINNED_SKILLS,
-                  items: {
-                    type: "string",
-                    pattern: scopedNameRegex.source,
-                    description: "`@scope/name` package id",
-                  },
+                pin_skills: {
+                  ...skillIds,
+                  description: `Skills to pin to the conversation, on top of its stored pins (a change, never the whole set: a pin the assistant added in between stays). A skill the assistant pinned becomes the user's. More than ${MAX_PINNED_SKILLS} pins as a result is a 400 naming this field, and nothing is written.`,
+                },
+                unpin_skills: {
+                  ...skillIds,
                   description:
-                    "The skills pinned to the conversation, written with `skill_discovery`. Deduped server-side; the cap applies to the array as sent.",
+                    "Skills to unpin from the conversation, whoever pinned them. Applied before `pin_skills`; unpinning a skill that is not pinned changes nothing.",
                 },
                 id: { type: "string", description: "Session id (the assistant-ui thread id)" },
               },

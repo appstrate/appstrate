@@ -65,7 +65,7 @@ describe("POST /api/orgs/:orgId/chat/sessions/:id/stop", () => {
     const controller = new AbortController();
     registerStopController(streamId, controller);
     registered.push(streamId);
-    await setActiveStream(sessionId, streamId, UNLIMITED);
+    await setActiveStream(sessionId, streamId, UNLIMITED, {});
     return { sessionId, controller };
   }
 

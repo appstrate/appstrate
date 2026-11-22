@@ -149,7 +149,9 @@ describe("formatCallerContext", () => {
         skillCatalogue,
       });
       expect(out.split("## Skills")).toHaveLength(2);
-      expect(out).toContain("The user chose these skills for this conversation.");
+      expect(out).toContain(
+        "These skills are pinned to this conversation, by the user or by your own earlier load.",
+      );
       expect(out).toContain(
         '<skill id="@acme/mine" uri="skill://space-1/acme/mine/mine/SKILL.md" version="1.0.0">\nMine body.\n</skill>',
       );
@@ -186,6 +188,33 @@ describe("formatCallerContext", () => {
     expect(out).not.toContain("- `@acme/mine`");
     expect(out.match(/@acme\/mine/g)).toHaveLength(1);
     expect(out).toContain('<skill id="@acme/mine"');
+  });
+
+  it("teaches that loading a listed skill pins it, and hands the claim each pin's verdict and the budget left", () => {
+    const mine = {
+      packageId: "@acme/mine",
+      uri: "skill://space-1/acme/mine/mine/SKILL.md",
+      version: "1.0.0",
+      served: { definition: "published", version: "1.0.0" } as const,
+      content: "Mine body.",
+    };
+    const rendered = identityContext(
+      { user: { name: "Ada" }, org: { role: "member" } },
+      {
+        ...BASE_OPTS,
+        skills: { skillDiscovery: true, pinnedSkills: ["@acme/gone", "@acme/mine"] },
+        skillContents: new Map([["@acme/mine", mine]]),
+        skillCatalogue: [listedSkill("@acme/pdf", "PDF", "1.0.0")],
+      },
+    );
+    expect(rendered.text).toContain(
+      "Loading one of these skills (its SKILL.md, with `read_resource`) pins it to the conversation",
+    );
+    expect(rendered.text.indexOf("pins it to the conversation")).toBeLessThan(
+      rendered.text.indexOf("- `@acme/pdf`"),
+    );
+    expect(rendered.skillStatus).toEqual({ "@acme/gone": "unavailable", "@acme/mine": "injected" });
+    expect(rendered.skillBudgetLeft).toBe(64_000 - "Mine body.".length);
   });
 
   it("keeps a pinned skill that did not fit the budget in the catalogue, with its notice", () => {
@@ -244,7 +273,7 @@ describe("formatCallerContext", () => {
     expect(out).toContain(
       "`@acme/gone` was chosen for this conversation but is not available here",
     );
-    expect(out).not.toContain("The user chose these skills");
+    expect(out).not.toContain("These skills are pinned to this conversation");
   });
 
   it("omits the heading entirely when nothing is pinned and nothing is listed", () => {
@@ -320,7 +349,7 @@ describe("formatCallerContext", () => {
         return out.indexOf(text);
       };
       expect(at("Skill discovery is off for this conversation")).toBeLessThan(
-        at("The user chose these skills"),
+        at("These skills are pinned to this conversation"),
       );
       expect(at(MINE_BLOCK)).toBeLessThan(at("`@acme/gone` was chosen"));
     });

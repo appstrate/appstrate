@@ -27,8 +27,10 @@ import { logger } from "./logger.ts";
 import { reaches, type TurnCapabilities } from "./capabilities.ts";
 import {
   injectedSkills,
+  MAX_PINNED_SKILLS,
   resolveChatSkills,
   type ChatSkillSelection,
+  type PinnedSkillStatus,
   type SkillContent,
 } from "./skills.ts";
 
@@ -83,7 +85,9 @@ const SKILLS_FILES = {
   none: "Only each SKILL.md is provided.",
 };
 const SKILLS_INJECTED_LEAD =
-  "The user chose these skills for this conversation. Each is a procedure for YOU: follow it whenever it applies.";
+  "These skills are pinned to this conversation, by the user or by your own earlier load. Each is a procedure for YOU: follow it whenever it applies.";
+// Loading a listed skill pins it (`turnSkillLoad`): told once, ahead of the listing it applies to.
+const SKILLS_LISTED_LEAD = `Loading one of these skills (its SKILL.md, with \`read_resource\`) pins it to the conversation: later turns show it in full here. A conversation pins at most ${MAX_PINNED_SKILLS} skills, which share one budget; a load refused for either reason says so, and the user can unpin a skill in the skills panel of the composer.`;
 // Why this turn holds no `skills:*`: without it, a model reads the gap as a role
 // to fix and hunts through other operations.
 const SKILLS_DISCOVERY_OFF_NOTE =
@@ -277,10 +281,16 @@ function skillBlock(skill: SkillContent): string {
   return `<skill id="${skill.packageId}" uri="${skill.uri}"${served}>\n${skill.content.trim()}\n</skill>`;
 }
 
-/** A rendered block (or section) and the skills it injected, which the turn's MCP bearer names. */
+/**
+ * A rendered block (or section) and the skills it injected, which the turn's MCP bearer names,
+ * with each pin's verdict (`skill_status`, written by the claim) and the budget left for an
+ * assistant load.
+ */
 interface RenderedContext {
   text: string;
   injected: InjectedSkillMap;
+  skillStatus: Record<string, PinnedSkillStatus>;
+  skillBudgetLeft: number;
 }
 
 /** `## Skills`, or "": the skills section `formatCallerContext` appends after the identity lines. */
@@ -301,7 +311,7 @@ function formatSkillsSection(opts: {
       : [];
   const groups: string[][] = [];
   if (!opts.selection.skillDiscovery) groups.push([SKILLS_DISCOVERY_OFF_NOTE]);
-  if (listed.length) groups.push(listed.map(skillLine));
+  if (listed.length) groups.push([SKILLS_LISTED_LEAD, ...listed.map(skillLine)]);
   if (skills.chosen.length) {
     groups.push([
       `${SKILLS_INJECTED_LEAD} ${files}`,
@@ -313,7 +323,12 @@ function formatSkillsSection(opts: {
     groups.length === 0
       ? ""
       : [SKILLS_HEADING, ...groups.map((group) => group.join("\n"))].join("\n\n");
-  return { text, injected: injectedSkills(skills) };
+  return {
+    text,
+    injected: injectedSkills(skills),
+    skillStatus: skills.statuses,
+    skillBudgetLeft: skills.left,
+  };
 }
 
 type CallerContextOpts = {
@@ -408,7 +423,7 @@ export function formatCallerContext(
   // Neither the connected integrations, the runnable agents nor the recent runs are rendered: they
   // differ per space, and the last rewrites itself on every launch, busting the system prompt's
   // single cache breakpoint. The model reads them with the tools, for the space concerned.
-  return { text: lines.join("\n"), injected: skills.injected };
+  return { ...skills, text: lines.join("\n") };
 }
 
 /**
@@ -633,7 +648,7 @@ export async function buildCallerContextBlock(
     /** Opened only when the turn lists or injects skills, under `signal`; closed once they are read. */
     openSkillsClient: (signal: AbortSignal) => Promise<ChatSkillsClient>;
   },
-): Promise<{ text: string; injected: InjectedSkills }> {
+): Promise<Omit<RenderedContext, "injected"> & { injected: InjectedSkills }> {
   const { user, locale, capabilities, skills } = args;
   // The persona's while previewing: this block tells the model what the caller
   // may do, and every operation it names is checked against the persona.
@@ -657,7 +672,7 @@ export async function buildCallerContextBlock(
       chosen: skills.pinnedSkills,
     },
   );
-  const { text, injected } = formatCallerContext(identity, {
+  const { injected, ...rendered } = formatCallerContext(identity, {
     locale,
     capabilities,
     rolePreview: persona !== undefined,
@@ -669,5 +684,5 @@ export async function buildCallerContextBlock(
     skillCatalogue: turnSkills.catalogue,
   });
   // What `resources/read` serves without `skills:*`: each skill in the space its URI names.
-  return { text, injected: { skills: injected } };
+  return { ...rendered, injected: { skills: injected } };
 }

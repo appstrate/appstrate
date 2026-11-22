@@ -61,6 +61,7 @@ import { clearActiveStream, getResumableContext, STALE_MARKER_MIN_AGE_MS } from 
 import { mintSessionId } from "./session-id.ts";
 import { notifySessionUpdate } from "./realtime.ts";
 import { logger } from "./logger.ts";
+import { pinnedSkillsOf } from "./skills.ts";
 import {
   createSession,
   sessionVisible,
@@ -135,7 +136,7 @@ function toSessionDto(row: SessionRow, touchedSpaceIds: readonly string[]) {
       row.lastAssistantSeq != null &&
       (row.lastReadSeq == null || row.lastReadSeq < row.lastAssistantSeq),
     skill_discovery: row.skillDiscovery,
-    pinned_skills: row.pinnedSkills,
+    skills: pinnedSkillsOf(row),
     spaceId: row.spaceId,
     restricted: row.restricted,
     space_ids: touchedSpaceIds,

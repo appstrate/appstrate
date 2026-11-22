@@ -87,7 +87,7 @@ describe("chat_session_update SSE fan-out", () => {
     const res = await openStream(ctx);
     await wait();
 
-    await claimTurn(session.id, "strm_1", { spaceId: null, restricted: false });
+    await claimTurn(session.id, "strm_1", { spaceId: null, restricted: false }, {});
     await persistClaimedUserMessage(session.id, "strm_1", {
       id: "u1",
       role: "user",

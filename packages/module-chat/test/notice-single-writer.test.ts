@@ -214,7 +214,7 @@ describe("persistNotice single-writer guard", () => {
 
   it("refuses while a turn owns the session", async () => {
     const sessionId = await createSession();
-    await setActiveStream(sessionId, "strm_live", UNLIMITED);
+    await setActiveStream(sessionId, "strm_live", UNLIMITED, {});
 
     const posted = await persistNotice({
       sessionId,
@@ -235,7 +235,7 @@ describe("persistNotice single-writer guard", () => {
     const sessionId = await createSession();
     await installClaimProbe();
     try {
-      await claimTurn(sessionId, "strm_claim", UNLIMITED);
+      await claimTurn(sessionId, "strm_claim", UNLIMITED, {});
       await persistClaimedUserMessage(sessionId, "strm_claim", userMessage("u1", "bonjour"));
       // Exactly one message landed, and the session was already claimed when it
       // did. With the write ordered first this reads `[null]`: a notice
@@ -252,7 +252,7 @@ describe("persistNotice single-writer guard", () => {
     // never started, or the session is stuck "generating" for good — the resume
     // GET answering 204 and `persistNotice` refusing forever.
     const sessionId = await createSession();
-    await claimTurn(sessionId, "strm_failed", UNLIMITED);
+    await claimTurn(sessionId, "strm_failed", UNLIMITED, {});
     await failEveryMessageInsert();
     try {
       await expect(
@@ -281,7 +281,7 @@ describe("persistNotice single-writer guard", () => {
       .set({ spaceId: ctx.defaultSpaceId, restricted: true })
       .where(eq(chatSessions.id, sessionId));
     const claim = (scope: { spaceId: string | null; restricted: boolean }) =>
-      claimTurn(sessionId, "strm_scope", scope);
+      claimTurn(sessionId, "strm_scope", scope, {});
 
     for (const read of [
       { spaceId: ctx.defaultSpaceId, restricted: false },
@@ -312,7 +312,7 @@ describe("persistNotice single-writer guard", () => {
       .set({ spaceId: ctx.defaultSpaceId, restricted: false })
       .where(eq(chatSessions.id, sessionId));
     await expect(
-      claimTurn(sessionId, "strm_origin", { spaceId: null, restricted: false }),
+      claimTurn(sessionId, "strm_origin", { spaceId: null, restricted: false }, {}),
     ).rejects.toMatchObject({ status: 409, code: "chat_turn_scope_changed" });
     expect(await activeStreamId(sessionId)).toBeNull();
   });
@@ -321,8 +321,8 @@ describe("persistNotice single-writer guard", () => {
     // One turn at a time: a second claim must not take the marker, or the first turn's
     // teardown would not find it and the limit PATCH would pass while it still acts.
     const sessionId = await createSession();
-    await claimTurn(sessionId, "strm_first", UNLIMITED);
-    await expect(claimTurn(sessionId, "strm_second", UNLIMITED)).rejects.toMatchObject({
+    await claimTurn(sessionId, "strm_first", UNLIMITED, {});
+    await expect(claimTurn(sessionId, "strm_second", UNLIMITED, {})).rejects.toMatchObject({
       status: 409,
       code: "chat_turn_in_flight",
     });
@@ -331,12 +331,12 @@ describe("persistNotice single-writer guard", () => {
 
   it("takes over a stale marker, whose producer is gone", async () => {
     const sessionId = await createSession();
-    await claimTurn(sessionId, "strm_dead", UNLIMITED);
+    await claimTurn(sessionId, "strm_dead", UNLIMITED, {});
     await db
       .update(chatSessions)
       .set({ updatedAt: new Date(Date.now() - STALE_MARKER_MIN_AGE_MS - 1_000) })
       .where(eq(chatSessions.id, sessionId));
-    await claimTurn(sessionId, "strm_next", UNLIMITED);
+    await claimTurn(sessionId, "strm_next", UNLIMITED, {});
     expect(await activeStreamId(sessionId)).toBe("strm_next");
   });
 

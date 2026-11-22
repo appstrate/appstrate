@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * The skill selection the session DTOs carry back. A turn writes the selection
- * (`chat-stream-handler.test.ts`).
+ * The skills the session DTOs carry back: each pin with its source and status. Turns write
+ * them (`chat-stream-handler.test.ts`).
  */
 
 import { describe, it, expect, beforeEach } from "bun:test";
@@ -22,7 +22,7 @@ const app = getTestApp();
 interface SessionDto {
   id: string;
   skill_discovery: boolean;
-  pinned_skills: string[];
+  skills: { id: string; source: string; status: string | null }[];
 }
 
 describe("chat session skills", () => {
@@ -51,12 +51,17 @@ describe("chat session skills", () => {
     expect(created.status).toBe(201);
     const fresh = (await created.json()) as SessionDto;
     expect(fresh.skill_discovery).toBe(true);
-    expect(fresh.pinned_skills).toEqual([]);
+    expect(fresh.skills).toEqual([]);
 
     // Written by a turn in real use (`chat-stream-handler.test.ts`); here, the row.
     await db
       .update(chatSessions)
-      .set({ skillDiscovery: false, pinnedSkills: ["@acme/a"] })
+      .set({
+        skillDiscovery: false,
+        pinnedSkills: ["@acme/a", "@acme/b", "@acme/c"],
+        assistantSkills: ["@acme/b"],
+        skillStatus: { "@acme/a": "injected", "@acme/b": "over_budget" },
+      })
       .where(eq(chatSessions.id, fresh.id));
 
     const list = (await (
@@ -66,10 +71,15 @@ describe("chat session skills", () => {
     };
     const row = list.data.find((s) => s.id === fresh.id);
     expect(row?.skill_discovery).toBe(false);
-    expect(row?.pinned_skills).toEqual(["@acme/a"]);
+    const skills = [
+      { id: "@acme/a", source: "user", status: "injected" },
+      { id: "@acme/b", source: "assistant", status: "over_budget" },
+      { id: "@acme/c", source: "user", status: null },
+    ];
+    expect(row?.skills).toEqual(skills);
 
     const detail = await getSession(fresh.id);
     expect(detail.skill_discovery).toBe(false);
-    expect(detail.pinned_skills).toEqual(["@acme/a"]);
+    expect(detail.skills).toEqual(skills);
   });
 });
