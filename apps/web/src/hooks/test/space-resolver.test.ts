@@ -99,6 +99,8 @@ describe("droppedOnSpaceSwitch", () => {
       null,
       null,
       false,
+      undefined,
+      undefined,
       "",
       15,
     );
@@ -119,6 +121,8 @@ describe("droppedOnSpaceSwitch", () => {
       null,
       null,
       false,
+      undefined,
+      undefined,
       "across-spaces",
       15,
     );

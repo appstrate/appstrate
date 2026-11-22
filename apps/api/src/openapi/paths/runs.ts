@@ -15,6 +15,7 @@ import {
 import { STD_RESPONSE_HEADERS, REQUEST_ID_ONLY_HEADERS } from "../headers.ts";
 import { MAX_CONNECTIONS_PER_INTEGRATION } from "@appstrate/core/integration";
 import { connectionIdSetJsonSchema } from "./integrations.ts";
+import { SPACE_ID_RE } from "@appstrate/db/ids";
 import { MAX_WAIT_SECONDS } from "../../lib/run-wait-limits.ts";
 import { terminalRunStatusValues } from "@appstrate/core/run-status";
 import { FILE_BY_ID_READ, ORG_READ_REACH, packageIdFilterParameter } from "../parameters.ts";
@@ -104,6 +105,29 @@ const runListQueryParameters = [
     in: "query",
     schema: { type: "string" },
     description: "Return only runs launched from this chat session.",
+  },
+  {
+    name: "space_kind",
+    in: "query",
+    required: false,
+    schema: { type: "string", enum: ["team", "personal"] },
+    description:
+      "Narrow the list to the runs of team spaces (`team`) or of personal spaces (`personal`) among the spaces the caller reaches. It only narrows, never widens: when no reached space matches, the page is empty (`total: 0`). Omit (or send an empty value) for every reached space. Any value outside the enum is rejected with `400`.",
+  },
+  {
+    name: "spaceId",
+    in: "query",
+    required: false,
+    style: "form" as const,
+    explode: false,
+    schema: {
+      type: "array",
+      maxItems: 100,
+      items: { type: "string", pattern: SPACE_ID_RE.source },
+      example: ["spc_0b5c7e1a-3f2d-4c6b-9a18-7d4e2f1c5b30"],
+    },
+    description:
+      "Narrow the list to the runs of these spaces, comma-separated on the wire (`spaceId=spc_a,spc_b`). It only narrows, never widens: a space the caller does not reach matches nothing, so when none is reached the page is empty (`total: 0`). Composes with `space_kind`. A value that is not a space id, or more than 100 ids, is rejected with `400`. Omit (or send an empty value) for every reached space.",
   },
   packageIdFilterParameter("runs", "page"),
   { $ref: "#/components/parameters/RunSearch" },

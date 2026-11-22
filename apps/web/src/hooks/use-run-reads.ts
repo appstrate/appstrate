@@ -3,6 +3,7 @@
 import { useMutation, useQueryClient, type QueryClient } from "@tanstack/react-query";
 import { $api, client } from "../api/client";
 import { markAllReadIn } from "../lib/mark-all-read";
+import type { RunSpaceScope } from "../lib/space-filter";
 import { useFirstRunsPage } from "./use-paginated-runs";
 import { agentsKeys, paginatedRunsKeys, runKeys, scheduleKeys } from "../lib/query-keys";
 import { invalidateNotificationQueries } from "./use-notifications";
@@ -17,10 +18,25 @@ import { invalidateNotificationQueries } from "./use-notifications";
 
 /**
  * The caller's unread runs in the space — the Runs badge; `enabled: false` where it is not shown.
- * `spanning`: in every space the reader reaches instead.
+ * `spanning`: in every space the reader reaches instead, narrowed to `spaces` when given (the
+ * runs page; the sidebar badge passes none and counts every space).
  */
-export function useUnreadRunCount({ enabled = true, spanning = false } = {}): number {
-  const { data } = useFirstRunsPage({ unread: true, limit: 1, enabled, spanning });
+export function useUnreadRunCount({
+  enabled = true,
+  spanning = false,
+  spaces,
+}: {
+  enabled?: boolean;
+  spanning?: boolean;
+  spaces?: RunSpaceScope;
+} = {}): number {
+  const { data } = useFirstRunsPage({
+    unread: true,
+    limit: 1,
+    enabled,
+    spanning,
+    spaces,
+  });
   return data?.total ?? 0;
 }
 

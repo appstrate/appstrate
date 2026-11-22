@@ -316,7 +316,7 @@ describe("lists spanning the organization's spaces: the shared reach", () => {
       });
 
       it("refuses an unknown query parameter", async () => {
-        const res = await app.request(path(list, `?spaceId=${un}`), { headers: session(member) });
+        const res = await app.request(path(list, "?bogus=1"), { headers: session(member) });
         expect(res.status).toBe(400);
         expect(res.headers.get("content-type")).toContain("application/problem+json");
       });

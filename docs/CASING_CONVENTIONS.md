@@ -465,7 +465,7 @@ The actual OAuth 2.0 wire endpoints (`/oauth2/authorize`, `/oauth2/token`, the C
 
 Query params are wire surface. They follow the **same rule as wire JSON (Zone 1): snake_case by default**, with the same carve-outs applied by literal name:
 
-- **Universal DB-convention names** (Carve-out 4b): `?runId=` (`GET /api/files`, `GET /api/agents/{scope}/{name}/persistence`, the two call-journal reads `GET /api/integrations/calls` and `GET /api/me/connections/{connectionId}/calls`), `?packageId=` (`GET /api/files`, the run lists `GET /api/runs` and `GET /api/orgs/{orgId}/runs`, the schedule lists `GET /api/schedules` and `GET /api/orgs/{orgId}/schedules`), `?spaceId=` (`GET /api/webhooks`, `GET /api/orgs/{orgId}/chat/commands`).
+- **Universal DB-convention names** (Carve-out 4b): `?runId=` (`GET /api/files`, `GET /api/agents/{scope}/{name}/persistence`, the two call-journal reads `GET /api/integrations/calls` and `GET /api/me/connections/{connectionId}/calls`), `?packageId=` (`GET /api/files`, the run lists `GET /api/runs` and `GET /api/orgs/{orgId}/runs`, the schedule lists `GET /api/schedules` and `GET /api/orgs/{orgId}/schedules`), `?spaceId=` (`GET /api/webhooks`, the run lists `GET /api/runs` and `GET /api/orgs/{orgId}/runs`, `GET /api/orgs/{orgId}/chat/commands`).
 - **Pagination-envelope params** (Carve-out 4n): the cursor param `startingAfter` pairs with the camelCase `hasMore` body field.
 - **Headless-platform surface params** mirror their Carve-out 4n wire fields: `?externalId=` on `GET /api/end-users`.
 
