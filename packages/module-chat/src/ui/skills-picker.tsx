@@ -70,6 +70,12 @@ export function SkillsChip({
 
 type Translate = ReturnType<typeof useChatHost>["t"];
 
+const REFUSAL_KEY: Record<Extract<SkillRowState, { kind: "refused" }>["reason"], string> = {
+  over_budget: "skills.state.refused.over_budget",
+  unavailable: "skills.state.refused.unavailable",
+  unreadable: "skills.state.refused.unreadable",
+};
+
 /** A row's caption: what the server reported of its skill; none for a skill the user's pin loaded. */
 function rowCaption(state: SkillRowState, t: Translate): string | null {
   switch (state.kind) {
@@ -80,7 +86,7 @@ function rowCaption(state: SkillRowState, t: Translate): string | null {
     case "loaded":
       return state.source === "assistant" ? t("skills.state.assistant") : null;
     case "refused":
-      return t(`skills.state.refused.${state.reason}`);
+      return t(REFUSAL_KEY[state.reason]);
     case "off":
       return null;
   }
