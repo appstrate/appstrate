@@ -54,7 +54,7 @@ import { UI_MESSAGE_STREAM_HEADERS } from "ai";
 import { handleChatStream } from "./chat-stream.ts";
 import { readChatCommands } from "./chat-commands.ts";
 import { callerMcpOpener, dispatchFetch } from "./platform-mcp.ts";
-import { limitedConversationPermissions } from "./turn-permissions.ts";
+import { limitedConversationPermissions, turnUsesDrafts } from "./turn-permissions.ts";
 import type { ChatEnv } from "./prompt.ts";
 import { stopStream } from "./stop-registry.ts";
 import { clearActiveStream, getResumableContext, STALE_MARKER_MIN_AGE_MS } from "./resumable.ts";
@@ -332,6 +332,11 @@ export function createChatRouter(deps: ChatPlatformDeps) {
     if (spaceId !== undefined && !canActIn(reachable, spaceId)) {
       throw invalidRequest("spaceId must be a space this conversation can act in", "spaceId");
     }
+    // The composer's package-authoring switch, as the turn takes it (`package_authoring`).
+    const authoring = c.req.query("package_authoring");
+    if (authoring !== undefined && authoring !== "true" && authoring !== "false") {
+      throw invalidRequest("package_authoring must be true or false", "package_authoring");
+    }
     // A space asked for stands for a conversation limited to it, whose grants are narrowed alike.
     const spaces = actingSpaces(reachable).filter(
       (space) => spaceId === undefined || space.id === spaceId,
@@ -351,7 +356,7 @@ export function createChatRouter(deps: ChatPlatformDeps) {
       spaces.map((space) => space.id),
       {
         readsSkills: permissions.has("skills:read"),
-        catalogueDrafts: permissions.has("skills:write"),
+        drafts: turnUsesDrafts(permissions, { authoring: authoring !== "false" }),
       },
     );
     return c.json(commands);

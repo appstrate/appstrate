@@ -27,6 +27,20 @@ export function turnPermissions(
 }
 
 /**
+ * Whether a turn works on the caller's skill drafts: package authoring on and the caller holds
+ * `skills:write`, whatever discovery. Then every skill it lists, injects or pins is the caller's
+ * draft when there is one, otherwise its published version. One predicate for the turn
+ * (`chat-stream.ts`) and the composer's commands (`GET …/chat/commands`), so a skill the panel
+ * offers is the definition the turn injects.
+ */
+export function turnUsesDrafts(
+  callerPermissions: ReadonlySet<string>,
+  opts: { authoring: boolean },
+): boolean {
+  return opts.authoring && callerPermissions.has("skills:write");
+}
+
+/**
  * The org-level permissions a limited conversation keeps: reads the turn needs to work in its
  * origin space, none of which reaches beyond what that space's own pages already show.
  *   - `org:read`: the organization the conversation belongs to (its name, in `get_me`).

@@ -21104,7 +21104,7 @@ export interface operations {
             };
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
-            /** @description `org_deleting` — the organization's deletion is reserved, so no new metered usage is admitted. Refused whatever modules the deployment loads. Or `needs_reconnection` — the selected model's subscription credential is dead (revoked, or expired beyond refresh), so the turn is refused before inference starts rather than failing upstream. RFC 9457 problem+json. Or `model_credential_required`: the selected model has no organization credential and the caller has no usable personal credential for it. Or `chat_turn_scope_changed`: the conversation's limit, its origin space or its skill settings (another client's `pin_skills` / `unpin_skills` / `skill_discovery`) changed while the turn was starting; nothing but this turn's own skill changes was written, and sending the message again starts it with the new scope. Or `chat_turn_in_flight`: another turn of the conversation is running (a conversation runs one turn at a time); nothing was written, and the message can be sent again once that turn ends. */
+            /** @description `org_deleting` — the organization's deletion is reserved, so no new metered usage is admitted. Refused whatever modules the deployment loads. Or `needs_reconnection` — the selected model's subscription credential is dead (revoked, or expired beyond refresh), so the turn is refused before inference starts rather than failing upstream. RFC 9457 problem+json. Or `model_credential_required`: the selected model has no organization credential and the caller has no usable personal credential for it. Or `chat_turn_scope_changed`: the conversation's limit, its origin space or its skill settings (another client's `pin_skills` / `unpin_skills` / `skill_discovery`) changed while the turn was starting; nothing but this turn's own skill changes was written, and sending the message again starts it with the new scope. Or `chat_turn_in_flight`: another turn of the conversation is running (a conversation runs one turn at a time); nothing but this turn's own skill changes was written, and the message can be sent again once that turn ends. */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -21131,6 +21131,8 @@ export interface operations {
             query?: {
                 /** @description Read the commands in this space alone; it must be a space the caller can act in (else a 400 naming `spaceId`). */
                 spaceId?: string;
+                /** @description The composer's package-authoring switch, as `streamChat` takes it in its body; absent = on. On, with `skills:write`, a skill is listed at the caller's draft when there is one (the definition a turn injects); off, at its published version, and a skill with no published version is not listed. */
+                package_authoring?: boolean;
             };
             header?: never;
             path: {

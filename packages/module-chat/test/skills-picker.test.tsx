@@ -42,7 +42,7 @@ function render(
   const stored = pins.map((pin) => (typeof pin === "string" ? userPin(pin) : pin));
   const qc = new QueryClient();
   const skill = (id: string, name: string) => ({ id, name, description: "", version: null });
-  qc.setQueryData(["packages", "chat-commands", "org_1", null], {
+  qc.setQueryData(["packages", "chat-commands", "org_1", null, true], {
     skills: [
       skill("@acme/free", "Free"),
       ...[...stored.map((pin) => pin.id), ...cited, ...changes.pin]
@@ -178,7 +178,7 @@ describe("SkillsPicker", () => {
     // Rows exist only once the catalogue answers: seed it, then toggle through the rendered tree.
     const qc = new QueryClient();
     const skill = (id: string) => ({ id, name: id, description: "", version: null });
-    qc.setQueryData(["packages", "chat-commands", "org_1", null], {
+    qc.setQueryData(["packages", "chat-commands", "org_1", null, true], {
       skills: ids.map(skill),
       agents: [],
     });

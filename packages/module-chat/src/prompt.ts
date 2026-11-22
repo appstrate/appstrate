@@ -546,12 +546,15 @@ export async function readSkillsOver(
         return new Map<string, ListedSkillEntry>();
       },
     );
-  const [published, drafts] = await Promise.all([
+  // A turn not working on drafts never asks for them: one hop fewer, and a failing draft list
+  // cannot turn a pin missing from the published one into an unreadable one.
+  const [published, usedDrafts] = await Promise.all([
     list(),
-    list({ [SKILL_DEFINITION_META_KEY]: "draft" }),
+    opts.drafts
+      ? list({ [SKILL_DEFINITION_META_KEY]: "draft" })
+      : new Map<string, ListedSkillEntry>(),
   ]);
   // The one definition the turn lists, injects and pins for each skill.
-  const usedDrafts = opts.drafts ? drafts : new Map<string, ListedSkillEntry>();
   const injectedFrom = new Map([...published, ...usedDrafts]);
   const read: ChatSkillsRead = {
     contents: new Map(),

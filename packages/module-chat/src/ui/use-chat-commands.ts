@@ -10,16 +10,34 @@ import { useQuery } from "@tanstack/react-query";
 import { chatCommandsSchema, type ChatCommands } from "../commands.ts";
 import { chatPath } from "./chat-route.ts";
 import { limitedSpaceOf, useConversationScope } from "./conversation-scope.ts";
+import { usePackageAuthoringEnabled } from "./package-authoring-store.ts";
 import { useChatHost, type ChatTransport } from "./runtime-context.ts";
 
-/** `spaceId` is the origin space of a conversation limited to it; absent, the route reads the acting set. */
+/**
+ * `spaceId` is the origin space of a conversation limited to it; absent, the route reads the
+ * acting set. `packageAuthoring` is the composer's switch: the catalogue lists drafts by the same
+ * rule as the turn.
+ */
 export async function fetchChatCommands(
   transport: ChatTransport,
   spaceId: string | undefined,
+  packageAuthoring: boolean,
 ): Promise<ChatCommands> {
-  const query = spaceId ? `?${new URLSearchParams({ spaceId })}` : "";
-  const res = await transport.request(`${chatPath(transport, "/commands")}${query}`);
+  const query = new URLSearchParams({
+    ...(spaceId && { spaceId }),
+    package_authoring: String(packageAuthoring),
+  });
+  const res = await transport.request(`${chatPath(transport, "/commands")}?${query}`);
   return chatCommandsSchema.parse(await res.json());
+}
+
+/** The catalogue's cache entry: by organization, limited space and authoring switch. */
+function chatCommandsQueryKey(
+  orgId: string | undefined,
+  spaceId: string | null,
+  packageAuthoring: boolean,
+): readonly unknown[] {
+  return ["packages", "chat-commands", orgId, spaceId, packageAuthoring];
 }
 
 /**
@@ -31,9 +49,10 @@ export async function fetchChatCommands(
 export function useChatCommands(transport: ChatTransport | undefined, wanted: boolean) {
   const { can } = useChatHost();
   const spaceId = limitedSpaceOf(useConversationScope());
+  const packageAuthoring = usePackageAuthoringEnabled();
   return useQuery({
-    queryKey: ["packages", "chat-commands", transport?.orgId, spaceId ?? null],
-    queryFn: () => fetchChatCommands(transport!, spaceId),
+    queryKey: chatCommandsQueryKey(transport?.orgId, spaceId ?? null, packageAuthoring),
+    queryFn: () => fetchChatCommands(transport!, spaceId, packageAuthoring),
     enabled: wanted && !!transport && can("chat:write"),
     staleTime: 5_000,
   });

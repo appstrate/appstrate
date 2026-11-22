@@ -54,10 +54,12 @@ definition; else `skills:read`; else refused. On that connection:
   bytes every MCP client and `appstrate code sync` get at that URI.
 
 **One definition per skill.** A turn works on drafts when package authoring is on and the
-caller holds `skills:write` (`skillDrafts` in `chat-stream.ts`, the `drafts` argument of
-`buildCallerContextBlock`), whatever discovery. Then the catalogue, the injected pins and the
+caller holds `skills:write` — `turnUsesDrafts` (`turn-permissions.ts`), the one predicate the
+turn (`skillDrafts` in `chat-stream.ts`, the `drafts` argument of `buildCallerContextBlock`) and
+the composer's commands (`GET …/chat/commands?package_authoring=`) share — whatever discovery. Then the catalogue, the injected pins and the
 URIs an assistant load must read to pin (`skillUris`) all take the caller's draft when there is
-one; otherwise all take the published version. The turn can read each: a listed draft with the
+one; otherwise all take the published version, and the drafts are not even listed (no draft
+`skills/list` hop, so a failing one cannot make a pin unreadable). The turn can read each: a listed draft with the
 `skills:write` it keeps, an injected one through its claim even with discovery off. So a load
 of a listed URI always pins the definition later turns inject. With authoring off, a pinned
 skill the caller has a draft of is injected at its published version.
@@ -179,7 +181,14 @@ the same changes changes nothing. More than 5 pins as a result is a 400 naming `
 nothing written (the cap rides the conflict arm's `WHERE`). An ephemeral turn applies the
 changes to the default selection. The changes are applied before the admission gate and the
 claim, so a refused turn may still have written them; when they change an existing row, the
-session-update signal tells the other tabs. Absent, the stored selection stands (discovery on, no
+session-update signal tells the other tabs.
+
+Accepted hazard: a request that fails before its response headers, after the server applied its
+changes, looks refused to the client, which keeps its changes and re-sends them with the next
+turn. Re-sending is idempotent, with one exception: if the turn's producer survived and the
+assistant re-pinned a skill by loading it, the re-sent unpin of that skill drops the pin again.
+The window is a lost response on a turn that kept running; the user sees the pin gone in the
+panel and can pin it back. Absent, the stored selection stands (discovery on, no
 pinned skill, for a new conversation). Nothing is written before the first message: choosing creates
 no conversation, no sidebar row, no navigation, and there is no write to wait
 for or to fail. A change made on an existing conversation and not followed by a
@@ -209,7 +218,10 @@ The composer's `/` menu (#2173) lists the skills the conversation can pin and th
 caller can launch, read as an MCP client reads the platform server (`skills/list`,
 `prompts/list`) over one connection of the caller's own: `GET /api/orgs/{orgId}/chat/commands`
 (`?spaceId=` reads one space, as a limited conversation). `/<skill>` is only the composer
-adding the id to the turn's `pin_skills`: no backend path of its own, no one-turn injection.
+adding the id to the turn's `pin_skills`: no backend path of its own, no one-turn injection. The skills half takes
+`package_authoring` (query, boolean, absent = on, as on `POST /chat`): it lists a skill's draft
+under `turnUsesDrafts` alone, so the panel never offers a definition the turn would not inject
+(a draft-only skill pinned with authoring off would otherwise be `unavailable`).
 
 An agent launch is a `data-agent-prompt` part (`{ name, title }`) in the last user message. The
 turn resolves it with `prompts/get` (the typed text as `request`) before taking the slot and the

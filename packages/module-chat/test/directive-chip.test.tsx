@@ -139,7 +139,7 @@ describe("an agent's glyph", () => {
       );
     expect(page(new QueryClient())).toContain("lucide-bot");
     const loaded = new QueryClient();
-    loaded.setQueryData(["packages", "chat-commands", undefined, null], commands);
+    loaded.setQueryData(["packages", "chat-commands", undefined, null, true], commands);
     expect(page(loaded)).not.toContain("lucide-bot");
   });
 });

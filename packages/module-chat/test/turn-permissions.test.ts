@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { describe, expect, it } from "bun:test";
-import { turnPermissions } from "../src/turn-permissions.ts";
+import { turnPermissions, turnUsesDrafts } from "../src/turn-permissions.ts";
 
 const GRANTED = [
   "mcp:read",
@@ -28,5 +28,15 @@ describe("turnPermissions", () => {
     expect(out).not.toContain("skills:write");
     expect(out).not.toContain("agents:write");
     expect(out).toContain("skills:read");
+  });
+});
+
+describe("turnUsesDrafts", () => {
+  it("holds with authoring on and `skills:write`, and only then", () => {
+    const writer = new Set(GRANTED);
+    const reader = new Set(GRANTED.filter((permission) => permission !== "skills:write"));
+    expect(turnUsesDrafts(writer, { authoring: true })).toBe(true);
+    expect(turnUsesDrafts(writer, { authoring: false })).toBe(false);
+    expect(turnUsesDrafts(reader, { authoring: true })).toBe(false);
   });
 });

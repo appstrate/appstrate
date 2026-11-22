@@ -542,7 +542,7 @@ function fakeSkillsClient(opts: {
   texts: Record<string, string>;
   savedAfterList?: Record<string, string>;
   blobs?: Record<string, string>;
-  listFails?: "published";
+  listFails?: "published" | "draft";
 }) {
   const calls: string[] = [];
   const signals: (AbortSignal | undefined)[] = [];
@@ -564,7 +564,7 @@ function fakeSkillsClient(opts: {
       signals.push(options?.signal);
       const draft = options?.meta?.[SKILL_DEFINITION_META_KEY] === "draft";
       calls.push(draft ? "skills/list draft" : "skills/list");
-      if (!draft && opts.listFails === "published") throw new Error("skills/list failed");
+      if ((draft ? "draft" : "published") === opts.listFails) throw new Error("skills/list failed");
       return { skills: listed(draft ? (opts.drafts ?? []) : opts.published) };
     },
     readResource: async ({ uri }, options) => {
@@ -816,6 +816,28 @@ describe("buildCallerContextBlock", () => {
     expect(out).not.toContain("another body");
     expect(out).toContain("`@acme/a` is pinned to this conversation but could not be read.");
     expect(injected).toEqual({ skills: {} });
+  });
+
+  it("asks for no draft listing on a turn not working on drafts: a pin missing from the published one is unavailable", async () => {
+    const A = "skill://spc_1/acme/a/a/SKILL.md";
+    const skills = fakeSkillsClient({
+      published: [skillEntry(A, "1.0.0")],
+      texts: { [A]: "a body" },
+      // Would make every missing pin unreadable, were it asked.
+      listFails: "draft",
+    });
+    const block = await buildCallerContextBlock(fakeContext({ orgRole: "member" }), {
+      spaces: REACH,
+      restricted: false,
+      user,
+      capabilities: caps(BUILDER),
+      permissions: ["mcp:read", "mcp:invoke", "skills:read"],
+      skills: { skillDiscovery: true, pinnedSkills: ["@acme/a", "@acme/gone"] },
+      drafts: false,
+      openSkillsClient: skills.open,
+    });
+    expect(skills.calls).not.toContain("skills/list draft");
+    expect(block.skillStatus).toEqual({ "@acme/a": "injected", "@acme/gone": "unavailable" });
   });
 
   it("lists, injects and pins one definition per skill: the draft only on a turn that works on drafts", async () => {

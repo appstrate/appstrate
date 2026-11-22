@@ -28,12 +28,17 @@ const withPerms = (space: ReachableSpaceGrant, ...extra: string[]): ReachableSpa
 });
 
 const digest = `sha256:${"0".repeat(64)}`;
-const skillEntry = (spaceId: string, name: string) => {
-  const uri = `skill://${spaceId}/acme/${name}/${name}/SKILL.md`;
+const skillEntry = (spaceId: string, name: string, draft = false) => {
+  const uri = `skill://${spaceId}/acme/${name}${draft ? "@draft" : ""}/${name}/SKILL.md`;
   return {
     uri,
-    frontmatter: { name, description: `${name} skill`, metadata: { version: "1.0.0" } },
+    frontmatter: {
+      name,
+      description: `${name} skill`,
+      ...(draft ? {} : { metadata: { version: "1.0.0" } }),
+    },
     resources: [{ uri, digest, size: 1 }],
+    ...(draft ? { _meta: { "dev.appstrate/lock_version": 1 } } : {}),
   };
 };
 
@@ -47,7 +52,12 @@ interface Seen {
 /** A scripted platform MCP server: the skills of each space and the agent prompts. */
 function mcpDispatch(
   seen: Seen,
-  opts: { skills?: Record<string, string[]>; prompts?: unknown[]; promptsFail?: boolean } = {},
+  opts: {
+    skills?: Record<string, string[]>;
+    drafts?: Record<string, string[]>;
+    prompts?: unknown[];
+    promptsFail?: boolean;
+  } = {},
 ) {
   return async (req: Request): Promise<Response> => {
     const message = (await req.json()) as {
@@ -75,7 +85,14 @@ function mcpDispatch(
       }
       case "skills/list": {
         const meta = message.params?._meta as Record<string, unknown> | undefined;
-        if (meta) return result({ skills: [] });
+        if (meta) {
+          seen.methods.push("skills/list draft");
+          return result({
+            skills: Object.entries(opts.drafts ?? {}).flatMap(([spaceId, names]) =>
+              names.map((name) => skillEntry(spaceId, name, true)),
+            ),
+          });
+        }
         return result({
           skills: Object.entries(opts.skills ?? {}).flatMap(([spaceId, names]) =>
             names.map((name) => skillEntry(spaceId, name)),
@@ -281,12 +298,43 @@ describe("GET /api/orgs/:orgId/chat/commands", () => {
     expect(seen.permissions[0]).toContain("skills:write");
     expect(seen.permissions[0]).not.toContain("agents:write");
     expect(drafts).toHaveLength(1);
-    // Without `skills:write` the drafts are still read (the turn does too) but never listed.
+    // Without `skills:write` the drafts are neither read nor listed, as on a turn.
     const readOnly = appFor(
       [withPerms(spaceA, "skills:read")],
       mcpDispatch(seen, { skills: { spc_a: ["tone"] }, prompts: [] }),
     );
     expect(chatCommandsSchema.parse(await (await get(readOnly)).json()).skills).toHaveLength(1);
+  });
+
+  it("lists a skill's draft only when a turn would inject it: authoring on and `skills:write`", async () => {
+    const reach = [withPerms(spaceA, "skills:read", "skills:write")];
+    const listed = async (query: string) => {
+      const seen: Seen = { spaceIds: [], permissions: [], methods: [] };
+      const app = appFor(
+        reach,
+        mcpDispatch(seen, { skills: { spc_a: ["tone"] }, drafts: { spc_a: ["fresh"] } }),
+      );
+      const res = await get(app, query);
+      expect(res.status).toBe(200);
+      const body = chatCommandsSchema.parse(await res.json());
+      return { ids: body.skills.map((skill) => skill.id), methods: seen.methods };
+    };
+    for (const query of ["", "?package_authoring=true"]) {
+      const on = await listed(query);
+      expect(on.ids).toEqual(["@acme/fresh", "@acme/tone"]);
+      expect(on.methods).toContain("skills/list draft");
+    }
+    // Authoring off: the published versions alone, and no draft listing asked for.
+    const off = await listed("?package_authoring=false");
+    expect(off.ids).toEqual(["@acme/tone"]);
+    expect(off.methods).not.toContain("skills/list draft");
+  });
+
+  it("refuses a `package_authoring` other than true or false with a 400 naming it", async () => {
+    const seen: Seen = { spaceIds: [], permissions: [], methods: [] };
+    const res = await get(appFor([spaceA], mcpDispatch(seen)), "?package_authoring=yes");
+    expect(res.status).toBe(400);
+    expect(JSON.stringify(await res.json())).toContain("package_authoring");
   });
 
   it("answers 502 when the MCP server cannot be reached, not an empty list", async () => {

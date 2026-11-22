@@ -12,7 +12,7 @@ import {
   hasSkillChanges,
   loadsSkill,
   resetSkillChanges,
-  subtractSkillChanges,
+  withAppliedChanges,
   citeSkill,
   skillPickerRows,
   skillRowState,
@@ -112,16 +112,23 @@ describe("resetSkillChanges", () => {
   });
 });
 
-describe("subtractSkillChanges", () => {
-  it("drops every sent entry by value, whatever the server shows", () => {
-    const sent = changes({ pin: ["@a/new"], unpin: ["@a/old"], skillDiscovery: false });
-    expect(subtractSkillChanges(sent, sent)).toEqual(NO_SKILL_CHANGES);
-  });
-
-  it("keeps a change made during the turn, the undo of a sent one included", () => {
-    const sent = changes({ pin: ["@a/new"], skillDiscovery: false });
-    const now = changes({ pin: ["@a/later"], unpin: ["@a/new"], skillDiscovery: true });
-    expect(subtractSkillChanges(now, sent)).toEqual(now);
+describe("withAppliedChanges", () => {
+  it("applies the changes as the server does: unpins out, new pins unjudged, a re-pin the user's", () => {
+    const before = stored(
+      [pin("@a/auto", "injected", "assistant"), pin("@a/old"), pin("@a/kept", "over_budget")],
+      true,
+    );
+    expect(
+      withAppliedChanges(
+        before,
+        changes({ pin: ["@a/new", "@a/auto"], unpin: ["@a/old"], skillDiscovery: false }),
+      ),
+    ).toEqual(
+      stored(
+        [pin("@a/auto", "injected", "user"), pin("@a/kept", "over_budget"), pin("@a/new", null)],
+        false,
+      ),
+    );
   });
 });
 

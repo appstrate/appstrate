@@ -43,7 +43,11 @@ import {
 import { runPiChat, type PiChatInput } from "./pi-chat/engine.ts";
 import { resolvePiChatModelBinding } from "./pi-chat/model-binding.ts";
 import { acquirePiChatSlot, chatCapacityError } from "./pi-chat/concurrency.ts";
-import { limitedConversationPermissions, turnPermissions } from "./turn-permissions.ts";
+import {
+  limitedConversationPermissions,
+  turnPermissions,
+  turnUsesDrafts,
+} from "./turn-permissions.ts";
 import { buildSystemPrompt, buildCallerContextBlock, type ChatEnv } from "./prompt.ts";
 import { scopedNameRegex } from "@appstrate/core/validation";
 import {
@@ -523,7 +527,9 @@ export async function handleChatStream(
     return {
       skills: conv.selection,
       // Whether the turn works on the caller's drafts (see `buildCallerContextBlock`).
-      skillDrafts: body.package_authoring !== false && callerPermissions.has("skills:write"),
+      skillDrafts: turnUsesDrafts(callerPermissions, {
+        authoring: body.package_authoring !== false,
+      }),
       // The caller's own connection over the turn's spaces (see `callerMcpOpener`): the turn's
       // skills and an agent launch's prompt are read through it.
       openCaller: callerMcpOpener(c, platformFetch, {

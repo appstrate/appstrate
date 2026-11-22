@@ -19,8 +19,8 @@ export async function readChatCommands(
   opts: {
     /** `skills:read`: without it the skills half is empty, whatever the server would list. */
     readsSkills: boolean;
-    /** `skills:write`: the drafts the caller reads are listed as the skill they stand for. */
-    catalogueDrafts: boolean;
+    /** The drafts the caller reads are listed as the skill they stand for (`turnUsesDrafts`). */
+    drafts: boolean;
   },
 ): Promise<ChatCommands> {
   const signal = AbortSignal.timeout(CALLER_READ_TIMEOUT_MS);
@@ -37,7 +37,7 @@ export async function readChatCommands(
       opts.readsSkills
         ? readSkillsOver(client, signal, spaces, {
             catalogue: true,
-            drafts: opts.catalogueDrafts,
+            drafts: opts.drafts,
             chosen: [],
           }).then(({ catalogue }) =>
             catalogue.map((skill): ChatSkillCommand => ({
