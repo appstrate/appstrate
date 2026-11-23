@@ -77,12 +77,9 @@ test("filters, selects with the keyboard or the mouse, and never sends while ope
 
   const menu = page.getByTestId("slash-menu");
   await expect(menu.getByRole("group", { name: "Compétences", exact: true })).toBeVisible();
-  // The billed-run notice is the Agents heading's, once.
-  await expect(
-    menu.getByRole("group", { name: /Agents · lancent une exécution facturée/ }),
-  ).toBeVisible();
+  await expect(menu.getByRole("group", { name: "Agents", exact: true })).toBeVisible();
   await expect(menu.getByRole("option")).toHaveCount(3);
-  // An agent shows its title and prompt name, no description.
+  // An agent shows its title and prompt name.
   await expect(menu.getByRole("option", { name: /Weekly report/ })).toContainText("/run-report");
 
   // The text after the slash filters; the field keeps the focus.

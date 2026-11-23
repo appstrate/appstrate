@@ -232,7 +232,7 @@
   "composer.queue.remove": "Remove",
   "slash.label": "Skills and agents",
   "slash.skills": "Skills",
-  "slash.agents": "Agents · start a billed run",
+  "slash.agents": "Agents",
   "slash.loading": "Loading…",
   "slash.error": "Skills and agents could not be loaded.",
   "composer.oneAgentOnly": "One agent per message: remove one to send.",

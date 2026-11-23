@@ -232,7 +232,7 @@
   "composer.queue.remove": "Retirer",
   "slash.label": "Compétences et agents",
   "slash.skills": "Compétences",
-  "slash.agents": "Agents · lancent une exécution facturée",
+  "slash.agents": "Agents",
   "slash.loading": "Chargement…",
   "slash.error": "Impossible de charger les compétences et les agents.",
   "composer.oneAgentOnly": "Un seul agent par message : retirez-en un pour envoyer.",
