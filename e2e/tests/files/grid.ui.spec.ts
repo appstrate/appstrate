@@ -102,7 +102,7 @@ for (const appearance of [
     await page.goto("/files");
     const cards = page.getByRole("radio", { name: "Vue cartes", exact: true });
     const table = page.getByRole("radio", { name: "Vue tableau", exact: true });
-    await expect(cards).toHaveAttribute("data-state", "active");
+    await expect(cards).toBeChecked();
     const preview = page.getByRole("button", { name: "Aperçu: capture.png", exact: true });
     await expect(preview).toBeVisible();
     await expect
@@ -141,10 +141,10 @@ for (const appearance of [
     await table.click();
     await expect(page.getByRole("table", { name: "Documents", exact: true })).toBeVisible();
     await page.reload();
-    await expect(table).toHaveAttribute("data-state", "active");
+    await expect(table).toBeChecked();
     await cards.click();
     await page.reload();
-    await expect(cards).toHaveAttribute("data-state", "active");
+    await expect(cards).toBeChecked();
     const search = page.getByRole("textbox", { name: /Rechercher des fichiers/ });
     await search.fill("absent");
     await expect(
@@ -197,7 +197,7 @@ for (const view of ["Vue cartes", "Vue tableau"]) {
         await route.fulfill({ json: { object: "list", data: [], hasMore: false } });
       });
       await page.goto("/files");
-      await page.getByRole("tab", { name: view, exact: true }).click();
+      await page.getByRole("radio", { name: view, exact: true }).click();
       await expect(page.getByText(name, { exact: true }).first()).toBeVisible();
       const pending = page.waitForRequest(
         (request) => new URL(request.url()).pathname === "/api/files",
