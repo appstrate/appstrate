@@ -8,7 +8,6 @@
   "composer.placeholder": "Message Appstrate…",
   "composer.placeholderModel": "Chat with {{model}}",
   "composer.attach": "Attach files",
-  "composer.removeDirective": "Remove {{label}}",
   "composer.removeAttachment": "Remove attachment",
   "composer.imageNotSent": "Image not sent to this model.",
   "composer.pdfNotSent": "PDF not sent to this model.",

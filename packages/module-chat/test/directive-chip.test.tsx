@@ -1,33 +1,19 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * The directive chip's pieces: the composer's remove button deletes that chip's node only, and an
- * agent's glyph is the tile of the commands entry its prompt name finds, the bot icon otherwise.
+ * The directive chip's pieces: the composer draws a skill or an agent as a chip and any other type
+ * as its text, and an agent's glyph is the tile of the commands entry its prompt name finds, the
+ * bot icon otherwise.
  */
 
 import { describe, expect, it } from "bun:test";
 import { renderToString } from "react-dom/server";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { $isDirectiveNode, DirectiveNode, $createDirectiveNode } from "@assistant-ui/react-lexical";
-import {
-  LexicalComposerContext,
-  createLexicalComposerContext,
-} from "@lexical/react/LexicalComposerContext";
-import {
-  $createParagraphNode,
-  $createTextNode,
-  $getNodeByKey,
-  $getRoot,
-  type ElementNode,
-  createEditor,
-  type LexicalEditor,
-} from "lexical";
 
 import type { ChatCommands } from "../src/commands.ts";
 import { agentByPromptName } from "../src/ui/agent-appearance.ts";
 import { AgentGlyph } from "../src/ui/agent-glyph.tsx";
-import { $removeDirectiveChip } from "../src/ui/directive-chip-remove.ts";
-import { ComposerDirectiveChip, DirectiveChip, DirectiveText } from "../src/ui/directive-chip.tsx";
+import { ComposerDirectiveChip, DirectiveText } from "../src/ui/directive-chip.tsx";
 import { ChatHostProvider } from "../src/ui/runtime-context.ts";
 import { testHost } from "./test-host.ts";
 
@@ -45,96 +31,20 @@ const commands: ChatCommands = {
   ],
 };
 
-function editorWithChips(): { editor: LexicalEditor; keys: string[] } {
-  const editor = createEditor({
-    nodes: [DirectiveNode],
-    onError: (error) => {
-      throw error;
-    },
-  });
-  const keys: string[] = [];
-  editor.update(
-    () => {
-      const p = $createParagraphNode();
-      for (const name of ["tone", "pdf"]) {
-        const chip = $createDirectiveNode({ id: `@acme/${name}`, type: "skill", label: name });
-        keys.push(chip.getKey());
-        p.append($createTextNode("a "), chip);
-      }
-      $getRoot().append(p);
-    },
-    { discrete: true },
-  );
-  return { editor, keys };
-}
-
-const texts = (editor: LexicalEditor) =>
-  editor.read(() => $getRoot().getTextContent().replace(/\n/g, ""));
-
-describe("removing a chip from the composer", () => {
-  it("deletes that chip's node and leaves the other and the text", () => {
-    const { editor, keys } = editorWithChips();
-    editor.update(() => void $removeDirectiveChip($getNodeByKey(keys[0]!)), { discrete: true });
-    const left = editor.read(() =>
-      $getRoot().getAllTextNodes().length >= 0
-        ? $getRoot()
-            .getFirstChildOrThrow<ElementNode>()
-            .getChildren()
-            .filter($isDirectiveNode)
-            .map((n) => n.getDirectiveItem().label)
-        : [],
-    );
-    expect(left).toEqual(["pdf"]);
-    expect(texts(editor)).toContain(":skill[pdf]{name=@acme/pdf}");
-    expect(texts(editor)).not.toContain("tone");
-    expect(texts(editor).match(/a /g)).toHaveLength(2);
-  });
-
-  it("does nothing for a node that is not a chip", () => {
-    const { editor } = editorWithChips();
-    let removed = true;
-    editor.update(
-      () => {
-        removed = $removeDirectiveChip($createTextNode("x"));
-      },
-      { discrete: true },
-    );
-    expect(removed).toBe(false);
-    expect(texts(editor)).toContain("tone");
-  });
-
-  it("draws the X in the composer only, named by its label, out of the tab order", () => {
-    const remove = { label: "Remove tone", onRemove: () => {} };
-    const inComposer = renderToString(
-      <DirectiveChip directiveType="skill" directiveId="@acme/tone" label="tone" remove={remove} />,
-    );
-    expect(inComposer).toContain('aria-label="Remove tone"');
-    expect(inComposer).toContain('tabindex="-1"');
-    const sent = renderToString(<DirectiveText text=":skill[tone]{name=@acme/tone}" />);
-    expect(sent).not.toContain("directive-chip-remove");
-  });
-});
-
 describe("the composer's chip", () => {
-  const draw = (directiveType: string, directiveId: string, label: string) => {
-    const { editor } = editorWithChips();
-    return renderToString(
-      <LexicalComposerContext.Provider value={[editor, createLexicalComposerContext(null, null)]}>
-        <ChatHostProvider value={testHost()}>
-          <ComposerDirectiveChip
-            directiveType={directiveType}
-            directiveId={directiveId}
-            label={label}
-          />
-        </ChatHostProvider>
-      </LexicalComposerContext.Provider>,
+  const draw = (directiveType: string, directiveId: string, label: string) =>
+    renderToString(
+      <ComposerDirectiveChip
+        directiveType={directiveType}
+        directiveId={directiveId}
+        label={label}
+      />,
     );
-  };
 
-  it("draws a skill as a removable chip", () => {
+  it("draws a skill as a chip with no remove button", () => {
     const html = draw("skill", "@acme/tone", "tone");
     expect(html).toContain('data-testid="directive-chip"');
-    expect(html).toContain("directive-chip-remove");
+    expect(html).not.toContain("<button");
   });
 
   it("draws an unknown directive type as the text it was, not as a skill's chip", () => {

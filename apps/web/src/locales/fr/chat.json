@@ -8,7 +8,6 @@
   "composer.placeholder": "Message Appstrate…",
   "composer.placeholderModel": "Discuter avec {{model}}",
   "composer.attach": "Joindre des fichiers",
-  "composer.removeDirective": "Retirer {{label}}",
   "composer.removeAttachment": "Retirer la pièce jointe",
   "composer.imageNotSent": "Image non envoyée à ce modèle.",
   "composer.pdfNotSent": "PDF non envoyé à ce modèle.",

@@ -2,17 +2,13 @@
 
 // A skill or agent named in a message as an inline chip: composer, sent bubble, assistant load.
 
-import { useRef, type MouseEvent, type ReactNode } from "react";
-import { BookOpenIcon, XIcon } from "lucide-react";
+import type { ReactNode } from "react";
+import { BookOpenIcon } from "lucide-react";
 import { defaultDirectiveFormatter } from "@assistant-ui/core";
 import type { DirectiveChipProps } from "@assistant-ui/react-lexical";
-import { useLexicalComposerContext } from "@lexical/react/LexicalComposerContext";
-import { $getNearestNodeFromDOMNode } from "lexical";
 import { cn } from "@appstrate/ui/cn";
 import { AGENT_DIRECTIVE, SKILL_DIRECTIVE, directiveSegments } from "../directives.ts";
-import { $removeDirectiveChip } from "./directive-chip-remove.ts";
 import { DirectiveAgentGlyph } from "./agent-glyph.tsx";
-import { useChatHost } from "./runtime-context.ts";
 
 /** A 1em square on the text's baseline: its content is out of flow, so it cannot move it. */
 function ChipSlot({ className, children }: { className?: string; children: ReactNode }) {
@@ -27,21 +23,17 @@ interface ChipProps {
   directiveType: string;
   directiveId: string;
   label: string;
-  /** In the composer only: deletes the chip. */
-  remove?: { label: string; onRemove: (chip: HTMLElement) => void };
   className?: string;
 }
 
-export function DirectiveChip({ directiveType, directiveId, label, remove, className }: ChipProps) {
-  const ref = useRef<HTMLSpanElement>(null);
+export function DirectiveChip({ directiveType, directiveId, label, className }: ChipProps) {
   return (
     <span
-      ref={ref}
       data-testid="directive-chip"
       data-directive-type={directiveType}
       // Inline, not flex: it keeps the line's baseline and height, its border on each wrapped piece.
       className={cn(
-        "group/chip bg-muted text-foreground mx-0.5 rounded-md border box-decoration-clone px-1.5",
+        "bg-muted text-foreground mx-0.5 rounded-md border box-decoration-clone px-1.5",
         className,
       )}
     >
@@ -53,35 +45,17 @@ export function DirectiveChip({ directiveType, directiveId, label, remove, class
         )}
       </ChipSlot>
       <span>{label}</span>
-      {remove && (
-        <ChipSlot className="ml-1">
-          {/* Not a tab stop: in a textbox, Backspace already deletes the chip. */}
-          <button
-            type="button"
-            tabIndex={-1}
-            data-testid="directive-chip-remove"
-            aria-label={remove.label}
-            onMouseDown={(event: MouseEvent) => event.preventDefault()}
-            onClick={() => ref.current && remove.onRemove(ref.current)}
-            className="text-muted-foreground hover:bg-foreground/10 hover:text-foreground desktop-pointer:opacity-0 desktop-pointer:group-hover/chip:opacity-100 desktop-pointer:focus-within:opacity-100 relative flex size-full items-center justify-center rounded-full before:absolute before:-inset-2 before:content-['']"
-          >
-            <XIcon className="size-3" aria-hidden="true" />
-          </button>
-        </ChipSlot>
-      )}
     </span>
   );
 }
 
 /**
- * The composer's chip: the X removes its node, found through its DOM (no node key is given). The
- * editor turns any `:word[…]` into a directive node — a restored or pasted draft too — so a type
- * that is neither a skill nor an agent is drawn as the text it was, never as a skill's chip (the
- * send and a sent bubble read it as text as well).
+ * The composer's chip, deleted with Backspace like a character. The editor turns any `:word[…]`
+ * into a directive node — a restored or pasted draft too — so a type that is neither a skill nor an
+ * agent is drawn as the text it was, never as a skill's chip (the send and a sent bubble read it as
+ * text as well).
  */
 export function ComposerDirectiveChip({ directiveType, directiveId, label }: DirectiveChipProps) {
-  const [editor] = useLexicalComposerContext();
-  const { t } = useChatHost();
   if (directiveType !== SKILL_DIRECTIVE && directiveType !== AGENT_DIRECTIVE) {
     return (
       <span data-directive-type={directiveType}>
@@ -89,18 +63,7 @@ export function ComposerDirectiveChip({ directiveType, directiveId, label }: Dir
       </span>
     );
   }
-  return (
-    <DirectiveChip
-      directiveType={directiveType}
-      directiveId={directiveId}
-      label={label}
-      remove={{
-        label: t("composer.removeDirective", { label }),
-        onRemove: (chip) =>
-          editor.update(() => void $removeDirectiveChip($getNearestNodeFromDOMNode(chip))),
-      }}
-    />
-  );
+  return <DirectiveChip directiveType={directiveType} directiveId={directiveId} label={label} />;
 }
 
 /** A user message's text, its directives as chips. */
