@@ -42,6 +42,10 @@ The three skill modes of a chat conversation (`auto`, `manual`, `strict`) become
 - A user message of `POST /api/orgs/{orgId}/chat` may carry one `data-agent-prompt` part, `{ name, title }`, to launch an agent. The turn resolves `name` with `prompts/get` (the message text as `request`) before persisting the message and stores the launch instructions in the part's `data.text`; the model reads that text in place of the typed text. An unknown name, launch instructions over 64 KB, a second part, a malformed one or one carrying its own `text` is a 400 and nothing is written; a platform MCP server that fails to answer is a 502. Later turns replay the stored texts, most recent first, within 64 000 characters; older ones become a short stub.
 - Data and schema (migration 0112): `strict` becomes `skill_discovery = false`; `auto` conversations lose their pinned skills, which were kept but unused and would otherwise be injected after the upgrade; `chat_sessions` gains `skill_status`.
 
+### MCP integrations
+
+- An MCP tool whose input and output schemas exceed the shared 8192-byte budget is degraded instead of silently dropped (#2361): its `output_schema` goes first, then the documentation keywords of its input schema, then the input schema itself (`{ "type": "object" }`, the description noting that the server validates the arguments). Tools of servers with large schemas (Google Calendar, Drive, Gmail) reappear. The steps taken are exposed as an optional `schema_reduced` array on `GET /api/credential-proxy/tools` and in MCP `describe` of an `integration_tool` (omitted when empty); in a run the sidecar logs a `tool_descriptor_reduced` warning. A name collision is the only remaining exclusion.
+
 ## [1.0.0-beta.70] - 2026-11-19
 
 The Apple Silicon CLI builds on the supported macOS 15 runner. Production upgrades directly from beta.68 using the [maintenance procedure](docs/deployment/BETA_69.md). The beta.69 tag stopped before CLI signing. Its client and operator changes are described below.
