@@ -20,6 +20,7 @@
  * fill as Studio's, or the two products would not read as one app.
  */
 
+import { isMobileViewport } from "@appstrate/ui/use-mobile";
 import { useEffect, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import {
@@ -36,7 +37,7 @@ import { useNowTick } from "@appstrate/ui/use-now-tick";
 import { Spinner } from "@appstrate/ui/components/spinner";
 import { Button } from "@appstrate/ui/components/button";
 import { Input } from "@appstrate/ui/components/input";
-import { opensAsSheet, SheetMenu, SheetMenuRow } from "./sheet-menu.tsx";
+import { SheetMenu, SheetMenuRow } from "./sheet-menu.tsx";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -501,7 +502,7 @@ function ConversationRow({
           <DropdownMenu
             open={dropdownOpen}
             onOpenChange={(open) =>
-              open && opensAsSheet() ? setMenuOpen(true) : setDropdownOpen(open)
+              open && isMobileViewport() ? setMenuOpen(true) : setDropdownOpen(open)
             }
           >
             <DropdownMenuTrigger asChild>

@@ -10,6 +10,7 @@
  * it as chips, the phone as the dot on its "+".
  */
 
+import { isMobileViewport } from "@appstrate/ui/use-mobile";
 import { createContext, createElement, useContext, useMemo, useState, type ReactNode } from "react";
 import { canComposeInlineRuns } from "../capabilities.ts";
 import { canResetSkills } from "./chat-skills.ts";
@@ -18,7 +19,6 @@ import { useInlineRunModelEnabled } from "./inline-run-model-store.ts";
 import { usePackageAuthoringEnabled } from "./package-authoring-store.ts";
 import { useChatHost } from "./runtime-context.ts";
 import { selectedModel, useModelPicker } from "./model-picker.ts";
-import { opensAsSheet } from "./sheet-menu.tsx";
 import type { MenuBack } from "./sheet-menu.tsx";
 import { useConversationSkillsContext } from "./use-conversation-skills.ts";
 
@@ -57,7 +57,7 @@ export function ComposerPanelProvider({ children }: { children: ReactNode }) {
       level,
       openAt: (next) => {
         setLevel(next);
-        setOpen(opensAsSheet() ? "sheet" : "popover");
+        setOpen(isMobileViewport() ? "sheet" : "popover");
       },
       setLevel,
       close: () => setOpen(null),
