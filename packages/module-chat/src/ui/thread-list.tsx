@@ -276,7 +276,7 @@ export function ChatConversationList({
                 setSearchOpen(false);
               }}
               className={cn(
-                "text-sidebar-foreground/70 hover:text-sidebar-foreground absolute top-1/2 right-3.5 -translate-y-1/2 rounded-md p-0.5 max-md:right-2 max-md:p-2.5",
+                "text-sidebar-foreground/70 hover:text-sidebar-foreground absolute top-1/2 right-3.5 -translate-y-1/2 rounded-md p-0.5 max-md:right-1 max-md:p-3.5",
                 input === "" && "md:hidden",
               )}
             >

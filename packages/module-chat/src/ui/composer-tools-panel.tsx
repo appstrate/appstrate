@@ -5,8 +5,8 @@
  * limit, creation mode), and the levels they open in their place, each named, with a way back —
  * the skills, the models (with the inline-run model switch and the context's detail), then one
  * model's settings. The container is the caller's `Popover` (`composer-tools.tsx`), a bottom
- * sheet below `md`. A phone's panel also holds attaching a file and, as its last line, the
- * disclaimer: its composer line has room for neither.
+ * sheet below `md`. Below `md` the panel also holds attaching a file and, as its last line, the
+ * disclaimer: a phone's composer line has room for neither.
  */
 
 import { useEffect, useId, useRef } from "react";
@@ -20,9 +20,8 @@ import {
   PaperclipIcon,
   SparklesIcon,
 } from "lucide-react";
-import { canComposeInlineRuns } from "../capabilities.ts";
 import { attachUnavailableKey } from "./attachment-adapter.ts";
-import { useComposerPanel } from "./composer-panel.ts";
+import { useComposerPanel, useOffersInlineRunModel } from "./composer-panel.ts";
 import { ContextDetail } from "./context-gauge.tsx";
 import {
   limitAvailability,
@@ -168,23 +167,15 @@ function LevelRow({
 const FOCUSABLE =
   'button:not([disabled]), input:not([disabled]), [href], [tabindex]:not([tabindex="-1"])';
 
-export function ComposerToolsPanel({
-  authorsPackages,
-  phone = false,
-}: {
-  authorsPackages: boolean;
-  /** The phone's panel: attaching a file, and the disclaimer as its last line. */
-  phone?: boolean;
-}) {
-  const { t, can, modelLabel } = useChatHost();
+export function ComposerToolsPanel({ authorsPackages }: { authorsPackages: boolean }) {
+  const { t, modelLabel } = useChatHost();
   const { level, setLevel, close } = useComposerPanel();
   // Offered with `skills:read` on a readable conversation: the context is null otherwise.
   const conversation = useConversationSkillsContext();
   const draft = useDraftSkills();
   const picker = useModelPicker();
   const creationMode = usePackageAuthoringEnabled();
-  // Composing an inline run needs creation mode too: off, no turn launches one.
-  const offersInlineRunModel = creationMode && canComposeInlineRuns(can);
+  const offersInlineRunModel = useOffersInlineRunModel();
   const inlineRunModel = useInlineRunModelEnabled();
   const creationId = useId();
   const inlineId = useId();
@@ -200,7 +191,7 @@ export function ComposerToolsPanel({
     content = (
       // The skills' own rows pad 4 px: the text lines up with the heading's.
       <div className="desktop-pointer:px-2 flex min-h-0 flex-col px-4 pb-2">
-        <SkillsPickerPanel conversation={conversation} draft={draft} titled={false} />
+        <SkillsPickerPanel conversation={conversation} draft={draft} />
       </div>
     );
   } else if ((level === "models" || level === "configuration") && picker) {
@@ -212,7 +203,6 @@ export function ComposerToolsPanel({
           onViewChange={setLevel}
           // A pick is the end of the errand: back to the composer, which names it.
           onPicked={close}
-          back={false}
         />
         {level === "models" && (
           <>
@@ -239,7 +229,10 @@ export function ComposerToolsPanel({
     const modelsEmpty = !picker || picker.models.length === 0;
     content = (
       <>
-        {phone && <AttachRows onDone={close} />}
+        {/* From `md` up attaching is a button of the composer line. */}
+        <div className="flex flex-col md:hidden">
+          <AttachRows onDone={close} />
+        </div>
         {conversation && (
           <LevelRow
             icon={<BookOpenIcon />}
@@ -275,12 +268,10 @@ export function ComposerToolsPanel({
             onCheckedChange={setPackageAuthoringEnabled}
           />
         )}
-        {/* The phone's composer line has no room for it: the panel's last line. */}
-        {phone && (
-          <p className="text-muted-foreground mt-1 border-t px-5 pt-3 pb-2 text-sm">
-            {t("thread.disclaimer")}
-          </p>
-        )}
+        {/* A phone's composer line has no room for it: the panel's last line. */}
+        <p className="text-muted-foreground mt-1 border-t px-5 pt-3 pb-2 text-sm md:hidden">
+          {t("thread.disclaimer")}
+        </p>
       </>
     );
   }

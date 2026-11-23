@@ -12,7 +12,7 @@
  */
 
 import { useMemo } from "react";
-import { ChevronLeftIcon, SlidersHorizontalIcon, TriangleAlertIcon } from "lucide-react";
+import { SlidersHorizontalIcon, TriangleAlertIcon } from "lucide-react";
 import { ModelGenerationControls } from "@appstrate/ui/components/model-generation-controls";
 import { buildGenerationLabels } from "@appstrate/ui/components/model-generation-labels";
 import { ModelPickerList } from "@appstrate/ui/components/model-picker";
@@ -50,8 +50,7 @@ const hasGenerationOverrides = (generation: ModelGenerationSettings) =>
 
 /**
  * The list of models, or the selected model's settings: the composer's tools panel shows it at its
- * « Modèle » level. `back` draws the settings' own way back to the list, named after the model;
- * the panel's heading does it there.
+ * « Modèle » level, whose heading holds the way back from the settings to the list.
  */
 export function ModelPanel({
   models,
@@ -62,13 +61,11 @@ export function ModelPanel({
   view,
   onViewChange,
   onPicked,
-  back = true,
 }: ModelPickerProps & {
   view: ModelPanelView;
   onViewChange: (view: ModelPanelView) => void;
-  /** After a pick from the list (the phone closes its panel). */
-  onPicked?: () => void;
-  back?: boolean;
+  /** After a pick from the list. */
+  onPicked: () => void;
 }) {
   const { t, can, personalModelCredentials, modelCredentials } = useChatHost();
   const translateSettings = (key: string, values?: Record<string, string>) =>
@@ -110,16 +107,6 @@ export function ModelPanel({
   if (view === "configuration" && active) {
     return (
       <div className="desktop-pointer:px-3 flex max-h-[min(20rem,calc(100dvh-8rem))] min-h-0 flex-col px-5 py-2 max-md:max-h-[70dvh]">
-        {back && (
-          <button
-            type="button"
-            onClick={() => onViewChange("models")}
-            className="text-muted-foreground hover:text-foreground desktop-pointer:min-h-8 flex min-h-11 w-full shrink-0 items-center gap-1.5 text-left text-sm"
-          >
-            <ChevronLeftIcon className="size-4 shrink-0" aria-hidden="true" />
-            <span className="truncate font-medium">{active.label ?? active.modelId}</span>
-          </button>
-        )}
         <div className="min-h-0 overflow-y-auto px-0.5 py-1">
           {hasNoGenerationControls ? (
             <p className="text-muted-foreground rounded-md border border-dashed px-3 py-4 text-center text-xs">
@@ -149,7 +136,7 @@ export function ModelPanel({
         onSelect={(id) => {
           if (id === null) return;
           onSelect(id);
-          onPicked?.();
+          onPicked();
         }}
         selectable={isModelSelectable}
         // `settings:` — the picker's labels live in the settings bundle (a boot

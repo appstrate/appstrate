@@ -26,7 +26,10 @@ const ROW_INSET_CLASS =
   "mx-2 rounded-lg px-3 desktop-pointer:mx-1 desktop-pointer:rounded-md desktop-pointer:px-2";
 
 /** A row of a sheet menu: 48 px tall, inset from the panel's edges. */
-export const SHEET_ROW_CLASS = `${ROW_INSET_CLASS} text-foreground flex min-h-12 items-center justify-start gap-3 py-2 text-left text-base font-normal outline-none transition-colors active:bg-muted focus-visible:bg-muted hover:bg-muted disabled:pointer-events-none disabled:opacity-50 data-[disabled]:pointer-events-none data-[disabled]:opacity-50 [&_svg]:size-5 [&_svg]:shrink-0 desktop-pointer:min-h-9 desktop-pointer:gap-2 desktop-pointer:py-1.5 desktop-pointer:text-sm desktop-pointer:[&_svg]:size-4`;
+/** A row's box: 48 px on touch, its icon at 20 px; a mouse's row is denser. */
+const ROW_BOX_CLASS = `${ROW_INSET_CLASS} flex min-h-12 items-center gap-3 py-2 [&_svg]:size-5 [&_svg]:shrink-0 desktop-pointer:min-h-9 desktop-pointer:gap-2 desktop-pointer:py-1.5 desktop-pointer:[&_svg]:size-4`;
+
+export const SHEET_ROW_CLASS = `${ROW_BOX_CLASS} text-foreground justify-start text-left text-base font-normal outline-none transition-colors active:bg-muted focus-visible:bg-muted hover:bg-muted disabled:pointer-events-none disabled:opacity-50 data-[disabled]:pointer-events-none data-[disabled]:opacity-50 desktop-pointer:text-sm`;
 
 /** A line naming a group of rows, inset like their text. */
 export const SHEET_LABEL_CLASS =
@@ -107,17 +110,11 @@ export const SheetMenuContent = React.forwardRef<HTMLDivElement, SheetMenuConten
 );
 SheetMenuContent.displayName = "SheetMenuContent";
 
-export const SheetMenuRow = React.forwardRef<
-  HTMLButtonElement,
-  React.ComponentProps<"button"> & { destructive?: boolean }
->(({ className, destructive, type = "button", ...props }, ref) => (
-  <button
-    ref={ref}
-    type={type}
-    className={cn(SHEET_ROW_CLASS, destructive && "text-destructive", className)}
-    {...props}
-  />
-));
+export const SheetMenuRow = React.forwardRef<HTMLButtonElement, React.ComponentProps<"button">>(
+  ({ className, type = "button", ...props }, ref) => (
+    <button ref={ref} type={type} className={cn(SHEET_ROW_CLASS, className)} {...props} />
+  ),
+);
 SheetMenuRow.displayName = "SheetMenuRow";
 
 /** A setting that is on or off: the label, then the switch, the whole row toggles. */
@@ -141,12 +138,7 @@ export function SheetMenuSwitchRow({
   testId?: string;
 }) {
   return (
-    <div
-      className={cn(
-        ROW_INSET_CLASS,
-        "desktop-pointer:min-h-9 desktop-pointer:gap-2 desktop-pointer:py-1.5 desktop-pointer:[&_svg]:size-4 flex min-h-12 items-center gap-3 py-2 [&_svg]:size-5 [&_svg]:shrink-0",
-      )}
-    >
+    <div className={ROW_BOX_CLASS}>
       {icon}
       <label
         htmlFor={id}

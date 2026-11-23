@@ -75,6 +75,7 @@ describe("composer model list", () => {
           onGenerationChange={() => {}}
           view="models"
           onViewChange={() => {}}
+          onPicked={() => {}}
         />
       </ChatHostProvider>,
     );

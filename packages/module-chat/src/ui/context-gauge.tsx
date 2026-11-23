@@ -156,7 +156,7 @@ export function ContextIndicator({ draftCrosses }: { draftCrosses: boolean }) {
       variant="ghost"
       // With the share beside the ring the button widens: a height and a minimum width, no `size-*`.
       className={cn(
-        "desktop-pointer:h-8 desktop-pointer:min-w-8 h-10 min-w-10 shrink-0 gap-1 rounded-lg px-2",
+        "desktop-pointer:h-8 desktop-pointer:min-w-8 h-11 min-w-11 shrink-0 gap-1 rounded-lg px-2",
         context.level === "ok" ? "text-warning" : LEVEL_TEXT[context.level],
       )}
       aria-label={t("contextUsage.label", { counts, sentence })}

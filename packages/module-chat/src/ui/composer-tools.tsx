@@ -10,7 +10,7 @@
  * the bottom below `md`, by the design system's own rule.
  */
 
-import { useId, type ReactNode } from "react";
+import { useId, useRef, type ReactNode, type Ref } from "react";
 import { ComposerPrimitive } from "@assistant-ui/react";
 import {
   CpuIcon,
@@ -30,7 +30,6 @@ import {
 import { Tooltip, TooltipContent, TooltipTrigger } from "@appstrate/ui/components/tooltip";
 import { MENU_TITLE_CLASS, MenuHeading } from "@appstrate/ui/components/sheet-menu";
 import { cn } from "@appstrate/ui/cn";
-import { useIsMobile } from "@appstrate/ui/use-mobile";
 import { attachUnavailableKey } from "./attachment-adapter.ts";
 import {
   DEPARTURE_LEVEL,
@@ -63,9 +62,7 @@ export function ComposerTools({ authorsPackages }: ComposerToolsProps) {
   const heading = useComposerPanelHeading();
   const departures = useComposerDepartures(authorsPackages);
   const titleId = useId();
-  // A phone's panel also holds attaching a file and the disclaimer: its composer line has room
-  // for neither.
-  const phone = useIsMobile();
+  const plus = useRef<HTMLButtonElement>(null);
   return (
     <Popover
       open={panel.open}
@@ -97,7 +94,7 @@ export function ComposerTools({ authorsPackages }: ComposerToolsProps) {
           ))}
         </div>
       </PopoverAnchor>
-      <ComposerPlusButton authorsPackages={authorsPackages} />
+      <ComposerPlusButton ref={plus} authorsPackages={authorsPackages} />
       <PopoverContent
         side="top"
         align="start"
@@ -111,6 +108,13 @@ export function ComposerTools({ authorsPackages }: ComposerToolsProps) {
           event.preventDefault();
           heading.back.onClick();
         }}
+        // Closing returns focus to the opener on screen: the "+" below `md`, where the
+        // registered trigger (the settings button) is hidden.
+        onCloseAutoFocus={(event) => {
+          if (!plus.current?.offsetParent) return;
+          event.preventDefault();
+          plus.current.focus();
+        }}
         className="flex max-h-[min(32rem,var(--radix-popover-content-available-height))] w-[min(22rem,calc(100vw-1.5rem))] flex-col overflow-hidden p-0"
       >
         <MenuHeading back={heading.back}>
@@ -119,7 +123,7 @@ export function ComposerTools({ authorsPackages }: ComposerToolsProps) {
           </p>
         </MenuHeading>
         <div className="flex min-h-0 flex-1 flex-col overflow-y-auto py-1">
-          <ComposerToolsPanel authorsPackages={authorsPackages} phone={phone} />
+          <ComposerToolsPanel authorsPackages={authorsPackages} />
         </div>
       </PopoverContent>
     </Popover>
@@ -254,18 +258,26 @@ function DepartureDot({ testId }: { testId: string }) {
 }
 
 /** The phone's opener of the panel, at the left of the field. */
-function ComposerPlusButton({ authorsPackages }: { authorsPackages: boolean }) {
+function ComposerPlusButton({
+  ref,
+  authorsPackages,
+}: {
+  ref: Ref<HTMLButtonElement>;
+  authorsPackages: boolean;
+}) {
   const { t } = useChatHost();
   const panel = useComposerPanel();
   const departed = useComposerDepartures(authorsPackages).length > 0;
   return (
     <Button
+      ref={ref}
       type="button"
       variant="ghost"
       size="icon-sm"
       className={cn(COMPOSER_TOOL_CLASS, "relative md:hidden")}
       aria-label={t("composer.tools")}
       aria-haspopup="dialog"
+      aria-expanded={panel.open}
       data-testid="composer-plus"
       onClick={() => panel.openAt("tools")}
     >

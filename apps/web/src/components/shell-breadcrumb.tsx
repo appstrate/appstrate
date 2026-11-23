@@ -22,16 +22,13 @@ import {
   BreadcrumbSeparator,
 } from "@appstrate/ui/components/breadcrumb";
 
-/**
- * The header's slot elements: a slot entry has one element per drawing of the trail, and
- * `ShellTrailContent` fills each.
- */
-const trailSlots = createStore<{ elements: HTMLElement[] }>(() => ({ elements: [] }));
+/** The header's slot element, which `ShellTrailContent` fills. */
+const trailSlot = createStore<{ element: HTMLElement | null }>(() => ({ element: null }));
 
 function registerTrailSlot(element: HTMLElement | null) {
   if (!element) return;
-  trailSlots.setState((s) => ({ elements: [...s.elements, element] }));
-  return () => trailSlots.setState((s) => ({ elements: s.elements.filter((e) => e !== element) }));
+  trailSlot.setState({ element });
+  return () => trailSlot.setState((s) => (s.element === element ? { element: null } : s));
 }
 
 /**
@@ -39,10 +36,8 @@ function registerTrailSlot(element: HTMLElement | null) {
  * renders it, so it reads the page's context, and portalled into the header.
  */
 export function ShellTrailContent({ children }: { children: ReactNode }) {
-  const elements = useStore(trailSlots, (s) => s.elements);
-  return elements.map((element, i) => (
-    <Fragment key={i}>{createPortal(children, element)}</Fragment>
-  ));
+  const element = useStore(trailSlot, (s) => s.element);
+  return element && createPortal(children, element);
 }
 
 export function ShellBreadcrumb() {

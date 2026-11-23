@@ -190,9 +190,11 @@ export function NotificationBell() {
   const agentNames = new Map(agents?.map((a) => [a.id, a.display_name ?? a.id]));
 
   const triggerButton = (
-    <button
+    <Button
       type="button"
-      className="text-muted-foreground hover:text-foreground hover:bg-accent desktop-pointer:size-8 relative inline-flex size-11 shrink-0 cursor-pointer items-center justify-center rounded-md border-none bg-transparent p-0 transition-colors"
+      variant="ghost"
+      size="icon-sm"
+      className="text-muted-foreground relative shrink-0"
       aria-label={t("notifications.ariaLabel")}
     >
       <Bell size={18} />
@@ -202,7 +204,7 @@ export function NotificationBell() {
         tone="spark"
         className="absolute -top-1 -right-1"
       />
-    </button>
+    </Button>
   );
 
   const contentProps = {

@@ -65,11 +65,7 @@ function BudgetGauge({ budget }: { budget: SkillBudget }) {
 export function SkillsPickerPanel({
   conversation: { skills: stored, setPin, setDiscovery },
   draft: effective,
-  titled = true,
-}: SkillsPickerProps & {
-  /** Its own heading; the tools panel draws the heading in its header. */
-  titled?: boolean;
-}) {
+}: SkillsPickerProps) {
   const { t } = useChatHost();
   const baseId = useId();
   const discoveryId = `${baseId}-discovery`;
@@ -95,8 +91,6 @@ export function SkillsPickerPanel({
 
   return (
     <>
-      {titled && <p className="shrink-0 text-sm font-medium">{t("skills.title")}</p>}
-
       <div className="mt-2 flex shrink-0 items-center justify-between gap-3 px-1">
         <label htmlFor={discoveryId} className="cursor-pointer text-xs font-medium">
           {t("skills.discovery.label")}

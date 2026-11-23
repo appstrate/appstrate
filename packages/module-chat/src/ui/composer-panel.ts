@@ -84,13 +84,11 @@ export const DEPARTURE_LEVEL: Record<ComposerDeparture, ComposerPanelLevel> = {
  * format says it — the desktop by its chip naming the space, the phone by the dot.
  */
 export function useComposerDepartures(authorsPackages: boolean): readonly ComposerDeparture[] {
-  const { can } = useChatHost();
   const conversation = useConversationSkillsContext();
   const scope = useConversationScope();
   const creationMode = usePackageAuthoringEnabled();
   const inlineRunModel = useInlineRunModelEnabled();
-  // Composing an inline run needs creation mode too: off, no turn launches one.
-  const offersInlineRunModel = creationMode && canComposeInlineRuns(can);
+  const offersInlineRunModel = useOffersInlineRunModel();
   const departures: ComposerDeparture[] = [];
   if (authorsPackages && !creationMode) departures.push("creationOff");
   if (offersInlineRunModel && inlineRunModel) departures.push("inlineRunModel");
@@ -118,4 +116,10 @@ export function useComposerPanelHeading(): { title: string; back?: MenuBack } {
     };
   }
   return { title: t("composer.tools") };
+}
+
+/** The inline-run model switch is offered: composing an inline run needs creation mode too. */
+export function useOffersInlineRunModel(): boolean {
+  const { can } = useChatHost();
+  return usePackageAuthoringEnabled() && canComposeInlineRuns(can);
 }

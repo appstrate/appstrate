@@ -56,7 +56,7 @@ export function DetailBarId({ id }: { id: string }) {
   return (
     <>
       <code className="truncate font-mono">{id}</code>
-      <CopyButton value={id} className="desktop-pointer:size-5 size-5 shrink-0 [&_svg]:size-3" />
+      <CopyButton value={id} className="desktop-pointer:size-5 shrink-0 [&_svg]:size-3" />
     </>
   );
 }

@@ -135,7 +135,12 @@ const DropdownMenuSubContent = React.forwardRef<
   const headingId = React.useContext(SubSheetContext);
   if (sheet) {
     return (
-      <div ref={ref} role="group" aria-labelledby={headingId} className="flex flex-col">
+      <div
+        ref={ref}
+        role="group"
+        aria-labelledby={headingId}
+        className={cn("flex flex-col", className)}
+      >
         {props.children}
       </div>
     );
@@ -334,7 +339,9 @@ const DropdownMenuSeparator = React.forwardRef<
 >(({ className, asChild: _asChild, ...props }, ref) => {
   const sheet = React.useContext(MenuSheetContext);
   if (sheet) {
-    return <div ref={ref} role="separator" className="bg-border my-2 h-px" {...props} />;
+    return (
+      <div ref={ref} role="separator" className={cn("bg-border my-2 h-px", className)} {...props} />
+    );
   }
   return (
     <DropdownMenuPrimitive.Separator

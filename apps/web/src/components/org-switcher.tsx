@@ -195,9 +195,6 @@ export function OrgSwitcher() {
   const { contextLabel: currentContextLabel, names: contextNames } = useContextNames();
   const exploredId = exploredOrgId ?? currentOrg?.id ?? null;
   const isExploringElsewhere = exploredId !== null && exploredId !== currentOrg?.id;
-  // A phone presents the panel under the trigger, in one column; everywhere else the
-  // organizations sit beside their spaces, even when there is only one.
-  const mobilePresentation = isMobile;
   const closeSwitcherAndSidebar = () => {
     setOpen(false);
     setOpenMobile(false);
@@ -323,15 +320,11 @@ export function OrgSwitcher() {
       </PopoverTrigger>
       <PopoverContent
         align="start"
-        side={mobilePresentation ? "bottom" : "right"}
+        side="right"
         sideOffset={6}
-        className={cn(
-          // Beside the sidebar the panel takes what the viewport leaves it, never more.
-          "max-w-[min(calc(100vw-2rem),calc(var(--radix-popover-content-available-width)-0.5rem))] overflow-hidden rounded-xl p-0",
-          mobilePresentation ? "w-[340px]" : "w-[660px]",
-          mobilePresentation && "max-h-[calc(100svh-4.5rem)] overflow-y-auto",
-          isMobile && "w-[calc(100vw-1rem)] max-w-none",
-        )}
+        // Beside the sidebar the panel takes what the viewport leaves it, never more. Below `md`
+        // the primitive draws a bottom sheet, which scrolls: only the popover clips.
+        className="w-[660px] max-w-[min(calc(100vw-2rem),calc(var(--radix-popover-content-available-width)-0.5rem))] rounded-xl p-0 md:overflow-hidden"
       >
         {/* The lists filter themselves (`matchesSearch`); cmdk only supplies the field. */}
         <Command shouldFilter={false} className="h-auto overflow-visible">
@@ -343,10 +336,10 @@ export function OrgSwitcher() {
             aria-label={t("switcher.searchAriaLabel")}
           />
 
-          <div className={cn("grid", mobilePresentation ? "grid-cols-1" : "grid-cols-2")}>
+          <div className={cn("grid", isMobile ? "grid-cols-1" : "grid-cols-2")}>
             <div className="flex min-h-0 flex-col p-2">
               <ColumnHeader label={t("switcher.orgsColumn")} />
-              <div className={cn("flex flex-col gap-1", !mobilePresentation && LIST_BOX)}>
+              <div className={cn("flex flex-col gap-1", !isMobile && LIST_BOX)}>
                 {shownOrgs.map((org) => {
                   const isCurrent = org.id === currentOrg.id;
                   const isExplored = org.id === exploredId;
@@ -369,7 +362,7 @@ export function OrgSwitcher() {
                       settings={{
                         to: "/org-settings",
                         label: t("switcher.settingsOf", { name: org.name }),
-                        pinned: isCurrent || mobilePresentation,
+                        pinned: isCurrent || isMobile,
                         onPick: settingsPick("/org-settings", { orgId: org.id }),
                       }}
                       onNavigate={closeSwitcherAndSidebar}
@@ -401,10 +394,7 @@ export function OrgSwitcher() {
 
             <div
               id={spacesColumnId}
-              className={cn(
-                "flex min-h-0 flex-col p-2",
-                mobilePresentation ? "border-t" : "border-l",
-              )}
+              className={cn("flex min-h-0 flex-col p-2", isMobile ? "border-t" : "border-l")}
             >
               <ColumnHeader label={t("switcher.workspacesColumn")} />
               {exploredSpaces.isPending ? (
@@ -419,7 +409,7 @@ export function OrgSwitcher() {
                   {t("switcher.workspacesEmpty")}
                 </p>
               ) : (
-                <div className={cn("flex flex-col gap-1", !mobilePresentation && LIST_BOX)}>
+                <div className={cn("flex flex-col gap-1", !isMobile && LIST_BOX)}>
                   {/* Not a space: a mode over the working space, set apart above them. */}
                   {offersOverview && (
                     <div className="border-b pb-1">
@@ -460,7 +450,7 @@ export function OrgSwitcher() {
                             ? {
                                 to: "/workspace-settings",
                                 label: t("switcher.settingsOf", { name: spaceLabel(space, t) }),
-                                pinned: isCurrent || mobilePresentation,
+                                pinned: isCurrent || isMobile,
                                 onPick: settingsPick("/workspace-settings", {
                                   orgId: exploredId ?? currentOrg.id,
                                   spaceId: space.id,
@@ -518,22 +508,19 @@ export function OrgSwitcher() {
 
 /**
  * The organization's tile with the space's as a badge on its corner, ringed in `ring` (the
- * background it sits on). The switcher's trigger and the chat's phone header draw it alike.
+ * background it sits on). The switcher's trigger and the shell's sidebar opener draw it alike.
  * « Tous les espaces » is no space: no badge, the name beside it says it.
  */
 export function OrgSpaceTile({ ring, className }: { ring: string; className?: string }) {
   const { currentOrg, loading } = useOrg();
-  const { data: spaces } = useSpaces();
-  const currentSpaceId = useCurrentSpaceId();
+  const { currentSpace } = useContextNames();
   const viewer = useViewer();
-  const overview = useOverviewMode();
   if (loading) return <Skeleton className={cn("size-8 shrink-0 rounded-lg", className)} />;
   if (!currentOrg) return null;
-  const currentSpace = spaces?.find((s) => s.id === currentSpaceId) ?? null;
   return (
     <span className={cn("relative shrink-0", className)} aria-hidden="true">
       <IdentityTile {...orgTile(currentOrg)} className="size-8 rounded-lg" />
-      {currentSpace && !overview.on && (
+      {currentSpace && (
         <IdentityTile
           {...spaceTile(currentSpace, viewer)}
           className={cn("absolute -right-1 -bottom-1 size-4 rounded-[5px] ring-2", ring)}

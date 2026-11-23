@@ -189,6 +189,7 @@ function SidebarOpener({ className }: { className?: string }) {
   // The Runs entry's own count (`NavOrg`): the working space's, or every reached space's.
   const { on: overview } = useOverviewMode();
   const unreadRuns = useUnreadRunCount({ spanning: overview });
+  const label = names ? t("nav.toggleSidebarIn", { current: names }) : t("nav.toggleSidebar");
   return (
     <Button
       type="button"
@@ -199,7 +200,9 @@ function SidebarOpener({ className }: { className?: string }) {
         className,
       )}
       aria-expanded={isMobile ? openMobile : state === "expanded"}
-      aria-label={names ? t("nav.toggleSidebarIn", { current: names }) : t("nav.toggleSidebar")}
+      aria-label={
+        unreadRuns > 0 ? t("nav.toggleSidebarUnread", { label, count: unreadRuns }) : label
+      }
       onClick={toggleSidebar}
     >
       <Menu className="size-5" aria-hidden="true" />
