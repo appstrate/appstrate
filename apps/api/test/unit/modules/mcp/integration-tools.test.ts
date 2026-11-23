@@ -1228,7 +1228,21 @@ describe("typed tools of a remote MCP integration", () => {
 
     expect(best!.input_schema).toEqual(inputSchema);
     expect(best!.usage).toContain("the server's own tool result");
+    expect("schema_reduced" in best!).toBe(false);
     expect(made.calls).toHaveLength(0);
+  });
+
+  it("describes a tool whose schemas were reduced with the steps applied", async () => {
+    const reduced = ["output_schema", "schema_documentation", "input_schema"];
+    const made = makeTools(CALL_OWN, undefined, true, {
+      listing: listingOf([
+        remoteTool({ input_schema: { type: "object" }, schema_reduced: reduced }),
+      ]),
+    });
+    const best = await describeTool(made, "acme_docs__search");
+    expect(best!.schema_reduced).toEqual(reduced);
+    expect(best!.input_schema).toEqual({ type: "object" });
+    expect(best!.usage).toContain("`schema_reduced`");
   });
 
   it("merges a tool listed in two spaces: both spaces, each connection's missing scopes", async () => {

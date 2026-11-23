@@ -1678,6 +1678,30 @@ describe("the typed tools of a remote MCP integration", () => {
     });
   });
 
+  it("lists a tool whose output schema exceeds the schema budget without it, saying so", async () => {
+    const outputSchema = {
+      type: "object" as const,
+      properties: Object.fromEntries(
+        Array.from({ length: 200 }, (_, i) => [
+          `field${i}`,
+          { type: "string", enum: ["x".repeat(40)] },
+        ]),
+      ),
+    };
+    await withServer({ tools: [{ name: "search", outputSchema }, "create"] }, async (other) => {
+      await seedProxyIntegration(ctx, on(other, { tools_policy: { search: {}, create: {} } }));
+      await seedProxyConnection(ctx, ID, "api_key", { token: TOKEN });
+
+      const { remote: tools } = await list();
+      const [search, create] = tools;
+      expect(search?.remote_name).toBe("search");
+      expect(search?.schema_reduced).toEqual(["output_schema"]);
+      expect(search && "output_schema" in search).toBe(false);
+      expect(create?.remote_name).toBe("create");
+      expect(create && "schema_reduced" in create).toBe(false);
+    });
+  });
+
   it("serves the tool routes with `Cache-Control: no-store`", async () => {
     await seedProxyIntegration(ctx, remote());
     await seedProxyConnection(ctx, ID, "api_key", { token: TOKEN });

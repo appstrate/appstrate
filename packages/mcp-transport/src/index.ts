@@ -474,6 +474,7 @@ export {
   MAX_TOOL_DESCRIPTION_BYTES,
   MAX_PARAMETER_DESCRIPTION_BYTES,
   MAX_SCHEMA_SERIALISED_BYTES,
+  type ToolDescriptorReduction,
 } from "./sanitize.ts";
 
 // Tool exposure — which upstream tools an integration exposes to the agent, and the descriptor

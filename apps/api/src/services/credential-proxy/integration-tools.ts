@@ -33,6 +33,7 @@ import {
   normaliseMcpToolBody,
 } from "@appstrate/afps-shared/mcp-naming";
 import type { ProblemDetail } from "@appstrate/core/api-errors";
+import type { ToolDescriptorReduction } from "@appstrate/mcp-transport";
 import { ApiError, notFound } from "../../lib/errors.ts";
 import { logger } from "../../lib/logger.ts";
 import type { ProxyConnectionStatus } from "../integration-connections.ts";
@@ -74,6 +75,8 @@ interface RemoteTool extends ToolBase {
   remote_name: string;
   input_schema: Record<string, unknown>;
   output_schema?: Record<string, unknown>;
+  /** The schema shown is partial: the budget steps applied to the server's descriptor, in order. */
+  schema_reduced?: ToolDescriptorReduction[];
   /** The server could not be listed: the tool is declared, without description or schema. */
   catalog_unreadable?: true;
   /** Per connection lacking some, the scopes its `tools_policy` entry requires. */
@@ -485,6 +488,7 @@ async function remoteTools(
       remote_name: upstream.name,
       input_schema: upstream.input_schema,
       ...(upstream.output_schema ? { output_schema: upstream.output_schema } : {}),
+      ...(upstream.schema_reduced ? { schema_reduced: upstream.schema_reduced } : {}),
       ...(unreadable ? { catalog_unreadable: true as const } : {}),
       connection_ids: connections.map((c) => c.connection_id),
       ...(Object.keys(missing).length > 0 ? { missing_scopes: missing } : {}),

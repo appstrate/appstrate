@@ -159,6 +159,9 @@ function describedTool(tool: Merged<CallableTool>): Record<string, unknown> {
     usage: tool.usage,
     input_schema: tool.input_schema,
     ...(tool.kind === "remote" && tool.output_schema ? { output_schema: tool.output_schema } : {}),
+    ...(tool.kind === "remote" && tool.schema_reduced
+      ? { schema_reduced: tool.schema_reduced }
+      : {}),
   };
 }
 
