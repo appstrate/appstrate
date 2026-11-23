@@ -27,6 +27,7 @@ import {
   type AppstrateToolDefinition,
   type CallToolResult,
 } from "@appstrate/mcp-transport";
+import { recallMemoryOutputSchema, runHistoryOutputSchema } from "@appstrate/core/mcp-result";
 import { listResponse } from "@appstrate/core/list-query";
 import {
   isRuntimeBoundIntegration,
@@ -87,6 +88,10 @@ function textResult(text: string): CallToolResult {
   return { content: [{ type: "text", text }] };
 }
 
+function structuredResult(payload: Record<string, unknown>): CallToolResult {
+  return { ...textResult(JSON.stringify(payload)), structuredContent: payload };
+}
+
 function errorResult(text: string): CallToolResult {
   return { content: [{ type: "text", text }], isError: true };
 }
@@ -105,12 +110,20 @@ function defineTool<S extends z.ZodObject>(spec: {
   title: string;
   description: string;
   args: S;
+  output?: z.ZodObject;
   run: (args: z.output<S>, ctx: ToolContext) => Promise<CallToolResult>;
 }): RunTool {
   const { $schema: _dialect, ...inputSchema } = z.toJSONSchema(spec.args);
   const descriptor = {
     name: spec.name,
     title: spec.title,
+    ...(spec.output
+      ? {
+          outputSchema: z.toJSONSchema(
+            spec.output,
+          ) as AppstrateToolDefinition["descriptor"]["outputSchema"],
+        }
+      : {}),
     description: spec.description,
     inputSchema: inputSchema as AppstrateToolDefinition["descriptor"]["inputSchema"],
   };
@@ -260,6 +273,7 @@ const RUN_TOOLS: RunTool[] = [
   }),
   defineTool({
     name: "recall_memory",
+    output: recallMemoryOutputSchema,
     title: "Recall memories",
     description:
       "Search the agent's archive memories — durable facts and learnings from past runs that " +
@@ -292,21 +306,20 @@ const RUN_TOOLS: RunTool[] = [
         query: q,
         limit,
       });
-      return textResult(
-        JSON.stringify({
-          memories: memories.map((m) => ({
-            id: m.id,
-            content: m.content,
-            createdAt: m.createdAt.toISOString(),
-            actor_type: m.actorType,
-            actor_id: m.actorId,
-          })),
-        }),
-      );
+      return structuredResult({
+        memories: memories.map((m) => ({
+          id: m.id,
+          content: m.content,
+          createdAt: m.createdAt.toISOString(),
+          actor_type: m.actorType,
+          actor_id: m.actorId,
+        })),
+      });
     },
   }),
   defineTool({
     name: "run_history",
+    output: runHistoryOutputSchema,
     title: "Read past runs",
     description:
       "Fetch metadata and optionally the carry-over checkpoint or final output of the agent's " +
@@ -341,7 +354,7 @@ const RUN_TOOLS: RunTool[] = [
           excludeRunId: run.id,
         },
       );
-      return textResult(JSON.stringify(listResponse(recent)));
+      return structuredResult({ ...listResponse(recent) });
     },
   }),
   defineTool({

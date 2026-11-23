@@ -34,6 +34,17 @@ import {
   uploadPackageZip,
   downloadVersionZip,
 } from "../../../src/services/package-storage.ts";
+import {
+  buildBundleFromAfps,
+  canonicalBundleDigest,
+  computeRecordEntries,
+  emptyPackageCatalog,
+  generateKeyPair,
+  serializeRecord,
+  signBundle,
+  verifyBundleSignature,
+} from "@appstrate/afps-runtime/bundle";
+import { uploadPackageFiles } from "../../../src/services/package-items/storage.ts";
 import { unzipPackageArchive } from "../../../src/services/package-archive.ts";
 import {
   AGENT_PACKAGES_BUCKET,
@@ -3777,7 +3788,24 @@ describe("Packages API", () => {
         description: "Published fixture",
         dependencies: { ...kept, ...retired },
       });
-      const original = await downloadVersionZip(id, version);
+      const encoder = new TextEncoder();
+      const sourceFiles = unzipPackageArchive((await downloadVersionZip(id, version))!);
+      const bundleOf = (bytes: Uint8Array) =>
+        buildBundleFromAfps(bytes, emptyPackageCatalog, { depTypes: [] });
+      const key = generateKeyPair();
+      const digest = canonicalBundleDigest(await bundleOf(zipArtifact(sourceFiles, 6)));
+      const signature = signBundle(digest, { keyId: key.keyId, privateKey: key.privateKey });
+      sourceFiles["signature.sig"] = encoder.encode(JSON.stringify(signature));
+      sourceFiles.RECORD = encoder.encode(
+        serializeRecord(computeRecordEntries(new Map(Object.entries(sourceFiles)))),
+      );
+      const original = zipArtifact(sourceFiles, 6);
+      await uploadPackageZip(id, version, Buffer.from(original));
+      await db
+        .update(packageVersions)
+        .set({ integrity: computeIntegrity(original), artifactSize: original.byteLength })
+        .where(and(eq(packageVersions.packageId, id), eq(packageVersions.version, version)));
+      await uploadPackageFiles("agents", source.orgId, id, sourceFiles);
       const fork = await app.request(`/api/packages/${id}/fork`, {
         method: "POST",
         headers: authHeaders(ctx, { "Content-Type": "application/json" }),
@@ -3799,7 +3827,13 @@ describe("Packages API", () => {
         body: JSON.stringify({ version: "1.1.0" }),
       });
       expect(publish.status, await publish.clone().text()).toBe(201);
-      expect(await downloadVersionZip(id, version)).toEqual(original);
+      const retained = (await downloadVersionZip(id, version))!;
+      expect(new Uint8Array(retained)).toEqual(original);
+      expect(
+        verifyBundleSignature(canonicalBundleDigest(await bundleOf(retained)), signature, {
+          keys: [{ keyId: key.keyId, publicKey: key.publicKey }],
+        }).ok,
+      ).toBe(true);
       expect(JSON.parse(await artifactManifestText(id, version)).dependencies).toEqual({
         ...kept,
         ...retired,
@@ -3810,6 +3844,11 @@ describe("Packages API", () => {
         [id, "1.1.0"],
       ] as const) {
         const bytes = (await downloadVersionZip(target, ver))!;
+        const entries = unzipPackageArchive(bytes);
+        expect(entries["signature.sig"]).toBeUndefined();
+        expect(new TextDecoder().decode(entries.RECORD)).toBe(
+          serializeRecord(computeRecordEntries(new Map(Object.entries(entries)))),
+        );
         const [row] = await db
           .select()
           .from(packageVersions)

@@ -63,13 +63,17 @@ import {
   invalidRequest,
   internalError,
   notFound,
-  parseBody,
   validationFailed,
 } from "../lib/errors.ts";
 import { readJsonBody } from "@appstrate/core/request-body";
 import { listResponse } from "@appstrate/core/list-query";
 import { parseListPagination } from "@appstrate/core/list-query";
-import { parseFieldSelection, paginate, projectFields } from "../lib/list-query.ts";
+import {
+  parseStrictQuery,
+  parseFieldSelection,
+  paginate,
+  projectFields,
+} from "../lib/list-query.ts";
 import { setOffsetLinkHeader } from "../lib/pagination-link.ts";
 import { popupHtmlClose, popupHtmlError } from "../lib/oauth-popup-html.ts";
 import { serveSpaceConnectionCalls } from "./connection-calls-handler.ts";
@@ -851,10 +855,12 @@ export function createIntegrationsRouter() {
   // only needs "which integrations exist" fetch a fraction of the payload.
   /**
    * `id` is a form array (`id=@a/x,@b/y`, OpenAPI `style: form, explode: false`),
-   * bounded like a page so one request answers it. Not `.strict()`: the
-   * pagination and `fields` params are read by their own parsers.
+   * bounded like a page so one request answers it.
    */
-  const listIntegrationsQuerySchema = z.object({
+  const listIntegrationsQuerySchema = z.strictObject({
+    limit: z.string().optional(),
+    offset: z.string().optional(),
+    fields: z.string().optional(),
     q: z.string().max(200).trim().optional(),
     id: z
       .string()
@@ -880,7 +886,7 @@ export function createIntegrationsRouter() {
     const scope = getSpaceScope(c);
     const fields = parseFieldSelection(c, INTEGRATION_FIELDS);
     const pagination = parseListPagination(c, { defaultLimit: 100 });
-    const query = parseBody(listIntegrationsQuerySchema, c.req.query());
+    const query = parseStrictQuery(c, listIntegrationsQuerySchema);
     const summaries = await listIntegrations(scope, {
       ...(query.id ? { ids: query.id } : {}),
       ...(query.q ? { search: query.q } : {}),

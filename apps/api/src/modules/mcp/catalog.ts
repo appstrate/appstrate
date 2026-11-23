@@ -31,6 +31,8 @@ export interface CatalogOperation {
   pathParams: string[];
   /** Names of OpenAPI `in: header` parameters this operation declares. */
   headerParams: string[];
+  /** Form-style array parameters sent in one comma-separated query value. */
+  csvQueryParams: Set<string>;
   requirement: RouteRequirement;
   /** Raw OpenAPI operation node (for `describe`). */
   operation: OperationNode;
@@ -124,11 +126,43 @@ export function getCatalog(): OperationCatalog {
   return catalog;
 }
 
+/** Inline OpenAPI Reference Objects while keeping JSON Schema refs in the returned schema table. */
+function resolveOperationRefs(
+  node: unknown,
+  components: Record<string, unknown>,
+  seen = new Set<string>(),
+): unknown {
+  if (Array.isArray(node)) return node.map((item) => resolveOperationRefs(item, components, seen));
+  if (!node || typeof node !== "object") return node;
+  const { $ref, ...siblings } = node as Record<string, unknown>;
+  if (typeof $ref === "string" && !seen.has($ref)) {
+    const match = /^#\/components\/(parameters|responses|requestBodies|headers)\/([^/]+)$/.exec(
+      $ref,
+    );
+    if (match) {
+      const entries = components[match[1]!] as Record<string, unknown> | undefined;
+      const target = entries?.[match[2]!];
+      if (target && typeof target === "object")
+        return resolveOperationRefs(
+          { ...target, ...siblings },
+          components,
+          new Set([...seen, $ref]),
+        );
+    }
+  }
+  return Object.fromEntries(
+    Object.entries(node).map(([key, value]) => [
+      key,
+      resolveOperationRefs(value, components, seen),
+    ]),
+  );
+}
+
 function buildCatalog(source: PlatformOperations): OperationCatalog {
   const operations = new Map<string, CatalogOperation>();
   for (const { operationId, method, pathTemplate, node, requirement } of source.operations) {
     if (isExcludedPath(pathTemplate)) continue;
-    const operation = node as OperationNode;
+    const operation = resolveOperationRefs(node, source.spec.components) as OperationNode;
     operations.set(operationId, {
       operationId,
       method,
@@ -140,6 +174,19 @@ function buildCatalog(source: PlatformOperations): OperationCatalog {
       description: typeof operation.description === "string" ? operation.description : "",
       pathParams: extractPathParams(pathTemplate),
       headerParams: extractHeaderParams(operation),
+      csvQueryParams: new Set(
+        Array.isArray(operation.parameters)
+          ? operation.parameters
+              .filter(
+                (p) =>
+                  p?.in === "query" &&
+                  p.explode === false &&
+                  (p.style ?? "form") === "form" &&
+                  p.schema?.type === "array",
+              )
+              .map((p) => p.name as string)
+          : [],
+      ),
       requirement,
       operation,
     });

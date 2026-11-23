@@ -182,8 +182,13 @@ export function isInvalidTextRepresentation(err: unknown): boolean {
 }
 
 /** True when a DB error is Postgres `23505` (unique_violation). */
-export function isUniqueViolation(err: unknown): boolean {
-  return hasSqlState(err, "23505");
+export function isUniqueViolation(err: unknown, constraint?: string): boolean {
+  return someCause(
+    err,
+    (cause) =>
+      cause.code === "23505" &&
+      (constraint === undefined || (cause.constraint_name ?? cause.constraint) === constraint),
+  );
 }
 
 /**

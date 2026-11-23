@@ -264,13 +264,16 @@ export interface ModelFailure extends ModelErrorClassification {
  * client parses the SDK's English. The status comes from the `<status> <body>` envelope, else
  * from the text; the provider's sentence from the body's `error.message` or `message`.
  */
-export function describeModelFailure(message: string): ModelFailure {
+export function describeModelFailure(message: string, reportedCategory?: unknown): ModelFailure {
   const trimmed = message.trim();
   const refusal = PROVIDER_REFUSAL.exec(trimmed);
   const status = refusal ? Number(refusal[1]) : statusFromMessage(trimmed);
   const providerMessage = refusal ? providerSentence(refusal[2]!) : undefined;
+  const category = MODEL_ERROR_CATEGORIES.find((value) => value === reportedCategory);
   return {
-    ...classifyModelError({ message: trimmed, ...(status !== undefined ? { status } : {}) }),
+    ...(category
+      ? { category, retryable: MODEL_ERROR_RETRYABLE_BY_CATEGORY[category] }
+      : classifyModelError({ message: trimmed, ...(status !== undefined ? { status } : {}) })),
     ...(status !== undefined ? { status } : {}),
     ...(providerMessage ? { providerMessage } : {}),
   };

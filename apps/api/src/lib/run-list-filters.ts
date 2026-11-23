@@ -132,8 +132,8 @@ const runListQuerySchema = z
     // Checked by `parseRunListFilters`.
     status: z.string().optional(),
     q: z.string().optional(),
-    start_date: z.string().optional(),
-    end_date: z.string().optional(),
+    start_date: z.iso.datetime({ offset: true }).optional(),
+    end_date: z.iso.datetime({ offset: true }).optional(),
     chat_session_id: z.string().optional(),
     space_kind: closedSet(SPACE_KINDS),
     // Checked by `parseSpaceIdFilter`.
@@ -144,14 +144,6 @@ const runListQuerySchema = z
     startingAfter: z.string().optional(),
   })
   .strict();
-
-/** `start_date` / `end_date`: an ISO date, a 400 otherwise. */
-function parseDate(raw: string | undefined, name: string): Date | undefined {
-  if (!raw) return undefined;
-  const date = new Date(raw);
-  if (Number.isNaN(date.getTime())) throw invalidRequest(`${name} is not a valid ISO date`, name);
-  return date;
-}
 
 /**
  * The query of `GET /api/runs` and `GET /api/orgs/{orgId}/runs`. Strict: an
@@ -175,8 +167,8 @@ export function parseGlobalRunListQuery(
     unread: query.unread === "true",
     status,
     search,
-    startDate: parseDate(query.start_date, "start_date"),
-    endDate: parseDate(query.end_date, "end_date"),
+    startDate: query.start_date ? new Date(query.start_date) : undefined,
+    endDate: query.end_date ? new Date(query.end_date) : undefined,
     chatSessionId: query.chat_session_id || undefined,
     packageId: query.packageId,
     spaceKind: query.space_kind,

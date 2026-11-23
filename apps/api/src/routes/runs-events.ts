@@ -142,6 +142,10 @@ export const RunResultSchema = z
         // before it becomes the `appstrate.run.terminal` `error_code` label, so
         // a runner-controlled string can never explode metric cardinality.
         code: z.string().max(64).optional(),
+        context: z
+          .object({ error_category: z.string().optional().catch(undefined) })
+          .optional()
+          .catch(undefined),
       })
       .optional(),
     status: z.enum(terminalRunStatusValues),

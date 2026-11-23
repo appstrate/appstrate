@@ -6,11 +6,17 @@ import { internalDispatchHeader } from "../../lib/internal-dispatch.ts";
 
 /**
  * A tool's JSON answer: `structuredContent` plus the same JSON as text (MCP 2025-06-18);
- * an error carries the text only.
+ * errors preserve their published text shape and distinguish route and tool refusals in structuredContent.
  */
 export function jsonResult(payload: Record<string, unknown>, isError = false): CallToolResult {
   const content = [{ type: "text" as const, text: JSON.stringify(payload) }];
-  return isError ? { content, isError } : { content, structuredContent: payload, isError };
+  return {
+    content,
+    isError,
+    structuredContent: isError
+      ? { ...payload, kind: typeof payload.status === "number" ? "route_refusal" : "tool_refusal" }
+      : payload,
+  };
 }
 
 export function asString(value: unknown): string | undefined {
@@ -58,8 +64,8 @@ type RefusalCode =
 
 /**
  * Every refused tool call, from every tool (MCP 2025-11-25, SEP-1303: input
- * validation is a tool result, not a JSON-RPC error). `isError: true`, JSON
- * as text only. `-32602` remains only for an unknown tool name (transport).
+ * validation is a tool result, not a JSON-RPC error). `isError: true`, the original JSON
+ * text and a typed structured refusal. `-32602` remains only for an unknown tool name (transport).
  */
 export interface Refusal {
   code: RefusalCode;

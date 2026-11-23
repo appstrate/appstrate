@@ -50,6 +50,7 @@ function limitedApp(): Hono<AppEnv> {
 }
 
 interface ToolResult {
+  structuredContent?: Record<string, unknown>;
   content: Array<{ type: string; text: string }>;
   isError?: boolean;
 }
@@ -162,6 +163,10 @@ describe("run MCP server", () => {
       const run = await seedRunningRun();
       const { envelope } = await rpc(path, bearer(run.id), "tools/list");
       const names = (envelope.result!.tools as Array<{ name: string }>).map((t) => t.name);
+      const outputs = (envelope.result!.tools as Array<{ name: string; outputSchema?: unknown }>)
+        .filter((tool) => tool.outputSchema)
+        .map((tool) => tool.name);
+      expect(outputs).toEqual(["recall_memory", "run_history"]);
       expect(names).toEqual(["log", "note", "pin", "recall_memory", "run_history", "notify"]);
       expect(Object.keys(manifest.tools_policy).sort()).toEqual([...names].sort());
       // `notify` reaches people: an agent receives it by selecting it, never by default.
@@ -307,6 +312,8 @@ describe("run MCP server", () => {
       const memoriesRead = JSON.parse(recalled.content[0]!.text) as {
         memories: Array<{ content: string }>;
       };
+      expect(recalled.structuredContent).toEqual(memoriesRead);
+      expect(history.structuredContent).toEqual(JSON.parse(history.content[0]!.text));
       expect(memoriesRead.memories.map((m) => m.content)).toEqual(["fact"]);
     });
 

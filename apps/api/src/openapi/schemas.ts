@@ -523,6 +523,16 @@ export const schemas = {
         type: "integer",
         description: "Seconds before retry; mirrored in the `Retry-After` header",
       },
+      login_refusal: {
+        type: "string",
+        enum: ["grant", "integration"],
+        description:
+          "For login_rejected, identifies an OAuth grant rejection or a refusal returned by the integration's login tool.",
+      },
+      integration_diagnostic: {
+        type: "string",
+        description: "The integration login tool's own diagnostic when it supplied one.",
+      },
       errors: {
         type: "array",
         description: "Field-level validation errors",

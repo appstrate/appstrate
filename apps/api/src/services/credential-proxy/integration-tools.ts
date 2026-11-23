@@ -24,10 +24,10 @@ import {
   type IntegrationManifest,
 } from "@appstrate/core/integration";
 import { mapWithConcurrency } from "@appstrate/core/map-with-concurrency";
-import { normaliseMcpToolNamespace } from "@appstrate/core/naming";
 import { API_CALL_TOOL_NAME, API_UPLOAD_TOOL_NAME } from "@appstrate/afps-shared/api-tool-naming";
 import {
   fnv1a64Hex,
+  integrationNamespaces,
   isValidMcpToolName,
   MCP_TOOL_NAME_MAX_LENGTH,
   normaliseMcpToolBody,
@@ -134,51 +134,6 @@ const NOT_READY_STATUSES: ReadonlySet<ProxyConnectionStatus> = new Set([
 ]);
 
 const LIST_CONCURRENCY = 3;
-/** Hex digits of the package id's hash a clashing namespace takes first; 16 at most. */
-const NAMESPACE_HASH_LENGTH = 6;
-const MAX_NAMESPACE_HASH_LENGTH = 16;
-
-/**
- * The namespace of each integration active in a space: its normalised id, without the trailing
- * `_` the length cut may leave, followed by `_` and a hash of its id while it equals another's.
- * No namespace holds `__` or ends with `_`, so distinct namespaces never yield the same
- * `{ns}__{body}` name, and the result depends on the set of ids alone.
- */
-export function integrationNamespaces(ids: readonly string[]): Map<string, string> {
-  const bases = new Map(
-    ids.map((id) => {
-      let base = normaliseMcpToolNamespace(id);
-      while (base.endsWith("_")) base = base.slice(0, -1);
-      return [id, base];
-    }),
-  );
-  const hashLength = new Map<string, number>(
-    ids.map((id) => [id, bases.get(id) ? 0 : NAMESPACE_HASH_LENGTH]),
-  );
-  const namespaceOf = (id: string) => {
-    const base = bases.get(id)!;
-    const length = hashLength.get(id)!;
-    if (length === 0) return base;
-    const hash = fnv1a64Hex(id).slice(0, length);
-    return base ? `${base}_${hash}` : hash;
-  };
-  for (;;) {
-    const holders = new Map<string, string[]>();
-    for (const id of ids) {
-      const namespace = namespaceOf(id);
-      holders.set(namespace, [...(holders.get(namespace) ?? []), id]);
-    }
-    const clashing = [...holders.values()].filter((group) => group.length > 1).flat();
-    const growable = clashing.filter((id) => hashLength.get(id)! < MAX_NAMESPACE_HASH_LENGTH);
-    if (growable.length === 0) break;
-    for (const id of growable) {
-      const length = hashLength.get(id)!;
-      hashLength.set(id, length === 0 ? NAMESPACE_HASH_LENGTH : length + 2);
-    }
-  }
-  return new Map(ids.map((id) => [id, namespaceOf(id)]));
-}
-
 /** Hex digits of the upstream name's hash a transformed tool name ends with. */
 const TOOL_NAME_HASH_LENGTH = 8;
 

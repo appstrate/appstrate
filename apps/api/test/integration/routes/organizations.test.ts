@@ -226,6 +226,22 @@ describe("Organizations API", () => {
       expect(resolved.overrideVersionLabel).toBe("1.0.0");
     });
 
+    it("answers one concurrent create with the documented slug_taken problem", async () => {
+      const user = await createTestUser();
+      const create = () =>
+        app.request("/api/orgs", {
+          method: "POST",
+          headers: { Cookie: user.cookie, "Content-Type": "application/json" },
+          body: JSON.stringify({ name: "Concurrent", slug: "concurrent-slug" }),
+        });
+      const replies = await Promise.all([create(), create()]);
+      expect(replies.map((r) => r.status).sort()).toEqual([201, 400]);
+      expect(await replies.find((r) => r.status === 400)!.json()).toMatchObject({
+        code: "slug_taken",
+        status: 400,
+      });
+    });
+
     it("rejects duplicate slug with 400", async () => {
       await createTestContext({ orgSlug: "taken-slug" });
       const otherUser = await createTestUser();

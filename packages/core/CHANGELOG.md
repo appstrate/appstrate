@@ -9,6 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `AUTH_META_KEY`, `CONNECT_META_KEY`, `OAUTH_META_KEY` and their readers `appstrateAuthRequired`, `getAppstrateConnectMeta`, `getAppstrateOAuthMeta` describe the published integration metadata fields.
+- `recallMemoryOutputSchema` and `runHistoryOutputSchema` describe the structured results of the run history and recall tools.
+
+- `assistantVisibleMcpResult` in `@appstrate/core/mcp-result` projects tool results to their assistant audience before workspace, history, or model use.
+
 - **`@appstrate/core/skill-address`**: the `skill://` URI grammar alone — `SKILL_URI_PREFIX`,
   `skillFileUri`, `parseSkillUri`, `parseSkillUriPackage` and the `SkillAddress` type — with no
   server-only import, so a browser bundle can parse a skill URI.

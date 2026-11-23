@@ -85,6 +85,38 @@ const TEMPLATE_SCHEME_PREFIX = /^[A-Za-z][A-Za-z0-9+.-]*:\/\//;
  */
 export const API_META_KEY = "dev.appstrate/api";
 
+export const OAUTH_META_KEY = "dev.appstrate/oauth";
+export const AUTH_META_KEY = "dev.appstrate/auth";
+export const CONNECT_META_KEY = "dev.appstrate/connect";
+const authMetaSchema = z.object({ required: z.boolean().optional() });
+const oauthMetaSchema = z.object({
+  scope_separator: z.string().optional(),
+  refresh_token_issuance: z.string().optional(),
+});
+const connectMetaSchema = z.object({
+  tool: z.string().optional(),
+  run_at: z.enum(["link", "run-start"]).optional(),
+  reauth_on: z.array(z.int()).optional(),
+  produces: z.array(z.string()).optional(),
+  persist_login_secret: z.boolean().optional(),
+});
+
+function metaValue(owner: unknown, key: string): unknown {
+  return isPlainObject(owner) && isPlainObject(owner._meta) ? owner._meta[key] : undefined;
+}
+
+export function appstrateAuthRequired(auth: unknown): boolean {
+  return authMetaSchema.safeParse(metaValue(auth, AUTH_META_KEY)).data?.required === true;
+}
+
+export function getAppstrateOAuthMeta(auth: unknown) {
+  return oauthMetaSchema.safeParse(metaValue(auth, OAUTH_META_KEY)).data;
+}
+
+export function getAppstrateConnectMeta(connect: unknown) {
+  return connectMetaSchema.safeParse(metaValue(connect, CONNECT_META_KEY)).data;
+}
+
 const APPSTRATE_META_NAMESPACE = API_META_KEY.slice(0, API_META_KEY.indexOf("/") + 1);
 
 // ─────────────────────────────────────────────
@@ -470,6 +502,24 @@ export const integrationManifestSchema = afpsIntegrationManifestSchema.superRefi
   }
 
   for (const [authKey, auth] of Object.entries(auths)) {
+    for (const [owner, key, schema, path] of [
+      [auth, AUTH_META_KEY, authMetaSchema, []],
+      [auth, OAUTH_META_KEY, oauthMetaSchema, []],
+      [auth.connect, CONNECT_META_KEY, connectMetaSchema, ["connect"]],
+    ] as const) {
+      const value = metaValue(owner, key);
+      if (value === undefined) continue;
+      const parsed = schema.safeParse(value);
+      if (!parsed.success) {
+        for (const issue of parsed.error.issues) {
+          ctx.addIssue({
+            code: "custom",
+            path: ["auths", authKey, ...path, "_meta", key, ...issue.path],
+            message: issue.message,
+          });
+        }
+      }
+    }
     // (1) authorized_uris non-empty unless allow_all_uris.
     const authorizedUris = auth.authorized_uris ?? [];
     if (authorizedUris.length === 0 && auth.allow_all_uris !== true) {
@@ -1079,7 +1129,9 @@ export function apiUploadToolNameFor(apiCallToolName: string): string {
  * For any other source these names are the base of the catalog
  * {@link resolveIntegrationToolCatalog} resolves.
  */
-export function getDeclaredToolNames(manifest: IntegrationManifest): string[] {
+export function getDeclaredToolNames(
+  manifest: Pick<IntegrationManifest, "tools_policy">,
+): string[] {
   return manifest.tools_policy ? Object.keys(manifest.tools_policy) : [];
 }
 
@@ -1142,19 +1194,7 @@ export function manifestAuthKeySet(
  * the parsed manifest (AFPS allows open `_meta` on auth objects).
  */
 export function manifestHasRequiredAuth(manifest: IntegrationManifest | null | undefined): boolean {
-  const auths = manifest?.auths ?? {};
-  for (const auth of Object.values(auths)) {
-    const meta =
-      auth && typeof auth === "object" ? (auth as Record<string, unknown>)._meta : undefined;
-    const block =
-      meta && typeof meta === "object"
-        ? (meta as Record<string, unknown>)["dev.appstrate/auth"]
-        : undefined;
-    const required =
-      block && typeof block === "object" ? (block as Record<string, unknown>).required : undefined;
-    if (required === true) return true;
-  }
-  return false;
+  return Object.values(manifest?.auths ?? {}).some(appstrateAuthRequired);
 }
 
 /**

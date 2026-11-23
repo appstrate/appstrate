@@ -18,14 +18,17 @@ import {
   spacePackages,
   spaces,
 } from "@appstrate/db/schema";
-import { fnv1a64Hex, isValidMcpToolName } from "@appstrate/afps-shared/mcp-naming";
+import {
+  fnv1a64Hex,
+  integrationNamespaces,
+  isValidMcpToolName,
+} from "@appstrate/afps-shared/mcp-naming";
 import { clearAllCachesLocally } from "@appstrate/core/cache";
 import { forgetProtocolEras } from "@appstrate/mcp-transport/testing";
 import type { IntegrationManifest } from "@appstrate/core/integration";
 import { getEnv } from "@appstrate/env";
 import { drainAudits, pendingAuditCount } from "../../../src/services/audit.ts";
 import {
-  integrationNamespaces,
   listIntegrationTools,
   type IntegrationTool,
   type IntegrationToolListing,

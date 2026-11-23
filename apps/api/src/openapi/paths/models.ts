@@ -285,7 +285,11 @@ export const modelsPaths = {
                   object: { type: "string", enum: ["model_choice"] },
                   credential_id: { type: ["string", "null"] },
                   models: { type: "array", items: { $ref: "#/components/schemas/OrgModel" } },
-                  default_model_id: { type: ["string", "null"] },
+                  default_model_id: {
+                    type: ["string", "null"],
+                    description:
+                      "Organization model row ID resolved from the provider modelId in the request and the choice’s credential. Null when this request did not set a default.",
+                  },
                 },
               },
             },

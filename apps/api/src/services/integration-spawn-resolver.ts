@@ -26,6 +26,7 @@
  * line, which gives the operator two-sided diagnosis.
  */
 
+import { getAppstrateConnectMeta } from "@appstrate/core/integration";
 import {
   decryptCredentialsToStringMap,
   decryptCredentialInputsToStringMap,
@@ -70,7 +71,6 @@ import {
 } from "./integration-service.ts";
 import {
   renderRemoteSource,
-  getAppstrateConnectMeta,
   renderCredentialTemplate,
   renderAuthAuthorizedUris,
   runnerEgressFor,

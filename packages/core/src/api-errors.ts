@@ -27,6 +27,9 @@ export interface ProblemDetail {
   param?: string;
   retry_after?: number;
   errors?: ValidationFieldError[];
+  /** Typed acquisition refusal extensions emitted by integration login flows. */
+  login_refusal?: "grant" | "integration";
+  integration_diagnostic?: string;
 }
 
 export interface ValidationFieldError {

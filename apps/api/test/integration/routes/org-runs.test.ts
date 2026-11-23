@@ -32,9 +32,10 @@
  * `modules/mcp/test/integration/org-reads.test.ts`.
  */
 
-import { describe, it, expect, beforeEach } from "bun:test";
+import { getPGliteClient } from "@appstrate/db/client";
+import { describe, it, expect, beforeEach, spyOn } from "bun:test";
 import { getTestApp } from "../../helpers/app.ts";
-import { truncateAll } from "../../helpers/db.ts";
+import { db, truncateAll } from "../../helpers/db.ts";
 import {
   addOrgMember,
   createTestContext,
@@ -155,6 +156,41 @@ describe("GET /api/orgs/{orgId}/runs", () => {
     expect(byId.get(r.deuxMember!)!.spaceId).toBe(deux);
   });
 
+  it("pages the same visible runs with a constant SELECT budget as the number of spaces grows", async () => {
+    const visiblePage = () => list(session(member), "?limit=2");
+    await visiblePage();
+    const selects = spyOn(db, "select");
+    const embedded = getPGliteClient();
+    const driver = embedded && spyOn(embedded, "query");
+    try {
+      const baseline = await visiblePage();
+      const budget = selects.mock.calls.length;
+      expect(budget).toBeGreaterThan(0);
+      const driverBudget = driver?.mock.calls.length;
+      if (driverBudget !== undefined) {
+        expect(driverBudget).toBeGreaterThan(0);
+        expect(driverBudget).toBeLessThanOrEqual(20);
+      }
+      for (let i = 0; i < 128; i++) {
+        await seedSpace({
+          orgId: owner.orgId,
+          name: `Budget ${i}`,
+          visibility: i % 2 ? "open" : "private",
+        });
+      }
+      selects.mockClear();
+      driver?.mockClear();
+      const after = await visiblePage();
+      expect(ids(after)).toEqual(ids(baseline));
+      expect(after.hasMore).toBe(true);
+      expect(selects.mock.calls.length).toBe(budget);
+      expect(driver?.mock.calls.length).toBe(driverBudget);
+    } finally {
+      selects.mockRestore();
+      driver?.mockRestore();
+    }
+  });
+
   it("decides agent input per row, by the row's space", async () => {
     const byId = new Map((await list(session(member))).data.map((run) => [run.id, run]));
     // `agents:read` in Un, not in Deux: one page, two answers.
@@ -224,6 +260,20 @@ describe("GET /api/orgs/{orgId}/runs", () => {
     expect(ids(await list(session(member), "?user=me"))).toEqual(
       sorted(r.unMember!, r.deuxMember!, r.defaultMember!),
     );
+  });
+
+  it("requires a full RFC 3339 timestamp including an offset", async () => {
+    for (const value of ["2026", "2026-06-01", "2026-06-01T13:00:00"]) {
+      const res = await app.request(path(`?start_date=${value}`), { headers: session(member) });
+      expect(res.status).toBe(400);
+    }
+    expect(
+      (
+        await app.request(path("?start_date=2026-06-01T13:00:00%2B02:00"), {
+          headers: session(member),
+        })
+      ).status,
+    ).toBe(200);
   });
 
   it("composes the filters of GET /api/runs and refuses an unknown value", async () => {
