@@ -435,6 +435,18 @@ describe("run MCP server", () => {
       for (const entry of body.data) expect(entry).not.toHaveProperty("checkpoint");
     });
 
+    it("recalls literal percent and underscore characters", async () => {
+      const run = await seedRunningRun();
+      for (const content of ["Budget 25%_used", "Budget 250 used"]) {
+        await callTool(path, bearer(run.id), "note", { content });
+      }
+      for (const q of ["%", "_"]) {
+        const result = await callTool(path, bearer(run.id), "recall_memory", { q });
+        const body = JSON.parse(result.content[0]!.text) as { memories: { content: string }[] };
+        expect(body.memories.map((row) => row.content)).toEqual(["Budget 25%_used"]);
+      }
+    });
+
     it("`recall_memory` honours `q` and `limit`", async () => {
       const run = await seedRunningRun();
       for (const content of ["Gmail quota", "gmail pagination", "Slack rate limit"]) {

@@ -257,12 +257,12 @@ export const updatePackageSchema = z
  * space being current. The per-space routes therefore resolve their space here
  * instead, through the same helper the middleware uses (spec §4.3).
  */
-function requireSpaceFromParam(param: "id") {
+function requireSpaceFromParam() {
   // Marked: every guard mounted behind this one reads the caller's set in the
   // space the PATH names, not in the space the request entered — a reader of
   // the route table cannot see that from the mounts alone.
   return markSpaceRescope(async (c: Context<AppEnv>, next: Next) => {
-    await enterSpaceById(c, c.req.param(param)!, c.get("orgId"));
+    await enterSpaceById(c, c.req.param("id")!, c.get("orgId"));
     return next();
   });
 }
@@ -386,7 +386,7 @@ export function createSpacesRouter() {
 
   router.get(
     "/:id/library",
-    requireSpaceFromParam("id"),
+    requireSpaceFromParam(),
     requirePermission("spaces", "read"),
     async (c) => {
       return c.json(await getPackageLibrary(c, c.req.param("id")));
@@ -504,7 +504,7 @@ export function createSpacesRouter() {
   // resolved from the PATH space, not from `X-Space-Id`.
   router.patch(
     "/:id",
-    requireSpaceFromParam("id"),
+    requireSpaceFromParam(),
     requirePermission("space-settings", "write"),
     async (c) => {
       const orgId = c.get("orgId");
@@ -651,11 +651,11 @@ export function createSpacesRouter() {
   // Every member route resolves the PATH space first, so `space-members:*`
   // (preset `admin`) is read from the caller's set in THAT space. Hono runs a
   // `/x/*` middleware on bare `/x` too, so one mount covers the collection.
-  router.use("/:id/members/*", requireSpaceFromParam("id"));
+  router.use("/:id/members/*", requireSpaceFromParam());
 
   router.get(
     "/:id/roles",
-    requireSpaceFromParam("id"),
+    requireSpaceFromParam(),
     requireAnyPermission([
       "space-members:invite",
       "space-members:change-role",
@@ -793,7 +793,7 @@ export function createSpacesRouter() {
   // /:id/packages/* routes. These are space-scoped by their path, not by
   // `X-Space-Id`, so they resolve their own space — `run-config` gates on
   // `agents:read`, a space-level string that org context alone never carries.
-  router.use("/:id/packages/*", requireSpaceFromParam("id"));
+  router.use("/:id/packages/*", requireSpaceFromParam());
 
   // GET /api/spaces/:id/packages — list this space's placements.
   // The `router.use` guard above only proves the space belongs to the org;
