@@ -669,7 +669,7 @@ function isSkillEntry(value: unknown): value is ListedSkillEntry {
 }
 
 /** One `skills/list` page; any malformed entry fails the whole list. */
-function readSkillPage(raw: unknown): { skills: ListedSkillEntry[]; nextCursor?: string } {
+function readSkillPage(raw: unknown): { items: ListedSkillEntry[]; nextCursor?: string } {
   const page = raw as { skills?: unknown; nextCursor?: unknown } | null;
   const skills = page?.skills;
   if (!Array.isArray(skills)) throw new Error("skills/list answered without a `skills` array");
@@ -678,20 +678,14 @@ function readSkillPage(raw: unknown): { skills: ListedSkillEntry[]; nextCursor?:
   if (page?.nextCursor !== undefined && typeof page.nextCursor !== "string") {
     throw new Error("skills/list answered a `nextCursor` that is not a string");
   }
-  return {
-    skills: skills as ListedSkillEntry[],
-    ...(page?.nextCursor === undefined ? {} : { nextCursor: page.nextCursor }),
-  };
+  return { items: skills as ListedSkillEntry[], nextCursor: page?.nextCursor };
 }
 
 /** One `prompts/list` page. */
 function readPromptPage(raw: unknown): { items: Prompt[]; nextCursor?: string } {
   const page = ListPromptsResultSchema.safeParse(raw);
   if (!page.success) throw new Error("prompts/list answered a page that is not a prompt list");
-  return {
-    items: page.data.prompts,
-    ...(page.data.nextCursor === undefined ? {} : { nextCursor: page.data.nextCursor }),
-  };
+  return { items: page.data.prompts, nextCursor: page.data.nextCursor };
 }
 
 /** MCP 2026-07-28 `HeaderMismatch`. */
@@ -921,10 +915,7 @@ function buildClient(
         "skills/list",
         options?.meta ? { _meta: options.meta } : {},
         options?.signal,
-        (raw) => {
-          const page = readSkillPage(raw);
-          return { items: page.skills, nextCursor: page.nextCursor };
-        },
+        readSkillPage,
       );
       return { skills };
     },

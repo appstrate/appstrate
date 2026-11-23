@@ -299,7 +299,7 @@ export async function updateSessionSkills(
   const [row] = await db
     .update(chatSessions)
     .set({
-      ...(skillDiscovery !== undefined && { skillDiscovery }),
+      skillDiscovery,
       ...(pinnedSkills !== undefined && {
         pinnedSkills,
         // The pins ride as one jsonb parameter: drizzle would spread a bare array into a list.
@@ -410,14 +410,17 @@ async function upsertMessage(
 }
 
 /**
- * The file parts of the session's stored messages among `messageIds` that hold any, by message
- * id: what an earlier turn of a conversation attached, as the server materialized it.
+ * What the session's stored messages among `messageIds` carry, by message id: the file parts an
+ * earlier turn attached, as the server materialized them, and the resolved launch text of an
+ * agent launch (`agent-prompt.ts`), the one source of an earlier message's launch text.
  */
-export async function storedFileParts(
+export async function storedHistory(
   sessionId: string,
   messageIds: readonly string[],
-): Promise<Map<string, FileUIPart[]>> {
-  if (!messageIds.length) return new Map();
+): Promise<{ files: Map<string, FileUIPart[]>; launches: Map<string, string> }> {
+  const files = new Map<string, FileUIPart[]>();
+  const launches = new Map<string, string>();
+  if (!messageIds.length) return { files, launches };
   const rows = await db
     .select({ messageId: chatMessages.messageId, content: chatMessages.content })
     .from(chatMessages)
@@ -425,45 +428,18 @@ export async function storedFileParts(
       and(
         eq(chatMessages.sessionId, sessionId),
         inArray(chatMessages.messageId, [...messageIds]),
-        sql`${chatMessages.content}->'parts' @> '[{"type":"file"}]'::jsonb`,
+        sql`(${chatMessages.content}->'parts' @> '[{"type":"file"}]'::jsonb OR ${chatMessages.content}->'parts' @> ${JSON.stringify([{ type: AGENT_PROMPT_PART_TYPE }])}::jsonb)`,
       ),
     );
-  return new Map(
-    rows.map((row) => [
-      row.messageId,
-      row.content.parts.filter(
-        (part): part is FileUIPart => (part as { type?: unknown }).type === "file",
-      ),
-    ]),
-  );
-}
-
-/**
- * The resolved launch instructions of the session's stored messages among `messageIds` that
- * carry an agent launch (`agent-prompt.ts`), by message id: what `prompts/get` answered when the
- * turn was sent, the one source of an earlier message's launch text.
- */
-export async function storedAgentPromptTexts(
-  sessionId: string,
-  messageIds: readonly string[],
-): Promise<Map<string, string>> {
-  if (!messageIds.length) return new Map();
-  const rows = await db
-    .select({ messageId: chatMessages.messageId, content: chatMessages.content })
-    .from(chatMessages)
-    .where(
-      and(
-        eq(chatMessages.sessionId, sessionId),
-        inArray(chatMessages.messageId, [...messageIds]),
-        sql`${chatMessages.content}->'parts' @> ${JSON.stringify([{ type: AGENT_PROMPT_PART_TYPE }])}::jsonb`,
-      ),
-    );
-  const texts = new Map<string, string>();
   for (const row of rows) {
+    const fileParts = row.content.parts.filter(
+      (part): part is FileUIPart => (part as { type?: unknown }).type === "file",
+    );
+    if (fileParts.length) files.set(row.messageId, fileParts);
     const text = agentPromptOfParts(row.content.parts)?.data.text;
-    if (text) texts.set(row.messageId, text);
+    if (text) launches.set(row.messageId, text);
   }
-  return texts;
+  return { files, launches };
 }
 
 /**

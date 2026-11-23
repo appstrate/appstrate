@@ -60,8 +60,7 @@ import {
   type TurnConversation,
   persistUserMessage,
   persistAssistantMessage,
-  storedFileParts,
-  storedAgentPromptTexts,
+  storedHistory,
   touchSessionSpace,
 } from "./persistence.ts";
 import { registerStopController, unregisterStopController } from "./stop-registry.ts";
@@ -387,7 +386,6 @@ export async function handleChatStream(
     ...(body.pins !== undefined && { pinnedSkills: body.pins }),
     ...(body.skill_discovery !== undefined && { skillDiscovery: body.skill_discovery }),
   };
-  const asksSkills = Object.keys(bodySkills).length > 0;
   // An ephemeral turn writes no row: it creates, so its origin is validated here, and its
   // skill settings apply to the defaults.
   const ephemeralConversation = (): TurnConversation => {
@@ -405,7 +403,7 @@ export async function handleChatStream(
           orgId,
           user.id,
           readableSpaceIds(reachable),
-          asksSkills ? bodySkills : undefined,
+          bodySkills,
           originRequest,
         )
       : Promise.resolve(ephemeralConversation());
@@ -414,12 +412,9 @@ export async function handleChatStream(
   const historyIds = messages
     .slice(0, -1)
     .flatMap((message) => (typeof message.id === "string" ? [message.id] : []));
-  const historyStored = conversation.then(async () =>
+  const historyStored = conversation.then(() =>
     sessionId && lastMessage?.id
-      ? await Promise.all([
-          storedFileParts(sessionId, historyIds),
-          storedAgentPromptTexts(sessionId, historyIds),
-        ]).then(([files, launches]) => ({ files, launches }))
+      ? storedHistory(sessionId, historyIds)
       : { files: new Map<string, FileUIPart[]>(), launches: new Map<string, string>() },
   );
 
@@ -509,9 +504,7 @@ export async function handleChatStream(
     return {
       skills: conv.selection,
       // See `turnUsesDrafts`.
-      skillDrafts: turnUsesDrafts(callerPermissions, {
-        authoring: body.package_authoring !== false,
-      }),
+      skillDrafts: turnUsesDrafts(callerPermissions, body.package_authoring !== false),
       // The caller's own connection over the turn's spaces (see `callerMcpOpener`): the turn's
       // skills and an agent launch's prompt are read through it.
       openCaller: callerMcpOpener(c, platformFetch, {

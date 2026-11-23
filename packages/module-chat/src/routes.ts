@@ -385,7 +385,7 @@ export function createChatRouter(deps: ChatPlatformDeps) {
       spaces.map((space) => space.id),
       {
         readsSkills: permissions.has("skills:read"),
-        drafts: turnUsesDrafts(permissions, { authoring }),
+        drafts: turnUsesDrafts(permissions, authoring),
       },
     );
     return c.json(commands);
@@ -583,8 +583,8 @@ function createSessionHandlers(deps: ChatPlatformDeps) {
       const session = await getOwnedSession(c.req.param("id")!, sessionScope(c));
       const { pins, skill_discovery } = await readJsonBody(c, updateSessionSkillsSchema);
       const row = await updateSessionSkills(session.id, {
-        ...(pins !== undefined && { pinnedSkills: pins }),
-        ...(skill_discovery !== undefined && { skillDiscovery: skill_discovery }),
+        pinnedSkills: pins,
+        skillDiscovery: skill_discovery,
       });
       if (!row) throw notFound("Chat session not found");
       notifySessionUpdate(row.id, row.orgId, row.userId);

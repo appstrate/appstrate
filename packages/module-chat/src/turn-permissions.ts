@@ -32,9 +32,9 @@ export function turnPermissions(
  */
 export function turnUsesDrafts(
   callerPermissions: ReadonlySet<string>,
-  opts: { authoring: boolean },
+  authoring: boolean,
 ): boolean {
-  return opts.authoring && callerPermissions.has("skills:write");
+  return authoring && callerPermissions.has("skills:write");
 }
 
 /**

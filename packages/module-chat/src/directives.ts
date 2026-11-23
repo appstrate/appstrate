@@ -21,10 +21,6 @@ export interface Directive {
 
 type TextSegment = { kind: "text"; text: string } | ({ kind: "directive" } & Directive);
 
-function isKnown(type: string): type is Directive["type"] {
-  return type === SKILL_DIRECTIVE || type === AGENT_DIRECTIVE;
-}
-
 export function serializeDirective(directive: Directive): string {
   return defaultDirectiveFormatter.serialize(directive);
 }
@@ -39,18 +35,17 @@ export function directiveSegments(text: string): TextSegment[] {
   };
   for (const segment of defaultDirectiveFormatter.parse(text)) {
     if (segment.kind === "text") push(segment);
-    else if (isKnown(segment.type)) {
+    else if (segment.type === SKILL_DIRECTIVE || segment.type === AGENT_DIRECTIVE) {
       push({ kind: "directive", type: segment.type, label: segment.label, id: segment.id });
     } else push({ kind: "text", text: defaultDirectiveFormatter.serialize(segment) });
   }
   return segments;
 }
 
-export function directivesOf(text: string): Directive[] {
-  return directiveSegments(text).flatMap((segment) =>
-    segment.kind === "directive"
-      ? [{ type: segment.type, label: segment.label, id: segment.id }]
-      : [],
+export function directivesOf(text: string) {
+  return directiveSegments(text).filter(
+    (segment): segment is Extract<TextSegment, { kind: "directive" }> =>
+      segment.kind === "directive",
   );
 }
 

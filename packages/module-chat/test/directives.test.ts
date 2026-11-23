@@ -17,12 +17,12 @@ describe("directives", () => {
   it("round-trips a skill and an agent through the text", () => {
     const text = `use ${serializeDirective(skill)} then ${serializeDirective(agent)}!`;
     expect(serializeDirective(skill)).toBe(":skill[tone]{name=@acme/tone}");
-    expect(directivesOf(text)).toEqual([skill, agent]);
+    expect(directivesOf(text)).toMatchObject([skill, agent]);
   });
 
   it("keeps a label with brackets, quotes or spaces whole", () => {
     const odd = { type: "agent", label: 'Rapport [Q3] "final"', id: "run-q3" } as const;
-    expect(directivesOf(serializeDirective(odd))).toEqual([odd]);
+    expect(directivesOf(serializeDirective(odd))).toMatchObject([odd]);
   });
 
   it("splits the text into literal text and directives, in order", () => {

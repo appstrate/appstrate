@@ -35,8 +35,8 @@ describe("turnUsesDrafts", () => {
   it("holds with authoring on and `skills:write`, and only then", () => {
     const writer = new Set(GRANTED);
     const reader = new Set(GRANTED.filter((permission) => permission !== "skills:write"));
-    expect(turnUsesDrafts(writer, { authoring: true })).toBe(true);
-    expect(turnUsesDrafts(writer, { authoring: false })).toBe(false);
-    expect(turnUsesDrafts(reader, { authoring: true })).toBe(false);
+    expect(turnUsesDrafts(writer, true)).toBe(true);
+    expect(turnUsesDrafts(writer, false)).toBe(false);
+    expect(turnUsesDrafts(reader, true)).toBe(false);
   });
 });

@@ -3,12 +3,7 @@
 // A composer agent launch (`agent-prompt.ts`), resolved into its instructions by `prompts/get`.
 
 import type { UIMessage } from "ai";
-import {
-  ErrorCode,
-  McpError,
-  jsonRpcErrorOf,
-  type AppstrateMcpClient,
-} from "@appstrate/mcp-transport";
+import { ErrorCode, jsonRpcErrorOf, type AppstrateMcpClient } from "@appstrate/mcp-transport";
 import { badGateway, invalidRequest } from "@appstrate/core/api-errors";
 import { agentPromptOfParts } from "./agent-prompt.ts";
 import { uiMessageText } from "./message-text.ts";
@@ -44,10 +39,8 @@ export async function resolveAgentPrompt(
           .flatMap((entry) => (entry.content.type === "text" ? [entry.content.text] : []))
           .join("\n\n");
       } catch (err) {
-        // The server answers one `-32602` for a name it does not serve and for one it cannot launch
-        // (a `ProtocolError` over HTTP, an `McpError` over an in-process pair).
-        const code = jsonRpcErrorOf(err)?.code ?? (err instanceof McpError ? err.code : undefined);
-        if (code === ErrorCode.InvalidParams) {
+        // The server answers one `-32602` for a name it does not serve and for one it cannot launch.
+        if (jsonRpcErrorOf(err)?.code === ErrorCode.InvalidParams) {
           throw invalidRequest(
             `"${name}" is not an agent this conversation can launch.`,
             "messages",
@@ -95,31 +88,29 @@ export function withStoredAgentPromptTexts(
   stored: ReadonlyMap<string, string>,
 ): UIMessage[] {
   let remaining = AGENT_LAUNCH_REPLAY_BUDGET_CHARS;
-  const texts = new Map<number, string>();
+  const out = [...messages];
+  // The last message is the new one: the schema already refuses a `text` on it.
   for (let index = messages.length - 2; index >= 0; index--) {
     const message = messages[index]!;
     const launch = message.role === "user" ? agentPromptOfParts(message.parts) : null;
-    const full = launch ? stored.get(message.id) : undefined;
-    if (!launch || !full) continue;
-    if (full.length <= remaining) {
+    if (!launch) continue;
+    const { name, title } = launch.data;
+    const full = stored.get(message.id);
+    let text: string | undefined;
+    if (full && full.length <= remaining) {
       remaining -= full.length;
-      texts.set(index, full);
-    } else {
+      text = full;
+    } else if (full) {
       // Once one launch does not fit, no older one is kept: the budget never skips back.
       remaining = 0;
-      texts.set(index, droppedLaunchText(launch.data.name, launch.data.title));
+      text = droppedLaunchText(name, title);
     }
-  }
-  return messages.map((message, index) => {
-    const launch = message.role === "user" ? agentPromptOfParts(message.parts) : null;
-    if (!launch) return message;
-    const { name, title } = launch.data;
-    const text = texts.get(index);
-    return {
+    out[index] = {
       ...message,
       parts: message.parts.map((part) =>
         part === launch.part ? { ...part, data: { name, title, ...(text ? { text } : {}) } } : part,
       ),
     } as UIMessage;
-  });
+  }
+  return out;
 }
