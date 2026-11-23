@@ -2297,6 +2297,7 @@ export const schemas = {
       "owner_name",
       "allowed_actions",
       "bindable",
+      "referencing_model_count",
       "serves_model_ids",
       "created_by",
       "createdAt",
@@ -2348,6 +2349,12 @@ export const schemas = {
         type: "boolean",
         description:
           "Whether an organization model may be bound to this credential: `true` for an organization credential (API key or subscription), `false` for a personal or a built-in one.",
+      },
+      referencing_model_count: {
+        type: "integer",
+        minimum: 0,
+        description:
+          "Number of organization model rows bound to this credential, including disabled models. A positive count prevents deletion (409 credential_in_use). Personal and built-in credentials have no such bindings.",
       },
       serves_model_ids: {
         type: "array",

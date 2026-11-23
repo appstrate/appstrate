@@ -6770,6 +6770,8 @@ export interface components {
             allowed_actions: ("edit" | "delete" | "test" | "reconnect")[];
             /** @description Whether an organization model may be bound to this credential: `true` for an organization credential (API key or subscription), `false` for a personal or a built-in one. */
             bindable: boolean;
+            /** @description Number of organization model rows bound to this credential, including disabled models. A positive count prevents deletion (409 credential_in_use). Personal and built-in credentials have no such bindings. */
+            referencing_model_count: number;
             /** @description On a personal credential, the ids of the organization models left to members' own credentials (`binding: user`) that it pays for — the same service, or a subscription offering the model on its API. `[]` on an organization or built-in credential: its models name it in `credentialId`. */
             serves_model_ids: string[];
             created_by: string | null;
@@ -18203,6 +18205,7 @@ export interface operations {
                      *             "test"
                      *           ],
                      *           "bindable": false,
+                     *           "referencing_model_count": 0,
                      *           "serves_model_ids": [],
                      *           "created_by": "usr_cm3abc123",
                      *           "createdAt": "2026-01-10T08:00:00Z",
