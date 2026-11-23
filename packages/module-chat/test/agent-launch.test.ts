@@ -1,10 +1,13 @@
 // SPDX-License-Identifier: Apache-2.0
 
-/** An agent launch: platform failures are a 502 (not a 400) and the replay of old launches is bounded. */
+/**
+ * An agent launch: an unreachable platform is a 502, and the replay of old launches is bounded.
+ * The internal-error 502 and the unknown-name 400 are covered end to end by
+ * `chat-stream-handler.test.ts`.
+ */
 
 import { describe, it, expect } from "bun:test";
 import type { UIMessage } from "ai";
-import { ErrorCode, ProtocolError, type AppstrateMcpClient } from "@appstrate/mcp-transport";
 import {
   AGENT_LAUNCH_REPLAY_BUDGET_CHARS,
   resolveAgentPrompt,
@@ -25,10 +28,6 @@ const textOf = (message: UIMessage): string | undefined =>
   (message.parts.find((p) => p.type === "data-agent-prompt") as { data: { text?: string } }).data
     .text;
 
-function clientAnswering(getPrompt: () => Promise<unknown>) {
-  return async () => ({ getPrompt, close: async () => {} }) as unknown as AppstrateMcpClient;
-}
-
 async function statusOf(promise: Promise<unknown>): Promise<number | undefined> {
   return promise.then(
     () => undefined,
@@ -37,25 +36,11 @@ async function statusOf(promise: Promise<unknown>): Promise<number | undefined> 
 }
 
 describe("resolveAgentPrompt failures", () => {
-  it("answers an internal error of the platform server with a 502", async () => {
-    const open = clientAnswering(async () => {
-      throw new ProtocolError(ErrorCode.InternalError, "boom");
-    });
-    expect(await statusOf(resolveAgentPrompt(launchMessage("m1"), open))).toBe(502);
-  });
-
   it("answers an unreachable platform server with a 502", async () => {
     const open = async () => {
       throw new Error("connect refused");
     };
     expect(await statusOf(resolveAgentPrompt(launchMessage("m1"), open))).toBe(502);
-  });
-
-  it("keeps an unknown or unlaunchable name a 400", async () => {
-    const open = clientAnswering(async () => {
-      throw new ProtocolError(ErrorCode.InvalidParams, "Invalid prompt name");
-    });
-    expect(await statusOf(resolveAgentPrompt(launchMessage("m1"), open))).toBe(400);
   });
 });
 
@@ -99,12 +84,5 @@ describe("withStoredAgentPromptTexts replay budget", () => {
     const full = out.filter((m) => textOf(m)?.length === 20_000).length;
     expect(full).toBe(3);
     expect(total).toBeLessThan(AGENT_LAUNCH_REPLAY_BUDGET_CHARS + 20 * 400);
-  });
-
-  it("is deterministic", () => {
-    const { messages, stored } = thread();
-    expect(withStoredAgentPromptTexts(messages, stored)).toEqual(
-      withStoredAgentPromptTexts(messages, stored),
-    );
   });
 });

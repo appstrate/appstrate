@@ -33,8 +33,6 @@ function identityContext(
 ) {
   return formatCallerContext(callerIdentity(raw), opts);
 }
-const blockText = async (...args: Parameters<typeof buildCallerContextBlock>) =>
-  (await buildCallerContextBlock(...args)).text;
 
 /** Minimal Hono-context stub exposing the `c.get(key)` reads the builder makes. */
 
@@ -97,6 +95,16 @@ const listedSkill = (packageId: string, description: string, version: string | n
   };
 };
 
+/** The read content of the published `@acme/<name>` 1.0.0, as `skillContents` holds it. */
+const skillOf = (name: string, content: string) => ({
+  packageId: `@acme/${name}`,
+  uri: `skill://space-1/acme/${name}/${name}/SKILL.md`,
+  version: "1.0.0",
+  served: { definition: "published", version: "1.0.0" } as const,
+  content,
+});
+const mine = (content = "Mine body.") => skillOf("mine", content);
+
 describe("formatCallerContext", () => {
   it("lists skills whatever the turn's authoring grant — the chat loads them itself", () => {
     const raw = { user: { name: "Ada" }, org: { role: "member" } };
@@ -115,26 +123,8 @@ describe("formatCallerContext", () => {
     const raw = { user: { name: "Ada" }, org: { role: "member" } };
     const skillCatalogue = [listedSkill("@acme/pdf", "PDF")];
     const skillContents = new Map([
-      [
-        "@acme/zeta",
-        {
-          packageId: "@acme/zeta",
-          uri: "skill://space-1/acme/zeta/zeta/SKILL.md",
-          version: "1.0.0",
-          served: { definition: "published", version: "1.0.0" },
-          content: "---\nname: zeta\n---\nZeta body.",
-        },
-      ],
-      [
-        "@acme/mine",
-        {
-          packageId: "@acme/mine",
-          uri: "skill://space-1/acme/mine/mine/SKILL.md",
-          version: "1.0.0",
-          served: { definition: "published", version: "1.0.0" },
-          content: "Mine body.\n",
-        },
-      ],
+      ["@acme/zeta", skillOf("zeta", "---\nname: zeta\n---\nZeta body.")],
+      ["@acme/mine", mine("Mine body.\n")],
     ]);
     // A turn without discovery holds no `skills:read`: the injected skills need no tool.
     for (const [skillDiscovery, permissions] of [
@@ -163,19 +153,12 @@ describe("formatCallerContext", () => {
   });
 
   it("lists the catalogue without the pinned skills, which are injected instead", () => {
-    const mine = {
-      packageId: "@acme/mine",
-      uri: "skill://space-1/acme/mine/mine/SKILL.md",
-      version: "1.0.0",
-      served: { definition: "published", version: "1.0.0" } as const,
-      content: "Mine body.",
-    };
     const out = contextText(
       { user: { name: "Ada" }, org: { role: "member" } },
       {
         ...BASE_OPTS,
         skills: { skillDiscovery: true, pinnedSkills: ["@acme/mine"] },
-        skillContents: new Map([["@acme/mine", mine]]),
+        skillContents: new Map([["@acme/mine", mine()]]),
         skillCatalogue: [
           listedSkill("@acme/mine", "Mine", "1.0.0"),
           listedSkill("@acme/pdf", "PDF", "1.0.0"),
@@ -188,45 +171,26 @@ describe("formatCallerContext", () => {
     expect(out).toContain('<skill id="@acme/mine"');
   });
 
-  it("teaches that a load is a read that pins nothing, and hands the claim each pin's verdict and size", () => {
-    const mine = {
-      packageId: "@acme/mine",
-      uri: "skill://space-1/acme/mine/mine/SKILL.md",
-      version: "1.0.0",
-      served: { definition: "published", version: "1.0.0" } as const,
-      content: "Mine body.",
-    };
-    const rendered = identityContext(
+  it("teaches that a load is a read that pins nothing", () => {
+    const out = contextText(
       { user: { name: "Ada" }, org: { role: "member" } },
       {
         ...BASE_OPTS,
         skills: { skillDiscovery: true, pinnedSkills: ["@acme/gone", "@acme/mine"] },
-        skillContents: new Map([["@acme/mine", mine]]),
+        skillContents: new Map([["@acme/mine", mine()]]),
         skillCatalogue: [listedSkill("@acme/pdf", "PDF", "1.0.0")],
       },
     );
-    expect(rendered.text).toContain(
+    expect(out).toContain(
       "Load one of these skills when it applies by reading its SKILL.md at the URI shown, with `read_resource` or `read`.",
     );
-    expect(rendered.text).toContain("only the user pins a skill");
-    expect(rendered.text).not.toContain("pins it to the conversation");
-    expect(rendered.text.indexOf("Load one of these skills")).toBeLessThan(
-      rendered.text.indexOf("- `@acme/pdf`"),
-    );
-    expect(rendered.skillStatus).toEqual({
-      "@acme/gone": { status: "unavailable", chars: null },
-      "@acme/mine": { status: "injected", chars: "Mine body.".length },
-    });
+    expect(out).toContain("only the user pins a skill");
+    expect(out).not.toContain("pins it to the conversation");
+    expect(out.indexOf("Load one of these skills")).toBeLessThan(out.indexOf("- `@acme/pdf`"));
   });
 
   it("lists no pin, even one that did not fit the budget: its notice says why", () => {
-    const huge = {
-      packageId: "@acme/huge",
-      uri: "skill://space-1/acme/huge/huge/SKILL.md",
-      version: "1.0.0",
-      served: { definition: "published", version: "1.0.0" } as const,
-      content: "x".repeat(64_001),
-    };
+    const huge = skillOf("huge", "x".repeat(64_001));
     const out = contextText(
       { user: { name: "Ada" }, org: { role: "member" } },
       {
@@ -325,13 +289,6 @@ describe("formatCallerContext", () => {
 
   describe("pinned skills", () => {
     const NO_SKILLS = BUILDER.filter((p) => !p.startsWith("skills:"));
-    const mine = (content = "Mine body.") => ({
-      packageId: "@acme/mine",
-      uri: "skill://space-1/acme/mine/mine/SKILL.md",
-      version: "1.0.0",
-      served: { definition: "published", version: "1.0.0" } as const,
-      content,
-    });
     const MINE_BLOCK =
       '<skill id="@acme/mine" uri="skill://space-1/acme/mine/mine/SKILL.md" version="1.0.0">';
 
@@ -382,11 +339,7 @@ describe("formatCallerContext", () => {
     });
 
     it("renders byte-identical whatever order the skill reads answered in", () => {
-      const other = {
-        ...mine("Other body."),
-        packageId: "@acme/other",
-        uri: "skill://space-1/acme/other/other/SKILL.md",
-      };
+      const other = skillOf("other", "Other body.");
       const render = (contents: [string, ReturnType<typeof mine>][]) =>
         contextText(
           { user: { name: "Ada" } },
@@ -595,18 +548,38 @@ function fakeSkillsClient(opts: {
 describe("buildCallerContextBlock", () => {
   const user = { id: "u_1", name: "Ada", email: "ada@acme.com" };
 
+  /** The block of a member's turn: the builder's capabilities, discovery on, drafts read. */
+  const block = ({
+    pins = [],
+    drafts = true,
+    client = NO_SKILLS,
+    permissions = ["mcp:read", "mcp:invoke"],
+    capabilities = caps(BUILDER),
+    skillDiscovery = true,
+    vars = { orgRole: "member" },
+  }: {
+    pins?: string[];
+    drafts?: boolean;
+    client?: (signal: AbortSignal) => Promise<ChatSkillsClient>;
+    permissions?: string[];
+    capabilities?: ReturnType<typeof caps>;
+    skillDiscovery?: boolean;
+    vars?: Record<string, unknown>;
+  } = {}) =>
+    buildCallerContextBlock(fakeContext(vars), {
+      spaces: REACH,
+      restricted: false,
+      user,
+      capabilities,
+      permissions,
+      skills: { skillDiscovery, pinnedSkills: pins },
+      drafts,
+      openSkillsClient: client,
+    });
+
   it("marks the turn's permissions as a role preview while one is on, and only then", async () => {
-    const build = (vars: Record<string, unknown>) =>
-      blockText(fakeContext(vars), {
-        spaces: REACH,
-        restricted: false,
-        user,
-        capabilities: caps(BUILDER),
-        permissions: ["mcp:read"],
-        skills: DEFAULT_SKILL_SELECTION,
-        drafts: true,
-        openSkillsClient: NO_SKILLS,
-      });
+    const build = async (vars: Record<string, unknown>) =>
+      (await block({ vars, permissions: ["mcp:read"] })).text;
     expect(await build({ orgRole: "owner", viewAs: { orgRole: "member" } })).toContain(
       "Permissions this turn (role preview active)",
     );
@@ -628,23 +601,13 @@ describe("buildCallerContextBlock", () => {
       drafts: [skillEntry(A, null, 7), skillEntry(B, null)],
       texts: { [A]: "a draft body", [B]: "b draft body", [C]: "c body" },
     });
-    const { text: out, injected } = await buildCallerContextBlock(
-      fakeContext({ orgRole: "member" }),
-      {
-        spaces: REACH,
-        restricted: false,
-        user,
-        // Discovery off: the turn holds no `skills:read`, the skills connection still reads.
-        capabilities: caps(BUILDER.filter((permission) => permission !== "skills:read")),
-        permissions: ["mcp:read", "mcp:invoke"],
-        skills: {
-          skillDiscovery: false,
-          pinnedSkills: ["@acme/a", "@acme/b", "@acme/c", "@acme/off", "@acme/other"],
-        },
-        drafts: true,
-        openSkillsClient: skills.open,
-      },
-    );
+    const { text: out, injected } = await block({
+      // Discovery off: the turn holds no `skills:read`, the skills connection still reads.
+      capabilities: caps(BUILDER.filter((permission) => permission !== "skills:read")),
+      skillDiscovery: false,
+      pins: ["@acme/a", "@acme/b", "@acme/c", "@acme/off", "@acme/other"],
+      client: skills.open,
+    });
     expect(skills.calls.sort()).toEqual([
       "close",
       `resources/read ${A}`,
@@ -676,16 +639,7 @@ describe("buildCallerContextBlock", () => {
   });
 
   it("leaves the pinned skills out, unreadable, when the skills connection cannot open", async () => {
-    const out = await blockText(fakeContext({ orgRole: "member" }), {
-      spaces: REACH,
-      restricted: false,
-      user,
-      capabilities: caps(BUILDER),
-      permissions: ["mcp:read", "mcp:invoke"],
-      skills: { skillDiscovery: true, pinnedSkills: ["@acme/a"] },
-      drafts: true,
-      openSkillsClient: NO_SKILLS,
-    });
+    const { text: out } = await block({ pins: ["@acme/a"] });
     expect(out).not.toContain("<skill");
     expect(out).toContain("`@acme/a` is pinned to this conversation but could not be read.");
   });
@@ -694,19 +648,14 @@ describe("buildCallerContextBlock", () => {
     const A = "skill://spc_1/acme/a/a/SKILL.md";
     const B = "skill://spc_1/acme/b/b/SKILL.md";
     const D = "skill://spc_1/acme/d@draft/d/SKILL.md";
-    const block = (opts: Parameters<typeof fakeSkillsClient>[0]) =>
-      buildCallerContextBlock(fakeContext({ orgRole: "member" }), {
-        spaces: REACH,
-        restricted: false,
-        user,
-        capabilities: caps(BUILDER),
+    const build = (opts: Parameters<typeof fakeSkillsClient>[0]) =>
+      block({
         permissions: ["mcp:read", "mcp:invoke", "skills:read"],
-        skills: { skillDiscovery: true, pinnedSkills: ["@acme/a", "@acme/b", "@acme/gone"] },
-        drafts: true,
-        openSkillsClient: fakeSkillsClient(opts).open,
+        pins: ["@acme/a", "@acme/b", "@acme/gone"],
+        client: fakeSkillsClient(opts).open,
       });
     // `@acme/b`'s `resources/read` fails; `@acme/gone` is listed nowhere.
-    const both = await block({
+    const both = await build({
       published: [skillEntry(A, "1.0.0"), skillEntry(B, "1.0.0")],
       drafts: [skillEntry(D, null, 2)],
       texts: { [A]: "a body", [D]: "d body" },
@@ -716,115 +665,87 @@ describe("buildCallerContextBlock", () => {
       "@acme/b": { status: "unreadable", chars: null },
       "@acme/gone": { status: "unavailable", chars: null },
     });
+    const unreadable = { status: "unreadable", chars: null } as const;
+    const allUnreadable = {
+      "@acme/a": unreadable,
+      "@acme/b": unreadable,
+      "@acme/gone": unreadable,
+    };
     // A failed listing may be the one a pin is missing from: unknown, so unreadable.
-    const listFailed = await block({
+    const listFailed = await build({
       published: [skillEntry(A, "1.0.0")],
       texts: { [A]: "a body" },
       listFails: "published",
     });
-    expect(listFailed.skillStatus).toEqual({
-      "@acme/a": { status: "unreadable", chars: null },
-      "@acme/b": { status: "unreadable", chars: null },
-      "@acme/gone": { status: "unreadable", chars: null },
-    });
+    expect(listFailed.skillStatus).toEqual(allUnreadable);
     // A failed draft listing hides which pin has a draft: none is injected from its published
     // version in its place.
-    const draftsFailed = await block({
+    const draftsFailed = await build({
       published: [skillEntry(A, "1.0.0"), skillEntry(B, "1.0.0")],
       texts: { [A]: "a body", [B]: "b body" },
       listFails: "draft",
     });
-    expect(draftsFailed.skillStatus).toEqual({
-      "@acme/a": { status: "unreadable", chars: null },
-      "@acme/b": { status: "unreadable", chars: null },
-      "@acme/gone": { status: "unreadable", chars: null },
-    });
+    expect(draftsFailed.skillStatus).toEqual(allUnreadable);
     expect(draftsFailed.injected).toEqual({ skills: {} });
     expect(draftsFailed.text).not.toContain("<skill ");
   });
 
-  it("gives a pinned skill whose SKILL.md is served as a blob its could-not-be-read notice", async () => {
-    const A = "skill://spc_1/acme/a/a/SKILL.md";
-    const skills = fakeSkillsClient({
-      published: [skillEntry(A, "1.0.0")],
-      texts: {},
-      blobs: { [A]: Buffer.from("a body").toString("base64") },
-    });
-    const { text: out, injected } = await buildCallerContextBlock(
-      fakeContext({ orgRole: "member" }),
+  const PUBLISHED = "skill://spc_1/acme/a/a/SKILL.md";
+  const DRAFT = "skill://spc_1/acme/a@draft/a/SKILL.md";
+  const unreadableCases: Array<[string, string, Parameters<typeof fakeSkillsClient>[0]]> = [
+    [
+      "its SKILL.md is served as a blob",
+      PUBLISHED,
       {
-        spaces: REACH,
-        restricted: false,
-        user,
-        capabilities: caps(BUILDER),
-        permissions: ["mcp:read", "mcp:invoke"],
-        skills: { skillDiscovery: true, pinnedSkills: ["@acme/a"] },
-        drafts: true,
-        openSkillsClient: skills.open,
+        published: [skillEntry(PUBLISHED, "1.0.0")],
+        texts: {},
+        blobs: { [PUBLISHED]: Buffer.from("a body").toString("base64") },
       },
-    );
-    expect(out).not.toContain("<skill");
-    expect(out).toContain("`@acme/a` is pinned to this conversation but could not be read.");
-    expect(injected).toEqual({ skills: {} });
-  });
-
-  it("gives a pinned skill whose SKILL.md differs from its listed digest its could-not-be-read notice", async () => {
-    // The draft is saved between `skills/list` (lock_version 7) and `resources/read`:
-    // the text read is the next draft, which the claim's lock_version does not name.
-    const A = "skill://spc_1/acme/a@draft/a/SKILL.md";
-    const skills = fakeSkillsClient({
-      published: [],
-      drafts: [skillEntry(A, null, 7)],
-      texts: { [A]: "a draft body" },
-      savedAfterList: { [A]: "a draft body, saved again" },
-    });
-    const { text: out, injected } = await buildCallerContextBlock(
-      fakeContext({ orgRole: "member" }),
+    ],
+    // The draft is saved between `skills/list` (lock_version 7) and `resources/read`: the text
+    // read is the next draft, which the claim's lock_version does not name.
+    [
+      "its draft SKILL.md differs from its listed digest",
+      DRAFT,
       {
-        spaces: REACH,
-        restricted: false,
-        user,
-        capabilities: caps(BUILDER),
-        permissions: ["mcp:read", "mcp:invoke"],
-        skills: { skillDiscovery: true, pinnedSkills: ["@acme/a"] },
-        drafts: true,
-        openSkillsClient: skills.open,
+        published: [],
+        drafts: [skillEntry(DRAFT, null, 7)],
+        texts: { [DRAFT]: "a draft body" },
+        savedAfterList: { [DRAFT]: "a draft body, saved again" },
       },
-    );
-    // Read once, never retried.
-    expect(skills.calls.filter((call) => call.startsWith("resources/read"))).toEqual([
-      `resources/read ${A}`,
-    ]);
-    expect(out).not.toContain("<skill");
-    expect(out).not.toContain("saved again");
-    expect(out).toContain("`@acme/a` is pinned to this conversation but could not be read.");
-    expect(injected).toEqual({ skills: {} });
-  });
-
-  it("gives a pinned published skill whose SKILL.md differs from its listed digest its could-not-be-read notice", async () => {
-    const A = "skill://spc_1/acme/a/a/SKILL.md";
-    const skills = fakeSkillsClient({
-      published: [skillEntry(A, "1.0.0")],
-      texts: { [A]: "a body" },
-      savedAfterList: { [A]: "another body" },
-    });
-    const { text: out, injected } = await buildCallerContextBlock(
-      fakeContext({ orgRole: "member" }),
+    ],
+    [
+      "its published SKILL.md differs from its listed digest",
+      PUBLISHED,
       {
-        spaces: REACH,
-        restricted: false,
-        user,
-        capabilities: caps(BUILDER),
-        permissions: ["mcp:read", "mcp:invoke"],
-        skills: { skillDiscovery: true, pinnedSkills: ["@acme/a"] },
-        drafts: true,
-        openSkillsClient: skills.open,
+        published: [skillEntry(PUBLISHED, "1.0.0")],
+        texts: { [PUBLISHED]: "a body" },
+        savedAfterList: { [PUBLISHED]: "another body" },
       },
-    );
-    expect(out).not.toContain("another body");
-    expect(out).toContain("`@acme/a` is pinned to this conversation but could not be read.");
-    expect(injected).toEqual({ skills: {} });
-  });
+    ],
+    [
+      "its content read is refused",
+      PUBLISHED,
+      { published: [skillEntry(PUBLISHED, "1.0.0")], texts: {} },
+    ],
+  ];
+  it.each(unreadableCases)(
+    "leaves out, with its could-not-be-read notice, a pinned skill when %s",
+    async (_label, uri, opts) => {
+      const skills = fakeSkillsClient(opts);
+      const { text: out, injected } = await block({ pins: ["@acme/a"], client: skills.open });
+      // Read once, never retried; the connection closed.
+      expect(skills.calls.filter((call) => call.startsWith("resources/read"))).toEqual([
+        `resources/read ${uri}`,
+      ]);
+      expect(skills.calls).toContain("close");
+      expect(out).not.toContain("<skill");
+      expect(out).not.toContain("saved again");
+      expect(out).not.toContain("another body");
+      expect(out).toContain("`@acme/a` is pinned to this conversation but could not be read.");
+      expect(injected).toEqual({ skills: {} });
+    },
+  );
 
   it("asks for no draft listing on a turn not working on drafts: a pin missing from the published one is unavailable", async () => {
     const A = "skill://spc_1/acme/a/a/SKILL.md";
@@ -834,18 +755,14 @@ describe("buildCallerContextBlock", () => {
       // Would make every missing pin unreadable, were it asked.
       listFails: "draft",
     });
-    const block = await buildCallerContextBlock(fakeContext({ orgRole: "member" }), {
-      spaces: REACH,
-      restricted: false,
-      user,
-      capabilities: caps(BUILDER),
+    const built = await block({
       permissions: ["mcp:read", "mcp:invoke", "skills:read"],
-      skills: { skillDiscovery: true, pinnedSkills: ["@acme/a", "@acme/gone"] },
+      pins: ["@acme/a", "@acme/gone"],
       drafts: false,
-      openSkillsClient: skills.open,
+      client: skills.open,
     });
     expect(skills.calls).not.toContain("skills/list draft");
-    expect(block.skillStatus).toEqual({
+    expect(built.skillStatus).toEqual({
       "@acme/a": { status: "injected", chars: "a body".length },
       "@acme/gone": { status: "unavailable", chars: null },
     });
@@ -857,15 +774,11 @@ describe("buildCallerContextBlock", () => {
     const B = "skill://spc_1/acme/b/b/SKILL.md";
     const B_DRAFT = "skill://spc_1/acme/b@draft/b/SKILL.md";
     const build = (drafts: boolean) =>
-      buildCallerContextBlock(fakeContext({ orgRole: "member" }), {
-        spaces: REACH,
-        restricted: false,
-        user,
-        capabilities: caps(BUILDER),
+      block({
         permissions: ["mcp:read", "mcp:invoke", "skills:read", ...(drafts ? ["skills:write"] : [])],
-        skills: { skillDiscovery: true, pinnedSkills: ["@acme/a"] },
+        pins: ["@acme/a"],
         drafts,
-        openSkillsClient: fakeSkillsClient({
+        client: fakeSkillsClient({
           published: [skillEntry(A, "1.0.0"), skillEntry(B, "1.0.0")],
           drafts: [skillEntry(A_DRAFT, null, 3), skillEntry(B_DRAFT, null, 4)],
           texts: { [A]: "a published", [A_DRAFT]: "a draft" },
@@ -893,20 +806,11 @@ describe("buildCallerContextBlock", () => {
       drafts: [skillEntry("skill://spc_1/acme/a@draft/a/SKILL.md", null, 7)],
       texts: {},
     });
-    const { text: out, injected } = await buildCallerContextBlock(
-      fakeContext({ orgRole: "member" }),
-      {
-        spaces: REACH,
-        restricted: false,
-        user,
-        capabilities: caps(BUILDER),
-        // The turn keeps `skills:write`: it reads the drafts the caller reads.
-        permissions: ["mcp:read", "mcp:invoke", "skills:read", "skills:write"],
-        skills: { skillDiscovery: true, pinnedSkills: [] },
-        drafts: true,
-        openSkillsClient: skills.open,
-      },
-    );
+    const { text: out, injected } = await block({
+      // The turn keeps `skills:write`: it reads the drafts the caller reads.
+      permissions: ["mcp:read", "mcp:invoke", "skills:read", "skills:write"],
+      client: skills.open,
+    });
     expect(skills.calls.sort()).toEqual(["close", "skills/list", "skills/list draft"]);
     expect(out).toContain(
       "- `@acme/a` `skill://spc_1/acme/a@draft/a/SKILL.md` — A\n- `@acme/c` (v2.0.0) `skill://spc_1/acme/c/c/SKILL.md` — A",
@@ -925,15 +829,10 @@ describe("buildCallerContextBlock", () => {
       ],
       texts: {},
     });
-    const readOnlyOut = await blockText(fakeContext({ orgRole: "member" }), {
-      spaces: REACH,
-      restricted: false,
-      user,
-      capabilities: caps(BUILDER),
+    const { text: readOnlyOut } = await block({
       permissions: ["mcp:read", "mcp:invoke", "skills:read"],
-      skills: { skillDiscovery: true, pinnedSkills: [] },
       drafts: false,
-      openSkillsClient: readOnly.open,
+      client: readOnly.open,
     });
     expect(readOnlyOut).toContain("- `@acme/a` (v1.0.0) `skill://spc_1/acme/a/a/SKILL.md` — A");
     expect(readOnlyOut).not.toContain("@draft");
@@ -941,73 +840,13 @@ describe("buildCallerContextBlock", () => {
 
     // A turn that cannot load a skill lists none, and opens nothing.
     let opened = false;
-    await blockText(fakeContext({ orgRole: "member" }), {
-      spaces: REACH,
-      restricted: false,
-      user,
+    await block({
       capabilities: caps(BUILDER.filter((permission) => permission !== "skills:read")),
-      permissions: ["mcp:read", "mcp:invoke"],
-      skills: { skillDiscovery: true, pinnedSkills: [] },
-      drafts: true,
-      openSkillsClient: async (signal) => {
+      client: async (signal) => {
         opened = true;
         return skills.open(signal);
       },
     });
     expect(opened).toBe(false);
-  });
-
-  it("reads the pinned skills and lists the others in the same turn, the pinned one in the catalogue never", async () => {
-    const A = "skill://spc_1/acme/a/a/SKILL.md";
-    const C = "skill://spc_1/acme/c/c/SKILL.md";
-    const skills = fakeSkillsClient({
-      published: [skillEntry(A, "1.0.0"), skillEntry(C, "2.0.0")],
-      texts: { [A]: "a body" },
-    });
-    const { text: out, injected } = await buildCallerContextBlock(
-      fakeContext({ orgRole: "member" }),
-      {
-        spaces: REACH,
-        restricted: false,
-        user,
-        capabilities: caps(BUILDER),
-        permissions: ["mcp:read", "mcp:invoke", "skills:read"],
-        skills: { skillDiscovery: true, pinnedSkills: ["@acme/a"] },
-        drafts: true,
-        openSkillsClient: skills.open,
-      },
-    );
-    expect(skills.calls.sort()).toEqual([
-      "close",
-      `resources/read ${A}`,
-      "skills/list",
-      "skills/list draft",
-    ]);
-    expect(out).toContain(`<skill id="@acme/a" uri="${A}" version="1.0.0">\na body\n</skill>`);
-    expect(out).toContain(`- \`@acme/c\` (v2.0.0) \`${C}\``);
-    expect(out).not.toContain("- `@acme/a`");
-    expect(injected).toEqual({
-      skills: { "@acme/a": { definition: "published", version: "1.0.0", spaceId: "spc_1" } },
-    });
-  });
-
-  it("leaves out, unreadable, a pinned skill whose content read is refused", async () => {
-    const skills = fakeSkillsClient({
-      published: [skillEntry("skill://spc_1/acme/a/a/SKILL.md", "1.0.0")],
-      texts: {},
-    });
-    const out = await blockText(fakeContext({ orgRole: "member" }), {
-      spaces: REACH,
-      restricted: false,
-      user,
-      capabilities: caps(BUILDER),
-      permissions: ["mcp:read", "mcp:invoke"],
-      skills: { skillDiscovery: true, pinnedSkills: ["@acme/a"] },
-      drafts: true,
-      openSkillsClient: skills.open,
-    });
-    expect(out).not.toContain("<skill");
-    expect(out).toContain("`@acme/a` is pinned to this conversation but could not be read.");
-    expect(skills.calls).toContain("close");
   });
 });

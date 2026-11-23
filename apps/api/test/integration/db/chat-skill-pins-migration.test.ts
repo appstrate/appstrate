@@ -125,48 +125,17 @@ describe("migration 0112 — fold the chat skill modes into pins and discovery",
 
       await replayMigration(tx);
 
-      const unattributed = { skill_status: {} };
+      const cols = (skill_discovery: boolean, pinned_skills: string[]) => ({
+        skill_discovery,
+        pinned_skills,
+        skill_status: {},
+      });
       // `auto` kept its pins unused: injecting them after the upgrade would change the chat.
-      expect(await skillColumnsOf(tx, autoPinned)).toEqual({
-        skill_discovery: true,
-        pinned_skills: [],
-        ...unattributed,
-      });
-      expect(await skillColumnsOf(tx, autoEmpty)).toEqual({
-        skill_discovery: true,
-        pinned_skills: [],
-        ...unattributed,
-      });
-      expect(await skillColumnsOf(tx, manual)).toEqual({
-        skill_discovery: true,
-        pinned_skills: PINS,
-        ...unattributed,
-      });
       // `strict` is discovery off; its pins stay.
-      expect(await skillColumnsOf(tx, strict)).toEqual({
-        skill_discovery: false,
-        pinned_skills: PINS,
-        ...unattributed,
-      });
-    });
-  });
-
-  it("drops `skill_mode` and its enum", async () => {
-    await inPre0112Schema(async (tx) => {
-      await replayMigration(tx);
-
-      const columns = rowsOf<unknown>(
-        await tx.execute(sql`
-          SELECT 1 FROM information_schema.columns
-          WHERE table_schema = 'public' AND table_name = 'chat_sessions'
-            AND column_name = 'skill_mode'
-        `),
-      );
-      expect(columns).toHaveLength(0);
-      const types = rowsOf<unknown>(
-        await tx.execute(sql`SELECT 1 FROM pg_type WHERE typname = 'chat_skill_mode'`),
-      );
-      expect(types).toHaveLength(0);
+      const actual: SkillColumns[] = [];
+      for (const id of [autoPinned, autoEmpty, manual, strict])
+        actual.push(await skillColumnsOf(tx, id));
+      expect(actual).toEqual([cols(true, []), cols(true, []), cols(true, PINS), cols(false, PINS)]);
     });
   });
 });

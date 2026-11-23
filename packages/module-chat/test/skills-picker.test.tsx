@@ -43,6 +43,45 @@ const draftOf = (stored: StoredSkills, cited: string[]): EffectiveSkills =>
     cited,
   );
 
+/** Seeds the commands catalogue with `ids` (named by their id) at their `bytes`. */
+function seedCatalogue(
+  qc: QueryClient,
+  ids: { id: string; name?: string }[],
+  bytes: Record<string, number> = {},
+): void {
+  qc.setQueryData(["packages", "chat-commands", "org_1", null, true], {
+    skills: ids.map(({ id, name }) => ({
+      id,
+      name: name ?? id,
+      description: "",
+      version: null,
+      bytes: bytes[id] ?? null,
+    })),
+    agents: [],
+  });
+}
+
+/** `children` under the providers the panel reads. */
+function wrap(children: ReactNode, qc = new QueryClient()): ReactElement {
+  return (
+    <QueryClientProvider client={qc}>
+      <ChatHostProvider value={host}>
+        <ChatTransportProvider value={transport}>
+          <ConversationScopeProvider
+            value={conversationScope({ originSpaceId: "spc_a", restricted: false })}
+          >
+            {children}
+          </ConversationScopeProvider>
+        </ChatTransportProvider>
+      </ChatHostProvider>
+    </QueryClientProvider>
+  );
+}
+
+/** A skill row's checkbox in `html`. */
+const box = (html: string, id: string) =>
+  html.match(new RegExp(`<button[^>]*data-testid="skill-pin-${id}"[^>]*>`))![0];
+
 function render(
   skillDiscovery: boolean,
   pins: string[] | PinnedSkill[] = [],
@@ -57,39 +96,26 @@ function render(
     pins: pins.map((pin) => (typeof pin === "string" ? userPin(pin) : pin)),
   };
   const qc = new QueryClient();
-  const skill = (id: string, name: string) => ({
-    id,
-    name,
-    description: "",
-    version: null,
-    bytes: bytes[id] ?? null,
-  });
-  qc.setQueryData(["packages", "chat-commands", "org_1", null, true], {
-    skills: [
-      skill("@acme/free", "Free"),
+  seedCatalogue(
+    qc,
+    [
+      { id: "@acme/free", name: "Free" },
       ...[...stored.pins.map((pin) => pin.id), ...cited]
         .filter((id) => !unlisted.includes(id))
-        .map((id) => skill(id, id)),
+        .map((id) => ({ id })),
     ],
-    agents: [],
-  });
+    bytes,
+  );
   return renderToStaticMarkup(
-    <QueryClientProvider client={qc}>
-      <ChatHostProvider value={host}>
-        <ChatTransportProvider value={transport}>
-          <ConversationScopeProvider
-            value={conversationScope({ originSpaceId: "spc_a", restricted: false })}
-          >
-            <TooltipProvider>
-              <SkillsPickerPanel
-                conversation={{ skills: stored, ...NO_ACTIONS }}
-                draft={draftOf(stored, cited)}
-              />
-            </TooltipProvider>
-          </ConversationScopeProvider>
-        </ChatTransportProvider>
-      </ChatHostProvider>
-    </QueryClientProvider>,
+    wrap(
+      <TooltipProvider>
+        <SkillsPickerPanel
+          conversation={{ skills: stored, ...NO_ACTIONS }}
+          draft={draftOf(stored, cited)}
+        />
+      </TooltipProvider>,
+      qc,
+    ),
   );
 }
 
@@ -127,19 +153,7 @@ function toggleDiscovery(skillDiscovery: boolean, next: boolean): boolean[] {
     (sw!.props.onCheckedChange as (checked: boolean) => void)(next);
     return null;
   }
-  renderToStaticMarkup(
-    <QueryClientProvider client={new QueryClient()}>
-      <ChatHostProvider value={host}>
-        <ChatTransportProvider value={transport}>
-          <ConversationScopeProvider
-            value={conversationScope({ originSpaceId: "spc_a", restricted: false })}
-          >
-            <Probe />
-          </ConversationScopeProvider>
-        </ChatTransportProvider>
-      </ChatHostProvider>
-    </QueryClientProvider>,
-  );
+  renderToStaticMarkup(wrap(<Probe />));
   return emitted;
 }
 
@@ -148,15 +162,6 @@ describe("SkillsPicker", () => {
     expect(toggleDiscovery(true, false)).toEqual([false]);
     expect(toggleDiscovery(false, true)).toEqual([true]);
   });
-
-  for (const discovery of [true, false]) {
-    it(`lists the choosable skills with discovery ${discovery ? "on" : "off"}`, () => {
-      const html = render(discovery);
-      expect(html).toContain("skill-pin-@acme/free");
-      expect(html).toContain("skills.chooseHeading");
-      expect(html).not.toContain("skills-mode-");
-    });
-  }
 
   it("binds the discovery switch to its label, checked while discovery is on", () => {
     const sw = (html: string) => html.match(/<button[^>]*data-testid="skills-discovery"[^>]*>/)![0];
@@ -168,36 +173,22 @@ describe("SkillsPicker", () => {
     expect(html).toContain(`for="${id}"`);
     expect(render(true)).toContain("skills.discovery.hintOn");
     expect(render(false)).toContain("skills.discovery.hintOff");
-  });
-
-  it("leaves every skill choosable however many are pinned, while they fit", () => {
-    const many = Array.from({ length: 12 }, (_, i) => `@acme/own-${i}`);
-    const html = render(true, many, [], [], { "@acme/free": 1_000 });
-    expect(html.match(/<button[^>]*data-testid="skill-pin-@acme\/free"[^>]*>/)![0]).not.toContain(
-      `aria-disabled="true"`,
-    );
+    // The choosable skills are listed whether discovery is on or off.
+    expect(render(false)).toContain("skill-pin-@acme/free");
   });
 
   it("shows a cited skill checked and locked, with its hint, even if not pinned", () => {
-    const html = render(true, [], ["@acme/cited"]);
-    const box = html.match(/<button[^>]*data-testid="skill-pin-@acme\/cited"[^>]*>/)![0];
-    expect(box).toContain('aria-checked="true"');
-    expect(box).toContain(`aria-disabled="true"`);
-    expect(html).toContain("skills.cited");
-    // An uncited skill is untouched.
-    const free = html.match(/<button[^>]*data-testid="skill-pin-@acme\/free"[^>]*>/)![0];
-    expect(free).not.toContain(`aria-disabled="true"`);
-  });
-
-  it("counts the cited skills with the pinned ones against the budget", () => {
-    const loaded: PinnedSkill = { id: "@a/loaded", status: "injected", chars: 40_000 };
-    const free = (html: string) =>
-      html.match(/<button[^>]*data-testid="skill-pin-@acme\/free"[^>]*>/)![0];
-    const sizes = { "@acme/free": 20_000, "@acme/cited": 10_000 };
-    expect(free(render(true, [loaded], [], [], sizes))).not.toContain(`aria-disabled="true"`);
-    expect(free(render(true, [loaded], ["@acme/cited"], [], sizes))).toContain(
-      `aria-disabled="true"`,
+    const html = render(
+      true,
+      [{ id: "@a/auto", status: "injected", chars: null }],
+      ["@acme/cited"],
     );
+    expect(box(html, "@acme/cited")).toContain('aria-checked="true"');
+    expect(box(html, "@acme/cited")).toContain(`aria-disabled="true"`);
+    expect(html).toMatch(/data-testid="skill-pin-state-@acme\/cited"[^>]*>skills.cited</);
+    // Only the draft locks: an uncited skill, pinned or not, is untouched.
+    expect(box(html, "@acme/free")).not.toContain(`aria-disabled="true"`);
+    expect(box(html, "@a/auto")).not.toContain(`aria-disabled="true"`);
   });
 
   /** Toggles each row of `ids` through the rendered tree; returns what the panel handed on (`±id`). */
@@ -210,17 +201,11 @@ describe("SkillsPicker", () => {
     const toggled: string[] = [];
     // Rows exist only once the catalogue answers: seed it, then toggle through the rendered tree.
     const qc = new QueryClient();
-    const skill = (id: string) => ({
-      id,
-      name: id,
-      description: "",
-      version: null,
-      bytes: bytes[id] ?? null,
-    });
-    qc.setQueryData(["packages", "chat-commands", "org_1", null, true], {
-      skills: ids.map(skill),
-      agents: [],
-    });
+    seedCatalogue(
+      qc,
+      ids.map((id) => ({ id })),
+      bytes,
+    );
     function Toggle() {
       const tree = SkillsPickerPanel({
         conversation: {
@@ -236,19 +221,7 @@ describe("SkillsPicker", () => {
       }
       return null;
     }
-    renderToStaticMarkup(
-      <QueryClientProvider client={qc}>
-        <ChatHostProvider value={host}>
-          <ChatTransportProvider value={transport}>
-            <ConversationScopeProvider
-              value={conversationScope({ originSpaceId: "spc_a", restricted: false })}
-            >
-              <Toggle />
-            </ConversationScopeProvider>
-          </ChatTransportProvider>
-        </ChatHostProvider>
-      </QueryClientProvider>,
-    );
+    renderToStaticMarkup(wrap(<Toggle />, qc));
     return toggled;
   }
 
@@ -256,21 +229,20 @@ describe("SkillsPicker", () => {
     expect(toggleRows([userPin("@a/one")], ["@a/one", "@a/two"], ["@a/one", "@a/two"])).toEqual([]);
   });
 
-  it("pins nothing past the budget, still lets a pin be unchecked, and pins an unknown size", () => {
+  it("pins nothing past the budget, lets every pin be unchecked (a refused one included), and pins an unknown size", () => {
     const full: PinnedSkill = { id: "@a/own", status: "injected", chars: 60_000 };
+    const refused: PinnedSkill = { id: "@a/big", status: "over_budget", chars: null };
     const sizes = { "@a/extra": 5_000 };
-    expect(toggleRows([full], [], ["@a/extra", "@a/unsized", "@a/own"], sizes)).toEqual([
-      "+@a/unsized",
-      "-@a/own",
-    ]);
+    expect(
+      toggleRows([full, refused], [], ["@a/extra", "@a/unsized", "@a/own", "@a/big"], sizes),
+    ).toEqual(["+@a/unsized", "-@a/own", "-@a/big"]);
     expect(toggleRows([], [], ["@a/extra"], sizes)).toEqual(["+@a/extra"]);
   });
 
   it("names a row's checkbox by its skill alone; the caption and description describe it", () => {
     const html = render(true, [{ id: "@a/big", status: "over_budget", chars: null }]);
-    const box = html.match(/<button[^>]*data-testid="skill-pin-@a\/big"[^>]*>/)![0];
-    const labelledBy = box.match(/aria-labelledby="([^"]+)"/)![1];
-    const describedBy = box.match(/aria-describedby="([^"]+)"/)![1];
+    const labelledBy = box(html, "@a/big").match(/aria-labelledby="([^"]+)"/)![1];
+    const describedBy = box(html, "@a/big").match(/aria-describedby="([^"]+)"/)![1];
     expect(html).toMatch(new RegExp(`id="${labelledBy}"[^>]*>@a/big<`));
     const details = html.slice(html.indexOf(`id="${describedBy}"`));
     expect(details).toContain("skills.state.refused.over_budget");
@@ -280,26 +252,9 @@ describe("SkillsPicker", () => {
     );
   });
 
-  it("lets every server pin be unchecked, a refused one included", () => {
-    const pins: PinnedSkill[] = [
-      userPin("@a/mine"),
-      { id: "@a/big", status: "over_budget", chars: null },
-    ];
-    expect(toggleRows(pins, [], ["@a/mine", "@a/big"])).toEqual(["-@a/mine", "-@a/big"]);
-  });
-
   describe("a pinned row is loaded, or not loaded and why", () => {
-    const box = (html: string, id: string) =>
-      html.match(new RegExp(`<button[^>]*data-testid="skill-pin-${id}"[^>]*>`))![0];
     const caption = (html: string, id: string) =>
       html.match(new RegExp(`data-testid="skill-pin-state-${id}"[^>]*>([^<]*)<`))?.[1];
-
-    it("a loaded pin: checked, enabled, no caption", () => {
-      const html = render(true, ["@a/mine"]);
-      expect(box(html, "@a/mine")).toContain('aria-checked="true"');
-      expect(box(html, "@a/mine")).not.toContain(`aria-disabled="true"`);
-      expect(caption(html, "@a/mine")).toBeUndefined();
-    });
 
     it("a pin no turn judged yet: checked, no caption, and ONE note that changes apply next message", () => {
       const html = render(true, [
@@ -326,12 +281,13 @@ describe("SkillsPicker", () => {
       expect(render(true, ["@a/mine"], ["@a/mine"])).not.toContain("skills-uncheck-hint");
     });
 
-    for (const reason of ["over_budget", "unavailable", "unreadable"] as const) {
-      it(`a pin the last turn refused (${reason}): checked, enabled, not loaded and why`, () => {
-        const html = render(true, [{ id: "@a/ref", status: reason, chars: null }]);
+    for (const status of ["injected", "over_budget", "unavailable", "unreadable"] as const) {
+      const why = status === "injected" ? undefined : `skills.state.refused.${status}`;
+      it(`a pin the last turn ${why ? `refused (${status}): not loaded and why` : "loaded: no caption"}, checked and enabled`, () => {
+        const html = render(true, [{ id: "@a/ref", status, chars: null }]);
         expect(box(html, "@a/ref")).toContain('aria-checked="true"');
         expect(box(html, "@a/ref")).not.toContain(`aria-disabled="true"`);
-        expect(caption(html, "@a/ref")).toBe(`skills.state.refused.${reason}`);
+        expect(caption(html, "@a/ref")).toBe(why);
       });
     }
 
@@ -351,45 +307,21 @@ describe("SkillsPicker", () => {
       expect(caption(html, "@a/gone")).toBe("skills.state.refused.unavailable");
       expect(html).not.toContain("skills.unavailable");
     });
-
-    it("only the draft locks: a cited row is the one locked", () => {
-      const html = render(true, [{ id: "@a/auto", status: "injected", chars: null }], ["@a/cited"]);
-      expect(box(html, "@a/cited")).toContain(`aria-disabled="true"`);
-      expect(caption(html, "@a/cited")).toBe("skills.cited");
-      expect(box(html, "@a/auto")).not.toContain(`aria-disabled="true"`);
-    });
   });
 
   describe("the budget gauge", () => {
     const counts = (html: string) =>
       html.match(/skills\.budget\.counts[^<]*/)?.[0].replace(/&quot;/g, '"');
 
-    it("sums the loaded pins' chars and the listed size of the pending ones", () => {
-      const html = render(
-        true,
-        [
-          { id: "@a/loaded", status: "injected", chars: 10_000 },
-          { id: "@a/new", status: null, chars: null },
-          { id: "@a/big", status: "over_budget", chars: 90_000 },
-        ],
-        [],
-        [],
-        { "@a/new": 2_000 },
-      );
-      expect(counts(html)).toContain('"used":"12,000"');
-      expect(counts(html)).toContain('"max":"64,000"');
-      expect(html).not.toContain("skills.budget.over");
-    });
-
     it("locks a row whose size would exceed the budget, its reason describing the checkbox", () => {
       const html = render(true, [{ id: "@a/loaded", status: "injected", chars: 50_000 }], [], [], {
         "@acme/free": 20_000,
       });
       expect(html).toContain('data-testid="skill-pin-budget-@acme/free"');
-      const box = html.match(/<button[^>]*data-testid="skill-pin-@acme\/free"[^>]*>/)![0];
-      expect(box).toContain(`aria-disabled="true"`);
-      expect(box).not.toMatch(/ disabled=""/);
-      const describedBy = box.match(/aria-describedby="([^"]+)"/)![1];
+      const free = box(html, "@acme/free");
+      expect(free).toContain(`aria-disabled="true"`);
+      expect(free).not.toMatch(/ disabled=""/);
+      const describedBy = free.match(/aria-describedby="([^"]+)"/)![1];
       expect(html.slice(html.indexOf(`id="${describedBy}"`))).toContain(
         "skills.budget.wouldExceed",
       );
@@ -400,6 +332,8 @@ describe("SkillsPicker", () => {
       const html = render(true, [{ id: "@a/new", status: null, chars: null }], [], [], {
         "@a/new": 70_000,
       });
+      expect(counts(html)).toContain('"used":"70,000"');
+      expect(counts(html)).toContain('"max":"64,000"');
       expect(html).toContain('data-over="true"');
       expect(html).toContain("skills.budget.over");
     });

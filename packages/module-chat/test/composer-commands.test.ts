@@ -127,13 +127,6 @@ describe("commandList", () => {
     expect(list.overBudget.map((i) => i.id)).toEqual(["@acme/pdf-tools"]);
     expect(commandList(commands, { ...ctx, skills: leaving(4_000) }).overBudget).toEqual([]);
   });
-
-  it("offers every skill however many are pinned, while they fit", () => {
-    const pinned = Array.from({ length: 12 }, (_, i) => `@x/${i}`);
-    expect(commandList(commands, { ...ctx, skills: skillsOf(pinned, "", 100) }).overBudget).toEqual(
-      [],
-    );
-  });
 });
 
 describe("searchCommands", () => {

@@ -2,46 +2,17 @@
 
 /**
  * `useChangeAnnouncement` mounted for real: a live region's text stays silent on the state a view
- * opens on and speaks only a later change. There is no DOM harness in this repo; a probe rendering
- * nothing needs only the few globals react-dom's client touches, installed for this file.
+ * opens on and speaks only a later change. The DOM globals come
+ * from `dom-shim.ts`.
  */
 
-import { afterAll, beforeAll, describe, expect, it } from "bun:test";
+import { describe, expect, it } from "bun:test";
 import { act } from "react";
 import { createRoot } from "react-dom/client";
 import { useChangeAnnouncement } from "../src/ui/use-change-announcement.ts";
+import { container, installDomShim } from "./dom-shim.ts";
 
-const globals = globalThis as { window?: unknown; IS_REACT_ACT_ENVIRONMENT?: boolean };
-const saved = { window: globals.window, act: globals.IS_REACT_ACT_ENVIRONMENT };
-const noop = () => {};
-const doc: Record<string, unknown> = {
-  addEventListener: noop,
-  removeEventListener: noop,
-  activeElement: null,
-};
-function container() {
-  const node = {
-    nodeType: 1,
-    nodeName: "DIV",
-    tagName: "DIV",
-    addEventListener: noop,
-    removeEventListener: noop,
-    ownerDocument: doc,
-  };
-  doc.documentElement = doc.body = node;
-  return node as unknown as HTMLElement;
-}
-
-beforeAll(() => {
-  globals.window = { HTMLIFrameElement: class {}, document: doc };
-  globals.IS_REACT_ACT_ENVIRONMENT = true;
-});
-
-afterAll(() => {
-  if (saved.window === undefined) delete globals.window;
-  else globals.window = saved.window;
-  globals.IS_REACT_ACT_ENVIRONMENT = saved.act;
-});
+installDomShim();
 
 /** Mounts the hook; `update` re-renders it with new inputs, `read` is what it last returned. */
 function mount(text: string, ready: boolean) {

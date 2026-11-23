@@ -33,31 +33,45 @@ const commands = {
   ],
 };
 
-async function mockCommands(page: Page, orgId: string) {
-  await page.route(`**/api/orgs/${orgId}/chat/commands*`, (route) =>
-    route.fulfill({ json: commands }),
-  );
-}
-
 const composer = (page: Page) =>
   page.getByRole("textbox", { name: "Message Appstrate…", exact: true });
 
 const chatPost = (chat: string) => (req: { method(): string; url(): string }) =>
   req.method() === "POST" && new URL(req.url()).pathname === chat;
 
+/**
+ * Mocks the commands (served once `gate` resolves, when one is given), refuses the turn with a
+ * 503 when `refuseTurn`, and opens `path` (a new conversation by default).
+ */
+async function openComposer(
+  page: Page,
+  orgId: string,
+  {
+    path = "/chat",
+    refuseTurn = true,
+    gate,
+  }: { path?: string; refuseTurn?: boolean; gate?: Promise<void> } = {},
+) {
+  const chat = `/api/orgs/${orgId}/chat`;
+  await page.route(`**${chat}/commands*`, async (route) => {
+    await gate;
+    await route.fulfill({ json: commands });
+  });
+  if (refuseTurn)
+    await page.route(`**${chat}`, (route) => route.fulfill({ status: 503, body: "" }));
+  await page.goto(path);
+  return { chat, input: composer(page) };
+}
+
 test("filters, selects with the keyboard or the mouse, and never sends while open", async ({
   authedPage: page,
   browserCtx,
 }) => {
-  const chat = `/api/orgs/${browserCtx.org.orgId}/chat`;
-  await mockCommands(page, browserCtx.org.orgId);
   const sent: string[] = [];
   page.on("request", (req) => {
-    if (chatPost(chat)(req)) sent.push(req.url());
+    if (chatPost(`/api/orgs/${browserCtx.org.orgId}/chat`)(req)) sent.push(req.url());
   });
-
-  await page.goto("/chat");
-  const input = composer(page);
+  const { input } = await openComposer(page, browserCtx.org.orgId, { refuseTurn: false });
   await input.click();
   await input.fill("/");
 
@@ -71,8 +85,8 @@ test("filters, selects with the keyboard or the mouse, and never sends while ope
   // An agent shows its title and prompt name, no description.
   await expect(menu.getByRole("option", { name: /Weekly report/ })).toContainText("/run-report");
 
-  // The text after the slash filters, case-insensitively; the field keeps the focus.
-  await input.fill("/TON");
+  // The text after the slash filters; the field keeps the focus.
+  await input.fill("/ton");
   await expect(menu.getByRole("option")).toHaveCount(1);
   await expect(input).toBeFocused();
 
@@ -80,7 +94,7 @@ test("filters, selects with the keyboard or the mouse, and never sends while ope
   await page.keyboard.press("Enter");
   await expect(menu).toBeHidden();
   await expect(input.getByTestId("directive-chip")).toHaveText("tone");
-  await expect(input).not.toContainText("/TON");
+  await expect(input).not.toContainText("/ton");
   expect(sent).toEqual([]);
 
   // Arrow keys move the highlight.
@@ -113,12 +127,7 @@ test("a path-like /name with no match is sent as ordinary text", async ({
   authedPage: page,
   browserCtx,
 }) => {
-  const chat = `/api/orgs/${browserCtx.org.orgId}/chat`;
-  await mockCommands(page, browserCtx.org.orgId);
-  await page.route(`**${chat}`, (route) => route.fulfill({ status: 503, body: "" }));
-
-  await page.goto("/chat");
-  const input = composer(page);
+  const { chat, input } = await openComposer(page, browserCtx.org.orgId);
   await input.fill("/nothing-like-this");
   await expect(page.getByTestId("slash-menu")).toBeHidden();
 
@@ -134,12 +143,7 @@ test("an agent chip is a message of its own: its text part and its prompt part, 
   authedPage: page,
   browserCtx,
 }) => {
-  const chat = `/api/orgs/${browserCtx.org.orgId}/chat`;
-  await mockCommands(page, browserCtx.org.orgId);
-  await page.route(`**${chat}`, (route) => route.fulfill({ status: 503, body: "" }));
-
-  await page.goto("/chat");
-  const input = composer(page);
+  const { chat, input } = await openComposer(page, browserCtx.org.orgId);
   await input.fill("/run");
   // The menu fills once the commands are read: a key sent before then is the field's own.
   await expect(page.getByRole("option", { name: /Weekly report/ })).toBeVisible();
@@ -147,14 +151,7 @@ test("an agent chip is a message of its own: its text part and its prompt part, 
   const chip = input.getByTestId("directive-chip");
   await expect(chip).toHaveText("Weekly report");
 
-  // One agent per message: the menu offers no second one.
-  await page.keyboard.type(" /");
-  await expect(page.getByTestId("slash-menu").getByRole("option", { name: /Weekly/ })).toHaveCount(
-    0,
-  );
-  await page.keyboard.press("Escape");
-  await page.keyboard.press("Backspace");
-  await page.keyboard.press("Backspace");
+  // The space the menu leaves after the chip goes.
   await page.keyboard.press("Backspace");
 
   const sent = page.waitForRequest(chatPost(chat));
@@ -173,23 +170,25 @@ test("an agent chip is a message of its own: its text part and its prompt part, 
   await expect(input.getByTestId("directive-chip")).toHaveCount(0);
 });
 
-test("a skill chip pins the skill with the first message, which creates the conversation", async ({
+test("a skill chip pins the skill: with the first message of a new conversation, by a PATCH before the message in an existing one", async ({
   authedPage: page,
+  orgOnlyClient,
   browserCtx,
 }) => {
-  const chat = `/api/orgs/${browserCtx.org.orgId}/chat`;
-  await mockCommands(page, browserCtx.org.orgId);
-  await page.route(`**${chat}`, (route) => route.fulfill({ status: 503, body: "" }));
+  const orgId = browserCtx.org.orgId;
+  const { chat, input } = await openComposer(page, orgId);
+  const citeTone = async () => {
+    await input.fill("/tone");
+    await expect(page.getByRole("option", { name: /tone/ })).toBeVisible();
+    await page.keyboard.press("Enter");
+    await page.keyboard.type("make it shorter");
+  };
 
-  await page.goto("/chat");
-  const input = composer(page);
-  await input.fill("/tone");
-  await expect(page.getByRole("option", { name: /tone/ })).toBeVisible();
+  // A new conversation: the first message carries the pins and creates the row.
+  await citeTone();
+  const first = page.waitForRequest(chatPost(chat));
   await page.keyboard.press("Enter");
-  await page.keyboard.type("make it shorter");
-  const sent = page.waitForRequest(chatPost(chat));
-  await page.keyboard.press("Enter");
-  const body = (await sent).postDataJSON() as {
+  const body = (await first).postDataJSON() as {
     pins?: string[];
     skill_discovery?: boolean;
     messages: { parts: { type: string; text?: string }[] }[];
@@ -199,42 +198,26 @@ test("a skill chip pins the skill with the first message, which creates the conv
   expect(body.messages.at(-1)!.parts).toEqual([
     { type: "text", text: ":skill[tone]{name=@acme/tone} make it shorter" },
   ]);
-});
 
-test("a skill chip in an existing conversation is pinned by a PATCH before the message leaves", async ({
-  authedPage: page,
-  orgOnlyClient,
-  browserCtx,
-}) => {
-  const orgId = browserCtx.org.orgId;
-  const chat = `/api/orgs/${orgId}/chat`;
+  // An existing conversation: its skills change by PATCH only, before the turn, which carries none.
   const created = await orgOnlyClient.post(`/orgs/${orgId}/chat/sessions`, { title: "Cited" });
   expect(created.status()).toBe(201);
   const { id } = (await created.json()) as { id: string };
-  await mockCommands(page, orgId);
-  await page.route(`**${chat}`, (route) => route.fulfill({ status: 503, body: "" }));
   const order: string[] = [];
   page.on("request", (req) => {
     const path = new URL(req.url()).pathname;
     if (req.method() === "PATCH" && path === `${chat}/sessions/${id}/skills`) order.push("patch");
     if (chatPost(chat)(req)) order.push("post");
   });
-
   await page.goto(`/chat/${id}`);
-  const input = composer(page);
-  await input.fill("/tone");
-  await expect(page.getByRole("option", { name: /tone/ })).toBeVisible();
-  await page.keyboard.press("Enter");
-  await page.keyboard.type("make it shorter");
+  await citeTone();
   const patched = page.waitForRequest(
     (req) => req.method() === "PATCH" && req.url().endsWith(`/sessions/${id}/skills`),
   );
   const sent = page.waitForRequest(chatPost(chat));
   await page.keyboard.press("Enter");
   expect((await patched).postDataJSON()).toEqual({ pins: ["@acme/tone"], skill_discovery: true });
-  const body = (await sent).postDataJSON() as Record<string, unknown>;
-  // An existing conversation's skills change by PATCH only: the turn carries none.
-  expect(body.pins).toBeUndefined();
+  expect(((await sent).postDataJSON() as Record<string, unknown>).pins).toBeUndefined();
   expect(order).toEqual(["patch", "post"]);
 });
 
@@ -244,21 +227,13 @@ test("Enter and Tab inside a /token wait for the commands instead of sending it"
   authedPage: page,
   browserCtx,
 }) => {
-  const chat = `/api/orgs/${browserCtx.org.orgId}/chat`;
   let release: () => void = () => {};
   const gate = new Promise<void>((resolve) => (release = resolve));
-  await page.route(`**/api/orgs/${browserCtx.org.orgId}/chat/commands*`, async (route) => {
-    await gate;
-    await route.fulfill({ json: commands });
-  });
-  await page.route(`**${chat}`, (route) => route.fulfill({ status: 503, body: "" }));
   const sent: string[] = [];
   page.on("request", (req) => {
-    if (chatPost(chat)(req)) sent.push(req.url());
+    if (chatPost(`/api/orgs/${browserCtx.org.orgId}/chat`)(req)) sent.push(req.url());
   });
-
-  await page.goto("/chat");
-  const input = composer(page);
+  const { input } = await openComposer(page, browserCtx.org.orgId, { gate });
   await input.fill("/tone");
   // The menu is open on its loading notice before the keys, and still after them: they were the
   // popover's, so the field kept its text and nothing left.

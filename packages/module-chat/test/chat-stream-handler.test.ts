@@ -22,7 +22,6 @@
  * connection from `platformMcp.url`; the handler only mints the bearer.
  */
 
-import { createHash } from "node:crypto";
 import { describe, it, expect, beforeEach, afterEach, spyOn } from "bun:test";
 import { Hono } from "hono";
 import { and, asc, eq } from "drizzle-orm";
@@ -63,7 +62,6 @@ import { buildModuleInitContext } from "../../../apps/api/src/lib/modules/regist
 import { errorHandler } from "../../../apps/api/src/middleware/error-handler.ts";
 import { initSystemModelProviderKeys } from "../../../apps/api/src/services/model-registry.ts";
 import { buildSystemPrompt } from "../src/prompt.ts";
-import { SKILL_DEFINITION_META_KEY, type SkillEntry } from "@appstrate/core/skill-uri";
 import { turnCapabilities } from "../src/capabilities.ts";
 import { chatLoopbackStrategy } from "../src/loopback-auth.ts";
 import { platformMcpSurfaceKey } from "../src/pi-chat/mcp-surface-cache.ts";
@@ -81,6 +79,7 @@ import { CHAT_SKILLS_CONTENT_BUDGET_CHARS } from "../src/skills.ts";
 import { buildPlatformMcpTools } from "../src/pi-chat/mcp-tools.ts";
 import { PiChatUiStreamMapper } from "../src/pi-chat/ui-stream-mapper.ts";
 import { spaceIdRefusal } from "@appstrate/core/mcp-spaces";
+import { fakePlatformMcp, fakeSkillUri, type FakeSkill } from "./fake-platform-mcp.ts";
 
 // The chat handler reads the system model registry; the HTTP harness initializes it at boot.
 initSystemModelProviderKeys();
@@ -147,16 +146,14 @@ function modelsResponse(apiShape = "openai-completions"): Response {
 /** Build the scripted in-memory dispatch. Nothing leaves this process. */
 function scriptedDispatch(
   apiShape?: string,
-  listedSkill?: SkillEntry,
+  listedSkill?: FakeSkill,
 ): (req: Request) => Promise<Response> {
-  return async (req: Request): Promise<Response> => {
+  const models = async (req: Request): Promise<Response> => {
     const path = new URL(req.url).pathname;
-    if (listedSkill && path.startsWith("/api/mcp/")) {
-      return answerSkillsMcp(await req.json(), { entry: listedSkill, text: "", onRead: () => {} });
-    }
     if (path === "/api/models") return modelsResponse(apiShape);
     return new Response("unexpected dispatch: " + path, { status: 404 });
   };
+  return listedSkill ? fakePlatformMcp({ skills: [listedSkill] }, models) : models;
 }
 
 /**
@@ -225,39 +222,6 @@ async function tokenInjectedSkills(input: PiChatInput): Promise<unknown> {
   } as never);
   return resolved!.extra?.[INJECTED_SKILLS_AUTH_EXTRA];
 }
-
-/**
- * A stateless platform MCP server listing one published skill entry and
- * serving its `SKILL.md`: answers one JSON-RPC message.
- */
-function answerSkillsMcp(
-  message: { id?: number; method: string; params?: Record<string, unknown> },
-  skill: { entry: SkillEntry; text: string; onRead: (uri: string) => void },
-): Response {
-  const result = (value: unknown) =>
-    Response.json({ jsonrpc: "2.0", id: message.id, result: value });
-  switch (message.method) {
-    case "initialize":
-      return result({
-        protocolVersion: message.params?.protocolVersion,
-        capabilities: { resources: {}, extensions: { "io.modelcontextprotocol/skills": {} } },
-        serverInfo: { name: "fake-platform", version: "1.0.0" },
-      });
-    case "skills/list": {
-      const meta = message.params?._meta as Record<string, unknown> | undefined;
-      return result({ skills: meta?.[SKILL_DEFINITION_META_KEY] === "draft" ? [] : [skill.entry] });
-    }
-    case "resources/read": {
-      const uri = message.params?.uri as string;
-      skill.onRead(uri);
-      return result({ contents: [{ uri, mimeType: "text/markdown", text: skill.text }] });
-    }
-    default:
-      return new Response(null, { status: 202 });
-  }
-}
-
-const sha256 = (text: string) => `sha256:${createHash("sha256").update(text).digest("hex")}`;
 
 /** The permission set the turn's platform-MCP bearer actually carries. */
 async function tokenPermissions(input: PiChatInput): Promise<string[]> {
@@ -353,7 +317,7 @@ describe("handleChatStream", () => {
       /** Stand in for the platform's usage writer. */
       recordChatUsage?: ChatPlatformDeps["recordChatUsage"];
       /** The one skill the scripted platform MCP server lists. */
-      listedSkill?: SkillEntry;
+      listedSkill?: FakeSkill;
       /** Replace the whole scripted dispatch (to observe request timing). */
       dispatch?: (req: Request) => Promise<Response>;
       /** Stand in for the platform's composer-attachment resolution. */
@@ -1167,26 +1131,20 @@ describe("handleChatStream", () => {
     // The pinned skill is listed by the platform MCP server; record which
     // contents are read and with which bearer, so the rendered block is a
     // function of what the handler read.
-    const uri = `skill://${ctx.defaultSpaceId}/acme/pinned-skill/pinned/SKILL.md`;
-    const PINNED_TEXT = "Always answer in haiku.";
+    const pinned = { space: ctx.defaultSpaceId, id: PIN, text: "Always answer in haiku." };
+    const uri = fakeSkillUri(pinned);
     const read: string[] = [];
     const skillBearers: string[] = [];
-    const dispatch = async (req: Request): Promise<Response> => {
-      const url = new URL(req.url);
-      if (url.pathname.startsWith("/api/mcp/")) {
-        skillBearers.push(req.headers.get("authorization") ?? "");
-        return answerSkillsMcp(await req.json(), {
-          entry: {
-            uri,
-            frontmatter: { name: "pinned", description: "P", metadata: { version: "1.0.0" } },
-            resources: [{ uri, digest: sha256(PINNED_TEXT), size: 23 }],
-          },
-          text: PINNED_TEXT,
-          onRead: (readUri) => read.push(readUri),
-        });
-      }
-      return scriptedDispatch()(req);
-    };
+    const dispatch = fakePlatformMcp(
+      {
+        skills: [pinned],
+        onMethod: (method, params, req) => {
+          skillBearers.push(req.headers.get("authorization") ?? "");
+          if (method === "resources/read") read.push(params?.uri as string);
+        },
+      },
+      scriptedDispatch(),
+    );
 
     const { engine, calls } = scriptedEngine();
     const res = await postChat(sessionId, undefined, engine, {
@@ -1245,54 +1203,15 @@ describe("handleChatStream", () => {
     /** Runs on each `skills/list`: inside the turn's preamble, between its upsert and its claim. */
     onList?: () => Promise<void>,
   ): (req: Request) => Promise<Response> {
-    const uriOf = (id: string) =>
-      `skill://${ctx.defaultSpaceId}/${id.slice(1)}/${id.split("/")[1]}/SKILL.md`;
-    return async (req) => {
-      if (!new URL(req.url).pathname.startsWith("/api/mcp/")) return scriptedDispatch()(req);
-      const message = (await req.json()) as {
-        id?: number;
-        method: string;
-        params?: Record<string, unknown>;
-      };
-      const result = (value: unknown) =>
-        Response.json({ jsonrpc: "2.0", id: message.id, result: value });
-      switch (message.method) {
-        case "initialize":
-          return result({
-            protocolVersion: message.params?.protocolVersion,
-            capabilities: { resources: {}, extensions: { "io.modelcontextprotocol/skills": {} } },
-            serverInfo: { name: "fake-platform", version: "1.0.0" },
-          });
-        case "tools/list":
-          return result({ tools: [] });
-        case "skills/list": {
-          await onList?.();
-          const meta = message.params?._meta as Record<string, unknown> | undefined;
-          if (meta?.[SKILL_DEFINITION_META_KEY] === "draft") return result({ skills: [] });
-          return result({
-            skills: skills.map(({ id, text, listedText }) => ({
-              uri: uriOf(id),
-              frontmatter: {
-                name: id.split("/")[1],
-                description: id,
-                metadata: { version: "1.0.0" },
-              },
-              // A digest of other text than the one served: the read is `unreadable`.
-              resources: [
-                { uri: uriOf(id), digest: sha256(listedText ?? text), size: text.length },
-              ],
-            })),
-          });
-        }
-        case "resources/read": {
-          const uri = message.params?.uri as string;
-          const skill = skills.find(({ id }) => uriOf(id) === uri)!;
-          return result({ contents: [{ uri, mimeType: "text/markdown", text: skill.text }] });
-        }
-        default:
-          return new Response(null, { status: 202 });
-      }
-    };
+    return fakePlatformMcp(
+      {
+        skills: skills.map((skill) => ({ space: ctx.defaultSpaceId, ...skill })),
+        onMethod: async (method) => {
+          if (method === "skills/list") await onList?.();
+        },
+      },
+      scriptedDispatch(),
+    );
   }
 
   const SKILL_TURN_PERMISSIONS = new Set(["mcp:read", "mcp:invoke", "skills:read"]);
@@ -1471,27 +1390,6 @@ describe("handleChatStream", () => {
     await waitForAssistantPersist(sessionId);
   });
 
-  it("records no verdict for a turn refused before its claim", async () => {
-    const sessionId = mintSessionId();
-    await seedSkillSession(sessionId, { pinned: ["@acme/a"] });
-    const previousCap = process.env.CHAT_PI_MAX_CONCURRENCY;
-    process.env.CHAT_PI_MAX_CONCURRENCY = "1";
-    _resetChatEnvForTests();
-    const heldSlot = acquirePiChatSlot();
-    try {
-      const res = await postChat(sessionId, undefined, scriptedEngine().engine, {
-        permissions: SKILL_TURN_PERMISSIONS,
-      });
-      expect(res.status).toBe(429);
-      expect((await sessionSkills(sessionId))?.skillStatus).toEqual({});
-    } finally {
-      heldSlot?.release();
-      if (previousCap === undefined) delete process.env.CHAT_PI_MAX_CONCURRENCY;
-      else process.env.CHAT_PI_MAX_CONCURRENCY = previousCap;
-      _resetChatEnvForTests();
-    }
-  });
-
   describe("a turn refused at or before its claim writes no verdict", () => {
     const stored = {
       pinned: ["@acme/a", "@acme/b"],
@@ -1510,37 +1408,79 @@ describe("handleChatStream", () => {
       });
     }
 
-    it("refused by the admission gate", async () => {
-      const sessionId = mintSessionId();
-      await seedSkillSession(sessionId, stored);
-      const res = await postChat(sessionId, undefined, scriptedEngine().engine, {
-        permissions: SKILL_TURN_PERMISSIONS,
-        dispatch: listedSkillsDispatch([]),
-        checkUsageAllowed: async () => ({
-          code: "quota_exceeded",
-          message: "Out of credits.",
-          status: 402,
+    type Arranged = { overrides: Parameters<typeof postChat>[3]; cleanup?: () => void };
+    const cases: Array<
+      [label: string, status: number, code: string | null, arrange: (sessionId: string) => Arranged]
+    > = [
+      [
+        "refused before its claim, the concurrency slot held",
+        429,
+        null,
+        () => {
+          const previousCap = process.env.CHAT_PI_MAX_CONCURRENCY;
+          process.env.CHAT_PI_MAX_CONCURRENCY = "1";
+          _resetChatEnvForTests();
+          const heldSlot = acquirePiChatSlot();
+          return {
+            overrides: {},
+            cleanup: () => {
+              heldSlot?.release();
+              if (previousCap === undefined) delete process.env.CHAT_PI_MAX_CONCURRENCY;
+              else process.env.CHAT_PI_MAX_CONCURRENCY = previousCap;
+              _resetChatEnvForTests();
+            },
+          };
+        },
+      ],
+      [
+        "refused by the admission gate",
+        402,
+        null,
+        () => ({
+          overrides: {
+            dispatch: listedSkillsDispatch([]),
+            checkUsageAllowed: async () => ({
+              code: "quota_exceeded",
+              message: "Out of credits.",
+              status: 402,
+            }),
+          },
         }),
-      });
-      await expectUnchanged(sessionId, res, 402);
-    });
+      ],
+      [
+        "refused by its claim while another turn is live",
+        409,
+        "chat_turn_in_flight",
+        (sessionId) => ({
+          overrides: {
+            dispatch: listedSkillsDispatch([], async () => {
+              await db
+                .update(chatSessions)
+                .set({ activeStreamId: "strm_live" })
+                .where(eq(chatSessions.id, sessionId));
+            }),
+          },
+        }),
+      ],
+    ];
 
-    it("refused by its claim while another turn is live (409 `chat_turn_in_flight`)", async () => {
-      const sessionId = mintSessionId();
-      await seedSkillSession(sessionId, stored);
-      const dispatch = listedSkillsDispatch([], async () => {
-        await db
-          .update(chatSessions)
-          .set({ activeStreamId: "strm_live" })
-          .where(eq(chatSessions.id, sessionId));
+    for (const [label, status, code, arrange] of cases) {
+      it(`${label} (${status})`, async () => {
+        const sessionId = mintSessionId();
+        await seedSkillSession(sessionId, stored);
+        const { overrides, cleanup } = arrange(sessionId);
+        try {
+          const res = await postChat(sessionId, undefined, scriptedEngine().engine, {
+            permissions: SKILL_TURN_PERMISSIONS,
+            ...overrides,
+          });
+          if (code) expect(await res.clone().json()).toMatchObject({ code });
+          await expectUnchanged(sessionId, res, status);
+        } finally {
+          cleanup?.();
+        }
       });
-      const res = await postChat(sessionId, undefined, scriptedEngine().engine, {
-        permissions: SKILL_TURN_PERMISSIONS,
-        dispatch,
-      });
-      expect(await res.clone().json()).toMatchObject({ code: "chat_turn_in_flight" });
-      await expectUnchanged(sessionId, res, 409);
-    });
+    }
   });
 
   it("reads a skill's SKILL.md as a plain read: its text stays in the persisted history, nothing is pinned", async () => {
@@ -1608,7 +1548,6 @@ describe("handleChatStream", () => {
     expect(first.status).toBe(200);
     await collectUiChunks(first);
     await waitForAssistantPersist(sessionId);
-    expect(results[0]).not.toHaveProperty("skillPinned");
     expect(results[0]).not.toHaveProperty("persistedContent");
     expect(await sessionSkills(sessionId)).toEqual({
       skillDiscovery: true,
@@ -1693,11 +1632,11 @@ describe("handleChatStream", () => {
       title: null,
     });
     const skillReads: string[] = [];
-    const uri = `skill://${ctx.defaultSpaceId}/acme/catalogued/catalogued/SKILL.md`;
-    const catalogued: SkillEntry = {
-      uri,
-      frontmatter: { name: "catalogued", description: "Catalogued" },
-      resources: [{ uri, digest: `sha256:${"0".repeat(64)}`, size: 1 }],
+    const catalogued: FakeSkill = {
+      space: ctx.defaultSpaceId,
+      id: "@acme/catalogued",
+      description: "Catalogued",
+      version: null,
     };
     const dispatch = async (req: Request): Promise<Response> => {
       const url = new URL(req.url);
@@ -1965,7 +1904,7 @@ describe("handleChatStream", () => {
     async function turn(
       permissions: Set<string>,
       packageAuthoring?: boolean,
-      listedSkill?: SkillEntry,
+      listedSkill?: FakeSkill,
     ) {
       const { engine, calls } = scriptedEngine();
       const res = await postChat(mintSessionId(), undefined, engine, {
@@ -2065,11 +2004,11 @@ describe("handleChatStream", () => {
     it("teaches no authoring without `mcp:invoke` — `createAgent` dispatches through it", async () => {
       // `agents:write` without `mcp:invoke` is a grant the turn cannot dispatch.
       // Skills are the counterpoint: `read_resource` needs no dispatch, so they stay.
-      const uri = `skill://${ctx.defaultSpaceId}/acme/research/research/SKILL.md`;
-      const withSkill: SkillEntry = {
-        uri,
-        frontmatter: { name: "research", description: "Research", metadata: { version: "1.2.0" } },
-        resources: [{ uri, digest: `sha256:${"0".repeat(64)}`, size: 1 }],
+      const withSkill: FakeSkill = {
+        space: ctx.defaultSpaceId,
+        id: SKILL_ID,
+        description: "Research",
+        version: "1.2.0",
       };
       const { system } = await turn(
         new Set(["mcp:read", "agents:write", "skills:read"]),
@@ -2603,62 +2542,21 @@ describe("handleChatStream", () => {
         const bodyOf = (space: string, id: string) => `${id} as read in ${space}`;
 
         /** The skills the organization endpoint lists, in the order it lists them. */
-        function skillsDispatch(listed: Array<[space: string, id: string]>, read: string[] = []) {
-          return async (req: Request): Promise<Response> => {
-            if (!new URL(req.url).pathname.startsWith("/api/mcp/")) return scriptedDispatch()(req);
-            const message = (await req.json()) as {
-              id?: number;
-              method: string;
-              params?: Record<string, unknown>;
-            };
-            const result = (value: unknown) =>
-              Response.json({ jsonrpc: "2.0", id: message.id, result: value });
-            switch (message.method) {
-              case "initialize":
-                return result({
-                  protocolVersion: message.params?.protocolVersion,
-                  capabilities: {
-                    resources: {},
-                    extensions: { "io.modelcontextprotocol/skills": {} },
-                  },
-                  serverInfo: { name: "fake-platform", version: "1.0.0" },
-                });
-              case "skills/list": {
-                const meta = message.params?._meta as Record<string, unknown> | undefined;
-                return result({
-                  skills:
-                    meta?.[SKILL_DEFINITION_META_KEY] === "draft"
-                      ? []
-                      : listed.map(([space, id]) => ({
-                          uri: uriIn(space, id),
-                          frontmatter: {
-                            name: id.split("/")[1],
-                            description: `${id} in ${space}`,
-                            metadata: { version: "1.0.0" },
-                          },
-                          resources: [
-                            {
-                              uri: uriIn(space, id),
-                              digest: sha256(bodyOf(space, id)),
-                              size: bodyOf(space, id).length,
-                            },
-                          ],
-                        })),
-                });
-              }
-              case "resources/read": {
-                const uri = message.params?.uri as string;
-                read.push(uri);
-                const [space, id] = listed.find(([s, i]) => uriIn(s, i) === uri)!;
-                return result({
-                  contents: [{ uri, mimeType: "text/markdown", text: bodyOf(space, id) }],
-                });
-              }
-              default:
-                return new Response(null, { status: 202 });
-            }
-          };
-        }
+        const skillsDispatch = (listed: Array<[space: string, id: string]>, read: string[] = []) =>
+          fakePlatformMcp(
+            {
+              skills: listed.map(([space, id]) => ({
+                space,
+                id,
+                text: bodyOf(space, id),
+                description: `${id} in ${space}`,
+              })),
+              onMethod: (method, params) => {
+                if (method === "resources/read") read.push(params?.uri as string);
+              },
+            },
+            scriptedDispatch(),
+          );
 
         /** The reach with `skills:read` on both spaces, and `chat:write` where `chatIn` names it. */
         const reachWith = (chatIn: string[]): ReachableSpaceGrant[] =>
@@ -2842,47 +2740,33 @@ describe("handleChatStream", () => {
     });
 
     /** A platform MCP server serving one launch prompt; records each `prompts/get`. */
-    function promptsDispatch(gets: Array<Record<string, unknown>>) {
-      return async (req: Request): Promise<Response> => {
-        const path = new URL(req.url).pathname;
-        if (path === "/api/models") return modelsResponse();
-        if (!path.startsWith("/api/mcp/"))
-          return new Response("unexpected: " + path, { status: 404 });
-        const message = (await req.json()) as {
-          id?: number;
-          method: string;
-          params?: Record<string, unknown>;
-        };
-        const reply = (body: Record<string, unknown>) =>
-          Response.json({ jsonrpc: "2.0", id: message.id, ...body });
-        switch (message.method) {
-          case "initialize":
-            return reply({
-              result: {
-                protocolVersion: message.params?.protocolVersion,
-                capabilities: { prompts: {} },
-                serverInfo: { name: "fake-platform", version: "1.0.0" },
-              },
-            });
-          case "prompts/get": {
-            gets.push(message.params ?? {});
-            const args = (message.params?.arguments ?? {}) as { request?: string };
-            if (message.params?.name !== "run-summarizer") {
-              return reply({ error: { code: -32602, message: "Invalid prompt name" } });
-            }
-            return reply({
-              result: {
-                messages: [
-                  { role: "user", content: { type: "text", text: LAUNCH(args.request ?? "") } },
-                ],
-              },
-            });
-          }
-          default:
-            return new Response(null, { status: 202 });
-        }
-      };
-    }
+    const promptsDispatch = (gets: Array<Record<string, unknown>>) =>
+      fakePlatformMcp(
+        {
+          capabilities: { prompts: {} },
+          getPrompt: (params) => {
+            gets.push(params);
+            if (params.name !== "run-summarizer") return undefined;
+            const args = (params.arguments ?? {}) as { request?: string };
+            return {
+              messages: [
+                { role: "user", content: { type: "text", text: LAUNCH(args.request ?? "") } },
+              ],
+            };
+          },
+        },
+        scriptedDispatch(),
+      );
+
+    /** The structured turn Pi builds from what the handler handed the engine. */
+    const modelTurn = (input: PiChatInput) => {
+      const { api, provider, id } = input.modelBinding.model;
+      return buildStructuredPiTurn(
+        input.messages,
+        { api, provider, model: id },
+        { estimateTokens: () => 1, baseTokens: 0, fileDelivery: { image: false, pdf: false } },
+      );
+    };
 
     const rowsOf = async (sessionId: string) =>
       (await db.select().from(chatMessages).where(eq(chatMessages.sessionId, sessionId))).map(
@@ -2916,17 +2800,10 @@ describe("handleChatStream", () => {
         },
       ]);
       // The model reads the expansion, once, not the typed text beside it.
-      const input = calls[0]!;
-      const { api, provider, id } = input.modelBinding.model;
-      const turn = buildStructuredPiTurn(
-        input.messages,
-        { api, provider, model: id },
-        { estimateTokens: () => 1, baseTokens: 0, fileDelivery: { image: false, pdf: false } },
-      );
-      expect(turn.prompt).toBe(LAUNCH("résume ma boîte").trim());
+      expect(modelTurn(calls[0]!).prompt).toBe(LAUNCH("résume ma boîte").trim());
     });
 
-    it("resolves a launch typed with no text", async () => {
+    it("resolves a launch typed with no text, titling the conversation from it", async () => {
       const gets: Array<Record<string, unknown>> = [];
       const sessionId = mintSessionId();
       const res = await postChat(sessionId, undefined, scriptedEngine().engine, {
@@ -2937,6 +2814,8 @@ describe("handleChatStream", () => {
       await collectUiChunks(res);
       await waitForAssistantPersist(sessionId);
       expect(gets).toEqual([{ name: "run-summarizer", arguments: { request: "" } }]);
+      const [session] = await db.select().from(chatSessions).where(eq(chatSessions.id, sessionId));
+      expect(session?.title).toBe("Summarizer");
     });
 
     it("keeps the directives as typed, and resolves the request with them read as /label, the agent's own left out", async () => {
@@ -2958,12 +2837,7 @@ describe("handleChatStream", () => {
       ]);
       const [user] = await rowsOf(sessionId);
       expect(user!.parts[0]).toEqual({ type: "text", text: typed });
-      const { api, provider, id } = calls[0]!.modelBinding.model;
-      const turn = buildStructuredPiTurn(
-        calls[0]!.messages,
-        { api, provider, model: id },
-        { estimateTokens: () => 1, baseTokens: 0, fileDelivery: { image: false, pdf: false } },
-      );
+      const turn = modelTurn(calls[0]!);
       expect(turn.prompt).toBe(LAUNCH("résume en suivant /tone").trim());
       expect(turn.prompt).not.toContain(":skill[");
       const [session] = await db.select().from(chatSessions).where(eq(chatSessions.id, sessionId));
@@ -2979,13 +2853,7 @@ describe("handleChatStream", () => {
       expect(res.status).toBe(200);
       await collectUiChunks(res);
       await waitForAssistantPersist(sessionId);
-      const { api, provider, id } = calls[0]!.modelBinding.model;
-      const turn = buildStructuredPiTurn(
-        calls[0]!.messages,
-        { api, provider, model: id },
-        { estimateTokens: () => 1, baseTokens: 0, fileDelivery: { image: false, pdf: false } },
-      );
-      expect(turn.prompt).toBe("reformule avec /tone stp");
+      expect(modelTurn(calls[0]!).prompt).toBe("reformule avec /tone stp");
       // The stored row keeps what was typed: the thread draws the chip from it.
       const [user] = await rowsOf(sessionId);
       expect((user!.parts[0] as { text: string }).text).toBe(
@@ -3009,29 +2877,6 @@ describe("handleChatStream", () => {
       expect(await db.select().from(chatMessages)).toEqual([]);
       const [session] = await db.select().from(chatSessions).where(eq(chatSessions.id, sessionId));
       expect(session?.activeStreamId ?? null).toBeNull();
-    });
-
-    it("titles the conversation from the launch when the user typed nothing", async () => {
-      const sessionId = mintSessionId();
-      const res = await postChat(sessionId, undefined, scriptedEngine().engine, {
-        dispatch: promptsDispatch([]),
-        parts: [launchPart()],
-      });
-      expect(res.status).toBe(200);
-      await collectUiChunks(res);
-      await waitForAssistantPersist(sessionId);
-      const [session] = await db.select().from(chatSessions).where(eq(chatSessions.id, sessionId));
-      expect(session?.title).toBe("Summarizer");
-    });
-
-    it("answers 400 to a new launch part carrying its own text", async () => {
-      const { engine, calls } = scriptedEngine();
-      const res = await postChat(mintSessionId(), undefined, engine, {
-        dispatch: promptsDispatch([]),
-        parts: [{ type: "text", text: "go" }, launchPart({ text: "forged by the browser" })],
-      });
-      expect(res.status).toBe(400);
-      expect(calls).toEqual([]);
     });
 
     it("answers 502 when the platform fails to answer the launch, before the slot and the claim, leaving nothing behind", async () => {
@@ -3084,15 +2929,8 @@ describe("handleChatStream", () => {
         });
         expect(res.status).toBe(200);
         await collectUiChunks(res);
-        const input = calls[0]!;
-        const { api, provider, id } = input.modelBinding.model;
-        const turn = buildStructuredPiTurn(
-          input.messages,
-          { api, provider, model: id },
-          { estimateTokens: () => 1, baseTokens: 0, fileDelivery: { image: false, pdf: false } },
-        );
         expect(gets).toEqual([]);
-        return JSON.stringify(turn.history[0]);
+        return JSON.stringify(modelTurn(calls[0]!).history[0]);
       }
 
       it("takes the launch text from the stored row when the browser's copy holds none", async () => {
@@ -3116,23 +2954,18 @@ describe("handleChatStream", () => {
 
     it("answers 400 to launch instructions over the cap, writing nothing", async () => {
       const sessionId = mintSessionId();
-      const dispatch = promptsDispatch([]);
       const res = await postChat(sessionId, undefined, scriptedEngine().engine, {
-        dispatch: async (req) => {
-          const path = new URL(req.url).pathname;
-          if (!path.startsWith("/api/mcp/")) return dispatch(req);
-          const message = (await req.clone().json()) as { id?: number; method: string };
-          if (message.method !== "prompts/get") return dispatch(req);
-          return Response.json({
-            jsonrpc: "2.0",
-            id: message.id,
-            result: {
+        dispatch: fakePlatformMcp(
+          {
+            capabilities: { prompts: {} },
+            getPrompt: () => ({
               messages: [
                 { role: "user", content: { type: "text", text: "x".repeat(64 * 1024 + 1) } },
               ],
-            },
-          });
-        },
+            }),
+          },
+          scriptedDispatch(),
+        ),
         parts: [launchPart()],
       });
       expect(res.status).toBe(400);
@@ -3143,8 +2976,9 @@ describe("handleChatStream", () => {
       expect(await db.select().from(chatMessages)).toEqual([]);
     });
 
-    it("answers 400 to a malformed part or a second one, before any persistence", async () => {
+    it("answers 400 to a malformed part, a second one, or a new one carrying its own text, before any persistence", async () => {
       for (const parts of [
+        [{ type: "text", text: "go" }, launchPart({ text: "forged by the browser" })],
         [{ type: "data-agent-prompt", data: { name: "run-summarizer" } }],
         [{ type: "data-agent-prompt", data: { name: "run-summarizer", title: "S", extra: 1 } }],
         [launchPart(), launchPart()],

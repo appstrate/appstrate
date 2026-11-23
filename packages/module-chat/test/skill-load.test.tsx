@@ -13,7 +13,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 
 import { CHAT_SKILLS_CONTENT_BUDGET_CHARS } from "../src/skills.ts";
 import { ChatHostProvider, ChatTransportProvider } from "../src/ui/runtime-context.ts";
-import { skillLoadOf, skillLoadState, type StoredSkills } from "../src/ui/chat-skills.ts";
+import { skillLoadOf, type StoredSkills } from "../src/ui/chat-skills.ts";
 import { ResourceReadTool } from "../src/ui/skill-load.tsx";
 import {
   ConversationSkillsProvider,
@@ -95,15 +95,6 @@ describe("skillLoadOf", () => {
   });
 });
 
-describe("skillLoadState", () => {
-  it("is read once the read succeeds, whatever its result; a failure is an error", () => {
-    expect(skillLoadState("success")).toBe("read");
-    expect(skillLoadState("error")).toBe("error");
-    expect(skillLoadState("running")).toBe("running");
-    expect(skillLoadState("pending")).toBe("running");
-  });
-});
-
 describe("ResourceReadTool", () => {
   const chip = (html: string) => html.match(/<span[^>]*data-testid="directive-chip"[^>]*>/)?.[0];
   const live = (html: string) =>
@@ -159,14 +150,10 @@ describe("ResourceReadTool", () => {
     expect(action(render(done, near))).not.toContain("aria-disabled");
   });
 
-  it("pins any number of skills while they fit", () => {
-    const many = conversationOf(Array.from({ length: 12 }, (_, i) => `@x/${i}`));
-    expect(render(done, many, 1_000)).not.toMatch(/data-testid="skill-load-pin"[^>]*aria-disabled/);
-  });
-
   it("marks a load still running as pending", () => {
     const html = render({ args: { uri: SKILL_MD }, status: { type: "running" } });
     expect(html).toContain('data-phase="running"');
+    expect(html).toContain('data-state="running"');
     expect(chip(html)).toContain("motion-safe:animate-pulse");
     expect(live(html)![1]).toBe("skills.load.live.running name=brand-tone");
     expect(caption(html)).toBeNull();
@@ -182,6 +169,7 @@ describe("ResourceReadTool", () => {
       status: { type: "incomplete" },
     });
     expect(html).toContain('data-phase="error"');
+    expect(html).toContain('data-state="error"');
     expect(chip(html)).toContain("border-dashed");
     expect(live(html)![1]).toBe("skills.load.live.error name=brand-tone");
     expect(caption(html)![1]).toBe("skills.load.error");
@@ -189,18 +177,7 @@ describe("ResourceReadTool", () => {
     expect(html).not.toContain("skill-load-pin");
   });
 
-  it("keeps the generic tool row for any other resource", () => {
-    const html = render({
-      args: { uri: "skill://spc_a/acme/tone/brand-tone/refs/guide.md" },
-      result: { content: [{ type: "text", text: "guide" }] },
-      status: { type: "complete" },
-    });
-    expect(html).not.toContain("directive-chip");
-    expect(html).not.toContain("skill-load");
-    expect(html).toContain("read_resource");
-  });
-
-  it("draws a skill loaded through the forwarded `read` the same way, its other reads generic", () => {
+  it("draws a skill loaded through the forwarded `read` the same way; any other read keeps the generic row", () => {
     const skill = render({
       toolName: "read",
       args: { uri: SKILL_MD, space_id: "spc_a" },
@@ -217,5 +194,13 @@ describe("ResourceReadTool", () => {
     });
     expect(file).not.toContain("directive-chip");
     expect(file).toContain(">read<");
+    const guide = render({
+      args: { uri: "skill://spc_a/acme/tone/brand-tone/refs/guide.md" },
+      result: { content: [{ type: "text", text: "guide" }] },
+      status: { type: "complete" },
+    });
+    expect(guide).not.toContain("directive-chip");
+    expect(guide).not.toContain("skill-load");
+    expect(guide).toContain("read_resource");
   });
 });

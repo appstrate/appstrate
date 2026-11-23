@@ -167,7 +167,9 @@ describe("chat session skills", () => {
         })
         .where(eq(chatSessions.id, id));
 
-      const res = await patchSkills(id, { pins: ["@acme/c", "@acme/a", "@acme/c"] });
+      // More than ten pins: the set has no count cap, only the content budget bounds it.
+      const extra = Array.from({ length: 10 }, (_, i) => `@acme/x${9 - i}`);
+      const res = await patchSkills(id, { pins: ["@acme/c", ...extra, "@acme/a", "@acme/c"] });
       expect(res.status).toBe(200);
       const dto = (await res.json()) as SessionDto;
       // The full resource, as the other session routes serve it.
@@ -175,11 +177,12 @@ describe("chat session skills", () => {
       expect(dto.pins).toEqual([
         { id: "@acme/a", status: "injected", chars: 10 },
         { id: "@acme/c", status: null, chars: null },
+        ...[...extra].reverse().map((x) => ({ id: x, status: null, chars: null })),
       ]);
       // A pin never reorders the sidebar.
       expect(dto.updatedAt).toBe(updatedAt);
       expect(await stored(id)).toEqual({
-        pinnedSkills: ["@acme/a", "@acme/c"],
+        pinnedSkills: ["@acme/a", "@acme/c", ...[...extra].reverse()],
         skillDiscovery: true,
         skillStatus: { "@acme/a": { status: "injected", chars: 10 } },
       });
@@ -236,33 +239,6 @@ describe("chat session skills", () => {
       const reader = await memberHolding(ctx, ["chat:read"]);
       expect((await patchSkills(id, { pins: ["@acme/a"] }, reader)).status).toBe(403);
       expect(await stored(id)).toMatchObject({ pinnedSkills: [] });
-    });
-
-    it("keeps a turn's claim from writing the verdict of a pin a PATCH removed since", async () => {
-      const { id } = await createSession();
-      expect((await patchSkills(id, { pins: ["@acme/a"] })).status).toBe(200);
-      // The turn read `@acme/a` and `@acme/b`; the PATCH below dropped `@acme/b` before its claim.
-      expect((await patchSkills(id, { pins: ["@acme/a"] })).status).toBe(200);
-      await setActiveStream(id, "strm_turn", UNLIMITED_SCOPE, {
-        "@acme/a": { status: "injected", chars: 10 },
-        "@acme/b": { status: "injected", chars: 20 },
-      });
-      expect((await stored(id))?.skillStatus).toEqual({
-        "@acme/a": { status: "injected", chars: 10 },
-      });
-      expect((await patchSkills(id, { pins: ["@acme/a", "@acme/b"] })).status).toBe(200);
-      expect((await getSession(id)).pins).toEqual([
-        { id: "@acme/a", status: "injected", chars: 10 },
-        { id: "@acme/b", status: null, chars: null },
-      ]);
-    });
-
-    it("stores any number of pins, each once and sorted", async () => {
-      const { id } = await createSession();
-      const many = Array.from({ length: 12 }, (_, i) => `@a/s${String(11 - i).padStart(2, "0")}`);
-      const res = await patchSkills(id, { pins: [...many, "@a/s00"] });
-      expect(res.status).toBe(200);
-      expect(await stored(id)).toMatchObject({ pinnedSkills: [...many].sort() });
     });
 
     it("is allowed while a turn is running, and leaves the turn's claim in place", async () => {

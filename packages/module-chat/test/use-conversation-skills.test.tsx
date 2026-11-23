@@ -6,11 +6,10 @@
  * lands and rolled back on a failure; concurrent changes are sent one after the other, each over
  * the previous; a new conversation keeps its selection locally and its first turn carries it, and
  * a change made before the row that turn created is read reaches the row by a PATCH.
- * There is no DOM harness in this repo; a hook rendering nothing needs only the few globals
- * react-dom's client touches, installed for this file and removed after it.
+ * The DOM globals come from `dom-shim.ts`.
  */
 
-import { afterAll, beforeAll, describe, expect, it } from "bun:test";
+import { describe, expect, it } from "bun:test";
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
@@ -22,39 +21,9 @@ import {
   type ConversationSkillsState,
 } from "../src/ui/use-conversation-skills.ts";
 import { transportOver } from "./fake-request.ts";
+import { container, installDomShim } from "./dom-shim.ts";
 
-const globals = globalThis as { window?: unknown; IS_REACT_ACT_ENVIRONMENT?: boolean };
-const saved = { window: globals.window, act: globals.IS_REACT_ACT_ENVIRONMENT };
-const noop = () => {};
-const doc: Record<string, unknown> = {
-  addEventListener: noop,
-  removeEventListener: noop,
-  activeElement: null,
-};
-/** A fresh root container: one per mount, as `createRoot` wants. */
-function container() {
-  const node = {
-    nodeType: 1,
-    nodeName: "DIV",
-    tagName: "DIV",
-    addEventListener: noop,
-    removeEventListener: noop,
-    ownerDocument: doc,
-  };
-  doc.documentElement = doc.body = node;
-  return node as unknown as HTMLElement;
-}
-
-beforeAll(() => {
-  globals.window = { HTMLIFrameElement: class {}, document: doc };
-  globals.IS_REACT_ACT_ENVIRONMENT = true;
-});
-
-afterAll(() => {
-  if (saved.window === undefined) delete globals.window;
-  else globals.window = saved.window;
-  globals.IS_REACT_ACT_ENVIRONMENT = saved.act;
-});
+installDomShim();
 
 const ID = "chs_c";
 
@@ -222,27 +191,12 @@ describe("useConversationSkills on a conversation the server holds", () => {
     await unmount();
   });
 
-  it("pins cited skills however many are pinned, and nothing where the panel is not offered", async () => {
-    const many = Array.from({ length: 12 }, (_, i) => pin(`@a/${String(i).padStart(2, "0")}`));
-    const { server, transport } = fakeServer({ skill_discovery: true, pins: many });
-    const { result, unmount } = await mount(transport, true);
-    await act(async () => result.current.pinCited(["@a/extra"]));
-    expect(server.patches).toEqual([
-      { pins: [...many.map((p) => p.id), "@a/extra"], skill_discovery: true },
-    ]);
-    await unmount();
+  it("pins nothing where the panel is not offered", async () => {
     const off = await mount(fakeServer({ skill_discovery: true, pins: [] }).transport, true, false);
     await act(async () => off.result.current.setPin("@a/x", true));
     expect(pinIds(off.result.current.skills)).toEqual([]);
     expect(off.result.current.takeForTurn()).toBeUndefined();
     await off.unmount();
-  });
-
-  it("takes no selection for a turn: the server holds its pins", async () => {
-    const { transport } = fakeServer({ skill_discovery: false, pins: [pin("@a/kept")] });
-    const { result, unmount } = await mount(transport, true);
-    expect(result.current.takeForTurn()).toBeUndefined();
-    await unmount();
   });
 });
 

@@ -419,7 +419,6 @@ export function notifyDetached(
 // Re-export the SDK error primitives so callers don't need a second
 // dependency line just to inspect error codes thrown by the server.
 export { McpError, ErrorCode } from "@modelcontextprotocol/sdk/types.js";
-export { ProtocolError } from "@modelcontextprotocol/client";
 export type {
   CallToolResult,
   GetPromptResult,

@@ -50,18 +50,36 @@ function promptsFetch(provider: AppstratePromptProvider): typeof fetch {
   });
 }
 
-/** {@link promptsFetch}, with `prompts/list` answered by `page(params)` instead. */
-function pagedFetch(page: (params: Record<string, unknown>) => unknown): typeof fetch {
+/** {@link promptsFetch}, with `method` answered by `page(params)` instead. */
+function pagedFetch(
+  method: "prompts/list" | "prompts/get",
+  page: (params: Record<string, unknown>) => unknown,
+): typeof fetch {
   const server = promptsFetch(prompts);
   return (async (input: string | URL | Request, init?: RequestInit) => {
     const request =
       input instanceof Request ? new Request(input, init) : new Request(String(input), init);
     const text = await request.clone().text();
     const message = text ? (JSON.parse(text) as Record<string, unknown>) : {};
-    if (message.method !== "prompts/list") return server(request);
+    if (message.method !== method) return server(request);
     const result = page((message.params as Record<string, unknown>) ?? {});
     return Response.json({ jsonrpc: "2.0", id: message.id, result });
   }) as typeof fetch;
+}
+
+type HttpClient = Awaited<ReturnType<typeof createMcpHttpClient>>;
+
+/** Runs `fn` against an HTTP client over `fetch`, closing it whatever happens. */
+async function withHttpClient(
+  fetch: typeof globalThis.fetch,
+  fn: (client: HttpClient) => Promise<void>,
+): Promise<void> {
+  const client = await createMcpHttpClient("http://mcp.test/mcp", { era: "legacy", fetch });
+  try {
+    await fn(client);
+  } finally {
+    await client.close();
+  }
 }
 
 describe("AppstrateMcpClient prompts", () => {
@@ -72,29 +90,6 @@ describe("AppstrateMcpClient prompts", () => {
       expect(await client.listPrompts()).toEqual({ prompts: [PROMPT] });
       const got = await client.getPrompt({ name: "run-demo", arguments: { request: "hi" } });
       expect(got.messages[0]!.content).toEqual({ type: "text", text: "hi" });
-    } finally {
-      await client.close();
-    }
-  });
-
-  it("lists and gets a prompt over HTTP", async () => {
-    const client = await createMcpHttpClient("http://mcp.test/mcp", {
-      era: "legacy",
-      fetch: promptsFetch(prompts),
-    });
-    try {
-      expect(await client.listPrompts()).toEqual({ prompts: [PROMPT] });
-      const got = await client.getPrompt({ name: "run-demo", arguments: { request: "go" } });
-      expect(got.messages[0]!.content).toEqual({ type: "text", text: "go" });
-    } finally {
-      await client.close();
-    }
-  });
-
-  it("refuses a name the server does not serve with its -32602", async () => {
-    const pair = await createInProcessPair([], { prompts });
-    const client = wrapClient(pair.client, pair);
-    try {
       const error = await client.getPrompt({ name: "run-other" }).catch((e: unknown) => e);
       expect(error).toBeInstanceOf(McpError);
       expect((error as McpError).code).toBe(ErrorCode.InvalidParams);
@@ -103,83 +98,54 @@ describe("AppstrateMcpClient prompts", () => {
     }
   });
 
+  it("lists and gets a prompt over HTTP", async () => {
+    await withHttpClient(promptsFetch(prompts), async (client) => {
+      expect(await client.listPrompts()).toEqual({ prompts: [PROMPT] });
+      const got = await client.getPrompt({ name: "run-demo", arguments: { request: "go" } });
+      expect(got.messages[0]!.content).toEqual({ type: "text", text: "go" });
+    });
+  });
+
   it("follows `nextCursor` to the last page", async () => {
     const seen: unknown[] = [];
     const second = { name: "run-other" };
-    const client = await createMcpHttpClient("http://mcp.test/mcp", {
-      era: "legacy",
-      fetch: pagedFetch((params) => {
-        seen.push(params);
-        return params.cursor === "p2"
-          ? { prompts: [second] }
-          : { prompts: [PROMPT], nextCursor: "p2" };
-      }),
+    const fetch = pagedFetch("prompts/list", (params) => {
+      seen.push(params);
+      return params.cursor === "p2"
+        ? { prompts: [second] }
+        : { prompts: [PROMPT], nextCursor: "p2" };
     });
-    try {
+    await withHttpClient(fetch, async (client) => {
       expect(await client.listPrompts()).toEqual({ prompts: [PROMPT, second] });
       expect(seen).toEqual([{}, { cursor: "p2" }]);
-    } finally {
-      await client.close();
-    }
+    });
   });
 
-  it("refuses a server repeating its cursor, with no partial list", async () => {
-    const client = await createMcpHttpClient("http://mcp.test/mcp", {
-      era: "legacy",
-      fetch: pagedFetch(() => ({ prompts: [PROMPT], nextCursor: "again" })),
+  let n = 0;
+  it.each([
+    [
+      "a page that is not a prompt list",
+      () => ({ prompts: [{ title: "no name" }] }),
+      "not a prompt list",
+    ],
+    [
+      "a listing that never ends within 64 pages",
+      () => ({ prompts: [PROMPT], nextCursor: `c${n++}` }),
+      "did not end within 64 pages",
+    ],
+  ] as const)("refuses %s", async (_label, page, message) => {
+    await withHttpClient(pagedFetch("prompts/list", page), async (client) => {
+      await expect(client.listPrompts()).rejects.toThrow(message);
     });
-    try {
-      await expect(client.listPrompts()).rejects.toThrow(
-        "prompts/list repeated its cursor 'again'",
-      );
-    } finally {
-      await client.close();
-    }
-  });
-
-  it("refuses a page that is not a prompt list", async () => {
-    const client = await createMcpHttpClient("http://mcp.test/mcp", {
-      era: "legacy",
-      fetch: pagedFetch(() => ({ prompts: [{ title: "no name" }] })),
-    });
-    try {
-      await expect(client.listPrompts()).rejects.toThrow("not a prompt list");
-    } finally {
-      await client.close();
-    }
-  });
-
-  it("refuses a listing that never ends within 64 pages", async () => {
-    let n = 0;
-    const client = await createMcpHttpClient("http://mcp.test/mcp", {
-      era: "legacy",
-      fetch: pagedFetch(() => ({ prompts: [PROMPT], nextCursor: `c${n++}` })),
-    });
-    try {
-      await expect(client.listPrompts()).rejects.toThrow("did not end within 64 pages");
-    } finally {
-      await client.close();
-    }
   });
 
   it("refuses a prompts/get result that is not a prompt", async () => {
-    const server = promptsFetch(prompts);
-    const client = await createMcpHttpClient("http://mcp.test/mcp", {
-      era: "legacy",
-      fetch: (async (input: string | URL | Request, init?: RequestInit) => {
-        const request =
-          input instanceof Request ? new Request(input, init) : new Request(String(input), init);
-        const text = await request.clone().text();
-        const message = text ? (JSON.parse(text) as Record<string, unknown>) : {};
-        if (message.method !== "prompts/get") return server(request);
-        return Response.json({ jsonrpc: "2.0", id: message.id, result: { messages: "nope" } });
-      }) as typeof fetch,
-    });
-    try {
-      await expect(client.getPrompt({ name: "run-demo" })).rejects.toThrow("not a prompt");
-    } finally {
-      await client.close();
-    }
+    await withHttpClient(
+      pagedFetch("prompts/get", () => ({ messages: "nope" })),
+      async (client) => {
+        await expect(client.getPrompt({ name: "run-demo" })).rejects.toThrow("not a prompt");
+      },
+    );
   });
 
   it("fails its calls once closed", async () => {

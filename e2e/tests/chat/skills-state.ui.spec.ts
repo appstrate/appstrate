@@ -1,11 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * The skills the server reports for a conversation, from the browser: each pinned row in the panel
- * is loaded, or not loaded with the last turn's reason; a skill the assistant read shows in its
- * message as the user's skill chip, read for that message only, with an action that pins it. The
- * session detail, its skills PATCH and the commands are mocked, so the states are checked without
- * a model.
+ * The skills of a conversation, from the browser: a skill the assistant read shows in its message
+ * as the user's skill chip, whose action pins it, and the panel unpins. The states, captions and
+ * budget text are covered by `skill-load.test.tsx` and `skills-picker.test.tsx`; here the session
+ * detail, its skills PATCH and the commands are mocked, so the clicks are checked without a model.
  */
 
 import type { Page } from "@playwright/test";
@@ -16,37 +15,15 @@ import { test, expect } from "../../fixtures/browser.fixture.ts";
 type SessionDetail = operations["getChatSession"]["responses"][200]["content"]["application/json"];
 type Pin = components["schemas"]["ChatSession"]["pins"][number];
 
+const skill = (name: string, bytes: number) => ({
+  id: `@acme/${name}`,
+  name,
+  description: name,
+  version: "1.0.0",
+  bytes,
+});
 const commands: components["schemas"]["ChatCommands"] = {
-  skills: [
-    {
-      id: "@acme/read",
-      name: "read",
-      description: "Reference notes",
-      version: "1.0.0",
-      bytes: 2000,
-    },
-    {
-      id: "@acme/big",
-      name: "big",
-      description: "Too long for the budget",
-      version: "1.0.0",
-      bytes: 70000,
-    },
-    {
-      id: "@acme/fresh",
-      name: "fresh",
-      description: "Pinned since the last turn",
-      version: "1.0.0",
-      bytes: 3000,
-    },
-    {
-      id: "@acme/tone",
-      name: "tone",
-      description: "Adjusts the tone",
-      version: "1.0.0",
-      bytes: 1000,
-    },
-  ],
+  skills: [skill("read", 2000), skill("fresh", 3000), skill("tone", 1000)],
   agents: [],
 };
 
@@ -55,7 +32,7 @@ async function openSkillsPicker(page: Page) {
   await page.getByRole("menuitem", { name: /Compétences|Skills/ }).click();
 }
 
-test("the panel reports each pin's state, and a skill the assistant read is pinned from its chip", async ({
+test("a skill the assistant read is pinned from its chip, and unpinned from the panel", async ({
   authedPage: page,
   orgOnlyClient,
   browserCtx,
@@ -69,18 +46,10 @@ test("the panel reports each pin's state, and a skill the assistant read is pinn
 
   // The server's row: the PATCH mock writes it, the detail mock serves it.
   let pins: Pin[] = [
-    { id: "@acme/big", status: "over_budget", chars: 70000 },
     { id: "@acme/fresh", status: null, chars: null },
     { id: "@acme/tone", status: "injected", chars: 1000 },
   ];
-  const skillMd = (pkg: string) => `skill://${spaceId}/acme/${pkg}/${pkg}/SKILL.md`;
-  const read = (toolCallId: string, pkg: string) => ({
-    type: "tool-read_resource",
-    toolCallId,
-    state: "output-available",
-    input: { uri: skillMd(pkg) },
-    output: { content: [{ type: "text", text: `---\nname: ${pkg}\n---\nBody` }] },
-  });
+  const uri = `skill://${spaceId}/acme/read/read/SKILL.md`;
   await page.route(`**/api/orgs/${orgId}/chat/commands*`, (route) =>
     route.fulfill({ json: commands }),
   );
@@ -96,14 +65,12 @@ test("the panel reports each pin's state, and a skill the assistant read is pinn
           content: {
             role: "assistant",
             parts: [
-              read("call_read", "read"),
-              read("call_tone", "tone"),
               {
                 type: "tool-read_resource",
-                toolCallId: "call_failed",
-                state: "output-error",
-                input: { uri: skillMd("gone") },
-                errorText: "Resource not found: the skill could not be read.",
+                toolCallId: "call_read",
+                state: "output-available",
+                input: { uri },
+                output: { content: [{ type: "text", text: "---\nname: read\n---\nBody" }] },
               },
             ],
           },
@@ -126,63 +93,34 @@ test("the panel reports each pin's state, and a skill the assistant read is pinn
 
   await page.goto(`/chat/${id}`);
 
-  // The assistant's reads are skill chips read for their message; the model's error is never shown.
-  const loads = page.getByTestId("skill-load");
-  await expect(loads).toHaveCount(3);
-  await expect(loads.nth(0)).toHaveAttribute("data-state", "read");
-  await expect(loads.nth(0).getByTestId("directive-chip")).toHaveText("read");
-  await expect(loads.nth(0).getByTestId("skill-load-state")).toHaveText("Lue pour ce message");
-  await expect(loads.nth(0).getByTestId("skill-load-live")).toHaveText(
-    "Compétence read lue pour ce message",
-  );
-  // `tone` is pinned already: nothing to offer.
-  await expect(loads.nth(1).getByTestId("skill-load-pin")).toHaveCount(0);
-  await expect(loads.nth(2)).toHaveAttribute("data-state", "error");
-  await expect(loads.nth(2).getByTestId("skill-load-state")).toHaveText("Lecture impossible");
-  await expect(loads.nth(2).getByTestId("skill-load-pin")).toHaveCount(0);
-  await expect(loads.nth(2)).not.toContainText("could not be read");
+  // The assistant's read is a skill chip.
+  const load = page.getByTestId("skill-load");
+  await expect(load.getByTestId("directive-chip")).toHaveText("read");
 
-  // The pill counts what the next turn loads: `tone`, and `fresh` pending; `big` is left out.
+  // The pill counts what the next turn loads: `tone`, and `fresh` pending.
   await expect(page.getByTestId("skill-pill-pinned")).toHaveText(/^\s*2 épinglées\s*$/);
-
-  await openSkillsPicker(page);
-  const popover = page.getByTestId("skills-picker-popover");
-  const row = (pkg: string) => popover.getByTestId(`skill-pin-@acme/${pkg}`);
-  const caption = (pkg: string) => popover.getByTestId(`skill-pin-state-@acme/${pkg}`);
-  await expect(row("tone")).toBeChecked();
-  await expect(caption("tone")).toHaveCount(0);
-  await expect(row("big")).toBeChecked();
-  await expect(caption("big")).toHaveText("Non chargée : budget de compétences dépassé");
-  await expect(row("fresh")).toBeChecked();
-  await expect(caption("fresh")).toHaveCount(0);
-  await expect(row("read")).not.toBeChecked();
-  await expect(popover.getByTestId("skills-budget")).toContainText(/4\s000 \/ 64\s000 caractères/);
-  await expect(popover.getByTestId("skills-uncheck-hint")).toHaveText(
-    "Décocher une compétence chargée la retire du contexte à partir du prochain message.",
-  );
-  await expect(popover.getByTestId("skills-pending-note")).toHaveText(
-    "Les changements s'appliquent à partir du prochain message.",
-  );
-  await page.keyboard.press("Escape");
-  await expect(popover).toBeHidden();
 
   // The chip's action pins the skill read: a PATCH of the full set.
   const pinned = page.waitForRequest((req) => req.method() === "PATCH");
-  await loads.nth(0).getByTestId("skill-load-pin").click();
+  await load.getByTestId("skill-load-pin").click();
   expect((await pinned).postDataJSON()).toEqual({
-    pins: ["@acme/big", "@acme/fresh", "@acme/read", "@acme/tone"],
+    pins: ["@acme/fresh", "@acme/read", "@acme/tone"],
     skill_discovery: true,
   });
-  await expect(loads.nth(0).getByTestId("skill-load-pin")).toHaveCount(0);
+  await expect(load.getByTestId("skill-load-pin")).toHaveCount(0);
 
   // Unchecking a pin sends the full set without it.
   await openSkillsPicker(page);
+  const row = (pkg: string) =>
+    page.getByTestId("skills-picker-popover").getByTestId(`skill-pin-@acme/${pkg}`);
   const unpinned = page.waitForRequest((req) => req.method() === "PATCH");
   await row("tone").click();
   expect((await unpinned).postDataJSON()).toEqual({
-    pins: ["@acme/big", "@acme/fresh", "@acme/read"],
+    pins: ["@acme/fresh", "@acme/read"],
     skill_discovery: true,
   });
   await expect(row("tone")).not.toBeChecked();
   expect(patches).toHaveLength(2);
+  // A detail refetch may still be in flight through the mock as the page closes.
+  await page.unrouteAll({ behavior: "ignoreErrors" });
 });
