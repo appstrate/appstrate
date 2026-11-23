@@ -42,7 +42,7 @@ export const NEW_CONVERSATION_CLASS = "max-md:justify-start max-md:gap-3 max-md:
 
 /** The conversation search field of the sidebar (a sheet below `md`, 40 px tall there). */
 export const SEARCH_INPUT_CLASS =
-  "h-10 pr-9 pl-7 text-base max-md:h-11 max-md:rounded-xl max-md:border-transparent max-md:bg-muted max-md:pl-10 max-md:shadow-none md:h-8 md:pr-7 md:py-0 md:text-base [&::-webkit-search-cancel-button]:hidden";
+  "h-10 pr-9 pl-7 text-base max-md:h-11 max-md:rounded-xl max-md:border-0 max-md:bg-muted max-md:focus-visible:ring-0 max-md:focus-visible:ring-offset-0 max-md:pl-10 max-md:shadow-none md:h-8 md:pr-7 md:py-0 md:text-base [&::-webkit-search-cancel-button]:hidden";
 
 /** The user's bubble. */
 export const USER_MESSAGE_CLASS =
@@ -66,5 +66,5 @@ export const THREAD_FOOTER_CLASS =
 /** The line under the composer, as the conversation skeleton draws it too. */
 export const DISCLAIMER_TEXT_CLASS = "text-muted-foreground/70 px-4 text-center text-xs";
 
-/** Under the composer from `md` up; a phone has it as the last line of the "+" panel. */
-export const DISCLAIMER_CLASS = `${DISCLAIMER_TEXT_CLASS} max-md:hidden`;
+/** Under the composer; on a phone it steps aside while the composer has the focus (the keyboard is up). */
+export const DISCLAIMER_CLASS = `${DISCLAIMER_TEXT_CLASS} max-md:group-focus-within/footer:hidden`;

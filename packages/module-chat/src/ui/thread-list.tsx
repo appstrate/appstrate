@@ -203,11 +203,12 @@ export function ChatConversationList({
                 </span>
                 <span>{t("threads.new")}</span>
               </SidebarMenuButton>
-              {showSearch && (
+              {/* Gone once the field shows: it carries its own magnifier. */}
+              {showSearch && !searchOpen && input === "" && (
                 <button
                   type="button"
                   aria-label={t("threads.search.open")}
-                  aria-expanded={searchOpen || input !== ""}
+                  aria-expanded={false}
                   data-testid="chat-search-toggle"
                   onClick={() => {
                     setSearchOpen(true);
@@ -533,15 +534,18 @@ function ConversationRow({
           >
             <EllipsisIcon className="size-5" />
           </button>
-          {/* A phone's menu is a panel from the bottom: rename, then delete in red (which asks). */}
+          {/* A phone's menu is a panel from the bottom, titled by the conversation: rename, then delete
+              in red (which asks). */}
           <SheetMenu
             open={menuOpen}
             onOpenChange={setMenuOpen}
-            title={t("threads.actions.openFor", { title: session.title ?? t("threads.new") })}
+            // Named after the conversation it acts on, the spaces it reaches under the name.
+            title={session.title ?? t("threads.new")}
+            showTitle
             header={
               <div
                 data-testid="chat-menu-spaces"
-                className={`text-muted-foreground flex min-w-0 items-center px-5 pt-3 [--space-tile-ring:var(--background)] ${NOTE_TEXT_CLASS}`}
+                className={`text-muted-foreground flex min-w-0 items-center px-5 [--space-tile-ring:var(--background)] ${NOTE_TEXT_CLASS}`}
               >
                 {sessionSpaces(session, renderSpaces, t)}
               </div>

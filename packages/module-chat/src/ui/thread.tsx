@@ -917,21 +917,28 @@ function TurnLimitNotice() {
  * survives reload; the transient assistant-ui marker covers failures that have
  * not reached a finish chunk yet.
  */
-export function MessageError() {
+function useTurnErrorState() {
   const { t, can, personalModelCredentials } = useChatHost();
   // Select a plain field, never a derived object: this selector IS
   // `useSyncExternalStore`'s getSnapshot. See `turn-error-state.ts`.
   const message = useAuiState((s) => s.message);
-  const aui = useAui();
   const errorState = React.useMemo(
     () => turnErrorState(message, t, can, personalModelCredentials),
     [message, t, can, personalModelCredentials],
   );
+  return { message, errorState };
+}
+
+export function MessageError() {
+  const { t } = useChatHost();
+  const { message, errorState } = useTurnErrorState();
+  const aui = useAui();
   if (!errorState) return null;
   return (
     <Alert
       variant="destructive"
-      className="mt-2 break-words"
+      // A phone puts the buttons under the text, aligned on it: beside it they squeeze it to a column.
+      className="mt-2 break-words max-md:flex-wrap max-md:[&>[data-slot=alert-action]]:my-0 max-md:[&>[data-slot=alert-action]]:basis-full max-md:[&>[data-slot=alert-action]]:pl-7"
       action={
         errorState.action || errorState.retryable ? (
           <div className="flex gap-2">
@@ -992,6 +999,8 @@ const ASSISTANT_PART_COMPONENTS = {
 
 function AssistantMessage() {
   const { t } = useChatHost();
+  // A failed turn has nothing worth copying: its error card says what happened.
+  const failed = useTurnErrorState().errorState !== null;
   return (
     <MessagePrimitive.Root className="group flex w-full max-w-(--thread-max-width) flex-col py-2">
       <div className={ASSISTANT_MESSAGE_CLASS}>
@@ -1008,16 +1017,18 @@ function AssistantMessage() {
             visibly jump. Copy stays usable mid-stream (copies the current
             snapshot), which is the seamless behavior we want. */}
         <ActionBarPrimitive.Root className={ACTION_BAR_CLASS}>
-          <ActionBarPrimitive.Copy asChild>
-            <IconButton label={t("common:btn.copy")}>
-              <MessagePrimitive.If copied>
-                <CheckIcon />
-              </MessagePrimitive.If>
-              <MessagePrimitive.If copied={false}>
-                <CopyIcon />
-              </MessagePrimitive.If>
-            </IconButton>
-          </ActionBarPrimitive.Copy>
+          {!failed && (
+            <ActionBarPrimitive.Copy asChild>
+              <IconButton label={t("common:btn.copy")}>
+                <MessagePrimitive.If copied>
+                  <CheckIcon />
+                </MessagePrimitive.If>
+                <MessagePrimitive.If copied={false}>
+                  <CopyIcon />
+                </MessagePrimitive.If>
+              </IconButton>
+            </ActionBarPrimitive.Copy>
+          )}
         </ActionBarPrimitive.Root>
       </div>
     </MessagePrimitive.Root>

@@ -54,8 +54,9 @@ describe("thread layout on a phone", () => {
     expect(THREAD_VIEWPORT_CLASS.split(/\s+/)).toContain("overscroll-contain");
   });
 
-  it('has no disclaimer under the composer on a phone: it is in the "+" panel', () => {
-    expect(DISCLAIMER_CLASS.split(/\s+/)).toContain("max-md:hidden");
+  it("keeps the disclaimer under the composer, out of the way while the keyboard is up", () => {
+    expect(DISCLAIMER_CLASS.split(/\s+/)).toContain("max-md:group-focus-within/footer:hidden");
+    expect(DISCLAIMER_CLASS.split(/\s+/)).not.toContain("max-md:hidden");
   });
 });
 
@@ -88,7 +89,7 @@ describe("composer row", () => {
 describe("the sidebar's search and new-conversation row on a phone", () => {
   it("shows the search as a filled field with no border", () => {
     expect(SEARCH_INPUT_CLASS).toContain("max-md:bg-muted");
-    expect(SEARCH_INPUT_CLASS).toContain("max-md:border-transparent");
+    expect(SEARCH_INPUT_CLASS).toContain("max-md:border-0");
     expect(SEARCH_INPUT_CLASS).toContain("max-md:h-11");
   });
 
