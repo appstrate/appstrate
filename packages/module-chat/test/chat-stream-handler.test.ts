@@ -1341,6 +1341,54 @@ describe("handleChatStream", () => {
     await waitForAssistantPersist(sessionId);
   });
 
+  it("injects the skills the history cites, discovery off, pins first and once, with no verdict", async () => {
+    const sessionId = mintSessionId();
+    await db.insert(chatSessions).values({
+      id: sessionId,
+      orgId: ctx.orgId,
+      userId: ctx.user.id,
+      title: null,
+      skillDiscovery: false,
+      pinnedSkills: ["@acme/pin"],
+    });
+    const chip = (id: string) => `:skill[${id.split("/")[1]}]{name=${id}}`;
+    const dispatch = listedSkillsDispatch([
+      { id: "@acme/pin", text: "Pin." },
+      { id: "@acme/earlier", text: "Earlier." },
+      { id: "@acme/now", text: "Now." },
+    ]);
+    const { engine, calls } = scriptedEngine();
+    const res = await postChat(sessionId, undefined, engine, {
+      permissions: SKILL_TURN_PERMISSIONS,
+      dispatch,
+      history: [
+        { id: "h1", role: "user", parts: [{ type: "text", text: `${chip("@acme/earlier")} go` }] },
+        { id: "h2", role: "assistant", parts: [{ type: "text", text: "ok" }] },
+      ],
+      parts: [
+        { type: "text", text: `${chip("@acme/now")} ${chip("@acme/pin")} ${chip("@acme/gone")}` },
+      ],
+    });
+    expect(res.status).toBe(200);
+    await collectUiChunks(res);
+    const system = calls[0]!.system;
+    // Pins first, then the most recent message's citations, then the earlier ones.
+    const at = (id: string) => system.indexOf(`<skill id="${id}"`);
+    expect(at("@acme/pin")).toBeGreaterThan(-1);
+    expect(at("@acme/pin")).toBeLessThan(at("@acme/now"));
+    expect(at("@acme/now")).toBeLessThan(at("@acme/earlier"));
+    expect(system.match(/<skill id="@acme\/pin"/g)).toHaveLength(1);
+    expect(system).toContain("`@acme/gone` named in this conversation is not available here");
+    const claim = (await tokenInjectedSkills(calls[0]!)) as { skills: Record<string, unknown> };
+    expect(Object.keys(claim.skills).sort()).toEqual(["@acme/earlier", "@acme/now", "@acme/pin"]);
+    // `skill_status` holds the pins' verdicts alone.
+    expect((await sessionSkills(sessionId))?.skillStatus).toEqual({
+      "@acme/pin": { status: "injected", chars: 4 },
+    });
+
+    await waitForAssistantPersist(sessionId);
+  });
+
   it("runs on the pins it read when the skills PATCH lands while it starts; the next turn reads the PATCH", async () => {
     const sessionId = mintSessionId();
     await seedSkillSession(sessionId, { pinned: ["@acme/a"] });

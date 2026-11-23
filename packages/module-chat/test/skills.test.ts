@@ -73,6 +73,25 @@ describe("resolveChatSkills", () => {
     expect(result.injected.map((s) => s.packageId)).toEqual(["@a/art"]);
     expect(result.notices).toEqual([]);
   });
+
+  it("injects the cited skills after the pins, out of what the pins left, without a verdict", () => {
+    const half = BUDGET / 2;
+    const result = resolveChatSkills(
+      { skillDiscovery: false, pinnedSkills: ["@a/pin"] },
+      new Map([
+        ["@a/pin", content("@a/pin", "p".repeat(half))],
+        ["@a/new", content("@a/new", "n".repeat(half))],
+        ["@a/late", content("@a/late", "l")],
+      ]),
+      ["@a/new", "@a/pin", "@a/late", "@a/gone"],
+    );
+    expect(result.injected.map((s) => s.packageId)).toEqual(["@a/pin", "@a/new"]);
+    expect(result.notices).toEqual([
+      `The skill \`@a/late\` named in this conversation does not fit (1 characters; the injected skills share ${BUDGET}, 0 left).`,
+      "The skill `@a/gone` named in this conversation is not available here — it may have been removed, deactivated, or be out of your reach.",
+    ]);
+    expect(Object.keys(result.skillStatus)).toEqual(["@a/pin"]);
+  });
 });
 
 describe("resolveChatSkills statuses", () => {

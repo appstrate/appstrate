@@ -103,9 +103,9 @@ export function skillRowState(skills: StoredSkills, id: string): SkillRowState {
   return pin.status === "injected" ? { kind: "loaded" } : { kind: "refused", reason: pin.status };
 }
 
-/** Whether a skill is in the model's context, or will be on the next turn. */
-export function loadsSkill(state: SkillRowState, cited: boolean): boolean {
-  return state.kind === "loaded" || state.kind === "pending" || (state.kind === "off" && cited);
+/** Whether a pin is in the model's context, or will be on the next turn. */
+export function loadsSkill(state: SkillRowState): boolean {
+  return state.kind === "loaded" || state.kind === "pending";
 }
 
 /** The catalogue's rows, then every pin missing from it (`available: false`), so it can be removed. */

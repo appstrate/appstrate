@@ -181,7 +181,6 @@ export function ComposerTools({ authorsPackages }: ComposerToolsProps) {
       {conversation && (
         <SkillChips
           skills={conversation.skills}
-          draft={draft}
           onOpenPicker={() => setSkillsOpen(true)}
           onReset={conversation.reset}
         />

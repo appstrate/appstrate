@@ -77,11 +77,11 @@ describe("skillRowState", () => {
     expect(state("@a/other")).toEqual({ kind: "off" });
   });
 
-  it("never counts a refused pin as loaded, even cited; a cited skill not pinned loads", () => {
-    expect(loadsSkill(state("@a/big"), true)).toBe(false);
-    expect(loadsSkill(state("@a/other"), false)).toBe(false);
-    expect(loadsSkill(state("@a/other"), true)).toBe(true);
-    expect(loadsSkill(state("@a/unseen"), false)).toBe(true);
+  it("counts a loaded or pending pin as loaded, never a refused pin or an unpinned skill", () => {
+    expect(loadsSkill(state("@a/mine"))).toBe(true);
+    expect(loadsSkill(state("@a/unseen"))).toBe(true);
+    expect(loadsSkill(state("@a/big"))).toBe(false);
+    expect(loadsSkill(state("@a/other"))).toBe(false);
   });
 });
 

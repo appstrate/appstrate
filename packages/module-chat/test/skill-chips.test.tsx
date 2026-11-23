@@ -18,12 +18,7 @@ import { ChatHostProvider, ChatTransportProvider } from "../src/ui/runtime-conte
 import { transportOf } from "./fake-request.ts";
 import { conversationScope, testHost } from "./test-host.ts";
 import type { PinnedSkill } from "../src/skills.ts";
-import {
-  citedSkillIds,
-  effectiveSkills,
-  pinIds,
-  type StoredSkills,
-} from "../src/ui/chat-skills.ts";
+import type { StoredSkills } from "../src/ui/chat-skills.ts";
 
 const stored = (pins: PinnedSkill[], skillDiscovery = true): StoredSkills => ({
   skillDiscovery,
@@ -63,7 +58,7 @@ function withCatalogue(): QueryClient {
 
 function render(
   skills: StoredSkills = pinned([], false),
-  { client = new QueryClient(), draft = "" }: { client?: QueryClient; draft?: string } = {},
+  { client = new QueryClient() }: { client?: QueryClient } = {},
 ): string {
   return renderToStaticMarkup(
     <QueryClientProvider client={client}>
@@ -73,12 +68,7 @@ function render(
             value={conversationScope({ originSpaceId: "spc_a", restricted: false })}
           >
             <TooltipProvider>
-              <SkillChips
-                skills={skills}
-                draft={effectiveSkills(pinIds(skills), citedSkillIds(draft))}
-                onOpenPicker={() => {}}
-                onReset={() => {}}
-              />
+              <SkillChips skills={skills} onOpenPicker={() => {}} onReset={() => {}} />
             </TooltipProvider>
           </ConversationScopeProvider>
         </ChatTransportProvider>
@@ -170,9 +160,8 @@ describe("SkillChips", () => {
     expect(refusedOnly).toContain('aria-label="skills.reset"');
   });
 
-  it("counts a pin no turn judged yet and a skill the draft cites: the next turn loads them", () => {
-    const draft = ":skill[two]{name=@a/two}";
-    expect(render(stored([pin("@a/one", null)]), { draft })).toContain(
+  it("counts a pin no turn judged yet: the next turn loads it", () => {
+    expect(render(stored([pin("@a/one", null), pin("@a/two")]))).toContain(
       "skills.pinnedCount {&quot;count&quot;:2}",
     );
   });

@@ -177,18 +177,16 @@ describe("SkillsPicker", () => {
     expect(render(false)).toContain("skill-pin-@acme/free");
   });
 
-  it("shows a cited skill checked and locked, with its hint, even if not pinned", () => {
+  it("checks the pins alone: a skill the draft cites is neither checked nor locked", () => {
     const html = render(
       true,
       [{ id: "@a/auto", status: "injected", chars: null }],
       ["@acme/cited"],
     );
-    expect(box(html, "@acme/cited")).toContain('aria-checked="true"');
-    expect(box(html, "@acme/cited")).toContain(`aria-disabled="true"`);
-    expect(html).toMatch(/data-testid="skill-pin-state-@acme\/cited"[^>]*>skills.cited</);
-    // Only the draft locks: an uncited skill, pinned or not, is untouched.
-    expect(box(html, "@acme/free")).not.toContain(`aria-disabled="true"`);
-    expect(box(html, "@a/auto")).not.toContain(`aria-disabled="true"`);
+    expect(box(html, "@acme/cited")).toContain('aria-checked="false"');
+    expect(box(html, "@acme/cited")).not.toContain(`aria-disabled="true"`);
+    expect(html).not.toContain("skill-pin-state-@acme/cited");
+    expect(box(html, "@a/auto")).toContain('aria-checked="true"');
   });
 
   /** Toggles each row of `ids` through the rendered tree; returns what the panel handed on (`±id`). */
@@ -225,8 +223,15 @@ describe("SkillsPicker", () => {
     return toggled;
   }
 
-  it("does nothing when a cited skill is toggled: the chip in the message is what drops it", () => {
-    expect(toggleRows([userPin("@a/one")], ["@a/one", "@a/two"], ["@a/one", "@a/two"])).toEqual([]);
+  it("pins or unpins a cited skill like any other; its size is already counted", () => {
+    expect(toggleRows([userPin("@a/one")], ["@a/one", "@a/two"], ["@a/one", "@a/two"])).toEqual([
+      "-@a/one",
+      "+@a/two",
+    ]);
+    const full: PinnedSkill = { id: "@a/own", status: "injected", chars: 60_000 };
+    expect(toggleRows([full], ["@a/cited"], ["@a/cited"], { "@a/cited": 4_000 })).toEqual([
+      "+@a/cited",
+    ]);
   });
 
   it("pins nothing past the budget, lets every pin be unchecked (a refused one included), and pins an unknown size", () => {
@@ -277,8 +282,8 @@ describe("SkillsPicker", () => {
       expect(render(true, [{ id: "@a/new", status: null, chars: null }])).not.toContain(
         "skills-uncheck-hint",
       );
-      // A loaded pin the draft cites cannot be unchecked here.
-      expect(render(true, ["@a/mine"], ["@a/mine"])).not.toContain("skills-uncheck-hint");
+      // A loaded pin the draft cites is still unchecked here.
+      expect(render(true, ["@a/mine"], ["@a/mine"])).toContain("skills-uncheck-hint");
     });
 
     for (const status of ["injected", "over_budget", "unavailable", "unreadable"] as const) {
@@ -291,10 +296,10 @@ describe("SkillsPicker", () => {
       });
     }
 
-    it("a cited pin the server refused gives the refusal, not « cited », and stays locked", () => {
+    it("a cited pin the server refused gives the refusal and can be unchecked", () => {
       const html = render(true, [{ id: "@a/big", status: "over_budget", chars: 1 }], ["@a/big"]);
       expect(caption(html, "@a/big")).toBe("skills.state.refused.over_budget");
-      expect(box(html, "@a/big")).toContain(`aria-disabled="true"`);
+      expect(box(html, "@a/big")).not.toContain(`aria-disabled="true"`);
     });
 
     it("a refused pin the catalogue no longer lists gives its reason once", () => {

@@ -26,8 +26,15 @@ that turn and its text stays in the history; it pins nothing. The injected `SKIL
 budget, `CHAT_SKILLS_CONTENT_BUDGET_CHARS` (64 000), spent in stored order; a pin that is not
 active, whose read fails or that does not fit renders one notice line instead.
 
+**Cited skills** are named by a `:skill[…]{name=…}` directive (the `/` menu's chip) in a user
+message of the history the turn sends, last message included (`citedSkills`). The turn injects them
+after the pins, most recent message first, each once, a pinned one not again, discovery on or off.
+They are read like pins (caller connection, drafts rule, listing, digest) and spend what the pins
+left of the same budget. One that is not injected renders a notice line. They get no
+`skill_status` entry: verdicts are the pins'. Sending a message pins nothing.
+
 **Discovery on**: the context lists the other skills of the turn's spaces, one line each (id,
-version, URI, description), minus the pinned ones; the model loads a body on demand. A turn without
+version, URI, description), minus the pinned and injected ones; the model loads a body on demand. A turn without
 `mcp:read` ∧ `skills:read` is shown no listing. **Discovery off** withholds every `skills:*` from
 the turn's permissions (`turnPermissions`): `read_resource` reads only injected skills, declaring or
 writing a skill is refused, and the `## Skills` section says why.
@@ -37,13 +44,20 @@ holds `skills:write` (`turnUsesDrafts`, shared by the turn and the composer's co
 catalogue and the pins take the caller's draft when there is one, otherwise the published version.
 
 The system prompt is ONE `cache_control` block, byte-identical across turns for the same state;
-changing discovery or the pins, or editing a pinned skill, may miss the cache once.
+changing discovery or the pins, citing a new skill, or editing an injected skill, may miss the cache
+once.
 
 **Why every turn, not once.** Claude Code and the Agent Skills loaders put an invoked skill into the
 history once. A pin is re-injected from the system prompt on every turn instead: the chat's history
 is bounded and summarized, so a skill injected once can fall out of it while the panel still shows
 it pinned, which breaks the invariant above. The cached system block makes the repeat cost a cache
 read, not new input.
+
+**Why a citation is not a pin.** `/skill` is an explicit, one-shot invocation, as `$skill` in Codex,
+`/skill` in Copilot and a slash skill in Claude Code: it loads the skill for the request that names
+it, whatever discovery says (Codex keeps it with `allow_implicit_invocation: false`). Its content
+follows the history: injected while the citing message is in it, gone when the history drops it.
+Pinning on send would turn a one-off request into a setting the user never chose.
 
 ## Stored state
 
@@ -93,10 +107,10 @@ if a live turn holds the conversation (answered first). Neither writes anything.
 The skills panel and the `/` menu both read `GET /api/orgs/{orgId}/chat/commands` (with
 `package_authoring`), so neither offers a definition the turn would not inject. The panel mounts
 when `canPinSkills` holds (`chat:write` ∧ `skills:read`) and the session read succeeded. It has one
-checkbox per skill (a skill cited in the draft is checked and locked: `aria-disabled`, still
-focusable so its reason is read), each row loaded or not loaded with its reason, one footer line for
-changes pending until the next message, one uncheck hint, the discovery switch, and a gauge of the
-64 000-character budget that warns before a pin would exceed it. The client state is the session
+checkbox per skill, checked for a pin only, each row loaded or not loaded with its reason, one
+footer line for changes pending until the next message, one uncheck hint, the discovery switch, and
+a gauge of the 64 000-character budget (the pins plus the skills the draft cites) that warns before
+a pin would exceed it. The client state is the session
 DTO; realtime session updates cover the owner's other clients. An assistant `SKILL.md` read renders
 in the thread as a « Lue pour ce message » chip with an « Épingler » action.
 
@@ -104,8 +118,9 @@ in the thread as a « Lue pour ce message » chip with an « Épingler » action
 
 `GET /api/orgs/{orgId}/chat/commands` (`?spaceId=` reads one space) lists the skills the
 conversation can pin and the agents the caller can launch, as an MCP client reads the platform
-server (`skills/list`, `prompts/list`) over one connection of the caller's own. `/<skill>` is only
-the composer adding the id to the pins: no backend path of its own.
+server (`skills/list`, `prompts/list`) over one connection of the caller's own. `/<skill>` writes a
+skill directive into the message text, which the turn reads (see Cited skills): no backend path of
+its own.
 
 An agent launch is a `data-agent-prompt` part (`{ name, title }`) in the last user message. The
 turn resolves it with `prompts/get` (the typed text as `request`) before taking the slot and the

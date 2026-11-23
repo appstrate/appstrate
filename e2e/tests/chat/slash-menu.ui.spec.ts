@@ -170,55 +170,48 @@ test("an agent chip is a message of its own: its text part and its prompt part, 
   await expect(input.getByTestId("directive-chip")).toHaveCount(0);
 });
 
-test("a skill chip pins the skill: with the first message of a new conversation, by a PATCH before the message in an existing one", async ({
+test("a skill chip pins nothing: the skill rides in the message text, in a new conversation and an existing one", async ({
   authedPage: page,
   orgOnlyClient,
   browserCtx,
 }) => {
   const orgId = browserCtx.org.orgId;
   const { chat, input } = await openComposer(page, orgId);
+  const patches: string[] = [];
+  page.on("request", (req) => {
+    if (req.method() === "PATCH" && new URL(req.url()).pathname.endsWith("/skills")) {
+      patches.push(req.url());
+    }
+  });
   const citeTone = async () => {
     await input.fill("/tone");
     await expect(page.getByRole("option", { name: /tone/ })).toBeVisible();
     await page.keyboard.press("Enter");
     await page.keyboard.type("make it shorter");
   };
+  type Body = { pins?: string[]; messages: { parts: { type: string; text?: string }[] }[] };
+  const CITED = [{ type: "text", text: ":skill[tone]{name=@acme/tone} make it shorter" }];
 
-  // A new conversation: the first message carries the pins and creates the row.
+  // A new conversation: the first message creates the row without pinning the skill.
   await citeTone();
   const first = page.waitForRequest(chatPost(chat));
   await page.keyboard.press("Enter");
-  const body = (await first).postDataJSON() as {
-    pins?: string[];
-    skill_discovery?: boolean;
-    messages: { parts: { type: string; text?: string }[] }[];
-  };
-  expect(body.pins).toEqual(["@acme/tone"]);
-  expect(body.skill_discovery).toBe(true);
-  expect(body.messages.at(-1)!.parts).toEqual([
-    { type: "text", text: ":skill[tone]{name=@acme/tone} make it shorter" },
-  ]);
+  const body = (await first).postDataJSON() as Body;
+  expect(body.pins ?? []).toEqual([]);
+  expect(body.messages.at(-1)!.parts).toEqual(CITED);
 
-  // An existing conversation: its skills change by PATCH only, before the turn, which carries none.
+  // An existing conversation: no PATCH, the turn carries the chip in its text.
   const created = await orgOnlyClient.post(`/orgs/${orgId}/chat/sessions`, { title: "Cited" });
   expect(created.status()).toBe(201);
   const { id } = (await created.json()) as { id: string };
-  const order: string[] = [];
-  page.on("request", (req) => {
-    const path = new URL(req.url()).pathname;
-    if (req.method() === "PATCH" && path === `${chat}/sessions/${id}/skills`) order.push("patch");
-    if (chatPost(chat)(req)) order.push("post");
-  });
   await page.goto(`/chat/${id}`);
   await citeTone();
-  const patched = page.waitForRequest(
-    (req) => req.method() === "PATCH" && req.url().endsWith(`/sessions/${id}/skills`),
-  );
   const sent = page.waitForRequest(chatPost(chat));
   await page.keyboard.press("Enter");
-  expect((await patched).postDataJSON()).toEqual({ pins: ["@acme/tone"], skill_discovery: true });
-  expect(((await sent).postDataJSON() as Record<string, unknown>).pins).toBeUndefined();
-  expect(order).toEqual(["patch", "post"]);
+  const next = (await sent).postDataJSON() as Body;
+  expect(next.pins).toBeUndefined();
+  expect(next.messages.at(-1)!.parts).toEqual(CITED);
+  expect(patches).toEqual([]);
 });
 
 // The popover's own loading hold (assistant-ui) keeps Enter and Tab from sending a `/token` while

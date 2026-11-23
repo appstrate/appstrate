@@ -637,15 +637,15 @@ function ConversationInner({
 > & {
   composerTools: React.ReactNode;
   initialMessages: UIMessage[];
-  /** The skills a first turn creates the conversation with, and the pins a sent message cites. */
-  turnSkills: Pick<ConversationSkillsState, "pinCited" | "takeForTurn">;
+  /** The skills a first turn creates the conversation with. */
+  turnSkills: Pick<ConversationSkillsState, "takeForTurn">;
   /** The origin space and limit the turn being sent creates the conversation with. */
   getCreation: () => ConversationCreation | undefined;
 }) {
   const queryClient = useQueryClient();
   const { t, attachTarget } = useChatHost();
   const scope = useConversationScope();
-  const { pinCited, takeForTurn } = turnSkills;
+  const { takeForTurn } = turnSkills;
   // File attachments: the composer stages picked files through the HOST uploader, into the
   // caller's personal space, as `upload://` file parts the server materializes into durable
   // files of the conversation.
@@ -861,16 +861,12 @@ function ConversationInner({
     if (transport) void stopSession(transport, id).catch(() => {});
     return chat.stop();
   }, [chat, transport, id, messageQueue]);
-  // The skills and the agent a message names take effect as it is sent: the cited skills are
-  // pinned before the turn starts (so it reads them), the agent joins the message.
+  // The agent a message names joins it as it is sent; its skills stay in the text, which the
+  // turn reads them from.
   const { sendMessage } = chat;
   const send = useCallback<typeof sendMessage>(
-    async (message, options) => {
-      const sent = sendWithDirectives(message);
-      await pinCited(sent.skills);
-      return sendMessage(sent.message, options);
-    },
-    [sendMessage, pinCited],
+    (message, options) => sendMessage(sendWithDirectives(message), options),
+    [sendMessage],
   );
   const chatWithServerStop = useMemo(
     () => ({ ...chat, stop, sendMessage: send }),

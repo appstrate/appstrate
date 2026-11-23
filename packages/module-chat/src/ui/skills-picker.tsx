@@ -13,6 +13,7 @@ import { Popover, PopoverAnchor, PopoverContent } from "@appstrate/ui/components
 import { cn } from "@appstrate/ui/cn";
 import {
   exceedsBudget,
+  pinIds,
   skillBudget,
   skillPickerRows,
   skillRowState,
@@ -28,7 +29,7 @@ interface SkillsPickerProps {
   /** Opened from the composer's settings menu or a skills chip, never by a trigger of its own. */
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  /** The skills the composer's draft cites: checked here, and held by the message, not the panel. */
+  /** The skills the composer's draft cites: counted in the budget, never checked here. */
   draft: EffectiveSkills;
   /** The popover anchors to this: the composer's tools row. */
   children: ReactNode;
@@ -80,20 +81,17 @@ export function SkillsPickerPanel({
   // as "nothing".
   const loading = catalogue.isLoading;
 
-  const rows = skillPickerRows(skills, effective.ids);
+  const rows = skillPickerRows(skills, pinIds(stored));
   const budget = skillBudget(stored, effective, skills);
-  const someLoaded = stored.pins.some(
-    (pin) => pin.status === "injected" && !effective.cited.has(pin.id),
-  );
+  const someLoaded = stored.pins.some((pin) => pin.status === "injected");
   const somePending = stored.pins.some((pin) => pin.status === null);
 
-  /** An unpinned skill whose listed size would take the pins past their budget. */
-  const overBudgetOf = (skill: { bytes: number | null }, checked: boolean) =>
-    !checked && exceedsBudget(budget, skill.bytes);
+  /** An unpinned skill whose listed size would take the budget past its limit (a cited one is counted). */
+  const overBudgetOf = (skill: { id: string; bytes: number | null }, checked: boolean) =>
+    !checked && !effective.cited.has(skill.id) && exceedsBudget(budget, skill.bytes);
 
   const togglePin = (skill: { id: string; bytes: number | null }, checked: boolean) => {
-    // A cited skill is the message's: only removing its chip drops it. Past the budget, nothing pins.
-    if (effective.cited.has(skill.id) || overBudgetOf(skill, checked)) return;
+    if (overBudgetOf(skill, checked)) return;
     setPin(skill.id, !checked);
   };
 
@@ -143,18 +141,10 @@ export function SkillsPickerPanel({
             const nameId = `${id}-name`;
             const detailsId = `${id}-details`;
             const state = skillRowState(stored, skill.id);
-            const isCited = effective.cited.has(skill.id);
-            const checked = state.kind !== "off" || isCited;
-            const overBudget = overBudgetOf(skill, checked);
+            const checked = state.kind !== "off";
             // Not `disabled`: a locked row stays focusable, so its reason is still read out.
-            const inert = overBudget || isCited;
+            const inert = overBudgetOf(skill, checked);
             const refused = state.kind === "refused";
-            // A refusal says why the skill is out, even for a cited one; else the lock's reason.
-            const caption = refused
-              ? t(`skills.state.refused.${state.reason}`)
-              : isCited
-                ? t("skills.cited")
-                : null;
             return (
               <div key={skill.id} className="flex items-start gap-2 rounded-md p-1">
                 <Checkbox
@@ -165,7 +155,6 @@ export function SkillsPickerPanel({
                   aria-disabled={inert || undefined}
                   aria-labelledby={nameId}
                   aria-describedby={detailsId}
-                  data-cited={isCited || undefined}
                   onCheckedChange={() => togglePin(skill, checked)}
                   className={cn("mt-0.5 shrink-0", inert && "cursor-not-allowed opacity-50")}
                 />
@@ -185,7 +174,7 @@ export function SkillsPickerPanel({
                   </span>
                   {/* The checkbox's description: why it is locked or not loaded, then what it does. */}
                   <span id={detailsId} className="block">
-                    {caption && (
+                    {refused && (
                       <span
                         data-testid={`skill-pin-state-${skill.id}`}
                         className={cn(
@@ -193,10 +182,10 @@ export function SkillsPickerPanel({
                           refused ? "text-warning" : "text-muted-foreground",
                         )}
                       >
-                        {caption}
+                        {t(`skills.state.refused.${state.reason}`)}
                       </span>
                     )}
-                    {overBudget && (
+                    {inert && (
                       <span
                         data-testid={`skill-pin-budget-${skill.id}`}
                         className="text-warning block text-[0.7rem] leading-snug"

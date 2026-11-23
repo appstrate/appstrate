@@ -139,7 +139,9 @@ describe("formatCallerContext", () => {
         skillCatalogue,
       });
       expect(out.split("## Skills")).toHaveLength(2);
-      expect(out).toContain("The user pinned these skills to this conversation.");
+      expect(out).toContain(
+        "The user pinned these skills to this conversation or named them in a message.",
+      );
       expect(out).toContain(
         '<skill id="@acme/mine" uri="skill://space-1/acme/mine/mine/SKILL.md" version="1.0.0">\nMine body.\n</skill>',
       );
@@ -229,6 +231,64 @@ describe("formatCallerContext", () => {
       skillCatalogue,
     });
     expect(noTransport).not.toContain("## Skills");
+  });
+
+  describe("skills the history cites", () => {
+    const raw = { user: { name: "Ada" }, org: { role: "member" } };
+
+    it("injects a cited skill after the pins, unlisted, with discovery on or off", () => {
+      for (const skillDiscovery of [true, false]) {
+        const rendered = formatCallerContext(callerIdentity(raw), {
+          ...BASE_OPTS,
+          skills: { skillDiscovery, pinnedSkills: ["@acme/zeta"] },
+          citedSkills: ["@acme/mine", "@acme/zeta"],
+          skillContents: new Map([
+            ["@acme/zeta", skillOf("zeta", "Zeta body.")],
+            ["@acme/mine", mine()],
+          ]),
+          skillCatalogue: [listedSkill("@acme/mine", "Mine"), listedSkill("@acme/pdf", "PDF")],
+        });
+        const out = rendered.text;
+        expect(out.indexOf('<skill id="@acme/zeta"')).toBeLessThan(
+          out.indexOf('<skill id="@acme/mine"'),
+        );
+        // Cited and pinned: injected once.
+        expect(out.match(/<skill id="@acme\/zeta"/g)).toHaveLength(1);
+        expect(out).not.toContain("- `@acme/mine`");
+        expect(out.includes("- `@acme/pdf`")).toBe(skillDiscovery);
+        expect(Object.keys(rendered.injected).sort()).toEqual(["@acme/mine", "@acme/zeta"]);
+        // Only the pins get a verdict.
+        expect(Object.keys(rendered.skillStatus)).toEqual(["@acme/zeta"]);
+      }
+    });
+
+    it("spends the budget on the pins first: a cited skill that does not fit gets a notice", () => {
+      const rendered = formatCallerContext(callerIdentity(raw), {
+        ...BASE_OPTS,
+        skills: { skillDiscovery: true, pinnedSkills: ["@acme/huge"] },
+        citedSkills: ["@acme/mine"],
+        skillContents: new Map([
+          ["@acme/huge", skillOf("huge", "x".repeat(63_995))],
+          ["@acme/mine", mine()],
+        ]),
+      });
+      expect(rendered.text).toContain('<skill id="@acme/huge"');
+      expect(rendered.text).not.toContain('<skill id="@acme/mine"');
+      expect(rendered.text).toContain("`@acme/mine` named in this conversation does not fit");
+      expect(rendered.skillStatus).toEqual({ "@acme/huge": { status: "injected", chars: 63_995 } });
+    });
+
+    it("says a cited skill is not available, without a verdict", () => {
+      const rendered = formatCallerContext(callerIdentity(raw), {
+        ...BASE_OPTS,
+        citedSkills: ["@acme/gone"],
+      });
+      expect(rendered.text).toContain(
+        "`@acme/gone` named in this conversation is not available here",
+      );
+      expect(rendered.skillStatus).toEqual({});
+      expect(rendered.injected).toEqual({});
+    });
   });
 
   it("says a pinned skill could not be included", () => {
@@ -551,6 +611,7 @@ describe("buildCallerContextBlock", () => {
   /** The block of a member's turn: the builder's capabilities, discovery on, drafts read. */
   const block = ({
     pins = [],
+    cited = [],
     drafts = true,
     client = NO_SKILLS,
     permissions = ["mcp:read", "mcp:invoke"],
@@ -559,6 +620,7 @@ describe("buildCallerContextBlock", () => {
     vars = { orgRole: "member" },
   }: {
     pins?: string[];
+    cited?: string[];
     drafts?: boolean;
     client?: (signal: AbortSignal) => Promise<ChatSkillsClient>;
     permissions?: string[];
@@ -573,6 +635,7 @@ describe("buildCallerContextBlock", () => {
       capabilities,
       permissions,
       skills: { skillDiscovery, pinnedSkills: pins },
+      cited,
       drafts,
       openSkillsClient: client,
     });
@@ -793,6 +856,35 @@ describe("buildCallerContextBlock", () => {
     const drafted = await build(true);
     expect(drafted.text).toContain("a draft");
     expect(drafted.text).toContain(`- \`@acme/b\` \`${B_DRAFT}\``);
+  });
+
+  it("reads a cited skill like a pin, once when it is also pinned, with discovery off", async () => {
+    const A = "skill://spc_1/acme/a/a/SKILL.md";
+    const C = "skill://spc_1/acme/c/c/SKILL.md";
+    const skills = fakeSkillsClient({
+      published: [skillEntry(A, "1.0.0"), skillEntry(C, "2.0.0")],
+      drafts: [],
+      texts: { [A]: "a body", [C]: "c body" },
+    });
+    const {
+      text: out,
+      injected,
+      skillStatus,
+    } = await block({
+      capabilities: caps(BUILDER.filter((permission) => permission !== "skills:read")),
+      skillDiscovery: false,
+      pins: ["@acme/a"],
+      cited: ["@acme/c", "@acme/a", "@acme/gone"],
+      client: skills.open,
+    });
+    expect(skills.calls.filter((call) => call.startsWith("resources/read")).sort()).toEqual([
+      `resources/read ${A}`,
+      `resources/read ${C}`,
+    ]);
+    expect(out).toContain(`<skill id="@acme/c" uri="${C}" version="2.0.0">\nc body\n</skill>`);
+    expect(out).toContain("`@acme/gone` named in this conversation is not available here");
+    expect(Object.keys(injected.skills).sort()).toEqual(["@acme/a", "@acme/c"]);
+    expect(Object.keys(skillStatus)).toEqual(["@acme/a"]);
   });
 
   it("lists the turn's skills over the skills connection, draft first, reading none when nothing is pinned", async () => {

@@ -2,7 +2,7 @@
 
 import type { UIMessage } from "ai";
 import { agentPromptOfParts } from "./agent-prompt.ts";
-import { readableDirectives } from "./directives.ts";
+import { SKILL_DIRECTIVE, directivesOf, readableDirectives } from "./directives.ts";
 
 /**
  * Concatenate the text of a UIMessage's `text` parts (all other part kinds —
@@ -65,4 +65,19 @@ export function uiMessageTitleText(parts: unknown[] | undefined): string {
   const typed = uiMessageText(parts);
   if (typed) return typed;
   return agentPromptOfParts(parts)?.data.title ?? "";
+}
+
+/** The skills the user messages cite (`:skill[…]{name=…}`), most recent message first, each once. */
+export function citedSkills(messages: readonly UIMessage[]): string[] {
+  const cited = new Set<string>();
+  for (const message of [...messages].reverse()) {
+    if (message.role !== "user") continue;
+    for (const part of message.parts) {
+      if (part.type !== "text") continue;
+      for (const directive of directivesOf(part.text)) {
+        if (directive.type === SKILL_DIRECTIVE) cited.add(directive.id);
+      }
+    }
+  }
+  return [...cited];
 }

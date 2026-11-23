@@ -25,7 +25,7 @@ import {
   useQueryClient,
   type QueryClient,
 } from "@tanstack/react-query";
-import { normalizePins, type ChatSkillSelection } from "../skills.ts";
+import type { ChatSkillSelection } from "../skills.ts";
 import {
   DEFAULT_STORED_SKILLS,
   citedSkillIds,
@@ -55,11 +55,6 @@ export interface ConversationSkillsState {
   setDiscovery: (on: boolean) => void;
   /** Back to the default selection: discovery on, no pin. */
   reset: () => void;
-  /**
-   * Pins the skills a message cites before it is sent; resolves once the server holds them, or
-   * once the turn is the one to carry them.
-   */
-  pinCited: (ids: readonly string[]) => Promise<void>;
   /** What the turn being sent creates the conversation with; `undefined` once the row is read. */
   takeForTurn: () => ChatSkillSelection | undefined;
 }
@@ -143,7 +138,7 @@ export function useConversationSkills({
     [queryClient, mutationKey],
   );
 
-  const { mutate, mutateAsync } = useMutation({
+  const { mutate } = useMutation({
     mutationKey,
     // One PATCH at a time, each carrying the full set computed over the previous ones: the server
     // applies them in order, so the last change made is the one it keeps.
@@ -203,22 +198,6 @@ export function useConversationSkills({
     [getEnabled, heldRow, transport, mutate, current, persisted, setSelection, reread],
   );
 
-  const pinCited = useCallback(
-    async (ids: readonly string[]): Promise<void> => {
-      if (!getEnabled()) return;
-      // The server ignores a turn's pins for a conversation it holds: know whether it does.
-      if (!heldRow()) await reread();
-      const now = current();
-      const next = { ...now, pinnedSkills: normalizePins([...now.pinnedSkills, ...ids]) };
-      if (next.pinnedSkills.length === now.pinnedSkills.length) return;
-      // A failure is toasted by the host; the message is still sent.
-      if (heldRow()) {
-        if (transport) await mutateAsync(next).catch(() => {});
-      } else if (!persisted) setSelection(next);
-    },
-    [getEnabled, heldRow, reread, current, transport, mutateAsync, persisted, setSelection],
-  );
-
   const takeForTurn = useCallback((): ChatSkillSelection | undefined => {
     if (!getEnabled() || heldRow()) return undefined;
     unsentRef.current = false;
@@ -233,10 +212,9 @@ export function useConversationSkills({
       setPin: (packageId: string, on: boolean) => change((s) => withPin(s, packageId, on)),
       setDiscovery: (on: boolean) => change((s) => ({ ...s, skillDiscovery: on })),
       reset: () => change(() => DEFAULT_SELECTION),
-      pinCited,
       takeForTurn,
     }),
-    [skills, held, change, pinCited, takeForTurn],
+    [skills, held, change, takeForTurn],
   );
 }
 

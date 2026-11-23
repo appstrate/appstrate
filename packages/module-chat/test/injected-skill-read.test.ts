@@ -83,6 +83,7 @@ async function discoveryOffTurn(
       capabilities: turnCapabilities((p) => permissions.includes(p), []),
       permissions,
       skills: { skillDiscovery: false, pinnedSkills: [SKILL_ID] },
+      cited: [],
       // The caller's own permissions, no claim: what `chat-stream.ts` opens.
       drafts: true,
       openSkillsClient: () =>

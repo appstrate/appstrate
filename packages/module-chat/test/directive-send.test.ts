@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-/** What a send does with the skills and the agent a message names. */
+/** What a send does with the agent a message names; its skills stay in the text. */
 
 import { describe, expect, it } from "bun:test";
 import { serializeDirective } from "../src/directives.ts";
@@ -13,21 +13,16 @@ const agent = (title: string, name = "run-report") =>
 const user = (...parts: object[]) => ({ role: "user", parts });
 
 describe("sendWithDirectives", () => {
-  it("collects the skills a message names, once each, and leaves the message as it is", () => {
-    const message = user({
-      type: "text",
-      text: `${skill("tone")} and ${skill("pdf")} ${skill("tone")}`,
-    });
-    const sent = sendWithDirectives(message);
-    expect(sent.skills).toEqual(["@acme/tone", "@acme/pdf"]);
-    expect(sent.message).toBe(message);
+  it("leaves a message naming skills as it is", () => {
+    const message = user({ type: "text", text: `${skill("tone")} and ${skill("pdf")}` });
+    expect(sendWithDirectives(message)).toBe(message);
   });
 
   it("turns the agent directive into the agent prompt part, text kept as typed", () => {
     const text = `${agent("Weekly report")} for Q3`;
     const message = user({ type: "text", text }, { type: "file", url: "appfile://f1" });
     const sent = sendWithDirectives(message);
-    expect(sent.message.parts).toEqual([
+    expect(sent.parts).toEqual([
       { type: "text", text },
       { type: "file", url: "appfile://f1" },
       { type: "data-agent-prompt", data: { name: "run-report", title: "Weekly report" } },
@@ -37,17 +32,17 @@ describe("sendWithDirectives", () => {
 
   it("sends a message with only an agent chip as an ordinary, non-empty text message", () => {
     const sent = sendWithDirectives(user({ type: "text", text: agent("Weekly report") }));
-    expect(sent.message.parts).toHaveLength(2);
-    expect((sent.message.parts[0] as { text: string }).text).not.toBe("");
+    expect(sent.parts).toHaveLength(2);
+    expect((sent.parts[0] as { text: string }).text).not.toBe("");
   });
 
   it("keeps only the first agent when it is handed two (the composer refuses to send them)", () => {
     const sent = sendWithDirectives(
       user({ type: "text", text: `${agent("A", "run-a")} ${agent("B", "run-b")}` }),
     );
-    expect(
-      sent.message.parts.filter((p) => (p as { type: string }).type === "data-agent-prompt"),
-    ).toEqual([{ type: "data-agent-prompt", data: { name: "run-a", title: "A" } }]);
+    expect(sent.parts.filter((p) => (p as { type: string }).type === "data-agent-prompt")).toEqual([
+      { type: "data-agent-prompt", data: { name: "run-a", title: "A" } },
+    ]);
   });
 
   it("adds no second part to a message that carries its launch already", () => {
@@ -55,19 +50,19 @@ describe("sendWithDirectives", () => {
       { type: "text", text: agent("Weekly report") },
       { type: "data-agent-prompt", data: { name: "run-report", title: "Weekly report" } },
     );
-    expect(sendWithDirectives(message).message).toBe(message);
+    expect(sendWithDirectives(message)).toBe(message);
   });
 
   it("cuts a title past the part's limit", () => {
     const sent = sendWithDirectives(user({ type: "text", text: agent("t".repeat(300)) }));
-    const part = sent.message.parts.at(-1) as { data: { title: string } };
+    const part = sent.parts.at(-1) as { data: { title: string } };
     expect(part.data.title).toHaveLength(200);
   });
 
   it("passes through what has no parts", () => {
-    expect(sendWithDirectives(undefined)).toEqual({ message: undefined, skills: [] });
+    expect(sendWithDirectives(undefined)).toBeUndefined();
     const text = { text: "hello" };
-    expect(sendWithDirectives(text).message).toBe(text);
+    expect(sendWithDirectives(text)).toBe(text);
   });
 });
 

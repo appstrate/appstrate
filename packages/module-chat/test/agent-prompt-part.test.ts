@@ -84,7 +84,7 @@ describe("retryContent", () => {
 
   it("is sent as the agent prompt part again: the send reads the directive back", () => {
     const [text] = retryContent("retry", agent);
-    const { message } = sendWithDirectives({ role: "user", parts: [text] });
+    const message = sendWithDirectives({ role: "user", parts: [text] });
     expect(message.parts.at(-1)).toEqual({ type: "data-agent-prompt", data: agent });
   });
 });

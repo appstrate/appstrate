@@ -11,8 +11,8 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@appstrate/ui/component
 import {
   canResetSkills,
   loadsSkill,
+  pinIds,
   skillRowState,
-  type EffectiveSkills,
   type StoredSkills,
 } from "./chat-skills.ts";
 import { RemovableChip } from "./removable-chip.tsx";
@@ -28,19 +28,20 @@ import { useChangeAnnouncement } from "./use-change-announcement.ts";
 import { useChatCommands } from "./use-chat-commands.ts";
 
 /**
- * The conversation's skills (pins and the draft's citations) split into those it loads and the
- * pins the last turn left out, and what the live region reads of the server's last verdicts.
+ * The conversation's pins split into those it loads and those the last turn left out, and what the
+ * live region reads of the server's last verdicts.
  */
-function useSkillsByLoad(skills: StoredSkills, effective: EffectiveSkills, t: ChatTranslate) {
-  const catalogue = useChatCommands(effective.ids.length > 0);
+function useSkillsByLoad(skills: StoredSkills, t: ChatTranslate) {
+  const pins = pinIds(skills);
+  const catalogue = useChatCommands(pins.length > 0);
   const names: SkillNames | null = catalogue.data
     ? new Map(catalogue.data.skills.map((s) => [s.id, s.name]))
     : null;
   const named = (id: string) => namedSkill(names ?? new Map(), id);
-  const loads = (id: string) => loadsSkill(skillRowState(skills, id), effective.cited.has(id));
+  const loads = (id: string) => loadsSkill(skillRowState(skills, id));
   return {
-    loaded: effective.ids.filter(loads).map(named),
-    refused: effective.ids.filter((id) => !loads(id)).map(named),
+    loaded: pins.filter(loads).map(named),
+    refused: pins.filter((id) => !loads(id)).map(named),
     verdicts: verdictsSummary(skills, names, t),
   };
 }
@@ -140,17 +141,15 @@ function SkillsChip({
 
 interface SkillChipsProps {
   skills: StoredSkills;
-  /** The skills the composer's draft cites, counted like the pinned ones. */
-  draft: EffectiveSkills;
   onOpenPicker: () => void;
   /** Back to the default selection: the pill's X. */
   onReset: () => void;
 }
 
 /** The skill pill, or with no pin the picker's summary chip (drawn only with discovery off). */
-export function SkillChips({ skills, draft, onOpenPicker, onReset }: SkillChipsProps) {
+export function SkillChips({ skills, onOpenPicker, onReset }: SkillChipsProps) {
   const { t } = useChatHost();
-  const { loaded, refused, verdicts } = useSkillsByLoad(skills, draft, t);
+  const { loaded, refused, verdicts } = useSkillsByLoad(skills, t);
   // The verdicts found on opening the conversation are not news: only a later change is read out.
   const announced = useChangeAnnouncement(verdicts ?? "", verdicts !== null);
   return (

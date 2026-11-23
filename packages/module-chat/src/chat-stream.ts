@@ -33,6 +33,7 @@ import {
 } from "./agent-prompt.ts";
 import { resolveAgentPrompt, withStoredAgentPromptTexts } from "./agent-launch.ts";
 import { notifySessionUpdate } from "./realtime.ts";
+import { citedSkills } from "./message-text.ts";
 import { listModels, pickModel } from "./llm.ts";
 import { actingOrgRole, callerMcpOpener, dispatchFetch, platformMcpUrl } from "./platform-mcp.ts";
 import { platformMcpSurfaceKey } from "./pi-chat/mcp-surface-cache.ts";
@@ -547,6 +548,8 @@ export async function handleChatStream(
   // handler. The error is rethrown where the block is consumed.
   const phaseBStart = Date.now();
   let phaseBMs = 0;
+  // The skills the history the turn sends cites: injected like pins, without a verdict.
+  const cited = citedSkills(messages);
   const contextBlockPromise: Promise<
     | ({ ok: true } & Awaited<ReturnType<typeof buildCallerContextBlock>>)
     | { ok: false; error: unknown }
@@ -572,6 +575,7 @@ export async function handleChatStream(
           capabilities,
           permissions,
           skills,
+          cited,
           drafts: skillDrafts,
           // Read before the turn's claim exists: over the caller's own connection, opened only
           // when the turn lists or injects skills.
