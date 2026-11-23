@@ -4,7 +4,7 @@
  * What the chat puts in its phone header (below `md`), after the shell's burger: the conversation's
  * name, truncated, « Nouvelle conversation » on a new one; the pencil that edits the name; and, at
  * the right end, the context panel. The desktop's header is the shell's own and carries the
- * spaces, the settings and the context through `ShellHeaderActions`.
+ * spaces, « Renommer » and the context through `ShellHeaderActions`.
  */
 
 import { useState, type Dispatch } from "react";
@@ -12,7 +12,7 @@ import { useTranslation } from "react-i18next";
 import { PencilIcon } from "lucide-react";
 import { Button } from "@appstrate/ui/components/button";
 import { Skeleton } from "@appstrate/ui/components/skeleton";
-import { ChatConversationSettingsDialog, type ChatTransport } from "@appstrate/module-chat/ui";
+import { ChatConversationRenameDialog, type ChatTransport } from "@appstrate/module-chat/ui";
 import { useActiveSession } from "@appstrate/module-chat/unread";
 import { ShellHeaderPhone } from "../../components/shell-header-slots";
 import type { ConversationSidebarAction } from "./conversation-sidebar-state";
@@ -60,7 +60,7 @@ export function ConversationPhoneBar({
           variant="ghost"
           size="icon"
           className={PHONE_HEADER_BUTTON_CLASS}
-          aria-label={t("conversation.rename")}
+          aria-label={t("threads.rename")}
           onClick={() => setRenaming(true)}
         >
           <PencilIcon />
@@ -72,7 +72,7 @@ export function ConversationPhoneBar({
         className={PHONE_HEADER_BUTTON_CLASS}
       />
       {renaming && (
-        <ChatConversationSettingsDialog
+        <ChatConversationRenameDialog
           activeId={conversationId}
           t={translate}
           can={can}

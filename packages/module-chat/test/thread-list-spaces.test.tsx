@@ -72,6 +72,6 @@ describe("the conversation list's space line", () => {
 
   it("leaves a row's actions to the chat's own grant", () => {
     const html = render("spc_a");
-    expect(html.match(/aria-label="common:btn\.delete"/g)).toHaveLength(3);
+    expect(html.match(/aria-label="threads\.actions\.openFor"/g)).toHaveLength(3);
   });
 });

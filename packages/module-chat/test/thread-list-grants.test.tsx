@@ -73,14 +73,14 @@ describe("the conversation list", () => {
   it("offers a new conversation to a caller who can write", () => {
     const html = render(["chat:read", "chat:write"]);
     expect(html).toContain("<span>threads.new</span>");
-    expect(html).toContain('aria-label="common:btn.delete"');
+    expect(html).toContain('aria-label="threads.actions.openFor"');
   });
 
   it("offers a reader no new conversation, and no row action", () => {
     const html = render(["chat:read"]);
     expect(html).toContain("Budget");
     expect(html).not.toContain("<span>threads.new</span>");
-    expect(html).not.toContain('aria-label="common:btn.delete"');
+    expect(html).not.toContain('aria-label="threads.actions.openFor"');
   });
 
   it("loads more with a plain button, which leaves the phone's drawer open", () => {

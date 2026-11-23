@@ -28,7 +28,6 @@ import {
   PencilIcon,
   PlusIcon,
   SearchIcon,
-  Settings2Icon,
   Trash2Icon,
   XIcon,
 } from "lucide-react";
@@ -38,6 +37,13 @@ import { Spinner } from "@appstrate/ui/components/spinner";
 import { Button } from "@appstrate/ui/components/button";
 import { Input } from "@appstrate/ui/components/input";
 import { SheetMenu, SheetMenuRow } from "./sheet-menu.tsx";
+import { opensAsSheet } from "./composer-panel.ts";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@appstrate/ui/components/dropdown-menu";
 import { Label } from "@appstrate/ui/components/label";
 import {
   Dialog,
@@ -381,9 +387,11 @@ function ConversationRow({
   const transport = useChatTransport();
   const select = useSelectConversation();
   const queryClient = useQueryClient();
-  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [renaming, setRenaming] = useState(false);
   const [confirmingDelete, setConfirmingDelete] = useState(false);
+  // The row's « … »: a dropdown from `md` up, a panel from the bottom below, both with the same items.
   const [menuOpen, setMenuOpen] = useState(false);
+  const [dropdownOpen, setDropdownOpen] = useState(false);
   // Closing a dialog opened from a row hands the focus back to what opened it.
   const dialogTrigger = useRef<HTMLButtonElement | null>(null);
   const menuTrigger = useRef<HTMLButtonElement>(null);
@@ -460,7 +468,7 @@ function ConversationRow({
       {/* Fixed-width right slot: spinner / unread dot / timestamp have different
           natural widths — without w-14 the title's truncation point reflows on
           every generating↔idle transition. Hover swaps them for the row's
-          actions; a reader has none, so for them hover changes nothing. */}
+          « … »; a reader has none, so for them hover changes nothing. */}
       <div
         className={cn(
           "desktop-pointer:w-14 pointer-events-none absolute top-1 right-1 flex h-6 w-6 items-center justify-end rounded-md",
@@ -486,54 +494,52 @@ function ConversationRow({
             {age}
           </span>
         )}
-        {/* pointer-events must track visibility: opacity-0 alone keeps the
-            invisible buttons tappable. Touchscreens use the separate 44 px menu trigger. */}
-        {canWrite && (
-          <div className="desktop-pointer:flex pointer-events-none absolute right-0 hidden items-center gap-0.5 rounded-md p-0.5 opacity-0 transition-opacity group-focus-within/menu-item:pointer-events-auto group-focus-within/menu-item:opacity-100 group-hover/menu-item:pointer-events-auto group-hover/menu-item:opacity-100">
-            <button
-              type="button"
-              aria-label={t("threads.settings.openFor", {
-                title: session.title ?? t("threads.new"),
-              })}
-              title={t("threads.settings.title")}
-              onClick={(event) => {
-                dialogTrigger.current = event.currentTarget;
-                setSettingsOpen(true);
-              }}
-              className="text-sidebar-foreground/70 hover:text-sidebar-foreground hover:bg-sidebar-border rounded-md p-0.5"
-            >
-              <Settings2Icon className="size-3.5" />
-            </button>
-            <button
-              type="button"
-              aria-label={t("common:btn.delete")}
-              title={t("common:btn.delete")}
-              onClick={(event) => {
-                dialogTrigger.current = event.currentTarget;
-                setDeleteFailed(false);
-                setConfirmingDelete(true);
-              }}
-              className="text-sidebar-foreground/70 hover:text-destructive hover:bg-destructive/10 rounded-md p-0.5"
-            >
-              <Trash2Icon className="size-3.5" />
-            </button>
-          </div>
-        )}
       </div>
       {canWrite && (
         <>
-          <button
-            type="button"
-            aria-label={t("threads.actions.openFor", {
-              title: session.title ?? t("threads.new"),
-            })}
-            aria-haspopup="dialog"
-            ref={menuTrigger}
-            onClick={() => setMenuOpen(true)}
-            className="text-sidebar-foreground/70 active:bg-sidebar-accent desktop-pointer:hidden absolute top-0 right-0 flex h-12 w-11 items-center justify-center rounded-md"
+          {/* One « … », the same two items on every format: always there and a thumb's size on
+              touch, revealed by hover or focus under a mouse. The width picks the container. */}
+          <DropdownMenu
+            open={dropdownOpen}
+            onOpenChange={(open) =>
+              open && opensAsSheet() ? setMenuOpen(true) : setDropdownOpen(open)
+            }
           >
-            <EllipsisIcon className="size-5" />
-          </button>
+            <DropdownMenuTrigger asChild>
+              <button
+                type="button"
+                aria-label={t("threads.actions.openFor", {
+                  title: session.title ?? t("threads.new"),
+                })}
+                ref={menuTrigger}
+                className="text-sidebar-foreground/70 active:bg-sidebar-accent desktop-pointer:top-1 desktop-pointer:right-1 desktop-pointer:size-6 desktop-pointer:opacity-0 desktop-pointer:group-hover/menu-item:opacity-100 desktop-pointer:group-focus-within/menu-item:opacity-100 desktop-pointer:data-[state=open]:opacity-100 desktop-pointer:hover:bg-sidebar-border desktop-pointer:hover:text-sidebar-foreground absolute top-0 right-0 flex h-12 w-11 items-center justify-center rounded-md transition-opacity"
+              >
+                <EllipsisIcon className="desktop-pointer:size-3.5 size-5" />
+              </button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="min-w-40">
+              <DropdownMenuItem
+                onSelect={() => {
+                  dialogTrigger.current = menuTrigger.current;
+                  setRenaming(true);
+                }}
+              >
+                <PencilIcon />
+                {t("threads.rename")}
+              </DropdownMenuItem>
+              <DropdownMenuItem
+                className="text-destructive focus:text-destructive focus:bg-destructive/10"
+                onSelect={() => {
+                  dialogTrigger.current = menuTrigger.current;
+                  setDeleteFailed(false);
+                  setConfirmingDelete(true);
+                }}
+              >
+                <Trash2Icon />
+                {t("common:btn.delete")}
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
           {/* A phone's menu is a panel from the bottom, titled by the conversation: rename, then delete
               in red (which asks). */}
           <SheetMenu
@@ -555,7 +561,7 @@ function ConversationRow({
               onClick={() => {
                 dialogTrigger.current = menuTrigger.current;
                 setMenuOpen(false);
-                setSettingsOpen(true);
+                setRenaming(true);
               }}
             >
               <PencilIcon />
@@ -606,12 +612,12 @@ function ConversationRow({
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
-      {settingsOpen && (
-        <ConversationSettingsDialog
+      {renaming && (
+        <ConversationRenameDialog
           session={session}
           t={t}
           onCloseAutoFocus={restoreDialogFocus}
-          onClose={() => setSettingsOpen(false)}
+          onClose={() => setRenaming(false)}
         />
       )}
     </SidebarMenuItem>
@@ -619,22 +625,22 @@ function ConversationRow({
 }
 
 /**
- * The open conversation's settings button, for the host's header actions. Renders
- * nothing until the conversation is known, or for a reader (settings are writes).
+ * « Renommer » for the open conversation, a pencil in the host's header actions from `md` up.
+ * Renders nothing until the conversation is known, or for a reader (renaming is a write).
  */
-export function ChatConversationSettingsButton(props: {
+export function ChatConversationRenameButton(props: {
   activeId: string | null;
   t: ChatTranslate;
   can: ChatCan;
 }) {
-  return <ConversationSettingsButton key={props.activeId} {...props} />;
+  return <ConversationRenameButton key={props.activeId} {...props} />;
 }
 
 /**
- * The settings dialog of the open conversation, opened by a control of the host's own (the phone
- * header's pencil): `ChatConversationSettingsButton` is the same dialog behind its icon button.
+ * The rename dialog of the open conversation, opened by a control of the host's own (the phone
+ * header's pencil): `ChatConversationRenameButton` is the same dialog behind its icon button.
  */
-export function ChatConversationSettingsDialog({
+export function ChatConversationRenameDialog({
   activeId,
   t,
   can,
@@ -648,10 +654,10 @@ export function ChatConversationSettingsDialog({
   const { data: sessions } = useSessions();
   const session = activeId ? sessions?.find((s) => s.id === activeId) : undefined;
   if (!session || !can("chat:write")) return null;
-  return <ConversationSettingsDialog session={session} t={t} onClose={onClose} />;
+  return <ConversationRenameDialog session={session} t={t} onClose={onClose} />;
 }
 
-function ConversationSettingsButton({
+function ConversationRenameButton({
   activeId,
   t,
   can,
@@ -671,25 +677,23 @@ function ConversationSettingsButton({
         variant="ghost"
         size="icon"
         className="size-8"
-        aria-label={t("threads.settings.title")}
-        title={t("threads.settings.title")}
+        aria-label={t("threads.rename")}
+        title={t("threads.rename")}
         onClick={() => setOpen(true)}
       >
-        <Settings2Icon className="size-4" />
+        <PencilIcon className="size-4" />
       </Button>
-      {open && (
-        <ConversationSettingsDialog session={session} t={t} onClose={() => setOpen(false)} />
-      )}
+      {open && <ConversationRenameDialog session={session} t={t} onClose={() => setOpen(false)} />}
     </>
   );
 }
 
 /**
- * The conversation's settings: its name, saved explicitly (Enregistrer or Enter),
+ * Renaming the conversation: its name, saved explicitly (Enregistrer or Enter),
  * never on blur. The dialog stays open on a refusal and says so: the chat's own
  * fetch is not toasted by the app's mutation cache.
  */
-function ConversationSettingsDialog({
+function ConversationRenameDialog({
   session,
   t,
   onClose,
@@ -730,18 +734,18 @@ function ConversationSettingsDialog({
     <Dialog open onOpenChange={(open) => !open && !saving && onClose()}>
       <DialogContent onCloseAutoFocus={onCloseAutoFocus}>
         <DialogHeader>
-          <DialogTitle>{t("threads.settings.title")}</DialogTitle>
-          <DialogDescription>{t("threads.settings.description")}</DialogDescription>
+          <DialogTitle>{t("threads.renameDialog.title")}</DialogTitle>
+          <DialogDescription>{t("threads.renameDialog.description")}</DialogDescription>
         </DialogHeader>
         <form
-          id="chat-conversation-settings"
+          id="chat-conversation-rename"
           className="flex flex-col gap-2"
           onSubmit={(event) => {
             event.preventDefault();
             void save();
           }}
         >
-          <Label htmlFor="chat-conversation-name">{t("threads.settings.name")}</Label>
+          <Label htmlFor="chat-conversation-name">{t("threads.renameDialog.name")}</Label>
           <Input
             id="chat-conversation-name"
             autoFocus
@@ -760,9 +764,9 @@ function ConversationSettingsDialog({
           <Button type="button" variant="outline" disabled={saving} onClick={onClose}>
             {t("common:btn.cancel")}
           </Button>
-          <Button type="submit" form="chat-conversation-settings" disabled={saving || !dirty}>
+          <Button type="submit" form="chat-conversation-rename" disabled={saving || !dirty}>
             {saving && <Spinner className="mr-1.5 size-3.5" />}
-            {t("common:btn.save")}
+            {t("threads.rename")}
           </Button>
         </DialogFooter>
       </DialogContent>

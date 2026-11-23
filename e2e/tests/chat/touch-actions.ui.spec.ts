@@ -43,7 +43,7 @@ test.describe("chat actions on a touchscreen", () => {
     await page.goto(`/chat/${id}`);
     await page.getByRole("textbox", { name: "Message Appstrate…", exact: true }).tap();
     const chip = page.getByTestId("composer-limit-chip");
-    const lift = chip.getByRole("button");
+    const lift = chip.getByRole("button", { name: /^Lever la limite/ });
     await expect(lift).toHaveCSS("width", "40px");
     await expect(lift).toHaveCSS("height", "40px");
     const hit = await lift.evaluate((button) => {
@@ -64,19 +64,23 @@ test.describe("chat actions on a touchscreen", () => {
     const trigger = page.getByRole("button", { name: "Actions de « Budget »" });
     await expect(trigger).toHaveCSS("width", "44px");
     await trigger.tap();
-    // The "…" opens a panel from the bottom: its rows are buttons.
-    await menu.getByRole("button", { name: "Renommer", exact: true }).tap();
-    const name = page.getByRole("textbox", { name: "Nom", exact: true });
+    // From `md` up the "…" opens a dropdown, whatever the pointer; the same two items.
+    await expect(page.getByRole("menuitem", { name: "Supprimer", exact: true })).toBeVisible();
+    await page.getByRole("menuitem", { name: "Renommer", exact: true }).tap();
+    const rename = page.getByRole("dialog", { name: "Renommer la conversation" });
+    const name = rename.getByRole("textbox", { name: "Nom", exact: true });
     await expect(name).toBeFocused();
     await name.fill("Budget validé");
-    await page.getByRole("button", { name: "Enregistrer", exact: true }).tap();
+    await rename.getByRole("button", { name: "Renommer", exact: true }).tap();
     const renamed = page.getByRole("button", { name: "Actions de « Budget validé »" });
     await expect(renamed).toBeFocused();
     await page.screenshot({ path: testInfo.outputPath("landscape.png"), animations: "disabled" });
 
     await page.setViewportSize({ width: 390, height: 844 });
     await page.locator('header [data-sidebar="trigger"]:visible').tap();
+    // Below `md` the same "…" opens a panel from the bottom: its rows are buttons.
     await renamed.tap();
+    await expect(menu.getByRole("button", { name: "Renommer", exact: true })).toBeVisible();
     const remove = menu.getByRole("button", { name: "Supprimer", exact: true });
     await expect(remove).toHaveCSS("min-height", "48px");
     await page.screenshot({ path: testInfo.outputPath("menu.png"), animations: "disabled" });
@@ -109,11 +113,12 @@ test("a keyboard user sees the focused conversation action and returns to it", a
   const row = page.getByRole("button", { name: /^Budget clavier/ });
   await row.focus();
   await page.keyboard.press("Tab");
-  const settings = page.getByRole("button", { name: "Paramètres de « Budget clavier »" });
-  await expect(settings).toBeFocused();
-  await expect(settings.locator("..")).toHaveCSS("opacity", "1");
+  const actions = page.getByRole("button", { name: "Actions de « Budget clavier »" });
+  await expect(actions).toBeFocused();
+  await expect(actions).toHaveCSS("opacity", "1");
   await page.keyboard.press("Enter");
+  await page.getByRole("menuitem", { name: "Renommer", exact: true }).click();
   await expect(page.getByRole("textbox", { name: "Nom", exact: true })).toBeFocused();
   await page.keyboard.press("Escape");
-  await expect(settings).toBeFocused();
+  await expect(actions).toBeFocused();
 });

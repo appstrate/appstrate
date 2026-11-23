@@ -70,24 +70,28 @@ function render(granted: string[]): string {
   );
 }
 
-describe("a conversation row on a phone", () => {
-  it("has an actions menu named for the conversation, shown on touchscreens", () => {
+describe("a conversation row's « … »", () => {
+  const trigger = () =>
+    render(["chat:read", "chat:write"]).match(
+      /<button[^>]*aria-label="threads\.actions\.openFor"[^>]*>/,
+    )?.[0];
+
+  it("is one menu named for the conversation, a thumb's size on touch", () => {
     const html = render(["chat:read", "chat:write"]);
-    const trigger = html.match(/<button[^>]*aria-label="threads\.actions\.openFor"[^>]*>/)?.[0];
-    expect(trigger).toBeDefined();
-    expect(trigger).toContain("desktop-pointer:hidden");
-    expect(trigger).toContain("w-11");
-    expect(trigger).toContain("h-12");
+    // One per row: the hover icons and the touch trigger are the same button now.
+    expect(html.match(/aria-label="threads\.actions\.openFor"/g)).toHaveLength(
+      html.match(/data-testid="chat-session-spaces"/g)!.length,
+    );
+    expect(trigger()).toContain("w-11");
+    expect(trigger()).toContain("h-12");
+    expect(trigger()).not.toContain("desktop-pointer:hidden");
   });
 
-  it("shows the desktop buttons on both hover and keyboard focus", () => {
-    const html = render(["chat:read", "chat:write"]);
-    const hover = html.match(
-      /<div class="[^"]*group-hover\/menu-item:pointer-events-auto[^"]*">/,
-    )?.[0];
-    expect(hover).toBeDefined();
-    expect(hover).toContain("desktop-pointer:flex");
-    expect(hover).toContain("group-focus-within/menu-item:opacity-100");
+  it("is revealed by hover and keyboard focus under a mouse", () => {
+    const button = trigger();
+    expect(button).toContain("desktop-pointer:opacity-0");
+    expect(button).toContain("desktop-pointer:group-hover/menu-item:opacity-100");
+    expect(button).toContain("desktop-pointer:group-focus-within/menu-item:opacity-100");
   });
 
   it("gives a reader no menu", () => {
