@@ -360,8 +360,12 @@ describe("MCP server instructions — run guidance", () => {
     expect(instructionsFor(new Set([...INVOKER, "skills:write"]), true)).toContain(
       "non-importable",
     );
-    // True of validation on its own, so it is written for every caller.
-    expect(prose(READ_ONLY)).toContain("Archive bytes stay server-side throughout.");
+    // The package-file bullet goes with its tools: absent for a caller who neither imports nor
+    // composes, present for an importer.
+    expect(prose(READ_ONLY)).not.toContain("validate_package_file");
+    expect(prose(new Set([...INVOKER, "skills:write"]))).toContain(
+      "Archive bytes stay server-side throughout.",
+    );
   });
 
   it("keeps the integration-preference bullet for both — it stands on its own", () => {
@@ -411,9 +415,12 @@ describe("MCP server instructions — agent authoring", () => {
 
 describe("buildServerInstructions grounding", () => {
   it("points every client at get_me, the chat included: the tool is declared for all", () => {
-    for (const rendersCards of [false, true]) {
-      expect(instructionsFor(permissions, rendersCards)).toContain("Start by calling get_me");
-    }
+    expect(instructionsFor(permissions, false)).toContain("Start by calling get_me");
+    // The chat's own prompt states the caller and their role: get_me is for a space's
+    // connections and agents.
+    const chat = instructionsFor(permissions, true);
+    expect(chat).not.toContain("Start by calling get_me");
+    expect(chat).toContain("get_me lists a space's connected integrations");
   });
 });
 
