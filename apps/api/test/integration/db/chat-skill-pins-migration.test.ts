@@ -2,8 +2,7 @@
 
 /**
  * Migration `0112_chat_skill_pins` — the three chat skill modes (`auto` | `manual` | `strict`)
- * folded into `skill_discovery` + `pinned_skills`, with `skill_status` added and the pins capped
- * by a CHECK.
+ * folded into `skill_discovery` + `pinned_skills`, with `skill_status` added.
  *
  * The tier-0 harness replays the chain against an empty database, where an UPDATE that fires on
  * every row and one that fires on none look the same. The stake is a conversation's pins: fold
@@ -47,9 +46,6 @@ function rowsOf<T>(result: unknown): T[] {
 async function inPre0112Schema(body: (tx: Tx) => Promise<void>): Promise<void> {
   try {
     await db.transaction(async (tx) => {
-      await tx.execute(
-        sql.raw(`ALTER TABLE "chat_sessions" DROP CONSTRAINT "chat_sessions_pinned_skills_cap"`),
-      );
       await tx.execute(
         sql.raw(`CREATE TYPE "public"."chat_skill_mode" AS ENUM('auto', 'manual', 'strict')`),
       );
@@ -111,16 +107,6 @@ async function skillColumnsOf(tx: Tx, id: string): Promise<SkillColumns> {
   return rows[0]!;
 }
 
-async function constraintNames(tx: Tx): Promise<string[]> {
-  const rows = rowsOf<{ conname: string }>(
-    await tx.execute(sql`
-      SELECT conname FROM pg_constraint
-      WHERE conrelid = 'public.chat_sessions'::regclass AND contype = 'c'
-    `),
-  );
-  return rows.map((row) => row.conname).sort();
-}
-
 describe("migration 0112 — fold the chat skill modes into pins and discovery", () => {
   let ctx: TestContext;
   const PINS = ["@acme/a", "@acme/b"];
@@ -165,7 +151,7 @@ describe("migration 0112 — fold the chat skill modes into pins and discovery",
     });
   });
 
-  it("drops `skill_mode` and its enum, and installs the pin cap", async () => {
+  it("drops `skill_mode` and its enum", async () => {
     await inPre0112Schema(async (tx) => {
       await replayMigration(tx);
 
@@ -181,8 +167,6 @@ describe("migration 0112 — fold the chat skill modes into pins and discovery",
         await tx.execute(sql`SELECT 1 FROM pg_type WHERE typname = 'chat_skill_mode'`),
       );
       expect(types).toHaveLength(0);
-      const constraints = await constraintNames(tx);
-      expect(constraints).toContain("chat_sessions_pinned_skills_cap");
     });
   });
 });

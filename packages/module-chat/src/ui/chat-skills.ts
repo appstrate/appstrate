@@ -10,7 +10,6 @@ import { SKILL_DIRECTIVE, directivesOf } from "../directives.ts";
 import {
   CHAT_SKILLS_CONTENT_BUDGET_CHARS,
   DEFAULT_SKILL_SELECTION,
-  MAX_PINNED_SKILLS,
   normalizePins,
   type ChatSkillStatus,
   type PinnedSkill,
@@ -76,11 +75,9 @@ export function canResetSkills(skills: StoredSkills): boolean {
 }
 
 export interface EffectiveSkills {
-  /** The pinned skills, then those the draft cites: the client's one place the cap is counted. */
+  /** The pinned skills, then those the draft cites: what the next turn loads. */
   ids: readonly string[];
   cited: ReadonlySet<string>;
-  atCap: boolean;
-  overCap: boolean;
 }
 
 export function effectiveSkills(
@@ -88,12 +85,7 @@ export function effectiveSkills(
   cited: readonly string[],
 ): EffectiveSkills {
   const ids = [...new Set([...pinned, ...cited])];
-  return {
-    ids,
-    cited: new Set(cited),
-    atCap: ids.length >= MAX_PINNED_SKILLS,
-    overCap: ids.length > MAX_PINNED_SKILLS,
-  };
+  return { ids, cited: new Set(cited) };
 }
 
 export type SkillRefusal = Exclude<ChatSkillStatus, "injected">;

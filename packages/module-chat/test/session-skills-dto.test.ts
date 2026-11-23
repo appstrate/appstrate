@@ -208,10 +208,9 @@ describe("chat session skills", () => {
       });
     });
 
-    it("refuses more than five pins, an empty body and an unknown field with a 400, writing nothing", async () => {
+    it("refuses an empty body, an unknown field and a malformed id with a 400, writing nothing", async () => {
       const { id } = await createSession();
       for (const body of [
-        { pins: ["@a/1", "@a/2", "@a/3", "@a/4", "@a/5", "@a/6"] },
         {},
         { pins: ["@a/1"], pinned_skills: ["@a/2"] },
         { pins: ["not-a-package"] },
@@ -258,24 +257,12 @@ describe("chat session skills", () => {
       ]);
     });
 
-    it("counts a repeated id once against the cap", async () => {
+    it("stores any number of pins, each once and sorted", async () => {
       const { id } = await createSession();
-      const res = await patchSkills(id, { pins: Array(6).fill("@acme/a") });
+      const many = Array.from({ length: 12 }, (_, i) => `@a/s${String(11 - i).padStart(2, "0")}`);
+      const res = await patchSkills(id, { pins: [...many, "@a/s00"] });
       expect(res.status).toBe(200);
-      expect(await stored(id)).toMatchObject({ pinnedSkills: ["@acme/a"] });
-    });
-
-    it("is held to five pins by the database too", async () => {
-      const { id } = await createSession();
-      const six = ["@a/1", "@a/2", "@a/3", "@a/4", "@a/5", "@a/6"];
-      let refused = false;
-      try {
-        await db.update(chatSessions).set({ pinnedSkills: six }).where(eq(chatSessions.id, id));
-      } catch {
-        refused = true;
-      }
-      expect(refused).toBe(true);
-      expect(await stored(id)).toMatchObject({ pinnedSkills: [] });
+      expect(await stored(id)).toMatchObject({ pinnedSkills: [...many].sort() });
     });
 
     it("is allowed while a turn is running, and leaves the turn's claim in place", async () => {

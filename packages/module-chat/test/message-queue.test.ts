@@ -1,8 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { describe, expect, it } from "bun:test";
-import { citedSkillIds, effectiveSkills } from "../src/ui/chat-skills.ts";
-import { draftIssue } from "../src/ui/directive-send.ts";
 import {
   canQueueDraft,
   createMessageQueue,
@@ -82,7 +80,7 @@ describe("createMessageQueue", () => {
 });
 
 describe("canQueueDraft", () => {
-  const draft = { running: true, text: "more", hasAttachments: false, issue: null };
+  const draft = { running: true, text: "more", hasAttachments: false };
 
   it("queues the text typed while a turn runs", () => {
     expect(canQueueDraft(draft)).toBe(true);
@@ -90,24 +88,6 @@ describe("canQueueDraft", () => {
 
   it("does not queue a draft that names an agent: no launch waits in a queue", () => {
     expect(canQueueDraft({ ...draft, text: ":agent[Report]{name=run-report} for Q3" })).toBe(false);
-  });
-
-  it("does not queue a draft whose queue would pass the pin cap", () => {
-    expect(canQueueDraft({ ...draft, issue: "pins" })).toBe(false);
-  });
-
-  it("counts the queue and the draft together against the pin cap", () => {
-    const sk = (n: string) => `:skill[${n}]{name=@acme/${n}}`;
-    const pinned = ["@acme/a", "@acme/b", "@acme/c"];
-    const queued = [sk("d")];
-    const issue = (text: string) => {
-      const joined = joinQueued([...queued, text]);
-      return draftIssue(joined, effectiveSkills(pinned, citedSkillIds(joined)).overCap);
-    };
-    expect(issue(sk("e"))).toBeNull();
-    expect(issue(`${sk("e")} ${sk("f")}`)).toBe("pins");
-    // A skill already pinned or queued takes no room.
-    expect(issue(`${sk("a")} ${sk("d")}`)).toBeNull();
   });
 
   it("queues a draft that names a skill: it is pinned when the queue is sent", () => {

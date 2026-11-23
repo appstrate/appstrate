@@ -8,12 +8,7 @@
 -- column dropped in this file; the second rewrites a surviving column, but the only
 -- thing it reads ("these pins were inactive") lives in `skill_mode`, which is dropped
 -- below, so a later operator script would have nothing to read.
--- Every surviving pin has no status until its next turn. A CHECK keeps the pins within the
--- chat's cap of 5 (every API write already did). `pinned_skills` predates this file, so the
--- CHECK scans existing rows; `auto` rows are emptied above, `manual`/`strict` rows keep their pins.
--- Preflight, expected 0 (otherwise this migration fails and applies nothing):
---   SELECT count(*) FROM chat_sessions
---   WHERE skill_mode <> 'auto' AND cardinality(pinned_skills) > 5;
+-- Every surviving pin has no status until its next turn; `manual`/`strict` rows keep their pins.
 -- Rollback: the old modes cannot be rebuilt and the `auto` pins are gone; restore a backup.
 -- The previous code reads `skill_mode`, dropped here, so it cannot run on this schema.
 
@@ -22,5 +17,4 @@ ALTER TABLE "chat_sessions" ADD COLUMN "skill_status" jsonb DEFAULT '{}'::jsonb 
 UPDATE "chat_sessions" SET "skill_discovery" = false WHERE "skill_mode" = 'strict';--> statement-breakpoint
 UPDATE "chat_sessions" SET "pinned_skills" = '{}' WHERE "skill_mode" = 'auto' AND "pinned_skills" <> '{}';--> statement-breakpoint
 ALTER TABLE "chat_sessions" DROP COLUMN "skill_mode";--> statement-breakpoint
-DROP TYPE "public"."chat_skill_mode";--> statement-breakpoint
-ALTER TABLE "chat_sessions" ADD CONSTRAINT "chat_sessions_pinned_skills_cap" CHECK (cardinality(pinned_skills) <= 5);
+DROP TYPE "public"."chat_skill_mode";

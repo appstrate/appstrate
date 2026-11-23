@@ -118,7 +118,6 @@ import {
   useConversationSkillsContext,
   useDraftSkillsOf,
 } from "./use-conversation-skills.ts";
-import { MAX_PINNED_SKILLS } from "../skills.ts";
 
 export function Thread({
   composerTools,
@@ -653,10 +652,10 @@ function Composer({
   const message = running ? joinQueued([...queued.items, draft]) : draft;
   const conversationSkills = useConversationSkillsContext()?.skills ?? null;
   const draftSkills = useDraftSkillsOf(conversationSkills, message);
-  // What the message names must be sendable: one agent, skills within the cap.
-  const issue = draftIssue(message, draftSkills.effective.overCap);
+  // What the message names must be sendable: one agent.
+  const issue = draftIssue(message);
   const issueId = React.useId();
-  const canQueue = canQueueDraft({ running, text: composer.value, hasAttachments, issue });
+  const canQueue = canQueueDraft({ running, text: composer.value, hasAttachments });
   const enqueue = () => {
     if (canQueue && queue.add(composer.value)) composer.setText("");
   };
@@ -766,11 +765,7 @@ function Composer({
             role="status"
             className={issue ? cn(NOTE_TEXT_CLASS, "text-destructive") : "sr-only"}
           >
-            {issue === "agents"
-              ? t("composer.oneAgentOnly")
-              : issue === "pins"
-                ? t("skills.chosenMax", { max: MAX_PINNED_SKILLS })
-                : ""}
+            {issue === "agents" ? t("composer.oneAgentOnly") : ""}
           </p>
         </CommandTriggers>
       </DraftSkillsProvider>

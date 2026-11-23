@@ -5,11 +5,17 @@
 import type { TriggerItem } from "@assistant-ui/core";
 import type { ChatCommands } from "../commands.ts";
 import { AGENT_DIRECTIVE, SKILL_DIRECTIVE, directivesOf } from "../directives.ts";
-import type { EffectiveSkills } from "./chat-skills.ts";
+import {
+  exceedsBudget,
+  pinIds,
+  skillBudget,
+  type EffectiveSkills,
+  type StoredSkills,
+} from "./chat-skills.ts";
 
 interface CommandContext {
-  /** The pins, and those with the draft's citations; `null`: no skill is listed here. */
-  skills: { pinned: readonly string[]; effective: EffectiveSkills } | null;
+  /** The conversation's skills, and those with the draft's citations; `null`: no skill is listed here. */
+  skills: { stored: StoredSkills; effective: EffectiveSkills } | null;
   /** A turn runs: the draft will be queued, so no agent is offered. */
   running: boolean;
   draft: string;
@@ -17,16 +23,19 @@ interface CommandContext {
 
 export interface CommandList {
   items: TriggerItem[];
-  /** Skills past the pin cap: not offered, the menu says why. */
-  capped: TriggerItem[];
+  /** Skills that would take the pins past their budget: not offered, the menu says why. */
+  overBudget: TriggerItem[];
 }
 
-/** The skills offered (into the result), those past the cap into `capped`. */
+/** The skills offered (into the result), those past the budget into `overBudget`. */
 function skillItems(
   commands: ChatCommands,
-  { pinned, effective }: NonNullable<CommandContext["skills"]>,
-  capped: TriggerItem[],
+  { stored, effective }: NonNullable<CommandContext["skills"]>,
+  overBudget: TriggerItem[],
 ): TriggerItem[] {
+  const pinned = pinIds(stored);
+  const bytes = new Map(commands.skills.map((skill) => [skill.id, skill.bytes]));
+  const budget = skillBudget(stored, effective, (id) => bytes.get(id) ?? null);
   const offered: TriggerItem[] = [];
   for (const skill of commands.skills) {
     const isPinned = pinned.includes(skill.id);
@@ -41,19 +50,20 @@ function skillItems(
         cited: !isPinned && effective.cited.has(skill.id),
       },
     };
-    (effective.ids.includes(skill.id) || !effective.atCap ? offered : capped).push(item);
+    const fits = effective.ids.includes(skill.id) || !exceedsBudget(budget, skill.bytes);
+    (fits ? offered : overBudget).push(item);
   }
   return offered;
 }
 
-/** Skills then agents; no agent once the draft names one, no new skill past the cap. */
+/** Skills then agents; no agent once the draft names one, no new skill past the budget. */
 export function commandList(
   commands: ChatCommands,
   { skills, running, draft }: CommandContext,
 ): CommandList {
   const named = directivesOf(draft);
-  const list: CommandList = { items: [], capped: [] };
-  if (skills) list.items.push(...skillItems(commands, skills, list.capped));
+  const list: CommandList = { items: [], overBudget: [] };
+  if (skills) list.items.push(...skillItems(commands, skills, list.overBudget));
   if (!running && !named.some((d) => d.type === AGENT_DIRECTIVE)) {
     for (const agent of commands.agents) {
       list.items.push({
@@ -99,15 +109,15 @@ export function searchCommands(items: readonly TriggerItem[], query: string): Tr
 }
 
 /**
- * The menu has nothing to show for `query`: no offered entry and no capped skill matches it. A
- * capped match keeps the menu open, to say why that skill cannot be added, and keeps Enter from
- * sending the `/token`. While the commands load (`list` null) the menu stays open.
+ * The menu has nothing to show for `query`: no offered entry and no over-budget skill matches it.
+ * An over-budget match keeps the menu open, to say why that skill cannot be added, and keeps Enter
+ * from sending the `/token`. While the commands load (`list` null) the menu stays open.
  */
 export function noCommandMatch(list: CommandList | null, query: string): boolean {
   return (
     list !== null &&
     searchCommands(list.items, query).length === 0 &&
-    searchCommands(list.capped, query).length === 0
+    searchCommands(list.overBudget, query).length === 0
   );
 }
 

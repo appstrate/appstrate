@@ -137,7 +137,6 @@
   "skills.title": "Compétences de la conversation",
   "skills.chooseHeading": "Compétences",
   "skills.cited": "Citée dans le message",
-  "skills.chosenMax": "Maximum atteint : {{max}} compétences.",
   "skills.loading": "Chargement des compétences…",
   "skills.empty": "Aucune compétence disponible dans vos espaces.",
   "skills.error": "Les compétences n'ont pas pu être chargées.",

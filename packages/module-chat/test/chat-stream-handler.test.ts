@@ -1647,7 +1647,6 @@ describe("handleChatStream", () => {
       { skill_mode: "strict" },
       { pinned_skills: ["@a/1"] },
       { pins: ["not-a-package-id"] },
-      { pins: ["@a/1", "@a/2", "@a/3", "@a/4", "@a/5", "@a/6"] },
     ]) {
       const res = await postChat(mintSessionId(), undefined, scriptedEngine().engine, { body });
       expect(res.status).toBe(400);

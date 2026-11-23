@@ -20,9 +20,6 @@ export interface SkillContent {
 /** The characters the pinned skills' SKILL.md bodies may take in one turn, all skills together. */
 export const CHAT_SKILLS_CONTENT_BUDGET_CHARS = 64_000;
 
-/** Every pinned skill is injected in full on every turn: a context-budget bound. */
-export const MAX_PINNED_SKILLS = 5;
-
 /** A set of pins as every write stores it: each id once, sorted. */
 export const normalizePins = (pins: readonly string[]): string[] => [...new Set(pins)].sort();
 

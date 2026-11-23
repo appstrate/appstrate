@@ -14,7 +14,7 @@ import { afterAll, beforeAll, describe, expect, it } from "bun:test";
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { MAX_PINNED_SKILLS, type PinnedSkill } from "../src/skills.ts";
+import type { PinnedSkill } from "../src/skills.ts";
 import { pinIds } from "../src/ui/chat-skills.ts";
 import { sessionQueryKey, type SessionHistory } from "../src/ui/sessions.ts";
 import {
@@ -222,14 +222,14 @@ describe("useConversationSkills on a conversation the server holds", () => {
     await unmount();
   });
 
-  it("pins nothing past the cap, and nothing at all where the panel is not offered", async () => {
-    const full = Array.from({ length: MAX_PINNED_SKILLS }, (_, i) => pin(`@a/${i}`));
-    const { server, transport } = fakeServer({ skill_discovery: true, pins: full });
+  it("pins cited skills however many are pinned, and nothing where the panel is not offered", async () => {
+    const many = Array.from({ length: 12 }, (_, i) => pin(`@a/${String(i).padStart(2, "0")}`));
+    const { server, transport } = fakeServer({ skill_discovery: true, pins: many });
     const { result, unmount } = await mount(transport, true);
-    let pinned: boolean | undefined;
-    await act(async () => void (pinned = await result.current.pinCited(["@a/extra"])));
-    expect(pinned).toBe(false);
-    expect(server.patches).toEqual([]);
+    await act(async () => result.current.pinCited(["@a/extra"]));
+    expect(server.patches).toEqual([
+      { pins: [...many.map((p) => p.id), "@a/extra"], skill_discovery: true },
+    ]);
     await unmount();
     const off = await mount(fakeServer({ skill_discovery: true, pins: [] }).transport, true, false);
     await act(async () => off.result.current.setPin("@a/x", true));
@@ -313,9 +313,7 @@ describe("useConversationSkills on a new conversation", () => {
     await settle();
     expect(result.current.held).toBe(false);
     server.row = { skill_discovery: true, pins: [] };
-    let pinned: boolean | undefined;
-    await act(async () => void (pinned = await result.current.pinCited(["@a/cited"])));
-    expect(pinned).toBe(true);
+    await act(async () => result.current.pinCited(["@a/cited"]));
     // Held by the server before the message leaves: the turn reads it.
     expect(server.patches).toEqual([{ pins: ["@a/cited"], skill_discovery: true }]);
     expect(server.row?.pins.map((p) => p.id)).toEqual(["@a/cited"]);

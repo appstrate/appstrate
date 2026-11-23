@@ -867,8 +867,7 @@ function ConversationInner({
   const send = useCallback<typeof sendMessage>(
     async (message, options) => {
       const sent = sendWithDirectives(message);
-      // Past the cap the composer refuses the draft before it gets here: nothing leaves.
-      if (!(await pinCited(sent.skills))) return;
+      await pinCited(sent.skills);
       return sendMessage(sent.message, options);
     },
     [sendMessage, pinCited],

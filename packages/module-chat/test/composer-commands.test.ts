@@ -11,14 +11,33 @@ import {
   searchCommands,
   slashMatch,
 } from "../src/ui/composer-commands.ts";
-import { citedSkillIds, effectiveSkills } from "../src/ui/chat-skills.ts";
+import { CHAT_SKILLS_CONTENT_BUDGET_CHARS } from "../src/skills.ts";
+import { citedSkillIds, effectiveSkills, type StoredSkills } from "../src/ui/chat-skills.ts";
 
 const commands: ChatCommands = {
   skills: [
-    { id: "@acme/tone", name: "tone", description: "Adjusts the tone of a text", version: "1.2.0" },
-    { id: "@acme/pdf", name: "pdf", description: "Reads PDF files, tone aside", version: null },
-    { id: "@acme/pdf-tools", name: "pdf-tools", description: "More PDF", version: null },
-    { id: "@other/tone", name: "tone", description: "Another tone", version: null },
+    {
+      id: "@acme/tone",
+      name: "tone",
+      description: "Adjusts the tone of a text",
+      version: "1.2.0",
+      bytes: 1_000,
+    },
+    {
+      id: "@acme/pdf",
+      name: "pdf",
+      description: "Reads PDF files, tone aside",
+      version: null,
+      bytes: 2_000,
+    },
+    {
+      id: "@acme/pdf-tools",
+      name: "pdf-tools",
+      description: "More PDF",
+      version: null,
+      bytes: 3_000,
+    },
+    { id: "@other/tone", name: "tone", description: "Another tone", version: null, bytes: null },
   ],
   agents: [
     {
@@ -31,11 +50,17 @@ const commands: ChatCommands = {
     },
   ],
 };
-/** The menu's context over `pinned` and the skills `draft` cites, as the composer computes it. */
-const skillsOf = (pinned: string[], draft = "") => ({
-  pinned,
-  effective: effectiveSkills(pinned, citedSkillIds(draft)),
-});
+/** The menu's context over `pinned` (loaded at `chars` each) and the skills `draft` cites. */
+const skillsOf = (pinned: string[], draft = "", chars = 0) => {
+  const stored: StoredSkills = {
+    skillDiscovery: true,
+    pins: pinned.map((id) => ({ id, status: "injected", chars })),
+  };
+  return { stored, effective: effectiveSkills(pinned, citedSkillIds(draft)) };
+};
+/** Pins loaded at sizes leaving `room` characters of the budget. */
+const leaving = (room: number, draft = "") =>
+  skillsOf(["@acme/tone"], draft, CHAT_SKILLS_CONTENT_BUDGET_CHARS - room);
 const ctx = { skills: skillsOf([]), running: false, draft: "" };
 
 describe("commandList", () => {
@@ -79,23 +104,35 @@ describe("commandList", () => {
     );
   });
 
-  it("holds back a new skill at the cap, counting the draft's, and says which", () => {
+  it("holds back a new skill whose size would pass the budget, and says which", () => {
     const draft = serializeDirective({ type: "skill", label: "tone", id: "@other/tone" });
-    const list = commandList(commands, {
-      ...ctx,
-      skills: skillsOf(["@x/1", "@x/2", "@x/3", "@acme/tone"], draft),
-      draft,
-    });
-    // Pinned or already in the draft: still offered, marked as such. Any other is capped.
+    const list = commandList(commands, { ...ctx, skills: leaving(2_500, draft), draft });
+    // Pinned or cited: offered, marked as such. A size that fits, or an unknown one, is offered.
     expect(list.items.filter((i) => i.type === "skill").map((i) => i.id)).toEqual([
       "@acme/tone",
+      "@acme/pdf",
       "@other/tone",
     ]);
     const meta = (id: string) => list.items.find((i) => i.id === id)?.metadata;
     expect(meta("@acme/tone")).toMatchObject({ pinned: true, cited: false });
     // Only cited in the draft: never « already pinned ».
     expect(meta("@other/tone")).toMatchObject({ pinned: false, cited: true });
-    expect(list.capped.map((i) => i.id)).toEqual(["@acme/pdf", "@acme/pdf-tools"]);
+    expect(list.overBudget.map((i) => i.id)).toEqual(["@acme/pdf-tools"]);
+  });
+
+  it("counts the draft's cited skills against the budget", () => {
+    const draft = serializeDirective({ type: "skill", label: "pdf", id: "@acme/pdf" });
+    const list = commandList(commands, { ...ctx, skills: leaving(4_000, draft), draft });
+    // 2 000 of the 4 000 left go to the cited pdf: pdf-tools' 3 000 no longer fit.
+    expect(list.overBudget.map((i) => i.id)).toEqual(["@acme/pdf-tools"]);
+    expect(commandList(commands, { ...ctx, skills: leaving(4_000) }).overBudget).toEqual([]);
+  });
+
+  it("offers every skill however many are pinned, while they fit", () => {
+    const pinned = Array.from({ length: 12 }, (_, i) => `@x/${i}`);
+    expect(commandList(commands, { ...ctx, skills: skillsOf(pinned, "", 100) }).overBudget).toEqual(
+      [],
+    );
   });
 });
 
@@ -125,12 +162,11 @@ describe("searchCommands", () => {
 });
 
 describe("noCommandMatch", () => {
-  it("keeps the menu open for a skill held back by the cap, so the menu says why", () => {
-    const pinned = ["@acme/tone", "@other/tone", "@x/a", "@x/b", "@x/c"];
-    const list = commandList(commands, { ...ctx, skills: skillsOf(pinned), running: true });
-    // At the cap nothing offered matches `pdf`: both pdf skills are held back.
+  it("keeps the menu open for a skill held back by the budget, so the menu says why", () => {
+    const list = commandList(commands, { ...ctx, skills: leaving(1_500), running: true });
+    // Nothing offered matches `pdf`: both pdf skills would pass the budget.
     expect(searchCommands(list.items, "pdf")).toEqual([]);
-    expect(searchCommands(list.capped, "pdf").map((i) => i.id)).toEqual([
+    expect(searchCommands(list.overBudget, "pdf").map((i) => i.id)).toEqual([
       "@acme/pdf",
       "@acme/pdf-tools",
     ]);
@@ -138,7 +174,7 @@ describe("noCommandMatch", () => {
     expect(slashMatch("/pdf", 4, (q) => noCommandMatch(list, q))?.query).toBe("pdf");
   });
 
-  it("closes when neither an entry nor a capped skill matches, and stays open while loading", () => {
+  it("closes when neither an entry nor an over-budget skill matches, and stays open while loading", () => {
     const list = commandList(commands, ctx);
     expect(noCommandMatch(list, "usr")).toBe(true);
     expect(noCommandMatch(list, "tone")).toBe(false);

@@ -25,7 +25,7 @@ import {
   useQueryClient,
   type QueryClient,
 } from "@tanstack/react-query";
-import { MAX_PINNED_SKILLS, normalizePins } from "../skills.ts";
+import { normalizePins } from "../skills.ts";
 import {
   DEFAULT_STORED_SKILLS,
   citedSkillIds,
@@ -58,9 +58,9 @@ export interface ConversationSkillsState {
   reset: () => void;
   /**
    * Pins the skills a message cites before it is sent; resolves once the server holds them, or
-   * once the turn is the one to carry them. `false`: they would pass the cap, nothing is pinned.
+   * once the turn is the one to carry them.
    */
-  pinCited: (ids: readonly string[]) => Promise<boolean>;
+  pinCited: (ids: readonly string[]) => Promise<void>;
   /** What the turn being sent creates the conversation with; `undefined` once the row is read. */
   takeForTurn: () => SkillSelection | undefined;
 }
@@ -205,19 +205,17 @@ export function useConversationSkills({
   );
 
   const pinCited = useCallback(
-    async (ids: readonly string[]): Promise<boolean> => {
-      if (!getEnabled()) return true;
+    async (ids: readonly string[]): Promise<void> => {
+      if (!getEnabled()) return;
       // The server ignores a turn's pins for a conversation it holds: know whether it does.
       if (!heldRow()) await reread();
       const now = current();
       const next = { ...now, pins: normalizePins([...now.pins, ...ids]) };
-      if (next.pins.length === now.pins.length) return true;
-      if (next.pins.length > MAX_PINNED_SKILLS) return false;
+      if (next.pins.length === now.pins.length) return;
       // A failure is toasted by the host; the message is still sent.
       if (heldRow()) {
         if (transport) await mutateAsync(next).catch(() => {});
       } else if (!persisted) setSelection(next);
-      return true;
     },
     [getEnabled, heldRow, reread, current, transport, mutateAsync, persisted, setSelection],
   );

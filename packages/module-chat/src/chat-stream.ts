@@ -51,12 +51,7 @@ import { acquirePiChatSlot, chatCapacityError } from "./pi-chat/concurrency.ts";
 import { callerGrants, turnPermissions, turnUsesDrafts } from "./turn-permissions.ts";
 import { buildSystemPrompt, buildCallerContextBlock, type ChatEnv } from "./prompt.ts";
 import { scopedNameRegex } from "@appstrate/core/validation";
-import {
-  DEFAULT_SKILL_SELECTION,
-  MAX_PINNED_SKILLS,
-  normalizePins,
-  type ChatSkillSelection,
-} from "./skills.ts";
+import { DEFAULT_SKILL_SELECTION, normalizePins, type ChatSkillSelection } from "./skills.ts";
 export type { ChatEnv } from "./prompt.ts";
 import { finalizeChatStream } from "./finalize-stream.ts";
 import {
@@ -150,10 +145,7 @@ export const CHAT_MESSAGE_MAX_BYTES = 256 * 1024;
 /** A set of pinned skills, as the turn and the skills PATCH take it: stored deduplicated and sorted. */
 export const pinnedSkillIdsSchema = z
   .array(z.string().regex(scopedNameRegex, { error: "Must be a package id in @scope/name form" }))
-  .transform(normalizePins)
-  .pipe(
-    z.array(z.string()).max(MAX_PINNED_SKILLS, { error: `At most ${MAX_PINNED_SKILLS} skills` }),
-  );
+  .overwrite(normalizePins);
 
 export const chatStreamSchema = z
   .object({

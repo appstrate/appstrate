@@ -12,8 +12,8 @@ The chat could _name_ skills but never _use_ one, and its Pi session is delibera
 
 ## Model
 
-Each conversation has two skill settings on `chat_sessions`: `pinned_skills` (the user's pins, at
-most 5) and `skill_discovery` (default `true`).
+Each conversation has two skill settings on `chat_sessions`: `pinned_skills` (the user's pins, any
+number) and `skill_discovery` (default `true`).
 
 **Invariant**: a skill shown as loaded is injected in the model's context. The server is the only
 source of truth for the pins; the client never infers "loaded".
@@ -47,8 +47,8 @@ read, not new input.
 
 ## Stored state
 
-`chat_sessions` carries `skill_discovery boolean`, `pinned_skills text[]` (sorted, deduplicated,
-CHECK-capped at 5, no FK) and `skill_status jsonb`
+`chat_sessions` carries `skill_discovery boolean`, `pinned_skills text[]` (sorted, deduplicated, no
+FK) and `skill_status jsonb`
 (`{ [packageId]: { status: "injected" | "over_budget" | "unavailable" | "unreadable", chars } }`).
 
 Every session DTO carries `skill_discovery` and `pins: [{ id, status, chars }]`, sorted by id.
@@ -74,13 +74,17 @@ if a live turn holds the conversation (answered first). Neither writes anything.
 ### Rationale
 
 - **User-only pins**: an assistant read that pinned would add skills the user never chose, sharing
-  their cap and budget.
+  their budget.
 - **PATCH of the full set**: the client always knows what was applied (the answer is the session),
   a change needs no message, and a fresh conversation's choices ride with its first `POST`, so
   choosing creates no conversation, row or navigation.
 - **`status`/`chars` on the row**: the panel reads real state from the session DTO and never
   guesses; the turn that evaluates is the one that writes.
-- **Arrays + CHECK, no child table**: a replace-on-write set read with the session row needs none.
+- **Arrays, no child table**: a replace-on-write set read with the session row needs none.
+- **One limit, the budget**: a count cap would refuse a sixth small skill while most of the 64 000
+  characters sit unused. The budget is what the context can hold; a pin past it is kept and shown
+  `over_budget`, and the panel refuses a pin whose listed size would not fit. A turn reads only the
+  pins its skill listings serve, so the number of reads stays bounded by the skills the caller has.
 - **One discovery switch**: `listSkills` and `resources/read` on a non-injected skill both answer to
   `skills:read`, so a separate listing-tool setting would not hold.
 

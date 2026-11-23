@@ -3257,7 +3257,7 @@ export interface paths {
         head?: never;
         /**
          * Set a chat session's pinned skills or skill discovery
-         * @description `pins` replaces the whole set of pinned skills (deduplicated and sorted, at most 5); a pin it drops loses its status, a new one has none until a turn evaluates it. `skill_discovery` sets the discovery switch. At least one of the two. Allowed while a turn is running: that turn keeps the skills it started with, and the next turn reads these. Never reorders the conversation list.
+         * @description `pins` replaces the whole set of pinned skills (deduplicated and sorted; any number, held to the content budget each turn); a pin it drops loses its status, a new one has none until a turn evaluates it. `skill_discovery` sets the discovery switch. At least one of the two. Allowed while a turn is running: that turn keeps the skills it started with, and the next turn reads these. Never reorders the conversation list.
          */
         patch: operations["updateChatSessionSkills"];
         trace?: never;
@@ -6385,7 +6385,7 @@ export interface components {
             unread: boolean;
             /** @description Whether the assistant may find skills beyond the pinned ones. On: the skills of the spaces the conversation can act in (its origin space alone when it is limited), minus the pinned ones, are listed in the context and the assistant loads what fits. Off: the turn holds no `skills:*` permission, so it lists, loads, declares and writes no other skill. Set by PATCH /api/orgs/{orgId}/chat/sessions/{id}/skills, or by the turn that creates the conversation. */
             skill_discovery: boolean;
-            /** @description The skills the user pinned to this conversation, sorted by id: injected in full on every turn, whatever `skill_discovery`. Set by PATCH /api/orgs/{orgId}/chat/sessions/{id}/skills, or by the turn that creates the conversation. The assistant reading a skill's SKILL.md pins nothing. */
+            /** @description The skills the user pinned to this conversation, sorted by id: injected in full on every turn, in that order, within the 64000-character budget, whatever `skill_discovery`; a pin that does not fit is reported `over_budget`. Set by PATCH /api/orgs/{orgId}/chat/sessions/{id}/skills, or by the turn that creates the conversation. The assistant reading a skill's SKILL.md pins nothing. */
             pins: {
                 /** @description `@scope/name` package id. */
                 id: string;

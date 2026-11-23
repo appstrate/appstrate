@@ -137,7 +137,6 @@
   "skills.title": "Conversation skills",
   "skills.chooseHeading": "Skills",
   "skills.cited": "Cited in the message",
-  "skills.chosenMax": "Limit reached: {{max}} skills.",
   "skills.loading": "Loading skills…",
   "skills.empty": "No skill is available in your spaces.",
   "skills.error": "Skills could not be loaded.",

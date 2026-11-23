@@ -13,12 +13,20 @@ import { PinIcon } from "lucide-react";
 import { Button } from "@appstrate/ui/components/button";
 import { cn } from "@appstrate/ui/cn";
 import { SKILL_DIRECTIVE } from "../directives.ts";
-import { MAX_PINNED_SKILLS } from "../skills.ts";
-import { skillLoadOf, skillLoadState, type SkillLoadState } from "./chat-skills.ts";
+import {
+  effectiveSkills,
+  exceedsBudget,
+  pinIds,
+  skillBudget,
+  skillLoadOf,
+  skillLoadState,
+  type SkillLoadState,
+} from "./chat-skills.ts";
 import { DirectiveChip } from "./directive-chip.tsx";
-import { useChatHost } from "./runtime-context.ts";
+import { useChatHost, useChatTransport } from "./runtime-context.ts";
 import { ToolFallback } from "./tool-fallback.tsx";
 import { deriveToolPhase } from "./tool-result.ts";
+import { useChatCommands } from "./use-chat-commands.ts";
 import { useConversationSkillsContext } from "./use-conversation-skills.ts";
 
 /** What the live region reads out, naming the skill. */
@@ -43,17 +51,22 @@ type ResourceReadProps = ToolCallMessagePartProps<Record<string, unknown>, unkno
 
 /**
  * Pins the skill read to the conversation: offered once the server holds the conversation and
- * while the skill is not pinned; at the cap it stays focusable and says why it cannot.
+ * while the skill is not pinned. When its listed size would take the pins past their budget it
+ * stays focusable and says why it cannot; an unlisted size pins.
  */
 function PinAction({ skill }: { skill: { packageId: string; name: string } }) {
   const { t } = useChatHost();
   const conversation = useConversationSkillsContext();
+  const catalogue = useChatCommands(useChatTransport() ?? undefined, !!conversation?.held);
   const reasonId = useId();
   if (!conversation?.held) return null;
   const { skills, setPin } = conversation;
   if (skills.pins.some((pin) => pin.id === skill.packageId)) return null;
-  const atCap = skills.pins.length >= MAX_PINNED_SKILLS;
-  const reason = t("skills.chosenMax", { max: MAX_PINNED_SKILLS });
+  const listed = catalogue.data?.skills ?? [];
+  const bytesOf = (id: string) => listed.find((s) => s.id === id)?.bytes ?? null;
+  const budget = skillBudget(skills, effectiveSkills(pinIds(skills), []), bytesOf);
+  const overBudget = exceedsBudget(budget, bytesOf(skill.packageId));
+  const reason = t("skills.budget.wouldExceed");
   return (
     <>
       <Button
@@ -62,18 +75,18 @@ function PinAction({ skill }: { skill: { packageId: string; name: string } }) {
         size="sm"
         data-testid="skill-load-pin"
         aria-label={t("skills.load.pinLabel", { name: skill.name })}
-        aria-disabled={atCap || undefined}
-        aria-describedby={atCap ? reasonId : undefined}
-        title={atCap ? reason : undefined}
+        aria-disabled={overBudget || undefined}
+        aria-describedby={overBudget ? reasonId : undefined}
+        title={overBudget ? reason : undefined}
         onClick={() => {
-          if (!atCap) setPin(skill.packageId, true);
+          if (!overBudget) setPin(skill.packageId, true);
         }}
-        className={cn("h-6 gap-1 px-1.5 text-xs", atCap && "cursor-not-allowed opacity-50")}
+        className={cn("h-6 gap-1 px-1.5 text-xs", overBudget && "cursor-not-allowed opacity-50")}
       >
         <PinIcon className="size-3" />
         {t("skills.load.pin")}
       </Button>
-      {atCap && (
+      {overBudget && (
         <span id={reasonId} className="sr-only">
           {reason}
         </span>

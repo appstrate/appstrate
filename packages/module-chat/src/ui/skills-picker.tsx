@@ -11,7 +11,6 @@ import { Skeleton } from "@appstrate/ui/components/skeleton";
 import { Switch } from "@appstrate/ui/components/switch";
 import { Popover, PopoverAnchor, PopoverContent } from "@appstrate/ui/components/popover";
 import { cn } from "@appstrate/ui/cn";
-import { MAX_PINNED_SKILLS } from "../skills.ts";
 import {
   exceedsBudget,
   skillBudget,
@@ -93,7 +92,6 @@ export function SkillsPickerPanel({
   const loading = catalogue.isLoading;
 
   const { effective } = draft;
-  const atPinCap = effective.atCap;
   const rows = skillPickerRows(skills, effective.ids);
   const bytes = new Map(skills.map((skill) => [skill.id, skill.bytes]));
   const budget = skillBudget(conversation, effective, (id) => bytes.get(id) ?? null);
@@ -103,10 +101,14 @@ export function SkillsPickerPanel({
   );
   const somePending = states.some((state) => state.kind === "pending");
 
-  const togglePin = (packageId: string, checked: boolean) => {
-    // A cited skill is the message's: only removing its chip drops it. Past the cap, nothing pins.
-    if (effective.cited.has(packageId) || (!checked && atPinCap)) return;
-    actions.setPin(packageId, !checked);
+  /** An unpinned skill whose listed size would take the pins past their budget. */
+  const overBudgetOf = (skill: { bytes: number | null }, checked: boolean) =>
+    !checked && exceedsBudget(budget, skill.bytes);
+
+  const togglePin = (skill: { id: string; bytes: number | null }, checked: boolean) => {
+    // A cited skill is the message's: only removing its chip drops it. Past the budget, nothing pins.
+    if (effective.cited.has(skill.id) || overBudgetOf(skill, checked)) return;
+    actions.setPin(skill.id, !checked);
   };
 
   return (
@@ -134,11 +136,6 @@ export function SkillsPickerPanel({
         <div className="text-muted-foreground px-1 py-1 text-[0.65rem] font-semibold tracking-wider uppercase">
           {t("skills.chooseHeading")}
         </div>
-        {atPinCap && (
-          <p className={cn(NOTE_CLASS, "pb-1")}>
-            {t("skills.chosenMax", { max: MAX_PINNED_SKILLS })}
-          </p>
-        )}
         {loading ? (
           <div role="status" aria-busy="true" aria-label={t("skills.loading")}>
             {[0, 1, 2, 3].map((i) => (
@@ -162,8 +159,9 @@ export function SkillsPickerPanel({
             const state = skillRowState(conversation, skill.id);
             const isCited = effective.cited.has(skill.id);
             const checked = state.kind !== "off" || isCited;
+            const overBudget = overBudgetOf(skill, checked);
             // Not `disabled`: a locked row stays focusable, so its reason is still read out.
-            const inert = (!checked && atPinCap) || isCited;
+            const inert = overBudget || isCited;
             const refused = state.kind === "refused";
             // A refusal says why the skill is out, even for a cited one; else the lock's reason.
             const caption = refused
@@ -171,7 +169,6 @@ export function SkillsPickerPanel({
               : isCited
                 ? t("skills.cited")
                 : null;
-            const overBudget = !checked && exceedsBudget(budget, skill.bytes);
             const hasDetails =
               !!caption || overBudget || (available ? !!skill.description : !refused);
             return (
@@ -185,7 +182,7 @@ export function SkillsPickerPanel({
                   aria-labelledby={nameId}
                   aria-describedby={hasDetails ? detailsId : undefined}
                   data-cited={isCited || undefined}
-                  onCheckedChange={() => togglePin(skill.id, checked)}
+                  onCheckedChange={() => togglePin(skill, checked)}
                   className={cn("mt-0.5 shrink-0", inert && "cursor-not-allowed opacity-50")}
                 />
                 <label

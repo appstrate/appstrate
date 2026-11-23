@@ -9,21 +9,24 @@
 
 import { describe, expect, it } from "bun:test";
 import { renderToStaticMarkup } from "react-dom/server";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 
-import { ChatHostProvider } from "../src/ui/runtime-context.ts";
+import { CHAT_SKILLS_CONTENT_BUDGET_CHARS } from "../src/skills.ts";
+import { ChatHostProvider, ChatTransportProvider } from "../src/ui/runtime-context.ts";
 import { skillLoadOf, skillLoadState, type StoredSkills } from "../src/ui/chat-skills.ts";
 import { ResourceReadTool } from "../src/ui/skill-load.tsx";
 import {
   ConversationSkillsProvider,
   type ConversationSkillsState,
 } from "../src/ui/use-conversation-skills.ts";
+import { transportOf } from "./fake-request.ts";
 import { testHost } from "./test-host.ts";
 
-/** The conversation's skills as the thread reads them: `held`, pins of `ids`. */
-function conversationOf(ids: string[], held = true): ConversationSkillsState {
+/** The conversation's skills as the thread reads them: `held`, pins of `ids` loaded at `chars`. */
+function conversationOf(ids: string[], held = true, chars = 100): ConversationSkillsState {
   const skills: StoredSkills = {
     skillDiscovery: true,
-    pins: ids.map((id) => ({ id, status: "injected", chars: 100 })),
+    pins: ids.map((id) => ({ id, status: "injected", chars })),
   };
   return {
     skills,
@@ -31,12 +34,13 @@ function conversationOf(ids: string[], held = true): ConversationSkillsState {
     setPin: () => {},
     setDiscovery: () => {},
     reset: () => {},
-    pinCited: async () => true,
+    pinCited: async () => {},
     takeForTurn: () => undefined,
   };
 }
 
 const SKILL_MD = "skill://spc_a/acme/tone/brand-tone/SKILL.md";
+const transport = transportOf(() => ({ "X-Org-Id": "org_1" }), null);
 const host = testHost({
   t: (key, options) => (options?.name ? `${key} name=${String(options.name)}` : key),
 });
@@ -50,14 +54,27 @@ function render(
     status: { type: string };
   },
   conversation: ConversationSkillsState | null = conversationOf([]),
+  /** The read skill's listed size in the commands catalogue; `undefined`: not listed. */
+  bytes?: number | null,
 ): string {
   const props = { type: "tool-call", toolCallId: "call_1", toolName: "read_resource", ...part };
+  const qc = new QueryClient();
+  if (bytes !== undefined) {
+    qc.setQueryData(["packages", "chat-commands", "org_1", null, true], {
+      skills: [{ id: "@acme/tone", name: "brand-tone", description: "", version: null, bytes }],
+      agents: [],
+    });
+  }
   return renderToStaticMarkup(
-    <ChatHostProvider value={host}>
-      <ConversationSkillsProvider value={conversation}>
-        <ResourceReadTool {...(props as unknown as Parameters<typeof ResourceReadTool>[0])} />
-      </ConversationSkillsProvider>
-    </ChatHostProvider>,
+    <QueryClientProvider client={qc}>
+      <ChatHostProvider value={host}>
+        <ChatTransportProvider value={transport}>
+          <ConversationSkillsProvider value={conversation}>
+            <ResourceReadTool {...(props as unknown as Parameters<typeof ResourceReadTool>[0])} />
+          </ConversationSkillsProvider>
+        </ChatTransportProvider>
+      </ChatHostProvider>
+    </QueryClientProvider>,
   );
 }
 
@@ -126,14 +143,25 @@ describe("ResourceReadTool", () => {
     expect(render(done, null)).not.toContain("skill-load-pin");
   });
 
-  it("at the cap keeps the action focusable and says why it cannot pin", () => {
-    const full = conversationOf(["@x/1", "@x/2", "@x/3", "@x/4", "@x/5"]);
-    const html = render(done, full);
-    const action = html.match(/<button[^>]*data-testid="skill-load-pin"[^>]*>/)![0];
-    expect(action).toContain('aria-disabled="true"');
-    expect(action).toContain('title="skills.chosenMax"');
-    const describedBy = action.match(/aria-describedby="([^"]+)"/)![1];
-    expect(html).toContain(`id="${describedBy}"`);
+  it("past the budget keeps the action focusable and says why it cannot pin", () => {
+    const action = (html: string) =>
+      html.match(/<button[^>]*data-testid="skill-load-pin"[^>]*>/)![0];
+    // One pin leaves 1 000 characters of the budget.
+    const near = conversationOf(["@x/1"], true, CHAT_SKILLS_CONTENT_BUDGET_CHARS - 1_000);
+    const html = render(done, near, 1_001);
+    expect(action(html)).toContain('aria-disabled="true"');
+    expect(action(html)).toContain('title="skills.budget.wouldExceed"');
+    const describedBy = action(html).match(/aria-describedby="([^"]+)"/)![1];
+    expect(html).toMatch(new RegExp(`id="${describedBy}"[^>]*>skills.budget.wouldExceed<`));
+    // A size that fits, an unknown one, or a skill the catalogue does not list: it pins.
+    expect(action(render(done, near, 1_000))).not.toContain("aria-disabled");
+    expect(action(render(done, near, null))).not.toContain("aria-disabled");
+    expect(action(render(done, near))).not.toContain("aria-disabled");
+  });
+
+  it("pins any number of skills while they fit", () => {
+    const many = conversationOf(Array.from({ length: 12 }, (_, i) => `@x/${i}`));
+    expect(render(done, many, 1_000)).not.toMatch(/data-testid="skill-load-pin"[^>]*aria-disabled/);
   });
 
   it("marks a load still running as pending", () => {

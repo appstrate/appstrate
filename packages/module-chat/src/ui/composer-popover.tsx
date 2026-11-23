@@ -19,8 +19,6 @@ import { cn } from "@appstrate/ui/cn";
 import { AGENT_DIRECTIVE } from "../directives.ts";
 import { AgentGlyph } from "./agent-glyph.tsx";
 import type { AgentAppearance } from "./agent-appearance.ts";
-import { MAX_PINNED_SKILLS } from "../skills.ts";
-import { pinIds } from "./chat-skills.ts";
 import { commandList, noCommandMatch, searchCommands, slashMatch } from "./composer-commands.ts";
 import { useChatHost, useChatTransport } from "./runtime-context.ts";
 import { useConversationSkillsContext, useDraftSkills } from "./use-conversation-skills.ts";
@@ -54,7 +52,7 @@ export function CommandPopover() {
   const commands = useChatCommands(transport, false);
   const { data } = commands;
   const skills = useMemo(
-    () => conversation && { pinned: pinIds(conversation.skills), effective },
+    () => conversation && { stored: conversation.skills, effective },
     [conversation, effective],
   );
   const list = useMemo(
@@ -101,18 +99,18 @@ export function CommandPopover() {
         className="max-h-72 overflow-y-auto overscroll-contain p-1"
       >
         <ComposerPrimitive.TriggerPopover.Directive />
-        <Entries capped={list?.capped ?? []} failed={failed} onMenu={setMenu} />
+        <Entries overBudget={list?.overBudget ?? []} failed={failed} onMenu={setMenu} />
       </ComposerPrimitive.TriggerPopover>
     </div>
   );
 }
 
 function Entries({
-  capped,
+  overBudget,
   failed,
   onMenu,
 }: {
-  capped: readonly TriggerItem[];
+  overBudget: readonly TriggerItem[];
   failed: boolean;
   /** Hands the menu's state to the card around the listbox, which this scope cannot reach. */
   onMenu: (menu: MenuState) => void;
@@ -125,9 +123,9 @@ function Entries({
       ? { text: t("slash.loading"), className: "text-muted-foreground text-sm py-2" }
       : items.length === 0 && failed
         ? { text: t("slash.error"), className: "text-destructive text-sm py-2" }
-        : searchCommands(capped, query).length > 0
+        : searchCommands(overBudget, query).length > 0
           ? {
-              text: t("skills.chosenMax", { max: MAX_PINNED_SKILLS }),
+              text: t("skills.budget.wouldExceed"),
               className: "text-muted-foreground text-xs py-1.5",
             }
           : null;

@@ -3,7 +3,7 @@
 /**
  * The skills picker: the choosable skills are listed whether discovery is on or off, the
  * discovery switch reflects the selection, each pinned row is loaded or not loaded with its
- * reason, and the budget gauge warns before a pin would exceed it. SSR only, the panel rendered
+ * reason, and a skill whose size would exceed the budget cannot be pinned. SSR only, the panel rendered
  * without the popover's portal.
  */
 
@@ -18,7 +18,7 @@ import { SkillsPickerPanel } from "../src/ui/skills-picker.tsx";
 import { transportOf } from "./fake-request.ts";
 import { conversationScope, testHost } from "./test-host.ts";
 import type { ReactElement, ReactNode } from "react";
-import { MAX_PINNED_SKILLS, type PinnedSkill } from "../src/skills.ts";
+import type { PinnedSkill } from "../src/skills.ts";
 import { effectiveSkills, type StoredSkills } from "../src/ui/chat-skills.ts";
 import type { ConversationSkillsState, DraftSkills } from "../src/ui/use-conversation-skills.ts";
 
@@ -168,16 +168,12 @@ describe("SkillsPicker", () => {
     expect(render(false)).toContain("skills.discovery.hintOff");
   });
 
-  it("locks an unchosen skill and says why once the chosen skills reach the cap", () => {
-    const full = Array.from({ length: MAX_PINNED_SKILLS }, (_, i) => `@acme/own-${i}`);
-    const pin = (html: string) =>
-      html.match(/<button[^>]*data-testid="skill-pin-@acme\/free"[^>]*>/)![0];
-    const atCap = render(true, full);
-    expect(atCap).toContain("skills.chosenMax");
-    expect(pin(atCap)).toContain(`aria-disabled="true"`);
-    const below = render(true, full.slice(1));
-    expect(below).not.toContain("skills.chosenMax");
-    expect(pin(below)).not.toContain(`aria-disabled="true"`);
+  it("leaves every skill choosable however many are pinned, while they fit", () => {
+    const many = Array.from({ length: 12 }, (_, i) => `@acme/own-${i}`);
+    const html = render(true, many, [], [], { "@acme/free": 1_000 });
+    expect(html.match(/<button[^>]*data-testid="skill-pin-@acme\/free"[^>]*>/)![0]).not.toContain(
+      `aria-disabled="true"`,
+    );
   });
 
   it("shows a cited skill checked and locked, with its hint, even if not pinned", () => {
@@ -191,21 +187,34 @@ describe("SkillsPicker", () => {
     expect(free).not.toContain(`aria-disabled="true"`);
   });
 
-  it("counts the cited skills with the pinned ones against the cap", () => {
-    const pinned = Array.from({ length: MAX_PINNED_SKILLS - 1 }, (_, i) => `@acme/own-${i}`);
-    const html = render(true, pinned, ["@acme/cited"]);
-    expect(html).toContain("skills.chosenMax");
-    expect(html.match(/<button[^>]*data-testid="skill-pin-@acme\/free"[^>]*>/)![0]).toContain(
+  it("counts the cited skills with the pinned ones against the budget", () => {
+    const loaded: PinnedSkill = { id: "@a/loaded", status: "injected", chars: 40_000 };
+    const free = (html: string) =>
+      html.match(/<button[^>]*data-testid="skill-pin-@acme\/free"[^>]*>/)![0];
+    const sizes = { "@acme/free": 20_000, "@acme/cited": 10_000 };
+    expect(free(render(true, [loaded], [], [], sizes))).not.toContain(`aria-disabled="true"`);
+    expect(free(render(true, [loaded], ["@acme/cited"], [], sizes))).toContain(
       `aria-disabled="true"`,
     );
   });
 
   /** Toggles each row of `ids` through the rendered tree; returns what the panel handed on (`±id`). */
-  function toggleRows(pins: PinnedSkill[], cited: string[], ids: string[]): string[] {
+  function toggleRows(
+    pins: PinnedSkill[],
+    cited: string[],
+    ids: string[],
+    bytes: Record<string, number> = {},
+  ): string[] {
     const toggled: string[] = [];
     // Rows exist only once the catalogue answers: seed it, then toggle through the rendered tree.
     const qc = new QueryClient();
-    const skill = (id: string) => ({ id, name: id, description: "", version: null, bytes: null });
+    const skill = (id: string) => ({
+      id,
+      name: id,
+      description: "",
+      version: null,
+      bytes: bytes[id] ?? null,
+    });
     qc.setQueryData(["packages", "chat-commands", "org_1", null, true], {
       skills: ids.map(skill),
       agents: [],
@@ -241,10 +250,14 @@ describe("SkillsPicker", () => {
     expect(toggleRows([userPin("@a/one")], ["@a/one", "@a/two"], ["@a/one", "@a/two"])).toEqual([]);
   });
 
-  it("pins nothing past the cap, and still lets a pin be unchecked there", () => {
-    const full = Array.from({ length: MAX_PINNED_SKILLS }, (_, i) => userPin(`@a/own-${i}`));
-    expect(toggleRows(full, [], ["@a/extra", "@a/own-0"])).toEqual(["-@a/own-0"]);
-    expect(toggleRows([], [], ["@a/extra"])).toEqual(["+@a/extra"]);
+  it("pins nothing past the budget, still lets a pin be unchecked, and pins an unknown size", () => {
+    const full: PinnedSkill = { id: "@a/own", status: "injected", chars: 60_000 };
+    const sizes = { "@a/extra": 5_000 };
+    expect(toggleRows([full], [], ["@a/extra", "@a/unsized", "@a/own"], sizes)).toEqual([
+      "+@a/unsized",
+      "-@a/own",
+    ]);
+    expect(toggleRows([], [], ["@a/extra"], sizes)).toEqual(["+@a/extra"]);
   });
 
   it("names a row's checkbox by its skill alone; the caption and description describe it", () => {
@@ -362,13 +375,14 @@ describe("SkillsPicker", () => {
       expect(html).not.toContain("skills.budget.over");
     });
 
-    it("warns on a row whose size would exceed the budget, still letting it be pinned", () => {
+    it("locks a row whose size would exceed the budget, its reason describing the checkbox", () => {
       const html = render(true, [{ id: "@a/loaded", status: "injected", chars: 50_000 }], [], [], {
         "@acme/free": 20_000,
       });
       expect(html).toContain('data-testid="skill-pin-budget-@acme/free"');
       const box = html.match(/<button[^>]*data-testid="skill-pin-@acme\/free"[^>]*>/)![0];
-      expect(box).not.toContain(`aria-disabled="true"`);
+      expect(box).toContain(`aria-disabled="true"`);
+      expect(box).not.toMatch(/ disabled=""/);
       const describedBy = box.match(/aria-describedby="([^"]+)"/)![1];
       expect(html.slice(html.indexOf(`id="${describedBy}"`))).toContain(
         "skills.budget.wouldExceed",

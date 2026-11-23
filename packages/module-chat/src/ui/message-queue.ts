@@ -7,7 +7,7 @@
  * it with `useSyncExternalStore` (no setState in effects) and tests need no DOM.
  */
 
-import { namesAgent, type DraftIssue } from "./directive-send.ts";
+import { namesAgent } from "./directive-send.ts";
 
 export interface QueueSnapshot {
   readonly items: readonly string[];
@@ -25,14 +25,9 @@ export function canQueueDraft(input: {
   running: boolean;
   text: string;
   hasAttachments: boolean;
-  issue: DraftIssue | null;
 }): boolean {
   return (
-    input.running &&
-    !input.hasAttachments &&
-    input.text.trim() !== "" &&
-    !namesAgent(input.text) &&
-    input.issue !== "pins"
+    input.running && !input.hasAttachments && input.text.trim() !== "" && !namesAgent(input.text)
   );
 }
 

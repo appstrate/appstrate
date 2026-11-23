@@ -8,7 +8,7 @@
  */
 
 import { scopedNameRegex } from "@appstrate/core/validation";
-import { CHAT_SKILLS_CONTENT_BUDGET_CHARS, MAX_PINNED_SKILLS } from "./skills.ts";
+import { CHAT_SKILLS_CONTENT_BUDGET_CHARS } from "./skills.ts";
 import { chatSkillStatusValues } from "@appstrate/db/schema";
 
 const problem = {
@@ -23,7 +23,6 @@ const stdHeaders = {
 /** A list of `@scope/name` package ids, as `pins` carries it. */
 const skillIds = {
   type: "array",
-  maxItems: MAX_PINNED_SKILLS,
   items: {
     type: "string",
     pattern: scopedNameRegex.source,
@@ -84,9 +83,7 @@ export const chatComponentSchemas = {
             },
           },
         },
-        maxItems: MAX_PINNED_SKILLS,
-        description:
-          "The skills the user pinned to this conversation, sorted by id: injected in full on every turn, whatever `skill_discovery`. Set by PATCH /api/orgs/{orgId}/chat/sessions/{id}/skills, or by the turn that creates the conversation. The assistant reading a skill's SKILL.md pins nothing.",
+        description: `The skills the user pinned to this conversation, sorted by id: injected in full on every turn, in that order, within the ${CHAT_SKILLS_CONTENT_BUDGET_CHARS}-character budget, whatever \`skill_discovery\`; a pin that does not fit is reported \`over_budget\`. Set by PATCH /api/orgs/{orgId}/chat/sessions/{id}/skills, or by the turn that creates the conversation. The assistant reading a skill's SKILL.md pins nothing.`,
       },
       spaceId: {
         type: ["string", "null"],
@@ -420,7 +417,7 @@ export const chatPaths = {
       operationId: "updateChatSessionSkills",
       tags: ["Chat"],
       summary: "Set a chat session's pinned skills or skill discovery",
-      description: `\`pins\` replaces the whole set of pinned skills (deduplicated and sorted, at most ${MAX_PINNED_SKILLS}); a pin it drops loses its status, a new one has none until a turn evaluates it. \`skill_discovery\` sets the discovery switch. At least one of the two. Allowed while a turn is running: that turn keeps the skills it started with, and the next turn reads these. Never reorders the conversation list.`,
+      description: `\`pins\` replaces the whole set of pinned skills (deduplicated and sorted; any number, held to the content budget each turn); a pin it drops loses its status, a new one has none until a turn evaluates it. \`skill_discovery\` sets the discovery switch. At least one of the two. Allowed while a turn is running: that turn keeps the skills it started with, and the next turn reads these. Never reorders the conversation list.`,
       parameters: [
         { $ref: "#/components/parameters/OrgIdPath" },
         { name: "id", in: "path", required: true, schema: { type: "string" } },

@@ -3,11 +3,7 @@
 /** The skill picker's pure rules. */
 
 import { describe, expect, it } from "bun:test";
-import {
-  CHAT_SKILLS_CONTENT_BUDGET_CHARS,
-  MAX_PINNED_SKILLS,
-  type PinnedSkill,
-} from "../src/skills.ts";
+import { CHAT_SKILLS_CONTENT_BUDGET_CHARS, type PinnedSkill } from "../src/skills.ts";
 import {
   canResetSkills,
   citedSkillIds,
@@ -172,16 +168,6 @@ describe("effectiveSkills", () => {
     const e = effectiveSkills(["@acme/a", "@acme/b"], ["@acme/b", "@acme/c"]);
     expect(e.ids).toEqual(["@acme/a", "@acme/b", "@acme/c"]);
     expect([...e.cited]).toEqual(["@acme/b", "@acme/c"]);
-  });
-
-  it("counts the union against the cap", () => {
-    const pinned = Array.from({ length: MAX_PINNED_SKILLS - 1 }, (_, i) => `@x/${i}`);
-    expect(effectiveSkills(pinned, []).atCap).toBe(false);
-    expect(effectiveSkills(pinned, ["@acme/a"]).atCap).toBe(true);
-    expect(effectiveSkills(pinned, ["@acme/a"]).overCap).toBe(false);
-    expect(effectiveSkills(pinned, ["@acme/a", "@acme/b"]).overCap).toBe(true);
-    // Already pinned: no room taken.
-    expect(effectiveSkills(pinned, ["@x/0"]).atCap).toBe(false);
   });
 });
 
