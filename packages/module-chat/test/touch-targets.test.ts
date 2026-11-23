@@ -39,10 +39,12 @@ describe("the copy action", () => {
     expect(tokens(ACTION_ROW_CLASS)).toContain("h-10");
   });
 
-  it("is under the user's own message too, on touch screens only, in a 40 px row", () => {
+  it("is under the user's own message too, revealed by hover under a mouse, in a 40 px row", () => {
     const list = tokens(USER_ACTION_BAR_CLASS);
     expect(list).toContain("h-10");
-    expect(list).toContain("desktop-pointer:hidden");
+    expect(list).not.toContain("desktop-pointer:hidden");
     expect(list).not.toContain("opacity-0");
+    expect(list).toContain("desktop-pointer:group-hover:opacity-100");
+    expect(list).toContain("desktop-pointer:focus-within:opacity-100");
   });
 });

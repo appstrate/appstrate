@@ -14,9 +14,8 @@ export const ICON_BUTTON_CLASS =
   "text-muted-foreground size-10 desktop-pointer:size-7 [&_svg]:size-3.5";
 export const QUEUE_ICON_BUTTON_CLASS = "size-10 desktop-pointer:size-6";
 
-/** Copy under the user's own message: a touch screen only (a desktop pointer has no bubble to hover). */
-export const USER_ACTION_BAR_CLASS =
-  "mt-0.5 flex h-10 items-center justify-end gap-1 desktop-pointer:hidden";
+/** Copy under the user's own message: always there on touch, revealed by hover or focus under a mouse. */
+export const USER_ACTION_BAR_CLASS = `mt-0.5 h-10 justify-end desktop-pointer:h-7 ${ACTION_BAR_CLASS}`;
 
 /** Reserve the button's real box so a tap cannot remove a chip from its neighboring action. */
 export const CHIP_REMOVE_CLASS = "flex size-10 shrink-0 items-center justify-center";
