@@ -15,6 +15,7 @@ import {
   integrationConnectionShares,
   integrationConnections,
   organizationMembers,
+  organizations,
   profiles,
   spaceMembers,
   spaceRoles,
@@ -29,7 +30,9 @@ import {
   loadSpaceMember,
   MEMBERSHIP_COLUMNS,
   memberFromJoin,
+  PERSONAL_SPACE_ROLE_COLUMN,
   resolveSpaceRole,
+  toPersonalSpaceRole,
   toSpaceRoleWire,
   type SpaceAccessRow,
   type SpaceRoleRef,
@@ -116,6 +119,7 @@ async function listMembersOfSpaces(
       },
       userId: organizationMembers.userId,
       orgRole: organizationMembers.role,
+      storedPersonalSpaceRole: PERSONAL_SPACE_ROLE_COLUMN,
       name: userTable.name,
       email: userTable.email,
       displayName: profiles.displayName,
@@ -123,6 +127,7 @@ async function listMembersOfSpaces(
       ...MEMBERSHIP_COLUMNS,
     })
     .from(spaces)
+    .innerJoin(organizations, eq(organizations.id, spaces.orgId))
     .innerJoin(organizationMembers, eq(organizationMembers.orgId, spaces.orgId))
     .innerJoin(userTable, eq(userTable.id, organizationMembers.userId))
     .leftJoin(profiles, eq(profiles.id, organizationMembers.userId))
@@ -153,7 +158,13 @@ async function listMembersOfSpaces(
     // caller: the question asked of the resolver is "what would this person
     // hold here". On a personal space that answers `admin` for its owner and
     // `null` for everyone else, so the list is the owner alone (decision 10).
-    const effective = resolveSpaceRole(row.orgRole, row.space, member, row.userId);
+    const effective = resolveSpaceRole(
+      row.orgRole,
+      row.space,
+      member,
+      row.userId,
+      toPersonalSpaceRole(row.storedPersonalSpaceRole),
+    );
     if (!effective) continue;
     out.push({
       space: { id: row.space.id, name: row.space.name },
@@ -342,8 +353,9 @@ export async function removeSpaceMember(params: {
     await lockSpaceRow(tx, space.id);
     // The standing is the TARGET's, so the caller id is theirs — a personal
     // space resolves `admin` for its owner and nothing for anyone else. No
-    // member row: the removal is about to delete the only one there could be.
-    const accessAfter = target ? resolveSpaceRole(target.role, space, null, userId) : null;
+    // member row: the removal is about to delete the only one there could be. The cap is
+    // `admin`: only an `admin` of a personal space (its uncapped owner) reaches this route.
+    const accessAfter = target ? resolveSpaceRole(target.role, space, null, userId, "admin") : null;
     assertCanGrantSpaceRole(params.actorPermissions, accessAfter);
     const existing = await loadSpaceMember(space.id, userId, tx);
     if (!existing) return removal(false, accessAfter, nothingUnshared());
@@ -665,7 +677,8 @@ async function sharesOfOwnersWithoutAccess(
       (row) =>
         row.orgRole === null ||
         row.userId === departedUserId ||
-        resolveSpaceRole(row.orgRole, row.space, memberFromJoin(row), row.userId) === null,
+        // Only null-ness is read, and the cap never turns a role into null or back.
+        resolveSpaceRole(row.orgRole, row.space, memberFromJoin(row), row.userId, "admin") === null,
     )
     .map((row) => ({ connectionId: row.id, spaceId: row.space.id }));
 }

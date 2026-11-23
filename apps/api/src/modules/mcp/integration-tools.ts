@@ -319,7 +319,8 @@ export async function searchIntegrationTools(
     notes.push(
       "`not_ready` lists the integrations active in a space searched that you have no usable connection of, each " +
         "with its `proxy_connection` verdict and, when a selection refusal explains it, that " +
-        "`refusal`, whose `connect_url` is a single-use link to hand to the user.",
+        "`refusal`. For a requested direct call, follow the space-choice instructions for that refusal " +
+        "even when it includes a `connect_url` for connecting here.",
     );
   }
   if (unlistedShown.length > 0) {

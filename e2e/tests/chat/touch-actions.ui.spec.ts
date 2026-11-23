@@ -41,7 +41,7 @@ test.describe("chat actions on a touchscreen", () => {
     await page.context().grantPermissions(["clipboard-read", "clipboard-write"]);
     await page.setViewportSize({ width: 844, height: 390 });
     await page.goto(`/chat/${id}`);
-    await page.locator('textarea[name="input"]').tap();
+    await page.getByRole("textbox", { name: "Message Appstrate…", exact: true }).tap();
     const chip = page.getByTestId("composer-limit-chip");
     const lift = chip.getByRole("button");
     await expect(lift).toHaveCSS("width", "40px");

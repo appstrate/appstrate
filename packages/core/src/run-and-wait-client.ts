@@ -171,7 +171,7 @@ type MaterializedManifest =
 
 /** What `materializeInlineManifest` does, told to whoever composes an inline run. */
 export const INLINE_MANIFEST_RULE =
-  "For an inline run, `manifest` is a PARTIAL canonical AFPS manifest: normally set only a " +
+  "For an inline `run_and_wait`, `manifest` is a PARTIAL canonical AFPS manifest: normally set only a " +
   "concise task-specific `display_name` plus the dependencies/configuration the task needs. " +
   "The platform derives `name` and fills the top-level fields you omit with AFPS boilerplate " +
   "and an open object `output` schema; every field you provide replaces its default verbatim, " +

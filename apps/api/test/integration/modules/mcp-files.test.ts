@@ -772,7 +772,8 @@ describe("mcp file-backed package workflow", () => {
       orgId: ctx.orgId,
       spaceId: ctx.defaultSpaceId,
       createdBy: ctx.user.id,
-      scopes: ["mcp:read", "mcp:invoke"],
+      // An inline run's grants declare validate_package_file; `files:read` is withheld.
+      scopes: ["mcp:read", "mcp:invoke", "agents:run", "agents:write", "runs:read"],
     });
     const { envelope } = await rpc(
       { Authorization: `Bearer ${key.rawKey}`, "X-Org-Id": ctx.orgId },

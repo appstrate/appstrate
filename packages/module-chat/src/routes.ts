@@ -46,12 +46,21 @@ import {
   reportPermissionDenial,
   type requireModulePermission,
 } from "@appstrate/core/permissions";
-import { conflict, forbidden, invalidRequest, notFound } from "@appstrate/core/api-errors";
+import {
+  conflict,
+  forbidden,
+  invalidRequest,
+  notFound,
+  parseBody,
+} from "@appstrate/core/api-errors";
 import { listResponse, parseListLimit } from "@appstrate/core/list-query";
 import { readJsonBody } from "@appstrate/core/request-body";
 import { setCursorLinkHeader } from "@appstrate/core/pagination-link";
 import { UI_MESSAGE_STREAM_HEADERS } from "ai";
-import { handleChatStream } from "./chat-stream.ts";
+import { handleChatStream, pinnedSkillIdsSchema } from "./chat-stream.ts";
+import { readChatCommands } from "./chat-commands.ts";
+import { callerMcpOpener, dispatchFetch } from "./platform-mcp.ts";
+import { callerGrants, turnUsesDrafts } from "./turn-permissions.ts";
 import type { ChatEnv } from "./prompt.ts";
 import { stopStream } from "./stop-registry.ts";
 import { clearActiveStream, getResumableContext, STALE_MARKER_MIN_AGE_MS } from "./resumable.ts";
@@ -60,6 +69,8 @@ import { notifySessionUpdate } from "./realtime.ts";
 import { logger } from "./logger.ts";
 import {
   createSession,
+  pinnedSkillsOf,
+  updateSessionSkills,
   sessionVisible,
   touchedSpaceIds,
   touchedUnder,
@@ -113,6 +124,29 @@ export const updateSessionSchema = z
     path: ["spaceId"],
   });
 
+/**
+ * The `/` menu's query: a space stands for a conversation limited to it; the package-authoring
+ * switch as the turn takes it (absent = on).
+ */
+const chatCommandsQuerySchema = z.object({
+  spaceId: z.string().min(1).optional(),
+  package_authoring: z
+    .enum(["true", "false"])
+    .default("true")
+    .transform((value) => value === "true"),
+});
+
+/** The skills PATCH: `pins` replaces the whole set. */
+export const updateSessionSkillsSchema = z
+  .object({
+    pins: pinnedSkillIdsSchema.optional(),
+    skill_discovery: z.boolean().optional(),
+  })
+  .strict()
+  .refine((body) => body.pins !== undefined || body.skill_discovery !== undefined, {
+    error: "pins or skill_discovery is required",
+  });
+
 type SessionRow = typeof chatSessions.$inferSelect;
 type MessageRow = typeof chatMessages.$inferSelect;
 
@@ -131,8 +165,8 @@ function toSessionDto(row: SessionRow, touchedSpaceIds: readonly string[]) {
     unread:
       row.lastAssistantSeq != null &&
       (row.lastReadSeq == null || row.lastReadSeq < row.lastAssistantSeq),
-    skill_mode: row.skillMode,
-    pinned_skills: row.pinnedSkills,
+    skill_discovery: row.skillDiscovery,
+    pins: pinnedSkillsOf(row),
     spaceId: row.spaceId,
     restricted: row.restricted,
     space_ids: touchedSpaceIds,
@@ -301,6 +335,12 @@ export function createChatRouter(deps: ChatPlatformDeps) {
   router.post("/api/orgs/:orgId/chat/sessions", rateLimited(30), ...actingGuards, handlers.create);
   router.get("/api/orgs/:orgId/chat/sessions/:id", guard("chat:read"), handlers.get);
   router.patch("/api/orgs/:orgId/chat/sessions/:id", guard("chat:write"), handlers.update);
+  router.patch(
+    "/api/orgs/:orgId/chat/sessions/:id/skills",
+    rateLimited(60),
+    guard("chat:write"),
+    handlers.updateSkills,
+  );
   router.put(
     "/api/orgs/:orgId/chat/sessions/:id/read",
     rateLimited(120),
@@ -320,6 +360,36 @@ export function createChatRouter(deps: ChatPlatformDeps) {
     guard("chat:write"),
     handlers.stop,
   );
+
+  // The composer's `/` menu: the skills and agents of the spaces a turn would act in.
+  router.get("/api/orgs/:orgId/chat/commands", rateLimited(60), ...actingGuards, async (c) => {
+    const reachable = c.get("reachable");
+    const { spaceId, package_authoring: authoring } = parseBody(
+      chatCommandsQuerySchema,
+      c.req.query(),
+    );
+    if (spaceId !== undefined && !canActIn(reachable, spaceId)) {
+      throw invalidRequest("spaceId must be a space this conversation can act in", "spaceId");
+    }
+    // A space asked for stands for a conversation limited to it, whose grants are narrowed alike.
+    const spaces = actingSpaces(reachable).filter(
+      (space) => spaceId === undefined || space.id === spaceId,
+    );
+    const permissions = callerGrants(spaces, spaceId !== undefined, c.get("reachableOrgHalf"));
+    const commands = await readChatCommands(
+      callerMcpOpener(c, dispatchFetch(deps), {
+        permissions,
+        spaces,
+        restricted: spaceId !== undefined,
+      }),
+      spaces.map((space) => space.id),
+      {
+        readsSkills: permissions.has("skills:read"),
+        drafts: turnUsesDrafts(permissions, authoring),
+      },
+    );
+    return c.json(commands);
+  });
 
   // POST …/chat — the conversational loop (AI SDK UIMessage stream).
   // 20/min: every call fans out into metered LLM traffic. The server is the
@@ -505,6 +575,21 @@ function createSessionHandlers(deps: ChatPlatformDeps) {
       }
       notifySessionUpdate(session.id, session.orgId, session.userId);
       return c.body(null, 204);
+    },
+
+    // PATCH …/sessions/:id/skills — the pins (full set) and the discovery switch. Allowed while a
+    // turn runs: that turn keeps what it read, the next one reads this.
+    updateSkills: async (c: Context<ChatEnv>) => {
+      const session = await getOwnedSession(c.req.param("id")!, sessionScope(c));
+      const { pins, skill_discovery } = await readJsonBody(c, updateSessionSkillsSchema);
+      const row = await updateSessionSkills(session.id, {
+        pinnedSkills: pins,
+        skillDiscovery: skill_discovery,
+      });
+      if (!row) throw notFound("Chat session not found");
+      notifySessionUpdate(row.id, row.orgId, row.userId);
+      const [dto] = await toSessionDtos([row]);
+      return c.json(dto);
     },
 
     // PUT …/sessions/:id/read — mark the session read (idempotent).

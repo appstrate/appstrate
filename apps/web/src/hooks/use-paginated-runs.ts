@@ -6,6 +6,7 @@ import { client } from "../api/client";
 import { useListScope } from "./use-org-scope";
 import { usePermissions } from "./use-permissions";
 import { paginatedRunsKeys } from "../lib/query-keys";
+import type { RunSpaceScope } from "../lib/space-filter";
 import { keysetPaging } from "@appstrate/ui/keyset-paging";
 import type { EnrichedRun, ListEnvelope } from "@appstrate/shared-types";
 import type { RunStatus } from "@appstrate/core/run-status";
@@ -25,6 +26,11 @@ interface UseRunsOptions {
   unread?: boolean;
   /** Every space the reader reaches (`GET /api/orgs/{orgId}/runs`); ignored for a schedule's list. */
   spanning?: boolean;
+  /**
+   * Narrows an org-wide list to team or personal spaces (`space_kind`) or to these spaces
+   * (`spaceId`); ignored off the org-wide route.
+   */
+  spaces?: RunSpaceScope;
   enabled?: boolean;
   limit?: number;
 }
@@ -57,6 +63,7 @@ export function useRuns({
   search,
   unread,
   spanning,
+  spaces,
   enabled = true,
   limit = RUNS_PAGE_SIZE,
 }: UseRunsOptions) {
@@ -68,6 +75,8 @@ export function useRuns({
 
   const statusKey = status && status.length > 0 ? status.join(",") : undefined;
   const statusQuery = status && status.length > 0 ? status : undefined;
+  const spaceIdsQuery =
+    spaces?.spaceIds && spaces.spaceIds.length > 0 ? spaces.spaceIds : undefined;
 
   const endpoint = scheduleId
     ? `/schedules/${scheduleId}/runs`
@@ -83,6 +92,9 @@ export function useRuns({
     kind,
     statusKey,
     unread,
+    // The key carries it only where the request does.
+    acrossSpaces ? spaces?.spaceKind : undefined,
+    acrossSpaces ? spaceIdsQuery?.join(",") : undefined,
     search,
     limit,
   );
@@ -100,6 +112,7 @@ export function useRuns({
           search,
           unread,
           acrossOrgId: scope.acrossOrgId,
+          spaces: { spaceKind: spaces?.spaceKind, spaceIds: spaceIdsQuery },
           limit,
           startingAfter: pageParam,
         },
@@ -166,6 +179,7 @@ export async function fetchRunPage(
     search,
     unread,
     acrossOrgId,
+    spaces,
     limit,
     startingAfter,
   }: RunPageRequest,
@@ -191,7 +205,10 @@ export async function fetchRunPage(
   };
   if (acrossOrgId) {
     const { data } = await client.GET("/api/orgs/{orgId}/runs", {
-      params: { path: { orgId: acrossOrgId }, query },
+      params: {
+        path: { orgId: acrossOrgId },
+        query: { ...query, space_kind: spaces?.spaceKind, spaceId: spaces?.spaceIds },
+      },
       signal,
     });
     return data!;

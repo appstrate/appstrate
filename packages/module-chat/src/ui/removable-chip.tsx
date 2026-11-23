@@ -19,7 +19,8 @@ interface RemovableChipProps extends Omit<ComponentProps<"span">, "children"> {
   children: ReactNode;
   removeLabel: string;
   removeDisabled?: boolean;
-  onRemove: () => void;
+  /** Absent: nothing to restore, the chip has no X. */
+  onRemove?: () => void;
   open?: { onClick: () => void; label: string; testId: string };
 }
 
@@ -45,7 +46,8 @@ export function RemovableChip({
       {...rest}
       className={cn(
         badgeVariants({ variant: "secondary" }),
-        "text-muted-foreground desktop-pointer:h-7 desktop-pointer:pr-1 h-10 max-w-56 min-w-0 shrink gap-1.5 py-0 pr-0 pl-2.5 font-normal",
+        "text-muted-foreground desktop-pointer:h-7 h-10 max-w-56 min-w-0 shrink gap-1.5 py-0 pl-2.5 font-normal",
+        onRemove ? "desktop-pointer:pr-1 pr-0" : "pr-2.5",
         NOTE_TEXT_CLASS,
         ICON,
         className,
@@ -65,18 +67,20 @@ export function RemovableChip({
       ) : (
         body
       )}
-      <button
-        type="button"
-        aria-label={removeLabel}
-        disabled={removeDisabled}
-        onClick={onRemove}
-        className={cn(
-          "hover:bg-foreground/10 desktop-pointer:size-5 rounded-full disabled:pointer-events-none disabled:opacity-50",
-          CHIP_REMOVE_CLASS,
-        )}
-      >
-        <XIcon className="size-3" />
-      </button>
+      {onRemove && (
+        <button
+          type="button"
+          aria-label={removeLabel}
+          disabled={removeDisabled}
+          onClick={onRemove}
+          className={cn(
+            "hover:bg-foreground/10 desktop-pointer:size-5 rounded-full disabled:pointer-events-none disabled:opacity-50",
+            CHIP_REMOVE_CLASS,
+          )}
+        >
+          <XIcon className="size-3" />
+        </button>
+      )}
     </span>
   );
 }

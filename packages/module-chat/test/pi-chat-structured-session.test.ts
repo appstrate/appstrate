@@ -463,3 +463,40 @@ describe("attachment images in the projected turn", () => {
     expect(turn.prompt).toContain("[Attached file: a.pdf — appfile://file_pdf — application/pdf]");
   });
 });
+
+describe("a message carrying an agent launch", () => {
+  const launched = (text: string | undefined): UIMessage => ({
+    id: "u1",
+    role: "user",
+    parts: [
+      { type: "text", text: "résume ma boîte" },
+      {
+        type: "data-agent-prompt",
+        data: { name: "run-summarizer", title: "Summarizer", ...(text ? { text } : {}) },
+      } as never,
+    ],
+  });
+  const thread = (first: UIMessage): UIMessage[] => [
+    first,
+    { id: "a1", role: "assistant", parts: [{ type: "text", text: "Lancé." }] },
+    { id: "u2", role: "user", parts: [{ type: "text", text: "Et le résultat ?" }] },
+  ];
+
+  it("shows the model the launch instructions in place of the typed text, in the history", () => {
+    const turn = buildStructuredPiTurn(thread(launched("LAUNCH INSTRUCTIONS")), MODEL, OPTIONS);
+    const first = JSON.stringify(turn.history[0]);
+    expect(first).toContain("LAUNCH INSTRUCTIONS");
+    expect(first).not.toContain("résume ma boîte");
+    expect(first).not.toContain("data-agent-prompt");
+  });
+
+  it("shows the model the launch instructions as the prompt of the turn that launches", () => {
+    const turn = buildStructuredPiTurn([launched("LAUNCH INSTRUCTIONS")], MODEL, OPTIONS);
+    expect(turn.prompt).toBe("LAUNCH INSTRUCTIONS");
+  });
+
+  it("keeps the typed text of a launch not resolved yet", () => {
+    const turn = buildStructuredPiTurn([launched(undefined)], MODEL, OPTIONS);
+    expect(turn.prompt).toBe("résume ma boîte");
+  });
+});

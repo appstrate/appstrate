@@ -23,7 +23,7 @@ const SIZES = {
 } as const;
 
 /** A space's tile at one of the {@link SIZES}: the one tile every space listing draws. */
-function SpaceTile({
+export function SpaceTile({
   space,
   size = "sm",
   className,

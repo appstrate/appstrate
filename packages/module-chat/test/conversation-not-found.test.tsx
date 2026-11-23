@@ -116,10 +116,7 @@ describe("a conversation URL the caller has no conversation for", () => {
 
   it("still mounts the composer for a conversation that exists", () => {
     // Guards the assertions above: the harness does render the thread.
-    const html = render(
-      { messages: [], skills: { skillMode: "auto", pinnedSkills: [] } },
-      () => true,
-    );
+    const html = render({ messages: [] }, () => true);
     expect(html).not.toContain("conversation.notFound.title");
     expect(html).toContain("composer.placeholder");
   });

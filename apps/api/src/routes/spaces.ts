@@ -447,7 +447,14 @@ export function createSpacesRouter() {
       // The creator holds org-level `spaces:write`, i.e. owner or admin, so
       // the resolver answers preset `admin` without any row — and no row is
       // written, per RBAC spec §6.3.
-      const role = resolveSpaceRole(callerOrgRole(c), space, null, callerPersonalOwnerId(c));
+      // A new team space is never personal, so the cap cannot change the answer.
+      const role = resolveSpaceRole(
+        callerOrgRole(c),
+        space,
+        null,
+        callerPersonalOwnerId(c),
+        "admin",
+      );
       return c.json(spaceWireForCaller(c, space, role), 201);
     } catch (err) {
       if (err instanceof ApiError) throw err;
@@ -472,7 +479,13 @@ export function createSpacesRouter() {
       // full row in the response, so the body shows the state that was judged.
       const access = await callerSpaceAccess(c, space);
       if (!access) throw notFound(`Space '${spaceId}' not found in this organization`);
-      const role = resolveSpaceRole(orgRole, access.space, access.member, callerPersonalOwnerId(c));
+      const role = resolveSpaceRole(
+        orgRole,
+        access.space,
+        access.member,
+        callerPersonalOwnerId(c),
+        access.personalSpaceRole,
+      );
       if (!isSpaceVisibleTo(orgRole, access.space, role)) {
         throw notFound(`Space '${spaceId}' not found in this organization`);
       }
@@ -608,8 +621,8 @@ export function createSpacesRouter() {
       resourceId: space.id,
     });
     // The caller now holds `admin` here through their org role, so the
-    // projection is the ordinary one.
-    const role = resolveSpaceRole(callerOrgRole(c), space, null, callerPersonalOwnerId(c));
+    // projection is the ordinary one. A converted space is a team space: no cap applies.
+    const role = resolveSpaceRole(callerOrgRole(c), space, null, callerPersonalOwnerId(c), "admin");
     return c.json(spaceWireForCaller(c, space, role));
   });
 

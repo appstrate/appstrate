@@ -276,8 +276,10 @@ export const EXEMPT_SCHEMAS: Record<string, string> = {
     "ProblemDetail narrowed to `missing_integration_connection`; RFC 9457 envelope, never read through a shared-type",
   AgentNotActiveInSpaceProblem:
     "ProblemDetail narrowed to `agent_not_active_in_space`; RFC 9457 envelope, never read through a shared-type",
+  InlineRunNotAllowedProblem:
+    "ProblemDetail narrowed to `inline_run_not_allowed_in_space`; RFC 9457 envelope, never read through a shared-type",
   ActiveInSpaces:
-    "`active_in_spaces` extension of two launch refusals, built by lib/launch-spaces.ts; never read through a shared-type",
+    "`active_in_spaces` extension of the launch and inline-run refusals, built by lib/launch-spaces.ts; never read through a shared-type",
   LaunchWarnings:
     "`warnings` envelope merged by allOf into the launch success bodies; its items are ConnectionResolutionWarning, no shared-type",
   ActivationWarnings:
@@ -340,6 +342,7 @@ export const EXEMPT_SCHEMAS: Record<string, string> = {
   ChatSession:
     "module-chat wire DTO; ISO timestamps, no shared-type (UI uses the generated spec type)",
   ChatMessage: "module-chat opaque history-node wire DTO; no shared-type",
+  ChatCommands: "module-chat wire DTO; the composer's `/` menu, no shared-type",
   // @appstrate/module-billing billing wire DTOs. The module keeps a Drizzle schema
   // of its own (packages/module-billing/drizzle/schema.ts), so none of these has a
   // shared-type in this repo at all; the dashboard consumes the generated spec

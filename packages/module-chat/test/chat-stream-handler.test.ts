@@ -22,7 +22,6 @@
  * connection from `platformMcp.url`; the handler only mints the bearer.
  */
 
-import { createHash } from "node:crypto";
 import { describe, it, expect, beforeEach, afterEach, spyOn } from "bun:test";
 import { Hono } from "hono";
 import { and, asc, eq } from "drizzle-orm";
@@ -33,6 +32,7 @@ import {
   chatSessionSpaces,
   files,
   uploads,
+  type ChatSkillStatusEntry,
 } from "@appstrate/db/schema";
 import { uploadStream } from "@appstrate/db/storage";
 import { createUpload } from "../../../apps/api/src/services/uploads.ts";
@@ -62,7 +62,6 @@ import { buildModuleInitContext } from "../../../apps/api/src/lib/modules/regist
 import { errorHandler } from "../../../apps/api/src/middleware/error-handler.ts";
 import { initSystemModelProviderKeys } from "../../../apps/api/src/services/model-registry.ts";
 import { buildSystemPrompt } from "../src/prompt.ts";
-import { SKILL_DEFINITION_META_KEY, type SkillEntry } from "@appstrate/core/skill-uri";
 import { turnCapabilities } from "../src/capabilities.ts";
 import { chatLoopbackStrategy } from "../src/loopback-auth.ts";
 import { platformMcpSurfaceKey } from "../src/pi-chat/mcp-surface-cache.ts";
@@ -76,7 +75,11 @@ import {
 import { buildStructuredPiTurn } from "../src/pi-chat/structured-session.ts";
 import { loadAttachmentImages } from "../src/pi-chat/attachment-inputs.ts";
 import { reachableSpace } from "./reachable-space.ts";
+import { CHAT_SKILLS_CONTENT_BUDGET_CHARS } from "../src/skills.ts";
+import { buildPlatformMcpTools } from "../src/pi-chat/mcp-tools.ts";
+import { PiChatUiStreamMapper } from "../src/pi-chat/ui-stream-mapper.ts";
 import { spaceIdRefusal } from "@appstrate/core/mcp-spaces";
+import { fakePlatformMcp, fakeSkillUri, type FakeSkill } from "./fake-platform-mcp.ts";
 
 // The chat handler reads the system model registry; the HTTP harness initializes it at boot.
 initSystemModelProviderKeys();
@@ -143,16 +146,14 @@ function modelsResponse(apiShape = "openai-completions"): Response {
 /** Build the scripted in-memory dispatch. Nothing leaves this process. */
 function scriptedDispatch(
   apiShape?: string,
-  listedSkill?: SkillEntry,
+  listedSkill?: FakeSkill,
 ): (req: Request) => Promise<Response> {
-  return async (req: Request): Promise<Response> => {
+  const models = async (req: Request): Promise<Response> => {
     const path = new URL(req.url).pathname;
-    if (listedSkill && path.startsWith("/api/mcp/")) {
-      return answerSkillsMcp(await req.json(), { entry: listedSkill, text: "", onRead: () => {} });
-    }
     if (path === "/api/models") return modelsResponse(apiShape);
     return new Response("unexpected dispatch: " + path, { status: 404 });
   };
+  return listedSkill ? fakePlatformMcp({ skills: [listedSkill] }, models) : models;
 }
 
 /**
@@ -221,39 +222,6 @@ async function tokenInjectedSkills(input: PiChatInput): Promise<unknown> {
   } as never);
   return resolved!.extra?.[INJECTED_SKILLS_AUTH_EXTRA];
 }
-
-/**
- * A stateless platform MCP server listing one published skill entry and
- * serving its `SKILL.md`: answers one JSON-RPC message.
- */
-function answerSkillsMcp(
-  message: { id?: number; method: string; params?: Record<string, unknown> },
-  skill: { entry: SkillEntry; text: string; onRead: (uri: string) => void },
-): Response {
-  const result = (value: unknown) =>
-    Response.json({ jsonrpc: "2.0", id: message.id, result: value });
-  switch (message.method) {
-    case "initialize":
-      return result({
-        protocolVersion: message.params?.protocolVersion,
-        capabilities: { resources: {}, extensions: { "io.modelcontextprotocol/skills": {} } },
-        serverInfo: { name: "fake-platform", version: "1.0.0" },
-      });
-    case "skills/list": {
-      const meta = message.params?._meta as Record<string, unknown> | undefined;
-      return result({ skills: meta?.[SKILL_DEFINITION_META_KEY] === "draft" ? [] : [skill.entry] });
-    }
-    case "resources/read": {
-      const uri = message.params?.uri as string;
-      skill.onRead(uri);
-      return result({ contents: [{ uri, mimeType: "text/markdown", text: skill.text }] });
-    }
-    default:
-      return new Response(null, { status: 202 });
-  }
-}
-
-const sha256 = (text: string) => `sha256:${createHash("sha256").update(text).digest("hex")}`;
 
 /** The permission set the turn's platform-MCP bearer actually carries. */
 async function tokenPermissions(input: PiChatInput): Promise<string[]> {
@@ -349,7 +317,7 @@ describe("handleChatStream", () => {
       /** Stand in for the platform's usage writer. */
       recordChatUsage?: ChatPlatformDeps["recordChatUsage"];
       /** The one skill the scripted platform MCP server lists. */
-      listedSkill?: SkillEntry;
+      listedSkill?: FakeSkill;
       /** Replace the whole scripted dispatch (to observe request timing). */
       dispatch?: (req: Request) => Promise<Response>;
       /** Stand in for the platform's composer-attachment resolution. */
@@ -370,8 +338,10 @@ describe("handleChatStream", () => {
       orgHalf?: ReadonlySet<string>;
       /** Earlier turns replayed ahead of the new user message. */
       history?: unknown[];
-      /** Extra body fields, e.g. the picker's `skill_mode` / `pinned_skills`. */
+      /** Extra body fields, e.g. a new conversation's `pins` / `skill_discovery`. */
       body?: Record<string, unknown>;
+      /** The admission gate; omitted = the platform's. */
+      checkUsageAllowed?: ChatPlatformDeps["checkUsageAllowed"];
     },
   ): Promise<Response> {
     // Real platform deps (the same context `init()` gets), with dispatch
@@ -383,6 +353,7 @@ describe("handleChatStream", () => {
         overrides?.dispatch ?? scriptedDispatch(overrides?.apiShape, overrides?.listedSkill),
       ...(overrides?.resolveChatModel ? { resolveChatModel: overrides.resolveChatModel } : {}),
       ...(overrides?.recordChatUsage ? { recordChatUsage: overrides.recordChatUsage } : {}),
+      ...(overrides?.checkUsageAllowed ? { checkUsageAllowed: overrides.checkUsageAllowed } : {}),
       ...(overrides?.resolveChatAttachment
         ? { resolveChatAttachment: overrides.resolveChatAttachment }
         : {}),
@@ -1143,7 +1114,7 @@ describe("handleChatStream", () => {
     }
   });
 
-  it("without a selection in the body, keeps the stored one: strict injects and withholds `skills:read`", async () => {
+  it("without a selection in the body, keeps the stored one: discovery off injects the pinned skill and withholds `skills:*`", async () => {
     // Persona, context block and token must agree within one turn; all three
     // are wired from the one session-row read, which only this test can prove.
     const sessionId = mintSessionId();
@@ -1153,33 +1124,27 @@ describe("handleChatStream", () => {
       orgId: ctx.orgId,
       userId: ctx.user.id,
       title: null,
-      skillMode: "strict",
+      skillDiscovery: false,
       pinnedSkills: [PIN],
     });
 
-    // The chosen skill is listed by the platform MCP server; record which
+    // The pinned skill is listed by the platform MCP server; record which
     // contents are read and with which bearer, so the rendered block is a
     // function of what the handler read.
-    const uri = `skill://${ctx.defaultSpaceId}/acme/pinned-skill/pinned/SKILL.md`;
-    const PINNED_TEXT = "Always answer in haiku.";
+    const pinned = { space: ctx.defaultSpaceId, id: PIN, text: "Always answer in haiku." };
+    const uri = fakeSkillUri(pinned);
     const read: string[] = [];
     const skillBearers: string[] = [];
-    const dispatch = async (req: Request): Promise<Response> => {
-      const url = new URL(req.url);
-      if (url.pathname.startsWith("/api/mcp/")) {
-        skillBearers.push(req.headers.get("authorization") ?? "");
-        return answerSkillsMcp(await req.json(), {
-          entry: {
-            uri,
-            frontmatter: { name: "pinned", description: "P", metadata: { version: "1.0.0" } },
-            resources: [{ uri, digest: sha256(PINNED_TEXT), size: 23 }],
-          },
-          text: PINNED_TEXT,
-          onRead: (readUri) => read.push(readUri),
-        });
-      }
-      return scriptedDispatch()(req);
-    };
+    const dispatch = fakePlatformMcp(
+      {
+        skills: [pinned],
+        onMethod: (method, params, req) => {
+          skillBearers.push(req.headers.get("authorization") ?? "");
+          if (method === "resources/read") read.push(params?.uri as string);
+        },
+      },
+      scriptedDispatch(),
+    );
 
     const { engine, calls } = scriptedEngine();
     const res = await postChat(sessionId, undefined, engine, {
@@ -1210,14 +1175,14 @@ describe("handleChatStream", () => {
     expect(input.system).toContain(
       `<skill id="${PIN}" uri="${uri}" version="1.0.0">\nAlways answer in haiku.\n</skill>`,
     );
-    // Strict lists no skill: the listed entry is injected, never a catalogue line.
+    // Discovery off lists no skill: the listed entry is injected, never a catalogue line.
     expect(input.system).not.toContain(`- \`${PIN}\``);
     // No skill tool is taught, and the token cannot reach one.
     // The injected skill's files stay readable; no loading or listing is taught.
     expect(input.system).toContain("read a file it references with `read_resource`");
     expect(input.system).not.toContain("LOAD IT BEFORE acting");
     expect(input.system).not.toContain("listSkills");
-    expect(input.system).toContain("This conversation is restricted to the skills the user chose");
+    expect(input.system).toContain("Skill discovery is off for this conversation");
     expect(await tokenPermissions(input)).toEqual([
       "chat:read",
       "chat:write",
@@ -1232,74 +1197,457 @@ describe("handleChatStream", () => {
     await waitForAssistantPersist(sessionId);
   });
 
-  it("writes the body's selection on the row it creates, and runs the turn on it", async () => {
+  /** The skills the platform MCP server lists in the default space, each served as `text`. */
+  function listedSkillsDispatch(
+    skills: Array<{ id: string; text: string; listedText?: string }>,
+    /** Runs on each `skills/list`: inside the turn's preamble, between its upsert and its claim. */
+    onList?: () => Promise<void>,
+  ): (req: Request) => Promise<Response> {
+    return fakePlatformMcp(
+      {
+        skills: skills.map((skill) => ({ space: ctx.defaultSpaceId, ...skill })),
+        onMethod: async (method) => {
+          if (method === "skills/list") await onList?.();
+        },
+      },
+      scriptedDispatch(),
+    );
+  }
+
+  const SKILL_TURN_PERMISSIONS = new Set(["mcp:read", "mcp:invoke", "skills:read"]);
+
+  async function sessionSkills(sessionId: string) {
+    const [row] = await db
+      .select({
+        skillDiscovery: chatSessions.skillDiscovery,
+        pinnedSkills: chatSessions.pinnedSkills,
+        skillStatus: chatSessions.skillStatus,
+      })
+      .from(chatSessions)
+      .where(eq(chatSessions.id, sessionId));
+    return row;
+  }
+
+  async function seedSkillSession(
+    sessionId: string,
+    skills: { pinned: string[]; status?: Record<string, ChatSkillStatusEntry> },
+  ) {
+    await db.insert(chatSessions).values({
+      id: sessionId,
+      orgId: ctx.orgId,
+      userId: ctx.user.id,
+      title: null,
+      pinnedSkills: skills.pinned,
+      skillStatus: skills.status ?? {},
+    });
+  }
+
+  const UNAVAILABLE = { status: "unavailable", chars: null } as const;
+
+  it("writes the body's pins and discovery on the row it creates, and runs the turn on them", async () => {
     const sessionId = mintSessionId();
     const { engine, calls } = scriptedEngine();
     const res = await postChat(sessionId, undefined, engine, {
-      permissions: new Set(["mcp:read", "mcp:invoke", "skills:read"]),
-      body: { skill_mode: "strict", pinned_skills: ["@acme/z", "@acme/a", "@acme/z"] },
+      permissions: SKILL_TURN_PERMISSIONS,
+      dispatch: listedSkillsDispatch([]),
+      body: { skill_discovery: false, pins: ["@acme/z", "@acme/a", "@acme/z"] },
     });
     expect(res.status).toBe(200);
     await collectUiChunks(res);
 
-    const [row] = await db.select().from(chatSessions).where(eq(chatSessions.id, sessionId));
-    expect(row?.skillMode).toBe("strict");
-    expect(row?.pinnedSkills).toEqual(["@acme/a", "@acme/z"]);
+    expect(await sessionSkills(sessionId)).toEqual({
+      skillDiscovery: false,
+      pinnedSkills: ["@acme/a", "@acme/z"],
+      // Listed nowhere (both listings answered): the claim records each pin's verdict.
+      skillStatus: { "@acme/a": UNAVAILABLE, "@acme/z": UNAVAILABLE },
+    });
     expect(await tokenPermissions(calls[0]!)).toEqual([
       "chat:read",
       "chat:write",
       "mcp:invoke",
       "mcp:read",
     ]);
-    // `strict` lists no skill: `list_skills` is not registered.
-    expect(calls[0]!.platformMcp.listsSkills).toBe(false);
 
     await waitForAssistantPersist(sessionId);
   });
 
-  it("lets the body's selection replace the stored one", async () => {
+  it("ignores `pins` and `skill_discovery` for an existing conversation: the turn runs on the stored ones", async () => {
+    const sessionId = mintSessionId();
+    await seedSkillSession(sessionId, {
+      pinned: ["@acme/a"],
+      status: { "@acme/a": { status: "injected", chars: 3 } },
+    });
+    const { engine, calls } = scriptedEngine();
+    const res = await postChat(sessionId, undefined, engine, {
+      permissions: SKILL_TURN_PERMISSIONS,
+      dispatch: listedSkillsDispatch([
+        { id: "@acme/a", text: "Stored pin." },
+        { id: "@acme/b", text: "Body pin." },
+      ]),
+      body: { pins: ["@acme/b"], skill_discovery: false },
+    });
+    expect(res.status).toBe(200);
+    await collectUiChunks(res);
+    expect(calls[0]!.system).toContain("Stored pin.");
+    expect(calls[0]!.system).not.toContain("Body pin.");
+    expect(await sessionSkills(sessionId)).toMatchObject({
+      pinnedSkills: ["@acme/a"],
+      skillDiscovery: true,
+    });
+
+    await waitForAssistantPersist(sessionId);
+  });
+
+  it("applies an ephemeral turn's skill settings to the defaults, writing no row", async () => {
+    const sessionId = mintSessionId();
+    const { engine, calls } = scriptedEngine();
+    const res = await postChat(sessionId, undefined, engine, {
+      permissions: SKILL_TURN_PERMISSIONS,
+      messageId: "",
+      dispatch: listedSkillsDispatch([{ id: "@acme/a", text: "Ephemeral pin." }]),
+      body: { pins: ["@acme/a"], skill_discovery: false },
+    });
+    expect(res.status).toBe(200);
+    await collectUiChunks(res);
+    expect(calls[0]!.system).toContain("Ephemeral pin.");
+    expect(calls[0]!.system).toContain("Skill discovery is off");
+    expect(await sessionSkills(sessionId)).toBeUndefined();
+  });
+
+  it("records each pin's verdict and size at the claim: injected, over budget, unavailable, unreadable", async () => {
+    const sessionId = mintSessionId();
+    await seedSkillSession(sessionId, {
+      pinned: ["@acme/big", "@acme/gone", "@acme/odd", "@acme/over"],
+      // Replaced whole by the claim: a stale verdict does not survive.
+      status: { "@acme/gone": { status: "injected", chars: 1 } },
+    });
+    const res = await postChat(sessionId, undefined, scriptedEngine().engine, {
+      permissions: SKILL_TURN_PERMISSIONS,
+      dispatch: listedSkillsDispatch([
+        { id: "@acme/big", text: "x".repeat(CHAT_SKILLS_CONTENT_BUDGET_CHARS - 10) },
+        { id: "@acme/odd", text: "served", listedText: "listed" },
+        { id: "@acme/over", text: "y".repeat(20) },
+      ]),
+    });
+    expect(res.status).toBe(200);
+    await collectUiChunks(res);
+    expect((await sessionSkills(sessionId))?.skillStatus).toEqual({
+      "@acme/big": { status: "injected", chars: CHAT_SKILLS_CONTENT_BUDGET_CHARS - 10 },
+      "@acme/gone": UNAVAILABLE,
+      "@acme/odd": { status: "unreadable", chars: null },
+      "@acme/over": { status: "over_budget", chars: 20 },
+    });
+
+    await waitForAssistantPersist(sessionId);
+  });
+
+  it("injects the skills the history cites, discovery off, pins first and once, with no verdict", async () => {
     const sessionId = mintSessionId();
     await db.insert(chatSessions).values({
       id: sessionId,
       orgId: ctx.orgId,
       userId: ctx.user.id,
       title: null,
-      skillMode: "strict",
-      pinnedSkills: ["@acme/a"],
+      skillDiscovery: false,
+      pinnedSkills: ["@acme/pin"],
     });
+    const chip = (id: string) => `:skill[${id.split("/")[1]}]{name=${id}}`;
+    const dispatch = listedSkillsDispatch([
+      { id: "@acme/pin", text: "Pin." },
+      { id: "@acme/earlier", text: "Earlier." },
+      { id: "@acme/now", text: "Now." },
+    ]);
     const { engine, calls } = scriptedEngine();
     const res = await postChat(sessionId, undefined, engine, {
-      permissions: new Set(["mcp:read", "mcp:invoke", "skills:read"]),
-      body: { skill_mode: "auto", pinned_skills: [] },
+      permissions: SKILL_TURN_PERMISSIONS,
+      dispatch,
+      history: [
+        { id: "h1", role: "user", parts: [{ type: "text", text: `${chip("@acme/earlier")} go` }] },
+        { id: "h2", role: "assistant", parts: [{ type: "text", text: "ok" }] },
+      ],
+      parts: [
+        { type: "text", text: `${chip("@acme/now")} ${chip("@acme/pin")} ${chip("@acme/gone")}` },
+      ],
     });
     expect(res.status).toBe(200);
     await collectUiChunks(res);
-
-    const [row] = await db.select().from(chatSessions).where(eq(chatSessions.id, sessionId));
-    expect(row?.skillMode).toBe("auto");
-    expect(row?.pinnedSkills).toEqual([]);
-    expect(await tokenPermissions(calls[0]!)).toContain("skills:read");
-    // `auto` shows the catalogue in the context: `list_skills` is not registered.
-    expect(calls[0]!.platformMcp.listsSkills).toBe(false);
+    const system = calls[0]!.system;
+    // Pins first, then the most recent message's citations, then the earlier ones.
+    const at = (id: string) => system.indexOf(`<skill id="${id}"`);
+    expect(at("@acme/pin")).toBeGreaterThan(-1);
+    expect(at("@acme/pin")).toBeLessThan(at("@acme/now"));
+    expect(at("@acme/now")).toBeLessThan(at("@acme/earlier"));
+    expect(system.match(/<skill id="@acme\/pin"/g)).toHaveLength(1);
+    expect(system).toContain("`@acme/gone` named in this conversation is not available here");
+    const claim = (await tokenInjectedSkills(calls[0]!)) as { skills: Record<string, unknown> };
+    expect(Object.keys(claim.skills).sort()).toEqual(["@acme/earlier", "@acme/now", "@acme/pin"]);
+    // `skill_status` holds the pins' verdicts alone.
+    expect((await sessionSkills(sessionId))?.skillStatus).toEqual({
+      "@acme/pin": { status: "injected", chars: 4 },
+    });
 
     await waitForAssistantPersist(sessionId);
   });
 
-  it("refuses a skill mode without its skills, and the reverse", async () => {
-    for (const body of [{ skill_mode: "manual" }, { pinned_skills: ["@acme/a"] }]) {
+  it("runs on the pins it read when the skills PATCH lands while it starts; the next turn reads the PATCH", async () => {
+    const sessionId = mintSessionId();
+    await seedSkillSession(sessionId, { pinned: ["@acme/a"] });
+    let done = false;
+    const dispatch = listedSkillsDispatch(
+      [
+        { id: "@acme/a", text: "Pin A." },
+        { id: "@acme/b", text: "Pin B." },
+      ],
+      async () => {
+        if (done) return;
+        done = true;
+        // Another tab's PATCH, landing while this turn's prompt is built.
+        await db
+          .update(chatSessions)
+          .set({ pinnedSkills: ["@acme/b"] })
+          .where(eq(chatSessions.id, sessionId));
+      },
+    );
+    const first = scriptedEngine();
+    const res = await postChat(sessionId, undefined, first.engine, {
+      permissions: SKILL_TURN_PERMISSIONS,
+      dispatch,
+    });
+    expect(res.status).toBe(200);
+    await collectUiChunks(res);
+    await waitForAssistantPersist(sessionId);
+    expect(first.calls[0]!.system).toContain("Pin A.");
+    // The PATCH stands; the claim writes no verdict for the pin it dropped.
+    expect(await sessionSkills(sessionId)).toEqual({
+      skillDiscovery: true,
+      pinnedSkills: ["@acme/b"],
+      skillStatus: {},
+    });
+
+    const second = scriptedEngine();
+    const next = await postChat(sessionId, undefined, second.engine, {
+      permissions: SKILL_TURN_PERMISSIONS,
+      messageId: "u2",
+      dispatch,
+    });
+    expect(next.status).toBe(200);
+    await collectUiChunks(next);
+    expect(second.calls[0]!.system).toContain("Pin B.");
+    expect(second.calls[0]!.system).not.toContain("Pin A.");
+
+    await waitForAssistantPersist(sessionId);
+  });
+
+  describe("a turn refused at or before its claim writes no verdict", () => {
+    const stored = {
+      pinned: ["@acme/a", "@acme/b"],
+      status: {
+        "@acme/a": { status: "injected", chars: 1 },
+        "@acme/b": { status: "injected", chars: 2 },
+      } as Record<string, ChatSkillStatusEntry>,
+    };
+
+    async function expectUnchanged(sessionId: string, res: Response, status: number) {
+      expect(res.status).toBe(status);
+      expect(await sessionSkills(sessionId)).toEqual({
+        skillDiscovery: true,
+        pinnedSkills: stored.pinned,
+        skillStatus: stored.status,
+      });
+    }
+
+    type Arranged = { overrides: Parameters<typeof postChat>[3]; cleanup?: () => void };
+    const cases: Array<
+      [label: string, status: number, code: string | null, arrange: (sessionId: string) => Arranged]
+    > = [
+      [
+        "refused before its claim, the concurrency slot held",
+        429,
+        null,
+        () => {
+          const previousCap = process.env.CHAT_PI_MAX_CONCURRENCY;
+          process.env.CHAT_PI_MAX_CONCURRENCY = "1";
+          _resetChatEnvForTests();
+          const heldSlot = acquirePiChatSlot();
+          return {
+            overrides: {},
+            cleanup: () => {
+              heldSlot?.release();
+              if (previousCap === undefined) delete process.env.CHAT_PI_MAX_CONCURRENCY;
+              else process.env.CHAT_PI_MAX_CONCURRENCY = previousCap;
+              _resetChatEnvForTests();
+            },
+          };
+        },
+      ],
+      [
+        "refused by the admission gate",
+        402,
+        null,
+        () => ({
+          overrides: {
+            dispatch: listedSkillsDispatch([]),
+            checkUsageAllowed: async () => ({
+              code: "quota_exceeded",
+              message: "Out of credits.",
+              status: 402,
+            }),
+          },
+        }),
+      ],
+      [
+        "refused by its claim while another turn is live",
+        409,
+        "chat_turn_in_flight",
+        (sessionId) => ({
+          overrides: {
+            dispatch: listedSkillsDispatch([], async () => {
+              await db
+                .update(chatSessions)
+                .set({ activeStreamId: "strm_live" })
+                .where(eq(chatSessions.id, sessionId));
+            }),
+          },
+        }),
+      ],
+    ];
+
+    for (const [label, status, code, arrange] of cases) {
+      it(`${label} (${status})`, async () => {
+        const sessionId = mintSessionId();
+        await seedSkillSession(sessionId, stored);
+        const { overrides, cleanup } = arrange(sessionId);
+        try {
+          const res = await postChat(sessionId, undefined, scriptedEngine().engine, {
+            permissions: SKILL_TURN_PERMISSIONS,
+            ...overrides,
+          });
+          if (code) expect(await res.clone().json()).toMatchObject({ code });
+          await expectUnchanged(sessionId, res, status);
+        } finally {
+          cleanup?.();
+        }
+      });
+    }
+  });
+
+  it("reads a skill's SKILL.md as a plain read: its text stays in the persisted history, nothing is pinned", async () => {
+    const sessionId = mintSessionId();
+    const SKILL = "@acme/tone";
+    const TEXT = "Always answer in haiku.";
+    const URI = `skill://${ctx.defaultSpaceId}/acme/tone/tone/SKILL.md`;
+    const dispatch = listedSkillsDispatch([{ id: SKILL, text: TEXT }]);
+
+    // Turn 1: the model calls `read_resource` on the listed SKILL.md, through the real tool
+    // layer the engine builds, and the result reaches the stream through the real mapper.
+    const results: unknown[] = [];
+    const loadingEngine: ChatEngine = (input) => {
+      const stream = new ReadableStream<UIMessageChunk>({
+        async start(controller) {
+          const { surfaceKey: _cached, ...platformMcp } = input.platformMcp;
+          const tools = await buildPlatformMcpTools({
+            ...platformMcp,
+            writeChunk: () => {},
+            signal: new AbortController().signal,
+            turnBudget: { deadlineAt: Date.now() + 60_000, stepCount: () => 0 },
+            fileDelivery: { image: true, pdf: true },
+          });
+          const registered: Array<{
+            name: string;
+            execute: (id: string, params: unknown) => Promise<unknown>;
+          }> = [];
+          for (const factory of tools.extensionFactories) {
+            factory({ registerTool: (tool: never) => registered.push(tool) } as never);
+          }
+          const read = registered.find((tool) => tool.name === "read_resource")!;
+          const result = await read.execute("call_skill", { uri: URI });
+          results.push(result);
+          await tools.close();
+          const mapper = new PiChatUiStreamMapper();
+          for (const chunk of [
+            { type: "start", messageId: "asst_load" },
+            {
+              type: "tool-input-available",
+              toolCallId: "call_skill",
+              toolName: "read_resource",
+              input: { uri: URI },
+            },
+            ...mapper.map({
+              type: "tool_execution_end",
+              toolCallId: "call_skill",
+              result,
+              isError: false,
+            } as never),
+            { type: "finish", messageMetadata: { appstrate: { turn: TURN_META } } },
+          ] as UIMessageChunk[]) {
+            controller.enqueue(chunk);
+          }
+          controller.close();
+        },
+      });
+      return createUIMessageStreamResponse({
+        stream: releaseOnClose(stream, () => input.slot.release()),
+      });
+    };
+    const first = await postChat(sessionId, undefined, loadingEngine, {
+      permissions: SKILL_TURN_PERMISSIONS,
+      dispatch,
+    });
+    expect(first.status).toBe(200);
+    await collectUiChunks(first);
+    await waitForAssistantPersist(sessionId);
+    expect(results[0]).not.toHaveProperty("persistedContent");
+    expect(await sessionSkills(sessionId)).toEqual({
+      skillDiscovery: true,
+      pinnedSkills: [],
+      skillStatus: {},
+    });
+
+    // Turn 2 replays the stored thread, as the client re-sends it: the text is in the history,
+    // not in the system prompt.
+    const stored = await db
+      .select({ messageId: chatMessages.messageId, content: chatMessages.content })
+      .from(chatMessages)
+      .where(eq(chatMessages.sessionId, sessionId))
+      .orderBy(asc(chatMessages.seq));
+    const history = stored.map(({ messageId, content }) => ({ id: messageId, ...content }));
+    expect(JSON.stringify(history)).toContain(TEXT);
+
+    const second = scriptedEngine();
+    const next = await postChat(sessionId, undefined, second.engine, {
+      permissions: SKILL_TURN_PERMISSIONS,
+      messageId: "u2",
+      history,
+      dispatch,
+    });
+    expect(next.status).toBe(200);
+    await collectUiChunks(next);
+    expect(second.calls[0]!.system).not.toContain(`<skill id="${SKILL}"`);
+    expect(JSON.stringify(second.calls[0]!.messages)).toContain(TEXT);
+
+    await waitForAssistantPersist(sessionId);
+  });
+
+  it("answers 400 to a body field the turn does not know, or malformed pins", async () => {
+    for (const body of [
+      { not_a_field: true },
+      { skill_mode: "strict" },
+      { pinned_skills: ["@a/1"] },
+      { pins: ["not-a-package-id"] },
+    ]) {
       const res = await postChat(mintSessionId(), undefined, scriptedEngine().engine, { body });
       expect(res.status).toBe(400);
     }
   });
 
-  it("keeps `skills:read` on the token in manual, where the model may look for more", async () => {
+  it("keeps `skills:read` on the token with discovery on", async () => {
     const sessionId = mintSessionId();
     await db.insert(chatSessions).values({
       id: sessionId,
       orgId: ctx.orgId,
       userId: ctx.user.id,
       title: null,
-      skillMode: "manual",
+      skillDiscovery: true,
       pinnedSkills: [],
     });
     const { engine, calls } = scriptedEngine();
@@ -1316,9 +1664,6 @@ describe("handleChatStream", () => {
       "skills:read",
     ]);
     expect(calls[0]!.system).toContain("call `read_resource` with that URI verbatim");
-    // The model finds a skill the user asks for with `list_skills`, registered on this turn alone.
-    expect(calls[0]!.platformMcp.listsSkills).toBe(true);
-    expect(calls[0]!.system).toContain("call `list_skills`, then load the one asked for");
 
     await waitForAssistantPersist(sessionId);
   });
@@ -1328,20 +1673,18 @@ describe("handleChatStream", () => {
     // is the turn's own gate, not an empty fixture: neither the persona nor the
     // block names a skill.
     const sessionId = mintSessionId();
-    const PIN = "@acme/pinned-skill";
     await db.insert(chatSessions).values({
       id: sessionId,
       orgId: ctx.orgId,
       userId: ctx.user.id,
       title: null,
-      pinnedSkills: [PIN],
     });
     const skillReads: string[] = [];
-    const uri = `skill://${ctx.defaultSpaceId}/acme/catalogued/catalogued/SKILL.md`;
-    const catalogued: SkillEntry = {
-      uri,
-      frontmatter: { name: "catalogued", description: "Catalogued" },
-      resources: [{ uri, digest: `sha256:${"0".repeat(64)}`, size: 1 }],
+    const catalogued: FakeSkill = {
+      space: ctx.defaultSpaceId,
+      id: "@acme/catalogued",
+      description: "Catalogued",
+      version: null,
     };
     const dispatch = async (req: Request): Promise<Response> => {
       const url = new URL(req.url);
@@ -1360,17 +1703,9 @@ describe("handleChatStream", () => {
     expect(skillReads).toEqual([]);
     const system = calls[0]!.system;
     expect(system).toContain(CONTEXT_ORG_MARKER);
-    for (const absent of [
-      "## Skills",
-      PIN,
-      "@acme/catalogued",
-      "read_resource",
-      "listSkills",
-      "list_skills",
-    ]) {
+    for (const absent of ["## Skills", "@acme/catalogued", "read_resource", "listSkills"]) {
       expect(system).not.toContain(absent);
     }
-    expect(calls[0]!.platformMcp.listsSkills).toBe(false);
 
     await waitForAssistantPersist(sessionId);
   });
@@ -1617,7 +1952,7 @@ describe("handleChatStream", () => {
     async function turn(
       permissions: Set<string>,
       packageAuthoring?: boolean,
-      listedSkill?: SkillEntry,
+      listedSkill?: FakeSkill,
     ) {
       const { engine, calls } = scriptedEngine();
       const res = await postChat(mintSessionId(), undefined, engine, {
@@ -1717,11 +2052,11 @@ describe("handleChatStream", () => {
     it("teaches no authoring without `mcp:invoke` — `createAgent` dispatches through it", async () => {
       // `agents:write` without `mcp:invoke` is a grant the turn cannot dispatch.
       // Skills are the counterpoint: `read_resource` needs no dispatch, so they stay.
-      const uri = `skill://${ctx.defaultSpaceId}/acme/research/research/SKILL.md`;
-      const withSkill: SkillEntry = {
-        uri,
-        frontmatter: { name: "research", description: "Research", metadata: { version: "1.2.0" } },
-        resources: [{ uri, digest: `sha256:${"0".repeat(64)}`, size: 1 }],
+      const withSkill: FakeSkill = {
+        space: ctx.defaultSpaceId,
+        id: SKILL_ID,
+        description: "Research",
+        version: "1.2.0",
       };
       const { system } = await turn(
         new Set(["mcp:read", "agents:write", "skills:read"]),
@@ -1873,7 +2208,7 @@ describe("handleChatStream", () => {
       const rowOf = async (sessionId: string) =>
         (await db.select().from(chatSessions).where(eq(chatSessions.id, sessionId)))[0]!;
 
-      it("is the default of a request naming no space, in the prompt, and is stored as the origin of a new conversation", async () => {
+      it("is named in the prompt as a fact, and is stored as the origin of a new conversation", async () => {
         const sessionId = mintSessionId();
         const { engine, calls } = scriptedEngine();
         const res = await postChat(sessionId, undefined, engine, {
@@ -1884,9 +2219,7 @@ describe("handleChatStream", () => {
         await collectUiChunks(res);
         await waitForAssistantPersist(sessionId);
 
-        expect(calls[0]!.system).toContain(
-          `This conversation's space is Beta (\`${spaceB}\`): when the user names no space, pass \`${spaceB}\` as the \`space_id\`.`,
-        );
+        expect(calls[0]!.system).toContain(`This conversation was opened in Beta (\`${spaceB}\`).`);
         // The default pins nothing: the turn acts on the organization endpoint.
         expect(new URL(calls[0]!.platformMcp.url).pathname).toBe(`/api/mcp/o/${ctx.orgId}`);
         expect(await rowOf(sessionId)).toMatchObject({ spaceId: spaceB, restricted: false });
@@ -1894,7 +2227,7 @@ describe("handleChatStream", () => {
         expect(await touchedBy(sessionId)).toEqual([]);
       });
 
-      it("defaults the overview to the organization's default space, storing no origin", async () => {
+      it("names no space in the overview, even with an organization default, storing no origin", async () => {
         const sessionId = mintSessionId();
         const { engine, calls } = scriptedEngine();
         const res = await postChat(sessionId, undefined, engine, {
@@ -1905,22 +2238,19 @@ describe("handleChatStream", () => {
         expect(res.status).toBe(200);
         await collectUiChunks(res);
         await waitForAssistantPersist(sessionId);
-        expect(calls[0]!.system).toContain(
-          `When the user names no space, pass \`${spaceB}\` (Beta, the organization's default space) as the \`space_id\``,
-        );
+        expect(calls[0]!.system).not.toContain("This conversation was opened in");
+        expect(calls[0]!.system).not.toContain("default space");
         expect(await rowOf(sessionId)).toMatchObject({ spaceId: null, restricted: false });
       });
 
-      it("has no default from the overview without a personal or default space: nothing stored, the assistant asks", async () => {
+      it("names no space from the overview: nothing stored", async () => {
         const sessionId = mintSessionId();
         const { engine, calls } = scriptedEngine();
         const res = await postChat(sessionId, undefined, engine, { reachable: reach });
         expect(res.status).toBe(200);
         await collectUiChunks(res);
         await waitForAssistantPersist(sessionId);
-        expect(calls[0]!.system).toContain(
-          "Ask the user which space when the request does not say",
-        );
+        expect(calls[0]!.system).not.toContain("This conversation was opened in");
         expect(await rowOf(sessionId)).toMatchObject({ spaceId: null, restricted: false });
         expect(await touchedBy(sessionId)).toEqual([]);
       });
@@ -1948,7 +2278,7 @@ describe("handleChatStream", () => {
         await waitForAssistantPersist(sessionId);
         // The stable origin is the default, and the body's space touched and limited nothing.
         expect(calls[0]!.system).toContain(
-          `This conversation's space is Alpha (\`${ctx.defaultSpaceId}\`)`,
+          `This conversation was opened in Alpha (\`${ctx.defaultSpaceId}\`)`,
         );
         expect([...(await tokenSpaceIds(calls[0]!))!].sort()).toEqual(
           [ctx.defaultSpaceId, spaceB].sort(),
@@ -2085,7 +2415,7 @@ describe("handleChatStream", () => {
         expect(res.status).toBe(200);
         await collectUiChunks(res);
         expect(calls[0]!.system).toContain(
-          `This conversation is limited to Beta (\`${spaceB}\`): pass \`${spaceB}\` as the \`space_id\` of every call`,
+          `This conversation was opened in Beta (\`${spaceB}\`) and is limited to it`,
         );
       });
 
@@ -2260,62 +2590,21 @@ describe("handleChatStream", () => {
         const bodyOf = (space: string, id: string) => `${id} as read in ${space}`;
 
         /** The skills the organization endpoint lists, in the order it lists them. */
-        function skillsDispatch(listed: Array<[space: string, id: string]>, read: string[] = []) {
-          return async (req: Request): Promise<Response> => {
-            if (!new URL(req.url).pathname.startsWith("/api/mcp/")) return scriptedDispatch()(req);
-            const message = (await req.json()) as {
-              id?: number;
-              method: string;
-              params?: Record<string, unknown>;
-            };
-            const result = (value: unknown) =>
-              Response.json({ jsonrpc: "2.0", id: message.id, result: value });
-            switch (message.method) {
-              case "initialize":
-                return result({
-                  protocolVersion: message.params?.protocolVersion,
-                  capabilities: {
-                    resources: {},
-                    extensions: { "io.modelcontextprotocol/skills": {} },
-                  },
-                  serverInfo: { name: "fake-platform", version: "1.0.0" },
-                });
-              case "skills/list": {
-                const meta = message.params?._meta as Record<string, unknown> | undefined;
-                return result({
-                  skills:
-                    meta?.[SKILL_DEFINITION_META_KEY] === "draft"
-                      ? []
-                      : listed.map(([space, id]) => ({
-                          uri: uriIn(space, id),
-                          frontmatter: {
-                            name: id.split("/")[1],
-                            description: `${id} in ${space}`,
-                            metadata: { version: "1.0.0" },
-                          },
-                          resources: [
-                            {
-                              uri: uriIn(space, id),
-                              digest: sha256(bodyOf(space, id)),
-                              size: bodyOf(space, id).length,
-                            },
-                          ],
-                        })),
-                });
-              }
-              case "resources/read": {
-                const uri = message.params?.uri as string;
-                read.push(uri);
-                const [space, id] = listed.find(([s, i]) => uriIn(s, i) === uri)!;
-                return result({
-                  contents: [{ uri, mimeType: "text/markdown", text: bodyOf(space, id) }],
-                });
-              }
-              default:
-                return new Response(null, { status: 202 });
-            }
-          };
-        }
+        const skillsDispatch = (listed: Array<[space: string, id: string]>, read: string[] = []) =>
+          fakePlatformMcp(
+            {
+              skills: listed.map(([space, id]) => ({
+                space,
+                id,
+                text: bodyOf(space, id),
+                description: `${id} in ${space}`,
+              })),
+              onMethod: (method, params) => {
+                if (method === "resources/read") read.push(params?.uri as string);
+              },
+            },
+            scriptedDispatch(),
+          );
 
         /** The reach with `skills:read` on both spaces, and `chat:write` where `chatIn` names it. */
         const reachWith = (chatIn: string[]): ReachableSpaceGrant[] =>
@@ -2330,7 +2619,7 @@ describe("handleChatStream", () => {
             ],
           }));
 
-        it("lists one skill per package in auto, the first space in reach order winning, each with its own URI", async () => {
+        it("lists one skill per package, the first space in reach order winning, each with its own URI", async () => {
           // The server lists Beta's copy first: only the reach order decides.
           const { res, calls } = await turn(
             mintSessionId(),
@@ -2354,7 +2643,33 @@ describe("handleChatStream", () => {
           expect(system).not.toContain("<skill id=");
         });
 
-        it("reads no skill of a space outside the acting set, listed or chosen", async () => {
+        it("injects a pinned skill and lists the others of the turn's spaces, never the pinned one twice", async () => {
+          const read: string[] = [];
+          const { res, calls } = await turn(
+            mintSessionId(),
+            {
+              dispatch: skillsDispatch(
+                [
+                  [ctx.defaultSpaceId, TONE],
+                  [spaceB, ONLY_B],
+                ],
+                read,
+              ),
+              body: { pins: [ONLY_B] },
+            },
+            reachWith([ctx.defaultSpaceId, spaceB]),
+          );
+          expect(res.status).toBe(200);
+          await collectUiChunks(res);
+          const system = calls[0]!.system;
+          expect(read).toEqual([uriIn(spaceB, ONLY_B)]);
+          expect(system).toContain(`<skill id="${ONLY_B}"`);
+          expect(system).toContain(`- \`${TONE}\``);
+          expect(system).not.toContain(`- \`${ONLY_B}\``);
+          expect(await tokenPermissions(calls[0]!)).toContain("skills:read");
+        });
+
+        it("reads no skill of a space outside the acting set, listed or pinned", async () => {
           const read: string[] = [];
           const { res, calls } = await turn(
             mintSessionId(),
@@ -2379,7 +2694,7 @@ describe("handleChatStream", () => {
             mintSessionId(),
             {
               dispatch: skillsDispatch([[spaceB, ONLY_B]], read),
-              body: { skill_mode: "manual", pinned_skills: [ONLY_B] },
+              body: { pins: [ONLY_B] },
             },
             reachWith([ctx.defaultSpaceId]),
           );
@@ -2400,7 +2715,7 @@ describe("handleChatStream", () => {
                 ],
                 read,
               ),
-              body: { skill_mode: "manual", pinned_skills: [ONLY_B] },
+              body: { pins: [ONLY_B] },
             },
             reachWith([ctx.defaultSpaceId, spaceB]),
           );
@@ -2462,6 +2777,272 @@ describe("handleChatStream", () => {
         expect([...requests[0]!.spaces[1]!.permissions]).toContain("agents:write");
         expect(await touched(sessionId)).toEqual([spaceB]);
       });
+    });
+  });
+  describe("an agent launch of the composer", () => {
+    const LAUNCH = (request: string) =>
+      `# Run Appstrate agent \`@acme/summarizer\`\n\n## Request\n\n${request || "(none)"}\n`;
+    const launchPart = (extra: Record<string, unknown> = {}) => ({
+      type: "data-agent-prompt",
+      data: { name: "run-summarizer", title: "Summarizer", ...extra },
+    });
+
+    /** A platform MCP server serving one launch prompt; records each `prompts/get`. */
+    const promptsDispatch = (gets: Array<Record<string, unknown>>) =>
+      fakePlatformMcp(
+        {
+          capabilities: { prompts: {} },
+          getPrompt: (params) => {
+            gets.push(params);
+            if (params.name !== "run-summarizer") return undefined;
+            const args = (params.arguments ?? {}) as { request?: string };
+            return {
+              messages: [
+                { role: "user", content: { type: "text", text: LAUNCH(args.request ?? "") } },
+              ],
+            };
+          },
+        },
+        scriptedDispatch(),
+      );
+
+    /** The structured turn Pi builds from what the handler handed the engine. */
+    const modelTurn = (input: PiChatInput) => {
+      const { api, provider, id } = input.modelBinding.model;
+      return buildStructuredPiTurn(
+        input.messages,
+        { api, provider, model: id },
+        { estimateTokens: () => 1, baseTokens: 0, fileDelivery: { image: false, pdf: false } },
+      );
+    };
+
+    const rowsOf = async (sessionId: string) =>
+      (await db.select().from(chatMessages).where(eq(chatMessages.sessionId, sessionId))).map(
+        (row) => row.content as UIMessage,
+      );
+
+    it("resolves the prompt with the typed text, persists the expansion and shows it to the model", async () => {
+      const sessionId = mintSessionId();
+      const gets: Array<Record<string, unknown>> = [];
+      const { engine, calls } = scriptedEngine();
+      const res = await postChat(sessionId, undefined, engine, {
+        dispatch: promptsDispatch(gets),
+        parts: [{ type: "text", text: "résume ma boîte" }, launchPart()],
+      });
+      expect(res.status).toBe(200);
+      await collectUiChunks(res);
+      await waitForAssistantPersist(sessionId);
+
+      expect(gets).toEqual([{ name: "run-summarizer", arguments: { request: "résume ma boîte" } }]);
+      // Persisted: the typed text as typed, the part with the server's expansion.
+      const [user] = await rowsOf(sessionId);
+      expect(user!.parts).toEqual([
+        { type: "text", text: "résume ma boîte" },
+        {
+          type: "data-agent-prompt",
+          data: {
+            name: "run-summarizer",
+            title: "Summarizer",
+            text: LAUNCH("résume ma boîte"),
+          },
+        },
+      ]);
+      // The model reads the expansion, once, not the typed text beside it.
+      expect(modelTurn(calls[0]!).prompt).toBe(LAUNCH("résume ma boîte").trim());
+    });
+
+    it("resolves a launch typed with no text, titling the conversation from it", async () => {
+      const gets: Array<Record<string, unknown>> = [];
+      const sessionId = mintSessionId();
+      const res = await postChat(sessionId, undefined, scriptedEngine().engine, {
+        dispatch: promptsDispatch(gets),
+        parts: [launchPart()],
+      });
+      expect(res.status).toBe(200);
+      await collectUiChunks(res);
+      await waitForAssistantPersist(sessionId);
+      expect(gets).toEqual([{ name: "run-summarizer", arguments: { request: "" } }]);
+      const [session] = await db.select().from(chatSessions).where(eq(chatSessions.id, sessionId));
+      expect(session?.title).toBe("Summarizer");
+    });
+
+    it("keeps the directives as typed, and resolves the request with them read as /label, the agent's own left out", async () => {
+      const sessionId = mintSessionId();
+      const gets: Array<Record<string, unknown>> = [];
+      const { engine, calls } = scriptedEngine();
+      const typed =
+        ":agent[Summarizer]{name=run-summarizer} résume en suivant :skill[tone]{name=@acme/tone}";
+      const res = await postChat(sessionId, undefined, engine, {
+        dispatch: promptsDispatch(gets),
+        parts: [{ type: "text", text: typed }, launchPart()],
+      });
+      expect(res.status).toBe(200);
+      await collectUiChunks(res);
+      await waitForAssistantPersist(sessionId);
+
+      expect(gets).toEqual([
+        { name: "run-summarizer", arguments: { request: "résume en suivant /tone" } },
+      ]);
+      const [user] = await rowsOf(sessionId);
+      expect(user!.parts[0]).toEqual({ type: "text", text: typed });
+      const turn = modelTurn(calls[0]!);
+      expect(turn.prompt).toBe(LAUNCH("résume en suivant /tone").trim());
+      expect(turn.prompt).not.toContain(":skill[");
+      const [session] = await db.select().from(chatSessions).where(eq(chatSessions.id, sessionId));
+      expect(session?.title).toBe("/Summarizer résume en suivant /tone");
+    });
+
+    it("shows the model a skill directive as /label, never as the composer's syntax", async () => {
+      const sessionId = mintSessionId();
+      const { engine, calls } = scriptedEngine();
+      const res = await postChat(sessionId, undefined, engine, {
+        parts: [{ type: "text", text: "reformule avec :skill[tone]{name=@acme/tone} stp" }],
+      });
+      expect(res.status).toBe(200);
+      await collectUiChunks(res);
+      await waitForAssistantPersist(sessionId);
+      expect(modelTurn(calls[0]!).prompt).toBe("reformule avec /tone stp");
+      // The stored row keeps what was typed: the thread draws the chip from it.
+      const [user] = await rowsOf(sessionId);
+      expect((user!.parts[0] as { text: string }).text).toBe(
+        "reformule avec :skill[tone]{name=@acme/tone} stp",
+      );
+    });
+
+    it("answers 400 to a name the server does not serve, writing nothing and freeing the conversation", async () => {
+      const sessionId = mintSessionId();
+      const { engine, calls } = scriptedEngine();
+      const res = await postChat(sessionId, undefined, engine, {
+        dispatch: promptsDispatch([]),
+        parts: [
+          { type: "text", text: "go" },
+          { type: "data-agent-prompt", data: { name: "run-ghost", title: "Ghost" } },
+        ],
+      });
+      expect(res.status).toBe(400);
+      expect(((await res.json()) as { code: string }).code).toBe("invalid_request");
+      expect(calls).toEqual([]);
+      expect(await db.select().from(chatMessages)).toEqual([]);
+      const [session] = await db.select().from(chatSessions).where(eq(chatSessions.id, sessionId));
+      expect(session?.activeStreamId ?? null).toBeNull();
+    });
+
+    it("answers 502 when the platform fails to answer the launch, before the slot and the claim, leaving nothing behind", async () => {
+      const sessionId = mintSessionId();
+      const { engine, calls } = scriptedEngine();
+      const res = await postChat(sessionId, undefined, engine, {
+        dispatch: async (req) =>
+          new URL(req.url).pathname === "/api/models"
+            ? modelsResponse()
+            : new Response("boom", { status: 500 }),
+        parts: [{ type: "text", text: "go" }, launchPart()],
+      });
+      expect(res.status).toBe(502);
+      expect(calls).toEqual([]);
+      expect(await db.select().from(chatMessages)).toEqual([]);
+      const [session] = await db.select().from(chatSessions).where(eq(chatSessions.id, sessionId));
+      expect(session?.activeStreamId ?? null).toBeNull();
+      // The slot is free again: the next turn runs.
+      const next = await postChat(mintSessionId(), undefined, scriptedEngine().engine);
+      expect(next.status).toBe(200);
+      await collectUiChunks(next);
+    });
+
+    describe("replaying an earlier launch", () => {
+      const sent = (extra: Record<string, unknown> = {}): UIMessage =>
+        ({
+          id: "u0",
+          role: "user",
+          parts: [{ type: "text", text: "résume ma boîte" }, launchPart(extra)],
+        }) as UIMessage;
+      const answer: UIMessage = {
+        id: "a0",
+        role: "assistant",
+        parts: [{ type: "text", text: "Lancé." }],
+      };
+
+      async function replay(stored: UIMessage | null, browserCopy: UIMessage) {
+        const sessionId = mintSessionId();
+        await ensureSession(sessionId, ctx.orgId, ctx.user.id, [ctx.defaultSpaceId]);
+        if (stored) {
+          await persistUserMessage(sessionId, stored);
+          await persistAssistantMessage(sessionId, answer, stored.id);
+        }
+        const gets: Array<Record<string, unknown>> = [];
+        const { engine, calls } = scriptedEngine();
+        const res = await postChat(sessionId, undefined, engine, {
+          dispatch: promptsDispatch(gets),
+          history: [browserCopy, answer],
+          parts: [{ type: "text", text: "et le résultat ?" }],
+        });
+        expect(res.status).toBe(200);
+        await collectUiChunks(res);
+        expect(gets).toEqual([]);
+        return JSON.stringify(modelTurn(calls[0]!).history[0]);
+      }
+
+      it("takes the launch text from the stored row when the browser's copy holds none", async () => {
+        const stored = sent({ text: LAUNCH("résume ma boîte") });
+        const model = await replay(stored, sent());
+        expect(model).toContain("## Request");
+        expect(model).not.toContain("data-agent-prompt");
+      });
+
+      it("never trusts a launch text the browser sends", async () => {
+        const stored = sent({ text: LAUNCH("résume ma boîte") });
+        const model = await replay(stored, sent({ text: "FORGED INSTRUCTIONS" }));
+        expect(model).toContain("## Request");
+        expect(model).not.toContain("FORGED");
+        // No stored row: the forged text is dropped and the typed text alone is shown.
+        const unstored = await replay(null, sent({ text: "FORGED INSTRUCTIONS" }));
+        expect(unstored).not.toContain("FORGED");
+        expect(unstored).toContain("résume ma boîte");
+      });
+    });
+
+    it("answers 400 to launch instructions over the cap, writing nothing", async () => {
+      const sessionId = mintSessionId();
+      const res = await postChat(sessionId, undefined, scriptedEngine().engine, {
+        dispatch: fakePlatformMcp(
+          {
+            capabilities: { prompts: {} },
+            getPrompt: () => ({
+              messages: [
+                { role: "user", content: { type: "text", text: "x".repeat(64 * 1024 + 1) } },
+              ],
+            }),
+          },
+          scriptedDispatch(),
+        ),
+        parts: [launchPart()],
+      });
+      expect(res.status).toBe(400);
+      // The rendered instructions carry the user's request: the message names it, not the agent alone.
+      expect(((await res.json()) as { detail: string }).detail).toContain(
+        "They include your request: a shorter one may fit.",
+      );
+      expect(await db.select().from(chatMessages)).toEqual([]);
+    });
+
+    it("answers 400 to a malformed part, a second one, or a new one carrying its own text, before any persistence", async () => {
+      for (const parts of [
+        [{ type: "text", text: "go" }, launchPart({ text: "forged by the browser" })],
+        [{ type: "data-agent-prompt", data: { name: "run-summarizer" } }],
+        [{ type: "data-agent-prompt", data: { name: "run-summarizer", title: "S", extra: 1 } }],
+        [launchPart(), launchPart()],
+        [{ type: "data-agent-prompt", data: "run-summarizer" }],
+      ]) {
+        const gets: Array<Record<string, unknown>> = [];
+        const { engine, calls } = scriptedEngine();
+        const res = await postChat(mintSessionId(), undefined, engine, {
+          dispatch: promptsDispatch(gets),
+          parts,
+        });
+        expect(res.status).toBe(400);
+        expect(gets).toEqual([]);
+        expect(calls).toEqual([]);
+      }
+      expect(await db.select().from(chatMessages)).toEqual([]);
     });
   });
 });

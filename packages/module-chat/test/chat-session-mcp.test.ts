@@ -143,7 +143,7 @@ beforeEach(async () => {
   await seedSpaceMember({ spaceId: lecture.id, userId: caller.user.id, presetRole: "viewer" });
   ceiling = turnPermissions(unionOf("operator", "admin", "viewer"), {
     authoring: true,
-    skillMode: "auto",
+    skillDiscovery: true,
   });
 });
 
@@ -262,7 +262,7 @@ describe("a chat turn's loopback bearer on the MCP endpoints", () => {
   it("is narrowed by the turn: without authoring the write is refused in Gestion too", async () => {
     const narrowed = turnPermissions(unionOf("operator", "admin", "viewer"), {
       authoring: false,
-      skillMode: "auto",
+      skillDiscovery: true,
     });
     expect(narrowed).not.toContain("agents:write");
     const refused = await invoke(bearer(caller, narrowed), gestion.id, "createAgent", {});

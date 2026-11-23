@@ -493,6 +493,7 @@ describe("search — integration_tool kind", () => {
         }),
       },
     );
+    expect(payload.note).toContain("follow the space-choice instructions for that refusal");
     expect(toolNames(payload)).toEqual([TOOL]);
     expect(payload.not_ready).toEqual([
       {

@@ -30,12 +30,11 @@
 
 import type { Context } from "hono";
 import {
-  parseSkillUri,
   SKILL_LOCK_VERSION_META_KEY,
   SKILL_MAX_TOTAL_BYTES,
-  type SkillAddress,
   type SkillEntry,
 } from "@appstrate/core/skill-uri";
+import { parseSkillUri, type SkillAddress } from "@appstrate/core/skill-address";
 import { mapWithConcurrency } from "@appstrate/core/map-with-concurrency";
 import { PACKAGE_MANIFEST_FILE } from "@appstrate/core/package-files";
 import type { AppEnv } from "../types/index.ts";

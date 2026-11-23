@@ -25,3 +25,16 @@ export function mayGovernScheduleActor(actor: ScheduleActor, caller: ScheduleCal
   if (actor.endUserId) return caller.canCreateApiKeys;
   return true;
 }
+
+/**
+ * What the schedule page's action menu may offer. Every deed is held by its own permission AND by
+ * governance, as the server judges it: enabling/disabling is a `PATCH` (`schedules:write`), deleting
+ * a `DELETE` (`schedules:delete`), and both call `assertMayGovern(…, "write")` on the row's actor.
+ * The menu renders when at least one is offered.
+ */
+export function scheduleMenuActions(held: { write: boolean; delete: boolean; governs: boolean }): {
+  toggle: boolean;
+  delete: boolean;
+} {
+  return { toggle: held.write && held.governs, delete: held.delete && held.governs };
+}

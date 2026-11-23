@@ -114,10 +114,15 @@ import { getPackageAuthoringEnabled } from "./package-authoring-store.ts";
 import { getInlineRunModelEnabled } from "./inline-run-model-store.ts";
 import { latestTurnModelId } from "./turn-model.ts";
 import { ComposerTools } from "./composer-tools.tsx";
-import { DEFAULT_SKILL_SELECTION, type ChatSkillSelection } from "../skills.ts";
 import { canAuthorPackages, canPinSkills } from "../capabilities.ts";
 import { createChatAttachmentAdapter } from "./attachment-adapter.ts";
 import { shouldReconcileHistory } from "./history-reconcile.ts";
+import { sendWithDirectives } from "./directive-send.ts";
+import {
+  ConversationSkillsProvider,
+  useConversationSkills,
+  type ConversationSkillsState,
+} from "./use-conversation-skills.ts";
 
 // Tab visibility as an external store — the mark-read effect must not fire
 // while the tab is hidden: SSE-driven invalidations refetch the list even in
@@ -543,28 +548,17 @@ const Conversation = memo(function Conversation({
   // No picker on a failed read: it would show the defaults, and a change would
   // send them over the stored choice.
   const showPicker = canPinSkills && !history.isError;
-  // What the user changed, sent with every turn (which writes it); nothing
-  // changed = nothing sent, and the stored selection stands. The ref is the
-  // transport's request-time read of the same value.
-  const [chosenSkills, setChosenSkills] = useState<ChatSkillSelection>();
-  const chosenSkillsRef = useRef<ChatSkillSelection>(undefined);
-  const chooseSkills = useCallback((selection: ChatSkillSelection) => {
-    chosenSkillsRef.current = selection;
-    setChosenSkills(selection);
-  }, []);
-  const getChosenSkills = useCallback(() => chosenSkillsRef.current, []);
-  const skills = chosenSkills ?? history.data?.skills ?? DEFAULT_SKILL_SELECTION;
+  // The session detail's skills once the server holds the row, a local selection before. Gated
+  // here for the turn (`turnSkills` bypasses the provider) and below for what the thread shows.
+  const conversationSkills = useConversationSkills({
+    transport,
+    id,
+    persisted: persistedAtMount,
+    enabled: showPicker,
+  });
   const tools = useMemo(
-    () => (
-      <ComposerTools
-        transport={transport}
-        selection={skills}
-        onSelectionChange={chooseSkills}
-        showPicker={showPicker}
-        authorsPackages={authorsPackages}
-      />
-    ),
-    [transport, skills, chooseSkills, showPicker, authorsPackages],
+    () => <ComposerTools authorsPackages={authorsPackages} />,
+    [authorsPackages],
   );
 
   if (persistedAtMount && history.isPending) {
@@ -584,17 +578,20 @@ const Conversation = memo(function Conversation({
   }
   return (
     <ConversationScopeProvider value={scope}>
-      <ConversationInner
-        id={id}
-        transport={transport}
-        isPersisted={persistedAtMount}
-        initialMessages={initialMessages}
-        composerTools={tools}
-        composerSlot={composerSlot}
-        getChosenSkills={getChosenSkills}
-        getCreation={getCreation}
-        {...rest}
-      />
+      {/* The panel, the `/` menu's skills and the thread's pin action, where the selection can change. */}
+      <ConversationSkillsProvider value={showPicker ? conversationSkills : null}>
+        <ConversationInner
+          id={id}
+          transport={transport}
+          isPersisted={persistedAtMount}
+          initialMessages={initialMessages}
+          composerTools={tools}
+          composerSlot={composerSlot}
+          turnSkills={conversationSkills}
+          getCreation={getCreation}
+          {...rest}
+        />
+      </ConversationSkillsProvider>
     </ConversationScopeProvider>
   );
 });
@@ -636,7 +633,7 @@ function ConversationInner({
   composerSlot,
   serverGenerating,
   serverUpdatedAt,
-  getChosenSkills,
+  turnSkills,
   getCreation,
 }: Omit<
   ConversationProps,
@@ -644,13 +641,15 @@ function ConversationInner({
 > & {
   composerTools: React.ReactNode;
   initialMessages: UIMessage[];
-  getChosenSkills: () => ChatSkillSelection | undefined;
+  /** The skills a first turn creates the conversation with. */
+  turnSkills: Pick<ConversationSkillsState, "takeForTurn">;
   /** The origin space and limit the turn being sent creates the conversation with. */
   getCreation: () => ConversationCreation | undefined;
 }) {
   const queryClient = useQueryClient();
   const { t, attachTarget } = useChatHost();
   const scope = useConversationScope();
+  const { takeForTurn } = turnSkills;
   // File attachments: the composer stages picked files through the HOST uploader, into the
   // caller's personal space, as `upload://` file parts the server materializes into durable
   // files of the conversation.
@@ -709,12 +708,12 @@ function ConversationInner({
             generation: getCompatibleGenerationSettings(),
             packageAuthoring: getPackageAuthoringEnabled(),
             inlineRunsUseChatModel: getInlineRunModelEnabled(),
-            skills: getChosenSkills(),
+            skills: takeForTurn(),
             creation: getCreation(),
           });
         },
       }),
-    [buildHeaders, getChosenSkills, getCreation, getTransport],
+    [buildHeaders, takeForTurn, getCreation, getTransport],
   );
 
   const chat = useChat({
@@ -866,7 +865,17 @@ function ConversationInner({
     if (transport) void stopSession(transport, id).catch(() => {});
     return chat.stop();
   }, [chat, transport, id, messageQueue]);
-  const chatWithServerStop = useMemo(() => ({ ...chat, stop }), [chat, stop]);
+  // The agent a message names joins it as it is sent; its skills stay in the text, which the
+  // turn reads them from.
+  const { sendMessage } = chat;
+  const send = useCallback<typeof sendMessage>(
+    (message, options) => sendMessage(sendWithDirectives(message), options),
+    [sendMessage],
+  );
+  const chatWithServerStop = useMemo(
+    () => ({ ...chat, stop, sendMessage: send }),
+    [chat, stop, send],
+  );
 
   const runtime = useAISDKRuntime(chatWithServerStop, { adapters: { attachments } });
 

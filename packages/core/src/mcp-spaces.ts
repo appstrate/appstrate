@@ -21,6 +21,7 @@ export function projectActiveInSpaces(problem: unknown, eligible: () => readonly
     !("active_in_spaces" in body) ||
     (body.code !== "agent_not_active_in_space" &&
       body.code !== "package_not_active_in_space" &&
+      body.code !== "inline_run_not_allowed_in_space" &&
       body.code !== "missing_integration_connection")
   )
     return undefined;

@@ -23,7 +23,7 @@ import {
 import { Button } from "@appstrate/ui/components/button";
 import { cn } from "@appstrate/ui/cn";
 import { canComposeInlineRuns } from "../capabilities.ts";
-import type { ChatSkillSelection } from "../skills.ts";
+import { canResetSkills } from "./chat-skills.ts";
 import { attachUnavailableKey } from "./attachment-adapter.ts";
 import { LIMIT_REASON_KEY } from "./composer-reasons.ts";
 import { limitAvailability, useConversationScope, useSpaceName } from "./conversation-scope.ts";
@@ -32,7 +32,8 @@ import {
   setPackageAuthoringEnabled,
   usePackageAuthoringEnabled,
 } from "./package-authoring-store.ts";
-import { useChatHost, type ChatTransport } from "./runtime-context.ts";
+import { useChatHost } from "./runtime-context.ts";
+import { useConversationSkillsContext, useDraftSkills } from "./use-conversation-skills.ts";
 import {
   isToolsPanelOpen,
   setModelPanelOpen,
@@ -122,20 +123,12 @@ function AttachRows({ onDone }: { onDone: () => void }) {
   );
 }
 
-export function ComposerPlusMenu({
-  transport,
-  selection,
-  onSelectionChange,
-  showPicker,
-  authorsPackages,
-}: {
-  transport: ChatTransport | undefined;
-  selection: ChatSkillSelection;
-  onSelectionChange: (selection: ChatSkillSelection) => void;
-  showPicker: boolean;
-  authorsPackages: boolean;
-}) {
+export function ComposerPlusMenu({ authorsPackages }: { authorsPackages: boolean }) {
   const { t, can, modelLabel } = useChatHost();
+  // Offered with `skills:read` on a readable conversation: the context is null otherwise.
+  const conversation = useConversationSkillsContext();
+  const showPicker = conversation !== null;
+  const draft = useDraftSkills();
   const creationMode = usePackageAuthoringEnabled();
   // Composing an inline run needs creation mode too: off, no turn launches one.
   const offersInlineRunModel = creationMode && canComposeInlineRuns(can);
@@ -151,7 +144,7 @@ export function ComposerPlusMenu({
   const departed =
     (authorsPackages && !creationMode) ||
     (offersInlineRunModel && inlineRunModel) ||
-    (showPicker && selection.skillMode !== "auto");
+    (conversation !== null && canResetSkills(conversation.skills));
   const close = () => setOpen(false);
   return (
     <>
@@ -227,18 +220,14 @@ export function ComposerPlusMenu({
           {t("thread.disclaimer")}
         </p>
       </SheetMenu>
-      {showPicker && (
+      {conversation && (
         <SheetMenu
           open={skillsOpen}
           onOpenChange={setSkillsOpen}
           title={t("skills.title")}
           className="flex flex-col p-4"
         >
-          <SkillsPickerPanel
-            transport={transport}
-            selection={selection}
-            onChange={onSelectionChange}
-          />
+          <SkillsPickerPanel conversation={conversation} draft={draft} />
         </SheetMenu>
       )}
     </>

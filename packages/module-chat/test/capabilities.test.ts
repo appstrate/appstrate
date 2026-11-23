@@ -96,7 +96,7 @@ describe("canPinSkills", () => {
   it("needs the caller to write the conversation and read skills, not to dispatch", () => {
     const pinner = ["chat:write", "skills:read"];
     const held = (set: string[]) => (p: string) => set.includes(p);
-    // The chosen skills are read by the chat with the caller's own authority,
+    // The pinned skills are read by the chat with the caller's own authority,
     // so a caller without the MCP pair still injects them.
     expect(canPinSkills(held(pinner))).toBe(true);
     for (const missing of pinner) {

@@ -331,6 +331,54 @@ describe("GET /api/orgs/{orgId}/runs", () => {
       admin = await memberContext(owner, "admin");
     });
 
+    it("narrows to team or personal spaces with space_kind, never widening", async () => {
+      const personal = await personalSpaceOf(member);
+      const personalRun = await seedSpaceRun(personal, member.user.id);
+      const teamRuns = sorted(r.unOwner!, r.unMember!, r.deuxMember!, r.defaultMember!);
+      expect(ids(await list(session(member)))).toEqual(sorted(personalRun, ...teamRuns));
+      expect(ids(await list(session(member), "?space_kind=team"))).toEqual(teamRuns);
+      expect(ids(await list(session(member), "?space_kind=personal"))).toEqual([personalRun]);
+      expect((await list(session(member), "?space_kind=")).total).toBe(5);
+      // No personal space reached: an empty page, never the full list.
+      const none = await list(session(owner), "?space_kind=personal");
+      expect(none.data).toEqual([]);
+      expect(none.total).toBe(0);
+      const bad = await app.request(path("?space_kind=nope"), { headers: session(member) });
+      expect(bad.status).toBe(400);
+    });
+
+    it("narrows to the picked spaces with spaceId, never widening", async () => {
+      const personal = await personalSpaceOf(member);
+      const personalRun = await seedSpaceRun(personal, member.user.id);
+      const pick = (...spaceIds: string[]) => `?spaceId=${spaceIds.join(",")}`;
+      expect(ids(await list(session(member), pick(un)))).toEqual(sorted(r.unOwner!, r.unMember!));
+      expect(ids(await list(session(member), pick(personal)))).toEqual([personalRun]);
+      expect(ids(await list(session(member), pick(un, personal)))).toEqual(
+        sorted(r.unOwner!, r.unMember!, personalRun),
+      );
+      // Privé is not reached: an empty page, never a leak.
+      const unreached = await list(session(member), pick(prive));
+      expect(unreached.data).toEqual([]);
+      expect(unreached.total).toBe(0);
+      // Combined with space_kind, both must hold.
+      const combined = await list(session(member), `${pick(un, personal)}&space_kind=personal`);
+      expect(ids(combined)).toEqual([personalRun]);
+      const bad = await app.request(path("?spaceId=nope"), { headers: session(member) });
+      expect(bad.status).toBe(400);
+    });
+
+    it("applies space_kind on GET /api/runs from a team space", async () => {
+      const headers = { Cookie: member.cookie, "X-Org-Id": owner.orgId, "X-Space-Id": un };
+      const get = async (query: string) => {
+        const res = await app.request(`/api/runs${query}`, { headers });
+        expect(res.status, await res.clone().text()).toBe(200);
+        return (await res.json()) as RunPage;
+      };
+      expect((await get("")).total).toBe(2);
+      expect((await get("?space_kind=team")).total).toBe(2);
+      expect((await get("?space_kind=personal")).total).toBe(0);
+    });
+
     it("reaches the member's own live personal space, and nobody else does", async () => {
       const personal = await personalSpaceOf(member);
       const run = await seedSpaceRun(personal, member.user.id);

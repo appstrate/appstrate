@@ -17,6 +17,7 @@
 
 import { describe, expect, it } from "bun:test";
 import { renderToString } from "react-dom/server";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { AssistantRuntimeProvider } from "@assistant-ui/react";
 import { useAISDKRuntime } from "@assistant-ui/react-ai-sdk";
 
@@ -66,9 +67,12 @@ function Turn({ helpers }: { helpers: ChatHelpers }) {
 
 function render(parts: Parts, status: ChatHelpers["status"] = "streaming", error?: Error) {
   return renderToString(
-    <ChatHostProvider value={host}>
-      <Turn helpers={chat(parts, status, error)} />
-    </ChatHostProvider>,
+    // The composer below the turn reads the `/` menu's commands.
+    <QueryClientProvider client={new QueryClient()}>
+      <ChatHostProvider value={host}>
+        <Turn helpers={chat(parts, status, error)} />
+      </ChatHostProvider>
+    </QueryClientProvider>,
   );
 }
 

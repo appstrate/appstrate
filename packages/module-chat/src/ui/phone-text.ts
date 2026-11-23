@@ -2,9 +2,9 @@
 
 // A landscape phone can cross md. Keep both editable fields at 1rem at every width.
 
-/** The composer's `<textarea>`: compact, borderless, inside the composer card. */
+/** The composer's Lexical editor, styled through the library's `aui-lexical-*` classes. */
 export const COMPOSER_INPUT_CLASS =
-  "placeholder:text-muted-foreground max-h-40 min-h-10 desktop-pointer:min-h-9 w-full resize-none border-0 bg-transparent px-0 py-1 text-base shadow-none outline-none focus:ring-0 focus-visible:ring-0 focus-visible:outline-none";
+  "relative max-h-40 w-full overflow-y-auto px-0 text-base [&_.aui-lexical-input]:min-h-10 desktop-pointer:[&_.aui-lexical-input]:min-h-9 [&_.aui-lexical-input]:py-2 md:[&_.aui-lexical-input]:py-1 [&_.aui-lexical-input]:break-words [&_.aui-lexical-input]:whitespace-pre-wrap [&_.aui-lexical-input]:outline-none [&_.aui-lexical-placeholder]:text-muted-foreground [&_.aui-lexical-placeholder]:pointer-events-none [&_.aui-lexical-placeholder]:absolute [&_.aui-lexical-placeholder]:inset-x-0 [&_.aui-lexical-placeholder]:top-2 md:[&_.aui-lexical-placeholder]:top-1 [&_.aui-lexical-placeholder]:truncate";
 
 /** Running text a phone reads (a hint, a state, a message): 16 px, the dense size from `md`. */
 export const READING_TEXT_CLASS = "text-base md:text-sm";
@@ -24,12 +24,9 @@ export const NOTE_TEXT_CLASS = "text-sm md:text-xs";
 export const COMPOSER_ROW_CLASS =
   "flex items-center gap-x-2 gap-y-1 md:flex-wrap max-md:flex-nowrap max-md:items-end";
 
-/**
- * The field: a line of its own from `md`, the stretchy cell of the phone's line (as tall as its
- * buttons). Empty, it shows one line of its placeholder, never the two a narrow screen would wrap.
- */
+/** The field: a line of its own from `md`, the stretchy cell of the phone's line. */
 export const COMPOSER_FIELD_CLASS =
-  "md:order-first md:basis-full max-md:min-h-10 max-md:min-w-0 max-md:flex-1 max-md:py-2 max-md:[&:placeholder-shown]:max-h-10 max-md:[&:placeholder-shown]:overflow-hidden max-md:[&:placeholder-shown]:py-0 max-md:[&:placeholder-shown]:leading-10 short-landscape:basis-0 short-landscape:grow";
+  "min-w-0 md:order-first md:basis-full max-md:flex-1 short-landscape:basis-0 short-landscape:grow";
 
 /** Send's cell: with the field on the same line in a short landscape (the keyboard leaves a sliver). */
 export const COMPOSER_SEND_CLASS = "flex shrink-0 items-center gap-2 short-landscape:order-first";

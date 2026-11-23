@@ -880,6 +880,8 @@ describe("Organizations API", () => {
           api_version: CURRENT_API_VERSION,
           dashboard_sso_enabled: true,
           restrict_package_copy: true,
+          personal_model_credentials: false,
+          personal_space_role: "operator",
         }),
       });
       expect(res.status).toBe(200);
@@ -894,6 +896,8 @@ describe("Organizations API", () => {
         apiVersion: CURRENT_API_VERSION,
         dashboardSsoEnabled: true,
         restrictPackageCopy: true,
+        personalModelCredentials: false,
+        personalSpaceRole: "operator",
       });
     });
 

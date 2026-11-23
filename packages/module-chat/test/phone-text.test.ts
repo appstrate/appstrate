@@ -76,7 +76,7 @@ describe("composer row", () => {
     expect(COMPOSER_FIELD_CLASS.split(/\s+/)).toContain("max-md:flex-1");
     expect(COMPOSER_FIELD_CLASS.split(/\s+/)).toContain("md:basis-full");
     // Empty, a narrow screen's placeholder is one line, never two.
-    expect(COMPOSER_FIELD_CLASS.split(/\s+/)).toContain("max-md:[&:placeholder-shown]:max-h-10");
+    expect(COMPOSER_INPUT_CLASS.split(/\s+/)).toContain("[&_.aui-lexical-placeholder]:truncate");
   });
 
   it('leaves the model out of a phone\'s line: it is in the "+" panel and the placeholder', () => {

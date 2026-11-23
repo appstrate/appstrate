@@ -41,6 +41,7 @@ import {
 } from "../src/ui/sessions.ts";
 import { useSessions, useSessionDetail } from "../src/ui/use-sessions.ts";
 import { transportOf, transportOver } from "./fake-request.ts";
+import { DEFAULT_STORED_SKILLS } from "../src/ui/chat-skills.ts";
 import { conversationScope, testHost } from "./test-host.ts";
 
 /** The assistant-ui runtime the attach button reads. */
@@ -126,7 +127,7 @@ describe("changing the limit of an existing conversation", () => {
         ...row,
         ...changes,
         messages: [],
-        skills: { skillMode: "auto", pinnedSkills: [] },
+        skills: DEFAULT_STORED_SKILLS,
         createdAt: "",
       });
       qc.setQueryData<SessionsCache>(listKey, {
@@ -261,6 +262,42 @@ describe("changing the limit of a conversation created in this mount", () => {
     );
     expect(seen).toMatchObject({ originSpaceId: "spc_b", restricted: true, pending: true });
   });
+
+  it("stops following the selection once the first message is sent", () => {
+    const qc = new QueryClient();
+    const taken: unknown[] = [];
+    let seen!: ConversationScope;
+    let step = 0;
+    function Harness() {
+      const [selected, setSelected] = useState("spc_a");
+      const limit = useConversationLimit({
+        id: "chs_new",
+        transport: undefined,
+        persistedAtMount: false,
+        stored: undefined,
+        selectedSpaceId: selected,
+        generating: false,
+      });
+      seen = limit.scope;
+      if (step === 0) {
+        step = 1;
+        taken.push(limit.getCreation());
+        setSelected("spc_c");
+      } else if (step === 1) {
+        step = 2;
+        taken.push(limit.getCreation());
+      }
+      return null;
+    }
+    renderToStaticMarkup(
+      <QueryClientProvider client={qc}>
+        <Harness />
+      </QueryClientProvider>,
+    );
+    const first = { spaceId: "spc_a", restricted: true };
+    expect(taken).toEqual([first, first]);
+    expect(seen).toMatchObject({ originSpaceId: "spc_a", restricted: true });
+  });
 });
 
 describe("the space a limited conversation acts in", () => {
@@ -384,9 +421,6 @@ describe("the composer's limit chip", () => {
               <TooltipProvider>
                 <ComposerTools
                   transport={transportOf(() => ({ "X-Space-Id": "spc_a" }))}
-                  selection={{ skillMode: "auto", pinnedSkills: [] }}
-                  onSelectionChange={() => {}}
-                  showPicker={false}
                   authorsPackages={false}
                 />
               </TooltipProvider>
@@ -514,13 +548,7 @@ describe("the composer's attach button", () => {
         <ChatTransportProvider value={transport}>
           <Runtime>
             <TooltipProvider>
-              <ComposerTools
-                transport={transport}
-                selection={{ skillMode: "auto", pinnedSkills: [] }}
-                onSelectionChange={() => {}}
-                showPicker={false}
-                authorsPackages={false}
-              />
+              <ComposerTools authorsPackages={false} />
             </TooltipProvider>
           </Runtime>
         </ChatTransportProvider>

@@ -5,6 +5,7 @@ import { DEFAULT_REQUEST_TIMEOUT_MSEC } from "@modelcontextprotocol/sdk/shared/p
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import { createInProcessPair, type AppstrateRequestExtra } from "@appstrate/mcp-transport";
 import { OPERATION_INDEX_HEADING } from "@appstrate/core/chat-contract";
+import { INLINE_MANIFEST_RULE } from "@appstrate/core/run-and-wait-client";
 import type { RunLogEvent } from "@appstrate/shared-types";
 import {
   RUN_AND_WAIT_LOG_MESSAGE_MAX_CHARS,
@@ -190,7 +191,7 @@ describe("run_and_wait", () => {
   it("promises the launch warnings in its result shape", () => {
     const { tool } = makeRunAndWait({});
     expect(tool.descriptor.description).toContain(
-      "`{ id, packageId, status, done:true, result?, error?, warnings }`",
+      "`{ id, packageId, status, done:true, result?, error?, warnings, files? }`",
     );
     for (const code of CONNECTION_RESOLUTION_WARNING_CODES) {
       expect(tool.descriptor.description).toContain(`\`${code}\``);
@@ -203,10 +204,9 @@ describe("run_and_wait", () => {
     expect(tool.descriptor.description).toContain("publish_file");
     expect(tool.descriptor.description).toContain("build a `.zip` or `.afps` archive");
     expect(tool.descriptor.description).not.toContain("publish_archive");
-    expect(tool.descriptor.description).toMatch(/fields you omit/i);
-    expect(tool.descriptor.description).toContain(
-      "selects its `log` tool in `integrations_configuration` unless either `dependencies.integrations` or `integrations_configuration` names it (the dependency alone keeps its `default_tools`)",
-    );
+    // The manifest rule reaches a composing caller once, on the `manifest` property.
+    expect(tool.descriptor.description).not.toContain(INLINE_MANIFEST_RULE);
+    expect(tool.descriptor.description).not.toContain("one-shot");
     expect(tool.descriptor.description).not.toMatch(/one main user-facing file/i);
     expect(tool.descriptor.description).not.toMatch(/several peer files/i);
     expect(tool.descriptor.inputSchema.properties).not.toHaveProperty("primary_deliverable");
@@ -215,6 +215,11 @@ describe("run_and_wait", () => {
       tool.descriptor.inputSchema.properties as Record<string, Record<string, unknown>>
     ).manifest!;
     expect(manifestSchema.additionalProperties).toBe(true);
+    expect(manifestSchema.description).toContain(INLINE_MANIFEST_RULE);
+    expect(manifestSchema.description).toMatch(/fields you omit/i);
+    expect(manifestSchema.description).toContain(
+      "selects its `log` tool in `integrations_configuration` unless either `dependencies.integrations` or `integrations_configuration` names it (the dependency alone keeps its `default_tools`)",
+    );
     expect(manifestSchema).not.toHaveProperty("required");
     expect(manifestSchema.properties).toEqual(
       expect.objectContaining({
@@ -405,9 +410,12 @@ describe("run_and_wait", () => {
       const without = prose(["mcp:read", ...LAUNCHES, "agents:run"]);
       const withGrant = prose(["mcp:read", ...LAUNCHES, ...COMPOSER]);
       expect(without).not.toMatch(/inline/i);
-      expect(without).toContain("validate_package_file");
+      // Neither composing nor importing: the package-file bullet goes with its tools.
+      expect(without).not.toContain("validate_package_file");
       expect(withGrant).toContain("runInline");
-      expect(withGrant).toContain("validateInlineRun");
+      // The partial-manifest rule is `run_and_wait`'s alone: `validateInlineRun` takes a full one.
+      expect(withGrant).not.toContain("validateInlineRun");
+      expect(withGrant).not.toContain("PARTIAL");
       expect(withGrant).toContain("have one inline run create the integration manifest");
     });
   });

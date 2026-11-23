@@ -40,10 +40,9 @@ import { describeRequiresPostgres } from "../../../apps/api/test/helpers/tier.ts
 import { persistNotice, persistUserMessage } from "../src/persistence.ts";
 import { claimTurn, persistClaimedUserMessage } from "../src/chat-stream.ts";
 import { reconcileChatRun, runNoticeMessageId } from "../src/run-reconcile.ts";
-import { setActiveStream, STALE_MARKER_MIN_AGE_MS } from "../src/resumable.ts";
+import { setActiveStream, STALE_MARKER_MIN_AGE_MS, type TurnScope } from "../src/resumable.ts";
 
-/** The scope of a session created with no origin space and no limit. */
-const UNLIMITED = { spaceId: null, restricted: false };
+import { NO_SKILL_STATUS, UNLIMITED_SCOPE } from "./turn-claim.ts";
 
 let ctx: TestContext;
 let packageId: string;
@@ -214,7 +213,7 @@ describe("persistNotice single-writer guard", () => {
 
   it("refuses while a turn owns the session", async () => {
     const sessionId = await createSession();
-    await setActiveStream(sessionId, "strm_live", UNLIMITED);
+    await setActiveStream(sessionId, "strm_live", UNLIMITED_SCOPE, NO_SKILL_STATUS);
 
     const posted = await persistNotice({
       sessionId,
@@ -235,7 +234,7 @@ describe("persistNotice single-writer guard", () => {
     const sessionId = await createSession();
     await installClaimProbe();
     try {
-      await claimTurn(sessionId, "strm_claim", UNLIMITED);
+      await claimTurn(sessionId, "strm_claim", UNLIMITED_SCOPE, NO_SKILL_STATUS);
       await persistClaimedUserMessage(sessionId, "strm_claim", userMessage("u1", "bonjour"));
       // Exactly one message landed, and the session was already claimed when it
       // did. With the write ordered first this reads `[null]`: a notice
@@ -252,7 +251,7 @@ describe("persistNotice single-writer guard", () => {
     // never started, or the session is stuck "generating" for good — the resume
     // GET answering 204 and `persistNotice` refusing forever.
     const sessionId = await createSession();
-    await claimTurn(sessionId, "strm_failed", UNLIMITED);
+    await claimTurn(sessionId, "strm_failed", UNLIMITED_SCOPE, NO_SKILL_STATUS);
     await failEveryMessageInsert();
     try {
       await expect(
@@ -280,13 +279,9 @@ describe("persistNotice single-writer guard", () => {
       .update(chatSessions)
       .set({ spaceId: ctx.defaultSpaceId, restricted: true })
       .where(eq(chatSessions.id, sessionId));
-    const claim = (scope: { spaceId: string | null; restricted: boolean }) =>
-      claimTurn(sessionId, "strm_scope", scope);
+    const claim = (scope: TurnScope) => claimTurn(sessionId, "strm_scope", scope, NO_SKILL_STATUS);
 
-    for (const read of [
-      { spaceId: ctx.defaultSpaceId, restricted: false },
-      { spaceId: null, restricted: false },
-    ]) {
+    for (const read of [{ ...UNLIMITED_SCOPE, spaceId: ctx.defaultSpaceId }, UNLIMITED_SCOPE]) {
       await expect(claim(read)).rejects.toMatchObject({
         status: 409,
         code: "chat_turn_scope_changed",
@@ -312,8 +307,11 @@ describe("persistNotice single-writer guard", () => {
       .set({ spaceId: ctx.defaultSpaceId, restricted: false })
       .where(eq(chatSessions.id, sessionId));
     await expect(
-      claimTurn(sessionId, "strm_origin", { spaceId: null, restricted: false }),
-    ).rejects.toMatchObject({ status: 409, code: "chat_turn_scope_changed" });
+      claimTurn(sessionId, "strm_origin", UNLIMITED_SCOPE, NO_SKILL_STATUS),
+    ).rejects.toMatchObject({
+      status: 409,
+      code: "chat_turn_scope_changed",
+    });
     expect(await activeStreamId(sessionId)).toBeNull();
   });
 
@@ -321,22 +319,42 @@ describe("persistNotice single-writer guard", () => {
     // One turn at a time: a second claim must not take the marker, or the first turn's
     // teardown would not find it and the limit PATCH would pass while it still acts.
     const sessionId = await createSession();
-    await claimTurn(sessionId, "strm_first", UNLIMITED);
-    await expect(claimTurn(sessionId, "strm_second", UNLIMITED)).rejects.toMatchObject({
+    await claimTurn(sessionId, "strm_first", UNLIMITED_SCOPE, NO_SKILL_STATUS);
+    await expect(
+      claimTurn(sessionId, "strm_second", UNLIMITED_SCOPE, NO_SKILL_STATUS),
+    ).rejects.toMatchObject({
       status: 409,
       code: "chat_turn_in_flight",
     });
     expect(await activeStreamId(sessionId)).toBe("strm_first");
   });
 
+  it("claims though the skill settings moved since the turn read them, writing no verdict for a dropped pin", async () => {
+    // The skills PATCH is allowed while a turn starts: the turn runs on what it read, and the
+    // next one reads the PATCH. A verdict keyed by a pin the row no longer holds is not written.
+    const sessionId = await createSession();
+    await db
+      .update(chatSessions)
+      .set({ pinnedSkills: ["@acme/b"], skillDiscovery: false })
+      .where(eq(chatSessions.id, sessionId));
+    const verdicts = { "@acme/a": { status: "injected" as const, chars: 12 } };
+    await claimTurn(sessionId, "strm_moved", UNLIMITED_SCOPE, verdicts);
+    expect(await activeStreamId(sessionId)).toBe("strm_moved");
+    const [row] = await db
+      .select({ pinnedSkills: chatSessions.pinnedSkills, skillStatus: chatSessions.skillStatus })
+      .from(chatSessions)
+      .where(eq(chatSessions.id, sessionId));
+    expect(row).toEqual({ pinnedSkills: ["@acme/b"], skillStatus: {} });
+  });
+
   it("takes over a stale marker, whose producer is gone", async () => {
     const sessionId = await createSession();
-    await claimTurn(sessionId, "strm_dead", UNLIMITED);
+    await claimTurn(sessionId, "strm_dead", UNLIMITED_SCOPE, NO_SKILL_STATUS);
     await db
       .update(chatSessions)
       .set({ updatedAt: new Date(Date.now() - STALE_MARKER_MIN_AGE_MS - 1_000) })
       .where(eq(chatSessions.id, sessionId));
-    await claimTurn(sessionId, "strm_next", UNLIMITED);
+    await claimTurn(sessionId, "strm_next", UNLIMITED_SCOPE, NO_SKILL_STATUS);
     expect(await activeStreamId(sessionId)).toBe("strm_next");
   });
 

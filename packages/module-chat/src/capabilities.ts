@@ -23,7 +23,7 @@ export interface TurnCapabilities {
   /**
    * `transport` ∧ `skills:read`: the context lists the space's skills by their `skill://` URI, and
    * `read_resource`, which loads one, is registered on every platform MCP connection — no
-   * dispatch needed. In the `manual` skill mode, `list_skills` lists them on the user's request.
+   * dispatch needed.
    */
   readonly readsSkills: boolean;
   /**

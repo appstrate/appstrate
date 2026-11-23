@@ -38,6 +38,7 @@ import { turnLimitReached } from "@appstrate/core/chat-turn-metadata";
 import { Alert, AlertDescription } from "@appstrate/ui/components/alert";
 import { Button } from "@appstrate/ui/components/button";
 import { cn } from "@appstrate/ui/cn";
+import { useIsMobile } from "@appstrate/ui/use-mobile";
 import { MarkdownText, ReasoningText } from "./markdown-text.tsx";
 import { ReasoningGroup, ThinkingStatus } from "./reasoning.tsx";
 import { ToolFallback } from "./tool-fallback.tsx";
@@ -48,6 +49,7 @@ import {
   ImportPackageFileToolUI,
   RunAndWaitToolUI,
 } from "./tool-uis.tsx";
+import { ReadResourceToolUI, ReadToolUI } from "./skill-load.tsx";
 import { parseResume, INTEGRATION_RESUME_MARKER } from "./auth-offer.ts";
 import { IntegrationIcon } from "./integration-icon.tsx";
 import {
@@ -89,7 +91,6 @@ import {
 import {
   ASSISTANT_MESSAGE_CLASS,
   COMPOSER_FIELD_CLASS,
-  COMPOSER_INPUT_CLASS,
   COMPOSER_ROW_CLASS,
   COMPOSER_SEND_CLASS,
   COMPOSER_SLOT_CLASS,
@@ -102,11 +103,28 @@ import {
   USER_MESSAGE_CLASS,
 } from "./phone-text.ts";
 import {
+  canQueueDraft,
   flushDecision,
   joinQueued,
   type MessageQueue,
   type QueueSnapshot,
 } from "./message-queue.ts";
+import {
+  agentPromptOf,
+  precedingUserMessage,
+  retryContent,
+  hasBubbleContent,
+} from "./agent-prompt-part.ts";
+import { DirectiveText } from "./directive-chip.tsx";
+import { namesSeveralAgents } from "./directive-send.ts";
+import { readableDirectives } from "../directives.ts";
+import { ComposerEditor } from "./composer-input.tsx";
+import { CommandPopover, CommandTriggers } from "./composer-popover.tsx";
+import {
+  DraftSkillsProvider,
+  useConversationSkillsContext,
+  useDraftSkillsOf,
+} from "./use-conversation-skills.ts";
 
 export function Thread({
   composerTools,
@@ -144,6 +162,8 @@ export function Thread({
           // the chat the one flat white screen in the product.
           className="bg-canvas flex h-full flex-col"
           style={{ ["--thread-max-width" as string]: "42rem" }}
+          // Lets a control inside find this thread's own composer (`ScrollToBottom`).
+          data-chat-thread=""
         >
           {/* Register the rich tool cards (these render nothing themselves). */}
           <InvokeOperationToolUI />
@@ -151,6 +171,8 @@ export function Thread({
           <SearchToolUI />
           <DescribeToolUI />
           <ImportPackageFileToolUI />
+          <ReadResourceToolUI />
+          <ReadToolUI />
 
           {/* Empty: composer centered mid-screen for a strong first impression.
           Non-empty: classic scrollable transcript with a sticky footer. */}
@@ -282,6 +304,15 @@ function ScrollToBottom() {
   return (
     <ThreadPrimitive.ScrollToBottom asChild>
       <Button
+        // Where the composer auto-focuses, it takes the focus back when the thread scrolls down:
+        // this thread's composer, found from the button, not the first one in the document.
+        onClick={(event) => {
+          if (shouldAutofocusComposer())
+            event.currentTarget
+              .closest("[data-chat-thread]")
+              ?.querySelector<HTMLElement>("[data-aui-composer-type=thread] [contenteditable]")
+              ?.focus({ preventScroll: true });
+        }}
         type="button"
         variant="outline"
         size="icon"
@@ -568,8 +599,8 @@ function QueuedMessages({
         {items.map((text, index) => (
           // Texts may repeat and the list only ever shrinks or appends: the index is the identity.
           <li key={index} className="text-muted-foreground flex items-center gap-1 text-xs">
-            <span className="min-w-0 flex-1 truncate" title={text}>
-              {text}
+            <span className="min-w-0 flex-1 truncate" title={readableDirectives(text)}>
+              <DirectiveText text={text} />
             </span>
             <IconButton
               label={t("composer.queue.edit")}
@@ -614,12 +645,35 @@ function Composer({
   const running = useAuiState((s) => s.thread.isRunning);
   const hasAttachments = useAuiState((s) => s.composer.attachments.length > 0);
   const autofocus = shouldAutofocusComposer();
+  // A phone's line is narrow: the model's name alone, never a sentence cut before it.
+  const phone = useIsMobile();
+  const placeholder = !modelLabel
+    ? t("composer.placeholder")
+    : phone
+      ? modelLabel
+      : t("composer.placeholderModel", { model: modelLabel });
+  // The runtime's text, not the input's value: a draft restored on reload holds it before any input.
+  const draft = useAuiState((s) => s.composer.text);
   // The turn carries the limit and its files go to its spaces: none leaves before the change lands.
   const limitPending = useConversationScope().pending;
   // Only text is queued: attachments stay in the composer until the next real send.
-  const canQueue = running && !hasAttachments && composer.value.trim() !== "";
+  const queued = React.useSyncExternalStore(queue.subscribe, queue.getSnapshot, queue.getSnapshot);
+  // While a turn runs the draft joins the queue, which is sent as one message: it is counted whole.
+  const message = running ? joinQueued([...queued.items, draft]) : draft;
+  const conversationSkills = useConversationSkillsContext()?.skills ?? null;
+  const draftSkills = useDraftSkillsOf(conversationSkills, message);
+  // What the message names must be sendable: one agent.
+  const issue = namesSeveralAgents(message);
+  const issueId = React.useId();
+  const canQueue = canQueueDraft({ running, text: composer.value, hasAttachments });
   const enqueue = () => {
     if (canQueue && queue.add(composer.value)) composer.setText("");
+  };
+  const blocked = limitPending || issue;
+  // Enter queues while a turn runs and sends otherwise, as the Send button does.
+  const enter = () => {
+    if (running) enqueue();
+    else if (!blocked) composer.send();
   };
   React.useEffect(() => {
     if (!takesDraft(initialDraft, { seeded: draftSeededRef.current, typed: composer.value }))
@@ -635,104 +689,108 @@ function Composer({
       </p>
     );
   }
-  // No focus ring on the box: the app's global `textarea:focus` ring is too
-  // intense here. min-h-9 + px-0 override the global `textarea { min-h-80px }`
-  // base rule (utilities beat the base layer) for a compact, Codex-like field.
   return (
     <ComposerPrimitive.Root
-      className="bg-card flex w-full flex-col gap-1 rounded-xl border px-3 py-2 shadow-sm"
+      className="group/composer bg-card relative flex w-full flex-col gap-1 rounded-xl border px-3 py-2 shadow-sm"
       onSubmit={(e) => {
-        if (limitPending) e.preventDefault();
+        if (blocked) e.preventDefault();
       }}
     >
-      {/* Pending attachments, above the input. `empty:hidden` collapses the row
+      <DraftSkillsProvider value={draftSkills}>
+        <CommandTriggers>
+          {/* Pending attachments, above the input. `empty:hidden` collapses the row
           (and its gap) when nothing is attached. */}
-      <QueuedMessages
-        queue={queue}
-        running={running}
-        composerEmpty={composer.value.trim() === ""}
-        onEdit={composer.setText}
-      />
-      <div className="flex flex-wrap gap-1.5 empty:hidden">
-        <ComposerPrimitive.Attachments components={{ Attachment: ComposerAttachmentChip }} />
-      </div>
-      <ComposerAttachmentError />
-      <DraftContextNotice />
-      <div className={COMPOSER_ROW_CLASS}>
-        <div className={COMPOSER_TOOLS_CLASS}>{tools}</div>
-        <ComposerPrimitive.Input
-          rows={1}
-          // A phone would open its keyboard on arrival, before anything was asked for.
-          autoFocus={autofocus}
-          unstable_focusOnRunStart={autofocus}
-          unstable_focusOnScrollToBottom={autofocus}
-          unstable_focusOnThreadSwitched={autofocus}
-          aria-label={t("composer.placeholder")}
-          enterKeyHint="send"
-          addAttachmentOnPaste
-          placeholder={
-            modelLabel
-              ? t("composer.placeholderModel", { model: modelLabel })
-              : t("composer.placeholder")
-          }
-          onKeyDown={(e) => {
-            // While the agent answers the primitive ignores Enter; it queues instead.
-            if (!running || e.key !== "Enter" || e.shiftKey || e.ctrlKey || e.metaKey) return;
-            if (e.nativeEvent.isComposing) return;
-            e.preventDefault();
-            enqueue();
-          }}
-          className={cn(COMPOSER_INPUT_CLASS, COMPOSER_FIELD_CLASS)}
-        />
-        <div className={COMPOSER_SLOT_CLASS}>{slot}</div>
-        <div className={COMPOSER_SEND_CLASS}>
-          <ContextGauge className="max-md:hidden" />
-          <ThreadPrimitive.If running={false}>
-            <ComposerPrimitive.Send asChild disabled={limitPending}>
-              <Button
-                type="button"
-                size="icon"
-                className={COMPOSER_BUTTON_CLASS}
-                aria-label={t("composer.send")}
-              >
-                <SendHorizontalIcon />
-              </Button>
-            </ComposerPrimitive.Send>
-          </ThreadPrimitive.If>
-          <ThreadPrimitive.If running>
-            <Button
-              type="button"
-              size="icon"
-              variant="outline"
-              className={COMPOSER_BUTTON_CLASS}
-              aria-label={t("composer.queue.add")}
-              title={t("composer.queue.add")}
-              disabled={!canQueue}
-              onClick={enqueue}
-            >
-              <ListPlusIcon />
-            </Button>
-            <ComposerPrimitive.Cancel asChild>
-              <Button
-                type="button"
-                size="icon"
-                variant="secondary"
-                className={COMPOSER_BUTTON_CLASS}
-                aria-label={t("composer.stop")}
-              >
-                <SquareIcon className="fill-current" />
-              </Button>
-            </ComposerPrimitive.Cancel>
-          </ThreadPrimitive.If>
-        </div>
-      </div>
+          <QueuedMessages
+            queue={queue}
+            running={running}
+            composerEmpty={composer.value.trim() === ""}
+            onEdit={composer.setText}
+          />
+          <CommandPopover />
+          <div className="flex flex-wrap gap-1.5 empty:hidden">
+            <ComposerPrimitive.Attachments components={{ Attachment: ComposerAttachmentChip }} />
+          </div>
+          <ComposerAttachmentError />
+          <DraftContextNotice />
+          <div className={COMPOSER_ROW_CLASS}>
+            <div className={COMPOSER_TOOLS_CLASS}>{tools}</div>
+            <div className={COMPOSER_FIELD_CLASS}>
+              <ComposerEditor
+                label={t("composer.placeholder")}
+                placeholder={placeholder}
+                // A phone would open its keyboard on arrival, before anything was asked for.
+                autofocus={autofocus}
+                onEnter={enter}
+              />
+            </div>
+            <div className={COMPOSER_SLOT_CLASS}>{slot}</div>
+            <div className={COMPOSER_SEND_CLASS}>
+              <ContextGauge className="max-md:hidden" />
+              <ThreadPrimitive.If running={false}>
+                <ComposerPrimitive.Send asChild disabled={blocked}>
+                  <Button
+                    type="button"
+                    size="icon"
+                    className={COMPOSER_BUTTON_CLASS}
+                    aria-label={t("composer.send")}
+                    aria-describedby={issue ? issueId : undefined}
+                  >
+                    <SendHorizontalIcon />
+                  </Button>
+                </ComposerPrimitive.Send>
+              </ThreadPrimitive.If>
+              <ThreadPrimitive.If running>
+                <Button
+                  type="button"
+                  size="icon"
+                  variant="outline"
+                  className={COMPOSER_BUTTON_CLASS}
+                  aria-label={t("composer.queue.add")}
+                  title={t("composer.queue.add")}
+                  disabled={!canQueue}
+                  aria-describedby={issue ? issueId : undefined}
+                  onClick={enqueue}
+                >
+                  <ListPlusIcon />
+                </Button>
+                <ComposerPrimitive.Cancel asChild>
+                  <Button
+                    type="button"
+                    size="icon"
+                    variant="secondary"
+                    className={COMPOSER_BUTTON_CLASS}
+                    aria-label={t("composer.stop")}
+                  >
+                    <SquareIcon className="fill-current" />
+                  </Button>
+                </ComposerPrimitive.Cancel>
+              </ThreadPrimitive.If>
+            </div>
+          </div>
+          {/* Always mounted, so a screen reader hears the issue appear. */}
+          <p
+            id={issueId}
+            role="status"
+            className={issue ? cn(NOTE_TEXT_CLASS, "text-destructive") : "sr-only"}
+          >
+            {issue ? t("composer.oneAgentOnly") : ""}
+          </p>
+        </CommandTriggers>
+      </DraftSkillsProvider>
     </ComposerPrimitive.Root>
   );
 }
 
 // ─── User message (bubble only — no edit/branch on a single-path thread) ─────
 
-function UserMessage() {
+/** Module-level: assistant-ui memoizes each part on these members' identity. */
+const USER_PART_COMPONENTS = {
+  // The user's text, with the skills and agents it names as chips.
+  Text: DirectiveText,
+  File: FileAttachmentPart,
+} satisfies React.ComponentProps<typeof MessagePrimitive.Parts>["components"];
+
+export function UserMessage() {
   // The OAuth auto-resume turn (oauth-connect-card) is a real user message — it
   // drives the model to continue — but showing its raw text as a bubble is
   // noise. Detect the marker prefix and render a discreet "connected" notice
@@ -752,6 +810,8 @@ function UserMessage() {
     return null;
   });
   const resume = resumeText ? parseResume(resumeText) : null;
+  // Plain values from the selectors, never a derived object. See `turn-error-state.ts`.
+  const hasBubble = useAuiState(({ message }) => hasBubbleContent(message));
 
   if (resume) {
     return (
@@ -782,30 +842,29 @@ function UserMessage() {
           <MessagePrimitive.Attachments components={{ Attachment: SentAttachmentChip }} />
         </div>
       </MessagePrimitive.If>
-      {/* The text bubble. Guarded on content so an attachment-only message (no
-          text part) doesn't paint an empty grey pill. */}
-      <MessagePrimitive.If hasContent>
-        {/* A white card on the canvas, like every other surface in the thread
-            (the composer, the tool cards). `bg-muted` was a hollow on white and
-            reads as a smudge on grey — 3 points of luminance from the page. */}
-        <div className={USER_MESSAGE_CLASS}>
-          <MessagePrimitive.Parts components={{ File: FileAttachmentPart }} />
-        </div>
-        {/* Under the bubble, as on every chat: copy, always there on a phone. Edit, retry and the
+      {/* The text bubble. Guarded on content so an attachment-only or agent-only message (no
+          text part) doesn't paint an empty grey pill. A white card, like the thread's other surfaces. */}
+      {hasBubble && (
+        <>
+          <div className={USER_MESSAGE_CLASS}>
+            <MessagePrimitive.Parts components={USER_PART_COMPONENTS} />
+          </div>
+          {/* Under the bubble, as on every chat: copy, always there on a phone. Edit, retry and the
             time are not features of this product yet. */}
-        <ActionBarPrimitive.Root className={USER_ACTION_BAR_CLASS}>
-          <ActionBarPrimitive.Copy asChild>
-            <IconButton label={t("common:btn.copy")}>
-              <MessagePrimitive.If copied>
-                <CheckIcon />
-              </MessagePrimitive.If>
-              <MessagePrimitive.If copied={false}>
-                <CopyIcon />
-              </MessagePrimitive.If>
-            </IconButton>
-          </ActionBarPrimitive.Copy>
-        </ActionBarPrimitive.Root>
-      </MessagePrimitive.If>
+          <ActionBarPrimitive.Root className={USER_ACTION_BAR_CLASS}>
+            <ActionBarPrimitive.Copy asChild>
+              <IconButton label={t("common:btn.copy")}>
+                <MessagePrimitive.If copied>
+                  <CheckIcon />
+                </MessagePrimitive.If>
+                <MessagePrimitive.If copied={false}>
+                  <CopyIcon />
+                </MessagePrimitive.If>
+              </IconButton>
+            </ActionBarPrimitive.Copy>
+          </ActionBarPrimitive.Root>
+        </>
+      )}
     </MessagePrimitive.Root>
   );
 }
@@ -863,6 +922,7 @@ export function MessageError() {
   // Select a plain field, never a derived object: this selector IS
   // `useSyncExternalStore`'s getSnapshot. See `turn-error-state.ts`.
   const message = useAuiState((s) => s.message);
+  const aui = useAui();
   const errorState = React.useMemo(
     () => turnErrorState(message, t, can, personalModelCredentials),
     [message, t, can, personalModelCredentials],
@@ -882,17 +942,27 @@ export function MessageError() {
             ) : null}
             {errorState.retryable ? (
               <ThreadPrimitive.If running={false}>
-                <ThreadPrimitive.Suggestion
-                  prompt={t("turn.retryPrompt")}
-                  method="replace"
-                  autoSend
-                  asChild
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => {
+                    // The retry names the agent the failed turn launched, or the launch is lost.
+                    // Read at the click: a selector on the thread would run on every chunk.
+                    const asked = precedingUserMessage(
+                      aui.thread().getState().messages,
+                      message.id,
+                    );
+                    const agent = asked ? agentPromptOf(asked) : null;
+                    aui.thread().append({
+                      role: "user",
+                      content: retryContent(t("turn.retryPrompt"), agent),
+                    });
+                  }}
                 >
-                  <Button type="button" variant="outline" size="sm">
-                    <RotateCcwIcon />
-                    {t("common:btn.retry")}
-                  </Button>
-                </ThreadPrimitive.Suggestion>
+                  <RotateCcwIcon />
+                  {t("common:btn.retry")}
+                </Button>
               </ThreadPrimitive.If>
             ) : null}
           </div>

@@ -2055,7 +2055,7 @@ export interface paths {
         put?: never;
         /**
          * Per-organization MCP Streamable HTTP endpoint
-         * @description Model Context Protocol server (Streamable HTTP, stateless) for a single organization. Accepts JSON-RPC 2.0 messages (`initialize`, `tools/list`, `tools/call`). The tools it declares follow the caller's permissions: the read-only set (`search`, `describe`, `read`, `validate_package_file`, `get_runtime_capabilities` and `get_me`) is always present, while the acting tools — `invoke_operation` (`mcp:invoke`), `run_and_wait` (`mcp:invoke` plus `agents:run` and a run-read permission), `list_files` (whatever guards the `listFiles` operation's own route), `import_package_file`, and `call_integration_tool`, with the `integration_tool` kind of `search` and `describe` (`mcp:invoke` plus `credential-proxy:call-own` or `credential-proxy:call`, on a bearer credential the credential proxy accepts) — are declared only to a caller whose grants make them usable, so `tools/list` differs by role. Together they let an MCP client discover and call platform API operations, launch and wait for agent runs, and call third-party APIs through the caller's own connections (and those shared into the space, for a caller holding `credential-proxy:call`), with the caller's own credentials. `call_integration_tool` is the only MCP path to the credential proxy: `/api/credential-proxy/proxy` is not an operation `invoke_operation` serves. Each organization has its own endpoint: a token obtained for this endpoint is audience-bound (RFC 8707) to the per-org resource URI `<APP_URL>/api/mcp/o/{org}` and cannot drive any other organization. To use several organizations, configure one MCP server entry per organization. Without a pinned space (no space-bound credential, no `/s/{space}` in the URL) the connection reaches every space where the caller holds a role, and every tool that acts in a space requires a `space_id` argument whose schema lists them. Requires the `mcp:read` permission (and `mcp:invoke` to call operations). A refused tool call (missing, unknown or invalid argument, unknown operation or space, missing grant) is a `tools/call` result with `isError: true` whose text is `{ code, error, … }`; an operation the route answered with an HTTP error is returned as `{ status, body }` with `isError: true`, except a 403 the caller's permissions explain, which is a `not_granted` refusal. Only an unknown tool name is a JSON-RPC `-32602`.
+         * @description Model Context Protocol server (Streamable HTTP, stateless) for a single organization. Accepts JSON-RPC 2.0 messages (`initialize`, `tools/list`, `tools/call`). The tools it declares follow the caller's permissions: the read-only set (`search`, `describe`, `read` and `get_me`) is always present, while the acting tools — `invoke_operation` (`mcp:invoke`), `run_and_wait` (`mcp:invoke` plus `agents:run` and a run-read permission), `list_files` (whatever guards the `listFiles` operation's own route), `import_package_file`, `get_runtime_capabilities` (the grants of an inline run), `validate_package_file` (those of `import_package_file` or of an inline run), and `call_integration_tool`, with the `integration_tool` kind of `search` and `describe` (`mcp:invoke` plus `credential-proxy:call-own` or `credential-proxy:call`, on a bearer credential the credential proxy accepts) — are declared only to a caller whose grants make them usable, so `tools/list` differs by role. Together they let an MCP client discover and call platform API operations, launch and wait for agent runs, and call third-party APIs through the caller's own connections (and those shared into the space, for a caller holding `credential-proxy:call`), with the caller's own credentials. `call_integration_tool` is the only MCP path to the credential proxy: `/api/credential-proxy/proxy` is not an operation `invoke_operation` serves. Each organization has its own endpoint: a token obtained for this endpoint is audience-bound (RFC 8707) to the per-org resource URI `<APP_URL>/api/mcp/o/{org}` and cannot drive any other organization. To use several organizations, configure one MCP server entry per organization. Without a pinned space (no space-bound credential, no `/s/{space}` in the URL) the connection reaches every space where the caller holds a role, and every tool that acts in a space requires a `space_id` argument whose schema lists them. Requires the `mcp:read` permission (and `mcp:invoke` to call operations). A refused tool call (missing, unknown or invalid argument, unknown operation or space, missing grant) is a `tools/call` result with `isError: true` whose text is `{ code, error, … }`; an operation the route answered with an HTTP error is returned as `{ status, body }` with `isError: true`, except a 403 the caller's permissions explain, which is a `not_granted` refusal. Only an unknown tool name is a JSON-RPC `-32602`.
          */
         post: operations["mcpStreamableHttpPost"];
         delete?: never;
@@ -2079,7 +2079,7 @@ export interface paths {
         put?: never;
         /**
          * Space-pinned MCP Streamable HTTP endpoint
-         * @description Model Context Protocol server (Streamable HTTP, stateless) for one space of an organization: the organization's endpoint pinned to `{space}` by its URL, usable by any client. Every call acts in `{space}`, and tools take no `space_id`. Accepts JSON-RPC 2.0 messages (`initialize`, `tools/list`, `tools/call`). The tools it declares follow the caller's permissions: the read-only set (`search`, `describe`, `read`, `validate_package_file`, `get_runtime_capabilities` and `get_me`) is always present, while the acting tools — `invoke_operation` (`mcp:invoke`), `run_and_wait` (`mcp:invoke` plus `agents:run` and a run-read permission), `list_files` (whatever guards the `listFiles` operation's own route), `import_package_file`, and `call_integration_tool`, with the `integration_tool` kind of `search` and `describe` (`mcp:invoke` plus `credential-proxy:call-own` or `credential-proxy:call`, on a bearer credential the credential proxy accepts) — are declared only to a caller whose grants make them usable, so `tools/list` differs by role. Together they let an MCP client discover and call platform API operations, launch and wait for agent runs, and call third-party APIs through the caller's own connections (and those shared into the space, for a caller holding `credential-proxy:call`), with the caller's own credentials. `call_integration_tool` is the only MCP path to the credential proxy: `/api/credential-proxy/proxy` is not an operation `invoke_operation` serves. The endpoint is its own OAuth protected resource, `<APP_URL>/api/mcp/o/{org}/s/{space}` (RFC 8707, RFC 9728). It accepts a token bound to that URI or to the organization's resource `<APP_URL>/api/mcp/o/{org}`. A token bound to the space reaches neither another space nor the organization's endpoint, and it is capped like a space API key: no organization-level permission (member management, organization settings) is in its reach. A space-bound credential (API key or token) naming another space is a 403. Requires the `mcp:read` permission (and `mcp:invoke` to call operations). A refused tool call (missing, unknown or invalid argument, unknown operation or space, missing grant) is a `tools/call` result with `isError: true` whose text is `{ code, error, … }`; an operation the route answered with an HTTP error is returned as `{ status, body }` with `isError: true`, except a 403 the caller's permissions explain, which is a `not_granted` refusal. Only an unknown tool name is a JSON-RPC `-32602`.
+         * @description Model Context Protocol server (Streamable HTTP, stateless) for one space of an organization: the organization's endpoint pinned to `{space}` by its URL, usable by any client. Every call acts in `{space}`, and tools take no `space_id`. Accepts JSON-RPC 2.0 messages (`initialize`, `tools/list`, `tools/call`). The tools it declares follow the caller's permissions: the read-only set (`search`, `describe`, `read` and `get_me`) is always present, while the acting tools — `invoke_operation` (`mcp:invoke`), `run_and_wait` (`mcp:invoke` plus `agents:run` and a run-read permission), `list_files` (whatever guards the `listFiles` operation's own route), `import_package_file`, `get_runtime_capabilities` (the grants of an inline run), `validate_package_file` (those of `import_package_file` or of an inline run), and `call_integration_tool`, with the `integration_tool` kind of `search` and `describe` (`mcp:invoke` plus `credential-proxy:call-own` or `credential-proxy:call`, on a bearer credential the credential proxy accepts) — are declared only to a caller whose grants make them usable, so `tools/list` differs by role. Together they let an MCP client discover and call platform API operations, launch and wait for agent runs, and call third-party APIs through the caller's own connections (and those shared into the space, for a caller holding `credential-proxy:call`), with the caller's own credentials. `call_integration_tool` is the only MCP path to the credential proxy: `/api/credential-proxy/proxy` is not an operation `invoke_operation` serves. The endpoint is its own OAuth protected resource, `<APP_URL>/api/mcp/o/{org}/s/{space}` (RFC 8707, RFC 9728). It accepts a token bound to that URI or to the organization's resource `<APP_URL>/api/mcp/o/{org}`. A token bound to the space reaches neither another space nor the organization's endpoint, and it is capped like a space API key: no organization-level permission (member management, organization settings) is in its reach. A space-bound credential (API key or token) naming another space is a 403. Requires the `mcp:read` permission (and `mcp:invoke` to call operations). A refused tool call (missing, unknown or invalid argument, unknown operation or space, missing grant) is a `tools/call` result with `isError: true` whose text is `{ code, error, … }`; an operation the route answered with an HTTP error is returned as `{ status, body }` with `isError: true`, except a 403 the caller's permissions explain, which is a `not_granted` refusal. Only an unknown tool name is a JSON-RPC `-32602`.
          */
         post: operations["mcpStreamableHttpPostInSpace"];
         delete?: never;
@@ -3147,9 +3147,29 @@ export interface paths {
         put?: never;
         /**
          * Run a conversational turn (streaming)
-         * @description Receives the running thread (AI SDK UIMessages) and streams the assistant turn (UIMessage stream over SSE). Inference runs on the org's configured models: API-key models are routed through the llm-proxy (key injected server-side), OAuth-subscription models are called natively at the provider's own base URL with the access token held in memory. Either way usage is metered server-side; tool calls dispatch through the organization MCP endpoint, each space-acting call naming its `space_id` and decided in that space under the caller's role there; every space a call names, and the space of a file `read_resource` reads or one attached from the file gallery when it is a space of the turn, is recorded on the conversation before the act (its own uploads, stored in the caller's personal space, record none; a call reads any other file by id in the space it names only), and every space disclosed by a search or a configuration refusal is recorded before its result is shown. The conversation stays openable only while the caller reaches all of them with `chat:read`; a call can name only a space of the acting set (the reachable spaces where the caller holds `chat:write`, `chat:read` and `mcp:read` together). A limited conversation (`restricted`) acts in its origin space alone, and is refused (403) once the caller can no longer act there. The default space of a request that names none (never a pin) is the conversation's origin space; without one, the caller's personal space, else the organization's default space, when the turn acts there; the assistant asks only when none of them is. `spaceId` and `restricted` set the origin and the limit, and are read only when this turn creates the conversation — an existing one keeps its own. Ignores `X-Space-Id`; admitted when the acting set is not empty. A credential confined to spaces (pinned to one, or carrying a space allowlist, such as the bearer of a chat turn) is refused (403). Message persistence is server-owned: the user turn is persisted before inference and the assistant turn when the stream finalizes (survives client disconnect). Rate limited (20/min per caller). Not invocable over MCP (streaming).
+         * @description Receives the running thread (AI SDK UIMessages) and streams the assistant turn (UIMessage stream over SSE). Inference runs on the org's configured models: API-key models are routed through the llm-proxy (key injected server-side), OAuth-subscription models are called natively at the provider's own base URL with the access token held in memory. Either way usage is metered server-side; tool calls dispatch through the organization MCP endpoint, each space-acting call naming its `space_id` and decided in that space under the caller's role there; every space a call names, and the space of a file `read_resource` reads or one attached from the file gallery when it is a space of the turn, is recorded on the conversation before the act (its own uploads, stored in the caller's personal space, record none; a call reads any other file by id in the space it names only), and every space disclosed by a search or a configuration refusal is recorded before its result is shown. The conversation stays openable only while the caller reaches all of them with `chat:read`; a call can name only a space of the acting set (the reachable spaces where the caller holds `chat:write`, `chat:read` and `mcp:read` together). A limited conversation (`restricted`) acts in its origin space alone, and is refused (403) once the caller can no longer act there. The space of a request that names none (a default, never a pin): the only space the turn can act in (a limited conversation); a space the user names; for an inline run, a new package or a direct integration tool call, the caller's personal space first, whatever their role there; for any other act, the conversation's origin space; otherwise the assistant asks. When the space so chosen cannot serve the request, the assistant stops and asks: it never activates, connects or switches space on its own. `spaceId` and `restricted` set the origin and the limit, and are read only when this turn creates the conversation — an existing one keeps its own. Ignores `X-Space-Id`; admitted when the acting set is not empty. A credential confined to spaces (pinned to one, or carrying a space allowlist, such as the bearer of a chat turn) is refused (403). A user message may carry one `data-agent-prompt` part, `{ name, title }` on the new message (a `text` there is a 400): a launch of an agent from the composer's menu (`listChatCommands`). The turn resolves `name` with `prompts/get` (the message text as its `request`) over the caller's own connection in the turn's spaces, before persisting the message (a name the server does not serve is a 400, nothing written), stores the launch instructions it returns in the part's `data.text`, and shows the model that text in place of the message's own on this turn and every later one. Message persistence is server-owned: the user turn is persisted before inference and the assistant turn when the stream finalizes (survives client disconnect). Rate limited (20/min per caller). Not invocable over MCP (streaming).
          */
         post: operations["streamChat"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/orgs/{orgId}/chat/commands": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List the composer's commands
+         * @description The skills a conversation can pin and the agents the caller can launch, read as an MCP client reads the platform server (`skills/list`, `prompts/list`) with the caller's own permissions: in every space the caller can act in, or, with `?spaceId=`, in that space alone (a conversation limited to it). An agent is launched by a user message carrying a `data-agent-prompt` part (see `streamChat`). A half that cannot be read is empty; a server that cannot be reached is a 502. Rate limited (60/min per caller). Ignores `X-Space-Id`; admitted when the acting set is not empty. A credential confined to spaces is refused (403).
+         */
+        get: operations["listChatCommands"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -3220,6 +3240,26 @@ export interface paths {
         options?: never;
         head?: never;
         patch?: never;
+        trace?: never;
+    };
+    "/api/orgs/{orgId}/chat/sessions/{id}/skills": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /**
+         * Set a chat session's pinned skills or skill discovery
+         * @description `pins` replaces the whole set of pinned skills (deduplicated and sorted; any number, held to the content budget each turn); a pin it drops loses its status, a new one has none until a turn evaluates it. `skill_discovery` sets the discovery switch. At least one of the two. Allowed while a turn is running: that turn keeps the skills it started with, and the next turn reads these. Never reorders the conversation list.
+         */
+        patch: operations["updateChatSessionSkills"];
         trace?: never;
     };
     "/api/orgs/{orgId}/chat/sessions/{id}/stop": {
@@ -4168,7 +4208,7 @@ export interface paths {
         get: operations["getPackageHome"];
         /**
          * Move a package to another home space
-         * @description Change the package's home space — the space whose `<type>:write` authorizes editing, publishing, renaming and deleting it. The caller must hold that permission in BOTH the current home and the destination space, which must be one the caller can reach; an unreachable destination answers 404 rather than confirming it exists. The destination can never be a PERSONAL space (`409 home_move_into_personal_space`): a personal space homes only what is created or forked in it, and every member but a guest holds `admin` (hence `<type>:write`) in their own, so the move would otherwise put a team's package beyond every administrator's reach (RBAC spec §3.6 gives no admin a way in) for as long as its owner stays a member. `POST /api/packages/{scope}/{name}/fork` is the private copy. `home_space_id` is required and cannot be null: every package of the organization is homed in one of its spaces, and one that belongs to no team is homed in the organization's default space. Every other space keeps its `space_packages` row, which goes on placing the package there; the old home keeps the package through its own row unless `keep_in_previous_home` is `false`. The destination is ACTIVATED through the activation door itself — a package lives where it is written, exactly as creating one activates it at home — which writes the same `package.activated` audit entry a click on the switch would. A destination that had deliberately switched the package OFF keeps that decision: the move transfers authority over a package, not a verdict about what a space runs. The row the old home keeps now places the package outside its home, so `GET /api/packages/{scope}/{name}/shares` lists it (with a null sharer when nobody had placed it there), and revoking it removes the package from that space like any other revocation. The draft itself is edited through `PATCH /api/packages/{type}/{scope}/{name}`, under its `If-Match`.
+         * @description Change the package's home space — the space whose `<type>:write` authorizes editing, publishing and renaming it. Deletion requires `<type>:delete` in the home. To move it, the caller must hold the type's `write` in BOTH the current home and the destination space, which must be one the caller can reach; an unreachable destination answers 404 rather than confirming it exists. The destination can never be a PERSONAL space (`409 home_move_into_personal_space`): a personal space homes only what is created or forked in it. Organization administrators cannot enter another member's personal space (RBAC §3.6). `POST /api/packages/{scope}/{name}/fork` is the private copy. `home_space_id` is required and cannot be null: every package of the organization is homed in one of its spaces, and one that belongs to no team is homed in the organization's default space. Every other space keeps its `space_packages` row, which goes on placing the package there; the old home keeps the package through its own row unless `keep_in_previous_home` is `false`. The destination is ACTIVATED through the activation door itself — a package lives where it is written, exactly as creating one activates it at home — which writes the same `package.activated` audit entry a click on the switch would. A destination that had deliberately switched the package OFF keeps that decision: the move transfers authority over a package, not a verdict about what a space runs. The row the old home keeps now places the package outside its home, so `GET /api/packages/{scope}/{name}/shares` lists it (with a null sharer when nobody had placed it there), and revoking it removes the package from that space like any other revocation. The draft itself is edited through `PATCH /api/packages/{type}/{scope}/{name}`, under its `If-Match`.
          */
         put: operations["movePackageHome"];
         post?: never;
@@ -4671,7 +4711,7 @@ export interface paths {
          *
          *     A remote runner addresses one connection per integration (its `api_call` tool carries no connection argument), so a run whose connection cascade binds several connections to an integration is refused with `409 missing_integration_connection` carrying one `remote_binds_one_connection` item per such integration (`field: integrations.<id>`): name one in `connection_overrides` or pick one with a member pin (a set an admin pin or an enforced org default imposes is bound whole and no override or member pin narrows it: only an admin changes it), or run the agent on the platform.
          *
-         *     **Permission:** `agents:run`; an `inline` source (a manifest the body carries) also requires `agents:write`. Caller-authored inline manifests require the read permission for each dependency type. Existing dependencies must be readable in an accessible source space (API keys remain pinned to their space), or belong to the readable system/catalog sources. Missing read permissions return `403`; inaccessible existing sources return `404`, before readiness checks or creation of a run. Nonexistent dependencies retain the normal validation errors.
+         *     **Permission:** `agents:run`; an `inline` source (a manifest the body carries) also requires `agents:write`. A caller missing either half is refused an `inline` source with `403 inline_run_not_allowed_in_space` (carrying `active_in_spaces`), the same refusal as `POST /api/runs/inline`; a `registry` source asks `agents:run` alone and keeps the plain `403 forbidden`. Caller-authored inline manifests require the read permission for each dependency type. Existing dependencies must be readable in an accessible source space (API keys remain pinned to their space), or belong to the readable system/catalog sources. Missing read permissions return `403`; inaccessible existing sources return `404`, before readiness checks or creation of a run. Nonexistent dependencies retain the normal validation errors.
          */
         post: operations["createRemoteRun"];
         delete?: never;
@@ -5855,7 +5895,7 @@ export interface components {
             /** @description Always present. When the package is an AGENT left switched ON in the space: one item per integration it declares that is not active there, judged on the definition a launch with `version` omitted runs (see `inactive_required_integrations` on `GET /api/agents`). `[]` when every declared integration is active, for any other package type, for a placement left OFF, and on a share whose caller may not activate in the target (a row a recipient switched on reports nothing of their space). Nothing was activated in its place and the activation stands: activating an integration opens its credentials to the space, so it is a decision of its own — `POST /api/spaces/{id}/packages` with the integration's `packageId`, or leave the agent on without it. */
             warnings: components["schemas"]["ActivationWarning"][];
         };
-        /** @description Where the launch refused here for a configuration reason could run instead: the spaces of this organization, other than this one, where the caller holds the permissions of the refusing door (`agents:run` to run an agent, `agents:write` and `agents:run` for an inline run, `agents:read` to export a bundle, `schedules:write` to create a schedule where the schedule’s actor can run agents) and the agent (an inline run has no placement) is placed and active, with every integration it requires active too except for a bundle export, which checks no integration, in the order of a space listing. `[]` for a credential pinned to this space and for an end-user. Act in one only with the user's agreement. */
+        /** @description Other spaces within this credential's reach where the caller holds the permissions required by the refused operation, in space-list order. The specific error describes any additional activation checks. Empty for a credential pinned to this space and for an end-user. Ask the user before acting in another space. */
         ActiveInSpaces: {
             /** @description Space id (`spc_…`). */
             id: string;
@@ -5961,7 +6001,7 @@ export interface components {
             home_space_id: string | null;
             /** @description Whether THIS caller holds the package type's `write` in its home space — the exact predicate the write routes enforce (`PUT`, publish, restore, rename, move). `false` on a package the caller may read but not author, including one whose `home_space_id` is withheld. It does NOT answer for `DELETE`, which enforces `<type>:delete`: read `home_deletable` for that. */
             home_writable: boolean;
-            /** @description Whether THIS caller holds the package type's `delete` in its home space — the exact predicate `DELETE` enforces, and a field of its own because `<type>:delete` is an independent permission string a custom space role may withhold while granting `write`. Every preset that writes also deletes, so this equals `home_writable` for a preset-only organization. `false` on a system package, which no principal may delete. */
+            /** @description Whether THIS caller holds the package type's `delete` in its home space — the exact predicate `DELETE` enforces, independent of `home_writable`. A member capped to `operator` may delete packages from their personal space even when they cannot edit them. `false` on a system package, which no principal may delete. */
             home_deletable: boolean;
             /** @description Whether THIS caller holds the package type's `share` in its home space — the exact predicate every act that widens the audience enforces: the share and the audience listing (`/shares`), plus the activation that has to create the placement first (`POST /api/spaces/{id}/packages` on a package this space does not yet hold). A withdrawal (`DELETE …/shares/{target}`) accepts it too, or the target space's `deactivate` grant. Activating an ALREADY-placed package asks for no `share`. `share` decides who runs the package with whose credentials, so it is granted by the `admin` and `builder` presets and carried by no API key; a custom role may hold it without `write`, or `write` without it. */
             home_shareable: boolean;
@@ -6183,7 +6223,7 @@ export interface components {
         } & {
             [key: string]: unknown;
         };
-        /** @description `agent_not_active_in_space`: the agent is placed in this space but switched OFF. Repair it by activating it here (`POST /api/spaces/{id}/packages` with `packageId`), or use it in one of `active_in_spaces` (non-empty only). For a run or a schedule, alternatives use the requested version (the latest publication when omitted) and its integration pins. An unavailable version or an unauthorized draft yields no alternative. A schedule for an end-user stays in its space. A bundle export checks only agent activation. */
+        /** @description `agent_not_active_in_space`: the agent is placed in this space but switched OFF. Repair it by activating it here (`POST /api/spaces/{id}/packages` with `packageId`), or use it in one of `active_in_spaces` (non-empty only). For a run or a schedule, alternatives require an active placement for the agent and its required integrations at the requested version (the latest publication when omitted), including its integration pins. An unavailable version or an unauthorized draft yields no alternative. A schedule for an end-user stays in its space. A bundle export checks only agent activation. */
         AgentNotActiveInSpaceProblem: components["schemas"]["ProblemDetail"] & {
             /** @enum {string} */
             code?: "agent_not_active_in_space";
@@ -6299,6 +6339,34 @@ export interface components {
         BillingUpgradePlan: components["schemas"]["BillingPlan"] & {
             id: components["schemas"]["BillingCheckoutPlanId"];
         };
+        /** @description What the composer's `/` menu offers, as the platform MCP server serves it to the caller (`skills/list`, `prompts/list`). */
+        ChatCommands: {
+            /** @description The skills the caller can read in the spaces asked, one per package (the first space's). Empty without `skills:read`. */
+            skills: {
+                /** @description `@scope/name`: what `pins` names. */
+                id: string;
+                /** @description The skill's `SKILL.md` frontmatter `name`. */
+                name: string;
+                description: string;
+                /** @description The published version; null for a draft. */
+                version: string | null;
+                /** @description The listed UTF-8 size of its SKILL.md: an upper bound on the characters it would take of the pins' 64000-character budget (equal for ASCII text). Null when the server lists no file sizes. */
+                bytes: number | null;
+            }[];
+            /** @description The agents the caller can launch, as launch prompts. Empty when the caller cannot run agents. */
+            agents: {
+                /** @description The prompt name (`run-<agent>`): what a `data-agent-prompt` part names. */
+                name: string;
+                title: string;
+                description: string;
+                /** @description `@scope/name`: the seed of the agent's derived colour. */
+                packageId: string;
+                /** @description The agent's chosen icon (`@appstrate/core/appearance` grammar, e.g. `lucide:bot`); null when none. */
+                icon: string | null;
+                /** @description The agent's chosen colour (a palette key); null when none. */
+                color: string | null;
+            }[];
+        };
         ChatMessage: {
             /** @description Server-generated message id */
             id: string;
@@ -6315,14 +6383,21 @@ export interface components {
             generating: boolean;
             /** @description Whether an assistant reply landed after the caller last read the conversation. Computed server-side; cleared via PUT /api/orgs/{orgId}/chat/sessions/{id}/read. */
             unread: boolean;
-            /**
-             * @description How turns use skills. `auto`: the skills of the spaces the conversation can act in (its origin space alone when it is limited) are listed and the assistant loads what fits. `manual`: the chosen skills (`pinned_skills`) are injected in full, and the assistant may still list and load others when asked. `strict`: the chosen skills are injected and the turn holds no `skills:*` permission, so it lists, loads, declares and writes no other. Written by the turn that carries it (POST /api/orgs/{orgId}/chat).
-             * @enum {string}
-             */
-            skill_mode: "auto" | "manual" | "strict";
-            /** @description Package ids (`@scope/name`) chosen for this conversation, sorted. Injected in `manual` and `strict`; kept but unused in `auto`. */
-            pinned_skills: string[];
-            /** @description The origin space: the space selected when the conversation was created, null when it was created from the overview or that space was deleted (the conversation is then detached and no longer limited). Not an owner: lists, filters and opening do not depend on it. It gives the default space of a request naming none, and the space a limited conversation is confined to. */
+            /** @description Whether the assistant may find skills beyond the pinned ones. On: the skills of the spaces the conversation can act in (its origin space alone when it is limited), minus the pinned ones, are listed in the context and the assistant loads what fits. Off: the turn holds no `skills:*` permission, so it lists, loads, declares and writes no other skill. Set by PATCH /api/orgs/{orgId}/chat/sessions/{id}/skills, or by the turn that creates the conversation. */
+            skill_discovery: boolean;
+            /** @description The skills the user pinned to this conversation, sorted by id: injected in full on every turn, in that order, within the 64000-character budget, whatever `skill_discovery`; a pin that does not fit is reported `over_budget`. Set by PATCH /api/orgs/{orgId}/chat/sessions/{id}/skills, or by the turn that creates the conversation. The assistant reading a skill's SKILL.md pins nothing. */
+            pins: {
+                /** @description `@scope/name` package id. */
+                id: string;
+                /**
+                 * @description What the last turn that claimed the conversation (the turn's start, past every refusal) did with it — recorded even if that turn failed afterwards: `injected` (in the assistant's context), or left out — `over_budget` (the pinned skills share a 64000-character budget, spent in pin order), `unavailable` (in no skill listing the turn read: removed, deactivated or out of reach), `unreadable` (its read failed, or its SKILL.md was not the text listed). Null until a turn evaluates it.
+                 * @enum {string|null}
+                 */
+                status: "injected" | "over_budget" | "unavailable" | "unreadable" | null;
+                /** @description The characters its SKILL.md takes of the 64000-character budget, as that turn read it (with `injected` and `over_budget`); null otherwise. */
+                chars: number | null;
+            }[];
+            /** @description The origin space: the space selected when the conversation was created, null when it was created from the overview or that space was deleted (the conversation is then detached and no longer limited). Not an owner: lists, filters and opening do not depend on it. It is the space of an act that names none (other than an inline run, a new package or a direct integration tool call, which go to the caller's personal space first), and the space a limited conversation is confined to. */
             spaceId: string | null;
             /** @description Whether the conversation is limited to its origin space: its tools act there alone. Always false without an origin space. */
             restricted: boolean;
@@ -6406,6 +6481,12 @@ export interface components {
             label: string;
             value: string;
             note?: string;
+        };
+        /** @description `inline_run_not_allowed_in_space`: the caller's role in this space does not allow composing an inline run (it needs `agents:write` and `agents:run` here). `active_in_spaces` lists the caller's other spaces, within the credential's reach, where they hold both. This permission check does not evaluate integration activation or connections. */
+        InlineRunNotAllowedProblem: components["schemas"]["ProblemDetail"] & {
+            /** @enum {string} */
+            code?: "inline_run_not_allowed_in_space";
+            active_in_spaces: components["schemas"]["ActiveInSpaces"];
         };
         /** @description Per-integration connection verdict for an agent: which connections the next run binds, the annotated candidate list, and admin/member pin + blocked state. The bound set is floor ∪ selection, floor first in its own order, then the selection's additions in theirs, deduplicated. Governed — an admin pin, else an enforced org default — the governing set is the floor, bound whole, and the selection is the launch override (the run's `connection_overrides`, or the firing schedule's — a scheduled fire carries no run override), else the member pin when additions are open, else nothing; no soft org default and no fallback contributes. Additions are open only under an admin pin that allows them with no enforced org default (`additional_connections_allowed`); open, the selection is drawn from the connections the actor can reach, closed, an override naming a connection outside the floor is `override_outranked`. Ungoverned there is no floor, and the first layer with a set is the selection: launch override → member pin → soft org default → fallback (the actor's ONE own serving connection binds; several answer `must_choose_connection`; a connection shared by another member is never bound without an explicit pick). More than 20 connections in all is `connection_set_too_large`; then a health and scope check on every bound connection. Computed by the same resolver the runtime uses, and reported in its vocabulary: `source`, `error_code`, `warning`. Readiness carries no launch override, so `source` is never `run_override` / `schedule_override` here. Per-connection provenance, read off the fields: under governance the floor is `admin_pinned_connection_ids` when an admin pin exists, else `org_default_connection_ids` (enforced); every other id of `resolved_connection_ids` is an addition — here the member pin's (`member_pinned_connection_ids`); a run's launch override, when it carries one, supplies them instead. Ungoverned, the whole set comes from `source`. */
         IntegrationAgentResolution: {
@@ -6530,7 +6611,7 @@ export interface components {
             home_space_id: string | null;
             /** @description Whether THIS caller holds the package type's `write` in its home space — the exact predicate the write routes enforce (`PUT`, publish, restore, rename, move). `false` on a package the caller may read but not author, including one whose `home_space_id` is withheld. It does NOT answer for `DELETE`, which enforces `<type>:delete`: read `home_deletable` for that. */
             home_writable: boolean;
-            /** @description Whether THIS caller holds the package type's `delete` in its home space — the exact predicate `DELETE` enforces, and a field of its own because `<type>:delete` is an independent permission string a custom space role may withhold while granting `write`. Every preset that writes also deletes, so this equals `home_writable` for a preset-only organization. `false` on a system package, which no principal may delete. */
+            /** @description Whether THIS caller holds the package type's `delete` in its home space — the exact predicate `DELETE` enforces, independent of `home_writable`. A member capped to `operator` may delete packages from their personal space even when they cannot edit them. `false` on a system package, which no principal may delete. */
             home_deletable: boolean;
             /** @description Whether THIS caller holds the package type's `share` in its home space — the exact predicate every act that widens the audience enforces: the share and the audience listing (`/shares`), plus the activation that has to create the placement first (`POST /api/spaces/{id}/packages` on a package this space does not yet hold). A withdrawal (`DELETE …/shares/{target}`) accepts it too, or the target space's `deactivate` grant. Activating an ALREADY-placed package asks for no `share`. `share` decides who runs the package with whose credentials, so it is granted by the `admin` and `builder` presets and carried by no API key; a custom role may hold it without `write`, or `write` without it. */
             home_shareable: boolean;
@@ -6587,7 +6668,7 @@ export interface components {
             home_space_id: string | null;
             /** @description Whether THIS caller holds the package type's `write` in its home space — the exact predicate the write routes enforce (`PUT`, publish, restore, rename, move). `false` on a package the caller may read but not author, including one whose `home_space_id` is withheld. It does NOT answer for `DELETE`, which enforces `<type>:delete`: read `home_deletable` for that. */
             home_writable: boolean;
-            /** @description Whether THIS caller holds the package type's `delete` in its home space — the exact predicate `DELETE` enforces, and a field of its own because `<type>:delete` is an independent permission string a custom space role may withhold while granting `write`. Every preset that writes also deletes, so this equals `home_writable` for a preset-only organization. `false` on a system package, which no principal may delete. */
+            /** @description Whether THIS caller holds the package type's `delete` in its home space — the exact predicate `DELETE` enforces, independent of `home_writable`. A member capped to `operator` may delete packages from their personal space even when they cannot edit them. `false` on a system package, which no principal may delete. */
             home_deletable: boolean;
             /** @description Whether THIS caller holds the package type's `share` in its home space — the exact predicate every act that widens the audience enforces: the share and the audience listing (`/shares`), plus the activation that has to create the placement first (`POST /api/spaces/{id}/packages` on a package this space does not yet hold). A withdrawal (`DELETE …/shares/{target}`) accepts it too, or the target space's `deactivate` grant. Activating an ALREADY-placed package asks for no `share`. `share` decides who runs the package with whose credentials, so it is granted by the `admin` and `builder` presets and carried by no API key; a custom role may hold it without `write`, or `write` without it. */
             home_shareable: boolean;
@@ -6940,7 +7021,7 @@ export interface components {
             home_space_id: string | null;
             /** @description Whether THIS caller holds the package type's `write` in its home space — the exact predicate the write routes enforce (`PUT`, publish, restore, rename, move). `false` on a package the caller may read but not author, including one whose `home_space_id` is withheld. It does NOT answer for `DELETE`, which enforces `<type>:delete`: read `home_deletable` for that. */
             home_writable: boolean;
-            /** @description Whether THIS caller holds the package type's `delete` in its home space — the exact predicate `DELETE` enforces, and a field of its own because `<type>:delete` is an independent permission string a custom space role may withhold while granting `write`. Every preset that writes also deletes, so this equals `home_writable` for a preset-only organization. `false` on a system package, which no principal may delete. */
+            /** @description Whether THIS caller holds the package type's `delete` in its home space — the exact predicate `DELETE` enforces, independent of `home_writable`. A member capped to `operator` may delete packages from their personal space even when they cannot edit them. `false` on a system package, which no principal may delete. */
             home_deletable: boolean;
             /** @description Whether THIS caller holds the package type's `share` in its home space — the exact predicate every act that widens the audience enforces: the share and the audience listing (`/shares`), plus the activation that has to create the placement first (`POST /api/spaces/{id}/packages` on a package this space does not yet hold). A withdrawal (`DELETE …/shares/{target}`) accepts it too, or the target space's `deactivate` grant. Activating an ALREADY-placed package asks for no `share`. `share` decides who runs the package with whose credentials, so it is granted by the `admin` and `builder` presets and carried by no API key; a custom role may hold it without `write`, or `write` without it. */
             home_shareable: boolean;
@@ -6986,7 +7067,7 @@ export interface components {
             home_space_id: string | null;
             /** @description Whether THIS caller holds the package type's `write` in its home space — the exact predicate the write routes enforce (`PUT`, publish, restore, rename, move). `false` on a package the caller may read but not author, including one whose `home_space_id` is withheld. It does NOT answer for `DELETE`, which enforces `<type>:delete`: read `home_deletable` for that. */
             home_writable: boolean;
-            /** @description Whether THIS caller holds the package type's `delete` in its home space — the exact predicate `DELETE` enforces, and a field of its own because `<type>:delete` is an independent permission string a custom space role may withhold while granting `write`. Every preset that writes also deletes, so this equals `home_writable` for a preset-only organization. `false` on a system package, which no principal may delete. */
+            /** @description Whether THIS caller holds the package type's `delete` in its home space — the exact predicate `DELETE` enforces, independent of `home_writable`. A member capped to `operator` may delete packages from their personal space even when they cannot edit them. `false` on a system package, which no principal may delete. */
             home_deletable: boolean;
             /** @description Whether THIS caller holds the package type's `share` in its home space — the exact predicate every act that widens the audience enforces: the share and the audience listing (`/shares`), plus the activation that has to create the placement first (`POST /api/spaces/{id}/packages` on a package this space does not yet hold). A withdrawal (`DELETE …/shares/{target}`) accepts it too, or the target space's `deactivate` grant. Activating an ALREADY-placed package asks for no `share`. `share` decides who runs the package with whose credentials, so it is granted by the `admin` and `builder` presets and carried by no API key; a custom role may hold it without `write`, or `write` without it. */
             home_shareable: boolean;
@@ -7028,6 +7109,11 @@ export interface components {
             dashboard_sso_enabled?: boolean;
             /** @description Whether members may bring personal model credentials. Defaults to true. When false, adding one (`owner_type: user` on `POST /api/model-provider-credentials` or on `POST /api/model-providers-oauth/pairing`) answers `403 personal_model_credentials_disabled`, and the personal credentials that already exist serve nothing: a model the organization leaves unbound is refused (`409 model_credential_required`), and a run on one is refused at its next call. Always present on read; optional on PATCH. */
             personal_model_credentials: boolean;
+            /**
+             * @description The role an organization MEMBER holds in their own personal space. Defaults to `admin`. `operator` caps it: the member runs published, active agents (a plain launch without a published version returns `404 no_published_version`). An explicit draft launch requires write access in the package’s home space (`403 draft_not_writable` otherwise). Existing schedules keep their previously authorized draft selectors. The member activates and deactivates packages, connects integrations, and can still delete the agents, skills, integrations and schedules they already have there (`agents:delete`, `skills:delete`, `integrations:delete`, `schedules:delete`), but can no longer create, edit, publish, share, configure or compose an inline run, nor rename the space. Owners and admins keep `admin` in their own personal space and a guest stays `operator`. Computed on every request: switching it back restores `admin` with no other write. Always present on read; optional on PATCH.
+             * @enum {string}
+             */
+            personal_space_role: "admin" | "operator";
         };
         Organization: {
             id: string;
@@ -7141,7 +7227,7 @@ export interface components {
             home_space_id: string | null;
             /** @description Whether THIS caller holds the package type's `write` in its home space — the exact predicate the write routes enforce (`PUT`, publish, restore, rename, move). `false` on a package the caller may read but not author, including one whose `home_space_id` is withheld. It does NOT answer for `DELETE`, which enforces `<type>:delete`: read `home_deletable` for that. */
             home_writable: boolean;
-            /** @description Whether THIS caller holds the package type's `delete` in its home space — the exact predicate `DELETE` enforces, and a field of its own because `<type>:delete` is an independent permission string a custom space role may withhold while granting `write`. Every preset that writes also deletes, so this equals `home_writable` for a preset-only organization. `false` on a system package, which no principal may delete. */
+            /** @description Whether THIS caller holds the package type's `delete` in its home space — the exact predicate `DELETE` enforces, independent of `home_writable`. A member capped to `operator` may delete packages from their personal space even when they cannot edit them. `false` on a system package, which no principal may delete. */
             home_deletable: boolean;
             /** @description Whether THIS caller holds the package type's `share` in its home space — the exact predicate every act that widens the audience enforces: the share and the audience listing (`/shares`), plus the activation that has to create the placement first (`POST /api/spaces/{id}/packages` on a package this space does not yet hold). A withdrawal (`DELETE …/shares/{target}`) accepts it too, or the target space's `deactivate` grant. Activating an ALREADY-placed package asks for no `share`. `share` decides who runs the package with whose credentials, so it is granted by the `admin` and `builder` presets and carried by no API key; a custom role may hold it without `write`, or `write` without it. */
             home_shareable: boolean;
@@ -21001,13 +21087,10 @@ export interface operations {
                     package_authoring?: boolean;
                     /** @description Launches the inline runs of this turn on the turn's model and generation settings (`modelId` and `generation` of `POST /api/runs/inline`, judged like any explicit model); absent = off, they run on the default model. A saved agent's run keeps its own model. */
                     inline_runs_use_chat_model?: boolean;
-                    /**
-                     * @description The conversation's skill mode (see ChatSession `skill_mode`), written onto the session by this turn. Sent with `pinned_skills` or not at all; absent = the stored selection (`auto` for a new conversation).
-                     * @enum {string}
-                     */
-                    skill_mode?: "auto" | "manual" | "strict";
-                    /** @description The skills chosen for the conversation, written with `skill_mode`. Deduped server-side; the cap applies to the array as sent. */
-                    pinned_skills?: string[];
+                    /** @description The pins of a conversation this turn creates (see ChatSession `pins`), written with its row; also honoured by an ephemeral turn (no `id`). Ignored for an existing conversation, whose pins change through PATCH /api/orgs/{orgId}/chat/sessions/{id}/skills. */
+                    pins?: string[];
+                    /** @description The discovery switch of a conversation this turn creates (see ChatSession `skill_discovery`); absent = on. Same rule as `pins`: ignored for an existing conversation. */
+                    skill_discovery?: boolean;
                     /** @description Session id (the assistant-ui thread id) */
                     id?: string;
                 };
@@ -21025,7 +21108,7 @@ export interface operations {
                     "text/event-stream": string;
                 };
             };
-            /** @description No enabled model configured, or invalid body — including a message that is not a valid AI SDK UIMessage, or a last message whose JSON exceeds 256 KB. */
+            /** @description No enabled model configured, or invalid body — including a message that is not a valid AI SDK UIMessage, a last message whose JSON exceeds 256 KB, a malformed or repeated `data-agent-prompt` part, an agent name the server does not serve, or launch instructions over 64 KB. */
             400: components["responses"]["ValidationError"];
             /** @description Usage refused by the `beforeUsage` admission hook; only emitted when a module provides it. RFC 9457 problem+json; `code` is `quota_exceeded` when the org is out of credits, or `subscription_blocked` when its subscription is suspended or cancelled. */
             402: {
@@ -21049,8 +21132,60 @@ export interface operations {
             };
             /** @description Rate limited (20/min per caller), or `chat_capacity` — the instance is at its concurrent chat-turn cap. Both carry `Retry-After`. */
             429: components["responses"]["RateLimited"];
+            /** @description `bad_gateway` — the message launches an agent (`data-agent-prompt`) and the platform's MCP server could not be reached or failed to answer `prompts/get`. Nothing was written. RFC 9457 problem+json. */
+            502: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
             /** @description `encryption_key_unavailable` — the selected model's stored credential is encrypted under a key id missing from the platform's keyring (operator configuration; nothing is flagged for reconnection). RFC 9457 problem+json. */
             503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+        };
+    };
+    listChatCommands: {
+        parameters: {
+            query?: {
+                /** @description Read the commands in this space alone; it must be a space the caller can act in (else a 400 naming `spaceId`). */
+                spaceId?: string;
+                /** @description The composer's package-authoring switch, as `streamChat` takes it in its body; absent = on. On, with `skills:write`, a skill is listed at the caller's draft when there is one (the definition a turn injects); off, at its published version, and a skill with no published version is not listed. */
+                package_authoring?: boolean;
+            };
+            header?: never;
+            path: {
+                /** @description Organization ID. */
+                orgId: components["parameters"]["OrgIdPath"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The commands */
+            200: {
+                headers: {
+                    "Request-Id": components["headers"]["RequestId"];
+                    "Appstrate-Version": components["headers"]["AppstrateVersion"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ChatCommands"];
+                };
+            };
+            400: components["responses"]["ValidationError"];
+            403: components["responses"]["Forbidden"];
+            /** @description Rate limited (60/min per caller) */
+            429: components["responses"]["RateLimited"];
+            /** @description `bad_gateway` — the platform's MCP server could not be reached, so the commands are unknown (not empty). RFC 9457 problem+json. A half that fails to read is empty in a 200. */
+            502: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -21264,6 +21399,45 @@ export interface operations {
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
             /** @description Rate limited (120/min per caller) */
+            429: components["responses"]["RateLimited"];
+        };
+    };
+    updateChatSessionSkills: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Organization ID. */
+                orgId: components["parameters"]["OrgIdPath"];
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** @description The full set of pinned skills. */
+                    pins?: string[];
+                    skill_discovery?: boolean;
+                };
+            };
+        };
+        responses: {
+            /** @description The session, as updated */
+            200: {
+                headers: {
+                    "Request-Id": components["headers"]["RequestId"];
+                    "Appstrate-Version": components["headers"]["AppstrateVersion"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ChatSession"];
+                };
+            };
+            400: components["responses"]["ValidationError"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            /** @description Rate limited (60/min per caller) */
             429: components["responses"]["RateLimited"];
         };
     };
@@ -22209,6 +22383,10 @@ export interface operations {
                 end_date?: string;
                 /** @description Return only runs launched from this chat session. */
                 chat_session_id?: string;
+                /** @description Narrow the list to the runs of team spaces (`team`) or of personal spaces (`personal`) among the spaces the caller reaches. It only narrows, never widens: when no reached space matches, the page is empty (`total: 0`). Omit (or send an empty value) for every reached space. Any value outside the enum is rejected with `400`. */
+                space_kind?: "team" | "personal";
+                /** @description Narrow the list to the runs of these spaces, comma-separated on the wire (`spaceId=spc_a,spc_b`). It only narrows, never widens: a space the caller does not reach matches nothing, so when none is reached the page is empty (`total: 0`). Composes with `space_kind`. A value that is not a space id, or more than 100 ids, is rejected with `400`. Omit (or send an empty value) for every reached space. */
+                spaceId?: string[];
                 /** @description Return only the runs of this agent (`@scope/name`). A package the caller cannot read yields an empty page, not a refusal. A value that is not a package id is rejected with `400`; an empty value reads as absent. */
                 packageId?: string;
                 /** @description Free-text filter, combined with every other filter. Matches the agent the run executed (scope and name, as stamped on the run) and the error it ended on, case-insensitively and anywhere in the value. A query of digits (optionally prefixed with `#`) also matches the run number. Longer than 200 characters is rejected with `400`. */
@@ -22441,7 +22619,8 @@ export interface operations {
                     /**
                      * @example {
                      *       "api_version": "2026-03-21",
-                     *       "personal_model_credentials": true
+                     *       "personal_model_credentials": true,
+                     *       "personal_space_role": "admin"
                      *     }
                      */
                     "application/json": components["schemas"]["OrgSettings"];
@@ -22471,6 +22650,11 @@ export interface operations {
                     dashboard_sso_enabled?: boolean;
                     /** @description Whether members may bring personal model credentials. Defaults to true. When false, adding one (`owner_type: user` on `POST /api/model-provider-credentials` or on `POST /api/model-providers-oauth/pairing`) answers `403 personal_model_credentials_disabled`, and the personal credentials that already exist serve nothing: a model the organization leaves unbound is refused (`409 model_credential_required`), and a run on one is refused at its next call. Always present on read; optional on PATCH. */
                     personal_model_credentials?: boolean;
+                    /**
+                     * @description The role an organization MEMBER holds in their own personal space. Defaults to `admin`. `operator` caps it: the member runs published, active agents (a plain launch without a published version returns `404 no_published_version`). An explicit draft launch requires write access in the package’s home space (`403 draft_not_writable` otherwise). Existing schedules keep their previously authorized draft selectors. The member activates and deactivates packages, connects integrations, and can still delete the agents, skills, integrations and schedules they already have there (`agents:delete`, `skills:delete`, `integrations:delete`, `schedules:delete`), but can no longer create, edit, publish, share, configure or compose an inline run, nor rename the space. Owners and admins keep `admin` in their own personal space and a guest stays `operator`. Computed on every request: switching it back restores `admin` with no other write. Always present on read; optional on PATCH.
+                     * @enum {string}
+                     */
+                    personal_space_role?: "admin" | "operator";
                 };
             };
         };
@@ -25759,6 +25943,10 @@ export interface operations {
                 end_date?: string;
                 /** @description Return only runs launched from this chat session. */
                 chat_session_id?: string;
+                /** @description Narrow the list to the runs of team spaces (`team`) or of personal spaces (`personal`) among the spaces the caller reaches. It only narrows, never widens: when no reached space matches, the page is empty (`total: 0`). Omit (or send an empty value) for every reached space. Any value outside the enum is rejected with `400`. */
+                space_kind?: "team" | "personal";
+                /** @description Narrow the list to the runs of these spaces, comma-separated on the wire (`spaceId=spc_a,spc_b`). It only narrows, never widens: a space the caller does not reach matches nothing, so when none is reached the page is empty (`total: 0`). Composes with `space_kind`. A value that is not a space id, or more than 100 ids, is rejected with `400`. Omit (or send an empty value) for every reached space. */
+                spaceId?: string[];
                 /** @description Return only the runs of this agent (`@scope/name`). A package the caller cannot read yields an empty page, not a refusal. A value that is not a package id is rejected with `400`; an empty value reads as absent. */
                 packageId?: string;
                 /** @description Free-text filter, combined with every other filter. Matches the agent the run executed (scope and name, as stamped on the run) and the error it ended on, case-insensitively and anywhere in the value. A query of digits (optionally prefixed with `#`) also matches the run number. Longer than 200 characters is rejected with `400`. */
@@ -25971,7 +26159,16 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetail"];
                 };
             };
-            403: components["responses"]["Forbidden"];
+            /** @description `inline_run_not_allowed_in_space` when the caller's role in this space does not allow composing an inline run (`agents:write` and `agents:run` are both required): `active_in_spaces` names the caller's other spaces where it does. Any other 403 is an insufficient permission or a draft the caller cannot write. */
+            403: {
+                headers: {
+                    "Request-Id": components["headers"]["RequestId"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"] | components["schemas"]["InlineRunNotAllowedProblem"];
+                };
+            };
             404: components["responses"]["NotFound"];
             409: components["responses"]["RunAdmissionConflict"];
             /** @description `payload_too_large` — an inline `data:` input file exceeds the per-file inline cap (4 MiB decoded), or the run's input files together exceed `WORKSPACE_MAX_FILES_BYTES`. Or `file_count_exceeded` — the run would carry more than `RUN_MAX_FILES` input files (uploads + inline + `appfile://` refs). Both are refused before the run launches, so nothing is charged and no workspace is provisioned; distinct codes so a client can tell "one file too big" from "too many files". */
@@ -26079,7 +26276,16 @@ export interface operations {
                 };
             };
             401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
+            /** @description `inline_run_not_allowed_in_space` when the caller's role in this space does not allow composing an inline run (`agents:write` and `agents:run` are both required): `active_in_spaces` names the caller's other spaces where it does. Any other 403 is an insufficient permission or a draft the caller cannot write. */
+            403: {
+                headers: {
+                    "Request-Id": components["headers"]["RequestId"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"] | components["schemas"]["InlineRunNotAllowedProblem"];
+                };
+            };
             404: components["responses"]["NotFound"];
             429: components["responses"]["RateLimited"];
             500: components["responses"]["InternalServerError"];
@@ -26232,8 +26438,16 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetail"];
                 };
             };
-            /** @description Insufficient permissions — including `draft_not_writable` when `stage: "draft"`, or a `dependency_overrides` entry spelled `draft`, names a package the caller cannot WRITE. Resolution precedes the refusal, so a package id that does not exist, or one this space does not hold, answers 404 `package_not_found` whatever `stage` says — deliberately: 403-ing it would confirm the existence of a package the caller is not entitled to know about, and "not yours" and "not there" must read the same. The 403 therefore only concerns a package the caller can already reach. */
-            403: components["responses"]["Forbidden"];
+            /** @description `inline_run_not_allowed_in_space` when a `kind: "inline"` source is posted by a caller who cannot compose here (`agents:write` or `agents:run` missing; `active_in_spaces` names the spaces where they can). Otherwise insufficient permissions — including `draft_not_writable` when `stage: "draft"`, or a `dependency_overrides` entry spelled `draft`, names a package the caller cannot WRITE. Resolution precedes the refusal, so a package id that does not exist, or one this space does not hold, answers 404 `package_not_found` whatever `stage` says — deliberately: 403-ing it would confirm the existence of a package the caller is not entitled to know about, and "not yours" and "not there" must read the same. The 403 therefore only concerns a package the caller can already reach. */
+            403: {
+                headers: {
+                    "Request-Id": components["headers"]["RequestId"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"] | components["schemas"]["InlineRunNotAllowedProblem"];
+                };
+            };
             404: components["responses"]["NotFound"];
             /** @description `idempotency_in_progress`, `org_deleting` or `missing_integration_connection` as on the other launch routes (with `active_in_spaces` on an `integration_not_active` item) — a `must_choose_connection` item is cleared by naming one of its `candidate_connections` in `connection_overrides`; a `remote_binds_one_connection` item names an integration the cascade binds several connections to (see above). */
             409: {

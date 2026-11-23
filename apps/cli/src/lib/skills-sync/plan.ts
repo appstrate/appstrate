@@ -16,15 +16,17 @@ import { isReservedScope, parseScopedName } from "@appstrate/core/naming";
 import { canonicalPackagePath } from "@appstrate/core/package-file-operations";
 import { unzipArtifact } from "@appstrate/core/zip";
 import {
-  parseSkillUri,
-  parseSkillUriPackage,
   SKILL_MAX_FILES,
   SKILL_MAX_TOTAL_BYTES,
   skillFileDigest,
-  type SkillAddress,
   type SkillEntry,
   type SkillResource,
 } from "@appstrate/core/skill-uri";
+import {
+  parseSkillUri,
+  parseSkillUriPackage,
+  type SkillAddress,
+} from "@appstrate/core/skill-address";
 import { lstat } from "node:fs/promises";
 import { join } from "node:path";
 import { collisionSlug, SKILL_ENTRY } from "./materialize.ts";
