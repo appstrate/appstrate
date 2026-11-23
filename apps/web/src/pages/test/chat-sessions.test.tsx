@@ -100,7 +100,6 @@ function hostWith(granted: string[]): ChatHost {
     renderSpaces: () => null,
     linkInSpace: (path, spaceId) => linkedSpacePath(path, spaceId, "spc_a"),
     useSpaceLabelOf: () => () => undefined,
-    SpaceChoiceMenu: () => null,
   };
 }
 

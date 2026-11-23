@@ -3,7 +3,7 @@
 /**
  * A menu as a phone shows it: a panel that rises from the bottom, rows a thumb can hit (48 px), the
  * destructive one in red. The design system's `Sheet`, bottom side, with the rows a menu is made of.
- * A desktop keeps its popovers and dropdown menus; this is for below `md`.
+ * Below `md`; from `md` up the same rows sit in a popover, dense under a mouse (`desktop-pointer:`).
  */
 
 import * as React from "react";
@@ -14,7 +14,39 @@ import { cn } from "@appstrate/ui/cn";
 
 /** A row of a sheet menu: 48 px tall, as wide as the panel. */
 export const SHEET_ROW_CLASS =
-  "text-foreground flex min-h-12 w-full items-center justify-start gap-3 px-5 py-2 text-left text-base font-normal outline-none transition-colors active:bg-muted focus-visible:bg-muted disabled:opacity-50 [&_svg]:size-5 [&_svg]:shrink-0";
+  "text-foreground flex min-h-12 w-full items-center justify-start gap-3 px-5 py-2 text-left text-base font-normal outline-none transition-colors active:bg-muted focus-visible:bg-muted hover:bg-muted disabled:pointer-events-none disabled:opacity-50 [&_svg]:size-5 [&_svg]:shrink-0 desktop-pointer:min-h-9 desktop-pointer:gap-2 desktop-pointer:px-3 desktop-pointer:py-1.5 desktop-pointer:text-sm desktop-pointer:[&_svg]:size-4";
+
+/** A level of a panel that navigates: the way back to the level above it. */
+export interface MenuBack {
+  label: string;
+  onClick: () => void;
+}
+
+/**
+ * A panel's heading: the way back to the level above, then the level's name (`children`, the
+ * container's own title element: a sheet's `SheetTitle`, a popover's labelled paragraph).
+ */
+export function MenuHeading({ back, children }: { back?: MenuBack; children: React.ReactNode }) {
+  return (
+    <div className="desktop-pointer:min-h-10 desktop-pointer:px-1 desktop-pointer:pt-1 flex min-h-14 items-center gap-1 px-2 pt-2">
+      {back && (
+        <button
+          type="button"
+          aria-label={back.label}
+          onClick={back.onClick}
+          className="text-muted-foreground active:bg-muted focus-visible:bg-muted hover:bg-muted desktop-pointer:size-8 flex size-11 shrink-0 items-center justify-center rounded-full outline-none"
+          data-testid="sheet-menu-back"
+        >
+          <ChevronLeftIcon className="desktop-pointer:size-4 size-5" aria-hidden />
+        </button>
+      )}
+      <div className={cn("min-w-0 flex-1", !back && "desktop-pointer:px-2 px-3")}>{children}</div>
+    </div>
+  );
+}
+
+/** A level's name, as {@link MenuHeading} draws it. */
+export const MENU_TITLE_CLASS = "truncate text-base font-semibold desktop-pointer:text-sm";
 
 export function SheetMenu({
   open,
@@ -31,8 +63,8 @@ export function SheetMenu({
   /** The panel's name: its accessible name, drawn as its heading with `showTitle` or `back`. */
   title: string;
   showTitle?: boolean;
-  /** A level of a panel that navigates: the way back to the level above it. */
-  back?: { label: string; onClick: () => void };
+  /** A level of a panel that navigates: the way back to the level above it (Escape takes it too). */
+  back?: MenuBack;
   /** A line shown above the rows, when the rows need saying what they act on. */
   header?: React.ReactNode;
   children: React.ReactNode;
@@ -50,24 +82,17 @@ export function SheetMenu({
           className,
         )}
         data-testid="sheet-menu"
+        // A level goes up one level on Escape; the top level closes.
+        onEscapeKeyDown={(event) => {
+          if (!back) return;
+          event.preventDefault();
+          back.onClick();
+        }}
       >
         {heading ? (
-          <div className="flex min-h-14 items-center gap-1 px-2 pt-2">
-            {back && (
-              <button
-                type="button"
-                aria-label={back.label}
-                onClick={back.onClick}
-                className="text-muted-foreground active:bg-muted focus-visible:bg-muted flex size-11 shrink-0 items-center justify-center rounded-full outline-none"
-                data-testid="sheet-menu-back"
-              >
-                <ChevronLeftIcon className="size-5" aria-hidden />
-              </button>
-            )}
-            <SheetTitle className={cn("truncate text-base font-semibold", !back && "px-3")}>
-              {title}
-            </SheetTitle>
-          </div>
+          <MenuHeading back={back}>
+            <SheetTitle className={MENU_TITLE_CLASS}>{title}</SheetTitle>
+          </MenuHeading>
         ) : (
           <SheetTitle className="sr-only">{title}</SheetTitle>
         )}
@@ -101,6 +126,7 @@ export function SheetMenuSwitchRow({
   icon,
   label,
   hint,
+  testId,
 }: {
   id: string;
   checked: boolean;
@@ -109,15 +135,27 @@ export function SheetMenuSwitchRow({
   icon?: React.ReactNode;
   label: React.ReactNode;
   hint?: React.ReactNode;
+  testId?: string;
 }) {
   return (
-    <div className="flex min-h-12 items-center gap-3 px-5 py-2 [&_svg]:size-5 [&_svg]:shrink-0">
+    <div className="desktop-pointer:min-h-9 desktop-pointer:gap-2 desktop-pointer:px-3 desktop-pointer:py-1.5 desktop-pointer:[&_svg]:size-4 flex min-h-12 items-center gap-3 px-5 py-2 [&_svg]:size-5 [&_svg]:shrink-0">
       {icon}
-      <label htmlFor={id} className="text-foreground flex min-w-0 flex-1 flex-col text-base">
+      <label
+        htmlFor={id}
+        className="text-foreground desktop-pointer:text-sm flex min-w-0 flex-1 flex-col text-base"
+      >
         {label}
-        {hint && <span className="text-muted-foreground text-sm">{hint}</span>}
+        {hint && (
+          <span className="text-muted-foreground desktop-pointer:text-xs text-sm">{hint}</span>
+        )}
       </label>
-      <Switch id={id} checked={checked} onCheckedChange={onCheckedChange} disabled={disabled} />
+      <Switch
+        id={id}
+        checked={checked}
+        onCheckedChange={onCheckedChange}
+        disabled={disabled}
+        data-testid={testId}
+      />
     </div>
   );
 }

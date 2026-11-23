@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Model picker shown under the composer input. Lists the org's configured models
+ * The model level of the composer's tools panel, on every format. Lists the org's configured models
  * (`GET /api/models`, the same catalog the server resolves against) and surfaces
  * the chosen preset id; the panel forwards it per turn via the `X-Model-Id`
  * header. The list itself is the dashboard's: `ModelPickerList` from
@@ -11,21 +11,13 @@
  * conversation's last measure already outgrows carries a marker (`model-fit.ts`).
  */
 
-import { useMemo, useState } from "react";
-import {
-  ChevronDownIcon,
-  ChevronLeftIcon,
-  SlidersHorizontalIcon,
-  TriangleAlertIcon,
-} from "lucide-react";
-import { cn } from "@appstrate/ui/cn";
-import { Button } from "@appstrate/ui/components/button";
+import { useMemo } from "react";
+import { ChevronLeftIcon, SlidersHorizontalIcon, TriangleAlertIcon } from "lucide-react";
 import { ModelGenerationControls } from "@appstrate/ui/components/model-generation-controls";
 import { buildGenerationLabels } from "@appstrate/ui/components/model-generation-labels";
 import { ModelPickerList } from "@appstrate/ui/components/model-picker";
 import { groupModelsForPicker } from "@appstrate/ui/components/model-picker-groups";
 import { buildModelPickerLabels } from "@appstrate/ui/components/model-picker-labels";
-import { Popover, PopoverContent, PopoverTrigger } from "@appstrate/ui/components/popover";
 import type { OrgModelOption } from "./models-data.ts";
 import { selectedModel, type ModelPickerProps } from "./model-picker.ts";
 import { isModelSelectable } from "@appstrate/core/model-selectable";
@@ -51,15 +43,15 @@ function FitNote({ fit }: { fit: ModelFit }) {
 }
 
 /** The list, or one model's settings (reached from its row's icon). */
-type ModelPanelView = "models" | "configuration";
+export type ModelPanelView = "models" | "configuration";
 
 const hasGenerationOverrides = (generation: ModelGenerationSettings) =>
   generation.temperature != null || generation.reasoning_level != null;
 
 /**
- * The list of models, or the selected model's settings: the desktop's popover and the phone's
- * "+" panel both show it. `back` draws the settings' own way back to the list, named after the
- * model; the phone's panel has a header of its own that does it.
+ * The list of models, or the selected model's settings: the composer's tools panel shows it at its
+ * « Modèle » level. `back` draws the settings' own way back to the list, named after the model;
+ * the panel's heading does it there.
  */
 export function ModelPanel({
   models,
@@ -122,7 +114,7 @@ export function ModelPanel({
           <button
             type="button"
             onClick={() => onViewChange("models")}
-            className="text-muted-foreground hover:text-foreground flex min-h-11 w-full shrink-0 items-center gap-1.5 text-left text-sm md:min-h-8"
+            className="text-muted-foreground hover:text-foreground desktop-pointer:min-h-8 flex min-h-11 w-full shrink-0 items-center gap-1.5 text-left text-sm"
           >
             <ChevronLeftIcon className="size-4 shrink-0" aria-hidden="true" />
             <span className="truncate font-medium">{active.label ?? active.modelId}</span>
@@ -187,7 +179,7 @@ export function ModelPanel({
                 onSelect(model.id);
                 onViewChange("configuration");
               }}
-              className="text-muted-foreground hover:text-foreground relative -my-1 -mr-1 flex size-9 shrink-0 items-center justify-center rounded-md md:size-7"
+              className="text-muted-foreground hover:text-foreground desktop-pointer:size-7 relative -my-1 -mr-1 flex size-9 shrink-0 items-center justify-center rounded-md"
             >
               <SlidersHorizontalIcon className="size-4" aria-hidden="true" />
               {hasOverrides && model.id === selectedId && (
@@ -199,102 +191,9 @@ export function ModelPanel({
             </button>
           );
         }}
-        // A phone's panel has room, and rows a thumb can hit.
-        listClassName="max-h-[min(15rem,calc(100dvh-10rem))] max-md:max-h-[55dvh] max-md:[&_[cmdk-item]]:min-h-11 max-md:[&_[cmdk-item]]:items-center"
+        // Rows a thumb can hit on touch, dense under a mouse; a phone's sheet has room for more of them.
+        listClassName="max-h-[min(15rem,calc(100dvh-10rem))] max-md:max-h-[55dvh] [&_[cmdk-item]]:min-h-11 [&_[cmdk-item]]:items-center desktop-pointer:[&_[cmdk-item]]:min-h-0"
       />
     </div>
-  );
-}
-
-/**
- * The pill from `md` up, and its popover. A phone has no pill on the composer's line: its list is
- * in the "+" panel (`ModelPanel`, through `ModelPickerProvider`).
- */
-export function ModelSelect(props: ModelPickerProps) {
-  const { models, selectedId, generation, pending = false, failed = false } = props;
-  const [open, setOpen] = useState(false);
-  const [view, setView] = useState<ModelPanelView>("models");
-  const { t } = useChatHost();
-  const active = selectedModel(models, selectedId);
-  const hasOverrides = hasGenerationOverrides(generation);
-
-  if (models.length === 0) {
-    // The pill itself, emptied: its box (py-1 on a text-sm line, the two 14px icons) is
-    // the loaded one's; only the model's name, unknown yet, may make it wider or narrower.
-    if (pending)
-      return (
-        <Button
-          type="button"
-          variant="outline"
-          size="sm"
-          disabled
-          aria-hidden
-          tabIndex={-1}
-          className="bg-muted desktop-pointer:min-h-0 h-auto min-h-10 max-w-[min(16rem,100%)] animate-pulse justify-start gap-1.5 border-transparent px-2.5 py-1 font-normal text-transparent shadow-none disabled:opacity-100 max-md:hidden [&_svg]:size-3.5"
-        >
-          <SlidersHorizontalIcon className="size-3.5 shrink-0" />
-          <span className="font-medium">{t("model.select")}</span>
-          <ChevronDownIcon className="size-3.5 shrink-0" />
-        </Button>
-      );
-    if (failed) {
-      return (
-        <Button
-          type="button"
-          variant="outline"
-          size="sm"
-          disabled
-          className="desktop-pointer:min-h-0 h-auto min-h-10 max-w-[min(16rem,100%)] justify-start gap-1.5 px-2.5 py-1 text-left font-normal shadow-none max-md:hidden [&_svg]:size-3.5"
-          title={t("model.loadFailed")}
-        >
-          <TriangleAlertIcon className="text-destructive shrink-0" />
-          <span className="truncate font-medium">{t("model.loadFailed")}</span>
-        </Button>
-      );
-    }
-    return null;
-  }
-
-  return (
-    <Popover
-      open={open}
-      onOpenChange={(next) => {
-        setOpen(next);
-        if (!next) setView("models");
-      }}
-    >
-      <PopoverContent
-        side="top"
-        align="start"
-        sideOffset={6}
-        collisionPadding={12}
-        aria-label={t("model.settingsTitle")}
-        className="w-[min(21rem,calc(100vw-1.5rem))] overflow-hidden p-0 shadow-xl"
-      >
-        <ModelPanel {...props} view={view} onViewChange={setView} />
-      </PopoverContent>
-      <PopoverTrigger asChild>
-        <Button
-          type="button"
-          variant="outline"
-          size="sm"
-          className={cn(
-            "text-foreground hover:text-foreground desktop-pointer:min-h-0 h-auto min-h-10 gap-1.5 px-2.5 py-1 font-normal shadow-none max-md:hidden [&_svg]:size-3.5",
-            "max-w-[min(16rem,100%)] justify-start text-left",
-            hasOverrides && "border-primary/40 bg-primary/5",
-          )}
-          title={t("model.settingsTitle")}
-        >
-          <SlidersHorizontalIcon className="text-muted-foreground size-3.5 shrink-0" />
-          {active ? (
-            <span className="truncate font-medium">{active.label ?? active.modelId}</span>
-          ) : (
-            <span className="font-medium">{t("model.select")}</span>
-          )}
-          {hasOverrides && <span className="bg-primary size-1.5 rounded-full" aria-hidden="true" />}
-          <ChevronDownIcon className="text-muted-foreground size-3.5 shrink-0" />
-        </Button>
-      </PopoverTrigger>
-    </Popover>
   );
 }

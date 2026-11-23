@@ -29,7 +29,7 @@
  * context hop for a value that never leaves the file would be pure ceremony.
  */
 
-import { createContext, useContext, type ComponentType, type ReactNode } from "react";
+import { createContext, useContext, type ReactNode } from "react";
 import type { PickerCredential } from "@appstrate/ui/components/model-picker-groups";
 import type { ModelSizing } from "./model-fit.ts";
 
@@ -65,15 +65,6 @@ export type RenderSpaces = (
   /** `tilesOnly`: the tiles alone, no name (two at most, then « +N »), for a line with no room for it. */
   options?: { tilesOnly?: boolean },
 ) => ReactNode;
-
-/** The host's space picker, opened from an entry in a menu. */
-export type SpaceChoiceMenu = ComponentType<{
-  label: string;
-  spaceIds: readonly string[];
-  onPick: (spaceId: string) => void;
-  trigger: ReactNode;
-  testId?: string;
-}>;
 
 const ChatTransportContext = createContext<ChatTransport | null>(null);
 
@@ -247,8 +238,6 @@ export interface ChatHost {
    * for the accessible names that carry a space's name where `renderSpaces`' node would not.
    */
   useSpaceLabelOf: () => (spaceId: string | null | undefined) => string | undefined;
-  /** The host's menu of spaces, the one every « … in which space? » entry of the app opens. */
-  SpaceChoiceMenu: SpaceChoiceMenu;
 }
 
 /** Why nothing can be attached: still loading, the listing failed, or a role preview (no personal space for good). */

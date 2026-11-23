@@ -1,13 +1,13 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * The composer's context gauge: a ring beside the send button, filled toward the size past which
- * the engine summarizes the history, its detail in a popover (which a touch screen opens, unlike a
- * tooltip). Nothing renders until a turn has measured something. After a switch to a model whose
- * sizing the catalog gives, the last measure is read against that model's window and threshold.
+ * The composer's context gauge: the size past which the engine summarizes the history, and how
+ * much of it the conversation takes. Its detail sits in the panel's « Modèle » level; a ring beside
+ * send says when the threshold is near. Nothing renders until a turn has measured something. After
+ * a switch to a model whose sizing the catalog gives, the last measure is read against that
+ * model's window and threshold.
  */
 
-import * as React from "react";
 import { cn } from "@appstrate/ui/cn";
 import {
   formatCompactTokens,
@@ -15,10 +15,9 @@ import {
   formatWindowPercent,
 } from "@appstrate/ui/context-window";
 import { Button } from "@appstrate/ui/components/button";
-import { Popover, PopoverContent, PopoverTrigger } from "@appstrate/ui/components/popover";
 import { Progress } from "@appstrate/ui/components/progress";
 import { useChatHost } from "./runtime-context.ts";
-import { COMPOSER_BUTTON_CLASS } from "./touch-targets.ts";
+import { useComposerPanel } from "./composer-panel.ts";
 import { thresholdShare, type ContextLevel } from "./turn-context.ts";
 import { modelFit } from "./model-fit.ts";
 import { useConversationContext } from "./use-conversation-context.ts";
@@ -65,13 +64,12 @@ function Ring({ ratio }: { ratio: number }) {
   );
 }
 
-export function ContextGauge({ className }: { className?: string }) {
-  const { t, lang, modelLabel } = useChatHost();
-  const titleId = React.useId();
+/** The last measure's figures and sentences, as the gauge reads them; `null` before any. */
+function useContextFigures() {
+  const { t, lang } = useChatHost();
   const reading = useConversationContext();
   if (!reading) return null;
-  const { context, measuredWith, readAgainstSelected } = reading;
-
+  const { context, readAgainstSelected } = reading;
   // Read against another model, the measure is the measuring model's tokenizer: approximate.
   const counts = t("contextUsage.counts", {
     used: formatTokenFigure(context.tokens, readAgainstSelected, lang),
@@ -84,76 +82,96 @@ export function ContextGauge({ className }: { className?: string }) {
       : t(LEVEL_SENTENCE[context.level === "full" && !fit ? "ok" : context.level], {
           threshold: formatCompactTokens(context.compactAt, lang),
         });
-  const showShare = context.level !== "ok";
+  return { reading, counts, sentence };
+}
 
+/**
+ * The context's detail, in the panel's « Modèle » level on every format: the model is what the
+ * window belongs to. Nothing before a turn has measured something.
+ */
+export function ContextDetail() {
+  const { t, lang, modelLabel } = useChatHost();
+  const figures = useContextFigures();
+  if (!figures) return null;
+  const { reading, counts, sentence } = figures;
+  const { context, measuredWith, readAgainstSelected } = reading;
   return (
-    <Popover>
-      <PopoverTrigger asChild>
-        <Button
-          type="button"
-          size={showShare ? "sm" : "icon"}
-          variant="ghost"
-          className={cn(
-            showShare ? SHARE_CLASS : COMPOSER_BUTTON_CLASS,
-            LEVEL_TEXT[context.level],
-            className,
-          )}
-          aria-label={t("contextUsage.label", { counts, sentence })}
-        >
-          <Ring ratio={context.ratio} />
-          {/* aria-hidden: the label already says the level. */}
-          {showShare ? (
-            <span aria-hidden="true" className="text-xs tabular-nums">
-              {formatWindowPercent(thresholdShare(context), lang)}
-            </span>
-          ) : null}
-        </Button>
-      </PopoverTrigger>
-      <PopoverContent
-        side="top"
-        align="end"
-        aria-labelledby={titleId}
-        className="w-72 space-y-2 p-3 text-sm"
-      >
-        <p id={titleId} className="font-medium">
-          {t("contextUsage.title")}
+    <section
+      aria-label={t("contextUsage.title")}
+      data-testid="context-detail"
+      className="desktop-pointer:px-3 desktop-pointer:text-xs space-y-1.5 border-t px-5 pt-3 pb-2 text-sm"
+    >
+      <p className="font-medium">{t("contextUsage.title")}</p>
+      <Progress
+        aria-hidden
+        value={Math.min(context.tokens, context.compactAt)}
+        max={context.compactAt}
+        className="h-1.5"
+        indicatorClassName={LEVEL_FILL[context.level]}
+      />
+      <p className="tabular-nums">{counts}</p>
+      <p className={LEVEL_TEXT[context.level]}>{sentence}</p>
+      {context.summarized ? (
+        <p className="text-muted-foreground">{t("contextUsage.summarized")}</p>
+      ) : null}
+      {context.windowAssumed ? (
+        <p className="text-muted-foreground">
+          {/* Read against the measuring model, "this model" would be the selected one: name it. */}
+          {measuredWith && !readAgainstSelected
+            ? t("contextUsage.windowAssumedOf", {
+                model: measuredWith,
+                window: formatCompactTokens(context.window, lang),
+              })
+            : t("contextUsage.windowAssumed", {
+                window: formatCompactTokens(context.window, lang),
+              })}
         </p>
-        <Progress
-          aria-hidden
-          value={Math.min(context.tokens, context.compactAt)}
-          max={context.compactAt}
-          className="h-1.5"
-          indicatorClassName={LEVEL_FILL[context.level]}
-        />
-        <p className="whitespace-nowrap tabular-nums">{counts}</p>
-        <p className="text-muted-foreground">{sentence}</p>
-        {context.summarized ? (
-          <p className="text-muted-foreground">{t("contextUsage.summarized")}</p>
-        ) : null}
-        {context.windowAssumed ? (
-          <p className="text-muted-foreground">
-            {/* Read against the measuring model, "this model" would be the selected one: name it. */}
-            {measuredWith && !readAgainstSelected
-              ? t("contextUsage.windowAssumedOf", {
-                  model: measuredWith,
-                  window: formatCompactTokens(context.window, lang),
-                })
-              : t("contextUsage.windowAssumed", {
-                  window: formatCompactTokens(context.window, lang),
-                })}
-          </p>
-        ) : null}
-        {measuredWith ? (
-          <p className="text-muted-foreground">
-            {readAgainstSelected && modelLabel
-              ? t("contextUsage.measuredWithReadAgainst", {
-                  model: measuredWith,
-                  selected: modelLabel,
-                })
-              : t("contextUsage.measuredWith", { model: measuredWith })}
-          </p>
-        ) : null}
-      </PopoverContent>
-    </Popover>
+      ) : null}
+      {measuredWith ? (
+        <p className="text-muted-foreground">
+          {readAgainstSelected && modelLabel
+            ? t("contextUsage.measuredWithReadAgainst", {
+                model: measuredWith,
+                selected: modelLabel,
+              })
+            : t("contextUsage.measuredWith", { model: measuredWith })}
+        </p>
+      ) : null}
+    </section>
+  );
+}
+
+/**
+ * The ring beside send, on every format, once the threshold is near or the draft would cross it:
+ * below that the detail waits in the « Modèle » level. A click opens the panel there.
+ */
+export function ContextIndicator({ draftCrosses }: { draftCrosses: boolean }) {
+  const { t, lang } = useChatHost();
+  const panel = useComposerPanel();
+  const figures = useContextFigures();
+  if (!figures) return null;
+  const { reading, counts, sentence } = figures;
+  const { context } = reading;
+  if (context.level === "ok" && !draftCrosses) return null;
+  return (
+    <Button
+      type="button"
+      size="sm"
+      variant="ghost"
+      className={cn(
+        SHARE_CLASS,
+        context.level === "ok" ? "text-warning" : LEVEL_TEXT[context.level],
+      )}
+      aria-label={t("contextUsage.label", { counts, sentence })}
+      aria-haspopup="dialog"
+      data-testid="context-indicator"
+      onClick={() => panel.openAt("models")}
+    >
+      <Ring ratio={context.ratio} />
+      {/* aria-hidden: the label already says the level. */}
+      <span aria-hidden="true" className="text-xs tabular-nums">
+        {formatWindowPercent(thresholdShare(context), lang)}
+      </span>
+    </Button>
   );
 }

@@ -4,12 +4,11 @@
 // the conversation's state (a PATCH once the server holds the row). Each pinned row is loaded,
 // or not loaded with the server's reason; only the server says a skill is loaded.
 
-import { useId, type ReactNode } from "react";
+import { useId } from "react";
 import { Checkbox } from "@appstrate/ui/components/checkbox";
 import { Progress } from "@appstrate/ui/components/progress";
 import { Skeleton } from "@appstrate/ui/components/skeleton";
 import { Switch } from "@appstrate/ui/components/switch";
-import { Popover, PopoverAnchor, PopoverContent } from "@appstrate/ui/components/popover";
 import { cn } from "@appstrate/ui/cn";
 import {
   exceedsBudget,
@@ -26,13 +25,8 @@ import { useChatHost } from "./runtime-context.ts";
 
 interface SkillsPickerProps {
   conversation: Pick<ConversationSkillsState, "skills" | "setPin" | "setDiscovery">;
-  /** Opened from the composer's settings menu or a skills chip, never by a trigger of its own. */
-  open: boolean;
-  onOpenChange: (open: boolean) => void;
   /** The skills the composer's draft cites: counted in the budget, never checked here. */
   draft: EffectiveSkills;
-  /** The popover anchors to this: the composer's tools row. */
-  children: ReactNode;
 }
 
 const NOTE_CLASS = "text-muted-foreground px-1 text-[0.7rem] leading-snug";
@@ -67,13 +61,13 @@ function BudgetGauge({ budget }: { budget: SkillBudget }) {
   );
 }
 
-/** The popover's body: the discovery switch and the skill list; exported for its tests, which render no portal. */
+/** The tools panel's skills level: the discovery switch and the skill list. */
 export function SkillsPickerPanel({
   conversation: { skills: stored, setPin, setDiscovery },
   draft: effective,
   titled = true,
-}: Pick<SkillsPickerProps, "conversation" | "draft"> & {
-  /** Its own heading; a phone's panel draws the heading in its header. */
+}: SkillsPickerProps & {
+  /** Its own heading; the tools panel draws the heading in its header. */
   titled?: boolean;
 }) {
   const { t } = useChatHost();
@@ -230,32 +224,5 @@ export function SkillsPickerPanel({
         </div>
       )}
     </>
-  );
-}
-
-export function SkillsPicker({
-  conversation,
-  open,
-  onOpenChange,
-  draft,
-  children,
-}: SkillsPickerProps) {
-  const { t } = useChatHost();
-  return (
-    <Popover open={open} onOpenChange={onOpenChange}>
-      <PopoverAnchor asChild>{children}</PopoverAnchor>
-
-      <PopoverContent
-        side="top"
-        align="start"
-        sideOffset={6}
-        collisionPadding={12}
-        aria-label={t("skills.title")}
-        data-testid="skills-picker-popover"
-        className="flex max-h-[min(28rem,var(--radix-popover-content-available-height))] w-[min(23rem,calc(100vw-1.5rem))] flex-col p-3"
-      >
-        <SkillsPickerPanel conversation={conversation} draft={draft} />
-      </PopoverContent>
-    </Popover>
   );
 }

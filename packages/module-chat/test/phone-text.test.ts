@@ -6,7 +6,7 @@ import {
   COMPOSER_INPUT_CLASS,
   COMPOSER_FIELD_CLASS,
   COMPOSER_ROW_CLASS,
-  COMPOSER_SLOT_CLASS,
+  COMPOSER_PLACEHOLDER_CLASS,
   COMPOSER_TOOLS_CLASS,
   DISCLAIMER_CLASS,
   MARKDOWN_PROSE_CLASS,
@@ -76,11 +76,11 @@ describe("composer row", () => {
     expect(COMPOSER_FIELD_CLASS.split(/\s+/)).toContain("max-md:flex-1");
     expect(COMPOSER_FIELD_CLASS.split(/\s+/)).toContain("md:basis-full");
     // Empty, a narrow screen's placeholder is one line, never two.
-    expect(COMPOSER_INPUT_CLASS.split(/\s+/)).toContain("[&_.aui-lexical-placeholder]:truncate");
+    expect(COMPOSER_PLACEHOLDER_CLASS.split(/\s+/)).toContain("truncate");
+    expect(COMPOSER_INPUT_CLASS.split(/\s+/)).toContain("text-base");
   });
 
-  it('leaves the model out of a phone\'s line: it is in the "+" panel and the placeholder', () => {
-    expect(COMPOSER_SLOT_CLASS.split(/\s+/)).toContain("max-md:hidden");
+  it('keeps the phone\'s line to the "+", the field and send: the model is in the panel', () => {
     expect(COMPOSER_TOOLS_CLASS.split(/\s+/)).toContain("max-md:flex-none");
   });
 });

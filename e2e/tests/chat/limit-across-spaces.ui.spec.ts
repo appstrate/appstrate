@@ -55,15 +55,12 @@ test("a conversation with no origin is limited to the space picked from « Tous 
     const chip = page.getByTestId("composer-limit-chip");
     await expect(chip).toHaveCount(0);
 
-    // Settings › « Limiter à un espace » › the acting spaces.
+    // The tools panel › « Limiter à… » › the acting spaces, one row each.
     await page.getByTestId("composer-settings-trigger").click();
-    const limit = page.getByTestId("composer-limit-item");
-    await expect(limit).toHaveText(/Limiter à un espace/);
-    await limit.click();
-    const choices = page.getByRole("menu", { name: "Limiter à un espace", exact: true });
+    const choices = page.getByRole("group", { name: "Limiter à…", exact: true });
     await expect(choices).toBeVisible();
-    await expect(choices.getByText("Limiter à…", { exact: true })).toBeVisible();
-    const entries = choices.getByRole("menuitem");
+    await expect(choices).toHaveAttribute("data-testid", "composer-limit-item");
+    const entries = choices.getByRole("button");
     await expect(entries.filter({ hasText: alpha.name })).toHaveCount(1);
     await expect(entries.filter({ hasText: beta.name })).toHaveCount(1);
 

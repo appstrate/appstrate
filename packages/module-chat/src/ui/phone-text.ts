@@ -4,7 +4,11 @@
 
 /** The composer's Lexical editor, styled through the library's `aui-lexical-*` classes. */
 export const COMPOSER_INPUT_CLASS =
-  "relative max-h-40 w-full overflow-y-auto px-0 text-base [&_.aui-lexical-input]:min-h-10 desktop-pointer:[&_.aui-lexical-input]:min-h-9 [&_.aui-lexical-input]:py-2 md:[&_.aui-lexical-input]:py-1 [&_.aui-lexical-input]:break-words [&_.aui-lexical-input]:whitespace-pre-wrap [&_.aui-lexical-input]:outline-none [&_.aui-lexical-placeholder]:text-muted-foreground [&_.aui-lexical-placeholder]:pointer-events-none [&_.aui-lexical-placeholder]:absolute [&_.aui-lexical-placeholder]:inset-x-0 [&_.aui-lexical-placeholder]:top-2 md:[&_.aui-lexical-placeholder]:top-1 [&_.aui-lexical-placeholder]:truncate";
+  "relative max-h-40 w-full overflow-y-auto px-0 text-base [&_.aui-lexical-input]:min-h-10 desktop-pointer:[&_.aui-lexical-input]:min-h-9 [&_.aui-lexical-input]:py-2 md:[&_.aui-lexical-input]:py-1 [&_.aui-lexical-input]:break-words [&_.aui-lexical-input]:whitespace-pre-wrap [&_.aui-lexical-input]:outline-none";
+
+/** The field's placeholder, laid over the editor's first line (`ComposerPlaceholder`). */
+export const COMPOSER_PLACEHOLDER_CLASS =
+  "text-muted-foreground pointer-events-none absolute inset-x-0 top-2 truncate text-base md:top-1";
 
 /** Running text a phone reads (a hint, a state, a message): 16 px, the dense size from `md`. */
 export const READING_TEXT_CLASS = "text-base md:text-sm";
@@ -17,9 +21,8 @@ export const NOTE_TEXT_CLASS = "text-sm md:text-xs";
 
 /**
  * The composer's row, below the field's own text. From `md` up the field takes a line to itself
- * with the tools, the model picker and send on the line under it. On a phone it is ONE line, always:
- * the "+" (all the tools), the field, the model picker, send. The row keeps its bottom edge when the
- * field grows to several lines.
+ * with the tools and send on the line under it. On a phone it is ONE line, always: the "+" (all
+ * the tools), the field, send. The row keeps its bottom edge when the field grows to several lines.
  */
 export const COMPOSER_ROW_CLASS =
   "flex items-center gap-x-2 gap-y-1 md:flex-wrap max-md:flex-nowrap max-md:items-end";
@@ -33,9 +36,6 @@ export const COMPOSER_SEND_CLASS = "flex shrink-0 items-center gap-2 short-lands
 
 /** The tools' cell: the desktop's settings and chips (`flex-1`), on a phone just the "+". */
 export const COMPOSER_TOOLS_CLASS = "min-w-0 flex-1 max-md:flex-none";
-
-/** The model picker's cell: pushed right on a desktop; a phone has its model in the "+" panel and the placeholder. */
-export const COMPOSER_SLOT_CLASS = "ml-auto min-w-0 max-md:hidden";
 
 /** "New conversation" in the sidebar: a row aligned left like the conversations below it on a phone. */
 export const NEW_CONVERSATION_CLASS = "max-md:justify-start max-md:gap-3 max-md:font-medium";
@@ -64,7 +64,7 @@ export const THREAD_FOOTER_CLASS =
   "group/footer bg-canvas sticky bottom-0 mt-2 flex w-full max-w-(--thread-max-width) flex-col items-center gap-2 pb-4";
 
 /** The line under the composer, as the conversation skeleton draws it too. */
-export const DISCLAIMER_TEXT_CLASS = "text-muted-foreground/70 px-4 text-center text-xs";
+const DISCLAIMER_TEXT_CLASS = "text-muted-foreground/70 px-4 text-center text-xs";
 
 /** Under the composer from `md` up; a phone has it as the last line of the "+" panel. */
 export const DISCLAIMER_CLASS = `${DISCLAIMER_TEXT_CLASS} max-md:hidden`;

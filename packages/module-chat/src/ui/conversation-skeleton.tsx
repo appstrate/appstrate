@@ -8,9 +8,8 @@ import {
   COMPOSER_FIELD_CLASS,
   COMPOSER_ROW_CLASS,
   COMPOSER_SEND_CLASS,
-  COMPOSER_SLOT_CLASS,
   COMPOSER_TOOLS_CLASS,
-  DISCLAIMER_TEXT_CLASS,
+  DISCLAIMER_CLASS,
 } from "./phone-text.ts";
 
 /**
@@ -26,8 +25,8 @@ export function ConversationSkeleton({
   label: string;
   /** The composer's placeholder; null for a reader, who gets no composer. */
   placeholder: ReactNode;
-  /** The writer's line under the composer: its text (`thread.disclaimer`), so it wraps as the live
-   *  one does, or a bar where the text is not loaded yet. */
+  /** The writer's line under the composer from `md` up (a phone has it in the "+" panel): its text
+   *  (`thread.disclaimer`), so it wraps as the live one does, or a bar where it is not loaded yet. */
   disclaimer: ReactNode;
 }) {
   return (
@@ -61,7 +60,7 @@ export function ConversationSkeleton({
       ) : (
         <div aria-hidden className="mx-auto flex w-full max-w-2xl flex-col gap-2 pb-4">
           <ComposerSkeleton placeholder={placeholder} />
-          <div className={cn(DISCLAIMER_TEXT_CLASS, "self-center")}>{disclaimer}</div>
+          <div className={cn(DISCLAIMER_CLASS, "self-center")}>{disclaimer}</div>
         </div>
       )}
     </div>
@@ -69,9 +68,10 @@ export function ConversationSkeleton({
 }
 
 /**
- * The writer's `Composer` (`thread.tsx`), inert: the `min-h-9` input line over the tool row —
- * `ComposerTools` on the left (attach, settings), the model picker's 30px trigger and send on the
- * right. Shared by every chat wait, the conversation's and the welcome screen's.
+ * The writer's `Composer` (`thread.tsx`), inert: from `md` up the `min-h-9` input line over the
+ * tool row — `ComposerTools` on the left (attach, the panel's settings button), send on the right;
+ * on a phone one line, the "+", the field, send. Shared by every chat wait, the conversation's and
+ * the welcome screen's.
  */
 export function ComposerSkeleton({
   placeholder,
@@ -100,9 +100,6 @@ export function ComposerSkeleton({
           )}
         >
           {placeholder}
-        </div>
-        <div className={COMPOSER_SLOT_CLASS}>
-          <Skeleton className="desktop-pointer:h-[30px] h-10 w-32 rounded-md max-md:w-10" />
         </div>
         <div className={COMPOSER_SEND_CLASS}>
           <Skeleton className={COMPOSER_BUTTON_CLASS} />

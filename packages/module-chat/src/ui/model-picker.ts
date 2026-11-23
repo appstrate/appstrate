@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * What the model picker shows, shared: the desktop's pill (`ModelSelect`) takes it as props, the
- * phone's "+" panel reads it from {@link ModelPickerProvider} and shows the same list.
+ * What the model picker shows, shared: the composer's tools panel reads it from
+ * {@link ModelPickerProvider} on every format.
  */
 
 import { createContext, useContext } from "react";
@@ -15,9 +15,9 @@ export interface ModelPickerProps {
   onSelect: (id: string) => void;
   generation: ModelGenerationSettings;
   onGenerationChange: (value: ModelGenerationSettings) => void;
-  /** The catalog is being read: the pill's box is reserved. */
+  /** The catalog is being read: the « Modèle » row names no model yet. */
   pending?: boolean;
-  /** The catalog could not be read: the pill says so, disabled. */
+  /** The catalog could not be read: the « Modèle » row says so, disabled. */
   failed?: boolean;
 }
 

@@ -77,13 +77,11 @@ function KeysPlugin({
 
 export function ComposerEditor({
   label,
-  placeholder,
   autofocus,
   onFocus,
   onEnter,
 }: {
   label: string;
-  placeholder: string;
   autofocus: boolean;
   onFocus?: () => void;
   onEnter: () => void;
@@ -106,7 +104,6 @@ export function ComposerEditor({
   return (
     <LexicalComposerInput
       aria-label={label}
-      placeholder={placeholder}
       autoFocus={autofocus}
       // Enter is the plugin's: it queues while a turn runs and honours the conversation's limit.
       submitMode="none"

@@ -122,3 +122,27 @@ test('a phone composer is one line for good: the "+", the input and send', async
   await expect(send).toBeEnabled();
   await line();
 });
+
+test("the desktop's settings button opens the panel the phone's \"+\" opens, with the same rows", async ({
+  authedPage: page,
+}) => {
+  const rows = async () => {
+    const panel = page.getByRole("dialog", { name: "Outils et réglages" });
+    await expect(panel).toBeVisible();
+    await expect(panel.getByTestId("composer-panel-skills")).toBeVisible();
+    await expect(panel.getByTestId("composer-limit-item")).toBeVisible();
+    // Escape closes the top level.
+    await page.keyboard.press("Escape");
+    await expect(panel).toBeHidden();
+  };
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await page.goto("/chat");
+  await page.getByTestId("composer-settings-trigger").click();
+  await rows();
+  // No model pill beside send: the model is a level of the panel.
+  await expect(page.getByRole("button", { name: "Modèle et génération" })).toHaveCount(0);
+
+  await page.setViewportSize({ width: 375, height: 812 });
+  await page.getByTestId("composer-plus").tap();
+  await rows();
+});

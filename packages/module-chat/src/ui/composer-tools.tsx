@@ -1,46 +1,43 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * The composer's left cluster: an attach button, a settings menu (skills, space limit, creation
- * mode, inline-run model) and, after them, a removable chip for each non-default setting that is
- * active. Settings live behind the menu, so the composer shows only what differs from the defaults.
+ * The composer's left cluster from `md` up: an attach button, the settings button that opens the
+ * tools panel (`ComposerToolsPanel`) in a popover, and a chip for each setting off its default
+ * (`useComposerDepartures`): a chip opens the panel at the level that changes it, its X restores
+ * the default. Below `md` the same panel opens from the "+" (`ComposerPlusMenu`).
  */
 
-import { useRef, useState, type ReactNode } from "react";
+import { useId, type ReactNode } from "react";
 import { ComposerPrimitive } from "@assistant-ui/react";
-import {
-  BookOpenIcon,
-  CpuIcon,
-  MapPinIcon,
-  PackageIcon,
-  PaperclipIcon,
-  SettingsIcon,
-} from "lucide-react";
+import { CpuIcon, MapPinIcon, PackageIcon, PaperclipIcon, SettingsIcon } from "lucide-react";
 import { Button } from "@appstrate/ui/components/button";
 import {
-  DropdownMenu,
-  DropdownMenuCheckboxItem,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from "@appstrate/ui/components/dropdown-menu";
+  Popover,
+  PopoverAnchor,
+  PopoverContent,
+  PopoverTrigger,
+} from "@appstrate/ui/components/popover";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@appstrate/ui/components/tooltip";
+import { cn } from "@appstrate/ui/cn";
 import { attachUnavailableKey } from "./attachment-adapter.ts";
-import { canComposeInlineRuns } from "../capabilities.ts";
-import { useConversationSkillsContext, useDraftSkills } from "./use-conversation-skills.ts";
-import { limitAvailability, useConversationScope, useSpaceName } from "./conversation-scope.ts";
-import { LIMIT_REASON_KEY } from "./composer-reasons.ts";
-import { ComposerPlusMenu } from "./phone-composer-menu.tsx";
 import {
-  setPackageAuthoringEnabled,
-  usePackageAuthoringEnabled,
-} from "./package-authoring-store.ts";
-import { setInlineRunModelEnabled, useInlineRunModelEnabled } from "./inline-run-model-store.ts";
+  DEPARTURE_LEVEL,
+  useComposerDepartures,
+  useComposerPanel,
+  useComposerPanelHeading,
+  type ComposerDeparture,
+} from "./composer-panel.ts";
+import { ComposerToolsPanel } from "./composer-tools-panel.tsx";
+import { useConversationSkillsContext } from "./use-conversation-skills.ts";
+import { useConversationScope, useSpaceName } from "./conversation-scope.ts";
+import { ComposerPlusMenu, DepartureDot } from "./phone-composer-menu.tsx";
+import { setPackageAuthoringEnabled } from "./package-authoring-store.ts";
+import { setInlineRunModelEnabled } from "./inline-run-model-store.ts";
 import { useChatHost } from "./runtime-context.ts";
 import { RemovableChip } from "./removable-chip.tsx";
 import { sentenceWithNode } from "./sentence-with-name.tsx";
+import { MENU_TITLE_CLASS, MenuHeading } from "./sheet-menu.tsx";
 import { SkillChips } from "./skill-chips.tsx";
-import { SkillsPicker } from "./skills-picker.tsx";
 import { COMPOSER_TOOL_BUTTON_CLASS } from "./touch-targets.ts";
 
 export interface ComposerToolsProps {
@@ -49,215 +46,142 @@ export interface ComposerToolsProps {
 }
 
 export function ComposerTools({ authorsPackages }: ComposerToolsProps) {
-  const { t, can } = useChatHost();
-  // Offered with `skills:read` on a readable conversation: the context is null otherwise.
-  const conversation = useConversationSkillsContext();
-  const showPicker = conversation !== null;
-  const draft = useDraftSkills();
-  const scope = useConversationScope();
-  const origin = useSpaceName(scope.originSpaceId);
-  const creationMode = usePackageAuthoringEnabled();
-  // Composing an inline run needs creation mode too: off, no turn launches one.
-  const offersInlineRunModel = creationMode && canComposeInlineRuns(can);
-  const inlineRunModel = useInlineRunModelEnabled();
-  const [skillsOpen, setSkillsOpen] = useState(false);
-  // A popover opened while the menu is closing loses to the menu's focus
-  // restore (Radix reads it as a focus-outside): open it once the menu is gone.
-  const openSkillsAfterClose = useRef(false);
-
-  // From `md` up: the attach button, the settings menu and the chips. A phone has the "+" panel.
-  const cluster = (
-    <div className="flex min-w-0 items-center gap-1.5 max-md:hidden">
-      <AttachButton />
-      <DropdownMenu>
-        <DropdownMenuTrigger asChild>
-          <Button
-            type="button"
-            variant="ghost"
-            size="icon"
-            className={COMPOSER_TOOL_BUTTON_CLASS}
-            aria-label={t("composer.settings")}
-            data-testid="composer-settings-trigger"
-          >
-            <SettingsIcon />
-          </Button>
-        </DropdownMenuTrigger>
-        <DropdownMenuContent
-          side="top"
-          align="start"
-          onCloseAutoFocus={(event) => {
-            if (!openSkillsAfterClose.current) return;
-            event.preventDefault();
-            openSkillsAfterClose.current = false;
-            setSkillsOpen(true);
-          }}
-        >
-          {showPicker && (
-            <DropdownMenuItem
-              onSelect={() => {
-                openSkillsAfterClose.current = true;
-              }}
-            >
-              <BookOpenIcon />
-              {t("composer.skills")}
-            </DropdownMenuItem>
-          )}
-          <LimitMenuEntry />
-          {authorsPackages && (
-            <DropdownMenuCheckboxItem
-              checked={creationMode}
-              onCheckedChange={setPackageAuthoringEnabled}
-            >
-              {/* The check mark takes the icon column, as Radix lays it out. */}
-              {t("composer.creationMode")}
-            </DropdownMenuCheckboxItem>
-          )}
-          {offersInlineRunModel && (
-            <DropdownMenuCheckboxItem
-              checked={inlineRunModel}
-              onCheckedChange={setInlineRunModelEnabled}
-              // The hint below would otherwise be read as part of the name.
-              aria-label={t("composer.inlineRunModel")}
-              data-testid="composer-inline-run-model-item"
-            >
-              <LabelWithHint
-                label={t("composer.inlineRunModel")}
-                hint={t("composer.inlineRunModel.hint")}
-              />
-            </DropdownMenuCheckboxItem>
-          )}
-        </DropdownMenuContent>
-      </DropdownMenu>
-
-      {/* On is the default, so the chip marks the departure from it: an author
-          who turned creation off sees it, and its X turns creation back on. */}
-      {authorsPackages && !creationMode && (
-        <RemovableChip
-          icon={<PackageIcon />}
-          removeLabel={t("composer.creationOff.undo")}
-          onRemove={() => setPackageAuthoringEnabled(true)}
-        >
-          {t("composer.creationOff")}
-        </RemovableChip>
-      )}
-      {/* Off is the default, so the chip marks the departure from it. */}
-      {offersInlineRunModel && inlineRunModel && (
-        <RemovableChip
-          icon={<CpuIcon />}
-          removeLabel={t("composer.inlineRunModelChip.undo")}
-          onRemove={() => setInlineRunModelEnabled(false)}
-          data-testid="composer-inline-run-model-chip"
-        >
-          {t("composer.inlineRunModelChip")}
-        </RemovableChip>
-      )}
-      {scope.restricted && (
-        <RemovableChip
-          icon={<MapPinIcon />}
-          removeLabel={
-            origin
-              ? t("composer.limit.undo", { name: origin.label })
-              : t("composer.limit.undoGeneric")
-          }
-          removeDisabled={scope.generating || scope.pending}
-          onRemove={scope.lift}
-          data-testid="composer-limit-chip"
-        >
-          {origin
-            ? sentenceWithNode(t, "composer.limitChip", origin.node)
-            : t("composer.limitChip.generic")}
-        </RemovableChip>
-      )}
-      {conversation && (
-        <SkillChips
-          skills={conversation.skills}
-          onOpenPicker={() => setSkillsOpen(true)}
-          onReset={conversation.reset}
-        />
-      )}
-    </div>
-  );
-
-  const phone = <ComposerPlusMenu authorsPackages={authorsPackages} />;
-  if (!conversation)
-    return (
-      <>
-        {cluster}
-        {phone}
-      </>
-    );
+  const { t } = useChatHost();
+  const panel = useComposerPanel();
+  const heading = useComposerPanelHeading();
+  const departures = useComposerDepartures(authorsPackages);
+  const titleId = useId();
   return (
     <>
-      <SkillsPicker
-        conversation={conversation}
-        draft={draft}
-        open={skillsOpen}
-        onOpenChange={setSkillsOpen}
+      <Popover
+        open={panel.open === "popover"}
+        onOpenChange={(open) => (open ? panel.openAt("tools") : panel.close())}
       >
-        {cluster}
-      </SkillsPicker>
-      {phone}
+        {/* From `md` up; a phone has the "+". The popover anchors to the whole row. */}
+        <PopoverAnchor asChild>
+          <div className="flex min-w-0 items-center gap-1.5 max-md:hidden">
+            <AttachButton />
+            <PopoverTrigger asChild>
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon"
+                className={cn(COMPOSER_TOOL_BUTTON_CLASS, "relative")}
+                aria-label={t("composer.tools")}
+                data-testid="composer-settings-trigger"
+              >
+                <SettingsIcon />
+                {departures.length > 0 && <DepartureDot testId="composer-settings-dot" />}
+              </Button>
+            </PopoverTrigger>
+            {departures.map((departure) => (
+              <DepartureChip
+                key={departure}
+                departure={departure}
+                onOpen={() => panel.openAt(DEPARTURE_LEVEL[departure])}
+              />
+            ))}
+          </div>
+        </PopoverAnchor>
+        <PopoverContent
+          side="top"
+          align="start"
+          sideOffset={6}
+          collisionPadding={12}
+          aria-labelledby={titleId}
+          data-testid="composer-panel"
+          // A level goes up one level on Escape; the top level closes.
+          onEscapeKeyDown={(event) => {
+            if (!heading.back) return;
+            event.preventDefault();
+            heading.back.onClick();
+          }}
+          className="flex max-h-[min(32rem,var(--radix-popover-content-available-height))] w-[min(22rem,calc(100vw-1.5rem))] flex-col overflow-hidden p-0"
+        >
+          <MenuHeading back={heading.back}>
+            <p id={titleId} className={MENU_TITLE_CLASS}>
+              {heading.title}
+            </p>
+          </MenuHeading>
+          <div className="flex min-h-0 flex-1 flex-col overflow-y-auto py-1">
+            <ComposerToolsPanel authorsPackages={authorsPackages} />
+          </div>
+        </PopoverContent>
+      </Popover>
+      <ComposerPlusMenu authorsPackages={authorsPackages} />
     </>
   );
 }
 
-/**
- * The settings menu's limit entry, as {@link limitAvailability} decides: one click limiting to the
- * space it names, the host's sub-menu of the acting spaces for a conversation without an origin,
- * or an inert entry giving the reason.
- */
-export function LimitMenuEntry() {
-  const { t, actingSpaceIds, SpaceChoiceMenu } = useChatHost();
+/** One departure as a chip: its body opens the panel at its level, its X restores the default. */
+function DepartureChip({
+  departure,
+  onOpen,
+}: {
+  departure: ComposerDeparture;
+  onOpen: () => void;
+}): ReactNode {
+  const { t } = useChatHost();
+  const conversation = useConversationSkillsContext();
   const scope = useConversationScope();
-  const limit = limitAvailability(scope, actingSpaceIds);
-  // The space a click limits to: the origin, or the one acting space.
-  const named = limit.kind === "toggle" ? limit.spaceId : null;
-  const space = useSpaceName(named);
-  return limit.kind === "toggle" ? (
-    // The origin, or the one space the chat acts in: one click limits there.
-    <DropdownMenuCheckboxItem
-      checked={scope.restricted}
-      disabled={scope.pending}
-      onCheckedChange={(on) => (on ? scope.limitTo(limit.spaceId) : scope.lift())}
-      aria-label={space ? t("composer.limit", { name: space.label }) : t("composer.limit.generic")}
-      data-testid="composer-limit-item"
-    >
-      {space ? sentenceWithNode(t, "composer.limit", space.node) : t("composer.limit.generic")}
-    </DropdownMenuCheckboxItem>
-  ) : limit.kind === "choose" ? (
-    // No origin and several acting spaces: the space picked becomes the origin.
-    <SpaceChoiceMenu
-      label={t("composer.limit.choose")}
-      spaceIds={limit.spaceIds}
-      onPick={scope.limitTo}
-      trigger={
-        <>
-          <MapPinIcon />
-          {t("composer.limit.generic")}
-        </>
-      }
-      testId="composer-limit-item"
-    />
-  ) : (
-    // A turn generating, no space to act in, an origin the chat no longer acts in, or the
-    // acting set not known yet (no reason then).
-    <DropdownMenuItem disabled data-testid="composer-limit-item">
-      <MapPinIcon />
-      <LabelWithHint
-        label={t("composer.limit.generic")}
-        hint={limit.reason && t(LIMIT_REASON_KEY[limit.reason])}
-      />
-    </DropdownMenuItem>
-  );
-}
-
-/** A menu item's label with a line of explanation under it. */
-function LabelWithHint({ label, hint }: { label: ReactNode; hint: ReactNode }) {
+  const origin = useSpaceName(scope.originSpaceId);
+  if (departure === "creationOff")
+    return (
+      <RemovableChip
+        icon={<PackageIcon />}
+        open={{
+          onClick: onOpen,
+          label: t("composer.creationOff"),
+          testId: "composer-creation-chip",
+        }}
+        removeLabel={t("composer.creationOff.undo")}
+        onRemove={() => setPackageAuthoringEnabled(true)}
+      >
+        {t("composer.creationOff")}
+      </RemovableChip>
+    );
+  if (departure === "inlineRunModel")
+    return (
+      <RemovableChip
+        icon={<CpuIcon />}
+        open={{
+          onClick: onOpen,
+          label: t("composer.inlineRunModelChip"),
+          testId: "composer-inline-run-model-chip",
+        }}
+        removeLabel={t("composer.inlineRunModelChip.undo")}
+        onRemove={() => setInlineRunModelEnabled(false)}
+      >
+        {t("composer.inlineRunModelChip")}
+      </RemovableChip>
+    );
+  if (departure === "limit")
+    return (
+      <RemovableChip
+        icon={<MapPinIcon />}
+        open={{
+          onClick: onOpen,
+          label: origin
+            ? t("composer.limitChip", { name: origin.label })
+            : t("composer.limitChip.generic"),
+          testId: "composer-limit-chip",
+        }}
+        removeLabel={
+          origin
+            ? t("composer.limit.undo", { name: origin.label })
+            : t("composer.limit.undoGeneric")
+        }
+        removeDisabled={scope.generating || scope.pending}
+        onRemove={scope.lift}
+      >
+        {origin
+          ? sentenceWithNode(t, "composer.limitChip", origin.node)
+          : t("composer.limitChip.generic")}
+      </RemovableChip>
+    );
+  if (!conversation) return null;
   return (
-    <span className="flex flex-col">
-      {label}
-      <span className="text-muted-foreground max-w-56 text-xs whitespace-normal">{hint}</span>
-    </span>
+    <SkillChips skills={conversation.skills} onOpenPicker={onOpen} onReset={conversation.reset} />
   );
 }
 
