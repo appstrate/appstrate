@@ -101,34 +101,48 @@ const DropdownMenuSubTrigger = React.forwardRef<
     inset?: boolean;
     variant?: "default" | "destructive";
   }
->(({ className, variant, inset, children, asChild: _asChild, textValue: _textValue, ...props }, ref) => {
-  const sheet = React.useContext(MenuSheetContext);
-  const headingId = React.useContext(SubSheetContext);
-  if (sheet) {
-    // The sub-menu's rows follow, under its words: no level to open.
-    const { disabled: _disabled, ...heading } = props;
+>(
+  (
+    { className, variant, inset, children, asChild: _asChild, textValue: _textValue, ...props },
+    ref,
+  ) => {
+    const sheet = React.useContext(MenuSheetContext);
+    const headingId = React.useContext(SubSheetContext);
+    if (sheet) {
+      // The sub-menu's rows follow, under its words: no level to open.
+      const { disabled: _disabled, ...heading } = props;
+      return (
+        <div
+          ref={ref}
+          id={headingId}
+          className={cn(
+            SHEET_LABEL_CLASS,
+            variant === "destructive" && DESTRUCTIVE_ITEM,
+            className,
+          )}
+          {...heading}
+        >
+          {children}
+        </div>
+      );
+    }
     return (
-      <div ref={ref} id={headingId} className={cn(SHEET_LABEL_CLASS, variant === "destructive" && DESTRUCTIVE_ITEM, className)} {...heading}>
+      <DropdownMenuPrimitive.SubTrigger
+        ref={ref}
+        className={cn(
+          "focus:bg-accent data-[state=open]:bg-accent flex cursor-default items-center gap-2 rounded-sm px-2 py-1.5 text-sm outline-none select-none [&_svg]:pointer-events-none [&_svg]:size-4 [&_svg]:shrink-0",
+          inset && "pl-8",
+          variant === "destructive" && DESTRUCTIVE_ITEM,
+          className,
+        )}
+        {...props}
+      >
         {children}
-      </div>
+        <ChevronRight className="ml-auto" />
+      </DropdownMenuPrimitive.SubTrigger>
     );
-  }
-  return (
-    <DropdownMenuPrimitive.SubTrigger
-      ref={ref}
-      className={cn(
-        "focus:bg-accent data-[state=open]:bg-accent flex cursor-default items-center gap-2 rounded-sm px-2 py-1.5 text-sm outline-none select-none [&_svg]:pointer-events-none [&_svg]:size-4 [&_svg]:shrink-0",
-        inset && "pl-8",
-        variant === "destructive" && DESTRUCTIVE_ITEM,
-        className,
-      )}
-      {...props}
-    >
-      {children}
-      <ChevronRight className="ml-auto" />
-    </DropdownMenuPrimitive.SubTrigger>
-  );
-});
+  },
+);
 DropdownMenuSubTrigger.displayName = DropdownMenuPrimitive.SubTrigger.displayName;
 
 const DropdownMenuSubContent = React.forwardRef<
@@ -272,7 +286,14 @@ const DropdownMenuItem = React.forwardRef<
   }
 >(({ className, variant, inset, textValue: _textValue, ...props }, ref) => {
   const sheet = React.useContext(MenuSheetContext);
-  if (sheet) return <SheetRow sheet={sheet} className={cn(variant === "destructive" && DESTRUCTIVE_ITEM, className)} {...props} />;
+  if (sheet)
+    return (
+      <SheetRow
+        sheet={sheet}
+        className={cn(variant === "destructive" && DESTRUCTIVE_ITEM, className)}
+        {...props}
+      />
+    );
   return (
     <DropdownMenuPrimitive.Item
       ref={ref}
