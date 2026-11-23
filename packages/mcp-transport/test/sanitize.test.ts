@@ -342,13 +342,13 @@ describe("sanitiseToolDescriptor — schema budget", () => {
     });
     expect(reduced).toEqual(["schema_documentation", "input_schema"]);
     expect(out.inputSchema).toEqual({ type: "object" });
-    expect(out.description!.startsWith("Its input schema was too large to show")).toBe(true);
+    expect(out.description!.startsWith("Input schema withheld, too large to show")).toBe(true);
     expect(out.description).toContain("zzz");
     expect(new TextEncoder().encode(out.description).byteLength).toBeLessThanOrEqual(
       MAX_TOOL_DESCRIPTION_BYTES,
     );
     const bare = sanitiseToolDescriptor({ name: "bare", inputSchema: objectSchema(600) }).tool;
-    expect(bare.description).toContain("input schema was too large to show");
+    expect(bare.description).toContain("Input schema withheld");
   });
 
   it("keeps a small outputSchema beside an input schema it had to withhold", () => {
