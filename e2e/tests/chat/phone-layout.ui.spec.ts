@@ -49,7 +49,7 @@ test("chat fields stay legible in both orientations and the search sheet fits th
 
   await page.setViewportSize({ width: 390, height: 844 });
   await expect(code).toHaveCSS("font-size", "14px");
-  await page.locator('header [data-sidebar="trigger"]:visible').click();
+  await page.getByTestId("chat-sidebar-trigger").click();
   const sheet = page.getByRole("dialog");
   // Below md the search is a magnifier that unfolds the field.
   await page.getByTestId("chat-search-toggle").click();
@@ -139,8 +139,6 @@ test("the desktop's settings button opens the panel the phone's \"+\" opens, wit
   await page.goto("/chat");
   await page.getByTestId("composer-settings-trigger").click();
   await rows();
-  // No model pill beside send: the model is a level of the panel.
-  await expect(page.getByRole("button", { name: "Modèle et génération" })).toHaveCount(0);
 
   await page.setViewportSize({ width: 375, height: 812 });
   await page.getByTestId("composer-plus").tap();

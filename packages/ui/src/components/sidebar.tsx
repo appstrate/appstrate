@@ -20,10 +20,6 @@ const SIDEBAR_COOKIE_MAX_AGE = 60 * 60 * 24 * 7;
 const SIDEBAR_WIDTH = "16rem";
 const SIDEBAR_WIDTH_MOBILE = "18rem";
 
-/** The phone sheet's width: a drawer of 18 rem, or the whole screen (what a chat app's menu is). */
-function mobileSidebarWidth(fullScreen: boolean): string {
-  return fullScreen ? "100vw" : SIDEBAR_WIDTH_MOBILE;
-}
 const SIDEBAR_WIDTH_ICON = "3rem";
 const SIDEBAR_KEYBOARD_SHORTCUT = "b";
 
@@ -206,7 +202,8 @@ const Sidebar = React.forwardRef<
             showCloseButton={false}
             style={
               {
-                "--sidebar-width": mobileSidebarWidth(mobileFullScreen),
+                // The phone sheet: a drawer, or the whole screen (what a chat app's menu is).
+                "--sidebar-width": mobileFullScreen ? "100vw" : SIDEBAR_WIDTH_MOBILE,
               } as React.CSSProperties
             }
             side={side}
@@ -730,7 +727,6 @@ const SidebarMenuSubButton = React.forwardRef<
 SidebarMenuSubButton.displayName = "SidebarMenuSubButton";
 
 export {
-  mobileSidebarWidth,
   Sidebar,
   SidebarContent,
   SidebarFooter,

@@ -120,25 +120,25 @@ export function AppSidebar({ product }: { product: "studio" | "chat" }) {
         <SidebarTrigger className="text-muted-foreground hidden size-7 shrink-0 opacity-0 transition-opacity group-hover:opacity-100 focus-visible:opacity-100 md:inline-flex">
           <PanelLeft className="size-4" />
         </SidebarTrigger>
-        {/* The chat's phone header has no bell: it is here, where the drawer opens. */}
+        {/* The chat's phone header has no bell: it is here, where the drawer opens. The drawer is
+            the whole screen on a phone: it closes from its own corner. */}
         {product === "chat" && (
-          <div className="shrink-0 md:hidden">
-            <NotificationBell />
-          </div>
-        )}
-        {/* The chat's drawer is the whole screen on a phone: it closes from its own corner. */}
-        {product === "chat" && (
-          <Button
-            type="button"
-            variant="ghost"
-            size="icon"
-            className="size-11 shrink-0 md:hidden"
-            aria-label={t("btn.close")}
-            data-testid="sidebar-close"
-            onClick={() => setOpenMobile(false)}
-          >
-            <X className="size-5" aria-hidden="true" />
-          </Button>
+          <>
+            <div className="shrink-0 md:hidden">
+              <NotificationBell triggerClassName="size-11" />
+            </div>
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon"
+              className="size-11 shrink-0 md:hidden"
+              aria-label={t("btn.close")}
+              data-testid="sidebar-close"
+              onClick={() => setOpenMobile(false)}
+            >
+              <X className="size-5" aria-hidden="true" />
+            </Button>
+          </>
         )}
       </SidebarHeader>
       <ProductTabs />
@@ -164,12 +164,7 @@ export function AppSidebar({ product }: { product: "studio" | "chat" }) {
         )}
       </SidebarContent>
       <SidebarFooter className="gap-0 p-0">
-        {/* The catalogue is Studio's (installing agents and skills): the chat's phone drawer leaves it
-            to the Studio tab, and carries settings as an icon beside the account. */}
-        <SidebarMenu
-          className={cn("px-2 pb-2", product === "chat" && "max-md:hidden")}
-          hidden={!catalogueReachable}
-        >
+        <SidebarMenu className="px-2 pb-2" hidden={!catalogueReachable}>
           <OverlayEntry
             to={catalogueHref("agent")}
             active={catalogueActive}
@@ -177,7 +172,7 @@ export function AppSidebar({ product }: { product: "studio" | "chat" }) {
             label={t("nav.catalogue")}
           />
         </SidebarMenu>
-        <SidebarMenu className={cn("px-2 pb-2", product === "chat" && "max-md:hidden")}>
+        <SidebarMenu className="px-2 pb-2">
           <OverlayEntry
             to={SETTINGS_ENTRY}
             active={settingsActive}
@@ -185,27 +180,8 @@ export function AppSidebar({ product }: { product: "studio" | "chat" }) {
             label={t("nav.settings")}
           />
         </SidebarMenu>
-        <div className="border-sidebar-border flex items-center gap-1 border-t p-2">
-          <div className="min-w-0 flex-1">
-            <NavUser variant="row" />
-          </div>
-          {product === "chat" && (
-            <Button
-              asChild
-              variant="ghost"
-              size="icon"
-              className="text-muted-foreground size-11 shrink-0 md:hidden"
-            >
-              <Link
-                to={SETTINGS_ENTRY}
-                aria-label={t("nav.settings")}
-                data-testid="sidebar-settings"
-                {...overlayIntent(SETTINGS_ENTRY)}
-              >
-                <Settings className="size-5" aria-hidden="true" />
-              </Link>
-            </Button>
-          )}
+        <div className="border-sidebar-border border-t p-2">
+          <NavUser variant="row" />
         </div>
       </SidebarFooter>
     </Sidebar>
@@ -220,7 +196,7 @@ export function AppSidebar({ product }: { product: "studio" | "chat" }) {
 function ChatPhoneHeader() {
   const { t } = useTranslation();
   const { toggleSidebar, isMobile, openMobile } = useSidebar();
-  const contextNames = useContextNames();
+  const { names } = useContextNames();
   return (
     <header
       data-testid="chat-phone-header"
@@ -232,9 +208,10 @@ function ChatPhoneHeader() {
       <Button
         type="button"
         variant="ghost"
-        data-sidebar="trigger"
+        data-testid="chat-sidebar-trigger"
         className="h-11 shrink-0 gap-2 px-3"
-        aria-label={`${t("nav.toggleSidebar")} (${contextNames})`}
+        aria-expanded={openMobile}
+        aria-label={names ? t("nav.toggleSidebarIn", { current: names }) : t("nav.toggleSidebar")}
         onClick={toggleSidebar}
       >
         <Menu className="size-5" aria-hidden="true" />

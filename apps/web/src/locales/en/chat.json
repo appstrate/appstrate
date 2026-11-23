@@ -107,7 +107,7 @@
   "model.select": "Model",
   "model.fit.threshold": "The conversation already exceeds this model’s summary threshold: the history will be summarized on the next message.",
   "model.fit.window": "The conversation already exceeds this model’s context window: it likely cannot take it, even summarized.",
-  "model.tabs.configuration": "Configuration",
+  "model.settings": "Configuration",
   "generation.noneSupported": "No generation settings are available for this model.",
   "access.subtitle": "The assistant acts with your own permissions in your spaces, never more.",
   "access.granted": "allowed",

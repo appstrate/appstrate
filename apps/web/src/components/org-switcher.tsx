@@ -27,6 +27,7 @@ import { useEnterSpace } from "../hooks/use-enter-space";
 import { useCanCreateOrg } from "../hooks/use-auth";
 import { useViewer } from "../hooks/use-viewer";
 import { useOverviewMode } from "../hooks/use-overview-mode";
+import { useContextNames } from "../hooks/use-context-names";
 import { routeOf } from "../lib/route-match";
 import { holdsOverview, isSpaceEnterable, overviewOffered } from "../lib/space-lists";
 import { Command, CommandInput } from "@appstrate/ui/components/command";
@@ -179,7 +180,7 @@ export function OrgSwitcher({ variant }: { variant: "brand" | "mobile" }) {
   const landAfterOrgSwitch = useLandAfterOrgSwitch();
   const openOverlayAfterOrgSwitch = useOpenOverlayAfterOrgSwitch();
   const { currentOrg, orgs, loading, switchOrg } = useOrg();
-  const { data: spaces, isPending: spacesPending } = useSpaces();
+  const { isPending: spacesPending } = useSpaces();
   const currentSpaceId = useCurrentSpaceId();
   const enterSpace = useEnterSpace();
   const { isMobile, setOpenMobile } = useSidebar();
@@ -193,7 +194,7 @@ export function OrgSwitcher({ variant }: { variant: "brand" | "mobile" }) {
   const [exploredOrgId, setExploredOrgId] = useState<string | null>(null);
   const spacesColumnId = useId();
 
-  const currentSpace = spaces?.find((s) => s.id === currentSpaceId) ?? null;
+  const { contextLabel: currentContextLabel, names: contextNames } = useContextNames();
   const exploredId = exploredOrgId ?? currentOrg?.id ?? null;
   const isExploringElsewhere = exploredId !== null && exploredId !== currentOrg?.id;
   // A phone presents the panel under the trigger, in one column; everywhere else the
@@ -275,11 +276,6 @@ export function OrgSwitcher({ variant }: { variant: "brand" | "mobile" }) {
   const offersOverview =
     overviewOffered(exploredSpaces.data) && matchesSearch(query, [overviewLabel]);
 
-  const currentContextLabel = overview.on
-    ? overviewLabel
-    : currentSpace
-      ? spaceLabel(currentSpace, t)
-      : undefined;
   const spaceName: ReactNode = currentContextLabel ? (
     <span className="truncate" title={currentContextLabel}>
       {currentContextLabel}
@@ -307,9 +303,7 @@ export function OrgSwitcher({ variant }: { variant: "brand" | "mobile" }) {
         <button
           type="button"
           data-testid="org-switcher-button"
-          aria-label={t("switcher.ariaLabel", {
-            current: [currentOrg.name, currentContextLabel].filter(Boolean).join(", "),
-          })}
+          aria-label={t("switcher.ariaLabel", { current: contextNames })}
           className={cn(
             // No hover fill: the chevron answers the pointer, a focus ring the keyboard.
             "group/trigger focus-visible:ring-ring flex items-center gap-2 rounded-lg px-2 text-sm outline-none focus-visible:ring-2",

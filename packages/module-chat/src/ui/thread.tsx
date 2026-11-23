@@ -472,11 +472,6 @@ function ComposerAttachmentError() {
   );
 }
 
-/**
- * Warns when the draft (its text and files) would take the conversation past the summarizing
- * threshold, by an approximation (`estimateDraftTokens`) against the last measure. Nothing before
- * one. The live region stays mounted: one inserted already filled is often not announced.
- */
 /** The draft would take the conversation past the summarizing threshold (`draftCrossesThreshold`). */
 function useDraftCrossesThreshold(): boolean {
   const reading = useConversationContext();
@@ -510,6 +505,11 @@ function useDraftCrossesThreshold(): boolean {
   return reading !== null && draftCrossesThreshold(reading.context, draftTokens);
 }
 
+/**
+ * Warns when the draft (its text and files) would take the conversation past the summarizing
+ * threshold, by an approximation (`estimateDraftTokens`) against the last measure. Nothing before
+ * one. The live region stays mounted: one inserted already filled is often not announced.
+ */
 function DraftContextNotice({ crosses }: { crosses: boolean }) {
   const { t } = useChatHost();
   return (
@@ -863,19 +863,10 @@ export function UserMessage() {
           <div className={USER_MESSAGE_CLASS}>
             <MessagePrimitive.Parts components={USER_PART_COMPONENTS} />
           </div>
-          {/* Under the bubble, as on every chat: copy, always there on touch, on hover under a mouse. Edit, retry and the
-            time are not features of this product yet. */}
+          {/* Under the bubble: copy, always there on touch, on hover under a mouse. No edit or
+              retry: the server writes the turns linearly, with no branch to rewrite one into. */}
           <ActionBarPrimitive.Root className={USER_ACTION_BAR_CLASS}>
-            <ActionBarPrimitive.Copy asChild>
-              <IconButton label={t("common:btn.copy")}>
-                <MessagePrimitive.If copied>
-                  <CheckIcon />
-                </MessagePrimitive.If>
-                <MessagePrimitive.If copied={false}>
-                  <CopyIcon />
-                </MessagePrimitive.If>
-              </IconButton>
-            </ActionBarPrimitive.Copy>
+            <CopyMessageButton />
           </ActionBarPrimitive.Root>
         </>
       )}
@@ -931,7 +922,7 @@ function TurnLimitNotice() {
  * survives reload; the transient assistant-ui marker covers failures that have
  * not reached a finish chunk yet.
  */
-function useTurnErrorState() {
+export function MessageError() {
   const { t, can, personalModelCredentials } = useChatHost();
   // Select a plain field, never a derived object: this selector IS
   // `useSyncExternalStore`'s getSnapshot. See `turn-error-state.ts`.
@@ -940,12 +931,6 @@ function useTurnErrorState() {
     () => turnErrorState(message, t, can, personalModelCredentials),
     [message, t, can, personalModelCredentials],
   );
-  return { message, errorState };
-}
-
-export function MessageError() {
-  const { t } = useChatHost();
-  const { message, errorState } = useTurnErrorState();
   const aui = useAui();
   if (!errorState) return null;
   return (
@@ -1012,9 +997,6 @@ const ASSISTANT_PART_COMPONENTS = {
 } satisfies React.ComponentProps<typeof MessagePrimitive.Parts>["components"];
 
 function AssistantMessage() {
-  const { t } = useChatHost();
-  // A failed turn has nothing worth copying: its error card says what happened.
-  const failed = useTurnErrorState().errorState !== null;
   return (
     <MessagePrimitive.Root className="group flex w-full max-w-(--thread-max-width) flex-col py-2">
       <div className={ASSISTANT_MESSAGE_CLASS}>
@@ -1031,18 +1013,7 @@ function AssistantMessage() {
             visibly jump. Copy stays usable mid-stream (copies the current
             snapshot), which is the seamless behavior we want. */}
         <ActionBarPrimitive.Root className={ACTION_BAR_CLASS}>
-          {!failed && (
-            <ActionBarPrimitive.Copy asChild>
-              <IconButton label={t("common:btn.copy")}>
-                <MessagePrimitive.If copied>
-                  <CheckIcon />
-                </MessagePrimitive.If>
-                <MessagePrimitive.If copied={false}>
-                  <CopyIcon />
-                </MessagePrimitive.If>
-              </IconButton>
-            </ActionBarPrimitive.Copy>
-          )}
+          <CopyMessageButton />
         </ActionBarPrimitive.Root>
       </div>
     </MessagePrimitive.Root>
@@ -1050,6 +1021,23 @@ function AssistantMessage() {
 }
 
 // ─── Shared bits ─────────────────────────────────────────────────────────────
+
+/** The message's copy button, a check once copied. Inside an `ActionBarPrimitive.Root`. */
+function CopyMessageButton() {
+  const { t } = useChatHost();
+  return (
+    <ActionBarPrimitive.Copy asChild>
+      <IconButton label={t("common:btn.copy")}>
+        <MessagePrimitive.If copied>
+          <CheckIcon />
+        </MessagePrimitive.If>
+        <MessagePrimitive.If copied={false}>
+          <CopyIcon />
+        </MessagePrimitive.If>
+      </IconButton>
+    </ActionBarPrimitive.Copy>
+  );
+}
 
 // forwardRef + prop spread so `asChild`/Slot-injected handlers (onClick from
 // the action-bar/branch-picker primitives) actually reach the button.

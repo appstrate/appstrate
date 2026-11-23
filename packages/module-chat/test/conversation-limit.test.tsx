@@ -480,7 +480,6 @@ describe("the composer's limit chip", () => {
 });
 
 describe("the tools panel's limit rows", () => {
-  const picked: string[] = [];
   const names: Record<string, string> = { spc_a: "Studio", spc_b: "Atelier" };
 
   function entry(scope: ConversationScope, actingSpaceIds: string[]) {
@@ -512,11 +511,7 @@ describe("the tools panel's limit rows", () => {
   });
 
   it("choose: lists the acting spaces, each a row the host names", () => {
-    picked.length = 0;
-    const out = entry(conversationScope({ limitTo: (spaceId) => picked.push(spaceId) }), [
-      "spc_a",
-      "spc_b",
-    ]);
+    const out = entry(conversationScope(), ["spc_a", "spc_b"]);
     expect(out).toContain('data-testid="composer-limit-item"');
     expect(out).toContain('aria-label="composer.limit.choose"');
     expect(out).toContain('data-spaces="spc_a"');

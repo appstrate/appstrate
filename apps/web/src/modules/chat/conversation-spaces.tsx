@@ -8,6 +8,7 @@
  * refetched by the session signal when it touches a new one.
  */
 
+import { cn } from "@appstrate/ui/cn";
 import { useTranslation } from "react-i18next";
 import { Button } from "@appstrate/ui/components/button";
 import { Popover, PopoverContent, PopoverTrigger } from "@appstrate/ui/components/popover";
@@ -24,8 +25,11 @@ const VISIBLE_SPACE_TILES = 3;
 /** The control for spaces already read: the trigger and its read-only list. */
 export function ConversationSpacesControl({
   spaces,
+  className,
 }: {
   spaces: readonly (SpaceListed & { id: string })[];
+  /** Sizes the trigger to its header (44 px tall in a phone's). */
+  className?: string;
 }) {
   const { t } = useTranslation(["chat", "settings"]);
   if (spaces.length === 0) return null;
@@ -41,7 +45,10 @@ export function ConversationSpacesControl({
               variant="ghost"
               size="sm"
               // The stacked tiles ring themselves in the button's background, at rest or hovered.
-              className="shrink-0 px-2 [--tile-ring:var(--canvas)] hover:[--tile-ring:var(--accent)]"
+              className={cn(
+                "shrink-0 px-2 [--tile-ring:var(--canvas)] hover:[--tile-ring:var(--accent)]",
+                className,
+              )}
               aria-label={label}
               data-testid="conversation-spaces"
             >
@@ -69,11 +76,13 @@ export function ConversationSpacesControl({
 export function ConversationSpaces({
   conversationId,
   transport,
+  className,
 }: {
   conversationId: string | null;
   transport: ChatTransport | undefined;
+  className?: string;
 }) {
   const row = useActiveSession(transport, conversationId ?? "", conversationId !== null);
   const spaces = useSpacesOf(row?.space_ids ?? []);
-  return <ConversationSpacesControl spaces={spaces} />;
+  return <ConversationSpacesControl spaces={spaces} className={className} />;
 }

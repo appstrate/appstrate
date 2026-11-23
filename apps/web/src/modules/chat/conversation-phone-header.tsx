@@ -2,9 +2,9 @@
 
 /**
  * What the chat puts in its phone header (below `md`), after the shell's burger: the conversation's
- * name, truncated, « Nouvelle conversation » on a new one; the pencil that edits the name; and, at
- * the right end, the context panel. The desktop's header is the shell's own and carries the
- * spaces, « Renommer » and the context through `ShellHeaderActions`.
+ * name, truncated, « Nouvelle conversation » on a new one; then what the desktop's header carries
+ * through `ShellHeaderActions`, in its order: the spaces the conversation touched, the pencil that
+ * edits the name, the context panel. Controls are 44 px.
  */
 
 import type { Dispatch } from "react";
@@ -15,10 +15,11 @@ import { useActiveSession } from "@appstrate/module-chat/unread";
 import { ShellHeaderPhone } from "../../components/shell-header-slots";
 import type { ConversationSidebarAction } from "./conversation-sidebar-state";
 import { ConversationContextToggle } from "./conversation-sidebar";
+import { ConversationSpaces } from "./conversation-spaces";
 import type { useChatCan, useChatTranslate } from "./use-chat-runtime";
 
 /** Controls in a phone's header are as big as a thumb. */
-export const PHONE_HEADER_BUTTON_CLASS = "size-11 shrink-0";
+const PHONE_HEADER_BUTTON_CLASS = "size-11 shrink-0";
 
 export function ConversationPhoneBar({
   conversationId,
@@ -50,6 +51,7 @@ export function ConversationPhoneBar({
           {row?.title ?? t("threads.new")}
         </h1>
       )}
+      <ConversationSpaces conversationId={conversationId} transport={transport} className="h-11" />
       <ChatConversationRenameButton
         activeId={conversationId}
         t={translate}

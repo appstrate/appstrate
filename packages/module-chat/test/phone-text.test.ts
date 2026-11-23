@@ -70,7 +70,7 @@ describe("secondary text", () => {
 describe("composer row", () => {
   it("is one line on a phone, always, and two from md up", () => {
     const row = COMPOSER_ROW_CLASS.split(/\s+/);
-    expect(row).toContain("max-md:flex-nowrap");
+    expect(row).not.toContain("flex-wrap");
     expect(row).toContain("md:flex-wrap");
     // The field is the line's stretchy cell on a phone and a line of its own from md.
     expect(COMPOSER_FIELD_CLASS.split(/\s+/)).toContain("max-md:flex-1");

@@ -38,10 +38,6 @@ const LEVEL_SENTENCE: Record<ContextLevel, string> = {
   full: "contextUsage.compactNext",
 };
 
-// With the share beside the ring the button widens: a height and a minimum width, no `size-*`.
-const SHARE_CLASS =
-  "h-10 min-w-10 shrink-0 gap-1 rounded-lg px-2 desktop-pointer:h-8 desktop-pointer:min-w-8";
-
 const RING_RADIUS = 6;
 const RING_CIRCUMFERENCE = 2 * Math.PI * RING_RADIUS;
 
@@ -158,8 +154,9 @@ export function ContextIndicator({ draftCrosses }: { draftCrosses: boolean }) {
       type="button"
       size="sm"
       variant="ghost"
+      // With the share beside the ring the button widens: a height and a minimum width, no `size-*`.
       className={cn(
-        SHARE_CLASS,
+        "desktop-pointer:h-8 desktop-pointer:min-w-8 h-10 min-w-10 shrink-0 gap-1 rounded-lg px-2",
         context.level === "ok" ? "text-warning" : LEVEL_TEXT[context.level],
       )}
       aria-label={t("contextUsage.label", { counts, sentence })}

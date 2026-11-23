@@ -78,12 +78,10 @@ function KeysPlugin({
 export function ComposerEditor({
   label,
   autofocus,
-  onFocus,
   onEnter,
 }: {
   label: string;
   autofocus: boolean;
-  onFocus?: () => void;
   onEnter: () => void;
 }) {
   const aui = useAui();
@@ -109,10 +107,7 @@ export function ComposerEditor({
       submitMode="none"
       directiveChip={ComposerDirectiveChip}
       onPaste={addPastedFiles}
-      onFocus={() => {
-        setArmed(true);
-        onFocus?.();
-      }}
+      onFocus={() => setArmed(true)}
       className={COMPOSER_INPUT_CLASS}
     >
       <KeysPlugin onEnter={onEnter} autofocus={autofocus} />

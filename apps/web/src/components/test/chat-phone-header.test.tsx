@@ -67,7 +67,7 @@ describe("the shell header on a phone", () => {
     expect(phone).toMatch(/class="[^"]*md:hidden/);
     // The one control that opens the sidebar is a burger, named for a screen reader with where the
     // user stands: the organization and the space.
-    expect(phone).toContain('data-sidebar="trigger"');
+    expect(phone).toContain('data-testid="chat-sidebar-trigger"');
     expect(phone).toMatch(/aria-label="Afficher ou masquer le menu latéral \(Acme, [^"]+\)"/);
     expect(phone).toContain("h-11");
     // The avatars are stacked as in the sidebar's switcher: the space's is a badge on the corner of
@@ -78,7 +78,7 @@ describe("the shell header on a phone", () => {
     expect(html.slice(phone.length)).toMatch(/<header class="[^"]*max-md:hidden/);
   });
 
-  it("keeps Studio's header as it was", () => {
+  it("Studio uses the shell's header at every width", () => {
     const html = render("studio");
     expect(html).not.toContain('data-testid="chat-phone-header"');
     expect(html).not.toContain("max-md:hidden");

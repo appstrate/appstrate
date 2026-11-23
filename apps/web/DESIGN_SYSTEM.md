@@ -109,9 +109,8 @@ they start with `packages/` or `e2e/`.
   Studio/Chat switch, "Nouvelle conversation" (a left-aligned row with its icon in a round tile, like the
   conversations below) with the search as a magnifier at the end of that row, which unfolds a filled
   field (no border) under it, closed by its X or by a tap elsewhere while empty, the recent conversations (one line each: the title, then the tiles of its spaces, two at most then
-  « +N »; the names are in the "…" panel), the account
-  at the bottom with Settings as a gear button at its right. No Catalogue there: it is a Studio concept
-  (both entries stay in Studio's drawer and on desktop).
+  « +N », named for a screen reader; the names are in the "…" panel), then the footer every drawer
+  has: Catalogue, Settings and the account.
 - **A phone's menus rise from the bottom** (`SheetMenu`, `packages/module-chat/src/ui/sheet-menu.tsx`,
   the design system's bottom `Sheet`): rows 48 px tall, the destructive one in red and asking before
   it acts. Below `md` the composer's "+", a conversation's "…" and the model picker are such panels; a

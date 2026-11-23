@@ -107,7 +107,7 @@
   "model.select": "Modèle",
   "model.fit.threshold": "La conversation dépasse déjà le seuil de résumé de ce modèle : l’historique sera résumé au prochain message.",
   "model.fit.window": "La conversation dépasse déjà la fenêtre de contexte de ce modèle : il ne pourra sans doute pas la prendre, même résumée.",
-  "model.tabs.configuration": "Configuration",
+  "model.settings": "Configuration",
   "generation.noneSupported": "Aucun réglage de génération disponible pour ce modèle.",
   "access.subtitle": "L'assistant agit avec vos propres droits dans vos espaces, jamais plus.",
   "access.granted": "autorisé",

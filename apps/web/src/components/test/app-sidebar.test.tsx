@@ -109,7 +109,7 @@ describe("the notification bell on a phone", () => {
   });
 });
 
-describe("the chat drawer's footer on a phone", () => {
+describe("the drawer's footer", () => {
   const render = (product: "studio" | "chat") =>
     renderInSpace(
       <SidebarProvider>
@@ -118,20 +118,12 @@ describe("the chat drawer's footer on a phone", () => {
       { overview: false, queryClient: memberSpaceClient([testSpace("spc_a", ["runs:read"])]) },
     );
 
-  it("carries Settings as an icon beside the account, in the chat only", () => {
-    const chat = render("chat");
-    expect(chat).toContain('data-testid="sidebar-settings"');
-    expect(chat).toMatch(/data-testid="sidebar-settings"[^>]*>/);
-    expect(render("studio")).not.toContain('data-testid="sidebar-settings"');
-  });
-
-  it("hides the Catalogue and Settings entries from the chat's phone drawer, not from Studio's", () => {
-    const entryMenu = (html: string, label: string) => {
-      const entry = html.indexOf(`<span>${label}</span>`);
-      const menu = html.slice(html.lastIndexOf("<ul", entry), entry);
-      return menu.slice(0, menu.indexOf(">"));
-    };
-    expect(entryMenu(render("chat"), "Paramètres")).toContain("max-md:hidden");
-    expect(entryMenu(render("studio"), "Paramètres")).not.toContain("max-md:hidden");
+  it("carries the same Settings entry in the chat as in Studio, on every format", () => {
+    for (const product of ["chat", "studio"] as const) {
+      const html = render(product);
+      const entry = html.indexOf("<span>Paramètres</span>");
+      expect(entry).toBeGreaterThan(-1);
+      expect(html.slice(html.lastIndexOf("<ul", entry), entry)).not.toContain("max-md:hidden");
+    }
   });
 });

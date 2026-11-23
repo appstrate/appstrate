@@ -22,6 +22,7 @@
 
 import { isMobileViewport } from "@appstrate/ui/use-mobile";
 import { useEffect, useRef, useState } from "react";
+import { flushSync } from "react-dom";
 import { useQueryClient } from "@tanstack/react-query";
 import {
   EllipsisIcon,
@@ -178,6 +179,8 @@ export function ChatConversationList({
   const canWrite = can("chat:write");
   const hasAny = (base.data?.length ?? 0) > 0;
   const showSearch = hasAny || input !== "";
+  // Gone once the field shows: it carries its own magnifier.
+  const showSearchToggle = showSearch && !searchOpen && input === "";
 
   const row = (s: SessionSummary) => (
     <ConversationRow
@@ -193,35 +196,40 @@ export function ChatConversationList({
   );
   return (
     <>
-      {/* Starting a conversation is a write: a reader only rereads its own. */}
-      {canWrite && (
-        <SidebarGroup className="pb-0">
+      {/* Starting a conversation is a write: a reader only rereads its own, and on a phone still
+          gets the magnifier that unfolds the search. */}
+      {(canWrite || showSearchToggle) && (
+        <SidebarGroup className={cn("pb-0", !canWrite && "md:hidden")}>
           <SidebarMenu>
             <SidebarMenuItem>
-              <SidebarMenuButton
-                onClick={() => select?.(null)}
-                tooltip={t("threads.new")}
-                className={cn(NEW_CONVERSATION_CLASS, showSearch && "max-md:pr-12")}
-              >
-                {/* A phone's row has its icon in a round tile, as the rows below it have theirs. */}
-                <span className="max-md:bg-sidebar-accent max-md:flex max-md:size-8 max-md:items-center max-md:justify-center max-md:rounded-full md:contents">
-                  <PlusIcon />
-                </span>
-                <span>{t("threads.new")}</span>
-              </SidebarMenuButton>
-              {/* Gone once the field shows: it carries its own magnifier. */}
-              {showSearch && !searchOpen && input === "" && (
+              {canWrite && (
+                <SidebarMenuButton
+                  onClick={() => select?.(null)}
+                  tooltip={t("threads.new")}
+                  className={cn(NEW_CONVERSATION_CLASS, showSearch && "max-md:pr-12")}
+                >
+                  {/* A phone's row has its icon in a round tile, as the rows below it have theirs. */}
+                  <span className="max-md:bg-sidebar-accent max-md:flex max-md:size-8 max-md:items-center max-md:justify-center max-md:rounded-full md:contents">
+                    <PlusIcon />
+                  </span>
+                  <span>{t("threads.new")}</span>
+                </SidebarMenuButton>
+              )}
+              {showSearchToggle && (
                 <button
                   type="button"
                   aria-label={t("threads.search.open")}
-                  aria-expanded={false}
                   data-testid="chat-search-toggle"
                   onClick={() => {
-                    setSearchOpen(true);
-                    // The field is mounted but hidden until this state lands: focus it after.
-                    requestAnimationFrame(() => searchField.current?.focus());
+                    // The field is hidden until this state lands: commit it now so the focus stays
+                    // inside the tap, the only place iOS opens the keyboard from.
+                    flushSync(() => setSearchOpen(true));
+                    searchField.current?.focus();
                   }}
-                  className="text-sidebar-foreground/70 active:bg-sidebar-accent absolute top-0 right-0 flex size-11 items-center justify-center rounded-md md:hidden"
+                  className={cn(
+                    "text-sidebar-foreground/70 active:bg-sidebar-accent flex size-11 items-center justify-center rounded-md md:hidden",
+                    canWrite ? "absolute top-0 right-0" : "ml-auto",
+                  )}
                 >
                   <SearchIcon className="size-5" />
                 </button>
@@ -403,6 +411,18 @@ function ConversationRow({
   };
   const [deleting, setDeleting] = useState(false);
   const [deleteFailed, setDeleteFailed] = useState(false);
+  // The « … »'s two items, the same from its dropdown and from its panel.
+  const openRename = () => {
+    dialogTrigger.current = menuTrigger.current;
+    setMenuOpen(false);
+    setRenaming(true);
+  };
+  const openDelete = () => {
+    dialogTrigger.current = menuTrigger.current;
+    setMenuOpen(false);
+    setDeleteFailed(false);
+    setConfirmingDelete(true);
+  };
 
   // The dialog stays open while the delete is in flight and on failure (it says
   // so); it closes only once the row is gone.
@@ -438,7 +458,12 @@ function ConversationRow({
           "[--tile-ring:var(--sidebar)] hover:[--tile-ring:var(--sidebar-accent)] active:[--tile-ring:var(--sidebar-accent)] data-[active=true]:[--tile-ring:var(--sidebar-accent)]",
         )}
       >
-        <span className="flex min-w-0 flex-1 flex-col gap-0.5 max-md:flex-row max-md:items-center max-md:gap-2">
+        <span
+          className={cn(
+            "flex min-w-0 flex-1 flex-col gap-0.5",
+            canWrite && "max-md:flex-row max-md:items-center max-md:gap-2",
+          )}
+        >
           <span
             className={cn(
               "block truncate text-left leading-4 max-md:min-w-0 max-md:flex-1 max-md:text-base max-md:leading-5",
@@ -447,15 +472,21 @@ function ConversationRow({
           >
             {session.title ?? t("threads.new")}
           </span>
-          {/* From `md` up the spaces are named on a line of their own... */}
+          {/* The spaces are named on a line of their own: from `md` up, and on a phone for a reader,
+              whose row has no « … » panel to name them in... */}
           <span
             data-testid="chat-session-spaces"
-            className={`text-sidebar-foreground/70 flex h-4 min-w-0 items-center max-md:hidden ${NOTE_TEXT_CLASS}`}
+            className={cn(
+              "text-sidebar-foreground/70 flex h-4 min-w-0 items-center",
+              canWrite && "max-md:hidden",
+              NOTE_TEXT_CLASS,
+            )}
           >
             {sessionSpaces(session, renderSpaces, t)}
           </span>
-          {/* ...and on a phone their tiles close the title's line (the names are in the "…" panel). */}
-          {session.space_ids.length > 0 && (
+          {/* ...and on a phone a writer's row closes the title's line with their tiles (the names
+              are in the « … » panel). */}
+          {canWrite && session.space_ids.length > 0 && (
             <span
               data-testid="chat-session-space-tiles"
               className="hidden shrink-0 items-center max-md:flex"
@@ -518,22 +549,13 @@ function ConversationRow({
               </button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end" className="min-w-40">
-              <DropdownMenuItem
-                onSelect={() => {
-                  dialogTrigger.current = menuTrigger.current;
-                  setRenaming(true);
-                }}
-              >
+              <DropdownMenuItem onSelect={openRename}>
                 <PencilIcon />
                 {t("threads.rename")}
               </DropdownMenuItem>
               <DropdownMenuItem
                 className="text-destructive focus:text-destructive focus:bg-destructive/10"
-                onSelect={() => {
-                  dialogTrigger.current = menuTrigger.current;
-                  setDeleteFailed(false);
-                  setConfirmingDelete(true);
-                }}
+                onSelect={openDelete}
               >
                 <Trash2Icon />
                 {t("common:btn.delete")}
@@ -557,25 +579,11 @@ function ConversationRow({
               </div>
             }
           >
-            <SheetMenuRow
-              onClick={() => {
-                dialogTrigger.current = menuTrigger.current;
-                setMenuOpen(false);
-                setRenaming(true);
-              }}
-            >
+            <SheetMenuRow onClick={openRename}>
               <PencilIcon />
               {t("threads.rename")}
             </SheetMenuRow>
-            <SheetMenuRow
-              destructive
-              onClick={() => {
-                dialogTrigger.current = menuTrigger.current;
-                setMenuOpen(false);
-                setDeleteFailed(false);
-                setConfirmingDelete(true);
-              }}
-            >
+            <SheetMenuRow destructive onClick={openDelete}>
               <Trash2Icon />
               {t("common:btn.delete")}
             </SheetMenuRow>
@@ -672,7 +680,7 @@ function ConversationRenameButton({
 }
 
 /**
- * Renaming the conversation: its name, saved explicitly (Enregistrer or Enter),
+ * Renaming the conversation: its name, saved explicitly (« Renommer » or Enter),
  * never on blur. The dialog stays open on a refusal and says so: the chat's own
  * fetch is not toasted by the app's mutation cache.
  */

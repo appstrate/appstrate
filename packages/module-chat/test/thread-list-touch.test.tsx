@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * A phone has no hover: the row's rename and delete cannot hide behind it. On touchscreens each row
- * carries a "…" menu (a 44 px strip); the hover buttons are for wide screens with a fine pointer.
+ * A phone has no hover: the row's rename and delete cannot hide behind it. Each row carries one « … »
+ * menu, always there on touch (a 44 px strip), revealed by hover or focus under a fine pointer.
  */
 
 import { describe, expect, it } from "bun:test";
@@ -78,7 +78,7 @@ describe("a conversation row's « … »", () => {
 
   it("is one menu named for the conversation, a thumb's size on touch", () => {
     const html = render(["chat:read", "chat:write"]);
-    // One per row: the hover icons and the touch trigger are the same button now.
+    // One « … » per row, on every format.
     expect(html.match(/aria-label="threads\.actions\.openFor"/g)).toHaveLength(
       html.match(/data-testid="chat-session-spaces"/g)!.length,
     );
@@ -93,11 +93,6 @@ describe("a conversation row's « … »", () => {
     expect(button).toContain("desktop-pointer:group-hover/menu-item:opacity-100");
     expect(button).toContain("desktop-pointer:group-focus-within/menu-item:opacity-100");
   });
-
-  it("gives a reader no menu", () => {
-    const html = render(["chat:read"]);
-    expect(html).not.toContain("threads.actions.openFor");
-  });
 });
 
 describe("the conversation search on a phone", () => {
@@ -108,7 +103,13 @@ describe("the conversation search on a phone", () => {
     expect(toggle).toBeDefined();
     expect(toggle).toContain("md:hidden");
     expect(toggle).toContain("size-11");
-    expect(toggle).toContain('aria-expanded="false"');
+  });
+
+  it("is there for a reader too, who has no « New conversation » beside it", () => {
+    const html = render(["chat:read"]);
+    const toggle = html.match(/<button[^>]*data-testid="chat-search-toggle"[^>]*>/)?.[0];
+    expect(toggle).toContain("md:hidden");
+    expect(html).not.toContain("<span>threads.new</span>");
   });
 
   it("keeps its field folded below md until the magnifier is tapped, always there from md", () => {
@@ -134,5 +135,14 @@ describe("a conversation's spaces on a phone", () => {
 
   it("puts the title and the tiles on one line below md", () => {
     expect(html).toMatch(/flex min-w-0 flex-1 flex-col[^"]*max-md:flex-row/);
+  });
+
+  it("names them on a line of their own for a reader, whose row has no « … » to name them in", () => {
+    const reader = render(["chat:read"]);
+    const names = reader.match(/<span[^>]*data-testid="chat-session-spaces"[^>]*>/)?.[0];
+    expect(names).toBeDefined();
+    expect(names).not.toContain("max-md:hidden");
+    expect(reader).not.toContain("chat-session-space-tiles");
+    expect(reader).not.toMatch(/flex min-w-0 flex-1 flex-col[^"]*max-md:flex-row/);
   });
 });

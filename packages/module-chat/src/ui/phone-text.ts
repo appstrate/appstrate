@@ -24,8 +24,7 @@ export const NOTE_TEXT_CLASS = "text-sm md:text-xs";
  * with the tools and send on the line under it. On a phone it is ONE line, always: the "+" (all
  * the tools), the field, send. The row keeps its bottom edge when the field grows to several lines.
  */
-export const COMPOSER_ROW_CLASS =
-  "flex items-center gap-x-2 gap-y-1 md:flex-wrap max-md:flex-nowrap max-md:items-end";
+export const COMPOSER_ROW_CLASS = "flex items-center gap-x-2 gap-y-1 md:flex-wrap max-md:items-end";
 
 /** The field: a line of its own from `md`, the stretchy cell of the phone's line. */
 export const COMPOSER_FIELD_CLASS =
@@ -40,9 +39,9 @@ export const COMPOSER_TOOLS_CLASS = "min-w-0 flex-1 max-md:flex-none";
 /** "New conversation" in the sidebar: a row aligned left like the conversations below it on a phone. */
 export const NEW_CONVERSATION_CLASS = "max-md:justify-start max-md:gap-3 max-md:font-medium";
 
-/** The conversation search field of the sidebar (a sheet below `md`, 40 px tall there). */
+/** The conversation search field of the sidebar (a filled field below `md`, 44 px tall there). */
 export const SEARCH_INPUT_CLASS =
-  "h-10 pr-9 pl-7 text-base max-md:h-11 max-md:rounded-xl max-md:border-0 max-md:bg-muted max-md:focus-visible:ring-0 max-md:focus-visible:ring-offset-0 max-md:pl-10 max-md:shadow-none md:h-8 md:pr-7 md:py-0 md:text-base [&::-webkit-search-cancel-button]:hidden";
+  "pr-9 pl-7 text-base max-md:h-11 max-md:rounded-xl max-md:border-0 max-md:bg-muted max-md:focus-visible:ring-0 max-md:focus-visible:ring-offset-0 max-md:pl-10 max-md:shadow-none md:h-8 md:pr-7 md:py-0 md:text-base [&::-webkit-search-cancel-button]:hidden";
 
 /** The user's bubble. */
 export const USER_MESSAGE_CLASS =

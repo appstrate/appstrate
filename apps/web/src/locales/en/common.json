@@ -499,6 +499,7 @@
   "nav.sidebar": "Sidebar",
   "nav.sidebarDescription": "Displays the mobile sidebar.",
   "nav.toggleSidebar": "Toggle sidebar",
+  "nav.toggleSidebarIn": "Toggle sidebar ({{current}})",
   "switcher.spaceOnRequest": "On request",
   "appearance.icon": "Icon",
   "appearance.remove": "Remove icon",

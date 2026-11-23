@@ -172,15 +172,14 @@ export function ModelPanel({
           return (
             <button
               type="button"
-              aria-label={`${t("model.tabs.configuration")}: ${model.label ?? model.modelId}`}
-              title={t("model.tabs.configuration")}
+              aria-label={`${t("model.settings")}: ${model.label ?? model.modelId}`}
+              title={t("model.settings")}
               data-testid="model-settings"
-              onClick={(event) => {
-                event.stopPropagation();
+              onClick={() => {
                 onSelect(model.id);
                 onViewChange("configuration");
               }}
-              className="text-muted-foreground hover:text-foreground desktop-pointer:size-7 relative -my-1 -mr-1 flex size-9 shrink-0 items-center justify-center rounded-md"
+              className="text-muted-foreground hover:text-foreground desktop-pointer:size-7 relative -my-1 -mr-1 flex size-11 shrink-0 items-center justify-center rounded-md"
             >
               <SlidersHorizontalIcon className="size-4" aria-hidden="true" />
               {hasOverrides && model.id === selectedId && (

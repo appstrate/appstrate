@@ -358,6 +358,7 @@
       "devDependencies": {
         "@appstrate/env": "workspace:*",
         "@types/react": "^19.3.0",
+        "@types/react-dom": "^19.3.0",
         "lucide-react": "^1.73.0",
         "react-dom": "^19.3.1",
       },
@@ -366,6 +367,7 @@
         "hono": "*",
         "lucide-react": "*",
         "react": "*",
+        "react-dom": "*",
       },
     },
     "packages/module-claude-code": {

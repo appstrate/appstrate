@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
+import { cn } from "@appstrate/ui/cn";
 import { useState } from "react";
 import { Link } from "react-router-dom";
 import { useTranslation } from "react-i18next";
@@ -165,7 +166,8 @@ export function NotificationContent({
   );
 }
 
-export function NotificationBell() {
+/** `triggerClassName` sizes the bell to the bar it sits in (44 px in the chat's phone drawer). */
+export function NotificationBell({ triggerClassName }: { triggerClassName?: string } = {}) {
   const { t } = useTranslation("common");
   // « Tous les espaces »: every space the caller holds a role in, as the org routes read them.
   const { on: spanning } = useOverviewMode();
@@ -195,7 +197,10 @@ export function NotificationBell() {
   const triggerButton = (
     <button
       type="button"
-      className="text-muted-foreground hover:text-foreground hover:bg-accent relative inline-flex size-8 shrink-0 cursor-pointer items-center justify-center rounded-md border-none bg-transparent p-0 transition-colors"
+      className={cn(
+        "text-muted-foreground hover:text-foreground hover:bg-accent relative inline-flex size-8 shrink-0 cursor-pointer items-center justify-center rounded-md border-none bg-transparent p-0 transition-colors",
+        triggerClassName,
+      )}
       aria-label={t("notifications.ariaLabel")}
     >
       <Bell size={18} />

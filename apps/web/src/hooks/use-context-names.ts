@@ -7,18 +7,21 @@ import { useCurrentSpaceId } from "./use-current-space";
 import { useOverviewMode } from "./use-overview-mode";
 import { spaceLabel } from "../lib/space-label";
 
-/** « Organization, space » as a screen reader says where the user stands (the working context). */
-export function useContextNames(): string {
+/**
+ * Where the user stands: the working context's label (the space, or « Tous les espaces »), and
+ * « Organization, context » as a screen reader says it. The switcher and the phone header read both.
+ */
+export function useContextNames(): { contextLabel: string | undefined; names: string } {
   const { t } = useTranslation();
   const { currentOrg } = useOrg();
   const { data: spaces } = useSpaces();
   const currentSpaceId = useCurrentSpaceId();
   const overview = useOverviewMode();
   const currentSpace = spaces?.find((s) => s.id === currentSpaceId) ?? null;
-  const context = overview.on
+  const contextLabel = overview.on
     ? t("overview.title")
     : currentSpace
       ? spaceLabel(currentSpace, t)
       : undefined;
-  return [currentOrg?.name, context].filter(Boolean).join(", ");
+  return { contextLabel, names: [currentOrg?.name, contextLabel].filter(Boolean).join(", ") };
 }

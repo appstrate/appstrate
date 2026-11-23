@@ -16,8 +16,7 @@ installFakeStorage({
 
 const { renderInSpace, memberSpaceClient } = await import("../../test/space-context.ts");
 const { default: i18n, i18nReady } = await import("../../i18n.ts");
-const { ConversationPhoneBar, PHONE_HEADER_BUTTON_CLASS } =
-  await import("./conversation-phone-header.tsx");
+const { ConversationPhoneBar } = await import("./conversation-phone-header.tsx");
 
 await i18nReady;
 await i18n.changeLanguage("fr");
@@ -52,7 +51,6 @@ describe("the chat's phone header", () => {
 
   it("ends on the context panel, as big as a thumb", () => {
     const html = render(null);
-    expect(PHONE_HEADER_BUTTON_CLASS.split(/\s+/)).toContain("size-11");
     expect(html).toContain('aria-label="Afficher le contexte"');
     expect(html).toMatch(/class="[^"]*size-11[^"]*"[^>]*aria-label="Afficher le contexte"/);
   });

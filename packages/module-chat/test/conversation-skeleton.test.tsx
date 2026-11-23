@@ -44,16 +44,7 @@ describe("ConversationSkeleton", () => {
     const html = renderToString(
       <ConversationSkeleton label="Chargement" placeholder="Écrire" disclaimer="Vérifiez" />,
     );
-    expect(html).toContain("max-md:flex-nowrap");
-    expect(html).not.toContain("data-rest");
     // The live phone composer has the disclaimer in its "+" panel, not under it.
     expect(html).toMatch(/class="[^"]*max-md:hidden[^"]*">Vérifiez/);
-  });
-
-  it("draws no model pill: the model lives in the tools panel", () => {
-    const html = renderToString(
-      <ConversationSkeleton label="Chargement" placeholder="Écrire" disclaimer="Vérifiez" />,
-    );
-    expect(html).not.toContain("w-32");
   });
 });

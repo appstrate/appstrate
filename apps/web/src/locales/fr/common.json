@@ -499,6 +499,7 @@
   "nav.sidebar": "Menu latéral",
   "nav.sidebarDescription": "Affiche le menu latéral sur mobile.",
   "nav.toggleSidebar": "Afficher ou masquer le menu latéral",
+  "nav.toggleSidebarIn": "Afficher ou masquer le menu latéral ({{current}})",
   "switcher.spaceOnRequest": "Sur demande",
   "appearance.icon": "Icône",
   "appearance.remove": "Retirer l’icône",

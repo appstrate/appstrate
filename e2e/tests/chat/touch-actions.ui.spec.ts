@@ -77,7 +77,7 @@ test.describe("chat actions on a touchscreen", () => {
     await page.screenshot({ path: testInfo.outputPath("landscape.png"), animations: "disabled" });
 
     await page.setViewportSize({ width: 390, height: 844 });
-    await page.locator('header [data-sidebar="trigger"]:visible').tap();
+    await page.getByTestId("chat-sidebar-trigger").tap();
     // Below `md` the same "…" opens a panel from the bottom: its rows are buttons.
     await renamed.tap();
     await expect(menu.getByRole("button", { name: "Renommer", exact: true })).toBeVisible();
