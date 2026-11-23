@@ -67,11 +67,7 @@ export type {
   RenderSpaces,
   SelectConversation,
 } from "./runtime-context.ts";
-export {
-  ChatConversationList,
-  ChatConversationRenameButton,
-  ChatConversationRenameDialog,
-} from "./thread-list.tsx";
+export { ChatConversationList, ChatConversationRenameButton } from "./thread-list.tsx";
 export { ChatTransportProvider, SelectConversationProvider } from "./runtime-context.ts";
 import { ModelPickerProvider, type ModelPickerProps } from "./model-picker.ts";
 import { modelSizing } from "./model-fit.ts";

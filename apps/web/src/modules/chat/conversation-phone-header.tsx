@@ -7,12 +7,10 @@
  * spaces, « Renommer » and the context through `ShellHeaderActions`.
  */
 
-import { useState, type Dispatch } from "react";
+import type { Dispatch } from "react";
 import { useTranslation } from "react-i18next";
-import { PencilIcon } from "lucide-react";
-import { Button } from "@appstrate/ui/components/button";
 import { Skeleton } from "@appstrate/ui/components/skeleton";
-import { ChatConversationRenameDialog, type ChatTransport } from "@appstrate/module-chat/ui";
+import { ChatConversationRenameButton, type ChatTransport } from "@appstrate/module-chat/ui";
 import { useActiveSession } from "@appstrate/module-chat/unread";
 import { ShellHeaderPhone } from "../../components/shell-header-slots";
 import type { ConversationSidebarAction } from "./conversation-sidebar-state";
@@ -38,10 +36,8 @@ export function ConversationPhoneBar({
   dispatch: Dispatch<ConversationSidebarAction>;
 }) {
   const { t } = useTranslation("chat");
-  const [renaming, setRenaming] = useState(false);
   const row = useActiveSession(transport, conversationId ?? "", conversationId !== null);
   const loading = conversationId !== null && !row;
-  const canRename = conversationId !== null && can("chat:write") && !!row;
   return (
     <>
       {loading ? (
@@ -51,34 +47,20 @@ export function ConversationPhoneBar({
           className="min-w-0 flex-1 truncate text-base font-semibold"
           data-testid="conversation-phone-title"
         >
-          {conversationId === null ? t("threads.new") : (row?.title ?? t("threads.new"))}
+          {row?.title ?? t("threads.new")}
         </h1>
       )}
-      {canRename && (
-        <Button
-          type="button"
-          variant="ghost"
-          size="icon"
-          className={PHONE_HEADER_BUTTON_CLASS}
-          aria-label={t("threads.rename")}
-          onClick={() => setRenaming(true)}
-        >
-          <PencilIcon />
-        </Button>
-      )}
+      <ChatConversationRenameButton
+        activeId={conversationId}
+        t={translate}
+        can={can}
+        className={PHONE_HEADER_BUTTON_CLASS}
+      />
       <ConversationContextToggle
         expanded={expanded}
         dispatch={dispatch}
         className={PHONE_HEADER_BUTTON_CLASS}
       />
-      {renaming && (
-        <ChatConversationRenameDialog
-          activeId={conversationId}
-          t={translate}
-          can={can}
-          onClose={() => setRenaming(false)}
-        />
-      )}
     </>
   );
 }

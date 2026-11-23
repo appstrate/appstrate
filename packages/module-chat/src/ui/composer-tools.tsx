@@ -4,12 +4,21 @@
  * The composer's left cluster from `md` up: an attach button, the settings button that opens the
  * tools panel (`ComposerToolsPanel`) in a popover, and a chip for each setting off its default
  * (`useComposerDepartures`): a chip opens the panel at the level that changes it, its X restores
- * the default. Below `md` the same panel opens from the "+" (`ComposerPlusMenu`).
+ * the default. Below `md` ONE "+" at the left of the field opens the same panel from the bottom, as
+ * the chats people already use do: nothing else stays beside the field, a dot on the "+" says a
+ * setting is off its default and the panel names it (`ComposerPlusMenu`).
  */
 
 import { useId, type ReactNode } from "react";
 import { ComposerPrimitive } from "@assistant-ui/react";
-import { CpuIcon, MapPinIcon, PackageIcon, PaperclipIcon, SettingsIcon } from "lucide-react";
+import {
+  CpuIcon,
+  MapPinIcon,
+  PackageIcon,
+  PaperclipIcon,
+  PlusIcon,
+  SettingsIcon,
+} from "lucide-react";
 import { Button } from "@appstrate/ui/components/button";
 import {
   Popover,
@@ -30,13 +39,12 @@ import {
 import { ComposerToolsPanel } from "./composer-tools-panel.tsx";
 import { useConversationSkillsContext } from "./use-conversation-skills.ts";
 import { useConversationScope, useSpaceName } from "./conversation-scope.ts";
-import { ComposerPlusMenu, DepartureDot } from "./phone-composer-menu.tsx";
 import { setPackageAuthoringEnabled } from "./package-authoring-store.ts";
 import { setInlineRunModelEnabled } from "./inline-run-model-store.ts";
 import { useChatHost } from "./runtime-context.ts";
 import { RemovableChip } from "./removable-chip.tsx";
 import { sentenceWithNode } from "./sentence-with-name.tsx";
-import { MENU_TITLE_CLASS, MenuHeading } from "./sheet-menu.tsx";
+import { MENU_TITLE_CLASS, MenuHeading, SheetMenu } from "./sheet-menu.tsx";
 import { SkillChips } from "./skill-chips.tsx";
 import { COMPOSER_TOOL_BUTTON_CLASS } from "./touch-targets.ts";
 
@@ -226,5 +234,48 @@ function AttachButton() {
         {reason}
       </TooltipContent>
     </Tooltip>
+  );
+}
+
+/** The dot on the panel's opener while a setting departs from its default. */
+function DepartureDot({ testId }: { testId: string }) {
+  return (
+    <span
+      aria-hidden
+      data-testid={testId}
+      className="bg-primary ring-card desktop-pointer:top-1 desktop-pointer:right-1 absolute top-1.5 right-1.5 size-2 rounded-full ring-2"
+    />
+  );
+}
+
+function ComposerPlusMenu({ authorsPackages }: { authorsPackages: boolean }) {
+  const { t } = useChatHost();
+  const panel = useComposerPanel();
+  const heading = useComposerPanelHeading();
+  const departed = useComposerDepartures(authorsPackages).length > 0;
+  return (
+    <>
+      <Button
+        type="button"
+        variant="ghost"
+        size="icon"
+        className={cn(COMPOSER_TOOL_BUTTON_CLASS, "relative md:hidden")}
+        aria-label={t("composer.tools")}
+        aria-haspopup="dialog"
+        data-testid="composer-plus"
+        onClick={() => panel.openAt("tools")}
+      >
+        <PlusIcon />
+        {departed && <DepartureDot testId="composer-plus-dot" />}
+      </Button>
+      <SheetMenu
+        open={panel.open === "sheet"}
+        onOpenChange={(open) => !open && panel.close()}
+        title={heading.title}
+        back={heading.back}
+      >
+        <ComposerToolsPanel authorsPackages={authorsPackages} phone />
+      </SheetMenu>
+    </>
   );
 }

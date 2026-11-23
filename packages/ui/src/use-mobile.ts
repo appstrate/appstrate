@@ -4,13 +4,16 @@ import * as React from "react";
 
 const MOBILE_BREAKPOINT = 768;
 
+/** Below Tailwind's `md` (48rem): the phone layout. One query, read the same everywhere. */
+export const MOBILE_MEDIA_QUERY = `(max-width: ${MOBILE_BREAKPOINT - 1}px)`;
+
 export function useIsMobile() {
   const [isMobile, setIsMobile] = React.useState<boolean>(
     () => typeof window !== "undefined" && window.innerWidth < MOBILE_BREAKPOINT,
   );
 
   React.useEffect(() => {
-    const mql = window.matchMedia(`(max-width: ${MOBILE_BREAKPOINT - 1}px)`);
+    const mql = window.matchMedia(MOBILE_MEDIA_QUERY);
     const onChange = () => {
       setIsMobile(window.innerWidth < MOBILE_BREAKPOINT);
     };

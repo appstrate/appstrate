@@ -18,6 +18,7 @@ import { useInlineRunModelEnabled } from "./inline-run-model-store.ts";
 import { usePackageAuthoringEnabled } from "./package-authoring-store.ts";
 import { useChatHost } from "./runtime-context.ts";
 import { selectedModel, useModelPicker } from "./model-picker.ts";
+import { opensAsSheet } from "./sheet-menu.tsx";
 import type { MenuBack } from "./sheet-menu.tsx";
 import { useConversationSkillsContext } from "./use-conversation-skills.ts";
 
@@ -45,14 +46,6 @@ const CLOSED: ComposerPanelState = {
 };
 
 const ComposerPanelContext = createContext<ComposerPanelState>(CLOSED);
-
-/**
- * The width decides the container, read when a menu opens: below `md` (48rem, the `md` of
- * styles.css) a sheet from the bottom, from `md` up a popover or a dropdown.
- */
-export function opensAsSheet(): boolean {
-  return !window.matchMedia("(min-width: 48rem)").matches;
-}
 
 /** One per composer: its "+", its settings button, its chips and its context indicator share it. */
 export function ComposerPanelProvider({ children }: { children: ReactNode }) {

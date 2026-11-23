@@ -11,6 +11,15 @@ import { Sheet, SheetContent, SheetDescription, SheetTitle } from "@appstrate/ui
 import { ChevronLeftIcon } from "lucide-react";
 import { Switch } from "@appstrate/ui/components/switch";
 import { cn } from "@appstrate/ui/cn";
+import { MOBILE_MEDIA_QUERY } from "@appstrate/ui/use-mobile";
+
+/**
+ * The width decides the container, read when a menu opens: below `md` (48rem, the `md` of
+ * styles.css) a sheet from the bottom, from `md` up a popover or a dropdown.
+ */
+export function opensAsSheet(): boolean {
+  return window.matchMedia(MOBILE_MEDIA_QUERY).matches;
+}
 
 /**
  * A row's inset, the way a dropdown's items sit: a margin off the panel's edges and a rounded

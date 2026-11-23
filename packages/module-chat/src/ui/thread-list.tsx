@@ -36,8 +36,7 @@ import { useNowTick } from "@appstrate/ui/use-now-tick";
 import { Spinner } from "@appstrate/ui/components/spinner";
 import { Button } from "@appstrate/ui/components/button";
 import { Input } from "@appstrate/ui/components/input";
-import { SheetMenu, SheetMenuRow } from "./sheet-menu.tsx";
-import { opensAsSheet } from "./composer-panel.ts";
+import { opensAsSheet, SheetMenu, SheetMenuRow } from "./sheet-menu.tsx";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -625,46 +624,29 @@ function ConversationRow({
 }
 
 /**
- * « Renommer » for the open conversation, a pencil in the host's header actions from `md` up.
- * Renders nothing until the conversation is known, or for a reader (renaming is a write).
+ * « Renommer » for the open conversation, a pencil in the host's header on every format (`className`
+ * sizes it to the header). Renders nothing until the conversation is known, or for a reader
+ * (renaming is a write).
  */
 export function ChatConversationRenameButton(props: {
   activeId: string | null;
   t: ChatTranslate;
   can: ChatCan;
+  className?: string;
 }) {
   return <ConversationRenameButton key={props.activeId} {...props} />;
-}
-
-/**
- * The rename dialog of the open conversation, opened by a control of the host's own (the phone
- * header's pencil): `ChatConversationRenameButton` is the same dialog behind its icon button.
- */
-export function ChatConversationRenameDialog({
-  activeId,
-  t,
-  can,
-  onClose,
-}: {
-  activeId: string | null;
-  t: ChatTranslate;
-  can: ChatCan;
-  onClose: () => void;
-}) {
-  const { data: sessions } = useSessions();
-  const session = activeId ? sessions?.find((s) => s.id === activeId) : undefined;
-  if (!session || !can("chat:write")) return null;
-  return <ConversationRenameDialog session={session} t={t} onClose={onClose} />;
 }
 
 function ConversationRenameButton({
   activeId,
   t,
   can,
+  className,
 }: {
   activeId: string | null;
   t: ChatTranslate;
   can: ChatCan;
+  className?: string;
 }) {
   const [open, setOpen] = useState(false);
   const { data: sessions } = useSessions();
@@ -676,7 +658,7 @@ function ConversationRenameButton({
         type="button"
         variant="ghost"
         size="icon"
-        className="size-8"
+        className={className ?? "size-8"}
         aria-label={t("threads.rename")}
         title={t("threads.rename")}
         onClick={() => setOpen(true)}

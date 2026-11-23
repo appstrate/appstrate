@@ -5,7 +5,7 @@
  * limit, creation mode), and the levels they open in their place, each named, with a way back —
  * the skills, the models (with the inline-run model switch and the context's detail), then one
  * model's settings. The container is the caller's: a popover from `md` up, a bottom sheet below
- * (`composer-tools.tsx`, `phone-composer-menu.tsx`). A phone's panel also holds attaching a file
+ * (`composer-tools.tsx`). A phone's panel also holds attaching a file
  * and, as its last line, the disclaimer: its composer line has room for neither.
  */
 
@@ -22,10 +22,14 @@ import {
 } from "lucide-react";
 import { canComposeInlineRuns } from "../capabilities.ts";
 import { attachUnavailableKey } from "./attachment-adapter.ts";
-import { LIMIT_REASON_KEY } from "./composer-reasons.ts";
 import { useComposerPanel } from "./composer-panel.ts";
 import { ContextDetail } from "./context-gauge.tsx";
-import { limitAvailability, useConversationScope, useSpaceName } from "./conversation-scope.ts";
+import {
+  limitAvailability,
+  useConversationScope,
+  useSpaceName,
+  type LimitUnavailableReason,
+} from "./conversation-scope.ts";
 import { setInlineRunModelEnabled, useInlineRunModelEnabled } from "./inline-run-model-store.ts";
 import { useModelPicker } from "./model-picker.ts";
 import { ModelPanel } from "./model-select.tsx";
@@ -37,6 +41,13 @@ import { useChatHost } from "./runtime-context.ts";
 import { SheetMenuRow, SheetMenuSwitchRow } from "./sheet-menu.tsx";
 import { SkillsPickerPanel } from "./skills-picker.tsx";
 import { useConversationSkillsContext, useDraftSkills } from "./use-conversation-skills.ts";
+
+/** Why the space limit is offered but inert: the key of the sentence that says it. */
+const LIMIT_REASON_KEY: Record<LimitUnavailableReason, string> = {
+  generating: "composer.limit.generating",
+  "no-acting-space": "composer.limit.noActingSpace",
+  outside: "composer.limit.outside",
+};
 
 /** A line of explanation under a group of rows. */
 function Hint({ children }: { children: React.ReactNode }) {
