@@ -537,25 +537,22 @@ describe("OAuth2Strategy — connect.login acquisition", () => {
     expect(creds.refresh_token).toBe("rt-2");
   });
 
-  for (const [label, body, status] of [
-    ["an OAuth error other than invalid_grant", { error: "invalid_request" }, 400],
-    ["a bare 401", "unauthorized", 401],
-  ] as const) {
-    it(`refuses the submitted grant on ${label}, before anything is stored`, async () => {
-      upstream.setToken(body, status);
-
+  for (const code of [
+    "invalid_request",
+    "invalid_scope",
+    "unsupported_grant_type",
+    "insufficient_scope",
+  ]) {
+    it(`attributes ${code} to the integration configuration`, async () => {
+      upstream.setToken({ error: code }, 400);
       const err = await submit({ refresh_token: "rt-submitted" });
-
-      expect(err).toBeInstanceOf(ApiError);
-      expect((err as ApiError).status).toBe(400);
-      expect((err as ApiError).code).toBe("login_rejected");
-      expect((err as ApiError).message).toContain(`HTTP ${status}`);
-      expect((err as ApiError).extensions?.login_refusal).toBe("grant");
+      expect(err).toMatchObject({ status: 409, code: "connection_not_ready" });
       expect(await db.select().from(integrationConnections)).toHaveLength(0);
     });
   }
 
   for (const [label, body, status] of [
+    ["a bare 401", "unauthorized", 401],
     ["a throttled token endpoint", { error: "slow_down" }, 429],
     ["a bare 403 (a firewall refusing the client)", "forbidden", 403],
   ] as const) {

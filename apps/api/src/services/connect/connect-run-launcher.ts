@@ -37,6 +37,7 @@
  * the sentinel below — plaintext bundle bytes never touch stdout/stderr/logs.
  */
 
+import { getAppstrateConnectMeta } from "@appstrate/core/integration";
 import { createDecipheriv, randomBytes } from "node:crypto";
 
 import { toCredentialStringMap } from "@appstrate/connect/integration-credentials";
@@ -54,11 +55,7 @@ import {
   getLocalServerEnv,
 } from "@appstrate/core/integration";
 import { effectiveMcpServerType } from "@appstrate/core/mcp-server";
-import {
-  getAppstrateConnectMeta,
-  runnerEgressFor,
-  type AfpsManifestAuth,
-} from "../integration-manifest-helpers.ts";
+import { runnerEgressFor, type AfpsManifestAuth } from "../integration-manifest-helpers.ts";
 import {
   getOrchestrator,
   orchestratorSupportsSidecarOnly,

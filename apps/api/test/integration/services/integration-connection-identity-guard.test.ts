@@ -6,7 +6,7 @@
  * re-consent authenticated a different identity, `persistCredentialBundle`
  * refuses (409 identity_mismatch) and leaves the row untouched — silently
  * rebinding a connection to another account would be a data-integrity and
- * access surprise. "default" (identity-less) never blocks an upgrade.
+ * access surprise. Identity-less connections require a fresh connection.
  */
 
 import { describe, it, expect, beforeEach } from "bun:test";
@@ -122,20 +122,26 @@ describe("integration connection — identity guard on reconnect/upgrade", () =>
     expect(countAfterInsert.length).toBe(2);
   });
 
-  it("allows upgrading an identity-less connection to a real identity", async () => {
-    // accountId "default" = no identity extracted (api_key/PAT-style).
-    const created = await saveIntegrationConnection(scope, {
-      packageId: INTEGRATION,
-      authKey: "oauth",
-      accountId: "default",
-      credentials: { access_token: "tok" },
-      actor,
-    });
-    // Identity-less connect falls back to the "Connexion N" label.
-    expect(created.label).toBe("Connexion 1");
-    const upgraded = await connect("alice@example.com", created.id);
-    expect(upgraded.account_id).toBe("alice@example.com");
-    // The label is fixed at creation — the upgrade doesn't rewrite it.
-    expect(upgraded.label).toBe("Connexion 1");
-  });
+  it.each([
+    ["default", "alice@example.com"],
+    ["default", "default"],
+    ["alice@example.com", "default"],
+  ])(
+    "keeps the original credential when reconnecting %s as %s cannot verify identity",
+    async (original, next) => {
+      const created = await connect(original);
+      const originalRow = await db
+        .select()
+        .from(integrationConnections)
+        .where(eq(integrationConnections.id, created.id));
+      await expect(connect(next, created.id)).rejects.toMatchObject({ code: "identity_mismatch" });
+      expect(
+        await db
+          .select()
+          .from(integrationConnections)
+          .where(eq(integrationConnections.id, created.id)),
+      ).toEqual(originalRow);
+      expect((await connect(next)).id).not.toEqual(created.id);
+    },
+  );
 });

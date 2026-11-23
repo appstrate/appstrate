@@ -123,6 +123,7 @@ export type {
 // neither module's input/output types are re-exported here.
 export {
   discoverProtectedResourceMetadata,
+  bearerChallengeParameters,
   parseResourceMetadataChallenge,
   parseScopeChallenge,
 } from "./mcp-oauth-discovery.ts";

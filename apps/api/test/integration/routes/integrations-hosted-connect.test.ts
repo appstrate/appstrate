@@ -258,7 +258,7 @@ describe("hosted connect portal — dispatch + submit", () => {
     expect(ctxRes.status).toBe(404);
   });
 
-  it("reconnects in place when connection_id is supplied — no duplicate", async () => {
+  it("preserves a key-only connection and its audit trail on unverifiable hosted reconnect", async () => {
     // First connect.
     const token1 = await mintSession(ctx, "@myorg/gmail", "api");
     const start1 = await app.request(
@@ -290,14 +290,17 @@ describe("hosted connect portal — dispatch + submit", () => {
       await app.request("/api/integrations/connect/context", { headers: { Cookie: cookie2 } })
     ).json()) as { csrf: string; connection_id: string };
     expect(c2.connection_id).toBe(created.connection.id);
-    const renewed = (await (
-      await app.request("/api/integrations/connect/submit", {
-        method: "POST",
-        headers: { Cookie: cookie2, "Content-Type": "application/json", "x-connect-csrf": c2.csrf },
-        body: JSON.stringify({ credentials: { api_key: "AKIA-RENEWED" } }),
-      })
-    ).json()) as { connection: { id: string } };
-    expect(renewed.connection.id).toBe(created.connection.id);
+    const [before] = await db
+      .select()
+      .from(integrationConnections)
+      .where(eq(integrationConnections.id, created.connection.id));
+    const renewed = await app.request("/api/integrations/connect/submit", {
+      method: "POST",
+      headers: { Cookie: cookie2, "Content-Type": "application/json", "x-connect-csrf": c2.csrf },
+      body: JSON.stringify({ credentials: { api_key: "AKIA-RENEWED" } }),
+    });
+    expect(renewed.status).toBe(409);
+    expect(await renewed.json()).toMatchObject({ code: "identity_mismatch" });
 
     const all = await db
       .select()
@@ -305,8 +308,7 @@ describe("hosted connect portal — dispatch + submit", () => {
       .where(eq(integrationConnections.integrationId, "@myorg/gmail"));
     expect(all).toHaveLength(1);
 
-    // The page cookie carries the principal, not a session: the trail must
-    // still name the user, and tell the renewal apart from the creation.
+    expect(all[0]).toEqual(before);
     const trail = await db
       .select()
       .from(auditEvents)
@@ -314,7 +316,6 @@ describe("hosted connect portal — dispatch + submit", () => {
       .orderBy(auditEvents.id);
     expect(trail.map((r) => [r.action, r.actorType, r.actorId, r.spaceId])).toEqual([
       ["integration.connection.created", "user", ctx.user.id, ctx.defaultSpaceId],
-      ["integration.connection.reconnected", "user", ctx.user.id, ctx.defaultSpaceId],
     ]);
     expect(trail[0]!.after).toMatchObject({ packageId: "@myorg/gmail", authKey: "api" });
     expect(JSON.stringify(trail)).not.toContain("AKIA");

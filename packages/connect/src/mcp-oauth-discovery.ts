@@ -112,23 +112,36 @@ export function buildProtectedResourceProbes(resourceServerUrl: string): Metadat
   }
 }
 
-/**
- * Parse the `resource_metadata` parameter out of a `WWW-Authenticate` header
- * value (RFC 9728 §5.1). Returns the URL string or `undefined`.
- */
-export function parseResourceMetadataChallenge(wwwAuthenticate: string): string | undefined {
-  const match = /resource_metadata\s*=\s*"([^"]+)"/i.exec(wwwAuthenticate);
-  return match?.[1];
+/** The first Bearer challenge, including only its own RFC 9110 auth-params. */
+export function bearerChallengeParameters(header: string): Map<string, string> | undefined {
+  let bearer: Map<string, string> | undefined;
+  // A comma in a quoted string belongs to the value. A quoted-pair stays together.
+  for (const [part] of header.matchAll(/(?:[^,"]|"(?:\\.|[^"\\])*")+/g)) {
+    let field = part.trim();
+    if (!field) continue;
+    // A leading token followed by '=' is another parameter of the current challenge.
+    if (!/^[!#$%&'*+.^_`|~\w-]+\s*=/.test(field)) {
+      if (bearer) break;
+      const scheme = /^([^\s]+)(?:\s+([\s\S]*))?$/.exec(field);
+      if (scheme?.[1]?.toLowerCase() !== "bearer") continue;
+      bearer = new Map();
+      field = scheme[2] ?? "";
+    }
+    if (!bearer) continue;
+    const param =
+      /^([!#$%&'*+.^_`|~\w-]+)\s*=\s*(?:"((?:\\.|[^"\\])*)"|([!#$%&'*+.^_`|~\w-]+))$/.exec(field);
+    if (param) bearer.set(param[1]!.toLowerCase(), param[2]?.replace(/\\(.)/g, "$1") ?? param[3]!);
+  }
+  return bearer;
 }
 
-/**
- * The scopes a `WWW-Authenticate` challenge asks for (RFC 6750 §3 `scope`, space-delimited), or
- * `undefined` when it names none.
- */
-export function parseScopeChallenge(wwwAuthenticate: string): string[] | undefined {
-  const match = /(?:^|[\s,])scope\s*=\s*"([^"]*)"/i.exec(wwwAuthenticate);
-  const scopes = match?.[1]?.split(/\s+/).filter(Boolean) ?? [];
-  return scopes.length > 0 ? scopes : undefined;
+export function parseResourceMetadataChallenge(header: string): string | undefined {
+  return bearerChallengeParameters(header)?.get("resource_metadata") || undefined;
+}
+
+export function parseScopeChallenge(header: string): string[] | undefined {
+  const scopes = bearerChallengeParameters(header)?.get("scope")?.split(/\s+/).filter(Boolean);
+  return scopes?.length ? scopes : undefined;
 }
 
 interface RawResourceMetadata {

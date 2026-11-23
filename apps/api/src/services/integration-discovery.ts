@@ -15,13 +15,14 @@ import { parse as parseHost } from "tldts";
 import { createMcpHttpClient, httpStatusOf } from "@appstrate/mcp-transport";
 import {
   discoverProtectedResourceMetadata,
+  bearerChallengeParameters,
   parseResourceMetadataChallenge,
   parseScopeChallenge,
   resolveOAuthEndpoints,
 } from "@appstrate/connect";
 import { isIconImage } from "@appstrate/core/appearance";
 import { getErrorMessage } from "@appstrate/core/errors";
-import { scopeTokenSchema } from "@appstrate/core/integration";
+import { OAUTH_META_KEY, scopeTokenSchema } from "@appstrate/core/integration";
 import { toSlug } from "@appstrate/core/naming";
 import { parseSseFrames } from "@appstrate/core/sse";
 import { ApiError, badGateway, invalidRequest } from "../lib/errors.ts";
@@ -334,7 +335,7 @@ export function serverIdentityFields(info: Implementation | undefined): {
 function bearerChallenge(res: Response): string | undefined {
   if (res.status !== 401 && res.status !== 403) return undefined;
   const challenge = res.headers.get("www-authenticate");
-  return challenge && /(?:^|,)\s*Bearer(?:\s|,|$)/i.test(challenge) ? challenge : undefined;
+  return challenge && bearerChallengeParameters(challenge) ? challenge : undefined;
 }
 
 async function reach(url: string, fetchImpl: typeof fetch, init: RequestInit): Promise<Response> {
@@ -404,6 +405,8 @@ async function discoverAuth(
     const advertised = md.authorizationServers[0]!;
     const issuer = isBlockedEgressUrl(advertised) ? undefined : advertised;
     const endpoints = issuer ? await resolveOAuthEndpoints({ issuer, fetchImpl }) : {};
+    if (endpoints.metadataUnreachable)
+      throw badGateway("The authorization server metadata could not be read. Retry shortly.");
     const scopes = scopeTokens(challengeScopes ?? md.scopesSupported ?? []);
     const autoClient = provisionsClientItself(endpoints);
     const warning = !issuer
@@ -441,6 +444,8 @@ async function discoverAuth(
   }
 
   const atOrigin = await resolveOAuthEndpoints({ issuer: origin, fetchImpl });
+  if (atOrigin.metadataUnreachable)
+    throw badGateway("The authorization server metadata could not be read. Retry shortly.");
   if (provisionsClientItself(atOrigin)) {
     const scopes = scopeTokens(challengeScopes ?? []);
     return {
@@ -514,7 +519,7 @@ function oauth2Auth(
     authorized_uris: [`${origin}/**`],
     delivery: bearerDelivery("{$credential.access_token}"),
     _meta: {
-      "dev.appstrate/oauth": { scope_separator: " " },
+      [OAUTH_META_KEY]: { scope_separator: " " },
       "dev.appstrate/auth": { required: true },
     },
   };

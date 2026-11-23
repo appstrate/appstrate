@@ -70,6 +70,15 @@ describe("parseScopeChallenge (RFC 6750 §3)", () => {
     expect(parseScopeChallenge('Bearer scope=""')).toBeUndefined();
   });
 
+  it("binds parameters to their scheme and keeps quoted commas and escaped quotes inside a value", () => {
+    const header =
+      'Basic realm="one, \\"Bearer\\"", scope="wrong", Bearer realm="two, three", scope="read write", Digest resource_metadata="https://other.test/"';
+    expect(parseScopeChallenge(header)).toEqual(["read", "write"]);
+    expect(parseResourceMetadataChallenge(header)).toBeUndefined();
+    expect(parseScopeChallenge('Bearer realm="one", Basic scope="wrong"')).toBeUndefined();
+    expect(parseScopeChallenge('Basic realm="one, Bearer scope=wrong"')).toBeUndefined();
+  });
+
   it("does not read a parameter merely ending in scope", () => {
     expect(parseScopeChallenge('Bearer x_scope="admin"')).toBeUndefined();
   });

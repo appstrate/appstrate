@@ -79,7 +79,7 @@ describe("connection scope = minting client tier", () => {
     return saveIntegrationConnection(scope, {
       packageId: INTEGRATION,
       authKey: AUTH_KEY,
-      accountId: "default",
+      accountId: "account-1",
       credentials: { access_token: "t" },
       actor,
       ...(clientRef !== undefined ? { clientRef } : {}),

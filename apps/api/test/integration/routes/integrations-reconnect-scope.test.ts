@@ -39,6 +39,7 @@ const manifest = localIntegrationManifest({
   auths: {
     api: {
       type: "api_key",
+      credentialFields: ["api_key", "email"],
       authorizedUris: ["https://api.example.com/**"],
       delivery: httpHeaderDelivery({ name: "Authorization", prefix: "Bearer ", field: "api_key" }),
     },
@@ -119,7 +120,7 @@ async function seedRow(authKey: string, spaceId: string | null, clientRef?: stri
     .values({
       integrationId: INTEGRATION,
       authKey,
-      accountId: "default",
+      accountId: "member@example.test",
       orgId: ctx.orgId,
       spaceId,
       originSpaceId: spaceId === null ? ctx.defaultSpaceId : null,
@@ -179,13 +180,17 @@ describe("a delegated credential reconnects rows scoped to its space only", () =
 
   const reconnect = (connectionId: string, headers: Record<string, string>) =>
     post("api/connect/fields", headers, {
-      credentials: { api_key: "new" },
+      credentials: { api_key: "new", email: "member@example.test" },
       connection_id: connectionId,
     });
 
   // A reconnect targets a row of the door's own auth.
   const doors = [
-    { path: "api/connect/fields", authKey: "api", body: { credentials: { api_key: "new" } } },
+    {
+      path: "api/connect/fields",
+      authKey: "api",
+      body: { credentials: { api_key: "new", email: "member@example.test" } },
+    },
     { path: "api/connect/session", authKey: "api", body: {} },
     { path: "google/connect/oauth2", authKey: "google", body: {} },
   ] as const;
@@ -308,7 +313,7 @@ describe("a delegated credential reconnects rows scoped to its space only", () =
         {
           packageId: INTEGRATION,
           authKey: "google",
-          accountId: "default",
+          accountId: "member@example.test",
           credentials: { access_token: "new" },
           actor: { type: "user", id: ctx.user.id },
           connectionId: spaceRow.id,
@@ -348,7 +353,7 @@ describe("a delegated credential reconnects rows scoped to its space only", () =
         {
           packageId: INTEGRATION,
           authKey: "google",
-          accountId: "default",
+          accountId: "member@example.test",
           credentials: { access_token: "new" },
           actor: { type: "user", id: ctx.user.id },
           connectionId: spaceRow.id,
@@ -391,7 +396,7 @@ describe("an org-scoped row reconnects through an org or system client", () => {
       {
         packageId: INTEGRATION,
         authKey: "google",
-        accountId: "default",
+        accountId: "member@example.test",
         credentials: { access_token: "new" },
         actor: { type: "user", id: ctx.user.id },
         connectionId,

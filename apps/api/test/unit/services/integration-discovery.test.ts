@@ -60,6 +60,7 @@ const HOSTS = [
   "mcp.offline.test",
   "mcp.nopkce.test",
   "mcp.manualnopkce.test",
+  "mcp.busymetadata.test",
   "mcp.noscope.test",
   "mcp.guessoffline.test",
   "mcp.guessempty.test",
@@ -353,6 +354,19 @@ describe("discoverRemoteIntegration", () => {
     const auth = (manifest.auths as Record<string, Record<string, unknown>>).oauth!;
     expect(auth.default_scopes).toEqual(["ok"]);
     expect(auth.scope_catalog).toEqual([{ value: "ok", label: "ok" }]);
+  });
+
+  it("asks to retry a throttled issuer instead of proposing a manual client", async () => {
+    const host = "mcp.busymetadata.test";
+    const { fetchImpl } = fakeFetch({
+      ...protectedServer(host),
+      [`GET https://${host}/.well-known/oauth-authorization-server`]: () => json({}, 429),
+    });
+    const err = await refusal(
+      discoverRemoteIntegration({ url: `https://${host}/mcp`, orgSlug: "acme" }, { fetchImpl }),
+    );
+    expect(err.status).toBe(502);
+    expect(err.message).toContain("Retry");
   });
 
   it("names the issuer and warns when the server offers no dynamic registration", async () => {

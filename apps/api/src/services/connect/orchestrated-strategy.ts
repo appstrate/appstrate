@@ -24,10 +24,10 @@
  *     never reachable by the injection path.
  */
 
+import { getAppstrateConnectMeta } from "@appstrate/core/integration";
 import { invalidRequest } from "../../lib/errors.ts";
 import type { IntegrationManifest } from "@appstrate/core/integration";
 import {
-  getAppstrateConnectMeta,
   type AfpsManifestAuth,
   type AfpsManifestConnect,
 } from "../integration-manifest-helpers.ts";

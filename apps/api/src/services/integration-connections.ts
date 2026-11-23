@@ -40,7 +40,6 @@ import {
   encryptCredentialEnvelope,
   decryptCredentials,
   decryptCredentialsToStringMap,
-  isClientMetadataRedirectTag,
 } from "@appstrate/connect";
 import { issuerOfClientMetadataDocumentRef } from "../lib/integration-client-metadata.ts";
 import {
@@ -62,6 +61,7 @@ import {
   type DbOrTx,
   type Tx,
 } from "../lib/db-helpers.ts";
+import { nextScheduleVersion } from "../lib/schedule-version.ts";
 import { logger } from "../lib/logger.ts";
 import {
   decryptForDisplay,
@@ -112,12 +112,13 @@ import {
 import {
   integrationCallbackUrl,
   authorizationServerTag,
-  redirectTagOf,
+  taggedCallbackOf,
 } from "../lib/integration-callback-url.ts";
 import { CONNECTION_LABEL_MAX, toMintedLabel } from "../lib/connection-label.ts";
 import { dedupeLabel } from "@appstrate/core/dedupe-label";
 import type { Actor, AuthorizationServerBinding, ResolvedOAuthClient } from "@appstrate/connect";
 import {
+  appstrateAuthRequired,
   allowsUndeclaredTools,
   isUnauthenticatedIntegration,
   resolveIntegrationToolCatalog,
@@ -1430,27 +1431,21 @@ function assertConnectClientUsable(client: IntegrationOAuthClientWithSecret): vo
  * The per-server callbacks are each trusted for one server by what the flow's state holds. A row an
  * admin registers on one would carry its tag into a state requiring nothing — a hostile server's
  * code delivered on that row's flow (mix-up). Only an auto-provisioned row carries a plain tag.
- */
-function isReservedRedirectTag(tag: string, autoProvisioned: boolean): boolean {
-  // Write side; the connect side is the stricter {@link assertRedirectBoundToFlow}.
-  return isClientMetadataRedirectTag(tag) || !autoProvisioned;
-}
-
-/**
+ *
  * Refuse a row's per-server redirect URI unless it is this flow's server's: a plain tag on an
  * auto-provisioned row, for the issuer the flow resolved; a `cimd/` tag on no row. Anything else
  * would send another server's tag with this flow's token endpoint.
  */
 function assertRedirectBoundToFlow(
   client: IntegrationOAuthClientWithSecret,
-  tag: string,
+  callback: NonNullable<ReturnType<typeof taggedCallbackOf>>,
   flowIssuer: string | undefined,
 ): void {
   const bound =
-    !isClientMetadataRedirectTag(tag) &&
+    callback.kind === "registered" &&
     client.autoProvisioned &&
     flowIssuer !== undefined &&
-    tag === authorizationServerTag(flowIssuer);
+    callback.tag === authorizationServerTag(flowIssuer);
   if (!bound) {
     throw new ApiError({
       status: 403,
@@ -1466,8 +1461,8 @@ function assertRedirectUriNotReserved(
   redirectUri: string | null | undefined,
   autoProvisioned: boolean,
 ): void {
-  const tag = redirectUri ? redirectTagOf(redirectUri) : undefined;
-  if (tag !== undefined && isReservedRedirectTag(tag, autoProvisioned)) {
+  const callback = redirectUri ? taggedCallbackOf(redirectUri) : undefined;
+  if (callback && (callback.kind === "metadata_document" || !autoProvisioned)) {
     throw new ApiError({
       status: 400,
       code: "redirect_uri_reserved",
@@ -1493,12 +1488,12 @@ function customConnectClient(
 ): ResolvedConnectClient {
   // Before the authorize redirect, never after the user has consented.
   assertConnectClientUsable(client);
-  const redirectTag = client.redirect_uri ? redirectTagOf(client.redirect_uri) : undefined;
-  if (redirectTag !== undefined) assertRedirectBoundToFlow(client, redirectTag, flowIssuer);
+  const callback = client.redirect_uri ? taggedCallbackOf(client.redirect_uri) : undefined;
+  if (callback) assertRedirectBoundToFlow(client, callback, flowIssuer);
   return {
     clientId: client.client_id,
     redirectUri: client.redirect_uri ?? null,
-    ...(redirectTag ? { redirectTag } : {}),
+    ...(callback ? { redirectTag: callback.tag } : {}),
     clientRef: client.id,
   };
 }
@@ -2334,10 +2329,7 @@ export async function persistCredentialBundle(
       eq(integrationConnections.authKey, target.authKey),
       ownRowInSpace(target.scope.spaceId, target.actor),
     );
-    // A reconnect stays on the same upstream account and instance (AFPS §7.12); "default" never
-    // blocks. Read and write share one `FOR UPDATE` transaction, so no update slips between.
-    const checksAccount =
-      input.accountId !== undefined && input.accountId !== PLACEHOLDER_ACCOUNT_ID;
+    // Compare identities under the write lock. A placeholder names no known account.
     const checksVariables = input.variables !== undefined && input.variables !== null;
     const row = await db.transaction(async (tx) => {
       // A re-stamped client re-decides the scope: see {@link writesOrgScope}.
@@ -2373,10 +2365,16 @@ export async function persistCredentialBundle(
         throw scopeNarrowingRefused("It was widened while this reconnect ran: reconnect it again.");
       }
       if (
-        checksAccount &&
-        existing.accountId !== PLACEHOLDER_ACCOUNT_ID &&
-        existing.accountId !== input.accountId
+        !input.accountId ||
+        input.accountId === PLACEHOLDER_ACCOUNT_ID ||
+        existing.accountId === PLACEHOLDER_ACCOUNT_ID
       ) {
+        throw conflict(
+          "identity_mismatch",
+          "The upstream account of this connection could not be verified. Create a new connection instead.",
+        );
+      }
+      if (existing.accountId !== input.accountId) {
         throw conflict(
           "identity_mismatch",
           `This connection is linked to a different account (${existing.accountId}). Reconnect with the same account, or create a new connection.`,
@@ -3053,7 +3051,7 @@ async function forgetDeletedConnection(
         ...(schedule.disables
           ? { enabled: false, disabledReason: "connection_deleted" as const, nextRunAt: null }
           : {}),
-        updatedAt: new Date(),
+        updatedAt: nextScheduleVersion,
       })
       .where(eq(schedules.id, schedule.id));
   }
@@ -3378,14 +3376,12 @@ export async function getIntegrationAuthStatuses(
   const auths: IntegrationAuthStatus[] = Object.entries(authsMap).map(([key, rawAuth]) => {
     // The run-policy `required` flag lives under `_meta["dev.appstrate/auth"]` (absent = false).
     const auth = rawAuth as AfpsManifestAuth;
-    const authMeta = (auth._meta?.["dev.appstrate/auth"] ?? undefined) as
-      { required?: boolean } | undefined;
     const resource = auth.resource ?? null;
     const keyConnections = allConnections.filter((c) => c.auth_key === key);
     return {
       auth_key: key,
       type: auth.type,
-      required: authMeta?.required === true,
+      required: appstrateAuthRequired(auth),
       scopes: auth.default_scopes ?? [],
       resource,
       connections: keyConnections,
