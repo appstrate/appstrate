@@ -3828,7 +3828,7 @@ describe("Packages API", () => {
       });
       expect(publish.status, await publish.clone().text()).toBe(201);
       const retained = (await downloadVersionZip(id, version))!;
-      expect(new Uint8Array(retained)).toEqual(original);
+      expect(new Uint8Array(retained)).toEqual(new Uint8Array(original));
       expect(
         verifyBundleSignature(canonicalBundleDigest(await bundleOf(retained)), signature, {
           keys: [{ keyId: key.keyId, publicKey: key.publicKey }],
