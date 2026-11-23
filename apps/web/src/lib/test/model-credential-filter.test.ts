@@ -23,6 +23,7 @@ function credential(overrides: Partial<ModelProviderCredentialInfo>): ModelProvi
     base_url: "http://localhost:11434/v1",
     source: "custom",
     authMode: "api_key",
+    referencing_model_count: 0,
     serves_model_ids: [],
     providerId: "openai-compatible",
     owner_type: "org",

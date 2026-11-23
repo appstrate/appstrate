@@ -6,27 +6,24 @@ import {
   useDeleteModelProviderCredential,
   type ModelProviderCredentialInfo,
 } from "../hooks/use-model-provider-credentials";
-import type { OrgModelInfo } from "../hooks/use-models";
 import { keyDeletionPrompt } from "../lib/key-deletion";
 
 /** « Supprimer » on a key of Settings › Models: an organization key goes only once no model uses it. */
 export function DeleteKeyConfirm({
   credential,
-  models,
   onClose,
 }: {
   credential: ModelProviderCredentialInfo;
-  /** Every model of the organization. */
-  models: readonly OrgModelInfo[];
   onClose: () => void;
 }) {
   const { t } = useTranslation("settings");
-  const deleteCredential = useDeleteModelProviderCredential();
-  const { description, blocked } = keyDeletionPrompt(credential, models, t);
+  const deleteCredential = useDeleteModelProviderCredential({ errorHandledByCaller: true });
+  const { description, blocked } = keyDeletionPrompt(credential, t, deleteCredential.error);
 
   return (
     <ConfirmModal
       open
+      keepOpenOnRefusal
       onClose={onClose}
       title={t("credentials.deleteTitle")}
       confirmLabel={t("credentials.delete")}

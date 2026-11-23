@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /** A JSON value with its object keys sorted: two equal values give one string. */
-export function stableJson(value: unknown): string {
+export function stableJson(value: unknown): string | undefined {
   return JSON.stringify(value, (_key, v: unknown) =>
     v && typeof v === "object" && !Array.isArray(v)
       ? Object.fromEntries(

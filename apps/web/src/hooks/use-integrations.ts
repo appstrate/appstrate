@@ -5,13 +5,7 @@
  * the query key's `init`, so switching org or space refetches instead of serving another scope's page.
  */
 
-import {
-  useMutation,
-  useQueries,
-  useQuery,
-  useQueryClient,
-  type QueryClient,
-} from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient, type QueryClient } from "@tanstack/react-query";
 import type {
   ConsumingAgentSummary,
   IntegrationConnection,
@@ -90,23 +84,31 @@ export function invalidateIntegrationQueries(qc: QueryClient): Promise<void> {
 
 type IntegrationNameOf = (integrationId: string) => string;
 
-/** Display names of `integrationIds` from the detail query cache (fetched when uncached and readable); the id stands in for an unreadable name. */
+/** Resolve warned integration names in bulk, reusing scoped details that are already loaded. */
 export async function loadIntegrationNames(
   qc: QueryClient,
   scope: { header: ReturnType<typeof useOrgScope>["header"]; enabled: boolean },
   integrationIds: readonly string[],
 ): Promise<IntegrationNameOf> {
   const names = new Map<string, string>();
+  const missing: string[] = [];
+  for (const packageId of new Set(integrationIds)) {
+    const options = $api.queryOptions("get", "/api/integrations/{packageId}", {
+      params: { path: { packageId }, header: scope.header },
+    });
+    const cached = qc.getQueryData<IntegrationDetailWire>(options.queryKey);
+    if (cached?.manifest.display_name) names.set(packageId, cached.manifest.display_name);
+    else missing.push(packageId);
+  }
   await Promise.all(
-    integrationIds.map(async (packageId) => {
-      const options = $api.queryOptions("get", "/api/integrations/{packageId}", {
-        params: { path: { packageId }, header: scope.header },
-      });
-      const detail = scope.enabled
+    integrationIdChunks(missing).map(async (chunk) => {
+      const options = integrationRowsOptions(scope.header, chunk);
+      const rows = scope.enabled
         ? await qc.ensureQueryData(options).catch(() => undefined)
-        : qc.getQueryData<RawIntegrationDetail>(options.queryKey);
-      const name = (detail as IntegrationDetailWire | undefined)?.manifest.display_name;
-      if (name) names.set(packageId, name);
+        : qc.getQueryData<IntegrationSummaryWire[]>(options.queryKey);
+      for (const row of rows ?? []) {
+        if (row.manifest.display_name) names.set(row.id, row.manifest.display_name);
+      }
     }),
   );
   return (integrationId) => names.get(integrationId) ?? integrationId;
@@ -126,6 +128,32 @@ const IDS_PER_REQUEST = 100;
 /** The answer for no id, one array so it is the same value from render to render. */
 const NO_ROWS: IntegrationSummaryWire[] = [];
 
+function integrationIdChunks(ids: readonly string[]): string[][] {
+  const unique = [...new Set(ids)].sort();
+  const chunks: string[][] = [];
+  for (let i = 0; i < unique.length; i += IDS_PER_REQUEST) {
+    chunks.push(unique.slice(i, i + IDS_PER_REQUEST));
+  }
+  return chunks;
+}
+
+function integrationRowsOptions(header: ReturnType<typeof useOrgScope>["header"], ids: string[]) {
+  return {
+    queryKey: ["get", "/api/integrations", "by-id", header["X-Org-Id"], header["X-Space-Id"], ids],
+    queryFn: async ({ signal }: { signal: AbortSignal }) => {
+      const responses = await Promise.all(
+        integrationIdChunks(ids).map((chunk) =>
+          client.GET("/api/integrations", {
+            params: { query: { id: chunk, limit: IDS_PER_REQUEST }, header },
+            signal,
+          }),
+        ),
+      );
+      return responses.flatMap((response) => response.data!.data as IntegrationSummaryWire[]);
+    },
+  };
+}
+
 /**
  * The list rows of `ids` for the current space, chunked by {@link IDS_PER_REQUEST}. An id not placed
  * here has no row; `undefined` until every request answered. When `ids` changes, the previous set's
@@ -141,27 +169,11 @@ export function useIntegrationsById(
   error: unknown;
 } {
   const scope = useSpaceReadScope("integrations:read");
-  // Sorted and unique, so the same set is the same keys whatever order it came in.
   const unique = [...new Set(ids)].sort();
-  const chunks: string[][] = [];
-  for (let i = 0; i < unique.length; i += IDS_PER_REQUEST) {
-    chunks.push(unique.slice(i, i + IDS_PER_REQUEST));
-  }
   const orgId = scope.header["X-Org-Id"];
   const spaceId = scope.header["X-Space-Id"];
   const query = useQuery({
-    queryKey: ["get", "/api/integrations", "by-id", orgId, spaceId, unique],
-    queryFn: async ({ signal }) => {
-      const responses = await Promise.all(
-        chunks.map((chunk) =>
-          client.GET("/api/integrations", {
-            params: { query: { id: chunk, limit: IDS_PER_REQUEST }, header: scope.header },
-            signal,
-          }),
-        ),
-      );
-      return responses.flatMap((response) => response.data!.data as IntegrationSummaryWire[]);
-    },
+    ...integrationRowsOptions(scope.header, unique),
     enabled: scope.enabled && (options?.enabled ?? true),
     // One observer retains the combined result; useQueries cannot retain changed keys.
     placeholderData: (previous, previousQuery) =>
@@ -191,21 +203,6 @@ export function useIntegrationDetail(packageId: string | undefined, spaceId?: st
       select: (data) => data as IntegrationDetailWire,
     },
   );
-}
-
-/** The detail of each of `packageIds`, in order. `active` and `block_user_connections` are read here: the list is paginated and would misreport them past 100 integrations. */
-export function useIntegrationDetails(packageIds: readonly string[]) {
-  const scope = useSpaceReadScope("integrations:read");
-  return useQueries({
-    queries: packageIds.map((packageId) => ({
-      ...$api.queryOptions("get", "/api/integrations/{packageId}", {
-        params: { path: { packageId }, header: scope.header },
-      }),
-      enabled: scope.enabled,
-      // Spec-pinned (see IntegrationDetailWire): only `manifest` is narrowed.
-      select: (data: RawIntegrationDetail) => data as IntegrationDetailWire,
-    })),
-  });
 }
 
 export function useIntegrationConnections(packageId: string | undefined) {

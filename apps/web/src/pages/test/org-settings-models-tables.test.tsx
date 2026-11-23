@@ -85,6 +85,7 @@ function credential(over: Partial<ModelProviderCredentialInfo>): ModelProviderCr
     created_by: "usr_admin",
     allowed_actions: ["edit", "delete", "test"],
     bindable: true,
+    referencing_model_count: 0,
     serves_model_ids: [],
     needs_reconnection: false,
     createdAt: CREATED,

@@ -3,6 +3,7 @@
 import { useQueryClient, type MutationMeta, type QueryClient } from "@tanstack/react-query";
 import { dedupeLabel } from "@appstrate/core/dedupe-label";
 import { $api, type components, type paths } from "../api/client";
+import { ApiError } from "../api/errors";
 import { invalidatePaths } from "../lib/query-keys";
 import { useInvalidatePaths } from "./use-invalidate-paths";
 import { useOrgOnlyScope } from "./use-org-scope";
@@ -94,6 +95,9 @@ export function useDeleteModelProviderCredential(meta?: MutationMeta) {
   return $api.useMutation("delete", "/api/model-provider-credentials/{id}", {
     meta,
     onSuccess: invalidate,
+    onError: (error) => {
+      if (error instanceof ApiError && error.code === "credential_in_use") return invalidate();
+    },
   });
 }
 
