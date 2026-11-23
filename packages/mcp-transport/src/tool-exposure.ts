@@ -15,12 +15,13 @@ import {
   MAX_TOOL_DESCRIPTION_BYTES,
   sanitiseTextField,
   sanitiseToolDescriptor,
+  type ToolDescriptorReduction,
 } from "./sanitize.ts";
 import type { ToolIntegration } from "@appstrate/core/integration";
 import { TOOL_INTEGRATION_META_KEY } from "./tool-meta.ts";
 
 /** Why an upstream tool is not exposed by {@link exposeTool}. */
-export type ToolExposureExclusion = "schema_too_large_after_sanitisation" | "name_collision";
+export type ToolExposureExclusion = "name_collision";
 
 export interface ToolExposureOptions {
   /** Package id of the integration serving the tool (`@scope/name`). */
@@ -31,15 +32,15 @@ export interface ToolExposureOptions {
 }
 
 /**
- * The descriptor the model sees for the upstream `tool` the selection admits, or why it is not
- * exposed: too large once sanitised, or left without a free name.
+ * The descriptor the model sees for the upstream `tool` the selection admits, with the steps
+ * sanitisation took to bring it within the schema budget (`reduced`, empty when none), or why it
+ * is not exposed: left without a free name.
  */
 export function exposeTool(
   tool: Tool,
   opts: ToolExposureOptions,
-): { descriptor: Tool } | { exclusion: ToolExposureExclusion } {
-  const sanitised = sanitiseToolDescriptor(tool);
-  if (!sanitised) return { exclusion: "schema_too_large_after_sanitisation" };
+): { descriptor: Tool; reduced: ToolDescriptorReduction[] } | { exclusion: ToolExposureExclusion } {
+  const { tool: sanitised, reduced } = sanitiseToolDescriptor(tool);
   let name: string;
   try {
     name = allocateMcpToolName(opts.namespace, tool.name, opts.isTaken);
@@ -52,6 +53,7 @@ export function exposeTool(
       opts.integrationId,
       tool,
     ),
+    reduced,
   };
 }
 

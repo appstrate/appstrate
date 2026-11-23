@@ -4,8 +4,8 @@
  * Tests for the no-silent-degradation guard `pushUnavailableToolBreadcrumb`.
  *
  * When an agent selects N tools from an integration but fewer survive
- * registration (server didn't advertise one under the declared name, or the
- * poisoning sanitiser dropped a too-large descriptor), the shortfall must
+ * registration (server didn't advertise one under the declared name, or no
+ * free exposed name was left for it), the shortfall must
  * surface as a `warn` breadcrumb rather than the LLM silently behaving as if
  * the tool was never authorised.
  */

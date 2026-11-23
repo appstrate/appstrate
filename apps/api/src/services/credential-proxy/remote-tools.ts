@@ -14,6 +14,7 @@ import {
   sanitiseToolDescriptor,
   stripReservedResultMeta,
   type AppstrateMcpClient,
+  type ToolDescriptorReduction,
 } from "@appstrate/mcp-transport";
 import { createCache } from "@appstrate/core/cache";
 import { getErrorMessage } from "@appstrate/core/errors";
@@ -78,8 +79,14 @@ const MAX_CATALOG_BYTES = 512 * 1024;
 /** Per replica, at most 64 MiB of catalogs; one evicted is listed again on its next use. */
 const MAX_CACHED_CATALOGS = 128;
 
+/** A sanitised descriptor and the steps that brought it within the schema budget. */
+interface SanitisedTool {
+  tool: Tool;
+  reduced: ToolDescriptorReduction[];
+}
+
 interface ReadCatalog {
-  tools: Tool[];
+  tools: SanitisedTool[];
   truncated: boolean;
 }
 
@@ -277,10 +284,10 @@ async function withClient<T>(
   }
 }
 
-function boundedCatalog(tools: Tool[], truncated: boolean): ReadCatalog {
+function boundedCatalog(tools: SanitisedTool[], truncated: boolean): ReadCatalog {
   const encoder = new TextEncoder();
   let bytes = 0;
-  for (const [index, tool] of tools.entries()) {
+  for (const [index, { tool }] of tools.entries()) {
     bytes += encoder.encode(JSON.stringify(tool)).byteLength;
     if (bytes > MAX_CATALOG_BYTES) return { tools: tools.slice(0, index), truncated: true };
   }
@@ -293,6 +300,8 @@ interface ServerTool {
   input_schema: Tool["inputSchema"];
   /** Present when the server declares one. */
   output_schema?: NonNullable<Tool["outputSchema"]>;
+  /** The schema shown is partial: the budget steps applied, in order. Absent when none was. */
+  schema_reduced?: ToolDescriptorReduction[];
 }
 
 export interface RemoteToolCatalog {
@@ -342,10 +351,7 @@ export async function listRemoteTools(
         url,
         async (client, signal) => {
           const { tools, truncated } = await listToolPages(client, signal);
-          return boundedCatalog(
-            tools.flatMap((tool) => sanitiseToolDescriptor(tool) ?? []),
-            truncated,
-          );
+          return boundedCatalog(tools.map(sanitiseToolDescriptor), truncated);
         },
       );
     try {
@@ -372,7 +378,10 @@ export async function listRemoteTools(
       }
     }
   }
-  const offered = offeredRemoteToolNames(manifest, described?.tools);
+  const offered = offeredRemoteToolNames(
+    manifest,
+    described?.tools.map(({ tool }) => tool),
+  );
   if (described === undefined) {
     return {
       tools: [...offered].map((name) => ({ name, input_schema: { type: "object" } })),
@@ -383,12 +392,13 @@ export async function listRemoteTools(
   }
   return {
     tools: described.tools
-      .filter((tool) => offered.has(tool.name))
-      .map((tool) => ({
+      .filter(({ tool }) => offered.has(tool.name))
+      .map(({ tool, reduced }) => ({
         name: tool.name,
         ...(tool.description !== undefined ? { description: tool.description } : {}),
         input_schema: tool.inputSchema,
         ...(tool.outputSchema !== undefined ? { output_schema: tool.outputSchema } : {}),
+        ...(reduced.length > 0 ? { schema_reduced: reduced } : {}),
       })),
     listed: true,
     truncatedAt: described.truncated ? described.tools.length : null,

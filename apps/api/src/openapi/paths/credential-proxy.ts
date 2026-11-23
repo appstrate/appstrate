@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
+import { TOOL_DESCRIPTOR_REDUCTIONS } from "@appstrate/mcp-transport";
 import { PROXY_STATUS_HEADER, STD_RESPONSE_HEADERS } from "../headers.ts";
 import { problemContent } from "../responses.ts";
 import { proxyConnectionVerdictProperties } from "./integrations.ts";
@@ -692,6 +693,16 @@ const integrationToolSchema = {
       description:
         "`remote` only, when the server declares one: the schema of the tool's " +
         "`structuredContent`, sanitised as in a run.",
+    },
+    schema_reduced: {
+      type: "array",
+      items: { type: "string", enum: [...TOOL_DESCRIPTOR_REDUCTIONS] },
+      description:
+        "`remote` only, when the server's schemas exceeded the size bound: the steps applied, in " +
+        "order, so the schemas shown are partial. `output_schema`: dropped; " +
+        "`schema_documentation`: documentation keywords (descriptions, titles, examples, " +
+        "annotations) stripped from `input_schema`; " +
+        "`input_schema`: replaced by an empty object schema, the server validating the arguments.",
     },
     catalog_unreadable: {
       type: "boolean",

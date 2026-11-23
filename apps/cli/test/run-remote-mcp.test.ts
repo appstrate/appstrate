@@ -25,6 +25,7 @@ import { buildIntegrationResolver } from "../src/commands/run/resolver.ts";
 import {
   buildIntegrationTools,
   cliPromptInputs,
+  reducedToolLines,
   unavailableIntegrationLines,
 } from "../src/commands/run.ts";
 import {
@@ -147,6 +148,7 @@ describe("run --local — unauthenticated remote MCP integrations", () => {
       expect(tools.map((t) => t.name)).toEqual(["acme_docs__a", "acme_docs__b"]);
       expect([...extensions.integrationIds]).toEqual([DOCS]);
       expect(extensions.unavailable).toEqual([]);
+      expect(extensions.reducedTools).toEqual([]);
       const result = await tools[1]!.execute("call_1", { q: "hi" });
       expect(result.content).toEqual([{ type: "text", text: "b:hi" }]);
     } finally {
@@ -217,6 +219,39 @@ describe("run --local — unauthenticated remote MCP integrations", () => {
       expect(prompt).not.toContain("## Unavailable Integrations");
     } finally {
       await extensions.close();
+    }
+  });
+
+  it("reports a tool whose descriptor was cut to fit the schema budget", async () => {
+    const heavy = echoTool("a");
+    heavy.descriptor.inputSchema = {
+      type: "object",
+      properties: { q: { type: "string" } },
+      "x-doc": "x".repeat(10_000),
+    };
+    const big = Bun.serve({
+      hostname: "127.0.0.1",
+      port: 0,
+      fetch: legacyMcpHandler({ tools: [heavy, echoTool("b")] }),
+    });
+    try {
+      const { extensions } = await wire(makeBundle({ url: `http://127.0.0.1:${big.port}/mcp` }));
+      try {
+        const entry = {
+          namespace: "acme_docs",
+          originalName: "a",
+          name: "acme_docs__a",
+          reduced: ["schema_documentation" as const],
+        };
+        expect(extensions.reducedTools).toEqual([entry]);
+        expect(reducedToolLines(extensions.reducedTools)).toBe(
+          `warn: tool acme_docs__a (acme_docs: "a") descriptor reduced: schema_documentation\n`,
+        );
+      } finally {
+        await extensions.close();
+      }
+    } finally {
+      big.stop(true);
     }
   });
 

@@ -1508,7 +1508,49 @@ describe("McpHost — one integration, several connections", () => {
     }
   });
 
-  it("drops a second connection's tool too large once sanitised, although a sibling serves it", async () => {
+  it("exposes a tool over the schema budget, reduced, and logs the reduction", async () => {
+    const [oversized] = sshTool("web-1");
+    const properties = Object.fromEntries(
+      Array.from({ length: 600 }, (_, i) => [`p${i}`, { type: "string" }]),
+    );
+    const work = await makeUpstream([
+      {
+        ...oversized!,
+        descriptor: { ...oversized!.descriptor, inputSchema: { type: "object", properties } },
+      },
+    ]);
+    try {
+      const logs: Array<{ level: string; data: unknown }> = [];
+      const host = new McpHost({ onLog: (e) => logs.push(e) });
+      await host.register({
+        integrationId: "@orga/ssh",
+        namespace: "@orga/ssh",
+        client: work.client,
+        connection: CONN_A,
+      });
+      const tools = host.buildTools();
+      expect(tools.map((t) => t.descriptor.name)).toEqual(["orga_ssh__ssh_exec"]);
+      expect(tools[0]!.descriptor.inputSchema).toEqual({ type: "object" });
+      expect(logs).toContainEqual(
+        expect.objectContaining({
+          level: "warn",
+          data: {
+            event: "tool_descriptor_reduced",
+            namespace: "orga_ssh",
+            originalName: "ssh_exec",
+            name: "orga_ssh__ssh_exec",
+            reduced: ["schema_documentation", "input_schema"],
+          },
+        }),
+      );
+      const result = await tools[0]!.handler({ command: "uptime" }, {} as never);
+      expect(result.content).toEqual([{ type: "text", text: "web-1:uptime" }]);
+    } finally {
+      await work.pair.close();
+    }
+  });
+
+  it("routes a second connection's tool over the schema budget through its sibling", async () => {
     const [oversized] = sshTool("db");
     const properties = Object.fromEntries(
       Array.from({ length: 600 }, (_, i) => [`p${i}`, { type: "string" }]),
@@ -1535,13 +1577,10 @@ describe("McpHost — one integration, several connections", () => {
         client: perso.client,
         connection: CONN_B,
       });
-      expect(host.routeCount()).toBe(1);
-      expect(logs.map((e) => e.data)).toContainEqual(
-        expect.objectContaining({
-          event: "tool_rejected",
-          reason: "schema_too_large_after_sanitisation",
-          originalName: "ssh_exec",
-        }),
+      expect(host.buildTools().length).toBe(1);
+      expect(host.routeCount()).toBe(2);
+      expect(logs.map((e) => e.data)).not.toContainEqual(
+        expect.objectContaining({ event: "tool_rejected" }),
       );
     } finally {
       await work.pair.close();

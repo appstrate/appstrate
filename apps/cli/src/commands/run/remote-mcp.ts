@@ -62,6 +62,7 @@ import {
   toolExclusion,
   type AppstrateMcpClient,
   type Tool,
+  type ToolDescriptorReduction,
 } from "@appstrate/mcp-transport";
 import {
   mcpToolForwardFactory,
@@ -76,6 +77,8 @@ export interface RemoteMcpExtensions {
   integrationIds: ReadonlySet<string>;
   /** Integrations the run starts without: `reason` worded for the prompt, `detail` the cause. */
   unavailable: UnavailableIntegration[];
+  /** Tools exposed with a descriptor cut to fit the schema budget, as the sidecar reports them. */
+  reducedTools: ReducedTool[];
   /** Closes every connection opened; the run's cleanup calls it once. */
   close(): Promise<void>;
 }
@@ -84,6 +87,14 @@ interface UnavailableIntegration {
   id: string;
   reason: string;
   detail?: string;
+}
+
+interface ReducedTool {
+  namespace: string;
+  originalName: string;
+  /** Exposed name. */
+  name: string;
+  reduced: ToolDescriptorReduction[];
 }
 
 /** The run's MCP server on the instance it reports to, and the run secret signing its requests. */
@@ -132,6 +143,7 @@ export async function buildRemoteMcpExtensions(
   const factories: ExtensionFactory[] = [];
   const integrationIds = new Set<string>();
   const unavailable: UnavailableIntegration[] = [];
+  const reducedTools: ReducedTool[] = [];
   const clients: AppstrateMcpClient[] = [];
   const closed = new Set<AppstrateMcpClient>();
   const toolNames = new Set(opts.takenToolNames);
@@ -171,6 +183,14 @@ export async function buildRemoteMcpExtensions(
         });
         if ("exclusion" in exposure) continue;
         toolNames.add(exposure.descriptor.name);
+        if (exposure.reduced.length > 0) {
+          reducedTools.push({
+            namespace,
+            originalName: tool.name,
+            name: exposure.descriptor.name,
+            reduced: exposure.reduced,
+          });
+        }
         factories.push(
           mcpToolForwardFactory({
             mcp: client,
@@ -210,6 +230,7 @@ export async function buildRemoteMcpExtensions(
     factories,
     integrationIds,
     unavailable,
+    reducedTools,
     close: async () => {
       await Promise.all(clients.map((client) => client.close().catch(() => {})));
     },

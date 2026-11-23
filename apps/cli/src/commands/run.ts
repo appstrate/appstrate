@@ -482,6 +482,7 @@ async function runCommandLocal(opts: RunCommandOptions): Promise<void> {
         process.stderr.write(`→ wired ${remoteMcp.factories.length} remote MCP tool(s)\n`);
       }
       process.stderr.write(unavailableIntegrationLines(remoteMcp.unavailable));
+      process.stderr.write(reducedToolLines(remoteMcp.reducedTools));
     }
     // The catalog lists only integrations the agent can call.
     const promptInputs = cliPromptInputs(
@@ -847,6 +848,17 @@ export function unavailableIntegrationLines(entries: RemoteMcpExtensions["unavai
       (entry) =>
         `warn: integration ${entry.id} unavailable: ${entry.reason}\n` +
         (entry.detail ? `  ${entry.detail}\n` : ""),
+    )
+    .join("");
+}
+
+/** The stderr warning of each tool whose descriptor was cut to fit the schema budget. */
+export function reducedToolLines(entries: RemoteMcpExtensions["reducedTools"]): string {
+  return entries
+    .map(
+      (entry) =>
+        `warn: tool ${entry.name} (${entry.namespace}: ${JSON.stringify(entry.originalName)}) ` +
+        `descriptor reduced: ${entry.reduced.join(", ")}\n`,
     )
     .join("");
 }

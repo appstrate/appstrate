@@ -1338,9 +1338,9 @@ function reportRejectedCredential(
  * No-silent-degradation guard: the agent author selected `spec.toolAllowlist`
  * tools, but only `added` of the server's native tools survived registration
  * (a selected tool can vanish if the server doesn't advertise it under the
- * declared name, or if the poisoning sanitiser drops its descriptor for being
- * too large). `added` counts ONLY the spawned/remote server's tools — never the
- * in-process `api_call`/`api_upload` tools, which are registered separately.
+ * declared name, or if no free exposed name is left for it). `added` counts
+ * ONLY the spawned/remote server's tools — never the in-process
+ * `api_call`/`api_upload` tools, which are registered separately.
  * Those synthetic names ARE part of `spec.toolAllowlist` (the agent selects
  * them like any other tool), so they must be discounted from the requested set
  * before comparing — otherwise every agent that selects `api_call` alongside a
