@@ -198,6 +198,7 @@ function Row({ item, index, homonym }: { item: TriggerItem; index: number; homon
   }, [active]);
   const agent = item.type === AGENT_DIRECTIVE;
   const version = item.metadata?.version;
+  const appearance = item.metadata?.appearance as AgentAppearance | undefined;
   return (
     <ComposerPrimitive.TriggerPopoverItem
       ref={ref}
@@ -212,14 +213,13 @@ function Row({ item, index, homonym }: { item: TriggerItem; index: number; homon
     >
       {agent ? (
         <>
-          <AgentGlyph
-            agent={item.metadata?.appearance as AgentAppearance | undefined}
-            label={item.label}
-            className="mt-0.5"
-          />
-          <span className="flex min-w-0 flex-1 items-baseline gap-1.5">
-            <span className="truncate text-sm font-medium">{item.label}</span>
-            <span className="text-muted-foreground shrink-0 text-xs">/{item.id}</span>
+          <AgentGlyph agent={appearance} label={item.label} className="mt-0.5" />
+          <span className="min-w-0 flex-1">
+            <span className="flex items-baseline gap-1.5">
+              <span className="truncate text-sm font-medium">{item.label}</span>
+              <span className="text-muted-foreground shrink-0 text-xs">/{item.id}</span>
+            </span>
+            <Subtitle item={item} packageId={appearance?.packageId} />
           </span>
         </>
       ) : (
@@ -233,9 +233,7 @@ function Row({ item, index, homonym }: { item: TriggerItem; index: number; homon
               )}
               {homonym && <span className="text-muted-foreground truncate text-xs">{item.id}</span>}
             </span>
-            <span className="text-muted-foreground line-clamp-1 block text-xs">
-              {item.description}
-            </span>
+            <Subtitle item={item} packageId={homonym ? undefined : item.id} />
           </span>
           {(item.metadata?.pinned === true || item.metadata?.cited === true) && (
             <>
@@ -249,4 +247,13 @@ function Row({ item, index, homonym }: { item: TriggerItem; index: number; homon
       )}
     </ComposerPrimitive.TriggerPopoverItem>
   );
+}
+
+/** A row's second line, as the app's package lists draw it: the description, else the package id. */
+function Subtitle({ item, packageId }: { item: TriggerItem; packageId: string | undefined }) {
+  if (item.description)
+    return <span className="text-muted-foreground block truncate text-xs">{item.description}</span>;
+  return packageId ? (
+    <span className="text-muted-foreground block truncate font-mono text-xs">{packageId}</span>
+  ) : null;
 }
