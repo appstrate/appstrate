@@ -148,7 +148,7 @@ function refusalBody(body: string): Record<string, unknown> | undefined {
  * The reason a `<status> <JSON body>` refusal names in `error.details.error_code`. Read from
  * that structured code only — never from the provider's prose nor from the model id.
  */
-function reasonFromRefusal(message: string): ModelErrorReason | undefined {
+export function modelErrorReason(message: string): ModelErrorReason | undefined {
   const refusal = PROVIDER_REFUSAL.exec(message);
   const body = refusal ? refusalBody(refusal[2]!) : undefined;
   const { error } = (body ?? {}) as { error?: { details?: { error_code?: unknown } } };
@@ -203,7 +203,7 @@ export function classifyModelError(input: ModelErrorInput): ModelErrorClassifica
   const normalized = message.toLowerCase();
   const status = input.status ?? statusFromMessage(message);
   const requestId = /\b(req_[A-Za-z0-9_-]+)\b/.exec(message)?.[1];
-  const reason = reasonFromRefusal(message);
+  const reason = modelErrorReason(message);
 
   let category: ModelErrorCategory;
   if (
