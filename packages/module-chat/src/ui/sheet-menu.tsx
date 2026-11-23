@@ -12,9 +12,17 @@ import { ChevronLeftIcon } from "lucide-react";
 import { Switch } from "@appstrate/ui/components/switch";
 import { cn } from "@appstrate/ui/cn";
 
-/** A row of a sheet menu: 48 px tall, as wide as the panel. */
-export const SHEET_ROW_CLASS =
-  "text-foreground flex min-h-12 w-full items-center justify-start gap-3 px-5 py-2 text-left text-base font-normal outline-none transition-colors active:bg-muted focus-visible:bg-muted hover:bg-muted disabled:pointer-events-none disabled:opacity-50 [&_svg]:size-5 [&_svg]:shrink-0 desktop-pointer:min-h-9 desktop-pointer:gap-2 desktop-pointer:px-3 desktop-pointer:py-1.5 desktop-pointer:text-sm desktop-pointer:[&_svg]:size-4";
+/**
+ * A row's inset, the way a dropdown's items sit: a margin off the panel's edges and a rounded
+ * shape, so its hover and press backgrounds read as the row rather than a band across the panel.
+ * Margin plus inner padding put its text where the heading's, the hints' and the disclaimer's sit
+ * (20 px on touch, 12 px under a mouse). Rows stretch in their flex column, so no `w-full`.
+ */
+const ROW_INSET_CLASS =
+  "mx-2 rounded-lg px-3 desktop-pointer:mx-1 desktop-pointer:rounded-md desktop-pointer:px-2";
+
+/** A row of a sheet menu: 48 px tall, inset from the panel's edges. */
+export const SHEET_ROW_CLASS = `${ROW_INSET_CLASS} text-foreground flex min-h-12 items-center justify-start gap-3 py-2 text-left text-base font-normal outline-none transition-colors active:bg-muted focus-visible:bg-muted hover:bg-muted disabled:pointer-events-none disabled:opacity-50 [&_svg]:size-5 [&_svg]:shrink-0 desktop-pointer:min-h-9 desktop-pointer:gap-2 desktop-pointer:py-1.5 desktop-pointer:text-sm desktop-pointer:[&_svg]:size-4`;
 
 /** A level of a panel that navigates: the way back to the level above it. */
 export interface MenuBack {
@@ -138,7 +146,12 @@ export function SheetMenuSwitchRow({
   testId?: string;
 }) {
   return (
-    <div className="desktop-pointer:min-h-9 desktop-pointer:gap-2 desktop-pointer:px-3 desktop-pointer:py-1.5 desktop-pointer:[&_svg]:size-4 flex min-h-12 items-center gap-3 px-5 py-2 [&_svg]:size-5 [&_svg]:shrink-0">
+    <div
+      className={cn(
+        ROW_INSET_CLASS,
+        "desktop-pointer:min-h-9 desktop-pointer:gap-2 desktop-pointer:py-1.5 desktop-pointer:[&_svg]:size-4 flex min-h-12 items-center gap-3 py-2 [&_svg]:size-5 [&_svg]:shrink-0",
+      )}
+    >
       {icon}
       <label
         htmlFor={id}

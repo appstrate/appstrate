@@ -7,11 +7,24 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { SHEET_ROW_CLASS, SheetMenuRow, SheetMenuSwitchRow } from "../src/ui/sheet-menu.tsx";
 
 describe("a sheet menu's rows", () => {
-  it("are 48 px tall, left-aligned, and as wide as the panel", () => {
+  it("are 48 px tall, left-aligned, and inset from the panel's edges", () => {
     const tokens = SHEET_ROW_CLASS.split(/\s+/);
     expect(tokens).toContain("min-h-12");
-    expect(tokens).toContain("w-full");
     expect(tokens).toContain("justify-start");
+    // Inset like a dropdown's items, so a hover reads as the row, not a band across the panel.
+    expect(tokens).toContain("mx-2");
+    expect(tokens).toContain("rounded-lg");
+    expect(tokens).toContain("desktop-pointer:mx-1");
+    expect(tokens).toContain("desktop-pointer:rounded-md");
+    expect(tokens).not.toContain("w-full");
+  });
+
+  it("inset the switch row the same way", () => {
+    const out = renderToStaticMarkup(
+      <SheetMenuSwitchRow id="s0" label="Limit" checked={false} onCheckedChange={() => {}} />,
+    );
+    expect(out).toContain("mx-2");
+    expect(out).toContain("rounded-lg");
   });
 
   it("show the destructive one in red", () => {

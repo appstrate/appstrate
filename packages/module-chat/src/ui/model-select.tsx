@@ -109,7 +109,7 @@ export function ModelPanel({
 
   if (view === "configuration" && active) {
     return (
-      <div className="flex max-h-[min(20rem,calc(100dvh-8rem))] min-h-0 flex-col p-2 max-md:max-h-[70dvh]">
+      <div className="desktop-pointer:px-3 flex max-h-[min(20rem,calc(100dvh-8rem))] min-h-0 flex-col px-5 py-2 max-md:max-h-[70dvh]">
         {back && (
           <button
             type="button"
@@ -141,7 +141,8 @@ export function ModelPanel({
     );
   }
   return (
-    <div className="flex max-h-[min(20rem,calc(100dvh-8rem))] min-h-0 flex-col overflow-y-auto p-2 max-md:max-h-none">
+    // cmdk's items pad 8 px: the list's 12 (4 under a mouse) puts their text with the heading's.
+    <div className="desktop-pointer:px-1 flex max-h-[min(20rem,calc(100dvh-8rem))] min-h-0 flex-col overflow-y-auto px-3 py-2 max-md:max-h-none">
       <ModelPickerList
         groups={groups}
         value={selectedId}

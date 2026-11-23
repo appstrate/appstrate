@@ -70,7 +70,12 @@ function LimitRows() {
   if (limit.kind === "choose") {
     // No origin and several acting spaces: the space picked becomes the origin.
     return (
-      <div role="group" aria-label={t("composer.limit.choose")} data-testid="composer-limit-item">
+      <div
+        role="group"
+        aria-label={t("composer.limit.choose")}
+        data-testid="composer-limit-item"
+        className="flex flex-col"
+      >
         <Hint>{t("composer.limit.choose")}</Hint>
         {limit.spaceIds.map((id) => (
           <SheetMenuRow key={id} onClick={() => scope.limitTo(id)}>
@@ -182,7 +187,8 @@ export function ComposerToolsPanel({
   let content: React.ReactNode;
   if (level === "skills" && conversation) {
     content = (
-      <div className="desktop-pointer:px-3 flex min-h-0 flex-col px-4 pb-2">
+      // The skills' own rows pad 4 px: the text lines up with the heading's.
+      <div className="desktop-pointer:px-2 flex min-h-0 flex-col px-4 pb-2">
         <SkillsPickerPanel conversation={conversation} draft={draft} titled={false} />
       </div>
     );
