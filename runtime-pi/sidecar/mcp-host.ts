@@ -493,6 +493,8 @@ export class McpHost {
       return true;
     };
     for (const tool of admitted) {
+      // A claimed tool needs no name of its own.
+      if (claim(tool.name)) continue;
       // Trusted first-party upstreams (our own in-process api_call server) are neither sanitised
       // nor renamed: their audited docs and canonical names (`api_call__primary`) reach the agent.
       const exposure = trusted
@@ -502,8 +504,6 @@ export class McpHost {
             namespace: normalisedNs,
             isTaken: (name) => this.toolToNamespace.has(name),
           });
-      // A claimed tool needs no name of its own.
-      if (claim(tool.name)) continue;
       let descriptor: Tool;
       if (exposure === null) {
         descriptor = withToolIntegration(

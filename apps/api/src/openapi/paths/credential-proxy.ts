@@ -699,7 +699,8 @@ const integrationToolSchema = {
       description:
         "`remote` only, when the server's schemas exceeded the size bound: the steps applied, in " +
         "order, so the schemas shown are partial. `output_schema`: dropped; " +
-        "`schema_documentation`: descriptions and examples stripped from `input_schema`; " +
+        "`schema_documentation`: documentation keywords (descriptions, titles, examples, " +
+        "annotations) stripped from `input_schema`; " +
         "`input_schema`: replaced by an empty object schema, the server validating the arguments.",
     },
     catalog_unreadable: {

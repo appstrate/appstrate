@@ -12590,7 +12590,7 @@ export interface operations {
                             output_schema?: {
                                 [key: string]: unknown;
                             };
-                            /** @description `remote` only, when the server's schemas exceeded the size bound: the steps applied, in order, so the schemas shown are partial. `output_schema`: dropped; `schema_documentation`: descriptions and examples stripped from `input_schema`; `input_schema`: replaced by an empty object schema, the server validating the arguments. */
+                            /** @description `remote` only, when the server's schemas exceeded the size bound: the steps applied, in order, so the schemas shown are partial. `output_schema`: dropped; `schema_documentation`: documentation keywords (descriptions, titles, examples, annotations) stripped from `input_schema`; `input_schema`: replaced by an empty object schema, the server validating the arguments. */
                             schema_reduced?: ("output_schema" | "schema_documentation" | "input_schema")[];
                             /**
                              * @description `remote` only: the server's `tools/list` could not be read, or not within the listing's wait (20 s, 5 s when resolving a `name`), so the tool is a declared name, without description and with an empty object schema.

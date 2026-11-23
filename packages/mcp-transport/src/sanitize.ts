@@ -27,7 +27,8 @@
  * A descriptor over the schema budget is degraded, never dropped: its
  * `outputSchema` goes first, then the input schema's documentation keywords,
  * then the input schema itself, which leaves `{ type: "object" }` and a note in
- * the description ({@link sanitiseToolDescriptor}). Every step taken is
+ * the description; the `outputSchema` comes back if the reduced input leaves
+ * room for it ({@link sanitiseToolDescriptor}). Every step that stands is
  * reported to the caller.
  *
  * What this module deliberately does NOT do:
@@ -201,18 +202,23 @@ const DOCUMENTATION_KEYWORDS: ReadonlySet<string> = new Set([
   "writeOnly",
 ]);
 
-/** Keywords whose value maps a name (a property's, a definition's, …) to a schema. */
+/**
+ * Keywords whose value maps a name (a property's, a definition's, …) to a schema. Draft-07
+ * `dependencies` also maps a name to a property-name array, kept as is like any non-schema value.
+ */
 const SCHEMA_MAP_KEYWORDS: ReadonlySet<string> = new Set([
   "properties",
   "patternProperties",
   "$defs",
   "definitions",
   "dependentSchemas",
+  "dependencies",
 ]);
 
 /** Keywords whose value is a schema or an array of schemas. */
 const SUBSCHEMA_KEYWORDS: ReadonlySet<string> = new Set([
   "items",
+  "additionalItems",
   "additionalProperties",
   "not",
   "if",
@@ -226,6 +232,7 @@ const SUBSCHEMA_KEYWORDS: ReadonlySet<string> = new Set([
   "anyOf",
   "oneOf",
   "prefixItems",
+  "contentSchema",
 ]);
 
 function isSchemaObject(value: unknown): value is Record<string, unknown> {
@@ -281,13 +288,15 @@ const INPUT_SCHEMA_WITHHELD_NOTE =
  * The sanitised `inputSchema` and `outputSchema` share a budget of
  * {@link MAX_SCHEMA_SERIALISED_BYTES}. A descriptor over it is degraded, never
  * dropped, by these steps in order, stopping as soon as it fits; `reduced`
- * lists the steps taken (empty when none was needed):
+ * lists the steps that stand (empty when none was needed):
  *   1. `output_schema`: `outputSchema` is removed (optional in MCP).
  *   2. `schema_documentation`: the input schema loses its documentation
  *      keywords. The tool's own description stays.
  *   3. `input_schema`: the input schema becomes `{ type: "object" }` and the
  *      description says it was withheld and that the server validates the
  *      arguments.
+ * Once the input schema is settled, the output schema comes back if it fits
+ * beside it.
  *
  * `outputSchema` is sanitised and budgeted alongside `inputSchema`: an
  * untrusted server could hide poisoned `description` fields in it, and it is
@@ -300,10 +309,11 @@ export function sanitiseToolDescriptor(tool: Tool): {
 } {
   let description = sanitiseTextField(tool.description, MAX_TOOL_DESCRIPTION_BYTES);
   let inputSchema = sanitiseSchemaDescriptions(tool.inputSchema) as Tool["inputSchema"];
-  let outputSchema =
+  const sanitisedOutput =
     tool.outputSchema === undefined
       ? undefined
       : (sanitiseSchemaDescriptions(tool.outputSchema) as Tool["outputSchema"]);
+  let outputSchema = sanitisedOutput;
   const reduced: ToolDescriptorReduction[] = [];
   if (
     outputSchema !== undefined &&
@@ -324,6 +334,15 @@ export function sanitiseToolDescriptor(tool: Tool): {
       MAX_TOOL_DESCRIPTION_BYTES,
     );
     reduced.push("input_schema");
+  }
+  // Steps 2–3 may have freed room for the output schema step 1 dropped.
+  if (
+    outputSchema === undefined &&
+    sanitisedOutput !== undefined &&
+    schemaBytes(inputSchema, sanitisedOutput) <= MAX_SCHEMA_SERIALISED_BYTES
+  ) {
+    outputSchema = sanitisedOutput;
+    reduced.splice(reduced.indexOf("output_schema"), 1);
   }
   const sanitisedMeta = sanitiseToolMeta(tool._meta);
   const { _meta: _untrustedMeta, outputSchema: _upstreamOutput, ...toolWithoutMeta } = tool;

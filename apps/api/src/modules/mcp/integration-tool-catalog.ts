@@ -97,7 +97,8 @@ const REMOTE_TOOL_USAGE =
   "either with its `mcp_error.code` and `message`) or with its own `isError` tool result. When " +
   "it has an `output_schema`, its `structuredContent` follows it. A `schema_reduced` lists " +
   "what was cut from the server's schemas to fit the size bound: `output_schema` (none shown), " +
-  "`schema_documentation` (descriptions and examples dropped), `input_schema` (arguments not " +
+  "`schema_documentation` (documentation keywords dropped: descriptions, titles, examples, " +
+  "annotations), `input_schema` (arguments not " +
   "shown; the server validates them). The `connection_id` of " +
   "call_integration_tool names the connection; without it the proxy chooses as for an " +
   "`api_call`, and `must_choose_connection` lists the candidates in " +
