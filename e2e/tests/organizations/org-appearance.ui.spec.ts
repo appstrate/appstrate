@@ -30,9 +30,8 @@ for (const width of [1440, 390]) {
       await expect(settings).toBeVisible();
     };
     /**
-     * The org's tile in the shell, on a fresh load. On a phone the header names
-     * the page's trail, not the organization, so the switcher is the sidebar's,
-     * behind the menu button. The org's tile is the trigger's first; the
+     * The org's tile in the shell, on a fresh load. On a phone the switcher is
+     * the sidebar's, behind the menu button. The org's tile is the trigger's first; the
      * current space's follows it.
      */
     const shellTile = async () => {

@@ -40,7 +40,6 @@ import {
   heldLocalUrl,
 } from "./conversation-sidebar-state";
 import { ConversationContextToggle, ConversationSidebar } from "./conversation-sidebar";
-import { ConversationPhoneHeader } from "./conversation-phone-header";
 import { ShellHeaderActions } from "../../components/shell-header-slots";
 import { ConversationSpaces } from "./conversation-spaces";
 import { renderSpaces } from "./render-spaces";
@@ -197,14 +196,6 @@ export function ChatModulePage() {
           <ChatConversationRenameButton activeId={conversationId ?? null} t={translate} can={can} />
           <ConversationContextToggle expanded={sidebarState.expanded} dispatch={dispatchSidebar} />
         </ShellHeaderActions>
-        <ConversationPhoneHeader
-          conversationId={conversationId ?? null}
-          transport={transport}
-          translate={translate}
-          can={can}
-          expanded={sidebarState.expanded}
-          dispatch={dispatchSidebar}
-        />
         <div className="relative flex min-h-0 min-w-0 flex-1">
           <div className="min-w-0 flex-1">
             <ChatPage

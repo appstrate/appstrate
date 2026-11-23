@@ -169,13 +169,11 @@ const NEW_SPACE_ADDRESS = `/org-settings/spaces?${NEW_SPACE_PARAM}=1`;
 /** A column's rows: it scrolls past eight of them, under a header that stays. */
 const LIST_BOX = "max-h-80 overflow-y-auto";
 
-/** The trigger's box per shape, shared by the live control and its loading placeholder. */
-const TRIGGER_BOX = {
-  brand: "h-11 w-full",
-  mobile: "h-11 min-w-0 flex-1",
-};
+/** The trigger's box, shared by the live control and its loading placeholder. */
+const TRIGGER_BOX = "h-11 w-full";
 
-export function OrgSwitcher({ variant }: { variant: "brand" | "mobile" }) {
+/** The sidebar's head: the organization and the working space, and the panel that changes them. */
+export function OrgSwitcher() {
   const { t } = useTranslation();
   const landAfterOrgSwitch = useLandAfterOrgSwitch();
   const openOverlayAfterOrgSwitch = useOpenOverlayAfterOrgSwitch();
@@ -199,7 +197,7 @@ export function OrgSwitcher({ variant }: { variant: "brand" | "mobile" }) {
   const isExploringElsewhere = exploredId !== null && exploredId !== currentOrg?.id;
   // A phone presents the panel under the trigger, in one column; everywhere else the
   // organizations sit beside their spaces, even when there is only one.
-  const mobilePresentation = variant === "mobile" || isMobile;
+  const mobilePresentation = isMobile;
   const closeSwitcherAndSidebar = () => {
     setOpen(false);
     setOpenMobile(false);
@@ -211,7 +209,7 @@ export function OrgSwitcher({ variant }: { variant: "brand" | "mobile" }) {
   // The trigger's own box (avatar + name), so the column does not move when the org lands.
   if (loading) {
     return (
-      <div className={cn("flex items-center gap-2 px-2", TRIGGER_BOX[variant])} aria-hidden>
+      <div className={cn("flex items-center gap-2 px-2", TRIGGER_BOX)} aria-hidden>
         <Skeleton className="mr-1 size-8 shrink-0 rounded-lg" />
         <div className="flex flex-col gap-1.5">
           <Skeleton className="h-3.5 w-28" />
@@ -296,8 +294,7 @@ export function OrgSwitcher({ variant }: { variant: "brand" | "mobile" }) {
       }}
     >
       <PopoverTrigger asChild>
-        {/* Two shapes, one control: `brand` heads the sidebar, `mobile` the phone header. It
-            replaces the whole context, which the coloured avatar and the up/down chevron
+        {/* It replaces the whole context, which the coloured avatar and the up/down chevron
             (never a right chevron) say. The workspace stays visible even when there is only
             one: a level nobody ever sees is a level nobody learns. */}
         <button
@@ -307,14 +304,11 @@ export function OrgSwitcher({ variant }: { variant: "brand" | "mobile" }) {
           className={cn(
             // No hover fill: the chevron answers the pointer, a focus ring the keyboard.
             "group/trigger focus-visible:ring-ring flex items-center gap-2 rounded-lg px-2 text-sm outline-none focus-visible:ring-2",
-            TRIGGER_BOX[variant],
+            TRIGGER_BOX,
           )}
         >
           {/* The organization's tile, the space's as a badge on its corner. */}
-          <OrgSpaceTile
-            ring={variant === "mobile" ? "ring-background" : "ring-sidebar"}
-            className="mr-1"
-          />
+          <OrgSpaceTile ring="ring-sidebar" className="mr-1" />
           {/* Two lines, each truncating by itself: a long organization name never hides the space. */}
           <span className="flex min-w-0 flex-1 flex-col text-left leading-tight">
             <span className="truncate font-semibold" title={currentOrg.name}>
@@ -330,14 +324,13 @@ export function OrgSwitcher({ variant }: { variant: "brand" | "mobile" }) {
       <PopoverContent
         align="start"
         side={mobilePresentation ? "bottom" : "right"}
-        sideOffset={variant === "mobile" ? 47 : 6}
+        sideOffset={6}
         className={cn(
           // Beside the sidebar the panel takes what the viewport leaves it, never more.
           "max-w-[min(calc(100vw-2rem),calc(var(--radix-popover-content-available-width)-0.5rem))] overflow-hidden rounded-xl p-0",
           mobilePresentation ? "w-[340px]" : "w-[660px]",
           mobilePresentation && "max-h-[calc(100svh-4.5rem)] overflow-y-auto",
-          variant === "mobile" && "w-[calc(100vw-1rem)] max-w-none",
-          isMobile && variant !== "mobile" && "w-[calc(100vw-1rem)] max-w-[17rem]",
+          isMobile && "w-[calc(100vw-1rem)] max-w-none",
         )}
       >
         {/* The lists filter themselves (`matchesSearch`); cmdk only supplies the field. */}

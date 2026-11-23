@@ -97,20 +97,22 @@ they start with `packages/` or `e2e/`.
   state is not duplicated: the header's trail is not drawn by the page, a
   `PageHeader` publishes its `breadcrumbs` to `stores/breadcrumb-store.ts` and
   `ShellBreadcrumb` draws them.
-- **The chat has its own header on a phone** (`ChatPhoneHeader`, `components/app-shell.tsx`; below
-  `md`, the shell's header is for the other products and for desktop). One control opens the
-  sidebar: a burger, then the organization's avatar with the space's on its corner (`OrgSpaceTile`,
-  the switcher's own, stacked, never side by side), no names; its accessible name says them. After it, what the
-  chat puts in the `phone` slot (`ShellHeaderPhone`): the conversation's name, truncated; the
-  pencil that edits it; the context panel at the right end. Controls are 44 px. It has no
-  notification bell: in the chat the bell is in the sidebar's header on a phone.
-- **The chat's sidebar is the whole screen on a phone** (`Sidebar mobileFullScreen`, the chat only):
-  the organization switcher, the notification bell and a close button on its first row, then the
-  Studio/Chat switch, "Nouvelle conversation" (a left-aligned row with its icon in a round tile, like the
-  conversations below) with the search as a magnifier at the end of that row, which unfolds a filled
-  field (no border) under it, closed by its X or by a tap elsewhere while empty, the recent conversations (one line each: the title, then the tiles of its spaces, two at most then
-  « +N », named for a screen reader; the names are in the "…" panel), then the footer every drawer
-  has: Catalogue, Settings and the account.
+- **One header, one sidebar, every product and format** (`ShellHeader` and `AppSidebar`,
+  `components/app-shell.tsx`). While the sidebar is off screen (a phone, a collapsed desktop) one
+  control opens it (`SidebarOpener`): a burger, then the organization's avatar with the space's on
+  its corner (`OrgSpaceTile`, the switcher's own, stacked, never side by side), no names; its
+  accessible name says them, and it carries the unread dot of the Runs entry it hides. Then the
+  trail (the last segment alone on a phone), the page's controls and the notification bell.
+  Controls are 44 px on touch. In the chat the trail is the conversation's name and the controls are
+  its spaces, the pencil that renames it and the context panel.
+- **The sidebar is the whole screen on a phone**: the organization switcher and a close button on
+  its first row, then the Studio/Chat switch and the product's navigation. In the chat: "Nouvelle
+  conversation" (a left-aligned row with its icon in a round tile, like the conversations below)
+  with the search as a magnifier at the end of that row, which unfolds a filled field (no border)
+  under it, closed by its X or by a tap elsewhere while empty, then the recent conversations (one
+  line each: the title, then the tiles of its spaces, two at most then « +N », named for a screen
+  reader; the names are in the "…" panel). Then the footer every drawer has: Catalogue, Settings
+  and the account.
 - **A phone's menus rise from the bottom** (`SheetMenu`, `packages/module-chat/src/ui/sheet-menu.tsx`,
   the design system's bottom `Sheet`): rows 48 px tall, the destructive one in red and asking before
   it acts. Below `md` the composer's "+", a conversation's "…" and the model picker are such panels; a

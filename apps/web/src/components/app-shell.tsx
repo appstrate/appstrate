@@ -107,39 +107,28 @@ export function AppSidebar({ product }: { product: "studio" | "chat" }) {
   );
 
   return (
-    <Sidebar
-      mobileFullScreen={product === "chat"}
-      className={product === "chat" ? `overflow-y-auto ${KEYBOARD_VIEWPORT_CLASS}` : undefined}
-    >
+    <Sidebar className={`overflow-y-auto ${KEYBOARD_VIEWPORT_CLASS}`}>
       {/* The brand cell sits at the header's height so the two rules meet across the shell. The
           collapse shows while the pointer is on the sidebar or on focus (`group` is its root). */}
       <SidebarHeader className="border-sidebar-border h-header flex-row items-center gap-1 border-b px-2 py-0">
         <div className="min-w-0 flex-1">
-          <OrgSwitcher variant="brand" />
+          <OrgSwitcher />
         </div>
         <SidebarTrigger className="text-muted-foreground hidden size-7 shrink-0 opacity-0 transition-opacity group-hover:opacity-100 focus-visible:opacity-100 md:inline-flex">
           <PanelLeft className="size-4" />
         </SidebarTrigger>
-        {/* The chat's phone header has no bell: it is here, where the drawer opens. The drawer is
-            the whole screen on a phone: it closes from its own corner. */}
-        {product === "chat" && (
-          <>
-            <div className="shrink-0 md:hidden">
-              <NotificationBell triggerClassName="size-11" />
-            </div>
-            <Button
-              type="button"
-              variant="ghost"
-              size="icon"
-              className="size-11 shrink-0 md:hidden"
-              aria-label={t("btn.close")}
-              data-testid="sidebar-close"
-              onClick={() => setOpenMobile(false)}
-            >
-              <X className="size-5" aria-hidden="true" />
-            </Button>
-          </>
-        )}
+        {/* The drawer is the whole screen on a phone: it closes from its own corner. */}
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon"
+          className="size-11 shrink-0 md:hidden"
+          aria-label={t("btn.close")}
+          data-testid="sidebar-close"
+          onClick={() => setOpenMobile(false)}
+        >
+          <X className="size-5" aria-hidden="true" />
+        </Button>
       </SidebarHeader>
       <ProductTabs />
       {/* Leave room for a search field and its results. In a short viewport the whole sidebar
@@ -189,48 +178,40 @@ export function AppSidebar({ product }: { product: "studio" | "chat" }) {
 }
 
 /**
- * The chat's header on a phone: one control that opens the sidebar (a burger, then the
- * organization's and the space's avatars, no names), then whatever the page puts in the `phone`
- * slot (the conversation's name and its controls). There is no bell: the drawer carries it.
+ * The one control that opens the sidebar while it is off screen (a phone, a collapsed desktop): a
+ * burger, then the organization's avatar with the space's on its corner, no names; its accessible
+ * name says them. It carries the unread dot of the Runs entry it hides.
  */
-function ChatPhoneHeader() {
+function SidebarOpener({ className }: { className?: string }) {
   const { t } = useTranslation();
-  const { toggleSidebar, isMobile, openMobile } = useSidebar();
+  const { toggleSidebar, isMobile, openMobile, state } = useSidebar();
   const { names } = useContextNames();
-  return (
-    <header
-      data-testid="chat-phone-header"
-      className={cn(
-        "bg-canvas h-header sticky top-0 z-20 flex shrink-0 items-center gap-1 pr-2 shadow-[inset_0_-1px_0_0_var(--color-border)] md:hidden",
-        isMobile && openMobile && "invisible",
-      )}
-    >
-      <Button
-        type="button"
-        variant="ghost"
-        data-testid="chat-sidebar-trigger"
-        className="h-11 shrink-0 gap-2 px-3"
-        aria-expanded={openMobile}
-        aria-label={names ? t("nav.toggleSidebarIn", { current: names }) : t("nav.toggleSidebar")}
-        onClick={toggleSidebar}
-      >
-        <Menu className="size-5" aria-hidden="true" />
-        <OrgSpaceTile ring="ring-canvas" />
-      </Button>
-      <HeaderSlotOutlet slot="phone" className="flex min-w-0 flex-1 items-center gap-1" />
-    </header>
-  );
-}
-
-export function ShellHeader({ product }: { product: "studio" | "chat" }) {
-  const { isMobile, openMobile, state } = useSidebar();
   // The Runs entry's own count (`NavOrg`): the working space's, or every reached space's.
   const { on: overview } = useOverviewMode();
   const unreadRuns = useUnreadRunCount({ spanning: overview });
+  return (
+    <Button
+      type="button"
+      variant="ghost"
+      data-testid="sidebar-opener"
+      className={cn("desktop-pointer:h-8 relative h-11 shrink-0 gap-2 px-2", className)}
+      aria-expanded={isMobile ? openMobile : state === "expanded"}
+      aria-label={names ? t("nav.toggleSidebarIn", { current: names }) : t("nav.toggleSidebar")}
+      onClick={toggleSidebar}
+    >
+      <Menu className="size-5" aria-hidden="true" />
+      <OrgSpaceTile ring="ring-canvas" />
+      {unreadRuns > 0 && (
+        <span className="ring-canvas bg-destructive pointer-events-none absolute top-1 left-6 size-2 rounded-full ring-2" />
+      )}
+    </Button>
+  );
+}
+
+export function ShellHeader() {
+  const { isMobile, openMobile, state } = useSidebar();
   const collapsed = !isMobile && state === "collapsed";
 
-  // The chat has its own header below `md` (`ChatPhoneHeader`): the shell's is for the rest.
-  const phoneHeader = product === "chat";
   // One band, up to three rows, on a three-column grid. Row one is the same on
   // every page: the burger, the trail, the page's controls and the bell. A page
   // with a title block (a detail page) adds its identity in row two, takes its
@@ -240,72 +221,50 @@ export function ShellHeader({ product }: { product: "studio" | "chat" }) {
   // shadow, not a border: a border would add a pixel to rows that are exactly
   // `--spacing-header`, the height the sidebar's brand cell shares.
   return (
-    <>
-      {phoneHeader && <ChatPhoneHeader />}
-      <header
-        className={cn(
-          "bg-canvas group/header sticky top-0 z-20 grid shrink-0 grid-cols-[minmax(0,1fr)_auto_auto] shadow-[inset_0_-1px_0_0_var(--color-border)]",
-          phoneHeader && "max-md:hidden",
-          isMobile && openMobile && "invisible",
-        )}
-      >
-        {/* Edge to edge, never centred on the page width: the header belongs to
+    <header
+      className={cn(
+        "bg-canvas group/header sticky top-0 z-20 grid shrink-0 grid-cols-[minmax(0,1fr)_auto_auto] shadow-[inset_0_-1px_0_0_var(--color-border)]",
+        isMobile && openMobile && "invisible",
+      )}
+    >
+      {/* Edge to edge, never centred on the page width: the header belongs to
           the shell, not to the page column. With a title block, the trail runs
           over the controls' column too: they are in row two, and must not
           squeeze it. Collapsed, the left inset is the
-          sidebar's own (`px-2`), so the burger stands where the brand cell
-          stood and its icon over the navigation's icons. */}
-        <div
-          className={cn(
-            "h-header pl-gutter col-start-1 row-start-1 flex min-w-0 items-center gap-2 group-has-[[data-header-lead]:not(:empty)]/header:col-span-2",
-            collapsed && "md:pl-2",
-          )}
-        >
-          {/* Mobile-only trigger: on desktop the collapse lives in the sidebar */}
-          <SidebarTrigger className="-ml-5 size-11 shrink-0 rounded-l-none md:hidden">
-            <Menu className="size-4" />
-          </SidebarTrigger>
-          {/* Desktop, collapsed: nothing of the sidebar is left on screen, so its
-            way back is here. A click pins it open again. It carries the unread
-            dot the hidden Runs entry cannot show. */}
-          {collapsed && (
-            <SidebarTrigger className="relative hidden size-8 shrink-0 md:inline-flex">
-              <Menu className="size-4" />
-              {unreadRuns > 0 && (
-                <span className="ring-canvas bg-destructive pointer-events-none absolute top-1 right-1 size-2 rounded-full ring-2" />
-              )}
-            </SidebarTrigger>
-          )}
-          {/* On a phone, the page's trail, or (where there is none) the
-            organization: the sidebar is closed, so the header names it. */}
-          <div className="flex min-w-0 flex-1 group-has-[[data-trail]:not(:empty)]/header:hidden md:hidden">
-            <OrgSwitcher variant="mobile" />
-          </div>
-          <div className="flex min-w-0 flex-1 items-center">
-            <ShellBreadcrumb />
-          </div>
+          sidebar's own (`px-2`), so the opener stands where the brand cell
+          stood. */}
+      <div
+        className={cn(
+          "h-header pl-gutter col-start-1 row-start-1 flex min-w-0 items-center gap-2 group-has-[[data-header-lead]:not(:empty)]/header:col-span-2",
+          collapsed && "md:pl-2",
+        )}
+      >
+        {/* Wherever the sidebar is off screen: a phone, or a collapsed desktop. */}
+        <SidebarOpener className={cn("-ml-2", !collapsed && "md:hidden")} />
+        <div className="flex min-w-0 flex-1 items-center">
+          <ShellBreadcrumb />
         </div>
-        {/* The page's title block, under the trail. */}
-        <HeaderSlotOutlet
-          slot="lead"
-          data-header-lead
-          className="px-gutter col-start-1 row-start-2 flex min-w-0 items-center py-2 empty:hidden"
-        />
-        {/* The page's own actions: in row one, left of the bell, and for a page
+      </div>
+      {/* The page's title block, under the trail. */}
+      <HeaderSlotOutlet
+        slot="lead"
+        data-header-lead
+        className="px-gutter col-start-1 row-start-2 flex min-w-0 items-center py-2 empty:hidden"
+      />
+      {/* The page's own actions: in row one, left of the bell, and for a page
           with a title block in row two, at its right end, level with the title. */}
-        <HeaderSlotOutlet
-          slot="actions"
-          className="group-has-[[data-header-lead]:not(:empty)]/header:pr-gutter col-start-2 row-start-1 flex items-center gap-1 pl-2 group-has-[[data-header-lead]:not(:empty)]/header:col-span-2 group-has-[[data-header-lead]:not(:empty)]/header:row-start-2 group-has-[[data-header-lead]:not(:empty)]/header:justify-self-end empty:hidden"
-        />
-        {/* The one utility that is global but not personal: notifications. It
+      <HeaderSlotOutlet
+        slot="actions"
+        className="group-has-[[data-header-lead]:not(:empty)]/header:pr-gutter col-start-2 row-start-1 flex items-center gap-1 pl-2 group-has-[[data-header-lead]:not(:empty)]/header:col-span-2 group-has-[[data-header-lead]:not(:empty)]/header:row-start-2 group-has-[[data-header-lead]:not(:empty)]/header:justify-self-end empty:hidden"
+      />
+      {/* The one utility that is global but not personal: notifications. It
           sits here rather than in the sidebar because the sidebar answers
           "where am I" and this answers "what is new". Same place on every page. */}
-        <div className="px-gutter h-header col-start-3 row-start-1 flex shrink-0 items-center md:pl-2">
-          <NotificationBell />
-        </div>
-        {/* The page's tabs: the same band, closed by the header's own rule. */}
-        <HeaderSlotOutlet slot="tabs" className="px-gutter col-span-3 empty:hidden" />
-      </header>
-    </>
+      <div className="px-gutter h-header col-start-3 row-start-1 flex shrink-0 items-center md:pl-2">
+        <NotificationBell />
+      </div>
+      {/* The page's tabs: the same band, closed by the header's own rule. */}
+      <HeaderSlotOutlet slot="tabs" className="px-gutter col-span-3 empty:hidden" />
+    </header>
   );
 }

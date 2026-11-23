@@ -633,15 +633,13 @@ function ConversationRow({
 }
 
 /**
- * « Renommer » for the open conversation, a pencil in the host's header on every format (`className`
- * sizes it to the header). Renders nothing until the conversation is known, or for a reader
- * (renaming is a write).
+ * « Renommer » for the open conversation, a pencil in the host's header on every format. Renders
+ * nothing until the conversation is known, or for a reader (renaming is a write).
  */
 export function ChatConversationRenameButton(props: {
   activeId: string | null;
   t: ChatTranslate;
   can: ChatCan;
-  className?: string;
 }) {
   return <ConversationRenameButton key={props.activeId} {...props} />;
 }
@@ -650,12 +648,10 @@ function ConversationRenameButton({
   activeId,
   t,
   can,
-  className,
 }: {
   activeId: string | null;
   t: ChatTranslate;
   can: ChatCan;
-  className?: string;
 }) {
   const [open, setOpen] = useState(false);
   const { data: sessions } = useSessions();
@@ -666,8 +662,7 @@ function ConversationRenameButton({
       <Button
         type="button"
         variant="ghost"
-        size="icon"
-        className={className ?? "size-8"}
+        size="icon-sm"
         aria-label={t("threads.rename")}
         title={t("threads.rename")}
         onClick={() => setOpen(true)}

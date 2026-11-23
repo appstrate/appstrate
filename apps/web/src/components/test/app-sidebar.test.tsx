@@ -86,7 +86,7 @@ describe("the sidebar in « Tous les espaces »", () => {
   });
 });
 
-describe("the notification bell on a phone", () => {
+describe("the drawer's head", () => {
   const render = (product: "studio" | "chat") =>
     renderInSpace(
       <SidebarProvider>
@@ -95,17 +95,12 @@ describe("the notification bell on a phone", () => {
       { overview: false, queryClient: memberSpaceClient([testSpace("spc_a", ["runs:read"])]) },
     );
 
-  it("is in the chat's drawer, which has no bell in its header to carry one, and only there", () => {
-    const chat = render("chat");
-    expect(chat).toContain('aria-label="Notifications"');
-    expect(chat).toMatch(/<div class="shrink-0 md:hidden"><[^>]*aria-label="Notifications"/);
-    // Studio's header keeps its own.
-    expect(render("studio")).not.toContain('aria-label="Notifications"');
-  });
-
-  it("goes with a close button, as the chat's drawer is the whole screen on a phone", () => {
-    expect(render("chat")).toContain('data-testid="sidebar-close"');
-    expect(render("studio")).not.toContain('data-testid="sidebar-close"');
+  it("closes from its own corner in every product, the drawer being the whole screen on a phone", () => {
+    for (const product of ["chat", "studio"] as const) {
+      expect(render(product)).toContain('data-testid="sidebar-close"');
+      // The bell is the header's, on every format.
+      expect(render(product)).not.toContain('aria-label="Notifications"');
+    }
   });
 });
 

@@ -12,6 +12,7 @@ import { breadcrumbStore, visibleTrail } from "@/stores/breadcrumb-store";
 import { useDocumentTitle } from "@/hooks/use-document-title";
 import { useCanReach } from "@/hooks/use-can-reach";
 import { useOverlayPath } from "@/lib/modal-route";
+import { cn } from "@appstrate/ui/cn";
 import {
   Breadcrumb,
   BreadcrumbItem,
@@ -22,8 +23,7 @@ import {
 } from "@appstrate/ui/components/breadcrumb";
 
 /**
- * The header's slot elements. The trail is drawn twice (the desktop row and the
- * phone row, one of them hidden), so a slot entry has one element per drawing and
+ * The header's slot elements: a slot entry has one element per drawing of the trail, and
  * `ShellTrailContent` fills each.
  */
 const trailSlots = createStore<{ elements: HTMLElement[] }>(() => ({ elements: [] }));
@@ -63,13 +63,14 @@ export function ShellBreadcrumb() {
     >
       <BreadcrumbList className="min-w-0 flex-nowrap gap-1.5 sm:gap-1.5">
         {entries.map((crumb, i) => (
+          // A phone's header has room for where you are: the last segment alone.
           <Fragment key={i}>
             {i > 0 && (
-              <BreadcrumbSeparator className="text-border shrink-0 select-none">
+              <BreadcrumbSeparator className="text-border shrink-0 select-none max-md:hidden">
                 /
               </BreadcrumbSeparator>
             )}
-            <BreadcrumbItem className="min-w-0">
+            <BreadcrumbItem className={cn("min-w-0", i < entries.length - 1 && "max-md:hidden")}>
               {crumb.slot ? (
                 <span ref={registerTrailSlot} className="flex min-w-0" />
               ) : crumb.href && canReach(crumb.href) ? (

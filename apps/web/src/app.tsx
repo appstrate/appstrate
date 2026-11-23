@@ -486,7 +486,7 @@ function MainLayout({ search }: { search: string }) {
               : "bg-canvas h-dvh overflow-y-auto"
           }
         >
-          <ShellHeader product={product} />
+          <ShellHeader />
           {/* Must stay visible on every route, permission-denied pages included. */}
           <ViewAsBanner />
           {/* Full-bleed surfaces opt out with `data-full-bleed` on their root. */}

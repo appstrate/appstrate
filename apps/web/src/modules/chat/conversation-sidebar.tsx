@@ -69,12 +69,9 @@ const FLOATING_FRAME = "overflow-hidden rounded-2xl shadow-xs";
 export function ConversationContextToggle({
   expanded,
   dispatch,
-  className = "size-8",
 }: {
   expanded: boolean;
   dispatch: Dispatch<ConversationSidebarAction>;
-  /** The button's size: a phone's header makes it a thumb's. */
-  className?: string;
 }) {
   const { t } = useTranslation("chat");
   const label = expanded ? t("context.hide") : t("context.show");
@@ -85,8 +82,7 @@ export function ConversationContextToggle({
         <Button
           type="button"
           variant="ghost"
-          size="icon"
-          className={className}
+          size="icon-sm"
           aria-label={label}
           aria-expanded={expanded}
           aria-controls={CONVERSATION_CONTEXT_PANEL_ID}

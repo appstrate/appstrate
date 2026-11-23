@@ -49,7 +49,7 @@ test("chat fields stay legible in both orientations and the search sheet fits th
 
   await page.setViewportSize({ width: 390, height: 844 });
   await expect(code).toHaveCSS("font-size", "14px");
-  await page.getByTestId("chat-sidebar-trigger").click();
+  await page.getByTestId("sidebar-opener").click();
   const sheet = page.getByRole("dialog");
   // Below md the search is a magnifier that unfolds the field.
   await page.getByTestId("chat-search-toggle").click();

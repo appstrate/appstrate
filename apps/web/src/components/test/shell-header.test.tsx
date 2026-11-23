@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * The shell's header on a phone: the chat has its own (a burger and the organization's and the
- * space's avatars, no names, no bell) and the shell's is for desktop; Studio keeps the shell's.
+ * The shell's header, one for every product and format: while the sidebar is off screen it opens
+ * from one control (a burger and the organization's and the space's avatars, no names).
  */
 
 import { afterAll, describe, expect, it } from "bun:test";
@@ -45,11 +45,11 @@ const { ShellFrameProvider } = await import("../shell-header-slots.tsx");
 await i18nReady;
 await i18n.changeLanguage("fr");
 
-function render(product: "studio" | "chat") {
+function render() {
   return renderInSpace(
     <SidebarProvider>
       <ShellFrameProvider>
-        <ShellHeader product={product} />
+        <ShellHeader />
       </ShellFrameProvider>
     </SidebarProvider>,
     {
@@ -59,28 +59,21 @@ function render(product: "studio" | "chat") {
   );
 }
 
-describe("the shell header on a phone", () => {
-  it("gives the chat its own header, hidden from md, and hides the shell's below md", () => {
-    const html = render("chat");
-    expect(html).toContain('data-testid="chat-phone-header"');
-    const phone = html.split("</header>")[0] ?? "";
-    expect(phone).toMatch(/class="[^"]*md:hidden/);
-    // The one control that opens the sidebar is a burger, named for a screen reader with where the
-    // user stands: the organization and the space.
-    expect(phone).toContain('data-testid="chat-sidebar-trigger"');
-    expect(phone).toMatch(/aria-label="Afficher ou masquer le menu latéral \(Acme, [^"]+\)"/);
-    expect(phone).toContain("h-11");
+describe("the shell header", () => {
+  it("opens the sidebar from one control on a phone, named with where the user stands", () => {
+    const html = render();
+    expect(html.match(/<header/g)).toHaveLength(1);
+    const opener = html.match(/<button[^>]*data-testid="sidebar-opener"[^>]*>/)?.[0] ?? "";
+    // Below md only while the desktop sidebar is open; 44 px on touch.
+    expect(opener).toMatch(/class="[^"]*md:hidden/);
+    expect(opener).toContain("h-11");
+    expect(opener).toMatch(/aria-label="Afficher ou masquer le menu latéral \(Acme, [^"]+\)"/);
     // The avatars are stacked as in the sidebar's switcher: the space's is a badge on the corner of
     // the organization's, not a second tile beside it.
-    expect(phone).toContain("absolute -right-1 -bottom-1 size-4");
-    expect(phone).toContain("ring-canvas");
-    // The shell's own header is the rest of the markup, gone below md.
-    expect(html.slice(phone.length)).toMatch(/<header class="[^"]*max-md:hidden/);
+    expect(html).toContain("absolute -right-1 -bottom-1 size-4");
   });
 
-  it("Studio uses the shell's header at every width", () => {
-    const html = render("studio");
-    expect(html).not.toContain('data-testid="chat-phone-header"');
-    expect(html).not.toContain("max-md:hidden");
+  it("keeps the bell in the header on every format", () => {
+    expect(render()).toContain('aria-label="Notifications"');
   });
 });

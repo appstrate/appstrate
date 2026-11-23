@@ -143,21 +143,17 @@ function renderIn(
 
 describe("the switcher", () => {
   it("names the organization and the space, or the mode, in its accessible name", () => {
-    expect(renderIn(true, <OrgSwitcher variant="brand" />).html).toContain(
+    expect(renderIn(true, <OrgSwitcher />).html).toContain(
       "aria-label=\"Changer d'organisation ou d'espace (actuel : Acme, Tous les espaces)\"",
     );
-    expect(renderIn(false, <OrgSwitcher variant="brand" />).html).toContain(
+    expect(renderIn(false, <OrgSwitcher />).html).toContain(
       "aria-label=\"Changer d'organisation ou d'espace (actuel : Acme, Studio)\"",
     );
   });
 
-  it("names the mode where it names the working space, in the sidebar and the phone header alike", () => {
-    for (const variant of ["brand", "mobile"] as const) {
-      expect(renderIn(true, <OrgSwitcher variant={variant} />).html).toContain(
-        'title="Tous les espaces"',
-      );
-      expect(renderIn(false, <OrgSwitcher variant={variant} />).html).toContain('title="Studio"');
-    }
+  it("names the mode where it names the working space", () => {
+    expect(renderIn(true, <OrgSwitcher />).html).toContain('title="Tous les espaces"');
+    expect(renderIn(false, <OrgSwitcher />).html).toContain('title="Studio"');
   });
 });
 
