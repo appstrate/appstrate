@@ -38,7 +38,7 @@ import {
   seedSystemSkill,
 } from "../../helpers/seed.ts";
 import { mcpRpc, inSpace, mcpAuthHeaders } from "../../helpers/mcp.ts";
-import { skillFileUri } from "@appstrate/core/skill-uri";
+import { skillFileUri } from "@appstrate/core/skill-address";
 import { registerTestPlatformApp } from "../../helpers/platform-app.ts";
 import {
   AGENT_PACKAGES_BUCKET,

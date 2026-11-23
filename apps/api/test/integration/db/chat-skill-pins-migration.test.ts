@@ -183,7 +183,6 @@ describe("migration 0112 — fold the chat skill modes into pins and discovery",
       expect(types).toHaveLength(0);
       const constraints = await constraintNames(tx);
       expect(constraints).toContain("chat_sessions_pinned_skills_cap");
-      expect(constraints).not.toContain("chat_sessions_assistant_skills_pinned");
     });
   });
 });

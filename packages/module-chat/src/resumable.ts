@@ -306,8 +306,9 @@ type StreamClaim = "claimed" | "scope_changed" | "in_flight";
  * {@link STALE_MARKER_MIN_AGE_MS}) and `updated_at`, compare-and-set on the `scope` the turn read
  * (its origin space and limit: the limit PATCH is refused only while a marker is set, so a change
  * landing between the read and this claim refuses the turn). Writes the turn's verdict on each pin
- * it read as `skill_status`; a refused claim writes nothing. Answers `claimed`, `scope_changed`
- * (the scope moved, or the row is gone) or `in_flight` (another turn holds the conversation).
+ * it read and the row still holds as `skill_status`; a refused claim writes nothing. Answers
+ * `claimed`, `scope_changed` (the scope moved, or the row is gone) or `in_flight` (another turn
+ * holds the conversation).
  * Emits no signal: the caller's next write does, or `clearActiveStream`.
  */
 export async function setActiveStream(
@@ -319,7 +320,12 @@ export async function setActiveStream(
   const staleBefore = new Date(Date.now() - STALE_MARKER_MIN_AGE_MS);
   const claimed = await db
     .update(chatSessions)
-    .set({ activeStreamId: streamId, updatedAt: new Date(), skillStatus })
+    .set({
+      activeStreamId: streamId,
+      updatedAt: new Date(),
+      // Only the pins the row still holds: a skills PATCH landing since the turn read them wins.
+      skillStatus: sql`(SELECT coalesce(jsonb_object_agg(key, value), '{}'::jsonb) FROM jsonb_each(${JSON.stringify(skillStatus)}::jsonb) WHERE key = ANY(${chatSessions.pinnedSkills}))`,
+    })
     .where(
       and(
         eq(chatSessions.id, sessionId),

@@ -3,8 +3,8 @@
 /**
  * The grammar of Appstrate's `skill://` URIs (MCP Skills extension, SEP-2640),
  * free of any server-only import so the browser can parse them too (the chat
- * UI reads them). `@appstrate/core/skill-uri` re-exports all of it beside the
- * entries, limits and digest the server and the CLI also need.
+ * UI reads them). The entries, limits and digest the server and the CLI also
+ * need live in `@appstrate/core/skill-uri`.
  *
  * URI forms (the authority is the space id, `<scope>` drops the `@`):
  * - published: `skill://<spaceId>/<scope>/<package-name>/<name>/<path>`

@@ -329,9 +329,9 @@ describe("persistNotice single-writer guard", () => {
     expect(await activeStreamId(sessionId)).toBe("strm_first");
   });
 
-  it("claims though the skill settings moved since the turn read them, writing its verdicts", async () => {
+  it("claims though the skill settings moved since the turn read them, writing no verdict for a dropped pin", async () => {
     // The skills PATCH is allowed while a turn starts: the turn runs on what it read, and the
-    // next one reads the PATCH. A verdict keyed by a pin no longer held is never shown.
+    // next one reads the PATCH. A verdict keyed by a pin the row no longer holds is not written.
     const sessionId = await createSession();
     await db
       .update(chatSessions)
@@ -344,7 +344,7 @@ describe("persistNotice single-writer guard", () => {
       .select({ pinnedSkills: chatSessions.pinnedSkills, skillStatus: chatSessions.skillStatus })
       .from(chatSessions)
       .where(eq(chatSessions.id, sessionId));
-    expect(row).toEqual({ pinnedSkills: ["@acme/b"], skillStatus: verdicts });
+    expect(row).toEqual({ pinnedSkills: ["@acme/b"], skillStatus: {} });
   });
 
   it("takes over a stale marker, whose producer is gone", async () => {

@@ -1,5 +1,7 @@
 # Skills in the chat
 
+Status: **implemented** (#2357).
+
 Implements issue #1309 (replaces #851, #1126 and #1165); the server-owned pins and their statuses
 are #2356; the composer's `/` menu is #2173.
 
@@ -36,6 +38,12 @@ catalogue and the pins take the caller's draft when there is one, otherwise the 
 
 The system prompt is ONE `cache_control` block, byte-identical across turns for the same state;
 changing discovery or the pins, or editing a pinned skill, may miss the cache once.
+
+**Why every turn, not once.** Claude Code and the Agent Skills loaders put an invoked skill into the
+history once. A pin is re-injected from the system prompt on every turn instead: the chat's history
+is bounded and summarized, so a skill injected once can fall out of it while the panel still shows
+it pinned, which breaks the invariant above. The cached system block makes the repeat cost a cache
+read, not new input.
 
 ## Stored state
 

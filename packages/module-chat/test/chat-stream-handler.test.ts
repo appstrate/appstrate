@@ -1450,11 +1450,11 @@ describe("handleChatStream", () => {
     await collectUiChunks(res);
     await waitForAssistantPersist(sessionId);
     expect(first.calls[0]!.system).toContain("Pin A.");
-    // The PATCH stands; the verdict of the pin it dropped is never shown.
+    // The PATCH stands; the claim writes no verdict for the pin it dropped.
     expect(await sessionSkills(sessionId)).toEqual({
       skillDiscovery: true,
       pinnedSkills: ["@acme/b"],
-      skillStatus: { "@acme/a": { status: "injected", chars: "Pin A.".length } },
+      skillStatus: {},
     });
 
     const second = scriptedEngine();
@@ -1644,8 +1644,8 @@ describe("handleChatStream", () => {
   it("answers 400 to a body field the turn does not know, or malformed pins", async () => {
     for (const body of [
       { not_a_field: true },
-      { pin_skills: ["@a/1"] },
-      { unpin_skills: ["@a/1"] },
+      { skill_mode: "strict" },
+      { pinned_skills: ["@a/1"] },
       { pins: ["not-a-package-id"] },
       { pins: ["@a/1", "@a/2", "@a/3", "@a/4", "@a/5", "@a/6"] },
     ]) {

@@ -11,8 +11,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **`@appstrate/core/skill-address`**: the `skill://` URI grammar alone — `SKILL_URI_PREFIX`,
   `skillFileUri`, `parseSkillUri`, `parseSkillUriPackage` and the `SkillAddress` type — with no
-  server-only import, so a browser bundle can parse a skill URI. `@appstrate/core/skill-uri`
-  re-exports the same names unchanged and keeps `skillFileDigest` (`node:crypto`).
+  server-only import, so a browser bundle can parse a skill URI.
 - **`personal_space_role`** org setting (`orgSettingsSchema`, `admin` | `operator`, read as `admin` when
   absent): `operator` caps the role an org member holds in their own personal space.
 - **`AuthResolution.spaceIdsRestricted`** (`@appstrate/core/module`, #2336): whether `spaceIds` is a
@@ -61,6 +60,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Removed
 
+- **`SKILL_URI_PREFIX`, `skillFileUri`, `parseSkillUri`, `parseSkillUriPackage`, `SkillAddress`
+  from `@appstrate/core/skill-uri`** — BREAKING. They live in `@appstrate/core/skill-address`
+  alone; import them from there. `skill-uri` keeps the entries, limits, `_meta` keys and
+  `skillFileDigest` (`node:crypto`).
 - **`relativeAge`, `RelativeAgeUnit`** — BREAKING (`@appstrate/core/format`). They returned a
   past-only `{ unit, count }` that every caller translated with its own keys, rounding where the
   schedules needed truncation and clamping every future date to now. Use `formatRelativeTime`

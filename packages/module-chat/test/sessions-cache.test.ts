@@ -135,8 +135,9 @@ describe("a conversation's seed", () => {
     messages: [],
     skills: {
       skillDiscovery: true,
-      pins: [{ id: "@acme/tone", source: "user", status: "injected" }],
+      pins: [{ id: "@acme/tone", status: "injected", chars: 120 }],
     },
+    usage: { input_tokens: 0, output_tokens: 0 },
     createdAt: "",
   };
 

@@ -12,11 +12,8 @@ import { createHash } from "node:crypto";
 import { eq } from "drizzle-orm";
 import { packageDistTags, packages } from "@appstrate/db/schema";
 import { unzipArtifact, zipArtifact } from "@appstrate/core/zip";
-import {
-  parseSkillUri,
-  SKILL_DEFINITION_META_KEY,
-  SKILL_LOCK_VERSION_META_KEY,
-} from "@appstrate/core/skill-uri";
+import { SKILL_DEFINITION_META_KEY, SKILL_LOCK_VERSION_META_KEY } from "@appstrate/core/skill-uri";
+import { parseSkillUri } from "@appstrate/core/skill-address";
 import { computeIntegrity } from "@appstrate/core/integrity";
 import * as storage from "@appstrate/db/storage";
 import { getTestApp } from "../../helpers/app.ts";

@@ -15,10 +15,9 @@ import type { Context } from "hono";
 import {
   SKILL_DEFINITION_META_KEY,
   SKILL_LOCK_VERSION_META_KEY,
-  parseSkillUri,
-  parseSkillUriPackage,
   skillFileDigest,
 } from "@appstrate/core/skill-uri";
+import { parseSkillUri, parseSkillUriPackage } from "@appstrate/core/skill-address";
 import type { AppstrateMcpClient, ListedSkillEntry } from "@appstrate/mcp-transport";
 import type { PrincipalKind, ReachableSpaceGrant } from "@appstrate/core/module";
 import type { InjectedSkills } from "@appstrate/core/chat-contract";
@@ -326,7 +325,7 @@ function formatSkillsSection(opts: {
   return {
     text,
     injected: injectedSkills(skills),
-    skillStatus: skills.statuses,
+    skillStatus: skills.skillStatus,
   };
 }
 

@@ -13,7 +13,7 @@
 
 import { mapWithConcurrency } from "@appstrate/core/map-with-concurrency";
 import { encodePackageIdPath, parseScopedName } from "@appstrate/core/naming";
-import { parseSkillUri } from "@appstrate/core/skill-uri";
+import { parseSkillUri } from "@appstrate/core/skill-address";
 import { ApiError } from "../../lib/errors.ts";
 import type { DispatchContext } from "./api-call-batch.ts";
 import type { SkillServer } from "./skills.ts";

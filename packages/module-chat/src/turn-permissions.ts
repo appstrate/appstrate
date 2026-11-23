@@ -68,3 +68,18 @@ export function limitedConversationPermissions(
     (permission) => !orgHalf.has(permission) || LIMITED_ORG_READS.has(permission),
   );
 }
+
+/**
+ * The caller's grants a turn (or the `/` menu) starts from: the union over its spaces' grants,
+ * narrowed by {@link limitedConversationPermissions} for a conversation limited to one space. A
+ * CEILING on the bearer (each space entry recomputes `(org ∪ role) ∩ ceiling`,
+ * `lib/auth-pipeline.ts`), so no space's grants reach another.
+ */
+export function callerGrants(
+  spaces: readonly { permissions: readonly string[] }[],
+  restricted: boolean,
+  orgHalf: ReadonlySet<string>,
+): ReadonlySet<string> {
+  const union = spaces.flatMap((space) => space.permissions);
+  return new Set(restricted ? limitedConversationPermissions(union, orgHalf) : union);
+}

@@ -57,7 +57,7 @@ import type { ResolutionFieldError } from "@appstrate/core/api-errors";
 import type { RunLogEvent } from "@appstrate/shared-types";
 import { FILE_NAME_META_KEY, parseFileUri, fileUri } from "@appstrate/core/file-uri";
 import { parseScopedName } from "@appstrate/core/naming";
-import { SKILL_URI_PREFIX } from "@appstrate/core/skill-uri";
+import { SKILL_URI_PREFIX } from "@appstrate/core/skill-address";
 import {
   CONNECTION_RESOLUTION_WARNING_CODES,
   MAX_CONNECTIONS_PER_INTEGRATION,

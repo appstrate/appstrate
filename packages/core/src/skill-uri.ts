@@ -6,20 +6,11 @@
  * transport that carries the entries and `appstrate code sync` that reads them.
  *
  * The URI grammar lives in `@appstrate/core/skill-address`, which imports
- * nothing server-only so a browser bundle can read it; this module re-exports
- * it and adds the size limits, the `_meta` keys, the entry types and the
- * `node:crypto` digest.
+ * nothing server-only so a browser bundle can read it; this module holds the
+ * size limits, the `_meta` keys, the entry types and the `node:crypto` digest.
  */
 
 import { createHash } from "node:crypto";
-
-export {
-  SKILL_URI_PREFIX,
-  parseSkillUri,
-  parseSkillUriPackage,
-  skillFileUri,
-  type SkillAddress,
-} from "./skill-address.ts";
 
 /** SEP-2640: a server SHOULD NOT serve a skill with more files than this. */
 export const SKILL_MAX_FILES = 512;

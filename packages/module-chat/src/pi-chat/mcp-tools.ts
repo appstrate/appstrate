@@ -27,7 +27,7 @@ import {
 } from "@appstrate/core/mcp-spaces";
 import { canComposeInline, canRunAgents } from "@appstrate/core/permissions";
 import { formatTurnBudgetNote } from "@appstrate/core/chat-turn-metadata";
-import { parseSkillUri, SKILL_URI_PREFIX } from "@appstrate/core/skill-uri";
+import { parseSkillUri, SKILL_URI_PREFIX } from "@appstrate/core/skill-address";
 import {
   createMcpHttpClient,
   RESOURCE_BLOB_MAX_BYTES,

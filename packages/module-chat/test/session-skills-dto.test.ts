@@ -11,6 +11,8 @@ import { truncateAll } from "../../../apps/api/test/helpers/db.ts";
 import {
   createTestContext,
   authHeaders,
+  memberContext,
+  memberHolding,
   type TestContext,
 } from "../../../apps/api/test/helpers/auth.ts";
 import { eq } from "drizzle-orm";
@@ -211,7 +213,7 @@ describe("chat session skills", () => {
       for (const body of [
         { pins: ["@a/1", "@a/2", "@a/3", "@a/4", "@a/5", "@a/6"] },
         {},
-        { pins: ["@a/1"], pin_skills: ["@a/2"] },
+        { pins: ["@a/1"], pinned_skills: ["@a/2"] },
         { pins: ["not-a-package"] },
       ]) {
         const res = await patchSkills(id, body);
@@ -220,11 +222,59 @@ describe("chat session skills", () => {
       expect(await stored(id)).toEqual({ pinnedSkills: [], skillDiscovery: true, skillStatus: {} });
     });
 
-    it("answers 404 for a session of another member, and for an unknown one", async () => {
+    it("answers 404 for a session of another member or organization, and for an unknown one", async () => {
       const { id } = await createSession();
+      const colleague = await memberContext(ctx, "member", "operator");
+      expect((await patchSkills(id, { pins: ["@acme/a"] }, colleague)).status).toBe(404);
       const other = await createTestContext({ orgSlug: "chatskills-other" });
       expect((await patchSkills(id, { pins: ["@acme/a"] }, other)).status).toBe(404);
       expect((await patchSkills("chs_unknown", { pins: ["@acme/a"] })).status).toBe(404);
+      expect(await stored(id)).toMatchObject({ pinnedSkills: [] });
+    });
+
+    it("refuses a caller without chat:write with a 403, writing nothing", async () => {
+      const { id } = await createSession();
+      const reader = await memberHolding(ctx, ["chat:read"]);
+      expect((await patchSkills(id, { pins: ["@acme/a"] }, reader)).status).toBe(403);
+      expect(await stored(id)).toMatchObject({ pinnedSkills: [] });
+    });
+
+    it("keeps a turn's claim from writing the verdict of a pin a PATCH removed since", async () => {
+      const { id } = await createSession();
+      expect((await patchSkills(id, { pins: ["@acme/a"] })).status).toBe(200);
+      // The turn read `@acme/a` and `@acme/b`; the PATCH below dropped `@acme/b` before its claim.
+      expect((await patchSkills(id, { pins: ["@acme/a"] })).status).toBe(200);
+      await setActiveStream(id, "strm_turn", UNLIMITED_SCOPE, {
+        "@acme/a": { status: "injected", chars: 10 },
+        "@acme/b": { status: "injected", chars: 20 },
+      });
+      expect((await stored(id))?.skillStatus).toEqual({
+        "@acme/a": { status: "injected", chars: 10 },
+      });
+      expect((await patchSkills(id, { pins: ["@acme/a", "@acme/b"] })).status).toBe(200);
+      expect((await getSession(id)).pins).toEqual([
+        { id: "@acme/a", status: "injected", chars: 10 },
+        { id: "@acme/b", status: null, chars: null },
+      ]);
+    });
+
+    it("counts a repeated id once against the cap", async () => {
+      const { id } = await createSession();
+      const res = await patchSkills(id, { pins: Array(6).fill("@acme/a") });
+      expect(res.status).toBe(200);
+      expect(await stored(id)).toMatchObject({ pinnedSkills: ["@acme/a"] });
+    });
+
+    it("is held to five pins by the database too", async () => {
+      const { id } = await createSession();
+      const six = ["@a/1", "@a/2", "@a/3", "@a/4", "@a/5", "@a/6"];
+      let refused = false;
+      try {
+        await db.update(chatSessions).set({ pinnedSkills: six }).where(eq(chatSessions.id, id));
+      } catch {
+        refused = true;
+      }
+      expect(refused).toBe(true);
       expect(await stored(id)).toMatchObject({ pinnedSkills: [] });
     });
 

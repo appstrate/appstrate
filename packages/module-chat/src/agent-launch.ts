@@ -53,11 +53,9 @@ export async function resolveAgentPrompt(
             "messages",
           );
         }
-        if (code === ErrorCode.InternalError) {
-          logger.warn("prompts/get failed — agent launch refused", { name, err: String(err) });
-          throw badGateway("The platform's MCP server could not read the agent.");
-        }
-        throw err;
+        // Any other failure (an internal error, a timeout, a malformed answer) is the server's.
+        logger.warn("prompts/get failed — agent launch refused", { name, err: String(err) });
+        throw badGateway("The platform's MCP server could not read the agent.");
       }
     },
     (err) => {
@@ -89,7 +87,8 @@ function droppedLaunchText(name: string, title: string): string {
 /**
  * The thread with each earlier launch's text taken from its stored row (`stored`, by message id),
  * never from the browser, most recent first within {@link AGENT_LAUNCH_REPLAY_BUDGET_CHARS}; older
- * ones become a stub. Pure in the thread and the rows, so the replay is stable and the prompt cache holds.
+ * ones become a stub. Pure in the thread and the rows: the same thread replays the same prompt (a
+ * new launch can push an older one out of the budget, which then reads as its stub).
  */
 export function withStoredAgentPromptTexts(
   messages: UIMessage[],

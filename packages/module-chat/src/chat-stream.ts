@@ -48,14 +48,15 @@ import {
 import { runPiChat, type PiChatInput } from "./pi-chat/engine.ts";
 import { resolvePiChatModelBinding } from "./pi-chat/model-binding.ts";
 import { acquirePiChatSlot, chatCapacityError } from "./pi-chat/concurrency.ts";
-import {
-  limitedConversationPermissions,
-  turnPermissions,
-  turnUsesDrafts,
-} from "./turn-permissions.ts";
+import { callerGrants, turnPermissions, turnUsesDrafts } from "./turn-permissions.ts";
 import { buildSystemPrompt, buildCallerContextBlock, type ChatEnv } from "./prompt.ts";
 import { scopedNameRegex } from "@appstrate/core/validation";
-import { DEFAULT_SKILL_SELECTION, MAX_PINNED_SKILLS, type ChatSkillSelection } from "./skills.ts";
+import {
+  DEFAULT_SKILL_SELECTION,
+  MAX_PINNED_SKILLS,
+  normalizePins,
+  type ChatSkillSelection,
+} from "./skills.ts";
 export type { ChatEnv } from "./prompt.ts";
 import { finalizeChatStream } from "./finalize-stream.ts";
 import {
@@ -146,9 +147,13 @@ export const CHAT_MESSAGE_MAX_BYTES = 256 * 1024;
 //     parses: `{ name, title }` on the new message, the stored shape on a replayed one (whose
 //     `text` the turn replaces); `handleChatStream` resolves it.
 //   - `.strict()`: an unknown field is a 400, never silently dropped.
-const skillIdsSchema = z
+/** A set of pinned skills, as the turn and the skills PATCH take it: stored deduplicated and sorted. */
+export const pinnedSkillIdsSchema = z
   .array(z.string().regex(scopedNameRegex, { error: "Must be a package id in @scope/name form" }))
-  .max(MAX_PINNED_SKILLS, { error: `At most ${MAX_PINNED_SKILLS} skills` });
+  .transform(normalizePins)
+  .pipe(
+    z.array(z.string()).max(MAX_PINNED_SKILLS, { error: `At most ${MAX_PINNED_SKILLS} skills` }),
+  );
 
 export const chatStreamSchema = z
   .object({
@@ -212,10 +217,10 @@ export const chatStreamSchema = z
     /** Runs the inline runs this turn launches on its model and generation; absent = off. */
     inline_runs_use_chat_model: z.boolean().optional(),
     /**
-     * The skill settings of a conversation this turn creates (or of an ephemeral turn): honoured
-     * only then, a 409 on an existing one, whose settings the skills PATCH changes.
+     * The skill settings of a conversation this turn creates (or of an ephemeral turn): ignored
+     * for an existing one, whose settings the skills PATCH changes.
      */
-    pins: skillIdsSchema.optional(),
+    pins: pinnedSkillIdsSchema.optional(),
     skill_discovery: z.boolean().optional(),
   })
   .strict();
@@ -387,7 +392,7 @@ export async function handleChatStream(
   // The composer's buffered skill settings, for a conversation this turn creates: the insert
   // writes them; an existing conversation keeps its own, like its origin space and limit.
   const bodySkills: Partial<ChatSkillSelection> = {
-    ...(body.pins !== undefined && { pinnedSkills: [...new Set(body.pins)].sort() }),
+    ...(body.pins !== undefined && { pinnedSkills: body.pins }),
     ...(body.skill_discovery !== undefined && { skillDiscovery: body.skill_discovery }),
   };
   const asksSkills = Object.keys(bodySkills).length > 0;
@@ -419,10 +424,10 @@ export async function handleChatStream(
     .flatMap((message) => (typeof message.id === "string" ? [message.id] : []));
   const historyStored = conversation.then(async () =>
     sessionId && lastMessage?.id
-      ? {
-          files: await storedFileParts(sessionId, historyIds),
-          launches: await storedAgentPromptTexts(sessionId, historyIds),
-        }
+      ? await Promise.all([
+          storedFileParts(sessionId, historyIds),
+          storedAgentPromptTexts(sessionId, historyIds),
+        ]).then(([files, launches]) => ({ files, launches }))
       : { files: new Map<string, FileUIPart[]>(), launches: new Map<string, string>() },
   );
 
@@ -482,14 +487,7 @@ export async function handleChatStream(
       );
     }
     const spaces = conv.restricted && originSpace ? [originSpace] : acting;
-    // The caller's grants this turn starts from: the union over the turn's spaces. It is a
-    // CEILING on the bearer (each space entry recomputes `(org ∪ role) ∩ ceiling`,
-    // `lib/auth-pipeline.ts`), so no space's grants reach another. A limited conversation keeps
-    // of the org-level half only the reads it needs: it changes nothing serving every space.
-    const union = spaces.flatMap((space) => space.permissions);
-    const callerPermissions: ReadonlySet<string> = new Set(
-      conv.restricted ? limitedConversationPermissions(union, c.get("reachableOrgHalf")) : union,
-    );
+    const callerPermissions = callerGrants(spaces, conv.restricted, c.get("reachableOrgHalf"));
     const permissions = turnPermissions(callerPermissions, {
       authoring: body.package_authoring !== false,
       skillDiscovery: conv.selection.skillDiscovery,

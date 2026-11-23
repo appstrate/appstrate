@@ -46,17 +46,21 @@ import {
   reportPermissionDenial,
   type requireModulePermission,
 } from "@appstrate/core/permissions";
-import { conflict, forbidden, invalidRequest, notFound } from "@appstrate/core/api-errors";
-import { scopedNameRegex } from "@appstrate/core/validation";
-import { MAX_PINNED_SKILLS } from "./skills.ts";
+import {
+  conflict,
+  forbidden,
+  invalidRequest,
+  notFound,
+  parseBody,
+} from "@appstrate/core/api-errors";
 import { listResponse, parseListLimit } from "@appstrate/core/list-query";
 import { readJsonBody } from "@appstrate/core/request-body";
 import { setCursorLinkHeader } from "@appstrate/core/pagination-link";
 import { UI_MESSAGE_STREAM_HEADERS } from "ai";
-import { handleChatStream } from "./chat-stream.ts";
+import { handleChatStream, pinnedSkillIdsSchema } from "./chat-stream.ts";
 import { readChatCommands } from "./chat-commands.ts";
 import { callerMcpOpener, dispatchFetch } from "./platform-mcp.ts";
-import { limitedConversationPermissions, turnUsesDrafts } from "./turn-permissions.ts";
+import { callerGrants, turnUsesDrafts } from "./turn-permissions.ts";
 import type { ChatEnv } from "./prompt.ts";
 import { stopStream } from "./stop-registry.ts";
 import { clearActiveStream, getResumableContext, STALE_MARKER_MIN_AGE_MS } from "./resumable.ts";
@@ -120,15 +124,22 @@ export const updateSessionSchema = z
     path: ["spaceId"],
   });
 
+/**
+ * The `/` menu's query: a space stands for a conversation limited to it; the package-authoring
+ * switch as the turn takes it (absent = on).
+ */
+const chatCommandsQuerySchema = z.object({
+  spaceId: z.string().min(1).optional(),
+  package_authoring: z
+    .enum(["true", "false"])
+    .default("true")
+    .transform((value) => value === "true"),
+});
+
 /** The skills PATCH: `pins` replaces the whole set. */
 export const updateSessionSkillsSchema = z
   .object({
-    pins: z
-      .array(
-        z.string().regex(scopedNameRegex, { error: "Must be a package id in @scope/name form" }),
-      )
-      .max(MAX_PINNED_SKILLS, { error: `At most ${MAX_PINNED_SKILLS} skills` })
-      .optional(),
+    pins: pinnedSkillIdsSchema.optional(),
     skill_discovery: z.boolean().optional(),
   })
   .strict()
@@ -353,25 +364,18 @@ export function createChatRouter(deps: ChatPlatformDeps) {
   // The composer's `/` menu: the skills and agents of the spaces a turn would act in.
   router.get("/api/orgs/:orgId/chat/commands", rateLimited(60), ...actingGuards, async (c) => {
     const reachable = c.get("reachable");
-    const spaceId = c.req.query("spaceId");
+    const { spaceId, package_authoring: authoring } = parseBody(
+      chatCommandsQuerySchema,
+      c.req.query(),
+    );
     if (spaceId !== undefined && !canActIn(reachable, spaceId)) {
       throw invalidRequest("spaceId must be a space this conversation can act in", "spaceId");
-    }
-    // The composer's package-authoring switch, as the turn takes it (`package_authoring`).
-    const authoring = c.req.query("package_authoring");
-    if (authoring !== undefined && authoring !== "true" && authoring !== "false") {
-      throw invalidRequest("package_authoring must be true or false", "package_authoring");
     }
     // A space asked for stands for a conversation limited to it, whose grants are narrowed alike.
     const spaces = actingSpaces(reachable).filter(
       (space) => spaceId === undefined || space.id === spaceId,
     );
-    const union = spaces.flatMap((space) => space.permissions);
-    const permissions = new Set(
-      spaceId === undefined
-        ? union
-        : limitedConversationPermissions(union, c.get("reachableOrgHalf")),
-    );
+    const permissions = callerGrants(spaces, spaceId !== undefined, c.get("reachableOrgHalf"));
     const commands = await readChatCommands(
       callerMcpOpener(c, dispatchFetch(deps), {
         permissions,
@@ -381,7 +385,7 @@ export function createChatRouter(deps: ChatPlatformDeps) {
       spaces.map((space) => space.id),
       {
         readsSkills: permissions.has("skills:read"),
-        drafts: turnUsesDrafts(permissions, { authoring: authoring !== "false" }),
+        drafts: turnUsesDrafts(permissions, { authoring }),
       },
     );
     return c.json(commands);
@@ -579,7 +583,7 @@ function createSessionHandlers(deps: ChatPlatformDeps) {
       const session = await getOwnedSession(c.req.param("id")!, sessionScope(c));
       const { pins, skill_discovery } = await readJsonBody(c, updateSessionSkillsSchema);
       const row = await updateSessionSkills(session.id, {
-        ...(pins !== undefined && { pinnedSkills: [...new Set(pins)].sort() }),
+        ...(pins !== undefined && { pinnedSkills: pins }),
         ...(skill_discovery !== undefined && { skillDiscovery: skill_discovery }),
       });
       if (!row) throw notFound("Chat session not found");

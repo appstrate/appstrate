@@ -19,9 +19,9 @@ type Pin = components["schemas"]["ChatSession"]["pins"][number];
 const commands: components["schemas"]["ChatCommands"] = {
   skills: [
     {
-      id: "@acme/auto",
-      name: "auto",
-      description: "Read by the assistant",
+      id: "@acme/read",
+      name: "read",
+      description: "Reference notes",
       version: "1.0.0",
       bytes: 2000,
     },
@@ -96,7 +96,7 @@ test("the panel reports each pin's state, and a skill the assistant read is pinn
           content: {
             role: "assistant",
             parts: [
-              read("call_auto", "auto"),
+              read("call_read", "read"),
               read("call_tone", "tone"),
               {
                 type: "tool-read_resource",
@@ -130,10 +130,10 @@ test("the panel reports each pin's state, and a skill the assistant read is pinn
   const loads = page.getByTestId("skill-load");
   await expect(loads).toHaveCount(3);
   await expect(loads.nth(0)).toHaveAttribute("data-state", "read");
-  await expect(loads.nth(0).getByTestId("directive-chip")).toHaveText("auto");
+  await expect(loads.nth(0).getByTestId("directive-chip")).toHaveText("read");
   await expect(loads.nth(0).getByTestId("skill-load-state")).toHaveText("Lue pour ce message");
   await expect(loads.nth(0).getByTestId("skill-load-live")).toHaveText(
-    "Compétence auto lue pour ce message",
+    "Compétence read lue pour ce message",
   );
   // `tone` is pinned already: nothing to offer.
   await expect(loads.nth(1).getByTestId("skill-load-pin")).toHaveCount(0);
@@ -155,7 +155,7 @@ test("the panel reports each pin's state, and a skill the assistant read is pinn
   await expect(caption("big")).toHaveText("Non chargée : budget de compétences dépassé");
   await expect(row("fresh")).toBeChecked();
   await expect(caption("fresh")).toHaveCount(0);
-  await expect(row("auto")).not.toBeChecked();
+  await expect(row("read")).not.toBeChecked();
   await expect(popover.getByTestId("skills-budget")).toContainText(/4\s000 \/ 64\s000 caractères/);
   await expect(popover.getByTestId("skills-uncheck-hint")).toHaveText(
     "Décocher une compétence chargée la retire du contexte à partir du prochain message.",
@@ -170,7 +170,7 @@ test("the panel reports each pin's state, and a skill the assistant read is pinn
   const pinned = page.waitForRequest((req) => req.method() === "PATCH");
   await loads.nth(0).getByTestId("skill-load-pin").click();
   expect((await pinned).postDataJSON()).toEqual({
-    pins: ["@acme/auto", "@acme/big", "@acme/fresh", "@acme/tone"],
+    pins: ["@acme/big", "@acme/fresh", "@acme/read", "@acme/tone"],
     skill_discovery: true,
   });
   await expect(loads.nth(0).getByTestId("skill-load-pin")).toHaveCount(0);
@@ -180,7 +180,7 @@ test("the panel reports each pin's state, and a skill the assistant read is pinn
   const unpinned = page.waitForRequest((req) => req.method() === "PATCH");
   await row("tone").click();
   expect((await unpinned).postDataJSON()).toEqual({
-    pins: ["@acme/auto", "@acme/big", "@acme/fresh"],
+    pins: ["@acme/big", "@acme/fresh", "@acme/read"],
     skill_discovery: true,
   });
   await expect(row("tone")).not.toBeChecked();

@@ -25,7 +25,7 @@ describe("resolveChatSkills", () => {
     expect(resolve({ skillDiscovery: true, pinnedSkills: [] })).toEqual({
       injected: [],
       notices: [],
-      statuses: {},
+      skillStatus: {},
     });
   });
 
@@ -86,7 +86,7 @@ describe("resolveChatSkills statuses", () => {
         ["@a/over", content("@a/over", "z".repeat(7))],
       ]),
     );
-    expect(result.statuses).toEqual({
+    expect(result.skillStatus).toEqual({
       "@a/big": { status: "injected", chars: BUDGET - 10 },
       "@a/gone": { status: "unavailable", chars: null },
       "@a/odd": { status: "unreadable", chars: null },

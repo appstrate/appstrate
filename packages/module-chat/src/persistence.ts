@@ -22,6 +22,7 @@
  */
 
 import { and, desc, eq, inArray, isNull, ne, or, sql, type SQL } from "drizzle-orm";
+import { z } from "zod";
 import { isForeignKeyViolation } from "@appstrate/db/errors";
 import { db } from "@appstrate/db/client";
 import {
@@ -31,7 +32,6 @@ import {
   chatSkillStatusValues,
   files,
   type ChatMessageContent,
-  type ChatSkillStatus,
 } from "@appstrate/db/schema";
 import { toPgSafe } from "@appstrate/db/pg-safe";
 import { invalidRequest, notFound } from "@appstrate/core/api-errors";
@@ -311,9 +311,10 @@ export async function updateSessionSkills(
   return row;
 }
 
-const CHAT_SKILL_STATUSES: ReadonlySet<unknown> = new Set(chatSkillStatusValues);
-const isChatSkillStatus = (value: unknown): value is ChatSkillStatus =>
-  CHAT_SKILL_STATUSES.has(value);
+const skillStatusEntrySchema = z.object({
+  status: z.enum(chatSkillStatusValues),
+  chars: z.int().nonnegative().nullable().catch(null),
+});
 
 /**
  * The pins of a session row as its DTOs carry them (`pins`); every write stores them sorted.
@@ -327,15 +328,8 @@ export function pinnedSkillsOf(row: {
   skillStatus: Readonly<Record<string, unknown>>;
 }): PinnedSkill[] {
   return row.pinnedSkills.map((id) => {
-    const entry = row.skillStatus[id] as { status?: unknown; chars?: unknown } | null | undefined;
-    const status = entry && typeof entry === "object" ? entry.status : undefined;
-    if (!isChatSkillStatus(status)) return { id, status: null, chars: null };
-    const chars = entry!.chars;
-    return {
-      id,
-      status,
-      chars: typeof chars === "number" && Number.isSafeInteger(chars) && chars >= 0 ? chars : null,
-    };
+    const entry = skillStatusEntrySchema.safeParse(row.skillStatus[id]);
+    return entry.success ? { id, ...entry.data } : { id, status: null, chars: null };
   });
 }
 
