@@ -194,7 +194,10 @@ function SidebarOpener({ className }: { className?: string }) {
       type="button"
       variant="ghost"
       data-testid="sidebar-opener"
-      className={cn("desktop-pointer:h-8 relative h-11 shrink-0 gap-2 px-2", className)}
+      className={cn(
+        "desktop-pointer:h-8 hover:text-foreground relative h-11 shrink-0 gap-2 px-2 hover:bg-transparent",
+        className,
+      )}
       aria-expanded={isMobile ? openMobile : state === "expanded"}
       aria-label={names ? t("nav.toggleSidebarIn", { current: names }) : t("nav.toggleSidebar")}
       onClick={toggleSidebar}
