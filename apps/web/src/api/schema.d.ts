@@ -12772,7 +12772,7 @@ export interface operations {
                     };
                 };
             };
-            /** @description `invalid_request` — the body is not valid JSON; `validation_failed` — it is not the schema's object (a missing or empty `integration_package_id` or `name`, a `connection_id` that is not a uuid, `arguments` that is not an object, an unknown field such as the retired `integration_id`); `connection_not_in_org_default` — an enforced org default governs the integration and `connection_id` names a connection outside its set (a holder of `credential-proxy:call`); the proxy's refusals of an exchange before it is sent: `unresolved_placeholder` — the server URL holds a placeholder no credential field fills, `invalid_request` — it is otherwise not a request the proxy can send. */
+            /** @description `invalid_request` — the body is not valid JSON; `validation_failed` — it is not the schema's object (a missing or empty `integration_package_id` or `name`, a `connection_id` that is not a uuid, `arguments` that is not an object, an unknown field); `connection_not_in_org_default` — an enforced org default governs the integration and `connection_id` names a connection outside its set (a holder of `credential-proxy:call`); the proxy's refusals of an exchange before it is sent: `unresolved_placeholder` — the server URL holds a placeholder no credential field fills, `invalid_request` — it is otherwise not a request the proxy can send. */
             400: {
                 headers: {
                     [name: string]: unknown;
