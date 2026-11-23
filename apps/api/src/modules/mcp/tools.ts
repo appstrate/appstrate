@@ -2359,6 +2359,8 @@ export interface McpSurface {
   creates: boolean;
   listsFiles: boolean;
   importsPackages: boolean;
+  /** `validate_package_file`: before an import, or of the archive an inline run wrote. */
+  validatesPackages: boolean;
   /** `search`'s and `describe`'s integration tools, and `call_integration_tool`: the credential proxy outside a run. */
   proxies: boolean;
   /**
@@ -2385,19 +2387,22 @@ export function deriveMcpSurface(
   // route, which guards as `/proxy` does. `mcp:invoke` is checked here and nowhere else.
   const mayProxy = invokes && proxyAcceptsCredential && granted("listCredentialProxyConnections");
   const closed = reachOutsideRunIfPermitted(permissions, space) === "closed";
+  const composes = runs && granted("runInline");
+  // `import_package_file` calls the import service directly: it re-checks
+  // each package's `write`, but `mcp:invoke` and the user actor (the import
+  // is recorded under a user id) are checked here and nowhere else.
+  const importsPackages = invokes && actor.type === "user" && granted("importBundle");
   return {
     invokes,
     runs,
-    composes: runs && granted("runInline"),
+    composes,
     authors: invokes && granted("createAgent"),
     creates:
       invokes &&
       (granted("createAgent") || granted("createSkill") || granted("createIntegrationPackage")),
     listsFiles: granted("listFiles"),
-    // `import_package_file` calls the import service directly: it re-checks
-    // each package's `write`, but `mcp:invoke` and the user actor (the import
-    // is recorded under a user id) are checked here and nowhere else.
-    importsPackages: invokes && actor.type === "user" && granted("importBundle"),
+    importsPackages,
+    validatesPackages: importsPackages || composes,
     proxies: mayProxy && !closed,
     proxiesClosed: mayProxy && closed,
   };
@@ -2465,10 +2470,7 @@ export function buildMcpTools(ctx: McpToolContext, surface: McpSurface): Appstra
     ...(surface.runs ? [buildRunAndWaitTool(ctx, surface.composes)] : []),
     ...(surface.listsFiles ? [buildListFilesTool(ctx)] : []),
     buildReadTool(ctx),
-    ...buildPackageFileTools(ctx, {
-      imports: surface.importsPackages,
-      composes: surface.composes,
-    }),
+    ...buildPackageFileTools(ctx, surface),
     ...(surface.proxies ? [buildCallIntegrationToolTool(integrations)] : []),
     buildGetMeTool(ctx, surface),
   ];
@@ -2492,7 +2494,7 @@ const SPACE_ACTS: Record<McpToolName, keyof McpSurface | null | false | "optiona
   run_and_wait: "runs",
   list_files: "listsFiles",
   read: null,
-  validate_package_file: null,
+  validate_package_file: "validatesPackages",
   import_package_file: "importsPackages",
   call_integration_tool: "proxies",
   get_me: null,

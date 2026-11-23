@@ -190,6 +190,19 @@ describe("mcp org-wide connection", () => {
     expect(invoke).toContain(gestion.id);
     expect(invoke).not.toContain(lecture.id);
     expect(described("read")).not.toContain("Available in:");
+    // Validation goes with an import or an inline run: offered where one holds, not to a viewer.
+    const validate = described("validate_package_file")!;
+    expect(validate).toContain(gestion.id);
+    expect(validate).not.toContain(lecture.id);
+  });
+
+  it("refuses validate_package_file in a space where the caller neither imports nor composes", async () => {
+    const refused = payload(
+      await call("validate_package_file", { file_uri: "appfile://fil_x", space_id: lecture.id }),
+    );
+    expect(refused.isError).toBe(true);
+    expect(refused.data.code).toBe("not_granted");
+    expect(refused.data.granted_in).toContain(gestion.id);
   });
 
   it("requires space_id on a read as on a write, and names the space read", async () => {
