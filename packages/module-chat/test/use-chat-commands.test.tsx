@@ -106,7 +106,7 @@ function request(
 }
 
 describe("useChatCommands", () => {
-  const writer = testHost();
+  const writer = testHost({ actingSpaceIds: ["spc_a"] });
 
   it("reads for the acting set unless the conversation is limited to its origin space", () => {
     expect(request(writer, { originSpaceId: "spc_a", restricted: false })).toEqual({
@@ -123,6 +123,7 @@ describe("useChatCommands", () => {
     expect(request(writer, { originSpaceId: "spc_a", restricted: false }, false).fetches).toBe(
       false,
     );
+    expect(request(writer, { originSpaceId: "spc_b", restricted: true }).fetches).toBe(false);
     const reader = testHost({ can: (permission) => permission !== "chat:write" });
     expect(request(reader, { originSpaceId: "spc_a", restricted: false }).fetches).toBe(false);
   });
