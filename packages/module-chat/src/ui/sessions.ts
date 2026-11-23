@@ -15,7 +15,7 @@ import {
 } from "@tanstack/react-query";
 import type { UIMessage } from "ai";
 import type { TokenUsage } from "@appstrate/core/token-usage";
-import type { ChatSkillSelection, PinnedSkill } from "../skills.ts";
+import type { SkillSettingsPatch, PinnedSkill } from "../skills.ts";
 import type { StoredSkills } from "./chat-skills.ts";
 import { errorStatus, jsonInit, type ChatTransport } from "./runtime-context.ts";
 import { chatPath } from "./chat-route.ts";
@@ -210,15 +210,15 @@ function storedSkillsOf(dto: { skill_discovery: boolean; pins: PinnedSkill[] }):
   return { skillDiscovery: dto.skill_discovery, pins: dto.pins };
 }
 
-/** Replace the conversation's pins (the full set) and its discovery switch; the server's result. */
+/** Apply the changed settings and read the confirmed selection. */
 export async function updateSessionSkills(
   transport: ChatTransport,
   id: string,
-  selection: ChatSkillSelection,
+  change: SkillSettingsPatch,
 ): Promise<StoredSkills> {
   const res = await transport.request(
     chatPath(transport, `/sessions/${id}/skills`),
-    jsonInit("PATCH", { pins: selection.pinnedSkills, skill_discovery: selection.skillDiscovery }),
+    jsonInit("PATCH", change),
   );
   return storedSkillsOf((await res.json()) as { skill_discovery: boolean; pins: PinnedSkill[] });
 }

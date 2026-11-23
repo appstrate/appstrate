@@ -30,6 +30,13 @@ export interface ChatSkillSelection {
   pinnedSkills: string[];
 }
 
+/** Changes accepted by the session skills PATCH. A single-pin change is applied to the current row. */
+export interface SkillSettingsPatch {
+  pins?: string[];
+  pin?: { id: string; pinned: boolean };
+  skill_discovery?: boolean;
+}
+
 export type { ChatSkillStatus };
 
 /** A pin as the session DTOs carry it (`pins`): `null` status and `chars` until a claiming turn evaluates it. */

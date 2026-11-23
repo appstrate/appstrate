@@ -546,7 +546,7 @@ function ConversationRow({
               {/* The spaces it reaches: a phone's row shows their tiles alone. */}
               <DropdownMenuLabel
                 data-testid="chat-menu-spaces"
-                className={`text-muted-foreground flex min-w-0 items-center font-normal [--space-tile-ring:var(--popover)] max-md:[--space-tile-ring:var(--background)] ${NOTE_TEXT_CLASS}`}
+                className={`text-muted-foreground flex min-w-0 items-center font-normal [--tile-ring:var(--popover)] max-md:[--tile-ring:var(--background)] ${NOTE_TEXT_CLASS}`}
               >
                 {sessionSpaces(session, renderSpaces, t)}
               </DropdownMenuLabel>

@@ -417,7 +417,7 @@ export const chatPaths = {
       operationId: "updateChatSessionSkills",
       tags: ["Chat"],
       summary: "Set a chat session's pinned skills or skill discovery",
-      description: `\`pins\` replaces the whole set of pinned skills (deduplicated and sorted; any number, held to the content budget each turn); a pin it drops loses its status, a new one has none until a turn evaluates it. \`skill_discovery\` sets the discovery switch. At least one of the two. Allowed while a turn is running: that turn keeps the skills it started with, and the next turn reads these. Never reorders the conversation list.`,
+      description: `\`pins\` replaces the whole set of pinned skills (deduplicated and sorted; any number, held to the content budget each turn); a pin it drops loses its status, a new one has none until a turn evaluates it. \`skill_discovery\` sets the discovery switch. The single-pin form sets or clears one pin atomically on the latest selection. Supply at least one field, and choose either the full set or a single pin. Allowed while a turn is running: that turn keeps the skills it started with, and the next turn reads these. Never reorders the conversation list.`,
       parameters: [
         { $ref: "#/components/parameters/OrgIdPath" },
         { name: "id", in: "path", required: true, schema: { type: "string" } },
@@ -430,9 +430,16 @@ export const chatPaths = {
               type: "object",
               properties: {
                 pins: { ...skillIds, description: "The full set of pinned skills." },
+                pin: {
+                  type: "object",
+                  properties: { id: skillIds.items, pinned: { type: "boolean" } },
+                  required: ["id", "pinned"],
+                  additionalProperties: false,
+                },
                 skill_discovery: { type: "boolean" },
               },
               minProperties: 1,
+              not: { required: ["pin", "pins"] },
               additionalProperties: false,
             },
           },

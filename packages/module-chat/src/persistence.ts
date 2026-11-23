@@ -38,7 +38,7 @@ import { invalidRequest, notFound } from "@appstrate/core/api-errors";
 import { uiMessageTitleText } from "./message-text.ts";
 import { AGENT_PROMPT_PART_TYPE, agentPromptOfParts } from "./agent-prompt.ts";
 import { notifySessionUpdate } from "./realtime.ts";
-import type { ChatSkillSelection, PinnedSkill } from "./skills.ts";
+import type { ChatSkillSelection, PinnedSkill, SkillSettingsPatch } from "./skills.ts";
 import type { FileUIPart, UIMessage } from "ai";
 
 /**
@@ -292,21 +292,33 @@ export async function ensureSession(
  * read; the next one reads this. Returns the row, or undefined when it is gone.
  */
 export async function updateSessionSkills(
-  sessionId: string,
-  change: Partial<ChatSkillSelection>,
+  session: SQL,
+  change: SkillSettingsPatch,
 ): Promise<typeof chatSessions.$inferSelect | undefined> {
-  const { pinnedSkills, skillDiscovery } = change;
+  const { pin, pins } = change;
+  // PostgreSQL evaluates the update against the latest locked row, including another tab's
+  // committed pin changes. "C" matches the JS sort order of the ASCII package ids.
+  const pinUpdate = pin?.pinned
+    ? {
+        pinnedSkills: sql`ARRAY(SELECT DISTINCT id COLLATE "C" FROM unnest(array_append(${chatSessions.pinnedSkills}, ${pin.id}::text)) AS ids(id) ORDER BY 1)`,
+      }
+    : pin
+      ? {
+          pinnedSkills: sql`array_remove(${chatSessions.pinnedSkills}, ${pin.id}::text)`,
+          skillStatus: sql`${chatSessions.skillStatus} - ${pin.id}::text`,
+        }
+      : undefined;
   const [row] = await db
     .update(chatSessions)
     .set({
-      skillDiscovery,
-      ...(pinnedSkills !== undefined && {
-        pinnedSkills,
-        // The pins ride as one jsonb parameter: drizzle would spread a bare array into a list.
-        skillStatus: sql`(SELECT coalesce(jsonb_object_agg(key, value), '{}'::jsonb) FROM jsonb_each(${chatSessions.skillStatus}) WHERE key IN (SELECT jsonb_array_elements_text(${JSON.stringify(pinnedSkills)}::jsonb)))`,
+      skillDiscovery: change.skill_discovery,
+      ...pinUpdate,
+      ...(pins !== undefined && {
+        pinnedSkills: pins,
+        skillStatus: sql`(SELECT coalesce(jsonb_object_agg(key, value), '{}'::jsonb) FROM jsonb_each(${chatSessions.skillStatus}) WHERE key IN (SELECT jsonb_array_elements_text(${JSON.stringify(pins)}::jsonb)))`,
       }),
     })
-    .where(eq(chatSessions.id, sessionId))
+    .where(session)
     .returning();
   return row;
 }

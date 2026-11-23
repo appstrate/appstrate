@@ -2,8 +2,7 @@
 
 /**
  * A conversation's skills. Once the server's row is read, the session detail is the truth and a
- * change is a PATCH of the full set, written into the cached detail before it lands (rolled back
- * on a failure, which the host's mutation cache toasts). Until then, a local selection the first
+ * pending change is projected over that row until its PATCH completes. Until then, a local selection the first
  * turn sends as `pins` / `skill_discovery`. A change made after that turn left and before its row
  * is read stays local, the row is read again, and the change is PATCHed over it; a turn that
  * created no row leaves the selection to the next turn.
@@ -18,14 +17,8 @@ import {
   useRef,
   useState,
 } from "react";
-import {
-  useMutation,
-  useMutationState,
-  useQuery,
-  useQueryClient,
-  type QueryClient,
-} from "@tanstack/react-query";
-import type { ChatSkillSelection } from "../skills.ts";
+import { useMutation, useMutationState, useQuery, useQueryClient } from "@tanstack/react-query";
+import type { ChatSkillSelection, SkillSettingsPatch } from "../skills.ts";
 import {
   DEFAULT_STORED_SKILLS,
   citedSkillIds,
@@ -64,13 +57,15 @@ const DEFAULT_SELECTION = selectionOf(DEFAULT_STORED_SKILLS);
 const skillsMutationKey = (orgId: string | undefined, id: string) =>
   ["chat-session-skills", orgId, id] as const;
 
-/** The latest selection in flight for the conversation, if any. */
-function pendingSelection(
-  queryClient: QueryClient,
-  mutationKey: readonly unknown[],
-): ChatSkillSelection | undefined {
-  const pending = queryClient.getMutationCache().findAll({ mutationKey, status: "pending" });
-  return pending[pending.length - 1]?.state.variables as ChatSkillSelection | undefined;
+function applyChange(
+  selection: ChatSkillSelection,
+  change: SkillSettingsPatch,
+): ChatSkillSelection {
+  const next = {
+    pinnedSkills: change.pins ?? selection.pinnedSkills,
+    skillDiscovery: change.skill_discovery ?? selection.skillDiscovery,
+  };
+  return change.pin ? withPin(next, change.pin.id, change.pin.pinned) : next;
 }
 
 const selectSkills = (row: SessionHistory | null) => row?.skills ?? null;
@@ -107,32 +102,28 @@ export function useConversationSkills({
     setSelectionState(next);
   }, []);
   // The local selection holds a change no turn and no PATCH has carried.
-  const unsentRef = useRef(false);
+  const unsentRef = useRef<SkillSettingsPatch[]>([]);
 
   const pending = useMutationState({
     filters: { mutationKey, status: "pending" },
-    select: (mutation) => mutation.state.variables as ChatSkillSelection,
+    select: (mutation) => mutation.state.variables as SkillSettingsPatch,
   });
-  const latest = pending[pending.length - 1];
   const held = detail.data != null;
   const base = useMemo(
     () => detail.data ?? withSelection(DEFAULT_STORED_SKILLS, selection),
     [detail.data, selection],
   );
   // The changes in flight over the server's state: a read landing mid-PATCH cannot hide them.
-  const skills = useMemo(() => (latest ? withSelection(base, latest) : base), [base, latest]);
+  const skills = useMemo(
+    () =>
+      pending.length ? withSelection(base, pending.reduce(applyChange, selectionOf(base))) : base,
+    [base, pending],
+  );
 
   const heldRow = useCallback(
     () => queryClient.getQueryData<SessionHistory | null>(detailKey) ?? null,
     [queryClient, detailKey],
   );
-  /** The full selection at call time: the last in flight, else an unsent one, else the row's. */
-  const current = useCallback((): ChatSkillSelection => {
-    const inFlight = pendingSelection(queryClient, mutationKey);
-    if (inFlight) return inFlight;
-    const row = heldRow();
-    return row && !unsentRef.current ? selectionOf(row.skills) : selectionRef.current;
-  }, [queryClient, mutationKey, heldRow]);
   const isLast = useCallback(
     () => queryClient.isMutating({ mutationKey }) <= 1,
     [queryClient, mutationKey],
@@ -140,28 +131,14 @@ export function useConversationSkills({
 
   const { mutate } = useMutation({
     mutationKey,
-    // One PATCH at a time, each carrying the full set computed over the previous ones: the server
-    // applies them in order, so the last change made is the one it keeps.
+    // Preserve the order of this tab's edits to the same pin.
     scope: { id: `chat-session-skills:${orgId}:${id}` },
-    mutationFn: (next: ChatSkillSelection) => updateSessionSkills(transport!, id, next),
-    onMutate: async (next) => {
-      unsentRef.current = false;
-      await queryClient.cancelQueries({ queryKey: detailKey, exact: true });
-      const previous = queryClient.getQueryData<SessionHistory | null>(detailKey);
-      queryClient.setQueryData<SessionHistory | null>(
-        detailKey,
-        (row) => row && { ...row, skills: withSelection(row.skills, next) },
-      );
-      return { previous };
-    },
+    mutationFn: (change: SkillSettingsPatch) => updateSessionSkills(transport!, id, change),
     onSuccess: (stored) => {
       queryClient.setQueryData<SessionHistory | null>(
         detailKey,
         (row) => row && { ...row, skills: stored },
       );
-    },
-    onError: (_error, _next, context) => {
-      if (isLast() && context?.previous) queryClient.setQueryData(detailKey, context.previous);
     },
     onSettled: () => {
       if (isLast()) void queryClient.invalidateQueries({ queryKey: detailKey, exact: true });
@@ -171,7 +148,9 @@ export function useConversationSkills({
   // The row is read: a change it does not hold yet is sent over it.
   const stored = detail.data;
   useEffect(() => {
-    if (stored && unsentRef.current && transport) mutate(selectionRef.current);
+    if (stored && transport) {
+      for (const edit of unsentRef.current.splice(0)) mutate(edit);
+    }
   }, [stored, transport, mutate]);
 
   /** Reads the row again: after the first turn it may hold the conversation now. */
@@ -182,25 +161,28 @@ export function useConversationSkills({
 
   const getEnabled = useLatest(enabled);
   const change = useCallback(
-    (apply: (selection: ChatSkillSelection) => ChatSkillSelection) => {
+    (edit: SkillSettingsPatch) => {
       if (!getEnabled()) return;
       if (heldRow()) {
-        if (transport) mutate(apply(current()));
+        if (transport) {
+          for (const earlier of unsentRef.current.splice(0)) mutate(earlier);
+          mutate(edit);
+        }
         return;
       }
       // A conversation held at mount changes once its row is read: the defaults are not its choice.
       if (persisted) return;
-      setSelection(apply(selectionRef.current));
-      unsentRef.current = true;
+      setSelection(applyChange(selectionRef.current, edit));
+      unsentRef.current.push(edit);
       // A query not enabled yet (no turn left) is not read.
       void reread();
     },
-    [getEnabled, heldRow, transport, mutate, current, persisted, setSelection, reread],
+    [getEnabled, heldRow, transport, mutate, persisted, setSelection, reread],
   );
 
   const takeForTurn = useCallback((): ChatSkillSelection | undefined => {
     if (!getEnabled() || heldRow()) return undefined;
-    unsentRef.current = false;
+    unsentRef.current = [];
     setSent(true);
     return selectionRef.current;
   }, [getEnabled, heldRow]);
@@ -209,9 +191,9 @@ export function useConversationSkills({
     () => ({
       skills,
       held,
-      setPin: (packageId: string, on: boolean) => change((s) => withPin(s, packageId, on)),
-      setDiscovery: (on: boolean) => change((s) => ({ ...s, skillDiscovery: on })),
-      reset: () => change(() => DEFAULT_SELECTION),
+      setPin: (packageId: string, on: boolean) => change({ pin: { id: packageId, pinned: on } }),
+      setDiscovery: (on: boolean) => change({ skill_discovery: on }),
+      reset: () => change({ pins: [], skill_discovery: true }),
       takeForTurn,
     }),
     [skills, held, change, takeForTurn],
