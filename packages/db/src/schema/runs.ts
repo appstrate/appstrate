@@ -504,10 +504,6 @@ export const runLogs = pgTable(
  *   calls `recall_memory`. Checkpoints are pinned by default; memories
  *   default to false.
  *
- * Mapping from the legacy `kind` enum (pre-0011):
- *   `kind='checkpoint'` ≡ `key='checkpoint'`, `pinned=true`.
- *   `kind='memory'`     ≡ `key IS NULL`,      `pinned=false`.
- *
  * Actor columns mirror the `runs` convention: `actor_type ∈
  * {'user', 'end_user', 'shared'}`, `actor_id` NULL iff `actor_type='shared'`.
  */

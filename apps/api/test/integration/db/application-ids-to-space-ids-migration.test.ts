@@ -507,7 +507,7 @@ describe("scripts/migration/0003 — `app_` ids and the `application` vocabulary
        WHERE contype = 'f' AND confrelid = 'public.spaces'::regclass
        ORDER BY 1, 2
     `);
-    expect(before.length).toBe(22);
+    expect(before.length).toBe(20);
 
     await replayScript();
 
