@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
+import { nextScheduleVersion } from "../lib/schedule-version.ts";
 import { createQueue } from "../infra/queue/index.ts";
 import type { JobQueue, QueueJob } from "../infra/queue/index.ts";
 import { getCache } from "../infra/index.ts";
@@ -245,7 +246,7 @@ async function disableScheduleAtFire(
       enabled: false,
       disabledReason: reason,
       nextRunAt: null,
-      updatedAt: new Date(),
+      updatedAt: nextScheduleVersion,
     })
     .where(
       and(
@@ -1106,7 +1107,7 @@ export async function updateSchedule(
     timezone: tz,
     enabled,
     nextRunAt: nextRun ?? null,
-    updatedAt: new Date(),
+    updatedAt: nextScheduleVersion,
   };
   if (enabled) payload.disabledReason = null;
   if (data.name !== undefined) payload.name = data.name;
@@ -1208,7 +1209,7 @@ export async function dropLockedFieldsFromSchedules(
     if (Object.keys(stripped).length === Object.keys(input).length) continue;
     await tx
       .update(schedules)
-      .set({ input: stripped, updatedAt: new Date() })
+      .set({ input: stripped, updatedAt: nextScheduleVersion })
       .where(eq(schedules.id, row.id));
   }
 }

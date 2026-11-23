@@ -12,6 +12,8 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it, spyOn } from "bun:test";
+import { ApiError } from "../../api/errors";
+import { scheduleKeys } from "../../lib/query-keys";
 import { QueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { installFakeStorage } from "../../test/fake-storage.ts";
@@ -124,6 +126,28 @@ describe("launch warnings, wired", () => {
     expect(warned.mock.calls[0]![0]).toBe(EXPECTED_SCHEDULE);
   });
 
+  it("sends the displayed schedule revision, refreshes on conflict and retries only with the reviewed revision", async () => {
+    const qc = cachedClient();
+    const key = scheduleKeys.detail("org", "space", "sch_1");
+    qc.setQueryData(key, SCHEDULE);
+    const patch = spyOn(client, "PATCH")
+      .mockRejectedValueOnce(new ApiError("precondition_failed", "Changed", 412))
+      .mockResolvedValueOnce({ data: { ...SCHEDULE, warnings: null } });
+    stubs.push(patch);
+    const update = capture(() => useUpdateSchedule(), qc);
+    const first = { id: "sch_1", etag: '"1"', enabled: false };
+    await expect(update.mutateAsync(first)).rejects.toMatchObject({ status: 412 });
+    expect(qc.getQueryState(key)?.isInvalidated).toBe(true);
+    expect(patch).toHaveBeenCalledTimes(1);
+    await update.mutateAsync({ ...first, etag: '"2"' });
+    for (const [index, etag] of ['"1"', '"2"'].entries()) {
+      expect(patch).toHaveBeenNthCalledWith(index + 1, "/api/schedules/{id}", {
+        params: { path: { id: "sch_1" }, header: { "If-Match": etag } },
+        body: { enabled: false },
+      });
+    }
+  });
+
   it("a schedule update toasts its warnings", async () => {
     stubs.push(
       spyOn(client, "PATCH").mockResolvedValue({
@@ -131,7 +155,7 @@ describe("launch warnings, wired", () => {
       }),
     );
     const update = capture(() => useUpdateSchedule(), cachedClient());
-    await update.mutateAsync({ id: "sch_1", enabled: true });
+    await update.mutateAsync({ id: "sch_1", etag: '"v1"', enabled: true });
     await Bun.sleep(0);
     expect(warned).toHaveBeenCalledTimes(1);
     expect(warned.mock.calls[0]![0]).toBe(EXPECTED_SCHEDULE);
@@ -184,7 +208,7 @@ describe("schedule writes — the toast follows the server's verdict", () => {
       await create.mutateAsync({ cron_expression: "0 9 * * *" });
     } else {
       const update = capture(() => useUpdateSchedule(), cachedClient());
-      await update.mutateAsync({ id: "sch_1", name: "Renamed" });
+      await update.mutateAsync({ id: "sch_1", etag: '"v1"', name: "Renamed" });
     }
     await Bun.sleep(0);
     return warned.mock.calls.length;

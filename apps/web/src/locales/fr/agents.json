@@ -418,6 +418,7 @@
   "schedule.agent": "Agent",
   "schedule.unnamed": "Sans nom",
   "schedule.enable": "Activer",
+  "schedule.reviewChanges": "Revoir mes modifications sur la dernière version",
   "schedule.disable": "Désactiver",
   "schedule.memberGoverned": "Seul un administrateur peut modifier une planification exécutée au nom d'un autre membre",
   "schedule.deleteTitle": "Supprimer la planification ?",

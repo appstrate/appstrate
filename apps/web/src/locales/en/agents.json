@@ -418,6 +418,7 @@
   "schedule.agent": "Agent",
   "schedule.unnamed": "Unnamed",
   "schedule.enable": "Enable",
+  "schedule.reviewChanges": "Review my edits against the latest version",
   "schedule.disable": "Disable",
   "schedule.memberGoverned": "Only an admin can change a schedule that runs as another member",
   "schedule.deleteTitle": "Delete the schedule?",
