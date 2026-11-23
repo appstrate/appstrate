@@ -54,9 +54,8 @@ describe("thread layout on a phone", () => {
     expect(THREAD_VIEWPORT_CLASS.split(/\s+/)).toContain("overscroll-contain");
   });
 
-  it("keeps the disclaimer under the composer, out of the way while the keyboard is up", () => {
-    expect(DISCLAIMER_CLASS.split(/\s+/)).toContain("max-md:group-focus-within/footer:hidden");
-    expect(DISCLAIMER_CLASS.split(/\s+/)).not.toContain("max-md:hidden");
+  it('has no disclaimer under the composer on a phone: it is in the "+" panel', () => {
+    expect(DISCLAIMER_CLASS.split(/\s+/)).toContain("max-md:hidden");
   });
 });
 

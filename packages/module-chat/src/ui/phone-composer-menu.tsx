@@ -5,7 +5,8 @@
  * bottom with all of them (attach a file, the skills, the model, the space limit, creation mode),
  * as the chats people already use do. Nothing of them stays beside the field: a dot on the "+"
  * says one of the settings is off its default, and the panel names it. The skills and the model
- * open in the same panel, in place of its rows, with a way back. From `md` up the composer keeps
+ * open in the same panel, in place of its rows, with a way back. The disclaimer is the panel's
+ * last line. From `md` up the composer keeps
  * its attach button, its settings menu, its model pill and its chips (`ComposerTools`).
  */
 
@@ -212,6 +213,10 @@ export function ComposerPlusMenu({ authorsPackages }: { authorsPackages: boolean
                 onCheckedChange={setPackageAuthoringEnabled}
               />
             )}
+            {/* The phone's composer line has no room for it: the panel's last line. */}
+            <p className="text-muted-foreground mt-1 border-t px-5 pt-3 pb-2 text-sm">
+              {t("thread.disclaimer")}
+            </p>
           </>
         ) : view === "skills" && conversation ? (
           <div className="flex min-h-0 flex-col px-4">

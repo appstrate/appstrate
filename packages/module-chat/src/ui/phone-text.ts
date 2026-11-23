@@ -66,5 +66,5 @@ export const THREAD_FOOTER_CLASS =
 /** The line under the composer, as the conversation skeleton draws it too. */
 export const DISCLAIMER_TEXT_CLASS = "text-muted-foreground/70 px-4 text-center text-xs";
 
-/** Under the composer; on a phone it steps aside while the composer has the focus (the keyboard is up). */
-export const DISCLAIMER_CLASS = `${DISCLAIMER_TEXT_CLASS} max-md:group-focus-within/footer:hidden`;
+/** Under the composer from `md` up; a phone has it as the last line of the "+" panel. */
+export const DISCLAIMER_CLASS = `${DISCLAIMER_TEXT_CLASS} max-md:hidden`;
