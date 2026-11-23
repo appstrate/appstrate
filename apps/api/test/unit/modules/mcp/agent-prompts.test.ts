@@ -8,7 +8,7 @@
 
 import { describe, expect, it } from "bun:test";
 import { ErrorCode, McpError } from "@modelcontextprotocol/sdk/types.js";
-import type { AppstrateRequestExtra } from "@appstrate/mcp-transport";
+import { AGENT_PROMPT_META_KEY, type AppstrateRequestExtra } from "@appstrate/mcp-transport";
 import {
   buildAgentPromptProvider,
   type PromptSpace,
@@ -25,6 +25,8 @@ interface FakeAgent {
   version?: string;
   display_name?: string;
   description?: string;
+  icon?: string;
+  color?: string;
   input?: Record<string, unknown>;
 }
 
@@ -46,6 +48,8 @@ function fakeDispatch(agentsBySpace: Record<string, FakeAgent[]>) {
           id: agent.id,
           display_name: agent.display_name,
           description: agent.description ?? "",
+          icon: agent.icon ?? null,
+          color: agent.color ?? null,
           // The draft manifest's version: present whether or not anything is published.
           version: "0.0.1",
           published: agent.version !== undefined,
@@ -125,10 +129,21 @@ describe("agent prompts — prompts/list", () => {
         title: "Writer",
         description: 'Launches a metered run of the Appstrate agent "Writer": Writes.',
         arguments: [expect.objectContaining({ name: "request", required: false })],
+        _meta: { [AGENT_PROMPT_META_KEY]: { packageId: "@acme/writer", icon: null, color: null } },
       },
     ]);
     // One listing read for the one space with `run_and_wait`: no agent detail, no other space.
     expect(requests).toEqual([{ spaceId: "spc_a", path: "/api/agents" }]);
+  });
+
+  it("carries the agent's icon and colour in the prompt's _meta", async () => {
+    const { prompts } = provider([space("spc_a", "Alpha")], {
+      spc_a: [{ id: "@acme/writer", version: "1.0.0", icon: "lucide:bot", color: "teal" }],
+    });
+    const [listed] = await prompts.list(noExtra);
+    expect(listed!._meta).toEqual({
+      [AGENT_PROMPT_META_KEY]: { packageId: "@acme/writer", icon: "lucide:bot", color: "teal" },
+    });
   });
 
   it("lists nothing when the caller can run in no space", async () => {
@@ -243,6 +258,37 @@ describe("agent prompts — prompts/get", () => {
       if (!(error instanceof McpError)) throw new Error(`expected an McpError for ${name}`);
       expect(error.code).toBe(ErrorCode.InvalidParams);
       expect(error.message).toContain(`Invalid prompt name: ${name}`);
+    }
+  });
+
+  it("answers a failing agent read with an internal error, not invalid params", async () => {
+    const fake = fakeDispatch({ spc_a: [{ id: "@acme/reader", version: "1.0.0" }] });
+    for (const failure of [
+      (request: Request) =>
+        new URL(request.url).pathname === "/api/agents"
+          ? fake.dispatch(request)
+          : Promise.resolve(Response.json({ code: "boom" }, { status: 503 })),
+      (request: Request) =>
+        new URL(request.url).pathname === "/api/agents"
+          ? fake.dispatch(request)
+          : Promise.reject(new Error("socket closed")),
+    ]) {
+      const prompts = buildAgentPromptProvider({
+        origin: "http://localhost:3000",
+        authHeaders: new Headers({ authorization: "Bearer test" }),
+        dispatchIn: (spaceId) => (request) => {
+          request.headers.set("x-space-id", spaceId);
+          return failure(request);
+        },
+        spaces: [space("spc_a", "Alpha")],
+        namesSpace: true,
+      });
+      const error = await Promise.resolve(prompts.get("run-reader", {}, noExtra)).then(
+        () => undefined,
+        (rejection: unknown) => rejection,
+      );
+      if (!(error instanceof McpError)) throw new Error("expected an McpError");
+      expect(error.code).toBe(ErrorCode.InternalError);
     }
   });
 });

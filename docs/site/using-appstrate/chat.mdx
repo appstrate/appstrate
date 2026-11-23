@@ -46,15 +46,17 @@ By default, a one-off agent the assistant composes runs on the organization's de
 
 ### Skills
 
-[Skills](/features/skills) give the assistant instructions for a domain. Each conversation has a skill mode, chosen in the composer:
+[Skills](/features/skills) give the assistant instructions for a domain. Each conversation has two skill settings, in the composer's skills panel:
 
-| Mode                | Behaviour                                                                      |
-| ------------------- | ------------------------------------------------------------------------------ |
-| Automatic (default) | The assistant sees the available skills and loads the ones that fit            |
-| Manual              | The skills you chose are loaded in full, and it can look for others if you ask |
-| Strict              | Only the skills you chose. It can neither list nor load any other              |
+- **Pinned skills**: a checked skill is pinned to the conversation, and each turn tries to load it in full. Each row shows whether the last message actually loaded it:
+  - no caption: loaded, or not yet evaluated;
+  - "Not loaded" with the reason: skill budget exceeded, unavailable or unreadable.
 
-Manual and strict take at most 5 skills, sharing a budget of 64,000 characters.
+  A skill that is not loaded stays pinned and is not counted as loaded. A gauge shows the share of the 64,000-character budget taken by the pinned skills and the skills named in the message you are typing, and warns before a pin would exceed it. Changes apply from the next message, as a line at the foot of the panel says, even while a reply is being written. Uncheck any pinned skill to remove it from the conversation: it leaves the context from the next message on, and earlier turns are unchanged.
+
+- **Automatic discovery** (on by default): the assistant sees the other skills of the spaces the conversation can act in, one line each, and loads the one that fits. The skills you pinned are not listed again. When it is off, the assistant has no access to any other skill: it cannot list, load, declare or write one, whatever your role. The skills you pinned or named in a message still apply.
+
+A skill the assistant reads this way is not pinned: it serves that message and its text stays in the conversation's history, shown in the thread as a "Read for this message" chip with a "Pin" action. Only you pin a skill. Pinned skills share a budget of 64,000 characters, injected in order; a skill that would not fit cannot be pinned, and one that no longer fits (a pinned skill grew) is shown as over budget until you uncheck another to make room.
 
 ## For administrators
 
@@ -62,3 +64,10 @@ Manual and strict take at most 5 skills, sharing a budget of 64,000 characters.
 - Inference goes through the platform's LLM proxy: the model's key is injected server-side and the usage is metered like any run. With the billing module, a chat can stop on an exhausted quota.
 - The assistant drives the platform through the same [MCP tools](/using-appstrate/mcp-clients#the-tools) an external client gets, which enforce your permissions on every call.
 - Developers can reach the same surface over the API: `POST /api/orgs/{orgId}/chat` and `/api/orgs/{orgId}/chat/sessions`. See the [API reference](/api).
+
+### Commands
+
+Type `/` in the composer to open the list of commands: the skills the conversation can read and the agents you can launch, in the spaces the conversation acts in (the origin space alone when it is limited to it). The list is the one the Appstrate MCP server serves to any client, with your own permissions, and it shows skills even when automatic discovery is off.
+
+- **A skill** is added to your message as a chip. Sending the message loads the skill in full for that turn, discovery on or off, and pins nothing. The skill stays loaded on later turns while the message is in the conversation's history, after the pinned skills and within the same 64,000-character budget. A named skill that cannot be loaded is reported to the assistant. To keep a skill on every turn, pin it in the skills panel.
+- **An agent** asks the assistant to run it. Type what you want after the command; the assistant builds the run's input from it, asks for what is missing, then launches the agent. Each launch is a metered run. The conversation shows what you typed, and the assistant is given the launch instructions the server returns, which are kept with the message. Later turns replay the most recent launch instructions within a 64,000-character budget; older ones are replaced by a short note, and you can launch the agent again. If the platform's MCP server cannot answer, the launch fails with a gateway error (502) and nothing is sent.

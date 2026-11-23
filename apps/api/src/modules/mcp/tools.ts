@@ -57,7 +57,7 @@ import type { ResolutionFieldError } from "@appstrate/core/api-errors";
 import type { RunLogEvent } from "@appstrate/shared-types";
 import { FILE_NAME_META_KEY, parseFileUri, fileUri } from "@appstrate/core/file-uri";
 import { parseScopedName } from "@appstrate/core/naming";
-import { SKILL_URI_PREFIX } from "@appstrate/core/skill-uri";
+import { SKILL_URI_PREFIX } from "@appstrate/core/skill-address";
 import {
   CONNECTION_RESOLUTION_WARNING_CODES,
   MAX_CONNECTIONS_PER_INTEGRATION,
@@ -769,9 +769,11 @@ async function searchAgentKind({ ctx, spaces, tokens, limit, signal }: SearchCal
     name: hit.id,
     text: `${hit.display_name} ${hit.description}`,
   }));
-  const items = matches
-    .slice(0, limit)
-    .map(({ item }) => ({ ...item.hit, ...(spaces ? { granted_in: item.spaceIds } : {}) }));
+  const items = matches.slice(0, limit).map(({ item: { hit, spaceIds } }) => {
+    // The appearance is the launch prompts' business, not part of what a search answers.
+    const { icon: _icon, color: _color, ...listed } = hit;
+    return { ...listed, ...(spaces ? { granted_in: spaceIds } : {}) };
+  });
   return {
     section: { total: matches.length, items, ...unsearched(refused) },
     searched: spacesShown(items),

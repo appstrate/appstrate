@@ -15,8 +15,8 @@ import {
 } from "@tanstack/react-query";
 import type { UIMessage } from "ai";
 import type { TokenUsage } from "@appstrate/core/token-usage";
-import type { ChatSkillMode } from "@appstrate/db/schema";
-import type { ChatSkillSelection } from "../skills.ts";
+import type { ChatSkillSelection, PinnedSkill } from "../skills.ts";
+import type { StoredSkills } from "./chat-skills.ts";
 import { errorStatus, jsonInit, type ChatTransport } from "./runtime-context.ts";
 import { chatPath } from "./chat-route.ts";
 
@@ -205,6 +205,24 @@ export async function stopSession(transport: ChatTransport, id: string): Promise
   await transport.request(chatPath(transport, `/sessions/${id}/stop`), { method: "POST" });
 }
 
+/** The session's skills as a session DTO carries them. */
+function storedSkillsOf(dto: { skill_discovery: boolean; pins: PinnedSkill[] }): StoredSkills {
+  return { skillDiscovery: dto.skill_discovery, pins: dto.pins };
+}
+
+/** Replace the conversation's pins (the full set) and its discovery switch; the server's result. */
+export async function updateSessionSkills(
+  transport: ChatTransport,
+  id: string,
+  selection: ChatSkillSelection,
+): Promise<StoredSkills> {
+  const res = await transport.request(
+    chatPath(transport, `/sessions/${id}/skills`),
+    jsonInit("PATCH", { pins: selection.pinnedSkills, skill_discovery: selection.skillDiscovery }),
+  );
+  return storedSkillsOf((await res.json()) as { skill_discovery: boolean; pins: PinnedSkill[] });
+}
+
 /** A stored message node as returned by `GET /sessions/:id`. */
 interface StoredMessage {
   id: string;
@@ -214,7 +232,7 @@ interface StoredMessage {
 /** A conversation as the detail route serves it: its row, history, skill selection and usage. */
 export interface SessionHistory extends SessionSummary {
   messages: UIMessage[];
-  skills: ChatSkillSelection;
+  skills: StoredSkills;
   createdAt: string;
   /** Tokens of every model call metered for the conversation's turns. */
   usage: TokenUsage;
@@ -236,10 +254,10 @@ export async function loadHistory(
     if (errorStatus(error) === 404) return null;
     throw error;
   }
-  const { messages, skill_mode, pinned_skills, ...row } = (await res.json()) as SessionSummary & {
+  const { messages, skill_discovery, pins, ...row } = (await res.json()) as SessionSummary & {
     messages?: StoredMessage[];
-    skill_mode: ChatSkillMode;
-    pinned_skills: string[];
+    skill_discovery: boolean;
+    pins: PinnedSkill[];
     createdAt: string;
     usage: TokenUsage;
   };
@@ -247,7 +265,7 @@ export async function loadHistory(
     ...row,
     // Row `id` LAST: a stray `id` inside a stored `content` must not win.
     messages: (messages ?? []).map((e) => ({ ...e.content, id: e.id }) as UIMessage),
-    skills: { skillMode: skill_mode, pinnedSkills: pinned_skills },
+    skills: storedSkillsOf({ skill_discovery, pins }),
   };
 }
 
@@ -265,8 +283,8 @@ export function sessionQuery(transport: ChatTransport | null | undefined, id: st
   });
 }
 
-/** What seeds a conversation's runtime: its stored messages and skill selection. */
-export type SessionSeed = Pick<SessionHistory, "messages" | "skills">;
+/** What seeds a conversation's runtime: its stored messages. */
+export type SessionSeed = Pick<SessionHistory, "messages">;
 
 /**
  * The seed of conversation `id` (`null`: no such conversation), read through the conversation's
@@ -284,7 +302,7 @@ export function sessionSeedQuery(
       ? async (): Promise<SessionSeed | null> => {
           // A cached entry has an observer, which the session signal keeps fresh.
           const history = await queryClient.fetchQuery(sessionQuery(transport, id));
-          return history && { messages: history.messages, skills: history.skills };
+          return history && { messages: history.messages };
         }
       : skipToken,
     staleTime: Infinity,

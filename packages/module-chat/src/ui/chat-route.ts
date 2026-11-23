@@ -36,9 +36,9 @@ export interface ConversationCreation {
 }
 
 /**
- * The body of a turn: the messages, the generation settings, the authoring switch, the skills the
- * user changed (nothing changed = nothing sent) and, on the turn that creates the conversation,
- * its origin space and limit (`creation`; the server ignores them for an existing conversation).
+ * The body of a turn: the messages, the generation settings, the authoring switch and, on the
+ * turn that creates the conversation, its origin space, limit and skills (`creation`, `skills`;
+ * the server ignores them for an existing conversation, whose skills change by PATCH).
  */
 export function turnBody(args: {
   body: object | undefined;
@@ -68,7 +68,11 @@ export function turnBody(args: {
     package_authoring: packageAuthoring,
     inline_runs_use_chat_model: inlineRunsUseChatModel,
     ...creation,
-    ...(skills && { skill_mode: skills.skillMode, pinned_skills: skills.pinnedSkills }),
+    ...(creation &&
+      skills && {
+        skill_discovery: skills.skillDiscovery,
+        ...(skills.pinnedSkills.length > 0 && { pins: skills.pinnedSkills }),
+      }),
   };
 }
 

@@ -1,7 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { describe, expect, it } from "bun:test";
-import { createMessageQueue, flushDecision, joinQueued } from "../src/ui/message-queue.ts";
+import {
+  canQueueDraft,
+  createMessageQueue,
+  flushDecision,
+  joinQueued,
+} from "../src/ui/message-queue.ts";
 
 describe("joinQueued", () => {
   it("joins queued texts into one message, a blank line apart", () => {
@@ -71,5 +76,27 @@ describe("createMessageQueue", () => {
     q.markStopped();
     q.clear();
     expect(q.getSnapshot()).toEqual({ items: [], stopped: false });
+  });
+});
+
+describe("canQueueDraft", () => {
+  const draft = { running: true, text: "more", hasAttachments: false };
+
+  it("queues the text typed while a turn runs", () => {
+    expect(canQueueDraft(draft)).toBe(true);
+  });
+
+  it("does not queue a draft that names an agent: no launch waits in a queue", () => {
+    expect(canQueueDraft({ ...draft, text: ":agent[Report]{name=run-report} for Q3" })).toBe(false);
+  });
+
+  it("queues a draft that names a skill: it is pinned when the queue is sent", () => {
+    expect(canQueueDraft({ ...draft, text: "use :skill[tone]{name=@acme/tone}" })).toBe(true);
+  });
+
+  it("does not queue blank text, files, or outside a running turn", () => {
+    expect(canQueueDraft({ ...draft, text: "  " })).toBe(false);
+    expect(canQueueDraft({ ...draft, hasAttachments: true })).toBe(false);
+    expect(canQueueDraft({ ...draft, running: false })).toBe(false);
   });
 });

@@ -26,7 +26,7 @@
 import { and, eq, isNotNull, isNull, lt, or, sql } from "drizzle-orm";
 import Redis from "ioredis";
 import { db } from "@appstrate/db/client";
-import { chatSessions } from "@appstrate/db/schema";
+import { chatSessions, type ChatSkillStatusEntry } from "@appstrate/db/schema";
 import { notifySessionUpdate } from "./realtime.ts";
 import {
   createResumableStreamContext,
@@ -292,33 +292,40 @@ export async function sweepStaleActiveStreams(): Promise<number> {
  */
 export const STALE_MARKER_MIN_AGE_MS = CHAT_TURN_DEADLINE_MS + 60_000;
 
+/** What a turn read of its conversation and acts on: the claim compares the row against it. */
+export interface TurnScope {
+  spaceId: string | null;
+  restricted: boolean;
+}
+
 /** What claiming a conversation for a turn answered: `claimed`, or why nothing was written. */
 type StreamClaim = "claimed" | "scope_changed" | "in_flight";
 
 /**
- * Mark a session's in-flight stream so a reloaded client can reconnect to it.
- * A conversation runs one turn at a time: the claim takes a free marker, or one
- * stale by {@link STALE_MARKER_MIN_AGE_MS} (its producer is gone), never a live
- * one. `updated_at` is stamped in the same statement: it is what tells a freshly
- * claimed turn from a marker whose producer died. Emits no signal: the caller's
- * user-message write does; on its failure `clearActiveStream` does.
- *
- * Also a compare-and-set on the scope the turn read (its origin space and limit):
- * the turn's spaces and bearer were computed from that read, and the limit PATCH
- * is refused only while a marker is set, so a change landing between the read and
- * this claim refuses the turn rather than letting it act with a reach it no
- * longer has. `scope_changed`: the scope moved (or the row is gone);
- * `in_flight`: another turn holds the conversation. Neither writes anything.
+ * Claim a session for a turn: set its in-flight marker (free, or stale by
+ * {@link STALE_MARKER_MIN_AGE_MS}) and `updated_at`, compare-and-set on the `scope` the turn read
+ * (its origin space and limit: the limit PATCH is refused only while a marker is set, so a change
+ * landing between the read and this claim refuses the turn). Writes the turn's verdict on each pin
+ * it read and the row still holds as `skill_status`; a refused claim writes nothing. Answers
+ * `claimed`, `scope_changed` (the scope moved, or the row is gone) or `in_flight` (another turn
+ * holds the conversation).
+ * Emits no signal: the caller's next write does, or `clearActiveStream`.
  */
 export async function setActiveStream(
   sessionId: string,
   streamId: string,
-  scope: { spaceId: string | null; restricted: boolean },
+  scope: TurnScope,
+  skillStatus: Readonly<Record<string, ChatSkillStatusEntry>>,
 ): Promise<StreamClaim> {
   const staleBefore = new Date(Date.now() - STALE_MARKER_MIN_AGE_MS);
   const claimed = await db
     .update(chatSessions)
-    .set({ activeStreamId: streamId, updatedAt: new Date() })
+    .set({
+      activeStreamId: streamId,
+      updatedAt: new Date(),
+      // Only the pins the row still holds: a skills PATCH landing since the turn read them wins.
+      skillStatus: sql`(SELECT coalesce(jsonb_object_agg(key, value), '{}'::jsonb) FROM jsonb_each(${JSON.stringify(skillStatus)}::jsonb) WHERE key = ANY(${chatSessions.pinnedSkills}))`,
+    })
     .where(
       and(
         eq(chatSessions.id, sessionId),
@@ -330,11 +337,20 @@ export async function setActiveStream(
     .returning({ id: chatSessions.id });
   if (claimed.length > 0) return "claimed";
   const [row] = await db
-    .select({ spaceId: chatSessions.spaceId, restricted: chatSessions.restricted })
+    .select({
+      activeStreamId: chatSessions.activeStreamId,
+      updatedAt: chatSessions.updatedAt,
+      spaceId: chatSessions.spaceId,
+      restricted: chatSessions.restricted,
+    })
     .from(chatSessions)
     .where(eq(chatSessions.id, sessionId))
     .limit(1);
-  return row && row.spaceId === scope.spaceId && row.restricted === scope.restricted
+  if (!row) return "scope_changed";
+  // A live turn holding the conversation wins over a moved scope: the caller must wait, not resend.
+  if (row.activeStreamId !== null && row.updatedAt >= staleBefore) return "in_flight";
+  // The marker cleared between the two statements, or the scope moved: told apart here.
+  return row.spaceId === scope.spaceId && row.restricted === scope.restricted
     ? "in_flight"
     : "scope_changed";
 }

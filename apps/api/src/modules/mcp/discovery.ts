@@ -13,7 +13,7 @@
 
 import { mapWithConcurrency } from "@appstrate/core/map-with-concurrency";
 import { encodePackageIdPath, parseScopedName } from "@appstrate/core/naming";
-import { parseSkillUri } from "@appstrate/core/skill-uri";
+import { parseSkillUri } from "@appstrate/core/skill-address";
 import { ApiError } from "../../lib/errors.ts";
 import type { DispatchContext } from "./api-call-batch.ts";
 import type { SkillServer } from "./skills.ts";
@@ -89,6 +89,8 @@ export interface AgentHit {
   display_name: string;
   description: string;
   published: boolean;
+  icon: string | null;
+  color: string | null;
 }
 
 /** A GET dispatched in-process, in the space `ctx` enters. */
@@ -127,6 +129,8 @@ export async function listAgents(
         display_name: name || id,
         description: typeof row?.description === "string" ? row.description : "",
         published: row?.published === true,
+        icon: typeof row?.icon === "string" ? row.icon : null,
+        color: typeof row?.color === "string" ? row.color : null,
       },
     ];
   });

@@ -27,7 +27,7 @@ import {
 import { Tooltip, TooltipContent, TooltipTrigger } from "@appstrate/ui/components/tooltip";
 import { attachUnavailableKey } from "./attachment-adapter.ts";
 import { canComposeInlineRuns } from "../capabilities.ts";
-import type { ChatSkillSelection } from "../skills.ts";
+import { useConversationSkillsContext, useDraftSkills } from "./use-conversation-skills.ts";
 import {
   limitAvailability,
   useConversationScope,
@@ -39,7 +39,7 @@ import {
   usePackageAuthoringEnabled,
 } from "./package-authoring-store.ts";
 import { setInlineRunModelEnabled, useInlineRunModelEnabled } from "./inline-run-model-store.ts";
-import { useChatHost, type ChatTransport } from "./runtime-context.ts";
+import { useChatHost } from "./runtime-context.ts";
 import { RemovableChip } from "./removable-chip.tsx";
 import { sentenceWithNode } from "./sentence-with-name.tsx";
 import { SkillChips } from "./skill-chips.tsx";
@@ -53,23 +53,16 @@ const LIMIT_REASON_KEY: Record<LimitUnavailableReason, string> = {
 };
 
 export interface ComposerToolsProps {
-  transport: ChatTransport | undefined;
-  selection: ChatSkillSelection;
-  onSelectionChange: (selection: ChatSkillSelection) => void;
-  /** The skills picker is offered (`skills:read` + a readable conversation). */
-  showPicker: boolean;
   /** The caller may author packages: the creation-mode switch is offered. */
   authorsPackages: boolean;
 }
 
-export function ComposerTools({
-  transport,
-  selection,
-  onSelectionChange,
-  showPicker,
-  authorsPackages,
-}: ComposerToolsProps) {
+export function ComposerTools({ authorsPackages }: ComposerToolsProps) {
   const { t, can } = useChatHost();
+  // Offered with `skills:read` on a readable conversation: the context is null otherwise.
+  const conversation = useConversationSkillsContext();
+  const showPicker = conversation !== null;
+  const draft = useDraftSkills();
   const scope = useConversationScope();
   const origin = useSpaceName(scope.originSpaceId);
   const creationMode = usePackageAuthoringEnabled();
@@ -185,23 +178,21 @@ export function ComposerTools({
             : t("composer.limitChip.generic")}
         </RemovableChip>
       )}
-      {showPicker && (
+      {conversation && (
         <SkillChips
-          transport={transport}
-          selection={selection}
+          skills={conversation.skills}
           onOpenPicker={() => setSkillsOpen(true)}
-          onResetMode={() => onSelectionChange({ ...selection, skillMode: "auto" })}
+          onReset={conversation.reset}
         />
       )}
     </div>
   );
 
-  if (!showPicker) return cluster;
+  if (!conversation) return cluster;
   return (
     <SkillsPicker
-      transport={transport}
-      selection={selection}
-      onChange={onSelectionChange}
+      conversation={conversation}
+      draft={draft}
       open={skillsOpen}
       onOpenChange={setSkillsOpen}
     >

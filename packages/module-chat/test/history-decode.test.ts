@@ -11,8 +11,8 @@ describe("loadHistory decode", () => {
     const request = requestAnswering(
       json({
         id: "chs_1",
-        skill_mode: "auto",
-        pinned_skills: [],
+        skill_discovery: true,
+        skills: [],
         messages: [
           { id: "m1", content: { role: "user", parts: [{ type: "text", text: "hi" }] } },
           { id: "m2", content: { role: "assistant", parts: [{ type: "text", text: "yo" }] } },
@@ -27,21 +27,18 @@ describe("loadHistory decode", () => {
     ] as never);
   });
 
-  it("carries the session's skill selection as the server stores it", async () => {
+  it("carries the session's skills as the server reports them: verdict and size per pin", async () => {
+    const pins = [
+      { id: "@scope/a", status: "injected", chars: null },
+      { id: "@scope/b", status: "over_budget", chars: null },
+      { id: "@scope/c", status: null, chars: null },
+    ];
     const request = requestAnswering(
-      json({
-        id: "chs_1",
-        messages: [],
-        skill_mode: "manual",
-        pinned_skills: ["@scope/a", "@scope/b"],
-      }),
+      json({ id: "chs_1", messages: [], skill_discovery: false, pins }),
     );
 
     const loaded = await loadHistory(transportOver(request), "chs_1");
-    expect(loaded?.skills).toEqual({
-      skillMode: "manual",
-      pinnedSkills: ["@scope/a", "@scope/b"],
-    });
+    expect(loaded?.skills).toEqual({ skillDiscovery: false, pins } as never);
   });
 
   it("reports a conversation the caller does not have (404) as null, not as an empty one", async () => {

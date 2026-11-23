@@ -1,41 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
 
-// Which skills a chat turn injects. Pure: the result sits in the system
-// prompt's single `cache_control` block.
+// Which skills a chat turn injects. Pure and browser-safe: the UI imports it (src/ui/*), so no
+// runtime import of the logger or any server module.
 
-import { z } from "zod";
-import type { ChatSkillMode } from "@appstrate/db/schema";
 import type { InjectedSkill, InjectedSkills } from "@appstrate/core/chat-contract";
-
-export interface SkillHint {
-  packageId: string;
-  display_name?: string | null;
-  description?: string | null;
-  version?: string | null;
-}
-
-/** The fields read off a row of `GET /api/packages/skills`. */
-const skillListRowSchema = z.object({
-  id: z.string(),
-  name: z.string(),
-  description: z.string().nullable(),
-  version: z.string().nullable(),
-});
-
-/**
- * `GET /api/packages/skills`: the space's ACTIVE skills, uncapped — what the
- * picker offers, and what a chosen skill must be in to be injected. A malformed
- * row is dropped.
- */
-export function parseSkillList(body: unknown): SkillHint[] {
-  const data = (body as { data?: unknown } | null)?.data;
-  return (Array.isArray(data) ? data : []).flatMap((row) => {
-    const parsed = skillListRowSchema.safeParse(row);
-    if (!parsed.success) return [];
-    const { id, name, description, version } = parsed.data;
-    return [{ packageId: id, display_name: name, description, version }];
-  });
-}
+import type { ChatSkillStatus, ChatSkillStatusEntry } from "@appstrate/db/schema";
 
 /** A skill's `SKILL.md` as injected: as the MCP Skills extension serves it at `uri`. */
 export interface SkillContent {
@@ -48,66 +17,78 @@ export interface SkillContent {
   served: InjectedSkill;
 }
 
-/** The characters the chosen skills' SKILL.md bodies may take in one turn, all skills together. */
+/** The characters the injected skills' SKILL.md bodies may take in one turn, all skills together. */
 export const CHAT_SKILLS_CONTENT_BUDGET_CHARS = 64_000;
 
-/** Every chosen skill is injected in full on every turn: a context-budget bound. */
-export const MAX_PINNED_SKILLS = 5;
+/** A set of pins as every write stores it: each id once, sorted. */
+export const normalizePins = (pins: readonly string[]): string[] => [...new Set(pins)].sort();
 
 /** Named as the `chat_sessions` columns, so a session row is a selection. */
 export interface ChatSkillSelection {
-  skillMode: ChatSkillMode;
-  /** Injected in `manual` and `strict`; kept but unused in `auto`. */
+  /** The model finds the other skills of the turn's spaces; off, the turn holds no `skills:*`. */
+  skillDiscovery: boolean;
   pinnedSkills: string[];
 }
 
+export type { ChatSkillStatus };
+
+/** A pin as the session DTOs carry it (`pins`): `null` status and `chars` until a claiming turn evaluates it. */
+export interface PinnedSkill {
+  id: string;
+  status: ChatSkillStatus | null;
+  /** Its SKILL.md length, counted against {@link CHAT_SKILLS_CONTENT_BUDGET_CHARS}, when last read. */
+  chars: number | null;
+}
+
 export const DEFAULT_SKILL_SELECTION: ChatSkillSelection = {
-  skillMode: "auto",
+  skillDiscovery: true,
   pinnedSkills: [],
 };
 
-/** `manual` and `strict` inject the chosen skills; `auto` lists the space's. */
-export function injectsSkills(mode: ChatSkillMode): boolean {
-  return mode !== "auto";
-}
-
 interface ResolvedChatSkills {
-  chosen: SkillContent[];
+  injected: SkillContent[];
   notices: string[];
+  skillStatus: Record<string, ChatSkillStatusEntry>;
 }
 
 /**
- * The skills to inject: the chosen ones in stored order (sorted and deduped by
- * `ensureSession`), out of one budget. `contents` holds the chosen skills active
- * here and read (`null`: answered malformed); any other becomes a notice.
+ * The pins to inject, in stored order, then the skills the history cites that are not pinned, out
+ * of one budget; `contents` maps each listed skill to its read (`null`: unreadable). Only the pins
+ * get a verdict.
  */
 export function resolveChatSkills(
   selection: ChatSkillSelection,
   contents: ReadonlyMap<string, SkillContent | null>,
+  cited: readonly string[] = [],
 ): ResolvedChatSkills {
-  const resolved: ResolvedChatSkills = { chosen: [], notices: [] };
-  if (!injectsSkills(selection.skillMode)) return resolved;
+  const resolved: ResolvedChatSkills = { injected: [], notices: [], skillStatus: {} };
   let left = CHAT_SKILLS_CONTENT_BUDGET_CHARS;
   const tooLong = (length: number) =>
     `(${length} characters; the injected skills share ${CHAT_SKILLS_CONTENT_BUDGET_CHARS}, ${left} left).`;
-  // A chosen skill is the user's own act, so the model is told when it is left out.
-  for (const id of selection.pinnedSkills) {
+  const pinned = new Set(selection.pinnedSkills);
+  // A pin or a citation is the user's act, so the model is told when it is left out.
+  for (const id of [...selection.pinnedSkills, ...cited.filter((id) => !pinned.has(id))]) {
+    const pin = pinned.has(id);
+    const lead = `The skill \`${id}\` ${pin ? "is pinned to this conversation but" : "named in this conversation"}`;
+    const verdict = (entry: ChatSkillStatusEntry) => {
+      if (pin) resolved.skillStatus[id] = entry;
+    };
     const skill = contents.get(id);
     if (skill === null) {
-      resolved.notices.push(
-        `The skill \`${id}\` was chosen for this conversation but could not be read.`,
-      );
+      verdict({ status: "unreadable", chars: null });
+      resolved.notices.push(`${lead} could not be read.`);
     } else if (!skill) {
+      verdict({ status: "unavailable", chars: null });
       resolved.notices.push(
-        `The skill \`${id}\` was chosen for this conversation but is not available here — it may have been removed, deactivated, or be out of your reach.`,
+        `${lead} is not available here — it may have been removed, deactivated, or be out of your reach.`,
       );
     } else if (skill.content.length > left) {
-      resolved.notices.push(
-        `The skill \`${id}\` was chosen for this conversation but does not fit ${tooLong(skill.content.length)}`,
-      );
+      verdict({ status: "over_budget", chars: skill.content.length });
+      resolved.notices.push(`${lead} does not fit ${tooLong(skill.content.length)}`);
     } else {
+      verdict({ status: "injected", chars: skill.content.length });
       left -= skill.content.length;
-      resolved.chosen.push(skill);
+      resolved.injected.push(skill);
     }
   }
   return resolved;
@@ -118,5 +99,5 @@ export function resolveChatSkills(
  * definitions injected, never a skill that only got a notice.
  */
 export function injectedSkills(resolved: ResolvedChatSkills): InjectedSkills["skills"] {
-  return Object.fromEntries(resolved.chosen.map(({ packageId, served }) => [packageId, served]));
+  return Object.fromEntries(resolved.injected.map(({ packageId, served }) => [packageId, served]));
 }

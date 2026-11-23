@@ -1,30 +1,40 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { PACKAGE_WRITE_PERMISSIONS, type OrgLevelPermission } from "@appstrate/core/permissions";
-import type { ChatSkillMode } from "@appstrate/db/schema";
 
 /**
  * The permissions a chat turn acts with: the caller's own, minus the write on
  * every package type when package authoring is off, and minus every `skills:*`
- * in the `strict` skill mode. The turn's MCP loopback token is minted from this
+ * when skill discovery is off. The turn's MCP loopback token is minted from this
  * set, so the platform's existing guards refuse creating, editing or importing
  * any package and composing an inline agent (which needs `agents:write` AND
- * `agents:run`), and in `strict` any skill
+ * `agents:run`), and with discovery off any skill
  * act: listing, loading, declaring — and writing, whose response echoes the
- * `SKILL.md`. The chosen skills reach the model injected, read with the caller's
+ * `SKILL.md`. The pinned skills reach the model injected, read with the caller's
  * own authority. The switches only narrow the caller's grants, never widen them.
  */
 const WRITES: ReadonlySet<string> = new Set(PACKAGE_WRITE_PERMISSIONS);
 
 export function turnPermissions(
   permissions: Iterable<string>,
-  opts: { authoring: boolean; skillMode: ChatSkillMode },
+  opts: { authoring: boolean; skillDiscovery: boolean },
 ): string[] {
-  const strict = opts.skillMode === "strict";
   return [...permissions].filter(
     (permission) =>
-      !(!opts.authoring && WRITES.has(permission)) && !(strict && permission.startsWith("skills:")),
+      !(!opts.authoring && WRITES.has(permission)) &&
+      !(!opts.skillDiscovery && permission.startsWith("skills:")),
   );
+}
+
+/**
+ * Whether a turn (and the composer's commands) works on drafts: authoring on and `skills:write`
+ * held. Every skill it lists, injects or pins is then the caller's draft when one exists.
+ */
+export function turnUsesDrafts(
+  callerPermissions: ReadonlySet<string>,
+  authoring: boolean,
+): boolean {
+  return authoring && callerPermissions.has("skills:write");
 }
 
 /**
@@ -57,4 +67,19 @@ export function limitedConversationPermissions(
   return [...permissions].filter(
     (permission) => !orgHalf.has(permission) || LIMITED_ORG_READS.has(permission),
   );
+}
+
+/**
+ * The caller's grants a turn (or the `/` menu) starts from: the union over its spaces' grants,
+ * narrowed by {@link limitedConversationPermissions} for a conversation limited to one space. A
+ * CEILING on the bearer (each space entry recomputes `(org ∪ role) ∩ ceiling`,
+ * `lib/auth-pipeline.ts`), so no space's grants reach another.
+ */
+export function callerGrants(
+  spaces: readonly { permissions: readonly string[] }[],
+  restricted: boolean,
+  orgHalf: ReadonlySet<string>,
+): ReadonlySet<string> {
+  const union = spaces.flatMap((space) => space.permissions);
+  return new Set(restricted ? limitedConversationPermissions(union, orgHalf) : union);
 }

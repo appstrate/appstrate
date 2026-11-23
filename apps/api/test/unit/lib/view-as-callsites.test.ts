@@ -64,8 +64,8 @@ describe("persona-sensitive call sites", () => {
           "the real role a connection list's share targets are judged under; `orgHalfFor` applies the persona",
         ],
         [
-          "packages/module-chat/src/chat-stream.ts",
-          "the fallback under the persona's role, which is what the turn is answered as",
+          "packages/module-chat/src/platform-mcp.ts",
+          "the fallback under the persona's role (`actingOrgRole`), which is what a turn and the composer's commands are answered as",
         ],
         [
           "packages/module-chat/src/prompt.ts",

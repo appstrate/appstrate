@@ -16,7 +16,13 @@
  */
 
 import { ErrorCode, McpError } from "@modelcontextprotocol/sdk/types.js";
-import type { AppstratePromptProvider, GetPromptResult, Prompt } from "@appstrate/mcp-transport";
+import {
+  AGENT_PROMPT_META_KEY,
+  type AgentPromptMeta,
+  type AppstratePromptProvider,
+  type GetPromptResult,
+  type Prompt,
+} from "@appstrate/mcp-transport";
 import { encodePackageIdPath, parseScopedName } from "@appstrate/core/naming";
 import {
   agentPromptDescription,
@@ -53,6 +59,8 @@ interface NamedAgent {
   description: string;
   name: string;
   spaceId: string;
+  icon: string | null;
+  color: string | null;
 }
 
 const REQUEST_ARGUMENT = {
@@ -86,7 +94,7 @@ async function nameAgents(ctx: AgentPromptContext): Promise<NamedAgent[]> {
     const published = value.agents
       .filter((agent) => agent.published)
       .sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
-    for (const { id, display_name: title, description } of published) {
+    for (const { id, display_name: title, description, icon, color } of published) {
       const segment = parseScopedName(id)!.name;
       const preferred = agentPromptName(segment);
       const name = !taken.has(preferred)
@@ -95,21 +103,39 @@ async function nameAgents(ctx: AgentPromptContext): Promise<NamedAgent[]> {
           ? spaceCollisionPromptName(segment, space.name, taken)
           : scopeCollisionPromptName(id, taken);
       taken.add(name);
-      named.push({ packageId: id, title, description, name, spaceId: space.id });
+      named.push({ packageId: id, title, description, name, spaceId: space.id, icon, color });
     }
   }
   return named;
 }
 
-/** The agent's launch contract at its latest published version, or `null` when it has none. */
+/**
+ * The agent's launch contract at its latest published version, or `null` when it has none or the
+ * route refuses it (4xx); a 5xx or a failed dispatch throws an `InternalError`.
+ */
 async function resolveAgent(
   ctx: AgentPromptContext,
   agent: NamedAgent,
 ): Promise<AgentLaunchView | null> {
-  const response = await dispatchGet(
-    readingIn(ctx, agent.spaceId),
-    `/api/packages/agents/${encodePackageIdPath(agent.packageId)}?version=latest`,
-  );
+  let response: Response;
+  try {
+    response = await dispatchGet(
+      readingIn(ctx, agent.spaceId),
+      `/api/packages/agents/${encodePackageIdPath(agent.packageId)}?version=latest`,
+    );
+  } catch (err) {
+    throw new McpError(ErrorCode.InternalError, `Could not read agent "${agent.packageId}".`, {
+      cause: String(err),
+    });
+  }
+  // A 5xx says nothing about the agent: an internal error the client may retry, never the
+  // invalid-params answer that means "not an agent you can launch".
+  if (response.status >= 500) {
+    throw new McpError(
+      ErrorCode.InternalError,
+      `Could not read agent "${agent.packageId}" (HTTP ${response.status}).`,
+    );
+  }
   if (!response.ok) return null;
   const body = (await response.json()) as {
     display_name?: unknown;
@@ -140,6 +166,13 @@ function toPrompt(agent: NamedAgent): Prompt {
     title: agent.title,
     description: agentPromptDescription(agent),
     arguments: [REQUEST_ARGUMENT],
+    _meta: {
+      [AGENT_PROMPT_META_KEY]: {
+        packageId: agent.packageId,
+        icon: agent.icon,
+        color: agent.color,
+      } satisfies AgentPromptMeta,
+    },
   };
 }
 

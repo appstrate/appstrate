@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { describe, expect, it } from "bun:test";
-import { parseSkillUri, parseSkillUriPackage, skillFileUri } from "../src/skill-uri.ts";
+import { parseSkillUri, parseSkillUriPackage, skillFileUri } from "../src/skill-address.ts";
 
 const SPACE = "spc_1";
 

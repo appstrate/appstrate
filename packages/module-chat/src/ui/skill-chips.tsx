@@ -1,50 +1,49 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * The skills the user chose for the conversation, as ONE pill in the composer's tool row. It shows
- * its count, or the name when there is a single skill; the tooltip lists the names. Removal
- * happens in the picker, which the pill opens; its X returns to the automatic mode.
+ * The skills the conversation loads, as ONE pill in the composer's tool row: their count, or the
+ * single name; the tooltip lists them, then the pins the last turn left out. The pill opens the
+ * picker, its X restores the default selection; with discovery off a lock replaces the book.
  */
 
-import { BookOpenIcon } from "lucide-react";
-import { parseScopedName } from "@appstrate/core/naming";
+import { BookOpenIcon, LockIcon } from "lucide-react";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@appstrate/ui/components/tooltip";
-import { injectsSkills, type ChatSkillSelection } from "../skills.ts";
+import {
+  canResetSkills,
+  loadsSkill,
+  pinIds,
+  skillRowState,
+  type StoredSkills,
+} from "./chat-skills.ts";
 import { RemovableChip } from "./removable-chip.tsx";
-import { useChatHost, type ChatTransport } from "./runtime-context.ts";
-import { SkillsChip } from "./skills-picker.tsx";
-import { useSkillCatalogue } from "./use-skill-catalogue.ts";
-
-interface LoadedSkill {
-  packageId: string;
-  name: string;
-}
+import {
+  namedSkill,
+  skillsSummary,
+  verdictsSummary,
+  type LoadedSkill,
+  type SkillNames,
+} from "./skills-summary.ts";
+import { useChatHost, type ChatTranslate } from "./runtime-context.ts";
+import { useChangeAnnouncement } from "./use-change-announcement.ts";
+import { useChatCommands } from "./use-chat-commands.ts";
 
 /**
- * What the conversation loads: the user's own pins, counted only in a mode that injects them
- * (`auto` keeps them but uses none). The catalogue is read only to name pins, so only when there are.
+ * The conversation's pins split into those it loads and those the last turn left out, and what the
+ * live region reads of the server's last verdicts.
  */
-function useLoadedSkills(transport: ChatTransport | undefined, selection: ChatSkillSelection) {
-  const pinnedIds = injectsSkills(selection.skillMode) ? selection.pinnedSkills : [];
-  const catalogue = useSkillCatalogue(transport, pinnedIds.length > 0);
-  const names = new Map((catalogue.data ?? []).map((s) => [s.packageId, s.display_name]));
-  // Named by the package's bare name until the catalogue answers.
-  return pinnedIds.map((id): LoadedSkill => ({
-    packageId: id,
-    name: names.get(id) ?? parseScopedName(id)?.name ?? id,
-  }));
-}
-
-type Translate = ReturnType<typeof useChatHost>["t"];
-
-/** The pill's text: the count of several skills, the name of a single one. */
-function pillText(skills: readonly LoadedSkill[], t: Translate): string {
-  return skills.length === 1 ? skills[0]!.name : t("skills.pinnedCount", { n: skills.length });
-}
-
-/** What the accessible name says of the skills: the single name, or how many. The tooltip lists them. */
-function skillsSummary(skills: readonly LoadedSkill[], t: Translate): string {
-  return skills.length === 1 ? skills[0]!.name : t("skills.count", { n: skills.length });
+function useSkillsByLoad(skills: StoredSkills, t: ChatTranslate) {
+  const pins = pinIds(skills);
+  const catalogue = useChatCommands(pins.length > 0);
+  const names: SkillNames | null = catalogue.data
+    ? new Map(catalogue.data.skills.map((s) => [s.id, s.name]))
+    : null;
+  const named = (id: string) => namedSkill(names ?? new Map(), id);
+  const loads = (id: string) => loadsSkill(skillRowState(skills, id));
+  return {
+    loaded: pins.filter(loads).map(named),
+    refused: pins.filter((id) => !loads(id)).map(named),
+    verdicts: verdictsSummary(skills, names, t),
+  };
 }
 
 function SkillNameList({ skills }: { skills: readonly LoadedSkill[] }) {
@@ -57,59 +56,119 @@ function SkillNameList({ skills }: { skills: readonly LoadedSkill[] }) {
   );
 }
 
-/**
- * The skills the user chose, in one pill: its body opens the picker, where they are removed; its X
- * returns to the automatic mode, which keeps them unused.
- */
+/** The pins the last turn left out, under the loaded ones. */
+function RefusedSkillList({ skills }: { skills: readonly LoadedSkill[] }) {
+  const { t } = useChatHost();
+  if (skills.length === 0) return null;
+  return (
+    <div className="mt-1">
+      <p className="font-medium">{t("skills.state.notLoaded", { count: skills.length })}</p>
+      <SkillNameList skills={skills} />
+    </div>
+  );
+}
+
 function PinnedPill({
   skills,
+  refused,
+  discovery,
   onOpen,
   onReset,
 }: {
   skills: readonly LoadedSkill[];
+  refused: readonly LoadedSkill[];
+  discovery: boolean;
   onOpen: () => void;
-  onReset: () => void;
+  /** Absent when there is nothing to restore. */
+  onReset?: () => void;
 }) {
   const { t } = useChatHost();
+  const summary = skillsSummary(skills, refused.length, t);
   return (
     <Tooltip>
       <TooltipTrigger asChild>
         <RemovableChip
-          icon={<BookOpenIcon />}
+          icon={discovery ? <BookOpenIcon /> : <LockIcon />}
           open={{
             onClick: onOpen,
-            label: t("skills.pinnedPillLabel", { skills: skillsSummary(skills, t) }),
+            label: t(discovery ? "skills.pinnedPillLabel" : "skills.pinnedLockedPillLabel", {
+              skills: summary,
+            }),
             testId: "skill-pill-pinned",
           }}
-          removeLabel={t("skills.resetToAuto")}
+          removeLabel={t("skills.reset")}
           onRemove={onReset}
         >
-          {pillText(skills, t)}
+          {skillsSummary(skills, refused.length, t, "skills.pinnedCount")}
         </RemovableChip>
       </TooltipTrigger>
       <TooltipContent side="top" className="max-w-72 text-xs">
         <SkillNameList skills={skills} />
+        <RefusedSkillList skills={refused} />
+        {!discovery && <p className="mt-1">{t("skills.discoveryOffChip")}</p>}
       </TooltipContent>
     </Tooltip>
   );
 }
 
-interface SkillChipsProps {
-  transport: ChatTransport | undefined;
-  selection: ChatSkillSelection;
-  onOpenPicker: () => void;
-  /** Back to the automatic mode: the pill's X. */
-  onResetMode: () => void;
+/**
+ * The picker's entry while no skill is pinned: drawn only with discovery off, it reopens the
+ * picker, and its X restores the default selection.
+ */
+function SkillsChip({
+  discovery,
+  onClick,
+  onReset,
+}: {
+  discovery: boolean;
+  onClick: () => void;
+  onReset: () => void;
+}) {
+  const { t } = useChatHost();
+  if (discovery) return null;
+  return (
+    <RemovableChip
+      icon={<LockIcon />}
+      open={{ onClick, label: t("skills.discoveryOffChip"), testId: "skills-discovery-off-chip" }}
+      removeLabel={t("skills.reset")}
+      onRemove={onReset}
+      className="shrink-0"
+    >
+      {t("skills.discoveryOffChip")}
+    </RemovableChip>
+  );
 }
 
-/**
- * The skill pill of the composer's tool row. While no skill is chosen, the picker's summary chip
- * stands in (drawn only off the automatic mode).
- */
-export function SkillChips({ transport, selection, onOpenPicker, onResetMode }: SkillChipsProps) {
-  const pinned = useLoadedSkills(transport, selection);
-  if (pinned.length === 0) {
-    return <SkillsChip selection={selection} onClick={onOpenPicker} onReset={onResetMode} />;
-  }
-  return <PinnedPill skills={pinned} onOpen={onOpenPicker} onReset={onResetMode} />;
+interface SkillChipsProps {
+  skills: StoredSkills;
+  onOpenPicker: () => void;
+  /** Back to the default selection: the pill's X. */
+  onReset: () => void;
+}
+
+/** The skill pill, or with no pin the picker's summary chip (drawn only with discovery off). */
+export function SkillChips({ skills, onOpenPicker, onReset }: SkillChipsProps) {
+  const { t } = useChatHost();
+  const { loaded, refused, verdicts } = useSkillsByLoad(skills, t);
+  // The verdicts found on opening the conversation are not news: only a later change is read out.
+  const announced = useChangeAnnouncement(verdicts ?? "", verdicts !== null);
+  return (
+    <>
+      {loaded.length === 0 && refused.length === 0 ? (
+        <SkillsChip discovery={skills.skillDiscovery} onClick={onOpenPicker} onReset={onReset} />
+      ) : (
+        <PinnedPill
+          skills={loaded}
+          refused={refused}
+          discovery={skills.skillDiscovery}
+          onOpen={onOpenPicker}
+          onReset={canResetSkills(skills) ? onReset : undefined}
+        />
+      )}
+      {/* Always mounted, so a verdict landing after a turn is read out. */}
+      <span aria-live="polite" data-testid="skill-pill-live" className="sr-only">
+        {announced}
+      </span>
+    </>
+  );
 }
