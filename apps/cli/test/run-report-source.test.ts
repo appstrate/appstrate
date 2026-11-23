@@ -118,6 +118,26 @@ describe("startReportSession — source discrimination", () => {
 
   afterEach(() => stub.restore());
 
+  it("uses the announced service addresses on a rewritten same-origin gateway", async () => {
+    stub.restore();
+    stub = installStubFetch(() =>
+      ok({
+        ...SUCCESS_BODY,
+        url: "https://app.example.com/custom/log",
+        mcp_url: "https://app.example.com/gateway/reports/tools",
+        heartbeat_url: "https://app.example.com/gateway/reports/pulse",
+      }),
+    );
+    const session = await startReportSession(
+      { kind: "inline", bundle: makeBundle() },
+      REPORT_CTX,
+      { mode: "true", fallback: "abort" },
+      SNAPSHOT,
+    );
+    expect(session?.mcpUrl).toBe("https://app.example.com/gateway/reports/tools");
+    expect(session?.heartbeatUrl).toBe("https://app.example.com/gateway/reports/pulse");
+  });
+
   it("posts kind: inline with manifest+prompt for path-mode bundles", async () => {
     const reportSource: ReportSource = { kind: "inline", bundle: makeBundle() };
     await startReportSession(

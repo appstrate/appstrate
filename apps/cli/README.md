@@ -379,6 +379,8 @@ All four subcommands respect the global `--profile <name>` flag and talk to `GET
 
 ### `appstrate code sync`
 
+The first sync from a ledger that identifies an older ZIP or draft ETag backs up the managed directories it is about to replace or remove. The CLI prints their private backup path under its data directory in `skills-sync/backups/`.
+
 Materialize the union of skills placed in the spaces you reach in the pinned organization as [Agent Skills](https://agentskills.io/specification) directories on this machine — one Claude Code plugin, and/or the shared skill directories Claude Code and Codex scan directly. The connected Claude Code plugin also configures the organization's Appstrate MCP server, which offers every agent you can run as a prompt (see [Agents](#agents)).
 
 The command is designed to run **unattended**. Claude Code plugin marketplaces accept a `command` source: a locally installed tool prints the path of a directory holding a complete plugin, and Claude Code re-runs that command at install, then once per session in the background, reinstalling and reloading the plugin when the directory's content hash changes. That is the whole auto-sync mechanism — no daemon, no server-side change; the plugin's one `SessionStart` hook only prints the session notice (below).

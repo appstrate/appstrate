@@ -8,7 +8,6 @@
  * served digest; concurrency is capped because the routes are rate limited.
  */
 
-import { createHash } from "node:crypto";
 import { isDeepStrictEqual } from "node:util";
 import { parseSkillFrontmatter } from "@appstrate/afps-shared/companion-files";
 import { ApiError, apiFetchRaw, apiList, problemFields, sessionRevokedError } from "../api.ts";
@@ -161,7 +160,7 @@ export function resolveSkill(entry: SkillEntry): ResolvedSkill {
   const lines = [...files]
     .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
     .map(([path, resource]) => `${resource.digest} ${path}`);
-  const integrity = `sha256:${createHash("sha256").update(lines.join("\n")).digest("hex")}`;
+  const integrity = `sha256:${new Bun.CryptoHasher("sha256").update(lines.join("\n")).digest("hex")}`;
   return {
     packageId: address.packageId,
     spaceId: address.spaceId,

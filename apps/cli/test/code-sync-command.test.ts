@@ -128,6 +128,27 @@ describe("code sync — claude-plugin target", () => {
     expect(Object.keys(after)).toEqual(["pdf-tools"]);
   });
 
+  it("preserves local edits across the first sync of a beta.68 ledger", async () => {
+    createSkillServer(ONE_SKILL).install();
+    const { io } = createMemoryIO();
+    await codeSyncCommand({ target: ["claude-plugin"] }, io);
+    const ledger = JSON.parse(await readText(getStatePath()));
+    ledger.version = 1;
+    ledger.targets["claude-plugin"].managed["pdf-tools"].integrity = "sha256-b2xkIHppcA==";
+    await writeFile(getStatePath(), JSON.stringify(ledger));
+    await writeFile(join(pluginRoot(), "skills/pdf-tools/SKILL.md"), "my edited skill");
+    await codeSyncCommand({ target: ["claude-plugin"] }, io);
+    const backups = join(getDataDir(), "skills-sync/backups");
+    const dirs = await readdir(backups);
+    expect(dirs).toHaveLength(1);
+    expect(await readText(join(backups, dirs[0]!, "pdf-tools/SKILL.md"))).toBe("my edited skill");
+    expect(await readText(join(pluginRoot(), "skills/pdf-tools/SKILL.md"))).toContain(
+      "name: pdf-tools",
+    );
+    await codeSyncCommand({ target: ["claude-plugin"] }, io);
+    expect(await readdir(backups)).toEqual(dirs);
+  });
+
   it("produces byte-identical bytes when rebuilt from scratch", async () => {
     // Two FULL builds, not "build then no-op": the second run of the old test
     // short-circuited and wrote nothing, so it compared a tree against itself.

@@ -1,3 +1,4 @@
+import { createConsoleSink } from "../src/commands/run/sink.ts";
 // SPDX-License-Identifier: Apache-2.0
 
 /**
@@ -25,7 +26,7 @@ import { buildIntegrationResolver } from "../src/commands/run/resolver.ts";
 import {
   buildIntegrationTools,
   cliPromptInputs,
-  reducedToolLines,
+  emitReducedTools,
   unavailableIntegrationLines,
 } from "../src/commands/run.ts";
 import {
@@ -244,9 +245,24 @@ describe("run --local — unauthenticated remote MCP integrations", () => {
           reduced: ["schema_documentation" as const],
         };
         expect(extensions.reducedTools).toEqual([entry]);
-        expect(reducedToolLines(extensions.reducedTools)).toBe(
-          `warn: tool acme_docs__a (acme_docs: "a") descriptor reduced: schema_documentation\n`,
+        const lines: string[] = [];
+        await emitReducedTools(
+          createConsoleSink({
+            json: true,
+            writeStdout: (line) => {
+              lines.push(line);
+            },
+          }),
+          "run_test",
+          extensions.reducedTools,
         );
+        expect(lines).toHaveLength(1);
+        expect(JSON.parse(lines[0]!)).toMatchObject({
+          type: "appstrate.progress",
+          level: "warn",
+          runId: "run_test",
+          data: { event: "tool_descriptor_reduced", ...entry },
+        });
       } finally {
         await extensions.close();
       }

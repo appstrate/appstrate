@@ -11,6 +11,7 @@ import {
   cp,
   lstat,
   mkdir,
+  mkdtemp,
   readdir,
   readFile,
   rename,
@@ -184,6 +185,35 @@ export function targetRoot(target: SyncTarget): string {
 export function skillDir(target: SyncTarget, slug: string): string {
   const root = targetRoot(target);
   return target === "claude-plugin" ? join(root, "skills", slug) : join(root, slug);
+}
+
+/** Older ledgers identify a ZIP or ETag alone. Keep the existing tree outside
+ * all discovery roots before replacing files whose local edits cannot be identified. */
+export async function backupPreviousSkillTrees(
+  target: SyncTarget,
+  slugs: string[],
+): Promise<string | undefined> {
+  let backup: string | undefined;
+  for (const slug of slugs) {
+    const source = skillDir(target, slug);
+    try {
+      await lstat(source);
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code === "ENOENT") continue;
+      throw err;
+    }
+    if (!backup) {
+      const parent = join(getDataDir(), "skills-sync", "backups");
+      await mkdir(parent, { recursive: true, mode: 0o700 });
+      backup = await mkdtemp(join(parent, `${target}-`));
+    }
+    await cp(source, join(backup, slug), {
+      recursive: true,
+      dereference: false,
+      verbatimSymlinks: true,
+    });
+  }
+  return backup;
 }
 
 export interface SkillWriteFailure {

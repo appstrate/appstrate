@@ -26,8 +26,7 @@ export interface ManagedSkill {
   /** Resolved version label — semver for `published`, `"draft"` for `draft`. */
   version: string;
   /**
-   * SRI digest of the artifact, or for a draft skill its ETag folded with the
-   * files-index ETag.
+   * Digest of the listed files; older ledgers contain the package SRI or draft ETags.
    */
   integrity: string;
 }

@@ -25,7 +25,7 @@
  *                           when telemetry is down.
  */
 
-import { HttpSink } from "@appstrate/afps-runtime/sinks";
+import { HttpSink, runServiceUrl } from "@appstrate/afps-runtime/sinks";
 import { UNAVAILABLE_INTEGRATION_REASONS, type Bundle } from "@appstrate/afps-runtime/bundle";
 import { parseScopedName } from "@appstrate/core/naming";
 import type { ConnectionOverrides } from "@appstrate/core/integration";
@@ -71,6 +71,8 @@ export interface ReportSession {
    * keep-alive — same mechanism the runtime-pi container uses.
    */
   sinkUrl: string;
+  mcpUrl: string;
+  heartbeatUrl: string;
   /**
    * Raw run secret. Required to sign heartbeat requests via the shared
    * `startSinkHeartbeat` helper. Also held inside `httpSink`, but not
@@ -206,11 +208,23 @@ export async function startReportSession(
     id: string;
     url: string;
     finalize_url: string;
+    mcp_url?: string;
+    heartbeat_url?: string;
     secret: string;
     expiresAt: string;
     warnings?: unknown;
   };
 
+  for (const address of [payload.url, payload.finalize_url]) {
+    const candidate = new URL(address);
+    if (
+      candidate.origin !== new URL(ctx.instance).origin ||
+      candidate.username ||
+      candidate.password ||
+      candidate.hash
+    )
+      throw new ReportStartError("Invalid run sink origin in registration response", "");
+  }
   const httpSink = new HttpSink({
     url: payload.url,
     finalizeUrl: payload.finalize_url,
@@ -222,6 +236,8 @@ export async function startReportSession(
     httpSink,
     proxyHeaders: { "X-Run-Id": payload.id },
     sinkUrl: payload.url,
+    mcpUrl: runServiceUrl(payload.url, "mcp", payload.mcp_url),
+    heartbeatUrl: runServiceUrl(payload.url, "heartbeat", payload.heartbeat_url),
     runSecret: payload.secret,
     warnings: parseLaunchItems(payload.warnings),
   };
