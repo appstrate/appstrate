@@ -95,7 +95,6 @@ type EventMember = keyof ModuleEvents;
 /** Capabilities the platform injects — what a module CONSUMES, not declares. */
 type ServiceMember = keyof PlatformServices;
 
-type Tenant = "oss" | "ee";
 type Classification = "extension" | "seam" | "lifecycle";
 
 interface LedgerEntry {
@@ -117,20 +116,6 @@ interface NamedLedgerEntry {
   owners: string[];
 }
 
-/** Which license tenant each known module belongs to. */
-const MODULE_TENANT: Record<string, Tenant> = {
-  oidc: "oss",
-  webhooks: "oss",
-  mcp: "oss",
-  "core-providers": "oss",
-  firecracker: "oss",
-  "module-codex": "oss",
-  "module-claude-code": "oss",
-  "module-chat": "oss",
-  "module-observability": "oss",
-  "module-billing": "oss",
-};
-
 /**
  * Module source roots to scan. A module's contract members are frequently
  * split across files (module-billing declares `openApiPaths` in `openapi.ts`, oidc
@@ -151,24 +136,6 @@ const DECLARER_ROOTS: Record<string, string> = {
   "module-observability": "packages/module-observability/src",
   "module-billing": "packages/module-billing/src",
 };
-
-// The two module tables are one roster written twice, and the compiler cannot
-// tie them: `Record<string, …>` accepts any key. A module present in one and
-// absent from the other reads as a clean run — an owner missing from
-// DECLARER_ROOTS is never scanned, and one missing from MODULE_TENANT is
-// classified by whatever the lookup falls back to.
-{
-  const roots = Object.keys(DECLARER_ROOTS).sort();
-  const tenants = Object.keys(MODULE_TENANT).sort();
-  if (roots.join() !== tenants.join()) {
-    throw new Error(
-      `MODULE_TENANT and DECLARER_ROOTS name different modules: ` +
-        `only in MODULE_TENANT [${tenants.filter((m) => !roots.includes(m)).join(", ")}], ` +
-        `only in DECLARER_ROOTS [${roots.filter((m) => !tenants.includes(m)).join(", ")}]. ` +
-        `Every known module belongs in both.`,
-    );
-  }
-}
 
 const LEDGER: Record<ContractMember, LedgerEntry> = {
   // ── lifecycle — exempt ──────────────────────────────────────────────────
@@ -383,16 +350,6 @@ for (const [member, entry] of Object.entries(LEDGER) as [ContractMember, LedgerE
         `single-owner extension: \`${member}\` is owned only by \`${entry.owners[0]}\`. ` +
           `Internalize it into that module, or reclassify as \`seam\` with a justification.`,
       );
-    } else {
-      // Every owner is a DECLARER_ROOTS key by the check below, and the two
-      // tables carry the same keys, so the lookup cannot miss.
-      const tenants = new Set(entry.owners.map((o) => MODULE_TENANT[o]));
-      if (tenants.size < 2 && !entry.justification) {
-        warnings.push(
-          `\`${member}\` has ${ownerCount} owners but all in one license tenant (${[...tenants][0]}). ` +
-            `Fine today; becomes single-owner if those owners consolidate.`,
-        );
-      }
     }
   }
 
@@ -486,7 +443,7 @@ for (const [ledgerName, ledger] of [
       if (owner in DECLARER_ROOTS) continue;
       problems.push(
         `unknown owner: ${ledgerName}.${member}.owners names \`${owner}\`, which is not a ` +
-          `module in DECLARER_ROOTS. Add the module there (and to MODULE_TENANT), or fix the name.`,
+          `module in DECLARER_ROOTS. Add the module there, or fix the name.`,
       );
     }
   }

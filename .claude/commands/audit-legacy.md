@@ -142,9 +142,8 @@ key. Also: storage keys, ids, and URI schemes where the code tolerates an old
 prefix.
 
 **Agent E — Env, config & modules.** `packages/env/src/index.ts`,
-`docker-compose*.yml`, `.env.example`, `apps/api/src/modules/**`. Verify every
-retired env name is in `RETIRED_ENV_RENAMES` and FAILS rather than falls back;
-find config keys read under two names; find module-contract branches keyed on a
+`docker-compose*.yml`, `.env.example`, `apps/api/src/modules/**`. Check the current env schema and the generic unread-key diagnostic. Verify any
+named retirement guard still has a pending transition under §4. Find keys read under two names; find module-contract branches keyed on a
 version or capability that every module now has.
 
 **Agent F — Cross-repo & tests.** `connect-helper/`, `github-action/`,

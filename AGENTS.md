@@ -301,7 +301,7 @@ Core schema: `packages/db/src/schema/` (Drizzle, barrel via `schema/index.ts`) �
 
 - **No RLS** — all queries filter by `orgId` at the application level (+ `spaceId` for space-scoped resources)
 - Table counts drift — derive them, don't quote them: `grep -c "= pgTable(" packages/db/src/schema/*.ts`
-- Migrations are **applied automatically at boot** (PGlite + PostgreSQL) unless `MIGRATIONS_ON_BOOT=verify` (PostgreSQL only; `deploy/` sets it): boot then applies nothing and refuses to start while a core migration is pending; `bun run db:migrate` is a manual escape hatch, not part of the normal loop. Adding one: § "Development Workflow" below, and § "Migrations" for the `db:generate` TTY/index-collision trap
+- Migrations are **applied automatically at boot** (PGlite + PostgreSQL) unless `MIGRATIONS_ON_BOOT=verify` (PostgreSQL only; `deploy/` sets it): the platform then verifies its core journal and refuses to start while a core migration is pending. When enabled, `@appstrate/module-billing` still migrates its separate journal during module initialization; `bun run db:migrate` is a manual escape hatch, not part of the normal loop. Adding one: § "Development Workflow" below, and § "Migrations" for the `db:generate` TTY/index-collision trap
 - Service layer: function-based (no classes), `apps/api/src/services/state/` (runs, notifications, package-persistence) is the central data-access layer
 
 ## Development Workflow
