@@ -343,7 +343,7 @@ export async function listRemoteTools(
         async (client, signal) => {
           const { tools, truncated } = await listToolPages(client, signal);
           return boundedCatalog(
-            tools.flatMap((tool) => sanitiseToolDescriptor(tool) ?? []),
+            tools.map((tool) => sanitiseToolDescriptor(tool).tool),
             truncated,
           );
         },

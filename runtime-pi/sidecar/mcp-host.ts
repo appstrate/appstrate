@@ -502,13 +502,8 @@ export class McpHost {
             namespace: normalisedNs,
             isTaken: (name) => this.toolToNamespace.has(name),
           });
-      // A claimed tool needs no name of its own; a descriptor too large once sanitised gets no
-      // route either.
-      const tooLarge =
-        exposure !== null &&
-        "exclusion" in exposure &&
-        exposure.exclusion === "schema_too_large_after_sanitisation";
-      if (!tooLarge && claim(tool.name)) continue;
+      // A claimed tool needs no name of its own.
+      if (claim(tool.name)) continue;
       let descriptor: Tool;
       if (exposure === null) {
         descriptor = withToolIntegration(
@@ -531,6 +526,19 @@ export class McpHost {
           continue;
         }
         descriptor = exposure.descriptor;
+        if (exposure.reduced.length > 0) {
+          this.options.onLog?.({
+            source: `host:${normalisedNs}`,
+            level: "warn",
+            data: {
+              event: "tool_descriptor_reduced",
+              namespace: normalisedNs,
+              originalName: tool.name,
+              name: descriptor.name,
+              reduced: exposure.reduced,
+            },
+          });
+        }
       }
       const finalName = descriptor.name;
       if (finalName !== `${normalisedNs}__${tool.name}`) {
