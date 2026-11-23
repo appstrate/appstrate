@@ -176,8 +176,7 @@ export async function buildConnectLoginSpec(
 
   return {
     integrationId: execution.integrationId,
-    // McpHost.normaliseNamespace slugs/caps this — the package id is the same
-    // namespace the spawn resolver uses for the agent-run path.
+    // Use the package ID as the namespace input, as the agent-run spawn resolver does.
     namespace: execution.integrationId,
     // connect-run only spawns local servers (the connect-login
     // tool can't run against a remote managed MCP — `runConnectOnce`

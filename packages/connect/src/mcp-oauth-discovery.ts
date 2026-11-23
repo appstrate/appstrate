@@ -112,11 +112,26 @@ export function buildProtectedResourceProbes(resourceServerUrl: string): Metadat
   }
 }
 
+/** Split the challenge list in one pass, preserving quoted commas and quoted-pairs. */
+function* challengeFields(header: string) {
+  let start = 0;
+  let quoted = false;
+  for (let i = 0; i < header.length; i++) {
+    const c = header[i];
+    if (quoted && c === "\\") i++;
+    else if (c === '"') quoted = !quoted;
+    else if (!quoted && c === ",") {
+      yield header.slice(start, i);
+      start = i + 1;
+    }
+  }
+  if (!quoted) yield header.slice(start);
+}
+
 /** The first Bearer challenge, including only its own RFC 9110 auth-params. */
 export function bearerChallengeParameters(header: string): Map<string, string> | undefined {
   let bearer: Map<string, string> | undefined;
-  // A comma in a quoted string belongs to the value. A quoted-pair stays together.
-  for (const [part] of header.matchAll(/(?:[^,"]|"(?:\\.|[^"\\])*")+/g)) {
+  for (const part of challengeFields(header)) {
     let field = part.trim();
     if (!field) continue;
     // A leading token followed by '=' is another parameter of the current challenge.
