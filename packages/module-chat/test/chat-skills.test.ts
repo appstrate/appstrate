@@ -33,7 +33,10 @@ describe("withSelection", () => {
   it("writes the full set: kept pins keep their verdict, new ones have none, sorted", () => {
     const base = stored([pin("@a/kept", "over_budget", 70_000), pin("@a/dropped")]);
     expect(
-      withSelection(base, { skillDiscovery: false, pins: ["@a/new", "@a/kept", "@a/new"] }),
+      withSelection(base, {
+        skillDiscovery: false,
+        pinnedSkills: ["@a/new", "@a/kept", "@a/new"],
+      }),
     ).toEqual({
       skillDiscovery: false,
       pins: [pin("@a/kept", "over_budget", 70_000), pin("@a/new", null)],
@@ -48,10 +51,10 @@ describe("withSelection", () => {
 
 describe("withPin", () => {
   it("adds a pin once, sorted, and removes one", () => {
-    const s = { skillDiscovery: true, pins: ["@a/b"] };
-    expect(withPin(s, "@a/a", true).pins).toEqual(["@a/a", "@a/b"]);
-    expect(withPin(s, "@a/b", true).pins).toEqual(["@a/b"]);
-    expect(withPin(s, "@a/b", false).pins).toEqual([]);
+    const s = { skillDiscovery: true, pinnedSkills: ["@a/b"] };
+    expect(withPin(s, "@a/a", true).pinnedSkills).toEqual(["@a/a", "@a/b"]);
+    expect(withPin(s, "@a/b", true).pinnedSkills).toEqual(["@a/b"]);
+    expect(withPin(s, "@a/b", false).pinnedSkills).toEqual([]);
   });
 });
 
@@ -88,26 +91,25 @@ describe("skillBudget", () => {
     pin("@a/new", null),
     pin("@a/big", "over_budget", 90_000),
   ]);
-  const bytes = new Map([
-    ["@a/new", 3_000],
-    ["@a/cited", 2_000],
-    ["@a/candidate", 60_000],
-  ]);
-  const of = (id: string) => bytes.get(id) ?? null;
+  const catalogue = [
+    { id: "@a/new", bytes: 3_000 },
+    { id: "@a/cited", bytes: 2_000 },
+    { id: "@a/candidate", bytes: 60_000 },
+  ];
 
   it("sums a loaded pin's chars and the listed size of a pending or cited skill, never a refused one", () => {
     const budget = skillBudget(
       skills,
       effectiveSkills(["@a/loaded", "@a/new", "@a/big"], ["@a/cited"]),
-      of,
+      catalogue,
     );
     expect(budget).toEqual({ used: 15_000, max: CHAT_SKILLS_CONTENT_BUDGET_CHARS });
   });
 
   it("warns before pinning a skill that would take the total past the budget", () => {
-    const budget = skillBudget(skills, effectiveSkills(["@a/loaded"], []), of);
-    expect(exceedsBudget(budget, of("@a/candidate"))).toBe(true);
-    expect(exceedsBudget(budget, of("@a/new"))).toBe(false);
+    const budget = skillBudget(skills, effectiveSkills(["@a/loaded"], []), catalogue);
+    expect(exceedsBudget(budget, 60_000)).toBe(true);
+    expect(exceedsBudget(budget, 3_000)).toBe(false);
     expect(exceedsBudget(budget, null)).toBe(false);
   });
 });

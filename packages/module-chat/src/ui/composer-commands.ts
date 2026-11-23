@@ -4,7 +4,7 @@
 
 import type { TriggerItem } from "@assistant-ui/core";
 import type { ChatCommands } from "../commands.ts";
-import { AGENT_DIRECTIVE, SKILL_DIRECTIVE, directivesOf } from "../directives.ts";
+import { AGENT_DIRECTIVE, SKILL_DIRECTIVE } from "../directives.ts";
 import {
   exceedsBudget,
   pinIds,
@@ -12,6 +12,7 @@ import {
   type EffectiveSkills,
   type StoredSkills,
 } from "./chat-skills.ts";
+import { namesAgent } from "./directive-send.ts";
 
 interface CommandContext {
   /** The conversation's skills, and those with the draft's citations; `null`: no skill is listed here. */
@@ -34,8 +35,7 @@ function skillItems(
   overBudget: TriggerItem[],
 ): TriggerItem[] {
   const pinned = pinIds(stored);
-  const bytes = new Map(commands.skills.map((skill) => [skill.id, skill.bytes]));
-  const budget = skillBudget(stored, effective, (id) => bytes.get(id) ?? null);
+  const budget = skillBudget(stored, effective, commands.skills);
   const offered: TriggerItem[] = [];
   for (const skill of commands.skills) {
     const isPinned = pinned.includes(skill.id);
@@ -61,10 +61,9 @@ export function commandList(
   commands: ChatCommands,
   { skills, running, draft }: CommandContext,
 ): CommandList {
-  const named = directivesOf(draft);
   const list: CommandList = { items: [], overBudget: [] };
   if (skills) list.items.push(...skillItems(commands, skills, list.overBudget));
-  if (!running && !named.some((d) => d.type === AGENT_DIRECTIVE)) {
+  if (!running && !namesAgent(draft)) {
     for (const agent of commands.agents) {
       list.items.push({
         id: agent.name,

@@ -39,7 +39,7 @@ import {
   usePackageAuthoringEnabled,
 } from "./package-authoring-store.ts";
 import { setInlineRunModelEnabled, useInlineRunModelEnabled } from "./inline-run-model-store.ts";
-import { useChatHost, type ChatTransport } from "./runtime-context.ts";
+import { useChatHost } from "./runtime-context.ts";
 import { RemovableChip } from "./removable-chip.tsx";
 import { sentenceWithNode } from "./sentence-with-name.tsx";
 import { SkillChips } from "./skill-chips.tsx";
@@ -53,12 +53,11 @@ const LIMIT_REASON_KEY: Record<LimitUnavailableReason, string> = {
 };
 
 export interface ComposerToolsProps {
-  transport: ChatTransport | undefined;
   /** The caller may author packages: the creation-mode switch is offered. */
   authorsPackages: boolean;
 }
 
-export function ComposerTools({ transport, authorsPackages }: ComposerToolsProps) {
+export function ComposerTools({ authorsPackages }: ComposerToolsProps) {
   const { t, can } = useChatHost();
   // Offered with `skills:read` on a readable conversation: the context is null otherwise.
   const conversation = useConversationSkillsContext();
@@ -181,7 +180,6 @@ export function ComposerTools({ transport, authorsPackages }: ComposerToolsProps
       )}
       {conversation && (
         <SkillChips
-          transport={transport}
           skills={conversation.skills}
           draft={draft}
           onOpenPicker={() => setSkillsOpen(true)}
@@ -194,9 +192,7 @@ export function ComposerTools({ transport, authorsPackages }: ComposerToolsProps
   if (!conversation) return cluster;
   return (
     <SkillsPicker
-      transport={transport}
-      skills={conversation.skills}
-      actions={conversation}
+      conversation={conversation}
       draft={draft}
       open={skillsOpen}
       onOpenChange={setSkillsOpen}

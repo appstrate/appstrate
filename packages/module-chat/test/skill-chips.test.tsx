@@ -14,7 +14,7 @@ import { TooltipProvider } from "@appstrate/ui/components/tooltip";
 import { SkillChips } from "../src/ui/skill-chips.tsx";
 import { verdictsSummary } from "../src/ui/skills-summary.ts";
 import { ConversationScopeProvider } from "../src/ui/conversation-scope.ts";
-import { ChatHostProvider } from "../src/ui/runtime-context.ts";
+import { ChatHostProvider, ChatTransportProvider } from "../src/ui/runtime-context.ts";
 import { transportOf } from "./fake-request.ts";
 import { conversationScope, testHost } from "./test-host.ts";
 import type { PinnedSkill } from "../src/skills.ts";
@@ -65,23 +65,23 @@ function render(
   skills: StoredSkills = pinned([], false),
   { client = new QueryClient(), draft = "" }: { client?: QueryClient; draft?: string } = {},
 ): string {
-  const cited = citedSkillIds(draft);
   return renderToStaticMarkup(
     <QueryClientProvider client={client}>
       <ChatHostProvider value={host}>
-        <ConversationScopeProvider
-          value={conversationScope({ originSpaceId: "spc_a", restricted: false })}
-        >
-          <TooltipProvider>
-            <SkillChips
-              transport={scoped}
-              skills={skills}
-              draft={{ cited, effective: effectiveSkills(pinIds(skills), cited) }}
-              onOpenPicker={() => {}}
-              onReset={() => {}}
-            />
-          </TooltipProvider>
-        </ConversationScopeProvider>
+        <ChatTransportProvider value={scoped}>
+          <ConversationScopeProvider
+            value={conversationScope({ originSpaceId: "spc_a", restricted: false })}
+          >
+            <TooltipProvider>
+              <SkillChips
+                skills={skills}
+                draft={effectiveSkills(pinIds(skills), citedSkillIds(draft))}
+                onOpenPicker={() => {}}
+                onReset={() => {}}
+              />
+            </TooltipProvider>
+          </ConversationScopeProvider>
+        </ChatTransportProvider>
       </ChatHostProvider>
     </QueryClientProvider>,
   );

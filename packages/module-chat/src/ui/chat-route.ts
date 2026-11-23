@@ -7,7 +7,7 @@
  */
 
 import { DefaultChatTransport, type UIMessage } from "ai";
-import type { SkillSelection } from "./chat-skills.ts";
+import type { ChatSkillSelection } from "../skills.ts";
 import type { ModelGenerationSettings } from "@appstrate/core/model-generation";
 import { actsIn, type ChatTransport } from "./runtime-context.ts";
 
@@ -47,7 +47,7 @@ export function turnBody(args: {
   generation: ModelGenerationSettings;
   packageAuthoring: boolean;
   inlineRunsUseChatModel: boolean;
-  skills: SkillSelection | undefined;
+  skills: ChatSkillSelection | undefined;
   creation: ConversationCreation | undefined;
 }) {
   const {
@@ -68,8 +68,11 @@ export function turnBody(args: {
     package_authoring: packageAuthoring,
     inline_runs_use_chat_model: inlineRunsUseChatModel,
     ...creation,
-    ...(creation && skills && { skill_discovery: skills.skillDiscovery }),
-    ...(creation && skills && skills.pins.length > 0 && { pins: [...skills.pins] }),
+    ...(creation &&
+      skills && {
+        skill_discovery: skills.skillDiscovery,
+        ...(skills.pinnedSkills.length > 0 && { pins: skills.pinnedSkills }),
+      }),
   };
 }
 

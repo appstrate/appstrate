@@ -11,6 +11,7 @@ import {
   CHAT_SKILLS_CONTENT_BUDGET_CHARS,
   DEFAULT_SKILL_SELECTION,
   normalizePins,
+  type ChatSkillSelection,
   type ChatSkillStatus,
   type PinnedSkill,
 } from "../skills.ts";
@@ -29,36 +30,35 @@ export const DEFAULT_STORED_SKILLS: StoredSkills = {
   pins: [],
 };
 
-/** What the user chooses, as the PATCH (or the first turn) sends it: the full set of pins. */
-export interface SkillSelection {
-  skillDiscovery: boolean;
-  pins: readonly string[];
-}
-
 export const pinIds = (skills: StoredSkills): string[] => skills.pins.map((pin) => pin.id);
 
-export function selectionOf(skills: StoredSkills): SkillSelection {
-  return { skillDiscovery: skills.skillDiscovery, pins: pinIds(skills) };
+/** What the user chooses, as the PATCH (or the first turn) sends it: the full set of pins. */
+export function selectionOf(skills: StoredSkills): ChatSkillSelection {
+  return { skillDiscovery: skills.skillDiscovery, pinnedSkills: pinIds(skills) };
 }
 
 /** `stored` with `selection` written: a kept pin keeps its verdict, a new one has none yet. */
-export function withSelection(stored: StoredSkills, selection: SkillSelection): StoredSkills {
+export function withSelection(stored: StoredSkills, selection: ChatSkillSelection): StoredSkills {
   const held = new Map(stored.pins.map((pin) => [pin.id, pin]));
   return {
     skillDiscovery: selection.skillDiscovery,
-    pins: normalizePins(selection.pins).map(
+    pins: normalizePins(selection.pinnedSkills).map(
       (id) => held.get(id) ?? { id, status: null, chars: null },
     ),
   };
 }
 
 /** `selection` with `id` pinned (`on`) or unpinned. */
-export function withPin(selection: SkillSelection, id: string, on: boolean): SkillSelection {
+export function withPin(
+  selection: ChatSkillSelection,
+  id: string,
+  on: boolean,
+): ChatSkillSelection {
   return {
     ...selection,
-    pins: on
-      ? normalizePins([...selection.pins, id])
-      : selection.pins.filter((other) => other !== id),
+    pinnedSkills: on
+      ? normalizePins([...selection.pinnedSkills, id])
+      : selection.pinnedSkills.filter((other) => other !== id),
   };
 }
 
@@ -88,14 +88,13 @@ export function effectiveSkills(
   return { ids, cited: new Set(cited) };
 }
 
-export type SkillRefusal = Exclude<ChatSkillStatus, "injected">;
-
 /**
  * A skill's place in the conversation: `off` (not pinned), `pending` (pinned, no turn judged it
  * since), or the last turn's verdict. Only the server says a skill is loaded.
  */
 export type SkillRowState =
-  { kind: "off" | "pending" | "loaded" } | { kind: "refused"; reason: SkillRefusal };
+  | { kind: "off" | "pending" | "loaded" }
+  | { kind: "refused"; reason: Exclude<ChatSkillStatus, "injected"> };
 
 export function skillRowState(skills: StoredSkills, id: string): SkillRowState {
   const pin = skills.pins.find((p) => p.id === id);
@@ -144,13 +143,14 @@ export interface SkillBudget {
 export function skillBudget(
   skills: StoredSkills,
   effective: EffectiveSkills,
-  bytesOf: (id: string) => number | null,
+  catalogue: readonly { id: string; bytes: number | null }[],
 ): SkillBudget {
+  const bytes = new Map(catalogue.map((skill) => [skill.id, skill.bytes]));
   let used = 0;
   for (const id of effective.ids) {
     const state = skillRowState(skills, id);
     if (state.kind === "loaded") used += skills.pins.find((p) => p.id === id)?.chars ?? 0;
-    else if (state.kind !== "refused") used += bytesOf(id) ?? 0;
+    else if (state.kind !== "refused") used += bytes.get(id) ?? 0;
   }
   return { used, max: CHAT_SKILLS_CONTENT_BUDGET_CHARS };
 }

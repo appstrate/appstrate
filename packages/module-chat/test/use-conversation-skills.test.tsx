@@ -261,7 +261,7 @@ describe("useConversationSkills on a new conversation", () => {
     expect(pinIds(result.current.skills)).toEqual(["@a/cited", "@a/picked"]);
     let taken: ReturnType<ConversationSkillsState["takeForTurn"]>;
     await act(async () => void (taken = result.current.takeForTurn()));
-    expect(taken).toEqual({ skillDiscovery: false, pins: ["@a/cited", "@a/picked"] });
+    expect(taken).toEqual({ skillDiscovery: false, pinnedSkills: ["@a/cited", "@a/picked"] });
     await unmount();
   });
 
@@ -334,7 +334,7 @@ describe("useConversationSkills on a new conversation", () => {
     expect(pinIds(result.current.skills)).toEqual(["@a/cited", "@a/later"]);
     let taken: ReturnType<ConversationSkillsState["takeForTurn"]>;
     await act(async () => void (taken = result.current.takeForTurn()));
-    expect(taken?.pins).toEqual(["@a/cited", "@a/later"]);
+    expect(taken?.pinnedSkills).toEqual(["@a/cited", "@a/later"]);
     await unmount();
   });
 });

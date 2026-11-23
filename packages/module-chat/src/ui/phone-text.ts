@@ -9,13 +9,13 @@ export const COMPOSER_INPUT_CLASS =
 /** Running text a phone reads (a hint, a state, a message): 16 px, the dense size from `md`. */
 export const READING_TEXT_CLASS = "text-base md:text-sm";
 
-/** Denser still on desktop (sidebar states and actions). */
+/** The same, where the desktop is denser still (the sidebar's states and actions). */
 export const READING_TEXT_DENSE_CLASS = "text-base md:text-xs";
 
 /** Secondary text (a chip, a meta line, a status): 14 px on a phone, never smaller. */
 export const NOTE_TEXT_CLASS = "text-sm md:text-xs";
 
-/** The sidebar's conversation search field. */
+/** The conversation search field of the sidebar (a sheet below `md`, 40 px tall there). */
 export const SEARCH_INPUT_CLASS =
   "h-10 pr-9 pl-7 text-base md:h-8 md:pr-7 md:py-0 md:text-base [&::-webkit-search-cancel-button]:hidden";
 
@@ -30,7 +30,7 @@ export const ASSISTANT_MESSAGE_CLASS = "text-foreground text-base leading-relaxe
 export const MARKDOWN_PROSE_CLASS =
   "prose prose-base md:prose-sm dark:prose-invert max-w-none break-words [&_code]:text-[0.85em] [&_pre>code]:text-[1em] [&_pre]:rounded-md [&_pre]:p-3 [&_pre]:text-sm md:[&_pre]:text-xs";
 
-/** The transcript scroller; it keeps its scroll to itself. */
+/** The transcript scroller: it keeps its scroll to itself (no rubber-band or pull-to-refresh of the page). */
 export const THREAD_VIEWPORT_CLASS =
   "relative flex min-h-0 flex-1 flex-col items-center overflow-y-auto overscroll-contain px-4 pt-6";
 
@@ -41,5 +41,5 @@ export const THREAD_FOOTER_CLASS =
 /** The line under the composer, as the conversation skeleton draws it too. */
 export const DISCLAIMER_TEXT_CLASS = "text-muted-foreground/70 px-4 text-center text-xs";
 
-/** Hidden on a phone while the composer has the focus (the keyboard is up). */
+/** Under the composer; on a phone it steps aside while the composer has the focus (the keyboard is up). */
 export const DISCLAIMER_CLASS = `${DISCLAIMER_TEXT_CLASS} max-md:group-focus-within/footer:hidden`;

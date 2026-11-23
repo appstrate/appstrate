@@ -109,7 +109,7 @@ import {
   hasBubbleContent,
 } from "./agent-prompt-part.ts";
 import { DirectiveText } from "./directive-chip.tsx";
-import { draftIssue } from "./directive-send.ts";
+import { namesSeveralAgents } from "./directive-send.ts";
 import { readableDirectives } from "../directives.ts";
 import { ComposerEditor } from "./composer-input.tsx";
 import { CommandPopover, CommandTriggers } from "./composer-popover.tsx";
@@ -653,13 +653,13 @@ function Composer({
   const conversationSkills = useConversationSkillsContext()?.skills ?? null;
   const draftSkills = useDraftSkillsOf(conversationSkills, message);
   // What the message names must be sendable: one agent.
-  const issue = draftIssue(message);
+  const issue = namesSeveralAgents(message);
   const issueId = React.useId();
   const canQueue = canQueueDraft({ running, text: composer.value, hasAttachments });
   const enqueue = () => {
     if (canQueue && queue.add(composer.value)) composer.setText("");
   };
-  const blocked = limitPending || issue !== null;
+  const blocked = limitPending || issue;
   // Enter queues while a turn runs and sends otherwise, as the Send button does.
   const enter = () => {
     if (running) enqueue();
@@ -725,10 +725,15 @@ function Composer({
               <ContextGauge className="max-md:group-data-[rest]/composer:hidden" />
               <ThreadPrimitive.If running={false}>
                 <ComposerPrimitive.Send asChild disabled={blocked}>
-                  <SendButton
-                    label={t("composer.send")}
+                  <Button
+                    type="button"
+                    size="icon"
+                    className={COMPOSER_BUTTON_CLASS}
+                    aria-label={t("composer.send")}
                     aria-describedby={issue ? issueId : undefined}
-                  />
+                  >
+                    <SendHorizontalIcon />
+                  </Button>
                 </ComposerPrimitive.Send>
               </ThreadPrimitive.If>
               <ThreadPrimitive.If running>
@@ -765,26 +770,11 @@ function Composer({
             role="status"
             className={issue ? cn(NOTE_TEXT_CLASS, "text-destructive") : "sr-only"}
           >
-            {issue === "agents" ? t("composer.oneAgentOnly") : ""}
+            {issue ? t("composer.oneAgentOnly") : ""}
           </p>
         </CommandTriggers>
       </DraftSkillsProvider>
     </ComposerPrimitive.Root>
-  );
-}
-
-/** The send button; as the child of `ComposerPrimitive.Send` it receives that primitive's handlers. */
-function SendButton({ label, ...props }: React.ComponentProps<typeof Button> & { label: string }) {
-  return (
-    <Button
-      type="button"
-      size="icon"
-      className={COMPOSER_BUTTON_CLASS}
-      aria-label={label}
-      {...props}
-    >
-      <SendHorizontalIcon />
-    </Button>
   );
 }
 

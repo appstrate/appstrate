@@ -7,7 +7,7 @@ import { chatCommandsSchema, type ChatCommands } from "../commands.ts";
 import { chatPath } from "./chat-route.ts";
 import { limitedSpaceOf, useConversationScope } from "./conversation-scope.ts";
 import { usePackageAuthoringEnabled } from "./package-authoring-store.ts";
-import { useChatHost, type ChatTransport } from "./runtime-context.ts";
+import { useChatHost, useChatTransport, type ChatTransport } from "./runtime-context.ts";
 
 /** `spaceId`: a limited conversation's origin space, absent for the acting set. */
 export async function fetchChatCommands(
@@ -32,8 +32,9 @@ function chatCommandsQueryKey(
 }
 
 /** Under the shell's `["packages"]` prefix, so a package write refreshes it; stale after 5 s. */
-export function useChatCommands(transport: ChatTransport | undefined, wanted: boolean) {
+export function useChatCommands(wanted: boolean) {
   const { can } = useChatHost();
+  const transport = useChatTransport();
   const spaceId = limitedSpaceOf(useConversationScope());
   const packageAuthoring = usePackageAuthoringEnabled();
   return useQuery({

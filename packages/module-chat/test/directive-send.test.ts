@@ -4,7 +4,7 @@
 
 import { describe, expect, it } from "bun:test";
 import { serializeDirective } from "../src/directives.ts";
-import { draftIssue, namesAgent, sendWithDirectives } from "../src/ui/directive-send.ts";
+import { namesAgent, namesSeveralAgents, sendWithDirectives } from "../src/ui/directive-send.ts";
 
 const skill = (name: string) =>
   serializeDirective({ type: "skill", label: name, id: `@acme/${name}` });
@@ -71,20 +71,20 @@ describe("sendWithDirectives", () => {
   });
 });
 
-describe("draftIssue", () => {
+describe("namesSeveralAgents", () => {
   it("is none for a draft naming one agent", () => {
-    expect(draftIssue(`${agent("A")} ${skill("tone")}`)).toBeNull();
+    expect(namesSeveralAgents(`${agent("A")} ${skill("tone")}`)).toBe(false);
   });
 
   it("refuses a second agent", () => {
-    expect(draftIssue(`${agent("A", "run-a")} ${agent("B", "run-b")}`)).toBe("agents");
+    expect(namesSeveralAgents(`${agent("A", "run-a")} ${agent("B", "run-b")}`)).toBe(true);
     // The same agent twice is two launches too.
-    expect(draftIssue(`${agent("A")} ${agent("A")}`)).toBe("agents");
+    expect(namesSeveralAgents(`${agent("A")} ${agent("A")}`)).toBe(true);
   });
 
   it("never refuses a draft for its skills, however many it names", () => {
     const many = ["a", "b", "c", "d", "e", "f", "g"].map(skill).join(" ");
-    expect(draftIssue(many)).toBeNull();
+    expect(namesSeveralAgents(many)).toBe(false);
   });
 });
 

@@ -15,8 +15,8 @@ import {
 } from "@tanstack/react-query";
 import type { UIMessage } from "ai";
 import type { TokenUsage } from "@appstrate/core/token-usage";
-import type { PinnedSkill } from "../skills.ts";
-import type { SkillSelection, StoredSkills } from "./chat-skills.ts";
+import type { ChatSkillSelection, PinnedSkill } from "../skills.ts";
+import type { StoredSkills } from "./chat-skills.ts";
 import { errorStatus, jsonInit, type ChatTransport } from "./runtime-context.ts";
 import { chatPath } from "./chat-route.ts";
 
@@ -214,11 +214,11 @@ function storedSkillsOf(dto: { skill_discovery: boolean; pins: PinnedSkill[] }):
 export async function updateSessionSkills(
   transport: ChatTransport,
   id: string,
-  selection: SkillSelection,
+  selection: ChatSkillSelection,
 ): Promise<StoredSkills> {
   const res = await transport.request(
     chatPath(transport, `/sessions/${id}/skills`),
-    jsonInit("PATCH", { pins: selection.pins, skill_discovery: selection.skillDiscovery }),
+    jsonInit("PATCH", { pins: selection.pinnedSkills, skill_discovery: selection.skillDiscovery }),
   );
   return storedSkillsOf((await res.json()) as { skill_discovery: boolean; pins: PinnedSkill[] });
 }

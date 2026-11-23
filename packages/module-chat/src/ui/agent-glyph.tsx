@@ -9,10 +9,11 @@
 import { BotIcon } from "lucide-react";
 import { IdentityTile } from "@appstrate/ui/components/identity-tile";
 import { cn } from "@appstrate/ui/cn";
-import type { AgentAppearance } from "./agent-appearance.ts";
-import { agentByPromptName } from "./agent-appearance.ts";
-import { useChatTransport } from "./runtime-context.ts";
+import type { ChatAgentCommand } from "../commands.ts";
 import { useChatCommands } from "./use-chat-commands.ts";
+
+/** What an agent's tile reads of it. */
+export type AgentAppearance = Pick<ChatAgentCommand, "packageId" | "icon" | "color">;
 
 export function AgentGlyph({
   agent,
@@ -46,8 +47,8 @@ export function DirectiveAgentGlyph({
   label: string;
   className?: string;
 }) {
-  const { data } = useChatCommands(useChatTransport() ?? undefined, true);
-  return (
-    <AgentGlyph agent={agentByPromptName(data, promptName)} label={label} className={className} />
-  );
+  const { data } = useChatCommands(true);
+  // A directive's id is the agent's prompt name.
+  const agent = data?.agents.find((a) => a.name === promptName);
+  return <AgentGlyph agent={agent} label={label} className={className} />;
 }

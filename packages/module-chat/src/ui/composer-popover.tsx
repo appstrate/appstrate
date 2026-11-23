@@ -17,10 +17,9 @@ import type { TriggerAdapter, TriggerItem } from "@assistant-ui/core";
 import { BookOpenIcon, CheckIcon } from "lucide-react";
 import { cn } from "@appstrate/ui/cn";
 import { AGENT_DIRECTIVE } from "../directives.ts";
-import { AgentGlyph } from "./agent-glyph.tsx";
-import type { AgentAppearance } from "./agent-appearance.ts";
+import { AgentGlyph, type AgentAppearance } from "./agent-glyph.tsx";
 import { commandList, noCommandMatch, searchCommands, slashMatch } from "./composer-commands.ts";
-import { useChatHost, useChatTransport } from "./runtime-context.ts";
+import { useChatHost } from "./runtime-context.ts";
 import { useConversationSkillsContext, useDraftSkills } from "./use-conversation-skills.ts";
 import { useChatCommands } from "./use-chat-commands.ts";
 
@@ -43,13 +42,12 @@ const CLOSED: MenuState = { open: false, notice: null };
 /** The menu, inside the composer card (it opens above it). */
 export function CommandPopover() {
   const { t } = useChatHost();
-  const transport = useChatTransport() ?? undefined;
   const conversation = useConversationSkillsContext();
-  const { effective } = useDraftSkills();
+  const effective = useDraftSkills();
   const draft = useAuiState((s) => s.composer.text);
   const running = useAuiState((s) => s.thread.isRunning);
   // Read only: the editor fetches the entry once focused, and the menu opens only in the editor.
-  const commands = useChatCommands(transport, false);
+  const commands = useChatCommands(false);
   const { data } = commands;
   const skills = useMemo(
     () => conversation && { stored: conversation.skills, effective },
@@ -133,7 +131,7 @@ function Entries({
   const className = notice?.className;
   // Before paint: the card appears with the listbox, never a frame after it.
   useLayoutEffect(
-    () => onMenu({ open, notice: text ? { text, className: className ?? "" } : null }),
+    () => onMenu({ open, notice: text && className ? { text, className } : null }),
     [onMenu, open, text, className],
   );
   // Closed, the popover renders its children without its listbox: nothing of ours shows.

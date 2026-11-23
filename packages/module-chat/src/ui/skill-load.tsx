@@ -23,23 +23,11 @@ import {
   type SkillLoadState,
 } from "./chat-skills.ts";
 import { DirectiveChip } from "./directive-chip.tsx";
-import { useChatHost, useChatTransport } from "./runtime-context.ts";
+import { useChatHost } from "./runtime-context.ts";
 import { ToolFallback } from "./tool-fallback.tsx";
 import { deriveToolPhase } from "./tool-result.ts";
 import { useChatCommands } from "./use-chat-commands.ts";
 import { useConversationSkillsContext } from "./use-conversation-skills.ts";
-
-/** What the live region reads out, naming the skill. */
-const LIVE_KEY: Record<SkillLoadState, string> = {
-  running: "skills.load.live.running",
-  read: "skills.load.live.read",
-  error: "skills.load.live.error",
-};
-
-const CAPTION_KEY: Partial<Record<SkillLoadState, string>> = {
-  read: "skills.load.read",
-  error: "skills.load.error",
-};
 
 const CHIP_CLASS: Record<SkillLoadState, string | undefined> = {
   running: "motion-safe:animate-pulse",
@@ -57,15 +45,15 @@ type ResourceReadProps = ToolCallMessagePartProps<Record<string, unknown>, unkno
 function PinAction({ skill }: { skill: { packageId: string; name: string } }) {
   const { t } = useChatHost();
   const conversation = useConversationSkillsContext();
-  const catalogue = useChatCommands(useChatTransport() ?? undefined, !!conversation?.held);
+  const catalogue = useChatCommands(!!conversation?.held);
   const reasonId = useId();
   if (!conversation?.held) return null;
   const { skills, setPin } = conversation;
   if (skills.pins.some((pin) => pin.id === skill.packageId)) return null;
   const listed = catalogue.data?.skills ?? [];
-  const bytesOf = (id: string) => listed.find((s) => s.id === id)?.bytes ?? null;
-  const budget = skillBudget(skills, effectiveSkills(pinIds(skills), []), bytesOf);
-  const overBudget = exceedsBudget(budget, bytesOf(skill.packageId));
+  const budget = skillBudget(skills, effectiveSkills(pinIds(skills), []), listed);
+  const bytes = listed.find((s) => s.id === skill.packageId)?.bytes ?? null;
+  const overBudget = exceedsBudget(budget, bytes);
   const reason = t("skills.budget.wouldExceed");
   return (
     <>
@@ -105,7 +93,6 @@ function SkillLoad({
   const { t } = useChatHost();
   const phase = deriveToolPhase(props);
   const state = skillLoadState(phase);
-  const caption = CAPTION_KEY[state];
   return (
     <div data-testid="skill-load" data-phase={phase} data-state={state} className="my-1.5 text-sm">
       <span className="flex flex-wrap items-center gap-1.5">
@@ -115,20 +102,20 @@ function SkillLoad({
           label={skill.name}
           className={CHIP_CLASS[state]}
         />
-        {caption && (
+        {state !== "running" && (
           <span
             aria-hidden="true"
             data-testid="skill-load-state"
             className="text-muted-foreground text-xs"
           >
-            {t(caption)}
+            {t(state === "read" ? "skills.load.read" : "skills.load.error")}
           </span>
         )}
         {state === "read" && <PinAction skill={skill} />}
       </span>
       {/* Present from the start, so the outcome is read out when it lands. */}
       <span aria-live="polite" data-testid="skill-load-live" className="sr-only">
-        {t(LIVE_KEY[state], { name: skill.name })}
+        {t(`skills.load.live.${state}`, { name: skill.name })}
       </span>
     </div>
   );

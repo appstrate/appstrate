@@ -544,7 +544,7 @@ describe("the composer's attach button", () => {
         <ChatTransportProvider value={transport}>
           <Runtime>
             <TooltipProvider>
-              <ComposerTools transport={transport} authorsPackages={false} />
+              <ComposerTools authorsPackages={false} />
             </TooltipProvider>
           </Runtime>
         </ChatTransportProvider>

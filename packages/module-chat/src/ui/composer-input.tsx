@@ -13,7 +13,6 @@ import { LexicalComposerInput } from "@assistant-ui/react-lexical";
 import { useLexicalComposerContext } from "@lexical/react/LexicalComposerContext";
 import { mergeRegister } from "@lexical/utils";
 import { COMMAND_PRIORITY_HIGH, KEY_ENTER_COMMAND } from "lexical";
-import { useChatTransport } from "./runtime-context.ts";
 import { useChatCommands } from "./use-chat-commands.ts";
 import { ComposerDirectiveChip } from "./directive-chip.tsx";
 import { COMPOSER_INPUT_CLASS } from "./phone-text.ts";
@@ -93,7 +92,7 @@ export function ComposerEditor({
   // Read as soon as the field is focused (the `/` menu reads the same cache entry), so the first
   // `/` rarely waits; while it does, the popover itself holds Enter and Tab.
   const [armed, setArmed] = useState(false);
-  useChatCommands(useChatTransport() ?? undefined, armed);
+  useChatCommands(armed);
   const addPastedFiles = (event: ClipboardEvent) => {
     const files = Array.from(event.clipboardData?.files ?? []);
     if (!aui.thread().getState().capabilities.attachments || files.length === 0) return;

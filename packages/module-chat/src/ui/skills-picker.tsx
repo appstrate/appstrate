@@ -16,32 +16,23 @@ import {
   skillBudget,
   skillPickerRows,
   skillRowState,
+  type EffectiveSkills,
   type SkillBudget,
-  type SkillRefusal,
-  type StoredSkills,
 } from "./chat-skills.ts";
-import type { ConversationSkillsState, DraftSkills } from "./use-conversation-skills.ts";
+import type { ConversationSkillsState } from "./use-conversation-skills.ts";
 import { useChatCommands } from "./use-chat-commands.ts";
-import { useChatHost, type ChatTransport } from "./runtime-context.ts";
+import { useChatHost } from "./runtime-context.ts";
 
 interface SkillsPickerProps {
-  transport: ChatTransport | undefined;
-  skills: StoredSkills;
-  actions: Pick<ConversationSkillsState, "setPin" | "setDiscovery">;
+  conversation: Pick<ConversationSkillsState, "skills" | "setPin" | "setDiscovery">;
   /** Opened from the composer's settings menu or a skills chip, never by a trigger of its own. */
   open: boolean;
   onOpenChange: (open: boolean) => void;
   /** The skills the composer's draft cites: checked here, and held by the message, not the panel. */
-  draft: DraftSkills;
+  draft: EffectiveSkills;
   /** The popover anchors to this: the composer's tools row. */
   children: ReactNode;
 }
-
-const REFUSAL_KEY: Record<SkillRefusal, string> = {
-  over_budget: "skills.state.refused.over_budget",
-  unavailable: "skills.state.refused.unavailable",
-  unreadable: "skills.state.refused.unreadable",
-};
 
 const NOTE_CLASS = "text-muted-foreground px-1 text-[0.7rem] leading-snug";
 
@@ -77,29 +68,24 @@ function BudgetGauge({ budget }: { budget: SkillBudget }) {
 
 /** The popover's body: the discovery switch and the skill list; exported for its tests, which render no portal. */
 export function SkillsPickerPanel({
-  transport,
-  skills: conversation,
-  actions,
-  draft,
-}: Pick<SkillsPickerProps, "transport" | "skills" | "actions" | "draft">) {
+  conversation: { skills: stored, setPin, setDiscovery },
+  draft: effective,
+}: Pick<SkillsPickerProps, "conversation" | "draft">) {
   const { t } = useChatHost();
   const baseId = useId();
   const discoveryId = `${baseId}-discovery`;
-  const catalogue = useChatCommands(transport, true);
+  const catalogue = useChatCommands(true);
   const skills = catalogue.data?.skills ?? [];
   // `isLoading`, not `isPending`: a disabled query stays pending forever, and unreadable reads
   // as "nothing".
   const loading = catalogue.isLoading;
 
-  const { effective } = draft;
   const rows = skillPickerRows(skills, effective.ids);
-  const bytes = new Map(skills.map((skill) => [skill.id, skill.bytes]));
-  const budget = skillBudget(conversation, effective, (id) => bytes.get(id) ?? null);
-  const states = conversation.pins.map((pin) => skillRowState(conversation, pin.id));
-  const someLoaded = conversation.pins.some(
-    (pin, i) => states[i]!.kind === "loaded" && !effective.cited.has(pin.id),
+  const budget = skillBudget(stored, effective, skills);
+  const someLoaded = stored.pins.some(
+    (pin) => pin.status === "injected" && !effective.cited.has(pin.id),
   );
-  const somePending = states.some((state) => state.kind === "pending");
+  const somePending = stored.pins.some((pin) => pin.status === null);
 
   /** An unpinned skill whose listed size would take the pins past their budget. */
   const overBudgetOf = (skill: { bytes: number | null }, checked: boolean) =>
@@ -108,7 +94,7 @@ export function SkillsPickerPanel({
   const togglePin = (skill: { id: string; bytes: number | null }, checked: boolean) => {
     // A cited skill is the message's: only removing its chip drops it. Past the budget, nothing pins.
     if (effective.cited.has(skill.id) || overBudgetOf(skill, checked)) return;
-    actions.setPin(skill.id, !checked);
+    setPin(skill.id, !checked);
   };
 
   return (
@@ -122,12 +108,12 @@ export function SkillsPickerPanel({
         <Switch
           id={discoveryId}
           data-testid="skills-discovery"
-          checked={conversation.skillDiscovery}
-          onCheckedChange={actions.setDiscovery}
+          checked={stored.skillDiscovery}
+          onCheckedChange={setDiscovery}
         />
       </div>
       <p className={cn(NOTE_CLASS, "mt-1.5 shrink-0")}>
-        {t(conversation.skillDiscovery ? "skills.discovery.hintOn" : "skills.discovery.hintOff")}
+        {t(stored.skillDiscovery ? "skills.discovery.hintOn" : "skills.discovery.hintOff")}
       </p>
 
       <BudgetGauge budget={budget} />
@@ -156,7 +142,7 @@ export function SkillsPickerPanel({
             const id = `${baseId}-pin-${index}`;
             const nameId = `${id}-name`;
             const detailsId = `${id}-details`;
-            const state = skillRowState(conversation, skill.id);
+            const state = skillRowState(stored, skill.id);
             const isCited = effective.cited.has(skill.id);
             const checked = state.kind !== "off" || isCited;
             const overBudget = overBudgetOf(skill, checked);
@@ -165,12 +151,10 @@ export function SkillsPickerPanel({
             const refused = state.kind === "refused";
             // A refusal says why the skill is out, even for a cited one; else the lock's reason.
             const caption = refused
-              ? t(REFUSAL_KEY[state.reason])
+              ? t(`skills.state.refused.${state.reason}`)
               : isCited
                 ? t("skills.cited")
                 : null;
-            const hasDetails =
-              !!caption || overBudget || (available ? !!skill.description : !refused);
             return (
               <div key={skill.id} className="flex items-start gap-2 rounded-md p-1">
                 <Checkbox
@@ -180,7 +164,7 @@ export function SkillsPickerPanel({
                   checked={checked}
                   aria-disabled={inert || undefined}
                   aria-labelledby={nameId}
-                  aria-describedby={hasDetails ? detailsId : undefined}
+                  aria-describedby={detailsId}
                   data-cited={isCited || undefined}
                   onCheckedChange={() => togglePin(skill, checked)}
                   className={cn("mt-0.5 shrink-0", inert && "cursor-not-allowed opacity-50")}
@@ -257,9 +241,7 @@ export function SkillsPickerPanel({
 }
 
 export function SkillsPicker({
-  transport,
-  skills,
-  actions,
+  conversation,
   open,
   onOpenChange,
   draft,
@@ -279,7 +261,7 @@ export function SkillsPicker({
         data-testid="skills-picker-popover"
         className="flex max-h-[min(28rem,var(--radix-popover-content-available-height))] w-[min(23rem,calc(100vw-1.5rem))] flex-col p-3"
       >
-        <SkillsPickerPanel transport={transport} skills={skills} actions={actions} draft={draft} />
+        <SkillsPickerPanel conversation={conversation} draft={draft} />
       </PopoverContent>
     </Popover>
   );

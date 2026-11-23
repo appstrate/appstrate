@@ -10,7 +10,11 @@ import { describe, expect, it } from "bun:test";
 import { renderToStaticMarkup } from "react-dom/server";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { ConversationScopeProvider } from "../src/ui/conversation-scope.ts";
-import { ChatHostProvider, type ChatHost } from "../src/ui/runtime-context.ts";
+import {
+  ChatHostProvider,
+  ChatTransportProvider,
+  type ChatHost,
+} from "../src/ui/runtime-context.ts";
 import { fetchChatCommands, useChatCommands } from "../src/ui/use-chat-commands.ts";
 import { requestAnswering, transportOf, transportOver } from "./fake-request.ts";
 import { conversationScope, testHost } from "./test-host.ts";
@@ -75,10 +79,7 @@ describe("fetchChatCommands", () => {
 });
 
 function Probe({ wanted }: { wanted: boolean }) {
-  const read = useChatCommands(
-    transportOf(() => ({})),
-    wanted,
-  );
+  const read = useChatCommands(wanted);
   return <b data-fetch={read.fetchStatus} />;
 }
 
@@ -92,9 +93,11 @@ function request(
   const html = renderToStaticMarkup(
     <QueryClientProvider client={qc}>
       <ChatHostProvider value={host}>
-        <ConversationScopeProvider value={conversationScope(scope)}>
-          <Probe wanted={wanted} />
-        </ConversationScopeProvider>
+        <ChatTransportProvider value={transportOf(() => ({}))}>
+          <ConversationScopeProvider value={conversationScope(scope)}>
+            <Probe wanted={wanted} />
+          </ConversationScopeProvider>
+        </ChatTransportProvider>
       </ChatHostProvider>
     </QueryClientProvider>,
   );

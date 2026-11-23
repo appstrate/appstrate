@@ -7,14 +7,12 @@ import { AGENT_PROMPT_PART_TYPE, agentPromptDataSchema } from "../agent-prompt.t
 import { AGENT_DIRECTIVE, directivesOf } from "../directives.ts";
 import { citedSkillIds } from "./chat-skills.ts";
 
-export type DraftIssue = "agents";
-
 /**
- * Why a draft cannot be sent, `null` when it can: one agent per message. Skills never refuse a
- * draft: a pin past the budget is reported `over_budget` by the turn.
+ * Whether a draft names more than one agent, which it cannot send. Skills never refuse a draft: a
+ * pin past the budget is reported `over_budget` by the turn.
  */
-export function draftIssue(text: string): DraftIssue | null {
-  return directivesOf(text).filter((d) => d.type === AGENT_DIRECTIVE).length > 1 ? "agents" : null;
+export function namesSeveralAgents(text: string): boolean {
+  return directivesOf(text).filter((d) => d.type === AGENT_DIRECTIVE).length > 1;
 }
 
 /** Whether a text launches an agent. */

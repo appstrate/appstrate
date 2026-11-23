@@ -12,15 +12,15 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { TooltipProvider } from "@appstrate/ui/components/tooltip";
 
-import { ChatHostProvider } from "../src/ui/runtime-context.ts";
+import { ChatHostProvider, ChatTransportProvider } from "../src/ui/runtime-context.ts";
 import { ConversationScopeProvider } from "../src/ui/conversation-scope.ts";
 import { SkillsPickerPanel } from "../src/ui/skills-picker.tsx";
 import { transportOf } from "./fake-request.ts";
 import { conversationScope, testHost } from "./test-host.ts";
 import type { ReactElement, ReactNode } from "react";
 import type { PinnedSkill } from "../src/skills.ts";
-import { effectiveSkills, type StoredSkills } from "../src/ui/chat-skills.ts";
-import type { ConversationSkillsState, DraftSkills } from "../src/ui/use-conversation-skills.ts";
+import { effectiveSkills, type EffectiveSkills, type StoredSkills } from "../src/ui/chat-skills.ts";
+import type { ConversationSkillsState } from "../src/ui/use-conversation-skills.ts";
 
 const host = testHost({
   actingSpaceIds: ["spc_a"],
@@ -37,13 +37,11 @@ const NO_ACTIONS: Pick<ConversationSkillsState, "setPin" | "setDiscovery"> = {
 };
 
 /** The draft's skills over `stored`, as the composer computes them. */
-const draftOf = (stored: StoredSkills, cited: string[]): DraftSkills => ({
-  cited,
-  effective: effectiveSkills(
+const draftOf = (stored: StoredSkills, cited: string[]): EffectiveSkills =>
+  effectiveSkills(
     stored.pins.map((pin) => pin.id),
     cited,
-  ),
-});
+  );
 
 function render(
   skillDiscovery: boolean,
@@ -78,18 +76,18 @@ function render(
   return renderToStaticMarkup(
     <QueryClientProvider client={qc}>
       <ChatHostProvider value={host}>
-        <ConversationScopeProvider
-          value={conversationScope({ originSpaceId: "spc_a", restricted: false })}
-        >
-          <TooltipProvider>
-            <SkillsPickerPanel
-              transport={transport}
-              skills={stored}
-              actions={NO_ACTIONS}
-              draft={draftOf(stored, cited)}
-            />
-          </TooltipProvider>
-        </ConversationScopeProvider>
+        <ChatTransportProvider value={transport}>
+          <ConversationScopeProvider
+            value={conversationScope({ originSpaceId: "spc_a", restricted: false })}
+          >
+            <TooltipProvider>
+              <SkillsPickerPanel
+                conversation={{ skills: stored, ...NO_ACTIONS }}
+                draft={draftOf(stored, cited)}
+              />
+            </TooltipProvider>
+          </ConversationScopeProvider>
+        </ChatTransportProvider>
       </ChatHostProvider>
     </QueryClientProvider>,
   );
@@ -115,9 +113,11 @@ function toggleDiscovery(skillDiscovery: boolean, next: boolean): boolean[] {
   const emitted: boolean[] = [];
   function Probe() {
     const tree = SkillsPickerPanel({
-      transport,
-      skills: { skillDiscovery, pins: [] },
-      actions: { ...NO_ACTIONS, setDiscovery: (on) => emitted.push(on) },
+      conversation: {
+        skills: { skillDiscovery, pins: [] },
+        ...NO_ACTIONS,
+        setDiscovery: (on) => emitted.push(on),
+      },
       draft: draftOf({ skillDiscovery, pins: [] }, []),
     });
     const sw = findElement(
@@ -130,11 +130,13 @@ function toggleDiscovery(skillDiscovery: boolean, next: boolean): boolean[] {
   renderToStaticMarkup(
     <QueryClientProvider client={new QueryClient()}>
       <ChatHostProvider value={host}>
-        <ConversationScopeProvider
-          value={conversationScope({ originSpaceId: "spc_a", restricted: false })}
-        >
-          <Probe />
-        </ConversationScopeProvider>
+        <ChatTransportProvider value={transport}>
+          <ConversationScopeProvider
+            value={conversationScope({ originSpaceId: "spc_a", restricted: false })}
+          >
+            <Probe />
+          </ConversationScopeProvider>
+        </ChatTransportProvider>
       </ChatHostProvider>
     </QueryClientProvider>,
   );
@@ -221,9 +223,11 @@ describe("SkillsPicker", () => {
     });
     function Toggle() {
       const tree = SkillsPickerPanel({
-        transport,
-        skills: { skillDiscovery: true, pins },
-        actions: { ...NO_ACTIONS, setPin: (id, on) => toggled.push(`${on ? "+" : "-"}${id}`) },
+        conversation: {
+          skills: { skillDiscovery: true, pins },
+          ...NO_ACTIONS,
+          setPin: (id, on) => toggled.push(`${on ? "+" : "-"}${id}`),
+        },
         draft: draftOf({ skillDiscovery: true, pins }, cited),
       });
       for (const id of ids) {
@@ -235,11 +239,13 @@ describe("SkillsPicker", () => {
     renderToStaticMarkup(
       <QueryClientProvider client={qc}>
         <ChatHostProvider value={host}>
-          <ConversationScopeProvider
-            value={conversationScope({ originSpaceId: "spc_a", restricted: false })}
-          >
-            <Toggle />
-          </ConversationScopeProvider>
+          <ChatTransportProvider value={transport}>
+            <ConversationScopeProvider
+              value={conversationScope({ originSpaceId: "spc_a", restricted: false })}
+            >
+              <Toggle />
+            </ConversationScopeProvider>
+          </ChatTransportProvider>
         </ChatHostProvider>
       </QueryClientProvider>,
     );

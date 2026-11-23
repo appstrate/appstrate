@@ -25,7 +25,7 @@ import {
   useQueryClient,
   type QueryClient,
 } from "@tanstack/react-query";
-import { normalizePins } from "../skills.ts";
+import { normalizePins, type ChatSkillSelection } from "../skills.ts";
 import {
   DEFAULT_STORED_SKILLS,
   citedSkillIds,
@@ -35,7 +35,6 @@ import {
   withPin,
   withSelection,
   type EffectiveSkills,
-  type SkillSelection,
   type StoredSkills,
 } from "./chat-skills.ts";
 import {
@@ -62,7 +61,7 @@ export interface ConversationSkillsState {
    */
   pinCited: (ids: readonly string[]) => Promise<void>;
   /** What the turn being sent creates the conversation with; `undefined` once the row is read. */
-  takeForTurn: () => SkillSelection | undefined;
+  takeForTurn: () => ChatSkillSelection | undefined;
 }
 
 const DEFAULT_SELECTION = selectionOf(DEFAULT_STORED_SKILLS);
@@ -74,9 +73,9 @@ const skillsMutationKey = (orgId: string | undefined, id: string) =>
 function pendingSelection(
   queryClient: QueryClient,
   mutationKey: readonly unknown[],
-): SkillSelection | undefined {
+): ChatSkillSelection | undefined {
   const pending = queryClient.getMutationCache().findAll({ mutationKey, status: "pending" });
-  return pending[pending.length - 1]?.state.variables as SkillSelection | undefined;
+  return pending[pending.length - 1]?.state.variables as ChatSkillSelection | undefined;
 }
 
 const selectSkills = (row: SessionHistory | null) => row?.skills ?? null;
@@ -108,7 +107,7 @@ export function useConversationSkills({
   // Read when a turn is built, outside render: a ref, mirrored in state for the render.
   const [selection, setSelectionState] = useState(DEFAULT_SELECTION);
   const selectionRef = useRef(DEFAULT_SELECTION);
-  const setSelection = useCallback((next: SkillSelection) => {
+  const setSelection = useCallback((next: ChatSkillSelection) => {
     selectionRef.current = next;
     setSelectionState(next);
   }, []);
@@ -117,7 +116,7 @@ export function useConversationSkills({
 
   const pending = useMutationState({
     filters: { mutationKey, status: "pending" },
-    select: (mutation) => mutation.state.variables as SkillSelection,
+    select: (mutation) => mutation.state.variables as ChatSkillSelection,
   });
   const latest = pending[pending.length - 1];
   const held = detail.data != null;
@@ -133,7 +132,7 @@ export function useConversationSkills({
     [queryClient, detailKey],
   );
   /** The full selection at call time: the last in flight, else an unsent one, else the row's. */
-  const current = useCallback((): SkillSelection => {
+  const current = useCallback((): ChatSkillSelection => {
     const inFlight = pendingSelection(queryClient, mutationKey);
     if (inFlight) return inFlight;
     const row = heldRow();
@@ -149,7 +148,7 @@ export function useConversationSkills({
     // One PATCH at a time, each carrying the full set computed over the previous ones: the server
     // applies them in order, so the last change made is the one it keeps.
     scope: { id: `chat-session-skills:${orgId}:${id}` },
-    mutationFn: (next: SkillSelection) => updateSessionSkills(transport!, id, next),
+    mutationFn: (next: ChatSkillSelection) => updateSessionSkills(transport!, id, next),
     onMutate: async (next) => {
       unsentRef.current = false;
       await queryClient.cancelQueries({ queryKey: detailKey, exact: true });
@@ -188,7 +187,7 @@ export function useConversationSkills({
 
   const getEnabled = useLatest(enabled);
   const change = useCallback(
-    (apply: (selection: SkillSelection) => SkillSelection) => {
+    (apply: (selection: ChatSkillSelection) => ChatSkillSelection) => {
       if (!getEnabled()) return;
       if (heldRow()) {
         if (transport) mutate(apply(current()));
@@ -210,8 +209,8 @@ export function useConversationSkills({
       // The server ignores a turn's pins for a conversation it holds: know whether it does.
       if (!heldRow()) await reread();
       const now = current();
-      const next = { ...now, pins: normalizePins([...now.pins, ...ids]) };
-      if (next.pins.length === now.pins.length) return;
+      const next = { ...now, pinnedSkills: normalizePins([...now.pinnedSkills, ...ids]) };
+      if (next.pinnedSkills.length === now.pinnedSkills.length) return;
       // A failure is toasted by the host; the message is still sent.
       if (heldRow()) {
         if (transport) await mutateAsync(next).catch(() => {});
@@ -220,7 +219,7 @@ export function useConversationSkills({
     [getEnabled, heldRow, reread, current, transport, mutateAsync, persisted, setSelection],
   );
 
-  const takeForTurn = useCallback((): SkillSelection | undefined => {
+  const takeForTurn = useCallback((): ChatSkillSelection | undefined => {
     if (!getEnabled() || heldRow()) return undefined;
     unsentRef.current = false;
     setSent(true);
@@ -248,25 +247,19 @@ export const ConversationSkillsProvider = ConversationSkillsContext.Provider;
 
 export const useConversationSkillsContext = () => useContext(ConversationSkillsContext);
 
-/** The skills the composer's draft cites, and the pinned ones with them: computed once per draft. */
-export interface DraftSkills {
-  cited: readonly string[];
-  effective: EffectiveSkills;
-}
+const NO_DRAFT_SKILLS = effectiveSkills([], []);
 
-const NO_DRAFT_SKILLS: DraftSkills = { cited: [], effective: effectiveSkills([], []) };
-
-const DraftSkillsContext = createContext<DraftSkills>(NO_DRAFT_SKILLS);
+/** The pinned skills and those the composer's draft cites: computed once per draft. */
+const DraftSkillsContext = createContext<EffectiveSkills>(NO_DRAFT_SKILLS);
 
 export const DraftSkillsProvider = DraftSkillsContext.Provider;
 
 export const useDraftSkills = () => useContext(DraftSkillsContext);
 
 /** The draft's skills over the conversation's pins (`null`: no panel, so none is counted). */
-export function useDraftSkillsOf(skills: StoredSkills | null, draft: string): DraftSkills {
-  return useMemo(() => {
-    if (!skills) return NO_DRAFT_SKILLS;
-    const cited = citedSkillIds(draft);
-    return { cited, effective: effectiveSkills(pinIds(skills), cited) };
-  }, [skills, draft]);
+export function useDraftSkillsOf(skills: StoredSkills | null, draft: string): EffectiveSkills {
+  return useMemo(
+    () => (skills ? effectiveSkills(pinIds(skills), citedSkillIds(draft)) : NO_DRAFT_SKILLS),
+    [skills, draft],
+  );
 }

@@ -11,7 +11,6 @@ import { renderToString } from "react-dom/server";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 
 import type { ChatCommands } from "../src/commands.ts";
-import { agentByPromptName } from "../src/ui/agent-appearance.ts";
 import { AgentGlyph } from "../src/ui/agent-glyph.tsx";
 import { ComposerDirectiveChip, DirectiveText } from "../src/ui/directive-chip.tsx";
 import { ChatHostProvider } from "../src/ui/runtime-context.ts";
@@ -56,12 +55,6 @@ describe("the composer's chip", () => {
 });
 
 describe("an agent's glyph", () => {
-  it("finds the commands entry by prompt name", () => {
-    expect(agentByPromptName(commands, "run-report")?.packageId).toBe("@acme/report");
-    expect(agentByPromptName(commands, "run-gone")).toBeUndefined();
-    expect(agentByPromptName(undefined, "run-report")).toBeUndefined();
-  });
-
   it("is the bot icon without an entry, the tile with one", () => {
     const bot = renderToString(<AgentGlyph agent={undefined} label="Weekly report" />);
     expect(bot).toContain("lucide-bot");

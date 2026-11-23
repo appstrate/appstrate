@@ -553,8 +553,8 @@ const Conversation = memo(function Conversation({
     enabled: showPicker,
   });
   const tools = useMemo(
-    () => <ComposerTools transport={transport} authorsPackages={authorsPackages} />,
-    [transport, authorsPackages],
+    () => <ComposerTools authorsPackages={authorsPackages} />,
+    [authorsPackages],
   );
 
   if (persistedAtMount && history.isPending) {
