@@ -118,7 +118,6 @@ import {
   useConversationSkillsContext,
   useDraftSkillsOf,
 } from "./use-conversation-skills.ts";
-import { pinIds } from "./chat-skills.ts";
 import { MAX_PINNED_SKILLS } from "../skills.ts";
 
 export function Thread({
@@ -649,19 +648,14 @@ function Composer({
   // The turn carries the limit and its files go to its spaces: none leaves before the change lands.
   const limitPending = useConversationScope().pending;
   // Only text is queued: attachments stay in the composer until the next real send.
-  const conversationSkills = useConversationSkillsContext()?.skills ?? null;
-  const draftSkills = useDraftSkillsOf(conversationSkills, draft);
-  const pinned = React.useMemo(
-    () => (conversationSkills ? pinIds(conversationSkills) : []),
-    [conversationSkills],
-  );
   const queued = React.useSyncExternalStore(queue.subscribe, queue.getSnapshot, queue.getSnapshot);
-  // What the draft names must be sendable: one agent, skills within the cap.
-  // While a turn runs the draft joins the queue, which is sent as one message: the cap counts it all.
-  const issue = draftIssue(
-    running ? joinQueued([...queued.items, composer.value]) : composer.value,
-    pinned,
-  );
+  // While a turn runs the draft joins the queue, which is sent as one message: it is counted whole.
+  const message = running ? joinQueued([...queued.items, draft]) : draft;
+  const conversationSkills = useConversationSkillsContext()?.skills ?? null;
+  const draftSkills = useDraftSkillsOf(conversationSkills, message);
+  // What the message names must be sendable: one agent, skills within the cap.
+  const issue = draftIssue(message, draftSkills.effective.overCap);
+  const issueId = React.useId();
   const canQueue = canQueueDraft({ running, text: composer.value, hasAttachments, issue });
   const enqueue = () => {
     if (canQueue && queue.add(composer.value)) composer.setText("");
@@ -732,7 +726,10 @@ function Composer({
               <ContextGauge className="max-md:group-data-[rest]/composer:hidden" />
               <ThreadPrimitive.If running={false}>
                 <ComposerPrimitive.Send asChild disabled={blocked}>
-                  <SendButton label={t("composer.send")} />
+                  <SendButton
+                    label={t("composer.send")}
+                    aria-describedby={issue ? issueId : undefined}
+                  />
                 </ComposerPrimitive.Send>
               </ThreadPrimitive.If>
               <ThreadPrimitive.If running>
@@ -744,6 +741,7 @@ function Composer({
                   aria-label={t("composer.queue.add")}
                   title={t("composer.queue.add")}
                   disabled={!canQueue}
+                  aria-describedby={issue ? issueId : undefined}
                   onClick={enqueue}
                 >
                   <ListPlusIcon />
@@ -762,13 +760,18 @@ function Composer({
               </ThreadPrimitive.If>
             </div>
           </div>
-          {issue && (
-            <p role="status" className={cn(NOTE_TEXT_CLASS, "text-destructive")}>
-              {issue === "agents"
-                ? t("composer.oneAgentOnly")
-                : t("skills.chosenMax", { max: MAX_PINNED_SKILLS })}
-            </p>
-          )}
+          {/* Always mounted, so a screen reader hears the issue appear. */}
+          <p
+            id={issueId}
+            role="status"
+            className={issue ? cn(NOTE_TEXT_CLASS, "text-destructive") : "sr-only"}
+          >
+            {issue === "agents"
+              ? t("composer.oneAgentOnly")
+              : issue === "pins"
+                ? t("skills.chosenMax", { max: MAX_PINNED_SKILLS })
+                : ""}
+          </p>
         </CommandTriggers>
       </DraftSkillsProvider>
     </ComposerPrimitive.Root>
@@ -792,14 +795,10 @@ function SendButton({ label, ...props }: React.ComponentProps<typeof Button> & {
 
 // ─── User message (bubble only — no edit/branch on a single-path thread) ─────
 
-/** The user's text, with the skills and agents it names as chips. */
-function UserText({ text }: { text: string }) {
-  return <DirectiveText text={text} />;
-}
-
 /** Module-level: assistant-ui memoizes each part on these members' identity. */
 const USER_PART_COMPONENTS = {
-  Text: UserText,
+  // The user's text, with the skills and agents it names as chips.
+  Text: DirectiveText,
   File: FileAttachmentPart,
 } satisfies React.ComponentProps<typeof MessagePrimitive.Parts>["components"];
 

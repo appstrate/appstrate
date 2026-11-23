@@ -44,15 +44,14 @@ const CLOSED: MenuState = { open: false, notice: null };
 
 /** The menu, inside the composer card (it opens above it). */
 export function CommandPopover() {
-  const { can, t } = useChatHost();
+  const { t } = useChatHost();
   const transport = useChatTransport() ?? undefined;
   const conversation = useConversationSkillsContext();
   const { effective } = useDraftSkills();
   const draft = useAuiState((s) => s.composer.text);
   const running = useAuiState((s) => s.thread.isRunning);
-  const writes = can("chat:write");
-  // Read once the draft holds a `/` (the route's own guard: the caller may write the chat).
-  const commands = useChatCommands(transport, writes && draft.includes("/"));
+  // Read only: the editor fetches the entry once focused, and the menu opens only in the editor.
+  const commands = useChatCommands(transport, false);
   const { data } = commands;
   const skills = useMemo(
     () => conversation && { pinned: pinIds(conversation.skills), effective },
@@ -87,7 +86,6 @@ export function CommandPopover() {
     >
       <p
         role="status"
-        aria-live="polite"
         data-testid="slash-status"
         className={notice ? cn("px-3 pt-1", notice.className) : "sr-only"}
       >

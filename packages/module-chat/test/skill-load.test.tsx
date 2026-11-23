@@ -31,7 +31,7 @@ function conversationOf(ids: string[], held = true): ConversationSkillsState {
     setPin: () => {},
     setDiscovery: () => {},
     reset: () => {},
-    pinCited: async () => {},
+    pinCited: async () => true,
     takeForTurn: () => undefined,
   };
 }

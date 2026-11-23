@@ -4,7 +4,8 @@
  * `useConversationSkills` mounted for real over a real `QueryClient` and a fake server: a change
  * to an existing conversation is a PATCH of the full set, written into the cached detail before it
  * lands and rolled back on a failure; concurrent changes are sent one after the other, each over
- * the previous; a new conversation keeps its selection locally and its first turn carries it.
+ * the previous; a new conversation keeps its selection locally and its first turn carries it, and
+ * a change made before the row that turn created is read reaches the row by a PATCH.
  * There is no DOM harness in this repo; a hook rendering nothing needs only the few globals
  * react-dom's client touches, installed for this file and removed after it.
  */
@@ -225,7 +226,9 @@ describe("useConversationSkills on a conversation the server holds", () => {
     const full = Array.from({ length: MAX_PINNED_SKILLS }, (_, i) => pin(`@a/${i}`));
     const { server, transport } = fakeServer({ skill_discovery: true, pins: full });
     const { result, unmount } = await mount(transport, true);
-    await act(async () => result.current.pinCited(["@a/extra"]));
+    let pinned: boolean | undefined;
+    await act(async () => void (pinned = await result.current.pinCited(["@a/extra"])));
+    expect(pinned).toBe(false);
     expect(server.patches).toEqual([]);
     await unmount();
     const off = await mount(fakeServer({ skill_discovery: true, pins: [] }).transport, true, false);
@@ -282,18 +285,58 @@ describe("useConversationSkills on a new conversation", () => {
     await unmount();
   });
 
-  it("keeps a change locally when its PATCH finds no session: the first turn created none", async () => {
+  it("PATCHes a change made before the row the first turn created is read", async () => {
+    const { server, transport } = fakeServer(null);
+    const { result, unmount } = await mount(transport, false);
+    await act(async () => result.current.setPin("@a/picked", true));
+    await act(async () => void result.current.takeForTurn());
+    await settle();
+    // Read before the turn created the row: nothing to PATCH yet.
+    expect(server.reads).toBe(1);
+    expect(result.current.held).toBe(false);
+    server.row = { skill_discovery: true, pins: [pin("@a/picked", null)] };
+    await act(async () => result.current.setPin("@a/later", true));
+    await settle();
+    // The change reads the row again and is sent over it: the turn's selection is not kept.
+    expect(server.patches).toEqual([{ pins: ["@a/later", "@a/picked"], skill_discovery: true }]);
+    expect(server.row?.pins.map((p) => p.id)).toEqual(["@a/later", "@a/picked"]);
+    expect(result.current.held).toBe(true);
+    expect(pinIds(result.current.skills)).toEqual(["@a/later", "@a/picked"]);
+    expect(result.current.takeForTurn()).toBeUndefined();
+    await unmount();
+  });
+
+  it("PATCHes a later message's cited skills once the first turn created the row", async () => {
+    const { server, transport } = fakeServer(null);
+    const { result, unmount } = await mount(transport, false);
+    await act(async () => void result.current.takeForTurn());
+    await settle();
+    expect(result.current.held).toBe(false);
+    server.row = { skill_discovery: true, pins: [] };
+    let pinned: boolean | undefined;
+    await act(async () => void (pinned = await result.current.pinCited(["@a/cited"])));
+    expect(pinned).toBe(true);
+    // Held by the server before the message leaves: the turn reads it.
+    expect(server.patches).toEqual([{ pins: ["@a/cited"], skill_discovery: true }]);
+    expect(server.row?.pins.map((p) => p.id)).toEqual(["@a/cited"]);
+    // The turn carries no pins, which the server would ignore.
+    expect(result.current.takeForTurn()).toBeUndefined();
+    await unmount();
+  });
+
+  it("keeps a change locally when the first turn created no row: the next turn carries it", async () => {
     const { server, transport } = fakeServer(null);
     const { result, unmount } = await mount(transport, false);
     await act(async () => void result.current.takeForTurn());
     await settle();
     await act(async () => result.current.setPin("@a/later", true));
+    await act(async () => void (await result.current.pinCited(["@a/cited"])));
     await settle();
-    expect(server.patches).toHaveLength(1);
-    expect(pinIds(result.current.skills)).toEqual(["@a/later"]);
+    expect(server.patches).toEqual([]);
+    expect(pinIds(result.current.skills)).toEqual(["@a/cited", "@a/later"]);
     let taken: ReturnType<ConversationSkillsState["takeForTurn"]>;
     await act(async () => void (taken = result.current.takeForTurn()));
-    expect(taken?.pins).toEqual(["@a/later"]);
+    expect(taken?.pins).toEqual(["@a/cited", "@a/later"]);
     await unmount();
   });
 });

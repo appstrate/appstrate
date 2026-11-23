@@ -128,7 +128,7 @@ function SkillsChip({
   return (
     <RemovableChip
       icon={<LockIcon />}
-      open={{ onClick, label: t("skills.discoveryOffChip"), testId: "skills-picker-trigger" }}
+      open={{ onClick, label: t("skills.discoveryOffChip"), testId: "skills-discovery-off-chip" }}
       removeLabel={t("skills.reset")}
       onRemove={onReset}
       className="shrink-0"

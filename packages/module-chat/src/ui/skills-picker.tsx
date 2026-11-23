@@ -4,7 +4,7 @@
 // the conversation's state (a PATCH once the server holds the row). Each pinned row is loaded,
 // or not loaded with the server's reason; only the server says a skill is loaded.
 
-import type { ReactNode } from "react";
+import { useId, type ReactNode } from "react";
 import { Checkbox } from "@appstrate/ui/components/checkbox";
 import { Progress } from "@appstrate/ui/components/progress";
 import { Skeleton } from "@appstrate/ui/components/skeleton";
@@ -76,7 +76,7 @@ function BudgetGauge({ budget }: { budget: SkillBudget }) {
   );
 }
 
-/** The popover's body: the discovery switch and the skill list. Exported to be rendered without the popover's portal. */
+/** The popover's body: the discovery switch and the skill list; exported for its tests, which render no portal. */
 export function SkillsPickerPanel({
   transport,
   skills: conversation,
@@ -84,6 +84,8 @@ export function SkillsPickerPanel({
   draft,
 }: Pick<SkillsPickerProps, "transport" | "skills" | "actions" | "draft">) {
   const { t } = useChatHost();
+  const baseId = useId();
+  const discoveryId = `${baseId}-discovery`;
   const catalogue = useChatCommands(transport, true);
   const skills = catalogue.data?.skills ?? [];
   // `isLoading`, not `isPending`: a disabled query stays pending forever, and unreadable reads
@@ -112,11 +114,11 @@ export function SkillsPickerPanel({
       <p className="shrink-0 text-sm font-medium">{t("skills.title")}</p>
 
       <div className="mt-2 flex shrink-0 items-center justify-between gap-3 px-1">
-        <label htmlFor="skills-discovery" className="cursor-pointer text-xs font-medium">
+        <label htmlFor={discoveryId} className="cursor-pointer text-xs font-medium">
           {t("skills.discovery.label")}
         </label>
         <Switch
-          id="skills-discovery"
+          id={discoveryId}
           data-testid="skills-discovery"
           checked={conversation.skillDiscovery}
           onCheckedChange={actions.setDiscovery}
@@ -154,7 +156,7 @@ export function SkillsPickerPanel({
           rows.map(({ skill, available }, index) => {
             // By row: a package id's `@` and `/` break selectors, and a slug
             // of it can collide (`@a-b/c`, `@a/b-c`).
-            const id = `skills-pin-${index}`;
+            const id = `${baseId}-pin-${index}`;
             const nameId = `${id}-name`;
             const detailsId = `${id}-details`;
             const state = skillRowState(conversation, skill.id);

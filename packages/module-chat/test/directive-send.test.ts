@@ -4,6 +4,7 @@
 
 import { describe, expect, it } from "bun:test";
 import { serializeDirective } from "../src/directives.ts";
+import { citedSkillIds, effectiveSkills } from "../src/ui/chat-skills.ts";
 import { draftIssue, namesAgent, sendWithDirectives } from "../src/ui/directive-send.ts";
 
 const skill = (name: string) =>
@@ -72,21 +73,25 @@ describe("sendWithDirectives", () => {
 });
 
 describe("draftIssue", () => {
+  /** As the composer counts it: the draft's cited skills over the pinned ones. */
+  const issue = (text: string, pinned: readonly string[]) =>
+    draftIssue(text, effectiveSkills(pinned, citedSkillIds(text)).overCap);
+
   it("is none for a draft naming one agent and skills within the cap", () => {
-    expect(draftIssue(`${agent("A")} ${skill("tone")}`, ["@acme/pdf"])).toBeNull();
+    expect(issue(`${agent("A")} ${skill("tone")}`, ["@acme/pdf"])).toBeNull();
   });
 
   it("refuses a second agent", () => {
-    expect(draftIssue(`${agent("A", "run-a")} ${agent("B", "run-b")}`, [])).toBe("agents");
+    expect(issue(`${agent("A", "run-a")} ${agent("B", "run-b")}`, [])).toBe("agents");
     // The same agent twice is two launches too.
-    expect(draftIssue(`${agent("A")} ${agent("A")}`, [])).toBe("agents");
+    expect(issue(`${agent("A")} ${agent("A")}`, [])).toBe("agents");
   });
 
   it("refuses skills past the cap, counting the pinned ones, not those already pinned", () => {
     const pinned = ["@acme/a", "@acme/b", "@acme/c", "@acme/d"];
-    expect(draftIssue(`${skill("e")}`, pinned)).toBeNull();
-    expect(draftIssue(`${skill("e")} ${skill("f")}`, pinned)).toBe("pins");
-    expect(draftIssue(`${skill("a")} ${skill("b")}`, pinned)).toBeNull();
+    expect(issue(`${skill("e")}`, pinned)).toBeNull();
+    expect(issue(`${skill("e")} ${skill("f")}`, pinned)).toBe("pins");
+    expect(issue(`${skill("a")} ${skill("b")}`, pinned)).toBeNull();
   });
 });
 

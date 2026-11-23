@@ -1,14 +1,23 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * A conversation's skills. Once the server holds its row, the session detail is the truth and a
+ * A conversation's skills. Once the server's row is read, the session detail is the truth and a
  * change is a PATCH of the full set, written into the cached detail before it lands (rolled back
- * on a failure, which the host's mutation cache toasts). Before that, a local selection the first
- * turn sends as `pins` / `skill_discovery`; a PATCH answering 404 (the first turn created no row)
- * writes the selection back there.
+ * on a failure, which the host's mutation cache toasts). Until then, a local selection the first
+ * turn sends as `pins` / `skill_discovery`. A change made after that turn left and before its row
+ * is read stays local, the row is read again, and the change is PATCHed over it; a turn that
+ * created no row leaves the selection to the next turn.
  */
 
-import { createContext, useCallback, useContext, useMemo, useRef, useState } from "react";
+import {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import {
   useMutation,
   useMutationState,
@@ -16,7 +25,7 @@ import {
   useQueryClient,
   type QueryClient,
 } from "@tanstack/react-query";
-import { MAX_PINNED_SKILLS } from "../skills.ts";
+import { MAX_PINNED_SKILLS, normalizePins } from "../skills.ts";
 import {
   DEFAULT_STORED_SKILLS,
   citedSkillIds,
@@ -35,7 +44,7 @@ import {
   updateSessionSkills,
   type SessionHistory,
 } from "./sessions.ts";
-import { errorStatus, type ChatTransport } from "./runtime-context.ts";
+import type { ChatTransport } from "./runtime-context.ts";
 import { useLatest } from "./use-latest.ts";
 
 export interface ConversationSkillsState {
@@ -47,9 +56,12 @@ export interface ConversationSkillsState {
   setDiscovery: (on: boolean) => void;
   /** Back to the default selection: discovery on, no pin. */
   reset: () => void;
-  /** Pins the skills a message cites before it is sent; resolves once the server holds them. */
-  pinCited: (ids: readonly string[]) => Promise<void>;
-  /** What the turn being sent creates the conversation with; `undefined` once the server holds it. */
+  /**
+   * Pins the skills a message cites before it is sent; resolves once the server holds them, or
+   * once the turn is the one to carry them. `false`: they would pass the cap, nothing is pinned.
+   */
+  pinCited: (ids: readonly string[]) => Promise<boolean>;
+  /** What the turn being sent creates the conversation with; `undefined` once the row is read. */
   takeForTurn: () => SkillSelection | undefined;
 }
 
@@ -88,7 +100,6 @@ export function useConversationSkills({
   const mutationKey = useMemo(() => skillsMutationKey(orgId, id), [orgId, id]);
   // A conversation created in this mount is read once its first turn has left.
   const [sent, setSent] = useState(false);
-  const sentRef = useRef(false);
   const detail = useQuery({
     ...sessionQuery(transport, id),
     enabled: persisted || sent,
@@ -101,6 +112,8 @@ export function useConversationSkills({
     selectionRef.current = next;
     setSelectionState(next);
   }, []);
+  // The local selection holds a change no turn and no PATCH has carried.
+  const unsentRef = useRef(false);
 
   const pending = useMutationState({
     filters: { mutationKey, status: "pending" },
@@ -115,13 +128,17 @@ export function useConversationSkills({
   // The changes in flight over the server's state: a read landing mid-PATCH cannot hide them.
   const skills = useMemo(() => (latest ? withSelection(base, latest) : base), [base, latest]);
 
-  /** The full selection at call time: the last one in flight, else the cache, else the local one. */
+  const heldRow = useCallback(
+    () => queryClient.getQueryData<SessionHistory | null>(detailKey) ?? null,
+    [queryClient, detailKey],
+  );
+  /** The full selection at call time: the last in flight, else an unsent one, else the row's. */
   const current = useCallback((): SkillSelection => {
     const inFlight = pendingSelection(queryClient, mutationKey);
     if (inFlight) return inFlight;
-    const row = queryClient.getQueryData<SessionHistory | null>(detailKey);
-    return row ? selectionOf(row.skills) : selectionRef.current;
-  }, [queryClient, mutationKey, detailKey]);
+    const row = heldRow();
+    return row && !unsentRef.current ? selectionOf(row.skills) : selectionRef.current;
+  }, [queryClient, mutationKey, heldRow]);
   const isLast = useCallback(
     () => queryClient.isMutating({ mutationKey }) <= 1,
     [queryClient, mutationKey],
@@ -132,15 +149,9 @@ export function useConversationSkills({
     // One PATCH at a time, each carrying the full set computed over the previous ones: the server
     // applies them in order, so the last change made is the one it keeps.
     scope: { id: `chat-session-skills:${orgId}:${id}` },
-    mutationFn: async (next: SkillSelection) => {
-      try {
-        return await updateSessionSkills(transport!, id, next);
-      } catch (error) {
-        if (!persisted && errorStatus(error) === 404) return null;
-        throw error;
-      }
-    },
+    mutationFn: (next: SkillSelection) => updateSessionSkills(transport!, id, next),
     onMutate: async (next) => {
+      unsentRef.current = false;
       await queryClient.cancelQueries({ queryKey: detailKey, exact: true });
       const previous = queryClient.getQueryData<SessionHistory | null>(detailKey);
       queryClient.setQueryData<SessionHistory | null>(
@@ -149,13 +160,11 @@ export function useConversationSkills({
       );
       return { previous };
     },
-    onSuccess: (stored, next) => {
-      if (stored === null) setSelection(next);
-      else
-        queryClient.setQueryData<SessionHistory | null>(
-          detailKey,
-          (row) => row && { ...row, skills: stored },
-        );
+    onSuccess: (stored) => {
+      queryClient.setQueryData<SessionHistory | null>(
+        detailKey,
+        (row) => row && { ...row, skills: stored },
+      );
     },
     onError: (_error, _next, context) => {
       if (isLast() && context?.previous) queryClient.setQueryData(detailKey, context.previous);
@@ -165,40 +174,60 @@ export function useConversationSkills({
     },
   });
 
+  // The row is read: a change it does not hold yet is sent over it.
+  const stored = detail.data;
+  useEffect(() => {
+    if (stored && unsentRef.current && transport) mutate(selectionRef.current);
+  }, [stored, transport, mutate]);
+
+  /** Reads the row again: after the first turn it may hold the conversation now. */
+  const reread = useCallback(
+    () => queryClient.refetchQueries({ queryKey: detailKey, exact: true }),
+    [queryClient, detailKey],
+  );
+
   const getEnabled = useLatest(enabled);
-  const exists = useCallback(() => persisted || sentRef.current, [persisted]);
   const change = useCallback(
     (apply: (selection: SkillSelection) => SkillSelection) => {
       if (!getEnabled()) return;
-      const next = apply(current());
-      if (!exists()) setSelection(next);
-      else if (transport) mutate(next);
+      if (heldRow()) {
+        if (transport) mutate(apply(current()));
+        return;
+      }
+      // A conversation held at mount changes once its row is read: the defaults are not its choice.
+      if (persisted) return;
+      setSelection(apply(selectionRef.current));
+      unsentRef.current = true;
+      // A query not enabled yet (no turn left) is not read.
+      void reread();
     },
-    [getEnabled, current, exists, setSelection, transport, mutate],
+    [getEnabled, heldRow, transport, mutate, current, persisted, setSelection, reread],
   );
 
   const pinCited = useCallback(
-    async (ids: readonly string[]) => {
-      if (!getEnabled()) return;
+    async (ids: readonly string[]): Promise<boolean> => {
+      if (!getEnabled()) return true;
+      // The server ignores a turn's pins for a conversation it holds: know whether it does.
+      if (!heldRow()) await reread();
       const now = current();
-      const missing = ids.filter((skill) => !now.pins.includes(skill));
-      if (missing.length === 0) return;
-      const next = { ...now, pins: [...now.pins, ...missing].sort() };
-      // The composer refuses such a draft; a stray call pins nothing.
-      if (next.pins.length > MAX_PINNED_SKILLS) return;
-      if (!exists()) setSelection(next);
+      const next = { ...now, pins: normalizePins([...now.pins, ...ids]) };
+      if (next.pins.length === now.pins.length) return true;
+      if (next.pins.length > MAX_PINNED_SKILLS) return false;
       // A failure is toasted by the host; the message is still sent.
-      else if (transport) await mutateAsync(next).catch(() => {});
+      if (heldRow()) {
+        if (transport) await mutateAsync(next).catch(() => {});
+      } else if (!persisted) setSelection(next);
+      return true;
     },
-    [getEnabled, current, exists, setSelection, transport, mutateAsync],
+    [getEnabled, heldRow, reread, current, transport, mutateAsync, persisted, setSelection],
   );
 
   const takeForTurn = useCallback((): SkillSelection | undefined => {
-    if (!getEnabled() || queryClient.getQueryData(detailKey)) return undefined;
-    sentRef.current = true;
+    if (!getEnabled() || heldRow()) return undefined;
+    unsentRef.current = false;
     setSent(true);
     return selectionRef.current;
-  }, [getEnabled, queryClient, detailKey]);
+  }, [getEnabled, heldRow]);
 
   return useMemo(
     () => ({

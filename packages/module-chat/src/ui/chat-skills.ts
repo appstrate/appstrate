@@ -11,6 +11,7 @@ import {
   CHAT_SKILLS_CONTENT_BUDGET_CHARS,
   DEFAULT_SKILL_SELECTION,
   MAX_PINNED_SKILLS,
+  normalizePins,
   type ChatSkillStatus,
   type PinnedSkill,
 } from "../skills.ts";
@@ -46,16 +47,20 @@ export function withSelection(stored: StoredSkills, selection: SkillSelection): 
   const held = new Map(stored.pins.map((pin) => [pin.id, pin]));
   return {
     skillDiscovery: selection.skillDiscovery,
-    pins: [...new Set(selection.pins)]
-      .sort()
-      .map((id) => held.get(id) ?? { id, status: null, chars: null }),
+    pins: normalizePins(selection.pins).map(
+      (id) => held.get(id) ?? { id, status: null, chars: null },
+    ),
   };
 }
 
 /** `selection` with `id` pinned (`on`) or unpinned. */
 export function withPin(selection: SkillSelection, id: string, on: boolean): SkillSelection {
-  const others = selection.pins.filter((other) => other !== id);
-  return { ...selection, pins: on ? [...others, id].sort() : others };
+  return {
+    ...selection,
+    pins: on
+      ? normalizePins([...selection.pins, id])
+      : selection.pins.filter((other) => other !== id),
+  };
 }
 
 /** The package ids of the skills a draft cites with a skill directive, each once. */

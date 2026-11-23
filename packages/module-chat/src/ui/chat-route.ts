@@ -93,9 +93,6 @@ export function createTurnTransport(read: {
   return new DefaultChatTransport<UIMessage>({
     credentials: "include",
     headers: read.headers,
-    // The global read per call, not captured at construction.
-    fetch: ((input: RequestInfo | URL, init?: RequestInit) =>
-      globalThis.fetch(input, init)) as typeof fetch,
     prepareSendMessagesRequest: (request) => ({
       api: chatPath(transport()),
       body: read.body(request),

@@ -122,7 +122,7 @@ function toggleDiscovery(skillDiscovery: boolean, next: boolean): boolean[] {
     });
     const sw = findElement(
       tree,
-      (props) => props.id === "skills-discovery" && "onCheckedChange" in props,
+      (props) => props["data-testid"] === "skills-discovery" && "onCheckedChange" in props,
     );
     (sw!.props.onCheckedChange as (checked: boolean) => void)(next);
     return null;
@@ -160,7 +160,10 @@ describe("SkillsPicker", () => {
     const sw = (html: string) => html.match(/<button[^>]*data-testid="skills-discovery"[^>]*>/)![0];
     expect(sw(render(true))).toContain('aria-checked="true"');
     expect(sw(render(false))).toContain('aria-checked="false"');
-    expect(render(true)).toContain('for="skills-discovery"');
+    // Its id is generated per panel: the label names the switch's.
+    const html = render(true);
+    const id = sw(html).match(/ id="([^"]+)"/)![1];
+    expect(html).toContain(`for="${id}"`);
     expect(render(true)).toContain("skills.discovery.hintOn");
     expect(render(false)).toContain("skills.discovery.hintOff");
   });

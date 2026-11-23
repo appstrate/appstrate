@@ -544,7 +544,8 @@ const Conversation = memo(function Conversation({
   // No picker on a failed read: it would show the defaults, and a change would
   // send them over the stored choice.
   const showPicker = canPinSkills && !history.isError;
-  // The session detail's skills once the server holds the row, a local selection before.
+  // The session detail's skills once the server holds the row, a local selection before. Gated
+  // here for the turn (`turnSkills` bypasses the provider) and below for what the thread shows.
   const conversationSkills = useConversationSkills({
     transport,
     id,
@@ -866,7 +867,8 @@ function ConversationInner({
   const send = useCallback<typeof sendMessage>(
     async (message, options) => {
       const sent = sendWithDirectives(message);
-      await pinCited(sent.skills);
+      // Past the cap the composer refuses the draft before it gets here: nothing leaves.
+      if (!(await pinCited(sent.skills))) return;
       return sendMessage(sent.message, options);
     },
     [sendMessage, pinCited],
