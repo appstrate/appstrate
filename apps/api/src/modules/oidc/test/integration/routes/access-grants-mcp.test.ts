@@ -20,6 +20,7 @@ import { describe, it, expect, beforeEach, afterEach } from "bun:test";
 import { and, eq, like, sql } from "drizzle-orm";
 import {
   auditEvents,
+  cliRefreshToken,
   oauthGrantState,
   oauthClient,
   oauthRefreshToken,
@@ -551,6 +552,45 @@ describe("MCP access grants", () => {
       expect(((await res.json()) as { revoked_count: number }).revoked_count).toBe(2);
       expect((await mcpInitialize(orgPath, tokenA)).status).toBe(401);
       expect((await mcpInitialize(orgPath, tokenB)).status).toBe(401);
+    });
+
+    it("rolls back both grant families when the durable MCP audit cannot be written", async () => {
+      const clientId = await registerClient();
+      await connect(ctx.cookie, clientId);
+      await db.insert(cliRefreshToken).values({
+        id: "crf_rollback",
+        familyId: "crf_rollback",
+        tokenHash: "rollback-fixture",
+        clientId,
+        userId: ctx.user.id,
+        expiresAt: new Date(Date.now() + 60_000),
+      });
+      await db.execute(sql`ALTER TABLE audit_events ADD CONSTRAINT test_refuse_grant_audit
+        CHECK (action <> 'oauth_grant.revoked') NOT VALID`);
+      const revokeAll = () =>
+        app.request("/api/auth/access-grants/revoke-all", {
+          method: "POST",
+          headers: { Cookie: ctx.cookie },
+        });
+      try {
+        expect((await revokeAll()).status).toBe(500);
+        expect((await myGrants(ctx.cookie)).map((grant) => grant.kind).sort()).toEqual([
+          "cli",
+          "mcp",
+        ]);
+      } finally {
+        await db.execute(sql`ALTER TABLE audit_events DROP CONSTRAINT test_refuse_grant_audit`);
+      }
+      expect(await (await revokeAll()).json()).toEqual({ revoked_count: 2 });
+      expect(await (await revokeAll()).json()).toEqual({ revoked_count: 0 });
+      expect(await myGrants(ctx.cookie)).toEqual([]);
+      const audits = await db
+        .select({ id: auditEvents.id })
+        .from(auditEvents)
+        .where(
+          and(eq(auditEvents.action, "oauth_grant.revoked"), eq(auditEvents.actorId, ctx.user.id)),
+        );
+      expect(audits).toHaveLength(1);
     });
   });
 

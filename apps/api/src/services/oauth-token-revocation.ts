@@ -71,7 +71,11 @@ interface McpGrantKey {
 }
 
 /** Caller holds the user's grant lock. Set the watermark after the resource withdrawals. */
-async function withdrawMcpGrants(tx: Tx, userId: string, grants: McpGrantKey[]): Promise<void> {
+export async function withdrawMcpGrants(
+  tx: Tx,
+  userId: string,
+  grants: McpGrantKey[],
+): Promise<void> {
   if (!grants.length) return;
   for (const { clientId, resource } of grants) {
     for (const table of [oauthRefreshToken, oauthAccessToken, oauthConsent]) {
@@ -100,11 +104,6 @@ async function withdrawMcpGrants(tx: Tx, userId: string, grants: McpGrantKey[]):
       target: [oauthGrantState.userId, oauthGrantState.clientId, oauthGrantState.resource],
       set: { tokensValidAfter: now },
     });
-}
-
-export async function endMcpGrants(tx: Tx, userId: string, grants: McpGrantKey[]): Promise<void> {
-  await lockOAuthGrantsOfUser(tx, userId);
-  await withdrawMcpGrants(tx, userId, grants);
 }
 
 /**
