@@ -74,10 +74,13 @@ export function CommandPopover() {
   const [menu, setMenu] = useState<MenuState>(CLOSED);
   const { notice } = menu;
   return (
+    // Out of the composer's flow open or closed: an empty item in its column would still take a gap,
+    // which the card would lose when the menu opens.
     <div
       className={cn(
+        "absolute inset-x-0 bottom-full z-30 mb-2",
         menu.open &&
-          "bg-popover text-popover-foreground absolute inset-x-0 bottom-full z-30 mb-2 flex flex-col overflow-hidden rounded-xl border shadow-md",
+          "bg-popover text-popover-foreground flex flex-col overflow-hidden rounded-xl border shadow-md",
       )}
     >
       <p
