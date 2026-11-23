@@ -398,16 +398,15 @@ describe("mcp tool round-trip", () => {
     });
     const tools = (envelope.result?.tools as Array<Record<string, unknown>>) ?? [];
     const names = tools.map((t) => t.name);
+    // Neither an import nor an inline run (no `agents:write`): no package-file tool.
     expect(names.sort()).toEqual([
       "describe",
       "get_me",
-      "get_runtime_capabilities",
       "invoke_operation",
       "list_files",
       "read",
       "run_and_wait",
       "search",
-      "validate_package_file",
     ]);
     const runAndWait = tools.find((t) => t.name === "run_and_wait")!;
     expect((runAndWait.annotations as Record<string, unknown>).destructiveHint).toBe(true);
@@ -453,10 +452,15 @@ describe("mcp tool round-trip", () => {
     // would also pass if the whole list were gone.
     expect(viewer).toContain("list_files");
     expect(viewer).toContain("search");
+    // Package files are for a caller who imports or composes: a viewer does neither.
+    for (const tool of ["validate_package_file", "import_package_file", "get_runtime_capabilities"])
+      expect(viewer).not.toContain(tool);
 
     const builder = await listFor("builder");
     expect(builder).toContain("run_and_wait");
     expect(builder).toContain("invoke_operation");
+    for (const tool of ["validate_package_file", "import_package_file", "get_runtime_capabilities"])
+      expect(builder).toContain(tool);
   });
 
   it("searches then invokes a real operation in-process", async () => {

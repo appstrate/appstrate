@@ -218,11 +218,14 @@ export function buildServerInstructions(
   const packageImportGuidance = importsPackages
     ? " Call `import_package_file` only when validation returns BOTH `valid: true` AND `importable: true`, and the user asked to add the package. If conflicts make it non-importable, report them instead of attempting a doomed mutation."
     : "";
-  // Authoring a package means an inline run writing it; without that grant
-  // only the validation half of the bullet is true.
+  // Authoring a package means an inline run writing it; without that grant only the
+  // validation half of the bullet is true, and without an import either there is no bullet
+  // (the tools go with it: `buildPackageFileTools`).
   const packageFiles = inline
     ? "Local MCP integration authoring — call `get_runtime_capabilities` first, have one inline run create the integration manifest + server files, package them from the package root with the available shell tools (for example `python3 -m zipfile -c package.afps manifest.json <entry-point> ...`), then publish that archive with `publish_file` and pass the returned `appfile://` URI to `validate_package_file`."
-    : "MCP package files — to check an existing archive, pass its `appfile://` URI to `validate_package_file`.";
+    : importsPackages
+      ? "MCP package files — to check an existing archive, pass its `appfile://` URI to `validate_package_file`."
+      : null;
   // Both need `invoke_operation`; the integration preference order they sit
   // beside names no tool, so every caller gets it.
   const concurrencyBullet = invokes
@@ -298,8 +301,12 @@ Organization → Spaces (id \`spc_…\`, one default) → Agents → Runs. End-u
 ${orgSpaces ? orgWideSpaceContext(orgSpaces, inlineSpaces ?? [], surface.creates || importsPackages) : pinnedSpaceContext}
 
 ## Beyond the per-operation schemas
-${runBullets}- ${packageFiles}${packageImportGuidance} Archive bytes stay server-side throughout.
-- Streaming/SSE operations (live logs, realtime) cannot be called through this server; fetch logs or poll instead.
+${runBullets}${
+    packageFiles
+      ? `- ${packageFiles}${packageImportGuidance} Archive bytes stay server-side throughout.
+`
+      : ""
+  }- Streaming/SSE operations (live logs, realtime) cannot be called through this server; fetch logs or poll instead.
 - Wire JSON is snake_case, except universal id/timestamp fields (id, createdAt…) which stay camelCase.
 - A refused call is a tool result with \`isError: true\` and \`{ code, error, … }\`. \`missing_argument\`, \`unknown_argument\`, \`invalid_argument\`, \`unknown_operation\`, \`unknown_space\` and \`space_mismatch\` mean fix the call (\`arguments\` names the faulty ones, \`accepted\` lists what is valid) and retry. \`not_granted\` (a permission, or a file you may see but not download) is final: report it. An operation the route answered with an HTTP error is not a refusal: it comes back as \`{ status, body }\` with \`isError: true\`; read \`body\` to decide — except a \`403\` your permissions explain, which is a \`not_granted\` refusal.
 ${heavyListBullet}${concurrencyBullet}${

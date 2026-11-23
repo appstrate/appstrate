@@ -2465,7 +2465,10 @@ export function buildMcpTools(ctx: McpToolContext, surface: McpSurface): Appstra
     ...(surface.runs ? [buildRunAndWaitTool(ctx, surface.composes)] : []),
     ...(surface.listsFiles ? [buildListFilesTool(ctx)] : []),
     buildReadTool(ctx),
-    ...buildPackageFileTools(ctx, surface.importsPackages),
+    ...buildPackageFileTools(ctx, {
+      imports: surface.importsPackages,
+      composes: surface.composes,
+    }),
     ...(surface.proxies ? [buildCallIntegrationToolTool(integrations)] : []),
     buildGetMeTool(ctx, surface),
   ];

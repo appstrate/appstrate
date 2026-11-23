@@ -333,15 +333,19 @@ function buildRuntimeCapabilitiesTool(): AppstrateToolDefinition {
   return { descriptor, handler };
 }
 
-/** `imports` is `McpSurface.importsPackages` — the only check on `mcp:invoke` and on
- *  the actor being a user; the import service re-checks each package's `write`. */
+/**
+ * `imports` is `McpSurface.importsPackages` — the only check on `mcp:invoke` and on the actor
+ * being a user; the import service re-checks each package's `write`. `composes`
+ * (`McpSurface.composes`) is the inline run that writes a package to validate: authoring
+ * starts from `get_runtime_capabilities`. A caller with neither gets none of these tools.
+ */
 export function buildPackageFileTools(
   ctx: PackageFileToolContext,
-  imports: boolean,
+  { imports, composes }: { imports: boolean; composes: boolean },
 ): AppstrateToolDefinition[] {
   return [
-    buildValidatePackageFileTool(ctx),
+    ...(imports || composes ? [buildValidatePackageFileTool(ctx)] : []),
     ...(imports ? [buildImportPackageFileTool(ctx)] : []),
-    buildRuntimeCapabilitiesTool(),
+    ...(composes ? [buildRuntimeCapabilitiesTool()] : []),
   ];
 }
