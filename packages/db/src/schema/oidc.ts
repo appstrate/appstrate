@@ -465,7 +465,7 @@ export const oauthGrantState = pgTable(
     orgId: uuid("org_id")
       .notNull()
       .references(() => organizations.id, { onDelete: "cascade" }),
-    spaceId: text("space_id").references(() => spaces.id, { onDelete: "cascade" }),
+    spaceId: text("space_id"),
     tokensValidAfter: timestamp("tokens_valid_after", { withTimezone: true }),
     lastIssuedAt: timestamp("last_issued_at", { withTimezone: true }),
     lastUsedAt: timestamp("last_used_at", { withTimezone: true }),
@@ -474,6 +474,11 @@ export const oauthGrantState = pgTable(
   },
   (t) => [
     primaryKey({ columns: [t.userId, t.clientId, t.resource] }),
+    foreignKey({
+      name: "oauth_grant_states_space_org_fk",
+      columns: [t.spaceId, t.orgId],
+      foreignColumns: [spaces.id, spaces.orgId],
+    }).onDelete("cascade"),
     // FK cascade targets that the primary key's leading column does not cover.
     index("idx_oauth_grant_states_client").on(t.clientId),
     index("idx_oauth_grant_states_org").on(t.orgId),

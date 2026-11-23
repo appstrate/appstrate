@@ -6,7 +6,7 @@ import { parseBefore, pendingRuntimeTools } from "./0053-migrate-runtime-tools.t
 import { pendingFileReadReceipts } from "./0055-chat-file-read-receipts.ts";
 import { describeDatabaseTarget, exitUnlessDatabaseNamed } from "./lib/database-target.ts";
 
-/** Run with writers stopped, immediately before the service that applies 0106. */
+/** Run with writers stopped, immediately before the schema migration service. */
 export async function checkBeforeSchema() {
   const { db, toRows } = await import("@appstrate/db/client");
   const checks = [];
@@ -24,6 +24,22 @@ export async function checkBeforeSchema() {
     );
     checks.push({ check: `0054 · ${table}.${column}`, pending: row!.pending });
   }
+  for (const table of ["run_reads", "oauth_grant_states"] as const) {
+    const [relation] = toRows<{ present: boolean }>(
+      await db.execute(`SELECT to_regclass('public.${table}') IS NOT NULL AS present`),
+    );
+    if (!relation!.present) continue;
+    const [row] = toRows<{ pending: number }>(
+      await db.execute(`SELECT count(*)::int AS pending FROM public.${table} r
+        WHERE r.space_id IS NOT NULL AND NOT EXISTS (
+          SELECT 1 FROM public.spaces s WHERE s.id = r.space_id AND s.org_id = r.org_id
+        )`),
+    );
+    checks.push({
+      check: `0113 · ${table} space belongs to another organization`,
+      pending: row!.pending,
+    });
+  }
   return checks;
 }
 
@@ -36,10 +52,18 @@ export async function checkBeforeTraffic(before: Date) {
         "AND coalesce(payload ->> 'status', '') NOT IN ('failed', 'timeout')",
     ),
   );
+  const [missingRead] = toRows<{ pending: number }>(
+    await db.execute(`SELECT count(*)::int AS pending FROM notifications n
+      WHERE n.type = 'run_failed' AND n.run_id IS NOT NULL AND NOT EXISTS (
+        SELECT 1 FROM run_reads r WHERE r.run_id = n.run_id
+        AND r.recipient_type = n.recipient_type AND r.recipient_id = n.recipient_id
+      )`),
+  );
   const stores = await pendingRuntimeTools(before);
   const receipts = await pendingFileReadReceipts();
   return [
     { check: "0052 · notifications to fold", pending: row!.pending },
+    { check: "0052 · notifications missing recipient read state", pending: missingRead!.pending },
     ...stores.map(({ store, pending }) => ({ check: `0053 · ${store}`, pending })),
     { check: "0055 · messages to rewrite", pending: receipts.messages },
   ];

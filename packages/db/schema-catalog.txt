@@ -856,7 +856,7 @@ constraint oauth_consents oauth_consents_pkey PRIMARY KEY (id)
 constraint oauth_consents oauth_consents_user_id_user_id_fk FOREIGN KEY (user_id) REFERENCES "user"(id) ON DELETE CASCADE
 constraint oauth_grant_states oauth_grant_states_client_id_oauth_clients_client_id_fk FOREIGN KEY (client_id) REFERENCES oauth_clients(client_id) ON DELETE CASCADE
 constraint oauth_grant_states oauth_grant_states_org_id_organizations_id_fk FOREIGN KEY (org_id) REFERENCES organizations(id) ON DELETE CASCADE
-constraint oauth_grant_states oauth_grant_states_space_id_spaces_id_fk FOREIGN KEY (space_id) REFERENCES spaces(id) ON DELETE CASCADE
+constraint oauth_grant_states oauth_grant_states_space_org_fk FOREIGN KEY (space_id, org_id) REFERENCES spaces(id, org_id) ON DELETE CASCADE
 constraint oauth_grant_states oauth_grant_states_user_id_client_id_resource_pk PRIMARY KEY (user_id, client_id, resource)
 constraint oauth_grant_states oauth_grant_states_user_id_user_id_fk FOREIGN KEY (user_id) REFERENCES "user"(id) ON DELETE CASCADE
 constraint oauth_refresh_tokens oauth_refresh_tokens_client_id_oauth_clients_client_id_fk FOREIGN KEY (client_id) REFERENCES oauth_clients(client_id) ON DELETE CASCADE
@@ -941,7 +941,7 @@ constraint run_reads run_reads_org_id_organizations_id_fk FOREIGN KEY (org_id) R
 constraint run_reads run_reads_recipient_type_valid CHECK ((recipient_type = ANY (ARRAY['user'::text, 'end_user'::text])))
 constraint run_reads run_reads_run_id_recipient_type_recipient_id_pk PRIMARY KEY (run_id, recipient_type, recipient_id)
 constraint run_reads run_reads_run_id_runs_id_fk FOREIGN KEY (run_id) REFERENCES runs(id) ON DELETE CASCADE
-constraint run_reads run_reads_space_id_spaces_id_fk FOREIGN KEY (space_id) REFERENCES spaces(id) ON DELETE CASCADE
+constraint run_reads run_reads_space_org_fk FOREIGN KEY (space_id, org_id) REFERENCES spaces(id, org_id) ON DELETE CASCADE
 constraint runs runs_api_key_id_api_keys_id_fk FOREIGN KEY (api_key_id) REFERENCES api_keys(id) ON DELETE SET NULL
 constraint runs runs_at_most_one_actor CHECK ((NOT ((user_id IS NOT NULL) AND (end_user_id IS NOT NULL))))
 constraint runs runs_chat_session_id_org_id_fk FOREIGN KEY (chat_session_id, org_id) REFERENCES chat_sessions(id, org_id) ON DELETE SET NULL (chat_session_id)
