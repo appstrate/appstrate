@@ -194,7 +194,11 @@ export function buildServerInstructions(
   const connects = runs && granted("initiateIntegrationConnect");
   const runningAgents = runs ? "configuring or running" : "configuring";
   const agentUse = authors ? "building or configuring" : runningAgents;
-  const grounding = `Start by calling get_me to learn who you are acting for, your role in this organization, and which integrations are already connected (prefer those when ${agentUse} an agent).`;
+  // The chat states who the caller is and their role in its own prompt, so it is not sent to
+  // get_me for that; an external client learns both from get_me.
+  const grounding = rendersCards
+    ? `Your context says who you act for and your role; get_me lists a space's connected integrations (prefer those when ${agentUse} an agent) and the agents you can run.`
+    : `Start by calling get_me to learn who you are acting for, your role in this organization, and which integrations are already connected (prefer those when ${agentUse} an agent).`;
   // Both halves of the connect bullet below end the same way: the connect offer
   // is already in the tool result, and only its DELIVERY differs by client. The
   // chat renders the offer as a card itself, so the model must not restate it;

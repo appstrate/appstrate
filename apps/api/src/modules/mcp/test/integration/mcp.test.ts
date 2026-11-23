@@ -463,6 +463,33 @@ describe("mcp tool round-trip", () => {
       expect(builder).toContain(tool);
   });
 
+  it("opens the instructions with get_me for an external client, not for the chat", async () => {
+    const headers = await apiKeyHeaders(["mcp:read", "mcp:invoke"]);
+    const instructionsFor = async (query: string): Promise<string> => {
+      const res = await app.request(`${mcpPath(headers)}${query}`, {
+        method: "POST",
+        headers: { ...mcpHeaders(headers), "content-type": "application/json", Accept: MCP_ACCEPT },
+        body: JSON.stringify({
+          jsonrpc: "2.0",
+          id: 1,
+          method: "initialize",
+          params: {
+            protocolVersion: "2025-06-18",
+            capabilities: {},
+            clientInfo: { name: "t", version: "1" },
+          },
+        }),
+      });
+      return ((await res.json()) as JsonRpcEnvelope).result?.instructions as string;
+    };
+    expect(await instructionsFor("")).toContain("Start by calling get_me");
+    const chat = await instructionsFor("?renders_cards=true");
+    expect(chat).not.toContain("Start by calling get_me");
+    expect(chat).toContain("Your context says who you act for");
+    // Neither an import nor an inline run: the package-file bullet is gone with its tools.
+    expect(chat).not.toContain("validate_package_file");
+  });
+
   it("searches then invokes a real operation in-process", async () => {
     const headers = await apiKeyHeaders(["mcp:read", "mcp:invoke"]);
     const search = await rpc(headers, {
