@@ -434,6 +434,7 @@ export type {
 export {
   createMcpHttpClient,
   httpStatusOf,
+  isMcpProtocolError,
   isRequestTimeout,
   jsonRpcErrorOf,
   wrapClient,

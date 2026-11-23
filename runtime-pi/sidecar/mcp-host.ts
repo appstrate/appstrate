@@ -29,6 +29,9 @@
  *     SubprocessTransport.
  */
 
+import { isMcpProtocolError } from "@appstrate/mcp-transport";
+import { scrubSecretMaterial } from "./redact.ts";
+import { assistantVisibleMcpResult } from "@appstrate/core/mcp-result";
 import {
   allocateMcpToolNamespace,
   isValidToolName,
@@ -128,6 +131,8 @@ function relayProgress(extra: AppstrateRequestExtra): ProgressRelay | undefined 
 }
 
 interface McpHostUpstream {
+  /** Remaining provisioning budget for the initial catalogue request. */
+  listSignal?: AbortSignal;
   /** Package id of the integration this upstream serves; stamped on each of its tools. */
   integrationId: string;
   /** Stable identifier for this upstream — appears in tool name prefix. */
@@ -388,7 +393,10 @@ export class McpHost {
       return normalisedNs;
     }
 
-    const { tools } = await effectiveUpstream.client.listTools();
+    upstream.listSignal?.throwIfAborted();
+    const { tools } = await effectiveUpstream.client.listTools(
+      upstream.listSignal ? { signal: upstream.listSignal } : undefined,
+    );
     // Pre-filter against the agent-declared allowlist
     // before any sanitisation / registration. The check uses the
     // ORIGINAL upstream tool name; namespacing happens downstream and
@@ -645,11 +653,41 @@ export class McpHost {
           );
         } catch (err) {
           // A JSON-RPC error message (or an HTTP body a transport echoes) is tool text too.
-          throw budget ? boundUpstreamError(err, budget.tokenBudget, extra.signal) : err;
+          if (
+            route.trusted ||
+            extra.signal?.aborted ||
+            (err instanceof Error && err.name === "AbortError")
+          )
+            throw err;
+          const bounded = budget ? boundUpstreamError(err, budget.tokenBudget, extra.signal) : err;
+          if (isMcpProtocolError(err)) throw bounded;
+          return {
+            isError: true,
+            content: [
+              {
+                type: "text",
+                text:
+                  bounded instanceof Error
+                    ? scrubSecretMaterial(bounded.message)
+                    : "Upstream MCP tool call failed",
+              },
+            ],
+          };
         } finally {
           relay?.close();
         }
-        return budget ? budgetMcpToolResult(result, budget, desc.name) : result;
+        const visible: CallToolResult = { ...assistantVisibleMcpResult(result) };
+        if (budget) {
+          const store = budget.blobStore;
+          visible.content = visible.content.map((block) => {
+            if (block.type !== "resource_link") return block;
+            const uri = store.link(block.uri, route.client);
+            return uri
+              ? { ...block, uri }
+              : { type: "text", text: "Resource link exceeds the supported URI length." };
+          });
+        }
+        return budget ? budgetMcpToolResult(visible, budget, desc.name) : visible;
       };
       // One connection: the upstream descriptor as is. Several: every tool of the
       // slot names its connection, so a call always states the account it acts on.
@@ -673,16 +711,6 @@ export class McpHost {
       });
     }
     return tools;
-  }
-
-  /**
-   * Forward a `notifications/message` from a third-party MCP server to
-   * the configured log sink (D4.5 transducer). The host does not
-   * subscribe to upstream notifications itself — wire this up at the
-   * orchestrator that owns each subprocess.
-   */
-  emitLog(source: string, level: string, data: unknown): void {
-    this.options.onLog?.({ source, level, data });
   }
 
   /** Close every upstream. Idempotent. */

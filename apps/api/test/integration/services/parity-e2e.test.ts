@@ -21,8 +21,7 @@ import { seedAgent, seedRun } from "../../helpers/seed.ts";
 import { activatePackage } from "../../../src/services/space-packages.ts";
 import { persistRunEvent } from "../../../src/services/run-launcher/appstrate-event-sink.ts";
 import type { RunEvent } from "@appstrate/afps-runtime/types";
-import { createReducerSink } from "@appstrate/afps-runtime/sinks";
-import { reduceEvents } from "@appstrate/afps-runtime/runner";
+import { emptyRunResult, foldEvent, reduceEvents } from "@appstrate/afps-runtime/runner";
 import { db } from "@appstrate/db/client";
 import { runLogs } from "@appstrate/db/schema";
 import { eq, and, asc } from "drizzle-orm";
@@ -72,20 +71,19 @@ describe("Parity E2E — full adapter stack", () => {
     // A consumer that needs a read-back aggregate composes the runtime
     // reducer with the platform's write-through and drives both — the
     // platform's own ingestion path only ever calls the write-through half.
-    const reducer = createReducerSink();
+    const snap = emptyRunResult();
     const scope = { orgId: ctx.orgId, spaceId: ctx.defaultSpaceId };
 
     async function* scripted() {
       for (const ev of script) yield ev;
     }
     for await (const ev of scripted()) {
-      await reducer.sink.handle(ev);
+      foldEvent(snap, ev);
       await persistRunEvent(db, scope, runId, ev);
     }
 
     // Reducer agreement: folding the stream event-by-event MUST land on the
     // same RunResult an external consumer gets from a one-shot reduce.
-    const snap = reducer.snapshot();
     expect(snap).toEqual(reduceEvents(script));
 
     // Snapshot is the runtime's own RunResult shape — no platform projection.

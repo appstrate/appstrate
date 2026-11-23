@@ -84,6 +84,13 @@ export function generateUlid(now: number = Date.now()): string {
   return out.slice(0, 26);
 }
 
+type LinkedResourceClient = Pick<
+  import("@appstrate/mcp-transport").AppstrateMcpClient,
+  "readResource"
+>;
+const MAX_LINKS = 1024;
+const MAX_LINK_URI_BYTES = 8192;
+
 const BLOB_URI_PREFIX_TEMPLATE = "appstrate://tool-output/";
 
 /**
@@ -124,6 +131,7 @@ export function parseBlobUri(uri: string): { runId: string; id: string } | null 
  * (the sidecar serves exactly one run for its lifetime).
  */
 export class BlobStore {
+  private readonly links = new Map<string, { upstreamUri: string; client: LinkedResourceClient }>();
   private readonly blobs = new Map<string, BlobRecord>();
   private readonly maxTotalBytes: number;
   private totalBytes = 0;
@@ -209,6 +217,35 @@ export class BlobStore {
     return record;
   }
 
+  /** Bind the emitted URI to this run and to the same upstream connection for future reads. */
+  link(upstreamUri: string, client: LinkedResourceClient): string | null {
+    if (Buffer.byteLength(upstreamUri) > MAX_LINK_URI_BYTES) return null;
+    const id = generateUlid();
+    if (this.links.size >= MAX_LINKS) this.links.delete(this.links.keys().next().value!);
+    this.links.set(id, { upstreamUri, client });
+    return blobUri(this.runId, id);
+  }
+
+  async readLink(uri: string, signal: AbortSignal | undefined, maxBytes: number) {
+    const parsed = parseBlobUri(uri);
+    const link = parsed?.runId === this.runId ? this.links.get(parsed.id) : undefined;
+    if (!link) return null;
+    signal?.throwIfAborted();
+    const result = await link.client.readResource(
+      { uri: link.upstreamUri },
+      { ...(signal && { signal }) },
+    );
+    signal?.throwIfAborted();
+    let total = 0;
+    for (const item of result.contents) {
+      total +=
+        "text" in item ? Buffer.byteLength(item.text) : Buffer.byteLength(item.blob, "base64");
+      if (total > maxBytes)
+        throw new Error("Upstream resource exceeds the run's resource size limit");
+    }
+    return { ...result, contents: result.contents.map((item) => ({ ...item, uri })) };
+  }
+
   /** List every URI currently stored (for `resources/list`). */
   list(): { uri: string; mimeType: string; name?: string }[] {
     return [...this.blobs.values()].map((r) => ({
@@ -220,6 +257,7 @@ export class BlobStore {
 
   /** Drop everything. Called at sidecar shutdown for orderly teardown. */
   clear(): void {
+    this.links.clear();
     this.blobs.clear();
     this.totalBytes = 0;
   }

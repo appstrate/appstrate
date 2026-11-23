@@ -24,10 +24,20 @@ afterEach(async () => {
   await fs.rm(workspace, { recursive: true, force: true });
 });
 
+const readDefaults = {
+  runId: "run-test",
+  emit: () => {},
+  readResource: async () => ({ contents: [] }),
+};
+
 describe("spillResourcesToWorkspace", () => {
   it("passes through results with no resource blocks unchanged", async () => {
     const result: CallToolResult = { content: [{ type: "text", text: "hello" }] };
-    const out = await spillResourcesToWorkspace(result, { workspace, toolCallId: "t1" });
+    const out = await spillResourcesToWorkspace(result, {
+      ...readDefaults,
+      workspace,
+      toolCallId: "t1",
+    });
     expect(out).toBe(result);
   });
 
@@ -47,7 +57,11 @@ describe("spillResourcesToWorkspace", () => {
       ],
     };
 
-    const out = await spillResourcesToWorkspace(result, { workspace, toolCallId: "toolu_1" });
+    const out = await spillResourcesToWorkspace(result, {
+      ...readDefaults,
+      workspace,
+      toolCallId: "toolu_1",
+    });
 
     // The sibling text block survives; the resource is now a text pointer.
     expect(out.content).toHaveLength(2);
@@ -82,7 +96,11 @@ describe("spillResourcesToWorkspace", () => {
       ],
     };
 
-    const out = await spillResourcesToWorkspace(result, { workspace, toolCallId: "tc2" });
+    const out = await spillResourcesToWorkspace(result, {
+      ...readDefaults,
+      workspace,
+      toolCallId: "tc2",
+    });
 
     const pointer = out.content[0] as { type: "text"; text: string };
     expect(pointer.text).toContain("resources/tc2-image.png");
@@ -99,6 +117,7 @@ describe("spillResourcesToWorkspace", () => {
       content: [{ type: "resource", resource: { uri: "x://a/b.txt", text: "data" } }],
     };
     await spillResourcesToWorkspace(result, {
+      ...readDefaults,
       workspace,
       toolCallId: "tc3",
       runId: "run_x",
@@ -116,11 +135,15 @@ describe("spillResourcesToWorkspace", () => {
     const result = {
       content: [{ type: "resource", resource: { uri: "x://empty" } }],
     } as unknown as CallToolResult;
-    const out = await spillResourcesToWorkspace(result, { workspace, toolCallId: "tc4" });
+    const out = await spillResourcesToWorkspace(result, {
+      ...readDefaults,
+      workspace,
+      toolCallId: "tc4",
+    });
     expect(out.content[0]).toEqual(result.content[0]!);
   });
 
-  it("passes a resource_link through untouched when no readResource fetcher is given", async () => {
+  it("passes a resource_link through untouched when its issuer returns no contents", async () => {
     const result = {
       content: [
         {
@@ -130,8 +153,12 @@ describe("spillResourcesToWorkspace", () => {
         },
       ],
     } as unknown as CallToolResult;
-    const out = await spillResourcesToWorkspace(result, { workspace, toolCallId: "tc5" });
-    expect(out).toBe(result);
+    const out = await spillResourcesToWorkspace(result, {
+      ...readDefaults,
+      workspace,
+      toolCallId: "tc5",
+    });
+    expect(out).toEqual(result);
   });
 
   it("fetches a resource_link, spills it to a file with a mime-derived extension", async () => {
@@ -142,6 +169,7 @@ describe("spillResourcesToWorkspace", () => {
     } as unknown as CallToolResult;
 
     const out = await spillResourcesToWorkspace(result, {
+      ...readDefaults,
       workspace,
       toolCallId: "tc6",
       readResource: async (u) => {
@@ -174,6 +202,7 @@ describe("spillResourcesToWorkspace", () => {
       ],
     } as unknown as CallToolResult;
     const out = await spillResourcesToWorkspace(result, {
+      ...readDefaults,
       workspace,
       toolCallId: "tc7",
       readResource: async () => {
@@ -194,7 +223,11 @@ describe("spillResourcesToWorkspace", () => {
       const result: CallToolResult = {
         content: [{ type: "image", data: PNG_B64, mimeType: "image/png" }],
       };
-      const out = await spillResourcesToWorkspace(result, { workspace, toolCallId: "img1" });
+      const out = await spillResourcesToWorkspace(result, {
+        ...readDefaults,
+        workspace,
+        toolCallId: "img1",
+      });
 
       expect(out.content).toHaveLength(2);
       expect(out.content[0]).toEqual({ type: "image", data: PNG_B64, mimeType: "image/png" });
@@ -215,6 +248,7 @@ describe("spillResourcesToWorkspace", () => {
       };
       const events: Array<{ type: string; [k: string]: unknown }> = [];
       const out = await spillResourcesToWorkspace(result, {
+        ...readDefaults,
         workspace,
         toolCallId: "img2",
         emit: (e) => events.push(e),
@@ -244,7 +278,11 @@ describe("spillResourcesToWorkspace", () => {
       const result: CallToolResult = {
         content: [{ type: "image", data: apng.toString("base64"), mimeType: "image/png" }],
       };
-      const out = await spillResourcesToWorkspace(result, { workspace, toolCallId: "img7" });
+      const out = await spillResourcesToWorkspace(result, {
+        ...readDefaults,
+        workspace,
+        toolCallId: "img7",
+      });
 
       expect(out.content).toHaveLength(1);
       const pointer = out.content[0] as { type: "text"; text: string };
@@ -260,7 +298,11 @@ describe("spillResourcesToWorkspace", () => {
       const result: CallToolResult = {
         content: [{ type: "image", data: "", mimeType: "image/png" }],
       };
-      const out = await spillResourcesToWorkspace(result, { workspace, toolCallId: "img8" });
+      const out = await spillResourcesToWorkspace(result, {
+        ...readDefaults,
+        workspace,
+        toolCallId: "img8",
+      });
 
       expect(out.content).toHaveLength(1);
       const pointer = out.content[0] as { type: "text"; text: string };
@@ -277,7 +319,11 @@ describe("spillResourcesToWorkspace", () => {
           { type: "image", data: Buffer.from(SVG).toString("base64"), mimeType: "image/svg+xml" },
         ],
       };
-      const out = await spillResourcesToWorkspace(result, { workspace, toolCallId: "img3" });
+      const out = await spillResourcesToWorkspace(result, {
+        ...readDefaults,
+        workspace,
+        toolCallId: "img3",
+      });
 
       expect(out.content).toHaveLength(1);
       const pointer = out.content[0] as { type: "text"; text: string };
@@ -300,7 +346,11 @@ describe("spillResourcesToWorkspace", () => {
           { type: "text", text: "after" },
         ],
       } as unknown as CallToolResult;
-      const out = await spillResourcesToWorkspace(result, { workspace, toolCallId: "img4" });
+      const out = await spillResourcesToWorkspace(result, {
+        ...readDefaults,
+        workspace,
+        toolCallId: "img4",
+      });
 
       expect(out.content.map((c) => c.type)).toEqual(["text", "image", "text", "text", "text"]);
       expect(out.content[0]).toEqual({ type: "text", text: "before" });
@@ -320,6 +370,7 @@ describe("spillResourcesToWorkspace", () => {
         content: [{ type: "image", data: PNG_B64, mimeType: "image/png" }],
       };
       const out = await spillResourcesToWorkspace(result, {
+        ...readDefaults,
         workspace: notADir,
         toolCallId: "img5",
       });
@@ -332,6 +383,7 @@ describe("spillResourcesToWorkspace", () => {
         content: [{ type: "image", data: PNG_B64, mimeType: "image/png" }],
       };
       await spillResourcesToWorkspace(result, {
+        ...readDefaults,
         workspace,
         toolCallId: "img6",
         runId: "run_x",
@@ -356,7 +408,11 @@ describe("spillResourcesToWorkspace", () => {
         const result = {
           content: [{ type: "image", data: PNG_B64, mimeType: "image/png" }, replacing],
         } as unknown as CallToolResult;
-        const out = await spillResourcesToWorkspace(result, { workspace, toolCallId: "c1" });
+        const out = await spillResourcesToWorkspace(result, {
+          ...readDefaults,
+          workspace,
+          toolCallId: "c1",
+        });
 
         const [imagePointer, resourcePointer] = pointers(out);
         expect(imagePointer).toContain("resources/c1-image-0.png (70 bytes");
@@ -372,7 +428,11 @@ describe("spillResourcesToWorkspace", () => {
             { type: "image", data: PNG_B64, mimeType: "image/png" },
           ],
         } as unknown as CallToolResult;
-        const out = await spillResourcesToWorkspace(result, { workspace, toolCallId: "c2" });
+        const out = await spillResourcesToWorkspace(result, {
+          ...readDefaults,
+          workspace,
+          toolCallId: "c2",
+        });
 
         const [resourcePointer, imagePointer] = pointers(out);
         expect(resourcePointer).toContain("resources/c2-image-1.png (8 bytes");
@@ -389,6 +449,7 @@ describe("spillResourcesToWorkspace", () => {
           ],
         } as unknown as CallToolResult;
         const out = await spillResourcesToWorkspace(result, {
+          ...readDefaults,
           workspace,
           toolCallId: "c3",
           readResource: async (uri) => ({
@@ -422,6 +483,7 @@ describe("spillResourcesToWorkspace", () => {
           ],
         ] as const) {
           const out = await spillResourcesToWorkspace({ content } as unknown as CallToolResult, {
+            ...readDefaults,
             workspace,
             toolCallId: id,
           });
@@ -440,7 +502,11 @@ describe("spillResourcesToWorkspace", () => {
             { type: "resource", resource: { uri: "repo://b/README.md", text: "second" } },
           ],
         } as unknown as CallToolResult;
-        const out = await spillResourcesToWorkspace(result, { workspace, toolCallId: "c4" });
+        const out = await spillResourcesToWorkspace(result, {
+          ...readDefaults,
+          workspace,
+          toolCallId: "c4",
+        });
 
         const [first, second] = pointers(out);
         expect(first).toContain("resources/c4-README.md");
@@ -458,7 +524,11 @@ describe("spillResourcesToWorkspace", () => {
             { type: "image", data: PNG_B64, mimeType: "image/jpeg" },
           ],
         } as unknown as CallToolResult;
-        const out = await spillResourcesToWorkspace(result, { workspace, toolCallId: "c5" });
+        const out = await spillResourcesToWorkspace(result, {
+          ...readDefaults,
+          workspace,
+          toolCallId: "c5",
+        });
 
         const [resourcePointer, imagePointer] = pointers(out);
         expect(resourcePointer).toContain("resources/c5-image-1.png (8 bytes");

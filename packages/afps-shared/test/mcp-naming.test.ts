@@ -3,6 +3,7 @@
 import { describe, expect, it } from "bun:test";
 import {
   allocateMcpToolName,
+  integrationNamespaces,
   isValidMcpToolName,
   MCP_TOOL_NAME_MAX_LENGTH,
   normaliseMcpToolBody,
@@ -61,4 +62,14 @@ describe("allocateMcpToolName", () => {
   it("hashes an empty or wholly-unusable name to a valid body", () => {
     expect(isValidMcpToolName(allocateMcpToolName("gh", "", free))).toBe(true);
   });
+});
+
+it("keeps space namespaces stable under ordering, repeated binds and long colliding ids", () => {
+  const a = "@scope/very-very-long-integration-1";
+  const b = "@scope/very-very-long-integration-2";
+  const ids = [a, b, "@scope/plain"];
+  const names = integrationNamespaces(ids);
+  expect([...integrationNamespaces([b, a, a, "@scope/plain"])]).toEqual([...names]);
+  expect(names.get(a)).not.toBe(names.get(b));
+  expect(integrationNamespaces([a]).get(a)).not.toBe(names.get(a));
 });

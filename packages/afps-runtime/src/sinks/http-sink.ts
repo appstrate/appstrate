@@ -161,6 +161,7 @@ export class HttpSink implements EventSink {
       try {
         const res = await this.fetchImpl(url, {
           method: "POST",
+          redirect: "manual",
           headers: {
             ...headers,
             "Content-Type": "application/cloudevents+json",
@@ -230,6 +231,29 @@ export class HttpSink implements EventSink {
 export function sinkSiblingUrl(sinkUrl: string, endpoint: string): string {
   if (!sinkUrl.endsWith("/events")) throw new Error(`sink URL does not end in /events: ${sinkUrl}`);
   return `${sinkUrl.slice(0, -"events".length)}${endpoint}`;
+}
+
+/** Service links authorize use of the run credential only on the selected origin. */
+export function runServiceUrl(
+  sink: string,
+  endpoint: "mcp" | "heartbeat" | "workspace" | "files",
+  explicit?: string,
+): string {
+  const link =
+    explicit ??
+    (endpoint === "heartbeat"
+      ? sink.replace(/\/$/, "") + "/heartbeat"
+      : sinkSiblingUrl(sink, endpoint));
+  const url = new URL(link);
+  if (
+    !["https:", "http:"].includes(url.protocol) ||
+    url.origin !== new URL(sink).origin ||
+    url.username ||
+    url.password ||
+    url.hash
+  )
+    throw new Error(`Invalid ${endpoint} service URL for this run origin`);
+  return url.href;
 }
 
 class NonRetryableHttpError extends Error {

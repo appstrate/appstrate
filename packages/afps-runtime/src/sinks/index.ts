@@ -1,6 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2026 Appstrate
 
-export { HttpSink, sinkSiblingUrl, type HttpSinkOptions } from "./http-sink.ts";
+export { HttpSink, runServiceUrl, sinkSiblingUrl, type HttpSinkOptions } from "./http-sink.ts";
 export { CompositeSink } from "./composite-sink.ts";
-export { createReducerSink, type ReducerSinkHandle } from "./reducer-sink.ts";

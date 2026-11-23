@@ -350,9 +350,18 @@ function isInconclusiveProbe(err: unknown): boolean {
   return isRequestTimeout(err);
 }
 
+/** A server-authored JSON-RPC failure in either supported protocol era. */
+export function isMcpProtocolError(err: unknown): err is McpError | ProtocolError {
+  return err instanceof McpError || err instanceof ProtocolError;
+}
+
 /** The SDK gave up waiting for an answer: its own timeout, or the request's signal aborting. */
 export function isRequestTimeout(err: unknown): boolean {
-  return err instanceof SdkError && err.code === SdkErrorCode.RequestTimeout;
+  return (
+    (err instanceof SdkError && err.code === SdkErrorCode.RequestTimeout) ||
+    (err instanceof McpError && err.code === ErrorCode.RequestTimeout) ||
+    err instanceof McpConnectDeadlineError
+  );
 }
 
 /** A 401/403: the credential's verdict, which no other era would change. */
@@ -564,6 +573,8 @@ function isFatalConnectError(err: unknown): boolean {
   return true;
 }
 
+class McpConnectDeadlineError extends Error {}
+
 function buildDeadlineExceededError(
   deadlineMs: number,
   lastError: unknown,
@@ -571,7 +582,7 @@ function buildDeadlineExceededError(
 ): Error {
   const lastMsg = lastError instanceof Error ? lastError.message : String(lastError);
   const codeHint = lastErrorCode ? ` ${lastErrorCode}` : "";
-  const err = new Error(
+  const err = new McpConnectDeadlineError(
     `MCP connect deadline exceeded after ${deadlineMs}ms (last error:${codeHint} ${lastMsg})`,
   );
   (err as { cause?: unknown }).cause = lastError;

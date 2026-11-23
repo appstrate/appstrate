@@ -48,7 +48,7 @@ import { getErrorMessage } from "@appstrate/core/errors";
 import { readDeclaredOutputSchema } from "@appstrate/afps-shared/output-schema";
 import { SIDECAR_AUTH_HEADER } from "@appstrate/core/sidecar-types";
 import { readBundleFromFile } from "@appstrate/afps-runtime/bundle";
-import { HttpSink } from "@appstrate/afps-runtime/sinks";
+import { runServiceUrl, HttpSink } from "@appstrate/afps-runtime/sinks";
 import type { ExecutionContext, RunEvent } from "@appstrate/afps-runtime/types";
 import type { EventSink } from "@appstrate/afps-runtime/interfaces";
 import { emptyRunResult } from "@appstrate/afps-runtime/runner";
@@ -198,7 +198,7 @@ const sink = new HttpSink({
 // outlast the stall threshold. Every exit below is a `process.exit`, which
 // ends the timer with the process.
 const heartbeat = startSinkHeartbeat({
-  url: `${env.sink.url.replace(/\/$/, "")}/heartbeat`,
+  url: runServiceUrl(env.sink.url, "heartbeat", env.sink.heartbeatUrl),
   runSecret: env.sink.secret,
   intervalMs: HEARTBEAT_INTERVAL_MS,
   onError: (err) => {
@@ -222,6 +222,7 @@ const publishedFileKeys = new Set<string>();
 const publishedFileSourceHashes = new Map<string, string>();
 const uploadRunFile = createRunFileUploader({
   sinkUrl: env.sink.url,
+  ...(env.sink.filesUrl && { filesUrl: env.sink.filesUrl }),
   sinkSecret: env.sink.secret,
   workspace: env.workspaceDir,
   publishedKeys: publishedFileKeys,
@@ -369,7 +370,9 @@ const provisionStart = performance.now();
 // one calls `die()` (process.exit), so the first fault wins and the other is
 // abandoned with the process.
 const provisionDeps: ProvisionDeps = {
+  ...(env.sink.workspaceUrl && { workspaceUrl: env.sink.workspaceUrl }),
   sinkUrl: env.sink.url,
+  ...(env.sink.filesUrl && { filesUrl: env.sink.filesUrl }),
   sinkSecret: env.sink.secret,
   workspace: WORKSPACE,
   die,
@@ -613,7 +616,6 @@ if ((await piSdkWarmup) === null) {
 }
 
 await emitRuntimeReady(sink, AGENT_RUN_ID, {
-  bundleLoaded: true,
   extensions: extensionFactories.length,
   bootDurationMs: performance.now(),
   phaseTimings,

@@ -28,8 +28,6 @@
 import type { EventSink } from "@appstrate/afps-runtime/interfaces";
 
 export interface RuntimeReadyPayload {
-  /** True when a concrete `.afps`/`.afps-bundle` was loaded from disk. */
-  bundleLoaded: boolean;
   /**
    * Count of the extension factories wired when the runtime reports ready:
    * every integration tool, in the container and in the CLI alike.
@@ -65,7 +63,6 @@ export async function emitRuntimeReady(
     runId,
     message: `runtime ready in ${Math.round(payload.bootDurationMs)}ms`,
     data: {
-      bundleLoaded: payload.bundleLoaded,
       extensions: payload.extensions,
       totalToReadyMs: Math.round(payload.bootDurationMs),
       ...(payload.phaseTimings ?? {}),

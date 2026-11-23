@@ -53,23 +53,23 @@ import type { RuntimeEventEmitter } from "./runtime-event.ts";
 const SPILL_DIR = "resources";
 
 export interface ResourceSpillOptions {
+  signal?: AbortSignal;
   /** Workspace root — spilled files are written under `<workspace>/resources/`. */
   workspace: string;
   /** Tool call id — namespaces the spilled filename to avoid cross-call collisions. */
   toolCallId: string;
-  /** Optional telemetry sink — emits `resource.spilled` per materialised file. */
-  emit?: RuntimeEventEmitter;
+  /** Telemetry sink — emits `resource.spilled` per materialised file. */
+  emit: RuntimeEventEmitter;
   /** Run id stamped on the emitted event. */
-  runId?: string;
+  runId: string;
   /**
    * Fetcher for `resource_link` blocks (URI-only, bytes live in the sidecar
    * blob store — e.g. `{ns}__api_call` spilling a response > 32 KB). When
    * provided, each link is resolved via MCP `resources/read` and spilled to a
    * file just like an embedded resource, so the agent can grep / head / tail /
    * read-with-offset it instead of receiving an unreadable `appstrate://` URI.
-   * Omitted ⇒ links are passed through untouched.
    */
-  readResource?: (uri: string) => Promise<{
+  readResource: (uri: string) => Promise<{
     contents: Array<{ uri: string; mimeType?: string; text?: string; blob?: string }>;
   }>;
 }
@@ -90,9 +90,7 @@ type EmbeddedResource = {
  *
  *   - Embedded `resource` blocks (inline `text` / base64 `blob`) are always
  *     spilled.
- *   - `resource_link` blocks (URI only) are spilled when {@link
- *     ResourceSpillOptions.readResource} is provided — the bytes are fetched
- *     via MCP `resources/read` first. Without a fetcher they pass through.
+ *   - `resource_link` blocks (URI only) are read through their emitting MCP client before spilling.
  *   - `image` blocks (base64 `data`) are always spilled; the block stays
  *     inline, with Pi's sniffed mime, only when Pi recognises the format.
  *
@@ -109,15 +107,9 @@ export async function spillResourcesToWorkspace(
   opts: ResourceSpillOptions,
 ): Promise<CallToolResult> {
   const blocks = result.content;
-  const canFetchLinks = typeof opts.readResource === "function";
   if (
     !Array.isArray(blocks) ||
-    !blocks.some(
-      (c) =>
-        c.type === "resource" ||
-        c.type === "image" ||
-        (canFetchLinks && c.type === "resource_link"),
-    )
+    !blocks.some((c) => c.type === "resource" || c.type === "image" || c.type === "resource_link")
   ) {
     return result;
   }
@@ -172,15 +164,25 @@ export async function spillResourcesToWorkspace(
       continue;
     }
     // Resource link — URI only; fetch the bytes via resources/read, then spill.
-    if (block.type === "resource_link" && canFetchLinks) {
+    if (block.type === "resource_link") {
       const uri = (block as { uri?: unknown }).uri;
       const linkMime = (block as { mimeType?: unknown }).mimeType;
       let inner: EmbeddedResource | null = null;
       let bytes: Uint8Array | null = null;
       if (typeof uri === "string") {
         try {
-          const res = await opts.readResource!(uri);
-          const c = res.contents?.[0];
+          opts.signal?.throwIfAborted();
+          const res = await opts.readResource(uri);
+          opts.signal?.throwIfAborted();
+          const total = res.contents.reduce(
+            (bytes, item) =>
+              bytes +
+              (item.text !== undefined
+                ? Buffer.byteLength(item.text)
+                : Buffer.byteLength(item.blob ?? "", "base64")),
+            0,
+          );
+          const c = total <= 32 * 1024 * 1024 ? res.contents[0] : undefined;
           if (c) {
             inner = {
               uri,
@@ -191,6 +193,7 @@ export async function spillResourcesToWorkspace(
             bytes = resourceBytes(inner);
           }
         } catch {
+          opts.signal?.throwIfAborted();
           // Fetch failed — leave the link untouched (degraded, not dropped).
         }
       }
@@ -279,7 +282,7 @@ function emitSpilled(
   bytes: Uint8Array,
   opts: ResourceSpillOptions,
 ): void {
-  opts.emit?.({
+  opts.emit({
     type: "resource.spilled",
     runId: opts.runId,
     toolCallId: opts.toolCallId,

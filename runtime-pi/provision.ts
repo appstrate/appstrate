@@ -17,7 +17,7 @@
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
 import { signFresh } from "@appstrate/afps-runtime/events";
-import { sinkSiblingUrl } from "@appstrate/afps-runtime/sinks";
+import { runServiceUrl } from "@appstrate/afps-runtime/sinks";
 import { computeBackoffDelayMs, isRetryableHttpStatus } from "@appstrate/afps-shared/backoff";
 import { getErrorMessage } from "@appstrate/core/errors";
 
@@ -62,6 +62,8 @@ export interface ProvisionDeps {
   /** The run-scoped event sink URL (`…/api/runs/:id/events`). The workspace
    *  and files routes are derived by swapping the `/events` suffix. */
   sinkUrl: string;
+  filesUrl?: string;
+  workspaceUrl?: string;
   /** Run secret used to HMAC-sign each GET (Standard Webhooks). */
   sinkSecret: string;
   /** Absolute workspace root the bundle + files are written under. */
@@ -125,7 +127,12 @@ export async function signedGetWithRetry(url: string, deps: ProvisionDeps): Prom
       );
       let res: Response;
       try {
-        res = await fetchFn(url, { method: "GET", headers, signal: deadline.signal });
+        res = await fetchFn(url, {
+          method: "GET",
+          redirect: "manual",
+          headers,
+          signal: deadline.signal,
+        });
       } finally {
         clearTimeout(timer);
       }
@@ -155,7 +162,7 @@ export async function signedGetWithRetry(url: string, deps: ProvisionDeps): Prom
  * loud instead.
  */
 export async function provisionWorkspace(deps: ProvisionDeps): Promise<void> {
-  const url = sinkSiblingUrl(deps.sinkUrl, "workspace");
+  const url = runServiceUrl(deps.sinkUrl, "workspace", deps.workspaceUrl);
   let res: Response;
   try {
     res = await signedGetWithRetry(url, deps);
@@ -230,7 +237,7 @@ export async function provisionFiles(deps: ProvisionDeps): Promise<void> {
   // produce a `documents`-keyed body here, because the only writer of that
   // body is the platform's `parseRunFilesManifest`, which throws on the
   // retired spelling rather than serving it.
-  const manifestUrl = sinkSiblingUrl(deps.sinkUrl, "files");
+  const manifestUrl = runServiceUrl(deps.sinkUrl, "files", deps.filesUrl);
   let manifestRes: Response;
   try {
     manifestRes = await signedGetWithRetry(manifestUrl, deps);

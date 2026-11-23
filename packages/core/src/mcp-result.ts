@@ -1,5 +1,34 @@
 // SPDX-License-Identifier: Apache-2.0
 
+import { z } from "zod";
+
+/** Successful JSON results of the platform integration's two read tools. */
+export const recallMemoryOutputSchema = z.object({
+  memories: z.array(
+    z.object({
+      id: z.int(),
+      content: z.unknown(),
+      createdAt: z.string(),
+      actor_type: z.enum(["user", "end_user", "shared"]),
+      actor_id: z.string().nullable(),
+    }),
+  ),
+});
+export const runHistoryOutputSchema = z.object({
+  object: z.literal("list"),
+  data: z.array(
+    z.object({
+      id: z.string(),
+      status: z.string(),
+      date: z.string().nullable(),
+      duration: z.number().nullable(),
+      checkpoint: z.unknown().optional(),
+      result: z.unknown().optional(),
+    }),
+  ),
+  hasMore: z.boolean(),
+});
+
 /**
  * Reading the payload out of an MCP tool result. A result reaches a UI as a raw
  * `CallToolResult` `{ content: [{ type: "text", text }] }`, a bare content
@@ -69,4 +98,30 @@ export function unwrapMcpResult(value: unknown, depth = 0): unknown {
   }
 
   return value;
+}
+
+/** Project an MCP result before model consumption or spill. A structured mirror cannot be
+ * separated by audience when one of the content blocks is private. */
+export function assistantVisibleMcpResult<
+  T extends {
+    content: Array<{ type: string; annotations?: { audience?: readonly string[] } }>;
+    structuredContent?: unknown;
+  },
+>(result: T) {
+  const privateBlock = (block: T["content"][number]) =>
+    block.annotations?.audience !== undefined && !block.annotations.audience.includes("assistant");
+  if (!result.content.some(privateBlock)) return result;
+  const projected = {
+    ...result,
+    content: result.content.map((block) =>
+      privateBlock(block)
+        ? {
+            type: "text" as const,
+            text: "Tool content omitted from model input by its audience annotation.",
+          }
+        : block,
+    ),
+  };
+  delete projected.structuredContent;
+  return projected;
 }

@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+- Removed the private workspace reducer-sink wrapper. `foldEvent` and `reduceEvents` retain the incremental and replay contracts.
+
 ### Added — the integration tool on tool events (#2233)
 
 - `buildToolStartProgress` and `buildToolResultProgress` take an optional `integration`

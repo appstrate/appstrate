@@ -156,6 +156,7 @@ if (connectLoginJson) {
     const bundle = await runConnectOnce(spec, {
       platformApiUrl: env.platformApiUrl,
       runToken: env.runToken,
+      ...(env.runId && { runId: env.runId }),
     });
     // Encrypt the bundle JSON — plaintext credentials never reach stdout.
     const iv = randomBytes(12);
@@ -212,7 +213,7 @@ const oauthTokenCache = new OAuthTokenCache({
 const runtimeDeps = buildSidecarRuntimeDeps({
   config,
   cookieJar,
-  ...(process.env.RUN_ID ? { runId: process.env.RUN_ID } : {}),
+  ...(env.runId && { runId: env.runId }),
 });
 
 let integrationTools: AppstrateToolDefinition[] = [];
@@ -237,6 +238,7 @@ const integrationBootPromise =
         {
           platformApiUrl: config.platformApiUrl,
           runToken: config.runToken,
+          ...(env.runId && { runId: env.runId }),
         },
         runtimeDeps,
         (adapter) => {

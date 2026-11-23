@@ -71,7 +71,7 @@ import {
   buildTurnProgress,
   emptyRunResult,
   finalizeThrownFailure,
-  reduceEvents,
+  foldEvent,
   truncateToolResult,
   zeroTokenUsage,
   type RunError,
@@ -431,10 +431,10 @@ export class PiRunner {
     signal?.throwIfAborted();
 
     const runId = context.runId;
-    const events: RunEvent[] = [];
+    const output = emptyRunResult();
 
     const emit = async (event: RunEvent): Promise<void> => {
-      events.push(event);
+      foldEvent(output, event);
       await eventSink.handle(event);
     };
 
@@ -510,7 +510,7 @@ export class PiRunner {
       if (timedOut && !signal?.aborted) {
         const bridge = bridgeRef.current;
         await finalizeThrownFailure({
-          events,
+          output,
           err,
           signal,
           runId,
@@ -560,6 +560,7 @@ export class PiRunner {
               ...(upstream
                 ? {
                     context: {
+                      error_category: classifyModelError({ message: upstream.message }).category,
                       upstream: {
                         stop_reason: upstream.stopReason,
                         message: upstream.message.slice(0, UPSTREAM_MESSAGE_MAX_CHARS),
@@ -584,7 +585,7 @@ export class PiRunner {
       // new, so reducing before vs after it is equivalent.
       const bridge = bridgeRef.current;
       await finalizeThrownFailure({
-        events,
+        output,
         err,
         signal,
         runId,
@@ -615,7 +616,7 @@ export class PiRunner {
     // adapter-error trail post-hoc (issue: run_fd977eb6).
     const terminalError = bridgeRef.current?.getTerminalError();
     const result: TerminalRunResult = {
-      ...(events.length === 0 ? emptyRunResult() : reduceEvents(events)),
+      ...output,
       status: terminalError ? "failed" : "success",
       ...(terminalError ? { error: terminalError } : {}),
     };
@@ -1844,14 +1845,11 @@ export function installSessionBridge(
         return undefined;
       }
       const message = terminalErrorMessage(lastAssistantErrorMessage);
-      // `message` stays the RAW provider text: the run surface is a debugging
-      // surface and the operator reading `runs.error` wants the upstream
-      // sentence verbatim (the chat surface deliberately does the opposite and
-      // ships only the class). The CLASSIFICATION of this same turn travels the
-      // `appstrate.error` event emitted above, never this `RunError`: the
-      // finalize body is parsed by a closed schema (`message`/`stack`/`code`),
-      // so a `context` here would be dropped at ingestion and reach no reader.
-      return { code: "adapter_error", message };
+      return {
+        code: "adapter_error",
+        message,
+        context: { error_category: classifyModelError({ message }).category },
+      };
     },
     getLastUpstreamError(): { stopReason: string; message: string } | undefined {
       if (lastUpstreamStopReason === undefined) return undefined;

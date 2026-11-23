@@ -7,6 +7,7 @@
  * CLI's remote MCP tools.
  */
 
+import { assistantVisibleMcpResult } from "@appstrate/core/mcp-result";
 import {
   readToolIntegration,
   type AppstrateMcpClient,
@@ -73,7 +74,11 @@ export type McpToolCallPlan =
   | {
       args: Record<string, unknown>;
       /** Default: resources spilled to the workspace, then {@link callToolResultToPi}. */
-      finish?: (result: CallToolResult, toolCallId: string) => Promise<PiToolResult>;
+      finish?: (
+        result: CallToolResult,
+        toolCallId: string,
+        signal?: AbortSignal,
+      ) => Promise<PiToolResult>;
     }
   | { error: string };
 
@@ -125,7 +130,7 @@ export function mcpToolForwardFactory(opts: McpToolForwardOptions): ExtensionFac
             { name: opts.upstreamName ?? tool.name, arguments: call.args },
             { ...(signal ? { signal } : {}), onProgress: () => {} },
           );
-          return { call, result };
+          return { call, result: assistantVisibleMcpResult(result) };
         })().catch((err: unknown) => {
           completed(true);
           throw err;
@@ -139,15 +144,16 @@ export function mcpToolForwardFactory(opts: McpToolForwardOptions): ExtensionFac
         }
         const { call, result } = outcome;
         completed(result.isError === true);
-        if (call.finish) return call.finish(result, toolCallId);
+        if (call.finish) return call.finish(result, toolCallId, signal);
         // Resources become workspace files before the adapter flattens them: embedded `resource`
         // blocks, and `resource_link` blocks read through `resources/read`.
         const spilled = await spillResourcesToWorkspace(result, {
           workspace: opts.workspace,
+          ...(signal && { signal }),
           toolCallId,
           emit,
           runId,
-          readResource: (uri) => mcp.readResource({ uri }),
+          readResource: (uri) => mcp.readResource({ uri }, { ...(signal && { signal }) }),
         });
         return callToolResultToPi(spilled);
       },

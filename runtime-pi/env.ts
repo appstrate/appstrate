@@ -81,7 +81,14 @@ interface RuntimeEnv {
   /** Optional user input — JSON-decoded, defaults to `{}` on absent or malformed. */
   agentInput: Record<string, unknown>;
   /** Sink credentials (HTTP-signed CloudEvents transport to the platform). */
-  sink: { url: string; finalizeUrl: string; secret: string };
+  sink: {
+    url: string;
+    finalizeUrl: string;
+    secret: string;
+    heartbeatUrl?: string;
+    workspaceUrl?: string;
+    filesUrl?: string;
+  };
   /** The run's sidecar (`/mcp`, `/llm`, boot report). */
   sidecarUrl: string;
   /**
@@ -453,7 +460,14 @@ export function parseRuntimeEnv(source: NodeJS.ProcessEnv = process.env): Runtim
     ...(modelMaxTokens > 0 ? { modelMaxTokens } : {}),
     agentPrompt: agentPrompt!,
     agentInput,
-    sink: { url: sinkUrl!, finalizeUrl: sinkFinalizeUrl!, secret: sinkSecret! },
+    sink: {
+      url: sinkUrl!,
+      finalizeUrl: sinkFinalizeUrl!,
+      secret: sinkSecret!,
+      ...(source.APPSTRATE_HEARTBEAT_URL && { heartbeatUrl: source.APPSTRATE_HEARTBEAT_URL }),
+      ...(source.APPSTRATE_WORKSPACE_URL && { workspaceUrl: source.APPSTRATE_WORKSPACE_URL }),
+      ...(source.APPSTRATE_FILES_URL && { filesUrl: source.APPSTRATE_FILES_URL }),
+    },
     sidecarUrl: sidecarUrl!,
     sidecarAuthToken: sidecarAuthToken!,
     timeoutSeconds: agentTimeoutSeconds > 0 ? agentTimeoutSeconds : undefined,

@@ -181,3 +181,37 @@ describe("BlobStore", () => {
     expect(store.bytesUsed()).toBe(0);
   });
 });
+
+it("reads identical URIs only through their issuing client, subject to revocation, size and abort", async () => {
+  const store = new BlobStore("run-a", { maxTotalBytes: 32 });
+  const same = "records://shared/key";
+  let permitted = true;
+  let observed: AbortSignal | undefined;
+  const first = store.link(same, {
+    readResource: async ({ uri }, options) => {
+      observed = options?.signal;
+      if (!permitted) throw new Error("revoked");
+      return { contents: [{ uri, text: "é" }] };
+    },
+  })!;
+  const second = store.link(same, {
+    readResource: async ({ uri }) => ({ contents: [{ uri, text: "b" }] }),
+  })!;
+  const controller = new AbortController();
+  expect(first).not.toBe(second);
+  expect(await store.readLink(first, controller.signal, 2)).toEqual({
+    contents: [{ uri: first, text: "é" }],
+  });
+  expect(observed).toBe(controller.signal);
+  expect(await store.readLink(second, undefined, 1)).toEqual({
+    contents: [{ uri: second, text: "b" }],
+  });
+  expect(await store.readLink(first.replace("run-a", "run-b"), undefined, 2)).toBeNull();
+  await expect(store.readLink(first, undefined, 1)).rejects.toThrow("size limit");
+  permitted = false;
+  await expect(store.readLink(first, undefined, 2)).rejects.toThrow("revoked");
+  controller.abort();
+  await expect(store.readLink(first, controller.signal, 2)).rejects.toThrow();
+  store.clear();
+  expect(await store.readLink(first, undefined, 2)).toBeNull();
+});

@@ -79,15 +79,10 @@ wrapper around two library calls — use them directly from a `.ts`
 file when you need fixture-based regression:
 
 ```ts
-import { readFile } from "node:fs/promises";
-import { reduceEvents, createReducerSink, type RunEvent } from "@appstrate/afps-runtime";
+import { reduceEvents, type RunEvent } from "@appstrate/afps-runtime";
 
-const events: RunEvent[] = JSON.parse(await readFile("events.json", "utf-8"));
-const { sink, snapshot } = createReducerSink();
-for (const ev of events) await sink.handle(ev);
-const result = reduceEvents(events);
-await sink.finalize(result);
-console.log(snapshot());
+const events: RunEvent[] = await Bun.file("events.json").json();
+console.log(reduceEvents(events));
 ```
 
 ## Library
@@ -101,7 +96,6 @@ import {
   verifyBundleSignature,
   renderPrompt,
   reduceEvents,
-  createReducerSink,
   type RunEvent,
 } from "@appstrate/afps-runtime";
 
@@ -134,14 +128,11 @@ const prompt = await renderPrompt({
 // Consume an event stream through a sink (produced by a runner you wire
 // up externally — one that takes the `RunOptions` shape from
 // `@appstrate/afps-runtime/runner`) and fold it into a RunResult.
-const { sink, snapshot } = createReducerSink();
 const events: RunEvent[] = [
   { type: "output.emitted", timestamp: Date.now(), runId: "run_1", data: { done: true } },
 ];
-for (const ev of events) await sink.handle(ev);
 const result = reduceEvents(events);
-await sink.finalize(result);
-console.log(snapshot().output); // { done: true }
+console.log(result.output); // { done: true }
 ```
 
 ### Package subpath exports
@@ -152,7 +143,7 @@ console.log(snapshot().output); // { done: true }
 | `@appstrate/afps-runtime/bundle`      | Loader, validator, hash, signing, prompt rendering                                                                |
 | `@appstrate/afps-runtime/runner`      | `RunOptions`, `reduceEvents`, `RunResult`                                                                         |
 | `@appstrate/afps-runtime/interfaces`  | `EventSink` contract                                                                                              |
-| `@appstrate/afps-runtime/sinks`       | `HttpSink`, `CompositeSink`, `createReducerSink`                                                                  |
+| `@appstrate/afps-runtime/sinks`       | `HttpSink`, `CompositeSink`                                                                                       |
 | `@appstrate/afps-runtime/resolvers`   | `LocalIntegrationResolver`, `RemoteAppstrateIntegrationResolver`, `IntegrationApiCallResolver`, `makeApiCallTool` |
 | `@appstrate/afps-runtime/events`      | CloudEvents envelope + Standard Webhooks signing                                                                  |
 | `@appstrate/afps-runtime/template`    | Logic-less Mustache with JSON sanitisation                                                                        |

@@ -6,7 +6,7 @@
  * event type, the `runs.tokenUsage` snapshot, and the `llm_usage` ledger
  * row (including the fail-closed `writeLedger` default).
  *
- * Reducer / `snapshot()` semantics belong to `createReducerSink()` and
+ * Incremental reduction belongs to the runtime’s `foldEvent` and
  * are covered by `packages/afps-runtime/test/sinks/reducer-sink.test.ts`;
  * the reducer-plus-persist composition a read-back consumer writes is
  * covered end-to-end by `parity-e2e.test.ts`.

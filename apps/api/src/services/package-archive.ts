@@ -60,6 +60,7 @@ export function refreshPackageRecord(
   if (!files["signature.sig"] && !files.RECORD) return;
   // Newly serialized bytes may still be identical on a no-change publish.
   if (
+    Object.keys(files).length === Object.keys(original).length &&
     Object.entries(files).every(([path, bytes]) => {
       const previous = original[path];
       return bytes === previous || (previous !== undefined && Buffer.from(bytes).equals(previous));
