@@ -42,11 +42,7 @@ import {
 // runtime values are pulled in via dynamic `import()` inside the enabled
 // branch of `initObservability`, so a disabled boot loads only the
 // `@opentelemetry/api` no-op above — never the heavy SDK.
-import type {
-  BasicTracerProvider,
-  SpanExporter,
-  SpanProcessor,
-} from "@opentelemetry/sdk-trace-base";
+import type { TracerProvider, SpanExporter, SpanProcessor } from "@opentelemetry/sdk-trace";
 import type { MeterProvider, MetricReader } from "@opentelemetry/sdk-metrics";
 
 import { runWithTraceContext, type Logger } from "@appstrate/core/logger";
@@ -61,7 +57,7 @@ let enabled = false;
 let initialized = false;
 let tracer: Tracer | undefined;
 let meter: Meter | undefined;
-let tracerProvider: BasicTracerProvider | undefined;
+let tracerProvider: TracerProvider | undefined;
 let meterProvider: MeterProvider | undefined;
 
 // Metric instruments — created once on enable.
@@ -135,7 +131,7 @@ export async function initObservability(opts: InitObservabilityOptions = {}): Pr
     // Lazy-load the SDK only when telemetry is actually enabled, so OSS /
     // no-collector deployments never pay the import+parse cost.
     const [
-      { BasicTracerProvider, BatchSpanProcessor, SimpleSpanProcessor },
+      { TracerProvider, BatchSpanProcessor, SimpleSpanProcessor },
       { MeterProvider, PeriodicExportingMetricReader },
       { resourceFromAttributes },
       { ATTR_SERVICE_NAME },
@@ -144,7 +140,7 @@ export async function initObservability(opts: InitObservabilityOptions = {}): Pr
       { OTLPTraceExporter },
       { OTLPMetricExporter },
     ] = await Promise.all([
-      import("@opentelemetry/sdk-trace-base"),
+      import("@opentelemetry/sdk-trace"),
       import("@opentelemetry/sdk-metrics"),
       import("@opentelemetry/resources"),
       import("@opentelemetry/semantic-conventions"),
@@ -159,10 +155,10 @@ export async function initObservability(opts: InitObservabilityOptions = {}): Pr
     // Tracing — batch in production, simple (synchronous) when a test
     // injects its own exporter so finished spans are observable immediately.
     const spanProcessor: SpanProcessor = opts.spanExporter
-      ? new SimpleSpanProcessor(opts.spanExporter)
-      : new BatchSpanProcessor(new OTLPTraceExporter());
-    const tp = new BasicTracerProvider({ resource, spanProcessors: [spanProcessor] });
-    // SDK 2.x BasicTracerProvider has no `register()` convenience — set the
+      ? new SimpleSpanProcessor({ exporter: opts.spanExporter })
+      : new BatchSpanProcessor({ exporter: new OTLPTraceExporter() });
+    const tp = new TracerProvider({ resource, spanProcessors: [spanProcessor] });
+    // Install the
     // globals explicitly. The AsyncLocalStorage context manager is what makes
     // `context.with(...)` propagate the active span across awaits (and lets the
     // logger bridge see it); the W3C propagator handles traceparent extract.
