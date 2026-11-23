@@ -183,7 +183,9 @@ export function ComposerToolsPanel({ authorsPackages }: { authorsPackages: boole
   // Each level starts on its first control, the way back aside: the container's focus trap keeps
   // a focus already inside it.
   useEffect(() => {
-    body.current?.querySelector<HTMLElement>(FOCUSABLE)?.focus();
+    // The first control on screen: the attach row is hidden from `md` up.
+    const controls = body.current?.querySelectorAll<HTMLElement>(FOCUSABLE) ?? [];
+    [...controls].find((control) => control.offsetParent !== null)?.focus();
   }, [level]);
 
   let content: React.ReactNode;

@@ -9,6 +9,7 @@
 
 import { useEffect, useState, type ClipboardEvent } from "react";
 import { useAui } from "@assistant-ui/react";
+import { cn } from "@appstrate/ui/cn";
 import { LexicalComposerInput } from "@assistant-ui/react-lexical";
 import { useLexicalComposerContext } from "@lexical/react/LexicalComposerContext";
 import { mergeRegister } from "@lexical/utils";
@@ -77,10 +78,13 @@ function KeysPlugin({
 
 export function ComposerEditor({
   label,
+  placeholder,
   autofocus,
   onEnter,
 }: {
   label: string;
+  /** What a screen reader hears while the field is empty; the visible one is drawn beside it. */
+  placeholder: string;
   autofocus: boolean;
   onEnter: () => void;
 }) {
@@ -102,13 +106,16 @@ export function ComposerEditor({
   return (
     <LexicalComposerInput
       aria-label={label}
+      // Sets the field's `aria-placeholder`; the library's own drawing of it is hidden, the
+      // composer draws one that fits the width (`ComposerPlaceholder`).
+      placeholder={placeholder}
       autoFocus={autofocus}
       // Enter is the plugin's: it queues while a turn runs and honours the conversation's limit.
       submitMode="none"
       directiveChip={ComposerDirectiveChip}
       onPaste={addPastedFiles}
       onFocus={() => setArmed(true)}
-      className={COMPOSER_INPUT_CLASS}
+      className={cn(COMPOSER_INPUT_CLASS, "[&_.aui-lexical-placeholder]:hidden")}
     >
       <KeysPlugin onEnter={onEnter} autofocus={autofocus} />
     </LexicalComposerInput>

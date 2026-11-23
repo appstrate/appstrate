@@ -42,8 +42,7 @@ test.describe("chat actions on a touchscreen", () => {
     await page.setViewportSize({ width: 844, height: 390 });
     await page.goto(`/chat/${id}`);
     await page.getByRole("textbox", { name: "Message Appstrate…", exact: true }).tap();
-    const chip = page.getByTestId("composer-limit-chip");
-    const lift = chip.getByRole("button", { name: /^Lever la limite/ });
+    const lift = page.getByRole("button", { name: /^Lever la limite/ });
     await expect(lift).toHaveCSS("width", "40px");
     await expect(lift).toHaveCSS("height", "40px");
     const hit = await lift.evaluate((button) => {
@@ -54,7 +53,7 @@ test.describe("chat actions on a touchscreen", () => {
     });
     expect(hit).toBe(true);
     const copy = page.getByRole("button", { name: "Copier", exact: true });
-    await expect(copy).toHaveCSS("width", "40px");
+    await expect(copy).toHaveCSS("width", "44px");
     await expect(copy.locator("..")).toHaveCSS("opacity", "1");
     await copy.tap();
     await expect

@@ -4,11 +4,11 @@
 
 /** The composer's Lexical editor, styled through the library's `aui-lexical-*` classes. */
 export const COMPOSER_INPUT_CLASS =
-  "relative max-h-40 w-full overflow-y-auto px-0 text-base [&_.aui-lexical-input]:min-h-10 desktop-pointer:[&_.aui-lexical-input]:min-h-9 [&_.aui-lexical-input]:py-2 md:[&_.aui-lexical-input]:py-1 [&_.aui-lexical-input]:break-words [&_.aui-lexical-input]:whitespace-pre-wrap [&_.aui-lexical-input]:outline-none";
+  "relative max-h-40 w-full overflow-y-auto px-0 text-base [&_.aui-lexical-input]:min-h-11 desktop-pointer:[&_.aui-lexical-input]:min-h-9 [&_.aui-lexical-input]:py-2.5 md:[&_.aui-lexical-input]:py-1 [&_.aui-lexical-input]:break-words [&_.aui-lexical-input]:whitespace-pre-wrap [&_.aui-lexical-input]:outline-none";
 
 /** The field's placeholder, laid over the editor's first line (`ComposerPlaceholder`). */
 export const COMPOSER_PLACEHOLDER_CLASS =
-  "text-muted-foreground pointer-events-none absolute inset-x-0 top-2 truncate text-base md:top-1";
+  "text-muted-foreground pointer-events-none absolute inset-x-0 top-2.5 truncate text-base md:top-1";
 
 /** Running text a phone reads (a hint, a state, a message): 16 px, the dense size from `md`. */
 export const READING_TEXT_CLASS = "text-base md:text-sm";

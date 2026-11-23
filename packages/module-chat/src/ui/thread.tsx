@@ -731,6 +731,11 @@ function Composer({
                 <ComposerPlaceholder modelLabel={modelLabel} />
                 <ComposerEditor
                   label={t("composer.placeholder")}
+                  placeholder={
+                    modelLabel
+                      ? t("composer.placeholderModel", { model: modelLabel })
+                      : t("composer.placeholder")
+                  }
                   // A phone would open its keyboard on arrival, before anything was asked for.
                   autofocus={autofocus}
                   onEnter={enter}
