@@ -554,10 +554,7 @@ function ConversationRow({
                 <PencilIcon />
                 {t("threads.rename")}
               </DropdownMenuItem>
-              <DropdownMenuItem
-                variant="destructive"
-                onSelect={openDelete}
-              >
+              <DropdownMenuItem variant="destructive" onSelect={openDelete}>
                 <Trash2Icon />
                 {t("common:btn.delete")}
               </DropdownMenuItem>
