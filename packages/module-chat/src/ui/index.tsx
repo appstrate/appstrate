@@ -75,6 +75,7 @@ export {
 } from "./thread-list.tsx";
 export { ChatTransportProvider, SelectConversationProvider } from "./runtime-context.ts";
 import { ModelSelect } from "./model-select.tsx";
+import { ModelPickerProvider, type ModelPickerProps } from "./model-picker.ts";
 import { modelSizing } from "./model-fit.ts";
 import { fetchModelsEnvelope, selectChatModels, type OrgModelOption } from "./models-data.ts";
 import {
@@ -403,20 +404,19 @@ export function ChatPage({
   // `Conversation` a new prop each time and defeat its `memo` below. The
   // setters are stable module functions, so the deps are exactly the values
   // the picker displays.
-  const composerSlot = useMemo(
-    () => (
-      <ModelSelect
-        models={models}
-        selectedId={selectedModel}
-        onSelect={setSelectedModel}
-        generation={generation}
-        onGenerationChange={editGenerationSettings}
-        pending={modelsPending}
-        failed={modelsFailed}
-      />
-    ),
+  const modelPicker = useMemo<ModelPickerProps>(
+    () => ({
+      models,
+      selectedId: selectedModel,
+      onSelect: setSelectedModel,
+      generation,
+      onGenerationChange: editGenerationSettings,
+      pending: modelsPending,
+      failed: modelsFailed,
+    }),
     [models, selectedModel, generation, modelsPending, modelsFailed],
   );
+  const composerSlot = useMemo(() => <ModelSelect {...modelPicker} />, [modelPicker]);
   const authorsPackages = canAuthorPackages(can);
 
   // The active row reduced to primitives so the memoised `Conversation` re-renders only when
@@ -432,31 +432,33 @@ export function ChatPage({
     <ChatTransportProvider value={transport ?? null}>
       <SelectConversationProvider value={onConversationChange ?? null}>
         <ChatHostProvider value={host}>
-          {/* The conversation list and the conversation settings are NOT here:
+          <ModelPickerProvider value={modelPicker}>
+            {/* The conversation list and the conversation settings are NOT here:
               they are the shell's navigation and header actions, mounted by
               the host from `ChatConversationList` /
               `ChatConversationSettingsButton`. What is left is the thread itself. */}
-          {/* A plain div, not a `main`: the host shell's inset already IS the
+            {/* A plain div, not a `main`: the host shell's inset already IS the
               page's `main` landmark, and two nested ones name two pages. */}
-          <div className="bg-canvas flex size-full min-h-0 min-w-0 flex-col overflow-hidden">
-            <Conversation
-              key={activeId}
-              id={activeId}
-              transport={transport}
-              isPersisted={isPersisted}
-              initialComposerDraft={isPersisted ? undefined : initialComposerDraft}
-              onConversationChange={onConversationChange}
-              uploadFile={uploadFile}
-              composerSlot={composerSlot}
-              authorsPackages={authorsPackages}
-              canPinSkills={canPinSkills(can)}
-              canWrite={canWrite}
-              serverGenerating={serverGenerating}
-              serverUpdatedAt={serverUpdatedAt}
-              storedSpaceId={storedSpaceId}
-              storedRestricted={storedRestricted}
-            />
-          </div>
+            <div className="bg-canvas flex size-full min-h-0 min-w-0 flex-col overflow-hidden">
+              <Conversation
+                key={activeId}
+                id={activeId}
+                transport={transport}
+                isPersisted={isPersisted}
+                initialComposerDraft={isPersisted ? undefined : initialComposerDraft}
+                onConversationChange={onConversationChange}
+                uploadFile={uploadFile}
+                composerSlot={composerSlot}
+                authorsPackages={authorsPackages}
+                canPinSkills={canPinSkills(can)}
+                canWrite={canWrite}
+                serverGenerating={serverGenerating}
+                serverUpdatedAt={serverUpdatedAt}
+                storedSpaceId={storedSpaceId}
+                storedRestricted={storedRestricted}
+              />
+            </div>
+          </ModelPickerProvider>
         </ChatHostProvider>
       </SelectConversationProvider>
     </ChatTransportProvider>

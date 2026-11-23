@@ -8,6 +8,7 @@
 
 import * as React from "react";
 import { Sheet, SheetContent, SheetDescription, SheetTitle } from "@appstrate/ui/components/sheet";
+import { ChevronLeftIcon } from "lucide-react";
 import { Switch } from "@appstrate/ui/components/switch";
 import { cn } from "@appstrate/ui/cn";
 
@@ -19,34 +20,58 @@ export function SheetMenu({
   open,
   onOpenChange,
   title,
+  showTitle = false,
+  back,
   header,
   children,
   className,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  /** The panel's accessible name (it draws no title of its own). */
+  /** The panel's name: its accessible name, drawn as its heading with `showTitle` or `back`. */
   title: string;
+  showTitle?: boolean;
+  /** A level of a panel that navigates: the way back to the level above it. */
+  back?: { label: string; onClick: () => void };
   /** A line shown above the rows, when the rows need saying what they act on. */
   header?: React.ReactNode;
   children: React.ReactNode;
   className?: string;
 }) {
+  const heading = showTitle || back !== undefined;
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
       <SheetContent
         side="bottom"
         showCloseButton={false}
+        // No drag to dismiss, so no grabber; the bottom inset is the home indicator's, or a margin.
         className={cn(
-          "max-h-[85dvh] overflow-y-auto rounded-t-2xl p-0 pb-[env(safe-area-inset-bottom)]",
+          "max-h-[85dvh] overflow-y-auto rounded-t-2xl p-0 pb-[max(env(safe-area-inset-bottom),1rem)]",
           className,
         )}
         data-testid="sheet-menu"
       >
-        <SheetTitle className="sr-only">{title}</SheetTitle>
+        {heading ? (
+          <div className="flex min-h-14 items-center gap-1 px-2 pt-2">
+            {back && (
+              <button
+                type="button"
+                aria-label={back.label}
+                onClick={back.onClick}
+                className="text-muted-foreground active:bg-muted focus-visible:bg-muted flex size-11 shrink-0 items-center justify-center rounded-full outline-none"
+                data-testid="sheet-menu-back"
+              >
+                <ChevronLeftIcon className="size-5" aria-hidden />
+              </button>
+            )}
+            <SheetTitle className={cn("truncate text-base font-semibold", !back && "px-3")}>
+              {title}
+            </SheetTitle>
+          </div>
+        ) : (
+          <SheetTitle className="sr-only">{title}</SheetTitle>
+        )}
         <SheetDescription className="sr-only">{title}</SheetDescription>
-        {/* The grabber says it is a panel one can drag away, as on every phone. */}
-        <div aria-hidden className="bg-border mx-auto mt-2 h-1 w-9 rounded-full" />
         {header}
         <div className="flex flex-col py-2">{children}</div>
       </SheetContent>

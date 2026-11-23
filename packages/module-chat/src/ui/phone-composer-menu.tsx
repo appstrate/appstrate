@@ -2,14 +2,14 @@
 
 /**
  * The composer's tools on a phone: ONE "+" at the left of the field that opens a panel from the
- * bottom with all of them (attach a file, the skills, the space limit, creation mode and what
- * rides on it), as the chats people already use do. Nothing of them stays beside the field: a dot
- * on the "+" says one of the settings is off its default, and the panel names it. The disclaimer
- * that used to sit under the composer is the panel's last line. From `md` up the composer keeps
- * its attach button, its settings menu and its chips (`ComposerTools`).
+ * bottom with all of them (attach a file, the skills, the model, the space limit, creation mode),
+ * as the chats people already use do. Nothing of them stays beside the field: a dot on the "+"
+ * says one of the settings is off its default, and the panel names it. The skills and the model
+ * open in the same panel, in place of its rows, with a way back. From `md` up the composer keeps
+ * its attach button, its settings menu, its model pill and its chips (`ComposerTools`).
  */
 
-import { useId, useState, useSyncExternalStore } from "react";
+import { useId, useState } from "react";
 import { ComposerPrimitive } from "@assistant-ui/react";
 import {
   BookOpenIcon,
@@ -18,7 +18,7 @@ import {
   PackageIcon,
   PaperclipIcon,
   PlusIcon,
-  SlidersHorizontalIcon,
+  SparklesIcon,
 } from "lucide-react";
 import { Button } from "@appstrate/ui/components/button";
 import { cn } from "@appstrate/ui/cn";
@@ -34,12 +34,8 @@ import {
 } from "./package-authoring-store.ts";
 import { useChatHost } from "./runtime-context.ts";
 import { useConversationSkillsContext, useDraftSkills } from "./use-conversation-skills.ts";
-import {
-  isToolsPanelOpen,
-  setModelPanelOpen,
-  setToolsPanelOpen,
-  subscribeToolsPanel,
-} from "./model-store.ts";
+import { ModelPanel } from "./model-select.tsx";
+import { selectedModel, useModelPicker } from "./model-picker.ts";
 import { SheetMenu, SheetMenuRow, SheetMenuSwitchRow } from "./sheet-menu.tsx";
 import { SkillsPickerPanel } from "./skills-picker.tsx";
 import { COMPOSER_TOOL_BUTTON_CLASS } from "./touch-targets.ts";
@@ -123,20 +119,22 @@ function AttachRows({ onDone }: { onDone: () => void }) {
   );
 }
 
+/** Where the panel is: its rows, or one of the panels they open in its place. */
+type View = "tools" | "skills" | "models" | "configuration";
+
 export function ComposerPlusMenu({ authorsPackages }: { authorsPackages: boolean }) {
   const { t, can, modelLabel } = useChatHost();
   // Offered with `skills:read` on a readable conversation: the context is null otherwise.
   const conversation = useConversationSkillsContext();
-  const showPicker = conversation !== null;
   const draft = useDraftSkills();
+  const picker = useModelPicker();
   const creationMode = usePackageAuthoringEnabled();
   // Composing an inline run needs creation mode too: off, no turn launches one.
   const offersInlineRunModel = creationMode && canComposeInlineRuns(can);
   const inlineRunModel = useInlineRunModelEnabled();
-  // In the store: the model panel this one opens comes back to it.
-  const open = useSyncExternalStore(subscribeToolsPanel, isToolsPanelOpen, isToolsPanelOpen);
-  const setOpen = setToolsPanelOpen;
-  const [skillsOpen, setSkillsOpen] = useState(false);
+  const [open, setOpen] = useState(false);
+  // ONE panel that navigates: a level replaces the rows in place, never a second panel over the first.
+  const [view, setView] = useState<View>("tools");
   const creationId = useId();
   const inlineId = useId();
   // A setting off its default: the "+" wears a dot, and the panel shows which.
@@ -146,6 +144,19 @@ export function ComposerPlusMenu({ authorsPackages }: { authorsPackages: boolean
     (offersInlineRunModel && inlineRunModel) ||
     (conversation !== null && canResetSkills(conversation.skills));
   const close = () => setOpen(false);
+  const toTools = { label: t("common:btn.back"), onClick: () => setView("tools") };
+  const active = picker ? selectedModel(picker.models, picker.selectedId) : undefined;
+  const sheet =
+    view === "skills" && conversation
+      ? { title: t("skills.title"), back: toTools }
+      : view === "models" && picker
+        ? { title: t("composer.model"), back: toTools }
+        : view === "configuration" && picker && active
+          ? {
+              title: active.label ?? active.modelId ?? t("composer.model"),
+              back: { label: t("common:btn.back"), onClick: () => setView("models") },
+            }
+          : { title: t("composer.tools"), back: undefined };
   return (
     <>
       <Button
@@ -156,7 +167,10 @@ export function ComposerPlusMenu({ authorsPackages }: { authorsPackages: boolean
         aria-label={t("composer.tools")}
         aria-haspopup="dialog"
         data-testid="composer-plus"
-        onClick={() => setOpen(true)}
+        onClick={() => {
+          setView("tools");
+          setOpen(true);
+        }}
       >
         <PlusIcon />
         {departed && (
@@ -167,69 +181,68 @@ export function ComposerPlusMenu({ authorsPackages }: { authorsPackages: boolean
           />
         )}
       </Button>
-      <SheetMenu open={open} onOpenChange={setOpen} title={t("composer.tools")}>
-        <AttachRows onDone={close} />
-        {showPicker && (
-          <SheetMenuRow
-            onClick={() => {
-              close();
-              setSkillsOpen(true);
-            }}
-          >
-            <BookOpenIcon />
-            {t("composer.skills")}
-          </SheetMenuRow>
-        )}
-        {modelLabel && (
-          <SheetMenuRow
-            onClick={() => {
-              close();
-              setModelPanelOpen(true);
-            }}
-          >
-            <SlidersHorizontalIcon />
-            <span className="flex min-w-0 flex-1 items-center justify-between gap-3">
-              {t("composer.model")}
-              <span className="text-muted-foreground truncate text-sm font-normal">
-                {modelLabel}
-              </span>
-            </span>
-          </SheetMenuRow>
-        )}
-        <LimitRows onDone={close} />
-        {authorsPackages && (
-          <SheetMenuSwitchRow
-            id={creationId}
-            icon={<PackageIcon />}
-            label={t("composer.creationMode")}
-            checked={creationMode}
-            onCheckedChange={setPackageAuthoringEnabled}
-          />
-        )}
-        {offersInlineRunModel && (
-          <SheetMenuSwitchRow
-            id={inlineId}
-            icon={<CpuIcon />}
-            label={t("composer.inlineRunModel")}
-            hint={t("composer.inlineRunModel.hint")}
-            checked={inlineRunModel}
-            onCheckedChange={setInlineRunModelEnabled}
-          />
-        )}
-        <p className="text-muted-foreground mt-1 border-t px-5 pt-3 pb-2 text-sm">
-          {t("thread.disclaimer")}
-        </p>
+      <SheetMenu open={open} onOpenChange={setOpen} title={sheet.title} back={sheet.back}>
+        {sheet.back === undefined ? (
+          <>
+            <AttachRows onDone={close} />
+            {conversation && (
+              <SheetMenuRow onClick={() => setView("skills")}>
+                <BookOpenIcon />
+                {t("composer.skills")}
+              </SheetMenuRow>
+            )}
+            {picker && modelLabel && (
+              <SheetMenuRow onClick={() => setView("models")} data-testid="composer-plus-model">
+                <SparklesIcon />
+                <span className="flex min-w-0 flex-1 items-center justify-between gap-3">
+                  {t("composer.model")}
+                  <span className="text-muted-foreground truncate text-sm font-normal">
+                    {modelLabel}
+                  </span>
+                </span>
+              </SheetMenuRow>
+            )}
+            <LimitRows onDone={close} />
+            {authorsPackages && (
+              <SheetMenuSwitchRow
+                id={creationId}
+                icon={<PackageIcon />}
+                label={t("composer.creationMode")}
+                checked={creationMode}
+                onCheckedChange={setPackageAuthoringEnabled}
+              />
+            )}
+          </>
+        ) : view === "skills" && conversation ? (
+          <div className="flex min-h-0 flex-col px-4">
+            <SkillsPickerPanel conversation={conversation} draft={draft} titled={false} />
+          </div>
+        ) : picker ? (
+          <>
+            <ModelPanel
+              {...picker}
+              view={view === "configuration" ? "configuration" : "models"}
+              onViewChange={setView}
+              // A pick is the end of the errand: back to the composer, which names it.
+              onPicked={close}
+              back={false}
+            />
+            {/* An expert's setting, beside the model it is about rather than in the main rows. */}
+            {view === "models" && offersInlineRunModel && (
+              <div className="mt-1 border-t pt-1">
+                <SheetMenuSwitchRow
+                  id={inlineId}
+                  icon={<CpuIcon />}
+                  label={t("composer.inlineRunModel")}
+                  hint={t("composer.inlineRunModel.hint")}
+                  checked={inlineRunModel}
+                  onCheckedChange={setInlineRunModelEnabled}
+                />
+              </div>
+            )}
+          </>
+        ) : null}
       </SheetMenu>
-      {conversation && (
-        <SheetMenu
-          open={skillsOpen}
-          onOpenChange={setSkillsOpen}
-          title={t("skills.title")}
-          className="flex flex-col p-4"
-        >
-          <SkillsPickerPanel conversation={conversation} draft={draft} />
-        </SheetMenu>
-      )}
     </>
   );
 }

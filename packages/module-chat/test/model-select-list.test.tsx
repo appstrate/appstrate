@@ -15,7 +15,7 @@ import { groupModelsForPicker } from "@appstrate/ui/components/model-picker-grou
 import { buildModelPickerLabels } from "@appstrate/ui/components/model-picker-labels";
 import { isModelSelectable } from "@appstrate/core/model-selectable";
 
-import { ModelSelect } from "../src/ui/model-select.tsx";
+import { ModelPanel } from "../src/ui/model-select.tsx";
 import { ChatHostProvider } from "../src/ui/runtime-context.ts";
 import { testHost } from "./test-host.ts";
 
@@ -67,12 +67,14 @@ describe("composer model list", () => {
     const t = mock((key: string) => key);
     renderToStaticMarkup(
       <ChatHostProvider value={testHost({ t })}>
-        <ModelSelect
+        <ModelPanel
           models={[{ ...live, apiShape: null }]}
           selectedId={live.id}
           onSelect={() => {}}
           generation={{}}
           onGenerationChange={() => {}}
+          view="models"
+          onViewChange={() => {}}
         />
       </ChatHostProvider>,
     );
