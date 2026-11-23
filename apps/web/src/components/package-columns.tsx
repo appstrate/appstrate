@@ -155,8 +155,8 @@ export function usePackageColumns(holds: PackageType, spanning = false): DataCol
             packageId={item.id}
             spaceIds={item.spaceIds}
             variant="ghost"
-            size="icon"
-            className="text-muted-foreground hover:text-primary size-7"
+            size="icon-sm"
+            className="text-muted-foreground hover:text-primary desktop-pointer:size-7"
           />
         </span>
       ) : null,

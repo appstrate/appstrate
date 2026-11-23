@@ -12,6 +12,9 @@ import {
   DISCLAIMER_CLASS,
 } from "./phone-text.ts";
 
+/** The box of the composer's `size="icon-sm"` buttons: 44 px on touch, 32 px under a mouse. */
+const COMPOSER_BUTTON_BOX_CLASS = cn("desktop-pointer:size-8 size-11", COMPOSER_BUTTON_CLASS);
+
 /**
  * A saved conversation while its history loads: the turns it will show, in
  * place, above an inert composer frame of the live one's height. The runtime is
@@ -86,8 +89,8 @@ export function ComposerSkeleton({
       <div className={COMPOSER_ROW_CLASS}>
         <div className={COMPOSER_TOOLS_CLASS}>
           <div className="flex items-center gap-1.5">
-            <Skeleton className={COMPOSER_BUTTON_CLASS} />
-            <Skeleton className={cn(COMPOSER_BUTTON_CLASS, "max-md:hidden")} />
+            <Skeleton className={COMPOSER_BUTTON_BOX_CLASS} />
+            <Skeleton className={cn(COMPOSER_BUTTON_BOX_CLASS, "max-md:hidden")} />
             {limited && (
               <Skeleton className="desktop-pointer:h-7 h-10 w-44 rounded-full max-md:hidden" />
             )}
@@ -102,7 +105,7 @@ export function ComposerSkeleton({
           {placeholder}
         </div>
         <div className={COMPOSER_SEND_CLASS}>
-          <Skeleton className={COMPOSER_BUTTON_CLASS} />
+          <Skeleton className={COMPOSER_BUTTON_BOX_CLASS} />
         </div>
       </div>
     </div>

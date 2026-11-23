@@ -122,7 +122,7 @@ export function AppSidebar({ product }: { product: "studio" | "chat" }) {
           type="button"
           variant="ghost"
           size="icon"
-          className="size-11 shrink-0 md:hidden"
+          className="shrink-0 md:hidden"
           aria-label={t("btn.close")}
           data-testid="sidebar-close"
           onClick={() => setOpenMobile(false)}

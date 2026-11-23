@@ -45,7 +45,10 @@ export function CopyBlock({
       </code>
       <CopyButton
         value={value}
-        className={cn("absolute", dense ? "top-0.5 right-0.5 size-6" : "top-1 right-1")}
+        className={cn(
+          "absolute",
+          dense ? "desktop-pointer:size-6 top-0.5 right-0.5" : "top-1 right-1",
+        )}
       />
     </div>
   );

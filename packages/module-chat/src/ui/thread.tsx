@@ -84,7 +84,6 @@ import {
   ACTION_ROW_CLASS,
   COMPOSER_BUTTON_CLASS,
   ICON_BUTTON_CLASS,
-  QUEUE_ICON_BUTTON_CLASS,
   CHIP_REMOVE_CLASS,
   USER_ACTION_BAR_CLASS,
 } from "./touch-targets.ts";
@@ -600,7 +599,7 @@ function QueuedMessages({
             </span>
             <IconButton
               label={t("composer.queue.edit")}
-              className={QUEUE_ICON_BUTTON_CLASS}
+              className="desktop-pointer:size-6"
               disabled={!composerEmpty}
               onClick={() => {
                 queue.remove(index);
@@ -611,7 +610,7 @@ function QueuedMessages({
             </IconButton>
             <IconButton
               label={t("composer.queue.remove")}
-              className={QUEUE_ICON_BUTTON_CLASS}
+              className="desktop-pointer:size-6"
               onClick={() => queue.remove(index)}
             >
               <XIcon />
@@ -743,7 +742,7 @@ function Composer({
                   <ComposerPrimitive.Send asChild disabled={blocked}>
                     <Button
                       type="button"
-                      size="icon"
+                      size="icon-sm"
                       className={COMPOSER_BUTTON_CLASS}
                       aria-label={t("composer.send")}
                       aria-describedby={issue ? issueId : undefined}
@@ -755,7 +754,7 @@ function Composer({
                 <ThreadPrimitive.If running>
                   <Button
                     type="button"
-                    size="icon"
+                    size="icon-sm"
                     variant="outline"
                     className={COMPOSER_BUTTON_CLASS}
                     aria-label={t("composer.queue.add")}
@@ -769,7 +768,7 @@ function Composer({
                   <ComposerPrimitive.Cancel asChild>
                     <Button
                       type="button"
-                      size="icon"
+                      size="icon-sm"
                       variant="secondary"
                       className={COMPOSER_BUTTON_CLASS}
                       aria-label={t("composer.stop")}
@@ -1049,7 +1048,7 @@ const IconButton = React.forwardRef<
     ref={ref}
     type="button"
     variant="ghost"
-    size="icon"
+    size="icon-sm"
     aria-label={label}
     title={label}
     {...props}
