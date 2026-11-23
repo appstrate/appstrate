@@ -349,8 +349,7 @@ export async function fetchAgents(acrossOrgId: string | null): Promise<AgentList
   const { data } = acrossOrgId
     ? await client.GET("/api/orgs/{orgId}/agents", { params: { path: { orgId: acrossOrgId } } })
     : await client.GET("/api/agents");
-  // The spec marks most item fields optional — normalize to the asserted
-  // list shape. `forked_from` is not returned by the list endpoint.
+  // Manifest-derived text can be absent. Fork provenance is detail-only.
   return data!.data.map((a) => ({
     ...a,
     // Fall back to the package id when display_name is empty.
@@ -358,12 +357,7 @@ export async function fetchAgents(acrossOrgId: string | null): Promise<AgentList
     description: a.description ?? "",
     schema_version: a.schema_version ?? "",
     author: a.author ?? "",
-    keywords: a.keywords ?? [],
-    scope: a.scope ?? null,
-    version: a.version ?? null,
     forked_from: null,
-    running_runs: a.running_runs ?? 0,
-    dependencies: a.dependencies,
   }));
 }
 

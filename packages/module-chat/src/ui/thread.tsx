@@ -50,7 +50,7 @@ import {
 } from "./tool-uis.tsx";
 import { ReadResourceToolUI, ReadToolUI } from "./skill-load.tsx";
 import { parseResume, INTEGRATION_RESUME_MARKER } from "./auth-offer.ts";
-import { IntegrationIcon } from "./integration-icon.tsx";
+import { IntegrationIcon } from "@appstrate/ui/components/integration-icon";
 import {
   getSelectedModelSendsImages,
   getSelectedModelSendsPdf,
