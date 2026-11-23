@@ -410,7 +410,8 @@ describe("run_and_wait", () => {
       const without = prose(["mcp:read", ...LAUNCHES, "agents:run"]);
       const withGrant = prose(["mcp:read", ...LAUNCHES, ...COMPOSER]);
       expect(without).not.toMatch(/inline/i);
-      expect(without).toContain("validate_package_file");
+      // Neither composing nor importing: the package-file bullet goes with its tools.
+      expect(without).not.toContain("validate_package_file");
       expect(withGrant).toContain("runInline");
       // The partial-manifest rule is `run_and_wait`'s alone: `validateInlineRun` takes a full one.
       expect(withGrant).not.toContain("validateInlineRun");

@@ -23,6 +23,7 @@ import {
 } from "../../services/bundle-import.ts";
 import { recordAudit } from "../../services/audit.ts";
 import { asString, jsonResult, refusalResult, ToolRefusal } from "./tool-results.ts";
+import type { McpSurface } from "./tools.ts";
 
 interface PackageFileToolContext {
   permissions: ReadonlySet<string>;
@@ -333,15 +334,18 @@ function buildRuntimeCapabilitiesTool(): AppstrateToolDefinition {
   return { descriptor, handler };
 }
 
-/** `imports` is `McpSurface.importsPackages` — the only check on `mcp:invoke` and on
- *  the actor being a user; the import service re-checks each package's `write`. */
+/**
+ * Each tool on its `McpSurface` act. `importsPackages` is the only check on `mcp:invoke` and on
+ * the actor being a user; the import service re-checks each package's `write`. Authoring starts
+ * from `get_runtime_capabilities`, inside an inline run (`composes`).
+ */
 export function buildPackageFileTools(
   ctx: PackageFileToolContext,
-  imports: boolean,
+  surface: Pick<McpSurface, "validatesPackages" | "importsPackages" | "composes">,
 ): AppstrateToolDefinition[] {
   return [
-    buildValidatePackageFileTool(ctx),
-    ...(imports ? [buildImportPackageFileTool(ctx)] : []),
-    buildRuntimeCapabilitiesTool(),
+    ...(surface.validatesPackages ? [buildValidatePackageFileTool(ctx)] : []),
+    ...(surface.importsPackages ? [buildImportPackageFileTool(ctx)] : []),
+    ...(surface.composes ? [buildRuntimeCapabilitiesTool()] : []),
   ];
 }

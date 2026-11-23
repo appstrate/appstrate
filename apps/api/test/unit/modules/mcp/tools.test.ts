@@ -34,6 +34,8 @@ await registerTestPlatformApp();
  * asserts on the tool it means to, not on whether it is declared.
  */
 const FULL_SURFACE = ["mcp:read", "mcp:invoke", "agents:run", "runs:read", "files:read"];
+/** {@link FULL_SURFACE} plus authoring: an inline run, so the package-file tools too. */
+const COMPOSER_SURFACE = [...FULL_SURFACE, "agents:write"];
 
 function makeTools(
   permissions: string[],
@@ -216,6 +218,8 @@ describe("buildMcpTools declarations", () => {
     expect(declared).not.toContain("invoke_operation");
     expect(declared).not.toContain("run_and_wait");
     expect(declared).not.toContain("list_files");
+    expect(declared).not.toContain("validate_package_file");
+    expect(declared).not.toContain("get_runtime_capabilities");
     // The control: discovery is behind the transport's own gate, so it stays.
     expect(declared).toContain("search");
     expect(declared).toContain("describe");
@@ -247,14 +251,8 @@ describe("buildMcpTools declarations", () => {
   // The whole surface, per preset-shaped set: each flag is read off the guard of
   // the route its tool dispatches to (`runAgent`+`getRun`, `runInline`,
   // `listFiles`, `importBundle`), so any drift between the two is a diff here.
-  const ALWAYS = [
-    "describe",
-    "get_me",
-    "get_runtime_capabilities",
-    "read",
-    "search",
-    "validate_package_file",
-  ];
+  // The package-file tools go with an import or an inline run.
+  const ALWAYS = ["describe", "get_me", "read", "search"];
   const cases: Array<{
     who: string;
     permissions: string[];
@@ -272,7 +270,14 @@ describe("buildMcpTools declarations", () => {
         "runs:read-all",
         "files:read",
       ],
-      extra: ["import_package_file", "invoke_operation", "list_files", "run_and_wait"],
+      extra: [
+        "get_runtime_capabilities",
+        "import_package_file",
+        "invoke_operation",
+        "list_files",
+        "run_and_wait",
+        "validate_package_file",
+      ],
       kinds: ["agent", "inline"],
     },
     {
@@ -297,7 +302,7 @@ describe("buildMcpTools declarations", () => {
       // Any package type's `write` opens `POST /api/packages/import-bundle`.
       who: "a skill author who launches nothing",
       permissions: ["mcp:read", "mcp:invoke", "skills:write"],
-      extra: ["import_package_file", "invoke_operation"],
+      extra: ["import_package_file", "invoke_operation", "validate_package_file"],
       kinds: null,
     },
   ];
@@ -1146,7 +1151,7 @@ describe("buildMcpTools helpers", () => {
   });
 
   it("exposes the runtime registry used by package authoring and adapters", async () => {
-    const { byName } = makeTools(["mcp:read"]);
+    const { byName } = makeTools(COMPOSER_SURFACE);
     const result = await byName.get("get_runtime_capabilities")!.handler({}, noExtra);
     const payload = parseResult(result);
     expect(payload).toMatchObject({
@@ -1287,7 +1292,7 @@ describe("structured tool output", () => {
       ["get_runtime_capabilities", {}, fileList],
     ];
     for (const [name, args, respond] of cases) {
-      const { byName } = makeTools(FULL_SURFACE, undefined, respond);
+      const { byName } = makeTools(COMPOSER_SURFACE, undefined, respond);
       const result = await byName.get(name)!.handler(args, noExtra);
       expect({ name, isError: result.isError }).toEqual({ name, isError: false });
       expect(result.structuredContent).toEqual(parseResult(result));

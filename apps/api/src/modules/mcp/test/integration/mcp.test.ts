@@ -398,16 +398,15 @@ describe("mcp tool round-trip", () => {
     });
     const tools = (envelope.result?.tools as Array<Record<string, unknown>>) ?? [];
     const names = tools.map((t) => t.name);
+    // Neither an import nor an inline run (no `agents:write`): no package-file tool.
     expect(names.sort()).toEqual([
       "describe",
       "get_me",
-      "get_runtime_capabilities",
       "invoke_operation",
       "list_files",
       "read",
       "run_and_wait",
       "search",
-      "validate_package_file",
     ]);
     const runAndWait = tools.find((t) => t.name === "run_and_wait")!;
     expect((runAndWait.annotations as Record<string, unknown>).destructiveHint).toBe(true);
@@ -453,10 +452,42 @@ describe("mcp tool round-trip", () => {
     // would also pass if the whole list were gone.
     expect(viewer).toContain("list_files");
     expect(viewer).toContain("search");
+    // Package files are for a caller who imports or composes: a viewer does neither.
+    for (const tool of ["validate_package_file", "import_package_file", "get_runtime_capabilities"])
+      expect(viewer).not.toContain(tool);
 
     const builder = await listFor("builder");
     expect(builder).toContain("run_and_wait");
     expect(builder).toContain("invoke_operation");
+    for (const tool of ["validate_package_file", "import_package_file", "get_runtime_capabilities"])
+      expect(builder).toContain(tool);
+  });
+
+  it("opens the instructions with get_me for an external client, not for the chat", async () => {
+    const headers = await apiKeyHeaders(["mcp:read", "mcp:invoke"]);
+    const instructionsFor = async (query: string): Promise<string> => {
+      const res = await app.request(`${mcpPath(headers)}${query}`, {
+        method: "POST",
+        headers: { ...mcpHeaders(headers), "content-type": "application/json", Accept: MCP_ACCEPT },
+        body: JSON.stringify({
+          jsonrpc: "2.0",
+          id: 1,
+          method: "initialize",
+          params: {
+            protocolVersion: "2025-06-18",
+            capabilities: {},
+            clientInfo: { name: "t", version: "1" },
+          },
+        }),
+      });
+      return ((await res.json()) as JsonRpcEnvelope).result?.instructions as string;
+    };
+    expect(await instructionsFor("")).toContain("Start by calling get_me");
+    const chat = await instructionsFor("?renders_cards=true");
+    expect(chat).not.toContain("Start by calling get_me");
+    expect(chat).toContain("Your context says who you act for");
+    // Neither an import nor an inline run: the package-file bullet is gone with its tools.
+    expect(chat).not.toContain("validate_package_file");
   });
 
   it("searches then invokes a real operation in-process", async () => {

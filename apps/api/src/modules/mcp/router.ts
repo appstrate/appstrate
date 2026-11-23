@@ -183,7 +183,7 @@ export function buildServerInstructions(
   orgSpaces?: OrgWideSpaces,
 ): string {
   // A missing act is taught by ABSENCE (see `McpSurface`).
-  const { invokes, runs, composes: inline, authors, importsPackages } = surface;
+  const { invokes, runs, composes: inline, authors, importsPackages, validatesPackages } = surface;
   // A sentence naming an operation renders only for a caller its route grants,
   // unless the gate it sits under already implies that grant (org-wide: in any space).
   const granted = (operationId: string): boolean =>
@@ -194,7 +194,11 @@ export function buildServerInstructions(
   const connects = runs && granted("initiateIntegrationConnect");
   const runningAgents = runs ? "configuring or running" : "configuring";
   const agentUse = authors ? "building or configuring" : runningAgents;
-  const grounding = `Start by calling get_me to learn who you are acting for, your role in this organization, and which integrations are already connected (prefer those when ${agentUse} an agent).`;
+  // The chat states who the caller is and their role in its own prompt, so it is not sent to
+  // get_me for that; an external client learns both from get_me.
+  const grounding = rendersCards
+    ? `Your context says who you act for and your role; get_me lists a space's connected integrations (prefer those when ${agentUse} an agent) and its agents.`
+    : `Start by calling get_me to learn who you are acting for, your role in this organization, and which integrations are already connected (prefer those when ${agentUse} an agent).`;
   // Both halves of the connect bullet below end the same way: the connect offer
   // is already in the tool result, and only its DELIVERY differs by client. The
   // chat renders the offer as a card itself, so the model must not restate it;
@@ -218,11 +222,13 @@ export function buildServerInstructions(
   const packageImportGuidance = importsPackages
     ? " Call `import_package_file` only when validation returns BOTH `valid: true` AND `importable: true`, and the user asked to add the package. If conflicts make it non-importable, report them instead of attempting a doomed mutation."
     : "";
-  // Authoring a package means an inline run writing it; without that grant
-  // only the validation half of the bullet is true.
+  // Authoring a package means an inline run writing it; without that grant only the
+  // validation half of the bullet is true, and without validation there is no bullet.
   const packageFiles = inline
     ? "Local MCP integration authoring — call `get_runtime_capabilities` first, have one inline run create the integration manifest + server files, package them from the package root with the available shell tools (for example `python3 -m zipfile -c package.afps manifest.json <entry-point> ...`), then publish that archive with `publish_file` and pass the returned `appfile://` URI to `validate_package_file`."
-    : "MCP package files — to check an existing archive, pass its `appfile://` URI to `validate_package_file`.";
+    : validatesPackages
+      ? "MCP package files — to check an existing archive, pass its `appfile://` URI to `validate_package_file`."
+      : null;
   // Both need `invoke_operation`; the integration preference order they sit
   // beside names no tool, so every caller gets it.
   const concurrencyBullet = invokes
@@ -298,8 +304,12 @@ Organization → Spaces (id \`spc_…\`, one default) → Agents → Runs. End-u
 ${orgSpaces ? orgWideSpaceContext(orgSpaces, inlineSpaces ?? [], surface.creates || importsPackages) : pinnedSpaceContext}
 
 ## Beyond the per-operation schemas
-${runBullets}- ${packageFiles}${packageImportGuidance} Archive bytes stay server-side throughout.
-- Streaming/SSE operations (live logs, realtime) cannot be called through this server; fetch logs or poll instead.
+${runBullets}${
+    packageFiles
+      ? `- ${packageFiles}${packageImportGuidance} Archive bytes stay server-side throughout.
+`
+      : ""
+  }- Streaming/SSE operations (live logs, realtime) cannot be called through this server; fetch logs or poll instead.
 - Wire JSON is snake_case, except universal id/timestamp fields (id, createdAt…) which stay camelCase.
 - A refused call is a tool result with \`isError: true\` and \`{ code, error, … }\`. \`missing_argument\`, \`unknown_argument\`, \`invalid_argument\`, \`unknown_operation\`, \`unknown_space\` and \`space_mismatch\` mean fix the call (\`arguments\` names the faulty ones, \`accepted\` lists what is valid) and retry. \`not_granted\` (a permission, or a file you may see but not download) is final: report it. An operation the route answered with an HTTP error is not a refusal: it comes back as \`{ status, body }\` with \`isError: true\`; read \`body\` to decide — except a \`403\` your permissions explain, which is a \`not_granted\` refusal.
 ${heavyListBullet}${concurrencyBullet}${
@@ -388,6 +398,7 @@ export function unionSurface(spaces: readonly McpSpace[]): McpSurface {
     creates: any("creates"),
     listsFiles: any("listsFiles"),
     importsPackages: any("importsPackages"),
+    validatesPackages: any("validatesPackages"),
     proxies: any("proxies"),
     proxiesClosed: any("proxiesClosed"),
   };
