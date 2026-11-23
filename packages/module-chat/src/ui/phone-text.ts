@@ -28,13 +28,17 @@ export const COMPOSER_ROW_CLASS = "flex items-center gap-x-2 gap-y-1 md:flex-wra
 
 /** The field: a line of its own from `md`, the stretchy cell of the phone's line. */
 export const COMPOSER_FIELD_CLASS =
-  "min-w-0 md:order-first md:basis-full max-md:flex-1 short-landscape:basis-0 short-landscape:grow";
+  "min-w-0 md:order-first md:basis-full max-md:flex-1 md-short:basis-0 md-short:grow";
 
-/** Send's cell: with the field on the same line in a short landscape (the keyboard leaves a sliver). */
-export const COMPOSER_SEND_CLASS = "flex shrink-0 items-center gap-2 short-landscape:order-first";
+/** Send's cell: on the field's line on a wide but short screen (the keyboard leaves a sliver). */
+export const COMPOSER_SEND_CLASS = "flex shrink-0 items-center gap-2 md-short:order-first";
 
-/** The tools' cell: the desktop's settings and chips (`flex-1`), on a phone just the "+". */
-export const COMPOSER_TOOLS_CLASS = "min-w-0 flex-1 max-md:flex-none";
+/**
+ * The tools' cell: the desktop's settings and chips (`flex-1`), on a phone just the "+". On a wide
+ * but short screen it keeps the line under the field and Send: `flex-1` alone starts it at zero
+ * width, so it would squeeze in after Send.
+ */
+export const COMPOSER_TOOLS_CLASS = "min-w-0 flex-1 max-md:flex-none md-short:basis-full";
 
 /** "New conversation" in the sidebar: a row aligned left like the conversations below it on a phone. */
 export const NEW_CONVERSATION_CLASS = "max-md:justify-start max-md:gap-3 max-md:font-medium";
