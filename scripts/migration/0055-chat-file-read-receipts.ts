@@ -27,10 +27,11 @@
  */
 
 import { parseArgs } from "node:util";
-import { eq, sql } from "drizzle-orm";
+import { and, eq, gt, sql } from "drizzle-orm";
+import type { Db } from "@appstrate/db/client";
 import { chatMessages, type ChatMessageContent } from "@appstrate/db/schema";
 import { getErrorMessage } from "@appstrate/core/errors";
-import { exitUnlessDatabaseNamed } from "./lib/database-target.ts";
+import { describeDatabaseTarget, exitUnlessDatabaseNamed } from "./lib/database-target.ts";
 
 const FILE_READ_TOOLS = new Set(["read_file", "read_resource"]);
 const NOTE = "File content omitted: read in an earlier version of the chat.";
@@ -115,36 +116,48 @@ export function rewriteFileReads(parts: readonly unknown[]): {
 /** Narrows the scan to messages that can hold a file read; the exact test is `rewriteFileReads`. */
 const CANDIDATE = sql`${chatMessages.content}::text LIKE '%appfile://%' AND (${chatMessages.content}::text LIKE '%read_file%' OR ${chatMessages.content}::text LIKE '%read_resource%')`;
 
+/** Keyset pages also bound the file content held during a release preflight. */
+async function scanFileReadReceipts(
+  database: Pick<Db, "select">,
+  write?: (seq: number, content: ChatMessageContent) => Promise<void>,
+) {
+  let messages = 0;
+  let calls = 0;
+  let after: number | undefined;
+  for (;;) {
+    const rows = await database
+      .select({ seq: chatMessages.seq, content: chatMessages.content })
+      .from(chatMessages)
+      .where(and(CANDIDATE, after === undefined ? undefined : gt(chatMessages.seq, after)))
+      .orderBy(chatMessages.seq)
+      .limit(100);
+    for (const row of rows) {
+      const { parts, rewritten } = rewriteFileReads(row.content.parts ?? []);
+      if (rewritten === 0) continue;
+      messages++;
+      calls += rewritten;
+      if (write) await write(row.seq, { ...row.content, parts } as ChatMessageContent);
+    }
+    if (rows.length < 100) return { messages, calls };
+    after = rows[rows.length - 1]!.seq;
+  }
+}
+
+export async function pendingFileReadReceipts() {
+  const { db } = await import("@appstrate/db/client");
+  return scanFileReadReceipts(db);
+}
+
 export async function runChatFileReadReceipts(options: {
   apply: boolean;
   out: (line: string) => void;
 }): Promise<void> {
   const { apply, out } = options;
-  // Imported here: `@appstrate/db/client` opens its database on import, after the entry point's guard.
-  const { db, toRows } = await import("@appstrate/db/client");
-  const [target] = toRows<{ name: string; addr: string | null; port: number | null }>(
-    await db.execute(
-      "SELECT current_database() AS name, inet_server_addr()::text AS addr, inet_server_port() AS port",
-    ),
-  );
-  out(`database: ${target!.name} at ${target!.addr ?? "local socket"}:${target!.port ?? "-"}`);
-
-  const pending = async () => {
-    const rows = await db
-      .select({ seq: chatMessages.seq, content: chatMessages.content })
-      .from(chatMessages)
-      .where(CANDIDATE)
-      .orderBy(chatMessages.seq);
-    return rows.flatMap((row) => {
-      const { parts, rewritten } = rewriteFileReads(row.content.parts ?? []);
-      return rewritten > 0 ? [{ seq: row.seq, content: { ...row.content, parts }, rewritten }] : [];
-    });
-  };
-
-  const rows = await pending();
-  const calls = rows.reduce((sum, row) => sum + row.rewritten, 0);
-  out(`messages to rewrite: ${rows.length}, file reads: ${calls}`);
+  const { db } = await import("@appstrate/db/client");
+  out(await describeDatabaseTarget());
   if (!apply) {
+    const { messages, calls } = await pendingFileReadReceipts();
+    out(`messages to rewrite: ${messages}, file reads: ${calls}`);
     out("0055: DRY RUN — nothing written. Re-run with --apply to commit.");
     return;
   }
@@ -152,17 +165,15 @@ export async function runChatFileReadReceipts(options: {
   await db.transaction(async (tx) => {
     await tx.execute("SET LOCAL lock_timeout = '5s'");
     await tx.execute("SET LOCAL statement_timeout = '300s'");
-    for (const row of rows) {
-      await tx
-        .update(chatMessages)
-        .set({ content: row.content as ChatMessageContent })
-        .where(eq(chatMessages.seq, row.seq));
-    }
+    const { messages, calls } = await scanFileReadReceipts(tx, async (seq, content) => {
+      await tx.update(chatMessages).set({ content }).where(eq(chatMessages.seq, seq));
+    });
+    out(`messages to rewrite: ${messages}, file reads: ${calls}`);
+    out(`rewritten: ${messages}`);
+    const { messages: left } = await scanFileReadReceipts(tx);
+    out(`left: ${left}`);
+    if (left !== 0) throw new Error("file reads in the old form are left after --apply");
   });
-  out(`rewritten: ${rows.length}`);
-  const left = (await pending()).length;
-  out(`left: ${left}`);
-  if (left !== 0) throw new Error("file reads in the old form are left after --apply");
   out("0055: APPLIED — committed.");
 }
 
