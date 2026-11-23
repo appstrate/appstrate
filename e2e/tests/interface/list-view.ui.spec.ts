@@ -11,28 +11,26 @@ for (const screen of [
     authedPage: page,
   }) => {
     await page.goto(screen.path);
-    const cards = page.getByRole("tab", { name: "Vue cartes", exact: true });
-    const table = page.getByRole("tab", { name: "Vue tableau", exact: true });
-    await expect(cards).toHaveAttribute("data-state", "active");
+    const cards = page.getByRole("radio", { name: "Vue cartes", exact: true });
+    const table = page.getByRole("radio", { name: "Vue tableau", exact: true });
+    await expect(cards).toBeChecked();
     for (const stored of ['"table"', '"cards"', '"invalid"', "{broken"]) {
       await page.evaluate(
         ({ key, stored }) => localStorage.setItem(`appstrate-view-${key}`, stored),
         { key: screen.key, stored },
       );
       await page.reload();
-      await expect(stored === '"table"' ? table : cards).toHaveAttribute("data-state", "active");
+      await expect(stored === '"table"' ? table : cards).toBeChecked();
     }
-    await table.focus();
-    await page.keyboard.press("Enter");
-    await expect(table).toHaveAttribute("data-state", "active");
+    await cards.focus();
+    await page.keyboard.press("ArrowLeft");
+    await expect(table).toBeFocused();
+    await expect(table).toBeChecked();
     await page.reload();
-    await expect(table).toHaveAttribute("data-state", "active");
+    await expect(table).toBeChecked();
     // A choice on either new grid must not change another index's default.
     await page.goto("/agents");
-    await expect(page.getByRole("tab", { name: "Vue tableau", exact: true })).toHaveAttribute(
-      "data-state",
-      "active",
-    );
+    await expect(page.getByRole("radio", { name: "Vue tableau", exact: true })).toBeChecked();
   });
 }
 

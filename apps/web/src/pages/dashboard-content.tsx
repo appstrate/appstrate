@@ -28,7 +28,6 @@ import { useSpaceLink } from "../hooks/use-current-space";
 import { useChatCan } from "../modules/chat/use-chat-runtime";
 import { useCanReach } from "../hooks/use-can-reach";
 import { useSpaces } from "../hooks/use-spaces";
-import { useOrg } from "../hooks/use-org";
 import { useCopyToClipboard } from "@appstrate/ui/use-copy-to-clipboard";
 import { chatDraftNavigationState } from "../lib/creation-handoff";
 import { ScheduledAt } from "../components/scheduled-at";
@@ -396,14 +395,11 @@ export function DashboardContent(data: DashboardData) {
   const { t } = useTranslation("agents");
   const { can } = usePermissions();
   const { data: spaces } = useSpaces();
-  const orgPermissions = useOrg().currentOrg?.permissions;
   // The dashboard is the fallback route and renders for ANY principal: each
   // section answers to the guard of the query that feeds it — in « Tous les
   // espaces », granted in some space (the org route lists those).
   const sections = dashboardSections(
-    data.spanning
-      ? (permission) => spacesWhere(spaces, orgPermissions, (can) => can(permission)).length > 0
-      : can,
+    data.spanning ? (permission) => spacesWhere(spaces, (can) => can(permission)).length > 0 : can,
   );
   const metrics = dashboardMetrics(data, sections, t);
   const agentById = new Map(data.agents.map((agent) => [agent.id, agent]));

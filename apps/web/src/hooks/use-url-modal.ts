@@ -25,15 +25,11 @@ function openedBy(state: unknown): unknown {
     : undefined;
 }
 
-function withOpener(state: unknown, name: string | undefined): unknown {
+/** The state of an entry that opens modal `name` on another address: the modal's close goes back over it instead of replacing it. */
+export function modalOpeningState(state: unknown, name: string | undefined): unknown {
   const { [OPENED_BY]: _, ...rest } =
     typeof state === "object" && state !== null ? (state as Record<string, unknown>) : {};
   return name === undefined ? rest : { ...rest, [OPENED_BY]: name };
-}
-
-/** The state of an entry that opens modal `name` on another address: the modal's close goes back over it instead of replacing it. */
-export function modalOpeningState(state: unknown, name: string): unknown {
-  return withOpener(state, name);
 }
 
 type ModalStep = { back: true } | { back: false; search: string; replace: boolean; state: unknown };
@@ -59,13 +55,14 @@ export function modalParamStep(
   if (next !== previous) for (const companion of companions) params.delete(companion);
   const search = searchOf(params);
   if (next === null) return { back: false, search, replace: true, state: current.state };
-  if (!open) return { back: false, search, replace: false, state: withOpener(current.state, name) };
+  if (!open)
+    return { back: false, search, replace: false, state: modalOpeningState(current.state, name) };
   // The entry is the open modal's: replaced, and still an opening's own when it was one.
   return {
     back: false,
     search,
     replace: true,
-    state: withOpener(current.state, opener === name ? name : undefined),
+    state: modalOpeningState(current.state, opener === name ? name : undefined),
   };
 }
 

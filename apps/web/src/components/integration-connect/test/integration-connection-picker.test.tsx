@@ -694,10 +694,8 @@ describe("IntegrationConnectionPicker — what the modal writes", () => {
 describe("IntegrationConnectionPicker — 'no connection'", () => {
   it("surfaces the agent's `required` flag, which withholds 'no connection'", () => {
     const unbound = resolution({ source: null, resolved_connection_ids: [] });
-    expect(pickerFor(unbound).required).toBe(false);
     expect(pickerFor(unbound).offersNone).toBe(true);
     const required = pickerFor(unbound, { required: true });
-    expect(required.required).toBe(true);
     expect(required.offersNone).toBe(false);
     expect(
       propsOf(modalFor(required).props.secondaryActions, `member-pick-none-${INTEGRATION}`),
@@ -721,7 +719,7 @@ describe("IntegrationConnectionPicker — 'no connection'", () => {
       },
     ).queryKey;
     qc.setQueryData(publishedKey, readiness(unbound, false, true));
-    const required = (version?: string) => {
+    const offersNone = (version?: string) => {
       const pickers: Array<ConnectionPicker | null> = [];
       render(
         <PickerProbe
@@ -731,10 +729,10 @@ describe("IntegrationConnectionPicker — 'no connection'", () => {
         />,
         { queryClient: qc },
       );
-      return pickers[0]?.required;
+      return pickers[0]?.offersNone;
     };
-    expect(required("published")).toBe(true);
-    expect(required()).toBe(false);
+    expect(offersNone("published")).toBe(false);
+    expect(offersNone()).toBe(true);
   });
 
   it("offers to connect only the agent's auth when the actor's connections are on another", () => {
@@ -1698,6 +1696,12 @@ describe("IntegrationConnectionPicker — scopes against the agent", () => {
     expect(
       propsOf(actionsOf(problem, withConnect(pickerOver([dead]))), `member-pick-renew-${WEB}`),
     ).toBeDefined();
+    const replacements: unknown[][] = [];
+    const owner = actionsOf(problem, withConnect(pickerOver([dead])), {
+      onConnect: (...args) => replacements.push(args),
+    });
+    click(propsOf(owner, `member-pick-new-for-agent-${WEB}`));
+    expect(replacements).toEqual([["primary", WEB]]);
     const foreign = { ...dead, is_own: false };
     expect(
       actionsOf({ kind: "dead", conn: foreign }, withConnect(pickerOver([foreign]))),

@@ -206,9 +206,11 @@
   --border: oklch(0.28 0.005 286);
   --input: oklch(0.28 0.005 286);
   --ring: oklch(0.68 0.17 262);
+  --destructive: oklch(0.75 0.15 29.7);
+  --destructive-foreground: oklch(0.145 0.004 286);
   --success: oklch(0.7 0.14 153);
   --warning: oklch(0.78 0.13 77);
-  --canvas: oklch(0.145 0.004 286);
+  --canvas: oklch(0.125 0.004 286);
   --spark: oklch(0.72 0.16 38);
   --spark-foreground: oklch(0.145 0.004 286);
   --identity-blue: oklch(0.707 0.165 255);

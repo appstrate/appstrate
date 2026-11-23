@@ -59,7 +59,7 @@ function pageFor(
     personal: options.personal ?? false,
     access: "member",
     role: null,
-    permissions,
+    permissions: [...org.permissions, ...permissions],
     created_by: null,
     createdAt: org.createdAt,
     updatedAt: org.createdAt,

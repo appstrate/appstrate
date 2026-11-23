@@ -121,7 +121,10 @@ describe("the navigation in « Tous les espaces »", () => {
     // Out of the mode the working space must read runs for the Runs entry to show at all.
     const asked = (overview: boolean) => {
       let queryClient: QueryClient | undefined;
-      navFor(overview ? working : [...working, "runs:read"], spaces, overview, "/", (qc) => {
+      const listed = overview
+        ? spaces
+        : [testSpace("spc_a", [...working, "runs:read"]), spaces[1]!];
+      navFor(working, listed, overview, "/", (qc) => {
         queryClient = qc;
       });
       return queryClient!

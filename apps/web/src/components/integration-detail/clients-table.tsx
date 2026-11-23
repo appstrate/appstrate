@@ -26,7 +26,13 @@ import { usePermissions } from "../../hooks/use-permissions";
 import { useUrlModal } from "../../hooks/use-url-modal";
 import { useWorkingSpaceWording } from "../../hooks/use-overview-mode";
 import { clientDeeds, clientLevelKey, useIntegrationClientColumns } from "./integration-columns";
-import { mergeClientTiers, type ClientRow } from "../../lib/integration-clients";
+import {
+  EDIT_OAUTH_CLIENT_PARAM,
+  integrationClientModalRef,
+  integrationClientModalValue,
+  mergeClientTiers,
+  type ClientRow,
+} from "../../lib/integration-clients";
 import {
   useIntegrationDetail,
   useIntegrationClients,
@@ -326,9 +332,7 @@ export function ClientsTable({
   const [newTier, setNewTier] = useState<IntegrationClientTier | null>(null);
   // Several tables can share a page (one per auth): each answers only the parameter
   // scoped to its own `authKey` (`?editOauthClient=<authKey>:<client_ref>`).
-  const editClient = useUrlModal("editOauthClient");
-  const scopedValue = (value: string | null) =>
-    value?.startsWith(`${authKey}:`) ? value.slice(authKey.length + 1) : null;
+  const editClient = useUrlModal(EDIT_OAUTH_CLIENT_PARAM);
   const [confirmDelete, setConfirmDelete] = useState<ClientRow | null>(null);
   const [confirmPromote, setConfirmPromote] = useState<ClientRow | null>(null);
   // Auto-provisioned auths hide the manual register button by default — their
@@ -351,7 +355,7 @@ export function ClientsTable({
   // A parameter typed in the URL opens only what the table itself would offer.
   const editedRow = rows.find(
     (row) =>
-      row.client.client_ref === scopedValue(editClient.value) &&
+      row.client.client_ref === integrationClientModalRef(authKey, editClient.value) &&
       clientDeeds(row, canManageOrg).editable,
   );
   const modal: ModalState = editedRow
@@ -384,7 +388,7 @@ export function ClientsTable({
         params: { path: { packageId, authKey } },
         body: { client_ref: row.client.client_ref },
       }),
-    onEdit: (row) => editClient.open(`${authKey}:${row.client.client_ref}`),
+    onEdit: (row) => editClient.open(integrationClientModalValue(authKey, row.client.client_ref)),
     onPromote: (row) => setConfirmPromote(row),
     onDelete: (row) => setConfirmDelete(row),
   });

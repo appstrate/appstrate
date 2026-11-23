@@ -19,6 +19,7 @@ export interface ListState {
 /** Only the values the screen declares — a URL is user input. */
 export function readList<T extends string>(raw: string | null, allowed: readonly T[]): T[] {
   if (!raw) return [];
+  if ((allowed as readonly string[]).includes(raw)) return [raw as T];
   return raw.split(",").filter((v): v is T => (allowed as readonly string[]).includes(v));
 }
 
@@ -38,15 +39,15 @@ export function urlListParams(
   return {
     params,
     values<T extends string>(key: string, allowed: readonly T[]): T[] {
-      return readList(params.get(key), allowed);
+      return [...new Set(params.getAll(key).flatMap((value) => readList(value, allowed)))];
     },
     setValues:
       (key: string) =>
       (values: string[]): void => {
         setParams((prev) => {
           const next = new URLSearchParams(prev);
-          if (values.length === 0) next.delete(key);
-          else next.set(key, values.join(","));
+          next.delete(key);
+          for (const value of values) next.append(key, value);
           return next;
         });
       },

@@ -18,6 +18,7 @@ const { ClientsTable } = await import("../clients-table.tsx");
 const { orgStore } = await import("../../../stores/org-store.ts");
 const { spaceStore } = await import("../../../stores/space-store.ts");
 const { render } = await import("../../../test/render.tsx");
+const { testSpace } = await import("../../../test/space-context.ts");
 const { $api } = await import("../../../api/client.ts");
 const i18nModule = await import("../../../i18n.ts");
 
@@ -43,6 +44,15 @@ function table({ loaded }: { loaded: boolean }): string {
     createdAt: "2026-09-05T00:00:00Z",
   };
   qc.setQueryData(["orgs"], [org]);
+  qc.setQueryData(
+    $api.queryOptions("get", "/api/spaces", { params: { header: { "X-Org-Id": ORG_ID } } })
+      .queryKey,
+    {
+      object: "list",
+      data: [testSpace(SPACE_ID, ["integrations:read"])],
+      hasMore: false,
+    },
+  );
   if (loaded)
     qc.setQueryData(
       $api.queryOptions("get", "/api/integrations/{packageId}/auths/{authKey}/clients", {

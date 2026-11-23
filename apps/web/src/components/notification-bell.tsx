@@ -19,7 +19,7 @@ import { useOverviewMode } from "../hooks/use-overview-mode";
 import { useCurrentSpaceId } from "../hooks/use-current-space";
 import { useSpaces } from "../hooks/use-spaces";
 import { notificationHref, notificationRow, type NotificationItem } from "../lib/notification-row";
-import { spacesHeld } from "../lib/space-lists";
+import { isSpaceEnterable } from "../lib/space-lists";
 import { SpaceNameOf } from "./space-name";
 
 /**
@@ -217,7 +217,9 @@ export function NotificationBell() {
     onItemClick: () => setOpen(false),
     // The spaces the list reads, every one of them.
     markAllRead: () =>
-      markAllRead.mutate(spanning ? spacesHeld(spaces).map((space) => space.id) : null),
+      markAllRead.mutate(
+        spanning ? (spaces ?? []).filter(isSpaceEnterable).map((space) => space.id) : null,
+      ),
     // Rows wait for the agent names: a title never shows the raw package id first.
     loading: notificationsPending || agentsLoading,
     failed: notificationsFailed && notifications === undefined,

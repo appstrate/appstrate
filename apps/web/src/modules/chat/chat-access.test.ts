@@ -12,7 +12,12 @@
  */
 
 import { describe, expect, it } from "bun:test";
-import { accessStanding, resolveChatCapabilities, type ChatAccessContext } from "./chat-access.ts";
+import {
+  accessStanding,
+  limitedGrants,
+  resolveChatCapabilities,
+  type ChatAccessContext,
+} from "./chat-access.ts";
 import { spacePackagePermission } from "@appstrate/core/permissions";
 import type { SpaceGrant } from "../../lib/package-permissions.ts";
 
@@ -33,7 +38,6 @@ function context(
       space === null
         ? []
         : [{ id: "spc_1", permissions, personal: false, access: "member", ...space }],
-    orgPermissions: [],
     authoring,
   };
 }
@@ -244,9 +248,18 @@ describe("activating an integration", () => {
   });
 
   it("is granted when ONE of the spaces the chat acts in allows it", () => {
-    const refused = { id: "spc_r", permissions: [], personal: false, access: "member" as const };
-    const allowed = { ...refused, id: "spc_a", permissions: [INTEGRATION_ACTIVATE_PERMISSION] };
-    const ctx = { orgPermissions: CONVERSES, authoring: true };
+    const refused = {
+      id: "spc_r",
+      permissions: CONVERSES,
+      personal: false,
+      access: "member" as const,
+    };
+    const allowed = {
+      ...refused,
+      id: "spc_a",
+      permissions: [...CONVERSES, INTEGRATION_ACTIVATE_PERMISSION],
+    };
+    const ctx = { authoring: true };
     expect(verdicts({ ...ctx, spaces: [refused] }).activateIntegrations).toBe(false);
     expect(verdicts({ ...ctx, spaces: [refused, allowed] }).activateIntegrations).toBe(true);
   });
@@ -343,7 +356,7 @@ describe("a caller who may read the chat but not write to it", () => {
 describe("the spaces granting each row", () => {
   const team = (id: string, permissions: string[]) => ({
     id,
-    permissions,
+    permissions: ["mcp:read", "mcp:invoke", ...permissions],
     personal: false,
     access: "member" as const,
   });
@@ -353,10 +366,9 @@ describe("the spaces granting each row", () => {
   it("names, for each row, the acting spaces that grant it, in order", () => {
     const ctx: ChatAccessContext = {
       spaces: [
-        team("spc_a", ["runs:read", "files:read"]),
-        team("spc_b", ["files:read", "schedules:write"]),
+        team("spc_a", ["chat:write", "runs:read", "files:read"]),
+        team("spc_b", ["chat:write", "files:read", "schedules:write"]),
       ],
-      orgPermissions: CONVERSES,
       authoring: true,
     };
     const spaces = spacesOf(ctx);
@@ -377,8 +389,10 @@ describe("the spaces granting each row", () => {
     // `run_and_wait` launches and polls in ONE space: launching in one and reading in another
     // is no run the assistant can follow.
     const ctx: ChatAccessContext = {
-      spaces: [team("spc_a", ["agents:run"]), team("spc_b", ["runs:read"])],
-      orgPermissions: CONVERSES,
+      spaces: [
+        team("spc_a", ["chat:write", "agents:run"]),
+        team("spc_b", ["chat:write", "runs:read"]),
+      ],
       authoring: true,
     };
     expect(spacesOf(ctx).runAgents).toEqual([]);
@@ -388,7 +402,6 @@ describe("the spaces granting each row", () => {
   it("names nothing for a space where the caller may not write to the chat", () => {
     const ctx: ChatAccessContext = {
       spaces: [team("spc_a", ["chat:write", "files:read"]), team("spc_b", ["files:read"])],
-      orgPermissions: ["mcp:read", "mcp:invoke"],
       authoring: true,
     };
     expect(spacesOf(ctx).browseFiles).toEqual(["spc_a"]);
@@ -443,5 +456,32 @@ describe("the standing the access summary names", () => {
         params: { org: "Membre", name: "Atelier", space: "Opérateur" },
       },
     });
+  });
+});
+
+describe("a limited conversation", () => {
+  it("keeps only the origin and drops the organization-only writes from its effective grants", () => {
+    const origin = {
+      id: "spc_a",
+      access: "member" as const,
+      personal: false,
+      permissions: [
+        "chat:read",
+        "chat:write",
+        "mcp:read",
+        "files:read",
+        "org:settings",
+        "members:read",
+      ],
+    };
+    const other = { ...origin, id: "spc_b", permissions: [...origin.permissions, "agents:write"] };
+    const org = ["org:settings", "members:read"];
+    expect(limitedGrants([origin, other], origin.id, org)).toEqual([
+      {
+        ...origin,
+        permissions: ["chat:read", "chat:write", "mcp:read", "files:read", "members:read"],
+      },
+    ]);
+    expect(limitedGrants([other], origin.id, org)).toEqual([]);
   });
 });

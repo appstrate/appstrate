@@ -14,8 +14,11 @@
  * seam is added for the test's benefit, so what runs here is what ships.
  */
 
-import { describe, it, expect } from "bun:test";
-import { triggerBlobDownload } from "../blob-download";
+import { describe, it, expect, spyOn } from "bun:test";
+import i18n, { i18nReady } from "../../i18n";
+import { toast } from "sonner";
+import { ApiError } from "../../api/errors";
+import { triggerBlobDownload, downloadOrToast } from "../blob-download";
 
 interface FakeAnchor {
   href: string;
@@ -178,6 +181,25 @@ describe("triggerBlobDownload", () => {
       URL.createObjectURL = realCreate;
       if (realDocument === undefined) delete g.document;
       else g.document = realDocument;
+    }
+  });
+});
+
+describe("downloadOrToast", () => {
+  it("preserves the API refusal and uses the download message for a network or non-JSON failure", async () => {
+    await i18nReady;
+    await i18n.changeLanguage("fr");
+    const notify = spyOn(toast, "error").mockImplementation(() => 0);
+    try {
+      const read = (error: Error) => () => Promise.reject(error);
+      await downloadOrToast(read(new ApiError("forbidden", "Denied", 403)), "x.pdf");
+      expect(notify).toHaveBeenLastCalledWith(i18n.t("common:apiError.forbidden"));
+      for (const error of [new TypeError("Failed to fetch"), new Error("Bad Gateway")]) {
+        await downloadOrToast(read(error), "x.pdf");
+        expect(notify).toHaveBeenLastCalledWith(i18n.t("common:error.downloadFailed"));
+      }
+    } finally {
+      notify.mockRestore();
     }
   });
 });

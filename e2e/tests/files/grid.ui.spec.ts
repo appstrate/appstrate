@@ -100,8 +100,8 @@ for (const appearance of [
       return route.fulfill({ json: { ...image, preview_url: "/api/files/file_grid/content" } });
     });
     await page.goto("/files");
-    const cards = page.getByRole("tab", { name: "Vue cartes", exact: true });
-    const table = page.getByRole("tab", { name: "Vue tableau", exact: true });
+    const cards = page.getByRole("radio", { name: "Vue cartes", exact: true });
+    const table = page.getByRole("radio", { name: "Vue tableau", exact: true });
     await expect(cards).toHaveAttribute("data-state", "active");
     const preview = page.getByRole("button", { name: "Aperçu: capture.png", exact: true });
     await expect(preview).toBeVisible();

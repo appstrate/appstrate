@@ -2,16 +2,7 @@
 
 import { useState, type SetStateAction } from "react";
 
-/** Key-order independent, so re-adding a key does not make an unchanged value dirty. */
-function stableJson(value: unknown): string {
-  return JSON.stringify(value, (_key, item: unknown) =>
-    item && typeof item === "object" && !Array.isArray(item)
-      ? Object.fromEntries(
-          Object.entries(item as Record<string, unknown>).sort(([a], [b]) => (a < b ? -1 : 1)),
-        )
-      : item,
-  );
-}
+import { stableJson } from "../lib/stable-json";
 
 /** A local edit survives refetches; a clean form follows the latest stored value. */
 export function useSettingDraft<T>(stored: T) {

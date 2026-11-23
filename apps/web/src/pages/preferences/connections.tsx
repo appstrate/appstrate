@@ -23,7 +23,7 @@ import { ConnectionDeleteConfirm } from "../../components/integration-connect/co
 import type { MeConnectionEntry, MeConnectionSourceGroup } from "@appstrate/shared-types";
 import { useCanReach } from "../../hooks/use-can-reach";
 import { connectionLockHintKey } from "../../components/integration-connect/connection-ownership";
-import { useCurrentOrgId, useOrg } from "../../hooks/use-org";
+import { useCurrentOrgId } from "../../hooks/use-org";
 import { useSpaces } from "../../hooks/use-spaces";
 import { connectionRowConfigures } from "../../lib/space-lists";
 import { ConnectionScopeBadge } from "../../components/integration-connect/connection-scope-badge";
@@ -50,11 +50,10 @@ function ConnectionRow({
 }) {
   const { t } = useTranslation(["settings", "common", "agents"]);
   const orgId = useCurrentOrgId();
-  const orgPermissions = useOrg().currentOrg?.permissions;
   const { data: spaces } = useSpaces();
   const [renaming, setRenaming] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
-  const configures = connectionRowConfigures(conn, orgId, spaces, orgPermissions);
+  const configures = connectionRowConfigures(conn, orgId, spaces);
   const lockKey = connectionLockHintKey(conn.locked_by, configures);
   const lockHint = lockKey ? t(lockKey) : null;
   const canRename = conn.allowed_actions.includes("rename");

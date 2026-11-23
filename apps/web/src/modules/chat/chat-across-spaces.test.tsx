@@ -28,6 +28,7 @@ const { ConversationFiles, ConversationRuns, ShownFile } =
   await import("./conversation-sidebar.tsx");
 const { useConversationTabs } = await import("./use-conversation-tabs.ts");
 const { useChatCan, useChatTransport } = await import("./use-chat-runtime.ts");
+const { usePermissions } = await import("../../hooks/use-permissions.ts");
 const { useCanReach } = await import("../../hooks/use-can-reach.ts");
 const { ACROSS_SPACES_POLL_MS } = await import("../../lib/across-spaces.ts");
 
@@ -166,7 +167,25 @@ describe("the grants the chat module reads", () => {
     renderOverview(<Probe permission={permission} />, spaces).html;
 
   // The rule itself is `grantedInSomeActingSpace` (`lib/test/space-lists.test.ts`): this pins the wiring.
-  it("reads the space listing and the organization's grants", () => {
+  it("keeps an administrator grant absent from the previewed space out of both the working gate and the chat", () => {
+    const qc = memberSpaceClient([space("spc_a", ["chat:read", "chat:write", "mcp:read"])]);
+    qc.setQueryData(
+      ["orgs"],
+      [{ id: "org_1", name: "Acme", role: "admin", permissions: ["files:read"] }],
+    );
+    function Gates() {
+      return (
+        <p>
+          {String(usePermissions().can("files:read"))}|{String(useChatCan()("files:read"))}
+        </p>
+      );
+    }
+    expect(
+      renderInSpace(<Gates />, { queryClient: qc, overview: false, spaceId: "spc_a" }),
+    ).toContain("<p>false|false</p>");
+  });
+
+  it("reads each space's effective grants", () => {
     expect(can("skills:read")).toContain("<p>true</p>");
     expect(can("files:read")).toContain("<p>false</p>");
   });

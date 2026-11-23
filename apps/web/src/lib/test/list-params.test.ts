@@ -32,10 +32,19 @@ describe("urlListParams", () => {
   it("pushes a filter and removes the key when it is emptied", () => {
     const url = recorder("q=mail");
     url.list(["state"]).setValues("state")(["active", "inactive"]);
-    expect(url.current()).toBe("q=mail&state=active%2Cinactive");
+    expect(url.current()).toBe("q=mail&state=active&state=inactive");
     url.list(["state"]).setValues("state")([]);
     expect(url.current()).toBe("q=mail");
     expect(url.calls).toEqual([{ replace: false }, { replace: false }]);
+  });
+
+  it("round-trips a comma inside a value and reads existing comma-separated bookmarks", () => {
+    const url = recorder("state=active%2Cinactive");
+    const allowed = ["active", "inactive", "has,comma"];
+    expect(url.list(["state"]).values("state", allowed)).toEqual(["active", "inactive"]);
+    url.list(["state"]).setValues("state")(["has,comma", "active"]);
+    expect(url.current()).toBe("state=has%2Ccomma&state=active");
+    expect(url.list(["state"]).values("state", allowed)).toEqual(["has,comma", "active"]);
   });
 
   it("replaces the entry for the search", () => {

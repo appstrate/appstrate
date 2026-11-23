@@ -1,15 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { useRef, useState, type Dispatch, type ReactNode } from "react";
-import {
-  ActivityIcon,
-  CheckIcon,
-  CopyIcon,
-  FilesIcon,
-  PanelRightCloseIcon,
-  PanelRightIcon,
-  XIcon,
-} from "lucide-react";
+import { ActivityIcon, FilesIcon, PanelRightCloseIcon, PanelRightIcon, XIcon } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { useNowTick } from "@appstrate/ui/use-now-tick";
 import { useSessionDetail } from "@appstrate/module-chat/unread";
@@ -23,7 +15,7 @@ import { Sheet, SheetContent, SheetTitle } from "@appstrate/ui/components/sheet"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@appstrate/ui/components/tabs";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@appstrate/ui/components/tooltip";
 import { MimeIcon } from "@appstrate/ui/components/mime-icon";
-import { useCopyToClipboard } from "@appstrate/ui/use-copy-to-clipboard";
+import { CopyButton } from "@appstrate/ui/components/copy-button";
 import { $api } from "../../api/client";
 import { AgentDetailPaneHeader } from "../../components/agent-detail/agent-detail-split";
 import { EmptyState, ErrorState } from "../../components/page-states";
@@ -312,20 +304,14 @@ function InfoDate({ iso }: { iso: string }) {
 
 function ConversationId({ id }: { id: string }) {
   const { t } = useTranslation(["chat", "common"]);
-  const { copy, copied } = useCopyToClipboard();
   return (
     <div className="text-muted-foreground flex items-center gap-1 text-xs">
       <code className="min-w-0 flex-1 truncate font-mono">{id}</code>
-      <Button
-        type="button"
-        variant="ghost"
-        size="icon-sm"
+      <CopyButton
+        value={id}
         className="desktop-pointer:size-6 shrink-0"
         aria-label={`${t("common:btn.copy")} (${t("chat:context.info.id")})`}
-        onClick={() => void copy(id)}
-      >
-        {copied ? <CheckIcon /> : <CopyIcon />}
-      </Button>
+      />
     </div>
   );
 }

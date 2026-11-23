@@ -336,10 +336,24 @@ export function ProblemActions({
   const { conn } = problem;
   const { oauthPending, busy } = picker;
   const canFix = picker.canFixInPlace(conn);
+  const canCreate = picker.canAddConnection && picker.authKeys.includes(conn.auth_key);
+  const create = canCreate && (
+    <Button
+      type="button"
+      size="sm"
+      disabled={busy || oauthPending}
+      onClick={() => onConnect(conn.auth_key, conn.id)}
+      data-testid={`member-pick-new-for-agent-${conn.id}`}
+    >
+      <Plus />
+      {t("detail.integrationMemberPicker.newWithAgentScopes")}
+    </Button>
+  );
   if (problem.kind === "dead") {
     if (!canFix) return null;
     return (
-      <div>
+      <div className="flex flex-wrap gap-1.5">
+        {create}
         <Button
           type="button"
           variant="outline"
@@ -354,23 +368,12 @@ export function ProblemActions({
       </div>
     );
   }
-  const canCreate = picker.canAddConnection && picker.authKeys.includes(conn.auth_key);
+
   if (!canCreate && !canFix) return null;
   const missing = picker.missingScopeLabels(conn).join(", ");
   return (
     <div className="flex flex-wrap gap-1.5">
-      {canCreate && (
-        <Button
-          type="button"
-          size="sm"
-          disabled={busy || oauthPending}
-          onClick={() => onConnect(conn.auth_key, conn.id)}
-          data-testid={`member-pick-new-for-agent-${conn.id}`}
-        >
-          <Plus />
-          {t("detail.integrationMemberPicker.newWithAgentScopes")}
-        </Button>
-      )}
+      {create}
       {canFix && (
         <Button
           type="button"
