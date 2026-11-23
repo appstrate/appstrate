@@ -4,7 +4,16 @@ import type { ReactNode } from "react";
 import { Skeleton } from "@appstrate/ui/components/skeleton";
 import { cn } from "@appstrate/ui/cn";
 import { COMPOSER_BUTTON_CLASS } from "./touch-targets.ts";
-import { DISCLAIMER_TEXT_CLASS } from "./phone-text.ts";
+import {
+  COMPOSER_FIELD_CLASS,
+  COMPOSER_ROW_CLASS,
+  COMPOSER_SEND_CLASS,
+  COMPOSER_TOOLS_CLASS,
+  DISCLAIMER_CLASS,
+} from "./phone-text.ts";
+
+/** The box of the composer's `size="icon-sm"` buttons: 44 px on touch, 32 px under a mouse. */
+const COMPOSER_BUTTON_BOX_CLASS = cn("desktop-pointer:size-8 size-11", COMPOSER_BUTTON_CLASS);
 
 /**
  * A saved conversation while its history loads: the turns it will show, in
@@ -19,8 +28,8 @@ export function ConversationSkeleton({
   label: string;
   /** The composer's placeholder; null for a reader, who gets no composer. */
   placeholder: ReactNode;
-  /** The writer's line under the composer: its text (`thread.disclaimer`), so it wraps as the live
-   *  one does, or a bar where the text is not loaded yet. */
+  /** The writer's line under the composer from `md` up (a phone has it in the "+" panel): its text
+   *  (`thread.disclaimer`), so it wraps as the live one does, or a bar where it is not loaded yet. */
   disclaimer: ReactNode;
 }) {
   return (
@@ -54,7 +63,7 @@ export function ConversationSkeleton({
       ) : (
         <div aria-hidden className="mx-auto flex w-full max-w-2xl flex-col gap-2 pb-4">
           <ComposerSkeleton placeholder={placeholder} />
-          <div className={cn(DISCLAIMER_TEXT_CLASS, "self-center")}>{disclaimer}</div>
+          <div className={cn(DISCLAIMER_CLASS, "self-center")}>{disclaimer}</div>
         </div>
       )}
     </div>
@@ -62,9 +71,10 @@ export function ConversationSkeleton({
 }
 
 /**
- * The writer's `Composer` (`thread.tsx`), inert: the `min-h-9` input line over the tool row —
- * `ComposerTools` on the left (attach, settings), the model picker's 30px trigger and send on the
- * right. Shared by every chat wait, the conversation's and the welcome screen's.
+ * The writer's `Composer` (`thread.tsx`), inert: from `md` up the `min-h-9` input line over the
+ * tool row — `ComposerTools` on the left (attach, the panel's settings button), send on the right;
+ * on a phone one line, the "+", the field, send. Shared by every chat wait, the conversation's and
+ * the welcome screen's.
  */
 export function ComposerSkeleton({
   placeholder,
@@ -76,22 +86,26 @@ export function ComposerSkeleton({
 }) {
   return (
     <div className="bg-card flex w-full flex-col gap-1 rounded-xl border px-3 py-2 shadow-sm">
-      <div className="group/composer chat-composer-grid" data-rest="">
-        <div className="text-muted-foreground desktop-pointer:min-h-9 flex min-h-10 min-w-0 items-center overflow-hidden py-1 text-base [grid-area:input]">
-          {placeholder}
-        </div>
-        <div className="min-w-0 [grid-area:tools]">
-          <div className="flex items-center gap-1.5 max-md:[&>:not(:first-child)]:hidden">
-            <Skeleton className={COMPOSER_BUTTON_CLASS} />
-            <Skeleton className={COMPOSER_BUTTON_CLASS} />
-            {limited && <Skeleton className="desktop-pointer:h-7 h-10 w-44 rounded-full" />}
+      <div className={COMPOSER_ROW_CLASS}>
+        <div className={COMPOSER_TOOLS_CLASS}>
+          <div className="flex items-center gap-1.5">
+            <Skeleton className={COMPOSER_BUTTON_BOX_CLASS} />
+            <Skeleton className={cn(COMPOSER_BUTTON_BOX_CLASS, "max-md:hidden")} />
+            {limited && (
+              <Skeleton className="desktop-pointer:h-7 h-10 w-44 rounded-full max-md:hidden" />
+            )}
           </div>
         </div>
-        {/* No slot for the context gauge: nothing says before load that a conversation has a
-            measure, and a reserved hole that collapses shifts more than a gauge that appears. */}
-        <Skeleton className="desktop-pointer:h-[30px] h-10 w-32 rounded-md [grid-area:model] max-md:hidden" />
-        <div className="flex items-center gap-2 [grid-area:send]">
-          <Skeleton className={COMPOSER_BUTTON_CLASS} />
+        <div
+          className={cn(
+            "text-muted-foreground desktop-pointer:min-h-9 flex min-w-0 items-center overflow-hidden py-1 text-base",
+            COMPOSER_FIELD_CLASS,
+          )}
+        >
+          {placeholder}
+        </div>
+        <div className={COMPOSER_SEND_CLASS}>
+          <Skeleton className={COMPOSER_BUTTON_BOX_CLASS} />
         </div>
       </div>
     </div>

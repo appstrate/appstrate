@@ -267,8 +267,8 @@ export function FileWidget(props: WidgetProps) {
                 <Button
                   type="button"
                   variant="ghost"
-                  size="icon"
-                  className="text-muted-foreground ml-2 size-7 shrink-0"
+                  size="icon-sm"
+                  className="text-muted-foreground desktop-pointer:size-7 ml-2 shrink-0"
                   disabled={locked}
                   onClick={() => remove(i)}
                 >

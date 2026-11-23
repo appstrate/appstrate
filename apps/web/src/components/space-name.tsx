@@ -120,25 +120,36 @@ export function SpaceNameOf({
 }
 
 /**
- * Every space a row touched, none counted away: all the tiles in a row, then the names joined
- * (« Studio, Coffre »), truncated with the full names in `title`. One space reads as
- * {@link SpaceName}. The line of a conversation's spaces.
+ * Every space a row touched: the tiles, then the names joined (« Studio, Coffre »), truncated with
+ * the full names in `title`; one space reads as {@link SpaceName}. With `tilesOnly`, for a line with
+ * no room for the names, two tiles at most then « +N », the names in `title` and for a screen
+ * reader. The line of a conversation's spaces.
  */
 export function SpaceTilesOf({
   spaceIds,
   size = "sm",
   className,
+  tilesOnly = false,
 }: {
   spaceIds: readonly string[];
   size?: keyof typeof SIZES;
   className?: string;
+  /** The tiles alone, two at most then « +N »: for a line with no room for the names. */
+  tilesOnly?: boolean;
 }) {
   const { t } = useTranslation();
   const spaces = useSpacesOf(spaceIds);
   if (spaces.length === 0) return null;
+  const names = spaceLabels(spaces, t);
+  if (tilesOnly)
+    return (
+      <span className={cn("flex shrink-0 items-center", className)} title={names}>
+        <SpaceTileStack spaces={spaces} size={size} max={2} />
+        <span className="sr-only">{names}</span>
+      </span>
+    );
   if (spaces.length === 1)
     return <SpaceName space={spaces[0]!} size={size} className={className} />;
-  const names = spaceLabels(spaces, t);
   return (
     <span
       className={cn("flex min-w-0 items-center", SIZES[size].box, className)}

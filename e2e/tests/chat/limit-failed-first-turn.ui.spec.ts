@@ -37,7 +37,7 @@ test("lifting the limit after a failed first turn shows no error and the retry c
   const patched = page.waitForResponse(
     (res) => res.request().method() === "PATCH" && res.url().includes(`${chat}/sessions/`),
   );
-  await chip.getByRole("button").click();
+  await page.getByRole("button", { name: /^Lever la limite/ }).click();
   expect((await patched).status()).toBe(404);
 
   await send("encore");

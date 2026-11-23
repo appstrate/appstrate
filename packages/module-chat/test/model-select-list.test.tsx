@@ -15,7 +15,7 @@ import { groupModelsForPicker } from "@appstrate/ui/components/model-picker-grou
 import { buildModelPickerLabels } from "@appstrate/ui/components/model-picker-labels";
 import { isModelSelectable } from "@appstrate/core/model-selectable";
 
-import { ModelSelect } from "../src/ui/model-select.tsx";
+import { ModelPanel } from "../src/ui/model-select.tsx";
 import { ChatHostProvider } from "../src/ui/runtime-context.ts";
 import { testHost } from "./test-host.ts";
 
@@ -67,12 +67,15 @@ describe("composer model list", () => {
     const t = mock((key: string) => key);
     renderToStaticMarkup(
       <ChatHostProvider value={testHost({ t })}>
-        <ModelSelect
+        <ModelPanel
           models={[{ ...live, apiShape: null }]}
           selectedId={live.id}
           onSelect={() => {}}
           generation={{}}
           onGenerationChange={() => {}}
+          view="models"
+          onViewChange={() => {}}
+          onPicked={() => {}}
         />
       </ChatHostProvider>,
     );
@@ -116,5 +119,32 @@ describe("composer model list", () => {
     expect(html.match(/<i>outgrown<\/i>/g)).toHaveLength(1);
     const gpt = itemsByLabel(html).GPT;
     expect(gpt).toContain("<i>outgrown</i>");
+  });
+});
+
+describe("a model row's action", () => {
+  it("draws the host's control at the end of each row, and nothing without one", () => {
+    const withAction = renderToStaticMarkup(
+      <ModelPickerList
+        groups={groups}
+        value={null}
+        onSelect={() => {}}
+        labels={labels}
+        selectable={isModelSelectable}
+        rowAction={(model) => <button data-testid="row-action" data-model={model.id} />}
+      />,
+    );
+    expect(withAction.match(/data-testid="row-action"/g)).toHaveLength(3);
+    expect(withAction).toContain('data-model="live"');
+    const without = renderToStaticMarkup(
+      <ModelPickerList
+        groups={groups}
+        value={null}
+        onSelect={() => {}}
+        labels={labels}
+        selectable={isModelSelectable}
+      />,
+    );
+    expect(without).not.toContain("row-action");
   });
 });

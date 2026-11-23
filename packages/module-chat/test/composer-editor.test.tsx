@@ -64,8 +64,4 @@ describe("the composer's field", () => {
   it("shows the model in its placeholder", () => {
     expect(html).toContain("composer.placeholderModel");
   });
-
-  it("sits where the composer grid puts its field", () => {
-    expect(html).toContain("[grid-area:input]");
-  });
 });

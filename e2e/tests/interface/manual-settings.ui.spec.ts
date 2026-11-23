@@ -211,7 +211,7 @@ test("browser Back can be cancelled without unmounting the edited form", async (
   await expect(page).toHaveURL(/preferences\/appearance/);
 });
 
-test("the trail shows a conversation's name, and its settings dialog renames it: Annuler writes nothing, Enregistrer writes to its own target", async ({
+test("the trail shows a conversation's name, and « Renommer » renames it: Annuler writes nothing, Renommer writes to its own target", async ({
   authedPage: page,
   apiClient,
   browserCtx,
@@ -240,10 +240,9 @@ test("the trail shows a conversation's name, and its settings dialog renames it:
   await expect(trail).toContainText("Rename A");
   await expect(trail.getByRole("textbox")).toHaveCount(0);
 
-  const openSettings = () =>
-    page.getByRole("button", { name: "Paramètres de la conversation", exact: true }).click();
-  const dialog = page.getByRole("dialog", { name: "Paramètres de la conversation" });
-  await openSettings();
+  const openRename = () => page.getByRole("button", { name: "Renommer", exact: true }).click();
+  const dialog = page.getByRole("dialog", { name: "Renommer la conversation" });
+  await openRename();
   const name = dialog.getByRole("textbox", { name: "Nom" });
   await expect(name).toHaveValue("Rename A");
   await name.fill("Pending A");
@@ -254,12 +253,12 @@ test("the trail shows a conversation's name, and its settings dialog renames it:
   // A row reads its title, then the spaces it touched.
   await page.getByRole("button", { name: /^Rename B\b/ }).click();
   await expect(page).toHaveURL(new RegExp(`/chat/${b}$`));
-  await openSettings();
+  await openRename();
   await expect(name).toHaveValue("Rename B");
   // Unchanged, nothing to save.
-  await expect(dialog.getByRole("button", { name: "Enregistrer", exact: true })).toBeDisabled();
+  await expect(dialog.getByRole("button", { name: "Renommer", exact: true })).toBeDisabled();
   await name.fill("Saved B");
-  await dialog.getByRole("button", { name: "Enregistrer", exact: true }).click();
+  await dialog.getByRole("button", { name: "Renommer", exact: true }).click();
   await expect(dialog).toHaveCount(0);
   await expect(trail).toContainText("Saved B");
   expect(writes).toEqual([{ id: b, title: "Saved B" }]);

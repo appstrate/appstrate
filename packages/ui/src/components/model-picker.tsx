@@ -90,6 +90,11 @@ interface ListProps {
    * keeps its reason.
    */
   selectable?: (model: PickerModel) => boolean;
+  /**
+   * A control at the end of a model's row (its settings). Its click and its Enter reach it alone:
+   * neither selects the row.
+   */
+  rowAction?: (model: PickerModel) => ReactNode;
   className?: string;
   listClassName?: string;
 }
@@ -104,6 +109,7 @@ export function ModelPickerList({
   renderNote,
   fixLink,
   selectable,
+  rowAction,
   className,
   listClassName,
 }: ListProps) {
@@ -177,6 +183,18 @@ export function ModelPickerList({
                     <Check
                       className={cn("mt-0.5", model.id === value ? "opacity-100" : "opacity-0")}
                     />
+                    {rowAction && (
+                      // cmdk selects the highlighted row on Enter anywhere inside the list.
+                      <span
+                        className="contents"
+                        onClick={(event) => event.stopPropagation()}
+                        onKeyDown={(event) => {
+                          if (event.key === "Enter") event.stopPropagation();
+                        }}
+                      >
+                        {rowAction(model)}
+                      </span>
+                    )}
                   </CommandItem>
                 );
               })}

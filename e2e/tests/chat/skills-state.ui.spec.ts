@@ -29,7 +29,7 @@ const commands: components["schemas"]["ChatCommands"] = {
 
 async function openSkillsPicker(page: Page) {
   await page.getByTestId("composer-settings-trigger").click();
-  await page.getByRole("menuitem", { name: /Compétences|Skills/ }).click();
+  await page.getByTestId("composer-panel-skills").click();
 }
 
 test("a skill the assistant read is pinned from its chip, and unpinned from the panel", async ({
@@ -112,7 +112,7 @@ test("a skill the assistant read is pinned from its chip, and unpinned from the 
   // Unchecking a pin sends the full set without it.
   await openSkillsPicker(page);
   const row = (pkg: string) =>
-    page.getByTestId("skills-picker-popover").getByTestId(`skill-pin-@acme/${pkg}`);
+    page.getByTestId("composer-panel").getByTestId(`skill-pin-@acme/${pkg}`);
   const unpinned = page.waitForRequest((req) => req.method() === "PATCH");
   await row("tone").click();
   expect((await unpinned).postDataJSON()).toEqual({

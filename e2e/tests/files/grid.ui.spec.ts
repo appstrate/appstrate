@@ -3,6 +3,7 @@
 import { test, expect } from "../../fixtures/browser.fixture.ts";
 import { createOverviewContext } from "../../helpers/overview.ts";
 import { createSpace } from "../../helpers/seed.ts";
+import { menuItem } from "../../helpers/menu.ts";
 import { Sidebar } from "../../pages/sidebar.ts";
 import type { FileDto } from "../../../apps/web/src/hooks/use-files.ts";
 
@@ -129,12 +130,12 @@ for (const appearance of [
 
     const menu = page.getByRole("button", { name: "Plus d'actions pour capture.png", exact: true });
     await menu.click();
-    await page.getByRole("menuitem", { name: "Conserver", exact: true }).click();
+    await menuItem(page, "Conserver", { exact: true }).click();
     await expect.poll(() => kept).toBe(true);
     await menu.click();
-    await expect(page.getByRole("menuitem", { name: "Conserver", exact: true })).toHaveCount(0);
+    await expect(menuItem(page, "Conserver", { exact: true })).toHaveCount(0);
     const download = page.waitForEvent("download");
-    await page.getByRole("menuitem", { name: "Télécharger", exact: true }).click();
+    await menuItem(page, "Télécharger", { exact: true }).click();
     expect((await download).suggestedFilename()).toBe("capture.png");
 
     await table.click();
@@ -152,12 +153,12 @@ for (const appearance of [
     await search.fill("");
     await expect(preview).toBeVisible();
     await menu.click();
-    await page.getByRole("menuitem", { name: "Supprimer", exact: true }).click();
+    await menuItem(page, "Supprimer", { exact: true }).click();
     const confirm = page.getByRole("alertdialog");
     await confirm.getByRole("button", { name: "Annuler", exact: true }).click();
     await expect(menu).toBeFocused();
     await menu.click();
-    await page.getByRole("menuitem", { name: "Supprimer", exact: true }).click();
+    await menuItem(page, "Supprimer", { exact: true }).click();
     await confirm.getByRole("button", { name: "Supprimer", exact: true }).click();
     await expect(preview).toHaveCount(0);
     expect(deleted).toBe(true);

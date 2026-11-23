@@ -4,7 +4,11 @@
 
 /** The composer's Lexical editor, styled through the library's `aui-lexical-*` classes. */
 export const COMPOSER_INPUT_CLASS =
-  "relative [grid-area:input] max-h-40 w-full px-0 text-base [&_.aui-lexical-input]:min-h-10 desktop-pointer:[&_.aui-lexical-input]:min-h-9 [&_.aui-lexical-input]:py-1 [&_.aui-lexical-input]:break-words [&_.aui-lexical-input]:whitespace-pre-wrap [&_.aui-lexical-input]:outline-none [&_.aui-lexical-placeholder]:text-muted-foreground [&_.aui-lexical-placeholder]:pointer-events-none [&_.aui-lexical-placeholder]:absolute [&_.aui-lexical-placeholder]:inset-x-0 [&_.aui-lexical-placeholder]:top-1 [&_.aui-lexical-placeholder]:truncate";
+  "relative max-h-40 w-full overflow-y-auto px-0 text-base [&_.aui-lexical-input]:min-h-11 desktop-pointer:[&_.aui-lexical-input]:min-h-9 [&_.aui-lexical-input]:py-2.5 md:[&_.aui-lexical-input]:py-1 [&_.aui-lexical-input]:break-words [&_.aui-lexical-input]:whitespace-pre-wrap [&_.aui-lexical-input]:outline-none";
+
+/** The field's placeholder, laid over the editor's first line (`ComposerPlaceholder`). */
+export const COMPOSER_PLACEHOLDER_CLASS =
+  "text-muted-foreground pointer-events-none absolute inset-x-0 top-2.5 truncate text-base md:top-1";
 
 /** Running text a phone reads (a hint, a state, a message): 16 px, the dense size from `md`. */
 export const READING_TEXT_CLASS = "text-base md:text-sm";
@@ -15,9 +19,29 @@ export const READING_TEXT_DENSE_CLASS = "text-base md:text-xs";
 /** Secondary text (a chip, a meta line, a status): 14 px on a phone, never smaller. */
 export const NOTE_TEXT_CLASS = "text-sm md:text-xs";
 
-/** The conversation search field of the sidebar (a sheet below `md`, 40 px tall there). */
+/**
+ * The composer's row, below the field's own text. From `md` up the field takes a line to itself
+ * with the tools and send on the line under it. On a phone it is ONE line, always: the "+" (all
+ * the tools), the field, send. The row keeps its bottom edge when the field grows to several lines.
+ */
+export const COMPOSER_ROW_CLASS = "flex items-center gap-x-2 gap-y-1 md:flex-wrap max-md:items-end";
+
+/** The field: a line of its own from `md`, the stretchy cell of the phone's line. */
+export const COMPOSER_FIELD_CLASS =
+  "min-w-0 md:order-first md:basis-full max-md:flex-1 short-landscape:basis-0 short-landscape:grow";
+
+/** Send's cell: with the field on the same line in a short landscape (the keyboard leaves a sliver). */
+export const COMPOSER_SEND_CLASS = "flex shrink-0 items-center gap-2 short-landscape:order-first";
+
+/** The tools' cell: the desktop's settings and chips (`flex-1`), on a phone just the "+". */
+export const COMPOSER_TOOLS_CLASS = "min-w-0 flex-1 max-md:flex-none";
+
+/** "New conversation" in the sidebar: a row aligned left like the conversations below it on a phone. */
+export const NEW_CONVERSATION_CLASS = "max-md:justify-start max-md:gap-3 max-md:font-medium";
+
+/** The conversation search field of the sidebar (a filled field below `md`, 44 px tall there). */
 export const SEARCH_INPUT_CLASS =
-  "h-10 pr-9 pl-7 text-base md:h-8 md:pr-7 md:py-0 md:text-base [&::-webkit-search-cancel-button]:hidden";
+  "pr-9 pl-7 text-base max-md:h-11 max-md:rounded-xl max-md:border-0 max-md:bg-muted max-md:focus-visible:ring-0 max-md:focus-visible:ring-offset-0 max-md:pl-10 max-md:shadow-none md:h-8 md:pr-7 md:py-0 md:text-base [&::-webkit-search-cancel-button]:hidden";
 
 /** The user's bubble. */
 export const USER_MESSAGE_CLASS =
@@ -39,7 +63,7 @@ export const THREAD_FOOTER_CLASS =
   "group/footer bg-canvas sticky bottom-0 mt-2 flex w-full max-w-(--thread-max-width) flex-col items-center gap-2 pb-4";
 
 /** The line under the composer, as the conversation skeleton draws it too. */
-export const DISCLAIMER_TEXT_CLASS = "text-muted-foreground/70 px-4 text-center text-xs";
+const DISCLAIMER_TEXT_CLASS = "text-muted-foreground/70 px-4 text-center text-xs";
 
-/** Under the composer; on a phone it steps aside while the composer has the focus (the keyboard is up). */
-export const DISCLAIMER_CLASS = `${DISCLAIMER_TEXT_CLASS} max-md:group-focus-within/footer:hidden`;
+/** Under the composer from `md` up; a phone has it as the last line of the "+" panel. */
+export const DISCLAIMER_CLASS = `${DISCLAIMER_TEXT_CLASS} max-md:hidden`;

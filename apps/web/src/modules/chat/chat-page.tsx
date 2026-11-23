@@ -15,13 +15,12 @@ import { useLocation, useNavigate, useParams } from "react-router-dom";
 import { useQueryClient } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
 import {
-  ChatConversationSettingsButton,
+  ChatConversationRenameButton,
   ChatPage,
   ChatTransportProvider,
   SelectConversationProvider,
   type AttachTarget,
   type OpenFile,
-  type SpaceChoiceMenu,
 } from "@appstrate/module-chat/ui";
 import { bindChatPreferencesUser } from "@appstrate/module-chat/preferences";
 import { useAuth } from "../../hooks/use-auth";
@@ -44,7 +43,6 @@ import { ConversationContextToggle, ConversationSidebar } from "./conversation-s
 import { ShellHeaderActions } from "../../components/shell-header-slots";
 import { ConversationSpaces } from "./conversation-spaces";
 import { renderSpaces } from "./render-spaces";
-import { SpaceChoiceSubmenu } from "../../components/space-choice-menu";
 import {
   useChatActingSpaceIds,
   useChatCan,
@@ -52,7 +50,7 @@ import {
   useChatTransport,
   useChatTranslate,
 } from "./use-chat-runtime";
-import { useOwnPersonalSpaceId, useSpaceLabelOf, useSpacesOf } from "../../hooks/use-spaces";
+import { useOwnPersonalSpaceId, useSpaceLabelOf } from "../../hooks/use-spaces";
 import { readChatComposerDraft } from "../../lib/creation-handoff";
 import { useOrgSettings } from "../../hooks/use-org-settings";
 import {
@@ -195,11 +193,7 @@ export function ChatModulePage() {
       <SelectConversationProvider value={onConversationChange}>
         <ShellHeaderActions>
           <ConversationSpaces conversationId={conversationId ?? null} transport={transport} />
-          <ChatConversationSettingsButton
-            activeId={conversationId ?? null}
-            t={translate}
-            can={can}
-          />
+          <ChatConversationRenameButton activeId={conversationId ?? null} t={translate} can={can} />
           <ConversationContextToggle expanded={sidebarState.expanded} dispatch={dispatchSidebar} />
         </ShellHeaderActions>
         <div className="relative flex min-h-0 min-w-0 flex-1">
@@ -228,7 +222,6 @@ export function ChatModulePage() {
               renderSpaces={renderSpaces}
               linkInSpace={linkInSpace}
               useSpaceLabelOf={useSpaceLabelOf}
-              SpaceChoiceMenu={ChatSpaceChoiceMenu}
             />
           </div>
           <ConversationSidebar
@@ -241,15 +234,3 @@ export function ChatModulePage() {
     </ChatTransportProvider>
   );
 }
-
-/** The chat's « in which space? » menu: the app's own, from a menu entry. */
-const ChatSpaceChoiceMenu: SpaceChoiceMenu = ({ label, spaceIds, onPick, trigger, testId }) => {
-  const spaces = useSpacesOf(spaceIds);
-  return (
-    <SpaceChoiceSubmenu
-      choice={{ label, spaces, onPick }}
-      trigger={trigger}
-      marks={testId ? { "data-testid": testId } : undefined}
-    />
-  );
-};

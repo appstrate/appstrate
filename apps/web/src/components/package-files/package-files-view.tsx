@@ -195,8 +195,7 @@ export function PackageFilesView({
                   key={label}
                   type="button"
                   variant={pressed ? "secondary" : "ghost"}
-                  size="icon"
-                  className="size-8"
+                  size="icon-sm"
                   aria-label={label}
                   aria-pressed={pressed}
                   title={label}
@@ -211,8 +210,7 @@ export function PackageFilesView({
                   <Button
                     type="button"
                     variant="ghost"
-                    size="icon"
-                    className="size-8"
+                    size="icon-sm"
                     aria-label={t("agents:detail.files.compareWith")}
                     title={t("agents:detail.files.compareWith")}
                   >

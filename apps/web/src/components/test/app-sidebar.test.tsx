@@ -85,3 +85,40 @@ describe("the sidebar in « Tous les espaces »", () => {
     expect(sidebar(true, true)).toContain('href="/catalogue/agent"');
   });
 });
+
+describe("the drawer's head", () => {
+  const render = (product: "studio" | "chat") =>
+    renderInSpace(
+      <SidebarProvider>
+        <AppSidebar product={product} />
+      </SidebarProvider>,
+      { overview: false, queryClient: memberSpaceClient([testSpace("spc_a", ["runs:read"])]) },
+    );
+
+  it("closes from its own corner in every product, the drawer being the whole screen on a phone", () => {
+    for (const product of ["chat", "studio"] as const) {
+      expect(render(product)).toContain('data-testid="sidebar-close"');
+      // The bell is the header's, on every format.
+      expect(render(product)).not.toContain('aria-label="Notifications"');
+    }
+  });
+});
+
+describe("the drawer's footer", () => {
+  const render = (product: "studio" | "chat") =>
+    renderInSpace(
+      <SidebarProvider>
+        <AppSidebar product={product} />
+      </SidebarProvider>,
+      { overview: false, queryClient: memberSpaceClient([testSpace("spc_a", ["runs:read"])]) },
+    );
+
+  it("carries the same Settings entry in the chat as in Studio, on every format", () => {
+    for (const product of ["chat", "studio"] as const) {
+      const html = render(product);
+      const entry = html.indexOf("<span>Paramètres</span>");
+      expect(entry).toBeGreaterThan(-1);
+      expect(html.slice(html.lastIndexOf("<ul", entry), entry)).not.toContain("max-md:hidden");
+    }
+  });
+});

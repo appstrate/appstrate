@@ -71,8 +71,8 @@ function ArtifactAction({
         <Button
           type="button"
           variant="ghost"
-          size="icon"
-          className={cn("text-muted-foreground hover:text-foreground size-8", className)}
+          size="icon-sm"
+          className={cn("text-muted-foreground hover:text-foreground", className)}
           aria-label={label}
           onFocus={(event) => {
             if (!event.currentTarget.matches(":focus-visible")) event.preventDefault();

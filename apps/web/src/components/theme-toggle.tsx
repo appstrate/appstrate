@@ -21,7 +21,7 @@ export function ThemeToggle() {
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
-        <Button variant="ghost" size="icon" className="size-8">
+        <Button variant="ghost" size="icon-sm">
           <CurrentIcon />
           <span className="sr-only">{t("userMenu.theme")}</span>
         </Button>

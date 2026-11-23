@@ -66,7 +66,8 @@ import { actsIn, useChatHost, useChatTransport } from "./runtime-context.ts";
 import { useConversationScope } from "./conversation-scope.ts";
 import { sentenceWithName } from "./sentence-with-name.tsx";
 import { sourceMessage, turnErrorState } from "./turn-error-state.ts";
-import { ContextGauge } from "./context-gauge.tsx";
+import { ContextIndicator } from "./context-gauge.tsx";
+import { ComposerPanelProvider } from "./composer-panel.ts";
 import { draftCrossesThreshold, estimateDraftTokens } from "./model-fit.ts";
 import { ConversationContextProvider, useConversationContext } from "./use-conversation-context.ts";
 import { turnModelLabel, turnModelSentenceKey } from "./turn-model.ts";
@@ -83,11 +84,16 @@ import {
   ACTION_ROW_CLASS,
   COMPOSER_BUTTON_CLASS,
   ICON_BUTTON_CLASS,
-  QUEUE_ICON_BUTTON_CLASS,
   CHIP_REMOVE_CLASS,
+  USER_ACTION_BAR_CLASS,
 } from "./touch-targets.ts";
 import {
   ASSISTANT_MESSAGE_CLASS,
+  COMPOSER_FIELD_CLASS,
+  COMPOSER_PLACEHOLDER_CLASS,
+  COMPOSER_ROW_CLASS,
+  COMPOSER_SEND_CLASS,
+  COMPOSER_TOOLS_CLASS,
   DISCLAIMER_CLASS,
   NOTE_TEXT_CLASS,
   READING_TEXT_CLASS,
@@ -121,14 +127,11 @@ import {
 
 export function Thread({
   composerTools,
-  composerSlot,
   initialComposerDraft,
   messageQueue,
 }: {
-  /** Left of the composer's bottom row: the attach button, the settings menu and the active-setting chips. */
+  /** Left of the composer's bottom row: the attach button, the tools panel's opener and the chips. */
   composerTools?: React.ReactNode;
-  /** Right of it, before send: the model picker. */
-  composerSlot?: React.ReactNode;
   initialComposerDraft?: string;
   /** Messages typed while the agent answers; created by the conversation, which also marks Stop on it. */
   messageQueue: MessageQueue;
@@ -172,7 +175,6 @@ export function Thread({
           <AuiIf condition={(s) => s.thread.isEmpty}>
             <ThreadWelcome
               composerTools={composerTools}
-              composerSlot={composerSlot}
               initialComposerDraft={initialComposerDraft}
               draftSeededRef={draftSeededRef}
               queue={messageQueue}
@@ -196,7 +198,6 @@ export function Thread({
                 <ScrollToBottom />
                 <Composer
                   tools={composerTools}
-                  slot={composerSlot}
                   initialDraft={initialComposerDraft}
                   draftSeededRef={draftSeededRef}
                   queue={messageQueue}
@@ -233,13 +234,11 @@ function shouldAutofocusComposer(): boolean {
 
 function ThreadWelcome({
   composerTools,
-  composerSlot,
   initialComposerDraft,
   draftSeededRef,
   queue,
 }: {
   composerTools?: React.ReactNode;
-  composerSlot?: React.ReactNode;
   initialComposerDraft?: string;
   draftSeededRef: React.RefObject<boolean>;
   queue: MessageQueue;
@@ -272,7 +271,6 @@ function ThreadWelcome({
         </div>
         <Composer
           tools={composerTools}
-          slot={composerSlot}
           initialDraft={initialComposerDraft}
           draftSeededRef={draftSeededRef}
           queue={queue}
@@ -473,13 +471,8 @@ function ComposerAttachmentError() {
   );
 }
 
-/**
- * Warns when the draft (its text and files) would take the conversation past the summarizing
- * threshold, by an approximation (`estimateDraftTokens`) against the last measure. Nothing before
- * one. The live region stays mounted: one inserted already filled is often not announced.
- */
-function DraftContextNotice() {
-  const { t } = useChatHost();
+/** The draft would take the conversation past the summarizing threshold (`draftCrossesThreshold`). */
+function useDraftCrossesThreshold(): boolean {
   const reading = useConversationContext();
   const textLength = useAuiState((s) => s.composer.text.length);
   const attachments = useAuiState((s) => s.composer.attachments);
@@ -508,7 +501,16 @@ function DraftContextNotice() {
       ),
     [textLength, attachments, readsImages, readsPdf],
   );
-  const crosses = reading !== null && draftCrossesThreshold(reading.context, draftTokens);
+  return reading !== null && draftCrossesThreshold(reading.context, draftTokens);
+}
+
+/**
+ * Warns when the draft (its text and files) would take the conversation past the summarizing
+ * threshold, by an approximation (`estimateDraftTokens`) against the last measure. Nothing before
+ * one. The live region stays mounted: one inserted already filled is often not announced.
+ */
+function DraftContextNotice({ crosses }: { crosses: boolean }) {
+  const { t } = useChatHost();
   return (
     <div role="status" className="empty:hidden">
       {crosses ? (
@@ -597,7 +599,7 @@ function QueuedMessages({
             </span>
             <IconButton
               label={t("composer.queue.edit")}
-              className={QUEUE_ICON_BUTTON_CLASS}
+              className="desktop-pointer:size-6"
               disabled={!composerEmpty}
               onClick={() => {
                 queue.remove(index);
@@ -608,7 +610,7 @@ function QueuedMessages({
             </IconButton>
             <IconButton
               label={t("composer.queue.remove")}
-              className={QUEUE_ICON_BUTTON_CLASS}
+              className="desktop-pointer:size-6"
               onClick={() => queue.remove(index)}
             >
               <XIcon />
@@ -620,15 +622,38 @@ function QueuedMessages({
   );
 }
 
+/**
+ * The field's placeholder while it is empty, naming the model: a phone's line is narrow, so the
+ * model's name alone, never a sentence cut before it; from `md` up, the sentence. CSS picks the
+ * span, so the first render is already the right one.
+ */
+function ComposerPlaceholder({ modelLabel }: { modelLabel: string | null | undefined }) {
+  const { t } = useChatHost();
+  const empty = useAuiState((s) => s.composer.text === "");
+  if (!empty) return null;
+  return (
+    <div aria-hidden className={COMPOSER_PLACEHOLDER_CLASS}>
+      {modelLabel ? (
+        <>
+          <span className="md:hidden">{modelLabel}</span>
+          <span className="max-md:hidden">
+            {t("composer.placeholderModel", { model: modelLabel })}
+          </span>
+        </>
+      ) : (
+        t("composer.placeholder")
+      )}
+    </div>
+  );
+}
+
 function Composer({
   tools,
-  slot,
   initialDraft,
   draftSeededRef,
   queue,
 }: {
   tools?: React.ReactNode;
-  slot?: React.ReactNode;
   initialDraft?: string;
   draftSeededRef: React.RefObject<boolean>;
   queue: MessageQueue;
@@ -637,13 +662,10 @@ function Composer({
   const composer = unstable_useComposerInput();
   const running = useAuiState((s) => s.thread.isRunning);
   const hasAttachments = useAuiState((s) => s.composer.attachments.length > 0);
-  // On a phone the composer rests as one line (attach, field, send) until it is touched; from then
-  // on, or with a draft, a file or a turn running, it shows its tools. From `md` up it never rests.
   const autofocus = shouldAutofocusComposer();
-  const [touched, setTouched] = React.useState(false);
+  const draftCrosses = useDraftCrossesThreshold();
   // The runtime's text, not the input's value: a draft restored on reload holds it before any input.
   const draft = useAuiState((s) => s.composer.text);
-  const rest = !touched && draft === "" && !hasAttachments && !running;
   // The turn carries the limit and its files go to its spaces: none leaves before the change lands.
   const limitPending = useConversationScope().pending;
   // Only text is queued: attachments stay in the composer until the next real send.
@@ -682,97 +704,96 @@ function Composer({
   return (
     <ComposerPrimitive.Root
       className="group/composer bg-card relative flex w-full flex-col gap-1 rounded-xl border px-3 py-2 shadow-sm"
-      data-rest={rest ? "" : undefined}
-      onClick={() => setTouched(true)}
       onSubmit={(e) => {
         if (blocked) e.preventDefault();
       }}
     >
       <DraftSkillsProvider value={draftSkills}>
-        <CommandTriggers>
-          {/* Pending attachments, above the input. `empty:hidden` collapses the row
+        <ComposerPanelProvider>
+          <CommandTriggers>
+            {/* Pending attachments, above the input. `empty:hidden` collapses the row
           (and its gap) when nothing is attached. */}
-          <QueuedMessages
-            queue={queue}
-            running={running}
-            composerEmpty={composer.value.trim() === ""}
-            onEdit={composer.setText}
-          />
-          <CommandPopover />
-          <div className="flex flex-wrap gap-1.5 empty:hidden">
-            <ComposerPrimitive.Attachments components={{ Attachment: ComposerAttachmentChip }} />
-          </div>
-          <ComposerAttachmentError />
-          <DraftContextNotice />
-          <div className="chat-composer-grid" data-rest={rest ? "" : undefined}>
-            <div className="min-w-0 [grid-area:tools]">{tools}</div>
-            <ComposerEditor
-              label={t("composer.placeholder")}
-              placeholder={
-                modelLabel
-                  ? t("composer.placeholderModel", { model: modelLabel })
-                  : t("composer.placeholder")
-              }
-              // A phone would open its keyboard on arrival and never show the resting composer.
-              autofocus={autofocus}
-              onFocus={() => setTouched(true)}
-              onEnter={enter}
+            <QueuedMessages
+              queue={queue}
+              running={running}
+              composerEmpty={composer.value.trim() === ""}
+              onEdit={composer.setText}
             />
-            <div className="max-w-full min-w-0 justify-self-end [grid-area:model] max-md:group-data-[rest]/composer:hidden">
-              {slot}
+            <CommandPopover />
+            <div className="flex flex-wrap gap-1.5 empty:hidden">
+              <ComposerPrimitive.Attachments components={{ Attachment: ComposerAttachmentChip }} />
             </div>
-            <div className="flex items-center gap-2 [grid-area:send]">
-              <ContextGauge className="max-md:group-data-[rest]/composer:hidden" />
-              <ThreadPrimitive.If running={false}>
-                <ComposerPrimitive.Send asChild disabled={blocked}>
+            <ComposerAttachmentError />
+            <DraftContextNotice crosses={draftCrosses} />
+            <div className={COMPOSER_ROW_CLASS}>
+              <div className={COMPOSER_TOOLS_CLASS}>{tools}</div>
+              <div className={cn("relative", COMPOSER_FIELD_CLASS)}>
+                <ComposerPlaceholder modelLabel={modelLabel} />
+                <ComposerEditor
+                  label={t("composer.placeholder")}
+                  placeholder={
+                    modelLabel
+                      ? t("composer.placeholderModel", { model: modelLabel })
+                      : t("composer.placeholder")
+                  }
+                  // A phone would open its keyboard on arrival, before anything was asked for.
+                  autofocus={autofocus}
+                  onEnter={enter}
+                />
+              </div>
+              <div className={COMPOSER_SEND_CLASS}>
+                <ContextIndicator draftCrosses={draftCrosses} />
+                <ThreadPrimitive.If running={false}>
+                  <ComposerPrimitive.Send asChild disabled={blocked}>
+                    <Button
+                      type="button"
+                      size="icon-sm"
+                      className={COMPOSER_BUTTON_CLASS}
+                      aria-label={t("composer.send")}
+                      aria-describedby={issue ? issueId : undefined}
+                    >
+                      <SendHorizontalIcon />
+                    </Button>
+                  </ComposerPrimitive.Send>
+                </ThreadPrimitive.If>
+                <ThreadPrimitive.If running>
                   <Button
                     type="button"
-                    size="icon"
+                    size="icon-sm"
+                    variant="outline"
                     className={COMPOSER_BUTTON_CLASS}
-                    aria-label={t("composer.send")}
+                    aria-label={t("composer.queue.add")}
+                    title={t("composer.queue.add")}
+                    disabled={!canQueue}
                     aria-describedby={issue ? issueId : undefined}
+                    onClick={enqueue}
                   >
-                    <SendHorizontalIcon />
+                    <ListPlusIcon />
                   </Button>
-                </ComposerPrimitive.Send>
-              </ThreadPrimitive.If>
-              <ThreadPrimitive.If running>
-                <Button
-                  type="button"
-                  size="icon"
-                  variant="outline"
-                  className={COMPOSER_BUTTON_CLASS}
-                  aria-label={t("composer.queue.add")}
-                  title={t("composer.queue.add")}
-                  disabled={!canQueue}
-                  aria-describedby={issue ? issueId : undefined}
-                  onClick={enqueue}
-                >
-                  <ListPlusIcon />
-                </Button>
-                <ComposerPrimitive.Cancel asChild>
-                  <Button
-                    type="button"
-                    size="icon"
-                    variant="secondary"
-                    className={COMPOSER_BUTTON_CLASS}
-                    aria-label={t("composer.stop")}
-                  >
-                    <SquareIcon className="fill-current" />
-                  </Button>
-                </ComposerPrimitive.Cancel>
-              </ThreadPrimitive.If>
+                  <ComposerPrimitive.Cancel asChild>
+                    <Button
+                      type="button"
+                      size="icon-sm"
+                      variant="secondary"
+                      className={COMPOSER_BUTTON_CLASS}
+                      aria-label={t("composer.stop")}
+                    >
+                      <SquareIcon className="fill-current" />
+                    </Button>
+                  </ComposerPrimitive.Cancel>
+                </ThreadPrimitive.If>
+              </div>
             </div>
-          </div>
-          {/* Always mounted, so a screen reader hears the issue appear. */}
-          <p
-            id={issueId}
-            role="status"
-            className={issue ? cn(NOTE_TEXT_CLASS, "text-destructive") : "sr-only"}
-          >
-            {issue ? t("composer.oneAgentOnly") : ""}
-          </p>
-        </CommandTriggers>
+            {/* Always mounted, so a screen reader hears the issue appear. */}
+            <p
+              id={issueId}
+              role="status"
+              className={issue ? cn(NOTE_TEXT_CLASS, "text-destructive") : "sr-only"}
+            >
+              {issue ? t("composer.oneAgentOnly") : ""}
+            </p>
+          </CommandTriggers>
+        </ComposerPanelProvider>
       </DraftSkillsProvider>
     </ComposerPrimitive.Root>
   );
@@ -842,9 +863,16 @@ export function UserMessage() {
       {/* The text bubble. Guarded on content so an attachment-only or agent-only message (no
           text part) doesn't paint an empty grey pill. A white card, like the thread's other surfaces. */}
       {hasBubble && (
-        <div className={USER_MESSAGE_CLASS}>
-          <MessagePrimitive.Parts components={USER_PART_COMPONENTS} />
-        </div>
+        <>
+          <div className={USER_MESSAGE_CLASS}>
+            <MessagePrimitive.Parts components={USER_PART_COMPONENTS} />
+          </div>
+          {/* Under the bubble: copy, always there on touch, on hover under a mouse. No edit or
+              retry: the server writes the turns linearly, with no branch to rewrite one into. */}
+          <ActionBarPrimitive.Root className={USER_ACTION_BAR_CLASS}>
+            <CopyMessageButton />
+          </ActionBarPrimitive.Root>
+        </>
       )}
     </MessagePrimitive.Root>
   );
@@ -903,16 +931,17 @@ export function MessageError() {
   // Select a plain field, never a derived object: this selector IS
   // `useSyncExternalStore`'s getSnapshot. See `turn-error-state.ts`.
   const message = useAuiState((s) => s.message);
-  const aui = useAui();
   const errorState = React.useMemo(
     () => turnErrorState(message, t, can, personalModelCredentials),
     [message, t, can, personalModelCredentials],
   );
+  const aui = useAui();
   if (!errorState) return null;
   return (
     <Alert
       variant="destructive"
-      className="mt-2 break-words"
+      // A phone puts the buttons under the text, aligned on it: beside it they squeeze it to a column.
+      className="mt-2 break-words max-md:flex-wrap max-md:[&>[data-slot=alert-action]]:my-0 max-md:[&>[data-slot=alert-action]]:basis-full max-md:[&>[data-slot=alert-action]]:pl-7"
       action={
         errorState.action || errorState.retryable ? (
           <div className="flex gap-2">
@@ -972,7 +1001,6 @@ const ASSISTANT_PART_COMPONENTS = {
 } satisfies React.ComponentProps<typeof MessagePrimitive.Parts>["components"];
 
 function AssistantMessage() {
-  const { t } = useChatHost();
   return (
     <MessagePrimitive.Root className="group flex w-full max-w-(--thread-max-width) flex-col py-2">
       <div className={ASSISTANT_MESSAGE_CLASS}>
@@ -989,16 +1017,7 @@ function AssistantMessage() {
             visibly jump. Copy stays usable mid-stream (copies the current
             snapshot), which is the seamless behavior we want. */}
         <ActionBarPrimitive.Root className={ACTION_BAR_CLASS}>
-          <ActionBarPrimitive.Copy asChild>
-            <IconButton label={t("common:btn.copy")}>
-              <MessagePrimitive.If copied>
-                <CheckIcon />
-              </MessagePrimitive.If>
-              <MessagePrimitive.If copied={false}>
-                <CopyIcon />
-              </MessagePrimitive.If>
-            </IconButton>
-          </ActionBarPrimitive.Copy>
+          <CopyMessageButton />
         </ActionBarPrimitive.Root>
       </div>
     </MessagePrimitive.Root>
@@ -1006,6 +1025,23 @@ function AssistantMessage() {
 }
 
 // ─── Shared bits ─────────────────────────────────────────────────────────────
+
+/** The message's copy button, a check once copied. Inside an `ActionBarPrimitive.Root`. */
+function CopyMessageButton() {
+  const { t } = useChatHost();
+  return (
+    <ActionBarPrimitive.Copy asChild>
+      <IconButton label={t("common:btn.copy")}>
+        <MessagePrimitive.If copied>
+          <CheckIcon />
+        </MessagePrimitive.If>
+        <MessagePrimitive.If copied={false}>
+          <CopyIcon />
+        </MessagePrimitive.If>
+      </IconButton>
+    </ActionBarPrimitive.Copy>
+  );
+}
 
 // forwardRef + prop spread so `asChild`/Slot-injected handlers (onClick from
 // the action-bar/branch-picker primitives) actually reach the button.
@@ -1017,7 +1053,7 @@ const IconButton = React.forwardRef<
     ref={ref}
     type="button"
     variant="ghost"
-    size="icon"
+    size="icon-sm"
     aria-label={label}
     title={label}
     {...props}

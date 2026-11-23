@@ -140,8 +140,8 @@ export function PackageCard({
                   packageId={id}
                   spaceIds={spaceIds}
                   variant="ghost"
-                  size="icon"
-                  className="text-muted-foreground hover:text-primary size-7"
+                  size="icon-sm"
+                  className="text-muted-foreground hover:text-primary desktop-pointer:size-7"
                 />
               )}
             </div>

@@ -50,8 +50,11 @@ export function CopyButton({
     <Button
       type="button"
       variant="ghost"
-      size="icon"
-      className={cn("text-muted-foreground hover:text-foreground h-7 w-7", className)}
+      size="icon-sm"
+      className={cn(
+        "text-muted-foreground hover:text-foreground desktop-pointer:size-7",
+        className,
+      )}
       aria-label={ariaLabel ?? name}
       title={name}
       onClick={onClick}

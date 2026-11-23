@@ -97,6 +97,35 @@ they start with `packages/` or `e2e/`.
   state is not duplicated: the header's trail is not drawn by the page, a
   `PageHeader` publishes its `breadcrumbs` to `stores/breadcrumb-store.ts` and
   `ShellBreadcrumb` draws them.
+- **One header, one sidebar, every product and format** (`ShellHeader` and `AppSidebar`,
+  `components/app-shell.tsx`). While the sidebar is off screen (a phone, a collapsed desktop) one
+  control opens it (`SidebarOpener`): a burger, then the organization's avatar with the space's on
+  its corner (`OrgSpaceTile`, the switcher's own, stacked, never side by side), no names; its
+  accessible name says them, and it carries the unread dot of the Runs entry it hides. Then the
+  trail (the last segment alone on a phone), the page's controls and the notification bell.
+  Controls are 44 px on touch. In the chat the trail is the conversation's name and the controls are
+  its spaces, the pencil that renames it and the context panel.
+- **The sidebar is the whole screen on a phone**: the organization switcher and a close button on
+  its first row, then the Studio/Chat switch and the product's navigation. In the chat: "Nouvelle
+  conversation" (a left-aligned row with its icon in a round tile, like the conversations below)
+  with the search as a magnifier at the end of that row, which unfolds a filled field (no border)
+  under it, closed by its X or by a tap elsewhere while empty, then the recent conversations (one
+  line each: the title, then the tiles of its spaces, two at most then « +N », named for a screen
+  reader; the names are in the "…" panel). Then the footer every drawer has: Catalogue, Settings
+  and the account.
+- **A phone's menus rise from the bottom**, and no screen decides it: `DropdownMenu` and `Popover`
+  (`packages/ui`) draw their content below `md` as a panel from the bottom (`SheetMenuContent`,
+  `packages/ui/src/components/sheet-menu.tsx`, on the bottom `Sheet`), with the same open state and
+  the same items; from `md` up they stay a dropdown and a popover. A menu's rows are 48 px tall
+  there, the destructive one in red and asking before it acts; a sub-menu is a group of rows under
+  its trigger's words; `sheetTitle` on a `DropdownMenuContent` names the panel in its heading. Never
+  choose the container by hand (`useIsMobile` + a `Sheet`): use the primitive. The chat composer is one line for good on a phone:
+  "+" (attach, skills, model, space limit, creation mode, the disclaimer), the field, send; the model is
+  named in the field's placeholder and chosen from the "+" panel's "Modèle" row, so no chip or tool
+  button stays beside the field. A dot on the "+" says a setting is off its default (never the space
+  limit, which is on whenever a space is selected). The model panel has no tabs: one icon at the end of
+  each model that has settings picks it and opens them, with a back arrow; the panel itself has a back
+  arrow to the "+" panel it was opened from, and picking a model closes it.
 - Settings and the catalogue are **routed overlays**: one dialog, `OverlayFrame`
   (`components/overlay-frame.tsx`, a layout route of the overlay tree), around
   `PanelLayout` (`components/panel-layout.tsx`, a rail on the left, one scroll

@@ -82,8 +82,7 @@ export function ConversationContextToggle({
         <Button
           type="button"
           variant="ghost"
-          size="icon"
-          className="size-8"
+          size="icon-sm"
           aria-label={label}
           aria-expanded={expanded}
           aria-controls={CONVERSATION_CONTEXT_PANEL_ID}
@@ -320,8 +319,8 @@ function ConversationId({ id }: { id: string }) {
       <Button
         type="button"
         variant="ghost"
-        size="icon"
-        className="size-6 shrink-0"
+        size="icon-sm"
+        className="desktop-pointer:size-6 shrink-0"
         aria-label={`${t("common:btn.copy")} (${t("chat:context.info.id")})`}
         onClick={() => void copy(id)}
       >
@@ -583,8 +582,8 @@ function ConversationContext({
         {closable ? (
           <Button
             variant="ghost"
-            size="icon"
-            className="size-8 shrink-0"
+            size="icon-sm"
+            className="shrink-0"
             aria-label={t("context.collapse")}
             onClick={() => dispatch({ type: "toggle" })}
           >

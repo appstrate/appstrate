@@ -69,9 +69,4 @@ describe("the conversation list's space line", () => {
     // Three rows: three space lines, none of them skipped for being the filter's own space.
     expect(render("spc_a").match(/data-testid="chat-session-spaces"/g)).toHaveLength(3);
   });
-
-  it("leaves a row's actions to the chat's own grant", () => {
-    const html = render("spc_a");
-    expect(html.match(/aria-label="common:btn\.delete"/g)).toHaveLength(3);
-  });
 });
