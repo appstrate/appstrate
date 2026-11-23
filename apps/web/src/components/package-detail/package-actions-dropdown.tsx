@@ -2,7 +2,6 @@
 
 import { Fragment } from "react";
 import { useTranslation } from "react-i18next";
-import { cn } from "@appstrate/ui/cn";
 import {
   DropdownMenuItem,
   DropdownMenuLabel,
@@ -59,7 +58,7 @@ export function PackageActionsDropdown(props: PackageActionsDropdownProps) {
                   key={entry.id}
                   disabled={entry.disabled || !!entry.reason}
                   onSelect={entry.onSelect}
-                  className={cn(entry.destructive && "text-destructive focus:text-destructive")}
+                  variant={entry.destructive ? "destructive" : "default"}
                 >
                   <entry.icon />
                   <DisabledItemLabel label={entry.label} reason={entry.reason} />

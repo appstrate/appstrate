@@ -9,7 +9,6 @@ interface PageHeaderProps {
   title: ReactNode;
   /** Level-one collection pages use a larger destination title. */
   variant?: "default" | "collection";
-  titleClassName?: string;
   /** Custom leading icon node. */
   icon?: ReactNode;
   /** One line under the title, styled like a settings heading's. */
@@ -25,7 +24,6 @@ interface PageHeaderProps {
 export function PageHeader({
   title,
   variant = "default",
-  titleClassName,
   icon,
   description,
   breadcrumbs,
@@ -50,7 +48,6 @@ export function PageHeader({
           className={cn(
             "flex items-center gap-2 font-semibold",
             variant === "collection" ? "text-lg md:text-2xl" : "text-lg",
-            titleClassName,
           )}
         >
           {icon}

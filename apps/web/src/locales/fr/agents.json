@@ -684,8 +684,6 @@
   "fork.namePlaceholder": "mon-nom-de-package",
   "fork.prefix": "Votre package sera créé sous le nom",
   "fork.invalidName": "Le nom ne doit contenir que des lettres minuscules, des chiffres et des tirets",
-  "fork.errorOwned": "Vous possédez déjà ce package",
-  "fork.errorNoPublishedVersion": "Ce package n'a pas de version publiée et ne peut pas être dupliqué",
   "ownership.readOnly": "Package système en lecture seule. Dupliquez-le pour le personnaliser.",
   "ownership.forkedFrom": "Dupliqué depuis ",
   "detail.inputSettings.lock": "Verrouiller",

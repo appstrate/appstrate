@@ -392,26 +392,6 @@ function ComposerAttachmentChip() {
 }
 
 /**
- * A sent file attachment, rendered from a message `file` part. The wire part
- * (ai-SDK `FileUIPart`) carries no byte size, so the chip shows the name + the
- * type's icon only (the composer chip shows the size, read from the picked File).
- */
-function FileAttachmentPart({ filename, mimeType }: { filename?: string; mimeType?: string }) {
-  return (
-    <div className="mt-1">
-      <AttachmentChip name={filename ?? ""} mime={mimeType} />
-    </div>
-  );
-}
-
-// ─── Sent user-message attachments ───────────────────────────────────────────
-// The `@assistant-ui/react-ai-sdk` converter filters user `file` parts OUT of a
-// message's content and re-exposes them as `message.attachments` — so the
-// `File: FileAttachmentPart` Parts mapping above NEVER fires for user messages
-// (it stays correct for assistant file parts). We render sent attachments from
-// the attachments channel instead (`MessagePrimitive.Attachments`).
-
-/**
  * One sent attachment on a user message, as the composer's chip. An `appfile://`
  * (server-persisted, or a reloaded conversation) is interactive (preview or
  * download). So is a just-sent optimistic `upload://` once the turn's stream
@@ -805,7 +785,6 @@ function Composer({
 const USER_PART_COMPONENTS = {
   // The user's text, with the skills and agents it names as chips.
   Text: DirectiveText,
-  File: FileAttachmentPart,
 } satisfies React.ComponentProps<typeof MessagePrimitive.Parts>["components"];
 
 export function UserMessage() {

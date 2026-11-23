@@ -782,7 +782,6 @@ describe("IntegrationConnectionPicker — 'no connection'", () => {
       resolved_connection_ids: [],
     });
     const picker = pickerFor(res);
-    expect(picker.pickedNone).toBe(true);
     expect(picker.initialTicks).toEqual([]);
     // Already the choice: not offered again.
     expect(picker.offersNone).toBe(false);

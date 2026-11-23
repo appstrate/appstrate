@@ -35,7 +35,7 @@ import { unwrapMcpResult } from "@appstrate/core/mcp-result";
 import { ENTER_SPACE_PARAM } from "@appstrate/core/chat-contract";
 
 /** Operation ids whose result launches a run we can follow. */
-const RUN_LAUNCH_OPS = ["runAgent", "runInline", "run_and_wait"] as const;
+const RUN_LAUNCH_OPS = ["runAgent", "runInline"] as const;
 type RunLaunchOp = (typeof RUN_LAUNCH_OPS)[number];
 
 export function isTerminalStatus(status: string | null | undefined): status is RunStatus {
@@ -302,11 +302,11 @@ export function orgSpaceFromHeaders(headers: Record<string, string> | undefined)
   spaceId: string | undefined;
   viewAs: string | undefined;
 } {
-  const h = headers ?? {};
+  const h = new Headers(headers);
   return {
-    orgId: h["X-Org-Id"] ?? h["x-org-id"],
-    spaceId: h["X-Space-Id"] ?? h["x-space-id"],
-    viewAs: h[VIEW_AS_HEADER] ?? h[VIEW_AS_HEADER.toLowerCase()],
+    orgId: h.get("X-Org-Id") ?? undefined,
+    spaceId: h.get("X-Space-Id") ?? undefined,
+    viewAs: h.get(VIEW_AS_HEADER) ?? undefined,
   };
 }
 

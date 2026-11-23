@@ -378,9 +378,7 @@ export function useConnectionPicker(
 
   return {
     gatesRun,
-    required,
     candidates,
-    candidateIds,
     canAddConnection,
     lockedConnectionIds,
     lockedBy,
@@ -397,7 +395,6 @@ export function useConnectionPicker(
     auths,
     authKeys,
     explicitIds,
-    pickedNone,
     summary,
     problems,
     problemsOf,

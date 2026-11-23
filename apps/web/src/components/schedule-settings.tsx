@@ -146,7 +146,7 @@ export function ScheduleActionsMenu({
           <DropdownMenuItem
             onSelect={onDelete}
             disabled={deletePending}
-            className="text-destructive focus:text-destructive"
+            variant="destructive"
           >
             <Trash2 />
             {t("common:btn.delete")}

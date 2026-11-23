@@ -73,7 +73,7 @@ import {
 import { isUnauthenticatedIntegration } from "@appstrate/core/integration";
 import { isVariableTemplate } from "@appstrate/afps-shared/connection-variables";
 import { usePackageDetail, usePackageDownload, type Versioned } from "../hooks/use-packages";
-import { useIntegrationDetail, type IntegrationDetailWire } from "../hooks/use-integrations";
+import { useIntegrationDetail } from "../hooks/use-integrations";
 import { useCanReach } from "../hooks/use-can-reach";
 import { useIntegrationSpaceAction } from "../components/integration-detail/use-integration-space";
 import { useSpacesFor } from "../hooks/use-space-action";
@@ -101,10 +101,6 @@ const DEFINITION_RAIL: readonly DefinitionRailEntry[] = [
   ["auth-methods", "auths"],
   ["tools", "tools"],
 ];
-
-function IntegrationGeneral({ detail }: { detail: IntegrationDetailWire }) {
-  return <IntegrationFunctioning detail={detail} />;
-}
 
 export function IntegrationSettings({
   packageId,
@@ -242,7 +238,7 @@ export function IntegrationSettings({
         ) : active === "functioning" ? (
           <div className="p-6">
             <SettingsHeading title={t("orgSettings.tabGeneral")} description={null} />
-            <IntegrationGeneral detail={detail} />
+            <IntegrationFunctioning detail={detail} />
           </div>
         ) : active === "tools" ? (
           <div className="p-6">

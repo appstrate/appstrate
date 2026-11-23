@@ -93,19 +93,22 @@ function DropdownMenuSub(props: React.ComponentProps<typeof DropdownMenuPrimitiv
   return <SubSheetContext.Provider value={headingId}>{props.children}</SubSheetContext.Provider>;
 }
 
+const DESTRUCTIVE_ITEM = "text-destructive focus:bg-destructive/10 focus:text-destructive";
+
 const DropdownMenuSubTrigger = React.forwardRef<
   React.ElementRef<typeof DropdownMenuPrimitive.SubTrigger>,
   React.ComponentPropsWithoutRef<typeof DropdownMenuPrimitive.SubTrigger> & {
     inset?: boolean;
+    variant?: "default" | "destructive";
   }
->(({ className, inset, children, asChild: _asChild, textValue: _textValue, ...props }, ref) => {
+>(({ className, variant, inset, children, asChild: _asChild, textValue: _textValue, ...props }, ref) => {
   const sheet = React.useContext(MenuSheetContext);
   const headingId = React.useContext(SubSheetContext);
   if (sheet) {
     // The sub-menu's rows follow, under its words: no level to open.
     const { disabled: _disabled, ...heading } = props;
     return (
-      <div ref={ref} id={headingId} className={cn(SHEET_LABEL_CLASS, className)} {...heading}>
+      <div ref={ref} id={headingId} className={cn(SHEET_LABEL_CLASS, variant === "destructive" && DESTRUCTIVE_ITEM, className)} {...heading}>
         {children}
       </div>
     );
@@ -116,6 +119,7 @@ const DropdownMenuSubTrigger = React.forwardRef<
       className={cn(
         "focus:bg-accent data-[state=open]:bg-accent flex cursor-default items-center gap-2 rounded-sm px-2 py-1.5 text-sm outline-none select-none [&_svg]:pointer-events-none [&_svg]:size-4 [&_svg]:shrink-0",
         inset && "pl-8",
+        variant === "destructive" && DESTRUCTIVE_ITEM,
         className,
       )}
       {...props}
@@ -264,16 +268,18 @@ const DropdownMenuItem = React.forwardRef<
   React.ElementRef<typeof DropdownMenuPrimitive.Item>,
   React.ComponentPropsWithoutRef<typeof DropdownMenuPrimitive.Item> & {
     inset?: boolean;
+    variant?: "default" | "destructive";
   }
->(({ className, inset, textValue: _textValue, ...props }, ref) => {
+>(({ className, variant, inset, textValue: _textValue, ...props }, ref) => {
   const sheet = React.useContext(MenuSheetContext);
-  if (sheet) return <SheetRow sheet={sheet} className={className} {...props} />;
+  if (sheet) return <SheetRow sheet={sheet} className={cn(variant === "destructive" && DESTRUCTIVE_ITEM, className)} {...props} />;
   return (
     <DropdownMenuPrimitive.Item
       ref={ref}
       className={cn(
         "focus:bg-accent focus:text-accent-foreground relative flex cursor-default items-center gap-2 rounded-sm px-2 py-1.5 text-sm transition-colors outline-none select-none data-[disabled]:pointer-events-none data-[disabled]:opacity-50 [&_svg]:pointer-events-none [&_svg]:size-4 [&_svg]:shrink-0",
         inset && "pl-8",
+        variant === "destructive" && DESTRUCTIVE_ITEM,
         className,
       )}
       {...props}

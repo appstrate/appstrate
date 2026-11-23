@@ -35,6 +35,7 @@ const ACTING = ["spc_a"];
 /** The host's space services, as the shell passes them. */
 const { canIn, attachTarget, renderSpaces, linkInSpace, useSpaceLabelOf } = testHost();
 const SPACE_PROPS = {
+  onOpenFile: () => {},
   canIn,
   attachTarget,
   renderSpaces,

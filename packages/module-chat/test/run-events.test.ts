@@ -64,7 +64,7 @@ describe("run-events helpers", () => {
   it("identifies run launch operations and terminal statuses", () => {
     expect(isRunLaunchOp("runAgent")).toBe(true);
     expect(isRunLaunchOp("runInline")).toBe(true);
-    expect(isRunLaunchOp("run_and_wait")).toBe(true);
+    expect(isRunLaunchOp("run_and_wait")).toBe(false);
     expect(isRunLaunchOp("getRun")).toBe(false);
 
     expect(isTerminalStatus("success")).toBe(true);
@@ -346,7 +346,7 @@ describe("run-events helpers", () => {
       orgId: "o",
       spaceId: "a",
     });
-    expect(orgSpaceFromHeaders({ "x-org-id": "o2", "x-space-id": "a2" })).toEqual({
+    expect(orgSpaceFromHeaders({ "x-ORG-id": "o2", "x-Space-iD": "a2" })).toEqual({
       orgId: "o2",
       spaceId: "a2",
       viewAs: undefined,

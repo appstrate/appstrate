@@ -555,7 +555,7 @@ function ConversationRow({
                 {t("threads.rename")}
               </DropdownMenuItem>
               <DropdownMenuItem
-                className="text-destructive focus:text-destructive focus:bg-destructive/10"
+                variant="destructive"
                 onSelect={openDelete}
               >
                 <Trash2Icon />

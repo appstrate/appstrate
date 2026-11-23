@@ -36,9 +36,8 @@ The widget is i18n-agnostic — pass translated strings via `labels`. See `apps/
 ## Exports
 
 - `./components/*` — shadcn/Radix primitives, one per file (e.g. `@appstrate/ui/components/button`, `dialog`, `select`, `sidebar`, `sonner`, …). CVA variants + `cn()` styling. `ls packages/ui/src/components/` is the authoritative list.
-- `./components/sidebar-context` — the `.ts`-only escape hatch for the sidebar context (the wildcard above resolves `.tsx`).
+- `./components/sidebar` exports the sidebar primitives, `SidebarProvider` and `useSidebar()`.
 - `./cn` — the canonical `cn(...)` class-merge helper (`clsx` + `tailwind-merge`). The single implementation used by every component and the web app.
-- `./use-mobile` — `useIsMobile()` hook (breakpoint-based).
 - `./schema-form` — `SchemaForm` component, `SchemaFormLabels` type, RJSF widgets/templates.
 
 > The `./components/*` wildcard is unguarded: a subpath naming a file that does

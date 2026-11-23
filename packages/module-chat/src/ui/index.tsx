@@ -178,11 +178,10 @@ export interface ChatPageProps {
   onConversationChange?: SelectConversation;
   /**
    * Presents a clicked chat file — or the single file a live run produced —
-   * through the host's in-app viewer. Optional: without it direct clicks fall
-   * back to `downloadFile` and automatic presentation is skipped. Delivered
+   * through the host's in-app viewer. Delivered
    * to deep tool UIs via context, not props.
    */
-  onOpenFile?: OpenFile;
+  onOpenFile: OpenFile;
   /**
    * REQUIRED host services — the chat implements none of them itself (see
    * `runtime-context.ts`): the authenticated download, the authenticated image
