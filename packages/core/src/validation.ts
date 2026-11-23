@@ -510,6 +510,15 @@ export function validateManifest(
           ({ key, guidance }) =>
             `dependencies.${key}: \`dependencies.${key}\` is a retired key — ${guidance}. No consumer reads it, so the dependencies declared under it are silently ignored.`,
         );
+  if (
+    type === "agent" &&
+    options?.retiredDependencyKeys !== "tolerate" &&
+    Object.prototype.hasOwnProperty.call(obj, "runtime_tools")
+  ) {
+    errors.push(
+      "runtime_tools: declare the @appstrate/platform integration and select its tools in integrations_configuration.",
+    );
+  }
   if (errors.length > 0) return { valid: false, errors };
 
   // Dispatch purely on the root `type` discriminator.

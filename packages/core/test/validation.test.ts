@@ -151,6 +151,12 @@ describe("validateManifest", () => {
   // `{ skills, integrations }`, so a retired spelling is inert — accepting it silently
   // ships an agent whose dependency is never resolved (#1021). Author input rejects,
   // an already-persisted manifest is tolerated.
+  it("names the current platform integration when an author supplies runtime_tools", () => {
+    const raw = validAgentManifest({ runtime_tools: ["pin"] });
+    expect(validateManifest(raw).errors[0]).toContain("@appstrate/platform");
+    expect(validateManifest(raw, { retiredDependencyKeys: "tolerate" }).valid).toBe(true);
+  });
+
   it("rejects dependencies.tools on the author path, naming the replacement", () => {
     const result = validateManifest(
       validAgentManifest({ dependencies: { tools: { "@appstrate/report": "^1.0.0" } } }),

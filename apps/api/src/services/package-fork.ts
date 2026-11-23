@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
+import { dropRetiredDependencyKeys } from "@appstrate/core/dependencies";
 import { parseScopedName, isOwnedByOrg } from "@appstrate/core/naming";
 import { validateManifest, type PackageType } from "@appstrate/core/validation";
 import { logger } from "../lib/logger.ts";
@@ -21,7 +22,7 @@ import {
   versionArtifactUnavailable,
 } from "./package-versions.ts";
 import { downloadVersionZip } from "./package-storage.ts";
-import { unzipPackageArchive } from "./package-archive.ts";
+import { refreshPackageRecord, unzipPackageArchive } from "./package-archive.ts";
 import { db } from "@appstrate/db/client";
 import { packageVersions } from "@appstrate/db/schema";
 import { eq } from "drizzle-orm";
@@ -118,7 +119,7 @@ async function forkWithConfig(
   // Build manifest from the published version snapshot, update name
   const versionManifest = asRecord(versionRow.manifest);
 
-  const updatedManifest: Record<string, unknown> = { ...versionManifest, name: targetId };
+  const updatedManifest = dropRetiredDependencyKeys({ ...versionManifest, name: targetId });
 
   // Look, warn, NEVER reject. A source manifest invalid for any reason (missing `type` /
   // `schema_version`, a null/array jsonb column) would otherwise mint a fresh
@@ -201,6 +202,7 @@ async function forkWithConfig(
   // from, so "the column equals this package's manifest.json" is structural
   // rather than two serializations that happen to agree today.
   draftFiles["manifest.json"] = new TextEncoder().encode(manifestText);
+  refreshPackageRecord(draftFiles, zipEntries);
 
   // Create the fork package (draft): row and archive commit together, under
   // the draft lock every writer of the archive's key holds. The key may still

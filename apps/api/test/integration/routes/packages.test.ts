@@ -3760,6 +3760,66 @@ describe("Packages API", () => {
       return new TextDecoder().decode(entries["manifest.json"]!);
     }
 
+    it("removes inert dependencies only from new fork and publication artifacts", async () => {
+      const source = await createTestContext({ orgSlug: "forkretired" });
+      await addOrgMember(source.orgId, ctx.user.id, "admin");
+      const id = "@forkretired/old-agent";
+      const dest = "@pkgorg/old-agent";
+      const retired = { tools: { "@old/tool": "^1.0.0" }, providers: { "@old/provider": "1" } };
+      const kept = { _meta: { example: "extension" }, skills: {} };
+      const version = "1.0.0";
+      await seedPublishedSource(id, source.orgId, {
+        name: id,
+        type: "agent",
+        version,
+        schema_version: "0.2",
+        display_name: "Agent",
+        description: "Published fixture",
+        dependencies: { ...kept, ...retired },
+      });
+      const original = await downloadVersionZip(id, version);
+      const fork = await app.request(`/api/packages/${id}/fork`, {
+        method: "POST",
+        headers: authHeaders(ctx, { "Content-Type": "application/json" }),
+        body: "{}",
+      });
+      expect(fork.status, await fork.clone().text()).toBe(201);
+      // Publish from the SOURCE's old draft independently of the fork's repair.
+      const headers = authHeaders(source, { "Content-Type": "application/json" });
+      const previous = await app.request(`/api/packages/agents/${id}`, { headers });
+      const edit = await app.request(`/api/packages/agents/${id}`, {
+        method: "PATCH",
+        headers: { ...headers, "If-Match": previous.headers.get("ETag")! },
+        body: JSON.stringify({ content: "Edited prompt" }),
+      });
+      expect(edit.status, await edit.clone().text()).toBe(200);
+      const publish = await app.request(`/api/packages/agents/${id}/versions`, {
+        method: "POST",
+        headers: { ...headers, "If-Match": edit.headers.get("ETag")! },
+        body: JSON.stringify({ version: "1.1.0" }),
+      });
+      expect(publish.status, await publish.clone().text()).toBe(201);
+      expect(await downloadVersionZip(id, version)).toEqual(original);
+      expect(JSON.parse(await artifactManifestText(id, version)).dependencies).toEqual({
+        ...kept,
+        ...retired,
+      });
+      expect((await draftManifest(dest)).dependencies).toEqual(kept);
+      for (const [target, ver] of [
+        [dest, version],
+        [id, "1.1.0"],
+      ] as const) {
+        const bytes = (await downloadVersionZip(target, ver))!;
+        const [row] = await db
+          .select()
+          .from(packageVersions)
+          .where(and(eq(packageVersions.packageId, target), eq(packageVersions.version, ver)));
+        expect(row?.integrity).toBe(computeIntegrity(bytes));
+        expect(row?.manifest).toMatchObject({ name: target, version: ver, dependencies: kept });
+        expect(JSON.parse(await artifactManifestText(target, ver)).dependencies).toEqual(kept);
+      }
+    });
+
     it("forks a clean manifest unchanged — nothing reordered, nothing defaulted", async () => {
       const srcCtx = await createTestContext({ orgSlug: "forkclean" });
       await addOrgMember(srcCtx.orgId, ctx.user.id, "admin");

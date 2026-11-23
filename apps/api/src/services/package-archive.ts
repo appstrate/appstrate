@@ -5,6 +5,7 @@ import {
   PACKAGE_ZIP_MAX_DECOMPRESSED_BYTES,
   unzipArtifact,
 } from "@appstrate/core/zip";
+import { computeRecordEntries, serializeRecord } from "@appstrate/afps-runtime/bundle";
 import { ApiError } from "../lib/errors.ts";
 import { logger } from "../lib/logger.ts";
 
@@ -48,5 +49,27 @@ export function unzipPackageArchive(bytes: Uint8Array): Record<string, Uint8Arra
       title: "Package Archive Unreadable",
       detail: `The package archive expands past the ${limitMb} MB decompression limit and was refused (${error.reason}). Republish the package from bytes that fit the limit.`,
     });
+  }
+}
+
+/** Rewrites are new unsigned artifacts. Preserve the input format when it carries a RECORD. */
+export function refreshPackageRecord(
+  files: Record<string, Uint8Array>,
+  original: Record<string, Uint8Array>,
+): void {
+  if (!files["signature.sig"] && !files.RECORD) return;
+  // Newly serialized bytes may still be identical on a no-change publish.
+  if (
+    Object.entries(files).every(([path, bytes]) => {
+      const previous = original[path];
+      return bytes === previous || (previous !== undefined && Buffer.from(bytes).equals(previous));
+    })
+  )
+    return;
+  delete files["signature.sig"];
+  if (files.RECORD) {
+    files.RECORD = new TextEncoder().encode(
+      serializeRecord(computeRecordEntries(new Map(Object.entries(files)))),
+    );
   }
 }
