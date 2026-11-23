@@ -19,7 +19,8 @@ test("two schedule editors can review and retry a stale change", async ({
   const submit = async (page: typeof first) => {
     const updated = page.waitForResponse(
       (res) =>
-        res.url().split("?")[0]?.endsWith(`/schedules/${id}`) && res.request().method() === "PATCH",
+        new URL(res.url()).pathname.endsWith(`/schedules/${id}`) &&
+        res.request().method() === "PATCH",
     );
     await save(page).click();
     return updated;
