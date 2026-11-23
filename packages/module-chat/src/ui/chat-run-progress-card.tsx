@@ -176,7 +176,7 @@ export function ChatRunProgressCard({
   // every chunk, and the filter walked the whole log array each time.
   const visible = React.useMemo(() => visibleLogEntries(logs), [logs]);
   const current = useLogTicker(visible);
-  const { openFile, t, linkInSpace } = useChatHost();
+  const { lang, openFile, t, linkInSpace } = useChatHost();
   // A card that mounted already complete belongs to history: never let N old
   // runs fight over the panel. A card mounted for a live call presents through
   // the exact same host opener as a direct file click.
@@ -255,7 +255,7 @@ export function ChatRunProgressCard({
               <CallSpace spaceId={spaceId} />
               {elapsedMs !== undefined ? (
                 <span className="text-muted-foreground text-xs tabular-nums">
-                  {formatDuration(elapsedMs)}
+                  {formatDuration(elapsedMs, lang)}
                 </span>
               ) : null}
               {effectiveRunHref ? (

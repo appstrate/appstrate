@@ -6,7 +6,12 @@
  * composer draws its chips with, so browser and server read the same text.
  */
 
-import { defaultDirectiveFormatter } from "@assistant-ui/core";
+import {
+  defaultDirectiveFormatter,
+  type DirectiveFormatter,
+  type DirectiveSegment,
+} from "@assistant-ui/core";
+import { fromMarkdown } from "mdast-util-from-markdown";
 
 export const SKILL_DIRECTIVE = "skill";
 export const AGENT_DIRECTIVE = "agent";
@@ -25,6 +30,45 @@ export function serializeDirective(directive: Directive): string {
   return defaultDirectiveFormatter.serialize(directive);
 }
 
+interface MarkdownNode {
+  type: string;
+  position?: { start: { offset?: number }; end: { offset?: number } };
+  children?: readonly MarkdownNode[];
+}
+
+/** Parse commands in prose while preserving the original Markdown source of literal examples. */
+export const markdownDirectiveFormatter: DirectiveFormatter = {
+  serialize: defaultDirectiveFormatter.serialize,
+  parse(text) {
+    if (!/:(?:skill|agent)[[{]/.test(text)) return [{ kind: "text", text }];
+    const literal: [number, number][] = [];
+    function visit(node: MarkdownNode) {
+      if (node.type === "code" || node.type === "inlineCode" || node.type === "html") {
+        const start = node.position?.start.offset;
+        const end = node.position?.end.offset;
+        if (start !== undefined && end !== undefined) literal.push([start, end]);
+      } else {
+        node.children?.forEach(visit);
+      }
+    }
+    visit(fromMarkdown(text));
+    // An odd number of backslashes escapes the colon. Preserve the backslashes verbatim.
+    for (const match of text.matchAll(/(\\+):(?=(?:skill|agent)[[{])/g)) {
+      if (match[1]!.length % 2) literal.push([match.index, match.index + match[0].length]);
+    }
+    const segments: DirectiveSegment[] = [];
+    let at = 0;
+    for (const [start, end] of literal.sort((a, b) => a[0] - b[0])) {
+      if (start < at) continue;
+      segments.push(...defaultDirectiveFormatter.parse(text.slice(at, start)));
+      segments.push({ kind: "text", text: text.slice(start, end) });
+      at = end;
+    }
+    segments.push(...defaultDirectiveFormatter.parse(text.slice(at)));
+    return segments;
+  },
+};
+
 /** `text` in order: literal text, and the skill and agent directives in it. Any other `:type[…]` stays text. */
 export function directiveSegments(text: string): TextSegment[] {
   const segments: TextSegment[] = [];
@@ -33,7 +77,7 @@ export function directiveSegments(text: string): TextSegment[] {
     if (segment.kind === "text" && last?.kind === "text") last.text += segment.text;
     else segments.push(segment);
   };
-  for (const segment of defaultDirectiveFormatter.parse(text)) {
+  for (const segment of markdownDirectiveFormatter.parse(text)) {
     if (segment.kind === "text") push(segment);
     else if (segment.type === SKILL_DIRECTIVE || segment.type === AGENT_DIRECTIVE) {
       push({ kind: "directive", type: segment.type, label: segment.label, id: segment.id });

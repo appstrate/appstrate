@@ -461,6 +461,7 @@ function entriesByPackage(
 
 /** The injected skills' contents and the catalogue of a turn. */
 interface ChatSkillsRead {
+  unavailable?: ("published_skills" | "draft_skills")[];
   contents: Map<string, SkillContent | null>;
   catalogue: CatalogueSkill[];
 }
@@ -600,6 +601,11 @@ export async function readSkillsOver(
       );
     }),
   );
+  if (failed.published || failed.draft) {
+    read.unavailable = [];
+    if (failed.published) read.unavailable.push("published_skills");
+    if (failed.draft) read.unavailable.push("draft_skills");
+  }
   return read;
 }
 

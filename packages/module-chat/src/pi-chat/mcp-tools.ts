@@ -26,6 +26,7 @@ import {
   type NamedSpace,
 } from "@appstrate/core/mcp-spaces";
 import { canComposeInline, canRunAgents } from "@appstrate/core/permissions";
+import { assistantVisibleMcpResult } from "@appstrate/core/mcp-result";
 import { formatTurnBudgetNote } from "@appstrate/core/chat-turn-metadata";
 import { parseSkillUri, SKILL_URI_PREFIX } from "@appstrate/core/skill-address";
 import {
@@ -201,17 +202,8 @@ async function relayedToolResult(
   scope: OfferScope,
   sendsImages: boolean,
 ): Promise<PiToolResult> {
-  const blocks = result.content.map((block) => {
-    const audience = block.annotations?.audience;
-    if (audience && !audience.includes("assistant")) {
-      return {
-        type: "text" as const,
-        text: "Tool content omitted from model input by its audience annotation.",
-      };
-    }
-    return block;
-  });
-  const projected = mcpResultToPi({ ...result, content: blocks }, scope);
+  const blocks = result.content;
+  const projected = mcpResultToPi(result, scope);
   if (result.isError) projected.isError = true;
   if (!blocks.some((block) => block.type === "image")) return projected;
   const content = [...projected.content];
@@ -593,22 +585,23 @@ function makeForwardExtension(
           }
         }
         const client = await untilAborted(getClient(), callSignal);
-        const result = await client.callTool(
+        const received = await client.callTool(
           { name: tool.name, arguments: args },
           { signal: callSignal },
         );
         const scope = offerScopeOf(toolName, {
           arguments: params,
-          relayed: isRelayedResult(result),
+          relayed: isRelayedResult(received),
         });
         const readSpaces =
-          toolName === "invoke_operation" && result.isError
-            ? result._meta?.[ACTIVE_SPACES_META_KEY]
+          toolName === "invoke_operation" && received.isError
+            ? received._meta?.[ACTIVE_SPACES_META_KEY]
             : spaceId === undefined && omitsOptionalSpace(tool.inputSchema, args)
-              ? result.structuredContent?.searched_spaces
+              ? received.structuredContent?.searched_spaces
               : undefined;
         const unrecorded = await recordResultSpaces(organization, readSpaces);
         if (unrecorded) return refusalToolResult(unrecorded, scope, turnBudget);
+        const result = assistantVisibleMcpResult(received);
         if (toolName === "call_integration_tool" && isRelayedResult(result)) {
           return withTurnBudgetNote(
             await relayedToolResult(result, scope, opts.fileDelivery.image),

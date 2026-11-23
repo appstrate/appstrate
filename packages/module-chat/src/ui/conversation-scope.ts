@@ -6,7 +6,7 @@
  */
 
 import { createContext, useContext, type ReactNode } from "react";
-import { actsIn, useChatHost } from "./runtime-context.ts";
+import { actsIn, useChatHost, type ChatHost } from "./runtime-context.ts";
 
 export interface ConversationScope {
   /**
@@ -44,6 +44,21 @@ export const ConversationScopeProvider = ConversationScopeContext.Provider;
 
 export function useConversationScope(): ConversationScope {
   return useContext(ConversationScopeContext);
+}
+
+/** The composer's space-level permissions follow the same acting space as the turn. */
+export function conversationTurnCan(
+  scope: Pick<ConversationScope, "restricted" | "originSpaceId">,
+  host: Pick<ChatHost, "actingSpaceIds" | "can" | "canIn">,
+) {
+  if (!scope.restricted) return host.can;
+  const origin = scope.originSpaceId;
+  return (permission: string) =>
+    !!origin && actsIn(host.actingSpaceIds, origin) && host.canIn(origin, permission);
+}
+
+export function useConversationTurnCan() {
+  return conversationTurnCan(useConversationScope(), useChatHost());
 }
 
 /** Why the limit cannot change: a turn generates, the chat acts nowhere, or not in the origin. */

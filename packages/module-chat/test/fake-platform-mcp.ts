@@ -33,6 +33,7 @@ export interface FakePlatformMcpOptions {
   prompts?: unknown[];
   /** `prompts/list` answers a JSON-RPC error. */
   promptsFail?: boolean;
+  failedSkillList?: "draft" | "published";
   /** Answers `prompts/get`: a result, or `{ error }` for a JSON-RPC error. */
   getPrompt?: (params: Record<string, unknown>) => unknown;
   /** Replaces the advertised capabilities. */
@@ -110,6 +111,8 @@ export function fakePlatformMcp(
       case "skills/list": {
         const meta = message.params?._meta as Record<string, unknown> | undefined;
         const draft = meta?.[SKILL_DEFINITION_META_KEY] === "draft";
+        if (opts.failedSkillList === (draft ? "draft" : "published"))
+          return reply({ error: { code: -32603, message: "listing failed" } });
         return result({
           skills: ((draft ? opts.drafts : opts.skills) ?? []).map((skill) => entryOf(skill, draft)),
         });

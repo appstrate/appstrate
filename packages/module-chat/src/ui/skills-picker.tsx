@@ -20,6 +20,7 @@ import {
   type SkillBudget,
 } from "./chat-skills.ts";
 import type { ConversationSkillsState } from "./use-conversation-skills.ts";
+import { CatalogueReadNotice } from "./catalogue-read-notice.tsx";
 import { useChatCommands } from "./use-chat-commands.ts";
 import { useChatHost } from "./runtime-context.ts";
 
@@ -70,7 +71,8 @@ export function SkillsPickerPanel({
   const baseId = useId();
   const discoveryId = `${baseId}-discovery`;
   const catalogue = useChatCommands(true);
-  const skills = catalogue.data?.skills ?? [];
+  const skills = catalogue.isError ? [] : (catalogue.data?.skills ?? []);
+  const missing = catalogue.data?.unavailable?.filter((source) => source !== "agents");
   // `isLoading`, not `isPending`: a disabled query stays pending forever, and unreadable reads
   // as "nothing".
   const loading = catalogue.isLoading;
@@ -83,11 +85,6 @@ export function SkillsPickerPanel({
   /** An unpinned skill whose listed size would take the budget past its limit (a cited one is counted). */
   const overBudgetOf = (skill: { id: string; bytes: number | null }, checked: boolean) =>
     !checked && !effective.cited.has(skill.id) && exceedsBudget(budget, skill.bytes);
-
-  const togglePin = (skill: { id: string; bytes: number | null }, checked: boolean) => {
-    if (overBudgetOf(skill, checked)) return;
-    setPin(skill.id, !checked);
-  };
 
   return (
     <>
@@ -107,6 +104,12 @@ export function SkillsPickerPanel({
       </p>
 
       <BudgetGauge budget={budget} />
+      <CatalogueReadNotice
+        sources={missing}
+        failed={catalogue.isError}
+        retry={() => void catalogue.refetch()}
+        busy={catalogue.isFetching}
+      />
 
       <div className="mt-3 min-h-0 flex-1 overflow-y-auto border-t pt-2">
         <div className="text-muted-foreground px-1 py-1 text-[0.65rem] font-semibold tracking-wider uppercase">
@@ -121,9 +124,8 @@ export function SkillsPickerPanel({
               </div>
             ))}
           </div>
-        ) : catalogue.isError ? (
-          <p className="text-destructive px-1 py-3 text-center text-xs">{t("skills.error")}</p>
-        ) : rows.length === 0 ? (
+        ) : rows.length === 0 && (catalogue.isError || missing?.length) ? null : rows.length ===
+          0 ? (
           <p className="text-muted-foreground px-1 py-3 text-center text-xs">{t("skills.empty")}</p>
         ) : (
           rows.map(({ skill, available }, index) => {
@@ -134,8 +136,7 @@ export function SkillsPickerPanel({
             const detailsId = `${id}-details`;
             const state = skillRowState(stored, skill.id);
             const checked = state.kind !== "off";
-            // Not `disabled`: a locked row stays focusable, so its reason is still read out.
-            const inert = overBudgetOf(skill, checked);
+            const estimatedOver = overBudgetOf(skill, checked);
             const refused = state.kind === "refused";
             return (
               <div key={skill.id} className="flex items-start gap-2 rounded-md p-1">
@@ -144,16 +145,12 @@ export function SkillsPickerPanel({
                   data-testid={`skill-pin-${skill.id}`}
                   data-state-kind={state.kind}
                   checked={checked}
-                  aria-disabled={inert || undefined}
                   aria-labelledby={nameId}
                   aria-describedby={detailsId}
-                  onCheckedChange={() => togglePin(skill, checked)}
-                  className={cn("mt-0.5 shrink-0", inert && "cursor-not-allowed opacity-50")}
+                  onCheckedChange={() => setPin(skill.id, !checked)}
+                  className="mt-0.5 shrink-0"
                 />
-                <label
-                  htmlFor={id}
-                  className={cn("min-w-0 flex-1 cursor-pointer", inert && "opacity-50")}
-                >
+                <label htmlFor={id} className="min-w-0 flex-1 cursor-pointer">
                   <span className="flex items-baseline gap-1.5">
                     <span id={nameId} className="truncate text-xs font-medium">
                       {skill.name}
@@ -177,7 +174,7 @@ export function SkillsPickerPanel({
                         {t(`skills.state.refused.${state.reason}`)}
                       </span>
                     )}
-                    {inert && (
+                    {estimatedOver && (
                       <span
                         data-testid={`skill-pin-budget-${skill.id}`}
                         className="text-warning block text-[0.7rem] leading-snug"

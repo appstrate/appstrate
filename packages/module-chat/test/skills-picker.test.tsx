@@ -234,13 +234,13 @@ describe("SkillsPicker", () => {
     ]);
   });
 
-  it("pins nothing past the budget, lets every pin be unchecked (a refused one included), and pins an unknown size", () => {
+  it("pins past the estimated budget, lets every pin be unchecked (a refused one included), and pins an unknown size", () => {
     const full: PinnedSkill = { id: "@a/own", status: "injected", chars: 60_000 };
     const refused: PinnedSkill = { id: "@a/big", status: "over_budget", chars: null };
     const sizes = { "@a/extra": 5_000 };
     expect(
       toggleRows([full, refused], [], ["@a/extra", "@a/unsized", "@a/own", "@a/big"], sizes),
-    ).toEqual(["+@a/unsized", "-@a/own", "-@a/big"]);
+    ).toEqual(["+@a/extra", "+@a/unsized", "-@a/own", "-@a/big"]);
     expect(toggleRows([], [], ["@a/extra"], sizes)).toEqual(["+@a/extra"]);
   });
 
@@ -318,13 +318,13 @@ describe("SkillsPicker", () => {
     const counts = (html: string) =>
       html.match(/skills\.budget\.counts[^<]*/)?.[0].replace(/&quot;/g, '"');
 
-    it("locks a row whose size would exceed the budget, its reason describing the checkbox", () => {
+    it("warns on an available row whose size might exceed the budget, its reason describing the checkbox", () => {
       const html = render(true, [{ id: "@a/loaded", status: "injected", chars: 50_000 }], [], [], {
         "@acme/free": 20_000,
       });
       expect(html).toContain('data-testid="skill-pin-budget-@acme/free"');
       const free = box(html, "@acme/free");
-      expect(free).toContain(`aria-disabled="true"`);
+      expect(free).not.toContain("aria-disabled");
       expect(free).not.toMatch(/ disabled=""/);
       const describedBy = free.match(/aria-describedby="([^"]+)"/)![1];
       expect(html.slice(html.indexOf(`id="${describedBy}"`))).toContain(

@@ -210,8 +210,29 @@ describe("GET /api/orgs/:orgId/chat/commands", () => {
     expect(res.status).toBe(200);
     const body = chatCommandsSchema.parse(await res.json());
     expect(body.agents).toEqual([]);
+    expect(body.unavailable).toEqual(["agents"]);
     expect(body.skills.map((skill) => skill.id)).toEqual(["@acme/tone"]);
   });
+
+  for (const definition of ["draft", "published"] as const) {
+    it(`identifies a failed ${definition} skills read and recovers on retry`, async () => {
+      const opts: FakePlatformMcpOptions = {
+        failedSkillList: definition,
+        skills: [skill("spc_a", "tone")],
+        prompts: PROMPTS,
+      };
+      const app = appFor([withPerms(spaceA, "skills:read", "skills:write")], fakePlatformMcp(opts));
+      const partial = chatCommandsSchema.parse(await (await get(app)).json());
+      expect(partial.unavailable).toEqual([
+        definition === "draft" ? "draft_skills" : "published_skills",
+      ]);
+      expect(partial.agents.length).toBeGreaterThan(0);
+      delete opts.failedSkillList;
+      const refreshed = chatCommandsSchema.parse(await (await get(app)).json());
+      expect(refreshed.unavailable).toBeUndefined();
+      expect(refreshed.skills.map((s) => s.id)).toContain("@acme/tone");
+    });
+  }
 
   it("narrows a `spaceId` read to the limited conversation's grants and gates drafts on `skills:write`", async () => {
     const seen = newSeen();

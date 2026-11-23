@@ -94,7 +94,11 @@ import {
   type ConversationCreation,
 } from "./chat-route.ts";
 import { useConversationLimit } from "./conversation-limit.ts";
-import { ConversationScopeProvider, useConversationScope } from "./conversation-scope.ts";
+import {
+  ConversationScopeProvider,
+  useConversationScope,
+  conversationTurnCan,
+} from "./conversation-scope.ts";
 import {
   subscribeGeneration,
   subscribeModel,
@@ -341,7 +345,7 @@ export function ChatPage({
   );
   const host = useMemo<ChatHost>(
     () => ({
-      openFile: onOpenFile ?? null,
+      openFile: onOpenFile,
       downloadFile,
       useFileImageSrc,
       t,
@@ -404,7 +408,6 @@ export function ChatPage({
     }),
     [models, selectedModel, generation, modelsPending, modelsFailed],
   );
-  const authorsPackages = canAuthorPackages(can);
 
   // The active row reduced to primitives so the memoised `Conversation` re-renders only when
   // they change (a few times per turn), not on every list refetch. `generating` and `updatedAt`
@@ -435,8 +438,6 @@ export function ChatPage({
                 initialComposerDraft={isPersisted ? undefined : initialComposerDraft}
                 onConversationChange={onConversationChange}
                 uploadFile={uploadFile}
-                authorsPackages={authorsPackages}
-                canPinSkills={canPinSkills(can)}
                 canWrite={canWrite}
                 serverGenerating={serverGenerating}
                 serverUpdatedAt={serverUpdatedAt}
@@ -459,8 +460,6 @@ interface ConversationProps {
   onConversationChange?: SelectConversation;
   /** The host's uploader, which the conversation's attachment adapter stages files through. */
   uploadFile: UploadFile;
-  authorsPackages: boolean;
-  canPinSkills: boolean;
   /** `chat:write`: the composer placeholder and the not-found screen's new-conversation action. */
   canWrite: boolean;
   /** Server session row `generating`, from the list or the conversation; `undefined` = no row. */
@@ -491,8 +490,6 @@ const Conversation = memo(function Conversation({
   id,
   transport,
   isPersisted,
-  authorsPackages,
-  canPinSkills,
   canWrite,
   storedSpaceId,
   storedRestricted,
@@ -506,7 +503,8 @@ const Conversation = memo(function Conversation({
   // streaming turn. A conversation that started new stays "load-free" for its
   // whole life; only a deep-linked (persisted-at-mount) one loads history.
   const [persistedAtMount] = useState(isPersisted);
-  const { t, actingSpaceIds } = useChatHost();
+  const host = useChatHost();
+  const { t, actingSpaceIds } = host;
   const queryClient = useQueryClient();
   const history = useQuery({
     ...sessionSeedQuery(queryClient, transport, id),
@@ -532,7 +530,9 @@ const Conversation = memo(function Conversation({
 
   // No picker on a failed read: it would show the defaults, and a change would
   // send them over the stored choice.
-  const showPicker = canPinSkills && !history.isError;
+  const turnCan = conversationTurnCan(scope, host);
+  const authorsPackages = canAuthorPackages(turnCan);
+  const showPicker = canPinSkills(turnCan) && !history.isError;
   // The session detail's skills once the server holds the row, a local selection before. Gated
   // here for the turn (`turnSkills` bypasses the provider) and below for what the thread shows.
   const conversationSkills = useConversationSkills({
@@ -541,16 +541,13 @@ const Conversation = memo(function Conversation({
     persisted: persistedAtMount,
     enabled: showPicker,
   });
-  const tools = useMemo(
-    () => <ComposerTools authorsPackages={authorsPackages} />,
-    [authorsPackages],
-  );
+  const tools = <ComposerTools authorsPackages={authorsPackages} />;
 
   if (persistedAtMount && history.isPending) {
     return (
       <ConversationSkeleton
         label={t("conversation.loading")}
-        placeholder={canWrite ? t("composer.placeholder") : null}
+        placeholder={turnCan("chat:write") ? t("composer.placeholder") : null}
         disclaimer={t("thread.disclaimer")}
       />
     );
@@ -618,10 +615,7 @@ function ConversationInner({
   serverUpdatedAt,
   turnSkills,
   getCreation,
-}: Omit<
-  ConversationProps,
-  "canPinSkills" | "canWrite" | "authorsPackages" | "storedSpaceId" | "storedRestricted"
-> & {
+}: Omit<ConversationProps, "canWrite" | "storedSpaceId" | "storedRestricted"> & {
   composerTools: React.ReactNode;
   initialMessages: UIMessage[];
   /** The skills a first turn creates the conversation with. */

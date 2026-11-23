@@ -123,7 +123,6 @@ export type ChatEngine = (input: PiChatInput) => Response;
  * other role silently, so anything else must be refused at the door rather than
  * accepted and discarded.
  */
-const CHAT_MESSAGE_ROLES = new Set(["user", "assistant"]);
 
 /** Ceiling on the turn's last (persisted) message; attachments ride as references. */
 export const CHAT_MESSAGE_MAX_BYTES = 256 * 1024;
@@ -131,7 +130,7 @@ export const CHAT_MESSAGE_MAX_BYTES = 256 * 1024;
 // The client (assistant-ui / useChat) posts the full thread plus optional
 // session/model/context extras. The last message's UIMessage shape is checked by
 // `safeValidateUIMessages` in the handler; this schema adds:
-//   - `role` MUST be one of {@link CHAT_MESSAGE_ROLES}. Nothing legitimate
+//   - `role` must be user or assistant. Nothing legitimate
 //     sends another: the composer only produces user turns, and a reload
 //     replays what the server persisted — user or assistant, a server-authored
 //     notice included (persistence.ts stores it as `assistant`).
@@ -151,24 +150,36 @@ export const chatStreamSchema = z
   .object({
     id: z.string().optional(),
     messages: z
-      .array(z.unknown())
+      .array(
+        z.looseObject({
+          id: z.string().optional(),
+          role: z.enum(["user", "assistant"]),
+          parts: z.array(z.looseObject({ type: z.string() })),
+        }),
+      )
       .min(1, "messages must not be empty")
       .superRefine((messages, ctx) => {
         messages.forEach((message, i) => {
-          const role = (message as { role?: unknown }).role;
-          if (typeof role !== "string" || !CHAT_MESSAGE_ROLES.has(role)) {
+          const { role, parts } = message;
+          // The SDK requires an id on the submitted message. Earlier thread entries were
+          // accepted without one; only an entry with an id is eligible for a persisted lookup.
+          if (i === messages.length - 1 && message.id === undefined) {
             ctx.addIssue({
               code: "custom",
-              message: "Message role must be 'user' or 'assistant'.",
-              path: [i, "role"],
+              path: [i, "id"],
+              message: "The new message requires an id.",
             });
           }
-          const parts = (message as { parts?: unknown }).parts;
-          if (!Array.isArray(parts)) return;
           let launches = 0;
           parts.forEach((part, j) => {
-            const type =
-              part && typeof part === "object" ? (part as { type?: unknown }).type : null;
+            const { type } = part;
+            if (type === "text" && typeof part.text !== "string") {
+              ctx.addIssue({
+                code: "custom",
+                message: "A text part requires text.",
+                path: [i, "parts", j, "text"],
+              });
+            }
             if (type === AGENT_PROMPT_PART_TYPE) {
               const shape =
                 i === messages.length - 1 ? clientAgentPromptDataSchema : agentPromptDataSchema;
@@ -184,6 +195,13 @@ export const chatStreamSchema = z
               return;
             }
             if (type !== "file") return;
+            if (typeof part.mediaType !== "string") {
+              ctx.addIssue({
+                code: "custom",
+                message: "A file part requires mediaType.",
+                path: [i, "parts", j, "mediaType"],
+              });
+            }
             const url = (part as { url?: unknown }).url;
             if (!isAttachmentUri(url)) {
               ctx.addIssue({

@@ -143,6 +143,12 @@ export const CAMEL_CASE_CARVE_OUTS: Record<string, CarveOut> = {
   referencedOrgId: OAUTH_CLIENTS,
   referencedSpaceId: OAUTH_CLIENTS,
   structuredContent: MCP_TOOL_RESULT,
+  mediaType: {
+    reason: "AI SDK FileUIPart wire field",
+    within: [
+      "#/paths/~1api~1orgs~1{orgId}~1chat/post/requestBody/content/application~1json/schema/properties/messages/items/properties/parts/items/",
+    ],
+  },
 };
 
 /**

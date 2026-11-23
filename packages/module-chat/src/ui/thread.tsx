@@ -63,7 +63,7 @@ import {
   subscribeResolvedUploads,
 } from "./upload.ts";
 import { actsIn, useChatHost, useChatTransport } from "./runtime-context.ts";
-import { useConversationScope } from "./conversation-scope.ts";
+import { useConversationScope, useConversationTurnCan } from "./conversation-scope.ts";
 import { sentenceWithName } from "./sentence-with-name.tsx";
 import { sourceMessage, turnErrorState } from "./turn-error-state.ts";
 import { ContextIndicator } from "./context-gauge.tsx";
@@ -139,7 +139,8 @@ export function Thread({
   useQueueFlush(messageQueue);
   // Held above the welcome and footer composers: the draft seeds the conversation once.
   const draftSeededRef = React.useRef(false);
-  const { can, t } = useChatHost();
+  const { t } = useChatHost();
+  const can = useConversationTurnCan();
   const canWrite = can("chat:write");
   // The whole thread is the drop target, welcome screen and transcript alike; a reader gets none.
   // Where attaching is unavailable a drop still reaches the adapter, whose refusal says why
@@ -243,7 +244,8 @@ function ThreadWelcome({
   draftSeededRef: React.RefObject<boolean>;
   queue: MessageQueue;
 }) {
-  const { can, t, firstName: name, actingSpaceIds } = useChatHost();
+  const { t, firstName: name, actingSpaceIds } = useChatHost();
+  const can = useConversationTurnCan();
   const canWrite = can("chat:write");
   // The host is looking at a space where the chat does not act (a viewer there): the conversation
   // still runs, in the caller's other spaces, and touches none of this one. Unsaid until known.
@@ -285,7 +287,8 @@ function ThreadWelcome({
  * triggers none, so it is not said to them.
  */
 function Disclaimer() {
-  const { can, t } = useChatHost();
+  const { t } = useChatHost();
+  const can = useConversationTurnCan();
   if (!can("chat:write")) return null;
   return <p className={DISCLAIMER_CLASS}>{t("thread.disclaimer")}</p>;
 }
@@ -638,7 +641,8 @@ function Composer({
   draftSeededRef: React.RefObject<boolean>;
   queue: MessageQueue;
 }) {
-  const { can, t, modelLabel } = useChatHost();
+  const { t, modelLabel } = useChatHost();
+  const can = useConversationTurnCan();
   const composer = unstable_useComposerInput();
   const running = useAuiState((s) => s.thread.isRunning);
   const hasAttachments = useAuiState((s) => s.composer.attachments.length > 0);

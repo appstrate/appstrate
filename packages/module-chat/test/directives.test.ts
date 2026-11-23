@@ -60,3 +60,18 @@ describe("readableDirectives", () => {
     expect(readableDirectives("plain /path text")).toBe("plain /path text");
   });
 });
+
+it("preserves fenced, inline and escaped directives while recognizing the selected prose chip", () => {
+  const chip = ":skill[tone]{name=@acme/tone}";
+  const examples = [
+    `\`\`${chip}\`\``,
+    "~".repeat(4) + "\n" + chip + "\n~~~~",
+    "\\" + chip,
+    "    " + chip,
+  ];
+  for (const example of examples) {
+    const text = example + "\n\n" + chip;
+    expect(directivesOf(text)).toHaveLength(1);
+    expect(readableDirectives(text)).toBe(example + "\n\n/tone");
+  }
+});

@@ -21,6 +21,7 @@ import { AgentGlyph, type AgentAppearance } from "./agent-glyph.tsx";
 import { commandList, noCommandMatch, searchCommands, slashMatch } from "./composer-commands.ts";
 import { useChatHost } from "./runtime-context.ts";
 import { useConversationSkillsContext, useDraftSkills } from "./use-conversation-skills.ts";
+import { CatalogueReadNotice } from "./catalogue-read-notice.tsx";
 import { useChatCommands } from "./use-chat-commands.ts";
 
 /** Wraps the composer: the popover and the editor find each other through it. */
@@ -48,7 +49,7 @@ export function CommandPopover() {
   const running = useAuiState((s) => s.thread.isRunning);
   // Read only: the editor fetches the entry once focused, and the menu opens only in the editor.
   const commands = useChatCommands(false);
-  const { data } = commands;
+  const data = commands.isError ? undefined : commands.data;
   const skills = useMemo(
     () => conversation && { stored: conversation.skills, effective },
     [conversation, effective],
@@ -68,7 +69,7 @@ export function CommandPopover() {
   );
   const failed = commands.isError;
   const matcher = (text: string, _char: string, cursor: number) =>
-    slashMatch(text, cursor, (query) => noCommandMatch(list, query));
+    slashMatch(text, cursor, (query) => !data?.unavailable?.length && noCommandMatch(list, query));
   // The listbox may hold only options: the card around it draws the notice, from a live region
   // that stays mounted so a screen reader hears each change.
   const [menu, setMenu] = useState<MenuState>(CLOSED);
@@ -90,6 +91,14 @@ export function CommandPopover() {
       >
         {notice?.text ?? ""}
       </p>
+      {menu.open && (
+        <CatalogueReadNotice
+          sources={data?.unavailable}
+          failed={failed}
+          retry={() => void commands.refetch()}
+          busy={commands.isFetching}
+        />
+      )}
       <ComposerPrimitive.TriggerPopover
         char="/"
         adapter={adapter}
@@ -123,7 +132,7 @@ function Entries({
     : items.length === 0 && isLoading
       ? { text: t("slash.loading"), className: "text-muted-foreground text-sm py-2" }
       : items.length === 0 && failed
-        ? { text: t("slash.error"), className: "text-destructive text-sm py-2" }
+        ? null
         : searchCommands(overBudget, query).length > 0
           ? {
               text: t("skills.budget.wouldExceed"),
