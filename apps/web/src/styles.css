@@ -18,10 +18,12 @@
   }
 }
 
-/* A short landscape touch screen (a phone turned sideways): the keyboard leaves a sliver, so Send
-   shares the line of the field that Safari pans into view above its accessory bar. */
-@custom-variant short-landscape {
-  @media (pointer: coarse) and (orientation: landscape) and (max-height: 32rem) {
+/* A wide but short touch screen (a phone turned sideways, a tablet with its keyboard up): from `md`
+   the composer gives the field a line of its own, which Safari pans into view above its accessory
+   bar while Send stays on the line below, so Send joins the field's line. Width and height, never
+   `orientation`: that one compares the viewport's sides, and an upright phone's keyboard flips it. */
+@custom-variant md-short {
+  @media (width >= 48rem) and (height <= 32rem) and (pointer: coarse) {
     @slot;
   }
 }
