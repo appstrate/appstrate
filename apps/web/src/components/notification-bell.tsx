@@ -9,7 +9,6 @@ import { PendingButton } from "@/components/app-ui/pending-button";
 import { RunStatusBadge } from "./status-badge";
 import { Button } from "@appstrate/ui/components/button";
 import { Popover, PopoverContent, PopoverTrigger } from "@appstrate/ui/components/popover";
-import { Sheet, SheetContent, SheetTrigger } from "@appstrate/ui/components/sheet";
 import { Separator } from "@appstrate/ui/components/separator";
 import { Skeleton } from "@appstrate/ui/components/skeleton";
 import { EmptyState, ErrorState } from "./page-states";
@@ -19,7 +18,6 @@ import { useAgents } from "../hooks/use-packages";
 import { useOverviewMode } from "../hooks/use-overview-mode";
 import { useCurrentSpaceId } from "../hooks/use-current-space";
 import { useSpaces } from "../hooks/use-spaces";
-import { useIsMobile } from "@appstrate/ui/use-mobile";
 import { notificationHref, notificationRow, type NotificationItem } from "../lib/notification-row";
 import { spacesHeld } from "../lib/space-lists";
 import { SpaceNameOf } from "./space-name";
@@ -187,7 +185,6 @@ export function NotificationBell() {
     fetchNextPage,
   } = useNotifications({ unread: true, limit: 50, spanning, enabled: open });
   const markAllRead = useMarkAllRead();
-  const isMobile = useIsMobile();
   const canReach = useCanReachInSpace();
   const unread = count ?? 0;
   const agentNames = new Map(agents?.map((a) => [a.id, a.display_name ?? a.id]));
@@ -227,17 +224,7 @@ export function NotificationBell() {
     onLoadMore: () => void fetchNextPage(),
   };
 
-  if (isMobile) {
-    return (
-      <Sheet open={open} onOpenChange={setOpen}>
-        <SheetTrigger asChild>{triggerButton}</SheetTrigger>
-        <SheetContent side="bottom" className="rounded-t-xl p-0" showCloseButton={false}>
-          <NotificationContent {...contentProps} />
-        </SheetContent>
-      </Sheet>
-    );
-  }
-
+  // A popover from `md` up, a panel from the bottom below: the primitive decides.
   return (
     <Popover open={open} onOpenChange={setOpen}>
       <PopoverTrigger asChild>{triggerButton}</PopoverTrigger>

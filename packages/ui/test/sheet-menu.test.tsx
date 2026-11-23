@@ -4,7 +4,11 @@
 
 import { describe, expect, it } from "bun:test";
 import { renderToStaticMarkup } from "react-dom/server";
-import { SHEET_ROW_CLASS, SheetMenuRow, SheetMenuSwitchRow } from "../src/ui/sheet-menu.tsx";
+import {
+  SHEET_ROW_CLASS,
+  SheetMenuRow,
+  SheetMenuSwitchRow,
+} from "../src/components/sheet-menu.tsx";
 
 describe("a sheet menu's rows", () => {
   it("are 48 px tall, left-aligned, and inset from the panel's edges", () => {

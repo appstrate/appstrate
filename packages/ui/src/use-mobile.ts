@@ -8,13 +8,9 @@ const MOBILE_BREAKPOINT = 768;
 const MOBILE_MEDIA_QUERY = `(max-width: ${MOBILE_BREAKPOINT - 1}px)`;
 
 /**
- * The width now, read once (when a menu opens, say): below `md` a menu opens as a sheet from the
- * bottom, from `md` up as a popover or a dropdown. `useIsMobile` is the live, re-rendering read.
+ * Below `md`, live: re-renders when the width crosses it. `DropdownMenu` and `Popover` read it to
+ * draw their content as a sheet from the bottom.
  */
-export function isMobileViewport(): boolean {
-  return window.matchMedia(MOBILE_MEDIA_QUERY).matches;
-}
-
 export function useIsMobile() {
   const [isMobile, setIsMobile] = React.useState<boolean>(
     () => typeof window !== "undefined" && window.innerWidth < MOBILE_BREAKPOINT,

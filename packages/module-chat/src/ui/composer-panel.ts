@@ -1,16 +1,15 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * The composer's ONE tools panel, as state: whether it is open, in which container, and at which
- * level. The phone's "+" and the desktop's settings button open the same panel; the width decides
- * the container (a popover from `md` up, a bottom sheet below), read once, when it opens. The
- * desktop's chips and the context indicator open it at the level they are about.
+ * The composer's ONE tools panel, as state: whether it is open, and at which level. The phone's "+"
+ * and the desktop's settings button open the same panel (a `Popover`, which is a sheet from the
+ * bottom below `md` on its own). The desktop's chips and the context indicator open it at the level
+ * they are about.
  *
  * And what of the composer's settings departs from its default, decided once: the desktop draws
  * it as chips, the phone as the dot on its "+".
  */
 
-import { isMobileViewport } from "@appstrate/ui/use-mobile";
 import { createContext, createElement, useContext, useMemo, useState, type ReactNode } from "react";
 import { canComposeInlineRuns } from "../capabilities.ts";
 import { canResetSkills } from "./chat-skills.ts";
@@ -19,26 +18,23 @@ import { useInlineRunModelEnabled } from "./inline-run-model-store.ts";
 import { usePackageAuthoringEnabled } from "./package-authoring-store.ts";
 import { useChatHost } from "./runtime-context.ts";
 import { selectedModel, useModelPicker } from "./model-picker.ts";
-import type { MenuBack } from "./sheet-menu.tsx";
+import type { MenuBack } from "@appstrate/ui/components/sheet-menu";
 import { useConversationSkillsContext } from "./use-conversation-skills.ts";
 
 /** Where the panel is: its rows, or one of the levels they open in their place. */
 export type ComposerPanelLevel = "tools" | "skills" | "models" | "configuration";
 
-type Container = "popover" | "sheet";
-
 export interface ComposerPanelState {
-  /** The open container, `null` while closed. */
-  open: Container | null;
+  open: boolean;
   level: ComposerPanelLevel;
-  /** Opens the panel at `level`, in the container the width calls for. */
+  /** Opens the panel at `level`. */
   openAt: (level: ComposerPanelLevel) => void;
   setLevel: (level: ComposerPanelLevel) => void;
   close: () => void;
 }
 
 const CLOSED: ComposerPanelState = {
-  open: null,
+  open: false,
   level: "tools",
   openAt: () => {},
   setLevel: () => {},
@@ -49,7 +45,7 @@ const ComposerPanelContext = createContext<ComposerPanelState>(CLOSED);
 
 /** One per composer: its "+", its settings button, its chips and its context indicator share it. */
 export function ComposerPanelProvider({ children }: { children: ReactNode }) {
-  const [open, setOpen] = useState<Container | null>(null);
+  const [open, setOpen] = useState(false);
   const [level, setLevel] = useState<ComposerPanelLevel>("tools");
   const value = useMemo<ComposerPanelState>(
     () => ({
@@ -57,10 +53,10 @@ export function ComposerPanelProvider({ children }: { children: ReactNode }) {
       level,
       openAt: (next) => {
         setLevel(next);
-        setOpen(isMobileViewport() ? "sheet" : "popover");
+        setOpen(true);
       },
       setLevel,
-      close: () => setOpen(null),
+      close: () => setOpen(false),
     }),
     [open, level],
   );

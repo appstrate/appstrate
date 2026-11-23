@@ -2,11 +2,12 @@
 
 /**
  * The composer's left cluster from `md` up: an attach button, the settings button that opens the
- * tools panel (`ComposerToolsPanel`) in a popover, and a chip for each setting off its default
+ * tools panel (`ComposerToolsPanel`), and a chip for each setting off its default
  * (`useComposerDepartures`): a chip opens the panel at the level that changes it, its X restores
- * the default. Below `md` ONE "+" at the left of the field opens the same panel from the bottom, as
- * the chats people already use do: nothing else stays beside the field, a dot on the "+" says a
- * setting is off its default and the panel names it (`ComposerPlusMenu`).
+ * the default. Below `md` ONE "+" at the left of the field opens the same panel, as the chats people
+ * already use do: nothing else stays beside the field, a dot on the "+" says a setting is off its
+ * default and the panel names it (`ComposerPlusButton`). The panel is one `Popover`: a sheet from
+ * the bottom below `md`, by the design system's own rule.
  */
 
 import { useId, type ReactNode } from "react";
@@ -27,7 +28,9 @@ import {
   PopoverTrigger,
 } from "@appstrate/ui/components/popover";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@appstrate/ui/components/tooltip";
+import { MENU_TITLE_CLASS, MenuHeading } from "@appstrate/ui/components/sheet-menu";
 import { cn } from "@appstrate/ui/cn";
+import { useIsMobile } from "@appstrate/ui/use-mobile";
 import { attachUnavailableKey } from "./attachment-adapter.ts";
 import {
   DEPARTURE_LEVEL,
@@ -44,9 +47,10 @@ import { setInlineRunModelEnabled } from "./inline-run-model-store.ts";
 import { useChatHost } from "./runtime-context.ts";
 import { RemovableChip } from "./removable-chip.tsx";
 import { sentenceWithNode } from "./sentence-with-name.tsx";
-import { MENU_TITLE_CLASS, MenuHeading, SheetMenu } from "./sheet-menu.tsx";
 import { SkillChips } from "./skill-chips.tsx";
-import { COMPOSER_TOOL_BUTTON_CLASS } from "./touch-targets.ts";
+import { COMPOSER_BUTTON_CLASS } from "./touch-targets.ts";
+
+const COMPOSER_TOOL_CLASS = cn(COMPOSER_BUTTON_CLASS, "text-muted-foreground");
 
 export interface ComposerToolsProps {
   /** The caller may author packages: the creation-mode switch is offered. */
@@ -59,65 +63,66 @@ export function ComposerTools({ authorsPackages }: ComposerToolsProps) {
   const heading = useComposerPanelHeading();
   const departures = useComposerDepartures(authorsPackages);
   const titleId = useId();
+  // A phone's panel also holds attaching a file and the disclaimer: its composer line has room
+  // for neither.
+  const phone = useIsMobile();
   return (
-    <>
-      <Popover
-        open={panel.open === "popover"}
-        onOpenChange={(open) => (open ? panel.openAt("tools") : panel.close())}
+    <Popover
+      open={panel.open}
+      onOpenChange={(open) => (open ? panel.openAt("tools") : panel.close())}
+    >
+      {/* From `md` up; a phone has the "+". The popover anchors to the whole row. */}
+      <PopoverAnchor asChild>
+        <div className="flex min-w-0 items-center gap-1.5 max-md:hidden">
+          <AttachButton />
+          <PopoverTrigger asChild>
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon-sm"
+              className={cn(COMPOSER_TOOL_CLASS, "relative")}
+              aria-label={t("composer.tools")}
+              data-testid="composer-settings-trigger"
+            >
+              <SettingsIcon />
+              {departures.length > 0 && <DepartureDot testId="composer-settings-dot" />}
+            </Button>
+          </PopoverTrigger>
+          {departures.map((departure) => (
+            <DepartureChip
+              key={departure}
+              departure={departure}
+              onOpen={() => panel.openAt(DEPARTURE_LEVEL[departure])}
+            />
+          ))}
+        </div>
+      </PopoverAnchor>
+      <ComposerPlusButton authorsPackages={authorsPackages} />
+      <PopoverContent
+        side="top"
+        align="start"
+        sideOffset={6}
+        collisionPadding={12}
+        aria-labelledby={titleId}
+        data-testid="composer-panel"
+        // A level goes up one level on Escape; the top level closes.
+        onEscapeKeyDown={(event) => {
+          if (!heading.back) return;
+          event.preventDefault();
+          heading.back.onClick();
+        }}
+        className="flex max-h-[min(32rem,var(--radix-popover-content-available-height))] w-[min(22rem,calc(100vw-1.5rem))] flex-col overflow-hidden p-0"
       >
-        {/* From `md` up; a phone has the "+". The popover anchors to the whole row. */}
-        <PopoverAnchor asChild>
-          <div className="flex min-w-0 items-center gap-1.5 max-md:hidden">
-            <AttachButton />
-            <PopoverTrigger asChild>
-              <Button
-                type="button"
-                variant="ghost"
-                size="icon"
-                className={cn(COMPOSER_TOOL_BUTTON_CLASS, "relative")}
-                aria-label={t("composer.tools")}
-                data-testid="composer-settings-trigger"
-              >
-                <SettingsIcon />
-                {departures.length > 0 && <DepartureDot testId="composer-settings-dot" />}
-              </Button>
-            </PopoverTrigger>
-            {departures.map((departure) => (
-              <DepartureChip
-                key={departure}
-                departure={departure}
-                onOpen={() => panel.openAt(DEPARTURE_LEVEL[departure])}
-              />
-            ))}
-          </div>
-        </PopoverAnchor>
-        <PopoverContent
-          side="top"
-          align="start"
-          sideOffset={6}
-          collisionPadding={12}
-          aria-labelledby={titleId}
-          data-testid="composer-panel"
-          // A level goes up one level on Escape; the top level closes.
-          onEscapeKeyDown={(event) => {
-            if (!heading.back) return;
-            event.preventDefault();
-            heading.back.onClick();
-          }}
-          className="flex max-h-[min(32rem,var(--radix-popover-content-available-height))] w-[min(22rem,calc(100vw-1.5rem))] flex-col overflow-hidden p-0"
-        >
-          <MenuHeading back={heading.back}>
-            <p id={titleId} className={MENU_TITLE_CLASS}>
-              {heading.title}
-            </p>
-          </MenuHeading>
-          <div className="flex min-h-0 flex-1 flex-col overflow-y-auto py-1">
-            <ComposerToolsPanel authorsPackages={authorsPackages} />
-          </div>
-        </PopoverContent>
-      </Popover>
-      <ComposerPlusMenu authorsPackages={authorsPackages} />
-    </>
+        <MenuHeading back={heading.back}>
+          <p id={titleId} className={MENU_TITLE_CLASS}>
+            {heading.title}
+          </p>
+        </MenuHeading>
+        <div className="flex min-h-0 flex-1 flex-col overflow-y-auto py-1">
+          <ComposerToolsPanel authorsPackages={authorsPackages} phone={phone} />
+        </div>
+      </PopoverContent>
+    </Popover>
   );
 }
 
@@ -201,9 +206,9 @@ function AttachButton() {
     <Button
       type="button"
       variant="ghost"
-      size="icon"
+      size="icon-sm"
       disabled={"unavailable" in attachTarget}
-      className={COMPOSER_TOOL_BUTTON_CLASS}
+      className={COMPOSER_TOOL_CLASS}
       aria-label={label}
     >
       <PaperclipIcon />
@@ -248,34 +253,24 @@ function DepartureDot({ testId }: { testId: string }) {
   );
 }
 
-function ComposerPlusMenu({ authorsPackages }: { authorsPackages: boolean }) {
+/** The phone's opener of the panel, at the left of the field. */
+function ComposerPlusButton({ authorsPackages }: { authorsPackages: boolean }) {
   const { t } = useChatHost();
   const panel = useComposerPanel();
-  const heading = useComposerPanelHeading();
   const departed = useComposerDepartures(authorsPackages).length > 0;
   return (
-    <>
-      <Button
-        type="button"
-        variant="ghost"
-        size="icon"
-        className={cn(COMPOSER_TOOL_BUTTON_CLASS, "relative md:hidden")}
-        aria-label={t("composer.tools")}
-        aria-haspopup="dialog"
-        data-testid="composer-plus"
-        onClick={() => panel.openAt("tools")}
-      >
-        <PlusIcon />
-        {departed && <DepartureDot testId="composer-plus-dot" />}
-      </Button>
-      <SheetMenu
-        open={panel.open === "sheet"}
-        onOpenChange={(open) => !open && panel.close()}
-        title={heading.title}
-        back={heading.back}
-      >
-        <ComposerToolsPanel authorsPackages={authorsPackages} phone />
-      </SheetMenu>
-    </>
+    <Button
+      type="button"
+      variant="ghost"
+      size="icon-sm"
+      className={cn(COMPOSER_TOOL_CLASS, "relative md:hidden")}
+      aria-label={t("composer.tools")}
+      aria-haspopup="dialog"
+      data-testid="composer-plus"
+      onClick={() => panel.openAt("tools")}
+    >
+      <PlusIcon />
+      {departed && <DepartureDot testId="composer-plus-dot" />}
+    </Button>
   );
 }

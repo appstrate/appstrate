@@ -113,10 +113,13 @@ they start with `packages/` or `e2e/`.
   line each: the title, then the tiles of its spaces, two at most then « +N », named for a screen
   reader; the names are in the "…" panel). Then the footer every drawer has: Catalogue, Settings
   and the account.
-- **A phone's menus rise from the bottom** (`SheetMenu`, `packages/module-chat/src/ui/sheet-menu.tsx`,
-  the design system's bottom `Sheet`): rows 48 px tall, the destructive one in red and asking before
-  it acts. Below `md` the composer's "+", a conversation's "…" and the model picker are such panels; a
-  desktop keeps its popovers and dropdown menus. The chat composer is one line for good on a phone:
+- **A phone's menus rise from the bottom**, and no screen decides it: `DropdownMenu` and `Popover`
+  (`packages/ui`) draw their content below `md` as a panel from the bottom (`SheetMenuContent`,
+  `packages/ui/src/components/sheet-menu.tsx`, on the bottom `Sheet`), with the same open state and
+  the same items; from `md` up they stay a dropdown and a popover. A menu's rows are 48 px tall
+  there, the destructive one in red and asking before it acts; a sub-menu is a group of rows under
+  its trigger's words; `sheetTitle` on a `DropdownMenuContent` names the panel in its heading. Never
+  choose the container by hand (`useIsMobile` + a `Sheet`): use the primitive. The chat composer is one line for good on a phone:
   "+" (attach, skills, model, space limit, creation mode, the disclaimer), the field, send; the model is
   named in the field's placeholder and chosen from the "+" panel's "Modèle" row, so no chip or tool
   button stays beside the field. A dot on the "+" says a setting is off its default (never the space

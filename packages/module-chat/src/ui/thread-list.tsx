@@ -20,7 +20,6 @@
  * fill as Studio's, or the two products would not read as one app.
  */
 
-import { isMobileViewport } from "@appstrate/ui/use-mobile";
 import { useEffect, useRef, useState } from "react";
 import { flushSync } from "react-dom";
 import { useQueryClient } from "@tanstack/react-query";
@@ -38,11 +37,11 @@ import { useNowTick } from "@appstrate/ui/use-now-tick";
 import { Spinner } from "@appstrate/ui/components/spinner";
 import { Button } from "@appstrate/ui/components/button";
 import { Input } from "@appstrate/ui/components/input";
-import { SheetMenu, SheetMenuRow } from "./sheet-menu.tsx";
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuLabel,
   DropdownMenuTrigger,
 } from "@appstrate/ui/components/dropdown-menu";
 import { Label } from "@appstrate/ui/components/label";
@@ -397,9 +396,6 @@ function ConversationRow({
   const queryClient = useQueryClient();
   const [renaming, setRenaming] = useState(false);
   const [confirmingDelete, setConfirmingDelete] = useState(false);
-  // The row's « … »: a dropdown from `md` up, a panel from the bottom below, both with the same items.
-  const [menuOpen, setMenuOpen] = useState(false);
-  const [dropdownOpen, setDropdownOpen] = useState(false);
   // Closing a dialog opened from a row hands the focus back to what opened it.
   const dialogTrigger = useRef<HTMLButtonElement | null>(null);
   const menuTrigger = useRef<HTMLButtonElement>(null);
@@ -411,15 +407,13 @@ function ConversationRow({
   };
   const [deleting, setDeleting] = useState(false);
   const [deleteFailed, setDeleteFailed] = useState(false);
-  // The « … »'s two items, the same from its dropdown and from its panel.
+  // The « … »'s two items; selecting one closes the menu.
   const openRename = () => {
     dialogTrigger.current = menuTrigger.current;
-    setMenuOpen(false);
     setRenaming(true);
   };
   const openDelete = () => {
     dialogTrigger.current = menuTrigger.current;
-    setMenuOpen(false);
     setDeleteFailed(false);
     setConfirmingDelete(true);
   };
@@ -528,14 +522,10 @@ function ConversationRow({
       </div>
       {canWrite && (
         <>
-          {/* One « … », the same two items on every format: always there and a thumb's size on
-              touch, revealed by hover or focus under a mouse. The width picks the container. */}
-          <DropdownMenu
-            open={dropdownOpen}
-            onOpenChange={(open) =>
-              open && isMobileViewport() ? setMenuOpen(true) : setDropdownOpen(open)
-            }
-          >
+          {/* One « … », the same items on every format: always there and a thumb's size on
+              touch, revealed by hover or focus under a mouse. Below `md` the menu is a panel from
+              the bottom, titled by the conversation. */}
+          <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <button
                 type="button"
@@ -548,7 +538,18 @@ function ConversationRow({
                 <EllipsisIcon className="desktop-pointer:size-3.5 size-5" />
               </button>
             </DropdownMenuTrigger>
-            <DropdownMenuContent align="end" className="min-w-40">
+            <DropdownMenuContent
+              align="end"
+              className="min-w-40"
+              sheetTitle={session.title ?? t("threads.new")}
+            >
+              {/* The spaces it reaches: a phone's row shows their tiles alone. */}
+              <DropdownMenuLabel
+                data-testid="chat-menu-spaces"
+                className={`text-muted-foreground flex min-w-0 items-center font-normal [--space-tile-ring:var(--popover)] max-md:[--space-tile-ring:var(--background)] ${NOTE_TEXT_CLASS}`}
+              >
+                {sessionSpaces(session, renderSpaces, t)}
+              </DropdownMenuLabel>
               <DropdownMenuItem onSelect={openRename}>
                 <PencilIcon />
                 {t("threads.rename")}
@@ -562,32 +563,6 @@ function ConversationRow({
               </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
-          {/* A phone's menu is a panel from the bottom, titled by the conversation: rename, then delete
-              in red (which asks). */}
-          <SheetMenu
-            open={menuOpen}
-            onOpenChange={setMenuOpen}
-            // Named after the conversation it acts on, the spaces it reaches under the name.
-            title={session.title ?? t("threads.new")}
-            showTitle
-            header={
-              <div
-                data-testid="chat-menu-spaces"
-                className={`text-muted-foreground flex min-w-0 items-center px-5 [--space-tile-ring:var(--background)] ${NOTE_TEXT_CLASS}`}
-              >
-                {sessionSpaces(session, renderSpaces, t)}
-              </div>
-            }
-          >
-            <SheetMenuRow onClick={openRename}>
-              <PencilIcon />
-              {t("threads.rename")}
-            </SheetMenuRow>
-            <SheetMenuRow destructive onClick={openDelete}>
-              <Trash2Icon />
-              {t("common:btn.delete")}
-            </SheetMenuRow>
-          </SheetMenu>
         </>
       )}
       <AlertDialog

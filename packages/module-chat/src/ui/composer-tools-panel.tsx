@@ -4,9 +4,9 @@
  * The composer's tools panel, the same on every format: its rows (the skills, the model, the space
  * limit, creation mode), and the levels they open in their place, each named, with a way back —
  * the skills, the models (with the inline-run model switch and the context's detail), then one
- * model's settings. The container is the caller's: a popover from `md` up, a bottom sheet below
- * (`composer-tools.tsx`). A phone's panel also holds attaching a file
- * and, as its last line, the disclaimer: its composer line has room for neither.
+ * model's settings. The container is the caller's `Popover` (`composer-tools.tsx`), a bottom
+ * sheet below `md`. A phone's panel also holds attaching a file and, as its last line, the
+ * disclaimer: its composer line has room for neither.
  */
 
 import { useEffect, useId, useRef } from "react";
@@ -38,7 +38,7 @@ import {
   usePackageAuthoringEnabled,
 } from "./package-authoring-store.ts";
 import { useChatHost } from "./runtime-context.ts";
-import { SheetMenuRow, SheetMenuSwitchRow } from "./sheet-menu.tsx";
+import { SheetMenuRow, SheetMenuSwitchRow } from "@appstrate/ui/components/sheet-menu";
 import { SkillsPickerPanel } from "./skills-picker.tsx";
 import { useConversationSkillsContext, useDraftSkills } from "./use-conversation-skills.ts";
 
