@@ -26,7 +26,7 @@ const transport = transportOf(() => ({ "X-Org-Id": "org_1", "X-Space-Id": "spc_a
 
 // The list is the shell's navigation, mounted outside `ChatPage`: `t` and `can`
 // arrive as props, and it renders into the host's sidebar.
-function render(granted: string[]): string {
+function render(granted: string[], activeId: string | null = null): string {
   const qc = new QueryClient();
   qc.setQueryData<SessionsCache>(sessionsQueryKey("spc_a"), {
     pages: [
@@ -60,7 +60,7 @@ function render(granted: string[]): string {
         <SidebarProvider>
           <ChatTransportProvider value={transport}>
             <ChatConversationList
-              activeId={null}
+              activeId={activeId}
               t={(key) => key}
               can={(permission) => granted.includes(permission)}
               renderSpaces={(ids, options) =>
@@ -81,12 +81,12 @@ describe("a conversation row's « … »", () => {
       /<button[^>]*aria-label="threads\.actions\.openFor"[^>]*>/,
     )?.[0];
 
-  it("is one menu named for the conversation, a thumb's size on touch", () => {
+  it("is one menu named for the conversation, always there on touch, the row's height", () => {
     const html = render(["chat:read", "chat:write"]);
     // One « … » per row, on every format.
     expect(html.match(/aria-label="threads\.actions\.openFor"/g)).toHaveLength(2);
-    expect(trigger()).toContain("w-11");
-    expect(trigger()).toContain("h-12");
+    expect(trigger()).toContain("w-10");
+    expect(trigger()).toContain("h-9");
     expect(trigger()).not.toContain("desktop-pointer:hidden");
   });
 
@@ -95,6 +95,17 @@ describe("a conversation row's « … »", () => {
     expect(button).toContain("desktop-pointer:opacity-0");
     expect(button).toContain("desktop-pointer:group-hover/menu-item:opacity-100");
     expect(button).toContain("desktop-pointer:group-focus-within/menu-item:opacity-100");
+    expect(button).not.toContain("desktop-pointer:opacity-100");
+  });
+
+  it("stays in view under a mouse on the open conversation, in place of its age", () => {
+    const html = render(["chat:read", "chat:write"], "chs_1");
+    const triggers = html.match(/<button[^>]*aria-label="threads\.actions\.openFor"[^>]*>/g) ?? [];
+    expect(triggers[0]).toContain("desktop-pointer:opacity-100");
+    expect(triggers[1]).not.toContain("desktop-pointer:opacity-100");
+    const ages = html.match(/<span class="[^"]*desktop-pointer:inline[^"]*">age/g) ?? [];
+    expect(ages[0]).toMatch(/(?:^|\s)desktop-pointer:opacity-0(?:\s|")/);
+    expect(ages[1]).not.toMatch(/(?:^|\s)desktop-pointer:opacity-0(?:\s|")/);
   });
 });
 
@@ -104,17 +115,23 @@ describe("the sidebar's head, the phone's on every format", () => {
   it("draws « New conversation » with its « + » in a round tile, folded to the « + » in the icon rail", () => {
     const tile = html.match(/<span class="[^"]*rounded-full[^"]*"><svg[^>]*lucide-plus/)?.[0];
     expect(tile).toContain("bg-sidebar-accent");
-    expect(tile).toContain("size-8");
+    expect(tile).toContain("size-7");
+    expect(tile).toContain("desktop-pointer:size-6");
     expect(tile).toContain("group-data-[collapsible=icon]:contents");
-    expect(tile).not.toContain("md:");
+    expect(tile).not.toMatch(/(?:^|\s)(?:max-)?md:/);
   });
 
-  it("puts the search's magnifier at the end of that row, a thumb's size, on every format", () => {
+  it("puts the search's magnifier beside that row, not over it, on every format", () => {
     const toggle = html.match(/<button[^>]*data-testid="chat-search-toggle"[^>]*>/)?.[0];
     expect(toggle).toBeDefined();
     expect(toggle).not.toContain("md:hidden");
-    expect(toggle).toContain("size-11");
-    expect(toggle).toContain("right-0");
+    expect(toggle).toContain("size-10");
+    expect(toggle).toContain("desktop-pointer:size-8");
+    // A sibling in the row's flex line: the row's hover stops before it.
+    expect(toggle).not.toContain("absolute");
+    expect(html).toMatch(
+      /<li[^>]*data-sidebar="menu-item"[^>]*class="[^"]*flex items-center gap-1/,
+    );
     expect(toggle).toContain("group-data-[collapsible=icon]:hidden");
     expect(html.indexOf("threads.new")).toBeLessThan(html.indexOf("chat-search-toggle"));
   });
@@ -137,9 +154,11 @@ describe("a conversation row's line", () => {
   const row = (markup: string) =>
     markup.match(/<button[^>]*data-sidebar="menu-button" data-size="lg"[^>]*>/)?.[0] ?? "";
 
-  it("is one line under a mouse, a thumb's 48 px on touch", () => {
+  it("is one dense line on every format: 32 px under a mouse, 36 on touch, in regular weight", () => {
     expect(row(html)).toContain("desktop-pointer:h-8");
-    expect(row(html)).toContain("h-12");
+    expect(row(html)).toMatch(/(?:^|\s)h-9(?:\s|")/);
+    expect(row(html)).toContain("font-normal");
+    expect(row(html)).toContain("text-sidebar-foreground/75");
   });
 
   it("closes the title's line with the spaces' tiles, on every format", () => {
@@ -165,18 +184,25 @@ describe("a conversation row's line", () => {
 describe("the list's date groups", () => {
   const html = render(["chat:read", "chat:write"]);
 
-  it("sit apart while their rows sit close together", () => {
-    expect(GROUP_CLASS).toContain("not-first:mt-4");
-    expect(GROUP_ROWS_CLASS).toContain("gap-0.5");
-    expect(html).toContain(`<li class="${GROUP_CLASS}">`);
-    expect(html).toContain(`<ul class="${GROUP_ROWS_CLASS}">`);
+  it("sit apart from « New conversation » and from each other while their rows sit close together", () => {
+    expect(GROUP_CLASS).toContain("mt-4");
+    expect(GROUP_ROWS_CLASS).not.toContain("gap-");
+    expect(html).toContain(`class="${GROUP_CLASS}"`);
+    expect(html).toContain(`class="${GROUP_ROWS_CLASS}"`);
   });
 
-  it("head each group with a semibold, muted label, in small capitals under a mouse", () => {
+  it("head each group with a semibold label, darker than its rows, in small capitals under a mouse", () => {
     expect(GROUP_LABEL_CLASS).toContain("font-semibold");
-    expect(GROUP_LABEL_CLASS).toContain("text-sidebar-foreground/60");
+    expect(GROUP_LABEL_CLASS.split(" ")).toContain("text-sidebar-foreground");
     expect(GROUP_LABEL_CLASS).toContain("md:uppercase");
     expect(html).toContain("threads.group.older");
+  });
+
+  it("fold and unfold from their heading, open until folded", () => {
+    const heading = html.match(/<button[^>]*data-sidebar="group-label"[^>]*>/)?.[0];
+    expect(heading).toContain('aria-expanded="true"');
+    expect(heading).toContain('data-state="open"');
+    expect(html).toMatch(/lucide-chevron-down[^"]*"[^>]*/);
   });
 
   it("scroll in the design system's scroll area, not the browser's scrollbar", () => {

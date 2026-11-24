@@ -116,18 +116,16 @@ export function ComposerSkeleton({
 }
 
 /**
- * A row's place while the list loads: the same height as `ConversationRow`, so the list does not
- * shift on load. One line under a mouse; on touch the row's 48 px, with a second line for a
- * reader's spaces.
+ * A row's place while the list loads: the same height as `ConversationRow` (32 px under a mouse,
+ * 36 on touch), so the list does not shift on load.
  */
 export function ConversationRowSkeleton() {
   return (
     <div
       data-sidebar="menu-skeleton"
-      className="desktop-pointer:h-8 flex h-12 flex-col justify-center gap-0.5 rounded-md px-2"
+      className="desktop-pointer:h-8 flex h-9 items-center rounded-md px-2"
     >
       <Skeleton className="h-4 w-3/5" />
-      <Skeleton className="desktop-pointer:hidden h-4 w-2/5" />
     </div>
   );
 }
@@ -141,7 +139,7 @@ export function ConversationRowSkeleton() {
 export function NewConversationContent({ label }: { label: string }) {
   return (
     <>
-      <span className="bg-sidebar-accent flex size-8 shrink-0 items-center justify-center rounded-full group-data-[collapsible=icon]:contents">
+      <span className="bg-sidebar-accent desktop-pointer:size-6 flex size-7 shrink-0 items-center justify-center rounded-full group-data-[collapsible=icon]:contents [&>svg]:size-4">
         <PlusIcon />
       </span>
       <span>{label}</span>

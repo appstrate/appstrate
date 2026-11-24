@@ -24,6 +24,7 @@ import { useEffect, useRef, useState, type ReactNode } from "react";
 import { flushSync } from "react-dom";
 import { useQueryClient } from "@tanstack/react-query";
 import {
+  ChevronDownIcon,
   EllipsisIcon,
   MessagesSquareIcon,
   PencilIcon,
@@ -45,6 +46,11 @@ import {
   DropdownMenuTrigger,
 } from "@appstrate/ui/components/dropdown-menu";
 import { Label } from "@appstrate/ui/components/label";
+import {
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
+} from "@appstrate/ui/components/collapsible";
 import {
   Dialog,
   DialogContent,
@@ -107,15 +113,51 @@ const GROUP_LABEL_KEY: Record<SessionGroupKey, string> = {
 };
 
 /**
- * A date group: the rows sit close together, the groups apart, so « Aujourd'hui », « Hier »… read
+ * A date group, set apart from « New conversation » and from each other: the rows sit close together, the groups apart, so « Aujourd'hui », « Hier »… read
  * at a glance as the list's sections. Exported for the tests.
  */
-export const GROUP_CLASS = "flex flex-col gap-0.5 not-first:mt-4";
-/** Its heading, set apart from the rows: semibold and muted, in small capitals under a mouse. */
+export const GROUP_CLASS = "mt-4 flex flex-col gap-0.5";
+/**
+ * Its heading, set apart from the rows: semibold and muted, in small capitals under a mouse. It
+ * folds and unfolds its group, its chevron turned while folded.
+ */
 export const GROUP_LABEL_CLASS =
-  "text-sidebar-foreground/60 h-6 px-2 text-sm font-semibold md:text-[11px] md:tracking-wider md:uppercase";
-/** Its rows, one line each under a mouse (`ConversationRow`). */
-export const GROUP_ROWS_CLASS = "flex flex-col gap-0.5";
+  "group/label text-sidebar-foreground hover:text-sidebar-foreground/80 h-6 w-fit gap-1 px-2 text-[13px] font-semibold md:text-[11px] md:tracking-wider md:uppercase";
+/** Its rows, one line each, close together (`ConversationRow`). */
+export const GROUP_ROWS_CLASS = "flex flex-col";
+
+/** The row's unread dot or age, stepping aside under a mouse for the « … » that takes its place. */
+const SLOT_HIDDEN_FOR_MENU =
+  "desktop-pointer:group-hover/menu-item:opacity-0 desktop-pointer:group-focus-within/menu-item:opacity-0";
+
+/** The date groups the person folded, kept per browser (a blocked storage keeps them in memory). */
+const COLLAPSED_GROUPS_KEY = "appstrate-chat-collapsed-groups";
+
+function readCollapsedGroups(): ReadonlySet<string> {
+  try {
+    const stored: unknown = JSON.parse(localStorage.getItem(COLLAPSED_GROUPS_KEY) ?? "[]");
+    return new Set(Array.isArray(stored) ? stored.filter((key) => typeof key === "string") : []);
+  } catch {
+    return new Set();
+  }
+}
+
+function useCollapsedGroups() {
+  const [collapsed, setCollapsed] = useState(readCollapsedGroups);
+  const setOpen = (key: string, open: boolean) =>
+    setCollapsed((current) => {
+      const next = new Set(current);
+      if (open) next.delete(key);
+      else next.add(key);
+      try {
+        localStorage.setItem(COLLAPSED_GROUPS_KEY, JSON.stringify([...next]));
+      } catch {
+        // Private mode or a full quota: the fold holds until the page reloads.
+      }
+      return next;
+    });
+  return [collapsed, setOpen] as const;
+}
 
 /**
  * The list's scroll, once it has rows: the design system's thin overlay scrollbar, not the
@@ -205,6 +247,7 @@ export function ChatConversationList({
   const showSearch = hasAny || input !== "";
   // Gone once the field shows: it carries its own magnifier.
   const showSearchToggle = showSearch && !searchOpen && input === "";
+  const [collapsedGroups, setGroupOpen] = useCollapsedGroups();
 
   const row = (s: SessionSummary) => (
     <ConversationRow
@@ -225,12 +268,13 @@ export function ChatConversationList({
       {(canWrite || showSearchToggle) && (
         <SidebarGroup className={cn("pb-0", !canWrite && "group-data-[collapsible=icon]:hidden")}>
           <SidebarMenu>
-            <SidebarMenuItem>
+            {/* The magnifier sits beside the row, not over it: the row's hover stops before it. */}
+            <SidebarMenuItem className="flex items-center gap-1">
               {canWrite && (
                 <SidebarMenuButton
                   onClick={() => select?.(null)}
                   tooltip={t("threads.new")}
-                  className={cn(NEW_CONVERSATION_CLASS, showSearch && "pr-12")}
+                  className={NEW_CONVERSATION_CLASS}
                 >
                   <NewConversationContent label={t("threads.new")} />
                 </SidebarMenuButton>
@@ -246,12 +290,9 @@ export function ChatConversationList({
                     flushSync(() => setSearchOpen(true));
                     searchField.current?.focus();
                   }}
-                  className={cn(
-                    "text-sidebar-foreground/70 hover:bg-sidebar-accent hover:text-sidebar-foreground active:bg-sidebar-accent flex size-11 items-center justify-center rounded-md group-data-[collapsible=icon]:hidden",
-                    canWrite ? "absolute top-0 right-0" : "ml-auto",
-                  )}
+                  className="text-sidebar-foreground/70 hover:bg-sidebar-accent hover:text-sidebar-foreground active:bg-sidebar-accent desktop-pointer:size-8 ml-auto flex size-10 shrink-0 items-center justify-center rounded-md group-data-[collapsible=icon]:hidden"
                 >
-                  <SearchIcon className="size-5" />
+                  <SearchIcon className="desktop-pointer:size-4 size-5" />
                 </button>
               )}
             </SidebarMenuItem>
@@ -317,12 +358,27 @@ export function ChatConversationList({
             {searching
               ? list.map(row)
               : groups.map((group) => (
-                  <li key={group.key} className={GROUP_CLASS}>
-                    <SidebarGroupLabel className={GROUP_LABEL_CLASS}>
-                      {t(GROUP_LABEL_KEY[group.key])}
-                    </SidebarGroupLabel>
-                    <ul className={GROUP_ROWS_CLASS}>{group.sessions.map(row)}</ul>
-                  </li>
+                  <Collapsible
+                    key={group.key}
+                    asChild
+                    open={!collapsedGroups.has(group.key)}
+                    onOpenChange={(open) => setGroupOpen(group.key, open)}
+                  >
+                    <li className={GROUP_CLASS}>
+                      <SidebarGroupLabel asChild className={GROUP_LABEL_CLASS}>
+                        <CollapsibleTrigger>
+                          {t(GROUP_LABEL_KEY[group.key])}
+                          <ChevronDownIcon
+                            aria-hidden
+                            className="transition-transform group-data-[state=closed]/label:-rotate-90"
+                          />
+                        </CollapsibleTrigger>
+                      </SidebarGroupLabel>
+                      <CollapsibleContent asChild>
+                        <ul className={GROUP_ROWS_CLASS}>{group.sessions.map(row)}</ul>
+                      </CollapsibleContent>
+                    </li>
+                  </Collapsible>
                 ))}
             {/* A plain button, not a menu row: a menu row closes the phone's
               drawer, and loading more must leave it open on the list. */}
@@ -449,12 +505,17 @@ function ConversationRow({
         isActive={active}
         onClick={() => select?.(session.id)}
         size="lg"
-        // One line under a mouse, as Studio's rows; a touch screen keeps its thumb's 48 px. Room
+        // One line on every format, dense as a desktop sidebar's: 32 px under a mouse, 36 on touch
+        // (a reader's phone row grows for its line of spaces). Room
         // for the fixed-width right slot below, which is absolutely positioned and would otherwise
         // sit on top of a long title. The host's stacked space tiles ring themselves in
         // `--tile-ring`: the row's background in each of its states.
         className={cn(
-          "desktop-pointer:h-8",
+          // A shade lighter than the date groups' headings, which head them; the open one is full.
+          // Regular weight: the base `button` rule sets every button medium, and only an unread
+          // title is meant to stand out.
+          "desktop-pointer:h-8 text-sidebar-foreground/75 data-[active=true]:text-sidebar-accent-foreground h-9 font-normal",
+          !canWrite && "max-md:h-auto max-md:min-h-9 max-md:py-1.5",
           canWrite ? "desktop-pointer:pr-16 pr-[4.5rem]" : "desktop-pointer:pr-16 pr-8",
           "[--tile-ring:var(--sidebar)] hover:[--tile-ring:var(--sidebar-accent)] active:[--tile-ring:var(--sidebar-accent)] data-[active=true]:[--tile-ring:var(--sidebar-accent)]",
         )}
@@ -467,7 +528,7 @@ function ConversationRow({
         >
           <span
             className={cn(
-              "block min-w-0 flex-1 truncate text-left leading-5 max-md:text-base",
+              "block min-w-0 flex-1 truncate text-left leading-5 max-md:text-[15px]",
               unread && "font-semibold",
             )}
           >
@@ -504,7 +565,7 @@ function ConversationRow({
           « … »; a reader has none, so for them hover changes nothing. */}
       <div
         className={cn(
-          "desktop-pointer:w-14 pointer-events-none absolute top-1 right-1 flex h-6 w-6 items-center justify-end rounded-md",
+          "desktop-pointer:w-14 desktop-pointer:top-1 pointer-events-none absolute top-1.5 right-1 flex h-6 w-6 items-center justify-end rounded-md",
           canWrite &&
             "desktop-pointer:right-1 desktop-pointer:group-hover/menu-item:bg-sidebar-accent desktop-pointer:group-focus-within/menu-item:bg-sidebar-accent right-11",
         )}
@@ -516,13 +577,21 @@ function ConversationRow({
           />
         ) : unread ? (
           <span
-            className={`bg-primary size-2 rounded-full transition-opacity ${canWrite ? "desktop-pointer:group-hover/menu-item:opacity-0 desktop-pointer:group-focus-within/menu-item:opacity-0" : ""}`}
+            className={cn(
+              "bg-primary size-2 rounded-full transition-opacity",
+              canWrite && SLOT_HIDDEN_FOR_MENU,
+              canWrite && active && "desktop-pointer:opacity-0",
+            )}
             aria-label={t("threads.unread")}
             title={t("threads.unread")}
           />
         ) : (
           <span
-            className={`text-sidebar-foreground/70 desktop-pointer:inline hidden text-xs transition-opacity ${canWrite ? "desktop-pointer:group-hover/menu-item:opacity-0 desktop-pointer:group-focus-within/menu-item:opacity-0" : ""}`}
+            className={cn(
+              "text-sidebar-foreground/70 desktop-pointer:inline hidden text-xs transition-opacity",
+              canWrite && SLOT_HIDDEN_FOR_MENU,
+              canWrite && active && "desktop-pointer:opacity-0",
+            )}
           >
             {age}
           </span>
@@ -531,7 +600,8 @@ function ConversationRow({
       {canWrite && (
         <>
           {/* One « … », the same items on every format: always there and a thumb's size on
-              touch, revealed by hover or focus under a mouse. Below `md` the menu is a panel from
+              touch; under a mouse, shown on the open conversation and revealed by hover or focus
+              on the others. Below `md` the menu is a panel from
               the bottom, titled by the conversation. */}
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
@@ -541,7 +611,11 @@ function ConversationRow({
                   title: session.title ?? t("threads.new"),
                 })}
                 ref={menuTrigger}
-                className="text-sidebar-foreground/70 active:bg-sidebar-accent desktop-pointer:top-1 desktop-pointer:right-1 desktop-pointer:size-6 desktop-pointer:opacity-0 desktop-pointer:group-hover/menu-item:opacity-100 desktop-pointer:group-focus-within/menu-item:opacity-100 desktop-pointer:data-[state=open]:opacity-100 desktop-pointer:hover:bg-sidebar-border desktop-pointer:hover:text-sidebar-foreground absolute top-0 right-0 flex h-12 w-11 items-center justify-center rounded-md transition-opacity"
+                className={cn(
+                  "text-sidebar-foreground/70 active:bg-sidebar-accent desktop-pointer:top-1 desktop-pointer:right-1 desktop-pointer:size-6 desktop-pointer:opacity-0 desktop-pointer:group-hover/menu-item:opacity-100 desktop-pointer:group-focus-within/menu-item:opacity-100 desktop-pointer:data-[state=open]:opacity-100 desktop-pointer:hover:bg-sidebar-border desktop-pointer:hover:text-sidebar-foreground absolute top-0 right-0 flex h-9 w-10 items-center justify-center rounded-md transition-opacity",
+                  // Under a mouse the open conversation keeps its « … » in view, in place of its age.
+                  active && "desktop-pointer:opacity-100",
+                )}
               >
                 <EllipsisIcon className="desktop-pointer:size-3.5 size-5" />
               </button>

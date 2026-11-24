@@ -42,9 +42,9 @@ export const COMPOSER_TOOLS_CLASS = "min-w-0 flex-1 max-md:flex-none md-short:ba
 
 /**
  * "New conversation" in the sidebar, on every format: a row aligned left like the conversations
- * below it, its "+" in a round tile (`NewConversationContent`), 44 px tall under a mouse too.
+ * below it, its "+" in a round tile (`NewConversationContent`); 40 px on touch, 32 under a mouse.
  */
-export const NEW_CONVERSATION_CLASS = "desktop-pointer:h-11 justify-start gap-3 font-medium";
+export const NEW_CONVERSATION_CLASS = "h-10 min-w-0 flex-1 justify-start gap-2.5 font-medium";
 
 /** The conversation search field of the sidebar, on every format: a filled field, 44 px tall. */
 export const SEARCH_INPUT_CLASS =

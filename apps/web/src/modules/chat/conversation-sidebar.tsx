@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { useRef, useState, type Dispatch, type ReactNode } from "react";
-import { ActivityIcon, FilesIcon, PanelRightCloseIcon, PanelRightIcon, XIcon } from "lucide-react";
+import { PanelRightCloseIcon, PanelRightIcon, XIcon } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { useNowTick } from "@appstrate/ui/use-now-tick";
 import { useSessionDetail } from "@appstrate/module-chat/unread";
@@ -18,7 +18,7 @@ import { MimeIcon } from "@appstrate/ui/components/mime-icon";
 import { CopyButton } from "@appstrate/ui/components/copy-button";
 import { $api } from "../../api/client";
 import { AgentDetailPaneHeader } from "../../components/agent-detail/agent-detail-split";
-import { EmptyState, ErrorState } from "../../components/page-states";
+import { ErrorState } from "../../components/page-states";
 import { FileArtifact } from "../../components/file-artifact";
 import { RowSpaceName, RunRow } from "../../components/run-row";
 import { TextSkeleton, Waiting } from "../../components/loading-skeletons";
@@ -63,6 +63,11 @@ const FLOATING_FRAME = "overflow-hidden rounded-2xl shadow-xs";
  * `block` keeps it to the card's, so a name truncates.
  */
 const TAB_SCROLL = "h-full [&_[data-radix-scroll-area-viewport]>div]:!block";
+
+/** A tab with nothing to list: one plain sentence, no illustration, in a card that stays small. */
+function PanelEmpty({ children }: { children: ReactNode }) {
+  return <p className="text-muted-foreground px-4 py-6 text-center text-sm">{children}</p>;
+}
 
 /** The shell header's one control for the context panel, wherever it is drawn. */
 export function ConversationContextToggle({
@@ -198,15 +203,12 @@ export function ConversationRuns({
     },
   );
 
-  if (!conversationId) {
-    return <EmptyState message={t("context.unsaved")} icon={ActivityIcon} compact />;
-  }
+  // A conversation not yet saved has launched nothing either: the same sentence.
+  if (!conversationId) return <PanelEmpty>{t("context.runs.empty")}</PanelEmpty>;
   if (query.isLoading) return <TextSkeleton className="p-4" />;
   if (query.error) return <ErrorState error={query.error} compact />;
   const runs = query.data?.data ?? [];
-  if (runs.length === 0) {
-    return <EmptyState message={t("context.runs.empty")} icon={ActivityIcon} compact />;
-  }
+  if (runs.length === 0) return <PanelEmpty>{t("context.runs.empty")}</PanelEmpty>;
 
   return (
     <div className="divide-y">
@@ -246,15 +248,11 @@ export function ConversationFiles({
     enabled: active && !!conversationId,
   });
 
-  if (!conversationId) {
-    return <EmptyState message={t("context.unsaved")} icon={FilesIcon} compact />;
-  }
+  if (!conversationId) return <PanelEmpty>{t("context.files.empty")}</PanelEmpty>;
   if (query.isLoading) return <TextSkeleton className="p-4" />;
   if (query.error) return <ErrorState error={query.error} compact />;
   const files = query.data?.data ?? [];
-  if (files.length === 0) {
-    return <EmptyState message={t("context.files.empty")} icon={FilesIcon} compact />;
-  }
+  if (files.length === 0) return <PanelEmpty>{t("context.files.empty")}</PanelEmpty>;
 
   return (
     <div className="divide-y">
@@ -441,7 +439,7 @@ function ConversationDetails({
   const query = useSessionDetail(active ? conversationId : null);
 
   if (!conversationId) {
-    return <p className="text-muted-foreground p-4 text-sm">{t("context.unsaved")}</p>;
+    return <PanelEmpty>{t("context.info.empty")}</PanelEmpty>;
   }
   if (query.isLoading) return <ConversationDetailsSkeleton />;
   if (query.error || !query.data) return <ErrorState error={query.error} compact />;
@@ -555,17 +553,29 @@ function ConversationContext({
       value={activeTab.id}
       onValueChange={(tab) => dispatch({ type: "select-tab", tab: tab as ConversationSidebarTab })}
       className={cn(
-        "flex h-full min-h-0 flex-col",
-        !closable && cn("bg-card border", FLOATING_FRAME),
+        "flex min-h-0 flex-col",
+        // On desktop the card is as tall as its content, from a floor to the column's height,
+        // where its tab scrolls; the phone's sheet is the surface, its whole height.
+        closable ? "h-full" : cn("bg-card min-h-64 shrink border", FLOATING_FRAME),
       )}
     >
       <AgentDetailPaneHeader className="h-12 min-h-12 gap-2 px-2">
-        <TabsList className="h-9 min-w-0" aria-label={t("context.label")}>
+        {/* The tabs are their icons, named by a tooltip and for a screen reader: the active one
+            in the foreground on a light fill, the others muted, no track behind them. */}
+        <TabsList className="h-auto gap-0.5 bg-transparent p-0" aria-label={t("context.label")}>
           {tabs.map(({ id, Icon, label }) => (
-            <TabsTrigger key={id} value={id} className="gap-1.5">
-              <Icon className="size-4 shrink-0" />
-              <span className="truncate">{label}</span>
-            </TabsTrigger>
+            <Tooltip key={id}>
+              <TooltipTrigger asChild>
+                <TabsTrigger
+                  value={id}
+                  aria-label={label}
+                  className="text-muted-foreground hover:text-foreground data-[state=active]:bg-accent desktop-pointer:size-8 size-10 rounded-md p-0 data-[state=active]:shadow-none"
+                >
+                  <Icon className="size-4 shrink-0" />
+                </TabsTrigger>
+              </TooltipTrigger>
+              <TooltipContent>{label}</TooltipContent>
+            </Tooltip>
           ))}
         </TabsList>
         {closable ? (
@@ -601,8 +611,8 @@ function ConversationContext({
       ))}
     </Tabs>
   );
-  // On desktop the card floats in the column, inset as the shown file is.
-  return closable ? panel : <div className="h-full p-3">{panel}</div>;
+  // On desktop the card floats in the column, inset as the shown file is, from its top.
+  return closable ? panel : <div className="flex h-full flex-col p-3">{panel}</div>;
 }
 
 export function ConversationSidebar({

@@ -114,8 +114,12 @@ they start with `packages/` or `e2e/`.
   reader; the names are in the "…" panel). Then the footer every drawer has: Catalogue, Settings
   and the account. On desktop the chat's sidebar is the phone's: the same "Nouvelle conversation"
   row and magnifier (one component, `NewConversationContent`, which its skeleton draws too), the
-  same folded search, and the conversations as the same one-line rows (32 px, the age at the end),
-  close together, under date groups set apart and headed in small semibold muted capitals. It
+  same folded search, and the conversations as the same one-line rows. The list is as dense as a
+  desktop app's: rows of 32 px under a mouse and 36 on touch (below the 44 px the rest of the
+  chat gives a thumb, by choice), in regular weight a shade lighter than the date groups' headings,
+  which are semibold, set apart from « Nouvelle conversation » and from each other, and fold and
+  unfold (remembered per browser). Under a mouse a row's "…" shows on hover and on the open
+  conversation, in place of its age; on touch it is always there. It
   opens at the phone drawer's 18rem and is resizable by its right edge (`PanelResizeHandle`,
   remembered per browser, double-click resets).
 - **A phone's menus rise from the bottom**, and no screen decides it: `DropdownMenu` and `Popover`
@@ -898,8 +902,12 @@ reasoning a collapsible group (`reasoning.tsx`), a run started from the chat a
 canvas, surfaces on it are white cards, and heights hold across states (no jump).
 The context panel (`modules/chat/conversation-sidebar.tsx`) is transparent on that
 canvas and floats beside the thread as ONE card: the Runs / Fichiers / Infos tabs in
-its header, the tab's content under them in the same card (in the phone's sheet the
-sheet is that surface). The card and the previewed file take `FLOATING_FRAME`
+its header as their icons alone (named by a tooltip; the active one on a light fill, no
+track behind them), the tab's content under them in the same card (in the phone's sheet the
+sheet is that surface). On desktop the card is as tall as its content, from a 16rem floor
+to the column's height, where the tab scrolls. A tab with nothing to list says so in one
+plain sentence (« Aucun run dans cette conversation. »), no illustration, and a conversation
+not yet saved reads the same. The card and the previewed file take `FLOATING_FRAME`
 (`rounded-2xl shadow-xs`), the one place a card takes a shadow outside what floats over
 the page. Its width follows what it shows (a list, the details, a file), each
 remembered per browser. The panel sits inside the thread's scroll area (`ChatPage`'s

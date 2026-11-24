@@ -94,10 +94,10 @@ describe("the sidebar's search and new-conversation row, the same on every forma
     expect(SEARCH_INPUT_CLASS).not.toMatch(/(?:^| )(?:max-)?md:(?:h|bg|border|rounded)-/);
   });
 
-  it("aligns the new-conversation row to the left, as the conversations are, 44 px under a mouse too", () => {
+  it("aligns the new-conversation row to the left, as the conversations are, 40 px on touch", () => {
     const classes = NEW_CONVERSATION_CLASS.split(" ");
     expect(classes).toContain("justify-start");
-    expect(classes).toContain("desktop-pointer:h-11");
+    expect(classes).toContain("h-10");
     expect(NEW_CONVERSATION_CLASS).not.toContain("md:");
   });
 });
