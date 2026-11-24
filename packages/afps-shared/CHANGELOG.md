@@ -14,6 +14,8 @@ consumer's publish rather than the first user's `npm install`.
 
 ## [Unreleased]
 
+## [0.14.1] — 2026-11-24
+
 - `integrationNamespaces` in `./mcp-naming` allocates deterministic namespaces for a space catalogue, including repeated connection bindings.
 
 ## [0.14.0] — 2026-11-18
