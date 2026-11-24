@@ -19,17 +19,27 @@ import {
   USER_MESSAGE_CLASS,
 } from "../src/ui/phone-text.ts";
 
-it("keeps the composer and search at 1rem in both orientations", () => {
-  for (const classes of [COMPOSER_INPUT_CLASS, SEARCH_INPUT_CLASS]) {
+it("keeps the composer and search at 1rem on touch in both orientations", () => {
+  for (const classes of [COMPOSER_INPUT_CLASS, COMPOSER_PLACEHOLDER_CLASS, SEARCH_INPUT_CLASS]) {
     expect(classes.split(" ")).toContain("text-base");
-    expect(classes).not.toMatch(/(?:^|[ :])text-(?:xs|sm)\b/);
+    // No width ever shrinks an editable field: a landscape phone crosses md.
+    expect(classes).not.toMatch(/(?:^|[ ])(?:md:)?text-(?:xs|sm)\b/);
   }
   // The shared Input defaults to md:text-sm.
   expect(SEARCH_INPUT_CLASS.split(" ")).toContain("md:text-base");
 });
 
-it("uses denser message bodies from md", () => {
-  for (const classes of [USER_MESSAGE_CLASS, ASSISTANT_MESSAGE_CLASS, READING_TEXT_CLASS]) {
+it("draws what is typed at the size the thread shows it once sent, on every device", () => {
+  // Both decided by the pointer: 16 px on touch, 14 px under a mouse.
+  const size = (classes: string) =>
+    classes.split(" ").filter((c) => /^(?:[a-z-]+:)?text-(?:base|sm|xs)$/.test(c));
+  expect(size(COMPOSER_INPUT_CLASS)).toEqual(["text-base", "desktop-pointer:text-sm"]);
+  expect(size(USER_MESSAGE_CLASS)).toEqual(size(COMPOSER_INPUT_CLASS));
+  expect(size(COMPOSER_PLACEHOLDER_CLASS)).toEqual(size(COMPOSER_INPUT_CLASS));
+});
+
+it("uses denser reading bodies from md", () => {
+  for (const classes of [ASSISTANT_MESSAGE_CLASS, READING_TEXT_CLASS]) {
     expect(classes.split(" ")).toContain("text-base");
     expect(classes.split(" ")).toContain("md:text-sm");
   }

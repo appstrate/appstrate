@@ -85,7 +85,6 @@ export function ChatAccessSummary({
 
   return (
     <section className={cn("flex flex-col gap-2", persona && "text-foreground")}>
-      <h3 className="text-sm font-medium">{t("chat:context.info.access")}</h3>
       <p className="text-muted-foreground text-xs">{t("chat:access.subtitle")}</p>
       <div className="flex items-center gap-2 text-sm">
         <RoleIcon aria-hidden="true" className="text-muted-foreground size-4 shrink-0" />

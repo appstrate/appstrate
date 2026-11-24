@@ -103,8 +103,9 @@ they start with `packages/` or `e2e/`.
   its corner (`OrgSpaceTile`, the switcher's own, stacked, never side by side), no names; its
   accessible name says them, and it carries the unread dot of the Runs entry it hides. Then the
   trail (the last segment alone on a phone), the page's controls and the notification bell.
-  Controls are 44 px on touch. In the chat the trail is the conversation's name and the controls are
-  its spaces, the pencil that renames it and the context panel.
+  Controls are 44 px on touch. In the chat the trail is the conversation's name, on a phone too
+  (the page publishes it, not the list, which a closed drawer unmounts), and the controls are its
+  spaces and the context panel. No pencil: a conversation is renamed from its row's « … ».
 - **The sidebar is the whole screen on a phone**: the organization switcher and a close button on
   its first row, then the Studio/Chat switch and the product's navigation. In the chat: "Nouvelle
   conversation" (a left-aligned row with its icon in a round tile, like the conversations below)
@@ -907,7 +908,9 @@ track behind them), the tab's content under them in the same card (in the phone'
 sheet is that surface). On desktop the card is as tall as its content, from a 16rem floor
 to the column's height, where the tab scrolls. A tab with nothing to list says so in one
 plain sentence (« Aucun run dans cette conversation. »), no illustration, and a conversation
-not yet saved reads the same. The card and the previewed file take `FLOATING_FRAME`
+not yet saved reads the same. The Infos tab is a stack of sections at one level (Général, Modèles et tokens,
+Votre accès), each heading folding what follows it, open by default (`InfoSection`); the
+conversation's name is not repeated there, the trail carries it. The card and the previewed file take `FLOATING_FRAME`
 (`rounded-2xl shadow-xs`), the one place a card takes a shadow outside what floats over
 the page. Its width follows what it shows (a list, the details, a file), each
 remembered per browser. The panel sits inside the thread's scroll area (`ChatPage`'s
@@ -968,9 +971,11 @@ Keep actions visible or reachable from a visible menu on touchscreens in either 
 The `desktop-pointer` variant allows denser controls on a wide screen with a fine pointer and
 hover. Actions revealed on hover must also appear on keyboard focus.
 
-- Keep the chat composer and conversation search at 1rem in both orientations. A landscape
-  phone can cross `md`, and iOS can zoom when focusing a smaller field. Message bodies use
-  `text-base md:text-sm`. Fenced code inherits its block's size (14 px below `md`, 12 px above).
+- Keep the chat composer and conversation search at 1rem on touch in both orientations. A landscape
+  phone can cross `md`, and iOS can zoom when focusing a smaller field. What is typed is drawn at the
+  size the thread shows it once sent: the composer and the user's bubble are both
+  `text-base desktop-pointer:text-sm`, decided by the pointer, never by the width. The assistant's
+  body uses `text-base md:text-sm`. Fenced code inherits its block's size (14 px below `md`, 12 px above).
 - Use `dvh` when a surface should follow the browser toolbars, or `svh` for a stable height.
   The chat shell and sidebar share `KEYBOARD_VIEWPORT_CLASS`, including the portalled search
   sheet. `interactive-widget=resizes-content` lets supporting browsers resize the layout.

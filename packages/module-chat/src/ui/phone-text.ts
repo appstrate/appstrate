@@ -1,14 +1,16 @@
 // SPDX-License-Identifier: Apache-2.0
 
-// A landscape phone can cross md. Keep both editable fields at 1rem at every width.
+// A landscape phone can cross md. Keep both editable fields at 1rem on touch at every width (iOS zooms
+// into a smaller field). Under a mouse the composer drops to the size its text is drawn at once sent
+// (`USER_MESSAGE_CLASS`): what you type is what the thread shows, decided by the pointer on both sides.
 
 /** The composer's Lexical editor, styled through the library's `aui-lexical-*` classes. */
 export const COMPOSER_INPUT_CLASS =
-  "relative max-h-40 w-full overflow-y-auto px-0 text-base [&_.aui-lexical-input]:min-h-11 desktop-pointer:[&_.aui-lexical-input]:min-h-9 [&_.aui-lexical-input]:py-2.5 md:[&_.aui-lexical-input]:py-1 [&_.aui-lexical-input]:break-words [&_.aui-lexical-input]:whitespace-pre-wrap [&_.aui-lexical-input]:outline-none";
+  "relative max-h-40 w-full overflow-y-auto px-0 text-base desktop-pointer:text-sm [&_.aui-lexical-input]:min-h-11 desktop-pointer:[&_.aui-lexical-input]:min-h-9 [&_.aui-lexical-input]:py-2.5 md:[&_.aui-lexical-input]:py-1 [&_.aui-lexical-input]:break-words [&_.aui-lexical-input]:whitespace-pre-wrap [&_.aui-lexical-input]:outline-none";
 
 /** The field's placeholder, laid over the editor's first line (`ComposerPlaceholder`). */
 export const COMPOSER_PLACEHOLDER_CLASS =
-  "text-muted-foreground pointer-events-none absolute inset-x-0 top-2.5 truncate text-base md:top-1";
+  "text-muted-foreground pointer-events-none absolute inset-x-0 top-2.5 truncate text-base desktop-pointer:text-sm md:top-1";
 
 /** Running text a phone reads (a hint, a state, a message): 16 px, the dense size from `md`. */
 export const READING_TEXT_CLASS = "text-base md:text-sm";
@@ -52,7 +54,7 @@ export const SEARCH_INPUT_CLASS =
 
 /** The user's bubble. */
 export const USER_MESSAGE_CLASS =
-  "bg-card text-foreground max-w-[80%] rounded-2xl border px-4 py-2 text-base whitespace-pre-wrap shadow-sm md:text-sm";
+  "bg-card text-foreground max-w-[80%] rounded-2xl border px-4 py-2 text-base whitespace-pre-wrap shadow-sm desktop-pointer:text-sm";
 
 /** The assistant's turn (the markdown renderer sizes its own prose: `MARKDOWN_PROSE_CLASS`). */
 export const ASSISTANT_MESSAGE_CLASS = "text-foreground text-base leading-relaxed md:text-sm";

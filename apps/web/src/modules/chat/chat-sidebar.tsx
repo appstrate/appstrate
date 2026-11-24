@@ -3,7 +3,6 @@
 /**
  * The chat's conversation list inside the shell's shared sidebar frame. Only
  * this list is lazy-loaded with the chat UI, so loading never blanks the shell.
- * Also publishes the chat's place in the trail (`ChatTitleCrumb`).
  */
 
 import { useCallback } from "react";
@@ -14,7 +13,6 @@ import {
   SelectConversationProvider,
 } from "@appstrate/module-chat/ui";
 import { ChatSidebarSkeleton } from "../../components/loading-skeletons";
-import { ChatTitleCrumb } from "./chat-title-crumb";
 import { renderSpaces } from "./render-spaces";
 import { formatAge } from "../../lib/format-date";
 import { useChatCan, useChatFilter, useChatTransport, useChatTranslate } from "./use-chat-runtime";
@@ -34,19 +32,11 @@ export function ChatSidebar() {
     [navigate],
   );
 
-  // The list waits for the mode like the page: its shape, and the trail's slot, hold meanwhile.
-  if (!known) {
-    return (
-      <>
-        <ChatTitleCrumb conversationId={conversationId} pending />
-        <ChatSidebarSkeleton />
-      </>
-    );
-  }
+  // The list waits for the mode like the page: its shape holds meanwhile.
+  if (!known) return <ChatSidebarSkeleton />;
   return (
     <ChatTransportProvider value={transport ?? null}>
       <SelectConversationProvider value={select}>
-        <ChatTitleCrumb conversationId={conversationId} transport={transport} />
         <ChatConversationList
           activeId={conversationId}
           t={t}

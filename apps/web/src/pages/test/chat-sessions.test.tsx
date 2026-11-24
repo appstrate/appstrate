@@ -18,7 +18,7 @@ import {
 import { FileAttachment } from "../../../../../packages/module-chat/src/ui/file-attachment.tsx";
 import { ChatRunProgressCard } from "../../../../../packages/module-chat/src/ui/chat-run-progress-card.tsx";
 import { render } from "../../test/render.tsx";
-import { ConversationUsage } from "../../modules/chat/conversation-sidebar.tsx";
+import { ConversationUsage, InfoSection } from "../../modules/chat/conversation-sidebar.tsx";
 import { mergeTurnMetadata } from "@appstrate/core/chat-turn-metadata";
 import chatFr from "../../locales/fr/chat.json";
 import i18n, { i18nReady } from "../../i18n.ts";
@@ -236,5 +236,27 @@ describe("conversation sidebar usage", () => {
     const html = render(<ConversationUsage session={session(false)} />);
     expect(html).not.toContain("≈");
     expect(html).not.toContain(chatFr["contextUsage.windowAssumed"].split("{{window}}")[0]!.trim());
+  });
+});
+
+describe("the Info tab's sections", () => {
+  it("head each one at the same level, a heading that folds it, open until folded", () => {
+    const html = render(
+      <InfoSection title="Général">
+        <p>body</p>
+      </InfoSection>,
+    );
+    const heading = html.match(/<button[^>]*>Général<svg[^>]*lucide-chevron-down/)?.[0];
+    expect(heading).toBeDefined();
+    expect(heading).toContain('aria-expanded="true"');
+    expect(heading).toContain('data-state="open"');
+    expect(html).toContain("<p>body</p>");
+  });
+
+  it("name the sections in both languages, the conversation's title never repeated among them", () => {
+    for (const key of ["context.info.general", "context.info.usageTitle", "context.info.access"]) {
+      expect(chatFr[key as keyof typeof chatFr]).toBeTruthy();
+    }
+    expect(chatFr).not.toHaveProperty("context.info.untitled");
   });
 });

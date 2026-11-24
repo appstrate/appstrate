@@ -15,7 +15,6 @@ import { useLocation, useNavigate, useParams } from "react-router-dom";
 import { useQueryClient } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
 import {
-  ChatConversationRenameButton,
   ChatPage,
   ChatTransportProvider,
   SelectConversationProvider,
@@ -40,6 +39,7 @@ import {
 import { ConversationContextToggle, ConversationSidebar } from "./conversation-sidebar";
 import { ShellHeaderActions } from "../../components/shell-header-slots";
 import { ConversationSpaces } from "./conversation-spaces";
+import { ChatTitleCrumb } from "./chat-title-crumb";
 import { renderSpaces } from "./render-spaces";
 import {
   useChatActingSpaceIds,
@@ -164,7 +164,15 @@ export function ChatModulePage() {
   // The assistant creates and imports packages: the lists show them as the editor's would.
   const onPackagesChanged = useCallback(() => refreshPackageLists(queryClient), [queryClient]);
   // The mode decides which conversations the list holds: until it is known the page holds its shape.
-  if (!known) return conversationId ? <ChatConversationSkeleton /> : <ChatPanelSkeleton />;
+  // The page, not the list, publishes the trail: on a phone the list is in a drawer, unmounted while closed.
+  if (!known) {
+    return (
+      <>
+        <ChatTitleCrumb conversationId={conversationId ?? null} pending />
+        {conversationId ? <ChatConversationSkeleton /> : <ChatPanelSkeleton />}
+      </>
+    );
+  }
   // The chat's tools (run agents, inspect runs, search…) are served by the
   // `mcp` module, which is a hard peer requirement of `chat` (enforced at
   // boot) — so tools are always available when the chat is reachable.
@@ -175,14 +183,15 @@ export function ChatModulePage() {
   // the thread's scroll area (`aside`), so the transcript's scrollbar runs along
   // the window's edge, past the panel: it belongs to the conversation, and it
   // opens in a sheet on narrow screens.
-  // One toggle sits in the shell's header, portaled there for the page's lifetime;
+  // The conversation's name is the trail's last segment (renamed from the list's « … »); the
+  // panel's toggle sits in the shell's header, portaled there for the page's lifetime, and
   // the tabs live in the panel's own header.
   return (
     <ChatTransportProvider value={transport ?? null}>
       <SelectConversationProvider value={onConversationChange}>
+        <ChatTitleCrumb conversationId={conversationId ?? null} transport={transport} />
         <ShellHeaderActions>
           <ConversationSpaces conversationId={conversationId ?? null} transport={transport} />
-          <ChatConversationRenameButton activeId={conversationId ?? null} t={translate} can={can} />
           <ConversationContextToggle expanded={sidebarState.expanded} dispatch={dispatchSidebar} />
         </ShellHeaderActions>
         <div className="relative flex min-h-0 min-w-0 flex-1">

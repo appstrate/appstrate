@@ -687,48 +687,6 @@ function ConversationRow({
 }
 
 /**
- * « Renommer » for the open conversation, a pencil in the host's header on every format. Renders
- * nothing until the conversation is known, or for a reader (renaming is a write).
- */
-export function ChatConversationRenameButton(props: {
-  activeId: string | null;
-  t: ChatTranslate;
-  can: ChatCan;
-}) {
-  return <ConversationRenameButton key={props.activeId} {...props} />;
-}
-
-function ConversationRenameButton({
-  activeId,
-  t,
-  can,
-}: {
-  activeId: string | null;
-  t: ChatTranslate;
-  can: ChatCan;
-}) {
-  const [open, setOpen] = useState(false);
-  const { data: sessions } = useSessions();
-  const session = activeId ? sessions?.find((s) => s.id === activeId) : undefined;
-  if (!session || !can("chat:write")) return null;
-  return (
-    <>
-      <Button
-        type="button"
-        variant="ghost"
-        size="icon-sm"
-        aria-label={t("threads.rename")}
-        title={t("threads.rename")}
-        onClick={() => setOpen(true)}
-      >
-        <PencilIcon className="size-4" />
-      </Button>
-      {open && <ConversationRenameDialog session={session} t={t} onClose={() => setOpen(false)} />}
-    </>
-  );
-}
-
-/**
  * Renaming the conversation: its name, saved explicitly (« Renommer » or Enter),
  * never on blur. The dialog stays open on a refusal and says so: the chat's own
  * fetch is not toasted by the app's mutation cache.

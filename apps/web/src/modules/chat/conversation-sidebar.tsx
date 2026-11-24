@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { useRef, useState, type Dispatch, type ReactNode } from "react";
-import { PanelRightCloseIcon, PanelRightIcon, XIcon } from "lucide-react";
+import { ChevronDownIcon, PanelRightCloseIcon, PanelRightIcon, XIcon } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { useNowTick } from "@appstrate/ui/use-now-tick";
 import { useSessionDetail } from "@appstrate/module-chat/unread";
@@ -11,6 +11,11 @@ import { Fact, FactGrid } from "@appstrate/ui/components/fact-grid";
 import { formatCompactTokens, formatTokenFigure } from "@appstrate/ui/context-window";
 import { Button } from "@appstrate/ui/components/button";
 import { ScrollArea } from "@appstrate/ui/components/scroll-area";
+import {
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
+} from "@appstrate/ui/components/collapsible";
 import { Sheet, SheetContent, SheetTitle } from "@appstrate/ui/components/sheet";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@appstrate/ui/components/tabs";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@appstrate/ui/components/tooltip";
@@ -63,6 +68,28 @@ const FLOATING_FRAME = "overflow-hidden rounded-2xl shadow-xs";
  * `block` keeps it to the card's, so a name truncates.
  */
 const TAB_SCROLL = "h-full [&_[data-radix-scroll-area-viewport]>div]:!block";
+
+/**
+ * One section of the Info tab: a heading at the same level as its siblings that folds and unfolds
+ * what follows it, open by default, its chevron turned while folded (as the conversation list's date
+ * groups).
+ */
+export function InfoSection({ title, children }: { title: string; children: ReactNode }) {
+  return (
+    <Collapsible defaultOpen asChild>
+      <section className="px-4 py-3">
+        <CollapsibleTrigger className="group/section text-foreground hover:text-foreground/80 flex w-full items-center justify-start gap-1 text-sm font-medium">
+          {title}
+          <ChevronDownIcon
+            aria-hidden
+            className="text-muted-foreground size-4 transition-transform group-data-[state=closed]/section:-rotate-90"
+          />
+        </CollapsibleTrigger>
+        <CollapsibleContent className="pt-3">{children}</CollapsibleContent>
+      </section>
+    </Collapsible>
+  );
+}
 
 /** A tab with nothing to list: one plain sentence, no illustration, in a card that stays small. */
 function PanelEmpty({ children }: { children: ReactNode }) {
@@ -323,8 +350,8 @@ function ConversationDetailsSkeleton() {
   );
   return (
     <Waiting className="divide-y">
-      <div className="flex flex-col gap-4 p-4">
-        <SkeletonLine className="w-2/3 text-base font-semibold" />
+      <div className="flex flex-col gap-3 px-4 py-3">
+        <SkeletonLine className="w-20 text-sm font-medium" />
         <div className="flex flex-col gap-3">
           {row("created", "w-24", 2)}
           {row("activity", "w-24", 2)}
@@ -332,7 +359,7 @@ function ConversationDetailsSkeleton() {
           {row("status", "w-16")}
         </div>
       </div>
-      <div className="flex flex-col gap-2 p-4">
+      <div className="flex flex-col gap-3 px-4 py-3">
         <SkeletonLine className="w-32 text-sm font-medium" />
         <div className="flex flex-col gap-3">
           {row("context", "w-28")}
@@ -365,8 +392,7 @@ export function ConversationUsage({
   const metered = read + generated > 0;
 
   return (
-    <section className="flex flex-col gap-2">
-      <h3 className="text-sm font-medium">{t("context.info.usageTitle")}</h3>
+    <div className="flex flex-col gap-2">
       {models.length === 0 && !context && !metered ? (
         <p className="text-muted-foreground text-sm">{t("context.info.noTurn")}</p>
       ) : (
@@ -424,7 +450,7 @@ export function ConversationUsage({
           ) : null}
         </>
       )}
-    </section>
+    </div>
   );
 }
 
@@ -455,23 +481,24 @@ function ConversationDetails({
     ],
   ];
 
+  // No heading naming the conversation: the trail above the thread already does.
   return (
     <>
-      <div className="flex flex-col gap-4 p-4">
-        <h3 className="text-base font-semibold break-words">
-          {session.title || t("context.info.untitled")}
-        </h3>
+      <InfoSection title={t("context.info.general")}>
         <FactGrid columns={1}>
           {rows.map(([label, value]) => (
             <Fact key={label} label={label}>
               {value}
             </Fact>
           ))}
+          <Fact label={t("context.info.id")}>
+            <ConversationId id={session.id} />
+          </Fact>
         </FactGrid>
-      </div>
-      <div className="p-4">
+      </InfoSection>
+      <InfoSection title={t("context.info.usageTitle")}>
         <ConversationUsage session={session} />
-      </div>
+      </InfoSection>
     </>
   );
 }
@@ -483,6 +510,7 @@ function ConversationInfo({
   conversationId: string | null;
   active: boolean;
 }) {
+  const { t } = useTranslation("chat");
   // The same query as the details': the access judges the conversation's own scope.
   const detail = useSessionDetail(active ? conversationId : null);
   const conversation = !conversationId
@@ -493,14 +521,9 @@ function ConversationInfo({
   return (
     <div className="divide-y">
       <ConversationDetails conversationId={conversationId} active={active} />
-      <div className="p-4">
+      <InfoSection title={t("context.info.access")}>
         <ChatAccessSummary conversation={conversation} />
-      </div>
-      {conversationId ? (
-        <div className="px-4 py-2">
-          <ConversationId id={conversationId} />
-        </div>
-      ) : null}
+      </InfoSection>
     </div>
   );
 }
