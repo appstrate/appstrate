@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Holder for the two organization queries this module reads off its init context.
+ * Holder for the organization queries this module reads off its init context.
  *
- * "Who owns this org" and "is this user id one of its members" are answers the platform
+ * "Who owns this org", "is this user id one of its members" and "does this org still exist" are answers the platform
  * owns, so they are asked through `ModuleInitContext` rather than through SQL of our own
  * — this module's pool reaches its `ee_*` tables, never a platform one. The `Pick` keeps
  * the shape core's to define; a redeclaration would compile against a moved contract.
@@ -12,7 +12,10 @@
 import type { ModuleInitContext } from "@appstrate/core/module";
 
 /** The slice of the platform's init context this module keeps after `init()`. */
-export type BillingOrgQueries = Pick<ModuleInitContext, "getOrgOwnerEmails" | "getOrgMembers">;
+export type BillingOrgQueries = Pick<
+  ModuleInitContext,
+  "getOrgOwnerEmails" | "getOrgMembers" | "getOrgName"
+>;
 
 let _queries: BillingOrgQueries | null = null;
 

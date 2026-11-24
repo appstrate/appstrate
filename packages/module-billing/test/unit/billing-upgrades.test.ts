@@ -30,6 +30,8 @@ function plan(id: string, tier: number, stripePriceId: string | null): PlanDefin
     fileStorageBytes: GIB,
     monthlyPrice: 10 * tier,
     stripePriceId,
+    includedComputeMinutes: null,
+    maxConcurrentRuns: null,
   };
 }
 
@@ -68,12 +70,26 @@ describe("upgradeOptions", () => {
         price: 10,
         credit_quota: 1000,
         file_storage_bytes: GIB,
+        included_compute_minutes: null,
+        max_concurrent_runs: null,
       },
     ]);
   });
 });
 
 describe("plan catalog", () => {
+  it("gives the Free plan 1 000 compute minutes a month and three concurrent runs", () => {
+    const { free: freePlan } = getPlans();
+    expect(freePlan.includedComputeMinutes).toBe(1000);
+    expect(freePlan.maxConcurrentRuns).toBe(3);
+  });
+
+  it("leaves the paid plans without a compute quota until the Team plan defines one", () => {
+    const { starter: s, pro: p } = getPlans();
+    expect([s.includedComputeMinutes, s.maxConcurrentRuns]).toEqual([null, null]);
+    expect([p.includedComputeMinutes, p.maxConcurrentRuns]).toEqual([null, null]);
+  });
+
   it("declares exactly the plans PLAN_IDS names", () => {
     // `PLAN_IDS` is what the wire enum and the `Plans` record are built from,
     // so a plan added to `getPlans()` alone would ship an id no client accepts.

@@ -9,9 +9,27 @@ export interface PlanDefinition {
   tier: number;
   creditQuota: number; // credits per billing cycle (e.g. 5000 = $5.00 worth)
   fileStorageBytes: number; // durable-file storage entitlement (bytes)
+  /**
+   * Compute minutes included per calendar month, or `null` while the plan has no compute
+   * quota. Compute is metered for every plan; only a plan that states a number is gated on it.
+   */
+  includedComputeMinutes: number | null;
+  /** Runs the org may have in flight at once, or `null` to leave the deployment-wide limit. */
+  maxConcurrentRuns: number | null;
   monthlyPrice: number; // display dollars (e.g. 29 = $29/mo)
   stripePriceId: string | null;
 }
+
+/**
+ * The Free plan's compute: 1 000 minutes per calendar month, three runs at once. The same
+ * figures the public pricing page states, kept here as the one place they are enforced from.
+ * The paid plans declare none yet (`null`): their quota arrives with the Team plan.
+ */
+export const FREE_INCLUDED_COMPUTE_MINUTES = 1000;
+export const FREE_MAX_CONCURRENT_RUNS = 3;
+
+/** Share of a quota (credits or compute minutes) at which the org is warned by email: 80 %. */
+export const QUOTA_WARNING_THRESHOLD = 0.8;
 
 /** Byte multiplier for plan storage entitlements. */
 export const GIB = 1024 * 1024 * 1024;
@@ -61,6 +79,8 @@ export function getPlans(): Plans {
       tier: 0,
       creditQuota: 5000,
       fileStorageBytes: 1 * GIB,
+      includedComputeMinutes: FREE_INCLUDED_COMPUTE_MINUTES,
+      maxConcurrentRuns: FREE_MAX_CONCURRENT_RUNS,
       monthlyPrice: 0,
       stripePriceId: null,
     },
@@ -70,6 +90,8 @@ export function getPlans(): Plans {
       tier: 1,
       creditQuota: 20000,
       fileStorageBytes: 20 * GIB,
+      includedComputeMinutes: null,
+      maxConcurrentRuns: null,
       monthlyPrice: 29,
       stripePriceId: env.STRIPE_PRICE_ID_STARTER,
     },
@@ -79,6 +101,8 @@ export function getPlans(): Plans {
       tier: 2,
       creditQuota: 80000,
       fileStorageBytes: 100 * GIB,
+      includedComputeMinutes: null,
+      maxConcurrentRuns: null,
       monthlyPrice: 99,
       stripePriceId: env.STRIPE_PRICE_ID_PRO,
     },

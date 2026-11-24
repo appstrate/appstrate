@@ -14,6 +14,7 @@ import { renderCancellationConfirmedEmail } from "./templates/cancellation-confi
 import { renderSubscriptionExpiredEmail } from "./templates/subscription-expired.ts";
 import { renderPlanChangedEmail } from "./templates/plan-changed.ts";
 import { renderQuotaWarningEmail } from "./templates/quota-warning.ts";
+import { renderComputeWarningEmail } from "./templates/compute-warning.ts";
 import { renderCardExpiringEmail } from "./templates/card-expiring.ts";
 
 const renderers: { [K in BillingEmailType]: BillingEmailRenderer<K> } = {
@@ -24,6 +25,7 @@ const renderers: { [K in BillingEmailType]: BillingEmailRenderer<K> } = {
   "subscription-expired": renderSubscriptionExpiredEmail,
   "plan-changed": renderPlanChangedEmail,
   "quota-warning": renderQuotaWarningEmail,
+  "compute-warning": renderComputeWarningEmail,
   "card-expiring": renderCardExpiringEmail,
 };
 

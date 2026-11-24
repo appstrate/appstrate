@@ -23,6 +23,7 @@ export type BillingEmailType =
   | "subscription-expired"
   | "plan-changed"
   | "quota-warning"
+  | "compute-warning"
   | "card-expiring";
 
 export interface SubscriptionConfirmedProps {
@@ -76,6 +77,18 @@ export interface QuotaWarningProps {
   locale: SupportedLocale;
 }
 
+/** The org has used 80 % of the compute minutes its plan includes this month. */
+export interface ComputeWarningProps {
+  planName: string;
+  usagePercent: number;
+  minutesUsed: number;
+  minutesIncluded: number;
+  /** ISO date the monthly allowance renews (the first of next month, UTC). */
+  resetDate: string;
+  upgradeUrl: string;
+  locale: SupportedLocale;
+}
+
 export interface CardExpiringProps {
   cardLast4: string;
   expiryMonth: string; // "MM/YY"
@@ -91,6 +104,7 @@ export interface BillingEmailPropsMap {
   "subscription-expired": SubscriptionExpiredProps;
   "plan-changed": PlanChangedProps;
   "quota-warning": QuotaWarningProps;
+  "compute-warning": ComputeWarningProps;
   "card-expiring": CardExpiringProps;
 }
 
