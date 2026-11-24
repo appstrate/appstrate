@@ -59,11 +59,17 @@ export async function checkBeforeTraffic(before: Date) {
         AND r.recipient_type = n.recipient_type AND r.recipient_id = n.recipient_id
       )`),
   );
+  const [unnamed] = toRows<{ pending: number }>(
+    await db.execute(`SELECT count(*)::int AS pending FROM notifications n
+      JOIN runs r ON r.id = n.run_id
+      WHERE n.type = 'run_failed' AND NOT (n.payload ? 'agent_name')`),
+  );
   const stores = await pendingRuntimeTools(before);
   const receipts = await pendingFileReadReceipts();
   return [
     { check: "0052 · notifications to fold", pending: row!.pending },
     { check: "0052 · notifications missing recipient read state", pending: missingRead!.pending },
+    { check: "0052 · notifications missing the recorded agent name", pending: unnamed!.pending },
     ...stores.map(({ store, pending }) => ({ check: `0053 · ${store}`, pending })),
     { check: "0055 · messages to rewrite", pending: receipts.messages },
   ];
