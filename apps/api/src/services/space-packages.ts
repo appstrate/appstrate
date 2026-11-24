@@ -522,6 +522,25 @@ export async function packagePlacementsInSpaces(
     .orderBy(sql`(${spaces.id} = ${packages.homeSpaceId}) IS TRUE DESC`, ...spaceListingOrder());
 }
 
+/** All readable placements of the requested packages in the candidate spaces, including switched-off placements. */
+export async function listPackagePlacements(
+  orgId: string,
+  packageIds: string[],
+  spaceIds: string[],
+  type: PackageType,
+) {
+  const query = db.select({ packageId: packages.id, spaceId: spaces.id }).from(packages).$dynamic();
+  return joinSpacePlacements(query, orgId, spaceIds)
+    .where(
+      and(
+        inArray(packages.id, packageIds),
+        eq(packages.type, type),
+        readablePlacementFilter(orgId),
+      ),
+    )
+    .orderBy(...spaceListingOrder());
+}
+
 /** The `spaceIds` where every one of `packageIds` is placed, readable and active. */
 export async function spacesActiveForAll(
   orgId: string,

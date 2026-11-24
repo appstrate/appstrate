@@ -17244,7 +17244,7 @@ export interface operations {
                                     id: string;
                                     name: string;
                                 }[];
-                                /** @description The space of `org` to start its renewal in (`X-Space-Id` of `POST /api/integrations/{packageId}/auths/{authKey}/connect/session` with `connection_id`): one where the caller holds `integrations:connect` and the connection serves, its own or origin space first. `null` exactly when `allowed_actions` lacks `reconnect`. */
+                                /** @description The space of `org` to start its renewal in (`X-Space-Id` of `POST /api/integrations/{packageId}/auths/{authKey}/connect/session` with `connection_id`): one where the caller holds `integrations:connect`, the integration is placed, and the connection serves. Its own or origin space is preferred. The current connect manifest must declare the auth method. An OAuth method needs a client usable at the connection's scope or support for automatic client provisioning. `null` exactly when `allowed_actions` lacks `reconnect`. */
                                 reconnect_space_id: string | null;
                                 /**
                                  * @description What binds this connection for every member of the space: `admin_pin` when an admin pin names it (takes precedence), `org_default` when an org default does; null when unlocked. While locked, unsharing or deleting it is refused with 409 `connection_pinned` until an admin removes it from the pin or default.

@@ -11,7 +11,12 @@ import type { Hono } from "hono";
 import type { AppstrateModule, AuthResolution } from "@appstrate/core/module";
 import type { AppEnv } from "../../../src/types/index.ts";
 import { eq } from "drizzle-orm";
-import { integrationConnections, integrationOauthClients } from "@appstrate/db/schema";
+import { integrationConnections, integrationOauthClients, packages } from "@appstrate/db/schema";
+import type {
+  IntegrationAuthStatus,
+  IntegrationConnection,
+  MeConnectionSourceGroup,
+} from "@appstrate/shared-types";
 import { encryptCredentialEnvelope, encryptCredentials } from "@appstrate/connect";
 import { getTestApp } from "../../helpers/app.ts";
 import { db, truncateAll } from "../../helpers/db.ts";
@@ -21,6 +26,7 @@ import { seedApiKey, seedPackage, seedSpacePackage } from "../../helpers/seed.ts
 import {
   httpHeaderDelivery,
   localIntegrationManifest,
+  remoteIntegrationManifest,
 } from "../../helpers/integration-manifests.ts";
 import {
   initSystemIntegrations,
@@ -367,6 +373,42 @@ describe("a delegated credential reconnects rows scoped to its space only", () =
 });
 
 describe("an org-scoped row reconnects through an org or system client", () => {
+  async function expectListedRenewals(...ids: string[]) {
+    const headers = authHeaders(ctx);
+    const [me, list, detail] = await Promise.all([
+      app.request("/api/me/connections", { headers }),
+      app.request(`/api/integrations/${INTEGRATION}/connections`, { headers }),
+      app.request(`/api/integrations/${INTEGRATION}`, { headers }),
+    ]);
+    expect([me.status, list.status, detail.status]).toEqual([200, 200, 200]);
+    const groups = ((await me.json()) as { data: MeConnectionSourceGroup[] }).data;
+    const connections = ((await list.json()) as { data: IntegrationConnection[] }).data;
+    const detailRows = ((await detail.json()) as { auths: IntegrationAuthStatus[] }).auths.flatMap(
+      (a) => a.connections,
+    );
+    const expected = ids.toSorted();
+    for (const rows of [connections, detailRows]) {
+      expect(
+        rows
+          .filter((r) => r.allowed_actions?.includes("reconnect"))
+          .map((r) => r.id)
+          .sort(),
+      ).toEqual(expected);
+    }
+    const accountRows = groups.flatMap((g) => g.connections);
+    expect(
+      accountRows
+        .filter((r) => r.allowed_actions.includes("reconnect"))
+        .map((r) => r.connection_id)
+        .sort(),
+    ).toEqual(expected);
+    for (const row of accountRows) {
+      expect(row.reconnect_space_id).toBe(
+        ids.includes(row.connection_id) ? ctx.defaultSpaceId : null,
+      );
+    }
+  }
+
   async function seedSpaceDefaultClient(): Promise<string> {
     const [row] = await db
       .insert(integrationOauthClients)
@@ -408,6 +450,7 @@ describe("an org-scoped row reconnects through an org or system client", () => {
   it("skips the origin space's own default client and stays org-scoped", async () => {
     const orgRow = await seedRow("google", null, SYSTEM_ID);
     await seedSpaceDefaultClient();
+    await expectListedRenewals(orgRow.id);
     const summary = await reconnectFromOrigin(orgRow.id);
     expect(summary.scope).toBe("org");
     const [row] = await db
@@ -415,6 +458,51 @@ describe("an org-scoped row reconnects through an org or system client", () => {
       .from(integrationConnections)
       .where(eq(integrationConnections.id, orgRow.id));
     expect(row).toMatchObject({ spaceId: null, clientRef: SYSTEM_ID });
+  });
+
+  it("lists an OAuth renewal only with a selectable client at its scope", async () => {
+    __resetSystemIntegrationsForTest();
+    const orgRow = await seedRow("google", null);
+    const spaceRow = await seedRow("google", ctx.defaultSpaceId);
+    // An old machine registration from before the auth became classic is not selectable.
+    await db.insert(integrationOauthClients).values({
+      orgId: ctx.orgId,
+      integrationId: INTEGRATION,
+      authKey: "google",
+      clientId: "former-dcr",
+      clientSecretEncrypted: "",
+      tokenEndpointAuthMethod: "none",
+      issuer: "https://accounts.example.com",
+      autoProvisioned: true,
+    });
+    await expectListedRenewals();
+    await seedSpaceDefaultClient();
+    await expectListedRenewals(spaceRow.id);
+    await db.insert(integrationOauthClients).values({
+      orgId: ctx.orgId,
+      integrationId: INTEGRATION,
+      authKey: "google",
+      clientId: "org-client",
+      clientSecretEncrypted: encryptCredentials({ client_secret: "s" }),
+    });
+    await expectListedRenewals(orgRow.id, spaceRow.id);
+  });
+
+  it("offers a remote public OAuth renewal before any client is provisioned", async () => {
+    __resetSystemIntegrationsForTest();
+    const manifest = remoteIntegrationManifest({
+      name: INTEGRATION,
+      auths: {
+        google: {
+          type: "oauth2",
+          issuer: "https://accounts.example.com",
+          tokenEndpointAuthMethod: "none",
+        },
+      },
+    });
+    await db.update(packages).set({ draftManifest: manifest }).where(eq(packages.id, INTEGRATION));
+    const row = await seedRow("google", null);
+    await expectListedRenewals(row.id);
   });
 
   it("after 0041 widened a system-client row of a space that has its own client since", async () => {

@@ -176,16 +176,23 @@ describe("connectionActions", () => {
     expect(connectionActions(spaceRow(), bound, false, "owner")).toEqual(["rename", "share"]);
   });
 
-  it("a delegated credential pinning no space renames like the person", () => {
-    const unpinned = reader({
-      principal: {
-        kind: "delegated",
-        actor: { type: "user", id: OWNER },
-        binding: { orgId: "org_1", spaceIds: null },
-      },
-    });
-    expect(connectionActions(orgRow(), unpinned, false)).toEqual(["rename", "share"]);
-  });
+  it.each([HERE, null])(
+    "an unpinned delegate renews only space rows (list space: %s)",
+    (spaceId) => {
+      const unpinned = reader({
+        spaceId,
+        principal: {
+          kind: "delegated",
+          actor: { type: "user", id: OWNER },
+          binding: { orgId: "org_1", spaceIds: null },
+        },
+      });
+      const orgConnection = { ...orgRow(), accountId: "alice@example.com" };
+      const spaceConnection = { ...orgConnection, spaceId: HERE };
+      expect(connectionActions(orgConnection, unpinned, false)).toEqual(["rename", "share"]);
+      expect(connectionActions(spaceConnection, unpinned, false)).toContain("reconnect");
+    },
+  );
 });
 
 describe("withinSpaces", () => {

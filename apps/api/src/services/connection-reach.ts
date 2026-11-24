@@ -21,7 +21,12 @@ import {
   spaces,
 } from "@appstrate/db/schema";
 import { actorFilter, actorOwns, type Actor } from "../lib/actor.ts";
-import { boundSpacesOf, type ConnectionPrincipal } from "../lib/connection-principal.ts";
+import {
+  boundSpacesOf,
+  reconnectScopeAllows,
+  writesDelegated,
+  type ConnectionPrincipal,
+} from "../lib/connection-principal.ts";
 import type { Permission } from "../lib/permissions.ts";
 
 function orgOf(spaceId: string): SQL {
@@ -128,7 +133,7 @@ export function withinSpaces(
 export interface SpaceSeen {
   id: string;
   name: string;
-  permissions: ReadonlySet<Permission>;
+  permissions: ReadonlySet<string>;
 }
 
 /** Who acts on connections, from where, and what they hold: every connection surface's one caller. */
@@ -147,7 +152,7 @@ export interface ConnectionCaller {
   /** The caller's permissions in one space of `orgId` (empty outside it). */
   permissionsIn: (spaceId: string, orgId: string) => Promise<ReadonlySet<Permission>>;
   /** Every space of `orgId` the caller sees under its role `orgRole` there, in one read. */
-  spacesSeen: (orgId: string, orgRole: OrgRole) => Promise<SpaceSeen[]>;
+  spacesSeen: (orgId: string, orgRole: OrgRole | undefined) => Promise<SpaceSeen[]>;
 }
 
 /** Where the owner may share: `integrations:connect` there; `configures` also holds `configure`. */
@@ -200,7 +205,13 @@ export function connectionActions(
     const bound = boundSpacesOf(caller.principal);
     const writesRow = bound === null || (row.spaceId !== null && bound.includes(row.spaceId));
     if (writesRow) actions.push("rename");
-    if (writesRow && displayAccountId(row.accountId) !== null) actions.push("reconnect");
+    if (
+      writesRow &&
+      displayAccountId(row.accountId) !== null &&
+      reconnectScopeAllows(writesDelegated(caller.principal), row.spaceId, caller.spaceId)
+    ) {
+      actions.push("reconnect");
+    }
     if (row.userId !== null) {
       actions.push("share");
       if (

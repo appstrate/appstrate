@@ -41,6 +41,12 @@ import {
   orgOrSystemFilter,
 } from "../lib/package-helpers.ts";
 import { activeHereSql } from "./package-activation.ts";
+import { listPackagePlacements } from "./space-packages.ts";
+import { readOAuthClientRegistrations, reconnectMethods } from "./reconnect-methods.ts";
+import {
+  parseIntegrationManifest,
+  readPublishedIntegrationManifests,
+} from "./integration-service.ts";
 import { placementRowJoin } from "./package-placement.ts";
 import {
   connectionLocks,
@@ -121,17 +127,15 @@ async function spacesServedToOwner(
   return { byConnection, orgOfSpace };
 }
 
-/**
- * Where each row is renewed from the account surface, which acts from no space: the kickoff needs
- * `integrations:connect` in a space the row serves. Its own or origin space first, else, for a row
- * serving its whole org, the first space of it the caller may connect in. A row holding
- * `reconnect` with no such space is absent, and the list withholds the action.
- */
+/** Choose a space where the hosted session can open: the caller may connect there, the
+ * integration is placed there and its connect manifest still declares the row's auth. */
 async function reconnectSpaces(
   caller: ConnectionCaller,
   rows: readonly {
     connectionId: string;
     orgId: string;
+    packageId: string;
+    authKey: string;
     userId: string | null;
     endUserId: string | null;
     spaceId: string | null;
@@ -139,25 +143,40 @@ async function reconnectSpaces(
     accountId: string;
   }[],
   orgRoles: ReadonlyMap<string, OrgRole>,
+  drafts: ReadonlyMap<string, unknown>,
 ): Promise<Map<string, string>> {
   const renewable = rows.filter((r) => connectionActions(r, caller, false).includes("reconnect"));
-  const connectIn = new Map(
-    await Promise.all(
-      [...new Set(renewable.map((r) => r.orgId))].map(async (orgId) => {
-        const orgRole = orgRoles.get(orgId);
-        const seen = orgRole ? await caller.spacesSeen(orgId, orgRole) : [];
-        const ids = seen.filter((s) => s.permissions.has("integrations:connect")).map((s) => s.id);
-        return [orgId, ids] as const;
-      }),
-    ),
-  );
+  const byOrg = Map.groupBy(renewable, (row) => row.orgId);
   const out = new Map<string, string>();
-  for (const r of renewable) {
-    const ids = connectIn.get(r.orgId) ?? [];
-    const home = r.spaceId ?? r.originSpaceId;
-    const spaceId = home !== null && ids.includes(home) ? home : r.spaceId === null ? ids[0] : null;
-    if (spaceId) out.set(r.connectionId, spaceId);
-  }
+  await Promise.all(
+    [...byOrg].map(async ([orgId, connections]) => {
+      const seen = await caller.spacesSeen(orgId, orgRoles.get(orgId));
+      const spaceIds = seen
+        .filter((s) => s.permissions.has("integrations:connect"))
+        .map((s) => s.id);
+      if (!spaceIds.length) return;
+      const packageIds = [...new Set(connections.map((r) => r.packageId))];
+      const [placements, { manifests, unpublished }, registrations] = await Promise.all([
+        listPackagePlacements(orgId, packageIds, spaceIds, "integration"),
+        readPublishedIntegrationManifests(packageIds, orgId),
+        readOAuthClientRegistrations(orgId, packageIds, spaceIds),
+      ]);
+      for (const id of unpublished) {
+        const parsed = parseIntegrationManifest(drafts.get(id));
+        if (parsed.ok) manifests.set(id, parsed.manifest);
+      }
+      const byPackage = Map.groupBy(placements, (p) => p.packageId);
+      const methodAvailable = reconnectMethods(manifests, registrations);
+      for (const row of connections) {
+        if (!methodAvailable(row.packageId, row.authKey, row.spaceId)) continue;
+        const placed = byPackage.get(row.packageId);
+        const preferred = row.spaceId ?? row.originSpaceId;
+        const home = placed?.find((p) => p.spaceId === preferred);
+        const target = home ?? (row.spaceId === null ? placed?.[0] : undefined);
+        if (target) out.set(row.connectionId, target.spaceId);
+      }
+    }),
+  );
   return out;
 }
 
@@ -243,7 +262,6 @@ export async function listMeConnections(
     rows.map((r) => ({ ...r, id: r.connectionId })),
     orgRoles,
   );
-  const renewIn = await reconnectSpaces(caller, rows, orgRoles);
   const uniqueSpaceIds = [...new Set(rows.flatMap(reachedSpaces))];
   const spaceRows =
     uniqueSpaceIds.length === 0
@@ -265,6 +283,12 @@ export async function listMeConnections(
     .from(packages)
     .where(inArray(packages.id, uniquePackageIds));
 
+  const renewIn = await reconnectSpaces(
+    caller,
+    rows,
+    orgRoles,
+    new Map(pkgRows.map((pkg) => [pkg.id, pkg.draftManifest])),
+  );
   const packageInfo = new Map<string, { displayName: string; logo: string }>();
   for (const pkg of pkgRows) {
     const manifest = asRecord(pkg.draftManifest);

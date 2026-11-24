@@ -15,8 +15,8 @@
  *
  * Integration manifests are supplied through the caller's `manifestCache` — the
  * same memo the readiness pass threads, so this exercises the production read
- * path with no DB round-trip. The one input that cannot be faked that way is
- * `block_user_connections` (a real `space_packages` row), so those cases live
+ * path without reading manifests from the DB. The space creation gate and
+ * signed renewals of existing connections are exercised with real rows
  * in `test/integration/services/preflight-connect-offer.test.ts`.
  */
 
@@ -291,20 +291,6 @@ describe("attachConnectOffers", () => {
       }),
     });
     expect(item!.connect_url).toStartWith("http");
-  });
-
-  it("carries the connection id on an owned needs_reconnection re-consent", async () => {
-    const [item] = await attachConnectOffers({
-      errors: [inPlace("needs_reconnection", true)],
-      scope: SCOPE,
-      actor: ACTOR,
-      policy: CONNECT,
-      manifestCache: cache,
-    });
-    expect(item!.connect_url).toStartWith("http");
-    const claims = claimsOf(item!);
-    expect(claims).toMatchObject({ connection_id: "conn-9" });
-    expect(claims!.scopes).toBeUndefined();
   });
 
   it("leaves insufficient_scopes on an owned connection, and a foreign-owned item, untouched", async () => {

@@ -15,6 +15,7 @@ import { getTestApp } from "../../helpers/app.ts";
 import { truncateAll } from "../../helpers/db.ts";
 import { createTestContext, createTestOrg, type TestContext } from "../../helpers/auth.ts";
 import { seedPackage, seedSpace } from "../../helpers/seed.ts";
+import { localIntegrationManifest } from "../../helpers/integration-manifests.ts";
 import { loopbackHeaders } from "../../helpers/loopback.ts";
 import { orgPermissions, presetPermissions } from "../../../src/lib/permissions.ts";
 
@@ -27,7 +28,15 @@ beforeEach(async () => {
   await truncateAll();
   owner = await createTestContext();
   gestion = await seedSpace({ orgId: owner.orgId, name: "Gestion", visibility: "closed" });
-  await seedPackage({ id: "@chatorg/gmail", orgId: owner.orgId, type: "integration" });
+  await seedPackage({
+    id: "@chatorg/gmail",
+    orgId: owner.orgId,
+    type: "integration",
+    draftManifest: localIntegrationManifest({
+      name: "@chatorg/gmail",
+      auths: { google: { type: "api_key" } },
+    }),
+  });
 });
 
 /** The org owner's bearer allowlisting the default space alone. */
