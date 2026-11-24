@@ -241,8 +241,7 @@ export class BlobStore {
   async readLink(uri: string, signal: AbortSignal | undefined, maxBytes: number) {
     const parsed = parseBlobUri(uri);
     if (!parsed || parsed.runId !== this.runId) return null;
-    const link = this.links.get(parsed.id);
-    if (!link) return null;
+    if (!this.links.has(parsed.id)) return null;
     signal?.throwIfAborted();
     // One large response can occupy the run's entire read budget, so upstream reads queue across
     // all connections in the run; local blobs need no turn. The turn covers the response's checks
@@ -253,6 +252,10 @@ export class BlobStore {
     this.upstreamTurn = previous.then(() => turn.promise);
     try {
       await waitUnlessAborted(previous, signal);
+      // Resolve the handle when its turn comes: eviction or `clear()` may have retired it while
+      // it waited, and then no upstream request may leave.
+      const link = this.links.get(parsed.id);
+      if (!link) return null;
       return await this.readLinked(parsed.id, link, signal, maxBytes);
     } finally {
       turn.resolve();

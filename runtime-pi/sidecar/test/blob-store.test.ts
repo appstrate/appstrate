@@ -342,3 +342,23 @@ it("queues upstream reads across connections and releases the turn after failure
   });
   expect(calls).toBe(2);
 });
+
+it("sends no upstream request for a link retired while its read was queued", async () => {
+  const store = new BlobStore("run-retired", NO_EVICTION);
+  const pending = Promise.withResolvers<{ contents: { uri: string; text: string }[] }>();
+  const first = store.link("records://first", { readResource: () => pending.promise })!;
+  let calls = 0;
+  const queued = store.link("records://queued", {
+    readResource: async ({ uri }) => {
+      calls++;
+      return { contents: [{ uri, text: "late" }] };
+    },
+  })!;
+  const reading = store.readLink(first, undefined, 10);
+  const waiting = store.readLink(queued, undefined, 10);
+  store.clear();
+  pending.resolve({ contents: [{ uri: "records://first", text: "ok" }] });
+  expect(await reading).toBeNull();
+  expect(await waiting).toBeNull();
+  expect(calls).toBe(0);
+});
