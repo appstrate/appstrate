@@ -47,6 +47,7 @@ const meConnectionEntrySchema = {
     "shared_spaces",
     "allowed_actions",
     "shareable_spaces",
+    "reconnect_space_id",
     "reused_by_agents",
     "locked_by",
     "org",
@@ -83,6 +84,11 @@ const meConnectionEntrySchema = {
     },
     allowed_actions: connectionActionsSchema,
     shareable_spaces: shareableSpacesSchema,
+    reconnect_space_id: {
+      type: ["string", "null"],
+      description:
+        "The space of `org` to start its renewal in (`X-Space-Id` of `POST /api/integrations/{packageId}/auths/{authKey}/connect/session` with `connection_id`): one where the caller holds `integrations:connect`, the integration is placed, and the connection serves. Its own or origin space is preferred. The current connect manifest must declare the auth method. An OAuth method needs a client usable at the connection's scope or support for automatic client provisioning. `null` exactly when `allowed_actions` lacks `reconnect`.",
+    },
     locked_by: lockedBySchema,
     org: {
       type: "object",

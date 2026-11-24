@@ -4,7 +4,7 @@ import { Card } from "@appstrate/ui/components/card";
 import { Fragment, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Link } from "react-router-dom";
-import { Unplug, Pencil, Trash2 } from "lucide-react";
+import { Unplug, Pencil, RefreshCw, Trash2 } from "lucide-react";
 import { DropdownMenuLabel } from "@appstrate/ui/components/dropdown-menu";
 import { Button } from "@appstrate/ui/components/button";
 import { cn } from "@appstrate/ui/cn";
@@ -26,6 +26,7 @@ import { connectionLockHintKey } from "../../components/integration-connect/conn
 import { useCurrentOrgId } from "../../hooks/use-org";
 import { useSpaces } from "../../hooks/use-spaces";
 import { connectionRowConfigures } from "../../lib/space-lists";
+import { useHostedConnectPopup } from "../../components/integration-connect/use-hosted-connect-popup";
 import { ConnectionScopeBadge } from "../../components/integration-connect/connection-scope-badge";
 import { ConnectionShareEditor } from "../../components/integration-connect/connection-share-editor";
 
@@ -35,6 +36,7 @@ import { ConnectionShareEditor } from "../../components/integration-connect/conn
 
 function ConnectionRow({
   conn,
+  packageId,
   onRename,
   onShare,
   onShareAllSpacesChange,
@@ -42,6 +44,7 @@ function ConnectionRow({
   sharing,
 }: {
   conn: MeConnectionEntry;
+  packageId: string;
   onRename: (label: string) => Promise<unknown>;
   onShare: (spaceId: string) => void;
   onShareAllSpacesChange: (enabled: boolean) => void;
@@ -57,6 +60,8 @@ function ConnectionRow({
   const lockKey = connectionLockHintKey(conn.locked_by, configures);
   const lockHint = lockKey ? t(lockKey) : null;
   const canRename = conn.allowed_actions.includes("rename");
+  const { openPopup, isPending: reconnecting } = useHostedConnectPopup();
+  const reconnectSpaceId = conn.reconnect_space_id;
   const canShare = conn.allowed_actions.includes("share");
   const canShareAllSpaces = conn.allowed_actions.includes("share_all_spaces");
   // Shareable spaces and the ones it is already shared into, one entry each.
@@ -181,6 +186,7 @@ function ConnectionRow({
 
       <TableRowActions
         menuLabel={t("providers.moreActions", { name: conn.label })}
+        isPending={reconnecting}
         renaming={renaming}
         actions={[
           {
@@ -189,6 +195,21 @@ function ConnectionRow({
             icon: Pencil,
             onSelect: () => setRenaming(true),
             hidden: !canRename,
+          },
+          {
+            id: "reconnect",
+            label: t("btn.reconnect", { ns: "common" }),
+            icon: RefreshCw,
+            onSelect: () =>
+              reconnectSpaceId &&
+              void openPopup({
+                packageId,
+                authKey: conn.auth_key,
+                connectionId: conn.connection_id,
+                space: { orgId: conn.org.id, spaceId: reconnectSpaceId },
+              }),
+            hidden: reconnectSpaceId === null,
+            testId: `connection-reconnect-${conn.connection_id}`,
           },
           {
             id: "delete",
@@ -382,6 +403,7 @@ export function PreferencesConnectionsPage() {
               renderRow={(conn) => (
                 <ConnectionRow
                   conn={conn}
+                  packageId={group.source_id}
                   sharing={
                     shareIntegration.isPending ||
                     unshareIntegration.isPending ||

@@ -213,7 +213,10 @@ export function SharingCell({
   );
 }
 
-/** Every deed of the row sits in its « … » menu: rename, reconnect when needed, then delete. */
+/**
+ * Every deed of the row sits in its « … » menu: rename, reconnect, then delete. Reconnecting is
+ * offered whatever the row's health; a dead row that cannot be renewed offers a replacement.
+ */
 export function ConnectionActionsCell({
   connection,
   packageId,
@@ -240,7 +243,7 @@ export function ConnectionActionsCell({
   const { t } = useTranslation(["settings", "common"]);
   const { openPopup, isPending: reconnecting } = useHostedConnectPopup();
   const [confirmDelete, setConfirmDelete] = useState(false);
-  const { canConnect, canRename, lockKey } = useRowGrants(connection, isAdmin);
+  const { canRename, lockKey } = useRowGrants(connection, isAdmin);
   const { text: lockHint, agents: pinningAgents } = useLockText(
     connection,
     packageId,
@@ -266,10 +269,10 @@ export function ConnectionActionsCell({
           },
           {
             id: "reconnect",
-            label: t("detail.integrationReconnect", { ns: "agents" }),
+            label: t("btn.reconnect", { ns: "common" }),
             icon: RefreshCw,
             onSelect: () => void openPopup({ packageId, authKey, connectionId: connection.id }),
-            hidden: !(needsRepair && canConnect && canRenew),
+            hidden: !canRenew,
             testId: `connection-reconnect-${connection.id}`,
           },
           {

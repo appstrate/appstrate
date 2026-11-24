@@ -97,9 +97,10 @@ import {
   type ConnectionCaller,
 } from "./connection-reach.ts";
 import { shareableSpaces } from "./connection-shares.ts";
+import { readOAuthClientRegistrations, reconnectMethods } from "./reconnect-methods.ts";
 import {
   boundSpacesOf,
-  writesDelegated,
+  reconnectScopeAllows,
   type ConnectionPrincipal,
 } from "../lib/connection-principal.ts";
 import type { OrgRole } from "@appstrate/core/permissions";
@@ -155,6 +156,7 @@ import { lockIntegrationGovernance } from "./integration-pins-service.ts";
 import {
   actorIdentityOf,
   candidateOf,
+  isUserConnectionCreationBlocked,
   proxyRequirement,
   resolveConnections,
   toLaunchOverrides,
@@ -271,17 +273,37 @@ export interface ReconnectTarget {
   scopesGranted: string[];
 }
 
-// IDOR guard on a client-supplied reconnect target. Ownership, not usability:
-// `block_user_connections` never stops a renewal.
-export async function assertConnectionBelongsToActor(
-  connectionId: string,
-  input: { spaceId: string; integrationId: string; authKey: string },
-  principal: ConnectionPrincipal,
-): Promise<ReconnectTarget> {
-  const target = await readReconnectTarget({ ...input, connectionId, actor: principal.actor });
-  if (!target) throw notFound("Connection not found");
-  assertDelegatedReconnect(writesDelegated(principal), target.spaceId, input.spaceId);
-  return target;
+/**
+ * Authorize a credential write before the interactive, direct or run-offered connect flow starts.
+ * An existing connection must be the caller's own in the requested scope. Only a creation is
+ * subject to the space's block, which an integration governor may override.
+ */
+export async function connectTarget(
+  input: { spaceId: string; integrationId: string; authKey: string; connectionId?: string },
+  writer: { actor: Actor; delegated: boolean; canConfigure: boolean },
+): Promise<ReconnectTarget | null> {
+  if (input.connectionId) {
+    const target = await readReconnectTarget({
+      ...input,
+      connectionId: input.connectionId,
+      actor: writer.actor,
+    });
+    if (!target) throw notFound("Connection not found");
+    assertDelegatedReconnect(writer.delegated, target.spaceId, input.spaceId);
+    return target;
+  }
+  if (
+    !writer.canConfigure &&
+    (await isUserConnectionCreationBlocked(input.spaceId, input.integrationId))
+  ) {
+    throw new ApiError({
+      status: 403,
+      code: "connection_blocked_by_admin",
+      title: "Connection Blocked by Admin",
+      detail: `Creation of personal connections to '${input.integrationId}' is disabled by an admin of this space. Use the shared connection instead.`,
+    });
+  }
+  return null;
 }
 
 /**
@@ -293,7 +315,7 @@ function assertDelegatedReconnect(
   rowSpaceId: string | null,
   spaceId: string,
 ): void {
-  if (delegated && rowSpaceId !== spaceId) {
+  if (!reconnectScopeAllows(delegated, rowSpaceId, spaceId)) {
     throw forbidden(
       "A credential bound to spaces cannot reconnect a connection serving the whole organization: its owner reconnects it from their own session",
     );
@@ -2629,12 +2651,24 @@ export async function listIntegrationConnections(
   packageId: string,
   caller: ConnectionCaller,
   orgRole: OrgRole | null,
+  methodAvailable?: ReturnType<typeof reconnectMethods>,
 ): Promise<IntegrationConnectionSummary[]> {
   await assertSpaceInScope(scope);
   const actor = caller.principal.actor;
   const rows = await listReachableConnections({ spaceId: scope.spaceId, actor }, "usable", [
     packageId,
   ]);
+  if (rows.length === 0) return [];
+  if (!methodAvailable) {
+    const [read, registrations] = await Promise.all([
+      readIntegrationManifestForConnect(scope, packageId),
+      readOAuthClientRegistrations(scope.orgId, [packageId], [scope.spaceId]),
+    ]);
+    methodAvailable = reconnectMethods(
+      new Map(read.ok ? [[packageId, read.manifest]] : []),
+      registrations,
+    );
+  }
   const ownerName = await resolveConnectionOwnerNames(rows);
   const own = rows.filter((row) => actorOwns(actor, row)).map((row) => row.id);
   const others = rows.filter((row) => !actorOwns(actor, row)).map((row) => row.id);
@@ -2658,7 +2692,14 @@ export async function listIntegrationConnections(
       ...serializeIntegrationConnection(row, view),
       owner_name: ownerName(row),
       locked_by: locks.get(row.id) ?? null,
-      allowed_actions: connectionActions(row, caller, rowShares.includes(scope.spaceId), orgRole),
+      allowed_actions: connectionActions(
+        row,
+        caller,
+        rowShares.includes(scope.spaceId),
+        orgRole,
+      ).filter(
+        (action) => action !== "reconnect" || methodAvailable(packageId, row.authKey, row.spaceId),
+      ),
       ...(view.owner && row.userId !== null
         ? { shareable_spaces: shareable.get(row.id) ?? [] }
         : {}),
@@ -3297,16 +3338,20 @@ export function serializeIntegrationConnection(
   };
 }
 
-/** One connection's variables (AFPS §7.12); keyed by id alone — the caller checked ownership. */
-export async function getIntegrationConnectionVariables(
+/** What a reconnect shows of the connection it renews; keyed by id alone — the caller checked ownership. */
+export async function getReconnectedConnection(
   connectionId: string,
-): Promise<Record<string, string> | null> {
+): Promise<{ label: string; accountId: string; variables: Record<string, string> | null } | null> {
   const [row] = await db
-    .select({ variables: integrationConnections.variables })
+    .select({
+      label: integrationConnections.label,
+      accountId: integrationConnections.accountId,
+      variables: integrationConnections.variables,
+    })
     .from(integrationConnections)
     .where(eq(integrationConnections.id, connectionId))
     .limit(1);
-  return row?.variables ?? null;
+  return row ?? null;
 }
 
 // ─────────────────────────────────────────────
@@ -3349,18 +3394,22 @@ export async function getIntegrationAuthStatuses(
     integration: manifest,
   });
 
-  const allConnections = await listIntegrationConnections(scope, packageId, caller, orgRole);
+  const oauthClients = await readOAuthClientRegistrations(
+    scope.orgId,
+    [packageId],
+    [scope.spaceId],
+  );
+  const allConnections = await listIntegrationConnections(
+    scope,
+    packageId,
+    caller,
+    orgRole,
+    reconnectMethods(new Map([[packageId, manifest]]), oauthClients),
+  );
   const [settings] = await db
     .select({ blocked: spacePackages.blockUserConnections })
     .from(spacePackages)
     .where(and(eq(spacePackages.packageId, packageId), eq(spacePackages.spaceId, scope.spaceId)));
-  const oauthClients = await db
-    .select({
-      authKey: integrationOauthClients.authKey,
-      autoProvisioned: integrationOauthClients.autoProvisioned,
-    })
-    .from(integrationOauthClients)
-    .where(and(spaceVisibleFilter(scope), eq(integrationOauthClients.integrationId, packageId)));
   // The clients a connect of the auth can use: a classic auth chooses among the manual rows only
   // (`loadClientTiers`), so a leftover auto-provisioned row does not make it connectable.
   const hasUsableOAuthClient = (key: string, autoProvisioned: boolean) =>

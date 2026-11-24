@@ -156,7 +156,6 @@
   "detail.emptyConnections": "Aucune connexion requise",
   "detail.emptyConnectionsHint": "Aucune intégration de cet agent ne demande de connexion",
   "detail.integrationConnect": "Connecter",
-  "detail.integrationReconnect": "Reconnecter",
   "missingConnections.title": "Connexions d'intégration requises",
   "missingConnections.intro": "Vérifiez les intégrations ci-dessous. Une fois chacune prête, relancez le run.",
   "missingConnections.introInactive": "Cet agent ne peut pas démarrer : les intégrations ci-dessous ne sont pas activées dans cet espace.",

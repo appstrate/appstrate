@@ -62,3 +62,15 @@ export function boundSpacesOf(principal: ConnectionPrincipal): readonly string[]
 export function writesDelegated(principal: ConnectionPrincipal): boolean {
   return principal.kind === "delegated" || boundSpacesOf(principal) !== null;
 }
+
+/** A delegated renewal needs a space-scoped row in the kickoff space (`null` on the account list). */
+export function reconnectScopeAllows(
+  delegated: boolean | undefined,
+  rowSpaceId: string | null,
+  kickoffSpaceId: string | null,
+): boolean {
+  return (
+    !delegated ||
+    (rowSpaceId !== null && (kickoffSpaceId === null || kickoffSpaceId === rowSpaceId))
+  );
+}

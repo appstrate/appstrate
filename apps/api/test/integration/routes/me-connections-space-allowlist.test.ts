@@ -15,6 +15,7 @@ import { getTestApp } from "../../helpers/app.ts";
 import { truncateAll } from "../../helpers/db.ts";
 import { createTestContext, createTestOrg, type TestContext } from "../../helpers/auth.ts";
 import { seedPackage, seedSpace } from "../../helpers/seed.ts";
+import { localIntegrationManifest } from "../../helpers/integration-manifests.ts";
 import { loopbackHeaders } from "../../helpers/loopback.ts";
 import { orgPermissions, presetPermissions } from "../../../src/lib/permissions.ts";
 
@@ -27,7 +28,15 @@ beforeEach(async () => {
   await truncateAll();
   owner = await createTestContext();
   gestion = await seedSpace({ orgId: owner.orgId, name: "Gestion", visibility: "closed" });
-  await seedPackage({ id: "@chatorg/gmail", orgId: owner.orgId, type: "integration" });
+  await seedPackage({
+    id: "@chatorg/gmail",
+    orgId: owner.orgId,
+    type: "integration",
+    draftManifest: localIntegrationManifest({
+      name: "@chatorg/gmail",
+      auths: { google: { type: "api_key" } },
+    }),
+  });
 });
 
 /** The org owner's bearer allowlisting the default space alone. */
@@ -114,14 +123,29 @@ describe("its owner's connections under a space allowlist", () => {
       });
 
     const listed = (await (await call("/api/me/connections")).json()) as {
-      data: Array<{ connections: Array<{ connection_id: string; allowed_actions: string[] }> }>;
+      data: Array<{
+        connections: Array<{
+          connection_id: string;
+          allowed_actions: string[];
+          reconnect_space_id: string | null;
+        }>;
+      }>;
     };
     const actions = Object.fromEntries(
       listed.data.flatMap((group) =>
         group.connections.map((row) => [row.connection_id, row.allowed_actions] as const),
       ),
     );
-    expect(actions).toEqual({ [inside]: ["rename", "share"], [orgWide]: ["share"] });
+    expect(actions).toEqual({
+      [inside]: ["rename", "reconnect", "share"],
+      [orgWide]: ["share"],
+    });
+    const renewIn = Object.fromEntries(
+      listed.data.flatMap((group) =>
+        group.connections.map((row) => [row.connection_id, row.reconnect_space_id] as const),
+      ),
+    );
+    expect(renewIn).toEqual({ [inside]: owner.defaultSpaceId, [orgWide]: null });
 
     // Outside the allowlist: not there, whatever the action.
     expect((await call(`/api/me/connections/${outside}`, "PATCH", { label: "x" })).status).toBe(

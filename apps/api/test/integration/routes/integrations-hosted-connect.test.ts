@@ -268,7 +268,8 @@ describe("hosted connect portal — dispatch + submit", () => {
     const cookie1 = `appstrate_connect=${readSetCookie(start1)}`;
     const c1 = (await (
       await app.request("/api/integrations/connect/context", { headers: { Cookie: cookie1 } })
-    ).json()) as { csrf: string };
+    ).json()) as { csrf: string; reconnecting: unknown };
+    expect(c1.reconnecting).toBeNull();
     const created = (await (
       await app.request("/api/integrations/connect/submit", {
         method: "POST",
@@ -288,12 +289,14 @@ describe("hosted connect portal — dispatch + submit", () => {
     const cookie2 = `appstrate_connect=${readSetCookie(start2)}`;
     const c2 = (await (
       await app.request("/api/integrations/connect/context", { headers: { Cookie: cookie2 } })
-    ).json()) as { csrf: string; connection_id: string };
+    ).json()) as { csrf: string; connection_id: string; reconnecting: unknown };
     expect(c2.connection_id).toBe(created.connection.id);
     const [before] = await db
       .select()
       .from(integrationConnections)
       .where(eq(integrationConnections.id, created.connection.id));
+    // The form names what it renews; a key carries no account identity.
+    expect(c2.reconnecting).toEqual({ label: before!.label, account_id: null });
     const renewed = await app.request("/api/integrations/connect/submit", {
       method: "POST",
       headers: { Cookie: cookie2, "Content-Type": "application/json", "x-connect-csrf": c2.csrf },

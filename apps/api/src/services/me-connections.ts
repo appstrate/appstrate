@@ -41,6 +41,12 @@ import {
   orgOrSystemFilter,
 } from "../lib/package-helpers.ts";
 import { activeHereSql } from "./package-activation.ts";
+import { listPackagePlacements } from "./space-packages.ts";
+import { readOAuthClientRegistrations, reconnectMethods } from "./reconnect-methods.ts";
+import {
+  parseIntegrationManifest,
+  readPublishedIntegrationManifests,
+} from "./integration-service.ts";
 import { placementRowJoin } from "./package-placement.ts";
 import {
   connectionLocks,
@@ -119,6 +125,59 @@ async function spacesServedToOwner(
     }),
   );
   return { byConnection, orgOfSpace };
+}
+
+/** Choose a space where the hosted session can open: the caller may connect there, the
+ * integration is placed there and its connect manifest still declares the row's auth. */
+async function reconnectSpaces(
+  caller: ConnectionCaller,
+  rows: readonly {
+    connectionId: string;
+    orgId: string;
+    packageId: string;
+    authKey: string;
+    userId: string | null;
+    endUserId: string | null;
+    spaceId: string | null;
+    originSpaceId: string | null;
+    accountId: string;
+  }[],
+  orgRoles: ReadonlyMap<string, OrgRole>,
+  drafts: ReadonlyMap<string, unknown>,
+): Promise<Map<string, string>> {
+  const renewable = rows.filter((r) => connectionActions(r, caller, false).includes("reconnect"));
+  const byOrg = Map.groupBy(renewable, (row) => row.orgId);
+  const out = new Map<string, string>();
+  await Promise.all(
+    [...byOrg].map(async ([orgId, connections]) => {
+      const seen = await caller.spacesSeen(orgId, orgRoles.get(orgId));
+      const spaceIds = seen
+        .filter((s) => s.permissions.has("integrations:connect"))
+        .map((s) => s.id);
+      if (!spaceIds.length) return;
+      const packageIds = [...new Set(connections.map((r) => r.packageId))];
+      const [placements, { manifests, unpublished }, registrations] = await Promise.all([
+        listPackagePlacements(orgId, packageIds, spaceIds, "integration"),
+        readPublishedIntegrationManifests(packageIds, orgId),
+        readOAuthClientRegistrations(orgId, packageIds, spaceIds),
+      ]);
+      for (const id of unpublished) {
+        const parsed = parseIntegrationManifest(drafts.get(id));
+        if (parsed.ok) manifests.set(id, parsed.manifest);
+      }
+      const byPackage = Map.groupBy(placements, (p) => p.packageId);
+      const methodAvailable = reconnectMethods(manifests, registrations);
+      for (const row of connections) {
+        if (!methodAvailable(row.packageId, row.authKey, row.spaceId)) continue;
+        const placed = byPackage.get(row.packageId);
+        const preferred = row.spaceId ?? row.originSpaceId;
+        const home = placed?.find((p) => p.spaceId === preferred);
+        const target = home ?? (row.spaceId === null ? placed?.[0] : undefined);
+        if (target) out.set(row.connectionId, target.spaceId);
+      }
+    }),
+  );
+  return out;
 }
 
 /**
@@ -224,6 +283,12 @@ export async function listMeConnections(
     .from(packages)
     .where(inArray(packages.id, uniquePackageIds));
 
+  const renewIn = await reconnectSpaces(
+    caller,
+    rows,
+    orgRoles,
+    new Map(pkgRows.map((pkg) => [pkg.id, pkg.draftManifest])),
+  );
   const packageInfo = new Map<string, { displayName: string; logo: string }>();
   for (const pkg of pkgRows) {
     const manifest = asRecord(pkg.draftManifest);
@@ -337,6 +402,7 @@ export async function listMeConnections(
             ? claims.sub
             : (displayAccountId(row.accountId) ?? row.label);
 
+    const reconnectSpaceId = renewIn.get(row.connectionId) ?? null;
     const entry: MeConnectionEntry = {
       connection_id: row.connectionId,
       kind: "integration",
@@ -350,8 +416,11 @@ export async function listMeConnections(
       scope: reach.scope,
       shared_spaces: sharesOf(row.connectionId).flatMap((id) => spaceRef(id) ?? []),
       share_all_spaces: reach.share_all_spaces,
-      allowed_actions: connectionActions(row, caller, false, orgRoles.get(row.orgId)),
+      allowed_actions: connectionActions(row, caller, false, orgRoles.get(row.orgId)).filter(
+        (action) => action !== "reconnect" || reconnectSpaceId !== null,
+      ),
       shareable_spaces: shareable.get(row.connectionId) ?? [],
+      reconnect_space_id: reconnectSpaceId,
       locked_by: locks.get(row.connectionId) ?? null,
       reused_by_agents: reusingAgents(row),
       org: { id: row.orgId, name: orgName },

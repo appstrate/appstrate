@@ -18,5 +18,6 @@ export interface ConnectionAuthContext {
   /** The auth method itself can connect (an OAuth method needs its client configured). */
   methodReady: boolean;
   canCreate: boolean;
+  /** The caller may renew this connection in place (`reconnect` action) and the method can. */
   canRenew: boolean;
 }

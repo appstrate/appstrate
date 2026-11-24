@@ -108,17 +108,17 @@ import {
   reachOutsideRun,
   reachOutsideRunIfPermitted,
 } from "../services/credential-proxy/access.ts";
-import { assertPackageMutationAccess } from "../lib/package-access.ts";
+import { assertPackageMutationAccess, packageAccessSpaces } from "../lib/package-access.ts";
 import { packageAvailabilityIn } from "../services/package-library.ts";
 import { getActor } from "../lib/actor.ts";
 import {
-  assertConnectionBelongsToActor,
   assertIsIntegration,
+  connectTarget,
   createIntegrationOAuthClient,
   deleteIntegrationOAuthClient,
   getIntegrationAuthStatuses,
   getIntegrationConnectionCredentialFields,
-  getIntegrationConnectionVariables,
+  getReconnectedConnection,
   listIntegrationClients,
   listIntegrationConnections,
   loadConnectionShares,
@@ -149,7 +149,6 @@ import {
 } from "../services/connect/provisioning.ts";
 import { createConnectRunExecutor } from "../services/connect/connect-run-launcher.ts";
 import { readReconnectTarget } from "../services/integration-scope-resolver.ts";
-import { isUserConnectionCreationBlocked } from "../services/integration-connection-resolver.ts";
 import { removeScheduleJobs } from "../services/scheduler.ts";
 import {
   CLIENT_SECRET_REQUIRED_MESSAGE,
@@ -159,6 +158,7 @@ import {
 } from "../services/integration-manifest-helpers.ts";
 import {
   acquiresByConnectLogin,
+  displayAccountId,
   partitionScopesByAuthCatalog,
   scopesNotCovered,
   scopeTokenSchema,
@@ -572,38 +572,13 @@ export function oauthClientHandlers(
 // Guards
 // ─────────────────────────────────────────────
 
-/**
- * Refuse a connection-creation attempt when the (space, integration)
- * has `block_user_connections=true` and the caller is not allowed to
- * govern this integration.
- *
- * Workflow this enables: an admin toggles the gate → connects → shares the
- * connection into the space → members are funnelled onto the shared
- * connection via the resolver's fallback path. Members trying to bypass
- * with their own connection get a clean 403 instead of a silent override.
- *
- * The exemption is `integrations:configure` — the very permission that sets
- * the gate. Whoever can turn it on can connect while it is on, which is the
- * whole point (otherwise nobody could create the shared connection).
- *
- * `configure` is session-only, so no API key can hold it — however privileged
- * its creator. A key hitting this path gets the 403 the gate exists to produce.
- */
-async function assertConnectionCreationAllowed(
-  c: import("hono").Context<AppEnv>,
-  spaceId: string,
-  integrationId: string,
-): Promise<void> {
-  if (canConfigureIntegrations(c)) return;
-  const blocked = await isUserConnectionCreationBlocked(spaceId, integrationId);
-  if (blocked) {
-    throw new ApiError({
-      status: 403,
-      code: "connection_blocked_by_admin",
-      title: "Connection Blocked by Admin",
-      detail: `Creation of personal connections to '${integrationId}' is disabled by an admin of this space. Use the shared connection instead.`,
-    });
-  }
+function connectWriter(c: Context<AppEnv>) {
+  const principal = connectionPrincipal(c);
+  return {
+    actor: principal.actor,
+    delegated: writesDelegated(principal),
+    canConfigure: canConfigureIntegrations(c),
+  };
 }
 
 /** The audited view of an org default. */
@@ -1209,20 +1184,17 @@ export function createIntegrationsRouter() {
       const packageId = c.req.param("packageId")!;
       const authKey = c.req.param("authKey")!;
       const scope = getSpaceScope(c);
-      const principal = connectionPrincipal(c);
-      const actor = principal.actor;
-      await assertConnectionCreationAllowed(c, scope.spaceId, packageId);
+      const writer = connectWriter(c);
       const body = await readJsonBody(c, importConnectionSchema);
-      // A reconnect target must be the caller's own connection in this space —
-      // otherwise the credential write below would overwrite an arbitrary
-      // (possibly another actor's) connection (IDOR).
-      const target = body.connection_id
-        ? await assertConnectionBelongsToActor(
-            body.connection_id,
-            { spaceId: scope.spaceId, integrationId: packageId, authKey },
-            principal,
-          )
-        : null;
+      const target = await connectTarget(
+        {
+          spaceId: scope.spaceId,
+          integrationId: packageId,
+          authKey,
+          connectionId: body.connection_id,
+        },
+        writer,
+      );
       try {
         const { auth } = await readIntegrationAuth(scope, packageId, authKey);
         if (auth.type === "oauth2" && !acquiresByConnectLogin(auth)) {
@@ -1245,11 +1217,11 @@ export function createIntegrationsRouter() {
         // paste-the-bag / declarative paths don't construct an executor.
         const ctx: ConnectContext = {
           scope,
-          actor,
+          actor: writer.actor,
           integrationId: packageId,
           authKey,
           ...(target ? { target } : {}),
-          delegated: writesDelegated(principal),
+          delegated: writer.delegated,
           ...(body.variables ? { variables: body.variables } : {}),
         };
         const strategy = resolveStrategy(auth, { connectToolExecutor: createConnectRunExecutor() });
@@ -1276,19 +1248,18 @@ export function createIntegrationsRouter() {
       const packageId = c.req.param("packageId")!;
       const authKey = c.req.param("authKey")!;
       const scope = getSpaceScope(c);
-      const principal = connectionPrincipal(c);
-      const actor = principal.actor;
-      await assertConnectionCreationAllowed(c, scope.spaceId, packageId);
+      const writer = connectWriter(c);
       const body = await readJsonBody(c, connectOAuthSchema, { allowEmpty: true });
-      // Same reconnect-target IDOR guard as connect/fields: the connection_id is
-      // carried into the OAuth state and honored at callback-time write.
-      const target = body.connection_id
-        ? await assertConnectionBelongsToActor(
-            body.connection_id,
-            { spaceId: scope.spaceId, integrationId: packageId, authKey },
-            principal,
-          )
-        : null;
+      // The connection_id is carried into the OAuth state and honored at callback-time write.
+      const target = await connectTarget(
+        {
+          spaceId: scope.spaceId,
+          integrationId: packageId,
+          authKey,
+          connectionId: body.connection_id,
+        },
+        writer,
+      );
 
       const { auth } = await readIntegrationAuth(scope, packageId, authKey);
       if (auth.type !== "oauth2" || acquiresByConnectLogin(auth)) {
@@ -1309,11 +1280,11 @@ export function createIntegrationsRouter() {
       const result = await strategy.begin(
         {
           scope,
-          actor,
+          actor: writer.actor,
           integrationId: packageId,
           authKey,
           ...(target ? { target } : {}),
-          delegated: writesDelegated(principal),
+          delegated: writer.delegated,
           ...(body.variables ? { variables: body.variables } : {}),
         },
         {
@@ -1339,19 +1310,18 @@ export function createIntegrationsRouter() {
       const packageId = c.req.param("packageId")!;
       const authKey = c.req.param("authKey")!;
       const scope = getSpaceScope(c);
-      const principal = connectionPrincipal(c);
-      const actor = principal.actor;
-      await assertConnectionCreationAllowed(c, scope.spaceId, packageId);
+      const writer = connectWriter(c);
       const body = await readJsonBody(c, connectSessionSchema, { allowEmpty: true });
-      // Same reconnect-target IDOR guard as connect/fields: the connection_id is
-      // minted into the hosted-connect capability token and honored at write.
-      if (body.connection_id) {
-        await assertConnectionBelongsToActor(
-          body.connection_id,
-          { spaceId: scope.spaceId, integrationId: packageId, authKey },
-          principal,
-        );
-      }
+      // The connection_id is minted into the hosted-connect capability token and honored at write.
+      await connectTarget(
+        {
+          spaceId: scope.spaceId,
+          integrationId: packageId,
+          authKey,
+          connectionId: body.connection_id,
+        },
+        writer,
+      );
       // Validate the auth exists (404/409 surfaced now, not after the redirect).
       const { auth } = await readIntegrationAuth(scope, packageId, authKey);
       // `scopes` are checked HERE, at the mint: `/connect/start` replays our own
@@ -1360,11 +1330,11 @@ export function createIntegrationsRouter() {
       const { connectUrl, expiresAt } = buildConnectUrl(
         connectClaimsFor({
           scope,
-          actor,
+          actor: writer.actor,
           packageId,
           authKey,
           ...(body.connection_id ? { connectionId: body.connection_id } : {}),
-          delegated: writesDelegated(principal),
+          delegated: writer.delegated,
           ...(body.scopes ? { scopes: body.scopes } : {}),
           ...(body.force_account_select ? { forceAccountSelect: true } : {}),
         }),
@@ -1473,12 +1443,11 @@ export function createIntegrationsRouter() {
     const scope = scopeFromClaims(claims);
     const { manifest, auth } = await readIntegrationAuth(scope, claims.package_id, claims.auth_key);
     const variablesSchema = getVariablesSchema(manifest);
-    // A reconnect shows the values the connection was made with; `connection_id` rides signed
-    // claims minted after `assertConnectionBelongsToActor`.
-    const values =
-      variablesSchema && claims.connection_id
-        ? await getIntegrationConnectionVariables(claims.connection_id)
-        : null;
+    // A reconnect names the connection it renews and shows the values it was made with;
+    // `connection_id` rides signed claims minted after `connectTarget`.
+    const renewed = claims.connection_id
+      ? await getReconnectedConnection(claims.connection_id)
+      : null;
     return c.json({
       packageId: claims.package_id,
       auth_key: claims.auth_key,
@@ -1486,8 +1455,13 @@ export function createIntegrationsRouter() {
       icon: manifest.icon ?? null,
       auth: authWithoutMintedCredentials(claims.package_id, claims.auth_key, auth),
       connection_id: claims.connection_id ?? null,
+      reconnecting: renewed
+        ? { label: renewed.label, account_id: displayAccountId(renewed.accountId) }
+        : null,
       csrf: claims.csrf ?? null,
-      variables: variablesSchema ? { schema: variablesSchema, values: values ?? {} } : null,
+      variables: variablesSchema
+        ? { schema: variablesSchema, values: renewed?.variables ?? {} }
+        : null,
     });
   });
 
@@ -1589,7 +1563,7 @@ export function createIntegrationsRouter() {
       // On a reconnect, the stored bundle, so the provisioner can reuse the key
       // already installed on the target. Decrypted only for a provisioning
       // auth; safe because `connection_id` rides SIGNED claims minted after
-      // `assertConnectionBelongsToActor` (`connect/session` above).
+      // `connectTarget` (`connect/session` above).
       const existing =
         provisioning && claims.connection_id
           ? await getIntegrationConnectionCredentialFields(claims.connection_id)
@@ -1914,10 +1888,21 @@ function canConfigureIntegrations(c: import("hono").Context<AppEnv>): boolean {
 async function callerSpacesSeen(
   c: Context<AppEnv>,
   orgId: string,
-  orgRole: OrgRole,
+  orgRole: OrgRole | undefined,
 ): Promise<SpaceSeen[]> {
+  if (c.get("principalKind") === "end_user") {
+    if (orgId !== c.get("orgId")) return [];
+    const [space] = await packageAccessSpaces(c);
+    if (!space || space.ownerUserId !== null || !credentialAdmitsSpace(c, space.id)) return [];
+    // An impersonating key also needs its creator's live grants in the pinned space.
+    // An end-user token's fixed grants are already the whole set there.
+    const permissions = c.get("orgRole")
+      ? await callerPermissionsInSpace(c, space.id, orgId)
+      : space.permissions;
+    return [{ id: space.id, name: space.name, permissions }];
+  }
   const userId = c.get("user")?.id;
-  if (!userId) return [];
+  if (!orgRole || !userId) return [];
   const persona = personaFor(c, orgId);
   const listed = await listSpacesForPrincipal(
     orgId,

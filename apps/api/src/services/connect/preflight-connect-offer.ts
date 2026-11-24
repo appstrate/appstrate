@@ -30,9 +30,9 @@
 
 import { buildConnectUrl, connectClaimsFor } from "./connect-session.ts";
 import { fetchIntegrationManifest, type IntegrationManifestCache } from "../integration-service.ts";
-import { isUserConnectionCreationBlocked } from "../integration-connection-resolver.ts";
+import { connectTarget } from "../integration-connections.ts";
 import { acquiresByConnectLogin, partitionScopesByAuthCatalog } from "@appstrate/core/integration";
-import type { ResolutionFieldError } from "../../lib/errors.ts";
+import { ApiError, type ResolutionFieldError } from "../../lib/errors.ts";
 import type { ConnectOfferPolicy } from "../../lib/connect-offer-policy.ts";
 import type { SpaceScope } from "../../lib/scope.ts";
 import type { Actor } from "../../lib/actor.ts";
@@ -138,15 +138,7 @@ export async function attachConnectOffers(params: {
           return e;
         }
 
-        // Same carve-out as `assertConnectionCreationAllowed`: an admin may
-        // create the shared connection the block exists to force everyone onto.
-        if (
-          !policy.canConfigure &&
-          (await isUserConnectionCreationBlocked(scope.spaceId, target.integrationId))
-        ) {
-          return e;
-        }
-
+        await connectTarget({ ...target, spaceId: scope.spaceId }, { ...policy, actor });
         const { connectUrl, expiresAt } = buildConnectUrl(
           connectClaimsFor({
             scope,
@@ -165,6 +157,7 @@ export async function attachConnectOffers(params: {
           packageId: target.integrationId,
         };
       } catch (err) {
+        if (err instanceof ApiError && (err.status === 403 || err.status === 404)) return e;
         logger.warn("Connect offer mint failed for readiness error", {
           integrationId: target.integrationId,
           authKey: target.authKey,

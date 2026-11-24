@@ -1200,6 +1200,18 @@ describe("POST /api/agents/:scope/:name/run — 409 missing_integration_connecti
       });
     });
 
+    async function blockUserConnections() {
+      await db
+        .update(spacePackages)
+        .set({ blockUserConnections: true })
+        .where(
+          and(
+            eq(spacePackages.spaceId, ctx.defaultSpaceId),
+            eq(spacePackages.packageId, OAUTH_INTEGRATION),
+          ),
+        );
+    }
+
     // `needs_reconnection` re-consents THAT row in place, so it is the owner's to run.
     describe("needs_reconnection", () => {
       /** A dead oauth2 connection, owned by `userId` and optionally shared. */
@@ -1251,6 +1263,23 @@ describe("POST /api/agents/:scope/:name/run — 409 missing_integration_connecti
           connection_id: connectionId,
         });
         expect(claims!.scopes ?? []).not.toContain("search.read");
+      });
+
+      it("offers the owner a renewal when the space blocks new connections", async () => {
+        await seedOauthIntegration();
+        const member = await memberHolding(["agents:run", "runs:read", "integrations:connect"]);
+        const connectionId = await seedDeadConnection(member.user.id);
+        await blockUserConnections();
+
+        const err = relayItem(await launchAs(member));
+        expect(err.code).toBe("needs_reconnection");
+        expect(err.connect_url).toStartWith("http");
+        const token = new URL(err.connect_url!).searchParams.get("token");
+        expect(readConnectToken(token!)).toMatchObject({
+          user_id: member.user.id,
+          connection_id: connectionId,
+          space_id: ctx.defaultSpaceId,
+        });
       });
 
       it("mints nothing when the dead connection is a colleague's shared row", async () => {
@@ -1321,24 +1350,8 @@ describe("POST /api/agents/:scope/:name/run — 409 missing_integration_connecti
       });
     });
 
-    // `block_user_connections` funnels a space onto one shared connection, and
-    // the relay must not hand out a link that walks around it. Its one
-    // carve-out is the same as `assertConnectionCreationAllowed`'s: an actor
-    // holding `integrations:configure` is precisely who is expected to create
-    // the shared connection the block exists to force everyone onto.
+    // The space can reserve the creation of new connections to its governors.
     describe("block_user_connections", () => {
-      async function blockUserConnections() {
-        await db
-          .update(spacePackages)
-          .set({ blockUserConnections: true })
-          .where(
-            and(
-              eq(spacePackages.spaceId, ctx.defaultSpaceId),
-              eq(spacePackages.packageId, OAUTH_INTEGRATION),
-            ),
-          );
-      }
-
       it("mints nothing for a member who may connect but may not configure", async () => {
         await seedOauthIntegration();
         await blockUserConnections();

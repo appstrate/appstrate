@@ -267,7 +267,7 @@ export const connectionActionsSchema = {
   type: "array",
   items: { type: "string", enum: [...CONNECTION_ACTIONS] },
   description:
-    "What the caller may do with this connection: `rename`, `share` (into a space it reaches) or `unshare_here` (withdraw it from the current space).",
+    "What the caller may do with this connection: `rename`, `reconnect` (its owner renews it in place, whether or not it is flagged `needs_reconnection`; absent when the stored upstream account is not identified, since a renewal could not be verified against it), `share` (into a space it reaches) or `unshare_here` (withdraw it from the current space).",
 } as const;
 
 export const spaceIdSchema = {
@@ -758,7 +758,7 @@ const connectKickoffRelayProperties = {
     type: "string",
     format: "uuid",
     description:
-      "Reconnect this existing connection in place only when both credentials identify the same upstream account and instance. An unidentified account (account_id default) requires another connection. Its shares, pins and schedules keep the original ID until explicitly changed. Added scopes then apply to every agent that uses it: to give one agent more rights without widening the others, omit it and pass the required `scopes`. Do not duplicate an integration to change its scopes; create another connection.",
+      "Reconnect this existing connection in place only when both credentials identify the same upstream account and instance. An unidentified account (account_id default) requires another connection. Its shares, pins and schedules keep the original ID until explicitly changed. A space's gate on new member connections (`block_user_connections`) never refuses a renewal. Added scopes then apply to every agent that uses it: to give one agent more rights without widening the others, omit it and pass the required `scopes`. Do not duplicate an integration to change its scopes; create another connection.",
   },
 } as const;
 
@@ -1685,7 +1685,7 @@ export const integrationsPaths = {
                   type: "string",
                   format: "uuid",
                   description:
-                    "Existing connection to renew in place only if the credentials identify the same upstream account and instance (409 identity_mismatch otherwise). A key or password without an account identity requires another connection. Shares, pins and schedules keep the original ID until explicitly changed. When an administrator restricts creation, choose a shared connection or ask the administrator to provide one. Omit on a fresh connect — the write then INSERTs a new row; to give one agent a different credential, create a new connection rather than duplicating the integration.",
+                    "Existing connection to renew in place only if the credentials identify the same upstream account and instance (409 identity_mismatch otherwise). A key or password without an account identity requires another connection. Shares, pins and schedules keep the original ID until explicitly changed. When an administrator restricts creation (`block_user_connections`), a renewal is still accepted; for another connection, choose a shared one or ask the administrator to provide one. Omit on a fresh connect — the write then INSERTs a new row; to give one agent a different credential, create a new connection rather than duplicating the integration.",
                 },
                 variables: connectionVariablesSchema,
               },
@@ -1924,6 +1924,20 @@ export const integrationsPaths = {
                       "The auth declaration the form renders. Credentials the platform mints (the `private_key` of `@appstrate/ssh`) are removed from `credentials.schema` — display only; submissions are validated against the full schema.",
                   },
                   connection_id: { type: ["string", "null"] },
+                  reconnecting: {
+                    type: ["object", "null"],
+                    required: ["label", "account_id"],
+                    properties: {
+                      label: { type: "string" },
+                      account_id: {
+                        type: ["string", "null"],
+                        description:
+                          "The upstream account the connection identifies; null when it identifies none.",
+                      },
+                    },
+                    description:
+                      "The connection this session renews in place, so the form can name the account the new credentials must belong to; null on a fresh connect.",
+                  },
                   csrf: { type: ["string", "null"] },
                   variables: {
                     type: ["object", "null"],
