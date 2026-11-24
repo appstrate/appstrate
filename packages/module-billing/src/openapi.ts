@@ -168,6 +168,7 @@ export function openApiPaths(): Record<string, unknown> {
     "/api/billing": {
       get: {
         operationId: "getBillingAccount",
+        "x-appstrate-space": { kind: "organization" },
         tags: ["Billing"],
         summary: "Get the current org's billing account",
         description:
@@ -192,6 +193,7 @@ export function openApiPaths(): Record<string, unknown> {
     "/api/billing/checkout": {
       post: {
         operationId: "createBillingCheckoutSession",
+        "x-appstrate-space": { kind: "organization" },
         tags: ["Billing"],
         summary: "Create a Stripe Checkout session",
         description:
@@ -261,6 +263,7 @@ export function openApiPaths(): Record<string, unknown> {
     "/api/billing/plan": {
       post: {
         operationId: "changeBillingPlan",
+        "x-appstrate-space": { kind: "organization" },
         tags: ["Billing"],
         summary: "Change the plan of the existing subscription",
         description:
@@ -315,6 +318,7 @@ export function openApiPaths(): Record<string, unknown> {
     "/api/billing/portal": {
       post: {
         operationId: "createBillingPortalSession",
+        "x-appstrate-space": { kind: "organization" },
         tags: ["Billing"],
         summary: "Create a Stripe Customer Portal session",
         description:
@@ -351,6 +355,7 @@ export function openApiPaths(): Record<string, unknown> {
     "/api/billing/managers": {
       get: {
         operationId: "listBillingManagers",
+        "x-appstrate-space": { kind: "organization" },
         tags: ["Billing"],
         summary: "List the organization's billing managers",
         description:
@@ -369,6 +374,7 @@ export function openApiPaths(): Record<string, unknown> {
       },
       put: {
         operationId: "replaceBillingManagers",
+        "x-appstrate-space": { kind: "organization" },
         tags: ["Billing"],
         summary: "Replace the organization's billing managers",
         description:
@@ -412,6 +418,7 @@ export function openApiPaths(): Record<string, unknown> {
     "/api/billing/contact": {
       get: {
         operationId: "getBillingContact",
+        "x-appstrate-space": { kind: "organization" },
         tags: ["Billing"],
         summary: "Get the billing contact",
         description:
@@ -434,6 +441,7 @@ export function openApiPaths(): Record<string, unknown> {
       },
       patch: {
         operationId: "updateBillingContact",
+        "x-appstrate-space": { kind: "organization" },
         tags: ["Billing"],
         summary: "Update the billing contact",
         description:
@@ -481,6 +489,7 @@ export function openApiPaths(): Record<string, unknown> {
     "/api/billing/webhooks": {
       post: {
         operationId: "receiveBillingStripeWebhook",
+        "x-appstrate-space": { kind: "organization" },
         tags: ["Billing"],
         summary: "Stripe webhook receiver",
         description:

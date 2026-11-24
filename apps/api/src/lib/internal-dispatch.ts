@@ -32,6 +32,7 @@
  */
 
 import type { Context } from "hono";
+import { setRowTargetChecker } from "@appstrate/core/permissions";
 import { randomBytes, timingSafeEqual } from "node:crypto";
 
 /** Lower-case so it round-trips through `Headers` (which lower-cases names). */
@@ -84,4 +85,41 @@ export function dispatchPinEnv(pin: DispatchPin): Record<symbol, DispatchPin> {
 export function dispatchPin(c: Context): DispatchPin | undefined {
   const env = c.env as Record<symbol, DispatchPin | undefined> | undefined;
   return env?.[DISPATCH_PIN];
+}
+
+/** A row-addressed route can determine its target only after authorizing the row.
+ * Associate the platform's per-call check with the in-process Request itself. */
+type TargetCheck = (
+  spaceId: string | null,
+  permissions: ReadonlySet<string> | undefined,
+) => Promise<void>;
+const targetChecks = new WeakMap<Request, TargetCheck>();
+
+export function onDispatchTarget(request: Request, check: TargetCheck): void {
+  targetChecks.set(request, check);
+}
+
+// Core owns the public module guard. The platform supplies its request-bound MCP check.
+setRowTargetChecker(async (context, spaceId) => {
+  const c = context as Context;
+  await targetChecks.get(c.req.raw)?.(spaceId, c.get("permissions"));
+});
+
+/** Routes can report additional spaces after proving their own authority, before a mutation. */
+type SpaceRecorder = (spaceIds: readonly string[]) => Promise<unknown>;
+const spaceRecorders = new WeakMap<Request, SpaceRecorder>();
+
+export function onDispatchSpaces(request: Request, record: SpaceRecorder): void {
+  spaceRecorders.set(request, record);
+}
+
+/** True only when the in-process caller asked the route to record its actual spaces. */
+export async function recordDispatchSpaces(
+  c: Context,
+  spaceIds: readonly string[],
+): Promise<boolean> {
+  const record = spaceRecorders.get(c.req.raw);
+  if (!record) return false;
+  await record(spaceIds);
+  return true;
 }

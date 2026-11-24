@@ -247,6 +247,7 @@ export const notificationsPaths = {
   "/api/orgs/{orgId}/notifications": {
     get: {
       operationId: "listOrgNotifications",
+      "x-appstrate-space": { kind: "aggregate" },
       tags: ["Notifications"],
       summary: "List notifications across the organization's spaces",
       description:
@@ -262,6 +263,7 @@ export const notificationsPaths = {
   "/api/orgs/{orgId}/notifications/unread-count": {
     get: {
       operationId: "getOrgUnreadNotificationCount",
+      "x-appstrate-space": { kind: "aggregate" },
       tags: ["Notifications"],
       summary: "Get unread notification count across the organization's spaces",
       description:
@@ -306,6 +308,7 @@ export const notificationsPaths = {
   "/api/orgs/{orgId}/notifications/{id}": {
     get: {
       operationId: "getOrgNotification",
+      "x-appstrate-space": { kind: "aggregate" },
       tags: ["Notifications"],
       summary: "Get a notification in any space of the organization",
       description:

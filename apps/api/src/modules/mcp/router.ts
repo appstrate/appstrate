@@ -61,7 +61,7 @@ import {
   type AppstrateResourceProvider,
   type McpPost,
 } from "@appstrate/mcp-transport";
-import { OPERATION_INDEX_HEADING } from "@appstrate/core/chat-contract";
+import { CHAT_LOOPBACK_AUTH_METHOD, OPERATION_INDEX_HEADING } from "@appstrate/core/chat-contract";
 import { RUN_AND_WAIT_RESUME_INSTRUCTION } from "@appstrate/core/run-and-wait-client";
 import { requireModulePermission } from "@appstrate/core/permissions";
 import { forbidden, invalidRequest, methodNotAllowed, notFound } from "../../lib/errors.ts";
@@ -359,14 +359,14 @@ function orgWideSpaceContext(
       ? "Not applicable to this connection: steps 4 and 5 apply to every act."
       : `For ${personalActs.join(", ")}: your personal space (the one marked \`your personal space\`); your reply names it. Send it there first, whatever your role there and even when another space looks better suited or is the only one where it would work: a refusal or a space that cannot serve is the next rule's case, never a reason to start in another space.`;
   return `This MCP server is scoped to ONE organization — the one this endpoint serves — and reaches every space of it where you hold a role. ${ORG_BOUNDARY}
-- Every tool that acts in a space REQUIRES \`space_id\`: the server picks no default. Its schema lists your spaces, their ids and your role in each; your role in the space a call names decides that call. Choose the space in this order:
+- Use \`describe\` on an operation without choosing a space: it reports where its route acts. An organization-level operation acts in no space: omit \`space_id\` and never ask which space, whatever the steps below say. A route with a space in its path, query or body uses that destination. For other space operations send the space the user named. When no space is named, call the tool: the server uses the connection or conversation's designated destination, or returns a choice if one is needed. For a refusal asking for that choice, halt and wait for the user. These rules choose the destination:
   1. Only one space is listed (a conversation limited to a space, a narrowed credential): that one.
   2. The user's request names a space: that one.
   3. ${personalStep}
-  4. For an act step 3 does not name (never for one it names, whatever space the conversation was opened in): the space your context designates (for the chat, the space the conversation was opened in); with none, ask which space; a space is not designated because the request would work there.
-  5. A credential with no personal space (API key, end-user, delegated credential) uses its own space; when several are reachable and nothing designates one, ask.
+  4. For an act step 3 does not name (never for one it names, whatever space the conversation was opened in): the space your context designates (for the chat, the space the conversation was opened in); with none, omit the argument so the server can request a choice. A space is not designated because the request would work there.
+  5. A credential with no personal space (API key, end-user, delegated credential) uses its own space; when several are reachable and nothing designates one, call without the argument and present the choice the server returns.
 - When the space this order gives cannot serve the request, STOP: make no further call that changes anything or acts elsewhere (no activation, no offer, no connect flow, no run in another space). Reply with the reason and every option below that applies, and wait: only the user's answer in a later message chooses one. Naming an integration in the request is not that answer. Offer another space only when your role there allows the act (the \`space_id\` schema gives your role in each; \`granted_in\` and \`active_in_spaces\` list them).${inlineSpaces.length ? ` For every inline-run alternative below, the ONLY spaces with launch permission are: ${inlineSpaces.map((space) => space.id).join(", ")}. A reachable connection or active integration in any other space does not authorize a run there. Check the integration and connection only in eligible spaces; pass their space_id to search or get_me.` : ""}
-  (a) The integration is off there (\`active: false\`, \`integration_not_active\`). Options: activating it there (\`activatePackage\`: path \`id\` and \`space_id\` both that space, when your role allows); using it in a named space where it is active and the requested action is allowed; for an organization owner or admin, offering it to the organization (from chat, the organization catalog; otherwise \`offerPackageToOrg\` with an unconfined credential), which activates it in every space without a row of its own: a space's own switched-off row still wins, and no connection becomes reachable by it.
+  (a) The integration is off there (\`active: false\`, \`integration_not_active\`). Options: activating it there (\`activatePackage\`: path \`id\` naming that space, when your role allows); using it in a named space where it is active and the requested action is allowed; for an organization owner or admin, offering it to the organization (from chat, the organization catalog; otherwise \`offerPackageToOrg\` with an unconfined credential), which activates it in every space without a row of its own: a space's own switched-off row still wins, and no connection becomes reachable by it.
   (b) The connection needed is missing or not reachable there (a colleague's connection shared with team spaces only never reaches a personal space). Options, both to state: using it in a named team space that allows the requested action (verify the connection there with \`get_me\` or \`search\`); connecting one's own.${proxySpaces.length ? ` For a direct call, when the personal search returns the integration in \`not_ready\` with \`not_connected\`, even with a link, search for its tool before replying in these team spaces allowing \`call_integration_tool\`: ${proxyTeams.map((space) => space.id).join(", ") || "none"}. Name a team whose search returns the tool alongside connecting one's own; call the tool only after the user chooses.` : ""} Never suggest sharing a member's account for a need that is only the caller's own.
   (c) Your role there does not allow the act (\`not_granted\`, 403 \`inline_run_not_allowed_in_space\`): ${NO_FALLBACK_HINT}
   To launch an existing agent, use a space where it is active (\`agent_not_active_in_space\`, \`active_in_spaces\`). Activating an agent, or sharing it so that it lands ON, refuses nothing: the response's \`warnings[]\` names each declared integration inactive in that space, and a \`required: true\` one will refuse its launch there — offer to activate it, with the user's agreement.
@@ -585,8 +585,28 @@ export function createMcpRouter(deps: McpRouterDeps = {}): Hono<AppEnv> {
     const reachable = await listReachableSpaces(c, orgId, (permissions, space) =>
       deriveMcpSurface(permissions, ceiling, actor, proxied, space),
     );
-    const requested = await requestedSpaceId(post?.payload, orgId);
-    const chosen = reachable.find((s) => s.id === requested) ?? reachable[0];
+    const chat = c.get("authMethod") === CHAT_LOOPBACK_AUTH_METHOD ? c.get("authExtra") : undefined;
+    const choice = chat?.spaceChoice as OrgWideSpaces["spaceChoice"];
+    const beforeAct = chat?.beforeMcpSpaceAct;
+    const policy = {
+      reachable,
+      bounded: c.get("credentialSpaceIds") !== undefined,
+      ceiling,
+      orgPermissions: c.get("permissions"),
+      originSpaceId: typeof chat?.originSpaceId === "string" ? chat.originSpaceId : undefined,
+      spaceChoice: choice,
+      beforeAct:
+        typeof beforeAct === "function"
+          ? (id: string) => Promise.resolve(beforeAct(id))
+          : undefined,
+    };
+    const requested = await requestedSpaceId(post?.payload, orgId, policy);
+    // Admission alone needs one live MCP role. Prefer one granting invoke so a truly
+    // organization-wide invocation can recheck its own grant there after admission.
+    const chosen =
+      reachable.find((s) => s.id === requested) ??
+      reachable.find((s) => s.surface.invokes) ??
+      reachable[0];
     if (!chosen) {
       throw forbidden(
         c.get("credentialSpaceIds") === undefined
@@ -605,6 +625,7 @@ export function createMcpRouter(deps: McpRouterDeps = {}): Hono<AppEnv> {
       surface: deriveMcpSurface(permissions, ceiling, actor, proxied, c.get("space")!),
     };
     c.set("mcpOrgSpaces", {
+      ...policy,
       reachable: reachable.map((s) => (s.id === current.id ? current : s)),
       current,
     });
@@ -683,6 +704,7 @@ export function createMcpRouter(deps: McpRouterDeps = {}): Hono<AppEnv> {
     // the context synchronously before its first await, so nothing here
     // depends on the request outliving the response (over SSE it runs after the handler returned).
     const observe: McpObserver = (event) => {
+      const spaceId = event.operationSpaceId === undefined ? scope.spaceId : event.operationSpaceId;
       logger.info("mcp.tool_call", {
         requestId: c.get("requestId"),
         tool: event.tool,
@@ -696,7 +718,7 @@ export function createMcpRouter(deps: McpRouterDeps = {}): Hono<AppEnv> {
         shownCount: event.shownCount,
         deniedCount: event.deniedCount,
         // A search across spaces acted in none of them in particular.
-        ...(event.spaceIds ? { spaceIds: event.spaceIds } : { spaceId: scope.spaceId }),
+        ...(event.spaceIds ? { spaceIds: event.spaceIds } : { spaceId }),
       });
       if (event.tool === "invoke_operation" && event.outcome === "invoked") {
         // `void`: deliberately off the response path — the rationale, and what
@@ -706,12 +728,13 @@ export function createMcpRouter(deps: McpRouterDeps = {}): Hono<AppEnv> {
             action: "mcp.operation.invoked",
             resourceType: "mcp_operation",
             resourceId: event.operationId ?? null,
+            spaceIdOverride: spaceId,
             after: {
               method: event.method ?? null,
               path: event.path ?? null,
               status: event.status ?? null,
               outcome: event.outcome,
-              spaceId: scope.spaceId,
+              spaceId,
             },
           }),
         );
@@ -738,7 +761,8 @@ export function createMcpRouter(deps: McpRouterDeps = {}): Hono<AppEnv> {
     );
     const toolCtx = {
       authorizeBundle: (bundle: Bundle) => authorizeBundlePackages(c, bundle),
-      placeRootAs: (packageId: string) => heldPlacementAuthority(c, packageId),
+      placeRootAs: (packageId: string, record?: (ids: readonly string[]) => Promise<boolean>) =>
+        heldPlacementAuthority(c, packageId, scope.spaceId, record),
       requestId: c.get("requestId"),
       followRunLogs: (runId: string, onLog: (log: RunLogEvent) => void) =>
         followRunLogs(

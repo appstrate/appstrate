@@ -2119,7 +2119,9 @@ export function createPackagesRouter() {
       packageId,
       spaceId,
       orgId,
-      placeAs: await callerPlacementAuthority(c, pkg.type),
+      placeAs: await callerPlacementAuthority(c, pkg, {
+        visibleSpaceId: target.kind === "space" ? spaceId : null,
+      }),
       enabled,
     });
     if (created) {
@@ -2219,7 +2221,12 @@ export function createPackagesRouter() {
       recipientUserId = target;
     }
 
-    const { authorityFor } = await assertPlacementRemovalAccess(c, packageId, spaceId);
+    const { authorityFor } = await assertPlacementRemovalAccess(
+      c,
+      packageId,
+      spaceId,
+      target.startsWith("spc_") ? "space" : "user",
+    );
     const { authority, disabledScheduleIds } = await revokePackageShare({
       packageId,
       spaceId,
@@ -2602,7 +2609,7 @@ export function createPackagesRouter() {
         // A root that already lives in another space is placed here by the same
         // rule as any activation: through the placement door, when this caller
         // holds the share authority.
-        (packageId) => heldPlacementAuthority(c, packageId),
+        (packageId) => heldPlacementAuthority(c, packageId, spaceId),
         expectedType,
       );
     } catch (err) {

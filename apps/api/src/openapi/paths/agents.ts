@@ -237,6 +237,7 @@ export const agentsPaths = {
   "/api/orgs/{orgId}/agents": {
     get: {
       operationId: "listOrgAgents",
+      "x-appstrate-space": { kind: "aggregate" },
       tags: ["Agents"],
       summary: "List agents across the organization's spaces",
       description:
@@ -515,6 +516,7 @@ export const agentsPaths = {
   "/api/orgs/{orgId}/agents/{scope}/{name}/persistence": {
     get: {
       operationId: "listOrgAgentPersistence",
+      "x-appstrate-space": { kind: "aggregate" },
       tags: ["Agents"],
       summary: "List an agent's persistence across the organization's spaces",
       description:

@@ -15,6 +15,7 @@ import {
   operationIdGranted,
   type CatalogOperation,
 } from "../../../../src/modules/mcp/catalog.ts";
+import { TOOL_SPACE_RULES } from "../../../../src/modules/mcp/call-space.ts";
 import type { Dispatch } from "../../../../src/modules/mcp/tools.ts";
 import { internalDispatchHeader } from "../../../../src/lib/internal-dispatch.ts";
 import { AFPS_SCHEMA_VERSION, validateManifest } from "@appstrate/core/validation";
@@ -86,6 +87,11 @@ function firstOp(predicate: (op: CatalogOperation) => boolean): CatalogOperation
 }
 
 describe("mcp catalog", () => {
+  it("registers a destination rule for every root tool the platform can advertise", () => {
+    const { byName } = makeTools([...orgPermissions("owner"), ...presetPermissions("admin")]);
+    expect([...byName.keys()].sort()).toEqual(Object.keys(TOOL_SPACE_RULES).sort());
+  });
+
   it("indexes core operations from the live spec", () => {
     const { operations } = getCatalog();
     expect(operations.size).toBeGreaterThan(50);

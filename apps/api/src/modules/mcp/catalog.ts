@@ -8,6 +8,8 @@
 import type { Tool } from "@modelcontextprotocol/sdk/types.js";
 import { getPlatformOperations, type PlatformOperations } from "../../lib/platform-app.ts";
 import { isGranted, type RouteRequirement } from "../../lib/route-requirements.ts";
+import type { OperationSpaceScope } from "../../lib/operation-space.ts";
+export type { OperationSpaceScope } from "../../lib/operation-space.ts";
 
 /** Minimal shape of an OpenAPI operation node we depend on. */
 interface OperationNode {
@@ -34,6 +36,8 @@ export interface CatalogOperation {
   /** Form-style array parameters sent in one comma-separated query value. */
   csvQueryParams: Set<string>;
   requirement: RouteRequirement;
+  /** The REST route’s registered space contract. */
+  spaceScope: OperationSpaceScope;
   /** Raw OpenAPI operation node (for `describe`). */
   operation: OperationNode;
 }
@@ -160,7 +164,14 @@ function resolveOperationRefs(
 
 function buildCatalog(source: PlatformOperations): OperationCatalog {
   const operations = new Map<string, CatalogOperation>();
-  for (const { operationId, method, pathTemplate, node, requirement } of source.operations) {
+  for (const {
+    operationId,
+    method,
+    pathTemplate,
+    node,
+    requirement,
+    spaceScope,
+  } of source.operations) {
     if (isExcludedPath(pathTemplate)) continue;
     const operation = resolveOperationRefs(node, source.spec.components) as OperationNode;
     operations.set(operationId, {
@@ -188,6 +199,7 @@ function buildCatalog(source: PlatformOperations): OperationCatalog {
           : [],
       ),
       requirement,
+      spaceScope,
       operation,
     });
   }

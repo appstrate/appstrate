@@ -33,6 +33,7 @@ export const organizationsPaths = {
   "/api/orgs": {
     get: {
       operationId: "listOrganizations",
+      "x-appstrate-space": { kind: "organization" },
       tags: ["Organizations"],
       summary: "List user organizations",
       description: "List organizations the current user is a member of, oldest membership first.",
@@ -83,6 +84,7 @@ export const organizationsPaths = {
     },
     post: {
       operationId: "createOrganization",
+      "x-appstrate-space": { kind: "organization" },
       tags: ["Organizations"],
       summary: "Create an organization",
       description:
@@ -150,6 +152,7 @@ export const organizationsPaths = {
   "/api/orgs/{orgId}": {
     get: {
       operationId: "getOrganization",
+      "x-appstrate-space": { kind: "aggregate", permission: "members:read" },
       tags: ["Organizations"],
       summary: "Get organization with members",
       description: "Get organization details including members and pending invitations.",
@@ -211,6 +214,7 @@ export const organizationsPaths = {
     },
     patch: {
       operationId: "updateOrganization",
+      "x-appstrate-space": { kind: "aggregate", permission: "members:read" },
       tags: ["Organizations"],
       summary: "Update organization",
       description:
@@ -264,6 +268,7 @@ export const organizationsPaths = {
     },
     delete: {
       operationId: "deleteOrganization",
+      "x-appstrate-space": { kind: "organization" },
       tags: ["Organizations"],
       summary: "Delete organization",
       description: "Delete organization and all associated data. Owner only.",
@@ -282,6 +287,7 @@ export const organizationsPaths = {
   "/api/orgs/{orgId}/members": {
     post: {
       operationId: "inviteMember",
+      "x-appstrate-space": { kind: "organization" },
       tags: ["Organizations"],
       summary: "Invite a member",
       description:
@@ -360,6 +366,7 @@ export const organizationsPaths = {
   "/api/orgs/{orgId}/members/{userId}": {
     put: {
       operationId: "changeMemberRole",
+      "x-appstrate-space": { kind: "aggregate" },
       tags: ["Organizations"],
       summary: "Change member role",
       description:
@@ -416,6 +423,7 @@ export const organizationsPaths = {
     },
     delete: {
       operationId: "removeMember",
+      "x-appstrate-space": { kind: "organization" },
       tags: ["Organizations"],
       summary: "Remove a member",
       description:
@@ -438,6 +446,7 @@ export const organizationsPaths = {
   "/api/orgs/{orgId}/members/{userId}/departure-impact": {
     get: {
       operationId: "getMemberDepartureImpact",
+      "x-appstrate-space": { kind: "organization" },
       tags: ["Organizations"],
       summary: "Preview what removing a member stops",
       description:
@@ -536,6 +545,7 @@ export const organizationsPaths = {
   "/api/orgs/{orgId}/leave": {
     post: {
       operationId: "leaveOrganization",
+      "x-appstrate-space": { kind: "organization" },
       tags: ["Organizations"],
       summary: "Leave an organization",
       description:
@@ -564,6 +574,7 @@ export const organizationsPaths = {
   "/api/orgs/{orgId}/invitations/{invitationId}": {
     patch: {
       operationId: "changeInvitationRole",
+      "x-appstrate-space": { kind: "organization" },
       tags: ["Organizations"],
       summary: "Change invitation role",
       description:
@@ -616,6 +627,7 @@ export const organizationsPaths = {
     },
     delete: {
       operationId: "cancelInvitation",
+      "x-appstrate-space": { kind: "organization" },
       tags: ["Organizations"],
       summary: "Cancel an invitation",
       description: "Cancel a pending invitation.",
@@ -637,6 +649,7 @@ export const organizationsPaths = {
   "/api/orgs/{orgId}/settings": {
     get: {
       operationId: "getOrgSettings",
+      "x-appstrate-space": { kind: "organization" },
       tags: ["Organizations"],
       summary: "Get organization settings",
       description: "Get organization settings (redirect domains, etc.).",
@@ -662,6 +675,7 @@ export const organizationsPaths = {
     },
     patch: {
       operationId: "updateOrgSettings",
+      "x-appstrate-space": { kind: "organization" },
       tags: ["Organizations"],
       summary: "Update organization settings",
       description:

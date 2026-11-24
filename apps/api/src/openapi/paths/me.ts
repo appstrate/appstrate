@@ -120,6 +120,7 @@ export const mePaths = {
   "/api/me/orgs": {
     get: {
       operationId: "listMyOrgs",
+      "x-appstrate-space": { kind: "organization" },
       tags: ["Profile"],
       summary: "List orgs the authenticated caller belongs to",
       description:
@@ -198,6 +199,7 @@ export const mePaths = {
   "/api/me/connections": {
     get: {
       operationId: "listMyConnections",
+      "x-appstrate-space": { kind: "organization" },
       tags: ["Profile"],
       summary: "List the caller's connections across every org/space",
       description:
@@ -257,6 +259,7 @@ export const mePaths = {
     put: {
       ...connectionShareAllSpacesOperation,
       operationId: "setMeConnectionShareAllSpaces",
+      "x-appstrate-space": { kind: "organization" },
       tags: ["Me"],
       summary: "Share an owned connection with current and future team spaces",
       parameters: [
@@ -282,6 +285,7 @@ export const mePaths = {
   "/api/me/connections/{connectionId}/shares/{spaceId}": {
     put: {
       operationId: "shareMyConnection",
+      "x-appstrate-space": { kind: "target", parameter: "spaceId" },
       tags: ["Profile"],
       summary: "Share one of the caller's connections into a space",
       description:
@@ -323,6 +327,7 @@ export const mePaths = {
     },
     delete: {
       operationId: "unshareMyConnection",
+      "x-appstrate-space": { kind: "target", parameter: "spaceId" },
       tags: ["Profile"],
       summary: "Withdraw one of the caller's connections from a space",
       description:
@@ -534,6 +539,7 @@ export const mePaths = {
   "/api/me/connections/{connectionId}/delete-impact": {
     get: {
       operationId: "getMyConnectionDeleteImpact",
+      "x-appstrate-space": { kind: "organization" },
       tags: ["Profile"],
       summary: "The caller's pins and schedules a connection delete would rewrite",
       description:
@@ -649,6 +655,7 @@ export const mePaths = {
   "/api/me/connections/{connectionId}": {
     patch: {
       operationId: "updateMyConnection",
+      "x-appstrate-space": { kind: "organization" },
       tags: ["Profile"],
       summary: "Rename one of the caller's own connections",
       description:
@@ -692,6 +699,7 @@ export const mePaths = {
     },
     delete: {
       operationId: "deleteMyConnection",
+      "x-appstrate-space": { kind: "organization" },
       tags: ["Profile"],
       summary: "Delete one of the caller's own connections (destructive)",
       description:
@@ -751,6 +759,7 @@ export const mePaths = {
   "/api/me/connections/{connectionId}/handoff": {
     get: {
       operationId: "getMyConnectionHandoff",
+      "x-appstrate-space": { kind: "organization" },
       tags: ["Profile"],
       summary: "What is due on the target when this connection is deleted",
       description:

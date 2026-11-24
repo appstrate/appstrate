@@ -6,11 +6,13 @@
  * operations they stand for. Reads the catalog only — no DB.
  */
 
-import { describe, it, expect } from "bun:test";
+import { describe, it, expect, spyOn } from "bun:test";
 import { Hono, type Context, type Next } from "hono";
 import { getTestApp } from "../../../helpers/app.ts";
 import { registerTestPlatformApp } from "../../../helpers/platform-app.ts";
 import { registerPlatformApp } from "../../../../src/lib/platform-app.ts";
+import { getModules } from "../../../../src/lib/modules/module-loader.ts";
+import { operationSpaceScope } from "../../../../src/lib/operation-space.ts";
 import {
   deriveRouteRequirements,
   isGranted,
@@ -24,6 +26,7 @@ import {
 import {
   ORG_ROLES,
   SPACE_ROLE_PRESETS,
+  withAuthorizedRow,
   canComposeInline,
   canReadRuns,
   canRunAgents,
@@ -50,6 +53,218 @@ describe("getCatalog — the route join", () => {
     // Registration already threw on any unjoined operation; this is the
     // control that it joined a real surface, not an empty one.
     expect(getCatalog().operations.size).toBeGreaterThan(100);
+  });
+
+  it("carries a space policy on every catalog entry, including local middleware and module operations", () => {
+    for (const entry of getCatalog().operations.values()) {
+      expect(entry.spaceScope.kind).toBeDefined();
+    }
+    for (const id of ["getSpace", "deleteSpace", "convertSpaceToTeam", "sweepPersonalSpace"]) {
+      expect(op(id).spaceScope).toEqual({ kind: "organization" });
+    }
+    expect(op("createOAuthClient").spaceScope).toEqual({
+      kind: "resource",
+      source: "body",
+      parameter: "referencedSpaceId",
+      levelParameter: "level",
+      spaceLevel: "space",
+    });
+    expect(op("listAgents").spaceScope).toEqual({ kind: "request" });
+    expect(op("getMyContext").spaceScope).toEqual({ kind: "request" });
+    expect(op("listSpaceMembers").spaceScope).toEqual({ kind: "target", parameter: "id" });
+    expect(op("listOrgRuns").spaceScope).toEqual({ kind: "aggregate" });
+    expect(op("listWebhooks").spaceScope).toEqual({
+      kind: "resource",
+      source: "query",
+      parameter: "spaceId",
+      allParameter: "all",
+      organizationPermission: "org-webhooks:read",
+      spacePermission: "webhooks:read",
+    });
+    expect(op("getOrganization").spaceScope).toEqual({
+      kind: "aggregate",
+      permission: "members:read",
+    });
+    expect(op("listModels").spaceScope).toEqual({ kind: "organization" });
+    expect(op("integrationsOAuthCallbackForServer").spaceScope).toEqual({ kind: "organization" });
+  });
+
+  it("rejects missing, unknown and contradictory module policies at registration", () => {
+    const path = "/api/new-module/items";
+    const publicPaths = new Set<string>();
+    const request = { spec: {}, pathItem: {}, operation: {} };
+    for (const declaration of [undefined, { kind: "typo" }]) {
+      expect(() =>
+        operationSpaceScope("newOperation", path, undefined, declaration, publicPaths, request),
+      ).toThrow("newOperation");
+    }
+    expect(() =>
+      operationSpaceScope(
+        "newOperation",
+        path,
+        { kind: "request" },
+        { kind: "organization" },
+        publicPaths,
+        request,
+      ),
+    ).toThrow("contradicts");
+    expect(() =>
+      operationSpaceScope(
+        "newOperation",
+        path,
+        undefined,
+        { kind: "target", parameter: "id" },
+        publicPaths,
+        request,
+      ),
+    ).toThrow("absent");
+    expect(() =>
+      operationSpaceScope(
+        "newOperation",
+        path,
+        { kind: "target", parameter: "id" },
+        undefined,
+        publicPaths,
+        request,
+      ),
+    ).toThrow("absent");
+  });
+
+  it("checks the source of every space field against the documented request", () => {
+    const spec = {
+      components: {
+        parameters: { Team: { name: "team", in: "path" }, All: { name: "all", in: "query" } },
+        requestBodies: {
+          Create: {
+            content: { "application/json": { schema: { $ref: "#/components/schemas/Create" } } },
+          },
+        },
+        schemas: {
+          Create: {
+            oneOf: [
+              { properties: { level: { const: "org" }, orgOnly: {} } },
+              {
+                allOf: [
+                  { properties: { level: { $ref: "#/components/schemas/Level" } } },
+                  { anyOf: [{ $ref: "#/components/schemas/Target" }, { type: "null" }] },
+                ],
+              },
+            ],
+          },
+          Level: { enum: ["space"] },
+          Target: { properties: { team: {}, nested: { properties: { nestedOnly: {} } } } },
+        },
+      },
+    };
+    const pathItem = { parameters: [{ $ref: "#/components/parameters/Team" }] };
+    const operation = {
+      parameters: [{ name: "team", in: "query" }, { $ref: "#/components/parameters/All" }],
+      requestBody: { $ref: "#/components/requestBodies/Create" },
+    };
+    const derive = (declaration: Record<string, unknown>, node: object = operation) =>
+      operationSpaceScope("testScope", "/api/test/{team}", undefined, declaration, new Set(), {
+        spec,
+        pathItem,
+        operation: node,
+      });
+    const target = { kind: "target", parameter: "team" };
+    const query = {
+      kind: "resource",
+      source: "query",
+      parameter: "team",
+      all_parameter: "all",
+      organization_permission: "example:read",
+    };
+    const body = {
+      kind: "resource",
+      source: "body",
+      parameter: "team",
+      level_parameter: "level",
+      space_level: "space",
+    };
+    expect(derive({ kind: "request", parameter: "team" }).kind).toBe("request");
+    expect(derive(target).kind).toBe("target");
+    expect(derive({ ...target, source: "query" }).kind).toBe("target");
+    expect(derive({ ...target, source: "body" }).kind).toBe("target");
+    expect(derive(query).kind).toBe("resource");
+    expect(derive(body).kind).toBe("resource");
+    for (const wrong of [
+      { kind: "request", parameter: "nestedOnly" },
+      { ...target, parameter: "all" },
+      { ...target, source: "query", parameter: "nested" },
+      { ...target, source: "body", parameter: "nestedOnly" },
+      { ...query, parameter: "missingFilter" },
+      { ...query, all_parameter: "missingAll" },
+      { ...body, parameter: "orgOnly" },
+      { ...body, level_parameter: "missingLevel" },
+      { ...body, space_level: "missingValue" },
+    ]) {
+      expect(() => derive(wrong)).toThrow("testScope");
+    }
+    expect(() => derive({ ...target, source: "query" }, {})).toThrow("team");
+    expect(() =>
+      derive(
+        { ...target, source: "body" },
+        {
+          requestBody: { $ref: "#/components/requestBodies/Missing" },
+        },
+      ),
+    ).toThrow("team");
+    expect(() =>
+      operationSpaceScope("testScope", "/api/test/{team}", undefined, target, new Set(), {
+        spec,
+        pathItem: {},
+        operation,
+      }),
+    ).toThrow("team");
+  });
+
+  it("refuses to register a module naming an undocumented space field and keeps the live catalog", () => {
+    const module = getModules().get("webhooks")!;
+    const paths = module.openApiPaths!();
+    const catalog = getCatalog();
+    const webhooks = paths["/api/webhooks"] as { post: Record<string, unknown> };
+    const override = spyOn(module, "openApiPaths").mockReturnValue({
+      ...paths,
+      "/api/webhooks": {
+        ...webhooks,
+        post: {
+          ...webhooks.post,
+          "x-appstrate-space": { kind: "target", source: "body", parameter: "spaceTypo" },
+        },
+      },
+    });
+    try {
+      expect(() => registerPlatformApp(getTestApp())).toThrow(/createWebhook.*spaceTypo/);
+      expect(getCatalog()).toBe(catalog);
+    } finally {
+      override.mockRestore();
+    }
+  });
+
+  it("requires a row-checked terminal wherever a resource:row operation can dispatch", () => {
+    const ordinary = (c: Context<AppEnv>) => c.json({ ok: true });
+    for (const path of [
+      "/api/webhooks/:id",
+      "/api/webhooks/literal",
+      "/api/webhooks/:id{[a-z]+}",
+    ]) {
+      const app = new Hono<AppEnv>();
+      app.get(path, ordinary);
+      app.route("/", getTestApp());
+      expect(() => registerPlatformApp(app)).toThrow(
+        /withAuthorizedRow|Inconsistent row authorization/,
+      );
+    }
+    // Conversely a checked terminal cannot advertise an organization-only operation.
+    const app = new Hono<AppEnv>();
+    app.get(
+      "/api/models",
+      withAuthorizedRow(async (_c: Context<AppEnv>) => ({ spaceId: null }), ordinary),
+    );
+    app.route("/", getTestApp());
+    expect(() => registerPlatformApp(app)).toThrow(/listModels: .*contradicts/);
+    expect(op("getWebhook").spaceScope).toEqual({ kind: "resource", source: "row" });
   });
 
   it("refuses to register an app when a documented operation has no mounted route", () => {
@@ -456,7 +671,11 @@ describe("requirement anchors", () => {
       getFileContent: req(["files:read"]),
     };
     const ceilings = Object.fromEntries(
-      Object.keys(expected).map((operationId) => [operationId, op(operationId).requirement]),
+      Object.keys(expected).map((operationId) => {
+        const { requirements, targetSpaceRequirements, ceilingRequirements } =
+          op(operationId).requirement;
+        return [operationId, { requirements, targetSpaceRequirements, ceilingRequirements }];
+      }),
     );
     expect(ceilings).toEqual(expected);
     const deleteMine = op("deleteMyConnection").requirement;

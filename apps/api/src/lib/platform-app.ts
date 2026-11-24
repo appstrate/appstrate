@@ -13,11 +13,13 @@ import type { Hono } from "hono";
 import type { AppEnv } from "../types/index.ts";
 import { buildOpenApiSpec } from "../openapi/index.ts";
 import { deriveRouteRequirements, type RouteRequirement } from "./route-requirements.ts";
+import { operationSpaceScope, type OperationSpaceScope } from "./operation-space.ts";
 import { dispatchPinEnv, type DispatchPin } from "./internal-dispatch.ts";
 import {
   getModuleOpenApiPaths,
   getModuleOpenApiComponentSchemas,
   getModuleOpenApiTags,
+  getModulePublicPaths,
 } from "./modules/module-loader.ts";
 
 const OPERATION_METHODS = ["get", "post", "put", "patch", "delete"] as const;
@@ -31,6 +33,7 @@ interface PlatformOperation {
   readonly pathTemplate: string;
   readonly node: Record<string, unknown>;
   readonly requirement: RouteRequirement;
+  readonly spaceScope: OperationSpaceScope;
 }
 
 /** Fresh per registration, so a derivation can be cached on its identity. */
@@ -52,6 +55,7 @@ export function registerPlatformApp(app: Hono<AppEnv>): void {
     getModuleOpenApiComponentSchemas(),
     getModuleOpenApiTags(),
   );
+  const publicPaths = getModulePublicPaths();
   const requirementFor = deriveRouteRequirements(app.routes);
   const operations: PlatformOperation[] = [];
   const orphans: string[] = [];
@@ -76,6 +80,14 @@ export function registerPlatformApp(app: Hono<AppEnv>): void {
         pathTemplate,
         node: node as Record<string, unknown>,
         requirement,
+        spaceScope: operationSpaceScope(
+          operationId,
+          pathTemplate,
+          requirement.spaceContext,
+          (node as Record<string, unknown>)["x-appstrate-space"],
+          publicPaths,
+          { spec, pathItem, operation: node },
+        ),
       });
     }
   }

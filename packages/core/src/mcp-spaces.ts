@@ -8,6 +8,10 @@
 
 import { asRecord } from "./safe-json.ts";
 
+/** Actual operation spaces and choices, stamped by the platform for its chat client. */
+export const OPERATION_SPACES_META_KEY = "dev.appstrate/operation-space-ids";
+export const SPACE_CHOICE_META_KEY = "dev.appstrate/space-choice-ids";
+
 /** First-party result metadata: the spaces whose activation state the result disclosed. */
 export const ACTIVE_SPACES_META_KEY = "dev.appstrate/active-space-ids";
 
@@ -100,4 +104,18 @@ export function spaceIdRefusal(
     };
   }
   return undefined;
+}
+
+/** A destination already designated by the connection or the turn, in the platform's order. */
+export function defaultMcpSpaceId(
+  spaces: readonly NamedSpace[],
+  originSpaceId: string | undefined,
+  personalFirst: boolean,
+): string | undefined {
+  if (spaces.length === 1) return spaces[0]!.id;
+  if (personalFirst) {
+    const personal = spaces.find((space) => space.personal);
+    if (personal) return personal.id;
+  }
+  return originSpaceId;
 }

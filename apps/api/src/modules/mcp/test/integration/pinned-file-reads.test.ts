@@ -21,6 +21,8 @@ import { MCP_ACCEPT, type JsonRpcEnvelope } from "../../../../../test/helpers/mc
 import { registerTestPlatformApp } from "../../../../../test/helpers/platform-app.ts";
 import { loopbackHeaders } from "../../../../../test/helpers/loopback.ts";
 import { db } from "@appstrate/db/client";
+import { asRecord } from "@appstrate/core/safe-json";
+import { OPERATION_SPACES_META_KEY, SPACE_CHOICE_META_KEY } from "@appstrate/core/mcp-spaces";
 import { chatSessions, runs, uploads } from "@appstrate/db/schema";
 import { uploadStream } from "@appstrate/db/storage";
 import { eq } from "drizzle-orm";
@@ -91,7 +93,7 @@ describe("file reads on the space-pinned MCP endpoint", () => {
     headers: Record<string, string>,
     uri: string,
     spaceId?: string,
-  ): Promise<{ tool: string; resource: JsonRpcEnvelope }> {
+  ) {
     const post = async (message: Record<string, unknown>) => {
       const res = await app.request(endpoint, {
         method: "POST",
@@ -112,7 +114,13 @@ describe("file reads on the space-pinned MCP endpoint", () => {
       method: "resources/read",
       params: { uri },
     });
-    return { tool: JSON.stringify(tool.result?.content), resource };
+    const meta = asRecord(tool.result?._meta);
+    return {
+      tool: JSON.stringify(tool.result?.content),
+      ids: meta[OPERATION_SPACES_META_KEY],
+      choices: meta[SPACE_CHOICE_META_KEY],
+      resource,
+    };
   }
 
   /** `invoke_operation getFile` on `endpoint` (entering `spaceId` on the org one): its status. */
@@ -249,6 +257,21 @@ describe("file reads on the space-pinned MCP endpoint", () => {
     // `resources/read` enters the file's space, one of the set.
     const resource = await read(endpoint, bound, ofOther);
     expect(JSON.stringify(resource.resource.result)).toContain("ailleurs");
+    expect(resource.tool).toContain("ailleurs");
+    expect(resource.ids).toEqual([other]);
+    expect(resource.choices).toBeUndefined();
+    const ownRead = await read(endpoint, bound, own);
+    expect(ownRead.tool).toContain("joint");
+    expect(ownRead.ids).toEqual([]);
+    for (const [uri, code] of [
+      ["appfile://file_aaaaaaaaaaaaaaaaaaaa", "not_found"],
+      ["appfile://invalid", "invalid_argument"],
+    ] as const) {
+      const missing = await read(endpoint, bound, uri);
+      expect(missing.tool).toContain(code);
+      expect(missing.ids).toEqual([]);
+      expect(missing.choices).toBeUndefined();
+    }
 
     // The conversation's own upload, in the personal space outside the set, from either space.
     for (const spaceId of [pinned, other]) {

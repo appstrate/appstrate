@@ -4,6 +4,7 @@ export const healthPaths = {
   "/health": {
     get: {
       operationId: "getHealth",
+      "x-appstrate-space": { kind: "organization" },
       tags: ["Health"],
       summary: "Health check",
       description: "Returns platform health status. No authentication required.",

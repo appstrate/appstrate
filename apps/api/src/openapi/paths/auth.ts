@@ -27,6 +27,7 @@ export const authPaths = {
   "/api/auth/sign-up/email": {
     post: {
       operationId: "signUpEmail",
+      "x-appstrate-space": { kind: "organization" },
       tags: ["Auth"],
       summary: "Create account",
       description: "Create a new account with email, password, and name. Sets session cookie.",
@@ -97,6 +98,7 @@ export const authPaths = {
   "/api/auth/sign-in/email": {
     post: {
       operationId: "signInEmail",
+      "x-appstrate-space": { kind: "organization" },
       tags: ["Auth"],
       summary: "Log in",
       description: "Login with email and password. Sets session cookie.",
@@ -162,6 +164,7 @@ export const authPaths = {
   "/api/auth/sign-out": {
     post: {
       operationId: "signOut",
+      "x-appstrate-space": { kind: "organization" },
       tags: ["Auth"],
       summary: "Log out",
       description: "Clears session cookie.",
@@ -192,6 +195,7 @@ export const authPaths = {
   "/api/auth/bootstrap/redeem": {
     post: {
       operationId: "redeemBootstrapToken",
+      "x-appstrate-space": { kind: "organization" },
       tags: ["Auth"],
       summary: "Claim ownership of an unattended install",
       description:
@@ -293,6 +297,7 @@ export const authPaths = {
   "/api/auth/get-session": {
     get: {
       operationId: "getSession",
+      "x-appstrate-space": { kind: "organization" },
       tags: ["Auth"],
       summary: "Get current session",
       description: "Returns the current session and user info.",

@@ -42,6 +42,7 @@ export const adminStorageDeletionPaths = {
   "/api/admin/storage-deletion-jobs": {
     get: {
       operationId: "listStorageDeletionJobs",
+      "x-appstrate-space": { kind: "organization" },
       tags: ["Admin"],
       summary: "List storage-deletion outbox jobs",
       description:
@@ -105,6 +106,7 @@ export const adminStorageDeletionPaths = {
   "/api/admin/storage-deletion-jobs/{id}/retry": {
     post: {
       operationId: "retryStorageDeletionJob",
+      "x-appstrate-space": { kind: "organization" },
       tags: ["Admin"],
       summary: "Retry a storage-deletion job now",
       description:

@@ -41,6 +41,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `formatAge` the same span as a bare quantity for a narrow column (`Intl.NumberFormat` units:
   « 5 min », « 3 j »). One unit ladder for both: minutes, hours, days under 30, months of 30
   days, years; counts truncated toward zero, days as 24-hour spans rather than calendar days.
+- `@appstrate/core/permissions` exports `withAuthorizedRow(loadAndAuthorize, act)` for module
+  routes whose space comes from a row. The action receives the authorized row after the platform
+  checks its destination. `setRowTargetChecker` wires that check at boot and
+  `AUTHORIZED_ROW_MARKER` lets registration verify the mounted handler.
+- `@appstrate/core/mcp-spaces` exports `defaultMcpSpaceId` for resolving the designated
+  destination of an MCP call. `OPERATION_SPACES_META_KEY` identifies the spaces the call used
+  and `SPACE_CHOICE_META_KEY` identifies the eligible destinations when a user choice is required.
 - `projectActiveInSpaces` in `@appstrate/core/mcp-spaces` filters launch alternatives by the spaces
   where the tool can repeat the operation. `ACTIVE_IN_SPACES_HINT` is the optional instruction
   accompanying those alternatives. `ACTIVE_SPACES_META_KEY` identifies the disclosed space IDs
@@ -67,6 +74,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Optional and additive: a turn that summarized nothing carries none.
 
 ### Changed
+
+- Upgrading the platform requires modules to declare `x-appstrate-space` on OpenAPI operations
+  whose scope the mounted guards do not supply. Registration fails at startup on a missing or
+  contradictory contract. Modules with row-scoped operations must use `withAuthorizedRow` from
+  `@appstrate/core/permissions`. See the [module authoring guide](../../apps/api/src/modules/README.md#openapi-contributions).
 
 - `validateManifest` now rejects a root `runtime_tools` field on an agent when validating new packages.
   Select the tools of the `@appstrate/platform` integration through `integrations_configuration`.

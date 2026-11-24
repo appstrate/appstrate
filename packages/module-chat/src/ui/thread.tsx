@@ -40,6 +40,7 @@ import { Button } from "@appstrate/ui/components/button";
 import { cn } from "@appstrate/ui/cn";
 import { MarkdownText, ReasoningText } from "./markdown-text.tsx";
 import { ReasoningGroup, ThinkingStatus } from "./reasoning.tsx";
+import { TurnSpaceChoice } from "./space-choice.tsx";
 import { ToolFallback } from "./tool-fallback.tsx";
 import {
   InvokeOperationToolUI,
@@ -976,6 +977,7 @@ function AssistantMessage() {
     <MessagePrimitive.Root className="group flex w-full max-w-(--thread-max-width) flex-col py-2">
       <div className={ASSISTANT_MESSAGE_CLASS}>
         <MessagePrimitive.Parts components={ASSISTANT_PART_COMPONENTS} />
+        <TurnSpaceChoice />
         <TurnLimitNotice />
         <MessageError />
       </div>

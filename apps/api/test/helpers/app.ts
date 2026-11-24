@@ -35,7 +35,8 @@ import { initSystemIntegrations } from "../../src/services/integration-client-re
 import { initRunLimits } from "../../src/services/run-limits.ts";
 import { initProxyLimits } from "../../src/services/proxy-limits.ts";
 import { seedTestModelProviders } from "./model-providers.ts";
-import { applyAuthPipeline, skipAuth } from "../../src/lib/auth-pipeline.ts";
+import { skipAuth } from "../../src/lib/auth-paths.ts";
+import { applyAuthPipeline } from "../../src/lib/auth-pipeline.ts";
 import { createAuthBootstrapRouter } from "../../src/routes/auth-bootstrap.ts";
 import {
   collectModulePermissions,

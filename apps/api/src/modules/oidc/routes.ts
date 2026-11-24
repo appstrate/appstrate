@@ -730,7 +730,7 @@ export function createOidcRouter() {
    * Marked: the guards behind it are asked in the path's space, which the
    * route-table reader cannot see from the mounts alone.
    */
-  const enterParamSpace = markSpaceRescope(async (c: Context<AppEnv>, next: Next) => {
+  const enterParamSpace = markSpaceRescope("id", async (c: Context<AppEnv>, next: Next) => {
     await enterSpaceContext(c, c.req.param("id")!);
     return next();
   });

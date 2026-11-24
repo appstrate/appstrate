@@ -29,6 +29,14 @@ export const webhooksPaths = {
   "/api/webhooks": {
     post: {
       operationId: "createWebhook",
+      "x-appstrate-space": {
+        kind: "resource",
+        source: "body",
+        parameter: "spaceId",
+        level_parameter: "level",
+        space_level: "space",
+        space_permission: "webhooks:write",
+      },
       tags: ["Webhooks"],
       summary: "Create a webhook",
       description:
@@ -158,6 +166,14 @@ export const webhooksPaths = {
     },
     get: {
       operationId: "listWebhooks",
+      "x-appstrate-space": {
+        kind: "resource",
+        source: "query",
+        parameter: "spaceId",
+        all_parameter: "all",
+        organization_permission: "org-webhooks:read",
+        space_permission: "webhooks:read",
+      },
       tags: ["Webhooks"],
       summary: "List webhooks",
       description:
@@ -231,6 +247,7 @@ export const webhooksPaths = {
   "/api/webhooks/{id}": {
     get: {
       operationId: "getWebhook",
+      "x-appstrate-space": { kind: "resource", source: "row" },
       tags: ["Webhooks"],
       summary: "Get a webhook",
       description: "Get a single webhook by ID.",
@@ -273,6 +290,7 @@ export const webhooksPaths = {
     },
     patch: {
       operationId: "updateWebhook",
+      "x-appstrate-space": { kind: "resource", source: "row" },
       tags: ["Webhooks"],
       summary: "Update a webhook",
       description:
@@ -352,6 +370,7 @@ export const webhooksPaths = {
     },
     delete: {
       operationId: "deleteWebhook",
+      "x-appstrate-space": { kind: "resource", source: "row" },
       tags: ["Webhooks"],
       summary: "Delete a webhook",
       description: "Delete a webhook and all its delivery history.",
@@ -377,6 +396,7 @@ export const webhooksPaths = {
   "/api/webhooks/{id}/test": {
     post: {
       operationId: "testWebhook",
+      "x-appstrate-space": { kind: "resource", source: "row" },
       tags: ["Webhooks"],
       summary: "Send a test ping",
       description:
@@ -419,6 +439,7 @@ export const webhooksPaths = {
   "/api/webhooks/{id}/rotate": {
     post: {
       operationId: "rotateWebhookSecret",
+      "x-appstrate-space": { kind: "resource", source: "row" },
       tags: ["Webhooks"],
       summary: "Rotate webhook secret",
       description:
@@ -497,6 +518,7 @@ export const webhooksPaths = {
   "/api/webhooks/{id}/deliveries": {
     get: {
       operationId: "listWebhookDeliveries",
+      "x-appstrate-space": { kind: "resource", source: "row" },
       tags: ["Webhooks"],
       summary: "Delivery history",
       description:

@@ -6,6 +6,7 @@ export const welcomePaths = {
   "/api/welcome/setup": {
     post: {
       operationId: "welcomeSetup",
+      "x-appstrate-space": { kind: "organization" },
       tags: ["Welcome"],
       summary: "Post-invite profile setup",
       description: "Set display name after invitation signup.",

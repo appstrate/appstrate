@@ -7,6 +7,7 @@ export const modelProvidersOAuthPaths = {
   "/api/model-providers-oauth/pairing": {
     post: {
       operationId: "createOAuthModelProviderPairing",
+      "x-appstrate-space": { kind: "organization" },
       tags: ["Model Provider Credentials"],
       summary: "Mint a one-shot pairing token for the connect helper",
       description: `Creates a single-use pairing token surfaced in the dashboard as a \`npx ${CONNECT_HELPER_PACKAGE} <token>\` command, pinned to the helper range this platform speaks. The user runs the command on their machine; the helper completes the loopback OAuth dance against the provider's authorization server, then POSTs the resulting credentials back to \`/api/model-providers-oauth/pair/redeem\` using this token as Bearer credentials. Two body shapes. A new connection sends \`owner_type\`, as on \`POST /api/model-provider-credentials\`: \`org\` (default) pairs an organization credential, which an organization model may be bound to and which then serves every caller; \`user\` pairs the caller's personal credential, serving only their own calls. A reconnect sends \`credentialId\` and no \`owner_type\` (the credential names its own owner, and the two together are a \`400\`): it updates that exact credential in place, and is accepted exactly when the credential lists the \`reconnect\` action for the caller. The plaintext token is returned exactly once — only its SHA-256 hash is persisted. **Permission:** a new connection needs \`model-provider-credentials:write\` for \`owner_type: org\`, \`model-provider-credentials:connect\` for \`owner_type: user\` (\`403\` otherwise, and \`403 personal_model_credentials_disabled\` for \`user\` while the organization has \`personal_model_credentials\` off). A reconnect the caller may not make answers \`404\`, except the caller's own personal credential while the organization has \`personal_model_credentials\` off, which answers \`403 personal_model_credentials_disabled\`. Org-scoped: only \`X-Org-Id\` is required (no \`X-Space-Id\` — the resulting credential lives in \`model_provider_credentials\`, which has no space affinity).`,
@@ -103,6 +104,7 @@ export const modelProvidersOAuthPaths = {
   "/api/model-providers-oauth/pairing/{id}": {
     get: {
       operationId: "getOAuthModelProviderPairing",
+      "x-appstrate-space": { kind: "organization" },
       tags: ["Model Provider Credentials"],
       summary: "Read pairing status (for dashboard polling)",
       description:
@@ -156,6 +158,7 @@ export const modelProvidersOAuthPaths = {
     },
     delete: {
       operationId: "cancelOAuthModelProviderPairing",
+      "x-appstrate-space": { kind: "organization" },
       tags: ["Model Provider Credentials"],
       summary: "Cancel a pending pairing",
       description:
@@ -181,6 +184,7 @@ export const modelProvidersOAuthPaths = {
   "/api/model-providers-oauth/pair/redeem": {
     post: {
       operationId: "redeemOAuthModelProviderPairing",
+      "x-appstrate-space": { kind: "organization" },
       tags: ["Model Provider Credentials"],
       summary: "Redeem a pairing token: post the OAuth credential bundle back to the platform",
       description:

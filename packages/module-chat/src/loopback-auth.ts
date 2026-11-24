@@ -49,6 +49,8 @@ import {
   type InjectedSkills,
 } from "@appstrate/core/chat-contract";
 
+import { spaceChoiceSchema, type SpaceChoice } from "./space-choice.ts";
+
 /**
  * Deliberately NOT parsed with `parseBearer` (@appstrate/core/bearer), unlike
  * every externally-reachable bearer surface on the platform. RFC 6750 scheme
@@ -104,6 +106,9 @@ interface LoopbackClaims extends LoopbackIdentity {
    * the bearer reaches; MCP bearer only. Absent means unbound — the inference bearer.
    */
   spaceIds?: string[];
+  /** Reachable origin of this conversation; a default only for acts governed by its origin. */
+  originSpaceId?: string;
+  spaceChoice?: SpaceChoice;
   /** Whether `spaceIds` is a limit the person chose (a limited conversation); read only beside `spaceIds`. */
   restricted?: boolean;
 }
@@ -186,6 +191,8 @@ export function mintMcpLoopbackToken(
     injectedSkills?: InjectedSkills;
     /** The turn's spaces: the only ones the bearer reaches, each request acting in one. Absent: unbound. */
     spaceIds?: readonly string[];
+    originSpaceId?: string;
+    spaceChoice?: SpaceChoice;
     /** Whether the conversation is limited to a space (its connections then stay in it). Absent: limited. */
     restricted?: boolean;
     /** The persisted conversation of the turn, whose own files a run it launches may consume. */
@@ -244,6 +251,32 @@ export const chatLoopbackStrategy: AuthStrategy = {
       return null;
     }
 
+    const { spaceIds: allowed, originSpaceId } = claims;
+    if (originSpaceId !== undefined && !allowed?.includes(originSpaceId)) return null;
+    let spaceChoice: SpaceChoice | undefined;
+    if (claims.spaceChoice !== undefined) {
+      const parsed = spaceChoiceSchema.safeParse(claims.spaceChoice);
+      if (!parsed.success || !allowed?.includes(parsed.data.spaceId)) return null;
+      spaceChoice = parsed.data;
+    }
+    const sessionId = claims.chatSessionId;
+    const beforeMcpSpaceAct =
+      allowed && typeof sessionId === "string"
+        ? async (spaceId: string) => {
+            if (!allowed.includes(spaceId)) throw new Error("Space outside the turn");
+            const { touchSessionSpace } = await import("./persistence.ts");
+            await touchSessionSpace(
+              {
+                id: sessionId,
+                userId: claims.userId,
+                orgId: claims.orgId,
+                originSpaceId: originSpaceId ?? null,
+              },
+              spaceId,
+            );
+          }
+        : undefined;
+
     return {
       user: { id: claims.userId, email: claims.email, name: claims.name },
       orgId: claims.orgId,
@@ -271,9 +304,15 @@ export const chatLoopbackStrategy: AuthStrategy = {
       // attribution, a run's inputs); `viewAs` is re-published before any permission is resolved.
       ...(claims.chatSessionId !== undefined ||
       claims.viewAs !== undefined ||
-      injectedSkills !== undefined
+      injectedSkills !== undefined ||
+      originSpaceId !== undefined ||
+      spaceChoice !== undefined ||
+      beforeMcpSpaceAct !== undefined
         ? {
             extra: {
+              ...(originSpaceId && { originSpaceId }),
+              ...(spaceChoice && { spaceChoice }),
+              ...(beforeMcpSpaceAct && { beforeMcpSpaceAct }),
               ...(typeof claims.chatSessionId === "string"
                 ? { chatSessionId: claims.chatSessionId }
                 : {}),

@@ -10,7 +10,7 @@
 import { describe, it, expect, beforeEach, spyOn } from "bun:test";
 import { and, eq } from "drizzle-orm";
 import { getEnv } from "@appstrate/env";
-import { spaceMembers } from "@appstrate/db/schema";
+import { auditEvents, packages, runs, spaceMembers } from "@appstrate/db/schema";
 import * as spacesService from "../../../../services/spaces.ts";
 import { db } from "../../../../../test/helpers/db.ts";
 import { getTestApp } from "../../../../../test/helpers/app.ts";
@@ -19,6 +19,8 @@ import { createTestContext, memberContext } from "../../../../../test/helpers/au
 import { seedApiKey, seedSpace, seedSpaceMember } from "../../../../../test/helpers/seed.ts";
 import { MCP_ACCEPT, mcpRpc, type JsonRpcEnvelope } from "../../../../../test/helpers/mcp.ts";
 import { registerTestPlatformApp } from "../../../../../test/helpers/platform-app.ts";
+import { drainAudits } from "../../../../services/audit.ts";
+import { OPERATION_SPACES_META_KEY, SPACE_CHOICE_META_KEY } from "@appstrate/core/mcp-spaces";
 
 const app = getTestApp();
 await registerTestPlatformApp();
@@ -40,12 +42,14 @@ describe("mcp org-wide connection", () => {
   let lecture: { id: string };
   let foreign: { id: string };
   let callerId: string;
+  let orgSlug: string;
 
   beforeEach(async () => {
     await truncateAll();
     const owner = await createTestContext();
     const caller = await memberContext(owner, "member", "operator");
     callerId = caller.user.id;
+    orgSlug = owner.org.slug;
     defaultSpaceId = owner.defaultSpaceId;
     gestion = await seedSpace({ orgId: owner.orgId, name: "Gestion", visibility: "closed" });
     lecture = await seedSpace({ orgId: owner.orgId, name: "Lecture", visibility: "closed" });
@@ -155,6 +159,86 @@ describe("mcp org-wide connection", () => {
     expect(instructions).not.toContain(`Perso (\`${perso.id}\``);
   });
 
+  it("creates a package in the personal space by default and respects an explicitly named team", async () => {
+    const personal = await seedSpace({
+      orgId: headers["X-Org-Id"]!,
+      name: "Personnel",
+      ownerUserId: callerId,
+      visibility: "private",
+    });
+    for (const [name, requested, expected] of [
+      ["personal-agent", undefined, personal.id],
+      ["team-agent", gestion.id, gestion.id],
+    ] as const) {
+      const id = `@${orgSlug}/${name}`;
+      const result = await call("invoke_operation", {
+        operation_id: "createAgent",
+        ...(requested && { space_id: requested }),
+        body: {
+          manifest: {
+            name: id,
+            type: "agent",
+            version: "0.1.0",
+            schema_version: "0.1",
+            display_name: name,
+            description: "Test agent",
+          },
+          content: "Summarize the request.",
+        },
+      });
+      expect(payload(result).data).toMatchObject({ status: 201, space: { id: expected } });
+      const [stored] = await db
+        .select({ home: packages.homeSpaceId })
+        .from(packages)
+        .where(eq(packages.id, id));
+      expect(stored?.home).toBe(expected);
+    }
+  });
+
+  it("uses the remote run's body destination and fills it for a personal inline run", async () => {
+    const operation_id = "createRemoteRun";
+    const source = {
+      kind: "inline",
+      manifest: {
+        name: `@${orgSlug}/inline`,
+        type: "agent",
+        version: "0.1.0",
+        schema_version: "0.1",
+        display_name: "Inline",
+        description: "Remote inline test",
+      },
+      prompt: "Summarize the request.",
+    };
+    const missing = await call("invoke_operation", { operation_id, body: { source } });
+    expect(missing.result?._meta).toMatchObject({ [SPACE_CHOICE_META_KEY]: [gestion.id] });
+
+    const personal = await seedSpace({
+      orgId: headers["X-Org-Id"]!,
+      name: "Personnel",
+      ownerUserId: callerId,
+      visibility: "private",
+    });
+    for (const [body, expectedId] of [
+      [{ source }, personal.id],
+      [{ source, spaceId: gestion.id }, gestion.id],
+    ] as const) {
+      const result = payload(await call("invoke_operation", { operation_id, body }));
+      expect(result.data.status).toBe(201);
+      expect(result.data.space).toMatchObject({ id: expectedId });
+      const [created] = await db
+        .select({ spaceId: runs.spaceId })
+        .from(runs)
+        .where(eq(runs.id, (result.data.body as { id: string }).id));
+      expect(created?.spaceId).toBe(expectedId);
+    }
+
+    const registry = await call("invoke_operation", {
+      operation_id,
+      body: { source: { kind: "registry", packageId: `@${orgSlug}/existing` } },
+    });
+    expect(payload(registry).data.code).toBe("missing_argument");
+  });
+
   it("declares space_id on the tools that act in a space, and only those", async () => {
     const { envelope } = await rpc(headers, {
       jsonrpc: "2.0",
@@ -170,10 +254,15 @@ describe("mcp org-wide connection", () => {
       const schema = tools.find((t) => t.name === name)?.inputSchema;
       return Boolean(schema?.properties?.space_id) && schema!.required!.includes("space_id");
     };
-    expect(spaceArg("invoke_operation")).toBe(true);
-    expect(spaceArg("describe")).toBe(true);
-    expect(spaceArg("get_me")).toBe(true);
-    expect(spaceArg("get_runtime_capabilities")).toBe(false);
+    const declaresSpace = (name: string) =>
+      Boolean(tools.find((t) => t.name === name)?.inputSchema.properties?.space_id);
+    // The operation a call names decides: an organization-level one takes no `space_id`.
+    for (const name of ["invoke_operation", "describe"]) {
+      expect(declaresSpace(name)).toBe(true);
+      expect(spaceArg(name)).toBe(false);
+    }
+    expect(declaresSpace("get_me")).toBe(true);
+    expect(declaresSpace("get_runtime_capabilities")).toBe(false);
 
     // The schema carries the spaces: clients truncate server instructions.
     const spaceId = tools.find((t) => t.name === "invoke_operation")!.inputSchema.properties!
@@ -194,6 +283,117 @@ describe("mcp org-wide connection", () => {
     const validate = described("validate_package_file")!;
     expect(validate).toContain(gestion.id);
     expect(validate).not.toContain(lecture.id);
+  });
+
+  it("takes no space_id for an organization-level operation, and never names a space for it", async () => {
+    const described = payload(await call("describe", { kind: "operation", id: "listModels" }));
+    expect(described.isError).toBe(false);
+    expect(described.data.scope).toBe("organization");
+    expect(described.data.space).toBeUndefined();
+
+    const listed = payload(await call("invoke_operation", { operation_id: "listModels" }));
+    expect(listed.isError).toBe(false);
+    expect(listed.data.status).toBe(200);
+    expect(listed.data.space).toBeUndefined();
+
+    expect((await drainAudits(5_000)).drained).toBe(true);
+    const [audit] = await db
+      .select()
+      .from(auditEvents)
+      .where(
+        and(
+          eq(auditEvents.action, "mcp.operation.invoked"),
+          eq(auditEvents.resourceId, "listModels"),
+        ),
+      );
+    expect(audit?.spaceId).toBeNull();
+    expect(audit?.after).toMatchObject({ spaceId: null });
+  });
+
+  it("describes space-dependent operations before asking for a destination, then enforces the actual route", async () => {
+    for (const [id, route] of [
+      ["getMyContext", "/api/me/context"],
+      ["listMyIntegrationPins", "/api/me/integration-pins"],
+      ["listAgents", "/api/agents"],
+    ] as const) {
+      const rest = await app.request(route, { headers: { ...headers, "X-Space-Id": gestion.id } });
+      expect(rest.status).toBe(200);
+      const described = payload(await call("describe", { kind: "operation", id }));
+      expect(described.isError).toBe(false);
+      expect(described.data.scope).toBe("request");
+      expect(described.data.space).toBeUndefined();
+      const missing = await call("invoke_operation", { operation_id: id });
+      expect(payload(missing).data).toMatchObject({
+        code: "missing_argument",
+        arguments: ["space_id"],
+      });
+      expect(missing.result?._meta).toMatchObject({
+        [SPACE_CHOICE_META_KEY]: expect.arrayContaining([gestion.id]),
+      });
+      const resolved = await call("invoke_operation", { operation_id: id, space_id: gestion.id });
+      expect(payload(resolved).data).toMatchObject({
+        status: 200,
+        space: { id: gestion.id },
+        body: await rest.json(),
+      });
+      expect(resolved.result?._meta).toMatchObject({ [OPERATION_SPACES_META_KEY]: [gestion.id] });
+    }
+  });
+
+  it("enters a target named by the route and records that team's actual data and audit scope", async () => {
+    const rest = await app.request(`/api/spaces/${gestion.id}/members`, { headers });
+    expect(rest.status).toBe(200);
+    const listed = await call("invoke_operation", {
+      operation_id: "listSpaceMembers",
+      path_params: { id: gestion.id },
+    });
+    expect(payload(listed).data).toMatchObject({
+      status: 200,
+      body: await rest.json(),
+      space: { id: gestion.id },
+    });
+    expect(listed.result?._meta).toMatchObject({ [OPERATION_SPACES_META_KEY]: [gestion.id] });
+    expect((await drainAudits(5_000)).drained).toBe(true);
+    const [audit] = await db
+      .select()
+      .from(auditEvents)
+      .where(
+        and(
+          eq(auditEvents.action, "mcp.operation.invoked"),
+          eq(auditEvents.resourceId, "listSpaceMembers"),
+        ),
+      );
+    expect(audit?.spaceId).toBe(gestion.id);
+    expect(audit?.after).toMatchObject({ spaceId: gestion.id });
+  });
+
+  it("dispatches a webhook in the space its body or filter already names", async () => {
+    const created = payload(
+      await call("invoke_operation", {
+        operation_id: "createWebhook",
+        body: {
+          level: "space",
+          spaceId: gestion.id,
+          events: ["run.success"],
+          url: "https://example.com/hook",
+        },
+      }),
+    );
+    expect(created.data).toMatchObject({ status: 201, space: { id: gestion.id } });
+    const rest = await app.request(`/api/webhooks?spaceId=${gestion.id}`, {
+      headers: { ...headers, "X-Space-Id": gestion.id },
+    });
+    expect(rest.status).toBe(200);
+    const listed = await call("invoke_operation", {
+      operation_id: "listWebhooks",
+      query: { spaceId: gestion.id },
+    });
+    expect(payload(listed).data).toMatchObject({
+      status: 200,
+      space: { id: gestion.id },
+      body: await rest.json(),
+    });
+    expect(listed.result?._meta).toMatchObject({ [OPERATION_SPACES_META_KEY]: [gestion.id] });
   });
 
   it("refuses validate_package_file in a space where the caller neither imports nor composes", async () => {
@@ -401,20 +601,18 @@ describe("mcp org-wide connection", () => {
     expect(status).toBe(403);
   });
 
-  it("is the same schema for a caller who reaches a single space", async () => {
+  it("uses the sole reachable space without asking for it again", async () => {
     const owner = await createTestContext();
-    const solo = await memberContext(owner, "member");
+    const solo = await memberContext(owner, "guest");
     const only = await seedSpace({ orgId: owner.orgId, name: "Solo", visibility: "closed" });
     await seedSpaceMember({ spaceId: only.id, userId: solo.user.id, presetRole: "admin" });
     const soloHeaders = { Cookie: solo.cookie, "X-Org-Id": owner.orgId };
 
-    const missing = payload(
+    const resolved = payload(
       await call("invoke_operation", { operation_id: "listAgents" }, soloHeaders),
     );
-    expect(missing.isError).toBe(true);
-    expect(missing.data.code).toBe("missing_argument");
-    expect(missing.data.error as string).toContain("space_id is required");
-    expect(missing.data.accepted as string[]).toContain(only.id);
+    expect(resolved.isError).toBe(false);
+    expect(resolved.data).toMatchObject({ status: 200, space: { id: only.id } });
 
     const named = payload(
       await call(

@@ -40,6 +40,7 @@ import {
   type Permission,
 } from "./permissions.ts";
 import { isUserPrincipal } from "./principal.ts";
+import { recordDispatchSpaces } from "./internal-dispatch.ts";
 import {
   callerOrgRole,
   callerPersonalOwnerId,
@@ -480,11 +481,13 @@ async function holdsPackageWriteAuthority(c: Context<AppEnv>, packageId: string)
 export async function heldPlacementAuthority(
   c: Context<AppEnv>,
   packageId: string,
+  visibleSpaceId: string,
+  record?: (ids: readonly string[]) => Promise<boolean>,
 ): Promise<PlacementAuthority | null> {
   const orgId = c.get("orgId");
   const pkg = await findPackageRow(packageId, orgId);
   if (!pkg || isSystemPackageRow(pkg) || pkg.orgId !== orgId) return null;
-  const authority = await callerPlacementAuthority(c, pkg.type);
+  const authority = await callerPlacementAuthority(c, pkg, { visibleSpaceId, record });
   return authority.authorizeHome(pkg.homeSpaceId) ? authority : null;
 }
 
@@ -624,13 +627,27 @@ export async function assertPackageShareAccessForPlacement(
 /** The caller as a placer: `shared_by` plus the share rule as a predicate `placePackage` re-asks against the locked home. */
 export async function callerPlacementAuthority(
   c: Context<AppEnv>,
-  type: PackageType,
+  pkg: Pick<PackageAccessRow, "type" | "homeSpaceId">,
+  destination: {
+    visibleSpaceId: string | null;
+    record?: (ids: readonly string[]) => Promise<boolean>;
+  },
 ): Promise<PlacementAuthority> {
   const accessible = await placementAccessSpaces(c);
-  const permission = packagePermission(type, "share");
+  const permission = packagePermission(pkg.type, "share");
+  // Import may ask whether the caller can place before it knows the answer. Only record an
+  // authorized home. A user share addresses a person and never exposes their private space.
+  const record = destination.record ?? ((ids: readonly string[]) => recordDispatchSpaces(c, ids));
+  const tracked =
+    holdsHomeAuthority(pkg, accessible, permission) &&
+    (await record([pkg.homeSpaceId, destination.visibleSpaceId].filter((id) => id !== null)));
   return {
     sharedBy: c.get("user").id,
-    authorizeHome: (homeSpaceId) => holdsHomeAuthority({ homeSpaceId }, accessible, permission),
+    // The transaction rechecks the locked home. A concurrent move must not turn a tracked
+    // operation into a write under an unseen home's authority.
+    authorizeHome: (homeSpaceId) =>
+      (!tracked || homeSpaceId === pkg.homeSpaceId) &&
+      holdsHomeAuthority({ homeSpaceId }, accessible, permission),
   };
 }
 
@@ -708,6 +725,7 @@ export async function assertPlacementRemovalAccess(
   c: Context<AppEnv>,
   packageId: string,
   targetSpaceId: string,
+  targetKind: "space" | "user",
 ): Promise<{
   pkg: PackageAccessRow;
   authorityFor: (homeSpaceId: string | null) => PlacementRemovalAuthority | null;
@@ -753,7 +771,18 @@ export async function assertPlacementRemovalAccess(
       `Withdrawing '${packageId}' from that space requires '${share}' in its home space, or '${spacePackagePermission(pkg.type, "deactivate")}' in that space.`,
     );
   }
-  return { pkg, authorityFor };
+  const tracked = await recordDispatchSpaces(c, [
+    ...(authority === "home" && pkg.homeSpaceId ? [pkg.homeSpaceId] : []),
+    ...(targetKind === "space" && target ? [target.id] : []),
+  ]);
+  return {
+    pkg,
+    authorityFor(homeSpaceId) {
+      const lockedAuthority = authorityFor(homeSpaceId);
+      if (tracked && lockedAuthority === "home" && homeSpaceId !== pkg.homeSpaceId) return null;
+      return lockedAuthority;
+    },
+  };
 }
 
 /** The spaces the home rule reads: {@link packageAccessSpaces}, or {@link placementAccessSpaces} for a placement write. */

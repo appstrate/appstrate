@@ -6,6 +6,7 @@ export const proxiesPaths = {
   "/api/proxies": {
     get: {
       operationId: "listProxies",
+      "x-appstrate-space": { kind: "organization" },
       tags: ["Proxies"],
       summary: "List organization proxies",
       description: "Returns all proxies (built-in + custom) for the current organization.",
@@ -54,6 +55,7 @@ export const proxiesPaths = {
     },
     post: {
       operationId: "createProxy",
+      "x-appstrate-space": { kind: "organization" },
       tags: ["Proxies"],
       summary: "Create a custom proxy",
       description: "Create a new custom proxy for the organization.",
@@ -112,6 +114,7 @@ export const proxiesPaths = {
   "/api/proxies/default": {
     put: {
       operationId: "setDefaultProxy",
+      "x-appstrate-space": { kind: "organization" },
       tags: ["Proxies"],
       summary: "Set the organization default proxy",
       description:
@@ -174,6 +177,7 @@ export const proxiesPaths = {
   "/api/proxies/{id}": {
     patch: {
       operationId: "updateProxy",
+      "x-appstrate-space": { kind: "organization" },
       tags: ["Proxies"],
       summary: "Update a custom proxy",
       description:
@@ -231,6 +235,7 @@ export const proxiesPaths = {
     },
     delete: {
       operationId: "deleteProxy",
+      "x-appstrate-space": { kind: "organization" },
       tags: ["Proxies"],
       summary: "Delete a custom proxy",
       description: "Delete a custom proxy. Built-in proxies cannot be deleted.",
@@ -251,6 +256,7 @@ export const proxiesPaths = {
   "/api/proxies/{id}/test": {
     post: {
       operationId: "testProxy",
+      "x-appstrate-space": { kind: "organization" },
       tags: ["Proxies"],
       summary: "Test proxy connection",
       description:

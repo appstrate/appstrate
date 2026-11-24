@@ -793,6 +793,41 @@ export async function enterSpaceContext(c: HonoContextLike, spaceId?: string): P
   await _spaceContextApplier(c, spaceId);
 }
 
+/** Platform marker for the row-checked terminal of a module route, including external modules. */
+export const AUTHORIZED_ROW_MARKER = Symbol.for("appstrate.authorizedRow");
+
+type RowTargetChecker = (c: HonoContextLike, spaceId: string | null) => Promise<void>;
+let rowTargetChecker: RowTargetChecker | null = null;
+
+/** Platform boot wiring, like setSpaceContextApplier. A missing checker refuses the action. */
+export function setRowTargetChecker(check: RowTargetChecker | null): void {
+  rowTargetChecker = check;
+}
+
+/**
+ * Wrap a by-id operation whose acting space comes from the authorized row. The loader applies
+ * the module's own ACL and returns that row with its spaceId (null for an organization row).
+ * The API checks the actual destination before the action receives the row or reads a write body.
+ */
+export function withAuthorizedRow<
+  C extends HonoContextLike,
+  Row extends { spaceId: string | null },
+>(
+  loadAndAuthorize: (c: C) => Promise<Row>,
+  act: (c: C, row: Row) => Response | Promise<Response>,
+): (c: C) => Promise<Response> {
+  const handler = async (c: C) => {
+    const check = rowTargetChecker;
+    if (!check)
+      throw new Error("withAuthorizedRow: no row target checker registered by the platform");
+    const row = await loadAndAuthorize(c);
+    await check(c, row.spaceId);
+    return act(c, row);
+  };
+  Object.defineProperty(handler, AUTHORIZED_ROW_MARKER, { value: true });
+  return handler;
+}
+
 // ---------------------------------------------------------------------------
 // Shared guard + audit-hook
 //

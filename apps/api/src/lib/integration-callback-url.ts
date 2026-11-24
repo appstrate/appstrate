@@ -42,6 +42,12 @@ const AUTHORIZATION_SERVER_TAG_LENGTH = 22;
 // The segment the connect package reads its tags by (`CLIENT_METADATA_REDIRECT_TAG_PREFIX`).
 const CLIENT_METADATA_CALLBACK_SEGMENT = CLIENT_METADATA_REDIRECT_TAG_PREFIX.slice(0, -1);
 
+/** OpenAPI templates for the two public, tag-constrained callback routes. */
+export const INTEGRATION_CALLBACK_TEMPLATES = {
+  dcr: `${INTEGRATION_CALLBACK_PATH}/{tag}`,
+  metadata: `${INTEGRATION_CALLBACK_PATH}/${CLIENT_METADATA_CALLBACK_SEGMENT}/{tag}`,
+};
+
 export const INTEGRATION_TAGGED_CALLBACK_PATH = new RegExp(
   `^${INTEGRATION_CALLBACK_PATH}/(?:${CLIENT_METADATA_CALLBACK_SEGMENT}/)?[A-Za-z0-9_-]{${AUTHORIZATION_SERVER_TAG_LENGTH}}$`,
 );
