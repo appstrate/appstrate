@@ -135,13 +135,31 @@ test.describe("Provider keys — UI", () => {
     const confirm = dialog.getByRole("button", { name: DELETE, exact: true });
     await expect(confirm).toBeEnabled();
     const model = await seedModel(apiClient, key.id, "vllm-model");
+    const readStarted = Promise.withResolvers<void>();
+    const releaseRead = Promise.withResolvers<void>();
+    await page.route(
+      /\/api\/model-provider-credentials(?:\?.*)?$/,
+      async (route) => {
+        readStarted.resolve();
+        await releaseRead.promise;
+        await route.continue();
+      },
+      { times: 1 },
+    );
     const refused = page.waitForResponse(
       (response) =>
         response.request().method() === "DELETE" &&
         response.url().endsWith(`/model-provider-credentials/${key.id}`),
     );
     await confirm.click();
-    expect((await refused).status()).toBe(409);
+    try {
+      expect((await refused).status()).toBe(409);
+      await readStarted.promise;
+      // The cached zero predates the refusal. A second DELETE must wait for the key read.
+      await expect(confirm).toBeDisabled();
+    } finally {
+      releaseRead.resolve();
+    }
     await expect(
       dialog.getByText(`La clé « ${key.label} » est utilisée par 1 modèle.`),
     ).toBeVisible();

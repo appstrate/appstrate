@@ -607,11 +607,11 @@ credentials (`lib/model-picker.ts`); a new surface that picks a model uses this 
     (`knownModels`, `lib/model-choice.ts`).
   - **Delete a key** (`components/delete-key-confirm.tsx`, its copy in
     `lib/key-deletion.ts`): the server refuses an organization key that model rows still
-    reference (`credential_in_use`, `ON DELETE RESTRICT`), so the confirmation names every model
-    using it, switched off ones included, and where they go (« La clé « Prod » est utilisée par
-    2 modèles : A, B. Supprimez ces modèles ou liez-les à une autre clé (« Choisir les modèles »,
-    puis « Réglages avancés ») avant de supprimer la clé. ») and offers only Annuler. Only a key
-    no model uses is deleted. A member's personal key serves no model of its own: its
+    reference (`credential_in_use`, `ON DELETE RESTRICT`). The confirmation uses the server's
+    reference count, including disabled models and models outside the reader's list. A positive
+    count disables deletion. After a concurrent refusal the dialog waits for the key to be read
+    again. Returning to the tab refreshes the count, so a key freed elsewhere can be deleted
+    in the same dialog. A member's personal key serves no model of its own: its
     confirmation says the member will have to add a new one.
 - **Packages** (agents, skills, integrations, the organisation catalogue) are one
   list: `components/package-collection.tsx`, with `PackageCard` and
