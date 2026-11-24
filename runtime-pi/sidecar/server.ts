@@ -27,8 +27,7 @@ import { admitsAgentProxyPeer, noRunnerPeers, type PeerAttribution } from "./run
  * credential-handling process). A blind `as` cast would let drift (a renamed
  * `authMode`, a removed required field) parse cleanly and surface far later as
  * a confusing 401/503 from `/llm`. We assert the discriminant + the required
- * fields here so drift fails at boot, at the cause. No Zod: the sidecar
- * deliberately carries no validation dependency; this is a focused shape guard.
+ * fields here so drift fails at boot, before the first request reaches the proxy.
  */
 function assertLlmOauthConfig(value: unknown): LlmProxyOauthConfig {
   if (!value || typeof value !== "object") {
