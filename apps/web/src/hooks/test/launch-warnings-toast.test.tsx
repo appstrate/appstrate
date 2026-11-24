@@ -230,7 +230,7 @@ describe("loadIntegrationNames", () => {
   const readable = { header, enabled: true };
   const GMAIL = ["@acme/gmail"];
   const detailResponse = () => ({
-    data: GMAIL_DETAIL,
+    data: { data: [{ id: "@acme/gmail", ...GMAIL_DETAIL }] },
     error: undefined,
     response: new Response(null),
   });
@@ -243,7 +243,7 @@ describe("loadIntegrationNames", () => {
     expect(get).not.toHaveBeenCalled();
   });
 
-  it("fetches only the warned integrations, once, through the query the detail hook caches", async () => {
+  it("fetches only the warned integrations, once, through the scoped catalogue", async () => {
     const get = spyOn(client, "GET").mockResolvedValue(detailResponse());
     stubs.push(get);
     const qc = new QueryClient();
@@ -252,9 +252,25 @@ describe("loadIntegrationNames", () => {
     // An id it was not asked for is not looked up.
     expect((await loadIntegrationNames(qc, readable, GMAIL))("@acme/slack")).toBe("@acme/slack");
     expect(get.mock.calls as unknown[][]).toHaveLength(1);
-    const [path, init] = get.mock.calls[0] as unknown as [string, { params: { path: unknown } }];
-    expect(path).toBe("/api/integrations/{packageId}");
-    expect(init.params.path).toEqual({ packageId: "@acme/gmail" });
+    const [path, init] = get.mock.calls[0] as unknown as [string, { params: { query: unknown } }];
+    expect(path).toBe("/api/integrations");
+    expect(init.params.query).toEqual({ id: GMAIL, limit: 100 });
+  });
+
+  it("resolves 101 missing names in two reads and preserves the successful batch", async () => {
+    const ids = Array.from({ length: 101 }, (_, i) => `@acme/item-${String(i).padStart(3, "0")}`);
+    const get = spyOn(client, "GET")
+      .mockResolvedValueOnce({
+        data: {
+          data: ids.slice(0, 100).map((id) => ({ id, manifest: { display_name: "Known" } })),
+        },
+      })
+      .mockRejectedValueOnce(new Error("offline"));
+    stubs.push(get);
+    const nameOf = await loadIntegrationNames(new QueryClient(), readable, [...ids, ids[0]!]);
+    expect(nameOf(ids[0]!)).toBe("Known");
+    expect(nameOf(ids[100]!)).toBe(ids[100]!);
+    expect(get).toHaveBeenCalledTimes(2);
   });
 
   it("falls back to the id when the fetch fails", async () => {
