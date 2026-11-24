@@ -139,7 +139,8 @@ export class BlobStore {
   private readonly blobs = new Map<string, BlobRecord>();
   private readonly maxTotalBytes: number;
   private totalBytes = 0;
-  private readingUpstream = false;
+  /** Settles once every upstream read queued so far has finished: one at a time per run. */
+  private upstreamTurn: Promise<void> = Promise.resolve();
 
   /**
    * Set the budget below the sidecar memory limit so the store can refuse a blob
@@ -243,25 +244,36 @@ export class BlobStore {
     const link = this.links.get(parsed.id);
     if (!link) return null;
     signal?.throwIfAborted();
-    // One large response can occupy the run's entire read budget. Refuse before issuing
-    // another upstream request, across all connections in the run; local blobs need no slot.
-    if (this.readingUpstream)
-      throw new Error("A resource read is in progress; retry when it completes");
-    this.readingUpstream = true;
-    let result;
+    // One large response can occupy the run's entire read budget, so upstream reads queue across
+    // all connections in the run; local blobs need no turn. The turn covers the response's checks
+    // too, so two large responses are never held at once. A later read waits for this one even
+    // when this one is cancelled while queued.
+    const previous = this.upstreamTurn;
+    const turn = Promise.withResolvers<void>();
+    this.upstreamTurn = previous.then(() => turn.promise);
     try {
-      result = await link.client.readResource(
-        { uri: link.upstreamUri },
-        { ...(signal && { signal }) },
-      );
+      await waitUnlessAborted(previous, signal);
+      return await this.readLinked(parsed.id, link, signal, maxBytes);
     } finally {
-      this.readingUpstream = false;
+      turn.resolve();
     }
+  }
+
+  private async readLinked(
+    id: string,
+    link: { upstreamUri: string; client: LinkedResourceClient },
+    signal: AbortSignal | undefined,
+    maxBytes: number,
+  ) {
+    const result = await link.client.readResource(
+      { uri: link.upstreamUri },
+      { ...(signal && { signal }) },
+    );
     signal?.throwIfAborted();
     if (!resourceReadWithinLimits(result.contents, maxBytes))
       throw new Error("Upstream resource exceeds the run's resource count or size limit");
     // A different request or shutdown can retire the parent while its upstream read is pending.
-    if (!this.links.has(parsed.id)) return null;
+    if (!this.links.has(id)) return null;
     const members = new Set([link.upstreamUri]);
     for (const item of result.contents) {
       if (Buffer.byteLength(item.uri) > MAX_LINK_URI_BYTES)
@@ -301,4 +313,18 @@ export class BlobStore {
     this.blobs.clear();
     this.totalBytes = 0;
   }
+}
+
+/** Resolve once `turn` settles, or reject with the signal's reason if it aborts first. */
+function waitUnlessAborted(turn: Promise<void>, signal: AbortSignal | undefined): Promise<void> {
+  if (!signal) return turn;
+  signal.throwIfAborted();
+  return new Promise((resolve, reject) => {
+    const onAbort = () => reject(signal.reason);
+    signal.addEventListener("abort", onAbort, { once: true });
+    void turn.then(() => {
+      signal.removeEventListener("abort", onAbort);
+      resolve();
+    });
+  });
 }

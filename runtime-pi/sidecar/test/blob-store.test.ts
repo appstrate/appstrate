@@ -300,7 +300,7 @@ it("rejects a late oversized member URI without rotating any live handle", async
   await expect(store.readLink(parent, undefined, 0)).rejects.toThrow("URI size limit");
 });
 
-it("shares one upstream read slot across connections and releases it after failure or cancellation", async () => {
+it("queues upstream reads across connections and releases the turn after failure or cancellation", async () => {
   const store = new BlobStore("run-busy", NO_EVICTION);
   const pending = Promise.withResolvers<never>();
   const first = store.link("records://first", { readResource: () => pending.promise })!;
@@ -312,10 +312,17 @@ it("shares one upstream read slot across connections and releases it after failu
     },
   })!;
   const reading = store.readLink(first, undefined, 10);
-  await expect(store.readLink(next, undefined, 10)).rejects.toThrow("retry when it completes");
+  const queued = store.readLink(next, undefined, 10);
+  const leaving = new AbortController();
+  const abandoned = store.readLink(next, leaving.signal, 10);
+  leaving.abort(new Error("left the queue"));
+  await expect(abandoned).rejects.toThrow("left the queue");
+  await Bun.sleep(0);
   expect(calls).toBe(0);
   pending.reject(new Error("read failed"));
   await expect(reading).rejects.toThrow("read failed");
+  expect(await queued).toEqual({ contents: [{ uri: next, text: "ok" }] });
+  expect(calls).toBe(1);
 
   const abort = new AbortController();
   const cancellable = store.link("records://cancel", {
@@ -333,5 +340,5 @@ it("shares one upstream read slot across connections and releases it after failu
   expect(await store.readLink(next, undefined, 10)).toEqual({
     contents: [{ uri: next, text: "ok" }],
   });
-  expect(calls).toBe(1);
+  expect(calls).toBe(2);
 });
