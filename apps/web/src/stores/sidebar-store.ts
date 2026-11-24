@@ -12,8 +12,12 @@ function createSidebarStore(storageKey: string) {
 export const useSidebarStore = createSidebarStore("appstrate-sidebar");
 export const useChatSidebarStore = createSidebarStore("appstrate-chat-sidebar");
 
-/** The chat's sidebar width on desktop, in px: its conversation titles are worth widening. */
-export const CHAT_SIDEBAR_WIDTH = { min: 224, default: 256, max: 480 } as const;
+/**
+ * The chat's sidebar width on desktop, in px: its conversation titles are worth widening. The
+ * default is the phone drawer's 18rem, so « Nouvelle conversation » and its magnifier share one line
+ * as they do there.
+ */
+export const CHAT_SIDEBAR_WIDTH = { min: 224, default: 288, max: 480 } as const;
 
 export function clampChatSidebarWidth(width: number): number {
   return Math.min(Math.max(width, CHAT_SIDEBAR_WIDTH.min), CHAT_SIDEBAR_WIDTH.max);

@@ -57,6 +57,7 @@ import { useSpaceResolver } from "./hooks/use-current-space";
 import { useOverviewRules } from "./hooks/use-overview-mode";
 import { NotFoundPage, RouteGate } from "./components/route-gate";
 import {
+  CHAT_SIDEBAR_WIDTH,
   useChatSidebarStore,
   useChatSidebarWidthStore,
   useSidebarStore,
@@ -481,8 +482,10 @@ function MainLayout({ search }: { search: string }) {
         open={sidebar.open}
         onOpenChange={sidebar.setOpen}
         style={
-          product === "chat" && chatWidth !== null
-            ? ({ "--sidebar-width": `${chatWidth}px` } as CSSProperties)
+          product === "chat"
+            ? ({
+                "--sidebar-width": `${chatWidth ?? CHAT_SIDEBAR_WIDTH.default}px`,
+              } as CSSProperties)
             : undefined
         }
         className={

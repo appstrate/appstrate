@@ -98,30 +98,37 @@ describe("a conversation row's « … »", () => {
   });
 });
 
-describe("the conversation search on a phone", () => {
+describe("the sidebar's head, the phone's on every format", () => {
   const html = render(["chat:read", "chat:write"]);
 
-  it("is a magnifier beside « New conversation », shown below md only", () => {
+  it("draws « New conversation » with its « + » in a round tile, folded to the « + » in the icon rail", () => {
+    const tile = html.match(/<span class="[^"]*rounded-full[^"]*"><svg[^>]*lucide-plus/)?.[0];
+    expect(tile).toContain("bg-sidebar-accent");
+    expect(tile).toContain("size-8");
+    expect(tile).toContain("group-data-[collapsible=icon]:contents");
+    expect(tile).not.toContain("md:");
+  });
+
+  it("puts the search's magnifier at the end of that row, a thumb's size, on every format", () => {
     const toggle = html.match(/<button[^>]*data-testid="chat-search-toggle"[^>]*>/)?.[0];
     expect(toggle).toBeDefined();
-    expect(toggle).toContain("md:hidden");
+    expect(toggle).not.toContain("md:hidden");
     expect(toggle).toContain("size-11");
+    expect(toggle).toContain("right-0");
+    expect(toggle).toContain("group-data-[collapsible=icon]:hidden");
+    expect(html.indexOf("threads.new")).toBeLessThan(html.indexOf("chat-search-toggle"));
   });
 
   it("is there for a reader too, who has no « New conversation » beside it", () => {
     const html = render(["chat:read"]);
     const toggle = html.match(/<button[^>]*data-testid="chat-search-toggle"[^>]*>/)?.[0];
-    expect(toggle).toContain("md:hidden");
+    expect(toggle).toBeDefined();
+    expect(toggle).not.toContain("md:hidden");
     expect(html).not.toContain("<span>threads.new</span>");
   });
 
-  it("keeps its field folded below md until the magnifier is tapped, always there from md", () => {
-    const field = html.match(/<div class="[^"]*max-md:hidden[^"]*"><svg[^>]*lucide-search/)?.[0];
-    expect(field).toBeDefined();
-  });
-
-  it("puts the field after « New conversation », never above it", () => {
-    expect(html.indexOf("threads.new")).toBeLessThan(html.indexOf('type="search"'));
+  it("keeps the field folded into the magnifier until it is tapped", () => {
+    expect(html).not.toContain('type="search"');
   });
 });
 

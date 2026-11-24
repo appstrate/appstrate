@@ -14,6 +14,8 @@ import {
   ComposerSkeleton,
   ConversationRowSkeleton,
   ConversationSkeleton,
+  NEW_CONVERSATION_CLASS,
+  NewConversationContent,
 } from "@appstrate/module-chat/conversation-skeleton";
 import { Card } from "@appstrate/ui/components/card";
 import { CardList } from "./card-list";
@@ -31,7 +33,6 @@ import { useQueryClient } from "@tanstack/react-query";
 import type { PackageType } from "@appstrate/core/validation";
 import { PACKAGE_TYPE_ROUTE_SEGMENT } from "@appstrate/core/package-files";
 import { canReadRuns } from "@appstrate/core/permissions";
-import { Plus } from "lucide-react";
 import { Skeleton } from "@appstrate/ui/components/skeleton";
 import {
   SidebarGroup,
@@ -1068,7 +1069,7 @@ export function ChatConversationSkeleton() {
 /**
  * The conversation list's shape, drawn while its permissions and chunk load:
  * the "new conversation" row (the chat's primary action, so it is real, not
- * grey) above a group of row skeletons — what `ChatConversationList` draws: one line per row under
+ * grey, drawn with the module's own `NewConversationContent`) above a group of row skeletons — what `ChatConversationList` draws: one line per row under
  * a mouse, drawn by the module's own `ConversationRowSkeleton`.
  */
 export function ChatSidebarSkeleton() {
@@ -1078,9 +1079,12 @@ export function ChatSidebarSkeleton() {
       <SidebarGroup className="pb-0">
         <SidebarMenu>
           <SidebarMenuItem>
-            <SidebarMenuButton disabled tooltip={t("threads.new")}>
-              <Plus />
-              <span>{t("threads.new")}</span>
+            <SidebarMenuButton
+              disabled
+              tooltip={t("threads.new")}
+              className={NEW_CONVERSATION_CLASS}
+            >
+              <NewConversationContent label={t("threads.new")} />
             </SidebarMenuButton>
           </SidebarMenuItem>
         </SidebarMenu>

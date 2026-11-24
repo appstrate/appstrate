@@ -40,12 +40,15 @@ export const COMPOSER_SEND_CLASS = "flex shrink-0 items-center gap-2 md-short:or
  */
 export const COMPOSER_TOOLS_CLASS = "min-w-0 flex-1 max-md:flex-none md-short:basis-full";
 
-/** "New conversation" in the sidebar: a row aligned left like the conversations below it on a phone. */
-export const NEW_CONVERSATION_CLASS = "max-md:justify-start max-md:gap-3 max-md:font-medium";
+/**
+ * "New conversation" in the sidebar, on every format: a row aligned left like the conversations
+ * below it, its "+" in a round tile (`NewConversationContent`), 44 px tall under a mouse too.
+ */
+export const NEW_CONVERSATION_CLASS = "desktop-pointer:h-11 justify-start gap-3 font-medium";
 
-/** The conversation search field of the sidebar (a filled field below `md`, 44 px tall there). */
+/** The conversation search field of the sidebar, on every format: a filled field, 44 px tall. */
 export const SEARCH_INPUT_CLASS =
-  "pr-9 pl-7 text-base max-md:h-11 max-md:rounded-xl max-md:border-0 max-md:bg-muted max-md:focus-visible:ring-0 max-md:focus-visible:ring-offset-0 max-md:pl-10 max-md:shadow-none md:h-8 md:pr-7 md:py-0 md:text-base [&::-webkit-search-cancel-button]:hidden";
+  "bg-muted h-11 rounded-xl border-0 pr-9 pl-10 text-base shadow-none md:text-base focus-visible:ring-0 focus-visible:ring-offset-0 [&::-webkit-search-cancel-button]:hidden";
 
 /** The user's bubble. */
 export const USER_MESSAGE_CLASS =

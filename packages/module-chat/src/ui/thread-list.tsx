@@ -27,7 +27,6 @@ import {
   EllipsisIcon,
   MessagesSquareIcon,
   PencilIcon,
-  PlusIcon,
   SearchIcon,
   Trash2Icon,
   XIcon,
@@ -86,7 +85,7 @@ import {
   SESSIONS_QUERY_KEY,
   type SessionSummary,
 } from "./sessions.ts";
-import { ConversationRowSkeleton } from "./conversation-skeleton.tsx";
+import { ConversationRowSkeleton, NewConversationContent } from "./conversation-skeleton.tsx";
 import { groupSessionsByDate, type SessionGroupKey } from "./session-groups.ts";
 import {
   NEW_CONVERSATION_CLASS,
@@ -179,8 +178,7 @@ export function ChatConversationList({
 }) {
   const select = useSelectConversation();
   const [input, setInput] = useState("");
-  // On a phone the search is a magnifier beside "New conversation" that unfolds the field; from
-  // `md` up the field is always there.
+  // The search is a magnifier beside "New conversation" that unfolds the field, on every format.
   const [searchOpen, setSearchOpen] = useState(false);
   const searchField = useRef<HTMLInputElement>(null);
   const term = useDebouncedTerm(input, SEARCH_DEBOUNCE_MS);
@@ -222,23 +220,19 @@ export function ChatConversationList({
   );
   return (
     <>
-      {/* Starting a conversation is a write: a reader only rereads its own, and on a phone still
-          gets the magnifier that unfolds the search. */}
+      {/* Starting a conversation is a write: a reader only rereads its own, and still gets the
+          magnifier that unfolds the search (not in the icon rail, which has no list to search). */}
       {(canWrite || showSearchToggle) && (
-        <SidebarGroup className={cn("pb-0", !canWrite && "md:hidden")}>
+        <SidebarGroup className={cn("pb-0", !canWrite && "group-data-[collapsible=icon]:hidden")}>
           <SidebarMenu>
             <SidebarMenuItem>
               {canWrite && (
                 <SidebarMenuButton
                   onClick={() => select?.(null)}
                   tooltip={t("threads.new")}
-                  className={cn(NEW_CONVERSATION_CLASS, showSearch && "max-md:pr-12")}
+                  className={cn(NEW_CONVERSATION_CLASS, showSearch && "pr-12")}
                 >
-                  {/* A phone's row has its icon in a round tile, as the rows below it have theirs. */}
-                  <span className="max-md:bg-sidebar-accent max-md:flex max-md:size-8 max-md:items-center max-md:justify-center max-md:rounded-full md:contents">
-                    <PlusIcon />
-                  </span>
-                  <span>{t("threads.new")}</span>
+                  <NewConversationContent label={t("threads.new")} />
                 </SidebarMenuButton>
               )}
               {showSearchToggle && (
@@ -253,7 +247,7 @@ export function ChatConversationList({
                     searchField.current?.focus();
                   }}
                   className={cn(
-                    "text-sidebar-foreground/70 active:bg-sidebar-accent flex size-11 items-center justify-center rounded-md md:hidden",
+                    "text-sidebar-foreground/70 hover:bg-sidebar-accent hover:text-sidebar-foreground active:bg-sidebar-accent flex size-11 items-center justify-center rounded-md group-data-[collapsible=icon]:hidden",
                     canWrite ? "absolute top-0 right-0" : "ml-auto",
                   )}
                 >
@@ -264,14 +258,9 @@ export function ChatConversationList({
           </SidebarMenu>
         </SidebarGroup>
       )}
-      {showSearch && (
-        <div
-          className={cn(
-            "relative px-2 pt-2 pb-1 group-data-[collapsible=icon]:hidden",
-            !searchOpen && input === "" && "max-md:hidden",
-          )}
-        >
-          <SearchIcon className="text-sidebar-foreground/50 pointer-events-none absolute top-1/2 left-4 size-3.5 -translate-y-1/2 max-md:left-6 max-md:size-4" />
+      {(searchOpen || input !== "") && (
+        <div className="relative px-2 pt-2 pb-1 group-data-[collapsible=icon]:hidden">
+          <SearchIcon className="text-sidebar-foreground/50 pointer-events-none absolute top-1/2 left-6 size-4 -translate-y-1/2" />
           <SidebarInput
             ref={searchField}
             type="search"
@@ -280,36 +269,31 @@ export function ChatConversationList({
             placeholder={t("threads.search.placeholder")}
             aria-label={t("threads.search.placeholder")}
             onChange={(event) => setInput(event.target.value)}
-            // An empty field folds back into its magnifier on a phone.
+            // An empty field folds back into its magnifier.
             onBlur={() => input === "" && setSearchOpen(false)}
             onKeyDown={(event) => {
-              if (event.key === "Escape" && input !== "") {
+              if (event.key === "Escape") {
                 event.preventDefault();
-                setInput("");
+                if (input !== "") setInput("");
+                else setSearchOpen(false);
               }
             }}
             className={SEARCH_INPUT_CLASS}
           />
-          {/* Clears the field; on a phone it also folds it back into its magnifier, and stays there
-              to close an empty one. */}
-          {(input !== "" || searchOpen) && (
-            <button
-              type="button"
-              aria-label={t(input !== "" ? "threads.search.clear" : "threads.search.close")}
-              title={t(input !== "" ? "threads.search.clear" : "threads.search.close")}
-              data-testid="chat-search-clear"
-              onClick={() => {
-                setInput("");
-                setSearchOpen(false);
-              }}
-              className={cn(
-                "text-sidebar-foreground/70 hover:text-sidebar-foreground absolute top-1/2 right-3.5 -translate-y-1/2 rounded-md p-0.5 max-md:right-1 max-md:p-3.5",
-                input === "" && "md:hidden",
-              )}
-            >
-              <XIcon className="size-3.5 max-md:size-4" />
-            </button>
-          )}
+          {/* Clears the field and folds it back into its magnifier; it also closes an empty one. */}
+          <button
+            type="button"
+            aria-label={t(input !== "" ? "threads.search.clear" : "threads.search.close")}
+            title={t(input !== "" ? "threads.search.clear" : "threads.search.close")}
+            data-testid="chat-search-clear"
+            onClick={() => {
+              setInput("");
+              setSearchOpen(false);
+            }}
+            className="text-sidebar-foreground/70 hover:text-sidebar-foreground absolute top-1/2 right-1 -translate-y-1/2 rounded-md p-3.5"
+          >
+            <XIcon className="size-4" />
+          </button>
         </div>
       )}
       <SidebarGroup

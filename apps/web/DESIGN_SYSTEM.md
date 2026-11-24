@@ -112,10 +112,12 @@ they start with `packages/` or `e2e/`.
   under it, closed by its X or by a tap elsewhere while empty, then the recent conversations (one
   line each: the title, then the tiles of its spaces, two at most then « +N », named for a screen
   reader; the names are in the "…" panel). Then the footer every drawer has: Catalogue, Settings
-  and the account. On desktop the conversations are the same one-line rows (32 px, the age at the
-  end), close together, under date groups set apart and headed in small semibold muted capitals;
-  the chat's sidebar is resizable there by its right edge (`PanelResizeHandle`, remembered per
-  browser, double-click resets).
+  and the account. On desktop the chat's sidebar is the phone's: the same "Nouvelle conversation"
+  row and magnifier (one component, `NewConversationContent`, which its skeleton draws too), the
+  same folded search, and the conversations as the same one-line rows (32 px, the age at the end),
+  close together, under date groups set apart and headed in small semibold muted capitals. It
+  opens at the phone drawer's 18rem and is resizable by its right edge (`PanelResizeHandle`,
+  remembered per browser, double-click resets).
 - **A phone's menus rise from the bottom**, and no screen decides it: `DropdownMenu` and `Popover`
   (`packages/ui`) draw their content below `md` as a panel from the bottom (`SheetMenuContent`,
   `packages/ui/src/components/sheet-menu.tsx`, on the bottom `Sheet`), with the same open state and

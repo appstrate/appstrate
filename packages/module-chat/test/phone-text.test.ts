@@ -85,14 +85,19 @@ describe("composer row", () => {
   });
 });
 
-describe("the sidebar's search and new-conversation row on a phone", () => {
-  it("shows the search as a filled field with no border", () => {
-    expect(SEARCH_INPUT_CLASS).toContain("max-md:bg-muted");
-    expect(SEARCH_INPUT_CLASS).toContain("max-md:border-0");
-    expect(SEARCH_INPUT_CLASS).toContain("max-md:h-11");
+describe("the sidebar's search and new-conversation row, the same on every format", () => {
+  it("shows the search as a filled field with no border, 44 px tall", () => {
+    const classes = SEARCH_INPUT_CLASS.split(" ");
+    expect(classes).toContain("bg-muted");
+    expect(classes).toContain("border-0");
+    expect(classes).toContain("h-11");
+    expect(SEARCH_INPUT_CLASS).not.toMatch(/(?:^| )(?:max-)?md:(?:h|bg|border|rounded)-/);
   });
 
-  it("aligns the new-conversation row to the left, as the conversations are", () => {
-    expect(NEW_CONVERSATION_CLASS).toContain("max-md:justify-start");
+  it("aligns the new-conversation row to the left, as the conversations are, 44 px under a mouse too", () => {
+    const classes = NEW_CONVERSATION_CLASS.split(" ");
+    expect(classes).toContain("justify-start");
+    expect(classes).toContain("desktop-pointer:h-11");
+    expect(NEW_CONVERSATION_CLASS).not.toContain("md:");
   });
 });

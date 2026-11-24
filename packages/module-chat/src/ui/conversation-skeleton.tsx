@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import type { ReactNode } from "react";
+import { PlusIcon } from "lucide-react";
 import { Skeleton } from "@appstrate/ui/components/skeleton";
 import { cn } from "@appstrate/ui/cn";
 import { COMPOSER_BUTTON_CLASS } from "./touch-targets.ts";
@@ -11,6 +12,8 @@ import {
   COMPOSER_TOOLS_CLASS,
   DISCLAIMER_CLASS,
 } from "./phone-text.ts";
+
+export { NEW_CONVERSATION_CLASS } from "./phone-text.ts";
 
 /** The box of the composer's `size="icon-sm"` buttons: 44 px on touch, 32 px under a mouse. */
 const COMPOSER_BUTTON_BOX_CLASS = cn("desktop-pointer:size-8 size-11", COMPOSER_BUTTON_CLASS);
@@ -126,5 +129,22 @@ export function ConversationRowSkeleton() {
       <Skeleton className="h-4 w-3/5" />
       <Skeleton className="desktop-pointer:hidden h-4 w-2/5" />
     </div>
+  );
+}
+
+/**
+ * "New conversation"'s content, the same on every format: its "+" in a round tile, as the rows below
+ * it carry their marks, then its words. Shared by the live row (`ChatConversationList`) and the
+ * shell's skeleton of it, so the two cannot drift; both sit in a `SidebarMenuButton` styled with
+ * `NEW_CONVERSATION_CLASS`. In the icon rail the tile steps aside and the "+" is the button's icon.
+ */
+export function NewConversationContent({ label }: { label: string }) {
+  return (
+    <>
+      <span className="bg-sidebar-accent flex size-8 shrink-0 items-center justify-center rounded-full group-data-[collapsible=icon]:contents">
+        <PlusIcon />
+      </span>
+      <span>{label}</span>
+    </>
   );
 }
