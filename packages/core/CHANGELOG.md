@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `@appstrate/core/chat-message` exposes the historical-message and submitted-thread schemas shared by chat and the upgrade check.
+
+- `displayAccountId` and `PLACEHOLDER_ACCOUNT_ID` identify integration connections that can be renewed on the same upstream account.
+
 - `AUTH_META_KEY`, `CONNECT_META_KEY`, `OAUTH_META_KEY` and their readers `appstrateAuthRequired`, `getAppstrateConnectMeta`, `getAppstrateOAuthMeta` describe the published integration metadata fields.
 - `recallMemoryOutputSchema` and `runHistoryOutputSchema` describe the structured results of the run history and recall tools.
 
@@ -60,6 +64,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Optional and additive: a turn that summarized nothing carries none.
 
 ### Changed
+
+- `validateManifest` now rejects a root `runtime_tools` field on an agent when validating new packages.
+  Select the tools of the `@appstrate/platform` integration through `integrations_configuration`.
+  Stored packages read with `retiredDependencyKeys: "tolerate"` retain their previous behavior.
+- Integration manifest validation now reports malformed `dev.appstrate/auth`, `dev.appstrate/oauth`
+  and `dev.appstrate/connect` metadata at the offending field. The metadata keys remain optional.
 
 - **`deriveResponseReserveTokens` caps the reserve at `RESERVE_CEILING_TOKENS` (64 000)**
   (`@appstrate/core/token-budget`): pi-ai clamps the `max_tokens` it sends, so the reserve is room
