@@ -86,6 +86,7 @@ export function registerPlatformApp(app: Hono<AppEnv>): void {
           requirement.spaceContext,
           (node as Record<string, unknown>)["x-appstrate-space"],
           publicPaths,
+          { spec, pathItem, operation: node },
         ),
       });
     }
