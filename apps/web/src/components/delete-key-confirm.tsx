@@ -11,14 +11,21 @@ import { keyDeletionPrompt } from "../lib/key-deletion";
 /** « Supprimer » on a key of Settings › Models: an organization key goes only once no model uses it. */
 export function DeleteKeyConfirm({
   credential,
+  referenceCountVerified,
   onClose,
 }: {
   credential: ModelProviderCredentialInfo;
+  referenceCountVerified: boolean;
   onClose: () => void;
 }) {
   const { t } = useTranslation("settings");
   const deleteCredential = useDeleteModelProviderCredential({ errorHandledByCaller: true });
-  const { description, blocked } = keyDeletionPrompt(credential, t, deleteCredential.error);
+  const { description, blocked } = keyDeletionPrompt(
+    credential,
+    t,
+    deleteCredential.error,
+    referenceCountVerified,
+  );
 
   return (
     <ConfirmModal

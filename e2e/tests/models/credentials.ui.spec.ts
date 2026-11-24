@@ -120,7 +120,7 @@ test.describe("Provider keys — UI", () => {
     await expect(keyRow(page, otherKey.label)).toBeVisible();
   });
 
-  test("keeps the key and updates the open dialog when another actor binds a model", async ({
+  test("rechecks the same open dialog when another actor binds and removes the last model", async ({
     authedPage: page,
     apiClient,
   }) => {
@@ -134,7 +134,7 @@ test.describe("Provider keys — UI", () => {
     const dialog = page.getByRole("alertdialog", { name: "Supprimer la clé ?" });
     const confirm = dialog.getByRole("button", { name: DELETE, exact: true });
     await expect(confirm).toBeEnabled();
-    await seedModel(apiClient, key.id, "vllm-model");
+    const model = await seedModel(apiClient, key.id, "vllm-model");
     const refused = page.waitForResponse(
       (response) =>
         response.request().method() === "DELETE" &&
@@ -146,7 +146,13 @@ test.describe("Provider keys — UI", () => {
       dialog.getByText(`La clé « ${key.label} » est utilisée par 1 modèle.`),
     ).toBeVisible();
     await expect(confirm).toBeDisabled();
-    await dialog.getByRole("button", { name: "Annuler" }).click();
-    await expect(keyRow(page, key.label)).toBeVisible();
+    expect((await apiClient.delete(`/models/${model.id}`)).status()).toBe(204);
+    // Returning from the other tab re-reads the key while the same dialog is open.
+    await page.evaluate(() => window.dispatchEvent(new Event("visibilitychange")));
+    await expect(dialog.getByText(`Supprimer la clé « ${key.label} » ?`)).toBeVisible();
+    await expect(confirm).toBeEnabled();
+    await confirm.click();
+    await expect(dialog).toBeHidden();
+    await expect(keyRow(page, key.label)).toHaveCount(0);
   });
 });

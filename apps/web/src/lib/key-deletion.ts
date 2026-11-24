@@ -10,6 +10,7 @@ export function keyDeletionPrompt(
   credential: Pick<ModelProviderCredentialInfo, "label" | "owner_type" | "referencing_model_count">,
   t: TFunction,
   refusal: unknown = null,
+  referenceCountVerified = true,
 ): { description: string; blocked: boolean } {
   const { label, referencing_model_count: count } = credential;
   if (count > 0) {
@@ -18,10 +19,11 @@ export function keyDeletionPrompt(
       blocked: true,
     };
   }
-  if (refusal) {
+  const refusedInUse = refusal instanceof ApiError && refusal.code === "credential_in_use";
+  if (refusal && (!refusedInUse || !referenceCountVerified)) {
     return {
       description: errorMessage(refusal),
-      blocked: refusal instanceof ApiError && refusal.code === "credential_in_use",
+      blocked: refusedInUse,
     };
   }
   return {

@@ -26,13 +26,14 @@ describe("keyDeletionPrompt", () => {
   it("shows a refusal for a reference added after opening, until the count is refreshed", () => {
     const refusal = new ApiError("credential_in_use", "now referenced", 409);
     expect(keyDeletionPrompt(KEY, i18n.t).blocked).toBe(false);
-    expect(keyDeletionPrompt(KEY, i18n.t, refusal)).toEqual({
+    expect(keyDeletionPrompt(KEY, i18n.t, refusal, false)).toEqual({
       description: i18n.t("apiError.credential_in_use", { ns: "common" }),
       blocked: true,
     });
     expect(
       keyDeletionPrompt({ ...KEY, referencing_model_count: 1 }, i18n.t, refusal).description,
     ).toContain("1 modèle.");
+    expect(keyDeletionPrompt(KEY, i18n.t, refusal, true)).toEqual(keyDeletionPrompt(KEY, i18n.t));
   });
 
   it("lets the user retry a temporary failure", () => {

@@ -44,13 +44,13 @@ function useCredentialsScope() {
   };
 }
 
-export function useModelProviderCredentials() {
+export function useModelProviderCredentials(refetchOnWindowFocus: false | "always" = false) {
   const scope = useCredentialsScope();
   return $api.useQuery(
     "get",
     "/api/model-provider-credentials",
     { params: { header: scope.header } },
-    { enabled: scope.enabled, select: (e) => e.data },
+    { enabled: scope.enabled, select: (e) => e.data, refetchOnWindowFocus },
   );
 }
 
@@ -91,7 +91,8 @@ export function useUpdateModelProviderCredential(meta?: MutationMeta) {
 
 /** `meta`: deleting an organization key with its models reports its own failures. */
 export function useDeleteModelProviderCredential(meta?: MutationMeta) {
-  const invalidate = useInvalidatePaths("/api/model-provider-credentials");
+  const qc = useQueryClient();
+  const invalidate = () => invalidatePaths(qc, ["/api/model-provider-credentials"]);
   return $api.useMutation("delete", "/api/model-provider-credentials/{id}", {
     meta,
     onSuccess: invalidate,
