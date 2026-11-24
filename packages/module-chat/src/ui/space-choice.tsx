@@ -2,6 +2,7 @@
 
 import { useAui, useAuiState } from "@assistant-ui/react";
 import { Button } from "@appstrate/ui/components/button";
+import { FieldLegend, FieldSet } from "@appstrate/ui/components/field";
 import { asRecord } from "@appstrate/core/safe-json";
 import { pendingSpaceChoiceSchema, SPACE_CHOICE_PART } from "../space-choice.ts";
 import { useChatHost } from "./runtime-context.ts";
@@ -18,7 +19,8 @@ export function TurnSpaceChoice() {
   );
   const running = useAuiState((s) => s.thread.isRunning);
   const parts = useAuiState((s) => s.message.content);
-  if (!current || !can("chat:write")) return null;
+  if (!current || actingSpaceIds === null) return null;
+  const canReply = can("chat:write");
 
   const choices = parts.flatMap((part) => {
     if (part.type !== "tool-call") return [];
@@ -27,12 +29,21 @@ export function TurnSpaceChoice() {
   });
   return choices.map(({ toolCallId, spaceIds, tool, operationId }) => {
     const options = spaceIds
-      .filter((id) => actingSpaceIds?.includes(id) && (!restricted || id === originSpaceId))
+      .filter((id) => actingSpaceIds.includes(id) && (!restricted || id === originSpaceId))
       .map((id) => ({ id, name: labelOf(id) ?? id }));
-    if (!options.length) return null;
+    if (!options.length || !canReply) {
+      return (
+        <p key={toolCallId} role="status" className="text-muted-foreground my-3 text-sm">
+          {t("tool.spaceChoiceUnavailable")}
+          {canReply && ` ${t("tool.spaceChoiceRetry")}`}
+        </p>
+      );
+    }
     return (
-      <fieldset key={toolCallId} className="my-3 rounded-lg border p-3" disabled={running}>
-        <legend className="px-1 text-sm font-medium">{t("tool.chooseSpace")}</legend>
+      <FieldSet key={toolCallId} className="my-3 gap-2 rounded-lg border p-3" disabled={running}>
+        <FieldLegend variant="label" className="mb-0 px-1">
+          {t("tool.chooseSpace")}
+        </FieldLegend>
         <div className="flex flex-wrap gap-2">
           {options.map(({ id, name }) => (
             <Button
@@ -50,7 +61,7 @@ export function TurnSpaceChoice() {
                 aui.thread().append({
                   role: "user",
                   content: [
-                    { type: "text", text: t("tool.spaceChoiceReply", { name, id }) },
+                    { type: "text", text: t("tool.spaceChoiceReply") },
                     {
                       type: "data",
                       name: SPACE_CHOICE_PART.slice("data-".length),
@@ -67,7 +78,7 @@ export function TurnSpaceChoice() {
             </Button>
           ))}
         </div>
-      </fieldset>
+      </FieldSet>
     );
   });
 }

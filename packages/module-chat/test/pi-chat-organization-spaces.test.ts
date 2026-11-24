@@ -347,6 +347,25 @@ describe("a forwarded tool", () => {
     }
   });
 
+  it("keeps the turn open when the refused operation cannot be represented by the picker", async () => {
+    const transport = transcript();
+    const { built, tool } = await tools(transport);
+    try {
+      transport.answers.remote = remote({ [SPACE_CHOICE_META_KEY]: ["spc_beta"] }, true);
+      for (const args of [{ operation_id: "" }, {}]) {
+        const refused = await tool("invoke_operation").execute("invalid", args);
+        expect(refused.spaceChoice).toBeUndefined();
+        expect(refused.terminate).toBeUndefined();
+        expect(text(refused)).toBe("platform response");
+      }
+      const valid = await tool("invoke_operation").execute("valid", { operation_id: "listAgents" });
+      expect(valid.terminate).toBe(true);
+      expect(transport.events).toEqual(["tools/call", "tools/call", "tools/call"]);
+    } finally {
+      await built.close();
+    }
+  });
+
   it("does not present a picker for a success, a relayed result or a refusal naming an outside space", async () => {
     const transport = transcript();
     const { built, tool } = await tools(transport);
@@ -505,6 +524,12 @@ describe("the conversation's run_and_wait", () => {
         const result = await tool("run_and_wait").execute("c2", agent);
         expect(result.actedSpaceIds).toEqual([expected]);
         expect(transport.events.slice(0, 2)).toEqual([`touch ${expected}`, "launch"]);
+        const repeated = await tool("run_and_wait").execute("c3", { ...agent, name: "another" });
+        expect(repeated.actedSpaceIds).toEqual([expected]);
+        expect(transport.launches.map((launch) => launch.spaceHeader)).toEqual([
+          expected,
+          expected,
+        ]);
       } finally {
         await built.close();
       }

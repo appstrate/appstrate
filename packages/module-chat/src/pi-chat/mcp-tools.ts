@@ -51,7 +51,11 @@ import {
   type OfferScope,
 } from "../connect-offer.ts";
 import { runAndWaitStepsWithinTurnBudget } from "../run-budget.ts";
-import type { PendingSpaceChoice, SpaceChoice } from "../space-choice.ts";
+import {
+  pendingSpaceChoiceSchema,
+  type PendingSpaceChoice,
+  type SpaceChoice,
+} from "../space-choice.ts";
 import { logger } from "../logger.ts";
 import { FILE_NAME_META_KEY, isFileUri } from "@appstrate/core/file-uri";
 import { isRasterImageMime, normalizeMime } from "@appstrate/core/mime";
@@ -580,6 +584,16 @@ function keepsSkillText(uri: unknown, resources: readonly object[]): boolean {
   );
 }
 
+function pendingChoice(tool: string, spaceIds: unknown, operationId?: unknown) {
+  if (spaceIds === undefined) return undefined;
+  const parsed = pendingSpaceChoiceSchema.safeParse({
+    tool,
+    spaceIds,
+    ...(tool === "invoke_operation" && { operationId }),
+  });
+  return parsed.success ? parsed.data : undefined;
+}
+
 function waitingForSpaceChoice(): PiToolResult {
   return {
     content: [{ type: "text", text: "Waiting for the user to choose a space." }],
@@ -642,25 +656,18 @@ function makeForwardExtension(
           );
         }
         const choice =
-          !isRelayedResult(result) && result.isError && result._meta?.[SPACE_CHOICE_META_KEY];
+          result.isError && !isRelayedResult(result)
+            ? pendingChoice(toolName, result._meta?.[SPACE_CHOICE_META_KEY], args.operation_id)
+            : undefined;
         if (
-          Array.isArray(choice) &&
-          choice.length &&
-          choice.every(
-            (id): id is string =>
-              typeof id === "string" && organization.spaces.some((space) => space.id === id),
-          )
+          choice &&
+          choice.spaceIds.every((id) => organization.spaces.some((space) => space.id === id))
         ) {
           choiceGate.waiting = true;
           return withTurnBudgetNote(
             {
               ...mcpResultToPi(result, scope),
-              spaceChoice: {
-                tool: toolName,
-                ...(toolName === "invoke_operation" &&
-                  typeof args.operation_id === "string" && { operationId: args.operation_id }),
-                spaceIds: choice,
-              },
+              spaceChoice: choice,
               terminate: true,
             },
             turnBudget,
@@ -923,12 +930,16 @@ function makeRunAndWaitExtension(
           );
         if (spaceId === undefined) {
           const allowed = eligible();
-          if (allowed.length > 0) {
+          const choice = pendingChoice(
+            RUN_AND_WAIT_TOOL,
+            allowed.map((s) => s.id),
+          );
+          if (choice) {
             ctx.choiceGate.waiting = true;
             return withTurnBudgetNote(
               {
                 ...toPiToolResult(spaceIdRefusal(allowed, undefined), runAndWaitScope),
-                spaceChoice: { tool: RUN_AND_WAIT_TOOL, spaceIds: allowed.map((s) => s.id) },
+                spaceChoice: choice,
                 terminate: true,
               },
               ctx.turnBudget,

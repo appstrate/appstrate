@@ -11,7 +11,7 @@ function specifiesOperation(choice: z.infer<typeof choiceTarget>) {
   return (choice.tool === "invoke_operation") === (choice.operationId !== undefined);
 }
 
-/** The user's answer applies to the call that asked on the preceding turn. */
+/** The chosen destination applies throughout the answering turn to the same tool and, for invoke_operation, the same operation. */
 export const spaceChoiceSchema = choiceTarget
   .extend({ spaceId: z.string().min(1) })
   .refine(specifiesOperation);
