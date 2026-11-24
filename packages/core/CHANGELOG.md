@@ -73,6 +73,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Stored packages read with `retiredDependencyKeys: "tolerate"` retain their previous behavior.
 - Integration manifest validation now reports malformed `dev.appstrate/auth`, `dev.appstrate/oauth`
   and `dev.appstrate/connect` metadata at the offending field. The metadata keys remain optional.
+- `ConnectionResolutionError.remedy` is now also set on `needs_reconnection` when the connection
+  has no identified upstream account (`PLACEHOLDER_ACCOUNT_ID`). Such a connection cannot be
+  renewed in place: `remedy` names the binding to change (`new_connection`, `rebind_by_admin` or
+  `rebind_by_schedule_owner`) instead. Its absence still means the owner can reconnect it.
 
 - **`deriveResponseReserveTokens` caps the reserve at `RESERVE_CEILING_TOKENS` (64 000)**
   (`@appstrate/core/token-budget`): pi-ai clamps the `max_tokens` it sends, so the reserve is room
