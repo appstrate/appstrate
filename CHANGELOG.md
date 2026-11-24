@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [1.0.0-beta.71] - 2026-11-24
+
 ### Module authors
 
 Before upgrading, declare `x-appstrate-space` on documented operations whose scope cannot be
@@ -17,7 +19,7 @@ that resolve a resource's space from a database row use `withAuthorizedRow` from
 
 - Follow the [upgrade procedure through migration 0113](docs/deployment/UPGRADE_0113.md) before migrating the schema and reopening traffic.
 - Reconnecting an integration in place requires a matching account identity and instance. A connection without a comparable identity needs a new connection and explicit reassignment of its shares, pins and schedules. Personal connection policies still apply.
-- MCP clients can validate both successful `run_and_wait` responses and structured refusals against the tool’s declared output schema. Remote resource reads in a run run one at a time, limited to 48 MiB on the wire and 32 MiB of decoded contents. A concurrent read waits for the previous one to complete.
+- MCP clients can validate both successful `run_and_wait` responses and structured refusals against the tool’s declared output schema. Each run processes remote resource reads one at a time, limited to 48 MiB on the wire and 32 MiB of decoded contents. A concurrent read waits for the previous one to complete.
 - Space and organization run lists require timestamps with a time and timezone. Send an RFC 3339 instant for date filters.
 - A reporting CLI must use the public origin configured in `APP_URL`. Run events, provisioning and finalization require direct endpoints without redirects. An unavailable resource-metadata service can temporarily interrupt automatic MCP OAuth setup even with a configured issuer; retry after it recovers.
 
