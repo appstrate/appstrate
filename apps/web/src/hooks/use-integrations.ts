@@ -45,7 +45,6 @@ import { invalidateSchedules, warnSchedulesDisabled } from "./use-schedules";
 export type {
   AgentIntegrationEntry,
   IntegrationAuthStatus,
-  IntegrationAuthType,
   IntegrationCandidate,
   IntegrationConnection,
   IntegrationManifestAuth,

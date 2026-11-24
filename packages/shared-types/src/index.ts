@@ -37,7 +37,6 @@ export type {
   ConsumingAgentSummary,
   IntegrationAgentResolution,
   IntegrationAuthStatus,
-  IntegrationAuthType,
   IntegrationCandidate,
   IntegrationConnection,
   IntegrationManifestAuth,
