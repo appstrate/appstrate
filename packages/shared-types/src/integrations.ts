@@ -46,7 +46,13 @@ export const CONNECTION_SCOPES = ["org", "space"] as const;
 export type ConnectionScope = (typeof CONNECTION_SCOPES)[number];
 
 /** Actions a caller may take on a connection, listed per row on the list surfaces. */
-export const CONNECTION_ACTIONS = ["rename", "share", "share_all_spaces", "unshare_here"] as const;
+export const CONNECTION_ACTIONS = [
+  "rename",
+  "reconnect",
+  "share",
+  "share_all_spaces",
+  "unshare_here",
+] as const;
 export type ConnectionAction = (typeof CONNECTION_ACTIONS)[number];
 
 /** Where a connection reaches, as one reader sees it. */

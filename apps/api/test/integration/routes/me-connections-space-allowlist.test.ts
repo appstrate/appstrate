@@ -121,7 +121,10 @@ describe("its owner's connections under a space allowlist", () => {
         group.connections.map((row) => [row.connection_id, row.allowed_actions] as const),
       ),
     );
-    expect(actions).toEqual({ [inside]: ["rename", "share"], [orgWide]: ["share"] });
+    expect(actions).toEqual({
+      [inside]: ["rename", "reconnect", "share"],
+      [orgWide]: ["share"],
+    });
 
     // Outside the allowlist: not there, whatever the action.
     expect((await call(`/api/me/connections/${outside}`, "PATCH", { label: "x" })).status).toBe(

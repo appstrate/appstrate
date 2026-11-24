@@ -14079,8 +14079,8 @@ export interface operations {
                             share_all_spaces?: boolean;
                             /** @description Owner only: the space an org-scoped connection was connected from — a space blocking member connections still accepts it. `null` for a space-scoped connection, once that space is deleted, or to a credential bound to another space. Absent for anyone else. */
                             origin_space_id?: string | null;
-                            /** @description What the caller may do with this connection: `rename`, `share` (into a space it reaches) or `unshare_here` (withdraw it from the current space). List surfaces only. */
-                            allowed_actions?: ("rename" | "share" | "share_all_spaces" | "unshare_here")[];
+                            /** @description What the caller may do with this connection: `rename`, `reconnect` (its owner renews it in place, whether or not it is flagged `needs_reconnection`; absent when the stored upstream account is not identified, since a renewal could not be verified against it), `share` (into a space it reaches) or `unshare_here` (withdraw it from the current space). List surfaces only. */
+                            allowed_actions?: ("rename" | "reconnect" | "share" | "share_all_spaces" | "unshare_here")[];
                             /** @description The team spaces this caller may share the connection into now — a credential bound to a space, that space at most. The owner's only. List surfaces only. */
                             shareable_spaces?: {
                                 id: string;
@@ -14391,8 +14391,8 @@ export interface operations {
                                 share_all_spaces?: boolean;
                                 /** @description Owner only: the space an org-scoped connection was connected from — a space blocking member connections still accepts it. `null` for a space-scoped connection, once that space is deleted, or to a credential bound to another space. Absent for anyone else. */
                                 origin_space_id?: string | null;
-                                /** @description What the caller may do with this connection: `rename`, `share` (into a space it reaches) or `unshare_here` (withdraw it from the current space). List surfaces only. */
-                                allowed_actions?: ("rename" | "share" | "share_all_spaces" | "unshare_here")[];
+                                /** @description What the caller may do with this connection: `rename`, `reconnect` (its owner renews it in place, whether or not it is flagged `needs_reconnection`; absent when the stored upstream account is not identified, since a renewal could not be verified against it), `share` (into a space it reaches) or `unshare_here` (withdraw it from the current space). List surfaces only. */
+                                allowed_actions?: ("rename" | "reconnect" | "share" | "share_all_spaces" | "unshare_here")[];
                                 /** @description The team spaces this caller may share the connection into now — a credential bound to a space, that space at most. The owner's only. List surfaces only. */
                                 shareable_spaces?: {
                                     id: string;
@@ -14603,8 +14603,8 @@ export interface operations {
                         share_all_spaces?: boolean;
                         /** @description Owner only: the space an org-scoped connection was connected from — a space blocking member connections still accepts it. `null` for a space-scoped connection, once that space is deleted, or to a credential bound to another space. Absent for anyone else. */
                         origin_space_id?: string | null;
-                        /** @description What the caller may do with this connection: `rename`, `share` (into a space it reaches) or `unshare_here` (withdraw it from the current space). List surfaces only. */
-                        allowed_actions?: ("rename" | "share" | "share_all_spaces" | "unshare_here")[];
+                        /** @description What the caller may do with this connection: `rename`, `reconnect` (its owner renews it in place, whether or not it is flagged `needs_reconnection`; absent when the stored upstream account is not identified, since a renewal could not be verified against it), `share` (into a space it reaches) or `unshare_here` (withdraw it from the current space). List surfaces only. */
+                        allowed_actions?: ("rename" | "reconnect" | "share" | "share_all_spaces" | "unshare_here")[];
                         /** @description The team spaces this caller may share the connection into now — a credential bound to a space, that space at most. The owner's only. List surfaces only. */
                         shareable_spaces?: {
                             id: string;
@@ -15023,8 +15023,8 @@ export interface operations {
                             share_all_spaces?: boolean;
                             /** @description Owner only: the space an org-scoped connection was connected from — a space blocking member connections still accepts it. `null` for a space-scoped connection, once that space is deleted, or to a credential bound to another space. Absent for anyone else. */
                             origin_space_id?: string | null;
-                            /** @description What the caller may do with this connection: `rename`, `share` (into a space it reaches) or `unshare_here` (withdraw it from the current space). List surfaces only. */
-                            allowed_actions?: ("rename" | "share" | "share_all_spaces" | "unshare_here")[];
+                            /** @description What the caller may do with this connection: `rename`, `reconnect` (its owner renews it in place, whether or not it is flagged `needs_reconnection`; absent when the stored upstream account is not identified, since a renewal could not be verified against it), `share` (into a space it reaches) or `unshare_here` (withdraw it from the current space). List surfaces only. */
+                            allowed_actions?: ("rename" | "reconnect" | "share" | "share_all_spaces" | "unshare_here")[];
                             /** @description The team spaces this caller may share the connection into now — a credential bound to a space, that space at most. The owner's only. List surfaces only. */
                             shareable_spaces?: {
                                 id: string;
@@ -15122,8 +15122,8 @@ export interface operations {
                         share_all_spaces?: boolean;
                         /** @description Owner only: the space an org-scoped connection was connected from — a space blocking member connections still accepts it. `null` for a space-scoped connection, once that space is deleted, or to a credential bound to another space. Absent for anyone else. */
                         origin_space_id?: string | null;
-                        /** @description What the caller may do with this connection: `rename`, `share` (into a space it reaches) or `unshare_here` (withdraw it from the current space). List surfaces only. */
-                        allowed_actions?: ("rename" | "share" | "share_all_spaces" | "unshare_here")[];
+                        /** @description What the caller may do with this connection: `rename`, `reconnect` (its owner renews it in place, whether or not it is flagged `needs_reconnection`; absent when the stored upstream account is not identified, since a renewal could not be verified against it), `share` (into a space it reaches) or `unshare_here` (withdraw it from the current space). List surfaces only. */
+                        allowed_actions?: ("rename" | "reconnect" | "share" | "share_all_spaces" | "unshare_here")[];
                         /** @description The team spaces this caller may share the connection into now — a credential bound to a space, that space at most. The owner's only. List surfaces only. */
                         shareable_spaces?: {
                             id: string;
@@ -16039,8 +16039,8 @@ export interface operations {
                                 share_all_spaces?: boolean;
                                 /** @description Owner only: the space an org-scoped connection was connected from — a space blocking member connections still accepts it. `null` for a space-scoped connection, once that space is deleted, or to a credential bound to another space. Absent for anyone else. */
                                 origin_space_id?: string | null;
-                                /** @description What the caller may do with this connection: `rename`, `share` (into a space it reaches) or `unshare_here` (withdraw it from the current space). List surfaces only. */
-                                allowed_actions?: ("rename" | "share" | "share_all_spaces" | "unshare_here")[];
+                                /** @description What the caller may do with this connection: `rename`, `reconnect` (its owner renews it in place, whether or not it is flagged `needs_reconnection`; absent when the stored upstream account is not identified, since a renewal could not be verified against it), `share` (into a space it reaches) or `unshare_here` (withdraw it from the current space). List surfaces only. */
+                                allowed_actions?: ("rename" | "reconnect" | "share" | "share_all_spaces" | "unshare_here")[];
                                 /** @description The team spaces this caller may share the connection into now — a credential bound to a space, that space at most. The owner's only. List surfaces only. */
                                 shareable_spaces?: {
                                     id: string;
@@ -17231,8 +17231,8 @@ export interface operations {
                                     id: string;
                                     name: string;
                                 }[];
-                                /** @description What the caller may do with this connection: `rename`, `share` (into a space it reaches) or `unshare_here` (withdraw it from the current space). */
-                                allowed_actions: ("rename" | "share" | "share_all_spaces" | "unshare_here")[];
+                                /** @description What the caller may do with this connection: `rename`, `reconnect` (its owner renews it in place, whether or not it is flagged `needs_reconnection`; absent when the stored upstream account is not identified, since a renewal could not be verified against it), `share` (into a space it reaches) or `unshare_here` (withdraw it from the current space). */
+                                allowed_actions: ("rename" | "reconnect" | "share" | "share_all_spaces" | "unshare_here")[];
                                 /** @description The team spaces this caller may share the connection into now — a credential bound to a space, that space at most. The owner's only. */
                                 shareable_spaces: {
                                     id: string;
@@ -17366,8 +17366,8 @@ export interface operations {
                         share_all_spaces?: boolean;
                         /** @description Owner only: the space an org-scoped connection was connected from — a space blocking member connections still accepts it. `null` for a space-scoped connection, once that space is deleted, or to a credential bound to another space. Absent for anyone else. */
                         origin_space_id?: string | null;
-                        /** @description What the caller may do with this connection: `rename`, `share` (into a space it reaches) or `unshare_here` (withdraw it from the current space). List surfaces only. */
-                        allowed_actions?: ("rename" | "share" | "share_all_spaces" | "unshare_here")[];
+                        /** @description What the caller may do with this connection: `rename`, `reconnect` (its owner renews it in place, whether or not it is flagged `needs_reconnection`; absent when the stored upstream account is not identified, since a renewal could not be verified against it), `share` (into a space it reaches) or `unshare_here` (withdraw it from the current space). List surfaces only. */
+                        allowed_actions?: ("rename" | "reconnect" | "share" | "share_all_spaces" | "unshare_here")[];
                         /** @description The team spaces this caller may share the connection into now — a credential bound to a space, that space at most. The owner's only. List surfaces only. */
                         shareable_spaces?: {
                             id: string;

@@ -189,3 +189,41 @@ describe("withinSpaces", () => {
     );
   });
 });
+
+describe("connectionActions: reconnect", () => {
+  const identified = { ...orgRow(), accountId: "alice@example.com" };
+
+  it("gives the owner reconnect on an identified row, whatever its health", () => {
+    expect(connectionActions(identified, reader(), false)).toEqual([
+      "rename",
+      "reconnect",
+      "share",
+    ]);
+  });
+
+  it("withholds it from a row whose upstream account is not identified", () => {
+    expect(connectionActions({ ...orgRow(), accountId: "default" }, reader(), false)).toEqual([
+      "rename",
+      "share",
+    ]);
+  });
+
+  it("never gives it to a governor on a colleague's row", () => {
+    const row = { ...spaceRow(COLLEAGUE), accountId: "bob@example.com" };
+    expect(connectionActions(row, reader({ governs: true }), true)).not.toContain("reconnect");
+  });
+
+  it("follows the bound credential's write rule: only a row scoped to one of its spaces", () => {
+    const bound = reader({
+      principal: {
+        kind: "delegated",
+        actor: { type: "user", id: OWNER },
+        binding: { orgId: "org_1", spaceIds: [HERE] },
+      },
+    });
+    expect(connectionActions(identified, bound, false)).not.toContain("reconnect");
+    expect(
+      connectionActions({ ...spaceRow(), accountId: "alice@example.com" }, bound, false),
+    ).toContain("reconnect");
+  });
+});

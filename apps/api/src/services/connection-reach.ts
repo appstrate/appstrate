@@ -13,6 +13,7 @@
 import { and, asc, eq, isNull, not, or, sql, type SQL, type SQLWrapper } from "drizzle-orm";
 import type { ConnectionAction } from "@appstrate/shared-types";
 import type { OrgRole } from "@appstrate/core/permissions";
+import { displayAccountId } from "@appstrate/core/integration";
 import {
   integrationConnectionShares as shares,
   integrationConnections as c,
@@ -175,9 +176,19 @@ export function shareableIn(t: ShareTargets): SQL<string[]> {
  * the whole org) and shares a member's row;
  * a governor of the request space renames a colleague's row scoped to it and withdraws one shared
  * into it. Sharing is the owner's consent: a governor never shares.
+ *
+ * `reconnect` is the owner's too, whatever the row's health: renewing in place is refused unless
+ * the stored account is identified (`persistCredentialBundle`), so an identity-less row never holds
+ * it. Judged only where the row carries its `accountId` (the list surfaces).
  */
 export function connectionActions(
-  row: { orgId: string; userId: string | null; endUserId: string | null; spaceId: string | null },
+  row: {
+    orgId: string;
+    userId: string | null;
+    endUserId: string | null;
+    spaceId: string | null;
+    accountId?: string;
+  },
   caller: ConnectionCaller,
   sharedHere: boolean,
   orgRole?: OrgRole | null,
@@ -186,8 +197,9 @@ export function connectionActions(
   const actions: ConnectionAction[] = [];
   if (actorOwns(caller.principal.actor, row)) {
     const bound = boundSpacesOf(caller.principal);
-    if (bound === null || (row.spaceId !== null && bound.includes(row.spaceId)))
-      actions.push("rename");
+    const writesRow = bound === null || (row.spaceId !== null && bound.includes(row.spaceId));
+    if (writesRow) actions.push("rename");
+    if (writesRow && displayAccountId(row.accountId) !== null) actions.push("reconnect");
     if (row.userId !== null) {
       actions.push("share");
       if (

@@ -267,7 +267,7 @@ export const connectionActionsSchema = {
   type: "array",
   items: { type: "string", enum: [...CONNECTION_ACTIONS] },
   description:
-    "What the caller may do with this connection: `rename`, `share` (into a space it reaches) or `unshare_here` (withdraw it from the current space).",
+    "What the caller may do with this connection: `rename`, `reconnect` (its owner renews it in place, whether or not it is flagged `needs_reconnection`; absent when the stored upstream account is not identified, since a renewal could not be verified against it), `share` (into a space it reaches) or `unshare_here` (withdraw it from the current space).",
 } as const;
 
 export const spaceIdSchema = {
