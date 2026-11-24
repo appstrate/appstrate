@@ -38,6 +38,27 @@ type SpacePolicy = Pick<
   "reachable" | "bounded" | "originSpaceId" | "orgPermissions" | "spaceChoice"
 >;
 
+/** The resource a body or query addresses, before applying the caller's space policy. */
+export function resourceAddress(
+  rule: Extract<CatalogOperation["spaceScope"], { kind: "resource"; source: "body" | "query" }>,
+  args: Record<string, unknown>,
+): { kind: "organization" | "default" | "invalid" } | { kind: "target"; spaceId: unknown } {
+  if (rule.source === "body") {
+    const body = asRecord(args.body);
+    return body[rule.levelParameter] === rule.spaceLevel
+      ? { kind: "target", spaceId: body[rule.parameter] }
+      : { kind: "organization" };
+  }
+  const query = asRecord(args.query);
+  if (Array.isArray(query[rule.parameter]) || Array.isArray(query[rule.allParameter]))
+    return { kind: "invalid" };
+  if (query[rule.allParameter] === true || query[rule.allParameter] === "true")
+    return { kind: "organization" };
+  return query[rule.parameter] === undefined
+    ? { kind: "default" }
+    : { kind: "target", spaceId: query[rule.parameter] };
+}
+
 export function effectiveOperationScope(
   op: CatalogOperation,
   orgPermissions?: ReadonlySet<string>,
@@ -142,15 +163,11 @@ export function resolveCallSpace(
       return target(asRecord(args[rule.source ?? "path_params"])[rule.parameter], rule.optional);
     case "resource": {
       if (rule.source === "row") return { kind: "row", id: explicit };
-      if (rule.source === "body")
-        return body[rule.levelParameter] === rule.spaceLevel
-          ? target(body[rule.parameter])
-          : { kind: "none" };
-      const query = asRecord(args.query);
-      if (query[rule.allParameter] === true || query[rule.allParameter] === "true")
-        return { kind: "none" };
-      if (query[rule.parameter] !== undefined) return target(query[rule.parameter]);
-      return explicit === undefined &&
+      const resource = resourceAddress(rule, args);
+      if (resource.kind === "organization" || resource.kind === "invalid") return { kind: "none" };
+      if (resource.kind === "target") return target(resource.spaceId);
+      return rule.source === "query" &&
+        explicit === undefined &&
         !policy.bounded &&
         policy.orgPermissions?.has(rule.organizationPermission)
         ? { kind: "none" }
@@ -175,10 +192,8 @@ export function withOperationTarget(
   else if (rule.kind === "target" && !rule.optional) source = rule.source ?? "path_params";
   else if (rule.kind === "resource") {
     source = rule.source;
-    if (rule.source === "body" && asRecord(args.body)[rule.levelParameter] !== rule.spaceLevel)
-      return args;
-    if (rule.source === "query" && String(asRecord(args.query)[rule.allParameter]) === "true")
-      return args;
+    const resource = resourceAddress(rule, args);
+    if (resource.kind === "organization" || resource.kind === "invalid") return args;
   } else return args;
   const original = args[source];
   if (

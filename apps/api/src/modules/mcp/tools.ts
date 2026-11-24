@@ -145,6 +145,7 @@ import {
   projectActiveInSpaces,
 } from "@appstrate/core/mcp-spaces";
 import {
+  resourceAddress,
   resolveCallSpace,
   withOperationTarget,
   isInlineRunSource,
@@ -1411,7 +1412,7 @@ function buildInvokeTool(ctx: McpToolContext): AppstrateToolDefinition {
     let operationSpaceId: string | null =
       spaceless ||
       op.spaceScope.kind === "organization" ||
-      resolved?.kind === "row" ||
+      (op.spaceScope.kind === "resource" && op.spaceScope.source === "row") ||
       (op.spaceScope.kind === "aggregate" && ctx.orgSpaces && !ctx.orgSpaces.bounded)
         ? null
         : ((resolved?.kind === "space" ? resolved.target : undefined) ?? ctx.scope.spaceId);
@@ -1486,24 +1487,53 @@ function buildInvokeTool(ctx: McpToolContext): AppstrateToolDefinition {
     });
 
     const spaces = ctx.orgSpaces;
+    const enteredId =
+      resolved && resolved.kind !== "none" && typeof resolved.id === "string"
+        ? resolved.id
+        : undefined;
     const additional = recordOperationSpaces(
       spaces,
       resolved?.kind === "space" && typeof resolved.id === "string" ? [resolved.id] : [],
     );
     if (additional.record) onDispatchSpaces(request, additional.record);
-    if (op.spaceScope.kind === "resource" && op.spaceScope.source === "row") {
-      onDispatchTarget(request, async (spaceId, targetPermissions) => {
-        if (spaceId !== null) {
-          const reachable = spaces
-            ? spaces.reachable.some((s) => s.id === spaceId)
-            : spaceId === ctx.scope.spaceId;
-          if (!reachable) throw notFound("Resource not found");
-          if (!targetPermissions?.has("mcp:invoke"))
-            throw forbidden("This space does not grant mcp:invoke");
-          if (additional.record) await additional.record([spaceId]);
-        }
-        operationSpaceId = spaceId;
-      });
+    if (op.spaceScope.kind === "resource") {
+      const reaches = (spaceId: string) =>
+        spaces
+          ? spaces.reachable.some((space) => space.id === spaceId)
+          : spaceId === ctx.scope.spaceId;
+      if (op.spaceScope.source === "row") {
+        onDispatchTarget(request, async (spaceId, targetPermissions) => {
+          if (spaceId !== null) {
+            if (!reaches(spaceId)) throw notFound("Resource not found");
+            // With no explicit entry, the authorized row determines where MCP is invoked.
+            // An explicit entry has checked its own grant; REST authorizes the row in its space.
+            if ((!enteredId || enteredId === spaceId) && !targetPermissions?.has("mcp:invoke"))
+              throw forbidden("This space does not grant mcp:invoke");
+            if (additional.record)
+              await additional.record(enteredId ? [enteredId, spaceId] : [spaceId]);
+          }
+          operationSpaceId = spaceId;
+        });
+      } else {
+        const address = resourceAddress(op.spaceScope, args);
+        let refusal: Refusal | undefined;
+        if (address.kind === "invalid")
+          refusal = {
+            code: "invalid_argument",
+            error: "Resource scope parameters must each have a single value.",
+          };
+        else if (
+          address.kind === "target" &&
+          typeof address.spaceId === "string" &&
+          !reaches(address.spaceId)
+        )
+          refusal = {
+            code: "unknown_space",
+            error: "The resource is outside the spaces this connection can use.",
+          };
+        if (refusal)
+          return { ...refusalResult(refusal), _meta: { [OPERATION_SPACES_META_KEY]: [] } };
+      }
     }
     const response = await ctx.dispatch(request);
     emit(ctx, {
@@ -1538,8 +1568,7 @@ function buildInvokeTool(ctx: McpToolContext): AppstrateToolDefinition {
     );
     const recordedIds = new Set<string>();
     if (operationSpaceId) {
-      if (resolved?.kind === "space" && typeof resolved.id === "string")
-        recordedIds.add(resolved.id);
+      if (enteredId) recordedIds.add(enteredId);
       recordedIds.add(operationSpaceId);
     }
     if (additional.record) for (const id of additional.ids) recordedIds.add(id);
@@ -2771,13 +2800,17 @@ function withSpaceArgument(
         entered && resolved.kind === "space"
           ? [...new Set([spaces.current.id, ...(target ? [target] : [])])]
           : [];
+      if (
+        target &&
+        (spaces.bounded || spaces.beforeAct) &&
+        !spaces.reachable.some((s) => s.id === target)
+      ) {
+        return refusalResult({
+          code: "unknown_space",
+          error: "The target is outside the spaces this connection can use.",
+        });
+      }
       if (spaces.beforeAct && ids.length > 0) {
-        if (ids.some((id) => !spaces.reachable.some((s) => s.id === id))) {
-          return refusalResult({
-            code: "unknown_space",
-            error: "The target is outside the spaces this conversation can use.",
-          });
-        }
         try {
           for (const id of ids) await spaces.beforeAct(id);
         } catch {

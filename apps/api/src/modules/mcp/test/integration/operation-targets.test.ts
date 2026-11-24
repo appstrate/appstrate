@@ -4,11 +4,16 @@ import { beforeEach, describe, expect, it } from "bun:test";
 import { asRecord } from "@appstrate/core/safe-json";
 import { OPERATION_SPACES_META_KEY, SPACE_CHOICE_META_KEY } from "@appstrate/core/mcp-spaces";
 import { getTestApp } from "../../../../../test/helpers/app.ts";
-import { createTestContext, type TestContext } from "../../../../../test/helpers/auth.ts";
+import {
+  createTestContext,
+  memberContext,
+  orgOnlyHeaders,
+  type TestContext,
+} from "../../../../../test/helpers/auth.ts";
 import { truncateAll } from "../../../../../test/helpers/db.ts";
-import { mcpRpc } from "../../../../../test/helpers/mcp.ts";
+import { inSpace, mcpRpc } from "../../../../../test/helpers/mcp.ts";
 import { registerTestPlatformApp } from "../../../../../test/helpers/platform-app.ts";
-import { seedSpace } from "../../../../../test/helpers/seed.ts";
+import { seedSpace, seedSpaceGrant } from "../../../../../test/helpers/seed.ts";
 import { createWebhook } from "../../../webhooks/service.ts";
 import { mintMcpLoopbackToken } from "../../../../../../../packages/module-chat/src/loopback-auth.ts";
 
@@ -24,11 +29,15 @@ describe("effective target of an MCP operation", () => {
     teamId = (await seedSpace({ orgId: owner.orgId, name: "Team" })).id;
   });
 
-  async function invoke(operation: string, args: Record<string, unknown>, token?: string) {
+  async function invoke(
+    operation: string,
+    args: Record<string, unknown>,
+    credential: string | Record<string, string> = orgOnlyHeaders(owner),
+  ) {
     const { envelope } = await rpc(
-      token
-        ? { Authorization: `Bearer ${token}`, "X-Org-Id": owner.orgId }
-        : { Cookie: owner.cookie, "X-Org-Id": owner.orgId },
+      typeof credential === "string"
+        ? { Authorization: `Bearer ${credential}`, "X-Org-Id": owner.orgId }
+        : credential,
       {
         jsonrpc: "2.0",
         id: 1,
@@ -77,6 +86,118 @@ describe("effective target of an MCP operation", () => {
     expect(fromOrg.data.status).toBe(200);
     expect(fromOrg.data.space).toBeUndefined();
     expect(fromOrg.ids).toEqual([]);
+  });
+
+  it("checks the invoke grant in the entry and the webhook grant in the target for every address", async () => {
+    const caller = await memberContext(owner, "member", "admin");
+    await seedSpaceGrant({
+      orgId: owner.orgId,
+      userId: caller.user.id,
+      spaceId: teamId,
+      permissions: ["mcp:read", "webhooks:read", "webhooks:write"],
+    });
+    const headers = orgOnlyHeaders(caller);
+    const entry = { space_id: owner.defaultSpaceId };
+    const body = {
+      level: "space",
+      spaceId: teamId,
+      events: ["run.success"],
+      url: "https://example.org/notify",
+    };
+    const created = await invoke("createWebhook", { ...entry, body }, headers);
+    expect(created.data).toMatchObject({ status: 201, space: { id: teamId } });
+    const id = asRecord(created.data.body).id;
+    expect(typeof id).toBe("string");
+    const byId = { path_params: { id } };
+    const list = { query: { spaceId: teamId } };
+    for (const [operation, args] of [
+      ["getWebhook", byId],
+      ["listWebhooks", list],
+    ] as const) {
+      const allowed = await invoke(operation, { ...args, ...entry }, headers);
+      expect(allowed.data).toMatchObject({ status: 200, space: { id: teamId } });
+      expect(allowed.ids).toEqual([owner.defaultSpaceId, teamId]);
+    }
+    expect((await invoke("getWebhook", byId, headers)).data.status).toBe(403);
+    expect((await invoke("listWebhooks", list, headers)).data.code).toBe("not_granted");
+    expect((await invoke("createWebhook", { body }, headers)).data.code).toBe("not_granted");
+  });
+
+  it("refuses a webhook outside an org-wide or pinned connection by row, filter and body", async () => {
+    const caller = await memberContext(owner, "member", "admin");
+    await seedSpaceGrant({
+      orgId: owner.orgId,
+      userId: caller.user.id,
+      spaceId: teamId,
+      permissions: ["webhooks:read", "webhooks:write"],
+    });
+    const pinned = inSpace(orgOnlyHeaders(owner), owner.defaultSpaceId);
+    const body = {
+      level: "space",
+      spaceId: teamId,
+      events: ["run.success"],
+      url: "https://example.org/notify",
+    };
+    const webhook = await createWebhook({
+      level: "space",
+      scope: { orgId: owner.orgId, spaceId: teamId },
+      url: body.url,
+      events: ["run.success"],
+    });
+    for (const [headers, entry] of [
+      [pinned, {}],
+      [orgOnlyHeaders(caller), { space_id: owner.defaultSpaceId }],
+    ] as const) {
+      const detail = await invoke(
+        "getWebhook",
+        { ...entry, path_params: { id: webhook.id } },
+        headers,
+      );
+      expect(detail.data.status).toBe(404);
+      expect(detail.ids).toEqual([]);
+      const list = await invoke("listWebhooks", { ...entry, query: { spaceId: teamId } }, headers);
+      expect(list.data.code).toBe("unknown_space");
+      expect(list.ids).toEqual([]);
+      expect((await invoke("createWebhook", { ...entry, body }, headers)).data.code).toBe(
+        "unknown_space",
+      );
+    }
+  });
+
+  it("keeps the target's REST permission when the entry grants webhook access", async () => {
+    const caller = await memberContext(owner, "member", "admin");
+    await seedSpaceGrant({
+      orgId: owner.orgId,
+      userId: caller.user.id,
+      spaceId: teamId,
+      permissions: ["mcp:read", "mcp:invoke"],
+    });
+    const webhook = await createWebhook({
+      level: "space",
+      scope: { orgId: owner.orgId, spaceId: teamId },
+      url: "https://example.org/notify",
+      events: ["run.success"],
+    });
+    const headers = orgOnlyHeaders(caller);
+    for (const [operation, args] of [
+      ["getWebhook", { path_params: { id: webhook.id } }],
+      ["listWebhooks", { query: { spaceId: teamId } }],
+      [
+        "createWebhook",
+        { body: { level: "space", spaceId: teamId, url: webhook.url, events: ["run.success"] } },
+      ],
+    ] as const) {
+      const result = await invoke(operation, { space_id: owner.defaultSpaceId, ...args }, headers);
+      expect(result.data.status).toBe(403);
+    }
+  });
+
+  it("refuses repeated scope selectors on a filtered resource list", async () => {
+    for (const query of [{ spaceId: [teamId] }, { all: [true] }]) {
+      const result = await invoke("listWebhooks", { query });
+      expect(result.data.code).toBe("invalid_argument");
+      expect(result.choices).toBeUndefined();
+    }
   });
 
   it("asks for a missing path or discriminated body space and fills only that parameter on selection", async () => {
