@@ -21,6 +21,9 @@
 import type { InlineRunModel } from "@appstrate/core/run-and-wait-client";
 import {
   ACTIVE_SPACES_META_KEY,
+  defaultMcpSpaceId,
+  OPERATION_SPACES_META_KEY,
+  SPACE_CHOICE_META_KEY,
   projectActiveInSpaces,
   spaceIdRefusal,
   type NamedSpace,
@@ -48,6 +51,7 @@ import {
   type OfferScope,
 } from "../connect-offer.ts";
 import { runAndWaitStepsWithinTurnBudget } from "../run-budget.ts";
+import type { PendingSpaceChoice, SpaceChoice } from "../space-choice.ts";
 import { logger } from "../logger.ts";
 import { FILE_NAME_META_KEY, isFileUri } from "@appstrate/core/file-uri";
 import { isRasterImageMime, normalizeMime } from "@appstrate/core/mime";
@@ -80,6 +84,10 @@ interface PiToolResult {
    * because `details` is redacted and nothing would fall back.
    */
   connectOffers?: ConnectOffer[];
+  /** Platform-owned metadata for the UI. Remote result text never supplies destinations. */
+  actedSpaceIds?: readonly string[];
+  spaceChoice?: PendingSpaceChoice;
+  terminate?: boolean;
   /**
    * The platform marked the result relayed (`_meta["dev.appstrate/relayed"]`): a third party
    * wrote it whole, so it was passed on verbatim. Persisted beside `connectOffers` (same
@@ -266,6 +274,9 @@ export interface PiTurnBudget {
  * conversation touched.
  */
 export interface TurnSpaces {
+  /** Defaults apply only to the current turn and remain subject to its reachable spaces. */
+  originSpaceId?: string;
+  spaceChoice?: SpaceChoice;
   /** The turn's spaces, each with the caller's effective permissions there. */
   spaces: readonly (NamedSpace & { permissions: readonly string[] })[];
   /**
@@ -442,12 +453,16 @@ export async function buildPlatformMcpTools(
 
   const runOrigin = new URL(opts.url).origin;
   const { organization } = opts;
+  // Pi may request several tools in one model step. A mixed batch can continue after a
+  // single tool terminates; once a choice was requested, subsequent calls must wait for the user.
+  const choiceGate = { waiting: false };
   const toolFactories = surface.tools.map((tool) =>
     tool.name === RUN_AND_WAIT_TOOL
       ? makeRunAndWaitExtension(tool, {
           origin: runOrigin,
           headers: opts.headers,
           organization,
+          choiceGate,
           // Same seam as the handshake above, and this is the tool that needs
           // it most: every `run_and_wait` is a launch POST plus a poll loop.
           fetch: opts.fetch ?? fetch,
@@ -456,9 +471,12 @@ export async function buildPlatformMcpTools(
           turnBudget: opts.turnBudget,
           ...(opts.inlineRunModel ? { inlineRunModel: opts.inlineRunModel } : {}),
         })
-      : makeForwardExtension(tool, getClient, opts),
+      : makeForwardExtension(tool, getClient, opts, choiceGate),
   );
-  const extensionFactories = [...toolFactories, makeReadResourceExtension(getClient, opts)];
+  const extensionFactories = [
+    ...toolFactories,
+    makeReadResourceExtension(getClient, opts, choiceGate),
+  ];
 
   const close = async () => {
     if (closed) return;
@@ -562,11 +580,20 @@ function keepsSkillText(uri: unknown, resources: readonly object[]): boolean {
   );
 }
 
+function waitingForSpaceChoice(): PiToolResult {
+  return {
+    content: [{ type: "text", text: "Waiting for the user to choose a space." }],
+    details: {},
+    terminate: true,
+  };
+}
+
 /** Generic forwarding Pi tool: verbatim `tools/call` → adapted Pi result. */
 function makeForwardExtension(
   tool: { name: string; description?: string; inputSchema: unknown },
   getClient: () => Promise<AppstrateMcpClient>,
   opts: BuildPlatformMcpToolsOptions,
+  choiceGate: { waiting: boolean },
 ): ExtensionFactory {
   const { signal, turnBudget, organization } = opts;
   const toolName = stripMcpToolPrefix(tool.name);
@@ -579,19 +606,10 @@ function makeForwardExtension(
         (tool.inputSchema as Record<string, unknown>) ?? { type: "object" },
       ),
       async execute(toolCallId: string, params: unknown, execSignal?: AbortSignal) {
+        if (choiceGate.waiting) return waitingForSpaceChoice();
         const callSignal = execSignal ?? signal;
         const args = (params as Record<string, unknown>) ?? {};
         const spaceId = dispatchSpace(args);
-        if (spaceId !== undefined) {
-          const refusal = await enterNamedSpace(organization, spaceId);
-          if (refusal) {
-            return refusalToolResult(
-              refusal,
-              offerScopeOf(toolName, { arguments: args }),
-              turnBudget,
-            );
-          }
-        }
         const client = await untilAborted(getClient(), callSignal);
         const result = await client.callTool(
           { name: tool.name, arguments: args },
@@ -601,6 +619,53 @@ function makeForwardExtension(
           arguments: params,
           relayed: isRelayedResult(result),
         });
+        // The platform records each operation's resolved execution space before dispatch,
+        // through the signed bearer's beforeMcpSpaceAct callback. Other disclosed spaces (a
+        // search, or the alternatives on a refusal) can only be known from the result.
+        const serverSpaces = result._meta?.[OPERATION_SPACES_META_KEY];
+        const actedSpaceIds =
+          Array.isArray(serverSpaces) &&
+          serverSpaces.every(
+            (id): id is string =>
+              typeof id === "string" && organization.spaces.some((space) => space.id === id),
+          )
+            ? serverSpaces
+            : undefined;
+        if (serverSpaces !== undefined && !actedSpaceIds) {
+          return refusalToolResult(
+            {
+              code: "spaces_not_recorded",
+              error: "The operation returned a space outside this conversation.",
+            },
+            scope,
+            turnBudget,
+          );
+        }
+        const choice =
+          !isRelayedResult(result) && result.isError && result._meta?.[SPACE_CHOICE_META_KEY];
+        if (
+          Array.isArray(choice) &&
+          choice.length &&
+          choice.every(
+            (id): id is string =>
+              typeof id === "string" && organization.spaces.some((space) => space.id === id),
+          )
+        ) {
+          choiceGate.waiting = true;
+          return withTurnBudgetNote(
+            {
+              ...mcpResultToPi(result, scope),
+              spaceChoice: {
+                tool: toolName,
+                ...(toolName === "invoke_operation" &&
+                  typeof args.operation_id === "string" && { operationId: args.operation_id }),
+                spaceIds: choice,
+              },
+              terminate: true,
+            },
+            turnBudget,
+          );
+        }
         const readSpaces =
           toolName === "invoke_operation" && result.isError
             ? result._meta?.[ACTIVE_SPACES_META_KEY]
@@ -611,7 +676,10 @@ function makeForwardExtension(
         if (unrecorded) return refusalToolResult(unrecorded, scope, turnBudget);
         if (toolName === "call_integration_tool" && isRelayedResult(result)) {
           return withTurnBudgetNote(
-            await relayedToolResult(result, scope, opts.fileDelivery.image),
+            {
+              ...(await relayedToolResult(result, scope, opts.fileDelivery.image)),
+              ...(actedSpaceIds && { actedSpaceIds }),
+            },
             turnBudget,
           );
         }
@@ -637,6 +705,7 @@ function makeForwardExtension(
             return withTurnBudgetNote(
               {
                 ...meta,
+                ...(actedSpaceIds && { actedSpaceIds }),
                 content: [...meta.content, ...file.content],
                 ...(keepsSkillText(args.uri, resources)
                   ? {}
@@ -651,7 +720,10 @@ function makeForwardExtension(
             );
           }
         }
-        return withTurnBudgetNote(mcpResultToPi(result, scope), turnBudget);
+        return withTurnBudgetNote(
+          { ...mcpResultToPi(result, scope), ...(actedSpaceIds && { actedSpaceIds }) },
+          turnBudget,
+        );
       },
     });
   };
@@ -666,6 +738,7 @@ function makeForwardExtension(
 function makeReadResourceExtension(
   getClient: () => Promise<AppstrateMcpClient>,
   opts: BuildPlatformMcpToolsOptions,
+  choiceGate: { waiting: boolean },
 ): ExtensionFactory {
   const { signal, turnBudget, organization } = opts;
   return (pi: ExtensionAPI) => {
@@ -687,6 +760,7 @@ function makeReadResourceExtension(
         additionalProperties: false,
       }),
       async execute(toolCallId: string, params: unknown, execSignal?: AbortSignal) {
+        if (choiceGate.waiting) return waitingForSpaceChoice();
         const callSignal = execSignal ?? signal;
         const uri = (params as { uri?: unknown } | null)?.uri;
         if (typeof uri !== "string" || uri === "") {
@@ -794,6 +868,7 @@ function makeRunAndWaitExtension(
     headers: Record<string, string>;
     /** The spaces one of which each call names. */
     organization: TurnSpaces;
+    choiceGate: { waiting: boolean };
     /** Transport for the launch POST and the poll loop — see the option above. */
     fetch: typeof fetch;
     writeChunk: (chunk: UIMessageChunk) => void;
@@ -810,13 +885,79 @@ function makeRunAndWaitExtension(
       description: tool.description ?? "Launch an Appstrate run and wait for completion.",
       parameters: unsafeSchema<Record<string, unknown>>(withoutWaitArgument(tool.inputSchema)),
       async execute(toolCallId: string, params: unknown, execSignal?: AbortSignal) {
+        if (ctx.choiceGate.waiting) return waitingForSpaceChoice();
         // Taken out of the arguments (the shared launch refuses one it does not declare) and
         // recorded before anything is launched.
-        const { space_id: spaceId, ...args } = (params as Record<string, unknown> | null) ?? {};
-        const refusal = await enterNamedSpace(ctx.organization, spaceId);
-        if (refusal) {
-          return withTurnBudgetNote(toPiToolResult(refusal, runAndWaitScope), ctx.turnBudget);
+        const { space_id: explicit, ...args } = (params as Record<string, unknown> | null) ?? {};
+        const chosen =
+          ctx.organization.spaceChoice?.tool === RUN_AND_WAIT_TOOL
+            ? ctx.organization.spaceChoice.spaceId
+            : undefined;
+        if (chosen !== undefined && explicit !== undefined && chosen !== explicit) {
+          return withTurnBudgetNote(
+            toPiToolResult(
+              { code: "space_mismatch", error: "Use the space the user selected for this call." },
+              runAndWaitScope,
+            ),
+            ctx.turnBudget,
+          );
         }
+        const spaceId =
+          explicit !== undefined
+            ? explicit
+            : (chosen ??
+              defaultMcpSpaceId(
+                ctx.organization.spaces,
+                ctx.organization.originSpaceId,
+                args.kind === "inline",
+              ));
+        const canLaunch = ({ permissions }: TurnSpaces["spaces"][number]) => {
+          const has = (permission: string) => permissions.includes(permission);
+          return has("mcp:read") && has("mcp:invoke") && canRunAgents(has);
+        };
+        const eligible = () =>
+          ctx.organization.spaces.filter(
+            (space) =>
+              canLaunch(space) &&
+              (args.kind !== "inline" || canComposeInline((p) => space.permissions.includes(p))),
+          );
+        if (spaceId === undefined) {
+          const allowed = eligible();
+          if (allowed.length > 0) {
+            ctx.choiceGate.waiting = true;
+            return withTurnBudgetNote(
+              {
+                ...toPiToolResult(spaceIdRefusal(allowed, undefined), runAndWaitScope),
+                spaceChoice: { tool: RUN_AND_WAIT_TOOL, spaceIds: allowed.map((s) => s.id) },
+                terminate: true,
+              },
+              ctx.turnBudget,
+            );
+          }
+        }
+        const target = ctx.organization.spaces.find((space) => space.id === spaceId);
+        if (spaceId !== undefined && !target) {
+          return withTurnBudgetNote(
+            toPiToolResult(spaceIdRefusal(ctx.organization.spaces, spaceId), runAndWaitScope),
+            ctx.turnBudget,
+          );
+        }
+        if (!target || !canLaunch(target)) {
+          return withTurnBudgetNote(
+            toPiToolResult(
+              {
+                code: "not_granted",
+                error: "Your role does not allow launching and reading this run here.",
+                granted_in: eligible().map(({ id, name }) => ({ id, name })),
+              },
+              runAndWaitScope,
+            ),
+            ctx.turnBudget,
+          );
+        }
+        // REST rechecks the launch grants and can explain a missing inline authoring
+        // permission together with the other spaces where the caller may compose.
+        await ctx.organization.touch(target.id);
         let finalPayload: Record<string, unknown> = {
           error: "run_and_wait produced no result",
         };
@@ -825,7 +966,7 @@ function makeRunAndWaitExtension(
         // here — before any run row exists.
         for await (const step of runAndWaitStepsWithinTurnBudget(args, {
           origin: ctx.origin,
-          headers: { ...ctx.headers, "x-space-id": spaceId as string },
+          headers: { ...ctx.headers, "x-space-id": target.id },
           fetch: ctx.fetch,
           signal: execSignal ?? ctx.signal,
           // The chat holds the connect capability itself — the link goes to a
@@ -844,17 +985,7 @@ function makeRunAndWaitExtension(
           if (step.isError) {
             // This tool launches over REST. Restrict its alternatives to the same tool and
             // record them before any preliminary card, tool result or history can reveal them.
-            const projected = projectActiveInSpaces(step.payload.body, () =>
-              ctx.organization.spaces.filter(({ permissions }) => {
-                const has = (permission: string) => permissions.includes(permission);
-                return (
-                  has("mcp:read") &&
-                  has("mcp:invoke") &&
-                  canRunAgents(has) &&
-                  (args.kind !== "inline" || canComposeInline(has))
-                );
-              }),
-            );
+            const projected = projectActiveInSpaces(step.payload.body, eligible);
             if (projected) {
               const unrecorded = await recordResultSpaces(ctx.organization, projected.ids);
               if (unrecorded) {
@@ -872,7 +1003,10 @@ function makeRunAndWaitExtension(
           ctx.writeChunk({
             type: "tool-output-available",
             toolCallId,
-            output: toPiToolResult(finalPayload, runAndWaitScope),
+            output: {
+              ...toPiToolResult(finalPayload, runAndWaitScope),
+              actedSpaceIds: [target.id],
+            },
             preliminary: true,
           });
         }
@@ -880,7 +1014,10 @@ function makeRunAndWaitExtension(
         // re-emits it under the same id — an idempotent update to the same card).
         // That last write is the one the card keeps, and it carries the budget
         // note appended to `content` — the very channel the card parses.
-        return withTurnBudgetNote(toPiToolResult(finalPayload, runAndWaitScope), ctx.turnBudget);
+        return withTurnBudgetNote(
+          { ...toPiToolResult(finalPayload, runAndWaitScope), actedSpaceIds: [target.id] },
+          ctx.turnBudget,
+        );
       },
     });
   };

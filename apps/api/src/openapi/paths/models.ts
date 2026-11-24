@@ -8,6 +8,7 @@ export const modelsPaths = {
   "/api/models": {
     get: {
       operationId: "listModels",
+      "x-appstrate-space": { kind: "organization" },
       tags: ["Models"],
       summary: "List organization models",
       description:
@@ -76,6 +77,7 @@ export const modelsPaths = {
     },
     post: {
       operationId: "createModel",
+      "x-appstrate-space": { kind: "organization" },
       tags: ["Models"],
       summary: "Create a custom model",
       description:
@@ -176,6 +178,7 @@ export const modelsPaths = {
   "/api/models/apply": {
     post: {
       operationId: "applyModelChoice",
+      "x-appstrate-space": { kind: "organization" },
       tags: ["Models"],
       summary: "Apply a model-provider choice in one transaction",
       description:
@@ -303,6 +306,7 @@ export const modelsPaths = {
   "/api/models/default": {
     put: {
       operationId: "setDefaultModel",
+      "x-appstrate-space": { kind: "organization" },
       tags: ["Models"],
       summary: "Set the organization default model",
       description:
@@ -365,6 +369,7 @@ export const modelsPaths = {
   "/api/models/seed": {
     post: {
       operationId: "seedModels",
+      "x-appstrate-space": { kind: "organization" },
       tags: ["Models"],
       summary: "Bulk-seed models from the registry for a credential",
       description:
@@ -425,6 +430,7 @@ export const modelsPaths = {
   "/api/models/openrouter": {
     get: {
       operationId: "searchOpenRouterModels",
+      "x-appstrate-space": { kind: "organization" },
       tags: ["Models"],
       summary: "Search OpenRouter models",
       description:
@@ -550,6 +556,7 @@ export const modelsPaths = {
   "/api/models/test": {
     post: {
       operationId: "testModelInline",
+      "x-appstrate-space": { kind: "organization" },
       tags: ["Models"],
       summary: "Test model configuration inline",
       description:
@@ -603,6 +610,7 @@ export const modelsPaths = {
   "/api/models/{id}": {
     patch: {
       operationId: "updateModel",
+      "x-appstrate-space": { kind: "organization" },
       tags: ["Models"],
       summary: "Update a custom model",
       description:
@@ -702,6 +710,7 @@ export const modelsPaths = {
     },
     delete: {
       operationId: "deleteModel",
+      "x-appstrate-space": { kind: "organization" },
       tags: ["Models"],
       summary: "Delete a custom model",
       description: "Delete a custom model. Built-in models cannot be deleted.",
@@ -722,6 +731,7 @@ export const modelsPaths = {
   "/api/models/{id}/test": {
     post: {
       operationId: "testModel",
+      "x-appstrate-space": { kind: "organization" },
       tags: ["Models"],
       summary: "Test model connection",
       description:

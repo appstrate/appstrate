@@ -14,6 +14,7 @@ export const spacesPaths = {
   "/api/spaces": {
     post: {
       operationId: "createSpace",
+      "x-appstrate-space": { kind: "organization" },
       tags: ["Spaces"],
       summary: "Create a space",
       description:
@@ -93,6 +94,7 @@ export const spacesPaths = {
     },
     get: {
       operationId: "listSpaces",
+      "x-appstrate-space": { kind: "organization" },
       tags: ["Spaces"],
       summary: "List spaces",
       description:
@@ -181,6 +183,7 @@ export const spacesPaths = {
   "/api/spaces/{id}": {
     get: {
       operationId: "getSpace",
+      "x-appstrate-space": { kind: "organization" },
       tags: ["Spaces"],
       summary: "Get a space",
       description: "Get a single space by ID.",
@@ -301,6 +304,7 @@ export const spacesPaths = {
     },
     delete: {
       operationId: "deleteSpace",
+      "x-appstrate-space": { kind: "organization" },
       tags: ["Spaces"],
       summary: "Delete a space",
       description:
@@ -332,6 +336,7 @@ export const spacesPaths = {
   "/api/spaces/{id}/convert-to-team": {
     post: {
       operationId: "convertSpaceToTeam",
+      "x-appstrate-space": { kind: "organization" },
       tags: ["Spaces"],
       summary: "Convert a personal space to a team space",
       description:
@@ -368,6 +373,7 @@ export const spacesPaths = {
   "/api/spaces/{id}/sweep-now": {
     post: {
       operationId: "sweepPersonalSpace",
+      "x-appstrate-space": { kind: "organization" },
       tags: ["Spaces"],
       summary: "Sweep an orphaned personal space now",
       description:

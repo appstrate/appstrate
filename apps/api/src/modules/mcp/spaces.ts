@@ -7,12 +7,14 @@
 
 import type { Context } from "hono";
 import type { AppEnv } from "../../types/index.ts";
+import { notFound } from "../../lib/errors.ts";
 import { loadFileForPreview } from "../../services/files.ts";
 import { parseFileUri } from "@appstrate/core/file-uri";
 import { enterableSpaces, type ReachableSpace } from "../../lib/reachable-spaces.ts";
 import { toSpaceRoleWire } from "../../lib/space-role.ts";
 import type { DispatchPin } from "../../lib/internal-dispatch.ts";
 import type { Dispatch, McpSurface } from "./tools.ts";
+import { resolveCallSpace } from "./call-space.ts";
 import { describeSpace, spaceIdRefusal } from "@appstrate/core/mcp-spaces";
 import type { Refusal } from "./tool-results.ts";
 
@@ -33,12 +35,40 @@ export interface McpSpace {
 export interface OrgWideSpaces {
   reachable: readonly McpSpace[];
   current: McpSpace;
+  /** A credential bound to a set acts in one destination even on aggregate routes. */
+  bounded?: boolean;
+  ceiling?: ReadonlySet<string>;
+  orgPermissions?: ReadonlySet<string>;
+  originSpaceId?: string;
+  spaceChoice?: { spaceId: string; tool: string; operationId?: string };
+  beforeAct?: (spaceId: string) => Promise<void>;
 }
 
 /** An org-wide connection as a tool reads it. */
 export interface OrgWideToolSpaces extends OrgWideSpaces {
   /** A dispatch run in one reachable space; throws for any other. */
   dispatchIn: (spaceId: string) => Dispatch;
+}
+
+/** Track spaces discovered after an operation authorizes its resource, before it acts there. */
+export function recordOperationSpaces(
+  spaces: OrgWideSpaces | undefined,
+  already: readonly string[] = [],
+) {
+  const ids = new Set(already);
+  const beforeAct = spaces?.beforeAct;
+  const record = beforeAct
+    ? async (spaceIds: readonly string[]) => {
+        for (const id of spaceIds) {
+          if (ids.has(id)) continue;
+          if (!spaces.reachable.some((space) => space.id === id)) throw notFound("Space not found");
+          await beforeAct(id);
+          ids.add(id);
+        }
+        return true;
+      }
+    : undefined;
+  return { ids, record };
 }
 
 /** {@link OrgWideToolSpaces.dispatchIn} over `send`: a `bound` credential is pinned to the space per dispatch, any other enters it by `x-space-id`. */
@@ -94,17 +124,25 @@ export async function listReachableSpaces(
 export async function requestedSpaceId(
   message: unknown,
   orgId: string,
+  policy: Omit<OrgWideSpaces, "current">,
 ): Promise<string | undefined> {
   const first: unknown = Array.isArray(message) ? message[0] : message;
   if (typeof first !== "object" || first === null) return undefined;
   const { method, params } = first as { method?: unknown; params?: Record<string, unknown> };
   if (typeof params !== "object" || params === null) return undefined;
+  let resourceUri = params.uri;
   if (method === "tools/call") {
-    const args = params.arguments as { space_id?: unknown } | undefined;
-    return typeof args?.space_id === "string" ? args.space_id : undefined;
+    const args =
+      typeof params.arguments === "object" && params.arguments !== null
+        ? (params.arguments as Record<string, unknown>)
+        : {};
+    const chosen = resolveCallSpace(params.name, args, policy);
+    if (params.name !== "read" || chosen.kind !== "row")
+      return chosen.kind !== "none" && typeof chosen.id === "string" ? chosen.id : undefined;
+    resourceUri = args.uri;
   }
-  if (method === "resources/read" && typeof params.uri === "string") {
-    const fileId = parseFileUri(params.uri);
+  if ((method === "resources/read" || method === "tools/call") && typeof resourceUri === "string") {
+    const fileId = parseFileUri(resourceUri);
     return (fileId && (await loadFileForPreview(orgId, fileId))?.spaceId) || undefined;
   }
   return undefined;

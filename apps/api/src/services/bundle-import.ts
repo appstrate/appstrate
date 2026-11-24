@@ -43,6 +43,7 @@ import { parsePackageZip } from "@appstrate/core/zip";
 import { db } from "@appstrate/db/client";
 import { packages, packageVersions } from "@appstrate/db/schema";
 import { and, eq, notExists, sql } from "drizzle-orm";
+import { isPackageReadableInSpace } from "../lib/package-access.ts";
 import { conflict, invalidRequest, validationFailed } from "../lib/errors.ts";
 import type { ValidationFieldError } from "../lib/errors.ts";
 import {
@@ -604,7 +605,8 @@ export async function importBundle(
   // `activatePackage` refuses and the result says `root_active: false`.
   let rootActive = false;
   try {
-    const placeAs = await placeRootAs(rootParsed.packageId);
+    const alreadyPlaced = await isPackageReadableInSpace(scope.spaceId, rootParsed.packageId);
+    const placeAs = alreadyPlaced ? null : await placeRootAs(rootParsed.packageId);
     await activatePackage(scope, rootParsed.packageId, placeAs ? { placeAs } : undefined);
     rootActive = true;
   } catch (err) {

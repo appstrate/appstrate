@@ -180,6 +180,7 @@ export const connectionCallsPaths = {
   "/api/me/connections/{connectionId}/calls": {
     get: {
       operationId: "listMyConnectionCalls",
+      "x-appstrate-space": { kind: "organization" },
       tags: ["Profile"],
       summary: "The credential proxy's calls made with one of the caller's connections",
       description:

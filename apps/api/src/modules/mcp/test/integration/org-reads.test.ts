@@ -37,6 +37,7 @@ import { overrideJwks } from "../../../oidc/services/enduser-token.ts";
 import { resetOidcGuardsLimiters } from "../../../oidc/auth/guards.ts";
 import { authorizationCodeFlow } from "../../../oidc/test/helpers/authorization-code-flow.ts";
 import mcpModule from "../../index.ts";
+import { mintMcpLoopbackToken } from "../../../../../../../packages/module-chat/src/loopback-auth.ts";
 
 const app = getTestApp();
 await registerTestPlatformApp();
@@ -215,8 +216,26 @@ describe("lists spanning spaces through invoke_operation", () => {
     const endpoint = `/api/mcp/o/${owner.orgId}`;
     // The entered space decides nothing here: each row's space decides it.
     // The default space (implicit `operator`) is reached too and holds no row.
+    expect(await invoke("listOrgRuns", endpoint, token)).toEqual(restIds);
     expect(await invoke("listOrgRuns", endpoint, token, un)).toEqual(restIds);
     expect(await invoke("listOrgRuns", endpoint, token, deux)).toEqual(restIds);
+  });
+
+  it("reads the conversation's origin when its signed bearer can reach two spaces", async () => {
+    const token = mintMcpLoopbackToken({
+      userId: member.user.id,
+      name: member.user.name,
+      email: member.user.email,
+      orgId: owner.orgId,
+      orgRole: "member",
+      permissions: ["mcp:read", "mcp:invoke", "runs:read", "runs:read-all"],
+      spaceIds: [un, deux],
+      originSpaceId: deux,
+      restricted: false,
+    });
+    const endpoint = `/api/mcp/o/${owner.orgId}`;
+    expect(await invoke("listOrgRuns", endpoint, token)).toEqual(runIds.deux);
+    expect(await invoke("listOrgRuns", endpoint, token, un)).toEqual([...runIds.un].sort());
   });
 
   it("bounds a space-bound token to its space", async () => {

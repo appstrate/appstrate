@@ -8,6 +8,7 @@ export const modelProviderCredentialsPaths = {
   "/api/model-provider-credentials/registry": {
     get: {
       operationId: "listModelProviderRegistry",
+      "x-appstrate-space": { kind: "organization" },
       tags: ["Model Provider Credentials"],
       summary: "List the in-code model provider registry",
       description:
@@ -166,6 +167,7 @@ export const modelProviderCredentialsPaths = {
   "/api/model-provider-credentials": {
     get: {
       operationId: "listModelProviderCredentials",
+      "x-appstrate-space": { kind: "organization" },
       tags: ["Model Provider Credentials"],
       summary: "List model provider credentials",
       description:
@@ -229,6 +231,7 @@ export const modelProviderCredentialsPaths = {
     },
     post: {
       operationId: "createModelProviderCredential",
+      "x-appstrate-space": { kind: "organization" },
       tags: ["Model Provider Credentials"],
       summary: "Create a model provider credential",
       description:
@@ -316,6 +319,7 @@ export const modelProviderCredentialsPaths = {
   "/api/model-provider-credentials/test": {
     post: {
       operationId: "testModelProviderCredentialInline",
+      "x-appstrate-space": { kind: "organization" },
       tags: ["Model Provider Credentials"],
       summary: "Test model provider credential configuration inline",
       description:
@@ -380,6 +384,7 @@ export const modelProviderCredentialsPaths = {
   "/api/model-provider-credentials/discover": {
     post: {
       operationId: "discoverModelProviderCredentialModels",
+      "x-appstrate-space": { kind: "organization" },
       tags: ["Model Provider Credentials"],
       summary: "Enumerate the models an endpoint serves",
       description:
@@ -543,6 +548,7 @@ export const modelProviderCredentialsPaths = {
   "/api/model-provider-credentials/{id}": {
     patch: {
       operationId: "updateModelProviderCredential",
+      "x-appstrate-space": { kind: "organization" },
       tags: ["Model Provider Credentials"],
       summary: "Update a model provider credential",
       description:
@@ -599,6 +605,7 @@ export const modelProviderCredentialsPaths = {
     },
     delete: {
       operationId: "deleteModelProviderCredential",
+      "x-appstrate-space": { kind: "organization" },
       tags: ["Model Provider Credentials"],
       summary: "Delete a model provider credential",
       description:
@@ -637,6 +644,7 @@ export const modelProviderCredentialsPaths = {
   "/api/model-provider-credentials/{id}/test": {
     post: {
       operationId: "testModelProviderCredential",
+      "x-appstrate-space": { kind: "organization" },
       tags: ["Model Provider Credentials"],
       summary: "Test model provider credential connection",
       description:

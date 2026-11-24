@@ -1064,6 +1064,7 @@ const canonicalRunsPaths = {
   "/api/orgs/{orgId}/runs": {
     get: {
       operationId: "listOrgRuns",
+      "x-appstrate-space": { kind: "aggregate" },
       tags: ["Runs"],
       summary: "List runs across the organization's spaces",
       description:
@@ -1162,6 +1163,7 @@ const canonicalRunsPaths = {
   "/api/orgs/{orgId}/runs/{id}": {
     get: {
       operationId: "getOrgRun",
+      "x-appstrate-space": { kind: "aggregate" },
       tags: ["Runs"],
       summary: "Get a run in any space of the organization",
       description:
@@ -1560,6 +1562,7 @@ const canonicalRunsPaths = {
   "/api/runs/{id}/events": {
     post: {
       operationId: "ingestRunEvent",
+      "x-appstrate-space": { kind: "organization" },
       tags: ["Runs"],
       summary: "Ingest one signed CloudEvent (HMAC)",
       description:
@@ -1658,6 +1661,7 @@ const canonicalRunsPaths = {
   "/api/runs/{id}/events/finalize": {
     post: {
       operationId: "finalizeRemoteRun",
+      "x-appstrate-space": { kind: "organization" },
       tags: ["Runs"],
       summary: "Terminal RunResult — close the sink (HMAC, idempotent)",
       description:
@@ -1754,6 +1758,7 @@ const canonicalRunsPaths = {
   "/api/runs/{id}/events/heartbeat": {
     post: {
       operationId: "heartbeatRemoteRun",
+      "x-appstrate-space": { kind: "organization" },
       tags: ["Runs"],
       summary: "Runner liveness keep-alive (HMAC)",
       description:
@@ -1800,6 +1805,7 @@ const canonicalRunsPaths = {
   "/api/runs/{id}/workspace": {
     get: {
       operationId: "fetchRunWorkspace",
+      "x-appstrate-space": { kind: "organization" },
       tags: ["Runs"],
       summary: "Fetch the run bundle archive (HMAC)",
       description:
@@ -1834,6 +1840,7 @@ const canonicalRunsPaths = {
   "/api/runs/{id}/files": {
     get: {
       operationId: "fetchRunFilesManifest",
+      "x-appstrate-space": { kind: "organization" },
       tags: ["Runs"],
       summary: "List the run's input files (HMAC)",
       description:
@@ -1879,6 +1886,7 @@ const canonicalRunsPaths = {
     },
     post: {
       operationId: "publishRunFile",
+      "x-appstrate-space": { kind: "organization" },
       tags: ["Runs"],
       summary: "Publish an agent-produced file (HMAC, streaming)",
       description:
@@ -1994,6 +2002,7 @@ const canonicalRunsPaths = {
   "/api/runs/{id}/files/{name}": {
     get: {
       operationId: "fetchRunFile",
+      "x-appstrate-space": { kind: "organization" },
       tags: ["Runs"],
       summary: "Fetch a single run input file (HMAC)",
       description:
@@ -2081,6 +2090,7 @@ const canonicalRunsPaths = {
   "/api/runs/{id}/mcp": {
     post: {
       operationId: "runToolsMcpPost",
+      "x-appstrate-space": { kind: "organization" },
       tags: ["Runs"],
       summary: "Run MCP server of a remote run (HMAC)",
       description:
@@ -2114,6 +2124,7 @@ const canonicalRunsPaths = {
     },
     get: {
       operationId: "runToolsMcpGet",
+      "x-appstrate-space": { kind: "organization" },
       tags: ["Runs"],
       summary: "Run MCP server of a remote run (GET)",
       description:

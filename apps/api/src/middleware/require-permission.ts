@@ -45,12 +45,13 @@ const SPACE_RESCOPE = Symbol.for("appstrate.spaceRescope");
 
 /** Mark a middleware that re-applies `permissions` for a space the PATH names,
  *  so guards mounted after it are enforced in that space, not the caller's. */
-export function markSpaceRescope<T extends object>(handler: T): T {
-  return markHandler(handler, SPACE_RESCOPE);
+export function markSpaceRescope<T extends object>(parameter: string, handler: T): T {
+  return markHandler(handler, SPACE_RESCOPE, parameter);
 }
 
-export function isSpaceRescope(handler: unknown): boolean {
-  return hasHandlerMarker(handler, SPACE_RESCOPE);
+export function rescopedSpaceParameter(handler: unknown): string | undefined {
+  const parameter = readHandlerMarker(handler, SPACE_RESCOPE);
+  return typeof parameter === "string" ? parameter : undefined;
 }
 
 /**

@@ -49,6 +49,7 @@ type RefusalCode =
   | "unknown_operation"
   | "unknown_tool"
   | "ambiguous_tool"
+  | "spaces_not_recorded"
   | "unknown_space"
   | "space_mismatch"
   | "not_granted"

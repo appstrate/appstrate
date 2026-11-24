@@ -75,6 +75,7 @@ export const oauthClientMetadataPaths = {
   "/oauth/client-metadata/{document}": {
     get: {
       operationId: "getOAuthClientMetadataDocument",
+      "x-appstrate-space": { kind: "organization" },
       tags: ["Integrations"],
       summary: "OAuth client metadata document",
       description:

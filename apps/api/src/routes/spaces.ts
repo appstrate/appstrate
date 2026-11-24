@@ -261,7 +261,7 @@ function requireSpaceFromParam(param: "id") {
   // Marked: every guard mounted behind this one reads the caller's set in the
   // space the PATH names, not in the space the request entered — a reader of
   // the route table cannot see that from the mounts alone.
-  return markSpaceRescope(async (c: Context<AppEnv>, next: Next) => {
+  return markSpaceRescope(param, async (c: Context<AppEnv>, next: Next) => {
     await enterSpaceById(c, c.req.param(param)!, c.get("orgId"));
     return next();
   });
@@ -838,7 +838,8 @@ export function createSpacesRouter() {
       : await activatePackage(scope, data.packageId, {
           placeAs: await callerPlacementAuthority(
             c,
-            (await assertPackageShareAccessForPlacement(c, data.packageId)).type,
+            await assertPackageShareAccessForPlacement(c, data.packageId),
+            { visibleSpaceId: spaceId },
           ),
         });
     // True only if this call turned the package on (a default-on package was already active).

@@ -142,7 +142,14 @@ function buildTurn(
     ...extra,
     url: MCP_URL,
     headers: { authorization: "Bearer loopback", "x-org-id": "org_1" },
-    organization: inertTurnSpaces([{ id: "spc_1", name: "One", role: "owner", permissions: [] }]),
+    organization: inertTurnSpaces([
+      {
+        id: "spc_1",
+        name: "One",
+        role: "owner",
+        permissions: ["mcp:read", "mcp:invoke", "agents:run", "agents:write", "runs:read"],
+      },
+    ]),
     writeChunk: () => {},
     fileDelivery: { image: false, pdf: false },
     signal: new AbortController().signal,

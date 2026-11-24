@@ -23,6 +23,8 @@ import {
 } from "../../services/bundle-import.ts";
 import { recordAudit } from "../../services/audit.ts";
 import { asString, jsonResult, refusalResult, ToolRefusal } from "./tool-results.ts";
+import { OPERATION_SPACES_META_KEY } from "@appstrate/core/mcp-spaces";
+import { recordOperationSpaces, type OrgWideSpaces } from "./spaces.ts";
 import type { McpSurface } from "./tools.ts";
 
 interface PackageFileToolContext {
@@ -41,7 +43,11 @@ interface PackageFileToolContext {
    * Who places a root re-imported from ANOTHER home space here, as
    * `POST /api/packages/import-bundle` decides; `null` → `root_active: false`.
    */
-  placeRootAs: Parameters<typeof handleImportBundle>[4];
+  placeRootAs: (
+    packageId: string,
+    record?: (ids: readonly string[]) => Promise<boolean>,
+  ) => ReturnType<Parameters<typeof handleImportBundle>[4]>;
+  orgSpaces?: OrgWideSpaces;
 }
 
 interface PackageFileBytes {
@@ -236,6 +242,7 @@ function buildImportPackageFileTool(ctx: PackageFileToolContext): AppstrateToolD
         arguments: ["file_uri"],
       });
     }
+    const operation = recordOperationSpaces(ctx.orgSpaces, [ctx.scope.spaceId]);
     try {
       const file = await readPackageFileBytes(ctx, uri);
       const result = await handleImportBundle(
@@ -243,7 +250,7 @@ function buildImportPackageFileTool(ctx: PackageFileToolContext): AppstrateToolD
         ctx.scope,
         ctx.actor.id,
         ctx.authorizeBundle,
-        ctx.placeRootAs,
+        (packageId) => ctx.placeRootAs(packageId, operation.record),
       );
       for (const audit of bundleImportAuditRecords(result, {
         via: "import:file",
@@ -260,7 +267,9 @@ function buildImportPackageFileTool(ctx: PackageFileToolContext): AppstrateToolD
           after: audit.after,
         });
       }
-      return jsonResult({ ...result, file_uri: fileUri(file.fileId) });
+      const response = jsonResult({ ...result, file_uri: fileUri(file.fileId) });
+      if (operation.record) response._meta = { [OPERATION_SPACES_META_KEY]: [...operation.ids] };
+      return response;
     } catch (err) {
       if (err instanceof ToolRefusal) return refusalResult(err.refusal);
       return jsonResult({ error: getErrorMessage(err) }, true);

@@ -17,6 +17,8 @@
   "welcome.hint": "Launch an agent, inspect a run, create a package or search your files.",
   "thread.disclaimer": "AI can make mistakes. Check before you confirm.",
   "thread.scrollToBottom": "Scroll to bottom",
+  "tool.chooseSpace": "Choose a space",
+  "tool.spaceChoiceReply": "Use the space {{name}} ({{id}}) for this request.",
   "turn.stepLimitReached": "Partial answer: step limit reached.",
   "context.label": "Conversation context",
   "context.collapse": "Collapse conversation context",

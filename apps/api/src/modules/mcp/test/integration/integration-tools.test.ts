@@ -428,7 +428,8 @@ describe("mcp integration tools", () => {
       const apiCall = (await listTools(caller)).find(
         (tool) => tool.name === "call_integration_tool",
       )!;
-      expect(apiCall.inputSchema.required).toContain("space_id");
+      expect(apiCall.inputSchema.properties).toHaveProperty("space_id");
+      expect(apiCall.inputSchema.required).not.toContain("space_id");
       // Granted in one of the two spaces: the description names it, and only it.
       const availableIn = apiCall.description.slice(
         0,
@@ -1157,7 +1158,9 @@ describe("mcp integration tools", () => {
         arguments: { ...where, tool: "nobody__nothing", arguments: {} },
       });
       expect((refused.result as { isError?: boolean }).isError).toBe(true);
-      expect((refused.result as { _meta?: unknown })._meta).toBeUndefined();
+      expect(
+        (refused.result?._meta as Record<string, unknown> | undefined)?.["dev.appstrate/relayed"],
+      ).toBeUndefined();
       // Sent with the connection's credential, never the caller's MCP token.
       const sent = server.requests.slice(exchanges);
       expect(sent.length).toBeGreaterThan(0);

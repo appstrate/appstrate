@@ -145,6 +145,7 @@ const organizationLibraryPaths = {
   "/api/library": {
     get: {
       operationId: "getLibrary",
+      "x-appstrate-space": { kind: "aggregate" },
       tags: ["Library"],
       summary: "Organization library — the placement map, graded by caller",
       description:

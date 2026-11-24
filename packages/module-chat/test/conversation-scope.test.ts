@@ -17,6 +17,14 @@ describe("callSpaceOf", () => {
     ).toBe("spc_origin");
   });
 
+  it("prefers the resolved target and honors an organization-only receipt", () => {
+    const providerMetadata = { appstrate: { spaceId: "spc_caller" } };
+    expect(
+      callSpaceOf({ providerMetadata, result: { actedSpaceIds: ["spc_caller", "spc_target"] } }),
+    ).toBe("spc_target");
+    expect(callSpaceOf({ providerMetadata, result: { actedSpaceIds: [] } })).toBeUndefined();
+  });
+
   it("is undefined without a usable stamp", () => {
     expect(callSpaceOf({})).toBeUndefined();
     expect(callSpaceOf({ providerMetadata: { appstrate: {} } })).toBeUndefined();

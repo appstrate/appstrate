@@ -22,8 +22,14 @@ import {
   memberContext,
   type TestContext,
 } from "../../helpers/auth.ts";
-import { seedPackage, seedPackageShare, seedPackageVersion } from "../../helpers/seed.ts";
+import {
+  seedPackage,
+  seedPackageShare,
+  seedPackageVersion,
+  seedSpace,
+} from "../../helpers/seed.ts";
 import { getTestApp } from "../../helpers/app.ts";
+import { onDispatchSpaces } from "../../../src/lib/internal-dispatch.ts";
 import { assertDbMissing } from "../../helpers/assertions.ts";
 import { localIntegrationManifest } from "../../helpers/integration-manifests.ts";
 import { activatePackage } from "../../../src/services/space-packages.ts";
@@ -224,6 +230,36 @@ describe("POST /api/packages/import-bundle — import", () => {
   beforeEach(async () => {
     await truncateAll();
     ctx = await createTestContext({ orgSlug: "importorg" });
+  });
+
+  it("records the home only when the import places its root into another space", async () => {
+    const { bytes } = await seedAndExportBundle({
+      ctx,
+      rootId: "@importorg/agent-root",
+      skillA: "@importorg/skill-a",
+      skillB: "@importorg/skill-b",
+    });
+    const destination = await seedSpace({ orgId: ctx.orgId, name: "Destination" });
+    async function importIn(spaceId: string) {
+      const form = new FormData();
+      form.append("file", new Blob([bytes]), "bundle.afps-bundle");
+      const request = new Request("http://localhost/api/packages/import-bundle", {
+        method: "POST",
+        headers: authHeaders(ctx, { "X-Space-Id": spaceId }),
+        body: form,
+      });
+      const ids: string[] = [];
+      onDispatchSpaces(request, async (used) => {
+        ids.push(...used);
+      });
+      const response = await app.fetch(request);
+      expect(response.status, await response.clone().text()).toBe(201);
+      expect(await response.json()).toMatchObject({ root_active: true });
+      return ids;
+    }
+    expect(await importIn(ctx.defaultSpaceId)).toEqual([]);
+    expect(await importIn(destination.id)).toEqual([ctx.defaultSpaceId, destination.id]);
+    expect(await importIn(destination.id)).toEqual([]);
   });
 
   it("imports a multi-package .afps-bundle and installs the root", async () => {

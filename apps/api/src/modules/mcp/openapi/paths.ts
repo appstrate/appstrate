@@ -65,6 +65,7 @@ const MCP_REFUSALS_DESCRIPTION =
 const orgEndpoint = {
   post: {
     operationId: "mcpStreamableHttpPost",
+    "x-appstrate-space": { kind: "organization" },
     tags: ["MCP"],
     summary: "Per-organization MCP Streamable HTTP endpoint",
     description:
@@ -75,8 +76,9 @@ const orgEndpoint = {
       "cannot drive any other organization. To use several organizations, configure one MCP " +
       "server entry per organization. Without a pinned space (no space-bound credential, no " +
       "`/s/{space}` in the URL) the connection reaches every space where the caller holds a " +
-      "role, and every tool that acts in a space requires a `space_id` argument whose schema " +
-      "lists them. " +
+      "role. Describe an operation before choosing its destination. Organization-level operations " +
+      "need no space. A space-dependent call can name its destination in its operation arguments. " +
+      "When the destination is still open, pass one of the reachable ids as `space_id`. " +
       MCP_REFUSALS_DESCRIPTION,
     security: [{ bearerJwt: [] }, { bearerApiKey: [] }, { cookieAuth: [] }],
     parameters: [orgPathParameter],
@@ -130,6 +132,7 @@ const orgEndpoint = {
   },
   get: {
     operationId: "mcpStreamableHttpGet",
+    "x-appstrate-space": { kind: "organization" },
     tags: ["MCP"],
     summary: "Per-organization MCP Streamable HTTP (GET)",
     description:
@@ -164,6 +167,7 @@ const orgEndpoint = {
 const orgMetadata = {
   get: {
     operationId: "mcpProtectedResourceMetadata",
+    "x-appstrate-space": { kind: "organization" },
     tags: ["MCP"],
     summary: "OAuth 2.0 Protected Resource Metadata (RFC 9728)",
     description:
@@ -206,6 +210,7 @@ function pinnedToSpace(
   return {
     ...op,
     operationId: `${op.operationId}InSpace`,
+    "x-appstrate-space": { kind: "target", parameter: "space" },
     description,
     parameters: [...op.parameters, spacePathParameter],
   };

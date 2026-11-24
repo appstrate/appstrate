@@ -17,6 +17,8 @@
   "welcome.hint": "Lancez un agent, inspectez un run, créez un package ou cherchez dans vos fichiers.",
   "thread.disclaimer": "L’IA peut se tromper. Vérifiez avant de confirmer.",
   "thread.scrollToBottom": "Aller en bas",
+  "tool.chooseSpace": "Choisissez un espace",
+  "tool.spaceChoiceReply": "Utilise l’espace {{name}} ({{id}}) pour cette demande.",
   "turn.stepLimitReached": "Réponse partielle : limite d'étapes atteinte.",
   "context.label": "Contexte de la conversation",
   "context.collapse": "Replier le contexte de la conversation",

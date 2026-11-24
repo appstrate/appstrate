@@ -334,6 +334,7 @@ export const packagesPaths = {
   "/api/orgs/{orgId}/packages/skills": {
     get: {
       operationId: "listOrgSkills",
+      "x-appstrate-space": { kind: "aggregate" },
       tags: ["Packages"],
       summary: "List skills across the organization's spaces",
       description: orgPackageIndexDescription("skills", "GET /api/packages/skills", "skills:read"),
@@ -347,6 +348,7 @@ export const packagesPaths = {
   "/api/orgs/{orgId}/packages/integrations": {
     get: {
       operationId: "listOrgIntegrationPackages",
+      "x-appstrate-space": { kind: "aggregate" },
       tags: ["Packages"],
       summary: "List integration packages across the organization's spaces",
       description: orgPackageIndexDescription(

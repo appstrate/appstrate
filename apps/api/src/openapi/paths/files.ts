@@ -282,6 +282,7 @@ export const filesPaths = {
   "/api/orgs/{orgId}/files": {
     get: {
       operationId: "listOrgFiles",
+      "x-appstrate-space": { kind: "aggregate" },
       tags: ["Files"],
       summary: "List files across the organization's spaces",
       description:

@@ -521,6 +521,33 @@ Modules that expose HTTP routes should also provide `openApiPaths()` (path items
 
 Every operation `openApiPaths()` documents must be served by a terminal handler on a route your router mounts — a middleware alone does not serve, while an `ALL` prefix proxy (`router.all("/x/*", handler)`) serves everything beneath it. A sub-app attached with `mount()` does not serve (its handler is middleware to the route table): forward to it from a route handler instead, `router.all("/x/*", (c) => handler(c.req.raw))`. `registerPlatformApp()` (`apps/api/src/lib/platform-app.ts`) joins each documented operation onto its route's guards at boot and refuses to boot on one no route serves, since it would otherwise be published as needing no permission.
 
+An operation also declares how a caller selects its space. Mounted `requireSpaceContext()` or
+`markSpaceRescope("id", middleware)` supplies the request or path target automatically. A route
+inside a core request-space family inherits its guard, except on a public or run-authenticated door.
+For other routes, put `x-appstrate-space` on each OpenAPI operation alongside `operationId`.
+
+| Declaration                                                                                                                       | When to use it                                                                                                                                                             |
+| --------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `{ kind: "organization" }`                                                                                                        | The request takes no acting space, including account-owned and public endpoints.                                                                                           |
+| `{ kind: "request" }`                                                                                                             | A module enters the caller's request space itself.                                                                                                                         |
+| `{ kind: "target", parameter: "id" }`                                                                                             | A path parameter names the acting space. Use `source: "query"` or `"body"` for a parameter in that bag, and `optional: true` when its omission selects organization scope. |
+| `{ kind: "aggregate" }`                                                                                                           | The route reads the caller's reachable spaces. A space-bound dispatch confines that reach. For a conditional enrichment, `permission` names the grant that enables it.     |
+| `{ kind: "resource", source: "row" }`                                                                                             | The authorized row determines the space. Mount `withAuthorizedRow(loadAndAuthorize, act)` on the by-id route.                                                              |
+| `{ kind: "resource", source: "body", parameter: "spaceId", level_parameter: "level", space_level: "space" }`                      | A discriminated body chooses an organization-level or space-level resource.                                                                                                |
+| `{ kind: "resource", source: "query", parameter: "spaceId", all_parameter: "all", organization_permission: "org-webhooks:read" }` | A list supports a space filter, an all-spaces flag and an organization-level default with the given grant.                                                                 |
+
+On a body- or query-selected resource, `space_permission` names the grant required on the space branch when the two levels use different permissions.
+
+Registration rejects a missing or unknown scope, a path target absent from the template, and a
+declaration contradicting mounted space middleware. Each route still enforces its own RBAC during
+dispatch. For a row-addressed resource, the loader verifies its organization, credential reach and
+row-level permissions and returns the row with its `spaceId` (null for an organization row).
+Import `withAuthorizedRow` from `@appstrate/core/permissions` in built-in and npm modules.
+It awaits the dispatch target check before handing that same row to the action.
+The registration rejects a row declaration whose terminal handler does not perform that check,
+including a literal or constrained sibling that would bypass it for some IDs. A test for a
+mixed-scope module should exercise both branches with the same caller.
+
 Because discovery is filesystem-based, adding a new endpoint only requires touching the module's own `openapi/` directory — no central list to update.
 
 ## Idempotency — built-in dir modules can opt in, package modules cannot

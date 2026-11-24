@@ -4,6 +4,7 @@ import { packageSourceValues } from "@appstrate/db/schema";
 import { SPACE_ID_RE } from "@appstrate/db/ids";
 import { PROXY_STATUS_HEADER, STD_RESPONSE_HEADERS } from "../headers.ts";
 import { MAX_CONNECTIONS_PER_INTEGRATION, SCOPE_TOKEN_RE } from "@appstrate/core/integration";
+import { INTEGRATION_CALLBACK_TEMPLATES } from "../../lib/integration-callback-url.ts";
 import { CONNECTION_LABEL_MAX } from "../../lib/connection-label.ts";
 import { CONNECTION_ACTIONS, CONNECTION_SCOPES } from "@appstrate/shared-types";
 
@@ -1031,6 +1032,7 @@ export const integrationsPaths = {
   "/api/integrations/callback": {
     get: {
       operationId: "integrationsOAuthCallback",
+      "x-appstrate-space": { kind: "organization" },
       tags: ["Integrations"],
       summary: "Integration OAuth2 callback (popup)",
       description:
@@ -1039,9 +1041,10 @@ export const integrationsPaths = {
       responses: oauthCallbackResponses,
     },
   },
-  "/api/integrations/callback/{tag}": {
+  [INTEGRATION_CALLBACK_TEMPLATES.dcr]: {
     get: {
       operationId: "integrationsOAuthCallbackForServer",
+      "x-appstrate-space": { kind: "organization" },
       tags: ["Integrations"],
       summary:
         "Integration OAuth2 callback of an auto-provisioned (DCR) client's authorization server (popup)",
@@ -1061,9 +1064,10 @@ export const integrationsPaths = {
       responses: oauthCallbackResponses,
     },
   },
-  "/api/integrations/callback/cimd/{tag}": {
+  [INTEGRATION_CALLBACK_TEMPLATES.metadata]: {
     get: {
       operationId: "integrationsOAuthCallbackForMetadataDocument",
+      "x-appstrate-space": { kind: "organization" },
       tags: ["Integrations"],
       summary: "Integration OAuth2 callback of a client metadata document (popup)",
       description:
@@ -1837,6 +1841,7 @@ export const integrationsPaths = {
   "/api/integrations/connect/start": {
     get: {
       operationId: "startIntegrationConnect",
+      "x-appstrate-space": { kind: "organization" },
       tags: ["Integrations"],
       summary: "Hosted connect dispatch (token)",
       description:
@@ -1893,6 +1898,7 @@ export const integrationsPaths = {
   "/api/integrations/connect/context": {
     get: {
       operationId: "getIntegrationConnectContext",
+      "x-appstrate-space": { kind: "organization" },
       tags: ["Integrations"],
       summary: "Hosted form render context (page cookie)",
       description:
@@ -1950,6 +1956,7 @@ export const integrationsPaths = {
   "/api/integrations/connect/submit": {
     post: {
       operationId: "submitIntegrationConnect",
+      "x-appstrate-space": { kind: "organization" },
       tags: ["Integrations"],
       summary: "Hosted form credential submit (page cookie + CSRF)",
       description:

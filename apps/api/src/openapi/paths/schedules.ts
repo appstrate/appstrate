@@ -87,6 +87,7 @@ export const schedulesPaths = {
   "/api/orgs/{orgId}/schedules": {
     get: {
       operationId: "listOrgSchedules",
+      "x-appstrate-space": { kind: "aggregate" },
       tags: ["Schedules"],
       summary: "List schedules across the organization's spaces",
       description:

@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
+import { markHandler } from "./handler-marker.ts";
 import type { Context, Next } from "hono";
 import type { AppEnv } from "../types/index.ts";
 import { ApiError, forbidden, invalidRequest, notFound } from "../lib/errors.ts";
@@ -53,7 +54,7 @@ const SPACE_SCOPED_PREFIXES = [
 
 /** True when `path` belongs to a core space-scoped route family. */
 export function isSpaceScopedPath(path: string): boolean {
-  return SPACE_SCOPED_PREFIXES.some((prefix) => path.startsWith(prefix));
+  return SPACE_SCOPED_PREFIXES.some((prefix) => path === prefix || path.startsWith(`${prefix}/`));
 }
 
 /**
@@ -159,6 +160,8 @@ async function admitSpace(
   return access.space;
 }
 
+export const REQUEST_SPACE_CONTEXT = Symbol.for("appstrate.requestSpaceContext");
+
 /**
  * Middleware: resolve space context for space-scoped routes.
  *
@@ -180,7 +183,7 @@ async function admitSpace(
  * c.set("spaceId"), and the admission sets c.set("space"), on success.
  */
 export function requireSpaceContext() {
-  return async (c: Context<AppEnv>, next: Next) => {
+  return markHandler(async (c: Context<AppEnv>, next: Next) => {
     const pinned = c.get("spaceId");
     const headerSpace = c.req.header("X-Space-Id");
 
@@ -198,7 +201,7 @@ export function requireSpaceContext() {
     await enterSpaceById(c, explicitSpace, c.get("orgId"));
     c.set("spaceId", explicitSpace);
     return next();
-  };
+  }, REQUEST_SPACE_CONTEXT);
 }
 
 /**

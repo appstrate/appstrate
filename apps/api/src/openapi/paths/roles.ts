@@ -16,6 +16,7 @@ export const rolesPaths = {
   "/api/org-roles": {
     get: {
       operationId: "listOrgRoles",
+      "x-appstrate-space": { kind: "organization" },
       tags: ["Roles"],
       summary: "List organization roles",
       description:
@@ -62,6 +63,7 @@ export const rolesPaths = {
   "/api/roles": {
     get: {
       operationId: "listRoles",
+      "x-appstrate-space": { kind: "organization" },
       tags: ["Roles"],
       summary: "List space roles",
       description:
@@ -94,6 +96,7 @@ export const rolesPaths = {
     },
     post: {
       operationId: "createRole",
+      "x-appstrate-space": { kind: "organization" },
       tags: ["Roles"],
       summary: "Create a custom space role",
       description:
@@ -155,6 +158,7 @@ export const rolesPaths = {
   "/api/roles/vocabulary": {
     get: {
       operationId: "listRoleVocabulary",
+      "x-appstrate-space": { kind: "organization" },
       tags: ["Roles"],
       summary: "List the permissions a custom role may hold",
       description:
@@ -193,6 +197,7 @@ export const rolesPaths = {
   "/api/roles/{id}": {
     patch: {
       operationId: "updateRole",
+      "x-appstrate-space": { kind: "organization" },
       tags: ["Roles"],
       summary: "Update a custom space role",
       description:
@@ -241,6 +246,7 @@ export const rolesPaths = {
     },
     delete: {
       operationId: "deleteRole",
+      "x-appstrate-space": { kind: "organization" },
       tags: ["Roles"],
       summary: "Delete a custom space role",
       description:

@@ -195,6 +195,13 @@ export const oidcPaths = {
   "/api/oauth/clients": {
     post: {
       operationId: "createOAuthClient",
+      "x-appstrate-space": {
+        kind: "resource",
+        source: "body",
+        parameter: "referencedSpaceId",
+        level_parameter: "level",
+        space_level: "space",
+      },
       tags: ["OAuth Clients"],
       summary: "Register an OAuth client",
       description:
@@ -240,6 +247,7 @@ export const oidcPaths = {
     },
     get: {
       operationId: "listOAuthClients",
+      "x-appstrate-space": { kind: "organization" },
       tags: ["OAuth Clients"],
       summary: "List OAuth clients",
       description:
@@ -259,6 +267,7 @@ export const oidcPaths = {
   "/api/oauth/clients/{clientId}": {
     get: {
       operationId: "getOAuthClient",
+      "x-appstrate-space": { kind: "organization" },
       tags: ["OAuth Clients"],
       summary: "Get OAuth client",
       parameters: [
@@ -285,6 +294,7 @@ export const oidcPaths = {
     },
     patch: {
       operationId: "updateOAuthClient",
+      "x-appstrate-space": { kind: "organization" },
       tags: ["OAuth Clients"],
       summary: "Update OAuth client",
       description:
@@ -318,6 +328,7 @@ export const oidcPaths = {
     },
     delete: {
       operationId: "deleteOAuthClient",
+      "x-appstrate-space": { kind: "organization" },
       tags: ["OAuth Clients"],
       summary: "Delete OAuth client",
       parameters: [
@@ -338,6 +349,7 @@ export const oidcPaths = {
   "/api/oauth/scopes": {
     get: {
       operationId: "listOAuthScopes",
+      "x-appstrate-space": { kind: "organization" },
       tags: ["OAuth Clients"],
       summary: "List supported OAuth scopes",
       parameters: [{ $ref: "#/components/parameters/XOrgId" }],
@@ -367,6 +379,7 @@ export const oidcPaths = {
   "/api/oauth/clients/{clientId}/rotate": {
     post: {
       operationId: "rotateOAuthClientSecret",
+      "x-appstrate-space": { kind: "organization" },
       tags: ["OAuth Clients"],
       summary: "Rotate client secret",
       parameters: [
@@ -402,6 +415,7 @@ export const oidcPaths = {
   "/api/auth/oauth2/authorize": {
     get: {
       operationId: "oauth2Authorize",
+      "x-appstrate-space": { kind: "organization" },
       // Public OAuth 2.1 protocol endpoint — NOT protected by the platform's
       // global cookie/apikey scheme. `security: []` overrides the inherited
       // global requirement so tooling doesn't advertise a session/API-key
@@ -463,6 +477,7 @@ export const oidcPaths = {
   "/api/auth/oauth2/token": {
     post: {
       operationId: "oauth2Token",
+      "x-appstrate-space": { kind: "organization" },
       // Public OAuth 2.1 protocol endpoint — client auth rides the request
       // body / Basic header, not the platform session. Override the global scheme.
       security: [],
@@ -540,6 +555,7 @@ export const oidcPaths = {
   "/api/auth/oauth2/userinfo": {
     get: {
       operationId: "oauth2Userinfo",
+      "x-appstrate-space": { kind: "organization" },
       // Authenticated by the OIDC access token (`Authorization: Bearer ey…`),
       // NOT the platform cookie/apikey scheme — override the global requirement.
       security: [],
@@ -559,6 +575,7 @@ export const oidcPaths = {
   "/api/auth/oauth2/introspect": {
     post: {
       operationId: "oauth2Introspect",
+      "x-appstrate-space": { kind: "organization" },
       // Public OAuth 2.0 protocol endpoint (RFC 7662) — override the global scheme.
       security: [],
       tags: ["OAuth Clients"],
@@ -610,6 +627,7 @@ export const oidcPaths = {
   "/api/auth/oauth2/revoke": {
     post: {
       operationId: "oauth2Revoke",
+      "x-appstrate-space": { kind: "organization" },
       // Public OAuth 2.0 protocol endpoint (RFC 7009) — override the global scheme.
       security: [],
       tags: ["OAuth Clients"],
@@ -646,6 +664,7 @@ export const oidcPaths = {
   "/api/auth/jwks": {
     get: {
       operationId: "oauth2Jwks",
+      "x-appstrate-space": { kind: "organization" },
       // Fully public — signing keys are meant to be fetched by anyone. Override.
       security: [],
       tags: ["OAuth Clients"],
@@ -673,6 +692,7 @@ export const oidcPaths = {
   "/.well-known/openid-configuration": {
     get: {
       operationId: "oidcDiscovery",
+      "x-appstrate-space": { kind: "organization" },
       // Public discovery document — override the global scheme.
       security: [],
       tags: ["OAuth Clients"],
@@ -685,6 +705,7 @@ export const oidcPaths = {
   "/.well-known/oauth-authorization-server": {
     get: {
       operationId: "oauthServerMetadata",
+      "x-appstrate-space": { kind: "organization" },
       // Public metadata document — override the global scheme.
       security: [],
       tags: ["OAuth Clients"],
@@ -695,6 +716,7 @@ export const oidcPaths = {
   "/.well-known/openid-configuration/api/auth": {
     get: {
       operationId: "oidcDiscoveryPathInserted",
+      "x-appstrate-space": { kind: "organization" },
       // Public discovery document — override the global scheme.
       security: [],
       tags: ["OAuth Clients"],
@@ -707,6 +729,7 @@ export const oidcPaths = {
   "/.well-known/oauth-authorization-server/api/auth": {
     get: {
       operationId: "oauthServerMetadataPathInserted",
+      "x-appstrate-space": { kind: "organization" },
       // Public metadata document — override the global scheme.
       security: [],
       tags: ["OAuth Clients"],
@@ -722,6 +745,7 @@ export const oidcPaths = {
   "/api/oauth/logout": {
     get: {
       operationId: "oauthLogout",
+      "x-appstrate-space": { kind: "organization" },
       // Public RP-initiated logout — clears the session cookie if present, but
       // requires no prior platform auth. Override the global scheme.
       security: [],
@@ -1043,6 +1067,7 @@ export const oidcPaths = {
     post: {
       tags: ["Device Authorization"],
       operationId: "deviceAuthorizationCode",
+      "x-appstrate-space": { kind: "organization" },
       // Public device-authorization grant (RFC 8628) — the client is gated by
       // `validateClient`, not the platform session. Matches the sibling public
       // device-flow endpoints (`/cli/token`, `/cli/revoke`) which are also `[]`.
@@ -1135,6 +1160,7 @@ export const oidcPaths = {
     post: {
       tags: ["Device Authorization"],
       operationId: "cliToken",
+      "x-appstrate-space": { kind: "organization" },
       security: [],
       summary: "Exchange a device_code or refresh token for a CLI token pair",
       description:
@@ -1201,6 +1227,7 @@ export const oidcPaths = {
     post: {
       tags: ["Device Authorization"],
       operationId: "cliRevoke",
+      "x-appstrate-space": { kind: "organization" },
       security: [],
       summary: "Revoke a CLI refresh token family",
       description:
@@ -1244,6 +1271,7 @@ export const oidcPaths = {
     get: {
       tags: ["Access Grants"],
       operationId: "listMyAccessGrants",
+      "x-appstrate-space": { kind: "organization" },
       summary: "List the caller's access grants",
       description:
         "Everything the caller has let act for them outside the browser: CLI sessions (one per device) and MCP client grants (one per client and MCP endpoint). Browser session only — an API key or an OAuth bearer cannot reach it. Most recent activity first.",
@@ -1276,6 +1304,7 @@ export const oidcPaths = {
     post: {
       tags: ["Access Grants"],
       operationId: "revokeMyAccessGrant",
+      "x-appstrate-space": { kind: "organization" },
       summary: "End one of the caller's access grants",
       description:
         "End one grant. A CLI session's refresh-token family is revoked. An MCP grant's tokens are deleted, its endpoint is taken out of the caller's consent to the client (reconnecting shows the consent screen again), and an access token already issued is refused from its next request. `revoked: false` when the id names no live grant of the caller — unknown, someone else's and already ended look the same, so an id cannot be probed. Browser session only.",
@@ -1317,6 +1346,7 @@ export const oidcPaths = {
     post: {
       tags: ["Access Grants"],
       operationId: "revokeAllMyAccessGrants",
+      "x-appstrate-space": { kind: "organization" },
       summary: "End every access grant of the caller",
       description:
         "End every CLI session and MCP client grant of the caller, as `revoke` does for one. Idempotent: an account with none returns `{ revoked_count: 0 }`. Browser session only.",
@@ -1345,6 +1375,7 @@ export const oidcPaths = {
     get: {
       tags: ["Device Authorization"],
       operationId: "deviceActivateGet",
+      "x-appstrate-space": { kind: "organization" },
       summary: "User-facing verification page",
       description:
         "Server-rendered HTML page where the user types the short `user_code` shown by the CLI. When called with `?user_code=...` and a valid session, resolves to a consent panel; otherwise shows the entry form or redirects to `/auth/login` with a `returnTo` that preserves the code.",
@@ -1383,6 +1414,7 @@ export const oidcPaths = {
     post: {
       tags: ["Device Authorization"],
       operationId: "deviceActivateSubmit",
+      "x-appstrate-space": { kind: "organization" },
       summary: "Normalize a submitted user_code and redirect to the consent panel",
       responses: {
         "303": { description: "Redirect to `GET /activate?user_code=...`." },
@@ -1402,6 +1434,7 @@ export const oidcPaths = {
     post: {
       tags: ["Device Authorization"],
       operationId: "deviceActivateApprove",
+      "x-appstrate-space": { kind: "organization" },
       summary: "Approve a pending device authorization",
       description:
         "Delegates to Better Auth's `/api/auth/device/approve`. The realm/level guard registered by `oidcGuardsPlugin` enforces that the approving user's realm matches the target client's level — a cross-audience approval is rejected with 403.",
@@ -1423,6 +1456,7 @@ export const oidcPaths = {
     post: {
       tags: ["Device Authorization"],
       operationId: "deviceActivateDeny",
+      "x-appstrate-space": { kind: "organization" },
       summary: "Deny a pending device authorization",
       responses: {
         "200": { description: "Denied — renders the refusal page." },
@@ -1441,6 +1475,7 @@ export const oidcPaths = {
     get: {
       tags: ["Access Grants"],
       operationId: "listOrgAccessGrants",
+      "x-appstrate-space": { kind: "organization" },
       summary: "List the access grants reaching an organization (admin)",
       description:
         "Every grant that reaches `orgId`: the CLI sessions of its current members, and the MCP client grants bound to its MCP endpoint or to one of its spaces' endpoints. Each row names its holder. A CLI session acts in every organization of its owner, so `revocable` is `false` for one whose owner also belongs to another organization. Requires `access-grants:read` (owner/admin).",
@@ -1477,6 +1512,7 @@ export const oidcPaths = {
     delete: {
       tags: ["Access Grants"],
       operationId: "revokeOrgAccessGrant",
+      "x-appstrate-space": { kind: "organization" },
       summary: "End an access grant reaching an organization (admin)",
       description:
         "End a member's CLI session (reason `org_admin_revoked`) or an MCP client grant bound to this organization, with the same effect as the holder ending it themselves. 404 when the id names no grant this organization can see, or a CLI session whose owner also belongs to another organization — the cases are not told apart, so membership outside the organization cannot be probed. Requires `access-grants:delete` (owner/admin).",
