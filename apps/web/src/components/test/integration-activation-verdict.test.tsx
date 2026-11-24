@@ -46,7 +46,6 @@ function cardFor(verdict: "allowed" | "not_shareable" | "forbidden" | null): str
   // No org is selected in this harness, so every scoped query is `enabled:
   // false` and serves the cache verbatim — which is what the seeds below are.
   const orgHeader = { "X-Org-Id": undefined };
-  const scoped = { header: { ...orgHeader, "X-Space-Id": SPACE_ID } };
 
   // The current space's library, whose row carries the served verdict; a null
   // verdict is a row with no cell for this space.
@@ -73,14 +72,15 @@ function cardFor(verdict: "allowed" | "not_shareable" | "forbidden" | null): str
     },
   );
   qc.setQueryData(
-    $api.queryOptions("get", "/api/integrations/{packageId}", {
-      params: { path: { packageId: "@acme/gmail" }, ...scoped },
-    }).queryKey,
-    {
-      manifest: { display_name: "Gmail", auths: { oauth: { type: "oauth2" } } },
-      auths: [],
-      active: false,
-    },
+    ["get", "/api/integrations", "by-id", undefined, SPACE_ID, ["@acme/gmail"]],
+    [
+      {
+        id: "@acme/gmail",
+        manifest: { display_name: "Gmail", auths: { oauth: { type: "oauth2" } } },
+        auths: [],
+        active: false,
+      },
+    ],
   );
 
   // `renderToStaticMarkup` takes zustand's SERVER snapshot, so the current

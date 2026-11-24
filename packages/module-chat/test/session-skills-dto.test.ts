@@ -193,6 +193,27 @@ describe("chat session skills", () => {
       expect(await stored(id)).toMatchObject({ pinnedSkills: [], skillStatus: {} });
     });
 
+    it("preserves independent pin and discovery edits from concurrent clients", async () => {
+      const { id } = await createSession();
+      const pin = (name: string, pinned: boolean) => patchSkills(id, { pin: { id: name, pinned } });
+      const edits = await Promise.all([
+        pin("@acme/b", true),
+        pin("@acme/a", true),
+        pin("@acme/a", true),
+        patchSkills(id, { skill_discovery: false }),
+      ]);
+      expect(edits.map((r) => r.status)).toEqual([200, 200, 200, 200]);
+      expect(await stored(id)).toMatchObject({
+        pinnedSkills: ["@acme/a", "@acme/b"],
+        skillDiscovery: false,
+      });
+      await Promise.all([pin("@acme/c", true), pin("@acme/a", false)]);
+      expect(await stored(id)).toMatchObject({
+        pinnedSkills: ["@acme/b", "@acme/c"],
+        skillDiscovery: false,
+      });
+    });
+
     it("sets the discovery switch alone, leaving the pins and their verdicts", async () => {
       const { id } = await createSession();
       await db
@@ -217,6 +238,8 @@ describe("chat session skills", () => {
         {},
         { pins: ["@a/1"], pinned_skills: ["@a/2"] },
         { pins: ["not-a-package"] },
+        { pin: { id: "@acme/a", pinned: true }, pins: [] },
+        { pin: { id: "invalid", pinned: true } },
       ]) {
         const res = await patchSkills(id, body);
         expect(res.status).toBe(400);

@@ -9,7 +9,11 @@
 
 import { PLATFORM_INTEGRATION_ID } from "@appstrate/core/integration";
 import { asRecordOrNull } from "@appstrate/core/safe-json";
-import { unwrapMcpResult } from "@appstrate/core/mcp-result";
+import {
+  recallMemoryOutputSchema,
+  runHistoryOutputSchema,
+  unwrapMcpResult,
+} from "@appstrate/core/mcp-result";
 
 /** Names of the platform tools on their own server. */
 export const LOG_TOOL = "log";
@@ -39,7 +43,10 @@ export interface HistoryRun {
 const str = (value: unknown) => (typeof value === "string" ? value : undefined);
 
 export function recalledMemories(result: unknown): RecalledMemory[] | null {
-  const memories = asRecordOrNull(unwrapMcpResult(result))?.memories;
+  const structured = recallMemoryOutputSchema.safeParse(asRecordOrNull(result)?.structuredContent);
+  const memories = structured.success
+    ? structured.data.memories
+    : asRecordOrNull(unwrapMcpResult(result))?.memories;
   if (!Array.isArray(memories)) return null;
   return memories.flatMap((raw) => {
     const memory = asRecordOrNull(raw);
@@ -49,7 +56,10 @@ export function recalledMemories(result: unknown): RecalledMemory[] | null {
 }
 
 export function historyRuns(result: unknown): HistoryRun[] | null {
-  const runs = asRecordOrNull(unwrapMcpResult(result))?.data;
+  const structured = runHistoryOutputSchema.safeParse(asRecordOrNull(result)?.structuredContent);
+  const runs = structured.success
+    ? structured.data.data
+    : asRecordOrNull(unwrapMcpResult(result))?.data;
   if (!Array.isArray(runs)) return null;
   return runs.flatMap((raw) => {
     const run = asRecordOrNull(raw);

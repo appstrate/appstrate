@@ -75,7 +75,7 @@ import { user as userTable, organizationMembers } from "@appstrate/db/schema";
 import { cliRefreshToken, deviceCode, oauthClient } from "@appstrate/db/schema";
 import { prefixedId } from "@appstrate/db/ids";
 import { logger } from "../../../lib/logger.ts";
-import type { DbOrTx } from "../../../lib/db-helpers.ts";
+import type { DbOrTx, Tx } from "../../../lib/db-helpers.ts";
 import { getOidcAuthApi } from "../auth/api.ts";
 import { getErrorMessage } from "@appstrate/core/errors";
 
@@ -748,43 +748,24 @@ export async function revokeFamilyForUser(params: {
  * reset (`password_changed`, `credential-change.ts`). Idempotent —
  * already-revoked families are skipped at the SQL level.
  *
- * Returns the count of families newly revoked so the caller can render a
- * meaningful confirmation toast ("Signed out 3 devices.").
- *
- * Implementation: a single UPDATE scoped by `user_id` + active
- * (`revoked_at IS NULL`). We don't need to enumerate families first —
- * the rotation children carry the same `revoked_at` column and the same
- * UPDATE flips both heads and children. The audit reason tells it apart
- * from per-family revocation in the security log.
+ * Return the affected heads to count devices once and invalidate their cached
+ * names after the caller commits.
  */
 export async function revokeAllFamiliesForUser(
+  tx: Tx,
   userId: string,
   reason: "user_revoked_all" | "password_changed",
-): Promise<{ revokedCount: number }> {
-  // Count families that will be touched BEFORE the UPDATE, so the return
-  // value matches "number of devices signed out" rather than "number of
-  // rows touched" (rotation rows would inflate the latter into something
-  // that doesn't reflect user-visible state).
-  const heads = await db
-    .select({ familyId: cliRefreshToken.familyId })
-    .from(cliRefreshToken)
-    .where(
-      and(
-        eq(cliRefreshToken.userId, userId),
-        isNull(cliRefreshToken.parentId),
-        isNull(cliRefreshToken.revokedAt),
-      ),
-    );
-  if (heads.length === 0) return { revokedCount: 0 };
-  await db
+): Promise<string[]> {
+  const rows = await tx
     .update(cliRefreshToken)
     .set({ revokedAt: new Date(), revokedReason: reason })
-    .where(and(eq(cliRefreshToken.userId, userId), isNull(cliRefreshToken.revokedAt)));
-  // Drop device-name cache entries for the revoked families — same race
-  // window as `revokeFamily` (see comment there). Bulk path bypasses the
-  // single-family helper, so invalidate inline.
-  for (const { familyId } of heads) runnerDeviceNameCache.invalidate(familyId);
-  return { revokedCount: heads.length };
+    .where(and(eq(cliRefreshToken.userId, userId), isNull(cliRefreshToken.revokedAt)))
+    .returning({ familyId: cliRefreshToken.familyId, parentId: cliRefreshToken.parentId });
+  return rows.flatMap((row) => (row.parentId === null ? [row.familyId] : []));
+}
+
+export function invalidateRevokedDeviceNames(familyIds: string[]): void {
+  for (const familyId of familyIds) runnerDeviceNameCache.invalidate(familyId);
 }
 
 /**

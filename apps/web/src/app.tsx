@@ -104,7 +104,6 @@ const NotificationDetailPage = lazyPage(
   () => import("./pages/notification-detail"),
   "NotificationDetailPage",
 );
-const SkillsPage = lazyPage(() => import("./pages/skills-page"), "SkillsPage");
 const IntegrationsPage = lazyPage(() => import("./pages/integrations-page"), "IntegrationsPage");
 const IntegrationDetailPage = lazyPage(
   () => import("./pages/integration-detail"),
@@ -281,7 +280,7 @@ const PAGES: Record<RoutePath, ReactNode> = {
   "/schedules": <SchedulesListPage />,
   "/schedules/:id": <ScheduleDetailPage />,
   "/notifications/:id": <NotificationDetailPage />,
-  "/skills": <SkillsPage />,
+  "/skills": <PackageIndexPage type="skill" />,
   "/skills/:scope/:name": <UnifiedPackageDetailPage type="skill" />,
   "/skills/:scope/:name/:version": <UnifiedPackageDetailPage type="skill" />,
   "/integrations": <IntegrationsPage />,
@@ -489,12 +488,11 @@ function MainLayout({ search }: { search: string }) {
           <ShellHeader />
           {/* Must stay visible on every route, permission-denied pages included. */}
           <ViewAsBanner />
-          {/* Full-bleed surfaces opt out with `data-full-bleed` on their root. */}
           <div
             className={
               product === "chat"
                 ? "flex min-h-0 min-w-0 flex-1 *:flex-1"
-                : "max-w-page px-gutter mx-auto w-full pt-8 pb-18 has-[[data-full-bleed]]:max-w-none has-[[data-full-bleed]]:p-0"
+                : "max-w-page px-gutter mx-auto w-full pt-8 pb-18"
             }
           >
             <ErrorBoundary resetKey={pathname}>

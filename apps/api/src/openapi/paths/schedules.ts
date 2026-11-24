@@ -3,7 +3,11 @@
 import { REQUEST_ID_ONLY_HEADERS, STD_RESPONSE_HEADERS } from "../headers.ts";
 import { MAX_CONNECTIONS_PER_INTEGRATION } from "@appstrate/core/integration";
 import { connectionIdSetJsonSchema } from "./integrations.ts";
-import { connectionConflictContent } from "../responses.ts";
+import {
+  connectionConflictContent,
+  runListPage,
+  scopedRunListValidationError,
+} from "../responses.ts";
 import { ORG_READ_REACH, packageIdFilterParameter } from "../parameters.ts";
 
 /**
@@ -546,31 +550,8 @@ export const schedulesPaths = {
         { $ref: "#/components/parameters/RunSearch" },
       ],
       responses: {
-        "200": {
-          description: "Paginated run list",
-          headers: { ...STD_RESPONSE_HEADERS, Link: { $ref: "#/components/headers/Link" } },
-          content: {
-            "application/json": {
-              schema: {
-                type: "object",
-                properties: {
-                  object: { type: "string", enum: ["list"] },
-                  data: {
-                    type: "array",
-                    items: { $ref: "#/components/schemas/Run" },
-                  },
-                  total: { type: "integer" },
-                  hasMore: { type: "boolean" },
-                },
-                required: ["object", "data", "total", "hasMore"],
-              },
-            },
-          },
-        },
-        "400": {
-          $ref: "#/components/responses/ValidationError",
-          description: "`limit` outside its declared range (`param` names it).",
-        },
+        "200": runListPage,
+        "400": scopedRunListValidationError,
         "401": { $ref: "#/components/responses/Unauthorized" },
         "403": { $ref: "#/components/responses/Forbidden" },
       },

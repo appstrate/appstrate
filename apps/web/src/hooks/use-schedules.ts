@@ -4,6 +4,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import i18n from "../i18n";
 import { schemaHasFileFields } from "@appstrate/core/form";
+import { ApiError } from "../api/errors";
 import { client } from "../api/client";
 import { splitPackageRef } from "../lib/package-paths";
 import { useCurrentOrgId } from "./use-org";
@@ -66,12 +67,12 @@ export function useScheduleById(id: string | undefined) {
       qc
         .getQueryData<EnrichedSchedule[]>(scheduleKeys.list(orgId, spaceId))
         ?.find((s) => s.id === id),
-    queryFn: async (): Promise<EnrichedSchedule> => {
-      const { data } = await client.GET("/api/schedules/{id}", {
+    queryFn: async (): Promise<EnrichedSchedule & { etag?: string | null }> => {
+      const { data, response } = await client.GET("/api/schedules/{id}", {
         params: { path: { id: id! } },
       });
       // Non-2xx throws via the client middleware, so `data` is defined here.
-      return data!;
+      return { ...data!, etag: response.headers.get("ETag") };
     },
     enabled: canRead && !!id && !!spaceId,
   });
@@ -135,12 +136,21 @@ export function useUpdateSchedule() {
   const qc = useQueryClient();
   const toastWarnings = useLaunchWarningsToast();
   return useMutation({
-    mutationFn: async ({ id, ...body }: ScheduleUpdateBody & { id: string }) => {
+    mutationFn: async ({
+      id,
+      etag,
+      ...body
+    }: ScheduleUpdateBody & { id: string; etag: string }) => {
       const { data: updated } = await client.PATCH("/api/schedules/{id}", {
-        params: { path: { id } },
+        params: { path: { id }, header: { "If-Match": etag } },
         body,
       });
       return updated!;
+    },
+    onError: async (error) => {
+      if (error instanceof ApiError && error.status === 412) {
+        await qc.invalidateQueries({ queryKey: scheduleKeys.detailAll });
+      }
     },
     onSuccess: (updated) => {
       invalidateSchedules(qc);

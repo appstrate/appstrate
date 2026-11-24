@@ -75,7 +75,7 @@ import {
   type ReportSource,
 } from "./run/report.ts";
 import { announceLaunch } from "./run/launch-warnings.ts";
-import { CompositeSink, sinkSiblingUrl, type HttpSink } from "@appstrate/afps-runtime/sinks";
+import { CompositeSink, type HttpSink } from "@appstrate/afps-runtime/sinks";
 import type { EventSink } from "@appstrate/afps-runtime/interfaces";
 import { emptyRunResult } from "@appstrate/afps-runtime/runner";
 import { loadSnapshotFile, mergeSnapshotIntoContext } from "./run/snapshot.ts";
@@ -463,7 +463,7 @@ async function runCommandLocal(opts: RunCommandOptions): Promise<void> {
       ...(reportSession
         ? {
             runToolsMcp: {
-              url: sinkSiblingUrl(reportSession.sinkUrl, "mcp"),
+              url: reportSession.mcpUrl,
               runSecret: reportSession.runSecret,
             },
           }
@@ -482,8 +482,8 @@ async function runCommandLocal(opts: RunCommandOptions): Promise<void> {
         process.stderr.write(`→ wired ${remoteMcp.factories.length} remote MCP tool(s)\n`);
       }
       process.stderr.write(unavailableIntegrationLines(remoteMcp.unavailable));
-      process.stderr.write(reducedToolLines(remoteMcp.reducedTools));
     }
+    await emitReducedTools(sink, emittedRunId, remoteMcp.reducedTools);
     // The catalog lists only integrations the agent can call.
     const promptInputs = cliPromptInputs(
       bundle,
@@ -508,7 +508,6 @@ async function runCommandLocal(opts: RunCommandOptions): Promise<void> {
     // phase entirely because ES module imports are evaluated before any
     // top-level statement runs.
     await emitRuntimeReady(sink, emittedRunId, {
-      bundleLoaded: true,
       extensions: extensionFactories.length,
       bootDurationMs: performance.now(),
     }).catch((err) => {
@@ -528,7 +527,7 @@ async function runCommandLocal(opts: RunCommandOptions): Promise<void> {
     // reportSession) has no platform to talk to — skip.
     if (reportSession) {
       heartbeat = startSinkHeartbeat({
-        url: `${reportSession.sinkUrl.replace(/\/$/, "")}/heartbeat`,
+        url: reportSession.heartbeatUrl,
         runSecret: reportSession.runSecret,
         onError: (err) => {
           if (!opts.json) {
@@ -852,15 +851,22 @@ export function unavailableIntegrationLines(entries: RemoteMcpExtensions["unavai
     .join("");
 }
 
-/** The stderr warning of each tool whose descriptor was cut to fit the schema budget. */
-export function reducedToolLines(entries: RemoteMcpExtensions["reducedTools"]): string {
-  return entries
-    .map(
-      (entry) =>
-        `warn: tool ${entry.name} (${entry.namespace}: ${JSON.stringify(entry.originalName)}) ` +
-        `descriptor reduced: ${entry.reduced.join(", ")}\n`,
-    )
-    .join("");
+/** Structured warnings serve local JSONL, human output and remote run logs. */
+export async function emitReducedTools(
+  sink: EventSink,
+  runId: string,
+  entries: RemoteMcpExtensions["reducedTools"],
+) {
+  for (const entry of entries) {
+    await sink.handle({
+      type: "appstrate.progress",
+      runId,
+      timestamp: Date.now(),
+      level: "warn",
+      message: `Tool ${entry.name} (${entry.namespace}: ${JSON.stringify(entry.originalName)}) descriptor reduced: ${entry.reduced.join(", ")}`,
+      data: { event: "tool_descriptor_reduced", ...entry },
+    });
+  }
 }
 
 /**

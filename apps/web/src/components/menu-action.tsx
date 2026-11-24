@@ -1,6 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { cn } from "@appstrate/ui/cn";
 import { Link } from "react-router-dom";
 import { DropdownMenuItem } from "@appstrate/ui/components/dropdown-menu";
 import { replacingNavigation, type MenuAction } from "../lib/menu-action";
@@ -32,7 +31,7 @@ export function MenuActionItem({
   const linked = action.to !== undefined || action.href !== undefined;
   return (
     <DropdownMenuItem
-      className={cn(action.destructive && "text-destructive focus:text-destructive")}
+      variant={action.destructive ? "destructive" : "default"}
       disabled={action.disabled}
       onSelect={action.to !== undefined ? undefined : action.onSelect}
       asChild={linked}

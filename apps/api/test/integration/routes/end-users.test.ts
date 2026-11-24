@@ -36,6 +36,15 @@ describe("End-Users API", () => {
     return { Authorization: `Bearer ${apiKeyRaw}`, ...extra };
   }
 
+  it.each(["search", "endingBefore", "offset"])(
+    "names the retired or unsupported parameter %s",
+    async (name) => {
+      const res = await app.request(`/api/end-users?${name}=1`, { headers: apiKeyHeaders() });
+      expect(res.status).toBe(400);
+      expect(await res.json()).toMatchObject({ param: name });
+    },
+  );
+
   describe("POST /api/end-users", () => {
     it("creates an end-user with name and email", async () => {
       const res = await app.request("/api/end-users", {
@@ -138,6 +147,26 @@ describe("End-Users API", () => {
       const body = (await res.json()) as any;
       expect(body.data).toHaveLength(1);
       expect(body.data[0].name).toBe("Zaphod Beeblebrox");
+    });
+
+    it("treats SQL wildcards and backslashes as literal search text", async () => {
+      for (const name of ["A%_\\\\B", "AxyzB"]) {
+        const created = await app.request("/api/end-users", {
+          method: "POST",
+          headers: { ...apiKeyHeaders(), "Content-Type": "application/json" },
+          body: JSON.stringify({ name }),
+        });
+        expect(created.status).toBe(201);
+      }
+      for (const q of ["%", "_", "\\\\"]) {
+        const res = await app.request("/api/end-users?" + new URLSearchParams({ q, limit: "1" }), {
+          headers: apiKeyHeaders(),
+        });
+        const body = (await res.json()) as { data: { name: string }[]; hasMore: boolean };
+        expect(res.status).toBe(200);
+        expect(body.data.map((row) => row.name)).toEqual(["A%_\\\\B"]);
+        expect(body.hasMore).toBe(false);
+      }
     });
 
     describe("?limit", () => {

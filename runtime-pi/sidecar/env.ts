@@ -13,6 +13,7 @@ import { parseEgressAllowInternalHosts } from "@appstrate/afps-shared/ssrf";
 export interface SidecarEnv {
   platformApiUrl: string;
   runToken: string;
+  runId?: string;
   port: number;
   /** The agent's forward proxy listener — its own port, never derived from `port`. */
   forwardProxyPort: number;
@@ -67,6 +68,7 @@ export function parseSidecarEnv(source: NodeJS.ProcessEnv = process.env): Sideca
   return {
     platformApiUrl: platformApiUrl!,
     runToken: runToken!,
+    ...(source.RUN_ID && { runId: source.RUN_ID }),
     port: port!,
     forwardProxyPort: forwardProxyPort!,
     listenHost,

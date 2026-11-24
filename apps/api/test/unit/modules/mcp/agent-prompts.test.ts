@@ -159,18 +159,23 @@ describe("agent prompts — prompts/list", () => {
     expect(await prompts.list(noExtra)).toEqual([]);
   });
 
-  it("names the same agent in a second space run-<space>-<name>, another agent run-<scope>-<name>", async () => {
-    const { prompts } = provider([space("spc_a", "Alpha"), space("spc_b", "Beta Team")], {
-      spc_a: [{ id: "@acme/writer", version: "1.0.0" }],
-      spc_b: [
-        { id: "@acme/writer", version: "1.0.0" },
-        { id: "@other/writer", version: "2.0.0" },
-      ],
-    });
-    const names = (await prompts.list(noExtra)).map((p) => p.name);
-    expect(names).toEqual(["run-writer", "run-beta-team-writer", "run-other-writer"]);
-    expect(await textOf(prompts, "run-beta-team-writer")).toContain('"space_id":"spc_b"');
-    expect(await textOf(prompts, "run-other-writer")).toContain('"scope":"@other"');
+  it("keeps launch prompt names under permutations of the returned agents within each space", async () => {
+    const spaces = [space("spc_a", "Alpha"), space("spc_b", "Beta Team")];
+    const writer = { id: "@acme/writer", version: "1.0.0" };
+    const other = { id: "@other/writer", version: "2.0.0" };
+    for (const agents of [
+      [writer, other],
+      [other, writer],
+    ]) {
+      const { prompts } = provider(spaces, { spc_a: [writer], spc_b: agents });
+      expect((await prompts.list(noExtra)).map((p) => p.name)).toEqual([
+        "run-writer",
+        "run-beta-team-writer",
+        "run-other-writer",
+      ]);
+      expect(await textOf(prompts, "run-beta-team-writer")).toContain('"space_id":"spc_b"');
+      expect(await textOf(prompts, "run-other-writer")).toContain('"scope":"@other"');
+    }
   });
 
   it("names no space_id on a connection pinned to one space, whose tools refuse it", async () => {

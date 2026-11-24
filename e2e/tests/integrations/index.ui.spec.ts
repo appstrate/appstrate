@@ -58,12 +58,9 @@ for (const view of ["cards", "table"] as const) {
     );
     // The seeded integration ships a local server: the Source filter narrows the list to it.
     await page.goto("/integrations?source=local");
-    await expect(page.getByRole("tab", { name: "Vue cartes", exact: true })).toHaveAttribute(
-      "data-state",
-      "active",
-    );
+    await expect(page.getByRole("radio", { name: "Vue cartes", exact: true })).toBeChecked();
     if (view === "table") {
-      await page.getByRole("tab", { name: "Vue tableau", exact: true }).click();
+      await page.getByRole("radio", { name: "Vue tableau", exact: true }).click();
     }
     const listed = await indexRead;
     expect(listed.status()).toBe(200);
@@ -75,8 +72,11 @@ for (const view of ["cards", "table"] as const) {
 
     await page.reload();
     await expect(
-      page.getByRole("tab", { name: view === "cards" ? "Vue cartes" : "Vue tableau", exact: true }),
-    ).toHaveAttribute("data-state", "active");
+      page.getByRole("radio", {
+        name: view === "cards" ? "Vue cartes" : "Vue tableau",
+        exact: true,
+      }),
+    ).toBeChecked();
 
     // The row carries the manifest's display name, not the bare package id.
     await expect(row(running)).toBeVisible();
@@ -93,3 +93,22 @@ for (const view of ["cards", "table"] as const) {
     await expect(row(running)).toHaveCount(0);
   });
 }
+
+test("a stale OAuth client link is removed without leaving the integration settings", async ({
+  authedPage: page,
+  apiClient,
+  browserCtx,
+}) => {
+  const { id } = await createIntegration(
+    apiClient,
+    `@${browserCtx.org.orgSlug}`,
+    "missing-client-link",
+  );
+  await page.goto(`/integrations/${id}?editOauthClient=gone%3Aclient#settings`);
+  await expect(page).toHaveURL(
+    (url) =>
+      url.pathname === `/integrations/${id}` &&
+      url.hash === "#settings" &&
+      !url.searchParams.has("editOauthClient"),
+  );
+});

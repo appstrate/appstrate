@@ -58,11 +58,13 @@ import {
   getVersionRow,
   readVersionArchive,
   requirePublishedPrompt,
+  versionArtifactUnavailable,
   type VersionDetail,
 } from "./package-versions.ts";
 import type { AgentManifest, LoadedPackage } from "../types/index.ts";
 import type { DbOrTx } from "../lib/db-helpers.ts";
-import { asRecord } from "@appstrate/core/safe-json";
+import { asRecord, isPlainObject } from "@appstrate/core/safe-json";
+import { AFPS_SCHEMA_VERSION, agentManifestSchema } from "@appstrate/core/validation";
 
 // Both keywords are reserved names (`isProtectedTag` in
 // `@appstrate/core/dist-tags`): they resolve here BEFORE any dist-tag lookup,
@@ -93,6 +95,20 @@ interface ResolvedRunAgent {
   overrideVersionLabel?: string;
 }
 
+/** Stored snapshots predate mandatory presentation metadata. Read their execution
+ * fields with the AFPS schema while preserving extensions and immutable archive bytes. */
+function readVersionAgentManifest(packageId: string, version: string, raw: unknown): AgentManifest {
+  if (isPlainObject(raw)) {
+    const parsed = agentManifestSchema.safeParse({
+      display_name: packageId,
+      schema_version: AFPS_SCHEMA_VERSION,
+      ...raw,
+    });
+    if (parsed.success) return parsed.data;
+  }
+  throw versionArtifactUnavailable(packageId, version, "agent manifest");
+}
+
 /**
  * Build the effective LoadedPackage for a resolved published version.
  *
@@ -108,7 +124,7 @@ function substituteVersion(
     agent: {
       ...agent,
       // Version manifest replaces the draft manifest entirely.
-      manifest: detail.manifest as unknown as AgentManifest,
+      manifest: readVersionAgentManifest(agent.id, detail.version, detail.manifest),
       prompt: requirePublishedPrompt(agent.id, detail),
     },
     overrideVersionLabel: detail.version,
@@ -195,7 +211,7 @@ export async function resolveAgentRunManifest(
   const row = await selectRunVersion(agent, selector, executor);
   if (!row) return { agent };
   return {
-    agent: { ...agent, manifest: row.manifest as unknown as AgentManifest },
+    agent: { ...agent, manifest: readVersionAgentManifest(agent.id, row.version, row.manifest) },
     overrideVersionLabel: row.version,
   };
 }

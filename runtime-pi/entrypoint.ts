@@ -187,7 +187,7 @@ const sink = new HttpSink({
 
 // --- Liveness keep-alive ---
 //
-// Start the runner-side heartbeat against POST {SINK_URL}/heartbeat.
+// Start the runner-side heartbeat on the platform-issued endpoint.
 // The server bumps `runs.last_heartbeat_at` on every ping; the stall
 // watchdog reads that column to detect a crashed container (network
 // partition, SIGKILL, Docker daemon drop). This path is identical to
@@ -198,7 +198,7 @@ const sink = new HttpSink({
 // outlast the stall threshold. Every exit below is a `process.exit`, which
 // ends the timer with the process.
 const heartbeat = startSinkHeartbeat({
-  url: `${env.sink.url.replace(/\/$/, "")}/heartbeat`,
+  url: env.sink.heartbeatUrl,
   runSecret: env.sink.secret,
   intervalMs: HEARTBEAT_INTERVAL_MS,
   onError: (err) => {
@@ -221,7 +221,7 @@ const heartbeat = startSinkHeartbeat({
 const publishedFileKeys = new Set<string>();
 const publishedFileSourceHashes = new Map<string, string>();
 const uploadRunFile = createRunFileUploader({
-  sinkUrl: env.sink.url,
+  filesUrl: env.sink.filesUrl,
   sinkSecret: env.sink.secret,
   workspace: env.workspaceDir,
   publishedKeys: publishedFileKeys,
@@ -369,7 +369,8 @@ const provisionStart = performance.now();
 // one calls `die()` (process.exit), so the first fault wins and the other is
 // abandoned with the process.
 const provisionDeps: ProvisionDeps = {
-  sinkUrl: env.sink.url,
+  workspaceUrl: env.sink.workspaceUrl,
+  filesUrl: env.sink.filesUrl,
   sinkSecret: env.sink.secret,
   workspace: WORKSPACE,
   die,
@@ -613,7 +614,6 @@ if ((await piSdkWarmup) === null) {
 }
 
 await emitRuntimeReady(sink, AGENT_RUN_ID, {
-  bundleLoaded: true,
   extensions: extensionFactories.length,
   bootDurationMs: performance.now(),
   phaseTimings,

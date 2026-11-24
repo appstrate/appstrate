@@ -87,8 +87,8 @@ export function AppSidebar({ product }: { product: "studio" | "chat" }) {
   // On a phone the navigation is a sheet over the page: once a link has taken the user somewhere,
   // the sheet would only hide where they went. Desktop keeps its own, remembered, open state.
   const { setOpenMobile } = useSidebar();
-  const { pathname, search } = useLocation();
-  useEffect(() => setOpenMobile(false), [pathname, search, setOpenMobile]);
+  const { key } = useLocation();
+  useEffect(() => setOpenMobile(false), [key, setOpenMobile]);
   // The catalogue is drawn only when its route admits the caller (`ROUTE_ACCESS`). It names no
   // space, so « Tous les espaces » opens it as it is: its add menu picks the space per package.
   const canReach = useCanReach();

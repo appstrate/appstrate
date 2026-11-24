@@ -1,5 +1,7 @@
 # Frontend (`@appstrate/web`)
 
+For hot module replacement, run the API with `TRUSTED_ORIGINS=http://localhost:5173` and run `bun run dev:hmr` from `apps/web`. Open port 5173. Vite proxies `/api` to `http://localhost:3000`. Set `VITE_API_ORIGIN` on the Vite process for a different backend. The API-served build injects the runtime feature flags. To test chat, social sign-in or other gated modules with their configured flags, use the standard API-served development entry point.
+
 Conventions for `apps/web` and `packages/ui`. Root guide: `../../AGENTS.md`.
 
 **Before building or changing a screen, a dialog or a setting, read `DESIGN_SYSTEM.md`** (next to this file): which component answers which need, and the rules every screen follows.

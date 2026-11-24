@@ -8,6 +8,7 @@ import { useCanReach } from "../../hooks/use-can-reach";
 import { useModels } from "../../hooks/use-models";
 import { usePermissions } from "../../hooks/use-permissions";
 import type { RunModelFallback } from "../../lib/run-model-fallback";
+import { packageDetailPath } from "../../lib/package-paths";
 import { agentSettingsHref } from "../../lib/settings-section-href";
 import { HealthAction, HealthCard, HealthCardItem } from "../health-card";
 import { artifactFailureCodeKey, partialArtifactFailures } from "../run-artifacts";
@@ -24,7 +25,7 @@ function DegradedIntegrationItem({ integrationId }: { integrationId: string }) {
   const { t } = useTranslation("common");
   const displayName = useIntegrationName(integrationId);
   const canReach = useCanReach();
-  const integrationPath = `/integrations/${integrationId}`;
+  const integrationPath = packageDetailPath("integration", integrationId);
   return (
     <HealthCardItem
       title={displayName}
@@ -77,7 +78,7 @@ function ResolvedModelFallback({
 }) {
   const canReach = useCanReach();
   const { data: models } = useModels(usePermissions().can("models:read"));
-  const agentPath = `/agents/${run.agent_scope}/${run.agent_name}`;
+  const agentPath = packageDetailPath("agent", `${run.agent_scope}/${run.agent_name}`);
   const reachable = !run.package_ephemeral && canReach(agentPath);
   return (
     <ModelFallbackCard

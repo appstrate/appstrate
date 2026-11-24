@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { isUnauthenticatedIntegration } from "@appstrate/core/integration";
-import type { IntegrationDetailWire } from "../../hooks/use-integrations";
+import type { IntegrationSummaryWire } from "../../hooks/use-integrations";
 
 /**
  * Whether an integration has a row. On a schedule, the readiness entry judges the version it
@@ -9,7 +9,7 @@ import type { IntegrationDetailWire } from "../../hooks/use-integrations";
  * `readiness` is `undefined` off a schedule.
  */
 export function bindsConnection(
-  detail: IntegrationDetailWire | undefined,
+  detail: Pick<IntegrationSummaryWire, "manifest"> | undefined,
   readiness: { connection_required: boolean } | undefined,
 ): boolean {
   return readiness

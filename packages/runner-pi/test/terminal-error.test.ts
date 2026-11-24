@@ -324,12 +324,14 @@ describe("PiRunner.run — timeout watchdog carries the upstream cause", () => {
     expect(sink.finalized?.error?.code).toBe("timeout");
     expect(sink.finalized?.error?.message).toMatch(/timed out after/i);
     expect(sink.finalized?.error?.context).toEqual({
+      error_category: "upstream_unavailable",
       upstream: { stop_reason: "error", message: "503 Service Unavailable from provider" },
     });
     // …and it reaches the platform: the finalize body's RunError is persisted
     // by `message` alone, so the live `appstrate.error` event is the path that
     // lands the structured cause in `run_logs.data`.
     expect(lastErrorEvent(sink.events)?.data).toEqual({
+      error_category: "upstream_unavailable",
       upstream: { stop_reason: "error", message: "503 Service Unavailable from provider" },
     });
   });
@@ -356,6 +358,7 @@ describe("PiRunner.run — timeout watchdog carries the upstream cause", () => {
 
     expect(sink.finalized?.error?.code).toBe("timeout");
     expect(sink.finalized?.error?.context).toEqual({
+      error_category: "upstream_unavailable",
       upstream: { stop_reason: "error", message: "upstream 503" },
     });
   });
@@ -394,6 +397,7 @@ describe("PiRunner.run — timeout watchdog names the cause for a HUMAN", () => 
     );
     // The structured channel is untouched by the human-channel work.
     expect(sink.finalized?.error?.context).toEqual({
+      error_category: "upstream_unavailable",
       upstream: { stop_reason: "error", message: "503 Service Unavailable" },
     });
   });

@@ -13,10 +13,15 @@ import {
   deleteVersionZip,
   buildMinimalZip,
 } from "./package-storage.ts";
-import { unzipPackageArchive } from "./package-archive.ts";
+import { refreshPackageRecord, unzipPackageArchive } from "./package-archive.ts";
 import { getErrorMessage } from "@appstrate/core/errors";
 import { computeIntegrity } from "@appstrate/core/integrity";
-import { extractDependencies, detectCycle, type DepEntry } from "@appstrate/core/dependencies";
+import {
+  dropRetiredDependencyKeys,
+  extractDependencies,
+  detectCycle,
+  type DepEntry,
+} from "@appstrate/core/dependencies";
 import { storeVersionDependencies, clearVersionDependencies } from "./package-version-deps.ts";
 import { packageVersionDependencies } from "@appstrate/db/schema";
 import {
@@ -807,7 +812,7 @@ export async function createVersionFromDraft(params: {
   const { pkg, storedFiles } = snapshot;
   params.assertVersion?.(pkg.lockVersion);
 
-  const baseManifest = asRecord(pkg.draftManifest);
+  const baseManifest = dropRetiredDependencyKeys(asRecord(pkg.draftManifest));
   const content = (pkg.draftContent ?? "") as string;
 
   // Use override version if provided, otherwise use manifest version
@@ -820,8 +825,8 @@ export async function createVersionFromDraft(params: {
 
   // The draft manifest is the single source of truth for dependencies
   // (skills / integrations) — the editor maintains them
-  // directly. Publish preserves the `dependencies` block verbatim, exactly
-  // like every other version-creation path (import, fork, system sync). The
+  // directly. Published dependencies are read from this normalized manifest,
+  // including extension keys. The
   // transitive skill closure and version resolution happen at bundle time
   // (`buildBundleFromCatalog`), and the derived per-version dependency index
   // is rebuilt downstream from this manifest via `extractDependencies`.
@@ -845,6 +850,7 @@ export async function createVersionFromDraft(params: {
           JSON.stringify(frozenManifest, null, 2),
         );
         entries["prompt.md"] = new TextEncoder().encode(content);
+        refreshPackageRecord(entries, storedFiles);
         return { zip: Buffer.from(zipArtifact(entries, 6)) };
       }
       // Locally-created agents have no stored files — minimal ZIP is correct
@@ -863,6 +869,7 @@ export async function createVersionFromDraft(params: {
     }
     const entries: Record<string, Uint8Array> = { ...storedFiles };
     entries["manifest.json"] = new TextEncoder().encode(JSON.stringify(frozenManifest, null, 2));
+    refreshPackageRecord(entries, storedFiles);
     return { zip: Buffer.from(zipArtifact(entries, 6)), entries };
   };
   const { zip: zipBuffer, entries: frozenEntries } = buildArtifact(finalManifest);

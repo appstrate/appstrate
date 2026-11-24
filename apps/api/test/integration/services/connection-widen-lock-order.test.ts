@@ -66,7 +66,7 @@ describeRequiresPostgres("a write naming a space locks the space before its rows
       .values({
         integrationId: INTEGRATION,
         authKey: AUTH,
-        accountId: "default",
+        accountId: "stored-account",
         orgId: ctx.orgId,
         spaceId: space,
         userId: ctx.user.id,
@@ -115,7 +115,11 @@ describeRequiresPostgres("a write naming a space locks the space before its rows
             packageId: INTEGRATION,
             authKey: AUTH,
           },
-          { credentials: { access_token: "new" }, clientRef: "lock-system" },
+          {
+            credentials: { access_token: "new" },
+            clientRef: "lock-system",
+            accountId: "stored-account",
+          },
         ),
       expectDone: expectWidened,
     },

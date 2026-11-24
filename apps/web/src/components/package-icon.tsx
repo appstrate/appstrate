@@ -1,11 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { Puzzle } from "lucide-react";
-import { parseIcon } from "@appstrate/core/appearance";
 import type { PackageType } from "@appstrate/shared-types";
 import { cn } from "@appstrate/ui/cn";
 import { IdentityTile } from "@appstrate/ui/components/identity-tile";
-import { ManifestGlyph } from "@appstrate/ui/components/manifest-glyph";
+import { IntegrationIcon } from "@appstrate/ui/components/integration-icon";
 import { PACKAGE_TYPE_ICON } from "../lib/package-type-icon";
 
 /** `xs` sits inline beside a line of text, `sm` in a compact row, `md` on a card. */
@@ -63,33 +61,13 @@ export function PackageIcon(props: PackageIconProps) {
   }
 
   if (type === "integration") {
-    const placeholder = (
-      <span className={muted} aria-hidden>
-        <Puzzle className={mutedGlyph} />
-      </span>
-    );
-    const parsed = parseIcon(icon);
-    if (!parsed) return placeholder;
-    // A logo is a brand's glyph, transparent and drawn for a light surface: a black one vanishes
-    // on the dark theme. It sits on a white ground of its own, as an app icon does, which keeps
-    // its colours exact on every theme (what Linear's or Raycast's catalogues do, and why app
-    // directories refuse transparent icons). A glyph drawn in `currentColor` (Lucide, simple-icons)
-    // takes the ground's dark ink, not the theme's text colour. A glyph that cannot be drawn leaves
-    // the ground and the placeholder's puzzle on it, in a grey that reads on white.
     return (
-      <span
-        className={cn(
-          "flex shrink-0 items-center justify-center bg-white text-neutral-900",
-          box,
-          GLYPH_PADDING[size],
-        )}
-      >
-        <ManifestGlyph
-          icon={parsed}
-          className="size-full"
-          fallback={<Puzzle className={cn(mutedGlyph, "text-neutral-400")} aria-hidden />}
-        />
-      </span>
+      <IntegrationIcon
+        src={icon}
+        className={box}
+        padding={GLYPH_PADDING[size]}
+        fallbackClassName={mutedGlyph}
+      />
     );
   }
 

@@ -57,7 +57,7 @@ const FIELD_PREFIX = "integrations.";
  *
  * `not_connected`, or `auth_key_mismatch` on the dep's own auth, qualifies as a fresh
  * connect (no `connection_id`). `needs_reconnection` qualifies only on a connection the actor
- * OWNS and only with an id to re-consent in place, with no scopes of this agent: a
+ * owns and can identify, with the id to re-consent in place and no scopes of this agent: a
  * foreign-owned row is somebody else's account, and minting against it would let the caller
  * re-consent a colleague's credential.
  *
@@ -74,7 +74,7 @@ export function connectOfferTarget(e: ResolutionFieldError): ConnectOfferTarget 
     case "auth_key_mismatch":
       return { integrationId, authKey: e.auth_key, scopes: e.required_scopes ?? [] };
     case "needs_reconnection":
-      return e.owned_by_actor === true && e.connection_id
+      return !e.remedy && e.owned_by_actor === true && e.connection_id
         ? { integrationId, authKey: e.auth_key, scopes: [], connectionId: e.connection_id }
         : null;
     default:

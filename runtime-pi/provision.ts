@@ -17,7 +17,7 @@
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
 import { signFresh } from "@appstrate/afps-runtime/events";
-import { sinkSiblingUrl } from "@appstrate/afps-runtime/sinks";
+import { appendUrlPath } from "@appstrate/afps-runtime/sinks";
 import { computeBackoffDelayMs, isRetryableHttpStatus } from "@appstrate/afps-shared/backoff";
 import { getErrorMessage } from "@appstrate/core/errors";
 
@@ -59,9 +59,9 @@ const PROVISION_MAX_ATTEMPTS = 9;
 const PROVISION_HEADERS_TIMEOUT_MS = 10_000;
 
 export interface ProvisionDeps {
-  /** The run-scoped event sink URL (`…/api/runs/:id/events`). The workspace
-   *  and files routes are derived by swapping the `/events` suffix. */
-  sinkUrl: string;
+  /** Verified run-scoped collection and bundle endpoints. */
+  filesUrl: string;
+  workspaceUrl: string;
   /** Run secret used to HMAC-sign each GET (Standard Webhooks). */
   sinkSecret: string;
   /** Absolute workspace root the bundle + files are written under. */
@@ -125,7 +125,12 @@ export async function signedGetWithRetry(url: string, deps: ProvisionDeps): Prom
       );
       let res: Response;
       try {
-        res = await fetchFn(url, { method: "GET", headers, signal: deadline.signal });
+        res = await fetchFn(url, {
+          method: "GET",
+          redirect: "manual",
+          headers,
+          signal: deadline.signal,
+        });
       } finally {
         clearTimeout(timer);
       }
@@ -155,10 +160,9 @@ export async function signedGetWithRetry(url: string, deps: ProvisionDeps): Prom
  * loud instead.
  */
 export async function provisionWorkspace(deps: ProvisionDeps): Promise<void> {
-  const url = sinkSiblingUrl(deps.sinkUrl, "workspace");
   let res: Response;
   try {
-    res = await signedGetWithRetry(url, deps);
+    res = await signedGetWithRetry(deps.workspaceUrl, deps);
   } catch (err) {
     return await deps.die(`Failed to provision workspace from platform: ${getErrorMessage(err)}`);
   }
@@ -215,25 +219,9 @@ export async function removeAgentPackage(
  * file the manifest listed IS fatal, same reasoning as the bundle.
  */
 export async function provisionFiles(deps: ProvisionDeps): Promise<void> {
-  // `/files` is the ONLY manifest path. There is no `/documents` probe: a
-  // platform without a `/files` route answers 404, the documented "this run
-  // carries no input files" case, and a second path would put a dual-read
-  // fallback on the common boot path (`docs/NO_TRANSITIONAL_CODE.md` §1).
-  //
-  // Do NOT lean on `findRuntimeImageTagMismatch` (`@appstrate/env`) to argue
-  // this: it compares `PI_IMAGE` against `SIDECAR_IMAGE` unconditionally, but
-  // the PLATFORM only joins that comparison when all three refs are release
-  // versions. A digest-pinned ref is exempt outright, and `:latest`, `dev`,
-  // `sha-…` and `{{major}}.{{minor}}` all take the platform back out — so a
-  // released platform under `:latest` runtime images boots fine and is a
-  // supported deployment. Platform/image skew IS reachable; it just cannot
-  // produce a `documents`-keyed body here, because the only writer of that
-  // body is the platform's `parseRunFilesManifest`, which throws on the
-  // retired spelling rather than serving it.
-  const manifestUrl = sinkSiblingUrl(deps.sinkUrl, "files");
   let manifestRes: Response;
   try {
-    manifestRes = await signedGetWithRetry(manifestUrl, deps);
+    manifestRes = await signedGetWithRetry(deps.filesUrl, deps);
   } catch (err) {
     return await deps.die(`Failed to fetch files manifest: ${getErrorMessage(err)}`);
   }
@@ -275,7 +263,7 @@ export async function provisionFiles(deps: ProvisionDeps): Promise<void> {
     }
     let docRes: Response;
     try {
-      docRes = await signedGetWithRetry(`${manifestUrl}/${encodeURIComponent(name)}`, deps);
+      docRes = await signedGetWithRetry(appendUrlPath(deps.filesUrl, name), deps);
     } catch (err) {
       return await deps.die(`Failed to fetch file ${name}: ${getErrorMessage(err)}`);
     }

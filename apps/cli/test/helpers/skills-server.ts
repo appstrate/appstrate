@@ -111,7 +111,7 @@ export interface SkillFixture {
 
 export interface SkillServer {
   /** Install the stub over `globalThis.fetch`. */
-  install(): void;
+  install(beforeDownload?: () => Promise<void>): void;
   /** Count of published `SKILL.md` reads — the "no re-download" assertion. */
   downloads(): number;
   /** Count of draft `SKILL.md` reads. */
@@ -202,15 +202,12 @@ export function createSkillServer(
   let draftDownloads = 0;
   let inFlight = 0;
   let peakInFlight = 0;
+  let beforeDownload: (() => Promise<void>) | undefined;
 
   const stub = async (input: string | URL | Request, init?: RequestInit): Promise<Response> => {
     inFlight += 1;
     peakInFlight = Math.max(peakInFlight, inFlight);
     try {
-      // One macrotask of latency, so overlapping requests are observable at
-      // all: a stub that answers synchronously never has two in flight and
-      // would measure a concurrency cap of 1 as if it were the real one.
-      await new Promise((resolve) => setTimeout(resolve, 0));
       return await respond(input, init);
     } finally {
       inFlight -= 1;
@@ -283,6 +280,7 @@ export function createSkillServer(
 
     const uri = url.searchParams.get("uri") ?? "";
     if (path === "/api/packages/skills/served/archive") {
+      await beforeDownload?.();
       const found = locate(uri, spaceId);
       if (!found || found.filePath !== "SKILL.md") {
         return json({ code: "not_found", message: `No skill readable at ${uri}` }, 404);
@@ -322,7 +320,8 @@ export function createSkillServer(
   };
 
   return {
-    install(): void {
+    install(onDownload): void {
+      beforeDownload = onDownload;
       globalThis.fetch = stub as unknown as typeof fetch;
     },
     downloads: () => downloads,

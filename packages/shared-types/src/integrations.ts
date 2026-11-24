@@ -18,7 +18,6 @@ import type { ResolutionFieldError } from "@appstrate/core/api-errors";
 
 export type IntegrationManifestView = IntegrationManifest;
 export type IntegrationManifestAuth = NonNullable<IntegrationManifest["auths"]>[string];
-export type IntegrationAuthType = IntegrationManifestAuth["type"];
 
 /**
  * An agent's integration declaration flattened by `parseManifestIntegrations`:
@@ -119,7 +118,7 @@ export interface IntegrationConnection extends ConnectionReach {
 
 export interface IntegrationAuthStatus {
   auth_key: string;
-  type: IntegrationAuthType;
+  type: IntegrationManifestAuth["type"];
   required: boolean;
   /** Scopes declared in the manifest (the ones the connect button requests). */
   scopes: string[];

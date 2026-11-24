@@ -94,6 +94,7 @@
     "./pairing-token": "./src/pairing-token.ts",
     "./jwt": "./src/jwt.ts",
     "./dedupe-label": "./src/dedupe-label.ts",
+    "./chat-message": "./src/chat-message.ts",
     "./chat-contract": "./src/chat-contract.ts",
     "./file-uri": "./src/file-uri.ts",
     "./appearance": "./src/appearance.ts",

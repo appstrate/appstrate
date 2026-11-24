@@ -237,11 +237,8 @@ export interface McpToolContext {
   followRunLogs: (runId: string, onLog: (log: RunLogEvent) => void) => () => void;
   /** In-process dispatcher (defaults to the platform app at request time). */
   dispatch: Dispatch;
-  /**
-   * Optional sink for audit + telemetry events. Defaults to a no-op so unit
-   * tests and any non-HTTP caller need not provide one.
-   */
-  observe?: McpObserver;
+  /** Sink for audit and telemetry events from this request. */
+  observe: McpObserver;
   /** Org-wide connection only: its spaces; `permissions` and `scope` are the entered one's. */
   orgSpaces?: OrgWideToolSpaces;
   /** The skills the connection reaches, through the Skills extension's reader (`./skills.ts`). */
@@ -251,7 +248,7 @@ export interface McpToolContext {
 /** Never let an observer error affect the tool result. */
 function emit(ctx: McpToolContext, event: McpToolEvent): void {
   try {
-    ctx.observe?.(event);
+    ctx.observe(event);
   } catch {
     // Telemetry/audit is best-effort; swallow.
   }
@@ -1182,11 +1179,16 @@ export async function readResponse(
   return result;
 }
 
-function applyQuery(url: URL, query: Record<string, unknown>): void {
+function applyQuery(
+  url: URL,
+  query: Record<string, unknown>,
+  csvParams?: ReadonlySet<string>,
+): void {
   for (const [key, value] of Object.entries(query)) {
     if (value === undefined || value === null) continue;
     if (Array.isArray(value)) {
-      for (const item of value) url.searchParams.append(key, String(item));
+      if (csvParams?.has(key)) url.searchParams.set(key, value.join(","));
+      else for (const item of value) url.searchParams.append(key, String(item));
     } else {
       url.searchParams.set(key, String(value));
     }
@@ -1377,7 +1379,7 @@ function buildInvokeTool(ctx: McpToolContext): AppstrateToolDefinition {
     }
 
     const url = new URL(path, ctx.origin);
-    applyQuery(url, query);
+    applyQuery(url, query, op.csvQueryParams);
 
     // Every Appstrate API request body is a JSON object. A model that passes
     // an array or primitive as `body` would otherwise have it silently

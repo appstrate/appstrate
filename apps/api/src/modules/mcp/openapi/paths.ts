@@ -101,7 +101,7 @@ const orgEndpoint = {
                       type: "object",
                       description:
                         "A `tools/call` result's structured payload, matching the tool's " +
-                        "`outputSchema` when it declares one (`run_and_wait`: RunAndWaitResult).",
+                        "`outputSchema` when it declares one. For `run_and_wait` this includes RunAndWaitResult on success and structured route or tool refusals on error.",
                     },
                   },
                 },

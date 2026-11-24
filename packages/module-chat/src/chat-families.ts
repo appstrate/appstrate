@@ -26,12 +26,7 @@
  * enforced by `test/chat-families.test.ts` — a proxy family missing from this
  * set would be filtered out by `pickModel` before a binding could be built.
  *
- * The other side of that relation now lives in `LLM_PROXY_ROUTES`
- * (`@appstrate/runner-pi`), NOT in a private switch in this package: the drift
- * this guards against is a row added to that table, in another package, which
- * no reviewer of a `module-chat` change will be looking at. This used to point
- * at `pi-chat/model-binding.ts`'s `proxyBaseUrl()` — deleted when the three
- * copies of the path convention were consolidated.
+ * LLM_PROXY_ROUTES in @appstrate/runner-pi defines the proxy side of this relation.
  */
 export const CHAT_USABLE_FAMILIES = new Set([
   "openai-completions",

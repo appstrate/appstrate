@@ -16,13 +16,7 @@ function envLevel(): LogLevel {
 /**
  * Where emitted lines go. `null` is production: the real process streams.
  *
- * A test that wants to read what the logger emitted used to swap the *global*
- * `process.stdout.write` for the duration of a call. `bun test` runs the whole
- * repo in one process, so that buffer also collected whatever any other suite
- * or library wrote in that window — and this logger's readers parse every
- * captured line as JSON, so one foreign byte is a `SyntaxError`, not a soft
- * assertion failure. Routing through a sink the test owns keeps
- * the buffer to lines this logger actually produced.
+ * A test-owned sink isolates JSON log lines from other writers in the shared Bun test process.
  */
 let testSink: ((level: LogLevel, line: string) => void) | null = null;
 

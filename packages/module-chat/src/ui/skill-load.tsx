@@ -11,7 +11,6 @@ import { useId } from "react";
 import { makeAssistantToolUI, type ToolCallMessagePartProps } from "@assistant-ui/react";
 import { PinIcon } from "lucide-react";
 import { Button } from "@appstrate/ui/components/button";
-import { cn } from "@appstrate/ui/cn";
 import { SKILL_DIRECTIVE } from "../directives.ts";
 import {
   effectiveSkills,
@@ -63,13 +62,10 @@ function PinAction({ skill }: { skill: { packageId: string; name: string } }) {
         size="sm"
         data-testid="skill-load-pin"
         aria-label={t("skills.load.pinLabel", { name: skill.name })}
-        aria-disabled={overBudget || undefined}
         aria-describedby={overBudget ? reasonId : undefined}
         title={overBudget ? reason : undefined}
-        onClick={() => {
-          if (!overBudget) setPin(skill.packageId, true);
-        }}
-        className={cn("h-6 gap-1 px-1.5 text-xs", overBudget && "cursor-not-allowed opacity-50")}
+        onClick={() => setPin(skill.packageId, true)}
+        className="h-6 gap-1 px-1.5 text-xs"
       >
         <PinIcon className="size-3" />
         {t("skills.load.pin")}

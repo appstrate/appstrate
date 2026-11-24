@@ -23,7 +23,11 @@ const chatAgentCommandSchema = z.object({
   color: z.string().nullable(),
 });
 
+export const catalogueSources = ["published_skills", "draft_skills", "agents"] as const;
+export type CatalogueSource = (typeof catalogueSources)[number];
+
 export const chatCommandsSchema = z.object({
+  unavailable: z.array(z.enum(catalogueSources)).optional(),
   skills: z.array(chatSkillCommandSchema),
   agents: z.array(chatAgentCommandSchema),
 });

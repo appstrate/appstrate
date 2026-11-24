@@ -757,7 +757,7 @@ const connectKickoffRelayProperties = {
     type: "string",
     format: "uuid",
     description:
-      "Reconnect this existing connection in place instead of creating a new one. Added scopes then apply to every agent that uses it: to give one agent more rights without widening the others, omit it and pass the required `scopes`. Do not duplicate an integration to change its scopes; create another connection.",
+      "Reconnect this existing connection in place only when both credentials identify the same upstream account and instance. An unidentified account (account_id default) requires another connection. Its shares, pins and schedules keep the original ID until explicitly changed. Added scopes then apply to every agent that uses it: to give one agent more rights without widening the others, omit it and pass the required `scopes`. Do not duplicate an integration to change its scopes; create another connection.",
   },
 } as const;
 
@@ -802,7 +802,7 @@ const connectRunResponses = {
 
 /** How a declarative `connect.login` (AFPS §7.7) refuses, on both connect surfaces. */
 const CONNECT_LOGIN_400 =
-  "A login the service refused is `login_rejected` on `credentials`; on an oauth2 auth, that is a token endpoint answering `invalid_grant`, or HTTP 400 or 401 other than a refused OAuth client. A `login_rejected` says what was refused in the extension member `login_refusal`: `grant` for an oauth2 token request, `integration` for an integration's login tool (a connect-run), whose own untranslated text, if any, is `integration_diagnostic`; it is absent when the service refused the submitted credentials. A credential value the declarative login request cannot carry where it is placed, a `null` included, is `login_input_unencodable` on `credentials.<field>`, and a submitted base URL it may not reach `login_url_refused`, with one `errors[]` entry per `credentials.<field>` the address comes from. None echoes a credential value nor the service's answer. oauth2 declaring `connect.login` and an `issuer`: a `token_endpoint` the issuer's metadata contradicts is `invalid_request`, before anything is sent.";
+  "A login the service refused is `login_rejected` on `credentials`; on an oauth2 auth, that is a token endpoint answering `invalid_grant`. A malformed OAuth request, unsupported grant type or invalid scope is a configuration refusal (`connection_not_ready`); a transient provider failure asks for a retry. A `login_rejected` says what was refused in the extension member `login_refusal`: `grant` for an oauth2 token request, `integration` for an integration's login tool (a connect-run), whose own untranslated text, if any, is `integration_diagnostic`; it is absent when the service refused the submitted credentials. A credential value the declarative login request cannot carry where it is placed, a `null` included, is `login_input_unencodable` on `credentials.<field>`, and a submitted base URL it may not reach `login_url_refused`, with one `errors[]` entry per `credentials.<field>` the address comes from. None echoes a credential value nor the service's answer. oauth2 declaring `connect.login` and an `issuer`: a `token_endpoint` the issuer's metadata contradicts is `invalid_request`, before anything is sent.";
 const CONNECT_LOGIN_502 =
   "A declarative login (`connect.login`) could not complete: the service could not be reached, or answered 429 or 5xx (`login_upstream_unavailable`). A `Retry-After` the service sent is relayed, as the header and as `retry_after`, except on an oauth2 auth, whose token request relays none. On an oauth2 auth, `login_upstream_unavailable` also covers any other 4xx (a 403 is often a firewall refusing the client), an unusable 2xx (no `access_token`, or a `token_type` absent or other than `Bearer`, compared case-insensitively), and an `issuer` whose metadata cannot be read, refused before anything is sent. On an oauth2 auth, an OAuth client its token endpoint refuses is `oauth_client_rejected`. Once an oauth2 token request may have redeemed the grant — a timeout, a 5xx, an unusable 2xx, or any refusal after a successful token request, whatever its status (400, 404, 500 or 502) — the problem carries the extension member `grant_may_be_redeemed: true` and its detail says so; it is absent when the answer was a 4xx or the request was never sent.";
 const CONNECT_LOGIN_403 =
@@ -810,7 +810,7 @@ const CONNECT_LOGIN_403 =
 /** An oauth2 `connect.login` whose chosen OAuth client is gone by the token request, on both connect surfaces. */
 const CONNECT_LOGIN_409 = {
   description:
-    "oauth2 declaring `connect.login` (`connection_not_ready`), nothing sent: the OAuth client chosen for the auth no longer resolves when the token request is built, removed in between; or the client authenticates with a `token_endpoint_auth_method` the platform does not implement (only `client_secret_basic`, `client_secret_post` and `none` are). An auth with no usable OAuth client is the 403.",
+    "`identity_mismatch`: the original and submitted credentials do not identify the same upstream account and instance and the stored connection is preserved. With oauth2 declaring `connect.login` (`connection_not_ready`), nothing sent: the OAuth client chosen for the auth no longer resolves when the token request is built, removed in between; or the client authenticates with a `token_endpoint_auth_method` the platform does not implement (only `client_secret_basic`, `client_secret_post` and `none` are). An auth with no usable OAuth client is the 403.",
   content: {
     "application/problem+json": { schema: { $ref: "#/components/schemas/ProblemDetail" } },
   },
@@ -1681,7 +1681,7 @@ export const integrationsPaths = {
                   type: "string",
                   format: "uuid",
                   description:
-                    "Existing connection to renew in place (api_key/PAT/custom); the new credential then serves every agent that uses it. Omit on a fresh connect — the write then INSERTs a new row; to give one agent a different credential, create a new connection rather than duplicating the integration.",
+                    "Existing connection to renew in place only if the credentials identify the same upstream account and instance (409 identity_mismatch otherwise). A key or password without an account identity requires another connection. Shares, pins and schedules keep the original ID until explicitly changed. When an administrator restricts creation, choose a shared connection or ask the administrator to provide one. Omit on a fresh connect — the write then INSERTs a new row; to give one agent a different credential, create a new connection rather than duplicating the integration.",
                 },
                 variables: connectionVariablesSchema,
               },

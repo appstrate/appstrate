@@ -6,7 +6,7 @@
  * tools and third-party MCP tools all draw on one budget per run.
  *
  * Background. The byte-based caps in `helpers.ts`
- * (`MAX_RESPONSE_SIZE`, `ABSOLUTE_MAX_RESPONSE_SIZE`) protect against
+ * (`ABSOLUTE_MAX_RESPONSE_SIZE`) protect against
  * OOM and "agent downloads a 10 MB PDF" scenarios but do not reflect
  * the true cost of a tool output in the agent's context window:
  *

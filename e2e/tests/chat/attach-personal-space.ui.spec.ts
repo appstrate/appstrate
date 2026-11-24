@@ -7,7 +7,7 @@
  */
 
 import type { Locator, Page } from "@playwright/test";
-import { test, expect } from "../../fixtures/browser.fixture.ts";
+import { test, expect, seedRolePreview } from "../../fixtures/browser.fixture.ts";
 import { pickModel, withLocalChatModel } from "../../helpers/chat-model.ts";
 import { createSpace } from "../../helpers/seed.ts";
 import { createOverviewContext } from "../../helpers/overview.ts";
@@ -98,10 +98,7 @@ test("a drop under a role preview says why nothing is attached", async ({
   const { orgId, defaultSpaceId } = browserCtx.org;
   const context = await createOverviewContext(browser, browserCtx.auth, orgId, defaultSpaceId);
   // A previewed role holds no personal space: attaching is unavailable for good.
-  await context.addInitScript(([key, value]) => localStorage.setItem(key, value), [
-    "appstrate_view_as",
-    JSON.stringify({ orgId, orgRole: "member", space: null }),
-  ] as const);
+  await seedRolePreview(context, { orgId, orgRole: "member", space: null });
   try {
     const page = await context.newPage();
     await page.goto("/chat");

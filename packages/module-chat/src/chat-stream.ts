@@ -23,14 +23,9 @@ import { safeValidateUIMessages, type FileUIPart, type UIMessage, type UIMessage
 import { z } from "zod";
 import { invalidRequest, conflict, forbidden } from "@appstrate/core/api-errors";
 import { readJsonBody } from "@appstrate/core/request-body";
-import { withByteCap } from "@appstrate/core/safe-json";
-import { isAttachmentUri, parseFileUri } from "@appstrate/core/file-uri";
+import { parseFileUri } from "@appstrate/core/file-uri";
 import { logger } from "./logger.ts";
-import {
-  AGENT_PROMPT_PART_TYPE,
-  agentPromptDataSchema,
-  clientAgentPromptDataSchema,
-} from "./agent-prompt.ts";
+import { chatThreadMessagesSchema } from "@appstrate/core/chat-message";
 import { resolveAgentPrompt, withStoredAgentPromptTexts } from "./agent-launch.ts";
 import { notifySessionUpdate } from "./realtime.ts";
 import { citedSkills } from "./message-text.ts";
@@ -123,15 +118,13 @@ export type ChatEngine = (input: PiChatInput) => Response;
  * other role silently, so anything else must be refused at the door rather than
  * accepted and discarded.
  */
-const CHAT_MESSAGE_ROLES = new Set(["user", "assistant"]);
 
-/** Ceiling on the turn's last (persisted) message; attachments ride as references. */
-export const CHAT_MESSAGE_MAX_BYTES = 256 * 1024;
+export { CHAT_MESSAGE_MAX_BYTES } from "@appstrate/core/chat-message";
 
 // The client (assistant-ui / useChat) posts the full thread plus optional
 // session/model/context extras. The last message's UIMessage shape is checked by
 // `safeValidateUIMessages` in the handler; this schema adds:
-//   - `role` MUST be one of {@link CHAT_MESSAGE_ROLES}. Nothing legitimate
+//   - `role` must be user or assistant. Nothing legitimate
 //     sends another: the composer only produces user turns, and a reload
 //     replays what the server persisted — user or assistant, a server-authored
 //     notice included (persistence.ts stores it as `assistant`).
@@ -150,52 +143,7 @@ export const pinnedSkillIdsSchema = z
 export const chatStreamSchema = z
   .object({
     id: z.string().optional(),
-    messages: z
-      .array(z.unknown())
-      .min(1, "messages must not be empty")
-      .superRefine((messages, ctx) => {
-        messages.forEach((message, i) => {
-          const role = (message as { role?: unknown }).role;
-          if (typeof role !== "string" || !CHAT_MESSAGE_ROLES.has(role)) {
-            ctx.addIssue({
-              code: "custom",
-              message: "Message role must be 'user' or 'assistant'.",
-              path: [i, "role"],
-            });
-          }
-          const parts = (message as { parts?: unknown }).parts;
-          if (!Array.isArray(parts)) return;
-          let launches = 0;
-          parts.forEach((part, j) => {
-            const type =
-              part && typeof part === "object" ? (part as { type?: unknown }).type : null;
-            if (type === AGENT_PROMPT_PART_TYPE) {
-              const shape =
-                i === messages.length - 1 ? clientAgentPromptDataSchema : agentPromptDataSchema;
-              const parsed = shape.safeParse((part as { data?: unknown }).data);
-              if (role !== "user" || ++launches > 1 || !parsed.success) {
-                ctx.addIssue({
-                  code: "custom",
-                  message:
-                    "A user message carries at most one agent launch: { name, title } on the new message (and the text a stored one holds).",
-                  path: [i, "parts", j, "data"],
-                });
-              }
-              return;
-            }
-            if (type !== "file") return;
-            const url = (part as { url?: unknown }).url;
-            if (!isAttachmentUri(url)) {
-              ctx.addIssue({
-                code: "custom",
-                message: "File attachment URI must be an 'upload://' or 'appfile://' URI.",
-                path: [i, "parts", j, "url"],
-              });
-            }
-          });
-        });
-        withByteCap(CHAT_MESSAGE_MAX_BYTES)(messages.at(-1), ctx);
-      }),
+    messages: chatThreadMessagesSchema,
     modelId: z.string().optional(),
     /**
      * The origin space and limit of the conversation, read ONLY when this turn creates its

@@ -136,15 +136,19 @@ const chatCommandsQuerySchema = z.object({
     .transform((value) => value === "true"),
 });
 
-/** The skills PATCH: `pins` replaces the whole set. */
+/** Replace the set or update a single pin against the current row. */
 export const updateSessionSkillsSchema = z
   .object({
     pins: pinnedSkillIdsSchema.optional(),
+    pin: z.object({ id: pinnedSkillIdsSchema.element, pinned: z.boolean() }).strict().optional(),
     skill_discovery: z.boolean().optional(),
   })
   .strict()
-  .refine((body) => body.pins !== undefined || body.skill_discovery !== undefined, {
-    error: "pins or skill_discovery is required",
+  .refine((body) => body.pin === undefined || body.pins === undefined, {
+    error: "pin and pins cannot be combined",
+  })
+  .refine((body) => Object.keys(body).length > 0, {
+    error: "pin, pins or skill_discovery is required",
   });
 
 type SessionRow = typeof chatSessions.$inferSelect;
@@ -580,12 +584,11 @@ function createSessionHandlers(deps: ChatPlatformDeps) {
     // PATCH …/sessions/:id/skills — the pins (full set) and the discovery switch. Allowed while a
     // turn runs: that turn keeps what it read, the next one reads this.
     updateSkills: async (c: Context<ChatEnv>) => {
-      const session = await getOwnedSession(c.req.param("id")!, sessionScope(c));
-      const { pins, skill_discovery } = await readJsonBody(c, updateSessionSkillsSchema);
-      const row = await updateSessionSkills(session.id, {
-        pinnedSkills: pins,
-        skillDiscovery: skill_discovery,
-      });
+      const change = await readJsonBody(c, updateSessionSkillsSchema);
+      const row = await updateSessionSkills(
+        and(eq(chatSessions.id, c.req.param("id")!), openableBy(sessionScope(c)))!,
+        change,
+      );
       if (!row) throw notFound("Chat session not found");
       notifySessionUpdate(row.id, row.orgId, row.userId);
       const [dto] = await toSessionDtos([row]);

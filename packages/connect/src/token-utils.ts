@@ -221,7 +221,10 @@ function classifiedFailure(
  * error bodies and a generic catcher logs `err.message`. The raw body rides on
  * `body`, for the caller's typed error field.
  */
-export async function readTokenResponse(response: Response): Promise<TokenResponseRead> {
+export async function readTokenResponse(
+  response: Response,
+  requireTokenType = false,
+): Promise<TokenResponseRead> {
   const { status } = response;
   if (!response.ok) {
     const body = (await readTextUnder(response, MAX_TOKEN_BODY_BYTES)) ?? "";
@@ -233,7 +236,23 @@ export async function readTokenResponse(response: Response): Promise<TokenRespon
   } catch (cause) {
     return { ok: false, kind: "transient", status, summary: "non-JSON response", cause };
   }
-  if (hasAccessToken(raw)) return { ok: true, raw };
+  if (hasAccessToken(raw)) {
+    // Older code-exchange and refresh integrations omitted token_type. An explicitly issued
+    // non-Bearer token cannot be used by any of these Bearer delivery paths.
+    if (
+      (raw.token_type !== undefined || requireTokenType) &&
+      (typeof raw.token_type !== "string" || raw.token_type.toLowerCase() !== "bearer")
+    ) {
+      return {
+        ok: false,
+        kind: "transient",
+        status,
+        summary: "The service did not issue a bearer token.",
+        error: "unsupported_token_type",
+      };
+    }
+    return { ok: true, raw };
+  }
   return classifiedFailure(
     classifyTokenErrorBody(raw),
     status,

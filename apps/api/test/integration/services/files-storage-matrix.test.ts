@@ -228,6 +228,7 @@ describeRequiresS3("files storage parity — S3 presigned posture", () => {
     );
 
     const mcpCtx: McpToolContext = {
+      observe: () => {},
       origin: "https://instance.example",
       authHeaders: new Headers(),
       permissions: new Set(["files:read"]),

@@ -2,7 +2,7 @@
 // Copyright 2026 Appstrate
 
 import { describe, it, expect, beforeEach, afterEach, afterAll } from "bun:test";
-import { HttpSink, sinkSiblingUrl } from "../../src/sinks/http-sink.ts";
+import { HttpSink, runServiceUrl, sinkSiblingUrl } from "../../src/sinks/http-sink.ts";
 import { verify } from "../../src/events/signing.ts";
 import type { RunEvent } from "@afps-spec/types";
 import type { TerminalRunResult } from "../../src/types/run-result.ts";
@@ -482,4 +482,20 @@ describe("sinkSiblingUrl", () => {
       "/events",
     );
   });
+});
+
+it("uses explicit links on a rewritten gateway and derives links for earlier platforms", () => {
+  const endpoint = "https://gateway.test/rewrite/events-stream";
+  for (const name of ["mcp", "workspace", "files", "heartbeat"] as const) {
+    const link = `https://gateway.test/other/${name}?run=123`;
+    expect(runServiceUrl(endpoint, name, link)).toBe(link);
+    expect(() => runServiceUrl(endpoint, name, "https://another.test/secret")).toThrow();
+    expect(() => runServiceUrl(endpoint, name, "https://actor@gateway.test/secret")).toThrow();
+  }
+  expect(runServiceUrl("https://gateway.test/run/events", "mcp")).toBe(
+    "https://gateway.test/run/mcp",
+  );
+  expect(runServiceUrl("https://gateway.test/run/events", "heartbeat")).toBe(
+    "https://gateway.test/run/events/heartbeat",
+  );
 });

@@ -93,7 +93,7 @@ describe("integration OAuth2 — refresh_token connect-time guard", () => {
       expiresAt: new Date(Date.now() + 3_600_000).toISOString(),
       scopesGranted: [],
       scopesRequested: [],
-      tokenResponse: { access_token: "at-1", expires_in: 3600 },
+      tokenResponse: { access_token: "at-1", expires_in: 3600, sub: "account-1" },
       clientRef: "probe-system",
       ...over,
     };

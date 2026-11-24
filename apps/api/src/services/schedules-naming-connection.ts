@@ -10,6 +10,7 @@
  * space, end user) locks in the order it walks; a deadlock with one is detected by Postgres.
  */
 
+import { nextScheduleVersion } from "../lib/schedule-version.ts";
 import { and, asc, eq, inArray, or, sql, type SQL } from "drizzle-orm";
 import { schedules, type ScheduleDisabledReason } from "@appstrate/db/schema";
 import type { ConnectionOverrides } from "@appstrate/core/integration";
@@ -84,7 +85,12 @@ export async function disableSchedules(
   if (ids.length === 0) return;
   await tx
     .update(schedules)
-    .set({ enabled: false, disabledReason: reason, nextRunAt: null, updatedAt: new Date() })
+    .set({
+      enabled: false,
+      disabledReason: reason,
+      nextRunAt: null,
+      updatedAt: nextScheduleVersion,
+    })
     .where(inArray(schedules.id, [...ids]));
 }
 

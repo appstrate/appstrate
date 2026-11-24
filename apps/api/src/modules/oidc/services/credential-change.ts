@@ -13,10 +13,10 @@ import {
   deleteOAuthTokens,
   lockOAuthGrantsOfUser,
 } from "../../../services/oauth-token-revocation.ts";
-import { revokeAllFamiliesForUser } from "./cli-tokens.ts";
+import { invalidateRevokedDeviceNames, revokeAllFamiliesForUser } from "./cli-tokens.ts";
 
 export async function revokeOidcAccessAfterCredentialChange(userId: string): Promise<void> {
-  await db.transaction(async (tx) => {
+  const families = await db.transaction(async (tx) => {
     await lockOAuthGrantsOfUser(tx, userId);
     await tx.delete(deviceCode).where(eq(deviceCode.userId, userId));
     // Deleted, not marked: see `oauth-token-revocation.ts`.
@@ -27,6 +27,7 @@ export async function revokeOidcAccessAfterCredentialChange(userId: string): Pro
       .update(oauthGrantState)
       .set({ tokensValidAfter: new Date() })
       .where(eq(oauthGrantState.userId, userId));
+    return revokeAllFamiliesForUser(tx, userId, "password_changed");
   });
-  await revokeAllFamiliesForUser(userId, "password_changed");
+  invalidateRevokedDeviceNames(families);
 }

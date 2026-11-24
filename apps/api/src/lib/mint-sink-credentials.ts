@@ -13,6 +13,10 @@ export interface SinkCredentials {
   url: string;
   /** Absolute URL — CLI plugs into `HttpSink.finalizeUrl`. */
   finalize_url: string;
+  mcp_url: string;
+  heartbeat_url: string;
+  workspace_url: string;
+  files_url: string;
   /** Plaintext run secret — returned once, never retrievable. */
   secret: string;
   /** ISO-8601. */
@@ -35,11 +39,16 @@ export function mintSinkCredentials(input: {
   ttlSeconds: number;
 }): SinkCredentials {
   const base = input.appUrl.replace(/\/$/, "");
+  const runUrl = `${base}/api/runs/${input.runId}`;
   const secret = randomBytes(32).toString("base64url");
   const expiresAt = new Date(Date.now() + input.ttlSeconds * 1000).toISOString();
   return {
-    url: `${base}/api/runs/${input.runId}/events`,
-    finalize_url: `${base}/api/runs/${input.runId}/events/finalize`,
+    url: `${runUrl}/events`,
+    finalize_url: `${runUrl}/events/finalize`,
+    mcp_url: `${runUrl}/mcp`,
+    heartbeat_url: `${runUrl}/events/heartbeat`,
+    workspace_url: `${runUrl}/workspace`,
+    files_url: `${runUrl}/files`,
     secret,
     expiresAt,
   };

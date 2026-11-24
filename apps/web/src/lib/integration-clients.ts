@@ -10,6 +10,20 @@
 
 import type { IntegrationClient } from "../hooks/use-integrations";
 
+/** The two routes own the same published edit-modal parameter; only an integration scopes its value by auth. */
+export const EDIT_OAUTH_CLIENT_PARAM = "editOauthClient";
+
+export function integrationClientModalValue(authKey: string, clientRef: string): string {
+  return `${authKey}:${clientRef}`;
+}
+
+export function integrationClientModalRef(authKey: string, value: string | null): string | null {
+  if (!value) return null;
+  // A client reference is a generated id; the auth key may contain a colon.
+  const boundary = value.lastIndexOf(":");
+  return boundary >= 0 && value.slice(0, boundary) === authKey ? value.slice(boundary + 1) : null;
+}
+
 export type ClientLevel = IntegrationClient["source"];
 
 export interface ClientRow {

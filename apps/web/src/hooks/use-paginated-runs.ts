@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { useInfiniteQuery } from "@tanstack/react-query";
+import { partialMatchKey, useInfiniteQuery } from "@tanstack/react-query";
 import { canReadRuns } from "@appstrate/core/permissions";
 import { client } from "../api/client";
 import { useListScope } from "./use-org-scope";
@@ -40,17 +40,13 @@ const RUNS_PAGE_SIZE = 25;
 /** One page of runs, newest first. */
 export type RunsPage = ListEnvelope<EnrichedRun> & { total: number };
 
-/**
- * Whether the previous rows stay on screen while `currentKey` loads: when only the search
- * (the key's second-to-last segment, `paginatedRunsKeys.list`) changed.
- */
-export function keepsRunRows(previousKey: readonly unknown[], currentKey: readonly unknown[]) {
-  const filters = (key: readonly unknown[]) => [...key.slice(0, -2), key[key.length - 1]];
-  const current = filters(currentKey);
-  const previous = filters(previousKey);
-  return (
-    previous.length === current.length && previous.every((segment, i) => segment === current[i])
-  );
+/** Keep previous rows only when every criterion except the search is unchanged. */
+export function keepsRunRows(
+  previousKey: readonly unknown[],
+  currentKey: ReturnType<typeof paginatedRunsKeys.list>,
+) {
+  const [family, org, space, { search: _search, ...filters }] = currentKey;
+  return partialMatchKey(previousKey, [family, org, space, filters]);
 }
 
 /** The runs list, paged with `fetchNextPage`. */

@@ -24,8 +24,8 @@
  * the AS is first asked for it — alongside the in-process verifier set in
  * `lib/audiences.ts`.
  *
- * Consumers: external MCP clients (Claude Code, Cursor) via OAuth, the
- * first-party chat app (BFF reuses its OIDC token), and Appstrate agents.
+ * External MCP clients connect over OAuth. The first-party chat uses a scoped
+ * loopback bearer for platform tool calls.
  */
 
 import type { AppstrateModule } from "@appstrate/core/module";

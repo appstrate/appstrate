@@ -12,7 +12,12 @@ import { badGateway } from "@appstrate/core/api-errors";
 import { logger } from "./logger.ts";
 import { withCallerClient } from "./platform-mcp.ts";
 import { readSkillsOver } from "./prompt.ts";
-import type { ChatAgentCommand, ChatCommands, ChatSkillCommand } from "./commands.ts";
+import type {
+  ChatAgentCommand,
+  ChatCommands,
+  ChatSkillCommand,
+  CatalogueSource,
+} from "./commands.ts";
 
 export async function readChatCommands(
   openCaller: (signal: AbortSignal) => Promise<AppstrateMcpClient>,
@@ -27,21 +32,23 @@ export async function readChatCommands(
   return withCallerClient(
     openCaller,
     async (client, signal) => {
+      const unavailable: CatalogueSource[] = [];
       const [skills, agents] = await Promise.all([
         opts.readsSkills
           ? readSkillsOver(client, signal, spaces, {
               catalogue: true,
               drafts: opts.drafts,
               read: [],
-            }).then(({ catalogue }) =>
-              catalogue.map((skill): ChatSkillCommand => ({
+            }).then(({ catalogue, unavailable: missing }) => {
+              if (missing) unavailable.push(...missing);
+              return catalogue.map((skill): ChatSkillCommand => ({
                 id: skill.packageId,
                 name: skill.name,
                 description: skill.description,
                 version: skill.version,
                 bytes: skill.bytes,
-              })),
-            )
+              }));
+            })
           : [],
         client.listPrompts({ signal }).then(
           ({ prompts }) =>
@@ -70,11 +77,12 @@ export async function readChatCommands(
             logger.warn("prompts/list failed — the composer's agents left empty", {
               err: String(err),
             });
+            unavailable.push("agents");
             return [];
           },
         ),
       ]);
-      return { skills, agents };
+      return { skills, agents, ...(unavailable.length && { unavailable: unavailable.sort() }) };
     },
     (err) => {
       // An unreachable server is not "nothing to offer": the composer must not read it as such.

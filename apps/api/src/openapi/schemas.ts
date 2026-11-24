@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { MODEL_ERROR_CATEGORIES } from "@appstrate/core/model-error";
+import { MODEL_ERROR_CATEGORIES, MODEL_ERROR_REASONS } from "@appstrate/core/model-error";
 import {
   orgRoleEnum,
   packageSourceValues,
@@ -440,7 +440,7 @@ export const schemas = {
       connection_id: {
         type: "string",
         description:
-          "Populated on `needs_reconnection` and `insufficient_scopes`. On `needs_reconnection`, forward it as the connect kickoff's `connection_id`, with no `scopes`, so the existing connection is reconnected in place (what it holds plus the auth's `default_scopes`) rather than duplicated. On `insufficient_scopes`, forwarding it upgrades that connection, which widens every agent that uses it: only under `remedy: upgrade_or_new`. Populated on `auth_serves_no_selected_tool` too, naming the connection an explicit set (pin, org default, run or schedule override) binds whose auth exposes none of the agent's selected tools: the remedy is taking it out of the set, not a connect flow.",
+          "Populated on `needs_reconnection` and `insufficient_scopes`. On `needs_reconnection` with a replacement `remedy`, it identifies the connection to replace. Otherwise its owner may forward it as the connect kickoff's `connection_id`, with no `scopes`, so the existing connection is reconnected in place (what it holds plus the auth's `default_scopes`) rather than duplicated. On `insufficient_scopes`, forwarding it upgrades that connection, which widens every agent that uses it: only under `remedy: upgrade_or_new`. Populated on `auth_serves_no_selected_tool` too, naming the connection an explicit set (pin, org default, run or schedule override) binds whose auth exposes none of the agent's selected tools: the remedy is taking it out of the set, not a connect flow.",
       },
       missing_scopes: {
         type: "array",
@@ -452,7 +452,7 @@ export const schemas = {
         type: "string",
         enum: [...INSUFFICIENT_SCOPES_REMEDIES],
         description:
-          "Populated on `insufficient_scopes`: how it clears. `new_connection` — start a connect kickoff without `connection_id`, with `scopes: required_scopes`, then bind the new connection (a pin, or `connection_overrides`). `upgrade_or_new` — the same, or, the connection being the caller's own, forward `connection_id` to upgrade it in place, which widens every agent that uses it. `rebind_by_admin` — an admin pin or an enforced org default binds the connection: an admin must switch that binding, and no connect flow clears it. `rebind_by_schedule_owner` — the schedule's `connection_overrides` bind it: the schedule's owner must switch them.",
+          "Populated on `insufficient_scopes` and on `needs_reconnection` for an unidentifiable account. The latter requires changing the binding. Shares, pins and schedules keep the original connection ID until explicitly changed. `new_connection` — start a connect kickoff without `connection_id`, with `scopes: required_scopes`, then bind the new connection (a pin, or `connection_overrides`). `upgrade_or_new` — the same, or, the connection being the caller's own, forward `connection_id` to upgrade it in place, which widens every agent that uses it. `rebind_by_admin` — an admin pin or an enforced org default binds the connection: an admin must switch that binding, and no connect flow clears it. `rebind_by_schedule_owner` — the schedule's `connection_overrides` bind it: the schedule's owner must switch them.",
       },
       owned_by_actor: {
         type: "boolean",
@@ -522,6 +522,16 @@ export const schemas = {
       retry_after: {
         type: "integer",
         description: "Seconds before retry; mirrored in the `Retry-After` header",
+      },
+      login_refusal: {
+        type: "string",
+        enum: ["grant", "integration"],
+        description:
+          "For login_rejected, identifies an OAuth grant rejection or a refusal returned by the integration's login tool.",
+      },
+      integration_diagnostic: {
+        type: "string",
+        description: "The integration login tool's own diagnostic when it supplied one.",
       },
       errors: {
         type: "array",
@@ -1756,6 +1766,11 @@ export const schemas = {
             required: ["category", "retryable", "status", "message"],
             properties: {
               category: { type: "string", enum: [...MODEL_ERROR_CATEGORIES] },
+              reason: {
+                type: "string",
+                enum: [...MODEL_ERROR_REASONS],
+                description: "Known provider reason carried by the terminal refusal.",
+              },
               retryable: { type: "boolean" },
               status: { type: ["integer", "null"], minimum: 100, maximum: 599 },
               message: { type: ["string", "null"] },
@@ -2287,6 +2302,7 @@ export const schemas = {
       "owner_name",
       "allowed_actions",
       "bindable",
+      "referencing_model_count",
       "serves_model_ids",
       "created_by",
       "createdAt",
@@ -2338,6 +2354,12 @@ export const schemas = {
         type: "boolean",
         description:
           "Whether an organization model may be bound to this credential: `true` for an organization credential (API key or subscription), `false` for a personal or a built-in one.",
+      },
+      referencing_model_count: {
+        type: "integer",
+        minimum: 0,
+        description:
+          "Number of organization model rows bound to this credential, including disabled models. A positive count prevents deletion (409 credential_in_use). Personal and built-in credentials have no such bindings.",
       },
       serves_model_ids: {
         type: "array",

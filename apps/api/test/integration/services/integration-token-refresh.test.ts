@@ -360,7 +360,7 @@ describe("refreshConnectionCredential — the refresh and its write-back", () =>
     token.setResponse({
       access_token: "access-3",
       refresh_token: "rt-2",
-      token_type: "DPoP",
+      token_type: "bearer",
       id_token: "idt-2",
       scope: "read",
       expires_in: 3600,
@@ -368,10 +368,16 @@ describe("refreshConnectionCredential — the refresh and its write-back", () =>
     expect(refreshedFields(await refresh(connId))).toEqual({
       access_token: "access-3",
       refresh_token: "rt-2",
-      token_type: "DPoP",
+      token_type: "bearer",
       id_token: "idt-2",
       scope: "read",
     });
+
+    token.setResponse({ access_token: "unsupported", token_type: "DPoP", expires_in: 3600 });
+    expect((await refresh(connId)).status).not.toBe("refreshed");
+    expect(decryptCredentialsToStringMap((await fetchEncrypted(connId))!).access_token).toBe(
+      "access-3",
+    );
   });
 
   it("writes back scopesGranted unchanged when the IdP echoes the same set", async () => {

@@ -49,7 +49,7 @@ describe("finalizeThrownFailure", () => {
 
     await expect(
       finalizeThrownFailure({
-        events: [],
+        output: { output: null },
         err,
         signal: controller.signal,
         runId: "run_1",
@@ -69,7 +69,7 @@ describe("finalizeThrownFailure", () => {
   it("emits appstrate.error, drains, then finalizes a failed result", async () => {
     const h = harness();
     await finalizeThrownFailure({
-      events: [],
+      output: { output: null },
       err: new Error("kaboom"),
       signal: undefined,
       runId: "run_2",
@@ -98,7 +98,7 @@ describe("finalizeThrownFailure", () => {
     const order: string[] = [];
     const err = new Error("x");
     await finalizeThrownFailure({
-      events: [],
+      output: { output: null },
       err,
       signal: undefined,
       runId: "run_order",
@@ -122,7 +122,7 @@ describe("finalizeThrownFailure", () => {
   it("does not let a throwing drain mask the failure (best-effort)", async () => {
     const h = harness();
     await finalizeThrownFailure({
-      events: [],
+      output: { output: null },
       err: new Error("nope"),
       signal: undefined,
       runId: "run_3",
@@ -141,7 +141,7 @@ describe("finalizeThrownFailure", () => {
   it("stamps cost / durationMs via the stamp hook, after the failed status", async () => {
     const h = harness();
     await finalizeThrownFailure({
-      events: [],
+      output: { output: null },
       err: new Error("e"),
       signal: undefined,
       runId: "run_5",
@@ -165,7 +165,7 @@ describe("finalizeThrownFailure", () => {
   it("stamps `terminalStatus` instead of the default failed (runner-enforced timeout)", async () => {
     const h = harness();
     await finalizeThrownFailure({
-      events: [],
+      output: { output: null },
       err: new Error("run timeout watchdog"),
       signal: undefined,
       runId: "run_timeout",
@@ -193,7 +193,7 @@ describe("finalizeThrownFailure", () => {
   it("defaults the terminal status to failed when terminalStatus is omitted", async () => {
     const h = harness();
     await finalizeThrownFailure({
-      events: [],
+      output: { output: null },
       err: new Error("boom"),
       signal: undefined,
       runId: "run_default",
@@ -209,7 +209,7 @@ describe("finalizeThrownFailure", () => {
   it("stamps explicit zero usage for very early failures", async () => {
     const h = harness();
     await finalizeThrownFailure({
-      events: [],
+      output: { output: null },
       err: new Error("early"),
       signal: undefined,
       runId: "run_6",

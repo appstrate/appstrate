@@ -14,7 +14,7 @@
 import { useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Link } from "react-router-dom";
-import { Bot, Pencil, RefreshCw, Trash2 } from "lucide-react";
+import { Bot, Pencil, Plus, RefreshCw, Trash2 } from "lucide-react";
 import { DropdownMenuItem, DropdownMenuLabel } from "@appstrate/ui/components/dropdown-menu";
 import { InlineEditableLabel } from "../inline-editable-label";
 import { ConnectionStatusBadge } from "../integration-connect/connection-status-badge";
@@ -27,7 +27,6 @@ import {
   useRenameIntegrationConnection,
   useConnectionShare,
   useConnectionShareAllSpaces,
-  type IntegrationAuthType,
   type IntegrationConnection,
   useAgentsConsumingIntegration,
   useIntegrationPins,
@@ -219,7 +218,8 @@ export function ConnectionActionsCell({
   connection,
   packageId,
   authKey,
-  authType,
+  methodReady,
+  canCreate,
   canRenew,
   isOwn,
   isAdmin,
@@ -229,7 +229,8 @@ export function ConnectionActionsCell({
   connection: IntegrationConnection;
   packageId: string;
   authKey: string;
-  authType: IntegrationAuthType;
+  methodReady: boolean;
+  canCreate: boolean;
   canRenew: boolean;
   isOwn: boolean;
   isAdmin: boolean;
@@ -247,8 +248,7 @@ export function ConnectionActionsCell({
     lockKey,
   );
   const canReach = useCanReach();
-  const canReconnect =
-    isOwn && connection.needs_reconnection && canConnect && canRenew && authType === "oauth2";
+  const needsRepair = isOwn && connection.needs_reconnection;
   return (
     <>
       <TableRowActions
@@ -269,8 +269,16 @@ export function ConnectionActionsCell({
             label: t("detail.integrationReconnect", { ns: "agents" }),
             icon: RefreshCw,
             onSelect: () => void openPopup({ packageId, authKey, connectionId: connection.id }),
-            hidden: !canReconnect,
+            hidden: !(needsRepair && canConnect && canRenew),
             testId: `connection-reconnect-${connection.id}`,
+          },
+          {
+            id: "replacement",
+            label: t("detail.integrationMemberPicker.addConnection", { ns: "agents" }),
+            icon: Plus,
+            onSelect: () => void openPopup({ packageId, authKey, forceAccountSelect: true }),
+            hidden: !(needsRepair && canCreate && !canRenew),
+            testId: `connection-replacement-${connection.id}`,
           },
           {
             id: "delete",
@@ -284,6 +292,18 @@ export function ConnectionActionsCell({
           },
         ]}
       >
+        {needsRepair && !canRenew && (
+          <DropdownMenuLabel className="text-muted-foreground max-w-64 text-xs font-normal">
+            {t(
+              !methodReady
+                ? "integrationWizard.connect.clientMissing"
+                : canCreate
+                  ? "detail.integrationMemberPicker.referencesStay"
+                  : "detail.integrationMemberPicker.askForReplacement",
+              { ns: "agents" },
+            )}
+          </DropdownMenuLabel>
+        )}
         {/* In the menu: a disabled item takes no hover. */}
         {isOwn && lockHint && (
           <DropdownMenuLabel className="text-muted-foreground max-w-64 text-xs font-normal">

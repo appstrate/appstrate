@@ -1080,7 +1080,7 @@ export const credentialProxyPaths = {
             "`invalid_request` — the body is not valid JSON; `validation_failed` — it is not the " +
             "schema's object (a missing or empty `integration_package_id` or `name`, a " +
             "`connection_id` that is not a uuid, `arguments` that is not an object, an unknown " +
-            "field such as the retired `integration_id`); `connection_not_in_org_default` — an " +
+            "field); `connection_not_in_org_default` — an " +
             "enforced org default governs the integration and `connection_id` names a connection " +
             "outside its set (a holder of `credential-proxy:call`); the proxy's refusals of an " +
             "exchange before it is sent: `unresolved_placeholder` — the server URL holds a " +

@@ -443,7 +443,7 @@ export interface paths {
         };
         /**
          * List runs for an agent
-         * @description List runs for a specific agent (org-scoped, newest first, keyset-paginated with `startingAfter`; default limit 20).
+         * @description List the visible runs of one agent in the selected space, newest first. Supports status and text or run-number search, with `startingAfter` pagination and a default limit of 20.
          */
         get: operations["listAgentRuns"];
         put?: never;
@@ -2993,7 +2993,7 @@ export interface paths {
         };
         /**
          * List organization roles
-         * @description The four organization roles (`owner`, `admin`, `member`, `guest`) and the org-level permissions each grants — the platform's own matrix with what the loaded modules contribute at `level: "org"`. The same in every organization and for every caller (no preview, no credential ceiling): it describes the roles, not the caller. Any member may read it.
+         * @description The four organization roles (`owner`, `admin`, `member`, `guest`) and the org-level permissions each grants — the platform's own matrix with what the loaded modules contribute at `level: "org"`. The same in every organization and for every caller (no preview, no credential ceiling): it describes the roles, not the caller. Membership is checked in the organization selected by X-Org-Id. Any member may read it.
          */
         get: operations["listOrgRoles"];
         put?: never;
@@ -3165,7 +3165,7 @@ export interface paths {
         };
         /**
          * List the composer's commands
-         * @description The skills a conversation can pin and the agents the caller can launch, read as an MCP client reads the platform server (`skills/list`, `prompts/list`) with the caller's own permissions: in every space the caller can act in, or, with `?spaceId=`, in that space alone (a conversation limited to it). An agent is launched by a user message carrying a `data-agent-prompt` part (see `streamChat`). A half that cannot be read is empty; a server that cannot be reached is a 502. Rate limited (60/min per caller). Ignores `X-Space-Id`; admitted when the acting set is not empty. A credential confined to spaces is refused (403).
+         * @description The skills a conversation can pin and the agents the caller can launch, read as an MCP client reads the platform server (`skills/list`, `prompts/list`) with the caller's own permissions: in every space the caller can act in, or, with `?spaceId=`, in that space alone (a conversation limited to it). An agent is launched by a user message carrying a `data-agent-prompt` part (see `streamChat`). A failed read is named in `unavailable` alongside the successful lists; a server that cannot be reached is a 502. Rate limited (60/min per caller). Ignores `X-Space-Id`; admitted when the acting set is not empty. A credential confined to spaces is refused (403).
          */
         get: operations["listChatCommands"];
         put?: never;
@@ -3257,7 +3257,7 @@ export interface paths {
         head?: never;
         /**
          * Set a chat session's pinned skills or skill discovery
-         * @description `pins` replaces the whole set of pinned skills (deduplicated and sorted; any number, held to the content budget each turn); a pin it drops loses its status, a new one has none until a turn evaluates it. `skill_discovery` sets the discovery switch. At least one of the two. Allowed while a turn is running: that turn keeps the skills it started with, and the next turn reads these. Never reorders the conversation list.
+         * @description `pins` replaces the whole set of pinned skills (deduplicated and sorted; any number, held to the content budget each turn); a pin it drops loses its status, a new one has none until a turn evaluates it. `skill_discovery` sets the discovery switch. The single-pin form sets or clears one pin atomically on the latest selection. Supply at least one field, and choose either the full set or a single pin. Allowed while a turn is running: that turn keeps the skills it started with, and the next turn reads these. Never reorders the conversation list.
          */
         patch: operations["updateChatSessionSkills"];
         trace?: never;
@@ -4623,7 +4623,7 @@ export interface paths {
         };
         /**
          * List runs across the space (global view)
-         * @description Org + space scoped paginated list. Supports filtering by `user=me` (self-owned, also implicit for end-user impersonation), `kind` (all, package, inline), `status`, a date range, and the chat session that launched the run. Every filter composes: `user=me` narrows to the caller's own runs and the remaining filters still apply on top of it. Inline runs surface via `package_ephemeral: true` on each row.
+         * @description Org + space scoped paginated list. Supports filtering by `user=me` (self-owned, also implicit for end-user impersonation), `kind` (all, package, inline), `status`, text or run-number search (`q`), a date range, and the chat session that launched the run. Every filter composes: `user=me` narrows to the caller's own runs and the remaining filters still apply on top of it. Inline runs surface via `package_ephemeral: true` on each row.
          */
         get: operations["listRuns"];
         put?: never;
@@ -5835,7 +5835,7 @@ export interface paths {
         };
         /**
          * OAuth client metadata document
-         * @description Public. This instance's OAuth Client ID Metadata Document (draft-ietf-oauth-client-id-metadata-document) for one authorization server: its URL is the `client_id` an auto-provisioned integration auth (remote MCP, or a server chosen per connection — `token_endpoint_auth_method: none`) presents to a server whose validated metadata advertises `client_id_metadata_document_supported` and RFC 9207 `authorization_response_iss_parameter_supported` (the `iss` check is what refuses a response another server returns on this redirect URI), which fetches it — the client registration MCP 2026-07-28 prefers to dynamic registration (RFC 7591), the fallback otherwise. `document` is `<base64url(issuer)>.json`, and the document names that server's own redirect URI (`/api/integrations/callback/cimd/<tag>`), so each server is given a `client_id` and a redirect URI of its own (RFC 9700 §4.4). Presented only when the instance can serve it (see `INTEGRATION_OAUTH_CIMD` in docs/ENV.md); otherwise connect registers by DCR. Computed from `APP_URL` and the issuer, nothing stored.
+         * @description Public. This instance's OAuth Client ID Metadata Document (draft-ietf-oauth-client-id-metadata-document) for one authorization server: its URL is the `client_id` an auto-provisioned integration auth (remote MCP, or a server chosen per connection — `token_endpoint_auth_method: none`) presents to a server whose validated metadata advertises `client_id_metadata_document_supported` and RFC 9207 `authorization_response_iss_parameter_supported` (the `iss` check is what refuses a response another server returns on this redirect URI), which fetches it — the client registration MCP 2026-07-28 prefers to dynamic registration (RFC 7591), the fallback otherwise. `document` is `<base64url(issuer)>.json`, and the document names that server's own redirect URI (`/api/integrations/callback/cimd/<tag>`), so each server is given a `client_id` and a redirect URI of its own (RFC 9700 §4.4). Presented only when the instance can serve it (see `INTEGRATION_OAUTH_CIMD` in docs/ENV.md); otherwise new connections register by DCR. Disabling new document clients keeps this URL available for authorization servers serving previously issued clients. Computed from `APP_URL` and the issuer, nothing stored.
          */
         get: operations["getOAuthClientMetadataDocument"];
         put?: never;
@@ -6341,6 +6341,8 @@ export interface components {
         };
         /** @description What the composer's `/` menu offers, as the platform MCP server serves it to the caller (`skills/list`, `prompts/list`). */
         ChatCommands: {
+            /** @description Lists whose read failed. Retry the request to reload them. An omitted field means all permitted lists were read. */
+            unavailable?: ("published_skills" | "draft_skills" | "agents")[];
             /** @description The skills the caller can read in the spaces asked, one per package (the first space's). Empty without `skills:read`. */
             skills: {
                 /** @description `@scope/name`: what `pins` names. */
@@ -6768,6 +6770,8 @@ export interface components {
             allowed_actions: ("edit" | "delete" | "test" | "reconnect")[];
             /** @description Whether an organization model may be bound to this credential: `true` for an organization credential (API key or subscription), `false` for a personal or a built-in one. */
             bindable: boolean;
+            /** @description Number of organization model rows bound to this credential, including disabled models. A positive count prevents deletion (409 credential_in_use). Personal and built-in credentials have no such bindings. */
+            referencing_model_count: number;
             /** @description On a personal credential, the ids of the organization models left to members' own credentials (`binding: user`) that it pays for — the same service, or a subscription offering the model on its API. `[]` on an organization or built-in credential: its models name it in `credentialId`. */
             serves_model_ids: string[];
             created_by: string | null;
@@ -7326,6 +7330,13 @@ export interface components {
             param?: string;
             /** @description Seconds before retry; mirrored in the `Retry-After` header */
             retry_after?: number;
+            /**
+             * @description For login_rejected, identifies an OAuth grant rejection or a refusal returned by the integration's login tool.
+             * @enum {string}
+             */
+            login_refusal?: "grant" | "integration";
+            /** @description The integration login tool's own diagnostic when it supplied one. */
+            integration_diagnostic?: string;
             /** @description Field-level validation errors */
             errors?: components["schemas"]["ResolutionFieldError"][];
         };
@@ -7360,12 +7371,12 @@ export interface components {
                 /** @description Scopes the agent's selected tools require that the connection lacks; empty when it covers them. A run naming a candidate with a non-empty list fails with `insufficient_scopes`. Always empty on the credential proxy, which selects no tool. */
                 missing_scopes: string[];
             }[];
-            /** @description Populated on `needs_reconnection` and `insufficient_scopes`. On `needs_reconnection`, forward it as the connect kickoff's `connection_id`, with no `scopes`, so the existing connection is reconnected in place (what it holds plus the auth's `default_scopes`) rather than duplicated. On `insufficient_scopes`, forwarding it upgrades that connection, which widens every agent that uses it: only under `remedy: upgrade_or_new`. Populated on `auth_serves_no_selected_tool` too, naming the connection an explicit set (pin, org default, run or schedule override) binds whose auth exposes none of the agent's selected tools: the remedy is taking it out of the set, not a connect flow. */
+            /** @description Populated on `needs_reconnection` and `insufficient_scopes`. On `needs_reconnection` with a replacement `remedy`, it identifies the connection to replace. Otherwise its owner may forward it as the connect kickoff's `connection_id`, with no `scopes`, so the existing connection is reconnected in place (what it holds plus the auth's `default_scopes`) rather than duplicated. On `insufficient_scopes`, forwarding it upgrades that connection, which widens every agent that uses it: only under `remedy: upgrade_or_new`. Populated on `auth_serves_no_selected_tool` too, naming the connection an explicit set (pin, org default, run or schedule override) binds whose auth exposes none of the agent's selected tools: the remedy is taking it out of the set, not a connect flow. */
             connection_id?: string;
             /** @description Populated on `insufficient_scopes`. OAuth scopes the agent's selected tools require that the connection lacks. */
             missing_scopes?: string[];
             /**
-             * @description Populated on `insufficient_scopes`: how it clears. `new_connection` — start a connect kickoff without `connection_id`, with `scopes: required_scopes`, then bind the new connection (a pin, or `connection_overrides`). `upgrade_or_new` — the same, or, the connection being the caller's own, forward `connection_id` to upgrade it in place, which widens every agent that uses it. `rebind_by_admin` — an admin pin or an enforced org default binds the connection: an admin must switch that binding, and no connect flow clears it. `rebind_by_schedule_owner` — the schedule's `connection_overrides` bind it: the schedule's owner must switch them.
+             * @description Populated on `insufficient_scopes` and on `needs_reconnection` for an unidentifiable account. The latter requires changing the binding. Shares, pins and schedules keep the original connection ID until explicitly changed. `new_connection` — start a connect kickoff without `connection_id`, with `scopes: required_scopes`, then bind the new connection (a pin, or `connection_overrides`). `upgrade_or_new` — the same, or, the connection being the caller's own, forward `connection_id` to upgrade it in place, which widens every agent that uses it. `rebind_by_admin` — an admin pin or an enforced org default binds the connection: an admin must switch that binding, and no connect flow clears it. `rebind_by_schedule_owner` — the schedule's `connection_overrides` bind it: the schedule's owner must switch them.
              * @enum {string}
              */
             remedy?: "new_connection" | "upgrade_or_new" | "rebind_by_admin" | "rebind_by_schedule_owner";
@@ -7470,6 +7481,11 @@ export interface components {
             model_error: {
                 /** @enum {string} */
                 category: "credential_unavailable" | "rate_limited" | "upstream_unavailable" | "invalid_request" | "unknown";
+                /**
+                 * @description Known provider reason carried by the terminal refusal.
+                 * @enum {string}
+                 */
+                reason?: "runtime_version_too_old";
                 retryable: boolean;
                 status: number | null;
                 message: string | null;
@@ -9683,7 +9699,7 @@ export interface operations {
                     };
                 };
             };
-            /** @description `limit` outside its declared range (`param` names it). */
+            /** @description Unknown query parameter, limit outside its range, unrecognized status, or search longer than 200 characters. */
             400: components["responses"]["ValidationError"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
@@ -12763,7 +12779,7 @@ export interface operations {
                     };
                 };
             };
-            /** @description `invalid_request` — the body is not valid JSON; `validation_failed` — it is not the schema's object (a missing or empty `integration_package_id` or `name`, a `connection_id` that is not a uuid, `arguments` that is not an object, an unknown field such as the retired `integration_id`); `connection_not_in_org_default` — an enforced org default governs the integration and `connection_id` names a connection outside its set (a holder of `credential-proxy:call`); the proxy's refusals of an exchange before it is sent: `unresolved_placeholder` — the server URL holds a placeholder no credential field fills, `invalid_request` — it is otherwise not a request the proxy can send. */
+            /** @description `invalid_request` — the body is not valid JSON; `validation_failed` — it is not the schema's object (a missing or empty `integration_package_id` or `name`, a `connection_id` that is not a uuid, `arguments` that is not an object, an unknown field); `connection_not_in_org_default` — an enforced org default governs the integration and `connection_id` names a connection outside its set (a holder of `credential-proxy:call`); the proxy's refusals of an exchange before it is sent: `unresolved_placeholder` — the server URL holds a placeholder no credential field fills, `invalid_request` — it is otherwise not a request the proxy can send. */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -14091,7 +14107,7 @@ export interface operations {
                     };
                 };
             };
-            /** @description Invalid body, CSRF token, credentials or variables. oauth2: any other 400 refusal of the flow is `connection_not_ready`, with a generic detail. A login the service refused is `login_rejected` on `credentials`; on an oauth2 auth, that is a token endpoint answering `invalid_grant`, or HTTP 400 or 401 other than a refused OAuth client. A `login_rejected` says what was refused in the extension member `login_refusal`: `grant` for an oauth2 token request, `integration` for an integration's login tool (a connect-run), whose own untranslated text, if any, is `integration_diagnostic`; it is absent when the service refused the submitted credentials. A credential value the declarative login request cannot carry where it is placed, a `null` included, is `login_input_unencodable` on `credentials.<field>`, and a submitted base URL it may not reach `login_url_refused`, with one `errors[]` entry per `credentials.<field>` the address comes from. None echoes a credential value nor the service's answer. oauth2 declaring `connect.login` and an `issuer`: a `token_endpoint` the issuer's metadata contradicts is `invalid_request`, before anything is sent. The page session survives and the form can be submitted again, unless an oauth2 `connect.login` token request was sent (a `login_rejected` from the token endpoint, a refusal after it). */
+            /** @description Invalid body, CSRF token, credentials or variables. oauth2: any other 400 refusal of the flow is `connection_not_ready`, with a generic detail. A login the service refused is `login_rejected` on `credentials`; on an oauth2 auth, that is a token endpoint answering `invalid_grant`. A malformed OAuth request, unsupported grant type or invalid scope is a configuration refusal (`connection_not_ready`); a transient provider failure asks for a retry. A `login_rejected` says what was refused in the extension member `login_refusal`: `grant` for an oauth2 token request, `integration` for an integration's login tool (a connect-run), whose own untranslated text, if any, is `integration_diagnostic`; it is absent when the service refused the submitted credentials. A credential value the declarative login request cannot carry where it is placed, a `null` included, is `login_input_unencodable` on `credentials.<field>`, and a submitted base URL it may not reach `login_url_refused`, with one `errors[]` entry per `credentials.<field>` the address comes from. None echoes a credential value nor the service's answer. oauth2 declaring `connect.login` and an `issuer`: a `token_endpoint` the issuer's metadata contradicts is `invalid_request`, before anything is sent. The page session survives and the form can be submitted again, unless an oauth2 `connect.login` token request was sent (a `login_rejected` from the token endpoint, a refusal after it). */
             400: components["responses"]["ValidationError"];
             /** @description oauth2: the authorization server's client could not be provisioned or is refused (`connection_not_ready`); the detail is generic, the operator-facing reason stays on the server log. oauth2 declaring `connect.login`: the auth has no usable OAuth client — none registered, or one whose secret cannot be decrypted (`forbidden`); an administrator must register one. */
             403: {
@@ -14115,7 +14131,7 @@ export interface operations {
             };
             /** @description No active connect session (an oauth2 `connect.login` form already submitted included), or the integration or auth is gone. oauth2: a 404 refusal of the flow is `connection_not_ready`, with a generic detail. */
             404: components["responses"]["NotFound"];
-            /** @description oauth2 declaring `connect.login` (`connection_not_ready`), nothing sent: the OAuth client chosen for the auth no longer resolves when the token request is built, removed in between; or the client authenticates with a `token_endpoint_auth_method` the platform does not implement (only `client_secret_basic`, `client_secret_post` and `none` are). An auth with no usable OAuth client is the 403. */
+            /** @description `identity_mismatch`: the original and submitted credentials do not identify the same upstream account and instance and the stored connection is preserved. With oauth2 declaring `connect.login` (`connection_not_ready`), nothing sent: the OAuth client chosen for the auth no longer resolves when the token request is built, removed in between; or the client authenticates with a `token_endpoint_auth_method` the platform does not implement (only `client_secret_basic`, `client_secret_post` and `none` are). An auth with no usable OAuth client is the 403. */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -14528,7 +14544,7 @@ export interface operations {
                     };
                     /**
                      * Format: uuid
-                     * @description Existing connection to renew in place (api_key/PAT/custom); the new credential then serves every agent that uses it. Omit on a fresh connect — the write then INSERTs a new row; to give one agent a different credential, create a new connection rather than duplicating the integration.
+                     * @description Existing connection to renew in place only if the credentials identify the same upstream account and instance (409 identity_mismatch otherwise). A key or password without an account identity requires another connection. Shares, pins and schedules keep the original ID until explicitly changed. When an administrator restricts creation, choose a shared connection or ask the administrator to provide one. Omit on a fresh connect — the write then INSERTs a new row; to give one agent a different credential, create a new connection rather than duplicating the integration.
                      */
                     connection_id?: string;
                     /** @description Connection variables (AFPS §7.12): the non-secret values choosing this connection's upstream (e.g. a self-hosted instance URL), one per variable the integration declares in `variables.schema`. Required when the integration declares variables — also on a reconnect, which re-acquires the credential for the values submitted — and refused when it declares none. Each value is validated against the schema, must leave every URL template the auth uses renderable, and every rendered URL must pass the platform's egress controls; a refusal is a 400 `validation_failed` whose entries name `variables.<name>`. */
@@ -14607,12 +14623,12 @@ export interface operations {
                     };
                 };
             };
-            /** @description Invalid body or credentials. A login the service refused is `login_rejected` on `credentials`; on an oauth2 auth, that is a token endpoint answering `invalid_grant`, or HTTP 400 or 401 other than a refused OAuth client. A `login_rejected` says what was refused in the extension member `login_refusal`: `grant` for an oauth2 token request, `integration` for an integration's login tool (a connect-run), whose own untranslated text, if any, is `integration_diagnostic`; it is absent when the service refused the submitted credentials. A credential value the declarative login request cannot carry where it is placed, a `null` included, is `login_input_unencodable` on `credentials.<field>`, and a submitted base URL it may not reach `login_url_refused`, with one `errors[]` entry per `credentials.<field>` the address comes from. None echoes a credential value nor the service's answer. oauth2 declaring `connect.login` and an `issuer`: a `token_endpoint` the issuer's metadata contradicts is `invalid_request`, before anything is sent. */
+            /** @description Invalid body or credentials. A login the service refused is `login_rejected` on `credentials`; on an oauth2 auth, that is a token endpoint answering `invalid_grant`. A malformed OAuth request, unsupported grant type or invalid scope is a configuration refusal (`connection_not_ready`); a transient provider failure asks for a retry. A `login_rejected` says what was refused in the extension member `login_refusal`: `grant` for an oauth2 token request, `integration` for an integration's login tool (a connect-run), whose own untranslated text, if any, is `integration_diagnostic`; it is absent when the service refused the submitted credentials. A credential value the declarative login request cannot carry where it is placed, a `null` included, is `login_input_unencodable` on `credentials.<field>`, and a submitted base URL it may not reach `login_url_refused`, with one `errors[]` entry per `credentials.<field>` the address comes from. None echoes a credential value nor the service's answer. oauth2 declaring `connect.login` and an `issuer`: a `token_endpoint` the issuer's metadata contradicts is `invalid_request`, before anything is sent. */
             400: components["responses"]["ValidationError"];
             /** @description Insufficient permissions. oauth2 declaring `connect.login`: the auth has no usable OAuth client — none registered, or one whose secret cannot be decrypted (`forbidden`); an administrator must register one. */
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
-            /** @description oauth2 declaring `connect.login` (`connection_not_ready`), nothing sent: the OAuth client chosen for the auth no longer resolves when the token request is built, removed in between; or the client authenticates with a `token_endpoint_auth_method` the platform does not implement (only `client_secret_basic`, `client_secret_post` and `none` are). An auth with no usable OAuth client is the 403. */
+            /** @description `identity_mismatch`: the original and submitted credentials do not identify the same upstream account and instance and the stored connection is preserved. With oauth2 declaring `connect.login` (`connection_not_ready`), nothing sent: the OAuth client chosen for the auth no longer resolves when the token request is built, removed in between; or the client authenticates with a `token_endpoint_auth_method` the platform does not implement (only `client_secret_basic`, `client_secret_post` and `none` are). An auth with no usable OAuth client is the 403. */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -14704,7 +14720,7 @@ export interface operations {
                     force_account_select?: boolean;
                     /**
                      * Format: uuid
-                     * @description Reconnect this existing connection in place instead of creating a new one. Added scopes then apply to every agent that uses it: to give one agent more rights without widening the others, omit it and pass the required `scopes`. Do not duplicate an integration to change its scopes; create another connection.
+                     * @description Reconnect this existing connection in place only when both credentials identify the same upstream account and instance. An unidentified account (account_id default) requires another connection. Its shares, pins and schedules keep the original ID until explicitly changed. Added scopes then apply to every agent that uses it: to give one agent more rights without widening the others, omit it and pass the required `scopes`. Do not duplicate an integration to change its scopes; create another connection.
                      */
                     connection_id?: string;
                     /** @description Connection variables (AFPS §7.12): the non-secret values choosing this connection's upstream (e.g. a self-hosted instance URL), one per variable the integration declares in `variables.schema`. Required when the integration declares variables — also on a reconnect, which re-acquires the credential for the values submitted — and refused when it declares none. Each value is validated against the schema, must leave every URL template the auth uses renderable, and every rendered URL must pass the platform's egress controls; a refusal is a 400 `validation_failed` whose entries name `variables.<name>`. */
@@ -14770,7 +14786,7 @@ export interface operations {
                     force_account_select?: boolean;
                     /**
                      * Format: uuid
-                     * @description Reconnect this existing connection in place instead of creating a new one. Added scopes then apply to every agent that uses it: to give one agent more rights without widening the others, omit it and pass the required `scopes`. Do not duplicate an integration to change its scopes; create another connection.
+                     * @description Reconnect this existing connection in place only when both credentials identify the same upstream account and instance. An unidentified account (account_id default) requires another connection. Its shares, pins and schedules keep the original ID until explicitly changed. Added scopes then apply to every agent that uses it: to give one agent more rights without widening the others, omit it and pass the required `scopes`. Do not duplicate an integration to change its scopes; create another connection.
                      */
                     connection_id?: string;
                 };
@@ -16932,7 +16948,7 @@ export interface operations {
                 content: {
                     "application/json": {
                         result?: {
-                            /** @description A `tools/call` result's structured payload, matching the tool's `outputSchema` when it declares one (`run_and_wait`: RunAndWaitResult). */
+                            /** @description A `tools/call` result's structured payload, matching the tool's `outputSchema` when it declares one. For `run_and_wait` this includes RunAndWaitResult on success and structured route or tool refusals on error. */
                             structuredContent?: Record<string, never>;
                         } & {
                             [key: string]: unknown;
@@ -17082,7 +17098,7 @@ export interface operations {
                 content: {
                     "application/json": {
                         result?: {
-                            /** @description A `tools/call` result's structured payload, matching the tool's `outputSchema` when it declares one (`run_and_wait`: RunAndWaitResult). */
+                            /** @description A `tools/call` result's structured payload, matching the tool's `outputSchema` when it declares one. For `run_and_wait` this includes RunAndWaitResult on success and structured route or tool refusals on error. */
                             structuredContent?: Record<string, never>;
                         } & {
                             [key: string]: unknown;
@@ -17568,7 +17584,30 @@ export interface operations {
     setMeConnectionShareAllSpaces: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
+                "X-Org-Id"?: components["parameters"]["XOrgId"];
+                /**
+                 * @description Preview the API as a lesser role ("view as"). One value, `;`-separated `key=value` pairs; whitespace around the separators is tolerated and nothing else is:
+                 *
+                 *     - `org_role` (required) — `member` or `guest`. Previewing `owner`/`admin` is refused.
+                 *     - `space` (optional) — a `spc_` space id. Must be paired with `role`.
+                 *     - `role` (optional) — `preset:<admin|builder|operator|runner|viewer>` or `custom:<srl_ id>`. Must be paired with `space`.
+                 *
+                 *     Example: `org_role=member; space=spc_…; role=preset:viewer`.
+                 *
+                 *     The persona is enforced server-side: `permissions`, the space role and every listing are the persona's, and a write the persona cannot make is refused exactly as it would be for a real holder of that role. The authenticated identity and the audit actor stay the real caller; audit rows carry the persona under `after.viewAs`.
+                 *
+                 *     Refusals — never a silent fall-back to the caller's real permissions: `400 invalid_view_as` (header does not parse), `400 view_as_unsupported` (the credential is not one that can carry a persona — only a cookie session and the CLI/instance token, which authenticate the user themselves, can), `403 view_as_forbidden` (the real org role is not owner/admin, or the role is not one the caller could grant in that space), `404 view_as_not_found` (the space is not in the org, the custom role does not exist, or the organization named alongside the persona is not one the caller belongs to). A 404 carrying `view_as_not_found` means the PREVIEW died and must be dropped; a plain `404 not_found` under an active persona is the previewed role's own wall and leaves the preview standing.
+                 *
+                 *     On `GET /api/orgs` and `GET /api/me/orgs` — the two listings exempt from `X-Org-Id` — the `X-Org-Id` header names the organization the persona applies to; every other row in those listings stays the caller's real role. Sending the persona without it is `400 invalid_view_as`, and naming an organization the caller is not a member of is `404 view_as_not_found`: a listing that answered with real permissions while the client believed it was previewing would be the failure this feature exists to prevent.
+                 *
+                 *     The Server-Sent-Events routes (`/api/realtime/*`) take the same value as the `view_as` QUERY parameter instead: `EventSource` cannot send headers.
+                 *
+                 *     Every response produced under a validated persona carries `X-View-As-Active: 1`.
+                 */
+                "X-View-As"?: components["parameters"]["XViewAs"];
+            };
             path: {
                 connectionId: string;
             };
@@ -17591,7 +17630,9 @@ export interface operations {
                 };
                 content?: never;
             };
-            400: components["responses"]["ValidationError"];
+            /** @description Invalid sharing request, or a refused persona switch. */
+            400: components["responses"]["ViewAsRefused"];
+            401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
         };
@@ -18169,6 +18210,7 @@ export interface operations {
                      *             "test"
                      *           ],
                      *           "bindable": false,
+                     *           "referencing_model_count": 0,
                      *           "serves_model_ids": [],
                      *           "created_by": "usr_cm3abc123",
                      *           "createdAt": "2026-01-10T08:00:00Z",
@@ -18633,7 +18675,7 @@ export interface operations {
                 "application/json": {
                     /** @description Must match the pairing's pinned provider id. Mismatched → 400; provider deregistered after mint → 404. */
                     providerId: string;
-                    /** @description Display name for the credential. Optional — the platform derives one from the provider's `displayName` when omitted (`@appstrate/connect-helper` no longer invents one client-side). */
+                    /** @description Display name for the credential. When omitted, the platform derives it from the provider's `displayName`. */
                     label?: string;
                     access_token: string;
                     refresh_token: string;
@@ -19025,6 +19067,7 @@ export interface operations {
                         object: "model_choice";
                         credential_id: string | null;
                         models: components["schemas"]["OrgModel"][];
+                        /** @description Organization model row ID resolved from the provider modelId in the request and the choice’s credential. Null when this request did not set a default. */
                         default_model_id: string | null;
                     };
                 };
@@ -21078,7 +21121,46 @@ export interface operations {
         requestBody: {
             content: {
                 "application/json": {
-                    messages: Record<string, never>[];
+                    /** @description Conversation ID. Omit for an ephemeral turn. */
+                    id?: string;
+                    messages: ({
+                        /** @description Required on the new message. Historical entries may omit an id. */
+                        id?: string;
+                        /** @enum {string} */
+                        role: "user" | "assistant";
+                        parts: (({
+                            /** @constant */
+                            type: "text";
+                            text: string;
+                        } & {
+                            [key: string]: unknown;
+                        }) | ({
+                            /** @constant */
+                            type: "file";
+                            url: string;
+                            mediaType: string;
+                            filename?: string;
+                        } & {
+                            [key: string]: unknown;
+                        }) | ({
+                            /** @constant */
+                            type: "data-agent-prompt";
+                            data: {
+                                name: string;
+                                title: string;
+                                /** @description On a stored message only. */
+                                text?: string;
+                            };
+                        } & {
+                            [key: string]: unknown;
+                        }) | ({
+                            type: string;
+                        } & {
+                            [key: string]: unknown;
+                        }))[];
+                    } & {
+                        [key: string]: unknown;
+                    })[];
                     modelId?: string;
                     /** @description The origin space of a conversation this turn creates, one of the spaces it can act in (else a 400 naming the field). Ignored for an existing conversation. Absent from the overview. */
                     spaceId?: string;
@@ -21093,8 +21175,6 @@ export interface operations {
                     pins?: string[];
                     /** @description The discovery switch of a conversation this turn creates (see ChatSession `skill_discovery`); absent = on. Same rule as `pins`: ignored for an existing conversation. */
                     skill_discovery?: boolean;
-                    /** @description Session id (the assistant-ui thread id) */
-                    id?: string;
                 };
             };
         };
@@ -21186,7 +21266,7 @@ export interface operations {
             403: components["responses"]["Forbidden"];
             /** @description Rate limited (60/min per caller) */
             429: components["responses"]["RateLimited"];
-            /** @description `bad_gateway` — the platform's MCP server could not be reached, so the commands are unknown (not empty). RFC 9457 problem+json. A half that fails to read is empty in a 200. */
+            /** @description `bad_gateway` — the platform's MCP server could not be reached, so the commands are unknown (not empty). RFC 9457 problem+json. A 200 lists any failed catalogue reads in unavailable. */
             502: {
                 headers: {
                     [name: string]: unknown;
@@ -21420,6 +21500,11 @@ export interface operations {
                 "application/json": {
                     /** @description The full set of pinned skills. */
                     pins?: string[];
+                    pin?: {
+                        /** @description `@scope/name` package id */
+                        id: string;
+                        pinned: boolean;
+                    };
                     skill_discovery?: boolean;
                 };
             };
@@ -22381,7 +22466,9 @@ export interface operations {
                 kind?: "all" | "package" | "inline";
                 /** @description Filter runs by lifecycle status: one or several of `pending`, `running`, `success`, `failed`, `timeout`, `cancelled`, comma-separated on the wire (`status=failed,timeout` returns both). Omit (or send an empty value) for every status. Any value outside the set is rejected with `400` — for the whole list, never by dropping the offending member, so a filtered response is never silently widened. */
                 status?: components["parameters"]["RunStatusFilter"];
+                /** @description RFC 3339 date and time with an explicit timezone offset or Z. */
                 start_date?: string;
+                /** @description RFC 3339 date and time with an explicit timezone offset or Z. */
                 end_date?: string;
                 /** @description Return only runs launched from this chat session. */
                 chat_session_id?: string;
@@ -25941,7 +26028,9 @@ export interface operations {
                 kind?: "all" | "package" | "inline";
                 /** @description Filter runs by lifecycle status: one or several of `pending`, `running`, `success`, `failed`, `timeout`, `cancelled`, comma-separated on the wire (`status=failed,timeout` returns both). Omit (or send an empty value) for every status. Any value outside the set is rejected with `400` — for the whole list, never by dropping the offending member, so a filtered response is never silently widened. */
                 status?: components["parameters"]["RunStatusFilter"];
+                /** @description RFC 3339 date and time with an explicit timezone offset or Z. */
                 start_date?: string;
+                /** @description RFC 3339 date and time with an explicit timezone offset or Z. */
                 end_date?: string;
                 /** @description Return only runs launched from this chat session. */
                 chat_session_id?: string;
@@ -26419,6 +26508,26 @@ export interface operations {
                          * @description Absolute URL for `HttpSink.finalizeUrl`.
                          */
                         finalize_url: string;
+                        /**
+                         * Format: uri
+                         * @description Run-scoped MCP endpoint.
+                         */
+                        mcp_url: string;
+                        /**
+                         * Format: uri
+                         * @description Endpoint for signed heartbeat requests.
+                         */
+                        heartbeat_url: string;
+                        /**
+                         * Format: uri
+                         * @description Endpoint for fetching the run workspace.
+                         */
+                        workspace_url: string;
+                        /**
+                         * Format: uri
+                         * @description Endpoint for the run's input files and output uploads.
+                         */
+                        files_url: string;
                         /** @description 32-byte ephemeral secret, base64url-encoded. Returned once and never retrievable afterwards. */
                         secret: string;
                         /**
@@ -26813,7 +26922,21 @@ export interface operations {
                 "application/json": {
                     output?: unknown;
                     error?: {
-                        message?: string;
+                        code?: string;
+                        context?: {
+                            /**
+                             * @description Model-call classification from the runner. Unknown categories fall back to the server classifier.
+                             * @example credential_unavailable
+                             * @example rate_limited
+                             * @example upstream_unavailable
+                             * @example invalid_request
+                             * @example unknown
+                             */
+                            error_category?: string;
+                        } & {
+                            [key: string]: unknown;
+                        };
+                        message: string;
                         stack?: string;
                     };
                     /**
@@ -27825,7 +27948,7 @@ export interface operations {
                     };
                 };
             };
-            /** @description `limit` outside its declared range (`param` names it). */
+            /** @description Unknown query parameter, limit outside its range, unrecognized status, or search longer than 200 characters. */
             400: components["responses"]["ValidationError"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
@@ -28889,7 +29012,7 @@ export interface operations {
                     "application/json": components["schemas"]["SmtpConfigView"];
                 };
             };
-            /** @description Malformed space id — `spc_` + a UUID is the only accepted shape (a retired `app_` id names the un-run `app_` → `spc_` migration). */
+            /** @description Malformed space id. Expected `spc_` followed by a canonical UUID. */
             400: components["responses"]["ValidationError"];
             403: components["responses"]["Forbidden"];
             /** @description Space or configuration not found */
@@ -28958,7 +29081,7 @@ export interface operations {
                 };
                 content?: never;
             };
-            /** @description Malformed space id — `spc_` + a UUID is the only accepted shape (a retired `app_` id names the un-run `app_` → `spc_` migration). */
+            /** @description Malformed space id. Expected `spc_` followed by a canonical UUID. */
             400: components["responses"]["ValidationError"];
             403: components["responses"]["Forbidden"];
             /** @description Space or configuration not found */
@@ -29025,7 +29148,7 @@ export interface operations {
                     "application/json": components["schemas"]["SocialProviderView"];
                 };
             };
-            /** @description Malformed space id — `spc_` + a UUID is the only accepted shape (a retired `app_` id names the un-run `app_` → `spc_` migration). */
+            /** @description Malformed space id. Expected `spc_` followed by a canonical UUID. */
             400: components["responses"]["ValidationError"];
             403: components["responses"]["Forbidden"];
             /** @description Space or configuration not found */
@@ -29088,7 +29211,7 @@ export interface operations {
                 };
                 content?: never;
             };
-            /** @description Malformed space id — `spc_` + a UUID is the only accepted shape (a retired `app_` id names the un-run `app_` → `spc_` migration). */
+            /** @description Malformed space id. Expected `spc_` followed by a canonical UUID. */
             400: components["responses"]["ValidationError"];
             403: components["responses"]["Forbidden"];
             /** @description Space or configuration not found */

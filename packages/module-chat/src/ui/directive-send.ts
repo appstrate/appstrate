@@ -4,7 +4,7 @@
 // part, the skills stay in the text, where the turn reads them. The server validates both; a
 // directive carries no authority.
 
-import { AGENT_PROMPT_PART_TYPE, agentPromptDataSchema } from "../agent-prompt.ts";
+import { AGENT_PROMPT_PART_TYPE, agentPromptDataSchema } from "@appstrate/core/chat-message";
 import { AGENT_DIRECTIVE, directivesOf } from "../directives.ts";
 
 /**

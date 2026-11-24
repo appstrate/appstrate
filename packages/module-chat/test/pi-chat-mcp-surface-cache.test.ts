@@ -59,7 +59,11 @@ function register(factories: Array<(pi: ExtensionAPI) => void>): RegisteredTool[
  * every `initialize` a 500 from then on; `initGate`, while set, holds every
  * `initialize` until it resolves.
  */
-function mcpStub(imageBlocks?: Array<Record<string, unknown>>, isError = false) {
+function mcpStub(
+  imageBlocks?: Array<Record<string, unknown>>,
+  isError = false,
+  structuredContent?: Record<string, unknown>,
+) {
   const methods: string[] = [];
   const state: { failInitialize: boolean; initGate: Promise<void> | null } = {
     failInitialize: false,
@@ -178,6 +182,7 @@ function mcpStub(imageBlocks?: Array<Record<string, unknown>>, isError = false) 
         if (imageBlocks) {
           return reply({
             content: imageBlocks,
+            structuredContent,
             isError,
             ...(remote ? { _meta: { "dev.appstrate/relayed": true } } : {}),
           });
@@ -592,6 +597,7 @@ describe("inline images from remote integration tools", () => {
         { type: "text", text: "private caption", annotations: audience },
       ],
       true,
+      { caption: "private mirror" },
     );
     const turn = await buildTurn(stub, "file-reader", undefined);
     try {
@@ -600,6 +606,7 @@ describe("inline images from remote integration tools", () => {
       )!;
       const result = await call.execute("diagnostic", { tool: "typed" });
       expect(result).toMatchObject({ isError: true });
+      expect(JSON.stringify(result)).not.toContain("private mirror");
       expect(result.content.slice(0, 2)).toEqual([diagnostic, image]);
       expect(result.content.slice(2, 4)).toEqual(
         Array(2).fill({
@@ -621,7 +628,7 @@ describe("inline images from remote integration tools", () => {
         }),
       );
       expect(JSON.stringify(chunks)).toContain("read for this turn]");
-      for (const secret of [data, hiddenData, "private caption"]) {
+      for (const secret of [data, hiddenData, "private caption", "private mirror"]) {
         expect(JSON.stringify(chunks)).not.toContain(secret);
       }
     } finally {

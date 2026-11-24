@@ -18,6 +18,7 @@ import {
   mergeServerSync,
   type ServerSyncProposal,
 } from "./integration-server-sync";
+import { stableJson } from "./stable-json";
 import { fileTextOperation, packageUpdateBody } from "./package-file-drafts";
 
 export type DiscoveryResult =
@@ -27,14 +28,7 @@ type DiscoveredManifest = DiscoveryResult["manifest"];
 /** Whether a field of the proposal was read from the server or inferred. */
 export type Provenance = "detected" | "guessed";
 
-export interface WizardEdits {
-  display_name: string;
-  name: string;
-}
-
-export function proposalEdits(manifest: DiscoveredManifest): WizardEdits {
-  return { display_name: manifest.display_name, name: manifest.name };
-}
+export type WizardEdits = Pick<DiscoveredManifest, "display_name" | "name">;
 
 /** The proposal's `auths` replace the defaults' API key auth; none (AFPS §7.2) drops it. */
 export function integrationCreationManifest(
@@ -63,14 +57,10 @@ export function wizardAuthKind(auth: unknown): WizardAuthKind {
   return token_endpoint_auth_method === "none" ? "oauthAuto" : "oauthAdmin";
 }
 
-export function declaredToolNames(manifest: Record<string, unknown>): string[] {
-  return getDeclaredToolNames(manifest as IntegrationManifest);
-}
-
 /** How many declared tools an agent inherits when it selects none itself. */
 export function defaultToolCount(manifest: Record<string, unknown>): number {
   const defaults = readDefaultTools(manifest as IntegrationManifest);
-  if (defaults === "*") return declaredToolNames(manifest).length;
+  if (defaults === "*") return getDeclaredToolNames(manifest).length;
   return defaults?.length ?? 0;
 }
 
@@ -170,7 +160,7 @@ export function needsWizardFinish(facts: {
     facts.homeWritable &&
     facts.canOpenWizard &&
     isRemoteSource(facts.manifest) &&
-    declaredToolNames(facts.manifest).length === 0
+    getDeclaredToolNames(facts.manifest).length === 0
   );
 }
 
@@ -197,22 +187,9 @@ export function toolsPublishVersion(facts: {
   return draft && compareVersionsDesc(draft, next) < 0 ? draft : next;
 }
 
-/** A JSON value with its object keys sorted: two equal values give one string. */
-function canonicalJson(value: unknown): string {
-  return JSON.stringify(value, (_key, v: unknown) =>
-    v && typeof v === "object" && !Array.isArray(v)
-      ? Object.fromEntries(
-          Object.entries(v as Record<string, unknown>).sort(([a], [b]) =>
-            a < b ? -1 : a > b ? 1 : 0,
-          ),
-        )
-      : v,
-  );
-}
-
 /** Whether the draft's `auths` are the published version's, key order aside. */
 export function sameAuths(draft: Record<string, unknown>, published: Record<string, unknown>) {
-  return canonicalJson(draft.auths ?? null) === canonicalJson(published.auths ?? null);
+  return stableJson(draft.auths ?? null) === stableJson(published.auths ?? null);
 }
 
 /**
@@ -245,7 +222,7 @@ export function catalogSourceKey(draft: Record<string, unknown>): string {
     source.kind,
     source.remoteUrl,
     source.remoteTransport,
-    canonicalJson(draft.auths ?? null),
+    stableJson(draft.auths ?? null),
   ]);
 }
 
@@ -270,7 +247,7 @@ export function initialToolSelection(
 ): Set<string> {
   const listed = proposal.tools.map((tool) => tool.name);
   const saved =
-    declaredToolNames(draft).length > 0
+    getDeclaredToolNames(draft).length > 0
       ? readDefaultTools(draft as IntegrationManifest)
       : undefined;
   if (saved === "*") return new Set(listed);
@@ -305,7 +282,7 @@ function toolsSelection(
 ): string[] {
   if (!isToolsTruncated(proposal)) return [...selected];
   const listed = new Set(Object.keys(proposal.manifest.tools_policy));
-  const declared = new Set(declaredToolNames(merged));
+  const declared = new Set(getDeclaredToolNames(merged));
   const held: unknown[] =
     merged.default_tools === "*"
       ? [...declared]

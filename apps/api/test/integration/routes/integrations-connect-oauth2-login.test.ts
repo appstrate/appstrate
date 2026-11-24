@@ -39,7 +39,10 @@ beforeAll(() => {
       const form = new URLSearchParams(await req.text());
       exchanged.push(form.get("refresh_token") ?? "");
       if (tokenStatus !== 200) {
-        return Response.json({ error: "server_error" }, { status: tokenStatus });
+        return Response.json(
+          { error: tokenStatus === 400 ? "invalid_grant" : "server_error" },
+          { status: tokenStatus },
+        );
       }
       return Response.json({
         access_token: "at",

@@ -260,6 +260,8 @@ export const mePaths = {
       tags: ["Me"],
       summary: "Share an owned connection with current and future team spaces",
       parameters: [
+        { $ref: "#/components/parameters/XOrgId" },
+        { $ref: "#/components/parameters/XViewAs" },
         {
           name: "connectionId",
           in: "path",
@@ -267,6 +269,14 @@ export const mePaths = {
           schema: { type: "string", format: "uuid" },
         },
       ],
+      responses: {
+        ...connectionShareAllSpacesOperation.responses,
+        "400": {
+          $ref: "#/components/responses/ViewAsRefused",
+          description: "Invalid sharing request, or a refused persona switch.",
+        },
+        "401": { $ref: "#/components/responses/Unauthorized" },
+      },
     },
   },
   "/api/me/connections/{connectionId}/shares/{spaceId}": {

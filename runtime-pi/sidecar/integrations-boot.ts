@@ -34,8 +34,11 @@ import { dirname, join, normalize } from "node:path";
 import { tmpdir } from "node:os";
 import { randomUUID } from "node:crypto";
 
-import { assertHttpFieldValue } from "@appstrate/afps-shared/delivery-http";
-import { guardedFetchChain } from "@appstrate/afps-shared/guarded-fetch";
+import {
+  assertHttpFieldValue,
+  InvalidHeaderValueError,
+} from "@appstrate/afps-shared/delivery-http";
+import { guardedFetchChain, SsrfBlockedError } from "@appstrate/afps-shared/guarded-fetch";
 import { compileRunnerEgressPolicy, isOperatorTrustedEgressHost } from "./ssrf.ts";
 import { unzipBounded } from "@appstrate/core/zip";
 import { mapWithConcurrency } from "@appstrate/core/map-with-concurrency";
@@ -45,8 +48,11 @@ import { SSEClientTransport } from "@modelcontextprotocol/sdk/client/sse.js";
 import { ListRootsRequestSchema } from "@modelcontextprotocol/sdk/types.js";
 import {
   createInProcessPair,
+  boundResourceResponse,
   createMcpHttpClient,
   httpStatusOf,
+  isMcpProtocolError,
+  isRequestTimeout,
   mcpFetch,
   wrapClient,
   type AppstrateMcpClient,
@@ -58,7 +64,12 @@ import {
   unresolvedPlaceholders,
 } from "@appstrate/afps-runtime/resolvers";
 import { matchesAuthorizedUriSpec } from "@appstrate/afps-shared/authorized-uris";
-import type { IntegrationSpawnSpec } from "@appstrate/core/sidecar-types";
+import {
+  integrationSpawnSpecSchema,
+  integrationSpawnSpecsSchema,
+  type IntegrationSpawnSpec,
+} from "@appstrate/core/sidecar-types";
+import { SidecarEnvError } from "./env.ts";
 
 import type { CredentialBundle } from "@appstrate/connect/connect";
 
@@ -173,6 +184,7 @@ function decodeWorkspaceHandle(): WorkspaceHandle | null {
  * Bearer-token auth (same run-token as the credentials endpoint).
  */
 interface BundleFetchOptions {
+  runId?: string;
   platformApiUrl: string;
   runToken: string;
   /** Override for tests. Defaults to `globalThis.fetch`. */
@@ -215,6 +227,36 @@ function connectionLabelOf(spec: IntegrationSpawnSpec): { connectionLabel?: stri
   return spec.connection ? { connectionLabel: spec.connection.label } : {};
 }
 
+export class IntegrationSpecsError extends SidecarEnvError {
+  constructor(
+    issues: string[],
+    readonly declaredConnections: number,
+  ) {
+    super(issues);
+  }
+}
+
+function readSpawnJson(raw: string, variable: string): unknown {
+  try {
+    return JSON.parse(raw);
+  } catch {
+    throw new IntegrationSpecsError([variable + ": invalid JSON"], 0);
+  }
+}
+
+/** The connect-mode sentinel may name a contract field, never input values or dynamic map keys. */
+export function readConnectSpec(raw: string): IntegrationSpawnSpec {
+  const result = integrationSpawnSpecSchema.safeParse(readSpawnJson(raw, "CONNECT_LOGIN_JSON"));
+  if (!result.success) {
+    const fields = result.error.issues.map(
+      ({ path }) =>
+        `CONNECT_LOGIN_JSON: invalid ${typeof path[0] === "string" ? path[0] : "entry"}`,
+    );
+    throw new IntegrationSpecsError([...new Set(fields)], 1);
+  }
+  return result.data;
+}
+
 /**
  * Parse the `INTEGRATIONS_TO_SPAWN_JSON` env var. Returns `null` when the
  * env var is missing or empty — the caller proceeds without integrations.
@@ -222,28 +264,22 @@ function connectionLabelOf(spec: IntegrationSpawnSpec): { connectionLabel?: stri
 export function readIntegrationSpecsFromEnv(env = process.env): IntegrationSpawnSpec[] | null {
   const raw = env.INTEGRATIONS_TO_SPAWN_JSON;
   if (!raw) return null;
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(raw);
-  } catch (err) {
-    logger.warn("INTEGRATIONS_TO_SPAWN_JSON is not valid JSON; skipping integrations", {
-      error: err instanceof Error ? err.message : String(err),
+  const parsed = readSpawnJson(raw, "INTEGRATIONS_TO_SPAWN_JSON");
+  const result = integrationSpawnSpecsSchema.safeParse(parsed);
+  if (!result.success) {
+    // Values and map keys may carry credentials. Only the entry and its contract field are public.
+    const issues = result.error.issues.map(({ path }) => {
+      const [index, field] = path;
+      return typeof index === "number"
+        ? `INTEGRATIONS_TO_SPAWN_JSON[${index}]: invalid ${typeof field === "string" ? field : "entry"}`
+        : "INTEGRATIONS_TO_SPAWN_JSON: expected an array";
     });
-    return null;
-  }
-  if (!Array.isArray(parsed)) {
-    logger.warn("INTEGRATIONS_TO_SPAWN_JSON must be an array; skipping integrations");
-    return null;
-  }
-  return parsed.filter((s): s is IntegrationSpawnSpec => {
-    return (
-      typeof s === "object" &&
-      s !== null &&
-      typeof (s as IntegrationSpawnSpec).integrationId === "string" &&
-      typeof (s as IntegrationSpawnSpec).namespace === "string" &&
-      typeof (s as IntegrationSpawnSpec).manifest === "object"
+    throw new IntegrationSpecsError(
+      [...new Set(issues)],
+      Array.isArray(parsed) ? parsed.length : 0,
     );
-  });
+  }
+  return result.data;
 }
 
 /**
@@ -371,6 +407,7 @@ export interface ConnectRemoteHttpDeps {
     opts: {
       fetch: typeof fetch;
       clientInfo: { name: string; version: string };
+      signal: AbortSignal;
     },
   ) => Promise<AppstrateMcpClient>;
   /**
@@ -402,26 +439,32 @@ async function defaultCreateSseClient(
   opts: {
     fetch: typeof fetch;
     clientInfo: { name: string; version: string };
+    signal: AbortSignal;
   },
 ): Promise<AppstrateMcpClient> {
   const targetUrl = new URL(url);
   const transport = new SSEClientTransport(targetUrl, {
-    // The SDK's SSEClientTransport accepts a `fetch` override applied to
-    // both the initial GET (stream open) and the outbound POSTs (client→
-    // server JSON-RPC messages). Routing through customFetch attaches the
-    // Bearer header per-request and triggers the 401-refresh-and-retry
-    // closure consistently across both directions.
-    fetch: opts.fetch as never,
+    // All results share the GET. A failed POST can also carry a body which this SDK reads as text.
+    fetch: mcpFetch(async (input, init) =>
+      boundResourceResponse(
+        await opts.fetch(input, init),
+        (init?.method ?? "GET") === "GET" ? "shared-stream" : "request",
+      ),
+    ) as never,
   });
   const client = new Client(opts.clientInfo);
   try {
-    await client.connect(transport);
+    await client.connect(transport, { signal: opts.signal });
   } catch (err) {
     await transport.close().catch(() => {});
     throw err;
   }
   return wrapClient(client, transport, toolTimeoutMsFromEnv());
 }
+
+// Provisioning waits for a newly scheduled remote workload. The interactive CLI uses a
+// shorter 10 s budget and spends it on a single connection plus listing.
+const REMOTE_PROVISION_TIMEOUT_MS = 30_000;
 
 /** A refusal the credential closure of a remote MCP server authored itself: safe to relay. */
 class RemoteCredentialRefusal extends Error {
@@ -446,22 +489,8 @@ export class RemoteMcpError extends Error {
 }
 
 /**
- * Names of the errors relayed as they are: the sidecar's own refusals (they name a host or an
- * origin, a header name), and the JSON-RPC answers of the exchange (`McpError` legacy,
- * `ProtocolError` modern), which are the server's protocol content like a tool result is.
- */
-const RELAYED_REMOTE_ERRORS = new Set([
-  "RemoteCredentialRefusal",
-  "RemoteMcpError",
-  "SsrfBlockedError",
-  "InvalidHeaderValueError",
-  "McpError",
-  "ProtocolError",
-]);
-
-/**
  * The error a remote MCP failure is reported as, everywhere it goes (boot report, run error,
- * logs, a tool call's result). Anything but a {@link RELAYED_REMOTE_ERRORS} one is rebuilt from
+ * logs, a tool call's result). Anything except a known local refusal or a JSON-RPC error is rebuilt from
  * safe fields only, never its message: an HTTP error body or a transport message can quote the
  * endpoint's path, which may itself be a capability. The `cause` chain is searched first so a
  * relayed refusal wrapped by a retry deadline keeps its own text.
@@ -473,15 +502,19 @@ function remoteMcpFailure(err: unknown, origin: string): Error {
     e = e instanceof Error ? e.cause : undefined;
   }
   const relayed = chain.find(
-    (e): e is Error => e instanceof Error && RELAYED_REMOTE_ERRORS.has(e.name),
+    (e): e is Error =>
+      e instanceof RemoteCredentialRefusal ||
+      e instanceof RemoteMcpError ||
+      e instanceof SsrfBlockedError ||
+      e instanceof InvalidHeaderValueError ||
+      (isMcpProtocolError(e) && !isRequestTimeout(e)),
   );
   if (relayed) return relayed;
   const status = chain.map(httpStatusOf).find((s) => s !== undefined);
   const names = chain.map((e) => (e instanceof Error ? e.name : ""));
-  const text = chain.map((e) => (e instanceof Error ? e.message : String(e))).join(" ");
   let failure: RemoteFailureCause;
   if (names.includes("AbortError")) failure = "aborted";
-  else if (names.includes("TimeoutError") || /deadline exceeded|timed? ?out/i.test(text)) {
+  else if (names.includes("TimeoutError") || chain.some(isRequestTimeout)) {
     failure = "timeout";
   } else if (status !== undefined) failure = "http_error";
   else if (
@@ -538,7 +571,7 @@ async function connectStreamableHttp(
       era,
       onWarning: (message, data) =>
         logger.warn(message, { integrationId: spec.integrationId, ...data }),
-      retry: { deadlineMs: deps.connectDeadlineMs ?? 30_000 },
+      retry: { deadlineMs: deps.connectDeadlineMs ?? REMOTE_PROVISION_TIMEOUT_MS },
       ...(toolTimeoutMs !== undefined ? { defaultTimeoutMs: toolTimeoutMs } : {}),
     }),
     originForLog(endpoint) ?? "<unparseable>",
@@ -739,7 +772,11 @@ export async function connectRemoteHttpIntegration(
   const client =
     transport === "sse"
       ? await settleRemoteClient(
-          createSseClient(serverUrl, { fetch: customFetch, clientInfo }),
+          createSseClient(serverUrl, {
+            fetch: customFetch,
+            clientInfo,
+            signal: AbortSignal.timeout(deps.connectDeadlineMs ?? REMOTE_PROVISION_TIMEOUT_MS),
+          }),
           origin,
         )
       : await connectStreamableHttp(spec, serverUrl, customFetch, clientInfo, deps);
@@ -1486,7 +1523,12 @@ type PreparedConnection = {
       source: IntegrationCredentialsSource | null;
       upstream:
         | { kind: "serverless" }
-        | { kind: "remote"; client: AppstrateMcpClient; authKey: string | null }
+        | {
+            kind: "remote";
+            client: AppstrateMcpClient;
+            authKey: string | null;
+            listBudgetMs: number;
+          }
         | { kind: "local"; started: StartedLocalIntegration };
     }
 );
@@ -1530,7 +1572,7 @@ export async function bootIntegrations(
 
   // RUN_ID labels docker runner containers for the orphan reaper; a process-mode sidecar lacks
   // it. NEVER derive it from RUN_TOKEN: labels are readable by anyone who can reach the daemon.
-  const runId = process.env.RUN_ID ?? `nosrunid-${randomUUID().slice(0, 8)}`;
+  const runId = bundleFetchOpts.runId ?? `nosrunid-${randomUUID().slice(0, 8)}`;
 
   // Pick the runtime backend from `INTEGRATION_RUNTIME_ADAPTER`, pinned by the
   // launching orchestrator — no probing. The selection logic is in
@@ -1707,6 +1749,7 @@ export async function bootIntegrations(
       // no per-tool upstream URL can be enforced through a hosted MCP —
       // the upstream decides.
       if (spec.sourceKind === "remote") {
+        const connectStart = performance.now();
         const { client, authKey } = spec.manifest.server?.platformEndpoint
           ? { client: await connectPlatformIntegration(spec, bundleFetchOpts), authKey: null }
           : await connectRemoteHttpIntegration(spec, source);
@@ -1717,7 +1760,15 @@ export async function bootIntegrations(
           ok: true as const,
           connection,
           source,
-          upstream: { kind: "remote", client, authKey },
+          upstream: {
+            kind: "remote",
+            client,
+            authKey,
+            listBudgetMs: Math.max(
+              0,
+              Math.floor(REMOTE_PROVISION_TIMEOUT_MS - (performance.now() - connectStart)),
+            ),
+          },
         });
       }
 
@@ -1788,13 +1839,9 @@ export async function bootIntegrations(
       return 0;
     }
     if (!source || !connection) {
-      // Unreachable: `hasApiCall` forces `needsSource` and a bound connection, so both always
-      // exist when there are api_calls. Guard narrows the type + fails loud if that invariant
-      // ever breaks.
-      logger.warn("integration declares api_call but no credentials source was hoisted", {
-        integrationId: spec.integrationId,
-      });
-      return 0;
+      throw new Error(
+        `Integration ${spec.integrationId} declares api_call without a bound credentials source`,
+      );
     }
     // The SHARED source serves every auth; each api_call entry binds its own
     // auth via a per-auth adapter reading from that same source.
@@ -1924,6 +1971,7 @@ export async function bootIntegrations(
           integrationId: spec.integrationId,
           namespace: spec.namespace,
           client,
+          listSignal: AbortSignal.timeout(upstream.listBudgetMs),
           connection,
           // The tool allowlist applies here too — McpHost filters
           // tools/list before exposing them to the agent.
@@ -2191,11 +2239,11 @@ export async function runConnectOnce(
   if (!server) {
     throw new Error("runConnectOnce: spec has no manifest.server to spawn");
   }
-  if (spec.sourceKind === "remote") {
-    throw new Error("runConnectOnce: remote http MCP integrations cannot run connect-login");
+  if (spec.sourceKind !== "local") {
+    throw new Error("runConnectOnce: only local MCP integrations can run connect-login");
   }
 
-  const runId = process.env.RUN_ID ?? `nosrunid-${randomUUID().slice(0, 8)}`;
+  const runId = bundleFetchOpts.runId ?? `nosrunid-${randomUUID().slice(0, 8)}`;
 
   const adapter = selectIntegrationRuntimeAdapter();
   const adapterCtx = await adapter.prepare(runId);

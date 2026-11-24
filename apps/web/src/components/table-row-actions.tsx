@@ -12,6 +12,7 @@ import {
 } from "@appstrate/ui/components/dropdown-menu";
 import { Spinner } from "@appstrate/ui/components/spinner";
 import { DisabledReasonTooltip } from "./disabled-reason-tooltip";
+import { inlineEditingSelector } from "../lib/keep-open-while-renaming";
 import { MenuActionItem } from "./menu-action";
 import { splitMenuActions, type MenuAction } from "../lib/menu-action";
 
@@ -97,7 +98,9 @@ export function TableRowActions({
             onCloseAutoFocus={(event) => {
               if (!renaming) return;
               event.preventDefault();
-              const field = triggerRef.current?.closest("tr, [data-row]")?.querySelector("input");
+              const field = triggerRef.current
+                ?.closest("tr, [data-row]")
+                ?.querySelector<HTMLInputElement>(inlineEditingSelector);
               field?.focus();
               field?.select();
             }}

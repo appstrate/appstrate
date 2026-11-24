@@ -17,8 +17,10 @@ installFakeStorage({
 
 const { PersonalSpaceRoleSetting } =
   await import("../../components/settings/personal-space-role-setting.tsx");
-const { toggleBody, PERSONAL_SPACE_ROLE_VALUES: ROLE_VALUES } =
-  await import("../../lib/org-setting-toggle-body.ts");
+const { toggleBody } = await import("../../lib/org-setting-toggle-body.ts");
+const { client, $api } = await import("../../api/client.ts");
+const { useUpdateOrgSettings } = await import("../../hooks/use-org-settings.ts");
+const { ApiError } = await import("../../api/errors.ts");
 const { orgStore } = await import("../../stores/org-store.ts");
 const { render } = await import("../../test/render.tsx");
 const i18nModule = await import("../../i18n.ts");
@@ -74,10 +76,10 @@ describe("the personal space role switch", () => {
   });
 
   it("writes operator when flipped OFF, then admin when flipped back ON", () => {
-    expect(toggleBody("personal_space_role", false, ROLE_VALUES)).toEqual({
+    expect(toggleBody("personal_space_role", false)).toEqual({
       personal_space_role: "operator",
     });
-    expect(toggleBody("personal_space_role", true, ROLE_VALUES)).toEqual({
+    expect(toggleBody("personal_space_role", true)).toEqual({
       personal_space_role: "admin",
     });
   });
@@ -85,4 +87,33 @@ describe("the personal space role switch", () => {
   it("keeps writing a boolean for the boolean settings", () => {
     expect(toggleBody("restrict_package_copy", true)).toEqual({ restrict_package_copy: true });
   });
+});
+
+it("keeps the cached toggle after a refused PATCH and refreshes it after a successful edit", async () => {
+  const qc = new QueryClient();
+  const path = "/api/orgs/{orgId}/settings";
+  const params = { path: { orgId: ORG_ID } };
+  const key = $api.queryOptions("get", path, { params }).queryKey;
+  const saved = { personal_space_role: "admin" };
+  qc.setQueryData(key, saved);
+  const updates: ReturnType<typeof useUpdateOrgSettings>[] = [];
+  function Probe() {
+    updates.push(useUpdateOrgSettings());
+    return null;
+  }
+  render(<Probe />, { queryClient: qc });
+  const patch = spyOn(client, "PATCH")
+    .mockRejectedValueOnce(new ApiError("forbidden", "Refused", 403))
+    .mockResolvedValueOnce({ data: { ...saved, personal_space_role: "operator" } });
+  const input = { params, body: toggleBody("personal_space_role", false) };
+  try {
+    await expect(updates[0]!.mutateAsync(input)).rejects.toMatchObject({ status: 403 });
+    expect(qc.getQueryData(key)).toEqual(saved);
+    expect(qc.getQueryState(key)?.isInvalidated).toBe(false);
+    await updates[0]!.mutateAsync(input);
+    expect(patch).toHaveBeenCalledWith(path, input);
+    expect(qc.getQueryState(key)?.isInvalidated).toBe(true);
+  } finally {
+    patch.mockRestore();
+  }
 });

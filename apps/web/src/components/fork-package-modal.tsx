@@ -10,7 +10,6 @@ import { Input } from "@appstrate/ui/components/input";
 import { useForkPackage } from "../hooks/use-packages";
 import { useSpaceLink } from "../hooks/use-current-space";
 import { useOrg } from "../hooks/use-org";
-import { ApiError } from "../api/errors";
 import { packageDetailPath } from "../lib/package-paths";
 import { errorMessage } from "../lib/mutation-error";
 
@@ -44,16 +43,7 @@ export function ForkPackageModal({ onClose, packageId, spaceId, defaultName, typ
           onClose();
           navigate(linkInSpace(packageDetailPath(type, result.id), spaceId));
         },
-        onError: (err) => {
-          const code = err instanceof ApiError ? err.code : "";
-          setError(
-            code === "already_owned"
-              ? t("fork.errorOwned")
-              : code === "no_published_version"
-                ? t("fork.errorNoPublishedVersion")
-                : errorMessage(err),
-          );
-        },
+        onError: (err) => setError(errorMessage(err)),
       },
     );
   };

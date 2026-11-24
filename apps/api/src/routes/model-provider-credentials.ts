@@ -584,7 +584,7 @@ export function createModelProviderCredentialsRouter() {
       // PG `foreign_key_violation` (23503) as a 409 with an actionable
       // message rather than a generic 500.
       if (err instanceof ApiError) throw err;
-      if (isForeignKeyViolation(err)) {
+      if (isForeignKeyViolation(err, "org_models_credential_provider_fk")) {
         throw conflict(
           "credential_in_use",
           "Cannot delete this credential while one or more models reference it. Detach the model first.",

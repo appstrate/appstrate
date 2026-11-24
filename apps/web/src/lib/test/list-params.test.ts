@@ -24,7 +24,8 @@ function recorder(initial: string) {
   return {
     calls,
     current: () => params.toString(),
-    list: (keys: readonly string[]) => urlListParams(params, setParams, keys),
+    list: (keys: readonly string[], names?: Readonly<Record<string, string>>) =>
+      urlListParams(params, setParams, keys, names),
   };
 }
 
@@ -32,10 +33,19 @@ describe("urlListParams", () => {
   it("pushes a filter and removes the key when it is emptied", () => {
     const url = recorder("q=mail");
     url.list(["state"]).setValues("state")(["active", "inactive"]);
-    expect(url.current()).toBe("q=mail&state=active%2Cinactive");
+    expect(url.current()).toBe("q=mail&state=active&state=inactive");
     url.list(["state"]).setValues("state")([]);
     expect(url.current()).toBe("q=mail");
     expect(url.calls).toEqual([{ replace: false }, { replace: false }]);
+  });
+
+  it("round-trips a comma inside a value and reads existing comma-separated bookmarks", () => {
+    const url = recorder("state=active%2Cinactive");
+    const allowed = ["active", "inactive", "has,comma"];
+    expect(url.list(["state"]).values("state", allowed)).toEqual(["active", "inactive"]);
+    url.list(["state"]).setValues("state")(["has,comma", "active"]);
+    expect(url.current()).toBe("state=has%2Ccomma&state=active");
+    expect(url.list(["state"]).values("state", allowed)).toEqual(["has,comma", "active"]);
   });
 
   it("replaces the entry for the search", () => {
@@ -74,4 +84,17 @@ describe("readList", () => {
     expect(readList(null, ["active"])).toEqual([]);
     expect(readList("", ["active"])).toEqual([]);
   });
+});
+
+it("keeps a shared agent panel filter in the address and preserves the outer list on reset", () => {
+  const url = recorder("q=outer&agentRunStatus=failed");
+  const list = () => url.list(["status"], { status: "agentRunStatus", q: "agentRunSearch" });
+  expect(list().values("status", ["failed", "running"])).toEqual(["failed"]);
+  list().setValues("status")(["running"]);
+  list().setSearch("weekly");
+  expect(list().values("status", ["failed", "running"])).toEqual(["running"]);
+  expect(list().search).toBe("weekly");
+  list().reset();
+  expect(url.current()).toBe("q=outer");
+  expect(url.calls).toEqual([{ replace: false }, { replace: true }, { replace: false }]);
 });

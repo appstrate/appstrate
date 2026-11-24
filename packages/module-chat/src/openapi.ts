@@ -7,6 +7,7 @@
  * clients automatically (search/describe/invoke_operation).
  */
 
+import { catalogueSources } from "./commands.ts";
 import { scopedNameRegex } from "@appstrate/core/validation";
 import { CHAT_SKILLS_CONTENT_BUDGET_CHARS } from "./skills.ts";
 import { chatSkillStatusValues } from "@appstrate/db/schema";
@@ -18,6 +19,71 @@ const problem = {
 const stdHeaders = {
   "Request-Id": { $ref: "#/components/headers/RequestId" },
   "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
+} as const;
+
+/** AI SDK messages. Extensions remain open, including stored tool/reasoning/data parts. */
+const chatMessage = {
+  type: "object",
+  required: ["role", "parts"],
+  properties: {
+    id: {
+      type: "string",
+      description: "Required on the new message. Historical entries may omit an id.",
+    },
+    role: { type: "string", enum: ["user", "assistant"] },
+    parts: {
+      type: "array",
+      items: {
+        oneOf: [
+          {
+            type: "object",
+            required: ["type", "text"],
+            properties: { type: { const: "text" }, text: { type: "string" } },
+            additionalProperties: true,
+          },
+          {
+            type: "object",
+            required: ["type", "url", "mediaType"],
+            properties: {
+              type: { const: "file" },
+              url: { type: "string", pattern: "^(upload|appfile)://" },
+              mediaType: { type: "string" },
+              filename: { type: "string" },
+            },
+            additionalProperties: true,
+          },
+          {
+            type: "object",
+            required: ["type", "data"],
+            properties: {
+              type: { const: "data-agent-prompt" },
+              data: {
+                type: "object",
+                required: ["name", "title"],
+                properties: {
+                  name: { type: "string", minLength: 1, maxLength: 64 },
+                  title: { type: "string", minLength: 1, maxLength: 200 },
+                  text: { type: "string", description: "On a stored message only." },
+                },
+                additionalProperties: false,
+              },
+            },
+            additionalProperties: true,
+          },
+          {
+            type: "object",
+            required: ["type"],
+            properties: {
+              type: { type: "string", not: { enum: ["text", "file", "data-agent-prompt"] } },
+            },
+            additionalProperties: true,
+            description: "Other AI SDK parts, including tool calls, reasoning and data extensions.",
+          },
+        ],
+      },
+    },
+  },
+  additionalProperties: true,
 } as const;
 
 /** A list of `@scope/name` package ids, as `pins` carries it. */
@@ -121,6 +187,12 @@ export const chatComponentSchemas = {
     description:
       "What the composer's `/` menu offers, as the platform MCP server serves it to the caller (`skills/list`, `prompts/list`).",
     properties: {
+      unavailable: {
+        type: "array",
+        items: { type: "string", enum: catalogueSources },
+        description:
+          "Lists whose read failed. Retry the request to reload them. An omitted field means all permitted lists were read.",
+      },
       skills: {
         type: "array",
         description:
@@ -417,7 +489,7 @@ export const chatPaths = {
       operationId: "updateChatSessionSkills",
       tags: ["Chat"],
       summary: "Set a chat session's pinned skills or skill discovery",
-      description: `\`pins\` replaces the whole set of pinned skills (deduplicated and sorted; any number, held to the content budget each turn); a pin it drops loses its status, a new one has none until a turn evaluates it. \`skill_discovery\` sets the discovery switch. At least one of the two. Allowed while a turn is running: that turn keeps the skills it started with, and the next turn reads these. Never reorders the conversation list.`,
+      description: `\`pins\` replaces the whole set of pinned skills (deduplicated and sorted; any number, held to the content budget each turn); a pin it drops loses its status, a new one has none until a turn evaluates it. \`skill_discovery\` sets the discovery switch. The single-pin form sets or clears one pin atomically on the latest selection. Supply at least one field, and choose either the full set or a single pin. Allowed while a turn is running: that turn keeps the skills it started with, and the next turn reads these. Never reorders the conversation list.`,
       parameters: [
         { $ref: "#/components/parameters/OrgIdPath" },
         { name: "id", in: "path", required: true, schema: { type: "string" } },
@@ -430,9 +502,16 @@ export const chatPaths = {
               type: "object",
               properties: {
                 pins: { ...skillIds, description: "The full set of pinned skills." },
+                pin: {
+                  type: "object",
+                  properties: { id: skillIds.items, pinned: { type: "boolean" } },
+                  required: ["id", "pinned"],
+                  additionalProperties: false,
+                },
                 skill_discovery: { type: "boolean" },
               },
               minProperties: 1,
+              not: { properties: { pin: {}, pins: {} }, required: ["pin", "pins"] },
               additionalProperties: false,
             },
           },
@@ -510,7 +589,7 @@ export const chatPaths = {
       tags: ["Chat"],
       summary: "List the composer's commands",
       description:
-        "The skills a conversation can pin and the agents the caller can launch, read as an MCP client reads the platform server (`skills/list`, `prompts/list`) with the caller's own permissions: in every space the caller can act in, or, with `?spaceId=`, in that space alone (a conversation limited to it). An agent is launched by a user message carrying a `data-agent-prompt` part (see `streamChat`). A half that cannot be read is empty; a server that cannot be reached is a 502. Rate limited (60/min per caller). Ignores `X-Space-Id`; admitted when the acting set is not empty. A credential confined to spaces is refused (403).",
+        "The skills a conversation can pin and the agents the caller can launch, read as an MCP client reads the platform server (`skills/list`, `prompts/list`) with the caller's own permissions: in every space the caller can act in, or, with `?spaceId=`, in that space alone (a conversation limited to it). An agent is launched by a user message carrying a `data-agent-prompt` part (see `streamChat`). A failed read is named in `unavailable` alongside the successful lists; a server that cannot be reached is a 502. Rate limited (60/min per caller). Ignores `X-Space-Id`; admitted when the acting set is not empty. A credential confined to spaces is refused (403).",
       parameters: [
         { $ref: "#/components/parameters/OrgIdPath" },
         {
@@ -544,7 +623,7 @@ export const chatPaths = {
         },
         "502": {
           description:
-            "`bad_gateway` — the platform's MCP server could not be reached, so the commands are unknown (not empty). RFC 9457 problem+json. A half that fails to read is empty in a 200.",
+            "`bad_gateway` — the platform's MCP server could not be reached, so the commands are unknown (not empty). RFC 9457 problem+json. A 200 lists any failed catalogue reads in unavailable.",
           content: problem,
         },
       },
@@ -574,10 +653,12 @@ export const chatPaths = {
             schema: {
               type: "object",
               required: ["messages"],
+              additionalProperties: false,
               properties: {
+                id: { type: "string", description: "Conversation ID. Omit for an ephemeral turn." },
                 messages: {
                   type: "array",
-                  items: { type: "object", description: "AI SDK UIMessage" },
+                  items: chatMessage,
                   minItems: 1,
                 },
                 modelId: { type: "string" },
@@ -613,9 +694,7 @@ export const chatPaths = {
                   description:
                     "The discovery switch of a conversation this turn creates (see ChatSession `skill_discovery`); absent = on. Same rule as `pins`: ignored for an existing conversation.",
                 },
-                id: { type: "string", description: "Session id (the assistant-ui thread id)" },
               },
-              additionalProperties: false,
             },
           },
         },

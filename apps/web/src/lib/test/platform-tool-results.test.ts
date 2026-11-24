@@ -29,6 +29,27 @@ describe("platform tool results", () => {
     ]);
   });
 
+  it("reads the structured output when present and falls back to a historical text receipt", () => {
+    const memory = {
+      id: 7,
+      content: "Saved",
+      createdAt: "2026-09-01",
+      actor_type: "shared",
+      actor_id: null,
+    };
+    expect(recalledMemories({ structuredContent: { memories: [memory] }, content: [] })).toEqual([
+      { id: "7", content: "Saved", createdAt: "2026-09-01" },
+    ]);
+    const run = { id: "run_1", status: "success", date: null, duration: 10 };
+    const history = { object: "list", hasMore: false, data: [run] };
+    expect(historyRuns({ structuredContent: history, content: [] })).toEqual([
+      { id: "run_1", status: "success", date: undefined, duration: 10 },
+    ]);
+    expect(historyRuns({ structuredContent: { data: "old" }, ...mcp({ data: [run] }) })).toEqual(
+      historyRuns(history),
+    );
+  });
+
   it("answers null for anything else, so the caller keeps the JSON", () => {
     expect(recalledMemories({ count: 3 })).toBeNull();
     expect(historyRuns("not json")).toBeNull();

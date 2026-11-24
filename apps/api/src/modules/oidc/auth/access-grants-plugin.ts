@@ -33,6 +33,7 @@ import { logger } from "../../../lib/logger.ts";
 import { recordAudit } from "../../../services/audit.ts";
 import {
   listAccessGrantsForUser,
+  mcpRevocationAudit,
   revokeAccessGrantForUser,
   revokeAllAccessGrantsForUser,
 } from "../services/access-grants.ts";
@@ -41,7 +42,6 @@ import {
   authorizationCodeIssuedAt,
   findMcpRefreshTokenOwner,
   hashOAuthToken,
-  type McpGrant,
 } from "../services/mcp-grants.ts";
 import { verifyEndUserAccessToken } from "../services/enduser-token.ts";
 import { mcpBindingFromAudiences } from "../../../lib/audiences.ts";
@@ -59,26 +59,11 @@ async function requireSessionUserId(ctx: unknown): Promise<string> {
   return session.user.id;
 }
 
-/** An MCP grant is bound to an org, so its revocation lands in that org's audit log. */
-async function auditMcpRevocations(
-  grants: McpGrant[],
-  actorId: string,
-  request: Request | undefined,
-): Promise<void> {
-  await recordAudit(
-    grants.map((grant) => ({
-      orgId: grant.orgId,
-      spaceId: grant.spaceId,
-      actorType: "user",
-      actorId,
-      action: "oauth_grant.revoked",
-      resourceType: "oauth_grant",
-      resourceId: grant.id,
-      after: { clientId: grant.clientId, clientName: grant.clientName, userId: grant.userId },
-      ip: request ? getClientIpFromRequest(request) : null,
-      userAgent: request?.headers.get("user-agent") ?? null,
-    })),
-  );
+function grantAuditContext(request: Request | undefined) {
+  return {
+    ip: request ? getClientIpFromRequest(request) : null,
+    userAgent: request?.headers.get("user-agent") ?? null,
+  };
 }
 
 /**
@@ -236,7 +221,9 @@ export function accessGrantsPlugin() {
           const userId = await requireSessionUserId(ctx);
           const outcome = await revokeAccessGrantForUser({ userId, grantId: ctx.body.id });
           if (outcome.revoked && outcome.kind === "mcp") {
-            await auditMcpRevocations([outcome.grant], userId, ctx.request);
+            await recordAudit(
+              mcpRevocationAudit(outcome.grant, userId, grantAuditContext(ctx.request)),
+            );
           }
           if (outcome.revoked) {
             logger.info("oidc: user revoked an access grant", {
@@ -258,8 +245,10 @@ export function accessGrantsPlugin() {
         },
         async (ctx) => {
           const userId = await requireSessionUserId(ctx);
-          const { revokedCount, mcpGrants } = await revokeAllAccessGrantsForUser(userId);
-          await auditMcpRevocations(mcpGrants, userId, ctx.request);
+          const revokedCount = await revokeAllAccessGrantsForUser(
+            userId,
+            grantAuditContext(ctx.request),
+          );
           logger.info("oidc: user revoked every access grant", {
             module: "oidc",
             audit: true,

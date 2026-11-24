@@ -15,12 +15,6 @@ const agent = { name: "run-report", title: "Weekly report" };
 
 describe("what a user message shows of its agent", () => {
   const launch = { name: "run-report", title: "Weekly report", text: "LAUNCH INSTRUCTIONS" };
-  const stored = {
-    parts: [
-      { type: "text", text: "for Q3" },
-      { type: "data-agent-prompt", data: launch },
-    ],
-  };
   const live = {
     content: [
       { type: "text", text: "for Q3" },
@@ -28,23 +22,19 @@ describe("what a user message shows of its agent", () => {
     ],
   };
 
-  it("reads the title off a stored message and off the runtime's, never the launch text", () => {
-    expect(agentPromptOf(stored)).toEqual({ name: "run-report", title: "Weekly report" });
+  it("reads the title off the runtime message, never the launch text", () => {
     expect(agentPromptOf(live)).toEqual({ name: "run-report", title: "Weekly report" });
-    expect(agentPromptOf({ parts: [{ type: "text", text: "plain" }] })).toBeNull();
-    expect(agentPromptOf({})).toBeNull();
+    expect(agentPromptOf({ content: [{ type: "text", text: "plain" }] })).toBeNull();
   });
 
   it("ignores an agent prompt part that is not one", () => {
     expect(
-      agentPromptOf({ parts: [{ type: "data-agent-prompt", data: { title: 3 } }] }),
+      agentPromptOf({ content: [{ type: "data", name: "agent-prompt", data: { title: 3 } }] }),
     ).toBeNull();
   });
 
   it("draws the bubble for anything but the agent prompt alone", () => {
-    expect(hasBubbleContent(stored)).toBe(true);
     expect(hasBubbleContent(live)).toBe(true);
-    expect(hasBubbleContent({ parts: [{ type: "data-agent-prompt", data: launch }] })).toBe(false);
     expect(
       hasBubbleContent({ content: [{ type: "data", name: "agent-prompt", data: launch }] }),
     ).toBe(false);

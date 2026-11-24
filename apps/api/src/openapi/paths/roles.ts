@@ -19,7 +19,7 @@ export const rolesPaths = {
       tags: ["Roles"],
       summary: "List organization roles",
       description:
-        'The four organization roles (`owner`, `admin`, `member`, `guest`) and the org-level permissions each grants — the platform\'s own matrix with what the loaded modules contribute at `level: "org"`. The same in every organization and for every caller (no preview, no credential ceiling): it describes the roles, not the caller. Any member may read it.',
+        'The four organization roles (`owner`, `admin`, `member`, `guest`) and the org-level permissions each grants — the platform\'s own matrix with what the loaded modules contribute at `level: "org"`. The same in every organization and for every caller (no preview, no credential ceiling): it describes the roles, not the caller. Membership is checked in the organization selected by X-Org-Id. Any member may read it.',
       parameters: [{ $ref: "#/components/parameters/XOrgId" }],
       responses: {
         "200": {

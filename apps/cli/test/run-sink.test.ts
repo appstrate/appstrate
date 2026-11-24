@@ -128,6 +128,20 @@ describe("createConsoleSink — human mode", () => {
     streams = memoryStreams();
   });
 
+  it("ignores malformed diagnostic fields without hiding the original JSONL event", async () => {
+    const raw = {
+      type: "appstrate.progress",
+      timestamp: 0,
+      runId: RUN_ID,
+      message: { text: "wrong" },
+      data: ["not a record"],
+    };
+    await streams.sink().handle(raw);
+    expect(streams.stdout).toBe("");
+    await streams.sink({ json: true }).handle(raw);
+    expect(JSON.parse(streams.stdout)).toEqual(raw);
+  });
+
   it("writes progress text to stdout", async () => {
     const sink = streams.sink({});
     await sink.handle(progressEvent("doing stuff"));

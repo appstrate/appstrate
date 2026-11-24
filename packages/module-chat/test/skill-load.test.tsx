@@ -134,13 +134,13 @@ describe("ResourceReadTool", () => {
     expect(render(done, null)).not.toContain("skill-load-pin");
   });
 
-  it("past the budget keeps the action focusable and says why it cannot pin", () => {
+  it("an estimate past the budget leaves the action available with a warning", () => {
     const action = (html: string) =>
       html.match(/<button[^>]*data-testid="skill-load-pin"[^>]*>/)![0];
     // One pin leaves 1 000 characters of the budget.
     const near = conversationOf(["@x/1"], true, CHAT_SKILLS_CONTENT_BUDGET_CHARS - 1_000);
     const html = render(done, near, 1_001);
-    expect(action(html)).toContain('aria-disabled="true"');
+    expect(action(html)).not.toContain("aria-disabled");
     expect(action(html)).toContain('title="skills.budget.wouldExceed"');
     const describedBy = action(html).match(/aria-describedby="([^"]+)"/)![1];
     expect(html).toMatch(new RegExp(`id="${describedBy}"[^>]*>skills.budget.wouldExceed<`));

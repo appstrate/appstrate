@@ -19,6 +19,7 @@
  * variant for space-wide rows; non-shared scopes pass through unchanged.
  */
 
+import { likeContains } from "../../lib/like-pattern.ts";
 import { and, asc, count, desc, eq, ilike, isNull, or, sql } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
 import { toPgSafe } from "@appstrate/db/pg-safe";
@@ -368,7 +369,7 @@ export async function recallMemories(
     // jsonb stringified for ILIKE: matches both string and structured
     // content without a separate index. Cheap on the modest row counts
     // we cap memories at; replace with FTS / pgvector if cardinality grows.
-    conditions.push(ilike(sql`${packagePersistence.content}::text`, `%${query}%`));
+    conditions.push(ilike(sql`${packagePersistence.content}::text`, likeContains(query)));
   }
 
   const rows = await db

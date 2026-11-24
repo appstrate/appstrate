@@ -24,9 +24,10 @@ import {
 } from "@appstrate/db/schema";
 import { and, eq, gte, inArray, sql } from "drizzle-orm";
 import { parseMcpResourceUri, type McpResourceBinding } from "../../../lib/audiences.ts";
+import type { DbOrTx } from "../../../lib/db-helpers.ts";
 import { logger } from "../../../lib/logger.ts";
 import {
-  endMcpGrants,
+  withdrawMcpGrants,
   lockOAuthGrantsOfUser,
   withdrawResource,
 } from "../../../services/oauth-token-revocation.ts";
@@ -277,7 +278,7 @@ interface Candidate {
  * issuance is within an access token's lifetime and after its watermark. A
  * grant whose org or space no longer exists is not listed.
  */
-async function listMcpGrants(scope: GrantScope): Promise<McpGrant[]> {
+async function listMcpGrants(scope: GrantScope, executor: DbOrTx = db): Promise<McpGrant[]> {
   if ("userIds" in scope && scope.userIds.length === 0) return [];
   const now = new Date();
   const inScope = (binding: McpResourceBinding) =>
@@ -306,7 +307,7 @@ async function listMcpGrants(scope: GrantScope): Promise<McpGrant[]> {
   // Every refresh row of these users, rotated-out ones included: a rotation
   // writes a new row on the same authorization, so the chain's oldest row
   // dates the authorization.
-  const tokenRows = await db
+  const tokenRows = await executor
     .select({
       id: oauthRefreshToken.id,
       userId: oauthRefreshToken.userId,
@@ -337,7 +338,7 @@ async function listMcpGrants(scope: GrantScope): Promise<McpGrant[]> {
     }
   }
 
-  const stateRows = await db
+  const stateRows = await executor
     .select()
     .from(oauthGrantState)
     .where(
@@ -363,7 +364,7 @@ async function listMcpGrants(scope: GrantScope): Promise<McpGrant[]> {
   const orgIds = [...new Set(all.map((c) => c.binding.orgId))];
   const spaceIds = [...new Set(all.flatMap((c) => c.binding.spaceId ?? []))];
   const [clients, orgRows, spaceRows] = await Promise.all([
-    db
+    executor
       .select({
         clientId: oauthClient.clientId,
         name: oauthClient.name,
@@ -374,12 +375,12 @@ async function listMcpGrants(scope: GrantScope): Promise<McpGrant[]> {
       })
       .from(oauthClient)
       .where(inArray(oauthClient.clientId, clientIds)),
-    db
+    executor
       .select({ id: organizations.id, name: organizations.name })
       .from(organizations)
       .where(inArray(organizations.id, orgIds)),
     spaceIds.length
-      ? db
+      ? executor
           .select({ id: spaces.id, name: spaces.name })
           .from(spaces)
           .where(inArray(spaces.id, spaceIds))
@@ -416,8 +417,8 @@ async function listMcpGrants(scope: GrantScope): Promise<McpGrant[]> {
   return grants;
 }
 
-export function listMcpGrantsForUser(userId: string): Promise<McpGrant[]> {
-  return listMcpGrants({ userId });
+export function listMcpGrantsForUser(userId: string, executor: DbOrTx = db): Promise<McpGrant[]> {
+  return listMcpGrants({ userId }, executor);
 }
 
 export function listMcpGrantsForOrg(scope: {
@@ -466,5 +467,8 @@ function hostOf(url: string): string | null {
 
 /** Ends the grant in its own transaction. */
 export async function revokeMcpGrant(grant: McpGrant): Promise<void> {
-  await db.transaction((tx) => endMcpGrants(tx, grant.userId, [grant]));
+  await db.transaction(async (tx) => {
+    await lockOAuthGrantsOfUser(tx, grant.userId);
+    await withdrawMcpGrants(tx, grant.userId, [grant]);
+  });
 }

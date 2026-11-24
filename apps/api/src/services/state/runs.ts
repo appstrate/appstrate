@@ -301,6 +301,7 @@ function runRowToWireDto(row: RunProjection): RunWireDto {
     checkpoint: row.checkpoint,
     error: row.error,
     model_error: runModelErrorWire({
+      terminalError: row.error,
       category: row.modelErrorCategory,
       status: row.modelErrorStatus,
       message: row.modelErrorMessage,

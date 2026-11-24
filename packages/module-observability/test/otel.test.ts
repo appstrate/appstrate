@@ -14,7 +14,7 @@
 
 import { describe, it, expect, beforeEach, afterEach } from "bun:test";
 import { SpanStatusCode } from "@opentelemetry/api";
-import { InMemorySpanExporter, type ReadableSpan } from "@opentelemetry/sdk-trace-base";
+import { InMemorySpanExporter, type ReadableSpan } from "@opentelemetry/sdk-trace";
 import {
   InMemoryMetricExporter,
   PeriodicExportingMetricReader,
@@ -24,6 +24,7 @@ import {
 import { getTraceContext } from "@appstrate/core/logger";
 import {
   initObservability,
+  shutdownObservability,
   isObservabilityEnabled,
   runWithSpan,
   currentSpan,
@@ -374,4 +375,32 @@ describe("observability — enabled (in-memory exporters)", () => {
     expect(terminal).toBeDefined();
     expect(terminal!.dataPoints.reduce((n, p) => n + (p.value as number), 0)).toBe(1);
   });
+});
+
+it("flushes spans and metrics through OTLP/HTTP before shutdown resolves", async () => {
+  await _resetObservabilityForTesting();
+  const requests = new Map<string, string>();
+  const receiver = Bun.serve({
+    hostname: "127.0.0.1",
+    port: 0,
+    async fetch(request) {
+      requests.set(new URL(request.url).pathname, await request.text());
+      return Response.json({});
+    },
+  });
+  const old = process.env.OTEL_EXPORTER_OTLP_ENDPOINT;
+  try {
+    process.env.OTEL_EXPORTER_OTLP_ENDPOINT = receiver.url.href;
+    await initObservability({ enabled: true });
+    await runWithSpan("run.otel-receiver", {}, async () => {});
+    recordRunDuration(17, { status: "success" });
+    await shutdownObservability();
+    expect(requests.get("/v1/traces")).toContain("run.otel-receiver");
+    expect(requests.get("/v1/metrics")).toContain("appstrate.run.duration");
+  } finally {
+    if (old === undefined) delete process.env.OTEL_EXPORTER_OTLP_ENDPOINT;
+    else process.env.OTEL_EXPORTER_OTLP_ENDPOINT = old;
+    await _resetObservabilityForTesting();
+    await receiver.stop(true);
+  }
 });

@@ -77,10 +77,11 @@ Two things this example gets asked about a lot:
 package declares it and pinning it protects you from a future major bump —
 include it.
 
-Validate before publishing:
+From the Appstrate monorepo root, validate the archive before publishing:
 
 ```sh
-bunx afps inspect custom-skill-1.0.0.afps
+bun -e 'import { parsePackageZip } from "./packages/core/src/zip.ts";
+  parsePackageZip(await Bun.file(process.argv[1]).bytes())' /path/to/custom-skill-1.0.0.afps
 ```
 
 Import from the dashboard (Agents > Import Package) or via the API.

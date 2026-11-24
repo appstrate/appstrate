@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import type { IntegrationAuthStatus, IntegrationAuthType } from "../hooks/use-integrations";
+import type { IntegrationAuthStatus } from "../hooks/use-integrations";
 
 /** Auth keys are identifiers, not capabilities or steps the user must activate. */
 export function authMethodLabel(
@@ -15,6 +15,8 @@ export function authMethodLabel(
 
 export interface ConnectionAuthContext {
   authKey: string;
-  authType: IntegrationAuthType;
+  /** The auth method itself can connect (an OAuth method needs its client configured). */
+  methodReady: boolean;
+  canCreate: boolean;
   canRenew: boolean;
 }

@@ -2,6 +2,11 @@
 
 import { afterEach, describe, expect, it, jest } from "bun:test";
 import { DEFAULT_REQUEST_TIMEOUT_MSEC } from "@modelcontextprotocol/sdk/shared/protocol.js";
+import {
+  Client as ModernClient,
+  StreamableHTTPClientTransport,
+} from "@modelcontextprotocol/client";
+import { handlerFetch, modernMcpHandler } from "@appstrate/mcp-transport/testing";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import { createInProcessPair, type AppstrateRequestExtra } from "@appstrate/mcp-transport";
 import { OPERATION_INDEX_HEADING } from "@appstrate/core/chat-contract";
@@ -453,6 +458,64 @@ describe("run_and_wait", () => {
       `?wait=${RUN_AND_WAIT_DEFAULT_WAIT_SECONDS}`,
     );
   });
+
+  it.each(["v1", "v2"] as const)(
+    "delivers a success and both structured refusals after the %s SDK lists the tool",
+    async (sdk) => {
+      let launches = 0;
+      const { tool } = makeRunAndWait({
+        launch: () =>
+          ++launches === 1
+            ? jsonResponse({ code: "not_connected" }, 409)
+            : jsonResponse({ id: "run_1", status: "pending" }, 201),
+      });
+      async function connect() {
+        if (sdk === "v1") return createInProcessPair([tool]);
+        const client = new ModernClient(
+          { name: "run-and-wait-test", version: "1" },
+          { versionNegotiation: { mode: "auto" } },
+        );
+        await client.connect(
+          new StreamableHTTPClientTransport(new URL("https://mcp.test.example/"), {
+            fetch: handlerFetch(modernMcpHandler({ tools: [tool] })),
+          }),
+        );
+        return { client, close: () => client.close() };
+      }
+      const pair = await connect();
+      try {
+        // The SDK compiles declared output schemas when tools/list is read.
+        const { tools } = await pair.client.listTools();
+        expect(tools.find((item) => item.name === "run_and_wait")?.outputSchema).toBeDefined();
+        const call = async (args: Record<string, unknown>) =>
+          (await pair.client.callTool({ name: "run_and_wait", arguments: args })) as CallToolResult;
+        const argumentsRefusal = await call({ kind: "agent" });
+        expect(argumentsRefusal.isError).toBe(true);
+        expect(argumentsRefusal.structuredContent).toMatchObject({
+          kind: "tool_refusal",
+          error: expect.any(String),
+        });
+        expect(argumentsRefusal.structuredContent).toEqual({
+          ...parseResult(argumentsRefusal),
+          kind: "tool_refusal",
+        });
+        const agent = { kind: "agent", scope: "@acme", name: "writer" };
+        const routeRefusal = await call(agent);
+        expect(routeRefusal.isError).toBe(true);
+        expect(routeRefusal.structuredContent).toEqual({
+          kind: "route_refusal",
+          status: 409,
+          body: { code: "not_connected" },
+        });
+        expect(parseResult(routeRefusal)).toEqual({ status: 409, body: { code: "not_connected" } });
+        const success = await call(agent);
+        expect(success.isError).not.toBe(true);
+        expect(success.structuredContent).toMatchObject({ id: "run_1", done: true });
+      } finally {
+        await pair.close();
+      }
+    },
+  );
 
   it("serves a truncated, file-enriched result that passes the server's outputSchema check", async () => {
     const { tool } = makeRunAndWait({

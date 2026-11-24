@@ -119,6 +119,7 @@ function Meta({
   status?: number;
   durationMs?: number;
 }) {
+  const { lang } = useChatHost();
   if (status === undefined && durationMs === undefined) return null;
   return (
     <span className="flex items-center gap-1.5 text-xs">
@@ -126,7 +127,7 @@ function Meta({
         <code className={`rounded px-1.5 py-0.5 font-medium ${BADGE_TONE[phase]}`}>{status}</code>
       ) : null}
       {durationMs !== undefined ? (
-        <span className="text-muted-foreground">{formatDuration(durationMs)}</span>
+        <span className="text-muted-foreground">{formatDuration(durationMs, lang)}</span>
       ) : null}
     </span>
   );

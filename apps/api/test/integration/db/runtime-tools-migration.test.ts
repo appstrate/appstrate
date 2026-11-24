@@ -19,6 +19,7 @@ import {
   exitCode,
   parseArguments,
   parseBefore,
+  pendingRuntimeTools,
   runMigrateRuntimeTools,
 } from "../../../../../scripts/migration/0053-migrate-runtime-tools.ts";
 
@@ -171,6 +172,18 @@ describe("scripts/migration/0053 — runtime_tools moved to @appstrate/platform"
   beforeEach(async () => {
     await truncateAll();
     orgId = (await createTestContext({ orgSlug: "migr" })).org.id;
+  });
+
+  it("checks both manifest stores without writing and respects the original cutoff", async () => {
+    await seedAgent("@migr/implicit", agentManifest("@migr/implicit", {}));
+    await seedAgent("@migr/explicit", agentManifest("@migr/explicit", { runtime_tools: [] }), true);
+    await seedAgent("@migr/new", agentManifest("@migr/new", {}), true);
+    const beforeCheck = await draftLockOf("@migr/implicit");
+    expect((await pendingRuntimeTools(BEFORE)).map((row) => row.pending)).toEqual([2, 2]);
+    expect(await draftLockOf("@migr/implicit")).toBe(beforeCheck);
+    await run(true);
+    expect((await pendingRuntimeTools(BEFORE)).map((row) => row.pending)).toEqual([0, 0]);
+    expect((await storedOf("@migr/new"))[0]).not.toHaveProperty("dependencies");
   });
 
   it.each(REWRITES)("rewrites both stores: $name", async (c) => {
