@@ -25,11 +25,9 @@ import {
 import { bindChatPreferencesUser } from "@appstrate/module-chat/preferences";
 import { useAuth } from "../../hooks/use-auth";
 import { useFirstName } from "../../hooks/use-first-name";
-import { useFileDownload, useFileImageSrc } from "../../hooks/use-files";
-import { useCurrentOrgId } from "../../hooks/use-org";
-import { useCurrentSpaceId, useSpaceLink } from "../../hooks/use-current-space";
+import { useFileImageSrc } from "../../hooks/use-files";
+import { useSpaceLink } from "../../hooks/use-current-space";
 import { useRowSpaceGrants } from "../../hooks/use-permissions";
-import { otherSpaceFileContext } from "../../lib/file-link";
 import { ChatConversationSkeleton, ChatPanelSkeleton } from "../../components/loading-skeletons";
 import { formatBytes } from "../../lib/format-bytes";
 import { useViewAs } from "../../stores/view-as-store";
@@ -157,19 +155,8 @@ export function ChatModulePage() {
     window.addEventListener("popstate", onHistoryNavigation);
     return () => window.removeEventListener("popstate", onHistoryNavigation);
   }, []);
-  // File services the module consumes instead of reimplementing: the typed
-  // download (reports failures with a toast) and the typed image preview.
-  const downloadFile = useFileDownload();
-  // A file of another space (a call of a conversation) is read in its own.
-  const orgId = useCurrentOrgId();
-  const currentSpaceId = useCurrentSpaceId();
   // A run a conversation launched opens in its space, entering it when it is not this one.
   const linkInSpace = useSpaceLink();
-  const onDownloadFile = useCallback(
-    (id: string, name: string, spaceId?: string) =>
-      void downloadFile(id, name, otherSpaceFileContext(spaceId, orgId, currentSpaceId)),
-    [downloadFile, orgId, currentSpaceId],
-  );
   // The very same uploader every SchemaForm file field uses — including its
   // refresh of the org storage gauge — into the space the chat names for each file.
   const uploadFile = useUploadInSpace();
@@ -205,7 +192,6 @@ export function ChatModulePage() {
               initialComposerDraft={initialComposerDraft}
               onConversationChange={onConversationChange}
               onOpenFile={presentFile}
-              downloadFile={onDownloadFile}
               useFileImageSrc={useFileImageSrc}
               uploadFile={uploadFile}
               t={translate}

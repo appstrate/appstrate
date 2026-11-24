@@ -1,7 +1,6 @@
 {
   "file.unnamed": "ce fichier",
   "file.previewOf": "Aperçu de {{name}}",
-  "file.downloadOf": "Télécharger {{name}}",
   "file.noAccess": "Votre rôle ne donne pas accès à ce fichier.",
   "file.noAccessIn": "Votre rôle ne donne pas accès aux fichiers de {{name}}.",
   "composer.readOnly": "Votre rôle permet de relire vos conversations, pas d’en démarrer ni d’y répondre.",

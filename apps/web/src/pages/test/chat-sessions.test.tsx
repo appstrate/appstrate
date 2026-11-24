@@ -85,7 +85,6 @@ function renderConversationList(qc: QueryClient, can: (permission: string) => bo
 function hostWith(granted: string[]): ChatHost {
   return {
     openFile: () => {},
-    downloadFile: () => {},
     useFileImageSrc: () => "blob:thumbnail",
     t: (key) => key,
     can: (permission) => granted.includes(permission),

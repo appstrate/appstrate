@@ -56,7 +56,6 @@ function render(history: unknown, can: (permission: string) => boolean): string 
           transport={transport}
           conversationId="chs_gone"
           onConversationChange={() => {}}
-          downloadFile={() => {}}
           useFileImageSrc={() => null}
           uploadFile={async () => "upload://upl_1"}
           t={(key) => key}
@@ -99,7 +98,6 @@ describe("a conversation URL the caller has no conversation for", () => {
             transport={transport}
             conversationId={null}
             onConversationChange={() => {}}
-            downloadFile={() => {}}
             useFileImageSrc={() => null}
             uploadFile={async () => "upload://upl_1"}
             t={(key) => key}
@@ -132,7 +130,6 @@ describe("a new conversation", () => {
             transport={transportOf(() => ({ "X-Org-Id": "org_1" }), spaceId)}
             conversationId={null}
             onConversationChange={() => {}}
-            downloadFile={() => {}}
             useFileImageSrc={() => null}
             uploadFile={async () => "upload://upl_1"}
             t={(key) => key}

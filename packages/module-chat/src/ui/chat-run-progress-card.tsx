@@ -54,9 +54,7 @@ import type { ToolPhase } from "./tool-result.ts";
 /**
  * Row of file attachments surfaced under a run card — the same unified
  * renderer the thread uses for sent attachments: the attachment chip, an image's
- * thumbnail or the file type's icon leading. With a host opener (web shell) it opens the
- * in-app preview; without one (embedded mounts) it falls back to the
- * authenticated download.
+ * thumbnail or the file type's icon leading. Clicking a file opens the host's viewer.
  */
 function FileChips({ files, spaceId }: { files: ChatRunFile[]; spaceId?: string }) {
   if (files.length === 0) return null;
@@ -188,17 +186,12 @@ export function ChatRunProgressCard({
     () => autoPresentFile({ files, status: effectiveStatus, sweepDone }),
     [files, effectiveStatus, sweepDone],
   );
-  // Opener-only on purpose: `fileActivation()` (the chips' single
-  // opener-vs-download decision) falls back to a DOWNLOAD when the host has no
-  // viewer, and a file landing in the user's Downloads folder unasked is not a
-  // presentation. No opener ⇒ no automatic presentation, as documented on
-  // `OpenFile`.
   // Fires AT MOST ONCE per card. A file published after the panel already
   // opened does not close it, swap it, or re-open anything: the user is reading
   // what they were handed, and the newcomer is one click away in the chips row.
   const hasAutoPresented = React.useRef(false);
   React.useEffect(() => {
-    if (!autoPresentEligible || !openFile || !runId || !autoPresented) return;
+    if (!autoPresentEligible || !runId || !autoPresented) return;
     if (hasAutoPresented.current) return;
     hasAutoPresented.current = true;
     openFile({ id: autoPresented.id, name: autoPresented.name, ...(spaceId && { spaceId }) });

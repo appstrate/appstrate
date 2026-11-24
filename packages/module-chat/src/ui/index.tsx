@@ -49,7 +49,6 @@ import type {
   ChatHost,
   ChatTranslate,
   ChatTransport,
-  DownloadFile,
   OpenFile,
   SelectConversation,
   UploadFile,
@@ -188,10 +187,9 @@ export interface ChatPageProps {
   onOpenFile: OpenFile;
   /**
    * REQUIRED host services — the chat implements none of them itself (see
-   * `runtime-context.ts`): the authenticated download, the authenticated image
+   * `runtime-context.ts`): the authenticated image
    * preview hook, the staged uploader, and the translator for user-facing text.
    */
-  downloadFile: DownloadFile;
   useFileImageSrc: UseFileImageSrc;
   uploadFile: UploadFile;
   t: ChatTranslate;
@@ -230,7 +228,6 @@ export function ChatPage({
   initialComposerDraft,
   onConversationChange,
   onOpenFile,
-  downloadFile,
   useFileImageSrc,
   uploadFile,
   t,
@@ -346,7 +343,6 @@ export function ChatPage({
   const host = useMemo<ChatHost>(
     () => ({
       openFile: onOpenFile,
-      downloadFile,
       useFileImageSrc,
       t,
       can,
@@ -368,7 +364,6 @@ export function ChatPage({
     }),
     [
       onOpenFile,
-      downloadFile,
       useFileImageSrc,
       t,
       can,

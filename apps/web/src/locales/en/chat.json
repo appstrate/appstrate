@@ -1,7 +1,6 @@
 {
   "file.unnamed": "this file",
   "file.previewOf": "Preview {{name}}",
-  "file.downloadOf": "Download {{name}}",
   "file.noAccess": "Your role does not give access to this file.",
   "file.noAccessIn": "Your role does not give access to the files of {{name}}.",
   "composer.readOnly": "Your role lets you reread your conversations, not start new ones or reply.",

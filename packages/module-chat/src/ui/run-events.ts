@@ -399,7 +399,7 @@ export interface ChatRunFile {
  * `fileActivation`: this same string becomes the name the browser saves the
  * download under, so a localized value would save the file as
  * «Fichier sans nom» for one reader and something else for the next. The chip
- * LABEL is a different question and gets `t("file.previewOf" | "file.downloadOf")`
+ * LABEL is a different question and gets `t("file.previewOf")`
  * with the translated `file.unnamed` placeholder inside it; `file.unnamed`
  * ("ce fichier") is a sentence fragment for that interpolation, not a name a
  * chip can wear on its own.

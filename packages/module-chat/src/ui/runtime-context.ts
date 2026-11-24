@@ -8,7 +8,7 @@
  * This is the ONLY direction the dependency runs: the module never imports the
  * web shell (nor the shell's API client, router, or i18n), and the shell never
  * imports module internals. A service the shell already owns (authenticated
- * download, authenticated image preview, staged upload) is injected rather than
+ * authenticated image preview, staged upload) is injected rather than
  * reimplemented here — one implementation, one set of error semantics.
  *
  * THREE contexts, no more:
@@ -111,12 +111,10 @@ export function useSelectConversation(): SelectConversation | null {
  *
  * The module owns no preview component — dependency direction is web →
  * module-chat, so the host injects an opener and the chat delegates to it.
- * `null` means no opener was provided (embedded mounts): direct clicks then fall
- * back to the authenticated download, while automatic presentation is a no-op.
  *
  * `spaceId` names the file's space when known (the space of the call of the conversation that
  * produced it): the host reads it there, and reads in the working space when it is the same one.
- * The download and the image hook below take it the same way.
+ * The image hook below takes it the same way.
  *
  * `{ local }` is a file picked in the composer and not yet sent: the host shows the browser's own
  * copy in the same panel. The composer offers it only for a `localPreviewKind`
@@ -126,13 +124,6 @@ export type OpenFile = (file: OpenFileTarget) => void;
 
 /** What {@link OpenFile} presents: a stored file, or a picked one not yet sent. */
 export type OpenFileTarget = { id: string; name: string; spaceId?: string } | { local: File };
-
-/**
- * The host's authenticated file download (typed API client + user-facing
- * error toast). Injected, never reimplemented: a second raw-`fetch` copy here
- * would swallow failures the shell's implementation reports.
- */
-export type DownloadFile = (id: string, name: string, spaceId?: string) => void;
 
 /**
  * The host's authenticated image-preview hook: a stored file id → an object
@@ -174,9 +165,7 @@ export type ChatTranslate = (key: string, params?: Record<string, string | numbe
  * one provider, one guard — see the file header for why this is not split.
  */
 export interface ChatHost {
-  /** `null` when the host provides no in-app preview (fall back to download). */
-  openFile: OpenFile | null;
-  downloadFile: DownloadFile;
+  openFile: OpenFile;
   useFileImageSrc: UseFileImageSrc;
   t: ChatTranslate;
   can: ChatCan;

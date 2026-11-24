@@ -353,7 +353,7 @@ function ComposerAttachmentChip() {
         ? t("composer.pdfNotSent")
         : undefined;
   const preview =
-    openFile && file && localPreviewKind(file.type)
+    file && localPreviewKind(file.type)
       ? {
           label: t("file.previewOf", { name: name || t("file.unnamed") }),
           onActivate: () => openFile({ local: file }),
@@ -401,8 +401,7 @@ function ComposerAttachmentChip() {
 
 /**
  * One sent attachment on a user message, as the composer's chip. An `appfile://`
- * (server-persisted, or a reloaded conversation) is interactive (preview or
- * download). So is a just-sent optimistic `upload://` once the turn's stream
+ * (server-persisted, or a reloaded conversation) can be previewed. So can a just-sent optimistic `upload://` once the turn's stream
  * named the file it became. Before that instant, or for an unparseable URI, the
  * chip is inert, its media the staged local copy when it was an image — the
  * content route serves files only.
@@ -437,7 +436,7 @@ function SentAttachmentChip() {
   }
 
   // A resolved `appfile://` is interactive: the unified renderer's chip, resolving
-  // the opener-vs-download action.
+  // the preview action.
   return (
     <FileAttachment
       file={{ id: resolved.id, name, mime: contentType, spaceId: resolved.spaceId }}
