@@ -518,6 +518,9 @@ function ConversationRow({
           !canWrite && "max-md:h-auto max-md:min-h-9 max-md:py-1.5",
           canWrite ? "desktop-pointer:pr-16 pr-[4.5rem]" : "desktop-pointer:pr-16 pr-8",
           "[--tile-ring:var(--sidebar)] hover:[--tile-ring:var(--sidebar-accent)] active:[--tile-ring:var(--sidebar-accent)] data-[active=true]:[--tile-ring:var(--sidebar-accent)]",
+          // Under a mouse the row stays lit while the pointer is on its « … », a sibling of this button.
+          canWrite &&
+            "desktop-pointer:group-hover/menu-item:bg-sidebar-accent desktop-pointer:group-hover/menu-item:[--tile-ring:var(--sidebar-accent)]",
         )}
       >
         <span
@@ -561,13 +564,13 @@ function ConversationRow({
       </SidebarMenuButton>
       {/* Fixed-width right slot: spinner / unread dot / timestamp have different
           natural widths — without w-14 the title's truncation point reflows on
-          every generating↔idle transition. Hover swaps them for the row's
-          « … »; a reader has none, so for them hover changes nothing. */}
+          every generating↔idle transition. Hover fades them out for the row's
+          « … » (no backdrop: the « … » draws its own square, as small as it is);
+          a reader has none, so for them hover changes nothing. */}
       <div
         className={cn(
           "desktop-pointer:w-14 desktop-pointer:top-1 pointer-events-none absolute top-1.5 right-1 flex h-6 w-6 items-center justify-end rounded-md",
-          canWrite &&
-            "desktop-pointer:right-1 desktop-pointer:group-hover/menu-item:bg-sidebar-accent desktop-pointer:group-focus-within/menu-item:bg-sidebar-accent right-11",
+          canWrite && "desktop-pointer:right-1 right-11",
         )}
       >
         {session.generating ? (
@@ -612,7 +615,7 @@ function ConversationRow({
                 })}
                 ref={menuTrigger}
                 className={cn(
-                  "text-sidebar-foreground/70 active:bg-sidebar-accent desktop-pointer:top-1 desktop-pointer:right-1 desktop-pointer:size-6 desktop-pointer:opacity-0 desktop-pointer:group-hover/menu-item:opacity-100 desktop-pointer:group-focus-within/menu-item:opacity-100 desktop-pointer:data-[state=open]:opacity-100 desktop-pointer:hover:bg-sidebar-border desktop-pointer:hover:text-sidebar-foreground absolute top-0 right-0 flex h-9 w-10 items-center justify-center rounded-md transition-opacity",
+                  "text-sidebar-foreground/70 active:bg-sidebar-accent desktop-pointer:top-1 desktop-pointer:right-1 desktop-pointer:size-6 desktop-pointer:opacity-0 desktop-pointer:group-hover/menu-item:opacity-100 desktop-pointer:group-focus-within/menu-item:opacity-100 desktop-pointer:data-[state=open]:opacity-100 desktop-pointer:hover:bg-sidebar-foreground/10 desktop-pointer:data-[state=open]:bg-sidebar-foreground/10 desktop-pointer:hover:text-sidebar-foreground absolute top-0 right-0 flex h-9 w-10 items-center justify-center rounded-md transition-opacity",
                   // Under a mouse the open conversation keeps its « … » in view, in place of its age.
                   active && "desktop-pointer:opacity-100",
                 )}

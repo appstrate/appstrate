@@ -90,6 +90,18 @@ describe("a conversation row's « … »", () => {
     expect(trigger()).not.toContain("desktop-pointer:hidden");
   });
 
+  it("draws its hover square on itself alone, the row lit behind it, under a mouse", () => {
+    const html = render(["chat:read", "chat:write"]);
+    expect(trigger()).toContain("desktop-pointer:size-6");
+    expect(trigger()).toContain("desktop-pointer:hover:bg-sidebar-foreground/10");
+    // No backdrop on the age's slot: it was a wide pill beside the « … ».
+    expect(html).not.toContain(
+      "group-hover/menu-item:bg-sidebar-accent desktop-pointer:group-focus-within",
+    );
+    const row = html.match(/<button[^>]*data-sidebar="menu-button" data-size="lg"[^>]*>/)?.[0];
+    expect(row).toContain("desktop-pointer:group-hover/menu-item:bg-sidebar-accent");
+  });
+
   it("is revealed by hover and keyboard focus under a mouse", () => {
     const button = trigger();
     expect(button).toContain("desktop-pointer:opacity-0");
