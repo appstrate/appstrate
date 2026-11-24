@@ -105,14 +105,16 @@ they start with `packages/` or `e2e/`.
   trail (the last segment alone on a phone), the page's controls and the notification bell.
   Controls are 44 px on touch. In the chat the trail is the conversation's name, on a phone too
   (the page publishes it, not the list, which a closed drawer unmounts), and the controls are its
-  spaces and the context panel. No pencil: a conversation is renamed from its row's « … ».
+  « … » and the context panel. That « … » (`ChatConversationMenu`) is the row's menu: the spaces
+  the conversation reaches, Infos, Renommer, Supprimer. Under a mouse a row has the same « … » on
+  hover; on touch the rows have none, a phone acts on the conversation it opened.
 - **The sidebar is the whole screen on a phone**: the organization switcher and a close button on
   its first row, then the Studio/Chat switch and the product's navigation. In the chat: "Nouvelle
   conversation" (a left-aligned row with its icon in a round tile, like the conversations below)
   with the search as a magnifier at the end of that row, which unfolds a filled field (no border)
   under it, closed by its X or by a tap elsewhere while empty, then the recent conversations (one
   line each: the title, then the tiles of its spaces, two at most then « +N », named for a screen
-  reader; the names are in the "…" panel). Then the footer every drawer has: Catalogue, Settings
+  reader; the names head the open conversation's « … »). Then the footer every drawer has: Catalogue, Settings
   and the account. On desktop the chat's sidebar is the phone's: the same "Nouvelle conversation"
   row and magnifier (one component, `NewConversationContent`, which its skeleton draws too), the
   same folded search, and the conversations as the same one-line rows. The list is as dense as a
@@ -120,7 +122,8 @@ they start with `packages/` or `e2e/`.
   chat gives a thumb, by choice), in regular weight a shade lighter than the date groups' headings,
   which are semibold, set apart from « Nouvelle conversation » and from each other, and fold and
   unfold (remembered per browser). Under a mouse a row's "…" shows on hover and on the open
-  conversation, in place of its age; on touch it is always there. It
+  conversation, in place of its age, its square as small as it is; on touch a row has none, the
+  header's « … » acts on the open conversation. It
   opens at the phone drawer's 18rem and is resizable by its right edge (`PanelResizeHandle`,
   remembered per browser, double-click resets).
 - **A phone's menus rise from the bottom**, and no screen decides it: `DropdownMenu` and `Popover`

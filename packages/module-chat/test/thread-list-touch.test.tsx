@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * A phone has no hover: the row's rename and delete cannot hide behind it. Each row carries one « … »
- * menu, always there on touch (a 44 px strip), revealed by hover or focus under a fine pointer.
+ * A conversation's « … » (its spaces, Renommer, Supprimer): on a row under a mouse, revealed by hover
+ * or focus; on touch a row has none, and the open conversation's header carries it on every format.
  */
 
 import { describe, expect, it } from "bun:test";
@@ -14,6 +14,7 @@ import { TooltipProvider } from "@appstrate/ui/components/tooltip";
 
 import {
   ChatConversationList,
+  ChatConversationMenu,
   GROUP_CLASS,
   GROUP_LABEL_CLASS,
   GROUP_ROWS_CLASS,
@@ -81,23 +82,17 @@ describe("a conversation row's « … »", () => {
       /<button[^>]*aria-label="threads\.actions\.openFor"[^>]*>/,
     )?.[0];
 
-  it("is one menu named for the conversation, always there on touch, the row's height", () => {
+  it("is one menu named for the conversation, a mouse's alone: a row on touch has none", () => {
     const html = render(["chat:read", "chat:write"]);
-    // One « … » per row, on every format.
     expect(html.match(/aria-label="threads\.actions\.openFor"/g)).toHaveLength(2);
-    expect(trigger()).toContain("w-10");
-    expect(trigger()).toContain("h-9");
-    expect(trigger()).not.toContain("desktop-pointer:hidden");
+    expect(trigger()).toMatch(/(?:^|\s)hidden(?:\s|")/);
+    expect(trigger()).toContain("desktop-pointer:flex");
   });
 
   it("draws its hover square on itself alone, the row lit behind it, under a mouse", () => {
     const html = render(["chat:read", "chat:write"]);
-    expect(trigger()).toContain("desktop-pointer:size-6");
+    expect(trigger()).toContain("size-6");
     expect(trigger()).toContain("desktop-pointer:hover:bg-sidebar-foreground/10");
-    // No backdrop on the age's slot: it was a wide pill beside the « … ».
-    expect(html).not.toContain(
-      "group-hover/menu-item:bg-sidebar-accent desktop-pointer:group-focus-within",
-    );
     const row = html.match(/<button[^>]*data-sidebar="menu-button" data-size="lg"[^>]*>/)?.[0];
     expect(row).toContain("desktop-pointer:group-hover/menu-item:bg-sidebar-accent");
   });
@@ -181,16 +176,6 @@ describe("a conversation row's line", () => {
     expect(html).not.toContain('data-testid="chat-session-spaces"');
     expect(html).not.toMatch(/flex min-w-0 flex-1 items-center gap-2 max-md:flex-col/);
   });
-
-  it("names them on a line of their own for a reader on a phone, whose row has no « … »", () => {
-    const reader = render(["chat:read"]);
-    const names = reader.match(/<span[^>]*data-testid="chat-session-spaces"[^>]*>/)?.[0];
-    expect(names).toContain("md:hidden");
-    // The tiles stay on the title's line under a mouse, where hovering names them.
-    const tiles = reader.match(/<span[^>]*data-testid="chat-session-space-tiles"[^>]*>/)?.[0];
-    expect(tiles).toContain("max-md:hidden");
-    expect(reader).toMatch(/flex min-w-0 flex-1 items-center gap-2 max-md:flex-col/);
-  });
 });
 
 describe("the list's date groups", () => {
@@ -220,5 +205,59 @@ describe("the list's date groups", () => {
   it("scroll in the design system's scroll area, not the browser's scrollbar", () => {
     expect(html).toContain("data-radix-scroll-area-viewport");
     expect(html).not.toContain("overflow-y-auto pr-2");
+  });
+});
+
+describe("the open conversation's « … » in the header", () => {
+  function header(activeId: string | null, granted: string[] = ["chat:read", "chat:write"]) {
+    const qc = new QueryClient();
+    qc.setQueryData<SessionsCache>(sessionsQueryKey("spc_a"), {
+      pages: [
+        {
+          data: [
+            {
+              id: "chs_1",
+              title: "Budget",
+              unread: false,
+              generating: false,
+              updatedAt: "",
+              space_ids: ["spc_a"],
+            },
+          ],
+          hasMore: false,
+        },
+      ],
+      pageParams: [undefined],
+    });
+    return renderToString(
+      <QueryClientProvider client={qc}>
+        <ChatTransportProvider value={transport}>
+          <ChatConversationMenu
+            activeId={activeId}
+            t={(key) => key}
+            can={(permission) => granted.includes(permission)}
+            renderSpaces={(ids) => ids.join(", ")}
+          />
+        </ChatTransportProvider>
+      </QueryClientProvider>,
+    );
+  }
+
+  it("is the row's menu, named for the open conversation, on every format", () => {
+    const button = header("chs_1").match(
+      /<button[^>]*data-testid="chat-conversation-menu"[^>]*>/,
+    )?.[0];
+    expect(button).toContain('aria-label="threads.actions.openFor"');
+    expect(button).toContain("size-11");
+    expect(button).toContain("desktop-pointer:size-8");
+    expect(button).not.toMatch(/(?:^|\s)hidden(?:\s|")/);
+  });
+
+  it("is there for a reader too, who reads the spaces in it", () => {
+    expect(header("chs_1", ["chat:read"])).toContain('data-testid="chat-conversation-menu"');
+  });
+
+  it("draws nothing on a new conversation", () => {
+    expect(header(null)).toBe("");
   });
 });

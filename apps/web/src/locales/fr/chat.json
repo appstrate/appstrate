@@ -221,8 +221,6 @@
   "context.resize": "Redimensionner le panneau de contexte",
   "context.info.lastActivity": "Dernière activité",
   "context.info.access": "Votre accès",
-  "spaces.trigger": "Espaces de la conversation : {{names}}",
-  "spaces.title": "Espaces de la conversation",
   "welcome.greeting": "Bonjour, {{name}}",
   "welcome.greetingAnonymous": "Bonjour",
   "welcome.spaceNotActing": "L'espace sélectionné n'est pas un espace où le chat peut agir : la conversation agira dans vos autres espaces.",

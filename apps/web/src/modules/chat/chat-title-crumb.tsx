@@ -7,7 +7,7 @@
  *
  * The name is the open conversation's server row (`useActiveSession`): a conversation belongs to
  * the organization, so one opened from outside the list's space filter keeps its name. The spaces
- * it touched are not part of the trail: `ConversationSpaces` draws them in the header's actions.
+ * it touched are not part of the trail: they head the conversation's « … » (`ChatConversationMenu`).
  *
  * While sessions load (or cannot be asked yet, `pending`) a skeleton slot reserves the space; an unknown (deleted) conversation
  * publishes "Chat" alone rather than a made-up name.

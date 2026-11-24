@@ -22,7 +22,6 @@ const { default: i18n, i18nReady } = await import("../../i18n.ts");
 const { ChatModulePage } = await import("./chat-page.tsx");
 const { SpaceTilesOf } = await import("../../components/space-name.tsx");
 const { renderSpaces } = await import("./render-spaces.tsx");
-const { ConversationSpacesControl } = await import("./conversation-spaces.tsx");
 const { ChatSidebar } = await import("./chat-sidebar.tsx");
 const { ConversationFiles, ConversationRuns, ShownFile } =
   await import("./conversation-sidebar.tsx");
@@ -318,31 +317,5 @@ describe("the spaces a conversation touched", () => {
   it("leaves the spaces the reader does not reach out", () => {
     const { html } = renderOverview(<SpaceTilesOf spaceIds={["spc_a", "spc_gone"]} />, spaces);
     expect(tiles(html)).toBe(1);
-  });
-
-  it("draws one tile per space in the top bar's trigger, named for assistive tech", () => {
-    const { html } = renderOverview(
-      <ConversationSpacesControl spaces={spaces.slice(0, 2)} />,
-      spaces,
-    );
-    expect(tiles(html)).toBe(2);
-    expect(html).toContain("Espaces de la conversation : ");
-    expect(html).not.toContain("+");
-  });
-
-  it("counts the spaces past the visible tiles", () => {
-    const many = ["a", "b", "c", "d", "e"].map((id) => ({
-      ...spaces[0]!,
-      id: `spc_${id}`,
-      name: id,
-    }));
-    const { html } = renderOverview(<ConversationSpacesControl spaces={many} />, spaces);
-    expect(tiles(html)).toBe(3);
-    expect(html).toContain("+2");
-  });
-
-  it("draws nothing for a conversation that touched no space", () => {
-    const { html } = renderOverview(<ConversationSpacesControl spaces={[]} />, spaces);
-    expect(html).not.toContain("conversation-spaces");
   });
 });

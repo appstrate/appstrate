@@ -59,10 +59,6 @@ describe("the conversation list's spaces", () => {
       expect(html).toContain('data-spaces="spc_a"');
       expect(html).toContain('data-spaces="spc_a,spc_b"');
     });
-
-    it(`says « Tous les espaces » on a reader's line for a conversation that touched none ${mode}`, () => {
-      expect(render(filter, sessions, false)).toContain("common:overview.title");
-    });
   }
 
   it("closes the title's line with their tiles on every row that touched one", () => {
@@ -73,8 +69,9 @@ describe("the conversation list's spaces", () => {
     expect(html).not.toContain('data-testid="chat-session-spaces"');
   });
 
-  it("names them on a line of their own for every reader's row on a phone", () => {
+  it("gives a reader's row no second line either: the open conversation's « … » names them", () => {
     const html = render("spc_a", sessions, false);
-    expect(html.match(/data-testid="chat-session-spaces"/g)).toHaveLength(3);
+    expect(html.match(/data-testid="chat-session-space-tiles"/g)).toHaveLength(2);
+    expect(html).not.toContain('data-testid="chat-session-spaces"');
   });
 });

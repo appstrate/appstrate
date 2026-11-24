@@ -20,7 +20,7 @@
  * fill as Studio's, or the two products would not read as one app.
  */
 
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactElement, type ReactNode } from "react";
 import { flushSync } from "react-dom";
 import { useQueryClient } from "@tanstack/react-query";
 import {
@@ -99,7 +99,7 @@ import {
   READING_TEXT_DENSE_CLASS,
   SEARCH_INPUT_CLASS,
 } from "./phone-text.ts";
-import { useSessions } from "./use-sessions.ts";
+import { useActiveSession, useSessions } from "./use-sessions.ts";
 
 const SEARCH_DEBOUNCE_MS = 250;
 const SEARCH_MAX_LENGTH = 200;
@@ -452,12 +452,141 @@ function ConversationRow({
   canWrite: boolean;
   renderSpaces: RenderSpaces;
 }) {
+  const select = useSelectConversation();
+  // Under a mouse a writer's row has a « … »; on touch none does: a phone renames, deletes and
+  // reads a conversation's spaces from the « … » of its open conversation (`ChatConversationMenu`).
+  const hasMenu = canWrite;
+
+  return (
+    <SidebarMenuItem>
+      <SidebarMenuButton
+        isActive={active}
+        onClick={() => select?.(session.id)}
+        size="lg"
+        // One line on every format, dense as a desktop sidebar's: 32 px under a mouse, 36 on touch.
+        // Room for the fixed-width right slot below, which is absolutely positioned and would
+        // otherwise sit on top of a long title. The host's stacked space tiles ring themselves in
+        // `--tile-ring`: the row's background in each of its states.
+        className={cn(
+          // A shade lighter than the date groups' headings, which head them; the open one is full.
+          // Regular weight: the base `button` rule sets every button medium, and only an unread
+          // title is meant to stand out.
+          "desktop-pointer:h-8 text-sidebar-foreground/75 data-[active=true]:text-sidebar-accent-foreground h-9 pr-8 font-normal",
+          "desktop-pointer:pr-16",
+          "[--tile-ring:var(--sidebar)] hover:[--tile-ring:var(--sidebar-accent)] active:[--tile-ring:var(--sidebar-accent)] data-[active=true]:[--tile-ring:var(--sidebar-accent)]",
+          // Under a mouse the row stays lit while the pointer is on its « … », a sibling of this button.
+          hasMenu &&
+            "desktop-pointer:group-hover/menu-item:bg-sidebar-accent desktop-pointer:group-hover/menu-item:[--tile-ring:var(--sidebar-accent)]",
+        )}
+      >
+        <span className="flex min-w-0 flex-1 items-center gap-2">
+          <span
+            className={cn(
+              "block min-w-0 flex-1 truncate text-left leading-5 max-md:text-[15px]",
+              unread && "font-semibold",
+            )}
+          >
+            {session.title ?? t("threads.new")}
+          </span>
+          {/* One line: the title, then the tiles of the spaces it touched, their names in the
+              tiles' tooltip and in the conversation's « … » menu. */}
+          {session.space_ids.length > 0 && (
+            <span data-testid="chat-session-space-tiles" className="flex shrink-0 items-center">
+              {renderSpaces(session.space_ids, { tilesOnly: true })}
+            </span>
+          )}
+        </span>
+      </SidebarMenuButton>
+      {/* Fixed-width right slot: spinner / unread dot / timestamp have different
+          natural widths — without w-14 the title's truncation point reflows on
+          every generating↔idle transition. Hover fades them out for the row's
+          « … » (no backdrop: the « … » draws its own square, as small as it is);
+          a reader has none, so for them hover changes nothing. */}
+      <div className="desktop-pointer:w-14 desktop-pointer:top-1 pointer-events-none absolute top-1.5 right-1 flex h-6 w-6 items-center justify-end rounded-md">
+        {session.generating ? (
+          <Spinner
+            className="text-sidebar-foreground/70 size-3.5"
+            aria-label={t("threads.generating")}
+          />
+        ) : unread ? (
+          <span
+            className={cn(
+              "bg-primary size-2 rounded-full transition-opacity",
+              hasMenu && SLOT_HIDDEN_FOR_MENU,
+              hasMenu && active && "desktop-pointer:opacity-0",
+            )}
+            aria-label={t("threads.unread")}
+            title={t("threads.unread")}
+          />
+        ) : (
+          <span
+            className={cn(
+              "text-sidebar-foreground/70 desktop-pointer:inline hidden text-xs transition-opacity",
+              hasMenu && SLOT_HIDDEN_FOR_MENU,
+              hasMenu && active && "desktop-pointer:opacity-0",
+            )}
+          >
+            {age}
+          </span>
+        )}
+      </div>
+      {hasMenu && (
+        // Under a mouse only: shown on the open conversation, revealed by hover or focus on the others.
+        <ConversationActionsMenu
+          session={session}
+          active={active}
+          t={t}
+          canWrite
+          renderSpaces={renderSpaces}
+          trigger={
+            <button
+              type="button"
+              className={cn(
+                "text-sidebar-foreground/70 desktop-pointer:flex desktop-pointer:opacity-0 desktop-pointer:group-hover/menu-item:opacity-100 desktop-pointer:group-focus-within/menu-item:opacity-100 desktop-pointer:data-[state=open]:opacity-100 desktop-pointer:hover:bg-sidebar-foreground/10 desktop-pointer:data-[state=open]:bg-sidebar-foreground/10 desktop-pointer:hover:text-sidebar-foreground absolute top-1 right-1 hidden size-6 items-center justify-center rounded-md transition-opacity",
+                // Under a mouse the open conversation keeps its « … » in view, in place of its age.
+                active && "desktop-pointer:opacity-100",
+              )}
+            >
+              <EllipsisIcon className="size-3.5" />
+            </button>
+          }
+        />
+      )}
+    </SidebarMenuItem>
+  );
+}
+
+/**
+ * A conversation's « … »: the spaces it reaches (« Tous les espaces » when none), then, for a
+ * writer, Renommer and Supprimer with their dialogs. One menu, opened from a row under a mouse and
+ * from the open conversation's header on every format (a panel from the bottom below `md`, titled
+ * by the conversation). `trigger` is the button that opens it; `children` are the host's own items,
+ * drawn between the spaces and the writes.
+ */
+function ConversationActionsMenu({
+  session,
+  active,
+  t,
+  canWrite,
+  renderSpaces,
+  trigger,
+  children,
+}: {
+  session: SessionSummary;
+  /** The open conversation: deleting it leaves for a new one. */
+  active: boolean;
+  t: ChatTranslate;
+  canWrite: boolean;
+  renderSpaces: RenderSpaces;
+  trigger: ReactElement;
+  children?: ReactNode;
+}) {
   const transport = useChatTransport();
   const select = useSelectConversation();
   const queryClient = useQueryClient();
   const [renaming, setRenaming] = useState(false);
   const [confirmingDelete, setConfirmingDelete] = useState(false);
-  // Closing a dialog opened from a row hands the focus back to what opened it.
+  // Closing a dialog opened from the menu hands the focus back to what opened it.
   const dialogTrigger = useRef<HTMLButtonElement | null>(null);
   const menuTrigger = useRef<HTMLButtonElement>(null);
   const restoreDialogFocus = (event: Event) => {
@@ -468,7 +597,8 @@ function ConversationRow({
   };
   const [deleting, setDeleting] = useState(false);
   const [deleteFailed, setDeleteFailed] = useState(false);
-  // The « … »'s two items; selecting one closes the menu.
+  const title = session.title ?? t("threads.new");
+  // Selecting an item closes the menu.
   const openRename = () => {
     dialogTrigger.current = menuTrigger.current;
     setRenaming(true);
@@ -500,141 +630,25 @@ function ConversationRow({
   };
 
   return (
-    <SidebarMenuItem>
-      <SidebarMenuButton
-        isActive={active}
-        onClick={() => select?.(session.id)}
-        size="lg"
-        // One line on every format, dense as a desktop sidebar's: 32 px under a mouse, 36 on touch
-        // (a reader's phone row grows for its line of spaces). Room
-        // for the fixed-width right slot below, which is absolutely positioned and would otherwise
-        // sit on top of a long title. The host's stacked space tiles ring themselves in
-        // `--tile-ring`: the row's background in each of its states.
-        className={cn(
-          // A shade lighter than the date groups' headings, which head them; the open one is full.
-          // Regular weight: the base `button` rule sets every button medium, and only an unread
-          // title is meant to stand out.
-          "desktop-pointer:h-8 text-sidebar-foreground/75 data-[active=true]:text-sidebar-accent-foreground h-9 font-normal",
-          !canWrite && "max-md:h-auto max-md:min-h-9 max-md:py-1.5",
-          canWrite ? "desktop-pointer:pr-16 pr-[4.5rem]" : "desktop-pointer:pr-16 pr-8",
-          "[--tile-ring:var(--sidebar)] hover:[--tile-ring:var(--sidebar-accent)] active:[--tile-ring:var(--sidebar-accent)] data-[active=true]:[--tile-ring:var(--sidebar-accent)]",
-          // Under a mouse the row stays lit while the pointer is on its « … », a sibling of this button.
-          canWrite &&
-            "desktop-pointer:group-hover/menu-item:bg-sidebar-accent desktop-pointer:group-hover/menu-item:[--tile-ring:var(--sidebar-accent)]",
-        )}
-      >
-        <span
-          className={cn(
-            "flex min-w-0 flex-1 items-center gap-2",
-            !canWrite && "max-md:flex-col max-md:items-stretch max-md:gap-0.5",
-          )}
+    <>
+      <DropdownMenu>
+        <DropdownMenuTrigger
+          asChild
+          ref={menuTrigger}
+          aria-label={t("threads.actions.openFor", { title })}
         >
-          <span
-            className={cn(
-              "block min-w-0 flex-1 truncate text-left leading-5 max-md:text-[15px]",
-              unread && "font-semibold",
-            )}
+          {trigger}
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="end" className="min-w-40" sheetTitle={title}>
+          <DropdownMenuLabel
+            data-testid="chat-menu-spaces"
+            className={`text-muted-foreground flex min-w-0 items-center font-normal [--tile-ring:var(--popover)] max-md:[--tile-ring:var(--background)] ${NOTE_TEXT_CLASS}`}
           >
-            {session.title ?? t("threads.new")}
-          </span>
-          {/* One line: the title, then the tiles of the spaces it touched, their names in the
-              tiles' tooltip and in the « … » menu... */}
-          {session.space_ids.length > 0 && (
-            <span
-              data-testid="chat-session-space-tiles"
-              className={cn("flex shrink-0 items-center", !canWrite && "max-md:hidden")}
-            >
-              {renderSpaces(session.space_ids, { tilesOnly: true })}
-            </span>
-          )}
-          {/* ...except a reader's row on a phone: no « … » panel and no hover to name them, so
-              they are named on a line of their own. */}
-          {!canWrite && (
-            <span
-              data-testid="chat-session-spaces"
-              className={cn(
-                "text-sidebar-foreground/70 flex h-4 min-w-0 items-center md:hidden",
-                NOTE_TEXT_CLASS,
-              )}
-            >
-              {sessionSpaces(session, renderSpaces, t)}
-            </span>
-          )}
-        </span>
-      </SidebarMenuButton>
-      {/* Fixed-width right slot: spinner / unread dot / timestamp have different
-          natural widths — without w-14 the title's truncation point reflows on
-          every generating↔idle transition. Hover fades them out for the row's
-          « … » (no backdrop: the « … » draws its own square, as small as it is);
-          a reader has none, so for them hover changes nothing. */}
-      <div
-        className={cn(
-          "desktop-pointer:w-14 desktop-pointer:top-1 pointer-events-none absolute top-1.5 right-1 flex h-6 w-6 items-center justify-end rounded-md",
-          canWrite && "desktop-pointer:right-1 right-11",
-        )}
-      >
-        {session.generating ? (
-          <Spinner
-            className="text-sidebar-foreground/70 size-3.5"
-            aria-label={t("threads.generating")}
-          />
-        ) : unread ? (
-          <span
-            className={cn(
-              "bg-primary size-2 rounded-full transition-opacity",
-              canWrite && SLOT_HIDDEN_FOR_MENU,
-              canWrite && active && "desktop-pointer:opacity-0",
-            )}
-            aria-label={t("threads.unread")}
-            title={t("threads.unread")}
-          />
-        ) : (
-          <span
-            className={cn(
-              "text-sidebar-foreground/70 desktop-pointer:inline hidden text-xs transition-opacity",
-              canWrite && SLOT_HIDDEN_FOR_MENU,
-              canWrite && active && "desktop-pointer:opacity-0",
-            )}
-          >
-            {age}
-          </span>
-        )}
-      </div>
-      {canWrite && (
-        <>
-          {/* One « … », the same items on every format: always there and a thumb's size on
-              touch; under a mouse, shown on the open conversation and revealed by hover or focus
-              on the others. Below `md` the menu is a panel from
-              the bottom, titled by the conversation. */}
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <button
-                type="button"
-                aria-label={t("threads.actions.openFor", {
-                  title: session.title ?? t("threads.new"),
-                })}
-                ref={menuTrigger}
-                className={cn(
-                  "text-sidebar-foreground/70 active:bg-sidebar-accent desktop-pointer:top-1 desktop-pointer:right-1 desktop-pointer:size-6 desktop-pointer:opacity-0 desktop-pointer:group-hover/menu-item:opacity-100 desktop-pointer:group-focus-within/menu-item:opacity-100 desktop-pointer:data-[state=open]:opacity-100 desktop-pointer:hover:bg-sidebar-foreground/10 desktop-pointer:data-[state=open]:bg-sidebar-foreground/10 desktop-pointer:hover:text-sidebar-foreground absolute top-0 right-0 flex h-9 w-10 items-center justify-center rounded-md transition-opacity",
-                  // Under a mouse the open conversation keeps its « … » in view, in place of its age.
-                  active && "desktop-pointer:opacity-100",
-                )}
-              >
-                <EllipsisIcon className="desktop-pointer:size-3.5 size-5" />
-              </button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent
-              align="end"
-              className="min-w-40"
-              sheetTitle={session.title ?? t("threads.new")}
-            >
-              {/* The spaces it reaches: a phone's row shows their tiles alone. */}
-              <DropdownMenuLabel
-                data-testid="chat-menu-spaces"
-                className={`text-muted-foreground flex min-w-0 items-center font-normal [--tile-ring:var(--popover)] max-md:[--tile-ring:var(--background)] ${NOTE_TEXT_CLASS}`}
-              >
-                {sessionSpaces(session, renderSpaces, t)}
-              </DropdownMenuLabel>
+            {sessionSpaces(session, renderSpaces, t)}
+          </DropdownMenuLabel>
+          {children}
+          {canWrite && (
+            <>
               <DropdownMenuItem onSelect={openRename}>
                 <PencilIcon />
                 {t("threads.rename")}
@@ -643,10 +657,10 @@ function ConversationRow({
                 <Trash2Icon />
                 {t("common:btn.delete")}
               </DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
-        </>
-      )}
+            </>
+          )}
+        </DropdownMenuContent>
+      </DropdownMenu>
       <AlertDialog
         open={confirmingDelete}
         onOpenChange={(open) => !deleting && setConfirmingDelete(open)}
@@ -655,7 +669,7 @@ function ConversationRow({
           <AlertDialogHeader>
             <AlertDialogTitle>{t("threads.delete.title")}</AlertDialogTitle>
             <AlertDialogDescription>
-              {t("threads.delete.description", { title: session.title ?? t("threads.new") })}
+              {t("threads.delete.description", { title })}
             </AlertDialogDescription>
           </AlertDialogHeader>
           {deleteFailed && (
@@ -685,7 +699,46 @@ function ConversationRow({
           onClose={() => setRenaming(false)}
         />
       )}
-    </SidebarMenuItem>
+    </>
+  );
+}
+
+/**
+ * The open conversation's « … », in the host's header on every format: the same menu as a row's,
+ * plus the host's own items (`children`). Renders nothing until the conversation is known.
+ */
+export function ChatConversationMenu({
+  activeId,
+  t,
+  can,
+  renderSpaces,
+  children,
+}: {
+  activeId: string | null;
+  t: ChatTranslate;
+  can: ChatCan;
+  renderSpaces: RenderSpaces;
+  children?: ReactNode;
+}) {
+  const transport = useChatTransport() ?? undefined;
+  const session = useActiveSession(transport, activeId ?? "", activeId !== null);
+  if (!activeId || !session) return null;
+  return (
+    <ConversationActionsMenu
+      key={session.id}
+      session={session}
+      active
+      t={t}
+      canWrite={can("chat:write")}
+      renderSpaces={renderSpaces}
+      trigger={
+        <Button type="button" variant="ghost" size="icon-sm" data-testid="chat-conversation-menu">
+          <EllipsisIcon />
+        </Button>
+      }
+    >
+      {children}
+    </ConversationActionsMenu>
   );
 }
 

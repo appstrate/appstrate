@@ -67,7 +67,7 @@ export type {
   RenderSpaces,
   SelectConversation,
 } from "./runtime-context.ts";
-export { ChatConversationList } from "./thread-list.tsx";
+export { ChatConversationList, ChatConversationMenu } from "./thread-list.tsx";
 export { ChatTransportProvider, SelectConversationProvider } from "./runtime-context.ts";
 import { ModelPickerProvider, type ModelPickerProps } from "./model-picker.ts";
 import { modelSizing } from "./model-fit.ts";
@@ -426,8 +426,8 @@ export function ChatPage({
         <ChatHostProvider value={host}>
           <ModelPickerProvider value={modelPicker}>
             {/* The conversation list is NOT here: it is the shell's navigation,
-              mounted by the host from `ChatConversationList` (renaming is in
-              each row's « … »). What is left is the thread itself. */}
+              mounted by the host from `ChatConversationList`, and the open
+              conversation's « … » (`ChatConversationMenu`) is in its header. What is left is the thread itself. */}
             {/* A plain div, not a `main`: the host shell's inset already IS the
               page's `main` landmark, and two nested ones name two pages. */}
             <ThreadScrollArea className="bg-canvas flex size-full min-h-0 min-w-0 overflow-hidden">
