@@ -174,7 +174,8 @@ describe("hydration", () => {
     fakeStorage.setItem(STORAGE_KEY, JSON.stringify({ orgId: "org_a", orgRole: "owner" }));
     expect(readStoredPreview().persona).toBeNull();
     fakeStorage.setItem(STORAGE_KEY, "{not json");
-    expect(readStoredPreview().persona).toBeNull();
+    expect(readStoredPreview().stoppedReason).toBe("invalid_view_as");
+    expect(fakeStorage.getItem(STORAGE_KEY)).toBeNull();
   });
 });
 

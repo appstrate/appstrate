@@ -50,7 +50,11 @@ interface ViewAsState {
 }
 
 const storedPreviewSchema = personaSchema.extend({ returnSpaceId: z.string().min(1).nullable() });
-const persistedPreview = persistedJson(STORAGE_KEY, (value) => value);
+const persistedPreview = persistedJson(
+  STORAGE_KEY,
+  (value) => (value === null ? null : storedPreviewSchema.safeParse(value).data),
+  () => undefined,
+);
 
 export function readStoredPreview(): Pick<
   ViewAsState,
@@ -59,12 +63,11 @@ export function readStoredPreview(): Pick<
   const value = persistedPreview.read();
   const empty = { persona: null, returnSpaceId: null, stoppedReason: null };
   if (value === null) return empty;
-  const parsed = storedPreviewSchema.safeParse(value);
-  if (!parsed.success) {
+  if (value === undefined) {
     persistedPreview.write(null);
     return { ...empty, stoppedReason: "invalid_view_as" };
   }
-  const { returnSpaceId, ...persona } = parsed.data;
+  const { returnSpaceId, ...persona } = value;
   return { persona, returnSpaceId, stoppedReason: null };
 }
 

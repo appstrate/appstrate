@@ -328,14 +328,14 @@ test.describe("View as role", () => {
     authedPage: page,
     browserCtx,
   }) => {
-    await page.goto("/agents");
-    await page.evaluate(
+    await page.addInitScript(
       ([key, orgId]) => {
+        localStorage.setItem("appstrate_signed_in", "1");
         localStorage.setItem(key, JSON.stringify({ orgId, orgRole: "member", space: null }));
       },
       [PREVIEW_STORAGE_KEY, browserCtx.org.orgId] as const,
     );
-    await page.reload();
+    await page.goto("/agents");
     await expect(page.getByText(/Relancez la prévisualisation du rôle/)).toBeVisible();
     await expect(banner(page)).toHaveCount(0);
     expect(await page.evaluate((key) => localStorage.getItem(key), PREVIEW_STORAGE_KEY)).toBeNull();

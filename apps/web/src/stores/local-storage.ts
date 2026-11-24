@@ -25,12 +25,17 @@ function writeItem(key: string, value: string | null): void {
 }
 
 /** Stored JSON narrowed by `parse`; `fallback` answers an absent, unparseable or rejected value. */
-function parseStored<T>(raw: string | null, parse: (value: unknown) => T, fallback: () => T): T {
+function parseStored<T>(
+  raw: string | null,
+  parse: (value: unknown) => T,
+  fallback: () => T,
+  unreadable = fallback,
+): T {
   if (raw === null) return fallback();
   try {
     return parse(JSON.parse(raw));
   } catch {
-    return fallback();
+    return unreadable();
   }
 }
 
@@ -45,10 +50,10 @@ export function persistedValue<T extends string | boolean | null>(
   };
 }
 
-/** One stored JSON value under `key`; absent or unparseable JSON reaches `parse` as `null`. Writing `null` removes it. */
-export function persistedJson<T>(key: string, parse: (value: unknown) => T) {
+/** One stored JSON value under `key`; absent JSON reaches `parse` as `null`. Invalid JSON does too unless `unreadable` is supplied. Writing `null` removes it. */
+export function persistedJson<T>(key: string, parse: (value: unknown) => T, unreadable?: () => T) {
   return {
-    read: (): T => parseStored(readItem(key), parse, () => parse(null)),
+    read: (): T => parseStored(readItem(key), parse, () => parse(null), unreadable),
     write: (value: T | null): void => writeItem(key, value === null ? null : JSON.stringify(value)),
   };
 }
