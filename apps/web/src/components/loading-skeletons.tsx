@@ -26,7 +26,7 @@ import { RunOverviewSkeleton } from "./run-detail/run-snapshot-inspector";
 import { SkeletonBadge, SkeletonLine } from "./skeleton-line";
 import type { ReactNode } from "react";
 import { useTranslation } from "react-i18next";
-import { useLocation, useParams } from "react-router-dom";
+import { useLocation, useParams, useSearchParams } from "react-router-dom";
 import { useQueryClient } from "@tanstack/react-query";
 import type { PackageType } from "@appstrate/core/validation";
 import { PACKAGE_TYPE_ROUTE_SEGMENT } from "@appstrate/core/package-files";
@@ -47,7 +47,7 @@ import { useCurrentOrgId } from "../hooks/use-org";
 import { usePermissions } from "../hooks/use-permissions";
 import { useChatFilter } from "../modules/chat/use-chat-runtime";
 import { useListView } from "../stores/list-view-store";
-import { useAdmittingSpaces, useOverviewMode } from "../hooks/use-overview-mode";
+import { useAdmittingSpaces, useHereSpaceId, useOverviewMode } from "../hooks/use-overview-mode";
 import {
   agentSectionVisible,
   isSpaceSetting,
@@ -158,10 +158,13 @@ export function DetailPageSkeleton({
   panel,
   meta,
   spaces,
+  actions,
 }: {
   title?: string;
   trail?: readonly BreadcrumbEntry[];
   tabCount: number;
+  /** Whether the page draws an action at the bar's end (`DetailBarSkeleton`). */
+  actions?: boolean;
   /** Whether the page draws a line under its title (`DetailBarSkeleton`). */
   meta?: boolean;
   /** Whether that line opens with the resource's spaces (`DetailBarSkeleton`). */
@@ -177,6 +180,7 @@ export function DetailPageSkeleton({
         tabCount={tabCount}
         meta={meta}
         spaces={spaces}
+        actions={actions}
       />
       {/* The first tab lays its blocks on the page, like `DetailTabPanel`: no frame around them. */}
       {panel ?? <CardBlocks count={3} />}
@@ -509,19 +513,28 @@ export function NotificationDetailSkeleton() {
   );
 }
 
-/** A file's page (the reader), under the files list: the bar, then the file's frame. */
+/** The height of a file's frame on its page (the reader), shared with its skeleton. */
+export const FILE_READER_FRAME = "h-[max(28rem,calc(100svh-16rem))]";
+
+/**
+ * A file's page (the reader), under the files list: the bar, then the file's frame. The address
+ * names the file's space, so the space and « Ouvrir dans l'espace » are drawn exactly when the
+ * page will draw them: while the switcher does not name that space.
+ */
 export function FileReaderSkeleton() {
   const { t } = useTranslation("common");
-  // The page names the file's space while the switcher does not: in « Tous les espaces » always.
-  const { on } = useOverviewMode();
+  const elsewhere = useSearchParams()[0].get("space") !== useHereSpaceId();
   return (
     <DetailPageSkeleton
       trail={[{ label: t("nav.files"), href: "/files" }]}
       tabCount={0}
       meta={false}
-      spaces={on}
+      spaces={elsewhere}
+      actions={elsewhere}
       panel={
-        <div className="flex h-[max(28rem,calc(100svh-16rem))] min-w-0 flex-col overflow-hidden rounded-lg border">
+        <div
+          className={`${FILE_READER_FRAME} flex min-w-0 flex-col overflow-hidden rounded-lg border`}
+        >
           <div className="flex min-h-12 items-center gap-2.5 border-b px-4 py-2">
             <Skeleton className="size-4 shrink-0" />
             <SkeletonLine className="w-32 text-xs leading-5" />

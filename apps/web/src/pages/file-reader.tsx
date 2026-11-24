@@ -14,7 +14,7 @@
  */
 
 import { useMemo } from "react";
-import { useNavigate, useParams, useSearchParams } from "react-router-dom";
+import { useParams, useSearchParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { SearchX, ShieldAlert } from "lucide-react";
 import { Alert, AlertDescription } from "@appstrate/ui/components/alert";
@@ -23,14 +23,13 @@ import { DetailBar } from "../components/detail-bar";
 import { FileArtifact } from "../components/file-artifact";
 import { HeaderActionButton } from "../components/header-action-button";
 import { EmptyState } from "../components/page-states";
-import { FileReaderSkeleton } from "../components/loading-skeletons";
+import { FILE_READER_FRAME, FileReaderSkeleton } from "../components/loading-skeletons";
 import { SpaceNameOf } from "../components/space-name";
 import { useEnterSpace } from "../hooks/use-enter-space";
-import { useCurrentSpaceId } from "../hooks/use-current-space";
-import { useOverviewMode } from "../hooks/use-overview-mode";
+import { useHereSpaceId, useOverviewMode } from "../hooks/use-overview-mode";
 import { useFile } from "../hooks/use-files";
 import { requestScopeChange } from "../hooks/use-unsaved-changes";
-import { fileReaderPath, readerContext, type FileContext } from "../lib/file-link";
+import { readerContext, type FileContext } from "../lib/file-link";
 
 export function FileReaderPage() {
   const { t } = useTranslation("files");
@@ -44,25 +43,21 @@ export function FileReaderPage() {
 
 function FileReader({ fileId, context }: { fileId: string; context: FileContext }) {
   const { t } = useTranslation(["files", "common"]);
-  const navigate = useNavigate();
   const enterSpace = useEnterSpace();
   const overview = useOverviewMode();
-  const currentSpaceId = useCurrentSpaceId();
+  const hereSpaceId = useHereSpaceId();
   const { data: file, error } = useFile(fileId, context);
 
   if (error && !file) return <EmptyState icon={SearchX} message={t("reader.unavailable")} />;
   if (!file) return <FileReaderSkeleton />;
 
-  // The switcher names another space than the file's (or every space): entering the file's
-  // own is the one move that changes something. The page stays the file's.
-  const elsewhere = overview.on || file.spaceId !== currentSpaceId;
+  // The switcher names another space than the file's (or every space): entering the file's own
+  // is the one move that changes something. The address already names it, so the page stays.
+  const elsewhere = file.spaceId !== hereSpaceId;
   const openInSpace = () =>
     requestScopeChange(() => {
       if (overview.on) overview.choose(false);
       enterSpace(context.orgId, file.spaceId);
-      navigate(fileReaderPath(file.id, { orgId: context.orgId, spaceId: file.spaceId }), {
-        replace: true,
-      });
     });
 
   return (
@@ -99,7 +94,7 @@ function FileReader({ fileId, context }: { fileId: string; context: FileContext 
         error={null}
         showName={false}
         openInNewTab={false}
-        className="h-[max(28rem,calc(100svh-16rem))]"
+        className={FILE_READER_FRAME}
       />
     </div>
   );

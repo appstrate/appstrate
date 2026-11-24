@@ -63,6 +63,7 @@ function inSpace1(node: React.ReactElement): string {
     for (const stub of stubs) stub.mockRestore();
   }
 }
+
 it("links each tile to its file's page and keeps the shared action menu in the grid", () => {
   const html = inSpace1(
     <DocumentListPanel
