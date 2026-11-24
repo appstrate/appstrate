@@ -21,46 +21,56 @@ export function nativeModel(provider: string, modelId: string): Model<Api> | und
 
 /**
  * The HTTP request Pi sends for a model (headers + body), with one tool
- * declared, captured by a local stub standing in for the vendor.
+ * declared, captured at the SDK HTTP transport boundary.
  */
 export async function captureRequest(
   model: Model<Api>,
   reasoning?: ThinkingLevel,
 ): Promise<{ headers: Headers; body: Payload }> {
   let captured: { headers: Headers; body: Payload } | undefined;
-  const stub = Bun.serve({
-    port: 0,
-    async fetch(req) {
+  const captureFetch: typeof fetch = Object.assign(
+    async (input: string | URL | Request, init?: RequestInit) => {
+      const req =
+        input instanceof Request ? new Request(input, init) : new Request(input.toString(), init);
       captured = { headers: req.headers, body: (await req.json()) as Payload };
       return Response.json({ error: { message: "captured" } }, { status: 400 });
     },
-  });
-  try {
-    await streamSimple(
-      { ...model, baseUrl: `http://127.0.0.1:${stub.port}` },
-      {
-        systemPrompt: "sys",
-        messages: [{ role: "user", content: "hi", timestamp: 0 }],
-        tools: [
-          {
-            name: "lookup",
-            description: "Look up a value",
-            // The exact JSON TypeBox's `Type.Object({ key: Type.String() })`
-            // emitted before Pi 1.5 dropped `Type`: pi-schema's `obj()` would
-            // add `additionalProperties: false` and move the captured payload.
-            parameters: unsafe({
-              type: "object",
-              properties: { key: { type: "string" } },
-              required: ["key"],
-            }),
-          },
-        ],
+    {
+      preconnect() {
+        /* This capture transport has no socket. */
       },
-      { apiKey: PAYLOAD_API_KEY, maxTokens: 1_024, ...(reasoning ? { reasoning } : {}) },
-    ).result();
-  } finally {
-    stub.stop(true);
-  }
-  if (!captured) throw new Error(`${model.provider}/${model.id}: no request sent`);
+    },
+  );
+  const result = await streamSimple(
+    { ...model, baseUrl: "http://127.0.0.1:1" },
+    {
+      systemPrompt: "sys",
+      messages: [{ role: "user", content: "hi", timestamp: 0 }],
+      tools: [
+        {
+          name: "lookup",
+          description: "Look up a value",
+          // The exact JSON TypeBox's `Type.Object({ key: Type.String() })`
+          // emitted before Pi 1.5 dropped `Type`: pi-schema's `obj()` would
+          // add `additionalProperties: false` and move the captured payload.
+          parameters: unsafe({
+            type: "object",
+            properties: { key: { type: "string" } },
+            required: ["key"],
+          }),
+        },
+      ],
+    },
+    {
+      apiKey: PAYLOAD_API_KEY,
+      maxTokens: 1_024,
+      fetch: captureFetch,
+      ...(reasoning ? { reasoning } : {}),
+    },
+  ).result();
+  if (!captured)
+    throw new Error(
+      `${model.provider}/${model.id}: ${result.errorMessage ?? "no HTTP request sent"}`,
+    );
   return captured;
 }
