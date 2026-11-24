@@ -1,7 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { readIntegrationSpecsFromEnv } from "../integrations-boot.ts";
-import { describe, it, expect } from "bun:test";
+import { readConnectSpec, readIntegrationSpecsFromEnv } from "../integrations-boot.ts";
+import { describe, it, expect, expectTypeOf } from "bun:test";
+import type {
+  integrationSpawnSpecSchema,
+  IntegrationSpawnSpec,
+} from "@appstrate/core/sidecar-types";
 import { parseSidecarEnv, SidecarEnvError } from "../env.ts";
 
 const VALID = {
@@ -113,6 +117,16 @@ describe("parseSidecarEnv", () => {
 });
 
 describe("integration launch declarations", () => {
+  it("keeps every schema field, including optional nested fields, aligned with the published interface", () => {
+    type WritableWire<T> = T extends readonly (infer Item)[]
+      ? WritableWire<Item>[]
+      : T extends object
+        ? { -readonly [K in keyof T]: WritableWire<T[K]> }
+        : T;
+    expectTypeOf<WritableWire<ReturnType<typeof integrationSpawnSpecSchema.parse>>>().toEqualTypeOf<
+      WritableWire<IntegrationSpawnSpec>
+    >();
+  });
   const spec = {
     integrationId: "@test/notes",
     namespace: "notes",
@@ -131,6 +145,33 @@ describe("integration launch declarations", () => {
     );
     expect(() => parse({})).toThrow("expected an array");
   });
+  it("validates a connect-run declaration with the same contract, naming only its public field", () => {
+    const value = {
+      ...spec,
+      sourceKind: "local" as const,
+      manifest: { ...spec.manifest, server: { type: "node" } },
+    };
+    expect(readConnectSpec(JSON.stringify(value))).toEqual(value);
+    for (const [raw, diagnostic] of [
+      ["{private-input", "CONNECT_LOGIN_JSON: invalid JSON"],
+      [
+        JSON.stringify({ ...value, sourceKind: "private-input" }),
+        "CONNECT_LOGIN_JSON: invalid sourceKind",
+      ],
+      [
+        JSON.stringify({ ...value, spawnEnv: { "private-name": 7 } }),
+        "CONNECT_LOGIN_JSON: invalid spawnEnv",
+      ],
+    ]) {
+      try {
+        readConnectSpec(raw!);
+        throw new Error("expected invalid declaration");
+      } catch (error) {
+        expect(error).toMatchObject({ issues: [diagnostic] });
+      }
+    }
+  });
+
   it("fails a mixed list even for a malformed nested field and reports no input values", () => {
     try {
       parse([spec, { ...spec, connection: { id: 1, label: "private label", accountId: null } }]);

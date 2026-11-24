@@ -64,6 +64,7 @@ import {
 } from "@appstrate/afps-runtime/resolvers";
 import { matchesAuthorizedUriSpec } from "@appstrate/afps-shared/authorized-uris";
 import {
+  integrationSpawnSpecSchema,
   integrationSpawnSpecsSchema,
   type IntegrationSpawnSpec,
 } from "@appstrate/core/sidecar-types";
@@ -234,6 +235,27 @@ export class IntegrationSpecsError extends SidecarEnvError {
   }
 }
 
+function readSpawnJson(raw: string, variable: string): unknown {
+  try {
+    return JSON.parse(raw);
+  } catch {
+    throw new IntegrationSpecsError([variable + ": invalid JSON"], 0);
+  }
+}
+
+/** The connect-mode sentinel may name a contract field, never input values or dynamic map keys. */
+export function readConnectSpec(raw: string): IntegrationSpawnSpec {
+  const result = integrationSpawnSpecSchema.safeParse(readSpawnJson(raw, "CONNECT_LOGIN_JSON"));
+  if (!result.success) {
+    const fields = result.error.issues.map(
+      ({ path }) =>
+        `CONNECT_LOGIN_JSON: invalid ${typeof path[0] === "string" ? path[0] : "entry"}`,
+    );
+    throw new IntegrationSpecsError([...new Set(fields)], 1);
+  }
+  return result.data;
+}
+
 /**
  * Parse the `INTEGRATIONS_TO_SPAWN_JSON` env var. Returns `null` when the
  * env var is missing or empty — the caller proceeds without integrations.
@@ -241,12 +263,7 @@ export class IntegrationSpecsError extends SidecarEnvError {
 export function readIntegrationSpecsFromEnv(env = process.env): IntegrationSpawnSpec[] | null {
   const raw = env.INTEGRATIONS_TO_SPAWN_JSON;
   if (!raw) return null;
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(raw);
-  } catch {
-    throw new IntegrationSpecsError(["INTEGRATIONS_TO_SPAWN_JSON: invalid JSON"], 0);
-  }
+  const parsed = readSpawnJson(raw, "INTEGRATIONS_TO_SPAWN_JSON");
   const result = integrationSpawnSpecsSchema.safeParse(parsed);
   if (!result.success) {
     // Values and map keys may carry credentials. Only the entry and its contract field are public.
@@ -2220,8 +2237,8 @@ export async function runConnectOnce(
   if (!server) {
     throw new Error("runConnectOnce: spec has no manifest.server to spawn");
   }
-  if (spec.sourceKind === "remote") {
-    throw new Error("runConnectOnce: remote http MCP integrations cannot run connect-login");
+  if (spec.sourceKind !== "local") {
+    throw new Error("runConnectOnce: only local MCP integrations can run connect-login");
   }
 
   const runId = bundleFetchOpts.runId ?? `nosrunid-${randomUUID().slice(0, 8)}`;

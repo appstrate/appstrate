@@ -12,12 +12,13 @@ import { OAuthTokenCache } from "./oauth-token-cache.ts";
 import {
   bootIntegrations,
   IntegrationSpecsError,
+  readConnectSpec,
   readIntegrationSpecsFromEnv,
   runConnectOnce,
 } from "./integrations-boot.ts";
 import type { AppstrateToolDefinition } from "@appstrate/mcp-transport";
 import type { CookieJar } from "@appstrate/afps-runtime/resolvers";
-import type { IntegrationSpawnSpec, IntegrationBootReport } from "@appstrate/core/sidecar-types";
+import type { IntegrationBootReport } from "@appstrate/core/sidecar-types";
 import { scrubSecretMaterial } from "./redact.ts";
 import { parseSidecarEnv, type SidecarEnv } from "./env.ts";
 import { admitsAgentProxyPeer, noRunnerPeers, type PeerAttribution } from "./runner-peers.ts";
@@ -152,7 +153,7 @@ if (connectLoginJson) {
   // `parseSidecarEnv` refused a connect mode without a valid key.
   const resultKey = env.connectResultKey!;
   try {
-    const spec = JSON.parse(connectLoginJson) as IntegrationSpawnSpec;
+    const spec = readConnectSpec(connectLoginJson);
     const bundle = await runConnectOnce(spec, {
       platformApiUrl: env.platformApiUrl,
       runToken: env.runToken,
