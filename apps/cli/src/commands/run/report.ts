@@ -211,11 +211,18 @@ export async function startReportSession(
 
   let eventsUrl: string;
   let finalizeUrl: string;
+  let mcpUrl: string;
+  let heartbeatUrl: string;
   try {
     eventsUrl = sameOriginRunUrl(ctx.instance, payload.url, "events");
     finalizeUrl = sameOriginRunUrl(ctx.instance, payload.finalize_url, "finalize");
-  } catch {
-    throw new ReportStartError("Invalid run sink origin in registration response", "");
+    mcpUrl = runServiceUrl(eventsUrl, "mcp", payload.mcp_url);
+    heartbeatUrl = runServiceUrl(eventsUrl, "heartbeat", payload.heartbeat_url);
+  } catch (err) {
+    throw new ReportStartError(
+      err instanceof Error ? err.message : "Invalid run service URL in registration response",
+      `Check that the server's APP_URL and your CLI instance use the same scheme, hostname and port (${new URL(ctx.instance).origin}).`,
+    );
   }
   const httpSink = new HttpSink({ url: eventsUrl, finalizeUrl, runSecret: payload.secret });
 
@@ -223,8 +230,8 @@ export async function startReportSession(
     runId: payload.id,
     httpSink,
     proxyHeaders: { "X-Run-Id": payload.id },
-    mcpUrl: runServiceUrl(eventsUrl, "mcp", payload.mcp_url),
-    heartbeatUrl: runServiceUrl(eventsUrl, "heartbeat", payload.heartbeat_url),
+    mcpUrl,
+    heartbeatUrl,
     runSecret: payload.secret,
     warnings: parseLaunchItems(payload.warnings),
   };
