@@ -48,6 +48,7 @@ import { SSEClientTransport } from "@modelcontextprotocol/sdk/client/sse.js";
 import { ListRootsRequestSchema } from "@modelcontextprotocol/sdk/types.js";
 import {
   createInProcessPair,
+  boundResourceResponse,
   createMcpHttpClient,
   httpStatusOf,
   isMcpProtocolError,
@@ -443,12 +444,13 @@ async function defaultCreateSseClient(
 ): Promise<AppstrateMcpClient> {
   const targetUrl = new URL(url);
   const transport = new SSEClientTransport(targetUrl, {
-    // The SDK's SSEClientTransport accepts a `fetch` override applied to
-    // both the initial GET (stream open) and the outbound POSTs (client→
-    // server JSON-RPC messages). Routing through customFetch attaches the
-    // Bearer header per-request and triggers the 401-refresh-and-retry
-    // closure consistently across both directions.
-    fetch: opts.fetch as never,
+    // All results share the GET. A failed POST can also carry a body which this SDK reads as text.
+    fetch: mcpFetch(async (input, init) =>
+      boundResourceResponse(
+        await opts.fetch(input, init),
+        (init?.method ?? "GET") === "GET" ? "shared-stream" : "request",
+      ),
+    ) as never,
   });
   const client = new Client(opts.clientInfo);
   try {

@@ -13,6 +13,7 @@
  * the injected `fetch` (the credential proxy) or in static headers.
  */
 
+import { boundResourceResponse } from "./resource-response.ts";
 import type { Client as LegacyClient } from "@modelcontextprotocol/sdk/client/index.js";
 import {
   Client as DualEraClient,
@@ -303,7 +304,11 @@ async function connectAttempt(
     const method = postedMethod(init);
     if (method !== undefined && method !== "server/discover") pastProbe = true;
     try {
-      return await baseFetch(input, init);
+      const response = await baseFetch(input, init);
+      if (method === "resources/read") return boundResourceResponse(response, "request");
+      if ((init?.method ?? "GET") === "GET")
+        return boundResourceResponse(response, "shared-stream");
+      return response;
     } catch (err) {
       if (typeof err === "object" && err !== null) injectedFetchFaults.add(err);
       throw err;
@@ -772,7 +777,12 @@ function dualEraSession(
       }
     },
     async readResource(args, options) {
-      return (await client.readResource(args, options)) as ReadResourceResult;
+      // The SDK cache bounds entry count, not bytes. Retaining resource bodies across calls
+      // would bypass the read budget even when only one upstream request is active.
+      return (await client.readResource(args, {
+        ...options,
+        cacheMode: "bypass",
+      })) as ReadResourceResult;
     },
     // The SDK sends a method outside the spec only with a result schema.
     request: (method, params, options) => client.request({ method, params }, ResultSchema, options),

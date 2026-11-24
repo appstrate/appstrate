@@ -139,6 +139,7 @@ export class BlobStore {
   private readonly blobs = new Map<string, BlobRecord>();
   private readonly maxTotalBytes: number;
   private totalBytes = 0;
+  private readingUpstream = false;
 
   /**
    * Set the budget below the sidecar memory limit so the store can refuse a blob
@@ -242,10 +243,20 @@ export class BlobStore {
     const link = this.links.get(parsed.id);
     if (!link) return null;
     signal?.throwIfAborted();
-    const result = await link.client.readResource(
-      { uri: link.upstreamUri },
-      { ...(signal && { signal }) },
-    );
+    // One large response can occupy the run's entire read budget. Refuse before issuing
+    // another upstream request, across all connections in the run; local blobs need no slot.
+    if (this.readingUpstream)
+      throw new Error("A resource read is in progress; retry when it completes");
+    this.readingUpstream = true;
+    let result;
+    try {
+      result = await link.client.readResource(
+        { uri: link.upstreamUri },
+        { ...(signal && { signal }) },
+      );
+    } finally {
+      this.readingUpstream = false;
+    }
     signal?.throwIfAborted();
     if (!resourceReadWithinLimits(result.contents, maxBytes))
       throw new Error("Upstream resource exceeds the run's resource count or size limit");

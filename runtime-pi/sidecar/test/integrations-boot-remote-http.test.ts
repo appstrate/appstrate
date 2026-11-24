@@ -854,3 +854,73 @@ describe("connectRemoteHttpIntegration — a modern call that outlasts its bound
     expect(ended).toEqual(["aborted", "aborted"]);
   });
 });
+
+it("reads two resources over the same legacy SSE integration stream", async () => {
+  const encoder = new TextEncoder();
+  let stream: ReadableStreamDefaultController<Uint8Array>;
+  const send = (event: string, data: string) =>
+    stream.enqueue(encoder.encode(`event: ${event}\r\ndata: ${data}\r\n\r\n`));
+  const url = "https://sse-resources.example.com/mcp";
+  const integration = spec(url);
+  const sseSpec = {
+    ...integration,
+    manifest: { ...integration.manifest, server: { url, transport: "sse" as const } },
+  };
+  await withGlobalFetch(
+    handlerFetch(async (request) => {
+      if (request.method === "GET") {
+        return new Response(
+          new ReadableStream<Uint8Array>({
+            start(controller) {
+              stream = controller;
+              send("endpoint", "/post");
+              request.signal.addEventListener("abort", () => controller.close(), { once: true });
+            },
+          }),
+          { headers: { "Content-Type": "text/event-stream" } },
+        );
+      }
+      const rpc = (await request.json()) as {
+        id: number;
+        method: string;
+        params: { protocolVersion?: string; uri?: string };
+      };
+      if (rpc.method === "initialize") {
+        send(
+          "message",
+          JSON.stringify({
+            jsonrpc: "2.0",
+            id: rpc.id,
+            result: {
+              protocolVersion: rpc.params.protocolVersion,
+              capabilities: { resources: {} },
+              serverInfo: { name: "reader", version: "1" },
+            },
+          }),
+        );
+      } else if (rpc.method === "resources/read") {
+        send(
+          "message",
+          JSON.stringify({
+            jsonrpc: "2.0",
+            id: rpc.id,
+            result: { contents: [{ uri: rpc.params.uri, text: "ok" }] },
+          }),
+        );
+      }
+      return new Response(null, { status: 202 });
+    }),
+    async () => {
+      const { client } = await connectRemoteHttpIntegration(sseSpec, null, {
+        resolveHost: async () => [PUBLIC_IP],
+      });
+      try {
+        for (const uri of ["example://first", "example://second"]) {
+          expect((await client.readResource({ uri })).contents).toEqual([{ uri, text: "ok" }]);
+        }
+      } finally {
+        await client.close();
+      }
+    },
+  );
+});

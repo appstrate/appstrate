@@ -470,6 +470,7 @@ export {
 export { exposeTool, toolExclusion, withToolIntegration } from "./tool-exposure.ts";
 
 // The `fetch` an MCP client transport is given, built from a `(url, init)` sender.
+export { boundResourceResponse } from "./resource-response.ts";
 export { mcpFetch } from "./mcp-fetch.ts";
 
 // Upstream-response metadata wire format — `_meta` key, header
