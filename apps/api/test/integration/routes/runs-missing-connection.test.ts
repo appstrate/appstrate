@@ -1323,7 +1323,7 @@ describe("POST /api/agents/:scope/:name/run — 409 missing_integration_connecti
 
     // `block_user_connections` funnels a space onto one shared connection, and
     // the relay must not hand out a link that walks around it. Its one
-    // carve-out is the same as `assertConnectionCreationAllowed`'s: an actor
+    // carve-out is the same as `connectTarget`'s: an actor
     // holding `integrations:configure` is precisely who is expected to create
     // the shared connection the block exists to force everyone onto.
     describe("block_user_connections", () => {

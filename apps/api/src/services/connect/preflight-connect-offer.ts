@@ -138,7 +138,7 @@ export async function attachConnectOffers(params: {
           return e;
         }
 
-        // Same carve-out as `assertConnectionCreationAllowed`: an admin may
+        // Same carve-out as `connectTarget`: an admin may
         // create the shared connection the block exists to force everyone onto.
         if (
           !policy.canConfigure &&

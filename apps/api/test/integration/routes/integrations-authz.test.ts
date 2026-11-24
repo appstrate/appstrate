@@ -175,7 +175,7 @@ describe("block_user_connections workflow", () => {
     });
 
     // A plain member holds `integrations:connect` (so it clears
-    // requirePermission) but `assertConnectionCreationAllowed` refuses it
+    // requirePermission) but `connectTarget` refuses it
     // because the (app, integration) gate is on and the member is not admin.
     const member = await createTestUser({ email: "blocked-member@myorg.test" });
     await addOrgMember(ctx.orgId, member.id, "member");
@@ -198,6 +198,36 @@ describe("block_user_connections workflow", () => {
     expect(rows).toHaveLength(0);
   });
 
+  it("lets a member renew their own connection while the gate is on: a renewal creates nothing", async () => {
+    const member = await createTestUser({ email: "renewing-member@myorg.test" });
+    await addOrgMember(ctx.orgId, member.id, "member");
+    const headers = memberHeaders(member.cookie, ctx, { "Content-Type": "application/json" });
+    const made = await app.request("/api/integrations/@myorg/gmail/auths/api/connect/fields", {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ credentials: { api_key: "AKIA-SECRET" } }),
+    });
+    expect(made.status).toBe(200);
+    const { id } = (await made.json()) as { id: string };
+
+    await app.request("/api/integrations/@myorg/gmail/settings", {
+      method: "PATCH",
+      headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
+      body: JSON.stringify({ block_user_connections: true }),
+    });
+
+    const session = (body: Record<string, unknown>) =>
+      app.request("/api/integrations/@myorg/gmail/auths/api/connect/session", {
+        method: "POST",
+        headers,
+        body: JSON.stringify(body),
+      });
+    expect((await session({ connection_id: id })).status).toBe(200);
+    const fresh = await session({});
+    expect(fresh.status).toBe(403);
+    expect(((await fresh.json()) as { code?: string }).code).toBe("connection_blocked_by_admin");
+  });
+
   it("exempts an ADMIN from the gate (passes through to create the connection)", async () => {
     // Gate on.
     await app.request("/api/integrations/@myorg/gmail/settings", {
@@ -206,7 +236,7 @@ describe("block_user_connections workflow", () => {
       body: JSON.stringify({ block_user_connections: true }),
     });
 
-    // ctx.user is the org owner — `assertConnectionCreationAllowed` returns
+    // ctx.user is the org owner — `connectTarget` returns
     // early for a holder of `integrations:configure`, so the connect succeeds
     // even with the gate on (this is how the admin creates the shared
     // connection).

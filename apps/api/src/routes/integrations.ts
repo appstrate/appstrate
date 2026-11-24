@@ -574,37 +574,39 @@ export function oauthClientHandlers(
 // ─────────────────────────────────────────────
 
 /**
- * Refuse a connection-creation attempt when the (space, integration)
- * has `block_user_connections=true` and the caller is not allowed to
- * govern this integration.
+ * What a connect door writes. `connectionId` names a renewal: it must be the caller's own
+ * connection reaching this space, or the credential write would overwrite another actor's (IDOR).
+ * A renewal creates nothing, so the space's admin gate never stops it.
  *
- * Workflow this enables: an admin toggles the gate → connects → shares the
- * connection into the space → members are funnelled onto the shared
- * connection via the resolver's fallback path. Members trying to bypass
- * with their own connection get a clean 403 instead of a silent override.
+ * Otherwise a new connection, refused while the (space, integration) has
+ * `block_user_connections=true` and the caller may not govern the integration. Workflow this
+ * enables: an admin toggles the gate → connects → shares the connection into the space → members
+ * are funnelled onto the shared connection via the resolver's fallback path. Members trying to
+ * bypass with their own connection get a clean 403 instead of a silent override.
  *
- * The exemption is `integrations:configure` — the very permission that sets
- * the gate. Whoever can turn it on can connect while it is on, which is the
- * whole point (otherwise nobody could create the shared connection).
- *
- * `configure` is session-only, so no API key can hold it — however privileged
- * its creator. A key hitting this path gets the 403 the gate exists to produce.
+ * The exemption is `integrations:configure` — the very permission that sets the gate. Whoever can
+ * turn it on can connect while it is on, which is the whole point (otherwise nobody could create
+ * the shared connection). `configure` is session-only, so no API key can hold it — however
+ * privileged its creator. A key hitting this path gets the 403 the gate exists to produce.
  */
-async function assertConnectionCreationAllowed(
+async function connectTarget(
   c: import("hono").Context<AppEnv>,
-  spaceId: string,
-  integrationId: string,
-): Promise<void> {
-  if (canConfigureIntegrations(c)) return;
-  const blocked = await isUserConnectionCreationBlocked(spaceId, integrationId);
-  if (blocked) {
+  input: { spaceId: string; integrationId: string; authKey: string },
+  connectionId: string | undefined,
+): Promise<ReconnectTarget | null> {
+  if (connectionId) {
+    return assertConnectionBelongsToActor(connectionId, input, connectionPrincipal(c));
+  }
+  if (canConfigureIntegrations(c)) return null;
+  if (await isUserConnectionCreationBlocked(input.spaceId, input.integrationId)) {
     throw new ApiError({
       status: 403,
       code: "connection_blocked_by_admin",
       title: "Connection Blocked by Admin",
-      detail: `Creation of personal connections to '${integrationId}' is disabled by an admin of this space. Use the shared connection instead.`,
+      detail: `Creation of personal connections to '${input.integrationId}' is disabled by an admin of this space. Use the shared connection instead.`,
     });
   }
+  return null;
 }
 
 /** The audited view of an org default. */
@@ -1212,18 +1214,12 @@ export function createIntegrationsRouter() {
       const scope = getSpaceScope(c);
       const principal = connectionPrincipal(c);
       const actor = principal.actor;
-      await assertConnectionCreationAllowed(c, scope.spaceId, packageId);
       const body = await readJsonBody(c, importConnectionSchema);
-      // A reconnect target must be the caller's own connection in this space —
-      // otherwise the credential write below would overwrite an arbitrary
-      // (possibly another actor's) connection (IDOR).
-      const target = body.connection_id
-        ? await assertConnectionBelongsToActor(
-            body.connection_id,
-            { spaceId: scope.spaceId, integrationId: packageId, authKey },
-            principal,
-          )
-        : null;
+      const target = await connectTarget(
+        c,
+        { spaceId: scope.spaceId, integrationId: packageId, authKey },
+        body.connection_id,
+      );
       try {
         const { auth } = await readIntegrationAuth(scope, packageId, authKey);
         if (auth.type === "oauth2" && !acquiresByConnectLogin(auth)) {
@@ -1279,17 +1275,13 @@ export function createIntegrationsRouter() {
       const scope = getSpaceScope(c);
       const principal = connectionPrincipal(c);
       const actor = principal.actor;
-      await assertConnectionCreationAllowed(c, scope.spaceId, packageId);
       const body = await readJsonBody(c, connectOAuthSchema, { allowEmpty: true });
-      // Same reconnect-target IDOR guard as connect/fields: the connection_id is
-      // carried into the OAuth state and honored at callback-time write.
-      const target = body.connection_id
-        ? await assertConnectionBelongsToActor(
-            body.connection_id,
-            { spaceId: scope.spaceId, integrationId: packageId, authKey },
-            principal,
-          )
-        : null;
+      // The connection_id is carried into the OAuth state and honored at callback-time write.
+      const target = await connectTarget(
+        c,
+        { spaceId: scope.spaceId, integrationId: packageId, authKey },
+        body.connection_id,
+      );
 
       const { auth } = await readIntegrationAuth(scope, packageId, authKey);
       if (auth.type !== "oauth2" || acquiresByConnectLogin(auth)) {
@@ -1342,17 +1334,13 @@ export function createIntegrationsRouter() {
       const scope = getSpaceScope(c);
       const principal = connectionPrincipal(c);
       const actor = principal.actor;
-      await assertConnectionCreationAllowed(c, scope.spaceId, packageId);
       const body = await readJsonBody(c, connectSessionSchema, { allowEmpty: true });
-      // Same reconnect-target IDOR guard as connect/fields: the connection_id is
-      // minted into the hosted-connect capability token and honored at write.
-      if (body.connection_id) {
-        await assertConnectionBelongsToActor(
-          body.connection_id,
-          { spaceId: scope.spaceId, integrationId: packageId, authKey },
-          principal,
-        );
-      }
+      // The connection_id is minted into the hosted-connect capability token and honored at write.
+      await connectTarget(
+        c,
+        { spaceId: scope.spaceId, integrationId: packageId, authKey },
+        body.connection_id,
+      );
       // Validate the auth exists (404/409 surfaced now, not after the redirect).
       const { auth } = await readIntegrationAuth(scope, packageId, authKey);
       // `scopes` are checked HERE, at the mint: `/connect/start` replays our own

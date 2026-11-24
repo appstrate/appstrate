@@ -97,7 +97,7 @@ describe("attachConnectOffers — block_user_connections", () => {
   });
 
   it("mints for an actor holding integrations:configure — the admin carve-out", async () => {
-    // Same carve-out as `assertConnectionCreationAllowed`: an admin may create
+    // Same carve-out as `connectTarget`: an admin may create
     // the shared connection the block exists to force everyone onto.
     const [item] = await attachConnectOffers({
       errors: [notConnected()],
