@@ -24,6 +24,7 @@
  * secret, so there is no long-lived session to refresh.
  */
 
+import { PLACEHOLDER_ACCOUNT_ID } from "@appstrate/core/integration";
 import {
   persistCredentialBundle,
   readIntegrationAuth,
@@ -62,7 +63,7 @@ export class LoginSecretStrategy implements IntegrationConnectStrategy {
       credentials: {},
       // The login secret, persisted in the NON-injectable `inputs` plane.
       inputs: credentials,
-      accountId: "default",
+      accountId: PLACEHOLDER_ACCOUNT_ID,
       labelHint: maskCredentialLabel(auth.credentials?.schema, credentials),
       identityClaims: {},
       scopesGranted: [],

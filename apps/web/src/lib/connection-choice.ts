@@ -2,6 +2,7 @@
 
 import {
   INTEGRATION_MANIFEST_FAILURE_CODES,
+  displayAccountId,
   type MissingIntegrationConnectionCode,
 } from "@appstrate/core/integration";
 import { ApiError } from "../api/errors";
@@ -30,8 +31,7 @@ export function candidateDescription(
   labels: { sharedByOther: string; needsReconnection: string },
 ): string {
   return [
-    // "default" is the placeholder of a connection with no account identity.
-    c.account_id !== "default" ? c.account_id : null,
+    displayAccountId(c.account_id),
     !c.owned_by_actor ? labels.sharedByOther : null,
     c.needs_reconnection ? labels.needsReconnection : null,
   ]

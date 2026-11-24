@@ -468,6 +468,21 @@ describe("IntegrationConnectionPicker — the verdict's precise cause", () => {
     expect(html).toContain(t("lockedByAdminPin", { count: 1 }));
   });
 
+  it("asks an administrator to replace an expired unidentified connection under a closed lock", () => {
+    const dead = { ...candidate(WEB, "expired"), needs_reconnection: true, account_id: "default" };
+    const html = renderPicker(
+      resolution({
+        source: "admin_pin",
+        error_code: "needs_reconnection",
+        admin_pinned_connection_ids: [WEB],
+        candidates: [dead],
+      }),
+      true,
+    );
+    expect(html).toContain(t("askAdminToRebind"));
+    expect(html).not.toContain(EDIT);
+  });
+
   it("names a locked member that is no candidate as unavailable, and warns while runs are blocked", () => {
     const html = renderPicker(
       resolution({
@@ -1564,7 +1579,6 @@ describe("IntegrationConnectionPicker — scopes against the agent", () => {
   const withConnect = (picker: ConnectionPicker): ConnectionPicker => ({
     ...picker,
     canConnect: true,
-    canFixInPlace: (c) => c.is_own && picker.auths[c.auth_key]?.type === "oauth2",
   });
 
   /** The way out of a problem, as an element tree (its confirmation is a portal). */
@@ -1703,12 +1717,37 @@ describe("IntegrationConnectionPicker — scopes against the agent", () => {
     click(propsOf(owner, `member-pick-new-for-agent-${WEB}`));
     expect(replacements).toEqual([["primary", WEB]]);
     const foreign = { ...dead, is_own: false };
-    expect(
-      actionsOf({ kind: "dead", conn: foreign }, withConnect(pickerOver([foreign]))),
-    ).toBeNull();
+    const foreignActions = actionsOf(
+      { kind: "dead", conn: foreign },
+      withConnect(pickerOver([foreign])),
+    );
+    expect(propsOf(foreignActions, `member-pick-renew-${WEB}`)).toBeUndefined();
+    expect(propsOf(foreignActions, `member-pick-new-for-agent-${WEB}`)).toBeDefined();
     // Without `integrations:connect` nobody renews.
-    expect(actionsOf(problem, pickerOver([dead]))).toBeNull();
+    expect(actionsOf(problem, pickerOver([dead], { canAdd: false }))).toBeNull();
   });
+
+  it.each(["oauth2", "api_key"] as const)(
+    "offers only a replacement for an unidentified %s account, subject to creation rights",
+    (type) => {
+      const conn = { ...scoped(WEB, ["read"]), account_id: "default", needs_reconnection: true };
+      const problem: PickerProblem = { kind: "dead", conn };
+      const manifest = {
+        ...OAUTH,
+        auths: { primary: { ...OAUTH.auths?.primary, type } },
+      } as IntegrationManifestView;
+      const pick = (canAdd: boolean) =>
+        actionsOf(problem, withConnect(pickerOver([conn], { canAdd, manifest })));
+      const allowed = pick(true);
+      expect(propsOf(allowed, `member-pick-new-for-agent-${WEB}`)).toBeDefined();
+      expect(propsOf(allowed, `member-pick-renew-${WEB}`)).toBeUndefined();
+      const blocked = pick(false);
+      expect(propsOf(blocked, `member-pick-new-for-agent-${WEB}`)).toBeUndefined();
+      expect(render(<>{blocked}</>)).toContain(
+        i18n.t("detail.integrationMemberPicker.askForReplacement", { ns: "agents" }),
+      );
+    },
+  );
 
   it("a renew sends no scopes, an upgrade only the missing ones, a new connection the agent's", async () => {
     const conn = scoped(WEB, ["read", "labels"], ["send"]);

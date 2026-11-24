@@ -5,7 +5,7 @@ import { useTranslation } from "react-i18next";
 import { Lock, Plus, RefreshCw } from "lucide-react";
 import { Button } from "@appstrate/ui/components/button";
 import { CheckboxField } from "@/components/app-ui/checkbox-field";
-import { MAX_CONNECTIONS_PER_INTEGRATION } from "@appstrate/core/integration";
+import { displayAccountId, MAX_CONNECTIONS_PER_INTEGRATION } from "@appstrate/core/integration";
 import { useSpaceLabelOf } from "../../hooks/use-spaces";
 import { useIntegrationName } from "../../hooks/use-integration-name";
 import type { IntegrationCandidate } from "../../hooks/use-integrations";
@@ -314,7 +314,7 @@ function CandidateLines({
 }
 
 /**
- * The way out of a problem. A dead connection: its owner renews it. An under-scoped one: a new
+ * An expired connection with a verifiable account can be renewed by its owner. An under-scoped one: a new
  * connection with the agent's scopes first; upgrading in place widens the grant of every agent
  * bound to it, so the owner gets it second, behind a confirmation.
  */
@@ -335,8 +335,11 @@ export function ProblemActions({
   if (problem.kind !== "dead" && problem.kind !== "underScoped") return null;
   const { conn } = problem;
   const { oauthPending, busy } = picker;
-  const canFix = picker.canFixInPlace(conn);
-  const canCreate = picker.canAddConnection && picker.authKeys.includes(conn.auth_key);
+  const canUseMethod = picker.authKeys.includes(conn.auth_key);
+  const identified = displayAccountId(conn.account_id) !== null;
+  const canFix = picker.canConnect && conn.is_own && canUseMethod && identified;
+  const imposed = picker.lockedConnectionIds.includes(conn.id);
+  const canCreate = picker.canAddConnection && canUseMethod && !imposed;
   const create = canCreate && (
     <Button
       type="button"
@@ -346,25 +349,42 @@ export function ProblemActions({
       data-testid={`member-pick-new-for-agent-${conn.id}`}
     >
       <Plus />
-      {t("detail.integrationMemberPicker.newWithAgentScopes")}
+      {t(
+        problem.kind === "dead"
+          ? "detail.integrationMemberPicker.replaceSelection"
+          : "detail.integrationMemberPicker.newWithAgentScopes",
+      )}
     </Button>
   );
   if (problem.kind === "dead") {
-    if (!canFix) return null;
+    if (identified && !canFix && !canCreate) return null;
     return (
       <div className="flex flex-wrap gap-1.5">
+        {!identified && (
+          <p className="text-muted-foreground w-full text-xs">
+            {t(
+              canCreate
+                ? "detail.integrationMemberPicker.replaceSelectionHint"
+                : imposed
+                  ? "detail.integrationMemberPicker.askAdminToRebind"
+                  : "detail.integrationMemberPicker.askForReplacement",
+            )}
+          </p>
+        )}
         {create}
-        <Button
-          type="button"
-          variant="outline"
-          size="sm"
-          disabled={oauthPending}
-          onClick={() => void picker.renewConnection(conn)}
-          data-testid={`member-pick-renew-${conn.id}`}
-        >
-          <RefreshCw />
-          {t("detail.integrationMemberPicker.renew")}
-        </Button>
+        {canFix && (
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            disabled={oauthPending}
+            onClick={() => void picker.renewConnection(conn)}
+            data-testid={`member-pick-renew-${conn.id}`}
+          >
+            <RefreshCw />
+            {t("detail.integrationMemberPicker.renew")}
+          </Button>
+        )}
       </div>
     );
   }

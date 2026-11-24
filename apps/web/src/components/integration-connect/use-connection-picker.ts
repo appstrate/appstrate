@@ -372,9 +372,6 @@ export function useConnectionPicker(
       scopes: conn.missing_scopes,
       connectionId: conn.id,
     });
-  // Only the owner renews or upgrades: a foreign shared connection's tokens are someone else's.
-  const canFixInPlace = (conn: IntegrationCandidate) =>
-    canConnect && conn.is_own && auths[conn.auth_key]?.type === "oauth2";
 
   return {
     gatesRun,
@@ -410,7 +407,6 @@ export function useConnectionPicker(
     manifest,
     missingScopeLabels,
     connectsWithAgentScopes,
-    canFixInPlace,
     oauthPending,
     persist,
     triggerConnect,

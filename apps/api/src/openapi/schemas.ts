@@ -440,7 +440,7 @@ export const schemas = {
       connection_id: {
         type: "string",
         description:
-          "Populated on `needs_reconnection` and `insufficient_scopes`. On `needs_reconnection`, forward it as the connect kickoff's `connection_id`, with no `scopes`, so the existing connection is reconnected in place (what it holds plus the auth's `default_scopes`) rather than duplicated. On `insufficient_scopes`, forwarding it upgrades that connection, which widens every agent that uses it: only under `remedy: upgrade_or_new`. Populated on `auth_serves_no_selected_tool` too, naming the connection an explicit set (pin, org default, run or schedule override) binds whose auth exposes none of the agent's selected tools: the remedy is taking it out of the set, not a connect flow.",
+          "Populated on `needs_reconnection` and `insufficient_scopes`. On `needs_reconnection` with a replacement `remedy`, it identifies the connection to replace. Otherwise its owner may forward it as the connect kickoff's `connection_id`, with no `scopes`, so the existing connection is reconnected in place (what it holds plus the auth's `default_scopes`) rather than duplicated. On `insufficient_scopes`, forwarding it upgrades that connection, which widens every agent that uses it: only under `remedy: upgrade_or_new`. Populated on `auth_serves_no_selected_tool` too, naming the connection an explicit set (pin, org default, run or schedule override) binds whose auth exposes none of the agent's selected tools: the remedy is taking it out of the set, not a connect flow.",
       },
       missing_scopes: {
         type: "array",
@@ -452,7 +452,7 @@ export const schemas = {
         type: "string",
         enum: [...INSUFFICIENT_SCOPES_REMEDIES],
         description:
-          "Populated on `insufficient_scopes`: how it clears. `new_connection` — start a connect kickoff without `connection_id`, with `scopes: required_scopes`, then bind the new connection (a pin, or `connection_overrides`). `upgrade_or_new` — the same, or, the connection being the caller's own, forward `connection_id` to upgrade it in place, which widens every agent that uses it. `rebind_by_admin` — an admin pin or an enforced org default binds the connection: an admin must switch that binding, and no connect flow clears it. `rebind_by_schedule_owner` — the schedule's `connection_overrides` bind it: the schedule's owner must switch them.",
+          "Populated on `insufficient_scopes` and on `needs_reconnection` for an unidentifiable account. The latter requires changing the binding. Shares, pins and schedules keep the original connection ID until explicitly changed. `new_connection` — start a connect kickoff without `connection_id`, with `scopes: required_scopes`, then bind the new connection (a pin, or `connection_overrides`). `upgrade_or_new` — the same, or, the connection being the caller's own, forward `connection_id` to upgrade it in place, which widens every agent that uses it. `rebind_by_admin` — an admin pin or an enforced org default binds the connection: an admin must switch that binding, and no connect flow clears it. `rebind_by_schedule_owner` — the schedule's `connection_overrides` bind it: the schedule's owner must switch them.",
       },
       owned_by_actor: {
         type: "boolean",

@@ -119,6 +119,8 @@ import { dedupeLabel } from "@appstrate/core/dedupe-label";
 import type { Actor, AuthorizationServerBinding, ResolvedOAuthClient } from "@appstrate/connect";
 import {
   appstrateAuthRequired,
+  PLACEHOLDER_ACCOUNT_ID,
+  displayAccountId,
   allowsUndeclaredTools,
   isUnauthenticatedIntegration,
   resolveIntegrationToolCatalog,
@@ -130,12 +132,7 @@ import {
 } from "@appstrate/core/integration";
 import type { ConnectionReach, IntegrationToolCatalogEntry } from "@appstrate/shared-types";
 import type { ConnectionVariables } from "./connect/connection-variables.ts";
-import {
-  PLACEHOLDER_ACCOUNT_ID,
-  connectionVariablesOf,
-  displayAccountId,
-  sameConnectionVariables,
-} from "../lib/connection-identity.ts";
+import { connectionVariablesOf, sameConnectionVariables } from "../lib/connection-identity.ts";
 import {
   hasPerConnectionAuthServer,
   toSupportedTokenEndpointAuthMethod,
@@ -2364,14 +2361,10 @@ export async function persistCredentialBundle(
       if (clientSpace !== null && existing.spaceId !== clientSpace) {
         throw scopeNarrowingRefused("It was widened while this reconnect ran: reconnect it again.");
       }
-      if (
-        !input.accountId ||
-        input.accountId === PLACEHOLDER_ACCOUNT_ID ||
-        existing.accountId === PLACEHOLDER_ACCOUNT_ID
-      ) {
+      if (!displayAccountId(input.accountId) || !displayAccountId(existing.accountId)) {
         throw conflict(
           "identity_mismatch",
-          "The upstream account of this connection could not be verified. Create a new connection instead.",
+          "The upstream account could not be verified. Use a different connection, or ask a space administrator to provide one. Existing shares, pins and schedules still use the original connection.",
         );
       }
       if (existing.accountId !== input.accountId) {

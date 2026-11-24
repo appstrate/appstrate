@@ -7371,12 +7371,12 @@ export interface components {
                 /** @description Scopes the agent's selected tools require that the connection lacks; empty when it covers them. A run naming a candidate with a non-empty list fails with `insufficient_scopes`. Always empty on the credential proxy, which selects no tool. */
                 missing_scopes: string[];
             }[];
-            /** @description Populated on `needs_reconnection` and `insufficient_scopes`. On `needs_reconnection`, forward it as the connect kickoff's `connection_id`, with no `scopes`, so the existing connection is reconnected in place (what it holds plus the auth's `default_scopes`) rather than duplicated. On `insufficient_scopes`, forwarding it upgrades that connection, which widens every agent that uses it: only under `remedy: upgrade_or_new`. Populated on `auth_serves_no_selected_tool` too, naming the connection an explicit set (pin, org default, run or schedule override) binds whose auth exposes none of the agent's selected tools: the remedy is taking it out of the set, not a connect flow. */
+            /** @description Populated on `needs_reconnection` and `insufficient_scopes`. On `needs_reconnection` with a replacement `remedy`, it identifies the connection to replace. Otherwise its owner may forward it as the connect kickoff's `connection_id`, with no `scopes`, so the existing connection is reconnected in place (what it holds plus the auth's `default_scopes`) rather than duplicated. On `insufficient_scopes`, forwarding it upgrades that connection, which widens every agent that uses it: only under `remedy: upgrade_or_new`. Populated on `auth_serves_no_selected_tool` too, naming the connection an explicit set (pin, org default, run or schedule override) binds whose auth exposes none of the agent's selected tools: the remedy is taking it out of the set, not a connect flow. */
             connection_id?: string;
             /** @description Populated on `insufficient_scopes`. OAuth scopes the agent's selected tools require that the connection lacks. */
             missing_scopes?: string[];
             /**
-             * @description Populated on `insufficient_scopes`: how it clears. `new_connection` — start a connect kickoff without `connection_id`, with `scopes: required_scopes`, then bind the new connection (a pin, or `connection_overrides`). `upgrade_or_new` — the same, or, the connection being the caller's own, forward `connection_id` to upgrade it in place, which widens every agent that uses it. `rebind_by_admin` — an admin pin or an enforced org default binds the connection: an admin must switch that binding, and no connect flow clears it. `rebind_by_schedule_owner` — the schedule's `connection_overrides` bind it: the schedule's owner must switch them.
+             * @description Populated on `insufficient_scopes` and on `needs_reconnection` for an unidentifiable account. The latter requires changing the binding. Shares, pins and schedules keep the original connection ID until explicitly changed. `new_connection` — start a connect kickoff without `connection_id`, with `scopes: required_scopes`, then bind the new connection (a pin, or `connection_overrides`). `upgrade_or_new` — the same, or, the connection being the caller's own, forward `connection_id` to upgrade it in place, which widens every agent that uses it. `rebind_by_admin` — an admin pin or an enforced org default binds the connection: an admin must switch that binding, and no connect flow clears it. `rebind_by_schedule_owner` — the schedule's `connection_overrides` bind it: the schedule's owner must switch them.
              * @enum {string}
              */
             remedy?: "new_connection" | "upgrade_or_new" | "rebind_by_admin" | "rebind_by_schedule_owner";
@@ -14131,7 +14131,7 @@ export interface operations {
             };
             /** @description No active connect session (an oauth2 `connect.login` form already submitted included), or the integration or auth is gone. oauth2: a 404 refusal of the flow is `connection_not_ready`, with a generic detail. */
             404: components["responses"]["NotFound"];
-            /** @description oauth2 declaring `connect.login` (`connection_not_ready`), nothing sent: the OAuth client chosen for the auth no longer resolves when the token request is built, removed in between; or the client authenticates with a `token_endpoint_auth_method` the platform does not implement (only `client_secret_basic`, `client_secret_post` and `none` are). An auth with no usable OAuth client is the 403. */
+            /** @description `identity_mismatch`: the original and submitted credentials do not identify the same upstream account and instance and the stored connection is preserved. With oauth2 declaring `connect.login` (`connection_not_ready`), nothing sent: the OAuth client chosen for the auth no longer resolves when the token request is built, removed in between; or the client authenticates with a `token_endpoint_auth_method` the platform does not implement (only `client_secret_basic`, `client_secret_post` and `none` are). An auth with no usable OAuth client is the 403. */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -14544,7 +14544,7 @@ export interface operations {
                     };
                     /**
                      * Format: uuid
-                     * @description Existing connection to renew in place (api_key/PAT/custom); the new credential then serves every agent that uses it. Omit on a fresh connect — the write then INSERTs a new row; to give one agent a different credential, create a new connection rather than duplicating the integration.
+                     * @description Existing connection to renew in place only if the credentials identify the same upstream account and instance (409 identity_mismatch otherwise). A key or password without an account identity requires another connection. Shares, pins and schedules keep the original ID until explicitly changed. When an administrator restricts creation, choose a shared connection or ask the administrator to provide one. Omit on a fresh connect — the write then INSERTs a new row; to give one agent a different credential, create a new connection rather than duplicating the integration.
                      */
                     connection_id?: string;
                     /** @description Connection variables (AFPS §7.12): the non-secret values choosing this connection's upstream (e.g. a self-hosted instance URL), one per variable the integration declares in `variables.schema`. Required when the integration declares variables — also on a reconnect, which re-acquires the credential for the values submitted — and refused when it declares none. Each value is validated against the schema, must leave every URL template the auth uses renderable, and every rendered URL must pass the platform's egress controls; a refusal is a 400 `validation_failed` whose entries name `variables.<name>`. */
@@ -14628,7 +14628,7 @@ export interface operations {
             /** @description Insufficient permissions. oauth2 declaring `connect.login`: the auth has no usable OAuth client — none registered, or one whose secret cannot be decrypted (`forbidden`); an administrator must register one. */
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
-            /** @description oauth2 declaring `connect.login` (`connection_not_ready`), nothing sent: the OAuth client chosen for the auth no longer resolves when the token request is built, removed in between; or the client authenticates with a `token_endpoint_auth_method` the platform does not implement (only `client_secret_basic`, `client_secret_post` and `none` are). An auth with no usable OAuth client is the 403. */
+            /** @description `identity_mismatch`: the original and submitted credentials do not identify the same upstream account and instance and the stored connection is preserved. With oauth2 declaring `connect.login` (`connection_not_ready`), nothing sent: the OAuth client chosen for the auth no longer resolves when the token request is built, removed in between; or the client authenticates with a `token_endpoint_auth_method` the platform does not implement (only `client_secret_basic`, `client_secret_post` and `none` are). An auth with no usable OAuth client is the 403. */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -14720,7 +14720,7 @@ export interface operations {
                     force_account_select?: boolean;
                     /**
                      * Format: uuid
-                     * @description Reconnect this existing connection in place instead of creating a new one. Added scopes then apply to every agent that uses it: to give one agent more rights without widening the others, omit it and pass the required `scopes`. Do not duplicate an integration to change its scopes; create another connection.
+                     * @description Reconnect this existing connection in place only when both credentials identify the same upstream account and instance. An unidentified account (account_id default) requires another connection. Its shares, pins and schedules keep the original ID until explicitly changed. Added scopes then apply to every agent that uses it: to give one agent more rights without widening the others, omit it and pass the required `scopes`. Do not duplicate an integration to change its scopes; create another connection.
                      */
                     connection_id?: string;
                     /** @description Connection variables (AFPS §7.12): the non-secret values choosing this connection's upstream (e.g. a self-hosted instance URL), one per variable the integration declares in `variables.schema`. Required when the integration declares variables — also on a reconnect, which re-acquires the credential for the values submitted — and refused when it declares none. Each value is validated against the schema, must leave every URL template the auth uses renderable, and every rendered URL must pass the platform's egress controls; a refusal is a 400 `validation_failed` whose entries name `variables.<name>`. */
@@ -14786,7 +14786,7 @@ export interface operations {
                     force_account_select?: boolean;
                     /**
                      * Format: uuid
-                     * @description Reconnect this existing connection in place instead of creating a new one. Added scopes then apply to every agent that uses it: to give one agent more rights without widening the others, omit it and pass the required `scopes`. Do not duplicate an integration to change its scopes; create another connection.
+                     * @description Reconnect this existing connection in place only when both credentials identify the same upstream account and instance. An unidentified account (account_id default) requires another connection. Its shares, pins and schedules keep the original ID until explicitly changed. Added scopes then apply to every agent that uses it: to give one agent more rights without widening the others, omit it and pass the required `scopes`. Do not duplicate an integration to change its scopes; create another connection.
                      */
                     connection_id?: string;
                 };
@@ -16948,7 +16948,7 @@ export interface operations {
                 content: {
                     "application/json": {
                         result?: {
-                            /** @description A `tools/call` result's structured payload, matching the tool's `outputSchema` when it declares one (`run_and_wait`: RunAndWaitResult). */
+                            /** @description A `tools/call` result's structured payload, matching the tool's `outputSchema` when it declares one. For `run_and_wait` this includes RunAndWaitResult on success and structured route or tool refusals on error. */
                             structuredContent?: Record<string, never>;
                         } & {
                             [key: string]: unknown;
@@ -17098,7 +17098,7 @@ export interface operations {
                 content: {
                     "application/json": {
                         result?: {
-                            /** @description A `tools/call` result's structured payload, matching the tool's `outputSchema` when it declares one (`run_and_wait`: RunAndWaitResult). */
+                            /** @description A `tools/call` result's structured payload, matching the tool's `outputSchema` when it declares one. For `run_and_wait` this includes RunAndWaitResult on success and structured route or tool refusals on error. */
                             structuredContent?: Record<string, never>;
                         } & {
                             [key: string]: unknown;

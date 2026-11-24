@@ -1884,6 +1884,13 @@ export function validateAgentIntegrationScopes(
 /** Cap on the connections one declared integration binds in a run, enforced at every write. */
 export const MAX_CONNECTIONS_PER_INTEGRATION = 20;
 
+/** `account_id` of an identity-less connection (`extractIdentity` found no claim). */
+export const PLACEHOLDER_ACCOUNT_ID = "default";
+
+export function displayAccountId(accountId: string | null | undefined): string | null {
+  return accountId && accountId !== PLACEHOLDER_ACCOUNT_ID ? accountId : null;
+}
+
 /**
  * Per-integration connection picks on `runs.connection_overrides` and
  * `package_schedules.connection_overrides` — the resolver's launch-override layer.
@@ -1905,7 +1912,7 @@ export const CONNECTION_RESOLUTION_SOURCES = [
 /** The cascade layer that bound a set — drives the audit + UI badge. */
 export type ConnectionResolutionSource = (typeof CONNECTION_RESOLUTION_SOURCES)[number];
 
-/** How an `insufficient_scopes` item clears (`ResolutionFieldError.remedy`). */
+/** How to resolve insufficient scopes or replace a connection with no comparable account identity. */
 export const INSUFFICIENT_SCOPES_REMEDIES = [
   "new_connection",
   "upgrade_or_new",
@@ -2041,6 +2048,8 @@ export interface ConnectionCandidate {
 
 /** One unresolved integration plus structured detail. */
 export interface ConnectionResolutionError {
+  /** The binding to change when an in-place renewal cannot identify the existing account. */
+  remedy?: InsufficientScopesRemedy;
   integrationId: string;
   code: ConnectionResolutionErrorCode;
   /** Pickable on `must_choose_connection`. */

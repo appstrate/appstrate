@@ -76,7 +76,7 @@ export interface ResolutionFieldError extends ValidationFieldError {
     scopes_granted: string[];
     missing_scopes: string[];
   }[];
-  /** `needs_reconnection`: the row to reconnect in place; `insufficient_scopes`: the under-scoped row; `auth_serves_no_selected_tool`: the member to remove. */
+  /** `needs_reconnection`: the affected row, which a replacement remedy must rebind; `insufficient_scopes`: the under-scoped row; `auth_serves_no_selected_tool`: the member to remove. */
   connection_id?: string;
   /** `insufficient_scopes` — OAuth scopes the selected tools require that the connection lacks. */
   missing_scopes?: string[];

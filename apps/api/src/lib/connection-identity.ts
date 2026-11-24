@@ -5,13 +5,6 @@
 
 import type { ConnectionVariables } from "../services/connect/connection-variables.ts";
 
-/** `account_id` of an identity-less connection (`extractIdentity` found no claim). */
-export const PLACEHOLDER_ACCOUNT_ID = "default";
-
-export function displayAccountId(accountId: string | null | undefined): string | null {
-  return accountId && accountId !== PLACEHOLDER_ACCOUNT_ID ? accountId : null;
-}
-
 /** Whether two connections name the same upstream: the same variables, the same values. */
 export function sameConnectionVariables(a: ConnectionVariables, b: ConnectionVariables): boolean {
   const entries = Object.entries(a);

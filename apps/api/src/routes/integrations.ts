@@ -224,7 +224,7 @@ export const importConnectionSchema = z
     credentials: z.record(z.string(), z.unknown()).refine((c) => Object.keys(c).length > 0, {
       message: "credentials must contain at least one field",
     }),
-    // Renew an existing connection in place (api_key/PAT/custom): the OAuth
+    // Renew an identifiable account in place (api_key/PAT/custom): the OAuth
     // flow smuggles this on `needs_reconnection`; the fields flow takes the same
     // id so the write UPDATEs the dead row instead of INSERTing a duplicate
     // (single-writer contract, integration-connections.ts:persistCredentialBundle).

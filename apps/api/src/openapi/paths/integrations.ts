@@ -757,7 +757,7 @@ const connectKickoffRelayProperties = {
     type: "string",
     format: "uuid",
     description:
-      "Reconnect this existing connection in place instead of creating a new one. Added scopes then apply to every agent that uses it: to give one agent more rights without widening the others, omit it and pass the required `scopes`. Do not duplicate an integration to change its scopes; create another connection.",
+      "Reconnect this existing connection in place only when both credentials identify the same upstream account and instance. An unidentified account (account_id default) requires another connection. Its shares, pins and schedules keep the original ID until explicitly changed. Added scopes then apply to every agent that uses it: to give one agent more rights without widening the others, omit it and pass the required `scopes`. Do not duplicate an integration to change its scopes; create another connection.",
   },
 } as const;
 
@@ -810,7 +810,7 @@ const CONNECT_LOGIN_403 =
 /** An oauth2 `connect.login` whose chosen OAuth client is gone by the token request, on both connect surfaces. */
 const CONNECT_LOGIN_409 = {
   description:
-    "oauth2 declaring `connect.login` (`connection_not_ready`), nothing sent: the OAuth client chosen for the auth no longer resolves when the token request is built, removed in between; or the client authenticates with a `token_endpoint_auth_method` the platform does not implement (only `client_secret_basic`, `client_secret_post` and `none` are). An auth with no usable OAuth client is the 403.",
+    "`identity_mismatch`: the original and submitted credentials do not identify the same upstream account and instance and the stored connection is preserved. With oauth2 declaring `connect.login` (`connection_not_ready`), nothing sent: the OAuth client chosen for the auth no longer resolves when the token request is built, removed in between; or the client authenticates with a `token_endpoint_auth_method` the platform does not implement (only `client_secret_basic`, `client_secret_post` and `none` are). An auth with no usable OAuth client is the 403.",
   content: {
     "application/problem+json": { schema: { $ref: "#/components/schemas/ProblemDetail" } },
   },
@@ -1681,7 +1681,7 @@ export const integrationsPaths = {
                   type: "string",
                   format: "uuid",
                   description:
-                    "Existing connection to renew in place (api_key/PAT/custom); the new credential then serves every agent that uses it. Omit on a fresh connect — the write then INSERTs a new row; to give one agent a different credential, create a new connection rather than duplicating the integration.",
+                    "Existing connection to renew in place only if the credentials identify the same upstream account and instance (409 identity_mismatch otherwise). A key or password without an account identity requires another connection. Shares, pins and schedules keep the original ID until explicitly changed. When an administrator restricts creation, choose a shared connection or ask the administrator to provide one. Omit on a fresh connect — the write then INSERTs a new row; to give one agent a different credential, create a new connection rather than duplicating the integration.",
                 },
                 variables: connectionVariablesSchema,
               },

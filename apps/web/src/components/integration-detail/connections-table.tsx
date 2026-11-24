@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
+import { displayAccountId } from "@appstrate/core/integration";
 import { useTranslation } from "react-i18next";
 import { Plug } from "lucide-react";
 import { DataTable } from "../data-table";
@@ -78,10 +79,11 @@ export function ConnectionsTable({
     },
     authForConnection: (connection) => {
       const auth = authOf(connection);
+      const methodReady = !!auth && (auth.type !== "oauth2" || isOauthAuthConnectable(auth));
       return {
         authKey: connection.auth_key,
-        authType: auth?.type ?? "custom",
-        canRenew: auth?.type === "oauth2" && isOauthAuthConnectable(auth),
+        canRenew: methodReady && displayAccountId(connection.account_id) !== null,
+        canCreate: methodReady && canConnect && !blockedByAdmin,
       };
     },
   });
