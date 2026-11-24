@@ -12,6 +12,7 @@ import * as React from "react";
 import {
   ThreadPrimitive,
   MessagePrimitive,
+  MessagePartPrimitive,
   ComposerPrimitive,
   AttachmentPrimitive,
   ActionBarPrimitive,
@@ -39,7 +40,8 @@ import { Alert, AlertDescription } from "@appstrate/ui/components/alert";
 import { Button } from "@appstrate/ui/components/button";
 import { cn } from "@appstrate/ui/cn";
 import { MarkdownText, ReasoningText } from "./markdown-text.tsx";
-import { ReasoningGroup, ThinkingStatus } from "./reasoning.tsx";
+import { ThinkingStatus, ThoughtGroup } from "./reasoning.tsx";
+import { THOUGHT_GROUP, groupThought, isThoughtPart } from "./thought-group.ts";
 import { TurnSpaceChoice } from "./space-choice.tsx";
 import { ToolFallback } from "./tool-fallback.tsx";
 import {
@@ -856,10 +858,18 @@ export function UserMessage() {
 // branches that aren't persisted — corrupting history on reload — so they're
 // intentionally absent.
 
-/** Gated on running: a dead message with no visible parts must not animate "thinking" forever. */
+/**
+ * The trailing dots while the turn runs with nothing else moving: no part yet,
+ * or a standalone card at the tail. A thought block at the tail carries its own
+ * dots, so the turn keeps one status region. `GroupedParts` only emits the
+ * indicator while the message runs.
+ */
 function ThinkingIndicator() {
-  const running = useAuiState((s) => s.message.status?.type === "running");
-  return running ? <ThinkingStatus /> : null;
+  const tailIsThought = useAuiState((s) => {
+    const last = s.message.parts[s.message.parts.length - 1];
+    return last !== undefined && isThoughtPart(last);
+  });
+  return tailIsThought ? null : <ThinkingStatus />;
 }
 
 /** Always shown, not on hover, so a mid-conversation model switch is visible. */
@@ -963,20 +973,39 @@ export function MessageError() {
   );
 }
 
-/** Module-level: assistant-ui memoizes each part on these members' identity. */
-const ASSISTANT_PART_COMPONENTS = {
-  Text: MarkdownText,
-  Reasoning: ReasoningText,
-  ReasoningGroup,
-  tools: { Fallback: ToolFallback },
-  Empty: ThinkingIndicator,
-} satisfies React.ComponentProps<typeof MessagePrimitive.Parts>["components"];
+type AssistantPartRender = React.ComponentProps<typeof MessagePrimitive.GroupedParts>["children"];
+
+/**
+ * One switch for every node of an assistant message: the thought block wraps
+ * its steps, the other parts render as they are. Module-level, so the render
+ * function keeps its identity across renders.
+ */
+const renderAssistantPart: AssistantPartRender = ({ part, children }) => {
+  switch (part.type) {
+    case THOUGHT_GROUP:
+      return "indices" in part ? <ThoughtGroup group={part}>{children}</ThoughtGroup> : null;
+    case "text":
+      return <MarkdownText />;
+    case "reasoning":
+      return <ReasoningText />;
+    case "image":
+      return <MessagePartPrimitive.Image />;
+    case "tool-call":
+      return "toolUI" in part ? (part.toolUI ?? <ToolFallback {...part} />) : null;
+    case "indicator":
+      return <ThinkingIndicator />;
+    default:
+      return null;
+  }
+};
 
 function AssistantMessage() {
   return (
     <MessagePrimitive.Root className="group flex w-full max-w-(--thread-max-width) flex-col py-2">
       <div className={ASSISTANT_MESSAGE_CLASS}>
-        <MessagePrimitive.Parts components={ASSISTANT_PART_COMPONENTS} />
+        <MessagePrimitive.GroupedParts groupBy={groupThought}>
+          {renderAssistantPart}
+        </MessagePrimitive.GroupedParts>
         <TurnSpaceChoice />
         <TurnLimitNotice />
         <MessageError />

@@ -1,17 +1,18 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * The reasoning phase of an assistant turn (#1601), through the real
- * assistant-ui runtime. assistant-ui hides `Empty` (the thinking dots) as soon
- * as the last part is `reasoning`, and its default `Reasoning` renders nothing,
- * so without our own components the bubble stayed blank for the whole
- * reasoning phase.
+ * The thought block of an assistant turn (#1601), through the real
+ * assistant-ui runtime: reasoning and the tool calls the agent makes along the
+ * way fold into one collapsible block per run of consecutive steps, and the
+ * cards the user acts on or reads stay out of it. Without our own components
+ * the bubble stayed blank for the whole reasoning phase (assistant-ui's default
+ * `Reasoning` renders nothing).
  *
  * The whole `Thread` renders, as the chat page mounts it: the seam is the
  * module's public component, not an export made for this file. SSR only, like
  * `turn-error-runtime.test.tsx`: the runtime derives every message status
- * during render. The group's open state follows the stream (open while its run
- * of reasoning is the part still streaming, folded once the turn moves on);
+ * during render. The block's open state follows the stream (open while it is
+ * the part still streaming, folded once the turn moves on);
  * the reader's own toggle is a click, which this DOM-less harness cannot drive.
  */
 
@@ -80,6 +81,7 @@ const count = (html: string, needle: string) => html.split(needle).length - 1;
 /** The thinking dots: THE status region, one at most per turn, carrying the e2e/bench hook. */
 const dots = (html: string) =>
   count(html, 'role="status" aria-label="thinking.status" data-testid="chat-thinking-status"');
+/** Thought blocks: each has one disclosure trigger. */
 const reasoningRows = (html: string) => count(html, "aria-expanded=");
 const openRows = (html: string) => count(html, 'aria-expanded="true"');
 
@@ -94,7 +96,20 @@ const pendingToolCall = {
   input: {},
 } as const;
 
-describe("the reasoning phase of an assistant turn", () => {
+const failedToolCall = {
+  type: "dynamic-tool",
+  toolName: "list_agents",
+  toolCallId: "call_failed",
+  state: "output-error",
+  input: {},
+  errorText: "device_busy: the device is in use",
+} as const;
+
+const toolOutput = (payload: unknown) => ({
+  content: [{ type: "text", text: JSON.stringify(payload) }],
+});
+
+describe("the thought block of an assistant turn", () => {
   it("shows a running reasoning row, open, while the model reasons", () => {
     const html = render([reasoning(REASONING, "streaming")]);
     expect(html).toContain("reasoning.running");
@@ -125,25 +140,61 @@ describe("the reasoning phase of an assistant turn", () => {
     expect(html).not.toContain(REASONING);
   });
 
-  it("hands the dots back to the thinking indicator while a tool call runs", () => {
+  it("folds a running tool call into the block, which keeps the one set of dots", () => {
     const html = render([reasoning(REASONING, "done"), pendingToolCall]);
-    expect(html).toContain("reasoning.done");
-    expect(html).not.toContain("reasoning.running");
+    expect(reasoningRows(html)).toBe(1);
+    expect(openRows(html)).toBe(1);
+    expect(html).toContain("reasoning.running");
+    expect(html).toContain("reasoning.steps");
+    expect(html).toContain('data-testid="tool-call"');
     expect(dots(html)).toBe(1);
   });
 
-  it("gives reasoning split by a tool call one row per run, only the tail running", () => {
+  it("coalesces reasoning and tool calls into one block, the steps appended in order", () => {
     const html = render([
       reasoning(REASONING, "done"),
       pendingToolCall,
-      reasoning(REASONING_AFTER_TOOL, "streaming"),
+      // Settled text: a streaming part renders empty under SSR (smoothing drains on the client).
+      reasoning(REASONING_AFTER_TOOL, "done"),
     ]);
-    expect(reasoningRows(html)).toBe(2);
+    expect(reasoningRows(html)).toBe(1);
     expect(openRows(html)).toBe(1);
-    expect(html.indexOf("reasoning.done")).toBeLessThan(html.indexOf("reasoning.running"));
     expect(dots(html)).toBe(1);
-    // The settled run before the tool call is folded.
-    expect(html).not.toContain(REASONING);
+    const tool = html.indexOf('data-testid="tool-call"');
+    expect(html.indexOf(REASONING)).toBeLessThan(tool);
+    expect(tool).toBeLessThan(html.indexOf(REASONING_AFTER_TOOL));
+  });
+
+  it("shows a failed step as a quiet row: no red, no inline error", () => {
+    const html = render([reasoning(REASONING, "done"), failedToolCall]);
+    expect(html).toContain('data-phase="error"');
+    expect(html).toContain("tool.stepFailed");
+    expect(html).not.toContain("device_busy");
+    expect(html).not.toContain("destructive");
+  });
+
+  it("keeps a call the user reads out of the block, as its card", () => {
+    // A created package: its card stays in the transcript once the block folds.
+    // Registered tool UIs mount in an effect, which SSR never runs: the card
+    // drawn here is the fallback, which is enough to place it.
+    const html = render([
+      reasoning(REASONING, "done"),
+      {
+        type: "dynamic-tool",
+        toolName: "invoke_operation",
+        toolCallId: "call_create",
+        state: "output-available",
+        input: { operation_id: "createAgent" },
+        output: toolOutput({ status: 201, body: { id: "@acme/report" } }),
+      },
+    ]);
+    expect(reasoningRows(html)).toBe(1);
+    expect(openRows(html)).toBe(0);
+    expect(html).toContain("reasoning.done");
+    // The folded block mounts no step: this card is outside it, a bordered card.
+    expect(html).toContain('data-testid="tool-call" data-phase="success" class="bg-card');
+    // Standalone tail: the trailing dots hold the status region, not the block.
+    expect(dots(html)).toBe(1);
   });
 
   it("stops the dots on a turn that failed mid-reasoning", () => {

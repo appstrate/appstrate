@@ -8,9 +8,12 @@
  * clicking the row — parsing arbitrary API payloads into a field table reads
  * worse than monospace JSON, and JSON keeps every field intact.
  *
- * Errors stay inline (banner under the header), never hidden behind the click.
- * Tone is driven by the actual result (`deriveToolPhase`), not the verb — a
- * failed call always renders as an error.
+ * Inside the turn's thought block (`ThoughtGroup`, `reasoning.tsx`) the card is
+ * a quiet step row: a failed call there is one the agent works past, so it
+ * reads as a muted step (no red, no banner) and its error stays one click away
+ * in the raw JSON. Outside the block, a card the user reads (e.g. the package a
+ * call created) keeps its border and its inline error. Tone is driven by the
+ * actual result (`deriveToolPhase`), not the verb.
  *
  * One shared `<ToolCallCard>` does the work; the four `makeAssistantToolUI`
  * registrations are thin wrappers that only pick the icon, label, and id.
@@ -24,6 +27,7 @@ import {
   ArrowUpRightIcon,
   BookOpenIcon,
   BracesIcon,
+  CircleXIcon,
   PencilIcon,
   PlayIcon,
   PlusIcon,
@@ -40,6 +44,8 @@ import { StructuredOutput } from "@appstrate/ui/components/structured-output";
 import { Modal } from "./modal.tsx";
 import { callSpaceOf } from "./conversation-scope.ts";
 import { useChatHost } from "./runtime-context.ts";
+import { useInThoughtGroup } from "./use-in-thought-group.ts";
+import { INITIATE_CONNECT_OP } from "./thought-group.ts";
 import { JsonView } from "./json-view.tsx";
 import { OAuthConnectCard } from "./oauth-connect-card.tsx";
 import { ChatRunProgressCard } from "./chat-run-progress-card.tsx";
@@ -74,14 +80,6 @@ import {
   type ToolPhase,
 } from "./tool-result.ts";
 
-/**
- * `invoke_operation` operationId that kicks off an integration connect flow.
- * `initiateIntegrationConnect` is the unified, auth-type-agnostic op
- * whose result carries a `connect_url`; its result renders the connect
- * card (button + auto-resume on completion — see oauth-connect-card).
- */
-const INITIATE_CONNECT_OP = "initiateIntegrationConnect";
-
 // Readable label + icon for an Appstrate API operation, by verb prefix — a
 // heuristic, not an exhaustive operationId map (which would rot). The first
 // match wins; unmatched ops fall back to the neutral `tool.op.other`.
@@ -114,17 +112,23 @@ function Meta({
   phase,
   status,
   durationMs,
+  quiet,
 }: {
   phase: ToolPhase;
   status?: number;
   durationMs?: number;
+  quiet: boolean;
 }) {
   const { lang } = useChatHost();
   if (status === undefined && durationMs === undefined) return null;
   return (
     <span className="flex items-center gap-1.5 text-xs">
       {status !== undefined ? (
-        <code className={`rounded px-1.5 py-0.5 font-medium ${BADGE_TONE[phase]}`}>{status}</code>
+        <code
+          className={`rounded px-1.5 py-0.5 font-medium ${quiet ? BADGE_TONE.pending : BADGE_TONE[phase]}`}
+        >
+          {status}
+        </code>
       ) : null}
       {durationMs !== undefined ? (
         <span className="text-muted-foreground">{formatDuration(durationMs, lang)}</span>
@@ -137,14 +141,20 @@ function Meta({
  * Single leading icon per row: the operation's verb icon, tinted by phase
  * (neutral / destructive). While running it is replaced by a spinner. Status is
  * otherwise carried by the HTTP badge, the red border, and the inline error —
- * no separate status icon, so the row shows one coherent glyph.
+ * no separate status icon, so the row shows one coherent glyph. A quiet step
+ * row marks a failure with a muted cross instead of red.
  */
-function LeadIcon({ phase, Icon }: { phase: ToolPhase; Icon: LucideIcon }) {
+function LeadIcon({ phase, Icon, quiet }: { phase: ToolPhase; Icon: LucideIcon; quiet: boolean }) {
+  const size = quiet ? "size-3.5" : "size-4";
   if (phase === "running") {
-    return <Spinner className="text-muted-foreground size-4 shrink-0" />;
+    return <Spinner className={`text-muted-foreground shrink-0 ${size}`} />;
+  }
+  if (quiet) {
+    const Glyph = phase === "error" ? CircleXIcon : Icon;
+    return <Glyph className={`text-muted-foreground shrink-0 ${size}`} />;
   }
   const tone = phase === "error" ? "text-destructive" : "text-muted-foreground";
-  return <Icon className={`size-4 shrink-0 ${tone}`} />;
+  return <Icon className={`shrink-0 ${size} ${tone}`} />;
 }
 
 function hasContent(value: unknown): boolean {
@@ -170,8 +180,8 @@ function DetailSection({ titleKey, value }: { titleKey: string; value: unknown }
 
 /**
  * Compact clickable tool row. Inline: phase icon, verb icon, label, id, and
- * HTTP/duration meta (+ an inline error banner on failure). Click opens a modal
- * with the raw input / output / metadata JSON.
+ * HTTP/duration meta (+ an inline error banner on failure, outside the thought
+ * block). Click opens a modal with the raw input / output / metadata JSON.
  */
 export function ToolCallCard({
   phase,
@@ -204,6 +214,7 @@ export function ToolCallCard({
   footer?: React.ReactNode;
 }) {
   const { t } = useChatHost();
+  const quiet = useInThoughtGroup();
   const title = labelKey ? t(labelKey) : (label ?? "");
   const [open, setOpen] = React.useState(false);
   // `unwrapMcpResult` JSON-parses the tool payload. Unmemoized it re-parsed on
@@ -212,7 +223,7 @@ export function ToolCallCard({
   const unwrapped = React.useMemo(() => unwrapMcpResult(result), [result]);
   const status = httpStatusOf(unwrapped);
   const durationMs = readDurationMs(timing);
-  const errorMsg = phase === "error" ? extractErrorMessage(unwrapped) : undefined;
+  const errorMsg = phase === "error" && !quiet ? extractErrorMessage(unwrapped) : undefined;
   const meta = definedEntries({
     tool_call_id: toolCallId,
     is_error: isError,
@@ -220,25 +231,38 @@ export function ToolCallCard({
     duration_ms: durationMs,
   });
 
-  const border = phase === "error" ? "border-destructive/40" : "";
+  const border = phase === "error" && !quiet ? "border-destructive/40" : "";
   return (
-    <div className={`bg-card text-card-foreground my-3 w-full rounded-lg border ${border}`}>
-      {/* Fixed h-9 header row: the HTTP badge (taller than the text line) and
-          the duration appear when the result lands — a py-based row would grow
-          by a few px at that moment. Fixed height makes result arrival a 0px
-          layout change. */}
+    <div
+      data-testid="tool-call"
+      data-phase={phase}
+      className={
+        quiet ? "w-full" : `bg-card text-card-foreground my-3 w-full rounded-lg border ${border}`
+      }
+    >
+      {/* Fixed-height header row (h-9 card, h-7 step): the HTTP badge (taller
+          than the text line) and the duration appear when the result lands — a
+          py-based row would grow by a few px at that moment. Fixed height makes
+          result arrival a 0px layout change. */}
       <button
         type="button"
-        className="hover:bg-muted/50 flex h-9 w-full items-center gap-2 rounded-lg px-3 text-left text-sm"
+        className={
+          quiet
+            ? "hover:bg-muted/50 text-muted-foreground hover:text-foreground flex h-7 w-full items-center gap-2 rounded-md px-2 text-left text-xs"
+            : "hover:bg-muted/50 flex h-9 w-full items-center gap-2 rounded-lg px-3 text-left text-sm"
+        }
         onClick={() => setOpen(true)}
       >
-        <LeadIcon phase={phase} Icon={Icon} />
+        <LeadIcon phase={phase} Icon={Icon} quiet={quiet} />
         <span className="flex min-w-0 flex-1 items-center gap-2 truncate">
-          <span className="font-medium">{title}</span>
+          <span className={quiet ? "" : "font-medium"}>{title}</span>
           {idText ? <code className="text-muted-foreground truncate text-xs">{idText}</code> : null}
+          {quiet && phase === "error" ? (
+            <span className="sr-only">{t("tool.stepFailed")}</span>
+          ) : null}
         </span>
         <CallSpace spaceId={spaceId} />
-        <Meta phase={phase} status={status} durationMs={durationMs} />
+        <Meta phase={phase} status={status} durationMs={durationMs} quiet={quiet} />
       </button>
       {errorMsg ? (
         <div className="text-destructive border-t px-3 py-2 text-xs break-words">{errorMsg}</div>

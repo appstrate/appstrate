@@ -1,21 +1,26 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * The model's reasoning, shown. The engine already streams it
- * (`reasoning-delta`, `pi-chat/ui-stream-mapper.ts`); assistant-ui's default
- * renderer for a reasoning part is `() => null`, and it hides `Empty` (the
- * thinking dots) as soon as the last part is reasoning, so without this the
- * bubble would stay blank for the whole reasoning phase.
+ * The agent's work on a turn, shown the way a coding agent shows it: its
+ * reasoning and its tool calls fold into ONE block per run of consecutive steps
+ * (`ThoughtGroup`, fed by `MessagePrimitive.GroupedParts` with the rule in
+ * `thought-group.ts`). Collapsed it is one line: "Thinking", the step count,
+ * the duration when the runtime timed it. Expanded it lists one compact row per
+ * step, appended live.
  *
- * One disclosure per run of consecutive reasoning parts (`ReasoningGroup`),
- * open while that run is the part still streaming, so it takes the place the
- * thinking dots held, then folded to one line once the answer moves on. The
- * first click hands the open state to the reader for good.
+ * Open while the block is the part still streaming, so it takes the place the
+ * thinking dots held, then folded once the answer moves on. The first click
+ * hands the open state to the reader for good.
+ *
+ * Inside the block a tool call is a quiet row (`useInThoughtGroup`): a failed
+ * call the agent recovers from is a step, not a user-facing error. Red stays
+ * for what ends the turn (`MessageError`).
  */
 
 import * as React from "react";
-import { useAuiState, type ReasoningGroupComponent } from "@assistant-ui/react";
+import { useAuiState } from "@assistant-ui/react";
 import { BrainIcon, ChevronRightIcon } from "lucide-react";
+import { formatDuration } from "@appstrate/core/format";
 import { Button } from "@appstrate/ui/components/button";
 import {
   Collapsible,
@@ -23,6 +28,7 @@ import {
   CollapsibleTrigger,
 } from "@appstrate/ui/components/collapsible";
 import { useChatHost } from "./runtime-context.ts";
+import { ThoughtGroupContext } from "./use-in-thought-group.ts";
 
 /**
  * The turn's one status region (the e2e/bench hook reads its test id). h-6 =
@@ -44,17 +50,44 @@ export function ThinkingStatus() {
   );
 }
 
+/** The group summary `MessagePrimitive.GroupedParts` hands a `group-…` node. */
+interface ThoughtGroupSummary {
+  indices: readonly number[];
+  timing?: { startedAt?: number; completedAt?: number };
+}
+
+function settledDurationMs(timing: ThoughtGroupSummary["timing"]): number | undefined {
+  if (typeof timing?.startedAt !== "number" || typeof timing.completedAt !== "number") {
+    return undefined;
+  }
+  return timing.completedAt - timing.startedAt;
+}
+
 /**
- * Running = message running ∧ this group is its tail, so the group settles once
- * a text or tool part follows, and on a turn stopped or failed mid-reasoning.
+ * Running = message running and this block is its tail, so the block settles
+ * once a text or a standalone card follows, and on a turn stopped or failed
+ * mid-step.
  */
-export const ReasoningGroup: ReasoningGroupComponent = ({ endIndex, children }) => {
-  const { t } = useChatHost();
+export function ThoughtGroup({
+  group,
+  children,
+}: {
+  group: ThoughtGroupSummary;
+  children: React.ReactNode;
+}) {
+  const { t, lang } = useChatHost();
+  const endIndex = group.indices[group.indices.length - 1];
   const streaming = useAuiState(
     (s) => s.message.status?.type === "running" && s.message.parts.length - 1 === endIndex,
   );
   const [readerOpen, setReaderOpen] = React.useState<boolean | null>(null);
   const open = readerOpen ?? streaming;
+  const steps = group.indices.length;
+  const durationMs = streaming ? undefined : settledDurationMs(group.timing);
+  const summary = [
+    steps > 1 ? t("reasoning.steps", { count: steps }) : null,
+    durationMs !== undefined ? formatDuration(durationMs, lang) : null,
+  ].filter((part) => part !== null);
 
   return (
     <Collapsible open={open} onOpenChange={setReaderOpen} className="my-2">
@@ -67,17 +100,29 @@ export const ReasoningGroup: ReasoningGroupComponent = ({ endIndex, children }) 
           >
             <BrainIcon />
             {streaming ? t("reasoning.running") : t("reasoning.done")}
+            {summary.length > 0 ? (
+              <span className="text-muted-foreground/80 font-normal tabular-nums">
+                {summary.join(" · ")}
+              </span>
+            ) : null}
             <ChevronRightIcon className="duration-fast ease-surface transition-transform group-data-[state=open]:rotate-90" />
           </Button>
         </CollapsibleTrigger>
         {/* A sibling of the trigger, not a child: a button's content is
             presentational, so a live region inside it is not exposed. It keeps
-            something moving between the end of the reasoning and the next part. */}
+            something moving while the agent works between two visible parts. */}
         {streaming ? <ThinkingStatus /> : null}
       </div>
       <CollapsibleContent className="duration-base ease-surface motion-safe:data-[state=open]:animate-collapsible-down motion-safe:data-[state=closed]:animate-collapsible-up overflow-hidden">
-        <div className="border-border ml-2 border-l pl-4">{children}</div>
+        {/* A click on a step (its detail modal) is the reader's too: the block
+            stays as they see it when the answer starts. */}
+        <div
+          className="border-border ml-2 flex flex-col border-l pl-3"
+          onClickCapture={() => setReaderOpen((current) => current ?? open)}
+        >
+          <ThoughtGroupContext.Provider value={true}>{children}</ThoughtGroupContext.Provider>
+        </div>
       </CollapsibleContent>
     </Collapsible>
   );
-};
+}
