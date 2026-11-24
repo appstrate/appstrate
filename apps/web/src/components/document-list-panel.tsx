@@ -1,17 +1,17 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Shared documents panel — loading/error/empty states, the two bodies
- * (table, cards, compact list), and the delete + preview modals. Used by the
+ * Shared documents panel — loading/error/empty states, the three bodies
+ * (table, cards, compact list), and the delete confirmation. Used by the
  * gallery page and the run page. Data fetching and pagination stay with the
- * caller; this component is fed an already-resolved list and owns only the
- * delete/preview interaction (download + delete gating live here since they
- * are identical on every surface).
+ * caller; this component is fed an already-resolved list. A file opens on its
+ * one page, the reader (`/files/:fileId`), from every list and every space:
+ * download, keep and delete gating live here since they are identical on every
+ * surface.
  */
 
 import { type ReactNode, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Navigate, useNavigate } from "react-router-dom";
 import { FileText } from "lucide-react";
 import { useDeleteFile, useFileDownload, useKeepFile, type FileDto } from "../hooks/use-files";
 import { EmptyState, NoMatchState } from "./page-states";
@@ -22,9 +22,7 @@ import { DataTable } from "./data-table";
 import type { ColumnMenuSpec } from "./list-toolbar";
 import { useDocumentColumns } from "./document-columns";
 import { DocumentRowActions } from "./document-row-actions";
-import { FilePreview } from "./file-preview";
 import { ConfirmModal } from "./confirm-modal";
-import { useUrlModal } from "../hooks/use-url-modal";
 import { useColumnVisibility } from "../stores/column-visibility-store";
 import { useCurrentOrgId } from "../hooks/use-org";
 import { useCurrentSpaceId } from "../hooks/use-current-space";
@@ -64,32 +62,18 @@ export function DocumentListPanel({
   const deleteDoc = useDeleteFile();
   const keepDoc = useKeepFile();
   const [pendingDelete, setPendingDelete] = useState<FileDto | null>(null);
-  const navigate = useNavigate();
   const orgId = useCurrentOrgId();
   const currentSpaceId = useCurrentSpaceId();
 
-  // A file of another space is read, kept and deleted in its own, named on the request
-  // (`?org=…&space=…` for the reader), without switching. Its `capabilities` are already its
-  // space's: the server judges each row by the grant of the row's space.
+  // A file of another space is kept and deleted in its own, named on the request, without
+  // switching. Its `capabilities` are already its space's: the server judges each row by the
+  // grant of the row's space.
   const contextOf = (doc: FileDto) => otherSpaceFileContext(doc.spaceId, orgId, currentSpaceId);
-  const readerHref = (doc: FileDto) => {
-    const context = contextOf(doc);
-    return context && doc.capabilities.preview ? fileReaderPath(doc.id, context) : undefined;
-  };
-  const openPreview = (doc: FileDto) => {
-    const href = readerHref(doc);
-    if (href) navigate(href);
-    else preview.open(doc.id);
-  };
-
-  // A deep-linked doc may be outside the currently loaded page, so an empty name
-  // is fine — the preview modal falls back to the fetched DTO's name.
-  const preview = useUrlModal("preview");
-  const previewed = preview.value ? documents.find((d) => d.id === preview.value) : undefined;
-  const previewDoc = preview.value ? { id: preview.value, name: previewed?.name ?? "" } : null;
-  // A listed file of another space is read in its own (the reader), as its row opens it: the
-  // in-place preview reads the working space only.
-  const previewElsewhere = previewed ? readerHref(previewed) : undefined;
+  // Every file opens on the reader, which names the file's own space whatever the current one.
+  const readerHref = (doc: FileDto) =>
+    orgId && doc.capabilities.preview
+      ? fileReaderPath(doc.id, { orgId, spaceId: doc.spaceId })
+      : undefined;
 
   // Wire the delete/keep handlers unconditionally — per-document visibility is
   // driven by the server-computed `capabilities` (delete/keep) inside the tile,
@@ -150,7 +134,7 @@ export function DocumentListPanel({
                 isKeepPending={pendingKeepId === doc.id}
                 showRunLink={showRunLink?.(doc)}
                 showSpace={spanning}
-                onPreview={openPreview}
+                href={readerHref(doc)}
                 onDownload={onDownload}
                 onKeep={onKeep}
                 onDelete={onDelete}
@@ -173,7 +157,7 @@ export function DocumentListPanel({
                   doc={doc}
                   isPending={pendingKeepId === doc.id}
                   showRunLink={showRunLink?.(doc)}
-                  onPreview={openPreview}
+                  readerHref={readerHref(doc)}
                   onDownload={onDownload}
                   onKeep={onKeep}
                   onDelete={onDelete}
@@ -189,9 +173,6 @@ export function DocumentListPanel({
             rows={documents}
             rowKey={(doc) => doc.id}
             rowHref={readerHref}
-            rowAction={(doc) => preview.open(doc.id)}
-            // The in-place preview reads in the current space; another space's row links instead.
-            rowActionable={(doc) => doc.capabilities.preview && !contextOf(doc)}
             rowLabel={(doc) => doc.name}
             isLoading={isLoading && documents.length === 0}
             failure={error}
@@ -210,12 +191,6 @@ export function DocumentListPanel({
         confirmLabel={t("common:btn.delete")}
         isPending={deleteDoc.isPending}
       />
-
-      {previewElsewhere ? (
-        <Navigate to={previewElsewhere} replace />
-      ) : (
-        previewDoc && <FilePreview file={previewDoc} onClose={preview.close} />
-      )}
     </>
   );
 }

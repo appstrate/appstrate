@@ -857,12 +857,14 @@ credentials (`lib/model-picker.ts`); a new surface that picks a model uses this 
 
 ## 12. Files, editors and content
 
-- **A file shown anywhere** (run deliverable, preview modal, chat side panel)
+- **A file shown anywhere** (run deliverable, the file's page, chat side panel)
   wears `FileArtifact` (`components/file-artifact.tsx`, on
   `packages/ui/src/components/artifact.tsx`) around `FileViewer`
   (`components/file-viewer.tsx`, by the server's `preview_kind`; its HTML sandbox
   is `allow-scripts` only, never loosen it). A file list is `DocumentListPanel`
-  (table, cards or compact list), a preview is addressable as `?preview=<id>`.
+  (table, cards or compact list); every row opens the file's one page, the reader
+  (`pages/file-reader.tsx`, `/files/:fileId?org=…&space=…`, built by `fileReaderPath`),
+  never a modal, from every list and every space.
 - **A package's files** are one explorer in Paramètres › Explorer
   (`components/package-files/`: `FileTree` is a virtualised WAI-ARIA tree,
   `PackageFilesView` the editor). Edits stay in the package draft until the save

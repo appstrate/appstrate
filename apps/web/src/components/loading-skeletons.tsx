@@ -509,6 +509,30 @@ export function NotificationDetailSkeleton() {
   );
 }
 
+/** A file's page (the reader), under the files list: the bar, then the file's frame. */
+export function FileReaderSkeleton() {
+  const { t } = useTranslation("common");
+  // The page names the file's space while the switcher does not: in « Tous les espaces » always.
+  const { on } = useOverviewMode();
+  return (
+    <DetailPageSkeleton
+      trail={[{ label: t("nav.files"), href: "/files" }]}
+      tabCount={0}
+      meta={false}
+      spaces={on}
+      panel={
+        <div className="flex h-[max(28rem,calc(100svh-16rem))] min-w-0 flex-col overflow-hidden rounded-lg border">
+          <div className="flex min-h-12 items-center gap-2.5 border-b px-4 py-2">
+            <Skeleton className="size-4 shrink-0" />
+            <SkeletonLine className="w-32 text-xs leading-5" />
+          </div>
+          <Skeleton className="min-h-0 flex-1 rounded-none" />
+        </div>
+      }
+    />
+  );
+}
+
 /** A schedule's page, under the schedules list. */
 export function ScheduleDetailSkeleton() {
   const { t } = useTranslation("agents");

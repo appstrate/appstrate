@@ -28,7 +28,7 @@
   "filter.user_upload": "Uploads",
   "purpose.agent_output": "Agent output",
   "purpose.user_upload": "Upload",
-  "row.preview": "Preview",
+  "row.open": "Open",
   "row.keep": "Keep",
   "row.moreActions": "More actions for {{name}}",
   "expiry.expired": "Expired",

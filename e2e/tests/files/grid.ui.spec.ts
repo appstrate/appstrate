@@ -103,7 +103,7 @@ for (const appearance of [
     const cards = page.getByRole("radio", { name: "Vue cartes", exact: true });
     const table = page.getByRole("radio", { name: "Vue tableau", exact: true });
     await expect(cards).toBeChecked();
-    const preview = page.getByRole("button", { name: "Aperçu: capture.png", exact: true });
+    const preview = page.getByRole("link", { name: "Ouvrir: capture.png", exact: true });
     await expect(preview).toBeVisible();
     await expect
       .poll(() =>
@@ -122,11 +122,12 @@ for (const appearance of [
     );
     await page.screenshot({ path: testInfo.outputPath("files-grid.png"), fullPage: true });
 
+    // A file opens on its page, never in a modal over the list.
     await preview.click();
-    await expect(page.getByRole("dialog", { name: "capture.png", exact: true })).toBeVisible();
-    await expect(page).toHaveURL(/preview=file_grid/);
-    await page.keyboard.press("Escape");
-    await expect(preview).toBeFocused();
+    await expect(page).toHaveURL(/\/files\/file_grid\?/);
+    await expect(page.getByRole("dialog")).toHaveCount(0);
+    await page.goBack();
+    await expect(preview).toBeVisible();
 
     const menu = page.getByRole("button", { name: "Plus d'actions pour capture.png", exact: true });
     await menu.click();
