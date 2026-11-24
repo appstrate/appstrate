@@ -36,6 +36,25 @@ interface MarkdownNode {
   children?: readonly MarkdownNode[];
 }
 
+// The SDK decodes a mention but does not return its source span. The bracket form carries
+// verbatim values; the quoted form can contain JSON escapes or braces inside either string.
+function mentionEnd(
+  text: string,
+  start: number,
+  mention: Extract<DirectiveSegment, { kind: "mention" }>,
+) {
+  const value = start + 1 + mention.type.length;
+  if (text[value] === "[") {
+    const afterLabel = value + 2 + mention.label.length;
+    const name = `{name=${mention.id}}`;
+    return text.startsWith(name, afterLabel) ? afterLabel + name.length : afterLabel;
+  }
+  const quotedFields = /\{(?:[^"}]|"(?:\\.|[^"\\])*")*\}/y;
+  quotedFields.lastIndex = value;
+  quotedFields.exec(text);
+  return quotedFields.lastIndex;
+}
+
 /** Parse commands in prose while preserving the original Markdown source of literal examples. */
 export const markdownDirectiveFormatter: DirectiveFormatter = {
   serialize: defaultDirectiveFormatter.serialize,
@@ -56,16 +75,23 @@ export const markdownDirectiveFormatter: DirectiveFormatter = {
     for (const match of text.matchAll(/(\\+):(?=(?:skill|agent)[[{])/g)) {
       if (match[1]!.length % 2) literal.push([match.index, match.index + match[0].length]);
     }
-    const segments: DirectiveSegment[] = [];
+    literal.sort((a, b) => a[0] - b[0]);
     let at = 0;
-    for (const [start, end] of literal.sort((a, b) => a[0] - b[0])) {
-      if (start < at) continue;
-      segments.push(...defaultDirectiveFormatter.parse(text.slice(at, start)));
-      segments.push({ kind: "text", text: text.slice(start, end) });
-      at = end;
-    }
-    segments.push(...defaultDirectiveFormatter.parse(text.slice(at)));
-    return segments;
+    let range = 0;
+    return defaultDirectiveFormatter.parse(text).map((part) => {
+      if (part.kind === "text") {
+        at += part.text.length;
+        return part;
+      }
+      const start = at;
+      at = mentionEnd(text, start, part);
+      while (range < literal.length && literal[range]![1] <= start) range++;
+      // Markdown inside a selected title belongs to the chip. Only its opening colon
+      // decides whether the whole directive is a literal example.
+      return range < literal.length && literal[range]![0] <= start
+        ? { kind: "text", text: text.slice(start, at) }
+        : part;
+    });
   },
 };
 

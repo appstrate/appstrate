@@ -24,7 +24,7 @@ const commands = {
   agents: [
     {
       name: "run-report",
-      title: "Weekly report",
+      title: "Weekly report for `package.json`",
       description: "Builds the weekly report",
       packageId: "@acme/report",
       icon: null,
@@ -146,7 +146,7 @@ test("an agent chip is a message of its own: its text part and its prompt part, 
   await expect(page.getByRole("option", { name: /Weekly report/ })).toBeVisible();
   await page.keyboard.press("Tab");
   const chip = input.getByTestId("directive-chip");
-  await expect(chip).toHaveText("Weekly report");
+  await expect(chip).toHaveText("Weekly report for `package.json`");
 
   // The space the menu leaves after the chip goes.
   await page.keyboard.press("Backspace");
@@ -157,12 +157,15 @@ test("an agent chip is a message of its own: its text part and its prompt part, 
     messages: { role: string; parts: { type: string; text?: string; data?: unknown }[] }[];
   };
   expect(body.messages.at(-1)!.parts).toEqual([
-    { type: "text", text: ":agent[Weekly report]{name=run-report}" },
-    { type: "data-agent-prompt", data: { name: "run-report", title: "Weekly report" } },
+    { type: "text", text: ":agent[Weekly report for `package.json`]{name=run-report}" },
+    {
+      type: "data-agent-prompt",
+      data: { name: "run-report", title: "Weekly report for `package.json`" },
+    },
   ]);
   // The thread shows the chip in the bubble, where it was typed; the composer is empty.
   await expect(
-    page.locator("[data-testid=directive-chip]", { hasText: "Weekly report" }),
+    page.locator("[data-testid=directive-chip]", { hasText: "Weekly report for `package.json`" }),
   ).toBeVisible();
   await expect(input.getByTestId("directive-chip")).toHaveCount(0);
 });

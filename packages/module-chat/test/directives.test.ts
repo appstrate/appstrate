@@ -25,6 +25,19 @@ describe("directives", () => {
     expect(directivesOf(serializeDirective(odd))).toMatchObject([odd]);
   });
 
+  it("keeps the source spans of noncanonical directives beside a literal example", () => {
+    const quoted = String.raw`:agent{label="\u007d \"quoted\"" name="run-legacy"}`;
+    const explicitName = ":skill[tone]{name=tone}";
+    const literal = "`" + quoted + "`";
+    const text = explicitName + quoted + literal + serializeDirective(skill);
+    expect(directivesOf(text)).toMatchObject([
+      { type: "skill", label: "tone", id: "tone" },
+      { type: "agent", label: '} "quoted"', id: "run-legacy" },
+      skill,
+    ]);
+    expect(readableDirectives(text)).toBe('/tone/} "quoted"' + literal + "/tone");
+  });
+
   it("splits the text into literal text and directives, in order", () => {
     expect(directiveSegments(`a ${serializeDirective(skill)} b`)).toEqual([
       { kind: "text", text: "a " },
