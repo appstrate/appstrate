@@ -536,6 +536,12 @@ For other routes, put `x-appstrate-space` on each OpenAPI operation alongside `o
 | `{ kind: "resource", source: "body", parameter: "spaceId", level_parameter: "level", space_level: "space" }`                      | A discriminated body chooses an organization-level or space-level resource.                                                                                                |
 | `{ kind: "resource", source: "query", parameter: "spaceId", all_parameter: "all", organization_permission: "org-webhooks:read" }` | A list supports a space filter, an all-spaces flag and an organization-level default with the given grant.                                                                 |
 
+A request-space operation can declare `default: "personal"` for personal creation or inline work.
+A run accepting both registry and inline sources uses `default: "personal_for_inline_source"`
+to apply that default only when `body.source.kind` is `"inline"`. If the REST body requires the
+same space as the request header, name its field with `parameter`. MCP uses that field when supplied
+and fills it when the destination is already known.
+
 On a body- or query-selected resource, `space_permission` names the grant required on the space branch when the two levels use different permissions.
 
 Registration rejects a missing or unknown scope, a path target absent from the template, and a

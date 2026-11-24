@@ -28,18 +28,6 @@ export const TOOL_SPACE_RULES = {
   }
 >;
 
-const PERSONAL_OPERATIONS = new Set([
-  "createAgent",
-  "createSkill",
-  "createIntegrationPackage",
-  "forkPackage",
-  "importPackage",
-  "importBundle",
-  "importPackageFromGithub",
-  "runInline",
-  "validateInlineRun",
-]);
-
 /** Admission, the tool's guard, and its receipt use the same decision. An omitted id on a
  * space call means the caller must choose. A target can differ from the space a call enters. */
 export type CallSpace =
@@ -58,6 +46,15 @@ export function effectiveOperationScope(
   return rule.kind === "aggregate" && rule.permission && !orgPermissions?.has(rule.permission)
     ? ({ kind: "organization" } as const)
     : rule;
+}
+
+/** An inline remote run composes an agent from the request, as on the inline-run route. */
+export function isInlineRunSource(rule: CatalogOperation["spaceScope"] | undefined, body: unknown) {
+  return (
+    rule?.kind === "request" &&
+    rule.default === "personal_for_inline_source" &&
+    asRecord(asRecord(body).source).kind === "inline"
+  );
 }
 
 export function chosenCallSpace(name: unknown, args: Record<string, unknown>, policy: SpacePolicy) {
@@ -134,10 +131,8 @@ export function resolveCallSpace(
     case "organization":
       return { kind: "none" };
     case "request":
-      return direct(
-        PERSONAL_OPERATIONS.has(op.operationId) ||
-          (op.operationId === "createRemoteRun" && asRecord(body.source).kind === "inline"),
-      );
+      if (rule.parameter && body[rule.parameter] !== undefined) return target(body[rule.parameter]);
+      return direct(rule.default === "personal" || isInlineRunSource(rule, body));
     case "aggregate":
       if (policy.bounded) return direct();
       // An explicitly named caller space still gates the tool there. Unconfined REST reads
@@ -173,9 +168,12 @@ export function withOperationTarget(
 ): Record<string, unknown> {
   if (!spaceId) return args;
   const rule = op.spaceScope;
+  if (!("parameter" in rule) || !rule.parameter) return args;
+  const parameter = rule.parameter;
   let source: "path_params" | "body" | "query";
-  if (rule.kind === "target" && !rule.optional) source = rule.source ?? "path_params";
-  else if (rule.kind === "resource" && rule.source !== "row") {
+  if (rule.kind === "request") source = "body";
+  else if (rule.kind === "target" && !rule.optional) source = rule.source ?? "path_params";
+  else if (rule.kind === "resource") {
     source = rule.source;
     if (rule.source === "body" && asRecord(args.body)[rule.levelParameter] !== rule.spaceLevel)
       return args;
@@ -189,7 +187,7 @@ export function withOperationTarget(
   )
     return args;
   const bag = asRecord(original);
-  return bag[rule.parameter] === undefined
-    ? { ...args, [source]: { ...bag, [rule.parameter]: spaceId } }
+  return bag[parameter] === undefined
+    ? { ...args, [source]: { ...bag, [parameter]: spaceId } }
     : args;
 }

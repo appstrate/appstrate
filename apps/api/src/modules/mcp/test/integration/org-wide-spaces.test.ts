@@ -10,7 +10,7 @@
 import { describe, it, expect, beforeEach, spyOn } from "bun:test";
 import { and, eq } from "drizzle-orm";
 import { getEnv } from "@appstrate/env";
-import { auditEvents, packages, spaceMembers } from "@appstrate/db/schema";
+import { auditEvents, packages, runs, spaceMembers } from "@appstrate/db/schema";
 import * as spacesService from "../../../../services/spaces.ts";
 import { db } from "../../../../../test/helpers/db.ts";
 import { getTestApp } from "../../../../../test/helpers/app.ts";
@@ -193,6 +193,50 @@ describe("mcp org-wide connection", () => {
         .where(eq(packages.id, id));
       expect(stored?.home).toBe(expected);
     }
+  });
+
+  it("uses the remote run's body destination and fills it for a personal inline run", async () => {
+    const operation_id = "createRemoteRun";
+    const source = {
+      kind: "inline",
+      manifest: {
+        name: `@${orgSlug}/inline`,
+        type: "agent",
+        version: "0.1.0",
+        schema_version: "0.1",
+        display_name: "Inline",
+        description: "Remote inline test",
+      },
+      prompt: "Summarize the request.",
+    };
+    const missing = await call("invoke_operation", { operation_id, body: { source } });
+    expect(missing.result?._meta).toMatchObject({ [SPACE_CHOICE_META_KEY]: [gestion.id] });
+
+    const personal = await seedSpace({
+      orgId: headers["X-Org-Id"]!,
+      name: "Personnel",
+      ownerUserId: callerId,
+      visibility: "private",
+    });
+    for (const [body, expectedId] of [
+      [{ source }, personal.id],
+      [{ source, spaceId: gestion.id }, gestion.id],
+    ] as const) {
+      const result = payload(await call("invoke_operation", { operation_id, body }));
+      expect(result.data.status).toBe(201);
+      expect(result.data.space).toMatchObject({ id: expectedId });
+      const [created] = await db
+        .select({ spaceId: runs.spaceId })
+        .from(runs)
+        .where(eq(runs.id, (result.data.body as { id: string }).id));
+      expect(created?.spaceId).toBe(expectedId);
+    }
+
+    const registry = await call("invoke_operation", {
+      operation_id,
+      body: { source: { kind: "registry", packageId: `@${orgSlug}/existing` } },
+    });
+    expect(payload(registry).data.code).toBe("missing_argument");
   });
 
   it("declares space_id on the tools that act in a space, and only those", async () => {

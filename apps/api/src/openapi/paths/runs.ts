@@ -680,6 +680,7 @@ const canonicalRunsPaths = {
   "/api/runs/inline": {
     post: {
       operationId: "runInline",
+      "x-appstrate-space": { kind: "request", default: "personal" },
       tags: ["Runs"],
       summary: "Execute an inline agent (no persisted package)",
       description:
@@ -930,6 +931,7 @@ const canonicalRunsPaths = {
   "/api/runs/inline/validate": {
     post: {
       operationId: "validateInlineRun",
+      "x-appstrate-space": { kind: "request", default: "personal" },
       tags: ["Runs"],
       summary: "Validate an inline manifest without firing a run",
       description:
@@ -1351,6 +1353,11 @@ const canonicalRunsPaths = {
   "/api/runs/remote": {
     post: {
       operationId: "createRemoteRun",
+      "x-appstrate-space": {
+        kind: "request",
+        parameter: "spaceId",
+        default: "personal_for_inline_source",
+      },
       tags: ["Runs"],
       summary: "Create a remote-backed run (caller executes the agent)",
       description:

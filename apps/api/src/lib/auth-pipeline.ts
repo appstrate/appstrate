@@ -39,7 +39,6 @@ import { principalGrants } from "./principal-permissions.ts";
 import { toScopeCeiling } from "./permissions.ts";
 import { getClientIp, propagateRequestClientIp } from "./client-ip.ts";
 import { skipAuth } from "./auth-paths.ts";
-export { skipAuth } from "./auth-paths.ts";
 import { logger } from "./logger.ts";
 import { withPublicAppOrigin } from "./public-url.ts";
 import type { AppEnv, OrgRole } from "../types/index.ts";

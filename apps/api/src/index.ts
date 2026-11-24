@@ -72,7 +72,8 @@ import { apiVersion } from "./middleware/api-version.ts";
 import { idempotencyGuard } from "./middleware/idempotency-guard.ts";
 import { getCachedOrgApiVersion } from "./services/organizations.ts";
 import { getAppConfig, initAppConfig } from "./lib/app-config.ts";
-import { applyAuthPipeline, skipAuth } from "./lib/auth-pipeline.ts";
+import { skipAuth } from "./lib/auth-paths.ts";
+import { applyAuthPipeline } from "./lib/auth-pipeline.ts";
 import type { AppEnv } from "./types/index.ts";
 import { apiCors } from "./lib/cors.ts";
 

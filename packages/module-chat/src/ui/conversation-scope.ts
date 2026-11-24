@@ -109,7 +109,7 @@ export function callSpaceOf(part: {
   result?: unknown;
 }): string | undefined {
   // A settled tool knows the execution scope, including a target named by path or a
-  // genuinely organization-wide call with an empty list. Older receipts only have the input stamp.
+  // genuinely organization-wide call with an empty list. Without a resolved scope, use the input stamp.
   const resolved = (part.result as { actedSpaceIds?: unknown } | undefined)?.actedSpaceIds;
   if (Array.isArray(resolved)) {
     const target = resolved[resolved.length - 1];

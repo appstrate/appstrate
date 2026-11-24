@@ -95,7 +95,7 @@ import {
 } from "../../services/files.ts";
 import { isTextShapedMime, normalizeMime } from "../../services/mime-policy.ts";
 import { isTextShapedContentType } from "@appstrate/core/mime";
-import { VIEW_AS_HEADER } from "@appstrate/core/permissions";
+import { canComposeInline, VIEW_AS_HEADER } from "@appstrate/core/permissions";
 import { filePurposeValues } from "@appstrate/db/schema";
 import {
   asRecord,
@@ -147,6 +147,7 @@ import {
 import {
   resolveCallSpace,
   withOperationTarget,
+  isInlineRunSource,
   effectiveOperationScope,
   chosenCallSpace,
   TOOL_SPACE_RULES,
@@ -2731,7 +2732,9 @@ function withSpaceArgument(
           const rule = op?.spaceScope;
           const targetGrant =
             rule?.kind === "resource" && rule.source !== "row" ? rule.spacePermission : undefined;
+          const inline = isInlineRunSource(rule, args.body);
           const candidates = spaces.reachable.filter((space) => {
+            if (inline && !canComposeInline((p) => space.permissions.has(p))) return false;
             if (need && !space.surface[need]) return false;
             if (targetGrant && !space.permissions.has(targetGrant)) return false;
             // With no named caller or destination, a selection serves as both. Cross-space

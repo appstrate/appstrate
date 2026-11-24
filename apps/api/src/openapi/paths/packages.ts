@@ -366,6 +366,7 @@ export const packagesPaths = {
   "/api/packages/import-bundle": {
     post: {
       operationId: "importBundle",
+      "x-appstrate-space": { kind: "request", default: "personal" },
       tags: ["Packages"],
       summary: "Import a multi-package .afps-bundle",
       description:
@@ -497,6 +498,7 @@ export const packagesPaths = {
   "/api/packages/import": {
     post: {
       operationId: "importPackage",
+      "x-appstrate-space": { kind: "request", default: "personal" },
       tags: ["Packages"],
       summary: "Import a package from ZIP",
       description:
@@ -593,6 +595,7 @@ export const packagesPaths = {
   "/api/packages/import-github": {
     post: {
       operationId: "importPackageFromGithub",
+      "x-appstrate-space": { kind: "request", default: "personal" },
       tags: ["Packages"],
       summary: "Import a package from a GitHub URL",
       description:
@@ -1040,6 +1043,7 @@ export const packagesPaths = {
     },
     post: {
       operationId: "createSkill",
+      "x-appstrate-space": { kind: "request", default: "personal" },
       tags: ["Packages"],
       summary: "Create a skill",
       description: "Create a new skill in the organization packages.",
@@ -1587,6 +1591,7 @@ export const packagesPaths = {
     },
     post: {
       operationId: "createAgent",
+      "x-appstrate-space": { kind: "request", default: "personal" },
       tags: ["Packages"],
       summary: "Create a user agent",
       description:
@@ -2297,6 +2302,7 @@ export const packagesPaths = {
   "/api/packages/{scope}/{name}/fork": {
     post: {
       operationId: "forkPackage",
+      "x-appstrate-space": { kind: "request", default: "personal" },
       tags: ["Packages"],
       summary: "Fork a package to your organization",
       description:
@@ -2408,6 +2414,7 @@ export const packagesPaths = {
     },
     post: {
       operationId: "createIntegrationPackage",
+      "x-appstrate-space": { kind: "request", default: "personal" },
       tags: ["Packages"],
       summary: "Create an integration package, including a remote MCP",
       description:

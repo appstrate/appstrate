@@ -7,7 +7,11 @@ import { isSpaceScopedPath } from "../middleware/space-context.ts";
 
 const scopeSchema = z.discriminatedUnion("kind", [
   z.strictObject({ kind: z.literal("organization") }),
-  z.strictObject({ kind: z.literal("request") }),
+  z.strictObject({
+    kind: z.literal("request"),
+    parameter: z.string().min(1).optional(),
+    default: z.enum(["personal", "personal_for_inline_source"]).optional(),
+  }),
   z.strictObject({ kind: z.literal("aggregate"), permission: z.string().min(1).optional() }),
   z.strictObject({
     kind: z.literal("target"),

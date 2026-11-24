@@ -59,6 +59,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Upgrading the platform requires modules to declare `x-appstrate-space` on OpenAPI operations
+  whose scope the mounted guards do not supply. Registration fails at startup on a missing or
+  contradictory contract. Modules with row-scoped operations must use `withAuthorizedRow` from
+  `@appstrate/core/permissions`. See the [module authoring guide](../../apps/api/src/modules/README.md#openapi-contributions).
+
 - **`deriveResponseReserveTokens` caps the reserve at `RESERVE_CEILING_TOKENS` (64 000)**
   (`@appstrate/core/token-budget`): pi-ai clamps the `max_tokens` it sends, so the reserve is room
   for a reply plus the summary trigger, not the model's max output. On a 1M window, a 384k
