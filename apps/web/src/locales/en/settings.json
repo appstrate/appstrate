@@ -587,7 +587,6 @@
   "credentials.form.apiKeyHint": "Leave empty to keep the current key.",
   "credentials.form.labelPlaceholder": "e.g. My Anthropic key",
   "credentials.form.apiKeyPlaceholder": "sk-...",
-  "credentials.oauth.reconnect": "Reconnect",
   "credentials.oauth.badgeOauth": "OAuth",
   "credentials.oauth.callbackSuccess": "OAuth provider connected successfully",
   "credentials.oauth.cliStageTitle": "Connect via CLI",

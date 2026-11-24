@@ -319,8 +319,8 @@ export function useProviderColumns({
       if (!pk) return null;
       const canRename = allowed(pk, "edit");
       const canChangeKey = canRename && pk.authMode !== "oauth2";
-      const canReconnect =
-        allowed(pk, "reconnect") && pk.needs_reconnection === true && !!pk.providerId;
+      // The owner re-pairs a subscription whatever its health: the flag only changes its badge.
+      const canReconnect = allowed(pk, "reconnect") && !!pk.providerId;
       const canChoose = row.kind === "org-key" && canWriteModels;
       return (
         <TableRowActions
@@ -351,7 +351,7 @@ export function useProviderColumns({
             },
             {
               id: "reconnect",
-              label: t("credentials.oauth.reconnect"),
+              label: t("btn.reconnect", { ns: "common" }),
               icon: RefreshCw,
               onSelect: () => onReconnect(pk),
               hidden: !canReconnect,
