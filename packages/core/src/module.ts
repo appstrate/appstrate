@@ -481,6 +481,26 @@ export interface FirstMatchHooks {
    * database.
    */
   beforeUsage: (params: BeforeUsageParams) => Promise<UsageRejection | null>;
+  /**
+   * The limits an organization's runs are held to beyond the deployment-wide ones, asked once
+   * per platform run launch. First-match-wins for the same reason as `beforeUsage`: the answer
+   * is one set of numbers. Unlike `beforeUsage` (a read-only admission check that cannot
+   * reserve anything), the value returned here is ENFORCED by the platform inside the same
+   * transaction, under the same per-org admission lock, that inserts the run row, so a limit
+   * it carries holds exactly under racing launches.
+   */
+  runLimits: (orgId: string) => Promise<RunLimits>;
+}
+
+/** What {@link FirstMatchHooks.runLimits} answers. */
+export interface RunLimits {
+  /**
+   * Runs the organization may have in flight at once (`pending` or `running`), or `null` to
+   * leave only the deployment-wide `max_concurrent_per_org`. The lower of the two applies.
+   * Applies to runs that execute on platform compute; a remote run is not counted against it
+   * at launch.
+   */
+  maxConcurrentRuns: number | null;
 }
 
 /**
@@ -1394,6 +1414,33 @@ export interface LlmUsageLedgerRow {
 }
 
 /**
+ * One finished run, as {@link PlatformServices.runs.listTerminal} projects it — the read a
+ * metering consumer settles a run's compute time from. OSS-neutral: the facts of the run,
+ * never a price or an entitlement.
+ */
+export interface TerminalRunRow {
+  id: string;
+  orgId: string;
+  /**
+   * Whose process executed the run: `"platform"` ran in a sandbox the platform operates,
+   * `"remote"` on a host the caller supplied (the platform only orchestrated it).
+   */
+  runOrigin: "platform" | "remote";
+  status: TerminalRunStatus;
+  /**
+   * The run's recorded duration in milliseconds, measured from when the run left `pending`
+   * (the runner's own loop start when it reported one, otherwise the first `running` flip),
+   * never from the creation of the row: queue and provisioning time are not in it, and a run
+   * that never ran lasted 0. Capped at the platform's timeout ceiling, so a terminal written
+   * long after the run stopped (an orphan finalized at the next boot) cannot report more than a
+   * run may last. `null` only when the run recorded none.
+   */
+  durationMs: number | null;
+  /** When the run became terminal — the cursor column. */
+  completedAt: Date;
+}
+
+/**
  * Audit `before` / `after` payload with camelCase top-level keys (CASING_CONVENTIONS 4m):
  * a raw snake_case body, or a `Record<string, unknown>` that could hide one, does not compile.
  */
@@ -1523,6 +1570,25 @@ export interface PlatformServices {
      * mirror, or sit above ids that were skipped.
      */
     settledFrontier(): Promise<number>;
+  };
+  /**
+   * Cursor read of FINISHED runs, ordered by `(completedAt, id)` ASC. A metering consumer
+   * that settles compute time per run sweeps it with a `(completedAt, id)` watermark
+   * instead of a cross-module SQL join into `runs`.
+   *
+   * `after` is exclusive: the rows strictly past that `(completedAt, id)` pair. Omitted, the
+   * read starts at the oldest finished run. `limit` defaults to 500, capped at 1000.
+   *
+   * A run's `completedAt` is stamped by the process that finalizes it, BEFORE the
+   * transaction that closes it commits, so a row can become visible BELOW a watermark a
+   * consumer already advanced. A consumer must therefore re-read a bounded window below its
+   * watermark and de-duplicate by run id; this service answers whatever is committed.
+   */
+  runs: {
+    listTerminal(args: {
+      after?: { completedAt: Date; id: string };
+      limit?: number;
+    }): Promise<TerminalRunRow[]>;
   };
   /**
    * In-process dispatch into the fully-wired platform Hono app — the same

@@ -110,4 +110,60 @@ describe("createRun — per-org concurrency reservation", () => {
     // unenforced AND commit the row.
     expect(await runCount()).toBe(0);
   });
+
+  // The cap a module (billing: the plan) sets for ONE org rides with the launch and is enforced
+  // in the same transaction, under the same lock, as the deployment-wide one: a burst of
+  // launches cannot overshoot it, which a count read before the INSERT could not guarantee.
+  describe("an org cap set by a module", () => {
+    function admitWithCap(id: string, maxConcurrentRuns: number | null) {
+      return createRun(scope(), {
+        id,
+        packageId: PACKAGE_ID,
+        actor: null,
+        input: null,
+        modelId: null,
+        inferenceRoute: null,
+        maxConcurrentRuns,
+      });
+    }
+
+    it("admits exactly the cap out of ten parallel launches", async () => {
+      _setRunLimitsForTesting({ max_concurrent_per_org: 50 });
+
+      const results = await Promise.allSettled(
+        Array.from({ length: 10 }, (_, i) => admitWithCap(`run_burst_${i}`, 3)),
+      );
+
+      const admitted = results.filter((r) => r.status === "fulfilled");
+      const refused = results.filter((r): r is PromiseRejectedResult => r.status === "rejected");
+      expect(admitted).toHaveLength(3);
+      expect(refused).toHaveLength(7);
+      for (const r of refused) {
+        expect((r.reason as { code?: string }).code).toBe("org_run_concurrency_exceeded");
+        expect((r.reason as { status?: number }).status).toBe(429);
+      }
+      expect(await runCount()).toBe(3);
+    });
+
+    it("applies the lower of the org cap and the deployment-wide cap", async () => {
+      _setRunLimitsForTesting({ max_concurrent_per_org: 2 });
+
+      const results = await Promise.allSettled(
+        Array.from({ length: 5 }, (_, i) => admitWithCap(`run_lower_${i}`, 10)),
+      );
+
+      expect(results.filter((r) => r.status === "fulfilled")).toHaveLength(2);
+      expect(await runCount()).toBe(2);
+    });
+
+    it("leaves the deployment-wide cap alone when the org has none", async () => {
+      _setRunLimitsForTesting({ max_concurrent_per_org: 4 });
+
+      const results = await Promise.allSettled(
+        Array.from({ length: 6 }, (_, i) => admitWithCap(`run_nocap_${i}`, null)),
+      );
+
+      expect(results.filter((r) => r.status === "fulfilled")).toHaveLength(4);
+    });
+  });
 });

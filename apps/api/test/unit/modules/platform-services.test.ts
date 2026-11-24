@@ -33,6 +33,10 @@ describe("ModuleInitContext.services — platform service wiring", () => {
     expect(typeof services.usage.settledFrontier).toBe("function");
   });
 
+  it("wires the finished-run cursor read (runs.listTerminal — sole consumer: the billing module's compute settlement)", () => {
+    expect(typeof services.runs.listTerminal).toBe("function");
+  });
+
   it("wires the per-route rate limiter (http.rateLimit)", () => {
     expect(typeof services.http.rateLimit).toBe("function");
   });

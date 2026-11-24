@@ -21,6 +21,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`RunLimits`, `ModuleHooks.runLimits`** (`@appstrate/core/module`): a first-match hook a module
+  answers with the limits an organization's runs are held to beyond the deployment-wide ones
+  (`maxConcurrentRuns`). The platform asks it once per platform run launch and enforces the value
+  in the same transaction, under the same per-org admission lock, that inserts the run, so the
+  limit holds exactly under racing launches (unlike `beforeUsage`, which can only refuse).
+
+- **`TerminalRunRow`, `PlatformServices.runs.listTerminal`** (`@appstrate/core/module`): a finished
+  run (`id`, `orgId`, `runOrigin`, `status`, `durationMs`, `completedAt`) and the cursor read of
+  them, ordered by `(completedAt, id)` with an exclusive `after` keyset. A metering module settles a
+  run's compute time from it without a SQL join into `runs`. A consumer must re-read a bounded
+  window below its watermark: `completedAt` is stamped before the closing transaction commits.
 - `@appstrate/core/chat-message` exports `historicalChatMessageSchema` for persisted messages and
   `chatThreadMessagesSchema` for submitted threads. The chat module and upgrade check share these
   validators. `AGENT_PROMPT_PART_TYPE` and `agentPromptDataSchema` describe an agent launch part,
