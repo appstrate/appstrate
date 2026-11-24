@@ -589,6 +589,12 @@ export const responses = {
   },
 } as const;
 
+export const scopedRunListValidationError = {
+  $ref: "#/components/responses/ValidationError",
+  description:
+    "Unknown query parameter, limit outside its range, unrecognized status, or search longer than 200 characters.",
+} as const;
+
 /** A successful page of space, organization, agent or schedule runs. */
 export const runListPage = {
   description: "Paginated run list",

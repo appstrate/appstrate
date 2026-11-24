@@ -8,6 +8,7 @@ import {
   jsonRpcRequestBody,
   problemContent,
   runListPage,
+  scopedRunListValidationError,
 } from "../responses.ts";
 import {
   RUN_TOOLS_MCP_DESCRIPTION,
@@ -549,7 +550,7 @@ const canonicalRunsPaths = {
       tags: ["Runs"],
       summary: "List runs for an agent",
       description:
-        "List runs for a specific agent (org-scoped, newest first, keyset-paginated with `startingAfter`; default limit 20).",
+        "List the visible runs of one agent in the selected space, newest first. Supports status and text or run-number search, with `startingAfter` pagination and a default limit of 20.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XSpaceId" },
@@ -572,10 +573,7 @@ const canonicalRunsPaths = {
       ],
       responses: {
         "200": runListPage,
-        "400": {
-          $ref: "#/components/responses/ValidationError",
-          description: "`limit` outside its declared range (`param` names it).",
-        },
+        "400": scopedRunListValidationError,
         "401": { $ref: "#/components/responses/Unauthorized" },
         // A READ: `requireAgent()` asks placement only, so the 404 is the opaque
         // `agent_not_found` and nothing else — an agent switched off here still
@@ -1013,7 +1011,7 @@ const canonicalRunsPaths = {
       tags: ["Runs"],
       summary: "List runs across the space (global view)",
       description:
-        "Org + space scoped paginated list. Supports filtering by `user=me` (self-owned, also implicit for end-user impersonation), `kind` (all, package, inline), `status`, a date range, and the chat session that launched the run. Every filter composes: `user=me` narrows to the caller's own runs and the remaining filters still apply on top of it. Inline runs surface via `package_ephemeral: true` on each row.",
+        "Org + space scoped paginated list. Supports filtering by `user=me` (self-owned, also implicit for end-user impersonation), `kind` (all, package, inline), `status`, text or run-number search (`q`), a date range, and the chat session that launched the run. Every filter composes: `user=me` narrows to the caller's own runs and the remaining filters still apply on top of it. Inline runs surface via `package_ephemeral: true` on each row.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XSpaceId" },

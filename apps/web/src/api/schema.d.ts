@@ -443,7 +443,7 @@ export interface paths {
         };
         /**
          * List runs for an agent
-         * @description List runs for a specific agent (org-scoped, newest first, keyset-paginated with `startingAfter`; default limit 20).
+         * @description List the visible runs of one agent in the selected space, newest first. Supports status and text or run-number search, with `startingAfter` pagination and a default limit of 20.
          */
         get: operations["listAgentRuns"];
         put?: never;
@@ -4623,7 +4623,7 @@ export interface paths {
         };
         /**
          * List runs across the space (global view)
-         * @description Org + space scoped paginated list. Supports filtering by `user=me` (self-owned, also implicit for end-user impersonation), `kind` (all, package, inline), `status`, a date range, and the chat session that launched the run. Every filter composes: `user=me` narrows to the caller's own runs and the remaining filters still apply on top of it. Inline runs surface via `package_ephemeral: true` on each row.
+         * @description Org + space scoped paginated list. Supports filtering by `user=me` (self-owned, also implicit for end-user impersonation), `kind` (all, package, inline), `status`, text or run-number search (`q`), a date range, and the chat session that launched the run. Every filter composes: `user=me` narrows to the caller's own runs and the remaining filters still apply on top of it. Inline runs surface via `package_ephemeral: true` on each row.
          */
         get: operations["listRuns"];
         put?: never;
@@ -9699,7 +9699,7 @@ export interface operations {
                     };
                 };
             };
-            /** @description `limit` outside its declared range (`param` names it). */
+            /** @description Unknown query parameter, limit outside its range, unrecognized status, or search longer than 200 characters. */
             400: components["responses"]["ValidationError"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
@@ -27948,7 +27948,7 @@ export interface operations {
                     };
                 };
             };
-            /** @description `limit` outside its declared range (`param` names it). */
+            /** @description Unknown query parameter, limit outside its range, unrecognized status, or search longer than 200 characters. */
             400: components["responses"]["ValidationError"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];

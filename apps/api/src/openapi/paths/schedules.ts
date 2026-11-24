@@ -3,7 +3,11 @@
 import { REQUEST_ID_ONLY_HEADERS, STD_RESPONSE_HEADERS } from "../headers.ts";
 import { MAX_CONNECTIONS_PER_INTEGRATION } from "@appstrate/core/integration";
 import { connectionIdSetJsonSchema } from "./integrations.ts";
-import { connectionConflictContent, runListPage } from "../responses.ts";
+import {
+  connectionConflictContent,
+  runListPage,
+  scopedRunListValidationError,
+} from "../responses.ts";
 import { ORG_READ_REACH, packageIdFilterParameter } from "../parameters.ts";
 
 /**
@@ -547,10 +551,7 @@ export const schedulesPaths = {
       ],
       responses: {
         "200": runListPage,
-        "400": {
-          $ref: "#/components/responses/ValidationError",
-          description: "`limit` outside its declared range (`param` names it).",
-        },
+        "400": scopedRunListValidationError,
         "401": { $ref: "#/components/responses/Unauthorized" },
         "403": { $ref: "#/components/responses/Forbidden" },
       },
