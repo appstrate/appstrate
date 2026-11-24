@@ -359,7 +359,7 @@ function orgWideSpaceContext(
       ? "Not applicable to this connection: steps 4 and 5 apply to every act."
       : `For ${personalActs.join(", ")}: your personal space (the one marked \`your personal space\`); your reply names it. Send it there first, whatever your role there and even when another space looks better suited or is the only one where it would work: a refusal or a space that cannot serve is the next rule's case, never a reason to start in another space.`;
   return `This MCP server is scoped to ONE organization — the one this endpoint serves — and reaches every space of it where you hold a role. ${ORG_BOUNDARY}
-- Every tool that acts in a space REQUIRES \`space_id\`: the server picks no default. Its schema lists your spaces, their ids and your role in each; your role in the space a call names decides that call. Choose the space in this order:
+- Every tool that acts in a space REQUIRES \`space_id\`: the server picks no default. Its schema lists your spaces, their ids and your role in each; your role in the space a call names decides that call. An organization-level operation (\`describe\` gives \`scope: "organization"\`) acts in no space: call \`describe\` and \`invoke_operation\` for it without \`space_id\`, and never ask which space, whatever the steps below say. For every other act, choose the space in this order:
   1. Only one space is listed (a conversation limited to a space, a narrowed credential): that one.
   2. The user's request names a space: that one.
   3. ${personalStep}

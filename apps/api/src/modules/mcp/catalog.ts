@@ -8,6 +8,8 @@
 import type { Tool } from "@modelcontextprotocol/sdk/types.js";
 import { getPlatformOperations, type PlatformOperations } from "../../lib/platform-app.ts";
 import { isGranted, type RouteRequirement } from "../../lib/route-requirements.ts";
+import { knownSpaceLevelPermissions } from "../../lib/permissions.ts";
+import { isSpaceScopedPath } from "../../middleware/space-context.ts";
 
 /** Minimal shape of an OpenAPI operation node we depend on. */
 interface OperationNode {
@@ -32,6 +34,8 @@ export interface CatalogOperation {
   /** Names of OpenAPI `in: header` parameters this operation declares. */
   headerParams: string[];
   requirement: RouteRequirement;
+  /** Whether the route acts in a space; `false` is an organization-level operation ({@link actsInSpace}). */
+  spaceScoped: boolean;
   /** Raw OpenAPI operation node (for `describe`). */
   operation: OperationNode;
 }
@@ -114,6 +118,22 @@ function isExcludedPath(pathTemplate: string): boolean {
   );
 }
 
+/**
+ * Whether an operation acts in a space, read off the server's own rules rather than a list of
+ * its own: a route family the platform space-scopes (`isSpaceScopedPath`), or a guard only a
+ * space role can clear, which a module route enters the caller's space for (an org role never
+ * carries a space-level string). Anything else reads no space from the request: an
+ * organization-level operation, which an org-wide MCP call names no space for. A guard an org
+ * permission also clears (`webhooks:read|org-webhooks:read`) does not make it space-scoped.
+ */
+function actsInSpace(pathTemplate: string, requirement: RouteRequirement): boolean {
+  if (isSpaceScopedPath(pathTemplate)) return true;
+  const spaceLevel = knownSpaceLevelPermissions();
+  return requirement.requirements.some((guard) =>
+    guard.split("|").every((permission) => spaceLevel.has(permission)),
+  );
+}
+
 export function getCatalog(): OperationCatalog {
   const source = getPlatformOperations();
   let catalog = catalogs.get(source);
@@ -141,6 +161,7 @@ function buildCatalog(source: PlatformOperations): OperationCatalog {
       pathParams: extractPathParams(pathTemplate),
       headerParams: extractHeaderParams(operation),
       requirement,
+      spaceScoped: actsInSpace(pathTemplate, requirement),
       operation,
     });
   }

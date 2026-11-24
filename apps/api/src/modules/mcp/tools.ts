@@ -343,7 +343,12 @@ function describePayload(
 ): Record<string, unknown> {
   const granted = operationGranted(op, ctx.permissions, ctx.ceiling);
   return {
-    ...(ctx.orgSpaces ? { space: spaceRef(ctx.orgSpaces.current) } : {}),
+    // An organization-level operation runs in no space: no space to name, none to ask for.
+    ...(ctx.orgSpaces
+      ? op.spaceScoped
+        ? { space: spaceRef(ctx.orgSpaces.current) }
+        : { scope: "organization" }
+      : {}),
     ...grantedIn(ctx.orgSpaces, (s) => operationGranted(op, s.permissions, ctx.ceiling)),
     kind: "operation",
     id: op.operationId,
@@ -1347,6 +1352,10 @@ function buildInvokeTool(ctx: McpToolContext): AppstrateToolDefinition {
       });
     };
     const headers = new Headers(ctx.authHeaders);
+    // An organization-level operation called without `space_id` acts in no space: the one this
+    // request entered only opened the endpoint, so the route is not handed it.
+    const spaceless = ctx.orgSpaces !== undefined && !op.spaceScoped && args.space_id === undefined;
+    if (spaceless) headers.delete("x-space-id");
     const ifMatch = asString(args.if_match);
     if (ifMatch && !trySetHeader(headers, "If-Match", ifMatch))
       return rejectHeader("If-Match", "if_match");
@@ -1432,7 +1441,8 @@ function buildInvokeTool(ctx: McpToolContext): AppstrateToolDefinition {
       response.status === 403 && !operationGranted(op, ctx.permissions, ctx.ceiling)
         ? notGrantedRefusal(op, ctx)
         : undefined;
-    const space = ctx.orgSpaces ? { space: spaceRef(ctx.orgSpaces.current) } : undefined;
+    const space =
+      ctx.orgSpaces && !spaceless ? { space: spaceRef(ctx.orgSpaces.current) } : undefined;
     return readResponse(response, space || denial ? { ...space, ...denial } : undefined, () =>
       (ctx.orgSpaces?.reachable ?? []).filter(
         (s) => s.surface.invokes && operationGranted(op, s.permissions, ctx.ceiling),
@@ -2503,8 +2513,35 @@ const SPACE_ACTS: Record<McpToolName, keyof McpSurface | null | false | "optiona
   get_runtime_capabilities: false,
 };
 
+/**
+ * The tools whose call names the operation it is about, so the operation decides whether the
+ * call needs a space: one outside every space (organization-level, `spaceScoped: false`) takes
+ * no `space_id`. An unknown operation needs none either: the tool's own refusal names it.
+ * These tools read `space_id` themselves: `invoke_operation` hands the route a space only when
+ * the call names one.
+ */
+const OPERATION_TOOLS: Partial<Record<McpToolName, (args: Record<string, unknown>) => unknown>> = {
+  describe: (args) => (args.kind === "operation" ? args.id : undefined),
+  invoke_operation: (args) => args.operation_id,
+};
+
+/** Whether this call of an {@link OPERATION_TOOLS} tool names an operation that acts in no space. */
+function callNeedsNoSpace(name: McpToolName, args: Record<string, unknown>): boolean {
+  const named = OPERATION_TOOLS[name]?.(args);
+  if (typeof named !== "string") return false;
+  return getCatalog().operations.get(named)?.spaceScoped !== true;
+}
+
+const ORGANIZATION_LEVEL_SPACE_ID =
+  ' An organization-level operation (`describe` gives `scope: "organization"`) acts in no ' +
+  "space: omit `space_id` for it, and never ask the user for a space.";
+
 /** `space_id`, listing the spaces itself: clients truncate server instructions. */
-function spaceIdProperty(spaces: OrgWideSpaces, optional: boolean): Record<string, unknown> {
+function spaceIdProperty(
+  spaces: OrgWideSpaces,
+  optional: boolean,
+  perOperation: boolean,
+): Record<string, unknown> {
   const reached = spaces.reachable.map(describeSpace).join("; ");
   return {
     type: "string",
@@ -2514,7 +2551,8 @@ function spaceIdProperty(spaces: OrgWideSpaces, optional: boolean): Record<strin
         "including when that space has no matches. Omit it for an explicitly cross-space search or when the space is unknown. " +
         "Each item's `granted_in` names the spaces where you reach it."
       : `The space this call acts in, by id: ${reached}. Choose it in the order given in the ` +
-        "server instructions.",
+        "server instructions." +
+        (perOperation ? ORGANIZATION_LEVEL_SPACE_ID : ""),
   };
 }
 
@@ -2555,9 +2593,12 @@ function withSpaceArgument(
   tool: AppstrateToolDefinition,
   spaces: OrgWideSpaces,
 ): AppstrateToolDefinition {
-  const declared = SPACE_ACTS[tool.descriptor.name as McpToolName];
+  const name = tool.descriptor.name as McpToolName;
+  const declared = SPACE_ACTS[name];
   if (declared === false) return tool;
   const optional = declared === "optional";
+  // Required unless the operation the call names acts in no space.
+  const perOperation = OPERATION_TOOLS[name] !== undefined;
   const act = optional ? null : declared;
   const holds = (need: keyof McpSurface | null) => (space: McpSpace) =>
     need === null || space.surface[need];
@@ -2571,8 +2612,11 @@ function withSpaceArgument(
       : tool.descriptor.description,
     inputSchema: {
       ...schema,
-      properties: { ...schema.properties, space_id: spaceIdProperty(spaces, optional) },
-      ...(optional ? {} : { required: [...(schema.required ?? []), "space_id"] }),
+      properties: {
+        ...schema.properties,
+        space_id: spaceIdProperty(spaces, optional, perOperation),
+      },
+      ...(optional || perOperation ? {} : { required: [...(schema.required ?? []), "space_id"] }),
     },
   };
   return {
@@ -2580,6 +2624,10 @@ function withSpaceArgument(
     handler: async (args, extra) => {
       // The tool reads `space_id` itself: absent, it covers every space reached.
       if (optional && args.space_id === undefined) return tool.handler(args, extra);
+      // Organization-level: no space to check, no act to re-check in one; the route guards it.
+      if (args.space_id === undefined && callNeedsNoSpace(name, args)) {
+        return tool.handler(args, extra);
+      }
       const refusal = spaceArgumentRefusal(spaces, args.space_id);
       if (refusal) return refusalResult(refusal);
       if (optional) return tool.handler(args, extra);
@@ -2591,6 +2639,7 @@ function withSpaceArgument(
         `${tool.descriptor.name}${need === "composes" ? ' with kind:"inline"' : ""}`,
       );
       if (unmet) return refusalResult(unmet);
+      if (perOperation) return tool.handler(args, extra);
       // Consumed: `run_and_wait` validates its own arguments.
       const { space_id: _entered, ...rest } = args;
       return tool.handler(rest, extra);

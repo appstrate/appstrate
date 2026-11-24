@@ -19,6 +19,7 @@ import { createTestContext, memberContext } from "../../../../../test/helpers/au
 import { seedApiKey, seedSpace, seedSpaceMember } from "../../../../../test/helpers/seed.ts";
 import { MCP_ACCEPT, mcpRpc, type JsonRpcEnvelope } from "../../../../../test/helpers/mcp.ts";
 import { registerTestPlatformApp } from "../../../../../test/helpers/platform-app.ts";
+import { getCatalog } from "../../catalog.ts";
 
 const app = getTestApp();
 await registerTestPlatformApp();
@@ -170,10 +171,15 @@ describe("mcp org-wide connection", () => {
       const schema = tools.find((t) => t.name === name)?.inputSchema;
       return Boolean(schema?.properties?.space_id) && schema!.required!.includes("space_id");
     };
-    expect(spaceArg("invoke_operation")).toBe(true);
-    expect(spaceArg("describe")).toBe(true);
+    const declaresSpace = (name: string) =>
+      Boolean(tools.find((t) => t.name === name)?.inputSchema.properties?.space_id);
+    // The operation a call names decides: an organization-level one takes no `space_id`.
+    for (const name of ["invoke_operation", "describe"]) {
+      expect(declaresSpace(name)).toBe(true);
+      expect(spaceArg(name)).toBe(false);
+    }
     expect(spaceArg("get_me")).toBe(true);
-    expect(spaceArg("get_runtime_capabilities")).toBe(false);
+    expect(declaresSpace("get_runtime_capabilities")).toBe(false);
 
     // The schema carries the spaces: clients truncate server instructions.
     const spaceId = tools.find((t) => t.name === "invoke_operation")!.inputSchema.properties!
@@ -194,6 +200,45 @@ describe("mcp org-wide connection", () => {
     const validate = described("validate_package_file")!;
     expect(validate).toContain(gestion.id);
     expect(validate).not.toContain(lecture.id);
+  });
+
+  it("takes no space_id for an organization-level operation, and never names a space for it", async () => {
+    // Derived from the server's own rules: a space-scoped route family, a space-level guard.
+    const { operations } = getCatalog();
+    expect(operations.get("listAgents")!.spaceScoped).toBe(true);
+    expect(operations.get("listModels")!.spaceScoped).toBe(false);
+    // An org permission also clears its guard: the space is optional, not required.
+    expect(operations.get("listWebhooks")!.spaceScoped).toBe(false);
+
+    const described = payload(await call("describe", { kind: "operation", id: "listModels" }));
+    expect(described.isError).toBe(false);
+    expect(described.data.scope).toBe("organization");
+    expect(described.data.space).toBeUndefined();
+
+    const listed = payload(await call("invoke_operation", { operation_id: "listModels" }));
+    expect(listed.isError).toBe(false);
+    expect(listed.data.status).toBe(200);
+    expect(listed.data.space).toBeUndefined();
+
+    // A space operation still requires it, through either tool.
+    const missing = payload(await call("invoke_operation", { operation_id: "listAgents" }));
+    expect(missing.data).toMatchObject({ code: "missing_argument", arguments: ["space_id"] });
+    const agentOp = payload(await call("describe", { kind: "operation", id: "listAgents" }));
+    expect(agentOp.data).toMatchObject({ code: "missing_argument", arguments: ["space_id"] });
+
+    const { envelope } = await rpc(headers, {
+      jsonrpc: "2.0",
+      id: 1,
+      method: "initialize",
+      params: {
+        protocolVersion: "2025-06-18",
+        capabilities: {},
+        clientInfo: { name: "t", version: "0" },
+      },
+    });
+    expect(envelope.result?.instructions as string).toContain(
+      "never ask which space, whatever the steps below say",
+    );
   });
 
   it("refuses validate_package_file in a space where the caller neither imports nor composes", async () => {
