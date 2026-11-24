@@ -82,6 +82,7 @@ export function ConnectionsTable({
       const methodReady = !!auth && (auth.type !== "oauth2" || isOauthAuthConnectable(auth));
       return {
         authKey: connection.auth_key,
+        methodReady,
         canRenew: methodReady && displayAccountId(connection.account_id) !== null,
         canCreate: methodReady && canConnect && !blockedByAdmin,
       };

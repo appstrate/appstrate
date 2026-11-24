@@ -266,6 +266,11 @@ function LockedPicker({
           {t("detail.integrationMemberPicker.askAdminToRebind")}
         </PickerLine>
       )}
+      {locked.some((c) => c.needs_reconnection && displayAccountId(c.account_id) !== null) && (
+        <PickerLine testId={`member-pick-locked-reconnect-${integrationId}`}>
+          {t("error.needsReconnection")}
+        </PickerLine>
+      )}
       {outranked && (
         <PickerLine testId={`member-pick-outranked-warning-${integrationId}`}>
           {t("error.overrideOutranked")}

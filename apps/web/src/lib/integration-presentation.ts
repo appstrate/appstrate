@@ -15,6 +15,8 @@ export function authMethodLabel(
 
 export interface ConnectionAuthContext {
   authKey: string;
+  /** The auth method itself can connect (an OAuth method needs its client configured). */
+  methodReady: boolean;
   canCreate: boolean;
   canRenew: boolean;
 }

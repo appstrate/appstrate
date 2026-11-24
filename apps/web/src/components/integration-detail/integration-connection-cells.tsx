@@ -218,6 +218,7 @@ export function ConnectionActionsCell({
   connection,
   packageId,
   authKey,
+  methodReady,
   canCreate,
   canRenew,
   isOwn,
@@ -228,6 +229,7 @@ export function ConnectionActionsCell({
   connection: IntegrationConnection;
   packageId: string;
   authKey: string;
+  methodReady: boolean;
   canCreate: boolean;
   canRenew: boolean;
   isOwn: boolean;
@@ -293,9 +295,11 @@ export function ConnectionActionsCell({
         {needsRepair && !canRenew && (
           <DropdownMenuLabel className="text-muted-foreground max-w-64 text-xs font-normal">
             {t(
-              canCreate
-                ? "detail.integrationMemberPicker.referencesStay"
-                : "detail.integrationMemberPicker.askForReplacement",
+              !methodReady
+                ? "integrationWizard.connect.clientMissing"
+                : canCreate
+                  ? "detail.integrationMemberPicker.referencesStay"
+                  : "detail.integrationMemberPicker.askForReplacement",
               { ns: "agents" },
             )}
           </DropdownMenuLabel>

@@ -32,7 +32,12 @@ function expiresCell(): DataColumn<IntegrationConnection>["cell"] {
       manifest: {} as IntegrationManifestView,
       userId: "user_1",
       isAdmin: false,
-      authForConnection: () => ({ authKey: "drive", canCreate: true, canRenew: true }),
+      authForConnection: () => ({
+        authKey: "drive",
+        methodReady: true,
+        canCreate: true,
+        canRenew: true,
+      }),
       methodLabel: () => "OAuth",
     });
     return null;
