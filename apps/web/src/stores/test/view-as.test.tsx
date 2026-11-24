@@ -126,24 +126,23 @@ describe("view-as store", () => {
 });
 
 describe("way back", () => {
-  it("restores the paired persona and return space after reload and ignores a stale unpaired space", () => {
-    fakeStorage.setItem("appstrate_view_as_return", "stale");
-    expect(readStoredPreview()).toEqual({ persona: null, returnSpaceId: null });
+  it("restores the paired persona and return space after reload", () => {
     enterViewAs(PERSONA, ORGS_AS_PERSONA, "spc_home");
-    expect(readStoredPreview()).toEqual({ persona: PERSONA, returnSpaceId: "spc_home" });
-    expect(fakeStorage.getItem("appstrate_view_as_return")).toBeNull();
     viewAsStore.setState(readStoredPreview());
+    expect(viewAsStore.getState().persona).toEqual(PERSONA);
     expect(exitViewAs()).toBe("spc_home");
-    expect(readStoredPreview()).toEqual({ persona: null, returnSpaceId: null });
+    expect(readStoredPreview().persona).toBeNull();
   });
 
-  it("resumes a valid preview saved by the earlier version", () => {
+  it("ends an incomplete saved preview and reports it once on reload", () => {
     fakeStorage.setItem(STORAGE_KEY, JSON.stringify(PERSONA));
-    fakeStorage.setItem("appstrate_view_as_return", "spc_prior");
     viewAsStore.setState(readStoredPreview());
-    expect(exitViewAs()).toBe("spc_prior");
-    expect(fakeStorage.getItem("appstrate_view_as_return")).toBeNull();
+    expect(getViewAsHeader()).toBeNull();
+    expect(takeViewAsStopped()).toBe("invalid_view_as");
+    expect(fakeStorage.getItem(STORAGE_KEY)).toBeNull();
+    expect(readStoredPreview().stoppedReason).toBeNull();
   });
+
   it("hands the space the preview moved the admin out of to the exit", () => {
     enterViewAs(PERSONA, ORGS_AS_PERSONA, "spc_home");
     expect(exitViewAs()).toBe("spc_home");
@@ -165,7 +164,7 @@ describe("way back", () => {
 
 describe("hydration", () => {
   it("reads a persisted persona back — this is what a reload resumes from", () => {
-    fakeStorage.setItem(STORAGE_KEY, JSON.stringify(PERSONA));
+    fakeStorage.setItem(STORAGE_KEY, JSON.stringify({ ...PERSONA, returnSpaceId: null }));
     expect(readStoredPreview().persona).toEqual(PERSONA);
   });
 

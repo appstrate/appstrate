@@ -473,7 +473,7 @@
   "viewAs.bannerHere": "In the space <b>{{space}}</b>, it has the <b>{{role}}</b> role, which this space gives every organization member.",
   "viewAs.bannerNoSpace": "This role has no access to any space.",
   "viewAs.exit": "Exit",
-  "viewAs.stopped.invalid_view_as": "Preview unavailable: this preview could not be read.",
+  "viewAs.stopped.invalid_view_as": "Preview unavailable: this preview could not be read. Start a new role preview.",
   "viewAs.stopped.view_as_unsupported": "Preview unavailable: this session cannot preview a role.",
   "viewAs.stopped.view_as_forbidden": "Preview unavailable: you may not preview this role.",
   "viewAs.stopped.view_as_not_found": "Preview unavailable: the space or role to preview does not exist.",

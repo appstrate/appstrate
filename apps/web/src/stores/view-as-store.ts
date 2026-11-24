@@ -12,7 +12,7 @@ import { createStore } from "zustand/vanilla";
 import type { components } from "../api/schema";
 import { queryClient } from "../lib/query-client";
 import { orgKeys, removeOrgScopedQueries } from "../lib/query-keys";
-import { persistedJson, persistedValue } from "./local-storage";
+import { persistedJson } from "./local-storage";
 import { getCurrentOrgId, orgStore } from "./org-store";
 
 export const STORAGE_KEY = "appstrate_view_as";
@@ -40,7 +40,7 @@ type Organization = components["schemas"]["Organization"];
 interface ViewAsState {
   persona: ViewAsPersona | null;
   returnSpaceId: string | null;
-  /** Set when the SERVER refused the persona. State, not a toast: it lands before `<Toaster/>` subscribes. */
+  /** Set when the preview can no longer be restored or applied. State, not a toast: it lands before `<Toaster/>` subscribes. */
   stoppedReason: string | null;
   commit: (
     persona: ViewAsPersona | null,
@@ -49,37 +49,30 @@ interface ViewAsState {
   ) => void;
 }
 
-// The previous browser version stored the return space separately. Only a valid,
-// active old persona may claim it when restoring a preview after a reload.
-const previousReturnSpace = persistedValue<string | null>(
-  "appstrate_view_as_return",
-  (raw) => raw || null,
-);
-const storedPreviewSchema = personaSchema.extend({
-  returnSpaceId: z.string().nullable().optional(),
-});
-const persistedPreview = persistedJson<z.infer<typeof storedPreviewSchema> | null>(
-  STORAGE_KEY,
-  (value) => {
-    const parsed = storedPreviewSchema.safeParse(value);
-    return parsed.success ? parsed.data : null;
-  },
-);
+const storedPreviewSchema = personaSchema.extend({ returnSpaceId: z.string().min(1).nullable() });
+const persistedPreview = persistedJson(STORAGE_KEY, (value) => value);
 
-export function readStoredPreview(): Pick<ViewAsState, "persona" | "returnSpaceId"> {
-  const saved = persistedPreview.read();
-  if (!saved) return { persona: null, returnSpaceId: null };
-  const { returnSpaceId = previousReturnSpace.read(), ...persona } = saved;
-  return { persona, returnSpaceId };
+export function readStoredPreview(): Pick<
+  ViewAsState,
+  "persona" | "returnSpaceId" | "stoppedReason"
+> {
+  const value = persistedPreview.read();
+  const empty = { persona: null, returnSpaceId: null, stoppedReason: null };
+  if (value === null) return empty;
+  const parsed = storedPreviewSchema.safeParse(value);
+  if (!parsed.success) {
+    persistedPreview.write(null);
+    return { ...empty, stoppedReason: "invalid_view_as" };
+  }
+  const { returnSpaceId, ...persona } = parsed.data;
+  return { persona, returnSpaceId, stoppedReason: null };
 }
 
 export const viewAsStore = createStore<ViewAsState>()((set) => ({
   ...readStoredPreview(),
-  stoppedReason: null,
   commit: (persona, stoppedReason, returnSpaceId) => {
     set({ persona, stoppedReason, returnSpaceId });
     persistedPreview.write(persona && { ...persona, returnSpaceId });
-    previousReturnSpace.write(null);
   },
 }));
 

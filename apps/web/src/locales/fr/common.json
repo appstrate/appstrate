@@ -473,7 +473,7 @@
   "viewAs.bannerHere": "Dans l'espace <b>{{space}}</b>, il a le rôle <b>{{role}}</b>, que cet espace donne à tout membre de l'organisation.",
   "viewAs.bannerNoSpace": "Ce rôle n'a accès à aucun espace.",
   "viewAs.exit": "Quitter",
-  "viewAs.stopped.invalid_view_as": "Prévisualisation indisponible : cette prévisualisation n'a pas pu être lue.",
+  "viewAs.stopped.invalid_view_as": "Prévisualisation indisponible : cette prévisualisation n'a pas pu être lue. Relancez la prévisualisation du rôle.",
   "viewAs.stopped.view_as_unsupported": "Prévisualisation indisponible : cette session ne peut pas prévisualiser de rôle.",
   "viewAs.stopped.view_as_forbidden": "Prévisualisation indisponible : vous n'avez pas le droit de prévisualiser ce rôle.",
   "viewAs.stopped.view_as_not_found": "Prévisualisation indisponible : l'espace ou le rôle à prévisualiser n'existe pas.",

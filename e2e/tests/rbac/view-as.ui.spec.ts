@@ -14,28 +14,16 @@
  * which a `viewer` in the space does not hold and the previewing owner does.
  */
 
-import { test, expect, createAuthedContext } from "../../fixtures/browser.fixture.ts";
+import {
+  test,
+  expect,
+  createAuthedContext,
+  seedRolePreview,
+  PREVIEW_STORAGE_KEY,
+} from "../../fixtures/browser.fixture.ts";
 import type { Page } from "@playwright/test";
-import type { ViewAsOrgRole } from "@appstrate/core/permissions";
-
-/** The key `apps/web/src/stores/view-as-store.ts` persists the persona under. */
-const STORAGE_KEY = "appstrate_view_as";
 import { createAgent, createSpace } from "../../helpers/seed.ts";
 import { Sidebar } from "../../pages/sidebar.ts";
-
-/** The shape `stores/view-as-store.ts` persists, under its own key. */
-interface Persona {
-  orgId: string;
-  orgRole: ViewAsOrgRole;
-  space: { spaceId: string; role: string; roleLabel: string; spaceName: string } | null;
-}
-
-async function seedPersona(page: Page, persona: Persona) {
-  await page.addInitScript(([key, value]) => localStorage.setItem(key, value), [
-    STORAGE_KEY,
-    JSON.stringify(persona),
-  ] as const);
-}
 
 /**
  * The preview is a deed of the page's Actions menu (Roles, Space members): open
@@ -226,7 +214,7 @@ test.describe("View as role", () => {
     release();
 
     await expect(banner(page)).toHaveCount(0);
-    expect(await page.evaluate((key) => localStorage.getItem(key), STORAGE_KEY)).toBeNull();
+    expect(await page.evaluate((key) => localStorage.getItem(key), PREVIEW_STORAGE_KEY)).toBeNull();
     // Still the owner's own authority: this entry is hidden from a member.
     await page.getByRole("button", { name: "Actions", exact: true }).click();
     await expect(page.getByTestId("view-as-space-button")).toBeVisible();
@@ -283,7 +271,7 @@ test.describe("View as role", () => {
           requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
         }),
     );
-    expect(await page.evaluate((key) => localStorage.getItem(key), STORAGE_KEY)).toBeNull();
+    expect(await page.evaluate((key) => localStorage.getItem(key), PREVIEW_STORAGE_KEY)).toBeNull();
     await expect(banner(page)).toHaveCount(0);
   });
 
@@ -301,7 +289,7 @@ test.describe("View as role", () => {
     await page.goto(agentUrl);
     await expect(runButton(page).first()).toBeVisible();
 
-    await seedPersona(page, {
+    await seedRolePreview(page, {
       orgId: browserCtx.org.orgId,
       orgRole: "member",
       space: {
@@ -336,12 +324,29 @@ test.describe("View as role", () => {
     await expect(runButton(page).first()).toBeVisible();
   });
 
+  test("explains when a saved preview cannot be restored", async ({
+    authedPage: page,
+    browserCtx,
+  }) => {
+    await page.goto("/agents");
+    await page.evaluate(
+      ([key, orgId]) => {
+        localStorage.setItem(key, JSON.stringify({ orgId, orgRole: "member", space: null }));
+      },
+      [PREVIEW_STORAGE_KEY, browserCtx.org.orgId] as const,
+    );
+    await page.reload();
+    await expect(page.getByText(/Relancez la prévisualisation du rôle/)).toBeVisible();
+    await expect(banner(page)).toHaveCount(0);
+    expect(await page.evaluate((key) => localStorage.getItem(key), PREVIEW_STORAGE_KEY)).toBeNull();
+  });
+
   test("survives a reload", async ({ authedPage: page, apiClient, browserCtx }) => {
     const scope = `@${browserCtx.org.orgSlug}`;
     const agentName = `view-as-reload-${Date.now()}`;
     await createAgent(apiClient, scope, agentName);
 
-    await seedPersona(page, {
+    await seedRolePreview(page, {
       orgId: browserCtx.org.orgId,
       orgRole: "member",
       space: {
@@ -374,7 +379,7 @@ test.describe("View as role", () => {
         body: JSON.stringify({ code: "view_as_forbidden", detail: "refused on the stream" }),
       }),
     );
-    await seedPersona(page, {
+    await seedRolePreview(page, {
       orgId: browserCtx.org.orgId,
       orgRole: "member",
       space: {
@@ -411,7 +416,7 @@ test.describe("View as role", () => {
     await context.addInitScript(() => localStorage.setItem("appstrate_signed_in", "1"));
     const page = await context.newPage();
     try {
-      await seedPersona(page, {
+      await seedRolePreview(page, {
         orgId: browserCtx.org.orgId,
         orgRole: "member",
         space: {
@@ -444,7 +449,7 @@ test.describe("View as role", () => {
     ).toBeVisible();
     await page.keyboard.press("Escape");
 
-    await seedPersona(page, {
+    await seedRolePreview(page, {
       orgId: browserCtx.org.orgId,
       orgRole: "member",
       space: null,
