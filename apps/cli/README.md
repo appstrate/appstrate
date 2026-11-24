@@ -379,7 +379,7 @@ All four subcommands respect the global `--profile <name>` flag and talk to `GET
 
 ### `appstrate code sync`
 
-The first sync from a ledger that identifies an older ZIP or draft ETag backs up the managed directories it is about to replace or remove. The CLI prints their private backup path under its data directory in `skills-sync/backups/`.
+The first sync from a ledger that identifies an older ZIP or draft ETag backs up the managed directories it is about to replace or remove. The CLI prints their private backup path under its data directory in `skills-sync/backups/`. Retrying the same placement reuses an intact copy. If files change before the retry, both versions are kept.
 
 Materialize the union of skills placed in the spaces you reach in the pinned organization as [Agent Skills](https://agentskills.io/specification) directories on this machine — one Claude Code plugin, and/or the shared skill directories Claude Code and Codex scan directly. The connected Claude Code plugin also configures the organization's Appstrate MCP server, which offers every agent you can run as a prompt (see [Agents](#agents)).
 
