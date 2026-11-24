@@ -139,8 +139,9 @@ const BETTER_AUTH_CODES = [
 
 /** Codes no literal and no union can show: each is picked by a ternary. */
 const EMITTED_OUT_OF_SIGHT = [
-  // The two `beforeUsage` refusals of `@appstrate/module-billing`.
+  // The `beforeUsage` refusals of `@appstrate/module-billing`.
   "quota_exceeded",
+  "compute_quota_exceeded",
   "subscription_blocked",
   // `parsePackageZip`'s companion-file refusal (`@appstrate/core/zip`).
   "missing_content",

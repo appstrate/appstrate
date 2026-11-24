@@ -43,6 +43,8 @@ const FREE: Plan = {
   price: 0,
   credit_quota: 5000,
   file_storage_bytes: 1,
+  included_compute_minutes: 1000,
+  max_concurrent_runs: 3,
 };
 const STARTER: UpgradePlan = {
   id: "starter",
@@ -50,6 +52,8 @@ const STARTER: UpgradePlan = {
   price: 29,
   credit_quota: 20000,
   file_storage_bytes: 2,
+  included_compute_minutes: null,
+  max_concurrent_runs: null,
 };
 const PRO: UpgradePlan = {
   id: "pro",
@@ -57,6 +61,8 @@ const PRO: UpgradePlan = {
   price: 99,
   credit_quota: 80000,
   file_storage_bytes: 3,
+  included_compute_minutes: null,
+  max_concurrent_runs: null,
 };
 const PLANS: Plan[] = [FREE, STARTER, PRO];
 
@@ -94,6 +100,14 @@ describe("the billing page for a subscribed org", () => {
   const subscribed: BillingAccount = {
     plan: { id: "starter", name: "Starter" },
     plans: PLANS,
+    compute: {
+      used_seconds: 0,
+      included_minutes: null,
+      usage_percent: 0,
+      period_start: "2026-11-01T00:00:00.000Z",
+      period_end: "2026-12-01T00:00:00.000Z",
+      max_concurrent_runs: null,
+    },
     usage_percent: 25,
     credits_used: 5000,
     credit_quota: 20000,
@@ -125,5 +139,65 @@ describe("the billing page for a subscribed org", () => {
     });
     expect(html).toContain(">Passer à un plan supérieur<");
     expect(html).not.toContain("Gérer l'abonnement");
+  });
+});
+
+describe("the compute minutes on the billing page", () => {
+  const freeAccount: BillingAccount = {
+    plan: { id: "free", name: "Free" },
+    plans: PLANS,
+    usage_percent: 0,
+    credits_used: 0,
+    credit_quota: 5000,
+    period_end: null,
+    status: "none",
+    plan_action: "checkout",
+    upgrades: [STARTER, PRO],
+    compute: {
+      used_seconds: 24_700,
+      included_minutes: 1000,
+      usage_percent: 41,
+      period_start: "2026-11-01T00:00:00.000Z",
+      period_end: "2026-12-01T00:00:00.000Z",
+      max_concurrent_runs: 3,
+    },
+  };
+
+  it("shows the minutes used out of those included, and when they renew", () => {
+    const html = renderPage(freeAccount);
+    expect(html).toContain("Minutes de calcul");
+    expect(html).toContain("411");
+    expect(html).toContain("minutes");
+    expect(html).toContain("Remise à zéro le");
+    expect(html).toContain("3 exécutions simultanées au plus");
+    expect(html).not.toContain("sont utilisées");
+  });
+
+  it("warns at 80 % that the minutes are running out", () => {
+    const html = renderPage({
+      ...freeAccount,
+      compute: { ...freeAccount.compute, used_seconds: 49_000, usage_percent: 81 },
+    });
+    expect(html).toContain("81 % de vos minutes de calcul sont utilisées");
+    expect(html).not.toContain("Minutes de calcul épuisées");
+  });
+
+  it("says new runs are blocked, and invites to upgrade, once the minutes are used up", () => {
+    const html = renderPage({
+      ...freeAccount,
+      compute: { ...freeAccount.compute, used_seconds: 60_000, usage_percent: 100 },
+    });
+    expect(html).toContain("Minutes de calcul épuisées");
+    expect(html).toContain("Passez en Équipe");
+    expect(html).toContain("ne sont pas interrompues");
+  });
+
+  it("draws no compute gauge for a plan without a compute quota", () => {
+    const html = renderPage({
+      ...freeAccount,
+      plan: { id: "starter", name: "Starter" },
+      compute: { ...freeAccount.compute, included_minutes: null, usage_percent: 0 },
+    });
+    expect(html).not.toContain("Minutes de calcul");
   });
 });
