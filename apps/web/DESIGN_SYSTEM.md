@@ -101,12 +101,17 @@ they start with `packages/` or `e2e/`.
   `components/app-shell.tsx`). While the sidebar is off screen (a phone, a collapsed desktop) one
   control opens it (`SidebarOpener`): a burger, then the organization's avatar with the space's on
   its corner (`OrgSpaceTile`, the switcher's own, stacked, never side by side), no names; its
-  accessible name says them, and it carries the unread dot of the Runs entry it hides. Then the
-  trail (the last segment alone on a phone), the page's controls and the notification bell.
-  Controls are 44 px on touch. In the chat the trail is the conversation's name and the controls are
+  accessible name says them, and it carries the unread dot of the Runs entry it hides and, below
+  `md`, that of the notification bell the drawer holds there (its accessible name counts both). Then
+  the trail (the last segment alone on a phone), the page's controls and, from `md` up, the
+  notification bell. Below `md` the bell leaves the header for the drawer so the page's title keeps
+  the room; the header never writes the organization's or the space's name either, the drawer
+  does. Controls are 44 px on touch. In the chat the trail is the conversation's name and the controls are
   its spaces, the pencil that renames it and the context panel.
-- **The sidebar is the whole screen on a phone**: the organization switcher and a close button on
-  its first row, then the Studio/Chat switch and the product's navigation. In the chat: "Nouvelle
+- **The sidebar is the whole screen on a phone**: its first row is the organization switcher, as
+  wide as its names with its chevrons right after them (the sidebar's width from `md` up), then at
+  the row's end the notification bell (its list rises from the bottom, as every phone menu does)
+  and the close button, both 44 px. Then the Studio/Chat switch and the product's navigation. In the chat: "Nouvelle
   conversation" (a left-aligned row with its icon in a round tile, like the conversations below)
   with the search as a magnifier at the end of that row, which unfolds a filled field (no border)
   under it, closed by its X or by a tap elsewhere while empty, then the recent conversations (one
@@ -153,10 +158,10 @@ they start with `packages/` or `e2e/`.
   The slots are portals: the page keeps its context, so the tab bar still answers
   the page's own `<DetailTabs>`, which therefore wraps the whole page, header
   included. The header's first row is the same on every page, a detail page
-  included: burger, trail, bell. `DetailBar` publishes the trail (its `trail`
+  included: burger, trail, bell (from `md` up). `DetailBar` publishes the trail (its `trail`
   ancestors, then its title) like any page, and the lead, its actions and the
   tabs are rows under it.
-- Outside that, the header's right end stays personal (notification bell, profile).
+- Outside that, the header's right end stays personal (the notification bell, from `md` up).
   A page's controls reach it only through a slot, never by drawing in it.
 
 ## 3. Page anatomy (detail pages)

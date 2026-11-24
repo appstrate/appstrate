@@ -503,6 +503,8 @@
   "nav.sidebarDescription": "Displays the mobile sidebar.",
   "nav.toggleSidebar": "Toggle sidebar",
   "nav.toggleSidebarIn": "Toggle sidebar ({{current}})",
+  "nav.toggleSidebarNotifications_one": "{{label}}, {{count}} unread notification",
+  "nav.toggleSidebarNotifications_other": "{{label}}, {{count}} unread notifications",
   "nav.toggleSidebarUnread_one": "{{label}}, {{count}} unread run",
   "nav.toggleSidebarUnread_other": "{{label}}, {{count}} unread runs",
   "switcher.spaceOnRequest": "On request",

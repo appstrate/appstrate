@@ -169,8 +169,11 @@ const NEW_SPACE_ADDRESS = `/org-settings/spaces?${NEW_SPACE_PARAM}=1`;
 /** A column's rows: it scrolls past eight of them, under a header that stays. */
 const LIST_BOX = "max-h-80 overflow-y-auto";
 
-/** The trigger's box, shared by the live control and its loading placeholder. */
-const TRIGGER_BOX = "h-11 w-full";
+/**
+ * The trigger's box, shared by the live control and its loading placeholder: the sidebar's width
+ * from `md` up, its own width below, where the bell and the close button share its row.
+ */
+const TRIGGER_BOX = "h-11 max-w-full md:w-full";
 
 /** The sidebar's head: the organization and the working space, and the panel that changes them. */
 export function OrgSwitcher() {
@@ -307,7 +310,7 @@ export function OrgSwitcher() {
           {/* The organization's tile, the space's as a badge on its corner. */}
           <OrgSpaceTile ring="ring-sidebar" className="mr-1" />
           {/* Two lines, each truncating by itself: a long organization name never hides the space. */}
-          <span className="flex min-w-0 flex-1 flex-col text-left leading-tight">
+          <span className="flex min-w-0 flex-col text-left leading-tight md:flex-1">
             <span className="truncate font-semibold" title={currentOrg.name}>
               {currentOrg.name}
             </span>
