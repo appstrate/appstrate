@@ -2,6 +2,26 @@
 
 import { z } from "zod";
 
+/** Bound a single MCP resources/read response before materializing any of its files. */
+export const MCP_RESOURCE_MAX_BYTES = 32 * 1024 * 1024;
+export const MCP_RESOURCE_MAX_ITEMS = 1024;
+
+export function resourceReadWithinLimits(
+  contents: ReadonlyArray<{ text?: string; blob?: string }>,
+  maxBytes = MCP_RESOURCE_MAX_BYTES,
+): boolean {
+  if (contents.length > MCP_RESOURCE_MAX_ITEMS) return false;
+  let remaining = maxBytes;
+  for (const item of contents) {
+    remaining -=
+      item.text !== undefined
+        ? Buffer.byteLength(item.text)
+        : Buffer.byteLength(item.blob ?? "", "base64");
+    if (remaining < 0) return false;
+  }
+  return true;
+}
+
 /** Successful JSON results of the platform integration's two read tools. */
 export const recallMemoryOutputSchema = z.object({
   memories: z.array(

@@ -36,6 +36,8 @@
  *     the sidecar drops every URI.
  */
 
+import { MCP_RESOURCE_MAX_ITEMS, resourceReadWithinLimits } from "@appstrate/core/mcp-result";
+
 const ULID_BYTES = 16;
 const ENCODING_ALPHABET = "0123456789ABCDEFGHJKMNPQRSTVWXYZ"; // Crockford base32 — ULID standard.
 
@@ -88,7 +90,8 @@ type LinkedResourceClient = Pick<
   import("@appstrate/mcp-transport").AppstrateMcpClient,
   "readResource"
 >;
-const MAX_LINKS = 1024;
+// A maximal collection can have a distinct URI for every member as well as its own.
+const MAX_LINK_HANDLES = MCP_RESOURCE_MAX_ITEMS + 1;
 const MAX_LINK_URI_BYTES = 8192;
 
 const BLOB_URI_PREFIX_TEMPLATE = "appstrate://tool-output/";
@@ -132,6 +135,7 @@ export function parseBlobUri(uri: string): { runId: string; id: string } | null 
  */
 export class BlobStore {
   private readonly links = new Map<string, { upstreamUri: string; client: LinkedResourceClient }>();
+  private readonly linkIds = new WeakMap<LinkedResourceClient, Map<string, string>>();
   private readonly blobs = new Map<string, BlobRecord>();
   private readonly maxTotalBytes: number;
   private totalBytes = 0;
@@ -214,15 +218,28 @@ export class BlobStore {
   /** Bind the emitted URI to this run and to the same upstream connection for future reads. */
   link(upstreamUri: string, client: LinkedResourceClient): string | null {
     if (Buffer.byteLength(upstreamUri) > MAX_LINK_URI_BYTES) return null;
-    const id = generateUlid();
-    if (this.links.size >= MAX_LINKS) this.links.delete(this.links.keys().next().value!);
+    const ids = this.linkIds.get(client) ?? new Map<string, string>();
+    const retained = ids.get(upstreamUri);
+    const id = retained ?? generateUlid();
+    if (retained) {
+      this.links.delete(retained);
+    } else {
+      if (this.links.size >= MAX_LINK_HANDLES) {
+        const [oldId, oldest] = this.links.entries().next().value!;
+        this.links.delete(oldId);
+        this.linkIds.get(oldest.client)?.delete(oldest.upstreamUri);
+      }
+      ids.set(upstreamUri, id);
+      this.linkIds.set(client, ids);
+    }
     this.links.set(id, { upstreamUri, client });
     return blobUri(this.runId, id);
   }
 
   async readLink(uri: string, signal: AbortSignal | undefined, maxBytes: number) {
     const parsed = parseBlobUri(uri);
-    const link = parsed?.runId === this.runId ? this.links.get(parsed.id) : undefined;
+    if (!parsed || parsed.runId !== this.runId) return null;
+    const link = this.links.get(parsed.id);
     if (!link) return null;
     signal?.throwIfAborted();
     const result = await link.client.readResource(
@@ -230,14 +247,31 @@ export class BlobStore {
       { ...(signal && { signal }) },
     );
     signal?.throwIfAborted();
-    let total = 0;
+    if (!resourceReadWithinLimits(result.contents, maxBytes))
+      throw new Error("Upstream resource exceeds the run's resource count or size limit");
+    // A different request or shutdown can retire the parent while its upstream read is pending.
+    if (!this.links.has(parsed.id)) return null;
+    const members = new Set([link.upstreamUri]);
     for (const item of result.contents) {
-      total +=
-        "text" in item ? Buffer.byteLength(item.text) : Buffer.byteLength(item.blob, "base64");
-      if (total > maxBytes)
-        throw new Error("Upstream resource exceeds the run's resource size limit");
+      if (Buffer.byteLength(item.uri) > MAX_LINK_URI_BYTES)
+        throw new Error("Upstream resource URI exceeds the run's URI size limit");
+      members.add(item.uri);
     }
-    return { ...result, contents: result.contents.map((item) => ({ ...item, uri })) };
+
+    // Validate the entire collection before changing any handle. Refresh its existing handles
+    // first, so allocating a new member can evict only a handle outside this response.
+    const ids = this.linkIds.get(link.client)!;
+    const missing: string[] = [];
+    for (const member of members) {
+      if (ids.has(member)) this.link(member, link.client);
+      else missing.push(member);
+    }
+    for (const member of missing) this.link(member, link.client);
+    const contents = result.contents.map((item) => ({
+      ...item,
+      uri: blobUri(this.runId, ids.get(item.uri)!),
+    }));
+    return { ...result, contents };
   }
 
   /** List every URI currently stored (for `resources/list`). */
@@ -251,6 +285,7 @@ export class BlobStore {
 
   /** Drop everything. Called at sidecar shutdown for orderly teardown. */
   clear(): void {
+    for (const { client } of this.links.values()) this.linkIds.delete(client);
     this.links.clear();
     this.blobs.clear();
     this.totalBytes = 0;

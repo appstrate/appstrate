@@ -191,6 +191,50 @@ describe("spillResourcesToWorkspace", () => {
     expect(written).toBe(json);
   });
 
+  it("materializes every member in order, including duplicate names and binary bytes", async () => {
+    const uri = "records://notes/bundle";
+    const original: CallToolResult = { content: [{ type: "resource_link", name: "bundle", uri }] };
+    const out = await spillResourcesToWorkspace(original, {
+      ...readDefaults,
+      workspace,
+      toolCallId: "multi",
+      readResource: async () => ({
+        contents: [
+          { uri: "records://alpha/note.txt", text: "first" },
+          { uri: "records://beta/note.txt", text: "second" },
+          { uri: "records://notes/attachment", mimeType: "application/pdf", blob: "AP8=" },
+        ],
+      }),
+    });
+    expect(out.content.map((block) => block.type)).toEqual(["text", "text", "text"]);
+    for (const [i, file] of ["note.txt", "note-2.txt", "attachment.pdf"].entries()) {
+      expect(out.content[i]).toMatchObject({
+        text: expect.stringContaining("resources/multi-" + file),
+      });
+    }
+    const root = path.join(workspace, "resources");
+    expect(await Bun.file(path.join(root, "multi-note.txt")).text()).toBe("first");
+    expect(await Bun.file(path.join(root, "multi-note-2.txt")).text()).toBe("second");
+    expect(Array.from(await Bun.file(path.join(root, "multi-attachment.pdf")).bytes())).toEqual([
+      0, 255,
+    ]);
+  });
+
+  it("keeps an excessive multi-resource response as one link, without writing any file", async () => {
+    const uri = "records://notes/bundle";
+    const result: CallToolResult = { content: [{ type: "resource_link", name: "bundle", uri }] };
+    const out = await spillResourcesToWorkspace(result, {
+      ...readDefaults,
+      workspace,
+      toolCallId: "many",
+      readResource: async () => ({
+        contents: Array.from({ length: 1025 }, () => ({ uri, text: "" })),
+      }),
+    });
+    expect(out).toEqual(result);
+    expect(await fs.readdir(workspace)).toEqual([]);
+  });
+
   it("leaves a resource_link inline when the fetch fails (degraded, not dropped)", async () => {
     const result = {
       content: [

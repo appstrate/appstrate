@@ -215,3 +215,87 @@ it("reads identical URIs only through their issuing client, subject to revocatio
   store.clear();
   expect(await store.readLink(first, undefined, 2)).toBeNull();
 });
+
+it("gives each linked resource its own opaque handle, preserving order, repeat identity and aggregate limits", async () => {
+  const store = new BlobStore("run-x", { maxTotalBytes: 10 });
+  const collection = "records://upstream/notes";
+  const child = "records://upstream/attachment";
+  const contents = [
+    { uri: collection, text: "é" },
+    { uri: child, blob: "AP8=" },
+    { uri: child, text: "x" },
+  ];
+  const readUris: string[] = [];
+  const link = store.link(collection, {
+    readResource: async ({ uri }) => {
+      readUris.push(uri);
+      return { contents: uri === collection ? contents : [{ uri, blob: "AP8=" }] };
+    },
+  })!;
+  await expect(store.readLink(link, undefined, 4)).rejects.toThrow("size limit");
+  const read = await store.readLink(link, undefined, 5);
+  const childHandle = read!.contents[1]!.uri;
+  expect(childHandle).toStartWith("appstrate://tool-output/run-x/");
+  expect(childHandle).not.toBe(link);
+  expect(read!.contents.map((item) => item.uri)).toEqual([link, childHandle, childHandle]);
+  const again = await store.readLink(link, undefined, 5);
+  expect(again!.contents.map((item) => item.uri)).toEqual([link, childHandle, childHandle]);
+  expect(await store.readLink(childHandle, undefined, 2)).toEqual({
+    contents: [{ uri: childHandle, blob: "AP8=" }],
+  });
+  expect(readUris).toEqual([collection, collection, collection, child]);
+});
+
+it("keeps the parent and all 1024 child handles stable when a read replaces a full link table", async () => {
+  const store = new BlobStore("run-full", NO_EVICTION);
+  const collection = "records://root";
+  const members = Array.from({ length: 1024 }, (_, i) => ({
+    uri: "records://member/" + i,
+    text: "",
+  }));
+  const issuer = {
+    readResource: async ({ uri }: { uri: string }) => ({
+      contents: uri === collection ? members : [{ uri, text: uri }],
+    }),
+  };
+  // Rotate out a previous batch, then put the parent and one existing child at the LRU end.
+  for (let i = 0; i < 1025; i++) store.link("records://old/" + i, issuer);
+  const parent = store.link(collection, issuer)!;
+  const retainedChild = store.link(members[1023]!.uri, issuer)!;
+  for (let i = 0; i < 1023; i++) store.link("records://filler/" + i, issuer);
+
+  const result = await store.readLink(parent, undefined, 0);
+  const handles = result!.contents.map((item) => item.uri);
+  expect(new Set(handles).size).toBe(1024);
+  expect(handles[1023]).toBe(retainedChild);
+  const readAgain = await store.readLink(parent, undefined, 0);
+  expect(readAgain!.contents.map((item) => item.uri)).toEqual(handles);
+  for (const [i, handle] of handles.entries()) {
+    const read = await store.readLink(handle, undefined, 128);
+    expect(read?.contents).toEqual([{ uri: handle, text: members[i]!.uri }]);
+  }
+});
+
+it("rejects a late oversized member URI without rotating any live handle", async () => {
+  const store = new BlobStore("run-atomic", NO_EVICTION);
+  const collection = "records://root";
+  const issuer = {
+    readResource: async ({ uri }: { uri: string }) => ({
+      contents:
+        uri === collection
+          ? [
+              { uri: "records://new", text: "" },
+              { uri: "x".repeat(8193), text: "" },
+            ]
+          : [{ uri, text: "" }],
+    }),
+  };
+  const oldest = store.link("records://oldest", issuer)!;
+  const parent = store.link(collection, issuer)!;
+  for (let i = 0; i < 1023; i++) store.link("records://other/" + i, issuer);
+  await expect(store.readLink(parent, undefined, 0)).rejects.toThrow("URI size limit");
+  expect(await store.readLink(oldest, undefined, 0)).toEqual({
+    contents: [{ uri: oldest, text: "" }],
+  });
+  await expect(store.readLink(parent, undefined, 0)).rejects.toThrow("URI size limit");
+});

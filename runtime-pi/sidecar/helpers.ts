@@ -28,7 +28,7 @@ import { DEFAULT_LLM_STREAM_IDLE_TIMEOUT_MS } from "@appstrate/connect/proxy-pri
 export const INTEGRATION_ID_RE = /^(@[a-z0-9][a-z0-9-]*\/)?[a-z0-9]([a-z0-9-]*[a-z0-9])?$/;
 
 // Maximum buffered transport payload. The smaller resolver limit applies only to model-inline responses.
-export const ABSOLUTE_MAX_RESPONSE_SIZE = 32 * 1024 * 1024; // 32 MB — covers PDFs/images/archives, aligned with MAX_MCP_ENVELOPE_SIZE × 2
+export { MCP_RESOURCE_MAX_BYTES as ABSOLUTE_MAX_RESPONSE_SIZE } from "@appstrate/core/mcp-result";
 /** Every sidecar outbound call (forward proxy, MITM, platform tools) shares the api_call deadline. */
 export { API_CALL_TIMEOUT_MS };
 const LLM_PROXY_TIMEOUT_MS = 1_800_000; // 30 minutes for the whole LLM exchange

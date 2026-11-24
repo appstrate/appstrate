@@ -44,6 +44,7 @@
 import { promises as fs } from "node:fs";
 import * as path from "node:path";
 import { resolveSafePath } from "@appstrate/afps-runtime/resolvers";
+import { resourceReadWithinLimits } from "@appstrate/core/mcp-result";
 import { extensionForMime } from "@appstrate/core/naming";
 import type { CallToolResult } from "@appstrate/mcp-transport";
 import { loadPiCodingAgentSdk } from "./pi-sdk.ts";
@@ -165,41 +166,37 @@ export async function spillResourcesToWorkspace(
     }
     // Resource link — URI only; fetch the bytes via resources/read, then spill.
     if (block.type === "resource_link") {
-      const uri = (block as { uri?: unknown }).uri;
-      const linkMime = (block as { mimeType?: unknown }).mimeType;
-      let inner: EmbeddedResource | null = null;
-      let bytes: Uint8Array | null = null;
-      if (typeof uri === "string") {
-        try {
-          opts.signal?.throwIfAborted();
-          const res = await opts.readResource(uri);
-          opts.signal?.throwIfAborted();
-          const total = res.contents.reduce(
-            (bytes, item) =>
-              bytes +
-              (item.text !== undefined
-                ? Buffer.byteLength(item.text)
-                : Buffer.byteLength(item.blob ?? "", "base64")),
-            0,
-          );
-          const c = total <= 32 * 1024 * 1024 ? res.contents[0] : undefined;
-          if (c) {
-            inner = {
-              uri,
-              mimeType: c.mimeType ?? (typeof linkMime === "string" ? linkMime : undefined),
-              text: c.text,
-              blob: c.blob,
-            };
-            bytes = resourceBytes(inner);
-          }
-        } catch {
-          opts.signal?.throwIfAborted();
-          // Fetch failed — leave the link untouched (degraded, not dropped).
+      let contents: EmbeddedResource[];
+      try {
+        opts.signal?.throwIfAborted();
+        const read = await opts.readResource(block.uri);
+        opts.signal?.throwIfAborted();
+        contents = read.contents;
+      } catch {
+        opts.signal?.throwIfAborted();
+        out.push(block);
+        continue;
+      }
+      if (!contents.length || !resourceReadWithinLimits(contents)) {
+        out.push(block);
+        continue;
+      }
+      // A read can return several texts or binaries, including chunks with the same URI.
+      // Keep the original link once if any item could not be materialized.
+      let incomplete = false;
+      for (const item of contents) {
+        opts.signal?.throwIfAborted();
+        const inner = { ...item, mimeType: item.mimeType ?? block.mimeType };
+        const bytes = resourceBytes(inner);
+        const pointer = bytes ? await writeAndPointer(inner, bytes, index, ctx) : null;
+        if (pointer) {
+          out.push(pointer);
+          index++;
+        } else {
+          incomplete = true;
         }
       }
-      const replaced = inner && bytes ? await writeAndPointer(inner, bytes, index, ctx) : null;
-      if (replaced) index++;
-      out.push(replaced ?? block);
+      if (incomplete) out.push(block);
       continue;
     }
     out.push(block);
