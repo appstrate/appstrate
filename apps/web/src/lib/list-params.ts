@@ -5,7 +5,7 @@
 // several `setParams` in the same tick read the same committed location and the last wins.
 
 import { useState } from "react";
-import { useSearchParams } from "react-router-dom";
+import { useLocation, useNavigate, useSearchParams } from "react-router-dom";
 
 /** A page keeps it in the URL ({@link useListParams}); a list inside a page keeps it locally ({@link useLocalListParams}) or both would write the page's `?q=`. */
 export interface ListState {
@@ -28,36 +28,62 @@ export function useListParams(filterKeys: readonly string[]) {
   return urlListParams(params, setParams, filterKeys);
 }
 
-type SetParams = ReturnType<typeof useSearchParams>[1];
+/** A detail panel has its own parameter names and keeps the selected tab in the hash. */
+export function usePanelListParams(names: Readonly<Record<string, string>>) {
+  const location = useLocation();
+  const navigate = useNavigate();
+  const params = new URLSearchParams(location.search);
+  return urlListParams(
+    params,
+    (update, options) => {
+      void navigate(
+        { search: update(params).toString(), hash: location.hash },
+        {
+          ...options,
+          state: location.state,
+        },
+      );
+    },
+    Object.keys(names),
+    names,
+  );
+}
+
+type SetParams = (
+  update: (previous: URLSearchParams) => URLSearchParams,
+  options?: { replace?: boolean },
+) => void;
 
 /** {@link useListParams} apart from the router hook, for its test. */
 export function urlListParams(
   params: URLSearchParams,
   setParams: SetParams,
   filterKeys: readonly string[],
+  names: Readonly<Record<string, string>> = {},
 ) {
+  const name = (key: string) => names[key] ?? key;
   return {
     params,
     values<T extends string>(key: string, allowed: readonly T[]): T[] {
-      return [...new Set(params.getAll(key).flatMap((value) => readList(value, allowed)))];
+      return [...new Set(params.getAll(name(key)).flatMap((value) => readList(value, allowed)))];
     },
     setValues:
       (key: string) =>
       (values: string[]): void => {
         setParams((prev) => {
           const next = new URLSearchParams(prev);
-          next.delete(key);
-          for (const value of values) next.append(key, value);
+          next.delete(name(key));
+          for (const value of values) next.append(name(key), value);
           return next;
         });
       },
-    search: params.get("q") ?? "",
+    search: params.get(name("q")) ?? "",
     setSearch(value: string): void {
       setParams(
         (prev) => {
           const next = new URLSearchParams(prev);
-          if (value) next.set("q", value);
-          else next.delete("q");
+          if (value) next.set(name("q"), value);
+          else next.delete(name("q"));
           return next;
         },
         { replace: true },
@@ -66,7 +92,7 @@ export function urlListParams(
     reset(): void {
       setParams((prev) => {
         const next = new URLSearchParams(prev);
-        for (const key of [...filterKeys, "q"]) next.delete(key);
+        for (const key of new Set([...filterKeys, "q"])) next.delete(name(key));
         return next;
       });
     },

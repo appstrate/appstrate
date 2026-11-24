@@ -121,6 +121,8 @@ export function useUrlModal(name: string, companions: readonly string[] = NO_COM
 }
 
 interface ModalTargetOptions {
+  /** A page with one table per group lets only the addressed table resolve the target. */
+  ownsValue?: (value: string) => boolean;
   /** Parameters that qualify the object and leave with it (see `modalParamStep`). */
   companions?: readonly string[];
 }
@@ -184,7 +186,9 @@ export function useUrlModalTarget<T>(
   const param = useUrlModal(name, options?.companions);
   const target =
     param.value === null ? undefined : items?.find((item) => keyOf(item) === param.value);
-  const { value, close } = param;
+  const value =
+    param.value !== null && options?.ownsValue?.(param.value) === false ? null : param.value;
+  const { close } = param;
   const loaded = items !== undefined;
   const found = target !== undefined;
   const lastResolved = useRef<string | null>(null);

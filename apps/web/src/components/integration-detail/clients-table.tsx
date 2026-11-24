@@ -23,7 +23,7 @@ import { errorMessage } from "../../lib/mutation-error";
 import { DataTable } from "../data-table";
 import { EmptyState } from "../page-states";
 import { usePermissions } from "../../hooks/use-permissions";
-import { useUrlModal } from "../../hooks/use-url-modal";
+import { useUrlModalTarget } from "../../hooks/use-url-modal";
 import { useWorkingSpaceWording } from "../../hooks/use-overview-mode";
 import { clientDeeds, clientLevelKey, useIntegrationClientColumns } from "./integration-columns";
 import {
@@ -332,7 +332,6 @@ export function ClientsTable({
   const [newTier, setNewTier] = useState<IntegrationClientTier | null>(null);
   // Several tables can share a page (one per auth): each answers only the parameter
   // scoped to its own `authKey` (`?editOauthClient=<authKey>:<client_ref>`).
-  const editClient = useUrlModal(EDIT_OAUTH_CLIENT_PARAM);
   const [confirmDelete, setConfirmDelete] = useState<ClientRow | null>(null);
   const [confirmPromote, setConfirmPromote] = useState<ClientRow | null>(null);
   // Auto-provisioned auths hide the manual register button by default — their
@@ -353,11 +352,15 @@ export function ClientsTable({
   const canRegister = !autoProvisioned || (showManual && !hasAutoClient);
   const tierOf = (row: ClientRow): IntegrationClientTier => (row.level === "org" ? "org" : "space");
   // A parameter typed in the URL opens only what the table itself would offer.
-  const editedRow = rows.find(
-    (row) =>
-      row.client.client_ref === integrationClientModalRef(authKey, editClient.value) &&
-      clientDeeds(row, canManageOrg).editable,
+  const editClient = useUrlModalTarget(
+    EDIT_OAUTH_CLIENT_PARAM,
+    spaceClients.data && (!canManageOrg || orgClients.data)
+      ? rows.filter((row) => clientDeeds(row, canManageOrg).editable)
+      : undefined,
+    (row) => integrationClientModalValue(authKey, row.client.client_ref),
+    { ownsValue: (value) => integrationClientModalRef(authKey, value) !== null },
   );
+  const editedRow = editClient.target;
   const modal: ModalState = editedRow
     ? { mode: "edit", tier: tierOf(editedRow), client: editedRow.client }
     : canRegister && (newTier === "space" || (newTier === "org" && canManageOrg))

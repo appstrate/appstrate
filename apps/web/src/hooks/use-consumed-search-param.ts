@@ -5,7 +5,7 @@ import { useLocation, useNavigate } from "react-router-dom";
 import { searchOf } from "../lib/url-search";
 
 /**
- * A deep link's one-shot parameter (`?agentRunStatus=`, `?connectionMethod=`): read at
+ * A deep link's one-shot parameter (`?connectionMethod=`): read at
  * mount, then dropped from the address so it does not stick to the tab.
  */
 export function useConsumedSearchParam(name: string): string | null {

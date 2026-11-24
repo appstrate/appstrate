@@ -22,6 +22,17 @@ for (const screen of [
       await page.reload();
       await expect(stored === '"table"' ? table : cards).toBeChecked();
     }
+    const other = await page.context().newPage();
+    try {
+      await other.goto(screen.path);
+      await expect(other.getByRole("radio", { name: "Vue cartes", exact: true })).toBeChecked();
+      await other.getByRole("radio", { name: "Vue tableau", exact: true }).click();
+      await expect(table).toBeChecked();
+      await cards.click();
+      await expect(other.getByRole("radio", { name: "Vue cartes", exact: true })).toBeChecked();
+    } finally {
+      await other.close();
+    }
     await cards.focus();
     await page.keyboard.press("ArrowLeft");
     await expect(table).toBeFocused();

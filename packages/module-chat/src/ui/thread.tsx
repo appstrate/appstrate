@@ -137,8 +137,7 @@ export function Thread({
   messageQueue: MessageQueue;
 }) {
   useQueueFlush(messageQueue);
-  // Held above the welcome and footer composers: the draft seeds the conversation once.
-  const draftSeededRef = React.useRef(false);
+  const seededDraft = React.useRef(false);
   const { t } = useChatHost();
   const can = useConversationTurnCan();
   const canWrite = can("chat:write");
@@ -163,6 +162,9 @@ export function Thread({
           data-chat-thread=""
         >
           {/* Register the rich tool cards (these render nothing themselves). */}
+          {initialComposerDraft && canWrite && (
+            <InitialComposerDraft draft={initialComposerDraft} seededRef={seededDraft} />
+          )}
           <InvokeOperationToolUI />
           <RunAndWaitToolUI />
           <SearchToolUI />
@@ -174,12 +176,7 @@ export function Thread({
           {/* Empty: composer centered mid-screen for a strong first impression.
           Non-empty: classic scrollable transcript with a sticky footer. */}
           <AuiIf condition={(s) => s.thread.isEmpty}>
-            <ThreadWelcome
-              composerTools={composerTools}
-              initialComposerDraft={initialComposerDraft}
-              draftSeededRef={draftSeededRef}
-              queue={messageQueue}
-            />
+            <ThreadWelcome composerTools={composerTools} queue={messageQueue} />
           </AuiIf>
 
           <AuiIf condition={(s) => !s.thread.isEmpty}>
@@ -197,12 +194,7 @@ export function Thread({
 
               <ThreadPrimitive.ViewportFooter className={THREAD_FOOTER_CLASS}>
                 <ScrollToBottom />
-                <Composer
-                  tools={composerTools}
-                  initialDraft={initialComposerDraft}
-                  draftSeededRef={draftSeededRef}
-                  queue={messageQueue}
-                />
+                <Composer tools={composerTools} queue={messageQueue} />
                 <Disclaimer />
               </ThreadPrimitive.ViewportFooter>
             </ThreadPrimitive.Viewport>
@@ -233,15 +225,33 @@ function shouldAutofocusComposer(): boolean {
   );
 }
 
+/** The welcome and footer render alternate inputs into this same conversation composer. */
+function InitialComposerDraft({
+  draft,
+  seededRef,
+}: {
+  draft: string;
+  seededRef: React.RefObject<boolean>;
+}) {
+  const aui = useAui();
+  const empty = useAuiState((s) => s.composer.isEditing && !s.composer.text);
+  React.useEffect(() => {
+    if (
+      !empty ||
+      !takesDraft(draft, { seeded: seededRef.current, typed: aui.composer.getState().text })
+    )
+      return;
+    seededRef.current = true;
+    aui.composer.setText(draft, { origin: "user" });
+  }, [aui, draft, empty, seededRef]);
+  return null;
+}
+
 function ThreadWelcome({
   composerTools,
-  initialComposerDraft,
-  draftSeededRef,
   queue,
 }: {
   composerTools?: React.ReactNode;
-  initialComposerDraft?: string;
-  draftSeededRef: React.RefObject<boolean>;
   queue: MessageQueue;
 }) {
   const { t, firstName: name, actingSpaceIds } = useChatHost();
@@ -271,12 +281,7 @@ function ThreadWelcome({
             </p>
           )}
         </div>
-        <Composer
-          tools={composerTools}
-          initialDraft={initialComposerDraft}
-          draftSeededRef={draftSeededRef}
-          queue={queue}
-        />
+        <Composer tools={composerTools} queue={queue} />
       </div>
     </div>
   );
@@ -630,17 +635,7 @@ function ComposerPlaceholder({ modelLabel }: { modelLabel: string | null | undef
   );
 }
 
-function Composer({
-  tools,
-  initialDraft,
-  draftSeededRef,
-  queue,
-}: {
-  tools?: React.ReactNode;
-  initialDraft?: string;
-  draftSeededRef: React.RefObject<boolean>;
-  queue: MessageQueue;
-}) {
+function Composer({ tools, queue }: { tools?: React.ReactNode; queue: MessageQueue }) {
   const { t, modelLabel } = useChatHost();
   const can = useConversationTurnCan();
   const composer = unstable_useComposerInput();
@@ -671,12 +666,6 @@ function Composer({
     if (running) enqueue();
     else if (!blocked) composer.send();
   };
-  React.useEffect(() => {
-    if (!takesDraft(initialDraft, { seeded: draftSeededRef.current, typed: composer.value }))
-      return;
-    draftSeededRef.current = true;
-    composer.setText(initialDraft);
-  }, [composer, initialDraft, draftSeededRef]);
   // Sending, stopping and attaching all guard on `chat:write`.
   if (!can("chat:write")) {
     return (

@@ -24,7 +24,8 @@ function recorder(initial: string) {
   return {
     calls,
     current: () => params.toString(),
-    list: (keys: readonly string[]) => urlListParams(params, setParams, keys),
+    list: (keys: readonly string[], names?: Readonly<Record<string, string>>) =>
+      urlListParams(params, setParams, keys, names),
   };
 }
 
@@ -83,4 +84,17 @@ describe("readList", () => {
     expect(readList(null, ["active"])).toEqual([]);
     expect(readList("", ["active"])).toEqual([]);
   });
+});
+
+it("keeps a shared agent panel filter in the address and preserves the outer list on reset", () => {
+  const url = recorder("q=outer&agentRunStatus=failed");
+  const list = () => url.list(["status"], { status: "agentRunStatus", q: "agentRunSearch" });
+  expect(list().values("status", ["failed", "running"])).toEqual(["failed"]);
+  list().setValues("status")(["running"]);
+  list().setSearch("weekly");
+  expect(list().values("status", ["failed", "running"])).toEqual(["running"]);
+  expect(list().search).toBe("weekly");
+  list().reset();
+  expect(url.current()).toBe("q=outer");
+  expect(url.calls).toEqual([{ replace: false }, { replace: true }, { replace: false }]);
 });

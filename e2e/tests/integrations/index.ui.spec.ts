@@ -93,3 +93,22 @@ for (const view of ["cards", "table"] as const) {
     await expect(row(running)).toHaveCount(0);
   });
 }
+
+test("a stale OAuth client link is removed without leaving the integration settings", async ({
+  authedPage: page,
+  apiClient,
+  browserCtx,
+}) => {
+  const { id } = await createIntegration(
+    apiClient,
+    `@${browserCtx.org.orgSlug}`,
+    "missing-client-link",
+  );
+  await page.goto(`/integrations/${id}?editOauthClient=gone%3Aclient#settings`);
+  await expect(page).toHaveURL(
+    (url) =>
+      url.pathname === `/integrations/${id}` &&
+      url.hash === "#settings" &&
+      !url.searchParams.has("editOauthClient"),
+  );
+});
