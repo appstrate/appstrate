@@ -9,7 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- `@appstrate/core/chat-message` exposes the historical-message and submitted-thread schemas shared by chat and the upgrade check.
+- `@appstrate/core/chat-message` exports `historicalChatMessageSchema` for persisted messages and
+  `chatThreadMessagesSchema` for submitted threads. The chat module and upgrade check share these
+  validators. `AGENT_PROMPT_PART_TYPE` and `agentPromptDataSchema` describe an agent launch part,
+  and `CHAT_MESSAGE_MAX_BYTES` sets the submitted message size limit.
 
 - `displayAccountId` and `PLACEHOLDER_ACCOUNT_ID` identify integration connections that can be renewed on the same upstream account.
 
