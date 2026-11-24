@@ -74,6 +74,7 @@ import { isValidSessionId } from "../../../../services/credential-proxy/session.
 import { resetOidcGuardsLimiters } from "../../../oidc/auth/guards.ts";
 import { authorizationCodeFlow } from "../../../oidc/test/helpers/authorization-code-flow.ts";
 import mcpModule from "../../index.ts";
+import { MAX_DESCRIBE_IDS } from "../../tools.ts";
 // By path, as `test/integration/modules/mcp-read-skill.test.ts` does: the minting secret is
 // process-local to the module instance whose auth strategy the app registered.
 import { mintMcpLoopbackToken } from "../../../../../../../packages/module-chat/src/loopback-auth.ts";
@@ -1198,6 +1199,94 @@ describe("mcp integration tools", () => {
         path: spacePath(owner),
         headers: { Authorization: `Bearer ${token}`, "X-Org-Id": owner.orgId },
       });
+    });
+
+    it("describes several tools in one call with `ids`, sharing their usage and refusing per item", async () => {
+      const kit = startFakeMcpServer({
+        tools: [
+          { name: "open", description: "Open a page." },
+          { name: "click", description: "Click an element." },
+        ],
+        bearer: REMOTE_TOKEN,
+      });
+      try {
+        const KIT_ID = "@cporg/kit";
+        await seedProxyIntegration(
+          owner,
+          remoteIntegrationManifest({
+            name: KIT_ID,
+            url: kit.url,
+            tools_policy: { open: {}, click: {} },
+            auths: {
+              api_key: {
+                type: "api_key" as const,
+                authorizedUris: [`${kit.origin}/**`],
+                credentialFields: ["token"],
+                requiredCredentialFields: ["token"],
+                delivery: {
+                  http: {
+                    in: "header" as const,
+                    name: "Authorization",
+                    prefix: "Bearer ",
+                    value: "{$credential.token}",
+                  },
+                },
+              },
+            },
+          }),
+        );
+        await seedProxyConnection(owner, KIT_ID, "api_key", { token: REMOTE_TOKEN });
+        const caller = await instanceCaller(owner);
+
+        const described = await callTool(caller, "describe", {
+          kind: "integration_tool",
+          ids: ["cporg_kit__open", "cporg_kit__click", "cporg_kit__open", "nobody__nothing"],
+        });
+        // One unknown id does not fail the others; a repeated id is described once.
+        expect(described.isError).toBe(false);
+        expect(described.data.kind).toBe("integration_tool");
+        expect(typeof described.data.usage).toBe("string");
+        const items = described.data.items as Array<Record<string, unknown>>;
+        expect(items.map((item) => item.id)).toEqual([
+          "cporg_kit__open",
+          "cporg_kit__click",
+          "nobody__nothing",
+        ]);
+        for (const item of items.slice(0, 2)) {
+          expect(item).toMatchObject({
+            kind: "integration_tool",
+            integration_package_id: KIT_ID,
+            input_schema: { type: "object", properties: {} },
+          });
+          // Given once, at the top: every described tool shares it.
+          expect(item.usage).toBeUndefined();
+        }
+        expect(items[2]).toMatchObject({ isError: true, code: "unknown_tool" });
+
+        // Only refusals: the call itself is an error.
+        const none = await callTool(caller, "describe", {
+          kind: "integration_tool",
+          ids: ["nobody__nothing"],
+        });
+        expect(none.isError).toBe(true);
+
+        const tooMany = await callTool(caller, "describe", {
+          kind: "integration_tool",
+          ids: Array.from({ length: MAX_DESCRIBE_IDS + 1 }, (_, i) => `cporg_kit__t${i}`),
+        });
+        expect(tooMany).toMatchObject({
+          isError: true,
+          data: { code: "invalid_argument", arguments: ["ids"] },
+        });
+        const both = await callTool(caller, "describe", {
+          kind: "integration_tool",
+          id: "cporg_kit__open",
+          ids: ["cporg_kit__click"],
+        });
+        expect(both).toMatchObject({ isError: true, data: { code: "invalid_argument" } });
+      } finally {
+        kit.stop();
+      }
     });
 
     it("reads a cold remote catalog only for a search naming the kind, never for a default one", async () => {

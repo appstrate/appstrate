@@ -21,7 +21,12 @@ export type ChatTurnErrorCategory = ModelErrorCategory;
 export type ChatTurnFinishReason =
   "stop" | "length" | "content-filter" | "tool-calls" | "error" | "other" | "deadline" | "unknown";
 
-export const CHAT_MAX_STEPS = 16;
+/**
+ * Model calls one chat turn may make, the last one tool-less. A step is a model call, so a read
+ * (search, describe) costs one as an action does: 16 left a chain of six integration tools at the
+ * cap. It bounds loops and cost; the wall-clock bound is {@link CHAT_TURN_DEADLINE_MS}.
+ */
+export const CHAT_MAX_STEPS = 30;
 export const CHAT_TOOL_STEP_BUDGET = CHAT_MAX_STEPS - 1;
 export const CHAT_FINAL_STEP_SYSTEM_PROMPT =
   "You are on the final step budget for this turn. Do not call tools. Give the user a concise final answer from the evidence already gathered, explicitly mark any remaining checks as untested, and ask them to continue if more tool work is needed.";

@@ -9,7 +9,11 @@
 
 import { describe, expect, it } from "bun:test";
 import { readUIMessageStream, type UIMessage, type UIMessageChunk } from "ai";
-import { turnMetadataFromMessage } from "@appstrate/core/chat-turn-metadata";
+import {
+  CHAT_MAX_STEPS,
+  CHAT_TOOL_STEP_BUDGET,
+  turnMetadataFromMessage,
+} from "@appstrate/core/chat-turn-metadata";
 import { contextReading } from "../src/ui/turn-context.ts";
 import type { PiUsage } from "../src/pi-chat/pi-events.ts";
 import {
@@ -130,8 +134,8 @@ describe("closePiTurn", () => {
       errorRetryable: true,
       requestId: "req_public123",
       stepCount: 0,
-      maxSteps: 16,
-      toolStepBudget: 15,
+      maxSteps: CHAT_MAX_STEPS,
+      toolStepBudget: CHAT_TOOL_STEP_BUDGET,
       toolStepBudgetReached: false,
       maxStepsReached: false,
       lastToolName: "read",

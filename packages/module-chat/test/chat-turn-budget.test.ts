@@ -11,6 +11,7 @@
 
 import { describe, expect, it } from "bun:test";
 import {
+  CHAT_MAX_STEPS,
   CHAT_MIN_RUN_BUDGET_MS,
   CHAT_TURN_DEADLINE_MS,
   CHAT_TURN_SAFETY_MARGIN_MS,
@@ -216,7 +217,7 @@ describe("turn budget shown to the model (A5)", () => {
   it("states the real remaining time and step position", () => {
     const note = formatTurnBudgetNote({ remainingMs: 4 * 60_000 + 12_000, stepsUsed: 7 });
     expect(note).toContain("4m12s");
-    expect(note).toContain("step 7/16");
+    expect(note).toContain(`step 7/${CHAT_MAX_STEPS}`);
     // The quoted threshold must be the one the GATE applies, not the bare floor:
     // `computeTurnRunBudget` spends the 45 s safety margin before comparing
     // against the 90 s floor, so a launch actually needs 2m15s of remaining time.
@@ -240,7 +241,7 @@ describe("turn budget shown to the model (A5)", () => {
     expect(result.content).toHaveLength(2);
     expect(result.content[0]).toEqual({ type: "text", text: '{"id":"run_1"}' });
     expect(result.content[1]?.text).toContain("1m30s left");
-    expect(result.content[1]?.text).toContain("step 5/16");
+    expect(result.content[1]?.text).toContain(`step 5/${CHAT_MAX_STEPS}`);
     // `details` keeps the pre-note payload. That protects no UI: the UI parses
     // `content` — the very channel the note is appended to — and nothing
     // currently reads `details`.
