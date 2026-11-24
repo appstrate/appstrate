@@ -15,6 +15,7 @@
  * fits a small validator without losing safety.
  */
 
+import { runServiceUrl, sameOriginRunUrl } from "@appstrate/afps-runtime/sinks";
 import { getErrorMessage } from "@appstrate/core/errors";
 import { normalizeHttpUrl } from "@appstrate/core/url";
 import { parsePiLoopEnv } from "@appstrate/runner-pi/loop-env";
@@ -85,9 +86,9 @@ interface RuntimeEnv {
     url: string;
     finalizeUrl: string;
     secret: string;
-    heartbeatUrl?: string;
-    workspaceUrl?: string;
-    filesUrl?: string;
+    heartbeatUrl: string;
+    workspaceUrl: string;
+    filesUrl: string;
   };
   /** The run's sidecar (`/mcp`, `/llm`, boot report). */
   sidecarUrl: string;
@@ -329,12 +330,12 @@ export function parseRuntimeEnv(source: NodeJS.ProcessEnv = process.env): Runtim
   const sinkUrl = source.APPSTRATE_SINK_URL;
   if (!sinkUrl) issues.push("APPSTRATE_SINK_URL: required");
   else if (normalizeHttpUrl(sinkUrl) === null)
-    issues.push(`APPSTRATE_SINK_URL: must be an http(s) URL (got "${sinkUrl}")`);
+    issues.push("APPSTRATE_SINK_URL: must be an http(s) URL");
 
   const sinkFinalizeUrl = source.APPSTRATE_SINK_FINALIZE_URL;
   if (!sinkFinalizeUrl) issues.push("APPSTRATE_SINK_FINALIZE_URL: required");
   else if (normalizeHttpUrl(sinkFinalizeUrl) === null)
-    issues.push(`APPSTRATE_SINK_FINALIZE_URL: must be an http(s) URL (got "${sinkFinalizeUrl}")`);
+    issues.push("APPSTRATE_SINK_FINALIZE_URL: must be an http(s) URL");
 
   const sinkSecret = source.APPSTRATE_SINK_SECRET;
   if (!sinkSecret) issues.push("APPSTRATE_SINK_SECRET: required");
@@ -440,6 +441,23 @@ export function parseRuntimeEnv(source: NodeJS.ProcessEnv = process.env): Runtim
 
   if (issues.length > 0) throw new RuntimeEnvError(issues);
 
+  // Floating tags and digest-pinned runtime images can pair with a platform predating service links.
+  // Resolve that wire contract once; every signer below consumes a verified, absolute URL.
+  let sink: RuntimeEnv["sink"];
+  try {
+    const url = sameOriginRunUrl(sinkUrl!, sinkUrl!, "events");
+    sink = {
+      url,
+      finalizeUrl: sameOriginRunUrl(url, sinkFinalizeUrl!, "finalize"),
+      heartbeatUrl: runServiceUrl(url, "heartbeat", source.APPSTRATE_HEARTBEAT_URL),
+      workspaceUrl: runServiceUrl(url, "workspace", source.APPSTRATE_WORKSPACE_URL),
+      filesUrl: runServiceUrl(url, "files", source.APPSTRATE_FILES_URL),
+      secret: sinkSecret!,
+    };
+  } catch (err) {
+    throw new RuntimeEnvError([getErrorMessage(err)]);
+  }
+
   return {
     runId: runId!,
     workspaceDir: source.WORKSPACE_DIR || "/workspace",
@@ -460,14 +478,7 @@ export function parseRuntimeEnv(source: NodeJS.ProcessEnv = process.env): Runtim
     ...(modelMaxTokens > 0 ? { modelMaxTokens } : {}),
     agentPrompt: agentPrompt!,
     agentInput,
-    sink: {
-      url: sinkUrl!,
-      finalizeUrl: sinkFinalizeUrl!,
-      secret: sinkSecret!,
-      ...(source.APPSTRATE_HEARTBEAT_URL && { heartbeatUrl: source.APPSTRATE_HEARTBEAT_URL }),
-      ...(source.APPSTRATE_WORKSPACE_URL && { workspaceUrl: source.APPSTRATE_WORKSPACE_URL }),
-      ...(source.APPSTRATE_FILES_URL && { filesUrl: source.APPSTRATE_FILES_URL }),
-    },
+    sink,
     sidecarUrl: sidecarUrl!,
     sidecarAuthToken: sidecarAuthToken!,
     timeoutSeconds: agentTimeoutSeconds > 0 ? agentTimeoutSeconds : undefined,

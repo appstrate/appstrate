@@ -98,7 +98,7 @@ export class HttpSink implements EventSink {
 
   constructor(opts: HttpSinkOptions) {
     this.url = opts.url;
-    this.finalizeUrl = opts.finalizeUrl ?? `${opts.url.replace(/\/$/, "")}/finalize`;
+    this.finalizeUrl = opts.finalizeUrl ?? appendUrlPath(opts.url, "finalize");
     this.runSecret = opts.runSecret;
     this.generateId = opts.generateId ?? randomUUID;
     this.now = opts.now ?? Date.now;
@@ -229,11 +229,20 @@ export class HttpSink implements EventSink {
  * same run-secret signature: `…/api/runs/{id}/events` → `…/api/runs/{id}/{endpoint}`.
  */
 export function sinkSiblingUrl(sinkUrl: string, endpoint: string): string {
-  if (!sinkUrl.endsWith("/events")) throw new Error(`sink URL does not end in /events: ${sinkUrl}`);
-  return `${sinkUrl.slice(0, -"events".length)}${endpoint}`;
+  const url = new URL(sinkUrl);
+  if (!url.pathname.endsWith("/events")) throw new Error("sink URL does not end in /events");
+  url.pathname = url.pathname.slice(0, -"events".length) + endpoint;
+  return url.href;
 }
 
-/** Service links authorize use of the run credential only on the selected origin. */
+/** Append a single path segment while preserving the collection's query parameters. */
+export function appendUrlPath(base: string, segment: string): string {
+  const url = new URL(base);
+  url.pathname = url.pathname.replace(/\/$/, "") + "/" + encodeURIComponent(segment);
+  return url.href;
+}
+
+/** Older platforms send only the events URL; their images and independent CLI derive the service links. */
 export function runServiceUrl(
   sink: string,
   endpoint: "mcp" | "heartbeat" | "workspace" | "files",
@@ -241,13 +250,17 @@ export function runServiceUrl(
 ): string {
   const link =
     explicit ??
-    (endpoint === "heartbeat"
-      ? sink.replace(/\/$/, "") + "/heartbeat"
-      : sinkSiblingUrl(sink, endpoint));
-  const url = new URL(link);
+    (endpoint === "heartbeat" ? appendUrlPath(sink, "heartbeat") : sinkSiblingUrl(sink, endpoint));
+  return sameOriginRunUrl(sink, link, endpoint);
+}
+
+/** Signing requests with delegated run credentials requires an HTTP endpoint on the trusted origin. */
+export function sameOriginRunUrl(origin: string, link: string, endpoint: string): string {
+  const url = URL.parse(link);
   if (
+    !url ||
     !["https:", "http:"].includes(url.protocol) ||
-    url.origin !== new URL(sink).origin ||
+    url.origin !== URL.parse(origin)?.origin ||
     url.username ||
     url.password ||
     url.hash

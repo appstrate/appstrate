@@ -138,6 +138,23 @@ describe("startReportSession — source discrimination", () => {
     expect(session?.heartbeatUrl).toBe("https://app.example.com/gateway/reports/pulse");
   });
 
+  for (const field of ["url", "finalize_url"] as const) {
+    it(`refuses a registration whose ${field} leaves the selected instance`, async () => {
+      stub.restore();
+      stub = installStubFetch(() =>
+        ok({ ...SUCCESS_BODY, [field]: "https://other.example.org/sink" }),
+      );
+      await expect(
+        startReportSession(
+          { kind: "inline", bundle: makeBundle() },
+          REPORT_CTX,
+          { mode: "true", fallback: "abort" },
+          SNAPSHOT,
+        ),
+      ).rejects.toThrow(ReportStartError);
+    });
+  }
+
   it("posts kind: inline with manifest+prompt for path-mode bundles", async () => {
     const reportSource: ReportSource = { kind: "inline", bundle: makeBundle() };
     await startReportSession(

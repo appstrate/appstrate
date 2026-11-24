@@ -25,7 +25,7 @@
  *                           when telemetry is down.
  */
 
-import { HttpSink, runServiceUrl } from "@appstrate/afps-runtime/sinks";
+import { HttpSink, runServiceUrl, sameOriginRunUrl } from "@appstrate/afps-runtime/sinks";
 import { UNAVAILABLE_INTEGRATION_REASONS, type Bundle } from "@appstrate/afps-runtime/bundle";
 import { parseScopedName } from "@appstrate/core/naming";
 import type { ConnectionOverrides } from "@appstrate/core/integration";
@@ -65,12 +65,6 @@ export interface ReportSession {
    * the connections the run bound.
    */
   proxyHeaders: Record<string, string>;
-  /**
-   * Base events URL (same one HttpSink POSTs to). Exposed so the
-   * caller can derive the heartbeat endpoint and start a liveness
-   * keep-alive — same mechanism the runtime-pi container uses.
-   */
-  sinkUrl: string;
   mcpUrl: string;
   heartbeatUrl: string;
   /**
@@ -215,29 +209,22 @@ export async function startReportSession(
     warnings?: unknown;
   };
 
-  for (const address of [payload.url, payload.finalize_url]) {
-    const candidate = new URL(address);
-    if (
-      candidate.origin !== new URL(ctx.instance).origin ||
-      candidate.username ||
-      candidate.password ||
-      candidate.hash
-    )
-      throw new ReportStartError("Invalid run sink origin in registration response", "");
+  let eventsUrl: string;
+  let finalizeUrl: string;
+  try {
+    eventsUrl = sameOriginRunUrl(ctx.instance, payload.url, "events");
+    finalizeUrl = sameOriginRunUrl(ctx.instance, payload.finalize_url, "finalize");
+  } catch {
+    throw new ReportStartError("Invalid run sink origin in registration response", "");
   }
-  const httpSink = new HttpSink({
-    url: payload.url,
-    finalizeUrl: payload.finalize_url,
-    runSecret: payload.secret,
-  });
+  const httpSink = new HttpSink({ url: eventsUrl, finalizeUrl, runSecret: payload.secret });
 
   return {
     runId: payload.id,
     httpSink,
     proxyHeaders: { "X-Run-Id": payload.id },
-    sinkUrl: payload.url,
-    mcpUrl: runServiceUrl(payload.url, "mcp", payload.mcp_url),
-    heartbeatUrl: runServiceUrl(payload.url, "heartbeat", payload.heartbeat_url),
+    mcpUrl: runServiceUrl(eventsUrl, "mcp", payload.mcp_url),
+    heartbeatUrl: runServiceUrl(eventsUrl, "heartbeat", payload.heartbeat_url),
     runSecret: payload.secret,
     warnings: parseLaunchItems(payload.warnings),
   };

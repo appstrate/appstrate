@@ -17,7 +17,7 @@
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
 import { signFresh } from "@appstrate/afps-runtime/events";
-import { runServiceUrl } from "@appstrate/afps-runtime/sinks";
+import { appendUrlPath } from "@appstrate/afps-runtime/sinks";
 import { computeBackoffDelayMs, isRetryableHttpStatus } from "@appstrate/afps-shared/backoff";
 import { getErrorMessage } from "@appstrate/core/errors";
 
@@ -59,11 +59,9 @@ const PROVISION_MAX_ATTEMPTS = 9;
 const PROVISION_HEADERS_TIMEOUT_MS = 10_000;
 
 export interface ProvisionDeps {
-  /** The run-scoped event sink URL (`…/api/runs/:id/events`). The workspace
-   *  and files routes are derived by swapping the `/events` suffix. */
-  sinkUrl: string;
-  filesUrl?: string;
-  workspaceUrl?: string;
+  /** Verified run-scoped collection and bundle endpoints. */
+  filesUrl: string;
+  workspaceUrl: string;
   /** Run secret used to HMAC-sign each GET (Standard Webhooks). */
   sinkSecret: string;
   /** Absolute workspace root the bundle + files are written under. */
@@ -162,10 +160,9 @@ export async function signedGetWithRetry(url: string, deps: ProvisionDeps): Prom
  * loud instead.
  */
 export async function provisionWorkspace(deps: ProvisionDeps): Promise<void> {
-  const url = runServiceUrl(deps.sinkUrl, "workspace", deps.workspaceUrl);
   let res: Response;
   try {
-    res = await signedGetWithRetry(url, deps);
+    res = await signedGetWithRetry(deps.workspaceUrl, deps);
   } catch (err) {
     return await deps.die(`Failed to provision workspace from platform: ${getErrorMessage(err)}`);
   }
@@ -222,10 +219,9 @@ export async function removeAgentPackage(
  * file the manifest listed IS fatal, same reasoning as the bundle.
  */
 export async function provisionFiles(deps: ProvisionDeps): Promise<void> {
-  const manifestUrl = runServiceUrl(deps.sinkUrl, "files", deps.filesUrl);
   let manifestRes: Response;
   try {
-    manifestRes = await signedGetWithRetry(manifestUrl, deps);
+    manifestRes = await signedGetWithRetry(deps.filesUrl, deps);
   } catch (err) {
     return await deps.die(`Failed to fetch files manifest: ${getErrorMessage(err)}`);
   }
@@ -267,7 +263,7 @@ export async function provisionFiles(deps: ProvisionDeps): Promise<void> {
     }
     let docRes: Response;
     try {
-      docRes = await signedGetWithRetry(`${manifestUrl}/${encodeURIComponent(name)}`, deps);
+      docRes = await signedGetWithRetry(appendUrlPath(deps.filesUrl, name), deps);
     } catch (err) {
       return await deps.die(`Failed to fetch file ${name}: ${getErrorMessage(err)}`);
     }

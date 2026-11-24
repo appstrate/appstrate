@@ -23,7 +23,6 @@
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
 import { signFresh } from "@appstrate/afps-runtime/events";
-import { runServiceUrl } from "@appstrate/afps-runtime/sinks";
 import { resolveWorkspaceFile } from "@appstrate/afps-runtime/resolvers";
 import { getErrorMessage } from "@appstrate/core/errors";
 import { encodeFilenameHeader, sanitizeFilename } from "@appstrate/core/naming";
@@ -152,9 +151,8 @@ function parseRetryAfterMs(header: string | null): number | undefined {
 }
 
 export interface RunFileUploaderDeps {
-  /** The run-scoped event sink URL (`…/api/runs/:id/events`). `/events` is swapped for `/files`. */
-  sinkUrl: string;
-  filesUrl?: string;
+  /** Verified run-scoped upload endpoint. */
+  filesUrl: string;
   /** Run secret used to HMAC-sign each POST (Standard Webhooks, empty body). */
   sinkSecret: string;
   /** Absolute workspace root; upload paths are resolved relative to it. */
@@ -202,7 +200,6 @@ export interface RunFileUploaderDeps {
 export function createRunFileUploader(deps: RunFileUploaderDeps): FileUploader {
   const fetchFn = deps.fetchFn ?? fetch;
   const sleep = deps.sleepFn ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)));
-  const url = runServiceUrl(deps.sinkUrl, "files", deps.filesUrl);
 
   return async (relPath, name) => {
     // `publish_file` promises a workspace-relative path. Keep that
@@ -247,7 +244,7 @@ export function createRunFileUploader(deps: RunFileUploaderDeps): FileUploader {
 
       let res: Response;
       try {
-        res = await fetchFn(url, {
+        res = await fetchFn(deps.filesUrl, {
           redirect: "manual",
           method: "POST",
           headers,
