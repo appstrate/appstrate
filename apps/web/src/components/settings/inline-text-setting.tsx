@@ -5,6 +5,7 @@
  * An empty value cannot be saved. `data-inline-editing` keeps Escape from closing the
  * surrounding dialog (`keepOpenWhileRenaming`).
  */
+import { inlineEditingAttributes } from "../../lib/keep-open-while-renaming";
 import { Input } from "@appstrate/ui/components/input";
 import { useSettingDraft } from "../../hooks/use-setting-draft";
 import { useSaveAction } from "../../hooks/use-save-action";
@@ -44,7 +45,7 @@ export function InlineTextSetting({
         maxLength={maxLength}
         aria-label={ariaLabel}
         className={className}
-        data-inline-editing=""
+        {...inlineEditingAttributes}
         onChange={(event) => draft.set(event.target.value)}
         onKeyDown={(event) => {
           if (event.key === "Enter") {

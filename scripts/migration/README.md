@@ -10,7 +10,8 @@ For a deployment crossing beta.58, rehearse from its own database and use the
 per-script preflights below. Check the OAuth client authentication methods before
 installing the new image. Resolve duplicate model bindings and pending invitations
 before the unique indexes are created. Schedule the billing transfer with the
-platform stopped. Run the RBAC and package-home backfills at their documented
+platform stopped. Script `0010` refuses a target that already contains billing rows.
+Preserve the target backup for recovery. Run the RBAC and package-home backfills at their documented
 schema boundaries, and run `0014` before `0016`. The optional `0015` provisions
 personal spaces for existing members who have not returned since the upgrade.
 

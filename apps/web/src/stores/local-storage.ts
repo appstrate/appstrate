@@ -63,6 +63,19 @@ export function createKeyedLocalStore<T>(prefix: string, parse: (value: unknown)
   /** Cached per key so `getSnapshot` returns a stable reference between writes. */
   const snapshots = new Map<string, T>();
 
+  // A browser fires this event in the other documents sharing the same storage area.
+  globalThis.addEventListener?.("storage", (event: StorageEvent) => {
+    if (event.key !== null && !event.key.startsWith(prefix)) return;
+    try {
+      if (event.storageArea !== localStorage) return;
+    } catch {
+      return;
+    }
+    if (event.key === null) snapshots.clear();
+    else snapshots.delete(event.key.slice(prefix.length));
+    for (const listener of listeners) listener();
+  });
+
   const subscribe = (listener: () => void) => {
     listeners.add(listener);
     return () => {

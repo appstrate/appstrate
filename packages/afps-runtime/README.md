@@ -29,8 +29,10 @@ CLI shebang assumes `bun`.
 
 ## CLI
 
+Run from the Appstrate monorepo root after installing dependencies with `bun install`.
+
 ```
-afps <command> [options]
+bun packages/afps-runtime/bin/afps.ts <command> [options]
 
   keygen              Generate an Ed25519 key pair
   sign <bundle>       Add signature.sig to a bundle (re-packs the ZIP)
@@ -52,24 +54,24 @@ Each command exposes `--help` with per-option documentation.
 
 ```sh
 # 1. Generate a signing key pair
-afps keygen --out key.json
+bun packages/afps-runtime/bin/afps.ts keygen --out key.json
 
 # 2. Produce a trust root mapping keyId → public key
 jq '{ keys: [{keyId: .keyId, publicKey: .publicKey}] }' key.json > trust.json
 
 # 3. Sign an existing bundle
-afps sign my-agent.afps --key key.json
+bun packages/afps-runtime/bin/afps.ts sign my-agent.afps-bundle --key key.json
 
 # 4. Verify
-afps verify my-agent.afps --trust-root trust.json
+bun packages/afps-runtime/bin/afps.ts verify my-agent.afps-bundle --trust-root trust.json
 # → ✓ manifest + template valid (3 files)
 # → ✓ signature valid (keyId: …)
 
 # 5. Inspect
-afps inspect my-agent.afps --json | jq
+bun packages/afps-runtime/bin/afps.ts inspect my-agent.afps-bundle --json | jq
 
 # 6. Contract-test your implementation
-afps conformance --json | jq '.summary'
+bun packages/afps-runtime/bin/afps.ts conformance --json | jq '.summary'
 ```
 
 ### Replay a recorded run (library API)

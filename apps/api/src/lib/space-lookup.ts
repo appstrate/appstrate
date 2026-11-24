@@ -59,11 +59,8 @@ export const SPACE_CONTEXT_COLUMNS = {
 } as const;
 
 /**
- * The space row, or null if it is not in `orgId`. Where a CLIENT-SUPPLIED
- * space id enters (middleware, MCP router — SSE auth enters through
- * {@link loadSpaceAccess}, which carries the same guard), hence the id-shape guard,
- * run BEFORE the SELECT: a retired `app_` id is un-migrated data, not a missing
- * row, and must throw rather than 404 (header, key and row would still agree).
+ * Returns the space in this organization, or null when it is absent. Validate the ID
+ * before querying so malformed input receives a 400 and a missing space receives a 404.
  */
 export async function validateSpaceInOrg(
   spaceId: string,

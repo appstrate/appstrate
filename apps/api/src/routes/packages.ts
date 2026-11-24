@@ -408,10 +408,7 @@ export const createVersionBodySchema = z.object({ version: z.string().min(1).opt
  * never be mistaken for the draft editor: the draft is `PATCH`, under its
  * `If-Match`.
  *
- * The id is SHAPE-CHECKED, like every other space id arriving in a body
- * (`lib/space-role-assignment.ts`): a retired `app_` spelling resolves to no
- * space, and without the refinement this route reports that as "space not
- * found" — the silence `SPACE_ID_RE` exists to end.
+ * Validate the destination ID before resolving access to the space.
  */
 export const packageHomeSpaceSchema = z
   .object({

@@ -31,7 +31,7 @@ export interface RuntimeReadyPayload {
   /**
    * Count of the extension factories wired when the runtime reports ready:
    * every integration tool, in the container and in the CLI alike.
-   * Diagnostics only: run logs store it, nothing reads it back.
+   * The CLI has no sidecar boot report. Its run log carries this count for diagnosis.
    */
   extensions: number;
   /** Caller-computed elapsed ms since its own "boot start" (process entry for runtime-pi, command entry for the CLI). */

@@ -766,8 +766,7 @@ export const oidcPaths = {
         },
         "400": {
           $ref: "#/components/responses/ValidationError",
-          description:
-            "Malformed space id — `spc_` + a UUID is the only accepted shape (a retired `app_` id names the un-run `app_` \u2192 `spc_` migration).",
+          description: "Malformed space id. Expected `spc_` followed by a canonical UUID.",
         },
         "403": { $ref: "#/components/responses/Forbidden" },
         "404": {
@@ -845,8 +844,7 @@ export const oidcPaths = {
         "204": { description: "Deleted" },
         "400": {
           $ref: "#/components/responses/ValidationError",
-          description:
-            "Malformed space id — `spc_` + a UUID is the only accepted shape (a retired `app_` id names the un-run `app_` \u2192 `spc_` migration).",
+          description: "Malformed space id. Expected `spc_` followed by a canonical UUID.",
         },
         "403": { $ref: "#/components/responses/Forbidden" },
         "404": {
@@ -936,8 +934,7 @@ export const oidcPaths = {
         },
         "400": {
           $ref: "#/components/responses/ValidationError",
-          description:
-            "Malformed space id — `spc_` + a UUID is the only accepted shape (a retired `app_` id names the un-run `app_` \u2192 `spc_` migration).",
+          description: "Malformed space id. Expected `spc_` followed by a canonical UUID.",
         },
         "403": { $ref: "#/components/responses/Forbidden" },
         "404": {
@@ -1027,8 +1024,7 @@ export const oidcPaths = {
         "204": { description: "Deleted" },
         "400": {
           $ref: "#/components/responses/ValidationError",
-          description:
-            "Malformed space id — `spc_` + a UUID is the only accepted shape (a retired `app_` id names the un-run `app_` \u2192 `spc_` migration).",
+          description: "Malformed space id. Expected `spc_` followed by a canonical UUID.",
         },
         "403": { $ref: "#/components/responses/Forbidden" },
         "404": {

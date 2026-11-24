@@ -202,12 +202,6 @@ export interface RunFileUploaderDeps {
 export function createRunFileUploader(deps: RunFileUploaderDeps): FileUploader {
   const fetchFn = deps.fetchFn ?? fetch;
   const sleep = deps.sleepFn ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)));
-  // `/files` is the only upload path — never add a `/documents` fallback. The
-  // platform validates at boot that its runtime images carry its own version
-  // (`findRuntimeImageTagMismatch`), so a stale counterpart cannot be on the
-  // other end of this request; and if one somehow were, a hard upload failure
-  // naming the status is the RIGHT outcome. A fallback would convert it into a
-  // published file silently landing on a path the platform no longer serves.
   const url = runServiceUrl(deps.sinkUrl, "files", deps.filesUrl);
 
   return async (relPath, name) => {
@@ -274,8 +268,7 @@ export function createRunFileUploader(deps: RunFileUploaderDeps): FileUploader {
       }
 
       if (res.ok) {
-        // A platform newer or older than this image may return extra fields
-        // (e.g. the retired `presentation`); they are simply not read.
+        // The uploader reads only the response fields it uses, across platform versions.
         const doc = (await res.json()) as PublishedFile;
         // Record the server-authoritative identity (its sanitized name +
         // sha256), matching the server dedup index exactly. Also remember the

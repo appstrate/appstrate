@@ -9,10 +9,6 @@
  * sidecar automatically.
  */
 
-// Straight from core. `./ssrf.ts` used to sit in the middle, re-exporting
-// these so this module could re-export them again; it added no behaviour and
-// no consumer imported them from there. `./ssrf.ts` keeps only the sidecar's
-// own egress-allowlist logic.
 export { isBlockedHost, resolveAndCheckHost } from "@appstrate/core/ssrf";
 export type { HostResolver } from "@appstrate/core/ssrf";
 
@@ -35,7 +31,7 @@ export const INTEGRATION_ID_RE = /^(@[a-z0-9][a-z0-9-]*\/)?[a-z0-9]([a-z0-9-]*[a
 export const ABSOLUTE_MAX_RESPONSE_SIZE = 32 * 1024 * 1024; // 32 MB — covers PDFs/images/archives, aligned with MAX_MCP_ENVELOPE_SIZE × 2
 /** Every sidecar outbound call (forward proxy, MITM, platform tools) shares the api_call deadline. */
 export { API_CALL_TIMEOUT_MS };
-const LLM_PROXY_TIMEOUT_MS = 1_800_000; // 30 minutes (patched from 300_000 — was killing legitimate long-running agentic runs at exactly 5 min)
+const LLM_PROXY_TIMEOUT_MS = 1_800_000; // 30 minutes for the whole LLM exchange
 
 /**
  * Bound on how long an LLM upstream may take to produce its RESPONSE HEADERS
@@ -252,13 +248,7 @@ export const MAX_MCP_ENVELOPE_SIZE = readPositiveByteEnv(
   16 * 1024 * 1024,
 );
 
-// `STREAMING_THRESHOLD` and `MAX_STREAMED_BODY_SIZE` used to be declared here
-// too, and had zero importers. The values that actually gate a request are the
-// same-named ones in `@appstrate/afps-runtime/resolvers`: `STREAMING_THRESHOLD`
-// is applied inside the shared outbound-HTTP engine, and `MAX_STREAMED_BODY_SIZE`
-// is imported from there by `mcp/api-upload-resolver.ts`. Two same-named
-// constants that agree only by coincidence are a coin-flip waiting to diverge,
-// so the unused pair is gone rather than kept "for symmetry".
+// The shared outbound HTTP resolver owns STREAMING_THRESHOLD and MAX_STREAMED_BODY_SIZE.
 
 /**
  * Concatenate read chunks into one buffer, dropping each source

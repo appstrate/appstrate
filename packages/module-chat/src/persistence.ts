@@ -3,22 +3,10 @@
 /**
  * Server-authoritative chat persistence.
  *
- * Why server-side: persistence used to be 100% client-driven (assistant-ui's
- * `useExternalHistory` POSTed the user+assistant pair only AFTER a run completed,
- * in one debounced batch). Leaving the conversation mid-inference dropped BOTH
- * messages and they never reappeared. The server now writes each message as soon
- * as it is known — the user turn before inference starts, the assistant turn when
- * the stream finalizes (driven to completion independently of the client by the
- * resumable-stream producer) — so a disconnect cannot lose data.
- *
- * Storage stays byte-compatible with assistant-ui's `ai-sdk/v6`
- * MessageFormatAdapter so the existing client history-adapter LOAD path keeps
- * working unchanged: `content` = the UIMessage WITHOUT its `id` (the id lives in
- * `message_id`). Ordering is `chat_messages.seq` and nothing else. The `format`
- * and `parent_id` columns were dropped by `0054` — a constant and a re-encoding
- * of that same `seq` order, neither of which any reader ever looked at; see the
- * `chatMessages` table doc. The message a new one FOLLOWS is still computed
- * here, because `deterministicMessageId` hashes it.
+ * Write the user turn before inference and the assistant turn when the stream
+ * finalizes on the server, so a client disconnect cannot lose either turn.
+ * The message payload preserves the UIMessage and seq orders the conversation.
+ * deterministicMessageId uses the predecessor to identify a retried append.
  */
 
 import { and, desc, eq, inArray, isNull, ne, or, sql, type SQL } from "drizzle-orm";

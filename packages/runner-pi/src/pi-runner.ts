@@ -176,10 +176,8 @@ function prepareProviderBaseUrl(model: PiModelConfig): PiModelConfig {
  *    collapses `xhigh` AND `max` onto its `high` budget
  *    (`pi-ai/api/simple-options.js` → `clampReasoning`).
  *
- * Pre-0.84 this function also routed `max` through Pi's `xhigh` slot, since
- * `max` did not exist as a selector. It does now; the disguise is gone —
- * it clobbered the model's own `xhigh` mapping for the duration of the turn,
- * which the adaptive-Anthropic path reads back (`mapThinkingLevelToEffort`).
+ * Pass `max` through its own selector. Reusing the `xhigh` slot would overwrite the
+ * model mapping that the adaptive Anthropic path reads in `mapThinkingLevelToEffort`.
  */
 export function prepareRequestedThinkingLevel(
   model: PiModelConfig,

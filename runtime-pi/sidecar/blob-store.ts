@@ -137,14 +137,8 @@ export class BlobStore {
   private totalBytes = 0;
 
   /**
-   * `maxTotalBytes` is REQUIRED, deliberately. It used to default to
-   * 256 MiB — exactly the sidecar container's cgroup limit
-   * (`SIDECAR_MEMORY_BYTES`) — so a store that filled to its own default
-   * tripped the kernel OOM-killer before the store's guard ever ran,
-   * killing every integration mid-run. Every caller already passed a lower
-   * cap precisely to avoid that; the default was reachable only by
-   * forgetting, and what it did on being reached was kill the process.
-   * A caller that must think about the number cannot forget it.
+   * Set the budget below the sidecar memory limit so the store can refuse a blob
+   * before the container runs out of memory.
    */
   constructor(
     readonly runId: string,

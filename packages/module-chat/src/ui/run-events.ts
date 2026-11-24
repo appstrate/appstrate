@@ -393,11 +393,7 @@ export interface ChatRunFile {
  * thing. A chip with a generic label still opens, still downloads, and — once
  * the run is terminal — is relabelled by the authoritative `/api/files` read.
  *
- * Exported and shared by every nameless-file site in the module (the run-card
- * chips, the thread's sent-attachment chips, the model-facing attachment line,
- * the run-notice code span) — the fallback WAS hand-written at six of them,
- * which is how the same file could read `file` on the card and something else
- * in the thread.
+ * Attachments, run results and the model-facing file reference use the same fallback.
  *
  * NOT translated, deliberately, and that is load-bearing at
  * `fileActivation`: this same string becomes the name the browser saves the
@@ -435,10 +431,8 @@ function rawFileList(record: Record<string, unknown> | null | undefined): unknow
 }
 
 /**
- * Pull the published file list out of a persisted run_and_wait tool result (at
- * the top level, or nested under the invoke envelope's `body`; under either
- * accepted key). Empty when the run produced none — survives reload because it
- * reads the persisted message part, not live state.
+ * Read files from a persisted run_and_wait result or the body of an invoke envelope.
+ * An empty list means the run produced no files.
  */
 export function extractRunFiles(result: unknown): ChatRunFile[] {
   const unwrapped = asRecordOrNull(unwrapMcpResult(result));
