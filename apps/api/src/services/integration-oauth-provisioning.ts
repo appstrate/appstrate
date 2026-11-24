@@ -119,7 +119,7 @@ async function readRemoteResourceMetadata(
     throw authorizationServerUnreachable(
       packageId,
       authKey,
-      "the advertised protected-resource metadata could not be read",
+      "the protected-resource metadata could not be read",
     );
   return metadata;
 }

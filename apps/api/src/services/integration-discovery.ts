@@ -13,6 +13,7 @@
 import type { Implementation } from "@modelcontextprotocol/sdk/types.js";
 import { parse as parseHost } from "tldts";
 import { createMcpHttpClient, httpStatusOf } from "@appstrate/mcp-transport";
+import { isRetryableHttpStatus } from "@appstrate/afps-shared/backoff";
 import {
   discoverProtectedResourceMetadata,
   parseBearerChallenge,
@@ -181,7 +182,7 @@ async function probeServer(url: string, fetchImpl: typeof fetch): Promise<Probed
     const status = httpStatusOf(err) ?? seen.status;
     if (status === 404 || status === 405) return probeSse(url, fetchImpl);
     // A server that could not answer (the probe, then `initialize`): not a verdict on it.
-    if (status !== undefined && status >= 500) throw unreachable(url, err);
+    if (status !== undefined && isRetryableHttpStatus(status)) throw unreachable(url, err);
     throw notAnMcpServer(url);
   }
   try {
@@ -199,14 +200,11 @@ async function probeServer(url: string, fetchImpl: typeof fetch): Promise<Probed
         identity,
       };
     }
-    if (refusal !== undefined && !seen.oversized) {
-      // The same reading as the connect's: a fault on the way is the server unreachable, a
-      // 401/403 without a Bearer challenge not an MCP server asking for a credential, a 5xx
-      // a server that could not answer.
+    if (refusal !== undefined) {
       if (seen.failure !== undefined) throw unreachable(url, seen.failure);
       const status = seen.status;
       if (status === 401 || status === 403) throw notAnMcpServer(url);
-      if (status !== undefined && status >= 500) throw unreachable(url, refusal);
+      if (status !== undefined && isRetryableHttpStatus(status)) throw unreachable(url, refusal);
     }
     // It listed its tools — or answered the ask, if past the probe's bound or with a JSON-RPC
     // error — without a credential: an open server.
@@ -303,6 +301,7 @@ async function probeSse(url: string, fetchImpl: typeof fetch): Promise<ProbedSer
     }
   } else {
     await sse.body?.cancel().catch(() => {});
+    if (isRetryableHttpStatus(sse.status)) throw unreachable(url, `HTTP ${sse.status}`);
   }
   throw notAnMcpServer(url);
 }

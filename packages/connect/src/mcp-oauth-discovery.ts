@@ -25,6 +25,7 @@
  * is temporarily unavailable and no valid alternative is found, the caller can retry.
  */
 
+import { isRetryableHttpStatus } from "@appstrate/afps-shared/backoff";
 import { guardedFetch, SsrfBlockedError } from "@appstrate/core/ssrf";
 import { readJsonUnder } from "./bounded-body.ts";
 import { sameUrlIdentifier } from "./oauth-discovery.ts";
@@ -216,7 +217,7 @@ async function fetchResourceMetadata(
       headers: { Accept: "application/json" },
       signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
     });
-    if (res.status === 429 || res.status >= 500) return UNAVAILABLE;
+    if (isRetryableHttpStatus(res.status)) return UNAVAILABLE;
     if (!res.ok) return null;
     const json = await readJsonUnder(res);
     if (!json || typeof json !== "object") return null;
@@ -228,7 +229,7 @@ async function fetchResourceMetadata(
   }
 }
 
-/** Discover a valid document and distinguish an advertised server outage from absent metadata. */
+/** Use any valid document and distinguish an unavailable candidate from absent metadata. */
 export async function discoverProtectedResourceMetadata(
   input: DiscoverProtectedResourceInput,
 ): Promise<{ metadata: ProtectedResourceMetadata | null; metadataUnreachable?: true }> {
@@ -240,8 +241,8 @@ export async function discoverProtectedResourceMetadata(
   // metadata and must not reach the network layer.
   if (!isHttpUrl(input.resourceServerUrl)) return { metadata: null };
 
-  let challenge = input.challenge;
-  if (!challenge) {
+  let advertised = input.challenge?.resourceMetadataUrl;
+  if (!advertised) {
     try {
       const res = await fetchImpl(input.resourceServerUrl, {
         method: "GET",
@@ -249,13 +250,13 @@ export async function discoverProtectedResourceMetadata(
         signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
       });
       const header = res.headers.get("www-authenticate");
-      if (header) challenge = parseBearerChallenge(header);
+      await res.body?.cancel().catch(() => {});
+      if (header) advertised = parseBearerChallenge(header)?.resourceMetadataUrl;
     } catch {
       // The well-known locations can still identify the protected resource.
     }
   }
 
-  const advertised = challenge?.resourceMetadataUrl;
   const probes = buildProtectedResourceProbes(input.resourceServerUrl);
   if (advertised) probes.unshift({ metadataUrl: advertised, resource: input.resourceServerUrl });
   // A challenge can advertise a well-known URL. Read it once, checking the resource
@@ -272,8 +273,6 @@ export async function discoverProtectedResourceMetadata(
   }
   return {
     metadata: null,
-    ...(advertised && responses.get(advertised) === UNAVAILABLE
-      ? { metadataUnreachable: true }
-      : {}),
+    ...(Array.from(responses.values()).includes(UNAVAILABLE) ? { metadataUnreachable: true } : {}),
   };
 }
