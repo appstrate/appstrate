@@ -19,7 +19,8 @@ import {
 import { conflict } from "../lib/errors.ts";
 import { readJsonBody } from "@appstrate/core/request-body";
 import { setCursorLinkHeader } from "../lib/pagination-link.ts";
-import { parseListPagination } from "@appstrate/core/list-query";
+import { parseStrictQuery } from "../lib/list-query.ts";
+import { parseListLimit } from "@appstrate/core/list-query";
 import { recordAuditFromContext } from "../services/audit.ts";
 import { requirePermission } from "../middleware/require-permission.ts";
 import { getSpaceScope } from "../lib/scope.ts";
@@ -56,6 +57,14 @@ export const updateEndUserSchema = z
       .optional(),
   })
   .strict();
+
+const endUserListQuery = z.strictObject({
+  limit: z.string().optional(),
+  startingAfter: z.string().optional(),
+  externalId: z.string().optional(),
+  email: z.string().optional(),
+  q: z.string().optional(),
+});
 
 export function createEndUsersRouter() {
   const router = new Hono<AppEnv>();
@@ -104,18 +113,13 @@ export function createEndUsersRouter() {
   // GET /api/end-users — list end-users in the space (cursor-based pagination)
   router.get("/", rateLimit(300), requirePermission("end-users", "read"), async (c) => {
     const scope = getSpaceScope(c);
-    const { limit } = parseListPagination(c, { defaultLimit: 20 });
-    const startingAfter = c.req.query("startingAfter");
-    const externalId = c.req.query("externalId");
-    const email = c.req.query("email");
-    const search = c.req.query("q");
-
+    const { startingAfter, externalId, email, q } = parseStrictQuery(c, endUserListQuery);
     const result = await listEndUsers(scope, {
-      externalId: externalId ?? undefined,
-      email: email ?? undefined,
-      search: search ?? undefined,
-      limit,
-      startingAfter: startingAfter ?? undefined,
+      externalId,
+      email,
+      search: q,
+      limit: parseListLimit(c, { defaultLimit: 20 }),
+      startingAfter,
     });
 
     setCursorLinkHeader({

@@ -8,9 +8,10 @@
  */
 
 import { db } from "@appstrate/db/client";
-import { organizationMembers, user as userTable } from "@appstrate/db/schema";
+import { auditEvents, organizationMembers, user as userTable } from "@appstrate/db/schema";
 import { eq, inArray } from "drizzle-orm";
 import {
+  invalidateRevokedDeviceNames,
   listSessionsForOrg,
   listSessionsForUser,
   membersOfOtherOrgs,
@@ -26,7 +27,10 @@ import {
   type ClientRegistration,
   type McpGrant,
 } from "./mcp-grants.ts";
-import { endMcpGrants } from "../../../services/oauth-token-revocation.ts";
+import {
+  lockOAuthGrantsOfUser,
+  withdrawMcpGrants,
+} from "../../../services/oauth-token-revocation.ts";
 
 /** Wire shape of one grant (snake_case, with the carve-out 4b names camelCase). */
 export interface AccessGrantDto {
@@ -84,13 +88,43 @@ export async function revokeAccessGrantForUser(params: {
   return revoked ? { revoked: true, kind: "cli" } : { revoked: false };
 }
 
+export function mcpRevocationAudit(grant: McpGrant, actorId: string, request: GrantAuditContext) {
+  return {
+    orgId: grant.orgId,
+    spaceId: grant.spaceId,
+    actorType: "user",
+    actorId,
+    action: "oauth_grant.revoked",
+    resourceType: "oauth_grant",
+    resourceId: grant.id,
+    after: { clientId: grant.clientId, clientName: grant.clientName, userId: grant.userId },
+    ...request,
+  };
+}
+
+interface GrantAuditContext {
+  ip: string | null;
+  userAgent: string | null;
+}
+
 export async function revokeAllAccessGrantsForUser(
   userId: string,
-): Promise<{ revokedCount: number; mcpGrants: McpGrant[] }> {
-  const { revokedCount } = await revokeAllFamiliesForUser(userId, "user_revoked_all");
-  const mcpGrants = await listMcpGrantsForUser(userId);
-  if (mcpGrants.length > 0) await db.transaction((tx) => endMcpGrants(tx, userId, mcpGrants));
-  return { revokedCount: revokedCount + mcpGrants.length, mcpGrants };
+  request: GrantAuditContext,
+): Promise<number> {
+  const { families, mcpCount } = await db.transaction(async (tx) => {
+    await lockOAuthGrantsOfUser(tx, userId);
+    const families = await revokeAllFamiliesForUser(tx, userId, "user_revoked_all");
+    const grants = await listMcpGrantsForUser(userId, tx);
+    if (grants.length) {
+      await withdrawMcpGrants(tx, userId, grants);
+      await tx
+        .insert(auditEvents)
+        .values(grants.map((grant) => mcpRevocationAudit(grant, userId, request)));
+    }
+    return { families, mcpCount: grants.length };
+  });
+  invalidateRevokedDeviceNames(families);
+  return families.length + mcpCount;
 }
 
 // ─── Org admin ───────────────────────────────────────────────────────────────

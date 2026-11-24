@@ -9,10 +9,6 @@
  * sidecar automatically.
  */
 
-// Straight from core. `./ssrf.ts` used to sit in the middle, re-exporting
-// these so this module could re-export them again; it added no behaviour and
-// no consumer imported them from there. `./ssrf.ts` keeps only the sidecar's
-// own egress-allowlist logic.
 export { isBlockedHost, resolveAndCheckHost } from "@appstrate/core/ssrf";
 export type { HostResolver } from "@appstrate/core/ssrf";
 
@@ -31,28 +27,11 @@ import { DEFAULT_LLM_STREAM_IDLE_TIMEOUT_MS } from "@appstrate/connect/proxy-pri
 // Accepts both simple IDs (gmail) and scoped IDs (@appstrate/gmail)
 export const INTEGRATION_ID_RE = /^(@[a-z0-9][a-z0-9-]*\/)?[a-z0-9]([a-z0-9-]*[a-z0-9])?$/;
 
-// Default cap on upstream response bytes the sidecar buffers before
-// returning them inline. Set generously enough that typical provider
-// responses (Drive metadata listings, Gmail thread snippets, paginated
-// payloads) round-trip untruncated. Larger or binary responses spill
-// to the run-scoped BlobStore and surface as MCP `resource_link`
-// blocks; the absolute ceiling is `ABSOLUTE_MAX_RESPONSE_SIZE`.
-export const MAX_RESPONSE_SIZE = 256 * 1024; // 256 KB
-// NAME COLLISION, read before touching: `@appstrate/afps-runtime/resolvers`
-// also exports an `ABSOLUTE_MAX_RESPONSE_SIZE`, it is 1 MB, and it means
-// something else — the schema cap on the agent-supplied
-// `responseMode.maxInlineBytes`. Both are loaded into THIS process (the sidecar
-// imports the resolvers for `executeApiCall`), so an import written from memory
-// silently picks the wrong ceiling by a factor of 32. This one is the
-// transport-buffer ceiling: how many upstream bytes the sidecar will hold
-// before refusing, applied only when a BlobStore is configured to spill them
-// into (otherwise MAX_RESPONSE_SIZE is the cap). Renaming the 1 MB one to
-// something like MAX_INLINE_RESPONSE_BYTES would end the ambiguity, but it
-// lives in packages/afps-runtime.
-export const ABSOLUTE_MAX_RESPONSE_SIZE = 32 * 1024 * 1024; // 32 MB — covers PDFs/images/archives, aligned with MAX_MCP_ENVELOPE_SIZE × 2
+// Maximum buffered transport payload. The smaller resolver limit applies only to model-inline responses.
+export { MCP_RESOURCE_MAX_BYTES as ABSOLUTE_MAX_RESPONSE_SIZE } from "@appstrate/core/mcp-result";
 /** Every sidecar outbound call (forward proxy, MITM, platform tools) shares the api_call deadline. */
 export { API_CALL_TIMEOUT_MS };
-const LLM_PROXY_TIMEOUT_MS = 1_800_000; // 30 minutes (patched from 300_000 — was killing legitimate long-running agentic runs at exactly 5 min)
+const LLM_PROXY_TIMEOUT_MS = 1_800_000; // 30 minutes for the whole LLM exchange
 
 /**
  * Bound on how long an LLM upstream may take to produce its RESPONSE HEADERS
@@ -269,13 +248,7 @@ export const MAX_MCP_ENVELOPE_SIZE = readPositiveByteEnv(
   16 * 1024 * 1024,
 );
 
-// `STREAMING_THRESHOLD` and `MAX_STREAMED_BODY_SIZE` used to be declared here
-// too, and had zero importers. The values that actually gate a request are the
-// same-named ones in `@appstrate/afps-runtime/resolvers`: `STREAMING_THRESHOLD`
-// is applied inside the shared outbound-HTTP engine, and `MAX_STREAMED_BODY_SIZE`
-// is imported from there by `mcp/api-upload-resolver.ts`. Two same-named
-// constants that agree only by coincidence are a coin-flip waiting to diverge,
-// so the unused pair is gone rather than kept "for symmetry".
+// The shared outbound HTTP resolver owns STREAMING_THRESHOLD and MAX_STREAMED_BODY_SIZE.
 
 /**
  * Concatenate read chunks into one buffer, dropping each source
@@ -311,7 +284,7 @@ export function concatAndRelease(chunks: Uint8Array[], total: number): Uint8Arra
  * request-body cap (`app.ts` via `bufferLlmBodyBounded`).
  */
 export async function readRequestBodyBounded(
-  req: Request,
+  req: Pick<Request, "body">,
   maxBytes: number,
 ): Promise<Uint8Array | "exceeded"> {
   if (!req.body) return new Uint8Array(0);

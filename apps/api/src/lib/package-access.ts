@@ -322,7 +322,7 @@ async function assertPackageReachable(
   const [pkg, accessible, placedIn] = await Promise.all([
     loadPackageRow(packageId, sourceOrgId),
     reach(c, source),
-    loadPlacementSpaces(packageId, sourceOrgId),
+    placedSpaceIds(sourceOrgId, packageId),
   ]);
   assertPackageIsReachable(packageId, pkg, placedIn, accessible);
   return pkg;
@@ -360,20 +360,6 @@ async function loadPackageRow(packageId: string, orgId: string) {
   const pkg = await findPackageRow(packageId, orgId);
   if (!pkg) throw notFound(`Package '${packageId}' not found`);
   return pkg;
-}
-
-/**
- * Every space of `orgId` the package is placed in beyond its home — a
- * `space_packages` row there, or every space when the package is offered to the
- * organization — the placements {@link placementGrantsRead} needs, the home
- * being a column on the package row itself.
- *
- * Split out from the row read because the write path never needs it: authority
- * is the home alone, so the placements are loaded only when a refusal has to
- * decide between 403 and 404.
- */
-async function loadPlacementSpaces(packageId: string, orgId: string): Promise<string[]> {
-  return placedSpaceIds(orgId, packageId);
 }
 
 /**
@@ -772,7 +758,7 @@ export async function assertPlacementRemovalAccess(
     assertPackageIsReachable(
       packageId,
       pkg,
-      await loadPlacementSpaces(packageId, c.get("orgId")),
+      await placedSpaceIds(c.get("orgId"), packageId),
       accessible,
     );
   } else if (authority === null) {
@@ -859,7 +845,7 @@ async function refuseHomeAuthority(
   assertPackageIsReachable(
     packageId,
     pkg,
-    await loadPlacementSpaces(packageId, c.get("orgId")),
+    await placedSpaceIds(c.get("orgId"), packageId),
     accessible,
   );
   reportPermissionDenial(c, permission);

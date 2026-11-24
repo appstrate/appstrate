@@ -10,6 +10,7 @@ import {
 } from "@appstrate/core/permissions";
 import type { ReachableSpaceGrant } from "@appstrate/core/module";
 
+export { limitedConversationPermissions } from "./turn-permissions.ts";
 export { reaches, type RunLevel } from "@appstrate/core/permissions";
 
 export interface TurnCapabilities {

@@ -102,7 +102,11 @@ function renderAs(
   queryClient.setQueryData(
     $api.queryOptions("get", "/api/spaces", { params: { header: { "X-Org-Id": org.id } } })
       .queryKey,
-    { object: "list", data: spaces, hasMore: false },
+    {
+      object: "list",
+      data: spaces.map((row) => ({ ...row, permissions: [...permissions, ...row.permissions] })),
+      hasMore: false,
+    },
   );
   return render(node, { queryClient });
 }

@@ -157,6 +157,7 @@ export function startSinkHeartbeat(opts: StartSinkHeartbeatOptions): SinkHeartbe
     inFlight = attempt;
     try {
       const res = await fetchImpl(opts.url, {
+        redirect: "manual",
         method: "POST",
         headers: { ...headers, "Content-Type": "application/json" },
         body,

@@ -96,7 +96,7 @@ describe("MCP server instructions — connect bullet", () => {
     expect(bullet).toContain("initiateIntegrationConnect");
     expect(bullet).toMatch(/scopes: <[^>]*required_scopes/);
     expect(bullet).toMatch(
-      /connection_id: <[^>]*connection_id, for a needs_reconnection item only/,
+      /connection_id: <[^>]*connection_id, for an owned needs_reconnection item without a remedy only/,
     );
   });
 
@@ -117,7 +117,7 @@ describe("MCP server instructions — connect bullet", () => {
         expect(part).toContain(`\`${remedy}\``);
       }
       // `connection_id` only on a reconnect.
-      expect(bullet).toContain("for a needs_reconnection item only");
+      expect(bullet).toContain("for an owned needs_reconnection item without a remedy only");
     }
     const cannotConnect = instructionsFor(["mcp:read", "mcp:invoke", "agents:run", "runs:read"]);
     expect(cannotConnect).toContain("An `insufficient_scopes` item carries no `connect_url`");

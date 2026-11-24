@@ -86,6 +86,9 @@ export interface RuntimePiEnvOptions {
     url: string;
     /** POST target for the terminal `RunResult` — typically `…/events/finalize`. */
     finalizeUrl: string;
+    heartbeatUrl?: string;
+    workspaceUrl?: string;
+    filesUrl?: string;
     /** Ephemeral HMAC secret — ASCII base64url, never persisted on the host. */
     secret: string;
   };
@@ -216,6 +219,9 @@ export function buildRuntimePiEnv(opts: RuntimePiEnvOptions): Record<string, str
   if (opts.sink) {
     env.APPSTRATE_SINK_URL = opts.sink.url;
     env.APPSTRATE_SINK_FINALIZE_URL = opts.sink.finalizeUrl;
+    if (opts.sink.heartbeatUrl) env.APPSTRATE_HEARTBEAT_URL = opts.sink.heartbeatUrl;
+    if (opts.sink.workspaceUrl) env.APPSTRATE_WORKSPACE_URL = opts.sink.workspaceUrl;
+    if (opts.sink.filesUrl) env.APPSTRATE_FILES_URL = opts.sink.filesUrl;
     env.APPSTRATE_SINK_SECRET = opts.sink.secret;
   }
 

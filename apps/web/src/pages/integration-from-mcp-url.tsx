@@ -8,6 +8,7 @@
  * package (published version, usable connection, declared tools).
  */
 
+import { getDeclaredToolNames } from "@appstrate/core/integration";
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Link, Navigate, useSearchParams } from "react-router-dom";
@@ -39,12 +40,10 @@ import { encodeIconDataUri } from "../lib/icon-image";
 import { agentCreationWithIntegrationPath } from "../lib/creation-handoff";
 import { packageDetailPath } from "../lib/package-paths";
 import {
-  declaredToolNames,
   defaultToolCount,
   integrationCreationManifest,
   integrationWizardStep,
   isRemoteSource,
-  proposalEdits,
   toolsPublishVersion,
   type DiscoveryResult,
   type IntegrationWizardStep,
@@ -115,7 +114,8 @@ function NewIntegrationWizard() {
       { body: { url: url.trim() } },
       {
         onSuccess: (result) => {
-          setReview({ result, edits: proposalEdits(result.manifest), icon: result.manifest.icon });
+          const { display_name, name, icon } = result.manifest;
+          setReview({ result, edits: { display_name, name }, icon });
           // A raster the manifest does not take as is is re-encoded; it lands only on this result.
           if (!result.manifest.icon && result.icon_source) {
             void encodeIconDataUri(result.icon_source)
@@ -212,7 +212,7 @@ function ExistingPackageWizard({ packageId }: { packageId: string }) {
     connected:
       detail.auths.length === 0 || detail.auths.some((auth) => auth.connections.length > 0),
     // The detail reads the published version, else the draft.
-    toolsDeclared: declaredToolNames(manifest).length > 0,
+    toolsDeclared: getDeclaredToolNames(manifest).length > 0,
   });
   const version = toolsPublishVersion({
     published,
@@ -326,7 +326,7 @@ function ReadyStep({
       )}
     >
       <p className="text-sm">
-        {t("integrationWizard.tools.declared", { count: declaredToolNames(manifest).length })}{" "}
+        {t("integrationWizard.tools.declared", { count: getDeclaredToolNames(manifest).length })}{" "}
         {t("integrationWizard.tools.selectedCount", { count: defaultToolCount(manifest) })}
       </p>
       {detail.proxy_connection.status === "must_choose" && (

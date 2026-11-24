@@ -374,15 +374,7 @@ export function runPiChat(input: PiChatInput): Response {
         });
       };
       try {
-        // Open the stream NOW, before any of the turn's construction work. This
-        // chunk carries nothing but a message id, and it is what flips the
-        // client from "sending" to "the assistant is answering". It used to be
-        // written after the platform-MCP handshake, the Pi SDK's dynamic import
-        // and the agent-session construction — three round trips and a ~200 ms
-        // module evaluation during which the response body stayed empty and the
-        // user saw nothing. The HTTP response itself was already on its way
-        // (this producer runs eagerly and `runPiChat` returns synchronously),
-        // so the silence bought nothing.
+        // Show the answering state before the MCP handshake, SDK import and session construction.
         write(mapper.startChunk(crypto.randomUUID()));
         for (const chunk of input.leadingChunks ?? []) write(chunk);
 
@@ -474,11 +466,7 @@ export function runPiChat(input: PiChatInput): Response {
           thinkingBudgets,
         } = prepareRequestedThinkingLevel(piModel, requestedThinkingLevel);
 
-        // Assemble the FINAL system prompt here, before the turn is projected,
-        // so `baseTokens` below can be measured on the string Pi actually sends.
-        // It used to be built 46 lines further down, after the projection, which
-        // meant the compaction baseline silently omitted the multi-KB MCP
-        // instructions + operation index.
+        // Build the system prompt before projection so baseTokens measures the string Pi sends.
         //
         // `applyOperationIndexPolicy` is applied to the MCP instructions ALONE,
         // not to the concatenation. The policy slices from the FIRST occurrence
@@ -672,9 +660,7 @@ export function runPiChat(input: PiChatInput): Response {
         timings.sessionMs = Date.now() - sessionStartedAt;
         const typedSession = session as unknown as PiChatSession;
 
-        // Enforce CHAT_MAX_STEPS on this engine too (it used to be reported and
-        // never applied). The cap cuts the TOOL loop one step early and the
-        // closing tool-less call below spends the last step on an answer.
+        // Reserve the last model call for a tool-free answer.
         stepCap = createStepCapController({
           modelCallCount: () => mapper.stepCount(),
         });
@@ -791,9 +777,7 @@ export function runPiChat(input: PiChatInput): Response {
             err: turnError,
           });
         }
-        // Same invariant, second failure mode: a turn killed by the deadline
-        // used to end in complete silence. The emitter gives it a REAL text part
-        // — an `error` chunk is transient and never becomes a persisted part.
+        // Persist a real notice for a deadline. An error chunk disappears when the thread reloads.
         if (closing.deadlineReached) {
           logger.warn("chat turn deadline reached", {
             chatSessionId: input.chatSessionId,

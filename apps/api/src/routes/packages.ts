@@ -16,6 +16,7 @@ import { buildDownloadHeaders } from "@appstrate/core/integrity";
 import { eq, and } from "drizzle-orm";
 import { packages } from "@appstrate/db/schema";
 import { db } from "@appstrate/db/client";
+import { parseStrictQuery } from "../lib/list-query.ts";
 import { listResponse } from "@appstrate/core/list-query";
 import { postInstallPackage } from "../services/post-install-package.ts";
 import { bundleImportAuditRecords, handleImportBundle } from "../services/bundle-import.ts";
@@ -407,10 +408,7 @@ export const createVersionBodySchema = z.object({ version: z.string().min(1).opt
  * never be mistaken for the draft editor: the draft is `PATCH`, under its
  * `If-Match`.
  *
- * The id is SHAPE-CHECKED, like every other space id arriving in a body
- * (`lib/space-role-assignment.ts`): a retired `app_` spelling resolves to no
- * space, and without the refinement this route reports that as "space not
- * found" — the silence `SPACE_ID_RE` exists to end.
+ * Validate the destination ID before resolving access to the space.
  */
 export const packageHomeSpaceSchema = z
   .object({
@@ -1694,16 +1692,16 @@ export function createPackagesRouter() {
   // paths. Registered before the per-type routes all the same, so a literal
   // segment always comes first.
   const readSkills = requirePermission("skills", "read");
+  const servedQuery = z.strictObject({
+    definition: z.enum(["published", "draft"]).default("published"),
+  });
+  const archiveQuery = z.strictObject({ uri: z.string().min(1) });
   router.get("/skills/served", rateLimit(50), readSkills, async (c) => {
-    const definition = c.req.query("definition") ?? "published";
-    if (definition !== "published" && definition !== "draft") {
-      throw invalidRequest("`definition` must be `published` or `draft`", "definition");
-    }
+    const { definition } = parseStrictQuery(c, servedQuery);
     return c.json(listResponse(await requestServedSkills(c).list(definition)));
   });
   router.get("/skills/served/archive", rateLimit(50), readSkills, async (c) => {
-    const uri = c.req.query("uri");
-    if (!uri) throw invalidRequest("The `uri` query parameter is required", "uri");
+    const { uri } = parseStrictQuery(c, archiveQuery);
     const files = await requestServedSkills(c).skillFiles(uri);
     if (!files) throw notFound(`No skill readable at ${uri}`);
     return new Response(new Uint8Array(zipArtifact(files)), {

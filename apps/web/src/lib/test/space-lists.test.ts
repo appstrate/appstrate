@@ -15,12 +15,11 @@ const {
   grantsInRowSpace,
   holdsOverview,
   isListRow,
-  isSpaceEnterable,
   listAdmits,
   spanningRouteVerdict,
   overviewOffered,
   spaceChoice,
-  spacesHeld,
+  isSpaceEnterable,
   spacesWhere,
 } = await import("../space-lists.ts");
 
@@ -73,10 +72,10 @@ describe("listAdmits", () => {
   });
 
   it("judges each space by its own set, through spacesWhere", () => {
-    expect(spacesWhere(TWO, undefined, listAdmits("files")).map((s) => s.id)).toEqual(["spc_b"]);
-    expect(spacesWhere(TWO, undefined, listAdmits("schedules"))).toEqual([]);
+    expect(spacesWhere(TWO, listAdmits("files")).map((s) => s.id)).toEqual(["spc_b"]);
+    expect(spacesWhere(TWO, listAdmits("schedules"))).toEqual([]);
     expect(
-      spacesWhere([space("spc_c", ["schedules:read"], "none")], undefined, listAdmits("schedules")),
+      spacesWhere([space("spc_c", ["schedules:read"], "none")], listAdmits("schedules")),
     ).toEqual([]);
   });
 });
@@ -218,19 +217,19 @@ describe("grantedInSomeActingSpace", () => {
   ];
 
   it("judges a permission in the spaces where the chat may act, not in the others", () => {
-    expect(grantedInSomeActingSpace(spaces, [], "skills:read")).toBe(true);
-    expect(grantedInSomeActingSpace(spaces, [], "files:read")).toBe(false);
-    expect(grantedInSomeActingSpace(spaces, [], "chat:write")).toBe(true);
+    expect(grantedInSomeActingSpace(spaces, "skills:read")).toBe(true);
+    expect(grantedInSomeActingSpace(spaces, "files:read")).toBe(false);
+    expect(grantedInSomeActingSpace(spaces, "chat:write")).toBe(true);
   });
 
-  it("counts the org-level grants, and nothing before the listing answers", () => {
-    expect(grantedInSomeActingSpace(spaces, ["files:read"], "files:read")).toBe(true);
-    expect(grantedInSomeActingSpace(undefined, [], "chat:write")).toBe(false);
+  it("does not add grants absent from the acting row, even while the listing loads", () => {
+    expect(grantedInSomeActingSpace(spaces, "files:read")).toBe(false);
+    expect(grantedInSomeActingSpace(undefined, "chat:write")).toBe(false);
   });
 
   it("holds nothing where the acting set is incomplete", () => {
     expect(
-      grantedInSomeActingSpace([space("spc_c", ["chat:write", "chat:read"])], [], "chat:read"),
+      grantedInSomeActingSpace([space("spc_c", ["chat:write", "chat:read"])], "chat:read"),
     ).toBe(false);
   });
 });
@@ -242,7 +241,7 @@ describe("actingSpaces", () => {
   ];
 
   it("keeps the spaces holding the whole acting triple", () => {
-    expect(actingSpaces(spaces, []).map((s) => s.id)).toEqual(["spc_a"]);
+    expect(actingSpaces(spaces).map((s) => s.id)).toEqual(["spc_a"]);
   });
 });
 
@@ -255,18 +254,15 @@ describe("spacesWhere", () => {
   const writes = (can: (permission: string) => boolean) => can("agents:write");
 
   it("keeps the spaces held with a role whose grants admit the action", () => {
-    expect(spacesWhere(spaces, [], writes).map((s) => s.id)).toEqual(["spc_a"]);
+    expect(spacesWhere(spaces, writes).map((s) => s.id)).toEqual(["spc_a"]);
   });
 
-  it("counts the org-level grants in every space, as the working space's gate does", () => {
-    expect(spacesWhere(spaces, ["agents:write"], writes).map((s) => s.id)).toEqual([
-      "spc_a",
-      "spc_b",
-    ]);
+  it("honors the grants on each effective row of the preview", () => {
+    expect(spacesWhere(spaces, writes).map((s) => s.id)).toEqual(["spc_a"]);
   });
 
   it("holds nothing before the listing answers", () => {
-    expect(spacesWhere(undefined, [], writes)).toEqual([]);
+    expect(spacesWhere(undefined, writes)).toEqual([]);
   });
 });
 
@@ -291,8 +287,8 @@ describe("grantsInRowSpace", () => {
     space("spc_closed", ["agents:run"], "none"),
   ];
   const working = (permission: string) => permission === "files:read";
-  const grants = (rowSpaceId: string | undefined, orgPermissions: string[] = []) =>
-    grantsInRowSpace(rowSpaceId, "spc_a", working, spaces, orgPermissions, "agents:run");
+  const grants = (rowSpaceId: string | undefined) =>
+    grantsInRowSpace(rowSpaceId, "spc_a", working, spaces, "agents:run");
 
   it("judges a row of another space by that space's grants, not the working space's", () => {
     expect(grants("spc_b")).toBe(true);
@@ -308,8 +304,8 @@ describe("grantsInRowSpace", () => {
     expect(grants("spc_gone")).toBe(false);
   });
 
-  it("counts the org-level grants in the row's space", () => {
-    expect(grantsInRowSpace("spc_b", "spc_a", working, spaces, ["x:y"], "x:y")).toBe(true);
+  it("does not add a missing grant to the row's space", () => {
+    expect(grantsInRowSpace("spc_b", "spc_a", working, spaces, "x:y")).toBe(false);
   });
 });
 
@@ -321,24 +317,17 @@ describe("grantedForRow", () => {
   ];
 
   it("judges a row of one space in that space, never the working one", () => {
-    expect(grantedForRow(spaces, [], "spc_a", "integrations:configure")).toBe(true);
-    expect(grantedForRow(spaces, [], "spc_b", "integrations:configure")).toBe(false);
+    expect(grantedForRow(spaces, "spc_a", "integrations:configure")).toBe(true);
+    expect(grantedForRow(spaces, "spc_b", "integrations:configure")).toBe(false);
     // A space held with no role grants nothing.
-    expect(grantedForRow(spaces, [], "spc_closed", "integrations:configure")).toBe(false);
+    expect(grantedForRow(spaces, "spc_closed", "integrations:configure")).toBe(false);
   });
 
   it("judges an org-wide row in any space held with a role, org-level grants included", () => {
-    expect(grantedForRow(spaces, [], null, "integrations:configure")).toBe(true);
-    expect(grantedForRow([space("spc_b", [])], [], null, "integrations:configure")).toBe(false);
-    expect(
-      grantedForRow(
-        [space("spc_b", [])],
-        ["integrations:configure"],
-        null,
-        "integrations:configure",
-      ),
-    ).toBe(true);
-    expect(grantedForRow(undefined, [], null, "integrations:configure")).toBe(false);
+    expect(grantedForRow(spaces, null, "integrations:configure")).toBe(true);
+    expect(grantedForRow([space("spc_b", [])], null, "integrations:configure")).toBe(false);
+    expect(grantedForRow([space("spc_b", [])], null, "integrations:configure")).toBe(false);
+    expect(grantedForRow(undefined, null, "integrations:configure")).toBe(false);
   });
 });
 
@@ -354,37 +343,36 @@ const connectionRow = (orgId: string, spaceId: string | null) => ({
 describe("connectionRowConfigures (Préférences › Connexions)", () => {
   it("follows the row's own space in the current organization", () => {
     expect(
-      connectionRowConfigures(connectionRow("org_1", "spc_b"), "org_1", CONNECTION_SPACES, []),
+      connectionRowConfigures(connectionRow("org_1", "spc_b"), "org_1", CONNECTION_SPACES),
     ).toBe(true);
     expect(
-      connectionRowConfigures(connectionRow("org_1", "spc_a"), "org_1", CONNECTION_SPACES, []),
+      connectionRowConfigures(connectionRow("org_1", "spc_a"), "org_1", CONNECTION_SPACES),
     ).toBe(false);
   });
 
   it("is any reached space's grant for an org-wide row", () => {
-    expect(
-      connectionRowConfigures(connectionRow("org_1", null), "org_1", CONNECTION_SPACES, []),
-    ).toBe(true);
+    expect(connectionRowConfigures(connectionRow("org_1", null), "org_1", CONNECTION_SPACES)).toBe(
+      true,
+    );
   });
 
   it("is refused for another organization's row, whatever the current one grants", () => {
     expect(
-      connectionRowConfigures(connectionRow("org_2", "spc_b"), "org_1", CONNECTION_SPACES, []),
+      connectionRowConfigures(connectionRow("org_2", "spc_b"), "org_1", CONNECTION_SPACES),
     ).toBe(false);
-    expect(
-      connectionRowConfigures(connectionRow("org_2", null), "org_1", CONNECTION_SPACES, []),
-    ).toBe(false);
+    expect(connectionRowConfigures(connectionRow("org_2", null), "org_1", CONNECTION_SPACES)).toBe(
+      false,
+    );
   });
 });
 
-describe("spacesHeld", () => {
+describe("isSpaceEnterable", () => {
   it("is every space held with a role, whatever it grants: what the bell lists and marks read", () => {
     const spaces = [
       space("spc_a", ["runs:read"]),
       space("spc_blind", []),
       space("spc_closed", ["runs:read"], "none"),
     ];
-    expect(spacesHeld(spaces).map((s) => s.id)).toEqual(["spc_a", "spc_blind"]);
-    expect(spacesHeld(undefined)).toEqual([]);
+    expect(spaces.filter(isSpaceEnterable).map((s) => s.id)).toEqual(["spc_a", "spc_blind"]);
   });
 });

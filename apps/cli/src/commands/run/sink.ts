@@ -35,7 +35,7 @@
 import type { EventSink } from "@appstrate/afps-runtime/interfaces";
 import type { RunEvent } from "@appstrate/afps-runtime/types";
 import type { RunResult } from "@appstrate/afps-runtime/runner";
-import type { TokenUsage } from "@appstrate/shared-types";
+import { readRunDiagnostic } from "@appstrate/afps-runtime/events";
 import {
   formatToolArgsCompact,
   formatToolArgsVerbose,
@@ -203,20 +203,16 @@ function createHumanSink(
   const verbosity: Verbosity = opts.verbosity ?? "normal";
   return {
     async handle(event: RunEvent): Promise<void> {
-      switch (event.type) {
+      if (event.type === "output.emitted") {
+        writeStdout(green(`✓ output: ${JSON.stringify(event.data ?? {})}\n`));
+        return;
+      }
+      const diagnostic = readRunDiagnostic(event);
+      switch (diagnostic?.type) {
         case "appstrate.progress": {
-          const msg = String(event.message ?? "");
-          const data = event.data as
-            | {
-                tool?: string;
-                args?: unknown;
-                result?: unknown;
-                isError?: boolean;
-                toolCallId?: string;
-              }
-            | undefined;
-          if (data?.tool) {
-            renderToolEvent(data, verbosity, writeStdout);
+          const { message: msg, data } = diagnostic;
+          if (data && typeof data.tool === "string" && data.tool) {
+            renderToolEvent({ ...data, tool: data.tool }, verbosity, writeStdout);
           } else if (msg) {
             // Prepend `→` for visual consistency with the rest of the
             // CLI output ("→ running ...", "→ tool: ..."). Messages
@@ -246,21 +242,17 @@ function createHumanSink(
           // stream would corrupt the JSONL contract. It still goes
           // through an injected writer — `writeStderr` — so the channel
           // stays observable without touching the global stream.
-          writeStderr(yellow(`⚠ ${event.message ?? "error"}\n`));
+          writeStderr(yellow(`⚠ ${diagnostic.message ?? "error"}\n`));
           return;
         }
         case "appstrate.metric": {
           // Print only the terminal metric (at end of run). Too noisy
           // mid-run otherwise.
-          const u = event.usage as TokenUsage | undefined;
-          const cost = typeof event.cost === "number" ? event.cost : 0;
+          const u = diagnostic.usage;
+          const cost = diagnostic.cost ?? 0;
           const input = u?.input_tokens ?? 0;
           const output = u?.output_tokens ?? 0;
           writeStdout(dim(`∑ tokens in=${input} out=${output}  $${cost.toFixed(4)}\n`));
-          return;
-        }
-        case "output.emitted": {
-          writeStdout(green(`✓ output: ${JSON.stringify(event.data ?? {})}\n`));
           return;
         }
         default: {

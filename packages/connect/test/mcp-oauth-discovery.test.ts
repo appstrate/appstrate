@@ -4,8 +4,7 @@
 import { describe, it, expect } from "bun:test";
 import {
   buildProtectedResourceProbes,
-  parseResourceMetadataChallenge,
-  parseScopeChallenge,
+  parseBearerChallenge,
   discoverProtectedResourceMetadata,
 } from "../src/mcp-oauth-discovery.ts";
 
@@ -44,34 +43,45 @@ describe("buildProtectedResourceProbes (RFC 9728 §3)", () => {
   });
 });
 
-describe("parseResourceMetadataChallenge (RFC 9728 §5.1)", () => {
+describe("Bearer resource metadata (RFC 9728 §5.1)", () => {
   it("extracts resource_metadata from a WWW-Authenticate challenge", () => {
     const header =
       'Bearer realm="MCP Server", error="invalid_token", resource_metadata="https://mcp.clickup.com/.well-known/oauth-protected-resource/mcp"';
-    expect(parseResourceMetadataChallenge(header)).toBe(
+    expect(parseBearerChallenge(header)?.resourceMetadataUrl).toBe(
       "https://mcp.clickup.com/.well-known/oauth-protected-resource/mcp",
     );
   });
 
   it("returns undefined when absent", () => {
-    expect(parseResourceMetadataChallenge('Bearer realm="x"')).toBeUndefined();
+    expect(parseBearerChallenge('Bearer realm="x"')?.resourceMetadataUrl).toBeUndefined();
   });
 });
 
-describe("parseScopeChallenge (RFC 6750 §3)", () => {
+describe("Bearer scopes (RFC 6750 §3)", () => {
   it("splits the space-delimited scope parameter", () => {
     const header =
       'Bearer error="invalid_token", resource_metadata="https://mcp.linear.app/.well-known/oauth-protected-resource/mcp", scope="read write"';
-    expect(parseScopeChallenge(header)).toEqual(["read", "write"]);
+    expect(parseBearerChallenge(header)?.scopes).toEqual(["read", "write"]);
   });
 
   it("returns undefined without a scope, or with an empty one", () => {
-    expect(parseScopeChallenge('Bearer resource_metadata="https://x/meta"')).toBeUndefined();
-    expect(parseScopeChallenge('Bearer scope=""')).toBeUndefined();
+    expect(
+      parseBearerChallenge('Bearer resource_metadata="https://x/meta"')?.scopes,
+    ).toBeUndefined();
+    expect(parseBearerChallenge('Bearer scope=""')?.scopes).toBeUndefined();
+  });
+
+  it("binds parameters to their scheme and keeps quoted commas and escaped quotes inside a value", () => {
+    const header =
+      'Basic realm="one, \\"Bearer\\"", scope="wrong", Bearer realm="two, three", scope="read write", Digest resource_metadata="https://other.test/"';
+    expect(parseBearerChallenge(header)?.scopes).toEqual(["read", "write"]);
+    expect(parseBearerChallenge(header)?.resourceMetadataUrl).toBeUndefined();
+    expect(parseBearerChallenge('Bearer realm="one", Basic scope="wrong"')?.scopes).toBeUndefined();
+    expect(parseBearerChallenge('Basic realm="one, Bearer scope=wrong"')?.scopes).toBeUndefined();
   });
 
   it("does not read a parameter merely ending in scope", () => {
-    expect(parseScopeChallenge('Bearer x_scope="admin"')).toBeUndefined();
+    expect(parseBearerChallenge('Bearer x_scope="admin"')?.scopes).toBeUndefined();
   });
 });
 
@@ -89,7 +99,7 @@ describe("discoverProtectedResourceMetadata", () => {
       return jsonResponse(valid);
     }) as unknown as typeof fetch;
 
-    const md = await discoverProtectedResourceMetadata({
+    const { metadata: md } = await discoverProtectedResourceMetadata({
       resourceServerUrl: "https://mcp.clickup.com/mcp",
       fetchImpl,
     });
@@ -118,7 +128,7 @@ describe("discoverProtectedResourceMetadata", () => {
       }
       return new Response("nope", { status: 404 });
     }) as unknown as typeof fetch;
-    const md = await discoverProtectedResourceMetadata({
+    const { metadata: md } = await discoverProtectedResourceMetadata({
       resourceServerUrl: "https://forge.example.com/api/v4/mcp",
       fetchImpl,
     });
@@ -137,7 +147,7 @@ describe("discoverProtectedResourceMetadata", () => {
       }
       return new Response("nope", { status: 404 });
     }) as unknown as typeof fetch;
-    const md = await discoverProtectedResourceMetadata({
+    const { metadata: md } = await discoverProtectedResourceMetadata({
       resourceServerUrl: "https://forge.example.com/api/v4/mcp",
       fetchImpl,
     });
@@ -152,7 +162,7 @@ describe("discoverProtectedResourceMetadata", () => {
             authorization_servers: ["https://mcp.x.com"],
           })
         : new Response("nope", { status: 404 })) as unknown as typeof fetch;
-    const md = await discoverProtectedResourceMetadata({
+    const { metadata: md } = await discoverProtectedResourceMetadata({
       resourceServerUrl: "https://mcp.x.com/mcp",
       fetchImpl,
     });
@@ -169,9 +179,11 @@ describe("discoverProtectedResourceMetadata", () => {
         resource_policy_uri: "javascript:alert(1)",
       })) as unknown as typeof fetch;
 
-    const md = await discoverProtectedResourceMetadata({
+    const { metadata: md } = await discoverProtectedResourceMetadata({
       resourceServerUrl: "https://mcp.clickup.com/mcp",
-      resourceMetadataUrl: "https://mcp.clickup.com/.well-known/oauth-protected-resource/mcp",
+      challenge: {
+        resourceMetadataUrl: "https://mcp.clickup.com/.well-known/oauth-protected-resource/mcp",
+      },
       fetchImpl,
     });
     expect(md?.resourceName).toBe("ClickUp MCP");
@@ -188,7 +200,7 @@ describe("discoverProtectedResourceMetadata", () => {
 
     await discoverProtectedResourceMetadata({
       resourceServerUrl: "https://mcp.clickup.com/mcp",
-      resourceMetadataUrl: "https://explicit/meta",
+      challenge: { resourceMetadataUrl: "https://explicit/meta" },
       fetchImpl,
     });
     expect(seen[0]).toBe("https://explicit/meta");
@@ -216,7 +228,7 @@ describe("discoverProtectedResourceMetadata", () => {
       return new Response("nope", { status: 404 });
     }) as unknown as typeof fetch;
 
-    const md = await discoverProtectedResourceMetadata({
+    const { metadata: md } = await discoverProtectedResourceMetadata({
       resourceServerUrl: "https://mcp.x.com/mcp",
       fetchImpl,
     });
@@ -246,14 +258,14 @@ describe("discoverProtectedResourceMetadata", () => {
         resourceServerUrl: "https://mcp.x.com/mcp",
         fetchImpl,
       }),
-    ).toBeNull();
+    ).toEqual({ metadata: null });
   });
 
   it("rejects metadata whose resource origin differs from the resource server (RFC 9728 §3.3)", async () => {
     // A hostile/misconfigured document that binds the token audience to an
     // unrelated origin must not be accepted, even when otherwise well-formed.
     const fetchImpl = (async () => jsonResponse(valid)) as unknown as typeof fetch;
-    const md = await discoverProtectedResourceMetadata({
+    const { metadata: md } = await discoverProtectedResourceMetadata({
       resourceServerUrl: "https://mcp.evil.example/mcp",
       fetchImpl,
     });
@@ -266,7 +278,7 @@ describe("discoverProtectedResourceMetadata", () => {
       calls++;
       return jsonResponse(valid);
     }) as unknown as typeof fetch;
-    const md = await discoverProtectedResourceMetadata({
+    const { metadata: md } = await discoverProtectedResourceMetadata({
       resourceServerUrl: "file:///etc/passwd",
       fetchImpl,
     });
@@ -277,7 +289,7 @@ describe("discoverProtectedResourceMetadata", () => {
   it("rejects metadata without authorization_servers", async () => {
     const fetchImpl = (async () =>
       jsonResponse({ resource: "https://x" })) as unknown as typeof fetch;
-    const md = await discoverProtectedResourceMetadata({
+    const { metadata: md } = await discoverProtectedResourceMetadata({
       resourceServerUrl: "https://x/mcp",
       fetchImpl,
     });
@@ -291,7 +303,7 @@ describe("discoverProtectedResourceMetadata", () => {
         authorization_servers: ["https://as.x"],
         padding: "x".repeat(64 * 1024),
       })) as unknown as typeof fetch;
-    const md = await discoverProtectedResourceMetadata({
+    const { metadata: md } = await discoverProtectedResourceMetadata({
       resourceServerUrl: "https://x/mcp",
       fetchImpl,
     });
@@ -301,7 +313,7 @@ describe("discoverProtectedResourceMetadata", () => {
   it("returns null when no strategy yields a document", async () => {
     const fetchImpl = (async () =>
       new Response("nope", { status: 404 })) as unknown as typeof fetch;
-    const md = await discoverProtectedResourceMetadata({
+    const { metadata: md } = await discoverProtectedResourceMetadata({
       resourceServerUrl: "https://x/mcp",
       fetchImpl,
     });
@@ -317,7 +329,7 @@ describe("discoverProtectedResourceMetadata", () => {
       calls++;
       throw new Error("SSRF guard: refusing to fetch blocked URL");
     }) as unknown as typeof fetch;
-    const md = await discoverProtectedResourceMetadata({
+    const { metadata: md } = await discoverProtectedResourceMetadata({
       resourceServerUrl: "https://blocked.internal/mcp",
       fetchImpl,
     });

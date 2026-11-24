@@ -22,7 +22,6 @@ import {
   memberDepartureImpact,
   removeMember,
   updateMemberRole,
-  isSlugAvailable,
   getOrgSettings,
   updateOrgSettings,
   orgSettingsPatchSchema,
@@ -82,21 +81,13 @@ export const updateOrgSchema = z
  * the platform owns (`isReservedScope`) nor another organization's. Checked on
  * create and on rename — the only two doors that write a slug.
  */
-async function assertSlugClaimable(slug: string): Promise<void> {
+function assertSlugNotReserved(slug: string): void {
   if (isReservedScope(slug)) {
     throw new ApiError({
       status: 400,
       code: "slug_reserved",
       title: "Bad Request",
       detail: `Slug '${slug}' is reserved by the platform`,
-    });
-  }
-  if (!(await isSlugAvailable(slug))) {
-    throw new ApiError({
-      status: 400,
-      code: "slug_taken",
-      title: "Bad Request",
-      detail: `Slug '${slug}' is already in use`,
     });
   }
 }
@@ -177,7 +168,7 @@ router.post("/", async (c) => {
     throw invalidRequest("Invalid slug (kebab-case required)");
   }
 
-  await assertSlugClaimable(slug);
+  assertSlugNotReserved(slug);
 
   const org = await createOrganization(data.name.trim(), slug, user.id);
 
@@ -317,7 +308,7 @@ router.patch("/:orgId", requirePermission("org", "update"), async (c) => {
   const orgId = c.req.param("orgId")!;
   const data = await readJsonBody(c, updateOrgSchema);
 
-  if (data.slug) await assertSlugClaimable(data.slug);
+  if (data.slug) assertSlugNotReserved(data.slug);
 
   const updates = {
     ...(data.name?.trim() ? { name: data.name.trim() } : {}),

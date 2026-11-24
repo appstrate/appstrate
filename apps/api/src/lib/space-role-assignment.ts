@@ -46,9 +46,7 @@ export function toAssignment(data: {
 
 export const spaceAssignmentSchema = exactlyOneRole(
   z.object({
-    // Shape-checked like the `custom_role_id` beside it: a retired `app_` id
-    // resolves to no space, and without this it reports that as "space not
-    // found" — the same silence `SPACE_ID_RE` exists to end.
+    // Reject a malformed ID before looking up its space.
     spaceId: z.string().refine(isSpaceId, {
       message: "Malformed space id. Expected `spc_` followed by a canonical UUID.",
     }),

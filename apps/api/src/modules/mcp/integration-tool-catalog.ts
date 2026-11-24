@@ -8,9 +8,14 @@
  * typed tool through `/api/credential-proxy/tools/call`.
  */
 
-import type { z } from "zod";
+import { z } from "zod";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
-import { markRelayedResult, type AppstrateRequestExtra } from "@appstrate/mcp-transport";
+import { proxyConnectionVerdictProperties } from "../../openapi/paths/integrations.ts";
+import {
+  TOOL_DESCRIPTOR_REDUCTIONS,
+  markRelayedResult,
+  type AppstrateRequestExtra,
+} from "@appstrate/mcp-transport";
 import { RUN_CONNECT_OFFERS_HEADER } from "@appstrate/core/run-and-wait-client";
 import type {
   IntegrationTool,
@@ -286,6 +291,85 @@ function callable(ctx: DispatchContext, tool: IntegrationTool): CallableTool {
   };
 }
 
+const stringList = z.array(z.string());
+const toolFields = {
+  name: z.string(),
+  integration_package_id: z.string(),
+  description: z.string(),
+  connection_ids: stringList,
+};
+const schemaObject = z.record(z.string(), z.unknown());
+const integrationListingSchema = z.looseObject({
+  tools: z.array(
+    z.discriminatedUnion("kind", [
+      z.looseObject({
+        ...toolFields,
+        kind: z.literal("api_call"),
+        auth_key: z.string(),
+        connection_required: z.boolean(),
+      }),
+      z.looseObject({
+        ...toolFields,
+        kind: z.literal("remote"),
+        remote_name: z.string(),
+        input_schema: schemaObject,
+        output_schema: schemaObject.optional(),
+        schema_reduced: z.array(z.enum(TOOL_DESCRIPTOR_REDUCTIONS)).optional(),
+        catalog_unreadable: z.literal(true).optional(),
+        missing_scopes: z.record(z.string(), stringList).optional(),
+      }),
+    ]),
+  ),
+  connections: z.array(
+    z.looseObject({
+      integration_package_id: z.string(),
+      connection_id: z.string(),
+      label: z.string(),
+      owned_by_actor: z.boolean(),
+      auth_key: z.string(),
+      scopes_granted: stringList,
+      authorized_uris: stringList,
+      allow_all_uris: z.boolean(),
+      needs_reconnection: z.boolean(),
+      call_permission_required: z.boolean(),
+    }),
+  ),
+  not_ready: z.array(
+    z.looseObject({
+      integration_package_id: z.string(),
+      display_name: z.string(),
+      proxy_connection: z.looseObject({
+        status: z.enum(proxyConnectionVerdictProperties.status.enum),
+        imposed: z.boolean(),
+      }),
+      refusal: z
+        .looseObject({ field: z.string(), code: z.string(), message: z.string() })
+        .optional(),
+    }),
+  ),
+  unlisted: z.array(
+    z.looseObject({
+      integration_package_id: z.string(),
+      refusal: z.looseObject({
+        type: z.string(),
+        title: z.string(),
+        status: z.number(),
+        detail: z.string(),
+        instance: z.string(),
+        code: z.string(),
+        request_id: z.string(),
+      }),
+    }),
+  ),
+  truncated_catalogs: z.array(
+    z.looseObject({
+      integration_package_id: z.string(),
+      listed_tools: z.number().int().nonnegative(),
+    }),
+  ),
+  uncached: stringList,
+}) satisfies z.ZodType<IntegrationToolListing>;
+
 /**
  * The caller's integration tools, from the listing route, filtered by its query parameters
  * (`integration_package_id`, `name`, `connection_id`); the MCP request's `signal` cancels it. The
@@ -311,9 +395,20 @@ export async function readIntegrationTools(
     }),
   );
   const body = asRecord(await response.json().catch(() => undefined));
-  if (!response.ok || !Array.isArray(body?.tools)) {
+  if (!response.ok) {
     return { refused: { status: response.status, body: body ?? null } };
   }
-  const listing = body as unknown as IntegrationToolListing;
+  const parsed = integrationListingSchema.safeParse(body);
+  if (!parsed.success)
+    return {
+      refused: {
+        status: 502,
+        body: {
+          code: "invalid_integration_catalog",
+          detail: "Invalid response from the integration tools catalogue",
+        },
+      },
+    };
+  const listing = parsed.data;
   return { ...listing, tools: listing.tools.map((tool) => callable(ctx, tool)) };
 }

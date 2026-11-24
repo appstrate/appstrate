@@ -431,24 +431,39 @@ describe("createMcpHttpClient — tools/list", () => {
       },
       handler: async () => ({ content: [] }),
     };
+    const numeric: AppstrateToolDefinition = {
+      ...bad,
+      descriptor: {
+        name: "number-param",
+        inputSchema: {
+          type: "object",
+          properties: { n: { type: "number", "x-mcp-header": "Amount" } },
+        },
+      },
+    };
     const warnings: string[] = [];
-    const modern = recorded(modernMcpHandler({ tools: [echo, bad] }));
+    const modern = recorded(modernMcpHandler({ tools: [echo, bad, numeric] }));
     const client = await createMcpHttpClient(freshUrl(), {
       fetch: modern.fetch,
       onWarning: (message) => warnings.push(message),
     });
     try {
       expect((await client.listTools()).tools.map((t) => t.name)).toEqual(["echo"]);
-      expect(warnings).toHaveLength(1);
-      expect(warnings[0]).toContain("bad");
+      expect(warnings).toHaveLength(2);
+      expect(warnings.join(" ")).toContain("bad");
+      expect(warnings.join(" ")).toContain("number-param");
     } finally {
       await client.close();
     }
     // A legacy connection carries no per-request headers: the rule does not bind there.
-    const legacy = recorded(legacyMcpHandler({ tools: [echo, bad] }));
+    const legacy = recorded(legacyMcpHandler({ tools: [echo, bad, numeric] }));
     const old = await createMcpHttpClient(freshUrl(), { fetch: legacy.fetch });
     try {
-      expect((await old.listTools()).tools.map((t) => t.name)).toEqual(["echo", "bad"]);
+      expect((await old.listTools()).tools.map((t) => t.name)).toEqual([
+        "echo",
+        "bad",
+        "number-param",
+      ]);
     } finally {
       await old.close();
     }

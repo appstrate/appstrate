@@ -3162,6 +3162,25 @@ describe("resolveConnections — an imposed set and its additions (floor ∪ sel
       expect(viaPin.errors[0]!.message).toContain("Your pinned connection 'conn_ghost'");
     });
 
+    it("names the binding to replace for a dead anonymous key and keeps its ID for diagnostics", () => {
+      const dead = conn({ needsReconnection: true, accountId: "default" });
+      for (const [pins, remedy] of [
+        [[memberPin(dead.id)], "new_connection"],
+        [[openPin(dead.id)], "rebind_by_admin"],
+      ] as const) {
+        const result = resolveConnections({
+          requirements: [req(oauth2Manifest())],
+          accessibleConnections: [dead],
+          pins: [...pins],
+        });
+        expect(translateResolutionError(result.errors[0]!)).toMatchObject({
+          code: "needs_reconnection",
+          connection_id: dead.id,
+          remedy,
+        });
+      }
+    });
+
     it("a floor member needing reconnection fails the union on the floor's layer, no substitution", () => {
       const dead = shared({ needsReconnection: true });
       const mine = conn({});

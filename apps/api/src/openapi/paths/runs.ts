@@ -1,11 +1,14 @@
 // SPDX-License-Identifier: Apache-2.0
 
+import { MODEL_ERROR_CATEGORIES } from "@appstrate/core/model-error";
 import {
   agentNotActiveContent,
   connectionConflictContent,
   inlineRunForbiddenContent,
   jsonRpcRequestBody,
   problemContent,
+  runListPage,
+  scopedRunListValidationError,
 } from "../responses.ts";
 import {
   RUN_TOOLS_MCP_DESCRIPTION,
@@ -98,8 +101,18 @@ const runListQueryParameters = [
       "Filter runs by kind. Omit (or send an empty value) for every kind. Any value outside the enum is rejected with `400`; it is never ignored, so a filtered response is never silently widened.",
   },
   { $ref: "#/components/parameters/RunStatusFilter" },
-  { name: "start_date", in: "query", schema: { type: "string", format: "date-time" } },
-  { name: "end_date", in: "query", schema: { type: "string", format: "date-time" } },
+  {
+    name: "start_date",
+    in: "query",
+    description: "RFC 3339 date and time with an explicit timezone offset or Z.",
+    schema: { type: "string", format: "date-time" },
+  },
+  {
+    name: "end_date",
+    in: "query",
+    description: "RFC 3339 date and time with an explicit timezone offset or Z.",
+    schema: { type: "string", format: "date-time" },
+  },
   {
     name: "chat_session_id",
     in: "query",
@@ -142,30 +155,7 @@ const runListQueryParameters = [
 
 /** The page and the refusal both run lists answer. */
 const runListPageResponses = {
-  "200": {
-    description: "Paginated run list",
-    headers: {
-      ...STD_RESPONSE_HEADERS,
-      Link: { $ref: "#/components/headers/Link" },
-    },
-    content: {
-      "application/json": {
-        schema: {
-          type: "object",
-          required: ["object", "data", "total", "hasMore"],
-          properties: {
-            object: { type: "string", enum: ["list"] },
-            data: {
-              type: "array",
-              items: { $ref: "#/components/schemas/Run" },
-            },
-            total: { type: "integer" },
-            hasMore: { type: "boolean" },
-          },
-        },
-      },
-    },
-  },
+  "200": runListPage,
   "400": {
     description:
       "Invalid query: a parameter the list does not take, an unknown `user` value, a malformed date, …",
@@ -560,7 +550,7 @@ const canonicalRunsPaths = {
       tags: ["Runs"],
       summary: "List runs for an agent",
       description:
-        "List runs for a specific agent (org-scoped, newest first, keyset-paginated with `startingAfter`; default limit 20).",
+        "List the visible runs of one agent in the selected space, newest first. Supports status and text or run-number search, with `startingAfter` pagination and a default limit of 20.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XSpaceId" },
@@ -582,34 +572,8 @@ const canonicalRunsPaths = {
         { $ref: "#/components/parameters/RunSearch" },
       ],
       responses: {
-        "200": {
-          description: "Paginated run list",
-          headers: {
-            ...STD_RESPONSE_HEADERS,
-            Link: { $ref: "#/components/headers/Link" },
-          },
-          content: {
-            "application/json": {
-              schema: {
-                type: "object",
-                properties: {
-                  object: { type: "string", enum: ["list"] },
-                  data: {
-                    type: "array",
-                    items: { $ref: "#/components/schemas/Run" },
-                  },
-                  total: { type: "integer" },
-                  hasMore: { type: "boolean" },
-                },
-                required: ["object", "data", "total", "hasMore"],
-              },
-            },
-          },
-        },
-        "400": {
-          $ref: "#/components/responses/ValidationError",
-          description: "`limit` outside its declared range (`param` names it).",
-        },
+        "200": runListPage,
+        "400": scopedRunListValidationError,
         "401": { $ref: "#/components/responses/Unauthorized" },
         // A READ: `requireAgent()` asks placement only, so the 404 is the opaque
         // `agent_not_found` and nothing else — an agent switched off here still
@@ -1049,7 +1013,7 @@ const canonicalRunsPaths = {
       tags: ["Runs"],
       summary: "List runs across the space (global view)",
       description:
-        "Org + space scoped paginated list. Supports filtering by `user=me` (self-owned, also implicit for end-user impersonation), `kind` (all, package, inline), `status`, a date range, and the chat session that launched the run. Every filter composes: `user=me` narrows to the caller's own runs and the remaining filters still apply on top of it. Inline runs surface via `package_ephemeral: true` on each row.",
+        "Org + space scoped paginated list. Supports filtering by `user=me` (self-owned, also implicit for end-user impersonation), `kind` (all, package, inline), `status`, text or run-number search (`q`), a date range, and the chat session that launched the run. Every filter composes: `user=me` narrows to the caller's own runs and the remaining filters still apply on top of it. Inline runs surface via `package_ephemeral: true` on each row.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XSpaceId" },
@@ -1495,7 +1459,17 @@ const canonicalRunsPaths = {
                     type: "object",
                     description:
                       "Operation envelope (not the run resource): the one-time sink credentials plus the created run's `id`. Fetch the resource itself via `GET /runs/{id}`.",
-                    required: ["id", "url", "finalize_url", "secret", "expiresAt"],
+                    required: [
+                      "id",
+                      "url",
+                      "finalize_url",
+                      "mcp_url",
+                      "heartbeat_url",
+                      "workspace_url",
+                      "files_url",
+                      "secret",
+                      "expiresAt",
+                    ],
                     properties: {
                       id: { type: "string", description: "The created run's id." },
                       url: {
@@ -1507,6 +1481,26 @@ const canonicalRunsPaths = {
                         type: "string",
                         format: "uri",
                         description: "Absolute URL for `HttpSink.finalizeUrl`.",
+                      },
+                      mcp_url: {
+                        type: "string",
+                        format: "uri",
+                        description: "Run-scoped MCP endpoint.",
+                      },
+                      heartbeat_url: {
+                        type: "string",
+                        format: "uri",
+                        description: "Endpoint for signed heartbeat requests.",
+                      },
+                      workspace_url: {
+                        type: "string",
+                        format: "uri",
+                        description: "Endpoint for fetching the run workspace.",
+                      },
+                      files_url: {
+                        type: "string",
+                        format: "uri",
+                        description: "Endpoint for the run's input files and output uploads.",
                       },
                       secret: {
                         type: "string",
@@ -1692,7 +1686,21 @@ const canonicalRunsPaths = {
                 output: {},
                 error: {
                   type: "object",
+                  required: ["message"],
                   properties: {
+                    code: { type: "string", maxLength: 64 },
+                    context: {
+                      type: "object",
+                      additionalProperties: true,
+                      properties: {
+                        error_category: {
+                          type: "string",
+                          examples: [...MODEL_ERROR_CATEGORIES],
+                          description:
+                            "Model-call classification from the runner. Unknown categories fall back to the server classifier.",
+                        },
+                      },
+                    },
                     message: { type: "string" },
                     stack: { type: "string" },
                   },

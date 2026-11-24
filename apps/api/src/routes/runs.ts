@@ -224,16 +224,24 @@ async function replayRun(c: Context<AppEnv>, response: Response): Promise<Respon
   return c.json({ ...cached, ...run }, 201, { "Idempotent-Replayed": "true" });
 }
 
+const scopedRunListQuery = z.strictObject({
+  limit: z.string().optional(),
+  startingAfter: z.string().optional(),
+  status: z.string().optional(),
+  q: z.string().optional(),
+});
+
 /** Agent and schedule histories read the same visible runs and expose the same pagination. */
 export async function respondScopedRunList(
   c: Context<AppEnv>,
   id: string,
   list: typeof listPackageRuns,
 ) {
+  const query = parseStrictQuery(c, scopedRunListQuery);
   const result = await list(getSpaceScope(c), id, {
     limit: parseListLimit(c, { defaultLimit: 20 }),
-    ...parseRunListFilters({ status: c.req.query("status"), q: c.req.query("q") }),
-    startingAfter: c.req.query("startingAfter") || undefined,
+    ...parseRunListFilters(query),
+    startingAfter: query.startingAfter || undefined,
     actor: getActor(c),
     visibility: runVisibilityFilter(c),
     canReadAgentInput: !agentReadIsSummary(c),

@@ -57,8 +57,7 @@ interface ServerConfig {
 }
 
 let server: ReturnType<typeof Bun.serve>;
-let sinkUrl: string; // .../api/runs/:id/events (uploader swaps to /files)
-let filesUrl: string; // the same URL with /events swapped for /files
+let filesUrl: string;
 let config: ServerConfig;
 
 function sha256Hex(bytes: Uint8Array): string {
@@ -123,7 +122,6 @@ beforeAll(() => {
       });
     },
   });
-  sinkUrl = `http://localhost:${server.port}/api/runs/run_x/events`;
   filesUrl = `http://localhost:${server.port}/api/runs/run_x/files`;
 });
 
@@ -143,7 +141,7 @@ beforeEach(async () => {
 
 function makeUploader(publishedKeys: Set<string>, overrides?: Partial<RunFileUploaderDeps>) {
   return createRunFileUploader({
-    sinkUrl,
+    filesUrl,
     sinkSecret: SECRET,
     workspace,
     publishedKeys,

@@ -12,15 +12,11 @@ import { useOrg } from "../../hooks/use-org";
 import { useOrgSettings, useUpdateOrgSettings } from "../../hooks/use-org-settings";
 import { usePermissions } from "../../hooks/use-permissions";
 import { fieldWriteState } from "../../lib/field-write-state";
-import {
-  toggleBody,
-  type OrgToggleField,
-  type ToggleValues,
-} from "../../lib/org-setting-toggle-body";
+import { toggleBody, type OrgToggleField } from "../../lib/org-setting-toggle-body";
 
 /**
  * An organization setting as a self-saving switch row (`org:settings`): a boolean, or a two-valued
- * setting when `values` names what ON and OFF store. A skeleton stands in until the settings load,
+ * setting that caps the personal space role. A skeleton stands in until the settings load,
  * so a click can never send a value read off a default; a refusal is said once, by the global
  * mutation toast.
  */
@@ -29,14 +25,12 @@ export function OrgSettingToggle({
   label,
   description,
   field,
-  values,
   onSuccess,
 }: {
   id: string;
   label: ReactNode;
   description: ReactNode;
   field: OrgToggleField;
-  values?: ToggleValues;
   onSuccess?: () => void;
 }) {
   const { t } = useTranslation("settings");
@@ -62,13 +56,13 @@ export function OrgSettingToggle({
         <DisabledReasonTooltip reason={mayWrite ? null : t("orgSettings.cannotChange")}>
           <Switch
             id={id}
-            checked={values ? orgSettings?.[field] === values.on : orgSettings?.[field] === true}
+            checked={orgSettings?.[field] === (field === "personal_space_role" ? "admin" : true)}
             disabled={!mayWrite || !orgSettings || update.isPending}
             onCheckedChange={(checked) =>
               update.mutate(
                 {
                   params: { path: { orgId: currentOrg.id } },
-                  body: toggleBody(field, checked === true, values),
+                  body: toggleBody(field, checked === true),
                 },
                 { onSuccess },
               )

@@ -23,11 +23,10 @@ export const STATE_VERSION = 1;
 
 export interface ManagedSkill {
   packageId: string;
-  /** Resolved version label — semver for `published`, `"draft"` for `draft`. */
+  /** Served metadata.version for a published skill, or "draft" for a draft. */
   version: string;
   /**
-   * SRI digest of the artifact, or for a draft skill its ETag folded with the
-   * files-index ETag.
+   * SHA-256 over file digest/path pairs sorted by path. Older ledgers can hold package SRI or draft ETags.
    */
   integrity: string;
 }

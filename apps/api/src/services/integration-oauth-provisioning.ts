@@ -106,6 +106,24 @@ function authorizationServerUnreachable(packageId: string, authKey: string, reas
   });
 }
 
+async function readRemoteResourceMetadata(
+  packageId: string,
+  authKey: string,
+  resourceServerUrl: string,
+) {
+  const { metadata, metadataUnreachable } = await discoverProtectedResourceMetadata({
+    resourceServerUrl,
+    fetchImpl: ssrfGuardedFetch,
+  });
+  if (metadataUnreachable)
+    throw authorizationServerUnreachable(
+      packageId,
+      authKey,
+      "the protected-resource metadata could not be read",
+    );
+  return metadata;
+}
+
 /** The 403 refusing a server that lacks `problem` ({@link provisionabilityProblems}). */
 function unprovisionableServer(
   problem: ProvisionabilityProblem,
@@ -248,15 +266,12 @@ export async function ensureIntegrationOAuthClient(
   }
 
   // RFC 9728 metadata is authoritative for the `resource` (the token's audience: a mismatch makes
-  // the token unusable against the MCP server); the manifest may pin the issuer. Best-effort.
+  // the token unusable against the MCP server). The manifest may pin the issuer.
   let issuer = auth.issuer;
   let resource = auth.resource;
   const remote = getRemoteSource(manifest);
   if (remote?.url) {
-    const md = await discoverProtectedResourceMetadata({
-      resourceServerUrl: remote.url,
-      fetchImpl: ssrfGuardedFetch,
-    });
+    const md = await readRemoteResourceMetadata(packageId, authKey, remote.url);
     if (md) {
       issuer = issuer ?? md.authorizationServers[0];
       resource = md.resource ?? resource;
@@ -369,10 +384,7 @@ async function ensurePerConnectionOAuthClient(
   let candidate: string;
   let resource: string | undefined;
   if (remote) {
-    const md = await discoverProtectedResourceMetadata({
-      resourceServerUrl: remote.url,
-      fetchImpl: ssrfGuardedFetch,
-    });
+    const md = await readRemoteResourceMetadata(packageId, authKey, remote.url);
     if (!md) {
       throw refuse(
         "authorization_server_unavailable",

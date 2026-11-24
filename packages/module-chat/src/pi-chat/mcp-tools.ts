@@ -29,6 +29,7 @@ import {
   type NamedSpace,
 } from "@appstrate/core/mcp-spaces";
 import { canComposeInline, canRunAgents } from "@appstrate/core/permissions";
+import { assistantVisibleMcpResult } from "@appstrate/core/mcp-result";
 import { formatTurnBudgetNote } from "@appstrate/core/chat-turn-metadata";
 import { parseSkillUri, SKILL_URI_PREFIX } from "@appstrate/core/skill-address";
 import {
@@ -213,17 +214,8 @@ async function relayedToolResult(
   scope: OfferScope,
   sendsImages: boolean,
 ): Promise<PiToolResult> {
-  const blocks = result.content.map((block) => {
-    const audience = block.annotations?.audience;
-    if (audience && !audience.includes("assistant")) {
-      return {
-        type: "text" as const,
-        text: "Tool content omitted from model input by its audience annotation.",
-      };
-    }
-    return block;
-  });
-  const projected = mcpResultToPi({ ...result, content: blocks }, scope);
+  const blocks = result.content;
+  const projected = mcpResultToPi(result, scope);
   if (result.isError) projected.isError = true;
   if (!blocks.some((block) => block.type === "image")) return projected;
   const content = [...projected.content];
@@ -625,18 +617,18 @@ function makeForwardExtension(
         const args = (params as Record<string, unknown>) ?? {};
         const spaceId = dispatchSpace(args);
         const client = await untilAborted(getClient(), callSignal);
-        const result = await client.callTool(
+        const received = await client.callTool(
           { name: tool.name, arguments: args },
           { signal: callSignal },
         );
         const scope = offerScopeOf(toolName, {
           arguments: params,
-          relayed: isRelayedResult(result),
+          relayed: isRelayedResult(received),
         });
         // The platform records each operation's resolved execution space before dispatch,
         // through the signed bearer's beforeMcpSpaceAct callback. Other disclosed spaces (a
         // search, or the alternatives on a refusal) can only be known from the result.
-        const serverSpaces = result._meta?.[OPERATION_SPACES_META_KEY];
+        const serverSpaces = received._meta?.[OPERATION_SPACES_META_KEY];
         const actedSpaceIds =
           Array.isArray(serverSpaces) &&
           serverSpaces.every(
@@ -656,8 +648,8 @@ function makeForwardExtension(
           );
         }
         const choice =
-          result.isError && !isRelayedResult(result)
-            ? pendingChoice(toolName, result._meta?.[SPACE_CHOICE_META_KEY], args.operation_id)
+          received.isError && !isRelayedResult(received)
+            ? pendingChoice(toolName, received._meta?.[SPACE_CHOICE_META_KEY], args.operation_id)
             : undefined;
         if (
           choice &&
@@ -666,7 +658,7 @@ function makeForwardExtension(
           choiceGate.waiting = true;
           return withTurnBudgetNote(
             {
-              ...mcpResultToPi(result, scope),
+              ...mcpResultToPi(assistantVisibleMcpResult(received), scope),
               spaceChoice: choice,
               terminate: true,
             },
@@ -674,13 +666,14 @@ function makeForwardExtension(
           );
         }
         const readSpaces =
-          toolName === "invoke_operation" && result.isError
-            ? result._meta?.[ACTIVE_SPACES_META_KEY]
+          toolName === "invoke_operation" && received.isError
+            ? received._meta?.[ACTIVE_SPACES_META_KEY]
             : spaceId === undefined && omitsOptionalSpace(tool.inputSchema, args)
-              ? result.structuredContent?.searched_spaces
+              ? received.structuredContent?.searched_spaces
               : undefined;
         const unrecorded = await recordResultSpaces(organization, readSpaces);
         if (unrecorded) return refusalToolResult(unrecorded, scope, turnBudget);
+        const result = assistantVisibleMcpResult(received);
         if (toolName === "call_integration_tool" && isRelayedResult(result)) {
           return withTurnBudgetNote(
             {

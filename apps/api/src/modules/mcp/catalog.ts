@@ -33,6 +33,8 @@ export interface CatalogOperation {
   pathParams: string[];
   /** Names of OpenAPI `in: header` parameters this operation declares. */
   headerParams: string[];
+  /** Form-style array parameters sent in one comma-separated query value. */
+  csvQueryParams: Set<string>;
   requirement: RouteRequirement;
   /** The REST route’s registered space contract. */
   spaceScope: OperationSpaceScope;
@@ -128,6 +130,38 @@ export function getCatalog(): OperationCatalog {
   return catalog;
 }
 
+/** Inline OpenAPI Reference Objects while keeping JSON Schema refs in the returned schema table. */
+function resolveOperationRefs(
+  node: unknown,
+  components: Record<string, unknown>,
+  seen = new Set<string>(),
+): unknown {
+  if (Array.isArray(node)) return node.map((item) => resolveOperationRefs(item, components, seen));
+  if (!node || typeof node !== "object") return node;
+  const { $ref, ...siblings } = node as Record<string, unknown>;
+  if (typeof $ref === "string" && !seen.has($ref)) {
+    const match = /^#\/components\/(parameters|responses|requestBodies|headers)\/([^/]+)$/.exec(
+      $ref,
+    );
+    if (match) {
+      const entries = components[match[1]!] as Record<string, unknown> | undefined;
+      const target = entries?.[match[2]!];
+      if (target && typeof target === "object")
+        return resolveOperationRefs(
+          { ...target, ...siblings },
+          components,
+          new Set([...seen, $ref]),
+        );
+    }
+  }
+  return Object.fromEntries(
+    Object.entries(node).map(([key, value]) => [
+      key,
+      resolveOperationRefs(value, components, seen),
+    ]),
+  );
+}
+
 function buildCatalog(source: PlatformOperations): OperationCatalog {
   const operations = new Map<string, CatalogOperation>();
   for (const {
@@ -139,7 +173,7 @@ function buildCatalog(source: PlatformOperations): OperationCatalog {
     spaceScope,
   } of source.operations) {
     if (isExcludedPath(pathTemplate)) continue;
-    const operation = node as OperationNode;
+    const operation = resolveOperationRefs(node, source.spec.components) as OperationNode;
     operations.set(operationId, {
       operationId,
       method,
@@ -151,6 +185,19 @@ function buildCatalog(source: PlatformOperations): OperationCatalog {
       description: typeof operation.description === "string" ? operation.description : "",
       pathParams: extractPathParams(pathTemplate),
       headerParams: extractHeaderParams(operation),
+      csvQueryParams: new Set(
+        Array.isArray(operation.parameters)
+          ? operation.parameters
+              .filter(
+                (p) =>
+                  p?.in === "query" &&
+                  p.explode === false &&
+                  (p.style ?? "form") === "form" &&
+                  p.schema?.type === "array",
+              )
+              .map((p) => p.name as string)
+          : [],
+      ),
       requirement,
       spaceScope,
       operation,
@@ -275,23 +322,45 @@ type ToolOutputSchema = NonNullable<Tool["outputSchema"]>;
 let runAndWaitOutputSchema: ToolOutputSchema | undefined;
 
 /**
- * `RunAndWaitResult` as `run_and_wait`'s self-contained `outputSchema` (refs as `$defs`, no
- * descriptions: the tool's own carries them). Built once: one object reaches the validator cache.
+ * The self-contained wire schema of `run_and_wait`. SDKs validate structured refusals too.
+ * The successful run uses the REST component verbatim. Build once for the validator cache.
  */
 export function getRunAndWaitOutputSchema(): ToolOutputSchema {
   if (runAndWaitOutputSchema) return runAndWaitOutputSchema;
   const { componentSchemas } = getCatalog();
   const root = componentSchemas.RunAndWaitResult;
-  const $defs = collectReferencedSchemas(root, componentSchemas);
-  runAndWaitOutputSchema = JSON.parse(
-    JSON.stringify({ ...(root as object), $defs }),
-    (key, value: unknown) => {
-      if (typeof value !== "string") return value;
-      if (key === "description") return undefined;
-      return key === "$ref" && value.startsWith(SCHEMA_REF_PREFIX)
-        ? `#/$defs/${value.slice(SCHEMA_REF_PREFIX.length)}`
-        : value;
-    },
-  ) as ToolOutputSchema;
+  const schema = {
+    type: "object",
+    oneOf: [
+      { $ref: "#/$defs/RunAndWaitResult" },
+      {
+        type: "object",
+        required: ["kind", "code", "error"],
+        properties: {
+          kind: { const: "tool_refusal" },
+          code: { type: "string" },
+          error: { type: "string" },
+        },
+      },
+      {
+        type: "object",
+        required: ["kind", "status"],
+        properties: { kind: { const: "route_refusal" }, status: { type: "integer" } },
+        // A route problem carries its body. A successful launch missing its run id carries the original response.
+        anyOf: [
+          { required: ["body"] },
+          { required: ["error", "launch"], properties: { error: { type: "string" } } },
+        ],
+      },
+    ],
+    $defs: { RunAndWaitResult: root, ...collectReferencedSchemas(root, componentSchemas) },
+  };
+  runAndWaitOutputSchema = JSON.parse(JSON.stringify(schema), (key, value: unknown) => {
+    if (typeof value !== "string") return value;
+    if (key === "description") return undefined;
+    return key === "$ref" && value.startsWith(SCHEMA_REF_PREFIX)
+      ? `#/$defs/${value.slice(SCHEMA_REF_PREFIX.length)}`
+      : value;
+  }) as ToolOutputSchema;
   return runAndWaitOutputSchema;
 }

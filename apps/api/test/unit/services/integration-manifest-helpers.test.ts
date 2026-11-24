@@ -7,14 +7,13 @@
  */
 
 import { describe, it, expect } from "bun:test";
-import type { IntegrationManifest } from "@appstrate/core/integration";
+import { getAppstrateConnectMeta, type IntegrationManifest } from "@appstrate/core/integration";
 import {
   renderCredentialTemplate,
   renderAuthAuthorizedUris,
   runnerEgressFor,
   renderRemoteSource,
   hasPerConnectionAuthServer,
-  getAppstrateConnectMeta,
   authKeysServingSelection,
   type AfpsManifestConnect,
 } from "../../../src/services/integration-manifest-helpers.ts";

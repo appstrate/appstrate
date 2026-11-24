@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { describe, expect, it } from "bun:test";
-import { callSpaceOf } from "../src/ui/conversation-scope.ts";
+import { callSpaceOf, conversationTurnCan } from "../src/ui/conversation-scope.ts";
 
 describe("callSpaceOf", () => {
   it("reads the stamp the engine put on the call", () => {
@@ -29,5 +29,23 @@ describe("callSpaceOf", () => {
     expect(callSpaceOf({})).toBeUndefined();
     expect(callSpaceOf({ providerMetadata: { appstrate: {} } })).toBeUndefined();
     expect(callSpaceOf({ providerMetadata: { appstrate: { spaceId: "" } } })).toBeUndefined();
+  });
+});
+
+describe("the composer of a limited conversation", () => {
+  it("offers only actions its origin can perform, and goes read-only when that origin is no longer in the acting set", () => {
+    const host = {
+      actingSpaceIds: ["origin", "other"],
+      can: () => true,
+      canIn: (space: string, permission: string) =>
+        space === "origin" && permission === "chat:write",
+    };
+    const scope = { originSpaceId: "origin", restricted: true };
+    expect(conversationTurnCan(scope, host)("chat:write")).toBe(true);
+    expect(conversationTurnCan(scope, host)("skills:read")).toBe(false);
+    expect(conversationTurnCan(scope, { ...host, actingSpaceIds: ["other"] })("chat:write")).toBe(
+      false,
+    );
+    expect(conversationTurnCan({ ...scope, restricted: false }, host)("skills:read")).toBe(true);
   });
 });

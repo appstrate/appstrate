@@ -9,7 +9,9 @@
  * ownership gates. The sections live in `components/integration-detail/`.
  */
 
-import { lazy, Suspense } from "react";
+import { lazy, Suspense, useEffect } from "react";
+import { useUrlModal } from "../hooks/use-url-modal";
+import { EDIT_OAUTH_CLIENT_PARAM, integrationClientModalRef } from "../lib/integration-clients";
 import { useTabWithHash } from "../hooks/use-tab-with-hash";
 import { IntegrationOverview } from "../components/package-detail/integration-overview";
 import { IntegrationFunctioning } from "../components/package-detail/integration-structure";
@@ -73,7 +75,7 @@ import {
 import { isUnauthenticatedIntegration } from "@appstrate/core/integration";
 import { isVariableTemplate } from "@appstrate/afps-shared/connection-variables";
 import { usePackageDetail, usePackageDownload, type Versioned } from "../hooks/use-packages";
-import { useIntegrationDetail, type IntegrationDetailWire } from "../hooks/use-integrations";
+import { useIntegrationDetail } from "../hooks/use-integrations";
 import { useCanReach } from "../hooks/use-can-reach";
 import { useIntegrationSpaceAction } from "../components/integration-detail/use-integration-space";
 import { useSpacesFor } from "../hooks/use-space-action";
@@ -101,10 +103,6 @@ const DEFINITION_RAIL: readonly DefinitionRailEntry[] = [
   ["auth-methods", "auths"],
   ["tools", "tools"],
 ];
-
-function IntegrationGeneral({ detail }: { detail: IntegrationDetailWire }) {
-  return <IntegrationFunctioning detail={detail} />;
-}
 
 export function IntegrationSettings({
   packageId,
@@ -140,6 +138,19 @@ export function IntegrationSettings({
   const workingSpace = useSpaceLabelOf()(workingSpaceId);
   const fromWorkingSpace = shownFromWorkingSpace(overview, workingSpaceId, spaceIds);
   const canConfigure = configureIn.offered;
+  const { value: clientTarget, close: closeClient } = useUrlModal(EDIT_OAUTH_CLIENT_PARAM);
+  const hasClientTable =
+    detail.active &&
+    detail.auths.some(
+      (auth) =>
+        auth.type === "oauth2" &&
+        !!detail.manifest.auths?.[auth.auth_key] &&
+        integrationClientModalRef(auth.auth_key, clientTarget) !== null,
+    );
+  useEffect(() => {
+    if (clientTarget !== null && !hasClientTable) closeClient();
+  }, [clientTarget, hasClientTable, closeClient]);
+
   // The sync calls the server of the DRAFT, published or not: the copy this editor writes.
   const draftSource = definition
     ? readIntegrationSource((definition.manifest as Record<string, unknown>).source)
@@ -242,7 +253,7 @@ export function IntegrationSettings({
         ) : active === "functioning" ? (
           <div className="p-6">
             <SettingsHeading title={t("orgSettings.tabGeneral")} description={null} />
-            <IntegrationGeneral detail={detail} />
+            <IntegrationFunctioning detail={detail} />
           </div>
         ) : active === "tools" ? (
           <div className="p-6">

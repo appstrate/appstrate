@@ -13,6 +13,7 @@
  * the injected `fetch` (the credential proxy) or in static headers.
  */
 
+import { boundResourceResponse } from "./resource-response.ts";
 import type { Client as LegacyClient } from "@modelcontextprotocol/sdk/client/index.js";
 import {
   Client as DualEraClient,
@@ -303,7 +304,11 @@ async function connectAttempt(
     const method = postedMethod(init);
     if (method !== undefined && method !== "server/discover") pastProbe = true;
     try {
-      return await baseFetch(input, init);
+      const response = await baseFetch(input, init);
+      if (method === "resources/read") return boundResourceResponse(response, "request");
+      if ((init?.method ?? "GET") === "GET")
+        return boundResourceResponse(response, "shared-stream");
+      return response;
     } catch (err) {
       if (typeof err === "object" && err !== null) injectedFetchFaults.add(err);
       throw err;
@@ -350,9 +355,18 @@ function isInconclusiveProbe(err: unknown): boolean {
   return isRequestTimeout(err);
 }
 
+/** A server-authored JSON-RPC failure in either supported protocol era. */
+export function isMcpProtocolError(err: unknown): err is McpError | ProtocolError {
+  return err instanceof McpError || err instanceof ProtocolError;
+}
+
 /** The SDK gave up waiting for an answer: its own timeout, or the request's signal aborting. */
 export function isRequestTimeout(err: unknown): boolean {
-  return err instanceof SdkError && err.code === SdkErrorCode.RequestTimeout;
+  return (
+    (err instanceof SdkError && err.code === SdkErrorCode.RequestTimeout) ||
+    (err instanceof McpError && err.code === ErrorCode.RequestTimeout) ||
+    err instanceof McpConnectDeadlineError
+  );
 }
 
 /** A 401/403: the credential's verdict, which no other era would change. */
@@ -564,6 +578,8 @@ function isFatalConnectError(err: unknown): boolean {
   return true;
 }
 
+class McpConnectDeadlineError extends Error {}
+
 function buildDeadlineExceededError(
   deadlineMs: number,
   lastError: unknown,
@@ -571,7 +587,7 @@ function buildDeadlineExceededError(
 ): Error {
   const lastMsg = lastError instanceof Error ? lastError.message : String(lastError);
   const codeHint = lastErrorCode ? ` ${lastErrorCode}` : "";
-  const err = new Error(
+  const err = new McpConnectDeadlineError(
     `MCP connect deadline exceeded after ${deadlineMs}ms (last error:${codeHint} ${lastMsg})`,
   );
   (err as { cause?: unknown }).cause = lastError;
@@ -761,7 +777,12 @@ function dualEraSession(
       }
     },
     async readResource(args, options) {
-      return (await client.readResource(args, options)) as ReadResourceResult;
+      // The SDK cache bounds entry count, not bytes. Retaining resource bodies across calls
+      // would bypass the read budget even when only one upstream request is active.
+      return (await client.readResource(args, {
+        ...options,
+        cacheMode: "bypass",
+      })) as ReadResourceResult;
     },
     // The SDK sends a method outside the spec only with a result schema.
     request: (method, params, options) => client.request({ method, params }, ResultSchema, options),

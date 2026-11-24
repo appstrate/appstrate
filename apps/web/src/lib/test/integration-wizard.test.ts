@@ -3,6 +3,7 @@
 import { describe, expect, it } from "bun:test";
 import { defaultIntegrationManifest } from "../../components/agent-editor/utils.ts";
 import type { ServerSyncProposal } from "../integration-server-sync.ts";
+import { stableJson } from "../stable-json";
 import { ApiError } from "../../api/errors.ts";
 import {
   defaultToolCount,
@@ -17,7 +18,6 @@ import {
   integrationWizardStep,
   isRemoteSource,
   needsWizardFinish,
-  proposalEdits,
   toolsPublishVersion,
   toolsUpdateBody,
   wizardAuthKind,
@@ -61,29 +61,27 @@ describe("integrationCreationManifest", () => {
 
   it("drops the default API key auth for a proposal declaring none (AFPS §7.2)", () => {
     const { auths: _auths, ...open } = proposal;
-    const manifest = integrationCreationManifest(defaults, open, proposalEdits(open));
+    const manifest = integrationCreationManifest(defaults, open, open);
     expect(manifest).not.toHaveProperty("auths");
     expect(manifest.source).toEqual(proposal.source);
   });
 
   it("carries the icon, the proposal's or the re-encoded one", () => {
     const withIcon = { ...proposal, icon: "data:image/png;base64,AAA" };
-    expect(integrationCreationManifest(defaults, withIcon, proposalEdits(withIcon)).icon).toBe(
+    expect(integrationCreationManifest(defaults, withIcon, withIcon).icon).toBe(
       "data:image/png;base64,AAA",
     );
-    expect(
-      integrationCreationManifest(defaults, proposal, proposalEdits(proposal), "data:x").icon,
-    ).toBe("data:x");
+    expect(integrationCreationManifest(defaults, proposal, proposal, "data:x").icon).toBe("data:x");
   });
 
   it("is created by the wizard as a draft only, the manifest sent once", () => {
-    const manifest = integrationCreationManifest(defaults, proposal, proposalEdits(proposal));
+    const manifest = integrationCreationManifest(defaults, proposal, proposal);
     expect(wizardCreateBody(manifest, "guided")).toEqual({ manifest, publish: false });
     expect(wizardCreateBody(manifest, "guided").manifest.version).toBe("1.0.0");
   });
 
   it("is created the manual way as the creation dialog creates it, published by the gate", () => {
-    const manifest = integrationCreationManifest(defaults, proposal, proposalEdits(proposal));
+    const manifest = integrationCreationManifest(defaults, proposal, proposal);
     expect(wizardCreateBody(manifest, "manual")).toEqual({ manifest });
   });
 });
@@ -674,5 +672,15 @@ describe("needsWizardFinish", () => {
 describe("wizardResumePath", () => {
   it("encodes the package id", () => {
     expect(wizardResumePath("@org/acme")).toBe("/integrations/new/mcp?package=%40org%2Facme");
+  });
+});
+
+describe("settings and wizard JSON comparisons", () => {
+  it("ignores missing JSON values in objects and preserves array order", () => {
+    expect(stableJson({ b: undefined, a: { c: 3, a: 2 } })).toBe(stableJson({ a: { a: 2, c: 3 } }));
+    expect(stableJson([undefined, 2])).toBe(stableJson([null, 2]));
+    expect(stableJson([1, 2])).not.toBe(stableJson([2, 1]));
+    expect(stableJson(undefined)).toBeUndefined();
+    expect(() => stableJson(2n)).toThrow();
   });
 });

@@ -1416,6 +1416,7 @@ describe("installSessionBridge — early stop on `output`", () => {
 
     expect(sink.events.find((e) => e.type === "appstrate.error")).toBeDefined();
     expect(bridge.getTerminalError()).toEqual({
+      context: { error_category: "unknown" },
       code: "adapter_error",
       message: "provider exploded",
     });
@@ -1439,6 +1440,7 @@ describe("installSessionBridge — early stop on `output`", () => {
 
     expect(sink.events.find((e) => e.type === "appstrate.error")).toBeDefined();
     expect(bridge.getTerminalError()).toEqual({
+      context: { error_category: "unknown" },
       code: "adapter_error",
       message: "Request was aborted",
     });

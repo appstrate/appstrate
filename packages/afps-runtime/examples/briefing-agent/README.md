@@ -55,14 +55,10 @@ from a 10-line bun script instead:
 
 ```ts
 // replay.ts
-import { readFile } from "node:fs/promises";
-import { reduceEvents, createReducerSink, type RunEvent } from "@appstrate/afps-runtime";
+import { reduceEvents, type RunEvent } from "@appstrate/afps-runtime";
 
-const events: RunEvent[] = JSON.parse(await readFile("events.json", "utf-8"));
-const { sink, snapshot } = createReducerSink();
-for (const ev of events) await sink.handle(ev);
-await sink.finalize(reduceEvents(events));
-console.log(JSON.stringify(snapshot(), null, 2));
+const events: RunEvent[] = await Bun.file("events.json").json();
+console.log(reduceEvents(events));
 ```
 
 Run with `bun replay.ts`.

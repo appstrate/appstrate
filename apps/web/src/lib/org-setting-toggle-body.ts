@@ -1,22 +1,19 @@
 // SPDX-License-Identifier: Apache-2.0
 
-/** The organization settings a switch row writes. */
-export type OrgToggleField =
-  | "personal_model_credentials"
-  | "dashboard_sso_enabled"
-  | "restrict_package_copy"
-  | "personal_space_role";
+import type { operations } from "../api/schema";
 
-/** The two stored values of a setting that is not a boolean: what ON and OFF write. */
-export interface ToggleValues {
-  on: string;
-  off: string;
-}
+type SettingsPatch = NonNullable<
+  operations["updateOrgSettings"]["requestBody"]
+>["content"]["application/json"];
+type BooleanToggle = {
+  [K in keyof SettingsPatch]-?: NonNullable<SettingsPatch[K]> extends boolean ? K : never;
+}[keyof SettingsPatch];
 
-/** `personal_space_role`: ON keeps a member `admin` of their personal space, OFF caps them. */
-export const PERSONAL_SPACE_ROLE_VALUES = { on: "admin", off: "operator" } as const;
+export type OrgToggleField = BooleanToggle | Extract<"personal_space_role", keyof SettingsPatch>;
 
-/** The PATCH body one flip of the switch sends: the boolean, or the stored value `values` names. */
-export function toggleBody(field: OrgToggleField, checked: boolean, values?: ToggleValues) {
-  return { [field]: values ? (checked ? values.on : values.off) : checked };
+/** A personal space role switch stores a role. The other switches store booleans. */
+export function toggleBody(field: OrgToggleField, checked: boolean): SettingsPatch {
+  return field === "personal_space_role"
+    ? { personal_space_role: checked ? "admin" : "operator" }
+    : { [field]: checked };
 }

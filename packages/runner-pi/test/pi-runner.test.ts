@@ -15,6 +15,7 @@ import {
   makeTestBundle,
   ScriptedPiRunner,
 } from "./helpers.ts";
+import type { InternalSink } from "../src/pi-runner.ts";
 import { emptyRunResult } from "@appstrate/afps-runtime/runner";
 
 const STUB_BUNDLE = makeTestBundle(makeBundlePackage("@test/stub", "0.0.0", "agent", {}));
@@ -40,6 +41,43 @@ describe("PiRunner.run — event forwarding", () => {
     expect(sink.finalizeCalls).toBe(1);
     expect(sink.finalized).not.toBeNull();
   });
+
+  for (const last of [false, 0, null]) {
+    it(`keeps the last output (${String(last)}) across a long stream and a thrown failure`, async () => {
+      class OutputStreamRunner extends ScriptedPiRunner {
+        protected override async executeSession(
+          context: ReturnType<typeof makeContext>,
+          sink: InternalSink,
+        ) {
+          for (let i = 0; i < 4096; ++i) {
+            await sink.emit({
+              type: "output.emitted",
+              runId: context.runId,
+              timestamp: i,
+              data: i,
+            });
+          }
+          await sink.emit({
+            type: "output.emitted",
+            runId: context.runId,
+            timestamp: 4096,
+            data: last,
+          });
+          await sink.emit({ type: "output.emitted", runId: context.runId, timestamp: 4097 });
+          throw new Error("stream failed");
+        }
+      }
+      const sink = createCaptureSink();
+      await new OutputStreamRunner(async () => {}).run({
+        bundle: STUB_BUNDLE,
+        context: makeContext(),
+        eventSink: sink,
+      });
+      expect(sink.events.filter((event) => event.type === "output.emitted")).toHaveLength(4098);
+      expect(sink.finalized?.output).toBe(last);
+      expect(sink.finalized?.status).toBe("failed");
+    });
+  }
 
   it("finalizes with emptyRunResult when no events were emitted", async () => {
     const sink = createCaptureSink();

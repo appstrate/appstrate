@@ -2,7 +2,9 @@
 
 import {
   MODEL_ERROR_RETRYABLE_BY_CATEGORY,
+  modelErrorReason,
   type ModelErrorCategory,
+  type ModelErrorReason,
 } from "@appstrate/core/model-error";
 import type { z } from "zod";
 import type { ModelCost, ModelInputModality } from "@appstrate/core/module";
@@ -35,7 +37,6 @@ export type {
   ConsumingAgentSummary,
   IntegrationAgentResolution,
   IntegrationAuthStatus,
-  IntegrationAuthType,
   IntegrationCandidate,
   IntegrationConnection,
   IntegrationManifestAuth,
@@ -83,6 +84,8 @@ import type { PricingStatus as _PricingStatus } from "@appstrate/db/pricing-stat
  */
 /** A model-call failure as a run carries it on the wire. */
 export interface RunModelError {
+  /** Stable reason named by the provider in the terminal refusal, when present. */
+  reason?: ModelErrorReason;
   category: ModelErrorCategory;
   /** Whether a new attempt, unchanged, might succeed — derived from `category`. */
   retryable: boolean;
@@ -94,12 +97,15 @@ export interface RunModelError {
 
 /** The one projection of the `model_error_*` columns onto {@link RunModelError}. */
 export function runModelErrorWire(columns: {
+  terminalError?: string | null;
   category: ModelErrorCategory | null;
   status: number | null;
   message: string | null;
 }): RunModelError | null {
   if (!columns.category) return null;
+  const reason = columns.terminalError ? modelErrorReason(columns.terminalError) : undefined;
   return {
+    ...(reason && { reason }),
     category: columns.category,
     retryable: MODEL_ERROR_RETRYABLE_BY_CATEGORY[columns.category],
     status: columns.status,
@@ -1190,6 +1196,8 @@ export interface ModelProviderCredentialInfo {
   allowed_actions: ModelProviderCredentialAction[];
   /** Whether an organization model may be bound to this credential: `true` for an organization one (API key or subscription), `false` for a personal or a built-in one. */
   bindable: boolean;
+  /** Organization model rows referencing this credential, including disabled models. A positive count prevents deletion. */
+  referencing_model_count: number;
   /**
    * On a personal credential, the organization models left to members' own credentials that it
    * pays for (`servesModel`: the same service, or a subscription offering the model on its

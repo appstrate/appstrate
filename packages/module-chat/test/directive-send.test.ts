@@ -30,6 +30,18 @@ describe("sendWithDirectives", () => {
     expect(message.parts).toHaveLength(2);
   });
 
+  it("launches the selected agent with Markdown inside its title and leaves the code example alone", () => {
+    const title = "Review `package.json` [Q3] <code>v2</code>";
+    const example = "`" + agent("Example", "run-example") + "`";
+    const text = `${example} then ${agent(title)}`;
+    expect(sendWithDirectives(user({ type: "text", text })).parts).toEqual([
+      { type: "text", text },
+      { type: "data-agent-prompt", data: { name: "run-report", title } },
+    ]);
+    const bracketTitle = "Review `package.json`";
+    expect(namesAgent(agent(bracketTitle))).toBe(true);
+  });
+
   it("sends a message with only an agent chip as an ordinary, non-empty text message", () => {
     const sent = sendWithDirectives(user({ type: "text", text: agent("Weekly report") }));
     expect(sent.parts).toHaveLength(2);

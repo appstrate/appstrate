@@ -52,11 +52,11 @@ By default, a one-off agent the assistant composes runs on the organization's de
   - no caption: loaded, or not yet evaluated;
   - "Not loaded" with the reason: skill budget exceeded, unavailable or unreadable.
 
-  A skill that is not loaded stays pinned and is not counted as loaded. A gauge shows the share of the 64,000-character budget taken by the pinned skills and the skills named in the message you are typing, and warns before a pin would exceed it. Changes apply from the next message, as a line at the foot of the panel says, even while a reply is being written. Uncheck any pinned skill to remove it from the conversation: it leaves the context from the next message on, and earlier turns are unchanged.
+  A skill that is not loaded stays pinned and is not counted as loaded. A gauge estimates the share of the 64,000-character budget taken by the pinned skills and the skills named in the message you are typing, and warns when the listed file sizes might exceed it. Changes apply from the next message, as a line at the foot of the panel says, even while a reply is being written. Uncheck any pinned skill to remove it from the conversation: it leaves the context from the next message on, and earlier turns are unchanged.
 
 - **Automatic discovery** (on by default): the assistant sees the other skills of the spaces the conversation can act in, one line each, and loads the one that fits. The skills you pinned are not listed again. When it is off, the assistant has no access to any other skill: it cannot list, load, declare or write one, whatever your role. The skills you pinned or named in a message still apply.
 
-A skill the assistant reads this way is not pinned: it serves that message and its text stays in the conversation's history, shown in the thread as a "Read for this message" chip with a "Pin" action. Only you pin a skill. Pinned skills share a budget of 64,000 characters, injected in order; a skill that would not fit cannot be pinned, and one that no longer fits (a pinned skill grew) is shown as over budget until you uncheck another to make room.
+A skill the assistant reads this way is not pinned: it serves that message and its text stays in the conversation's history, shown in the thread as a "Read for this message" chip with a "Pin" action. Only you pin a skill. Pinned skills share a budget of 64,000 characters, injected in order; any skill can be pinned. When a turn reads the contents, it reports which pins fit and which exceed the remaining budget.
 
 ## For administrators
 

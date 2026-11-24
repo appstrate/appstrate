@@ -12,7 +12,7 @@ import { createStore } from "zustand/vanilla";
 import type { components } from "../api/schema";
 import { queryClient } from "../lib/query-client";
 import { orgKeys, removeOrgScopedQueries } from "../lib/query-keys";
-import { persistedJson, persistedValue } from "./local-storage";
+import { persistedJson } from "./local-storage";
 import { getCurrentOrgId, orgStore } from "./org-store";
 
 export const STORAGE_KEY = "appstrate_view_as";
@@ -39,28 +39,43 @@ type Organization = components["schemas"]["Organization"];
 
 interface ViewAsState {
   persona: ViewAsPersona | null;
-  /** Set when the SERVER refused the persona. State, not a toast: it lands before `<Toaster/>` subscribes. */
+  returnSpaceId: string | null;
+  /** Set when the preview can no longer be restored or applied. State, not a toast: it lands before `<Toaster/>` subscribes. */
   stoppedReason: string | null;
-  commit: (persona: ViewAsPersona | null, stoppedReason: string | null) => void;
+  commit: (
+    persona: ViewAsPersona | null,
+    stoppedReason: string | null,
+    returnSpaceId: string | null,
+  ) => void;
 }
 
-/** A stored value that no longer parses is dropped, never sent as a malformed header. */
-const persistedPersona = persistedJson<ViewAsPersona | null>(STORAGE_KEY, (value) => {
-  const parsed = personaSchema.safeParse(value);
-  return parsed.success ? parsed.data : null;
-});
+const storedPreviewSchema = personaSchema.extend({ returnSpaceId: z.string().min(1).nullable() });
+const persistedPreview = persistedJson(
+  STORAGE_KEY,
+  (value) => (value === null ? null : storedPreviewSchema.safeParse(value).data),
+  () => undefined,
+);
 
-export const readPersistedPersona = persistedPersona.read;
-
-/** The space the previewer stood in before the preview; "Quitter" returns there. */
-const returnSpace = persistedValue<string | null>("appstrate_view_as_return", (raw) => raw || null);
+export function readStoredPreview(): Pick<
+  ViewAsState,
+  "persona" | "returnSpaceId" | "stoppedReason"
+> {
+  const value = persistedPreview.read();
+  const empty = { persona: null, returnSpaceId: null, stoppedReason: null };
+  if (value === null) return empty;
+  if (value === undefined) {
+    persistedPreview.write(null);
+    return { ...empty, stoppedReason: "invalid_view_as" };
+  }
+  const { returnSpaceId, ...persona } = value;
+  return { persona, returnSpaceId, stoppedReason: null };
+}
 
 export const viewAsStore = createStore<ViewAsState>()((set) => ({
-  persona: readPersistedPersona(),
-  stoppedReason: null,
-  commit: (persona, stoppedReason) => {
-    set({ persona, stoppedReason });
-    persistedPersona.write(persona);
+  ...readStoredPreview(),
+  commit: (persona, stoppedReason, returnSpaceId) => {
+    set({ persona, stoppedReason, returnSpaceId });
+    persistedPreview.write(persona && { ...persona, returnSpaceId });
   },
 }));
 
@@ -119,9 +134,12 @@ export function enterViewAs(
   orgs: Organization[],
   returnSpaceId: string | null = null,
 ): void {
-  viewAsStore.getState().commit(persona, null);
-  // A preview replacing another keeps the first one's way home.
-  if (returnSpace.read() === null) returnSpace.write(returnSpaceId);
+  const previous = viewAsStore.getState();
+  previous.commit(
+    persona,
+    null,
+    previous.persona?.orgId === persona.orgId ? previous.returnSpaceId : returnSpaceId,
+  );
   // Cancel first: an `/api/orgs` in flight under the PREVIOUS authority would
   // overwrite the seeded persona permissions (`exitViewAs` gets this from `invalidateQueries`).
   void queryClient.cancelQueries({ queryKey: orgKeys.all });
@@ -131,15 +149,14 @@ export function enterViewAs(
 
 /** The ONE exit path ("Quitter", org switch, sign-out, refused persona); returns the space to go back to. */
 export function exitViewAs(reason?: string): string | null {
-  const back = returnSpace.read();
-  returnSpace.write(null);
-  if (!viewAsStore.getState().persona) return null;
-  viewAsStore.getState().commit(null, reason ?? null);
+  const { persona, returnSpaceId, commit } = viewAsStore.getState();
+  if (!persona) return null;
+  commit(null, reason ?? null, null);
   removeOrgScopedQueries(queryClient);
   // Invalidated, not refetched: a failed refetch would leave the persona's
   // reduced row serving the caller for good. Exit must need no network.
   void queryClient.invalidateQueries({ queryKey: orgKeys.all });
-  return back;
+  return returnSpaceId;
 }
 
 /** The `X-View-As` grammar the server parses; `; ` separated `key=value` pairs. */

@@ -71,14 +71,26 @@ function canonicalLocale(locale: string | undefined): string | undefined {
  * Defensive against `NaN`/`Infinity`/negatives: those clamp to `0ms` so a
  * malformed input never shows a misleading figure.
  */
-export function formatDuration(ms: number): string {
-  if (!Number.isFinite(ms) || ms < 0) return "0ms";
-  if (ms < 1000) return `${Math.round(ms)}ms`;
+export function formatDuration(ms: number, locale?: string): string {
+  const unit = (value: number, name: "millisecond" | "second" | "minute", digits = 0) => {
+    if (!locale) {
+      const suffix = { millisecond: "ms", second: "s", minute: "m" }[name];
+      return `${value.toFixed(digits)}${suffix}`;
+    }
+    return new Intl.NumberFormat(locale, {
+      style: "unit",
+      unit: name,
+      unitDisplay: "short",
+      minimumFractionDigits: digits,
+      maximumFractionDigits: digits,
+    }).format(value);
+  };
+  if (!Number.isFinite(ms) || ms < 0) return unit(0, "millisecond");
+  if (ms < 1000) return unit(Math.round(ms), "millisecond");
   const seconds = ms / 1000;
-  if (seconds < 60) return `${seconds.toFixed(1)}s`;
+  if (seconds < 60) return unit(seconds, "second", 1);
   const minutes = Math.floor(seconds / 60);
-  const rest = Math.round(seconds - minutes * 60);
-  return `${minutes}m ${rest}s`;
+  return `${unit(minutes, "minute")} ${unit(Math.round(seconds - minutes * 60), "second")}`;
 }
 
 const MINUTE_MS = 60_000;

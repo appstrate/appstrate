@@ -128,6 +128,42 @@ describe("code sync — claude-plugin target", () => {
     expect(Object.keys(after)).toEqual(["pdf-tools"]);
   });
 
+  it("keeps each distinct local edit when a beta.68 ledger retries a failed placement", async () => {
+    createSkillServer(ONE_SKILL).install();
+    const { io } = createMemoryIO();
+    await codeSyncCommand({ target: ["claude-plugin"] }, io);
+    const ledger = JSON.parse(await readText(getStatePath()));
+    ledger.version = 1;
+    ledger.targets["claude-plugin"].managed["pdf-tools"].integrity = "sha256-b2xkIHppcA==";
+    await writeFile(getStatePath(), JSON.stringify(ledger));
+    await writeFile(join(pluginRoot(), "skills/pdf-tools/SKILL.md"), "my edited skill");
+    const staging = join(getDataDir(), ".appstrate-staging");
+    await writeFile(staging, "blocks placement");
+    const sync = () => codeSyncCommand({ target: ["claude-plugin"] }, io);
+    await expect(sync()).rejects.toBeInstanceOf(CommandExit);
+    const backups = join(getDataDir(), "skills-sync/backups");
+    const first = await readdir(backups);
+    expect(first).toHaveLength(1);
+    await expect(sync()).rejects.toBeInstanceOf(CommandExit);
+    expect(await readdir(backups)).toEqual(first);
+    await writeFile(join(pluginRoot(), "skills/pdf-tools/SKILL.md"), "my second edit");
+    await expect(sync()).rejects.toBeInstanceOf(CommandExit);
+    const second = await readdir(backups);
+    expect(second).toHaveLength(2);
+    expect(
+      await Promise.all(
+        second.map((dir) => readText(join(backups, dir, "pdf-tools/SKILL.md"))),
+      ).then((values) => values.sort()),
+    ).toEqual(["my edited skill", "my second edit"]);
+    await rm(staging);
+    await sync();
+    expect(await readText(join(pluginRoot(), "skills/pdf-tools/SKILL.md"))).toContain(
+      "name: pdf-tools",
+    );
+    await sync();
+    expect((await readdir(backups)).sort()).toEqual(second.sort());
+  });
+
   it("produces byte-identical bytes when rebuilt from scratch", async () => {
     // Two FULL builds, not "build then no-op": the second run of the old test
     // short-circuited and wrote nothing, so it compared a tree against itself.
@@ -1597,7 +1633,12 @@ describe("code sync — request concurrency", () => {
       skillMd: skillMd(`skill-${String(i).padStart(2, "0")}`),
     }));
     const server = createSkillServer(many);
-    server.install();
+    const firstBatch = Promise.withResolvers<void>();
+    let started = 0;
+    server.install(async () => {
+      if (++started === 8) firstBatch.resolve();
+      await firstBatch.promise;
+    });
     const { io } = createMemoryIO();
 
     await codeSyncCommand({ target: ["claude-plugin"] }, io);

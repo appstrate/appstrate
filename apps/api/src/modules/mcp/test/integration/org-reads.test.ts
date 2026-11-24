@@ -80,7 +80,7 @@ describe("lists spanning spaces through invoke_operation", () => {
         orgId: owner.orgId,
         spaceId,
         userId,
-        status: "success",
+        status: who === "owner" ? "failed" : "success",
         startedAt: new Date(),
       });
       runs[who] = run.id;
@@ -143,6 +143,7 @@ describe("lists spanning spaces through invoke_operation", () => {
     endpoint: string,
     token: string,
     spaceId?: string,
+    query?: Record<string, unknown>,
   ): Promise<Array<{ id: string; space_ids?: string[] } & Partial<HomeWire>>> {
     const res = await app.request(endpoint, {
       method: "POST",
@@ -159,6 +160,7 @@ describe("lists spanning spaces through invoke_operation", () => {
           name: "invoke_operation",
           arguments: {
             operation_id: operation,
+            query,
             path_params: { orgId: owner.orgId },
             ...(spaceId ? { space_id: spaceId } : {}),
           },
@@ -178,8 +180,8 @@ describe("lists spanning spaces through invoke_operation", () => {
     return body.data;
   }
 
-  async function restRuns(): Promise<string[]> {
-    const res = await app.request(`/api/orgs/${owner.orgId}/runs`, {
+  async function restRuns(query = ""): Promise<string[]> {
+    const res = await app.request(`/api/orgs/${owner.orgId}/runs${query}`, {
       headers: { Cookie: member.cookie },
     });
     expect(res.status).toBe(200);
@@ -236,6 +238,17 @@ describe("lists spanning spaces through invoke_operation", () => {
     const endpoint = `/api/mcp/o/${owner.orgId}`;
     expect(await invoke("listOrgRuns", endpoint, token)).toEqual(runIds.deux);
     expect(await invoke("listOrgRuns", endpoint, token, un)).toEqual([...runIds.un].sort());
+  });
+
+  it("returns the same failed and successful runs through CSV REST and MCP arrays", async () => {
+    const token = await mintToken(member, getMcpOrgResourceUri(owner.orgId));
+    const statuses = ["failed", "success"];
+    const rest = await restRuns("?status=failed,success");
+    const mcp = await invokeRows("listOrgRuns", `/api/mcp/o/${owner.orgId}`, token, un, {
+      status: statuses,
+    });
+    expect(rest).toEqual([...runIds.un, ...runIds.deux].sort());
+    expect(mcp.map((row) => row.id).sort()).toEqual(rest);
   });
 
   it("bounds a space-bound token to its space", async () => {

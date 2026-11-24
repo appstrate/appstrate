@@ -5,7 +5,7 @@ import { useLocation } from "react-router-dom";
 import type { PackageType } from "@appstrate/core/validation";
 import { useCanReach } from "../../hooks/use-can-reach";
 import { modalOpeningState } from "../../hooks/use-url-modal";
-import { catalogueHref } from "../../lib/catalogue-link";
+import { catalogueHref, CATALOGUE_PACKAGE_PARAM } from "../../lib/catalogue-link";
 
 /**
  * A package page's way over to the package's sheet in the catalogue: where it
@@ -24,7 +24,7 @@ export function useCatalogueEntry(type: PackageType, packageId: string, version?
   if (!canReach(catalogueHref(type))) return null;
   return {
     to: catalogueHref(type, { packageId, version }),
-    state: modalOpeningState(location.state, "package"),
+    state: modalOpeningState(location.state, CATALOGUE_PACKAGE_PARAM),
     label: version
       ? t("catalogue.openInCatalogueVersion", { version })
       : t("catalogue.openInCatalogue"),

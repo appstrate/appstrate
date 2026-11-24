@@ -13,6 +13,8 @@ import { test, expect } from "../../fixtures/browser.fixture.ts";
 
 // Typed from the generated API types: a contract change breaks the typecheck, not the mock.
 type SessionDetail = operations["getChatSession"]["responses"][200]["content"]["application/json"];
+type SkillsPatch =
+  operations["updateChatSessionSkills"]["requestBody"]["content"]["application/json"];
 type Pin = components["schemas"]["ChatSession"]["pins"][number];
 
 const skill = (name: string, bytes: number) => ({
@@ -81,14 +83,17 @@ test("a skill the assistant read is pinned from its chip, and unpinned from the 
   });
   const patches: unknown[] = [];
   await page.route(`**${chat}/sessions/${id}/skills`, async (route) => {
-    const body = route.request().postDataJSON() as { pins: string[]; skill_discovery: boolean };
+    const body = route.request().postDataJSON() as SkillsPatch;
     patches.push(body);
-    pins = body.pins.map(
-      (pin) => pins.find((held) => held.id === pin) ?? { id: pin, status: null, chars: null },
-    );
-    await route.fulfill({
-      json: { object: "chat_session", id, skill_discovery: body.skill_discovery, pins },
-    });
+    const { pin } = body;
+    if (!pin) throw new Error("Expected a per-skill PATCH");
+    if (pin.pinned) {
+      if (!pins.some((held) => held.id === pin.id))
+        pins.push({ id: pin.id, status: null, chars: null });
+    } else {
+      pins = pins.filter((held) => held.id !== pin.id);
+    }
+    await route.fulfill({ json: { object: "chat_session", id, skill_discovery: true, pins } });
   });
 
   await page.goto(`/chat/${id}`);
@@ -100,26 +105,26 @@ test("a skill the assistant read is pinned from its chip, and unpinned from the 
   // The pill counts what the next turn loads: `tone`, and `fresh` pending.
   await expect(page.getByTestId("skill-pill-pinned")).toHaveText(/^\s*2 épinglées\s*$/);
 
-  // The chip's action pins the skill read: a PATCH of the full set.
+  // The chip's action pins the skill read: only the skill read is touched.
   const pinned = page.waitForRequest((req) => req.method() === "PATCH");
   await load.getByTestId("skill-load-pin").click();
   expect((await pinned).postDataJSON()).toEqual({
-    pins: ["@acme/fresh", "@acme/read", "@acme/tone"],
-    skill_discovery: true,
+    pin: { id: "@acme/read", pinned: true },
   });
   await expect(load.getByTestId("skill-load-pin")).toHaveCount(0);
 
-  // Unchecking a pin sends the full set without it.
+  // Unchecking a pin touches only that skill.
   await openSkillsPicker(page);
   const row = (pkg: string) =>
     page.getByTestId("composer-panel").getByTestId(`skill-pin-@acme/${pkg}`);
   const unpinned = page.waitForRequest((req) => req.method() === "PATCH");
   await row("tone").click();
   expect((await unpinned).postDataJSON()).toEqual({
-    pins: ["@acme/fresh", "@acme/read"],
-    skill_discovery: true,
+    pin: { id: "@acme/tone", pinned: false },
   });
   await expect(row("tone")).not.toBeChecked();
+  await expect(row("fresh")).toBeChecked();
+  await expect(row("read")).toBeChecked();
   expect(patches).toHaveLength(2);
   // A detail refetch may still be in flight through the mock as the page closes.
   await page.unrouteAll({ behavior: "ignoreErrors" });

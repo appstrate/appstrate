@@ -60,7 +60,6 @@ import { useCurrentSpaceId } from "../hooks/use-current-space";
 import {
   cataloguePlacement,
   detailSpace,
-  inPlacedTab,
   type CataloguePlacement,
   type PlacementState,
 } from "../lib/catalogue-placement";
@@ -257,7 +256,7 @@ export function OrgCatalogueModal({
     // agents and skills (placed by their home) would empty it.
     if (discovering) return true;
     const placement = placementById.get(item.id);
-    return placement ? inPlacedTab(placement) : false;
+    return !!placement && !placement.unplaced;
   });
   const mayActivateIn = (pkg: LibraryPackageItem, targetSpaceId: string) =>
     activationGate(pkg, targetSpaceId, true).allowed;

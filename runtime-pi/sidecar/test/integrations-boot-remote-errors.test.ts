@@ -155,10 +155,9 @@ describe("bootIntegrations — a failing remote MCP server", () => {
       expect(result.report.ok).toBe(true);
       const tool = result.tools.find((t) => t.descriptor.name.endsWith("echo"))!;
       broken = true;
-      const outcome = await Promise.resolve(tool.handler({}, {} as never)).then(
-        (value) => JSON.stringify(value),
-        (err: unknown) => String(err),
-      );
+      const answer = await tool.handler({}, {} as never);
+      expect(answer.isError).toBe(true);
+      const outcome = JSON.stringify(answer);
       expect(outcome).toContain(ORIGIN);
       expect(outcome).not.toContain(SECRET);
       expect(lines.join("\n")).not.toContain(SECRET);

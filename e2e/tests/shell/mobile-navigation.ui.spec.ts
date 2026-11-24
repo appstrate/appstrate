@@ -12,12 +12,18 @@ test("the mobile navigation folds once one of its links is followed", async ({
   await page.setViewportSize({ width: 390, height: 844 });
   await page.goto("/");
 
-  await page
-    .getByRole("button", { name: /Afficher ou masquer le menu latéral|Toggle sidebar/ })
-    .click();
+  const toggle = page.getByRole("button", {
+    name: /Afficher ou masquer le menu latéral|Toggle sidebar/,
+  });
+  await toggle.click();
   const sheet = page.getByRole("dialog", { name: /Menu latéral|Sidebar/ });
   await expect(sheet).toBeVisible();
 
+  await sheet.getByRole("link", { name: "Runs", exact: true }).click();
+  await expect(page).toHaveURL(/\/runs/);
+  await expect(sheet).toHaveCount(0);
+
+  await toggle.click();
   await sheet.getByRole("link", { name: "Runs", exact: true }).click();
   await expect(page).toHaveURL(/\/runs/);
   await expect(sheet).toHaveCount(0);

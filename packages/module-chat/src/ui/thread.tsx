@@ -51,7 +51,7 @@ import {
 } from "./tool-uis.tsx";
 import { ReadResourceToolUI, ReadToolUI } from "./skill-load.tsx";
 import { parseResume, INTEGRATION_RESUME_MARKER } from "./auth-offer.ts";
-import { IntegrationIcon } from "./integration-icon.tsx";
+import { IntegrationIcon } from "@appstrate/ui/components/integration-icon";
 import {
   getSelectedModelSendsImages,
   getSelectedModelSendsPdf,
@@ -64,7 +64,7 @@ import {
   subscribeResolvedUploads,
 } from "./upload.ts";
 import { actsIn, useChatHost, useChatTransport } from "./runtime-context.ts";
-import { useConversationScope } from "./conversation-scope.ts";
+import { useConversationScope, useConversationTurnCan } from "./conversation-scope.ts";
 import { sentenceWithName } from "./sentence-with-name.tsx";
 import { sourceMessage, turnErrorState } from "./turn-error-state.ts";
 import { ContextIndicator } from "./context-gauge.tsx";
@@ -138,9 +138,9 @@ export function Thread({
   messageQueue: MessageQueue;
 }) {
   useQueueFlush(messageQueue);
-  // Held above the welcome and footer composers: the draft seeds the conversation once.
-  const draftSeededRef = React.useRef(false);
-  const { can, t } = useChatHost();
+  const seededDraft = React.useRef(false);
+  const { t } = useChatHost();
+  const can = useConversationTurnCan();
   const canWrite = can("chat:write");
   // The whole thread is the drop target, welcome screen and transcript alike; a reader gets none.
   // Where attaching is unavailable a drop still reaches the adapter, whose refusal says why
@@ -163,6 +163,9 @@ export function Thread({
           data-chat-thread=""
         >
           {/* Register the rich tool cards (these render nothing themselves). */}
+          {initialComposerDraft && canWrite && (
+            <InitialComposerDraft draft={initialComposerDraft} seededRef={seededDraft} />
+          )}
           <InvokeOperationToolUI />
           <RunAndWaitToolUI />
           <SearchToolUI />
@@ -174,12 +177,7 @@ export function Thread({
           {/* Empty: composer centered mid-screen for a strong first impression.
           Non-empty: classic scrollable transcript with a sticky footer. */}
           <AuiIf condition={(s) => s.thread.isEmpty}>
-            <ThreadWelcome
-              composerTools={composerTools}
-              initialComposerDraft={initialComposerDraft}
-              draftSeededRef={draftSeededRef}
-              queue={messageQueue}
-            />
+            <ThreadWelcome composerTools={composerTools} queue={messageQueue} />
           </AuiIf>
 
           <AuiIf condition={(s) => !s.thread.isEmpty}>
@@ -197,12 +195,7 @@ export function Thread({
 
               <ThreadPrimitive.ViewportFooter className={THREAD_FOOTER_CLASS}>
                 <ScrollToBottom />
-                <Composer
-                  tools={composerTools}
-                  initialDraft={initialComposerDraft}
-                  draftSeededRef={draftSeededRef}
-                  queue={messageQueue}
-                />
+                <Composer tools={composerTools} queue={messageQueue} />
                 <Disclaimer />
               </ThreadPrimitive.ViewportFooter>
             </ThreadPrimitive.Viewport>
@@ -233,18 +226,37 @@ function shouldAutofocusComposer(): boolean {
   );
 }
 
+/** The welcome and footer render alternate inputs into this same conversation composer. */
+function InitialComposerDraft({
+  draft,
+  seededRef,
+}: {
+  draft: string;
+  seededRef: React.RefObject<boolean>;
+}) {
+  const aui = useAui();
+  const empty = useAuiState((s) => s.composer.isEditing && !s.composer.text);
+  React.useEffect(() => {
+    if (
+      !empty ||
+      !takesDraft(draft, { seeded: seededRef.current, typed: aui.composer.getState().text })
+    )
+      return;
+    seededRef.current = true;
+    aui.composer.setText(draft, { origin: "user" });
+  }, [aui, draft, empty, seededRef]);
+  return null;
+}
+
 function ThreadWelcome({
   composerTools,
-  initialComposerDraft,
-  draftSeededRef,
   queue,
 }: {
   composerTools?: React.ReactNode;
-  initialComposerDraft?: string;
-  draftSeededRef: React.RefObject<boolean>;
   queue: MessageQueue;
 }) {
-  const { can, t, firstName: name, actingSpaceIds } = useChatHost();
+  const { t, firstName: name, actingSpaceIds } = useChatHost();
+  const can = useConversationTurnCan();
   const canWrite = can("chat:write");
   // The host is looking at a space where the chat does not act (a viewer there): the conversation
   // still runs, in the caller's other spaces, and touches none of this one. Unsaid until known.
@@ -270,12 +282,7 @@ function ThreadWelcome({
             </p>
           )}
         </div>
-        <Composer
-          tools={composerTools}
-          initialDraft={initialComposerDraft}
-          draftSeededRef={draftSeededRef}
-          queue={queue}
-        />
+        <Composer tools={composerTools} queue={queue} />
       </div>
     </div>
   );
@@ -286,7 +293,8 @@ function ThreadWelcome({
  * triggers none, so it is not said to them.
  */
 function Disclaimer() {
-  const { can, t } = useChatHost();
+  const { t } = useChatHost();
+  const can = useConversationTurnCan();
   if (!can("chat:write")) return null;
   return <p className={DISCLAIMER_CLASS}>{t("thread.disclaimer")}</p>;
 }
@@ -346,7 +354,7 @@ function ComposerAttachmentChip() {
         ? t("composer.pdfNotSent")
         : undefined;
   const preview =
-    openFile && file && localPreviewKind(file.type)
+    file && localPreviewKind(file.type)
       ? {
           label: t("file.previewOf", { name: name || t("file.unnamed") }),
           onActivate: () => openFile({ local: file }),
@@ -393,29 +401,8 @@ function ComposerAttachmentChip() {
 }
 
 /**
- * A sent file attachment, rendered from a message `file` part. The wire part
- * (ai-SDK `FileUIPart`) carries no byte size, so the chip shows the name + the
- * type's icon only (the composer chip shows the size, read from the picked File).
- */
-function FileAttachmentPart({ filename, mimeType }: { filename?: string; mimeType?: string }) {
-  return (
-    <div className="mt-1">
-      <AttachmentChip name={filename ?? ""} mime={mimeType} />
-    </div>
-  );
-}
-
-// ─── Sent user-message attachments ───────────────────────────────────────────
-// The `@assistant-ui/react-ai-sdk` converter filters user `file` parts OUT of a
-// message's content and re-exposes them as `message.attachments` — so the
-// `File: FileAttachmentPart` Parts mapping above NEVER fires for user messages
-// (it stays correct for assistant file parts). We render sent attachments from
-// the attachments channel instead (`MessagePrimitive.Attachments`).
-
-/**
  * One sent attachment on a user message, as the composer's chip. An `appfile://`
- * (server-persisted, or a reloaded conversation) is interactive (preview or
- * download). So is a just-sent optimistic `upload://` once the turn's stream
+ * (server-persisted, or a reloaded conversation) can be previewed. So can a just-sent optimistic `upload://` once the turn's stream
  * named the file it became. Before that instant, or for an unparseable URI, the
  * chip is inert, its media the staged local copy when it was an image — the
  * content route serves files only.
@@ -450,7 +437,7 @@ function SentAttachmentChip() {
   }
 
   // A resolved `appfile://` is interactive: the unified renderer's chip, resolving
-  // the opener-vs-download action.
+  // the preview action.
   return (
     <FileAttachment
       file={{ id: resolved.id, name, mime: contentType, spaceId: resolved.spaceId }}
@@ -648,18 +635,9 @@ function ComposerPlaceholder({ modelLabel }: { modelLabel: string | null | undef
   );
 }
 
-function Composer({
-  tools,
-  initialDraft,
-  draftSeededRef,
-  queue,
-}: {
-  tools?: React.ReactNode;
-  initialDraft?: string;
-  draftSeededRef: React.RefObject<boolean>;
-  queue: MessageQueue;
-}) {
-  const { can, t, modelLabel } = useChatHost();
+function Composer({ tools, queue }: { tools?: React.ReactNode; queue: MessageQueue }) {
+  const { t, modelLabel } = useChatHost();
+  const can = useConversationTurnCan();
   const composer = unstable_useComposerInput();
   const running = useAuiState((s) => s.thread.isRunning);
   const hasAttachments = useAuiState((s) => s.composer.attachments.length > 0);
@@ -688,12 +666,6 @@ function Composer({
     if (running) enqueue();
     else if (!blocked) composer.send();
   };
-  React.useEffect(() => {
-    if (!takesDraft(initialDraft, { seeded: draftSeededRef.current, typed: composer.value }))
-      return;
-    draftSeededRef.current = true;
-    composer.setText(initialDraft);
-  }, [composer, initialDraft, draftSeededRef]);
   // Sending, stopping and attaching all guard on `chat:write`.
   if (!can("chat:write")) {
     return (
@@ -806,7 +778,6 @@ function Composer({
 const USER_PART_COMPONENTS = {
   // The user's text, with the skills and agents it names as chips.
   Text: DirectiveText,
-  File: FileAttachmentPart,
 } satisfies React.ComponentProps<typeof MessagePrimitive.Parts>["components"];
 
 export function UserMessage() {

@@ -181,3 +181,184 @@ describe("BlobStore", () => {
     expect(store.bytesUsed()).toBe(0);
   });
 });
+
+it("reads identical URIs only through their issuing client, subject to revocation, size and abort", async () => {
+  const store = new BlobStore("run-a", { maxTotalBytes: 32 });
+  const same = "records://shared/key";
+  let permitted = true;
+  let observed: AbortSignal | undefined;
+  const first = store.link(same, {
+    readResource: async ({ uri }, options) => {
+      observed = options?.signal;
+      if (!permitted) throw new Error("revoked");
+      return { contents: [{ uri, text: "é" }] };
+    },
+  })!;
+  const second = store.link(same, {
+    readResource: async ({ uri }) => ({ contents: [{ uri, text: "b" }] }),
+  })!;
+  const controller = new AbortController();
+  expect(first).not.toBe(second);
+  expect(await store.readLink(first, controller.signal, 2)).toEqual({
+    contents: [{ uri: first, text: "é" }],
+  });
+  expect(observed).toBe(controller.signal);
+  expect(await store.readLink(second, undefined, 1)).toEqual({
+    contents: [{ uri: second, text: "b" }],
+  });
+  expect(await store.readLink(first.replace("run-a", "run-b"), undefined, 2)).toBeNull();
+  await expect(store.readLink(first, undefined, 1)).rejects.toThrow("size limit");
+  permitted = false;
+  await expect(store.readLink(first, undefined, 2)).rejects.toThrow("revoked");
+  controller.abort();
+  await expect(store.readLink(first, controller.signal, 2)).rejects.toThrow();
+  store.clear();
+  expect(await store.readLink(first, undefined, 2)).toBeNull();
+});
+
+it("gives each linked resource its own opaque handle, preserving order, repeat identity and aggregate limits", async () => {
+  const store = new BlobStore("run-x", { maxTotalBytes: 10 });
+  const collection = "records://upstream/notes";
+  const child = "records://upstream/attachment";
+  const contents = [
+    { uri: collection, text: "é" },
+    { uri: child, blob: "AP8=" },
+    { uri: child, text: "x" },
+  ];
+  const readUris: string[] = [];
+  const link = store.link(collection, {
+    readResource: async ({ uri }) => {
+      readUris.push(uri);
+      return { contents: uri === collection ? contents : [{ uri, blob: "AP8=" }] };
+    },
+  })!;
+  await expect(store.readLink(link, undefined, 4)).rejects.toThrow("size limit");
+  const read = await store.readLink(link, undefined, 5);
+  const childHandle = read!.contents[1]!.uri;
+  expect(childHandle).toStartWith("appstrate://tool-output/run-x/");
+  expect(childHandle).not.toBe(link);
+  expect(read!.contents.map((item) => item.uri)).toEqual([link, childHandle, childHandle]);
+  const again = await store.readLink(link, undefined, 5);
+  expect(again!.contents.map((item) => item.uri)).toEqual([link, childHandle, childHandle]);
+  expect(await store.readLink(childHandle, undefined, 2)).toEqual({
+    contents: [{ uri: childHandle, blob: "AP8=" }],
+  });
+  expect(readUris).toEqual([collection, collection, collection, child]);
+});
+
+it("keeps the parent and all 1024 child handles stable when a read replaces a full link table", async () => {
+  const store = new BlobStore("run-full", NO_EVICTION);
+  const collection = "records://root";
+  const members = Array.from({ length: 1024 }, (_, i) => ({
+    uri: "records://member/" + i,
+    text: "",
+  }));
+  const issuer = {
+    readResource: async ({ uri }: { uri: string }) => ({
+      contents: uri === collection ? members : [{ uri, text: uri }],
+    }),
+  };
+  // Rotate out a previous batch, then put the parent and one existing child at the LRU end.
+  for (let i = 0; i < 1025; i++) store.link("records://old/" + i, issuer);
+  const parent = store.link(collection, issuer)!;
+  const retainedChild = store.link(members[1023]!.uri, issuer)!;
+  for (let i = 0; i < 1023; i++) store.link("records://filler/" + i, issuer);
+
+  const result = await store.readLink(parent, undefined, 0);
+  const handles = result!.contents.map((item) => item.uri);
+  expect(new Set(handles).size).toBe(1024);
+  expect(handles[1023]).toBe(retainedChild);
+  const readAgain = await store.readLink(parent, undefined, 0);
+  expect(readAgain!.contents.map((item) => item.uri)).toEqual(handles);
+  for (const [i, handle] of handles.entries()) {
+    const read = await store.readLink(handle, undefined, 128);
+    expect(read?.contents).toEqual([{ uri: handle, text: members[i]!.uri }]);
+  }
+});
+
+it("rejects a late oversized member URI without rotating any live handle", async () => {
+  const store = new BlobStore("run-atomic", NO_EVICTION);
+  const collection = "records://root";
+  const issuer = {
+    readResource: async ({ uri }: { uri: string }) => ({
+      contents:
+        uri === collection
+          ? [
+              { uri: "records://new", text: "" },
+              { uri: "x".repeat(8193), text: "" },
+            ]
+          : [{ uri, text: "" }],
+    }),
+  };
+  const oldest = store.link("records://oldest", issuer)!;
+  const parent = store.link(collection, issuer)!;
+  for (let i = 0; i < 1023; i++) store.link("records://other/" + i, issuer);
+  await expect(store.readLink(parent, undefined, 0)).rejects.toThrow("URI size limit");
+  expect(await store.readLink(oldest, undefined, 0)).toEqual({
+    contents: [{ uri: oldest, text: "" }],
+  });
+  await expect(store.readLink(parent, undefined, 0)).rejects.toThrow("URI size limit");
+});
+
+it("queues upstream reads across connections and releases the turn after failure or cancellation", async () => {
+  const store = new BlobStore("run-busy", NO_EVICTION);
+  const pending = Promise.withResolvers<never>();
+  const first = store.link("records://first", { readResource: () => pending.promise })!;
+  let calls = 0;
+  const next = store.link("records://next", {
+    readResource: async ({ uri }) => {
+      calls++;
+      return { contents: [{ uri, text: "ok" }] };
+    },
+  })!;
+  const reading = store.readLink(first, undefined, 10);
+  const queued = store.readLink(next, undefined, 10);
+  const leaving = new AbortController();
+  const abandoned = store.readLink(next, leaving.signal, 10);
+  leaving.abort(new Error("left the queue"));
+  await expect(abandoned).rejects.toThrow("left the queue");
+  await Bun.sleep(0);
+  expect(calls).toBe(0);
+  pending.reject(new Error("read failed"));
+  await expect(reading).rejects.toThrow("read failed");
+  expect(await queued).toEqual({ contents: [{ uri: next, text: "ok" }] });
+  expect(calls).toBe(1);
+
+  const abort = new AbortController();
+  const cancellable = store.link("records://cancel", {
+    readResource: async (_, options) =>
+      new Promise((_, reject) => {
+        options!.signal!.addEventListener("abort", () => reject(options!.signal!.reason), {
+          once: true,
+        });
+      }),
+  })!;
+  const cancelled = store.readLink(cancellable, abort.signal, 10);
+  abort.abort(new Error("read cancelled"));
+  await expect(cancelled).rejects.toThrow("read cancelled");
+
+  expect(await store.readLink(next, undefined, 10)).toEqual({
+    contents: [{ uri: next, text: "ok" }],
+  });
+  expect(calls).toBe(2);
+});
+
+it("sends no upstream request for a link retired while its read was queued", async () => {
+  const store = new BlobStore("run-retired", NO_EVICTION);
+  const pending = Promise.withResolvers<{ contents: { uri: string; text: string }[] }>();
+  const first = store.link("records://first", { readResource: () => pending.promise })!;
+  let calls = 0;
+  const queued = store.link("records://queued", {
+    readResource: async ({ uri }) => {
+      calls++;
+      return { contents: [{ uri, text: "late" }] };
+    },
+  })!;
+  const reading = store.readLink(first, undefined, 10);
+  const waiting = store.readLink(queued, undefined, 10);
+  store.clear();
+  pending.resolve({ contents: [{ uri: "records://first", text: "ok" }] });
+  expect(await reading).toBeNull();
+  expect(await waiting).toBeNull();
+  expect(calls).toBe(0);
+});

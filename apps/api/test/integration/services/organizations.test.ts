@@ -20,7 +20,7 @@ import {
   createOrganization,
   getUserOrganizations,
   getOrgMembers,
-  isSlugAvailable,
+  updateOrganization,
   getOrgById,
   provisionMember,
   removeMember,
@@ -383,31 +383,16 @@ describe("organizations service", () => {
     });
   });
 
-  // ── isSlugAvailable ───────────────────────────────────────
-
-  describe("isSlugAvailable", () => {
-    it("returns true for an unused slug", async () => {
-      const available = await isSlugAvailable("never-used-slug");
-      expect(available).toBe(true);
-    });
-
-    it("returns false for a slug already in use", async () => {
-      await createOrganization("Taken Org", "taken-slug", userId);
-
-      const available = await isSlugAvailable("taken-slug");
-      expect(available).toBe(false);
-    });
-
-    it("returns true again after the org is deleted", async () => {
-      const org = await createOrganization("Del Org", "del-slug", userId);
-
-      expect(await isSlugAvailable("del-slug")).toBe(false);
-
-      // Import deleteOrganization for cleanup
-      const { deleteOrganization } = await import("../../../src/services/organizations.ts");
-      await deleteOrganization(org.id);
-
-      expect(await isSlugAvailable("del-slug")).toBe(true);
+  describe("organization slug ownership", () => {
+    it("accepts the current owner's slug and refuses another owner's slug on rename", async () => {
+      const first = await createOrganization("First", "first", userId);
+      await createOrganization("Second", "second", userId);
+      expect((await updateOrganization(first.id, { slug: "first" })).slug).toBe("first");
+      await expect(updateOrganization(first.id, { slug: "second" })).rejects.toMatchObject({
+        status: 400,
+        code: "slug_taken",
+      });
+      expect((await getOrgById(first.id))?.slug).toBe("first");
     });
   });
 

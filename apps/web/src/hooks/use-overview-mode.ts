@@ -70,7 +70,7 @@ export function useWorkingSpaceWording(ns: string) {
  */
 export function useAdmittingSpaces(list: SpaceList) {
   const { data: spaces } = useSpaces();
-  return spacesWhere(spaces, undefined, listAdmits(list));
+  return spacesWhere(spaces, listAdmits(list));
 }
 
 function withdraw(key: string): void {

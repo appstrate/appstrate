@@ -610,6 +610,10 @@ describe("describe", () => {
     const res = await byName
       .get("describe")!
       .handler({ kind: "operation", id: "doesNotExist" }, noExtra);
+    expect(res.structuredContent).toMatchObject({
+      kind: "tool_refusal",
+      code: "unknown_operation",
+    });
     expect(res.isError).toBe(true);
     expect(parseResult(res)).toMatchObject({
       code: "unknown_operation",
@@ -843,6 +847,22 @@ describe("invoke_operation", () => {
     expect(calls.length).toBe(0);
   });
 
+  it("resolves component parameters for describe and uses their declared CSV wire format", async () => {
+    const { byName, calls } = makeTools(FULL_SURFACE);
+    const body = parseResult(
+      await byName.get("describe")!.handler({ kind: "operation", id: "listRuns" }, noExtra),
+    );
+    expect(body.parameters).toContainEqual(
+      expect.objectContaining({ in: "query", name: "status", explode: false }),
+    );
+    expect(JSON.stringify(body.responses)).not.toContain("#/components/responses/");
+    expect(JSON.stringify(body.responses)).not.toContain("#/components/headers/");
+    await byName
+      .get("invoke_operation")!
+      .handler({ operation_id: "listRuns", query: { status: ["success", "failed"] } }, noExtra);
+    expect(new URL(calls[0]!.url).searchParams.getAll("status")).toEqual(["success,failed"]);
+  });
+
   it("sends an array of scalars as repeated query keys", async () => {
     const op = firstOp((o) => o.method === "GET" && o.pathParams.length === 0);
     const { byName, calls } = makeTools(["mcp:invoke"]);
@@ -916,6 +936,7 @@ describe("invoke_operation", () => {
     expect(calls.length).toBe(1);
     expect(res.isError).toBe(true);
     const body = parseResult(res);
+    expect(res.structuredContent).toMatchObject({ kind: "route_refusal", status: 403 });
     expect(body.status).toBe(403);
     expect(body.required_permissions).toEqual(["agents:read|agents:run"]);
     expect(body.hint).toContain("do not retry");
@@ -1305,7 +1326,7 @@ describe("structured tool output", () => {
     }
   });
 
-  it("carries no structuredContent on a tool error", async () => {
+  it("preserves the HTTP error in text and identifies a structured route refusal", async () => {
     const op = firstOp((o) => o.method === "GET" && o.pathParams.length === 0);
     const { byName } = makeTools(FULL_SURFACE, undefined, () =>
       Response.json({ title: "nope" }, { status: 500 }),
@@ -1314,6 +1335,6 @@ describe("structured tool output", () => {
       .get("invoke_operation")!
       .handler({ operation_id: op.operationId }, noExtra);
     expect(result.isError).toBe(true);
-    expect(result.structuredContent).toBeUndefined();
+    expect(result.structuredContent).toEqual({ ...parseResult(result), kind: "route_refusal" });
   });
 });

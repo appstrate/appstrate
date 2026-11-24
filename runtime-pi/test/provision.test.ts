@@ -134,7 +134,8 @@ function deps(
   extra: Partial<ProvisionDeps> = {},
 ): ProvisionDeps {
   return {
-    sinkUrl: `${base}/api/runs/run_test/events`,
+    workspaceUrl: `${base}/api/runs/run_test/workspace`,
+    filesUrl: `${base}/api/runs/run_test/files`,
     sinkSecret: SECRET,
     workspace,
     die,
@@ -224,6 +225,28 @@ describe("provisionFiles", () => {
 
     expect(messages).toHaveLength(0);
     expect(await exists(path.join(ws, "files"))).toBe(false);
+  });
+
+  it("keeps collection queries and appends one encoded filename after a trailing slash", async () => {
+    const ws = await tempWorkspace();
+    const name = "note #1?.txt";
+    const expected = "http://gateway.test/run/files/note%20%231%3F.txt?revision=3";
+    const filesUrl = "http://gateway.test/run/files/?revision=3";
+    const requested: string[] = [];
+    const fetchFn: typeof fetch = Object.assign(
+      async (input: Parameters<typeof fetch>[0]) => {
+        const url = input.toString();
+        requested.push(url);
+        if (url === filesUrl)
+          return Response.json({ files: [{ name, workspace_name: name, size: 2 }] });
+        if (url === expected) return new Response("ok");
+        return new Response(null, { status: 404 });
+      },
+      { preconnect: fetch.preconnect },
+    );
+    await provisionFiles(deps(ws, makeDie().die, { filesUrl, fetchFn }));
+    expect(requested).toEqual([filesUrl, expected]);
+    expect(await Bun.file(path.join(ws, "files", name)).text()).toBe("ok");
   });
 
   it("is a no-op when the manifest is empty", async () => {

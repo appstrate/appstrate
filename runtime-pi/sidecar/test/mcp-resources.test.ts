@@ -10,6 +10,8 @@
  * `mcp.test.ts` to keep the wire contract honest.
  */
 
+import { createInProcessPair, wrapClient } from "@appstrate/mcp-transport";
+import { McpHost } from "../mcp-host.ts";
 import { describe, it, expect, mock } from "bun:test";
 import { buildSidecarRuntimeDeps, type AppDeps } from "../app.ts";
 import { createTestApp } from "./helpers/authed-app.ts";
@@ -491,6 +493,70 @@ describe("POST /mcp — api_call response body survives (no outputSchema / no st
 });
 
 describe("POST /mcp — resources/list + resources/read", () => {
+  it("reads a hosted tool link on the connection which emitted it, including later refusals", async () => {
+    const deps = makeDeps();
+    const runtime = buildSidecarRuntimeDeps(deps);
+    const host = new McpHost({ outputBudget: runtime });
+    const shared = "records://service/42";
+    let firstActive = true;
+    const upstreams = await Promise.all(
+      ["first", "second"].map(async (namespace) => {
+        const pair = await createInProcessPair(
+          [
+            {
+              descriptor: { name: "link", inputSchema: { type: "object" } },
+              handler: async () => ({
+                content: [{ type: "resource_link", name: "record.txt", uri: shared }],
+              }),
+            },
+          ],
+          {
+            resources: {
+              list: () => [],
+              read: async (uri) => {
+                if (namespace === "first" && !firstActive) throw new Error("access revoked");
+                return { contents: [{ uri, text: namespace }] };
+              },
+            },
+          },
+        );
+        return { namespace, pair };
+      }),
+    );
+    try {
+      for (const { namespace, pair } of upstreams) {
+        await host.register({
+          integrationId: namespace,
+          namespace,
+          client: wrapClient(pair.client, { close: async () => {} }),
+        });
+      }
+      const app = createTestApp({
+        ...deps,
+        blobStore: runtime.blobStore,
+        mcpToolsProvider: () => host.buildTools(),
+      });
+      const handles = [];
+      for (const { namespace } of upstreams) {
+        const { json } = await rpc(app, {
+          method: "tools/call",
+          params: { name: `${namespace}__link`, arguments: {} },
+        });
+        const uri = (json.result as { content: { uri: string }[] }).content[0]!.uri;
+        expect(uri).toStartWith("appstrate://tool-output/run-test/");
+        const read = await rpc(app, { method: "resources/read", params: { uri } });
+        expect(read.json.result).toMatchObject({ contents: [{ uri, text: namespace }] });
+        handles.push(uri);
+      }
+      expect(handles[0]).not.toBe(handles[1]);
+      firstActive = false;
+      const denied = await rpc(app, { method: "resources/read", params: { uri: handles[0] } });
+      expect(denied.json.error).toBeDefined();
+    } finally {
+      for (const { pair } of upstreams) await pair.close();
+    }
+  });
+
   it("returns an empty resources/list initially", async () => {
     const app = await makeResourcesApp();
     const res = await rpc(app, { method: "resources/list" });

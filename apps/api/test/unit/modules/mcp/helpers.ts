@@ -20,9 +20,13 @@ import {
  * reads off the request's auth method; the contexts built here forward a bearer. `proxyOpen`:
  * the space's `credential_proxy_open`.
  */
-export function toolsFor(ctx: McpToolContext, proxyAcceptsCredential = true, proxyOpen = true) {
+export function toolsFor(
+  ctx: Omit<McpToolContext, "observe"> & Partial<Pick<McpToolContext, "observe">>,
+  proxyAcceptsCredential = true,
+  proxyOpen = true,
+) {
   return buildMcpTools(
-    ctx,
+    { observe: () => {}, ...ctx },
     deriveMcpSurface(ctx.permissions, ctx.ceiling, ctx.actor, proxyAcceptsCredential, {
       credentialProxyOpen: proxyOpen,
     }),

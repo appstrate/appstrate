@@ -209,7 +209,7 @@ export const modelProvidersOAuthPaths = {
                   minLength: 1,
                   maxLength: 120,
                   description:
-                    "Display name for the credential. Optional — the platform derives one from the provider's `displayName` when omitted (`@appstrate/connect-helper` no longer invents one client-side).",
+                    "Display name for the credential. When omitted, the platform derives it from the provider's `displayName`.",
                 },
                 access_token: { type: "string", minLength: 1 },
                 refresh_token: { type: "string", minLength: 1 },

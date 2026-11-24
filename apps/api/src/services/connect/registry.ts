@@ -24,6 +24,7 @@
  * an executor is a structured error rather than a silent half-acquisition.
  */
 
+import { getAppstrateConnectMeta } from "@appstrate/core/integration";
 import { invalidRequest } from "../../lib/errors.ts";
 import type { IntegrationManifest } from "@appstrate/core/integration";
 import { OAuth2Strategy } from "./oauth2-strategy.ts";
@@ -31,10 +32,7 @@ import { FieldsStrategy } from "./fields-strategy.ts";
 import { LoginStrategy } from "./login-strategy.ts";
 import { LoginSecretStrategy } from "./login-secret-strategy.ts";
 import { OrchestratedStrategy, type ConnectToolExecutor } from "./orchestrated-strategy.ts";
-import {
-  getAppstrateConnectMeta,
-  type AfpsManifestConnect,
-} from "../integration-manifest-helpers.ts";
+import { type AfpsManifestConnect } from "../integration-manifest-helpers.ts";
 import type { IntegrationConnectStrategy } from "./strategy.ts";
 
 type IntegrationAuthDef = NonNullable<IntegrationManifest["auths"]>[string];

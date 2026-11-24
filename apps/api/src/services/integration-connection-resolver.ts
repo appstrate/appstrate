@@ -44,6 +44,7 @@ import {
   type ManifestIntegrationEntry,
 } from "@appstrate/core/dependencies";
 import {
+  displayAccountId,
   resolveEffectiveToolSelection,
   resolveScopeToolSelection,
   expandScopesGranted,
@@ -666,14 +667,14 @@ function missingScopesOf(
   });
 }
 
-/** How an under-scoped member of the set `source` bound clears. */
-function scopeRemedy(
+/** Who can change the binding, and whether the existing grant can be upgraded in place. */
+function connectionRemedy(
   source: ConnectionResolutionSource,
-  ownedByActor: boolean,
+  canUpgrade: boolean,
 ): InsufficientScopesRemedy {
   if (source === "admin_pin" || source === "org_default_enforced") return "rebind_by_admin";
   if (source === "schedule_override") return "rebind_by_schedule_owner";
-  return ownedByActor ? "upgrade_or_new" : "new_connection";
+  return canUpgrade ? "upgrade_or_new" : "new_connection";
 }
 
 const LAYER_PHRASE: Record<ExplicitSource, string> = {
@@ -895,16 +896,20 @@ function checkHealth(
 
   if (conn.needsReconnection) {
     const authKey = declaredAuthKey(args.manifest, conn.authKey);
+    const identified = displayAccountId(conn.accountId) !== null;
     return errorOf(args, {
       code: "needs_reconnection",
-      // The reconnect UPDATEs this row in place; without the id it would INSERT a duplicate.
+      ...(!identified && { remedy: connectionRemedy(source, false) }),
+      // Identifies the failing binding. Forward the id to reconnect only for a verifiable account.
       connectionId: conn.id,
       // No `requiredScopes`: the reconnect re-consents what the row holds plus `default_scopes`,
       // adding no agent's scopes; a row still short afterwards answers `insufficient_scopes`.
       ...(authKey !== null ? { authKey } : {}),
       ownedByActor,
       source,
-      message: `Connection for ${args.integrationId} needs to be reconnected.`,
+      message: identified
+        ? `Connection for ${args.integrationId} needs to be reconnected.`
+        : `Connection for ${args.integrationId} has no verifiable account. Choose another connection or ask an administrator to replace the binding. Existing shares, pins and schedules still use the original connection.`,
     });
   }
 
@@ -912,6 +917,7 @@ function checkHealth(
   if (missing.length > 0) {
     return errorOf(args, {
       code: "insufficient_scopes",
+      remedy: connectionRemedy(source, ownedByActor && displayAccountId(conn.accountId) !== null),
       connectionId: conn.id,
       authKey: conn.authKey,
       missingScopes: missing,
@@ -1179,7 +1185,7 @@ export function translateResolutionError(e: ResolutionItem): ResolutionFieldErro
       : {}),
     ...(e.code === "insufficient_scopes"
       ? {
-          ...(e.source ? { remedy: scopeRemedy(e.source, e.ownedByActor === true) } : {}),
+          ...(e.remedy ? { remedy: e.remedy } : {}),
           ...(e.connectionId ? { connection_id: e.connectionId } : {}),
           ...(e.missingScopes && e.missingScopes.length > 0
             ? { missing_scopes: e.missingScopes }
@@ -1192,6 +1198,7 @@ export function translateResolutionError(e: ResolutionItem): ResolutionFieldErro
       : {}),
     ...(e.code === "needs_reconnection"
       ? {
+          ...(e.remedy ? { remedy: e.remedy } : {}),
           ...(e.connectionId ? { connection_id: e.connectionId } : {}),
           ...(e.ownedByActor !== undefined ? { owned_by_actor: e.ownedByActor } : {}),
         }

@@ -131,10 +131,12 @@ describe("the integration index", () => {
     expect(html).toContain("Zéphyr");
     expect(html).toContain("Boréal");
     expect(html).toContain("Kestrel");
-    // No « Distantes / Locales » tabs: the only tablist left is the cards/table switch.
+    // Table and cards change the presentation of a single list.
     expect(html).not.toContain("Distantes");
     expect(html).not.toContain("Locales");
-    expect(html.match(/role="tablist"/g)).toHaveLength(1);
+    expect(html).not.toContain('role="tablist"');
+    expect(html).toContain('role="radiogroup"');
+    expect(html).toContain('aria-label="Affichage de la liste"');
   });
 
   it("filters on the source param", () => {

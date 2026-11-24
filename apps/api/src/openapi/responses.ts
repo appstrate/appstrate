@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { REQUEST_ID_ONLY_HEADERS } from "./headers.ts";
+import { REQUEST_ID_ONLY_HEADERS, STD_RESPONSE_HEADERS } from "./headers.ts";
 
 /** The `content` of an error response: an RFC 9457 `ProblemDetail`. */
 export const problemContent = {
@@ -583,6 +583,38 @@ export const responses = {
             "This Idempotency-Key was already used with a different method, URL or body. Use a new key for different requests.",
           code: "idempotency_conflict",
           request_id: "req_abc123",
+        },
+      },
+    },
+  },
+} as const;
+
+export const scopedRunListValidationError = {
+  $ref: "#/components/responses/ValidationError",
+  description:
+    "Unknown query parameter, limit outside its range, unrecognized status, or search longer than 200 characters.",
+} as const;
+
+/** A successful page of space, organization, agent or schedule runs. */
+export const runListPage = {
+  description: "Paginated run list",
+  headers: {
+    ...STD_RESPONSE_HEADERS,
+    Link: { $ref: "#/components/headers/Link" },
+  },
+  content: {
+    "application/json": {
+      schema: {
+        type: "object",
+        required: ["object", "data", "total", "hasMore"],
+        properties: {
+          object: { type: "string", enum: ["list"] },
+          data: {
+            type: "array",
+            items: { $ref: "#/components/schemas/Run" },
+          },
+          total: { type: "integer" },
+          hasMore: { type: "boolean" },
         },
       },
     },

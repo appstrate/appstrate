@@ -234,6 +234,20 @@ describe("mintSinkCredentials", () => {
     expect(creds.url).toBe("https://app.example.com/api/runs/run_abc/events");
   });
 
+  it("returns the run service endpoints including the configured gateway prefix", () => {
+    const base = "https://gateway.test/app/api/runs/r";
+    expect(
+      mintSinkCredentials({ runId: "r", appUrl: "https://gateway.test/app/", ttlSeconds: 60 }),
+    ).toMatchObject({
+      url: `${base}/events`,
+      finalize_url: `${base}/events/finalize`,
+      mcp_url: `${base}/mcp`,
+      heartbeat_url: `${base}/events/heartbeat`,
+      workspace_url: `${base}/workspace`,
+      files_url: `${base}/files`,
+    });
+  });
+
   it("mints a base64url secret of 32 bytes of entropy", () => {
     const a = mintSinkCredentials({ runId: "r", appUrl: "http://x", ttlSeconds: 60 });
     const b = mintSinkCredentials({ runId: "r", appUrl: "http://x", ttlSeconds: 60 });

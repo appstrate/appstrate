@@ -9,6 +9,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `@appstrate/core/chat-message` exports `historicalChatMessageSchema` for persisted messages and
+  `chatThreadMessagesSchema` for submitted threads. The chat module and upgrade check share these
+  validators. `AGENT_PROMPT_PART_TYPE` and `agentPromptDataSchema` describe an agent launch part,
+  and `CHAT_MESSAGE_MAX_BYTES` sets the submitted message size limit.
+
+- `displayAccountId` and `PLACEHOLDER_ACCOUNT_ID` identify integration connections that can be renewed on the same upstream account.
+
+- `AUTH_META_KEY`, `CONNECT_META_KEY`, `OAUTH_META_KEY` and their readers `appstrateAuthRequired`, `getAppstrateConnectMeta`, `getAppstrateOAuthMeta` describe the published integration metadata fields.
+- `recallMemoryOutputSchema` and `runHistoryOutputSchema` describe the structured results of the run history and recall tools.
+
+- `resourceReadWithinLimits`, `MCP_RESOURCE_MAX_ITEMS` and `MCP_RESOURCE_MAX_BYTES` bound a complete MCP resource read across the sidecar and runner.
+- `integrationSpawnSpecSchema` and `integrationSpawnSpecsSchema` in `@appstrate/core/sidecar-types` validate declared launch specs before integration boot.
+- `modelErrorReason` in `@appstrate/core/model-error` reads a known reason from the structured provider refusal carried by a terminal run.
+
+- `assistantVisibleMcpResult` in `@appstrate/core/mcp-result` projects tool results to their assistant audience before workspace, history, or model use.
+
 - **`@appstrate/core/skill-address`**: the `skill://` URI grammar alone — `SKILL_URI_PREFIX`,
   `skillFileUri`, `parseSkillUri`, `parseSkillUriPackage` and the `SkillAddress` type — with no
   server-only import, so a browser bundle can parse a skill URI.
@@ -63,6 +79,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   whose scope the mounted guards do not supply. Registration fails at startup on a missing or
   contradictory contract. Modules with row-scoped operations must use `withAuthorizedRow` from
   `@appstrate/core/permissions`. See the [module authoring guide](../../apps/api/src/modules/README.md#openapi-contributions).
+
+- `validateManifest` now rejects a root `runtime_tools` field on an agent when validating new packages.
+  Select the tools of the `@appstrate/platform` integration through `integrations_configuration`.
+  Stored packages read with `retiredDependencyKeys: "tolerate"` retain their previous behavior.
+- Integration manifest validation now reports malformed `dev.appstrate/auth`, `dev.appstrate/oauth`
+  and `dev.appstrate/connect` metadata at the offending field. The metadata keys remain optional.
+- `ConnectionResolutionError.remedy` is now also set on `needs_reconnection` when the connection
+  has no identified upstream account (`PLACEHOLDER_ACCOUNT_ID`). Such a connection cannot be
+  renewed in place: `remedy` names the binding to change (`new_connection`, `rebind_by_admin` or
+  `rebind_by_schedule_owner`) instead. Its absence still means the owner can reconnect it.
 
 - **`deriveResponseReserveTokens` caps the reserve at `RESERVE_CEILING_TOKENS` (64 000)**
   (`@appstrate/core/token-budget`): pi-ai clamps the `max_tokens` it sends, so the reserve is room

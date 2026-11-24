@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
+import { asRecordOrNull } from "@appstrate/core/safe-json";
 import type { ResourceEntry } from "./types";
 import type { MetadataState } from "./metadata-section";
 import type { SchemaField } from "./types";
@@ -233,9 +234,7 @@ export function manifestSchemaWrapper(
   manifest: Record<string, unknown>,
   key: "input" | "output",
 ): ManifestSchemaWrapper | undefined {
-  const raw = manifest[key] as ManifestSchemaWrapper | undefined;
-  if (!raw) return undefined;
-  return raw;
+  return asRecordOrNull(manifest[key]) ?? undefined;
 }
 
 /** Convert the manifest input/output wrappers into SchemaField arrays for the form. */

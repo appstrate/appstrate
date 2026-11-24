@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
+import { nextScheduleVersion } from "../lib/schedule-version.ts";
 import { createQueue } from "../infra/queue/index.ts";
 import type { JobQueue, QueueJob } from "../infra/queue/index.ts";
 import { getCache } from "../infra/index.ts";
@@ -245,7 +246,7 @@ async function disableScheduleAtFire(
       enabled: false,
       disabledReason: reason,
       nextRunAt: null,
-      updatedAt: new Date(),
+      updatedAt: nextScheduleVersion,
     })
     .where(
       and(
@@ -815,8 +816,7 @@ export async function getSchedule(
 ): Promise<EnrichedSchedule | null> {
   const schedule = await loadSchedule(id, scope);
   if (!schedule) return null;
-  const [enriched] = await enrichSchedules([schedule], schedule.orgId, viewer, visibility);
-  return enriched ?? null;
+  return enrichSchedule(schedule, viewer, visibility);
 }
 
 /** Per-schedule run counters served with the schedule itself (see {@link loadScheduleRunStats}). */
@@ -827,24 +827,6 @@ interface ScheduleRunStats {
 }
 
 const EMPTY_RUN_STATS: ScheduleRunStats = { runningRuns: 0, unreadCount: 0, lastRunNumber: 0 };
-
-/**
- * The schedule as served in the (unreachable in practice) branch where the
- * enrichment query returns no row for a schedule we just wrote. One function
- * rather than a re-listing at each call site, so a new `EnrichedSchedule` field
- * cannot be added to the happy path alone.
- */
-function unenrichedSchedule(schedule: ScheduleWireDto): EnrichedSchedule {
-  return {
-    ...schedule,
-    agent_name: schedule.packageId,
-    actor_name: null,
-    actor_type: null,
-    running_runs: 0,
-    unread_count: 0,
-    last_run_number: 0,
-  };
-}
 
 /**
  * The three run counters every schedule card shows — active runs, unread runs
@@ -978,6 +960,16 @@ async function enrichSchedules(
   });
 }
 
+async function enrichSchedule(
+  schedule: ScheduleWireDto,
+  viewer: Actor | null,
+  visibility: SQL | undefined,
+): Promise<EnrichedSchedule> {
+  const [enriched] = await enrichSchedules([schedule], schedule.orgId, viewer, visibility);
+  // enrichSchedules maps each input row, including a schedule without runs.
+  return enriched!;
+}
+
 export async function createSchedule(
   scope: SpaceScope,
   packageId: string,
@@ -1051,8 +1043,7 @@ export async function createSchedule(
   // create response matches the GET detail shape (actor_name/actor_type).
   // Neither a viewer nor a visibility predicate is needed here: the schedule
   // was just created, so it has no runs and every counter is zero for anyone.
-  const [enriched] = await enrichSchedules([schedule], scope.orgId, null, undefined);
-  return enriched ?? unenrichedSchedule(schedule);
+  return enrichSchedule(schedule, null, undefined);
 }
 
 /** The caller's read of the row a write is judged against: the `updatedAt` token + fallbacks. */
@@ -1116,7 +1107,7 @@ export async function updateSchedule(
     timezone: tz,
     enabled,
     nextRunAt: nextRun ?? null,
-    updatedAt: new Date(),
+    updatedAt: nextScheduleVersion,
   };
   if (enabled) payload.disabledReason = null;
   if (data.name !== undefined) payload.name = data.name;
@@ -1179,8 +1170,7 @@ export async function updateSchedule(
 
   // Same EnrichedSchedule serializer as getSchedule/listSchedules, so the
   // update response matches the GET detail shape (actor/run counters).
-  const [enriched] = await enrichSchedules([schedule], scope.orgId, viewer, visibility);
-  return enriched ?? unenrichedSchedule(schedule);
+  return enrichSchedule(schedule, viewer, visibility);
 }
 
 /**
@@ -1219,7 +1209,7 @@ export async function dropLockedFieldsFromSchedules(
     if (Object.keys(stripped).length === Object.keys(input).length) continue;
     await tx
       .update(schedules)
-      .set({ input: stripped, updatedAt: new Date() })
+      .set({ input: stripped, updatedAt: nextScheduleVersion })
       .where(eq(schedules.id, row.id));
   }
 }

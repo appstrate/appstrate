@@ -1,8 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-// What core projects for `run_and_wait` is what the `RunAndWaitResult` component
-// (the tool's `outputSchema`) accepts, checked with the validator the SDK client
-// applies to `structuredContent`.
+// Validate both structured MCP refusals and the successful REST projection with the SDK validator.
 
 import { describe, expect, it } from "bun:test";
 import { AjvJsonSchemaValidator } from "@modelcontextprotocol/sdk/validation/ajv";
@@ -96,6 +94,17 @@ describe("RunAndWaitResult ↔ core's run_and_wait projection", () => {
     const [, waited] = await payloads({ status: "running" }, { maxMs: 0 });
     expect(waited).toMatchObject({ done: false, warnings: [warning] });
     expectValid(waited!);
+  });
+
+  it("accepts an upstream launch with no run id, and rejects incomplete refusals", () => {
+    expectValid({
+      kind: "route_refusal",
+      status: 201,
+      error: "Run launch returned no run id.",
+      launch: {},
+    });
+    expect(validate({ kind: "route_refusal", status: 409 }).valid).toBe(false);
+    expect(validate({ kind: "tool_refusal", error: "missing kind" }).valid).toBe(false);
   });
 
   it("refuses an outcome on a run still going, and any undeclared key", () => {

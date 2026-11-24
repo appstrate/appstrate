@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
+import { isUniqueViolation } from "../lib/db-helpers.ts";
+import { nextScheduleVersion } from "../lib/schedule-version.ts";
 import { db } from "@appstrate/db/client";
 import { ApiError, conflict, forbidden, notFound } from "../lib/errors.ts";
 import { CURRENT_API_VERSION } from "../lib/api-versions.ts";
@@ -104,6 +106,19 @@ function toOrgResult(row: typeof organizations.$inferSelect): OrgResult {
   };
 }
 
+function rethrowOrgWriteError(err: unknown, slug: string | undefined): never {
+  if (slug !== undefined && isUniqueViolation(err, "organizations_slug_unique")) {
+    throw new ApiError({
+      status: 400,
+      code: "slug_taken",
+      title: "Bad Request",
+      detail: `Slug '${slug}' is already in use`,
+      cause: err,
+    });
+  }
+  throw err;
+}
+
 export async function createOrganization(
   name: string,
   slug: string,
@@ -114,14 +129,16 @@ export async function createOrganization(
   // bootstrap path so neither can provision half an organization. A default
   // space created after this commit, outside the transaction, is an
   // organization that can commit without one.
-  const { org } = await db.transaction(async (tx) =>
-    provisionOrg(tx, {
-      name,
-      slug,
-      ownerUserId: userId,
-      orgSettings: { api_version: CURRENT_API_VERSION },
-    }),
-  );
+  const { org } = await db
+    .transaction(async (tx) =>
+      provisionOrg(tx, {
+        name,
+        slug,
+        ownerUserId: userId,
+        orgSettings: { api_version: CURRENT_API_VERSION },
+      }),
+    )
+    .catch((err: unknown) => rethrowOrgWriteError(err, slug));
 
   // The initial `orgSettings` write above is a settings writer like any other:
   // a pin read for this id that raced the insert (and cached "no pin" for a
@@ -170,7 +187,8 @@ export async function updateOrganization(
     .update(organizations)
     .set({ ...updates, updatedAt: new Date() })
     .where(eq(organizations.id, orgId))
-    .returning();
+    .returning()
+    .catch((err: unknown) => rethrowOrgWriteError(err, updates.slug));
 
   if (!row) throw new Error("Failed to update organization");
   return toOrgResult(row);
@@ -595,7 +613,7 @@ async function removeMemberInTx(
       enabled: false,
       disabledReason: "actor_left_org",
       nextRunAt: null,
-      updatedAt: new Date(),
+      updatedAt: nextScheduleVersion,
     })
     .where(departedSchedules)
     .returning({ id: schedules.id });
@@ -965,13 +983,4 @@ export async function deleteOrganization(orgId: string): Promise<void> {
   // Hygiene, not a confinement boundary: a cached pin for a deleted org is
   // inert (membership is gone, org-context 403s), but it need not linger.
   orgApiVersionCache.invalidate(orgId);
-}
-
-export async function isSlugAvailable(slug: string): Promise<boolean> {
-  const result = await db
-    .select({ slugCount: count() })
-    .from(organizations)
-    .where(eq(organizations.slug, slug));
-
-  return (result[0]?.slugCount ?? 0) === 0;
 }

@@ -104,17 +104,18 @@ function renderCard(
 ): string {
   const qc = new QueryClient();
   qc.setQueryData(
-    $api.queryOptions("get", "/api/integrations/{packageId}", {
-      params: { path: { packageId: GMAIL }, header },
-    }).queryKey,
-    {
-      manifest: {
-        display_name: "Gmail",
-        ...(!entry.noAuths && { auths: { oauth: { type: "oauth2" } } }),
+    ["get", "/api/integrations", "by-id", header["X-Org-Id"], header["X-Space-Id"], [GMAIL]],
+    [
+      {
+        id: GMAIL,
+        manifest: {
+          display_name: "Gmail",
+          ...(!entry.noAuths && { auths: { oauth: { type: "oauth2" } } }),
+        },
+        auths: [],
+        active: entry.active ?? true,
       },
-      auths: [],
-      active: entry.active ?? true,
-    },
+    ],
   );
   qc.setQueryData(
     $api.queryOptions("get", "/api/agents/{scope}/{name}/connection-readiness", {
@@ -289,14 +290,22 @@ describe("AgentIntegrationsBlock — why the run starts without it", () => {
 });
 
 describe("AgentIntegrationsBlock — the integration's own detail does not land", () => {
-  const detailKey = $api.queryOptions("get", "/api/integrations/{packageId}", {
-    params: { path: { packageId: GMAIL }, header },
-  }).queryKey;
+  const detailKey = [
+    "get",
+    "/api/integrations",
+    "by-id",
+    header["X-Org-Id"],
+    header["X-Space-Id"],
+    [GMAIL],
+  ];
 
   /** The detail query in `state`; none seeded is a read the actor may not run (disabled). */
-  function renderWith(state: { error: Error } | { fetching: true } | null): string {
+  function renderWith(
+    state: { error: Error } | { fetching: true } | { absent: true } | null,
+  ): string {
     const qc = new QueryClient();
-    if (state) {
+    if (state && "absent" in state) qc.setQueryData(detailKey, []);
+    else if (state) {
       const query = qc.getQueryCache().build(qc, { queryKey: detailKey });
       query.setState(
         "error" in state
@@ -325,8 +334,8 @@ describe("AgentIntegrationsBlock — the integration's own detail does not land"
     expect(html).not.toContain(`member-picker-${GMAIL}`);
   });
 
-  it("offers the activation when the detail answers 404: not placed in this space", () => {
-    const html = renderWith({ error: new ApiError("not_found", "no such integration", 404) });
+  it("offers activation when the scoped list omits an unplaced dependency", () => {
+    const html = renderWith({ absent: true });
     expect(html).not.toContain("animate-pulse");
     expect(html).toContain(`integration-activate-${GMAIL}`);
   });
@@ -445,11 +454,17 @@ function renderAs(
     hasMore: false,
   });
   const integration = { path: { packageId: GMAIL }, header: scoped };
-  qc.setQueryData(key("/api/integrations/{packageId}", integration), {
-    manifest: { display_name: "Gmail", auths: { oauth: { type: "oauth2" } } },
-    auths: [],
-    active: opts.active ?? true,
-  });
+  qc.setQueryData(
+    ["get", "/api/integrations", "by-id", ORG, SPACE, [GMAIL]],
+    [
+      {
+        id: GMAIL,
+        manifest: { display_name: "Gmail", auths: { oauth: { type: "oauth2" } } },
+        auths: [],
+        active: opts.active ?? true,
+      },
+    ],
+  );
   const list = (data: unknown[]) => ({ object: "list", data, hasMore: false });
   qc.setQueryData(key("/api/integrations/{packageId}/pins", integration), list([]));
   qc.setQueryData(key("/api/integrations/{packageId}/connections", integration), list([]));

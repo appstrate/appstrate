@@ -25,6 +25,19 @@ describe("directives", () => {
     expect(directivesOf(serializeDirective(odd))).toMatchObject([odd]);
   });
 
+  it("keeps the source spans of noncanonical directives beside a literal example", () => {
+    const quoted = String.raw`:agent{label="\u007d \"quoted\"" name="run-legacy"}`;
+    const explicitName = ":skill[tone]{name=tone}";
+    const literal = "`" + quoted + "`";
+    const text = explicitName + quoted + literal + serializeDirective(skill);
+    expect(directivesOf(text)).toMatchObject([
+      { type: "skill", label: "tone", id: "tone" },
+      { type: "agent", label: '} "quoted"', id: "run-legacy" },
+      skill,
+    ]);
+    expect(readableDirectives(text)).toBe('/tone/} "quoted"' + literal + "/tone");
+  });
+
   it("splits the text into literal text and directives, in order", () => {
     expect(directiveSegments(`a ${serializeDirective(skill)} b`)).toEqual([
       { kind: "text", text: "a " },
@@ -59,4 +72,19 @@ describe("readableDirectives", () => {
   it("is the text itself when it names nothing", () => {
     expect(readableDirectives("plain /path text")).toBe("plain /path text");
   });
+});
+
+it("preserves fenced, inline and escaped directives while recognizing the selected prose chip", () => {
+  const chip = ":skill[tone]{name=@acme/tone}";
+  const examples = [
+    `\`\`${chip}\`\``,
+    "~".repeat(4) + "\n" + chip + "\n~~~~",
+    "\\" + chip,
+    "    " + chip,
+  ];
+  for (const example of examples) {
+    const text = example + "\n\n" + chip;
+    expect(directivesOf(text)).toHaveLength(1);
+    expect(readableDirectives(text)).toBe(example + "\n\n/tone");
+  }
 });

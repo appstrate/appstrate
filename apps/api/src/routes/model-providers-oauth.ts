@@ -133,7 +133,7 @@ export const createPairingBody = z
  * shape lands here and we 401.
  */
 async function handlePairRedeem(c: Context<AppEnv>) {
-  const authHeader = c.req.header("authorization") ?? c.req.header("Authorization");
+  const authHeader = c.req.header("authorization");
   const token = parseBearer(authHeader);
   if (!token?.startsWith("appp_")) {
     throw unauthorized(

@@ -11,6 +11,7 @@ import { eq } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
 import { chatMessages, chatSessions } from "@appstrate/db/schema";
 import {
+  pendingFileReadReceipts,
   rewriteFileReads,
   runChatFileReadReceipts,
 } from "../migration/0055-chat-file-read-receipts.ts";
@@ -118,6 +119,7 @@ describe("0055 — chat file reads rewritten as receipts", () => {
         (await db.select().from(chatMessages).where(eq(chatMessages.seq, row!.seq)))[0]!.content,
       );
 
+    expect(await pendingFileReadReceipts()).toEqual({ messages: 1, calls: 1 });
     await run(false);
     expect(lines).toContain("messages to rewrite: 1, file reads: 1");
     expect(await stored()).toContain(BLOB);
@@ -127,6 +129,7 @@ describe("0055 — chat file reads rewritten as receipts", () => {
     expect(await stored()).not.toContain(BLOB);
     expect(await stored()).toContain(URI);
 
+    expect(await pendingFileReadReceipts()).toEqual({ messages: 0, calls: 0 });
     lines.length = 0;
     await run(true);
     expect(lines).toContain("messages to rewrite: 0, file reads: 0");

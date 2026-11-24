@@ -47,23 +47,8 @@ import { setCursorLinkHeader } from "../../lib/pagination-link.ts";
 import { credentialAdmitsSpace, credentialConfinedToSpaces } from "../../lib/view-as.ts";
 
 /**
- * Assert that a space belongs to the given org.
- *
- * Throws the platform's UNIFORM space 404 — worded exactly as `getSpace`,
- * `assertSpaceInScope` and `applySpacePermissions` word it (`services/spaces.ts`,
- * `middleware/space-context.ts`) — whether the space does not exist or is one
- * this caller may not see. A `forbidden` here made the route an existence
- * oracle: a nonexistent id answered 403, while a LIVE personal space of another
- * member passed this check (the row does belong to the org) and was refused
- * further down by `enterSpaceContext` with a 404. Two different answers told an
- * org owner or admin exactly which ids are somebody's private space — the thing
- * every other space read is careful never to say (RBAC spec §3.6).
- *
- * Delegates to the canonical `validateSpaceInOrg` — same SELECT, plus the
- * `assertSpaceId` shape guard this copy did not have. Both call sites already
- * assert the shape with a `spaceId` param name, so that guard is a backstop
- * here rather than the primary diagnostic; its 400 stays a 400, because a
- * malformed id is not a hidden row.
+ * A missing space and a space the caller cannot access must return the same 404.
+ * The caller validates the request's spaceId before this organization lookup.
  */
 async function assertSpaceBelongsToOrg(spaceId: string, orgId: string): Promise<void> {
   if (!(await validateSpaceInOrg(spaceId, orgId))) {
@@ -102,12 +87,7 @@ const createOrgWebhookSchema = z
 const createSpaceWebhookSchema = z
   .object({
     level: z.literal("space"),
-    // Shape deliberately NOT re-encoded here: `assertSpaceId` (called by the
-    // handler right after parse) is the single implementation of the space-id
-    // shape check AND of its two diagnostics — a retired `app_` id must say "run
-    // the `app_` → `spc_` migration" on this route exactly as it does on
-    // `X-Space-Id`. A `.regex()` here would win the race and answer with a
-    // generic message instead.
+    // The handler applies assertSpaceId so body and header IDs have the same 400 response.
     spaceId: z.string(),
     url: z.url("url must be a valid URL"),
     events: z.array(webhookEventSchema).min(1, "events is required"),

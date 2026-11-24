@@ -9,7 +9,11 @@
  */
 
 import { decodeJwtPayload } from "@appstrate/core/jwt";
-import { acquiresByConnectLogin, getRemoteSource } from "@appstrate/core/integration";
+import {
+  acquiresByConnectLogin,
+  getAppstrateOAuthMeta,
+  getRemoteSource,
+} from "@appstrate/core/integration";
 import {
   initiateIntegrationOAuth,
   performTokenRequest,
@@ -60,19 +64,6 @@ import {
 
 /** The userinfo budget, tighter than the token exchange's: the credential is already in hand. */
 const USERINFO_TIMEOUT_MS = 10_000;
-
-/**
- * The manifest's `_meta["dev.appstrate/oauth"].refresh_token_issuance`: `"not_supported"`, the
- * server issues access-only tokens by design (re-authorised at expiry).
- */
-function refreshTokenIssuance(auth: Record<string, unknown>): string | undefined {
-  const meta = auth._meta;
-  if (!meta || typeof meta !== "object") return undefined;
-  const oauthMeta = (meta as Record<string, unknown>)["dev.appstrate/oauth"];
-  if (!oauthMeta || typeof oauthMeta !== "object") return undefined;
-  const value = (oauthMeta as Record<string, unknown>).refresh_token_issuance;
-  return typeof value === "string" ? value : undefined;
-}
 
 /**
  * The identity source of `extractIdentity`, each layer filling only what earlier ones left:
@@ -256,13 +247,27 @@ function tokenRequestRefusal(err: RefreshError): ApiError {
         "The service rejected this integration's OAuth client. Ask an administrator to check its client registration.",
     });
   }
-  const { status } = err;
-  if (status === 400 || status === 401) {
-    return loginRejected(
-      `The service refused the token request (HTTP ${status}): the submitted grant cannot be used as given.`,
-      { kind: "grant" },
+  if (err.oauthError === "unsupported_token_type") {
+    return mayHaveRedeemed(
+      new ApiError({
+        status: 502,
+        code: "login_upstream_unavailable",
+        title: "Login Upstream Unavailable",
+        detail: "The service did not issue a bearer token usable by this integration.",
+      }),
     );
   }
+  if (
+    err.oauthError &&
+    ["invalid_request", "invalid_scope", "unsupported_grant_type", "insufficient_scope"].includes(
+      err.oauthError,
+    )
+  ) {
+    return connectionNotReady(
+      "The service refused this integration's OAuth request. Ask an administrator to check its grant type, fields and scopes.",
+    );
+  }
+  const { status } = err;
   if (
     (status !== undefined && status >= 400 && status < 500) ||
     err.cause instanceof SsrfBlockedError
@@ -303,9 +308,7 @@ export class OAuth2Strategy implements IntegrationConnectStrategy {
     // persisted with the credential at the callback.
     const variables = await resolveConnectionVariables(manifest, auth, ctx.variables);
     const perConnection = hasPerConnectionAuthServer(manifest, auth);
-    // `scope_separator` lives under `_meta["dev.appstrate/oauth"]`.
-    const oauthMeta = (auth._meta?.["dev.appstrate/oauth"] ?? undefined) as
-      { scope_separator?: string } | undefined;
+    const oauthMeta = getAppstrateOAuthMeta(auth);
     // AFPS §7.3: an `issuer` or both explicit endpoints — unless a remote source's server is
     // discovered from `source.remote.url`.
     if (
@@ -426,7 +429,7 @@ export class OAuth2Strategy implements IntegrationConnectStrategy {
       let refreshGrantSupported = true; // strict default when capability is unknown
       // The manifest's declaration is the fact discovery would report, for a provider that
       // publishes no metadata.
-      if (refreshTokenIssuance(auth) === "not_supported") {
+      if (getAppstrateOAuthMeta(auth)?.refresh_token_issuance === "not_supported") {
         refreshGrantSupported = false;
       } else if (issuer) {
         try {
@@ -592,6 +595,7 @@ export class OAuth2Strategy implements IntegrationConnectStrategy {
     let exchanged: RefreshExchangeResult;
     try {
       exchanged = await performTokenRequest(tokenContext, grant, {
+        requireTokenType: true,
         label: `Integration connect.login for '${ctx.integrationId}' auth '${ctx.authKey}'`,
         // RFC 6749 §6 / AFPS §7.7: a refresh-token grant answered without `refresh_token` keeps
         // the one it presented.
@@ -619,20 +623,6 @@ export class OAuth2Strategy implements IntegrationConnectStrategy {
     // token), so a failure from here on must say so.
     const { parsed, raw } = exchanged;
     try {
-      // RFC 6749 §5.1 / §7.1: the delivery sends the token as a bearer token (RFC 6750); a token of
-      // another type would fail every call, and its absence violates §5.1.
-      const tokenType = raw.token_type;
-      if (typeof tokenType !== "string" || tokenType.toLowerCase() !== "bearer") {
-        throw new ApiError({
-          status: 502,
-          code: "login_upstream_unavailable",
-          title: "Login Upstream Unavailable",
-          detail:
-            typeof tokenType === "string"
-              ? `The service issued a token of type '${tokenType}', not a bearer token: this integration cannot use it.`
-              : "The service issued a token without a token_type: this integration uses bearer tokens only.",
-        });
-      }
       const identitySource = await identitySourceFor(
         raw,
         parsed.accessToken,

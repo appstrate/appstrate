@@ -25,7 +25,6 @@ import { Switch } from "./switch.tsx";
 const ROW_INSET_CLASS =
   "mx-2 rounded-lg px-3 desktop-pointer:mx-1 desktop-pointer:rounded-md desktop-pointer:px-2";
 
-/** A row of a sheet menu: 48 px tall, inset from the panel's edges. */
 /** A row's box: 48 px on touch, its icon at 20 px; a mouse's row is denser. */
 const ROW_BOX_CLASS = `${ROW_INSET_CLASS} flex min-h-12 items-center gap-3 py-2 [&_svg]:size-5 [&_svg]:shrink-0 desktop-pointer:min-h-9 desktop-pointer:gap-2 desktop-pointer:py-1.5 desktop-pointer:[&_svg]:size-4`;
 

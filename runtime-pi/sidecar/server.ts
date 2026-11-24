@@ -11,12 +11,14 @@ import { logger } from "./logger.ts";
 import { OAuthTokenCache } from "./oauth-token-cache.ts";
 import {
   bootIntegrations,
+  IntegrationSpecsError,
+  readConnectSpec,
   readIntegrationSpecsFromEnv,
   runConnectOnce,
 } from "./integrations-boot.ts";
 import type { AppstrateToolDefinition } from "@appstrate/mcp-transport";
 import type { CookieJar } from "@appstrate/afps-runtime/resolvers";
-import type { IntegrationSpawnSpec, IntegrationBootReport } from "@appstrate/core/sidecar-types";
+import type { IntegrationBootReport } from "@appstrate/core/sidecar-types";
 import { scrubSecretMaterial } from "./redact.ts";
 import { parseSidecarEnv, type SidecarEnv } from "./env.ts";
 import { admitsAgentProxyPeer, noRunnerPeers, type PeerAttribution } from "./runner-peers.ts";
@@ -26,8 +28,7 @@ import { admitsAgentProxyPeer, noRunnerPeers, type PeerAttribution } from "./run
  * credential-handling process). A blind `as` cast would let drift (a renamed
  * `authMode`, a removed required field) parse cleanly and surface far later as
  * a confusing 401/503 from `/llm`. We assert the discriminant + the required
- * fields here so drift fails at boot, at the cause. No Zod: the sidecar
- * deliberately carries no validation dependency; this is a focused shape guard.
+ * fields here so drift fails at boot, before the first request reaches the proxy.
  */
 function assertLlmOauthConfig(value: unknown): LlmProxyOauthConfig {
   if (!value || typeof value !== "object") {
@@ -152,10 +153,11 @@ if (connectLoginJson) {
   // `parseSidecarEnv` refused a connect mode without a valid key.
   const resultKey = env.connectResultKey!;
   try {
-    const spec = JSON.parse(connectLoginJson) as IntegrationSpawnSpec;
+    const spec = readConnectSpec(connectLoginJson);
     const bundle = await runConnectOnce(spec, {
       platformApiUrl: env.platformApiUrl,
       runToken: env.runToken,
+      ...(env.runId && { runId: env.runId }),
     });
     // Encrypt the bundle JSON — plaintext credentials never reach stdout.
     const iv = randomBytes(12);
@@ -212,12 +214,11 @@ const oauthTokenCache = new OAuthTokenCache({
 const runtimeDeps = buildSidecarRuntimeDeps({
   config,
   cookieJar,
-  ...(process.env.RUN_ID ? { runId: process.env.RUN_ID } : {}),
+  ...(env.runId && { runId: env.runId }),
 });
 
 let integrationTools: AppstrateToolDefinition[] = [];
-const specs = readIntegrationSpecsFromEnv();
-const declaredConnections = specs?.length ?? 0;
+let declaredConnections = 0;
 
 // Boot report fetched by the agent via `GET /integrations/boot-report`. Starts
 // as a synthetic empty-OK report (covers the no-integrations run); the boot
@@ -230,50 +231,51 @@ let integrationBootReport: IntegrationBootReport = {
   failed: [],
   breadcrumbs: [],
 };
-const integrationBootPromise =
-  specs && specs.length > 0
-    ? bootIntegrations(
-        specs,
-        {
-          platformApiUrl: config.platformApiUrl,
-          runToken: config.runToken,
-        },
-        runtimeDeps,
-        (adapter) => {
-          peerAttribution = adapter.peerAttribution();
-        },
-      )
-        .then((result) => {
-          integrationTools = result.tools;
-          integrationBootReport = result.report;
-          logger.info("Integrations bootstrapped", {
-            spawned: result.spawned,
-            failed: result.failed,
-            toolCount: result.tools.length,
-          });
-        })
-        .catch((err) => {
-          // A throw here (vs. a per-connection failure) means the whole boot
-          // pass blew up — surface it as a non-OK report so the agent aborts
-          // the run rather than running with a silently empty toolset.
-          // Same sink as the per-connection `failed[]` entries:
-          // `GET /integrations/boot-report`, which the agent relays into the
-          // org-visible run log. Scrub for the same reason (see
-          // `integrations-boot.ts`' per-spec catch).
-          const error = scrubSecretMaterial(err instanceof Error ? err.message : String(err));
-          logger.error("Integration boot raised", { error });
-          integrationBootReport = {
-            ok: false,
-            declaredConnections,
-            adapter: "unknown",
-            spawned: [],
-            failed: [{ integrationId: "*", error }],
-            breadcrumbs: [
-              { message: `integration boot raised: ${error}`, level: "error", data: { error } },
-            ],
-          };
-        })
-    : Promise.resolve();
+const integrationBootPromise = (async () => {
+  const specs = readIntegrationSpecsFromEnv();
+  if (!specs?.length) return;
+  declaredConnections = specs.length;
+  const result = await bootIntegrations(
+    specs,
+    {
+      platformApiUrl: config.platformApiUrl,
+      runToken: config.runToken,
+      ...(env.runId && { runId: env.runId }),
+    },
+    runtimeDeps,
+    (adapter) => {
+      peerAttribution = adapter.peerAttribution();
+    },
+  );
+  integrationTools = result.tools;
+  integrationBootReport = result.report;
+  logger.info("Integrations bootstrapped", {
+    spawned: result.spawned,
+    failed: result.failed,
+    toolCount: result.tools.length,
+  });
+})().catch((err) => {
+  // A throw here (vs. a per-connection failure) means the whole boot
+  // pass blew up — surface it as a non-OK report so the agent aborts
+  // the run rather than running with a silently empty toolset.
+  // Same sink as the per-connection `failed[]` entries:
+  // `GET /integrations/boot-report`, which the agent relays into the
+  // org-visible run log. Scrub for the same reason (see
+  // `integrations-boot.ts`' per-spec catch).
+  const error = scrubSecretMaterial(err instanceof Error ? err.message : String(err));
+  logger.error("Integration boot raised", { error });
+  integrationBootReport = {
+    ok: false,
+    declaredConnections:
+      err instanceof IntegrationSpecsError ? err.declaredConnections : declaredConnections,
+    adapter: "unknown",
+    spawned: [],
+    failed: [{ integrationId: "*", error }],
+    breadcrumbs: [
+      { message: `integration boot raised: ${error}`, level: "error", data: { error } },
+    ],
+  };
+});
 
 const app = createApp({
   config,
@@ -288,7 +290,7 @@ const app = createApp({
 
 logger.info("Sidecar proxy listening", {
   port: env.port,
-  integrationsDeclared: specs?.length ?? 0,
+  integrationsDeclared: declaredConnections,
 });
 
 // `idleTimeout` mirrors `apps/api/src/index.ts` — value + rationale live

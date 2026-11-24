@@ -4,6 +4,7 @@ import { expect, it } from "bun:test";
 import { AssistantRuntimeProvider, ThreadPrimitive } from "@assistant-ui/react";
 import { useAISDKRuntime } from "@assistant-ui/react-ai-sdk";
 import { renderToStaticMarkup } from "react-dom/server";
+import { ConversationScopeProvider } from "../src/ui/conversation-scope.ts";
 import { TurnSpaceChoice } from "../src/ui/space-choice.tsx";
 import { ChatHostProvider, type ChatHost } from "../src/ui/runtime-context.ts";
 import { testHost } from "./test-host.ts";
@@ -54,15 +55,31 @@ function PendingTurn() {
 }
 
 it("renders the saved question against current access when a user reopens the conversation", () => {
-  function render(actingSpaceIds: ChatHost["actingSpaceIds"], canReply: boolean) {
+  function render(
+    actingSpaceIds: ChatHost["actingSpaceIds"],
+    canReply: boolean,
+    restricted = false,
+  ) {
     const host = testHost({
       actingSpaceIds,
       can: () => canReply,
+      canIn: (space) => space === "other" && canReply,
       useSpaceLabelOf: () => () => "Team name",
     });
     return renderToStaticMarkup(
       <ChatHostProvider value={host}>
-        <PendingTurn />
+        <ConversationScopeProvider
+          value={{
+            restricted,
+            originSpaceId: restricted ? "team" : null,
+            generating: false,
+            pending: false,
+            limitTo: () => {},
+            lift: () => {},
+          }}
+        >
+          <PendingTurn />
+        </ConversationScopeProvider>
       </ChatHostProvider>,
     );
   }
@@ -71,6 +88,10 @@ it("renders the saved question against current access when a user reopens the co
   expect(revoked).not.toContain("<button");
   expect(revoked).toContain("tool.spaceChoiceUnavailable");
   expect(revoked).toContain("tool.spaceChoiceRetry");
+  const limited = render(["team", "other"], true, true);
+  expect(limited).toContain("tool.spaceChoiceUnavailable");
+  expect(limited).not.toContain("tool.spaceChoiceRetry");
+  expect(limited).not.toContain("<button");
   const readOnly = render([], false);
   expect(readOnly).toContain("tool.spaceChoiceUnavailable");
   expect(readOnly).not.toContain("tool.spaceChoiceRetry");

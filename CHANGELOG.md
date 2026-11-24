@@ -13,6 +13,14 @@ inferred from their mounted guards. The platform checks these contracts at start
 that resolve a resource's space from a database row use `withAuthorizedRow` from
 `@appstrate/core/permissions`. See the [module authoring guide](apps/api/src/modules/README.md#openapi-contributions).
 
+### Upgrade and client changes
+
+- Follow the [upgrade procedure through migration 0113](docs/deployment/UPGRADE_0113.md) before migrating the schema and reopening traffic.
+- Reconnecting an integration in place requires a matching account identity and instance. A connection without a comparable identity needs a new connection and explicit reassignment of its shares, pins and schedules. Personal connection policies still apply.
+- MCP clients can validate both successful `run_and_wait` responses and structured refusals against the tool’s declared output schema. Remote resource reads in a run run one at a time, limited to 48 MiB on the wire and 32 MiB of decoded contents. A concurrent read waits for the previous one to complete.
+- Space and organization run lists require timestamps with a time and timezone. Send an RFC 3339 instant for date filters.
+- A reporting CLI must use the public origin configured in `APP_URL`. Run events, provisioning and finalization require direct endpoints without redirects. An unavailable resource-metadata service can temporarily interrupt automatic MCP OAuth setup even with a configured issuer; retry after it recovers.
+
 ### MCP clients
 
 The platform MCP server replaces `search_operations`, `search_integration_tools` and `describe_operation` with `search` and `describe`, and `read_file` with `read` (#2315). An MCP client re-lists its tools on its next connection; a call to a retired name answers `-32602 Unknown tool`.

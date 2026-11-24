@@ -319,6 +319,18 @@ describe("search — integration_tool kind", () => {
   const toolNames = (payload: Record<string, unknown>) =>
     (payload.items as Array<{ id: string }>).map((tool) => tool.id);
 
+  it("reports a malformed catalogue as an upstream failure before exposing its tools", async () => {
+    const made = makeTools(CALL_OWN, undefined, true, {
+      listing: () => Response.json({ tools: [{ connection_ids: 72 }] }),
+    });
+    const result = await made.byName
+      .get("call_integration_tool")!
+      .handler({ tool: TOOL, arguments: {} }, {} as AppstrateRequestExtra);
+    expect(result.isError).toBe(true);
+    expect(JSON.stringify(result)).toContain("invalid_integration_catalog");
+    expect(made.calls).toHaveLength(0);
+  });
+
   it("with no argument, lists every tool, and each connection they reach once with every field", async () => {
     const { result, payload, listings, calls, events } = await search({});
     expect(result.isError).toBe(false);
@@ -1616,7 +1628,7 @@ describe("search — what an integration_tool search says it leaves out", () => 
   });
 
   it("lists a remote integration whose server the platform refused to list, with that refusal", async () => {
-    const refusal = { status: 429, code: "rate_limited", detail: "Too many requests." };
+    const refusal = await problem(429, "rate_limited", "Too many requests.").json();
     const payload = await search(
       {},
       {

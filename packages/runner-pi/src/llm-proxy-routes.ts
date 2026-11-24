@@ -87,13 +87,7 @@ export function isProxiedApiShape(apiShape: string): apiShape is ProxiedApiShape
  * Base URL a vendor client is pointed at to reach the proxy, or null when the
  * shape is not proxyable.
  *
- * A trailing slash on `origin` is trimmed here rather than required of the
- * caller. The precondition used to be documented and unenforced, and only one
- * of the two callers honoured it: the CLI trimmed its `--instance` value, while
- * chat passed `CHAT_SELF_ORIGIN` — an operator-set env var — verbatim, so
- * `http://127.0.0.1:3000/` produced a double slash. Consolidating three copies
- * of a path convention into one function is the moment to enforce its
- * precondition once too, instead of restating it.
+ * The operator may include a trailing slash in CHAT_SELF_ORIGIN. Trim it before joining paths.
  */
 export function llmProxyBaseUrl(
   origin: string,

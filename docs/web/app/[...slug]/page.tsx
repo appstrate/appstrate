@@ -21,10 +21,26 @@ import { SITE_NAME, SITE_URL } from '@/lib/site';
 // - Response body schema hidden: the JSON example in the right rail is enough
 //   for humans, and agents can read the OpenAPI spec directly.
 const codeUsages = createCodeUsageGeneratorRegistry();
-codeUsages.add('curl', curl);
+codeUsages.add('curl', {
+  ...curl,
+  generate(url, data, context) {
+    const example = data.bodyMediaType === '*/*'
+      ? { ...data, bodyMediaType: 'application/octet-stream' } : data;
+    return curl.generate(url, example, context);
+  },
+});
 
 const APIPage = createAPIPage(openapi, {
   playground: { enabled: false },
+  mediaAdapters: {
+    '*/*': {
+      encode({ body }) {
+        if (typeof body === 'string' || body instanceof Blob) return body;
+        throw new TypeError('Choose the media type of the request body.');
+      },
+      generateExample: () => undefined,
+    },
+  },
   codeUsages,
   showResponseSchema: false,
   generateTypeScriptDefinitions: false,

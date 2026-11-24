@@ -30,7 +30,7 @@ import {
   spaces,
 } from "@appstrate/db/schema";
 import { actorFilter, type Actor } from "../lib/actor.ts";
-import { displayAccountId } from "../lib/connection-identity.ts";
+import { displayAccountId } from "@appstrate/core/integration";
 import { boundSpacesOf, type ConnectionPrincipal } from "../lib/connection-principal.ts";
 import type { MeConnectionEntry, MeConnectionSourceGroup } from "@appstrate/shared-types";
 import { asRecord } from "@appstrate/core/safe-json";

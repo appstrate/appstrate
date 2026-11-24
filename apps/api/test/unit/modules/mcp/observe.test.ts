@@ -31,7 +31,7 @@ function firstOp(predicate: (op: CatalogOperation) => boolean): CatalogOperation
   return op;
 }
 
-function makeTools(permissions: string[], status = 200) {
+function makeTools(permissions: string[], status = 200, observer?: McpToolContext["observe"]) {
   const events: McpToolEvent[] = [];
   const dispatch: Dispatch = async () =>
     new Response(JSON.stringify({ ok: true }), {
@@ -44,7 +44,7 @@ function makeTools(permissions: string[], status = 200) {
     permissions: new Set(permissions),
     ceiling: undefined,
     dispatch,
-    observe: (e) => events.push(e),
+    observe: observer ?? ((event) => events.push(event)),
     actor: { type: "user", id: "user_1" },
     scope: { orgId: "org_1", spaceId: "spc_1" },
     skills: {
@@ -66,6 +66,17 @@ function makeTools(permissions: string[], status = 200) {
 }
 
 describe("observe — search", () => {
+  it("returns the operation description even when the observer fails", async () => {
+    const { byName } = makeTools(["mcp:read"], 200, () => {
+      throw new Error("telemetry unavailable");
+    });
+    const op = firstOp(() => true);
+    const result = await byName
+      .get("describe")!
+      .handler({ kind: "operation", id: op.operationId }, noExtra);
+    expect(result.isError).toBeFalsy();
+  });
+
   it("emits a search event carrying the shown count and a duration", async () => {
     const { byName, events } = makeTools(["mcp:read"]);
     await byName

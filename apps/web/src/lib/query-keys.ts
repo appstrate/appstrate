@@ -93,16 +93,7 @@ export const paginatedRunsKeys = {
       "paginated-runs",
       orgId,
       spaceId,
-      endpoint,
-      user,
-      kind,
-      status,
-      unread,
-      spaceKind,
-      spaceIds,
-      // `search, limit` stay last: `placeholderData` keeps rows across a search change only (`keepsRunRows`).
-      search,
-      limit,
+      { endpoint, user, kind, status, unread, spaceKind, spaceIds, search, limit },
     ] as const,
 };
 

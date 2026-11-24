@@ -151,6 +151,11 @@ Credentials and egress belong to the injected `fetch` (the credential proxy):
 the SDK is never given an auth provider and leaves redirects to it. A fault
 the injected fetch throws during the connect comes back as itself.
 
+For `resources/read`, the HTTP client counts bytes as they arrive. A POST response may carry
+up to 48 MiB, including the JSON envelope and base64. The same limit applies to each event
+on a shared SSE connection, so independent reads can continue for the life of the session.
+Each read fetches the current resource. The client does not retain resource bodies between calls.
+
 `wrapClient(client, transport)` gives the same surface over a connected v1
 SDK `Client`: in-process pairs, stdio subprocesses, the HTTP+SSE transport.
 Their servers are 2025-era by construction. `listTools()` walks the pages

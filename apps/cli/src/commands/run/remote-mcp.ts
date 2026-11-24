@@ -145,7 +145,6 @@ export async function buildRemoteMcpExtensions(
   const unavailable: UnavailableIntegration[] = [];
   const reducedTools: ReducedTool[] = [];
   const clients: AppstrateMcpClient[] = [];
-  const closed = new Set<AppstrateMcpClient>();
   const toolNames = new Set(opts.takenToolNames);
   // `{namespace}__{body}`: a normalised namespace never holds `__`.
   const namespaces = new Set([...toolNames].map((name) => name.slice(0, name.indexOf("__"))));
@@ -203,7 +202,6 @@ export async function buildRemoteMcpExtensions(
         );
       }
       if (factories.length === before) {
-        closed.add(client);
         await client.close().catch(() => {});
         unavailable.push({
           id: ref.name,
@@ -219,9 +217,7 @@ export async function buildRemoteMcpExtensions(
   } catch (err) {
     // A throw leaves no caller holding the connected clients.
     await Promise.all(
-      outcomes.flatMap((outcome) =>
-        "client" in outcome && !closed.has(outcome.client) ? [outcome.client.close()] : [],
-      ),
+      outcomes.flatMap((outcome) => ("client" in outcome ? [outcome.client.close()] : [])),
     ).catch(() => {});
     throw err;
   }

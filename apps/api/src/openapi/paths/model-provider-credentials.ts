@@ -207,6 +207,7 @@ export const modelProviderCredentialsPaths = {
                     owner_name: null,
                     allowed_actions: ["edit", "delete", "test"],
                     bindable: false,
+                    referencing_model_count: 0,
                     serves_model_ids: [],
                     created_by: "usr_cm3abc123",
                     createdAt: "2026-01-10T08:00:00Z",

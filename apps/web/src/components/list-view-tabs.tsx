@@ -2,7 +2,7 @@
 
 import { useTranslation } from "react-i18next";
 import { LayoutGrid, Rows3 } from "lucide-react";
-import { Tabs, TabsList, TabsTrigger } from "@appstrate/ui/components/tabs";
+import { ToggleGroup, ToggleGroupItem } from "@appstrate/ui/components/toggle-group";
 import type { ListView } from "../stores/list-view-store";
 
 export function ListViewTabs({
@@ -14,20 +14,31 @@ export function ListViewTabs({
 }) {
   const { t } = useTranslation("common");
   return (
-    <Tabs
+    <ToggleGroup
+      type="single"
+      aria-label={t("toolbar.viewMode")}
+      className="bg-muted h-8 shrink-0 gap-0 rounded-md p-0.5"
       value={view}
       onValueChange={(next) => {
         if (next === "cards" || next === "table") onChange(next);
       }}
     >
-      <TabsList className="h-8 shrink-0 p-0.5">
-        <TabsTrigger value="table" aria-label={t("toolbar.viewTable")}>
-          <Rows3 className="size-4" />
-        </TabsTrigger>
-        <TabsTrigger value="cards" aria-label={t("toolbar.viewCards")}>
-          <LayoutGrid className="size-4" />
-        </TabsTrigger>
-      </TabsList>
-    </Tabs>
+      <ToggleGroupItem
+        className="data-[state=on]:bg-background h-7 min-w-7 px-1.5"
+        value="table"
+        onFocus={() => onChange("table")}
+        aria-label={t("toolbar.viewTable")}
+      >
+        <Rows3 className="size-4" />
+      </ToggleGroupItem>
+      <ToggleGroupItem
+        className="data-[state=on]:bg-background h-7 min-w-7 px-1.5"
+        value="cards"
+        onFocus={() => onChange("cards")}
+        aria-label={t("toolbar.viewCards")}
+      >
+        <LayoutGrid className="size-4" />
+      </ToggleGroupItem>
+    </ToggleGroup>
   );
 }

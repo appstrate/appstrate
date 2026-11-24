@@ -129,6 +129,26 @@ describe("connectOfferTarget", () => {
     expect(connectOfferTarget(inPlace("insufficient_scopes", true))).toBeNull();
   });
 
+  it("leaves a dead account's diagnostic ID out of a signed reconnect when its binding must change", async () => {
+    for (const remedy of [
+      "new_connection",
+      "rebind_by_admin",
+      "rebind_by_schedule_owner",
+    ] as const) {
+      const error = { ...inPlace("needs_reconnection", true), remedy };
+      const cache = manifestCache({ [INTEGRATION]: authManifest("oauth2") });
+      expect(
+        await attachConnectOffers({
+          errors: [error],
+          scope: SCOPE,
+          actor: ACTOR,
+          policy: CONNECT,
+          manifestCache: cache,
+        }),
+      ).toEqual([error]);
+    }
+  });
+
   it("refuses needs_reconnection on a foreign-owned connection", () => {
     expect(connectOfferTarget(inPlace("needs_reconnection", false))).toBeNull();
     // Absent (a resolver that could not decide) is not "mine".

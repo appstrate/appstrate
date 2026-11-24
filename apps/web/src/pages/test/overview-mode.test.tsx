@@ -525,18 +525,19 @@ describe("the dashboard in the mode", () => {
     const { asked } = renderIn(true, <DashboardPage />, "/", seed);
     expect(asked("agents")).toEqual([["agents", "org_1", "across-spaces"]]);
     expect(asked("schedules")).toEqual([["schedules", "org_1", "across-spaces"]]);
-    const runRequests = asked("paginated-runs").map(
-      ([, orgId, scope, endpoint, , , status, , , , , limit]) => ({
-        orgId,
-        scope,
-        endpoint,
-        status,
-        limit,
-      }),
-    );
-    expect(runRequests).toEqual([
-      { orgId: "org_1", scope: "across-spaces", endpoint: "/runs", status: undefined, limit: 15 },
-      { orgId: "org_1", scope: "across-spaces", endpoint: "/runs", status: "running", limit: 1 },
+    expect(asked("paginated-runs")).toMatchObject([
+      [
+        "paginated-runs",
+        "org_1",
+        "across-spaces",
+        { endpoint: "/runs", status: undefined, limit: 15 },
+      ],
+      [
+        "paginated-runs",
+        "org_1",
+        "across-spaces",
+        { endpoint: "/runs", status: "running", limit: 1 },
+      ],
     ]);
   });
 
@@ -680,9 +681,9 @@ describe("an agent's page", () => {
       runner("spc_a"),
       runner("spc_b"),
     ]);
-    expect(asked("paginated-runs").map((key) => key.slice(1, 4))).toEqual([
-      ["org_1", "across-spaces", "/agents/@acme/reporter/runs"],
-      ["org_1", "spc_a", "/agents/@acme/reporter/runs"],
+    expect(asked("paginated-runs")).toMatchObject([
+      ["paginated-runs", "org_1", "across-spaces", { endpoint: "/agents/@acme/reporter/runs" }],
+      ["paginated-runs", "org_1", "spc_a", { endpoint: "/agents/@acme/reporter/runs" }],
     ]);
   });
 });

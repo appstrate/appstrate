@@ -6,21 +6,23 @@ import { FieldLegend, FieldSet } from "@appstrate/ui/components/field";
 import { asRecord } from "@appstrate/core/safe-json";
 import { pendingSpaceChoiceSchema, SPACE_CHOICE_PART } from "../space-choice.ts";
 import { useChatHost } from "./runtime-context.ts";
-import { useConversationScope } from "./conversation-scope.ts";
+import { conversationTurnCan, useConversationScope } from "./conversation-scope.ts";
 
 /** Only the latest assistant message can still be waiting for an answer. A click starts a new user turn. */
 export function TurnSpaceChoice() {
   const aui = useAui();
-  const { t, actingSpaceIds, useSpaceLabelOf, can } = useChatHost();
+  const host = useChatHost();
+  const { t, actingSpaceIds, useSpaceLabelOf } = host;
   const labelOf = useSpaceLabelOf();
-  const { restricted, originSpaceId } = useConversationScope();
+  const scope = useConversationScope();
+  const { restricted, originSpaceId } = scope;
   const current = useAuiState(
     (s) => s.thread.messages[s.thread.messages.length - 1]?.id === s.message.id,
   );
   const running = useAuiState((s) => s.thread.isRunning);
   const parts = useAuiState((s) => s.message.content);
   if (!current || actingSpaceIds === null) return null;
-  const canReply = can("chat:write");
+  const canReply = conversationTurnCan(scope, host)("chat:write");
 
   const choices = parts.flatMap((part) => {
     if (part.type !== "tool-call") return [];

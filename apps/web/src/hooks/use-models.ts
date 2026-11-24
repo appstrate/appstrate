@@ -31,7 +31,7 @@ export function useModels(enabled = true) {
 }
 
 export function useUpdateModel() {
-  const invalidate = useInvalidatePaths("/api/models");
+  const invalidate = useInvalidatePaths("/api/models", "/api/model-provider-credentials");
   return $api.useMutation("patch", "/api/models/{id}", {
     meta: { errorHandledByCaller: true },
     onSuccess: invalidate,
@@ -39,7 +39,7 @@ export function useUpdateModel() {
 }
 
 export function useDeleteModel() {
-  const invalidate = useInvalidatePaths("/api/models");
+  const invalidate = useInvalidatePaths("/api/models", "/api/model-provider-credentials");
   return $api.useMutation("delete", "/api/models/{id}", { onSuccess: invalidate });
 }
 

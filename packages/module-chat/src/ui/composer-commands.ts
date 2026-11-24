@@ -24,7 +24,7 @@ interface CommandContext {
 
 export interface CommandList {
   items: TriggerItem[];
-  /** Skills that would take the pins past their budget: not offered, the menu says why. */
+  /** Skills whose catalogue size may exceed the budget: still offered with a warning. */
   overBudget: TriggerItem[];
 }
 
@@ -51,7 +51,8 @@ function skillItems(
       },
     };
     const fits = effective.ids.includes(skill.id) || !exceedsBudget(budget, skill.bytes);
-    (fits ? offered : overBudget).push(item);
+    offered.push(item);
+    if (!fits) overBudget.push(item);
   }
   return offered;
 }
@@ -113,11 +114,7 @@ export function searchCommands(items: readonly TriggerItem[], query: string): Tr
  * from sending the `/token`. While the commands load (`list` null) the menu stays open.
  */
 export function noCommandMatch(list: CommandList | null, query: string): boolean {
-  return (
-    list !== null &&
-    searchCommands(list.items, query).length === 0 &&
-    searchCommands(list.overBudget, query).length === 0
-  );
+  return list !== null && searchCommands(list.items, query).length === 0;
 }
 
 /** A `/` starting a word, up to the cursor; not while `closed` (no match: Enter sends `/usr`). */

@@ -104,13 +104,14 @@ describe("commandList", () => {
     );
   });
 
-  it("holds back a new skill whose size would pass the budget, and says which", () => {
+  it("offers a new skill whose size might exceed the budget and warns", () => {
     const draft = serializeDirective({ type: "skill", label: "tone", id: "@other/tone" });
     const list = commandList(commands, { ...ctx, skills: leaving(2_500, draft), draft });
     // Pinned or cited: offered, marked as such. A size that fits, or an unknown one, is offered.
     expect(list.items.filter((i) => i.type === "skill").map((i) => i.id)).toEqual([
       "@acme/tone",
       "@acme/pdf",
+      "@acme/pdf-tools",
       "@other/tone",
     ]);
     const meta = (id: string) => list.items.find((i) => i.id === id)?.metadata;
@@ -158,7 +159,7 @@ describe("noCommandMatch", () => {
   it("keeps the menu open for a skill held back by the budget, so the menu says why", () => {
     const list = commandList(commands, { ...ctx, skills: leaving(1_500), running: true });
     // Nothing offered matches `pdf`: both pdf skills would pass the budget.
-    expect(searchCommands(list.items, "pdf")).toEqual([]);
+    expect(searchCommands(list.items, "pdf")).toHaveLength(2);
     expect(searchCommands(list.overBudget, "pdf").map((i) => i.id)).toEqual([
       "@acme/pdf",
       "@acme/pdf-tools",

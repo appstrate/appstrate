@@ -50,7 +50,7 @@ function spaceFixture(personal: boolean, domains: string[] = []): Space {
     personal,
     access: "member",
     role: null,
-    permissions: [],
+    permissions: ORG.permissions,
     created_by: null,
     createdAt: ORG.createdAt,
     updatedAt: ORG.createdAt,
