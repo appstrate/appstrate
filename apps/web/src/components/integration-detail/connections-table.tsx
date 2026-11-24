@@ -1,6 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { displayAccountId } from "@appstrate/core/integration";
 import { useTranslation } from "react-i18next";
 import { Plug } from "lucide-react";
 import { DataTable } from "../data-table";
@@ -83,7 +82,7 @@ export function ConnectionsTable({
       return {
         authKey: connection.auth_key,
         methodReady,
-        canRenew: methodReady && displayAccountId(connection.account_id) !== null,
+        canRenew: methodReady && (connection.allowed_actions ?? []).includes("reconnect"),
         canCreate: methodReady && canConnect && !blockedByAdmin,
       };
     },

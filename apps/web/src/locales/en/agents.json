@@ -156,7 +156,6 @@
   "detail.emptyConnections": "No connections required",
   "detail.emptyConnectionsHint": "None of this agent's integrations needs a connection",
   "detail.integrationConnect": "Connect",
-  "detail.integrationReconnect": "Reconnect",
   "missingConnections.title": "Integration connections required",
   "missingConnections.intro": "Check the integrations below. Once each is ready, retry the run.",
   "missingConnections.introInactive": "This agent cannot start: the integrations below are not active in this space.",
