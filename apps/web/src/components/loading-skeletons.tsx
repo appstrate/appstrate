@@ -203,36 +203,30 @@ function SpaceLineBlocks() {
   );
 }
 
-/** An integration's « Connexion utilisée par défaut », under its connections table: a group heading, the default's row, then the exceptions (sub-heading, table, add button). */
+/** An integration's « Connexion utilisée par défaut », under its connections table: its heading, then the account a call uses and, for a configurer, the button to its settings. */
 function DefaultConnectionBlocks({ canConfigure }: { canConfigure: boolean }) {
   return (
-    <div className="mt-8 flex flex-col gap-6">
+    <div className="mt-8 flex flex-col gap-3">
       <header>
         <SkeletonLine className="w-48 text-base font-semibold" />
         <div className="mt-1 max-w-2xl">
           <SkeletonLine className="w-full text-sm leading-relaxed" />
         </div>
       </header>
-      <SkeletonLine className="w-64 text-sm" />
-      {canConfigure && (
-        <>
-          <SettingsSkeleton rows={1} />
-          {/* The exceptions: their sub-heading, the table's card, then « Ajouter ». */}
-          <div>
-            <header className="mb-3">
-              <SkeletonLine className="w-44 text-sm font-semibold" />
-              <div className="mt-1 max-w-2xl">
-                <SkeletonLine className="w-full text-sm leading-relaxed" />
-              </div>
-            </header>
-            <div className="mb-4">
-              <TableBlocks framed />
-            </div>
-            <Skeleton className="h-8 w-32" />
-          </div>
-        </>
-      )}
+      <div className="flex min-h-8 items-center gap-3">
+        <SkeletonLine className="w-64 text-sm" />
+        {canConfigure && <Skeleton className="h-8 w-20" />}
+      </div>
     </div>
+  );
+}
+
+/** {@link ListTabBlocks} on its own, while a tab's rows load inside the page. */
+export function ListTabSkeleton() {
+  return (
+    <Waiting>
+      <ListTabBlocks />
+    </Waiting>
   );
 }
 
@@ -286,7 +280,6 @@ function useOpensWithSpaceLine(type: PackageType, tab: string): boolean {
     );
   }
   if (type !== "integration") return false;
-  if (tab === "connections") return true;
   if (tab !== "settings") return false;
   // A section named in the address exists: the rail offers it.
   const section = resolveIntegrationSettingsSection(search.get("integrationSettings"), {
@@ -418,6 +411,7 @@ export function PackageDetailSkeleton({ type }: { type: PackageType }) {
   const { can } = usePermissions();
   const search = new URLSearchParams(useLocation().search);
   const configuresIntegration = useSpacesFor({ permission: "integrations:configure" }).offered;
+  const { on: overview } = useOverviewMode();
   // « Création de connexions » is one setting; the other sections hold several.
   const opensAccess =
     type === "integration" &&
@@ -442,8 +436,9 @@ export function PackageDetailSkeleton({ type }: { type: PackageType }) {
           <MemoryTabBlocks />
         ) : type === "integration" && tab === "connections" ? (
           <>
-            <ListTabBlocks spaceLine={spaceLine} />
-            <DefaultConnectionBlocks canConfigure={can("integrations:configure")} />
+            <ListTabBlocks />
+            {/* The default is one space's: « Tous les espaces » lists without it. */}
+            {!overview && <DefaultConnectionBlocks canConfigure={can("integrations:configure")} />}
           </>
         ) : tab === "runs" || tab === "connections" || tab === "usedBy" ? (
           <ListTabBlocks spaceLine={spaceLine} />

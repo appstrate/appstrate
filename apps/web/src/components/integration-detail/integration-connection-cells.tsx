@@ -27,24 +27,28 @@ import {
   useRenameIntegrationConnection,
   useConnectionShare,
   useConnectionShareAllSpaces,
-  type IntegrationConnection,
   useAgentsConsumingIntegration,
   useIntegrationPins,
 } from "../../hooks/use-integrations";
-import { usePermissions } from "../../hooks/use-permissions";
-import { useCurrentSpaceId } from "../../hooks/use-current-space";
+import { useRowSpaceGrants } from "../../hooks/use-permissions";
 import { useCurrentOrgId } from "../../hooks/use-org";
+import type { ConnectionRow } from "../../lib/connection-rows";
+import { spaceHeader } from "../../lib/scoping-headers";
 import { useOrgSpaces, useSpaceLabelOf } from "../../hooks/use-spaces";
 import { useOverviewMode } from "../../hooks/use-overview-mode";
 import { useCanReach } from "../../hooks/use-can-reach";
 import { packageDetailPath } from "../../lib/package-paths";
 import { TableRowActions } from "../table-row-actions";
 
-/** The agents an admin pin binds this connection to; the queries only run for an admin-pin-locked row. */
-function usePinningAgents(connection: IntegrationConnection, packageId: string) {
+/**
+ * The agents an admin pin of the row's space binds this connection to; the queries only run for
+ * an admin-pin-locked row.
+ */
+function usePinningAgents(connection: ConnectionRow, packageId: string) {
   const pinned = connection.locked_by === "admin_pin";
-  const { data: pins } = useIntegrationPins(pinned ? packageId : undefined);
-  const { data: agents } = useAgentsConsumingIntegration(pinned ? packageId : undefined);
+  const spaceId = connection.rowSpaceId;
+  const { data: pins } = useIntegrationPins(pinned ? packageId : undefined, spaceId);
+  const { data: agents } = useAgentsConsumingIntegration(pinned ? packageId : undefined, spaceId);
   if (!pinned || !pins) return [];
   return pins
     .filter((pin) => pin.connection_ids.includes(connection.id))
@@ -58,7 +62,7 @@ function usePinningAgents(connection: IntegrationConnection, packageId: string) 
 
 /** Why a locked row refuses unshare/delete: names the pinning agents when known, else the generic sentence. */
 function useLockText(
-  connection: IntegrationConnection,
+  connection: ConnectionRow,
   packageId: string,
   isAdmin: boolean,
   lockKey: string | null,
@@ -81,13 +85,13 @@ function useLockText(
   };
 }
 
-/** What the caller may do to this row: the API's verdict on it (`allowed_actions`). */
-function useRowGrants(connection: IntegrationConnection, isAdmin: boolean) {
-  const { can } = usePermissions();
-  const spaceId = useCurrentSpaceId();
+/** What the caller may do to this row in its space: the API's verdict on it (`allowed_actions`). */
+function useRowGrants(connection: ConnectionRow, isAdmin: boolean) {
+  const grants = useRowSpaceGrants();
+  const spaceId = connection.rowSpaceId;
   const actions = connection.allowed_actions ?? [];
   return {
-    canConnect: can("integrations:connect"),
+    canConnect: grants(spaceId, "integrations:connect"),
     spaceId,
     canRename: actions.includes("rename"),
     canShare: actions.includes("share"),
@@ -108,7 +112,7 @@ export function AccountCell({
   renaming,
   onRenamingChange,
 }: {
-  connection: IntegrationConnection;
+  connection: ConnectionRow;
   packageId: string;
   isAdmin: boolean;
   /** The row's « Rename » menu entry puts the name in edit. */
@@ -117,7 +121,7 @@ export function AccountCell({
 }) {
   const { t } = useTranslation("settings");
   const renameConnection = useRenameIntegrationConnection();
-  const { canRename } = useRowGrants(connection, isAdmin);
+  const { canRename, spaceId } = useRowGrants(connection, isAdmin);
 
   return (
     <div className="min-w-0">
@@ -132,6 +136,7 @@ export function AccountCell({
           await renameConnection.mutateAsync({
             params: { path: { packageId, connectionId: connection.id } },
             body: { label: next },
+            ...spaceHeader(spaceId),
           });
         }}
       />
@@ -144,7 +149,7 @@ export function AccountCell({
 }
 
 /** Connected, or needing a reconnection its owner alone can perform. */
-export function StatusCell({ connection }: { connection: IntegrationConnection }) {
+export function StatusCell({ connection }: { connection: ConnectionRow }) {
   return (
     <div className="flex min-w-0 items-center gap-2">
       <ConnectionStatusBadge needsReconnection={connection.needs_reconnection} />
@@ -158,15 +163,15 @@ export function SharingCell({
   packageId,
   isAdmin,
 }: {
-  connection: IntegrationConnection;
+  connection: ConnectionRow;
   packageId: string;
   isAdmin: boolean;
 }) {
-  const shareConnection = useConnectionShare("share", packageId);
-  const allSpacesSharing = useConnectionShareAllSpaces(packageId);
-  const unshareConnection = useConnectionShare("unshare", packageId);
-  const orgId = useCurrentOrgId();
   const { spaceId, canShare, canUnshareHere, lockKey } = useRowGrants(connection, isAdmin);
+  const shareConnection = useConnectionShare("share", packageId, spaceId);
+  const allSpacesSharing = useConnectionShareAllSpaces(packageId, spaceId);
+  const unshareConnection = useConnectionShare("unshare", packageId, spaceId);
+  const orgId = useCurrentOrgId();
   const { text: lockText } = useLockText(connection, packageId, isAdmin, lockKey);
   const { on } = useOverviewMode();
   const labelOf = useSpaceLabelOf();
@@ -229,7 +234,7 @@ export function ConnectionActionsCell({
   renaming,
   onRename,
 }: {
-  connection: IntegrationConnection;
+  connection: ConnectionRow;
   packageId: string;
   authKey: string;
   methodReady: boolean;
@@ -243,7 +248,10 @@ export function ConnectionActionsCell({
   const { t } = useTranslation(["settings", "common"]);
   const { openPopup, isPending: reconnecting } = useHostedConnectPopup();
   const [confirmDelete, setConfirmDelete] = useState(false);
-  const { canRename, lockKey } = useRowGrants(connection, isAdmin);
+  const { canRename, lockKey, spaceId } = useRowGrants(connection, isAdmin);
+  const orgId = useCurrentOrgId();
+  // The kickoff runs in the row's space: its OAuth client is that space's.
+  const space = orgId ? { orgId, spaceId } : undefined;
   const { text: lockHint, agents: pinningAgents } = useLockText(
     connection,
     packageId,
@@ -271,7 +279,8 @@ export function ConnectionActionsCell({
             id: "reconnect",
             label: t("btn.reconnect", { ns: "common" }),
             icon: RefreshCw,
-            onSelect: () => void openPopup({ packageId, authKey, connectionId: connection.id }),
+            onSelect: () =>
+              void openPopup({ packageId, authKey, connectionId: connection.id, space }),
             hidden: !canRenew,
             testId: `connection-reconnect-${connection.id}`,
           },
@@ -279,7 +288,7 @@ export function ConnectionActionsCell({
             id: "replacement",
             label: t("detail.integrationMemberPicker.addConnection", { ns: "agents" }),
             icon: Plus,
-            onSelect: () => void openPopup({ packageId, authKey, forceAccountSelect: true }),
+            onSelect: () => void openPopup({ packageId, authKey, forceAccountSelect: true, space }),
             hidden: !(needsRepair && canCreate && !canRenew),
             testId: `connection-replacement-${connection.id}`,
           },

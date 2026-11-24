@@ -7,7 +7,8 @@ import { useUpdateIntegrationSettings } from "../../hooks/use-integrations";
 
 /**
  * Who may create connections: cross-cutting, not tied to one auth, and admin only. The account
- * runs use by default and the per-agent exceptions live in the Connexions tab.
+ * runs use by default and the per-agent exceptions are their own section of Paramètres
+ * (`DefaultConnectionSettings`).
  */
 export function AccessRulesSection({
   packageId,

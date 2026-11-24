@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { useTranslation } from "react-i18next";
+import { Link } from "react-router-dom";
+import { Button } from "@appstrate/ui/components/button";
 import type { IntegrationDetailWire } from "../../hooks/use-integrations";
 import { connectionOptionLabel } from "../../lib/connection-set";
 import { SettingsHeading } from "../settings/settings-heading";
@@ -24,15 +26,10 @@ const directCallLabels = {
   string
 >;
 
-export function DefaultConnectionSection({
-  packageId,
-  detail,
-  canConfigure,
-}: {
-  packageId: string;
-  detail: Pick<IntegrationDetailWire, "auths" | "proxy_connection" | "active">;
-  canConfigure: boolean;
-}) {
+type DefaultConnectionDetail = Pick<IntegrationDetailWire, "auths" | "proxy_connection" | "active">;
+
+/** The account a call without an agent uses in this space, or why there is none. */
+function DefaultConnectionVerdict({ detail }: { detail: DefaultConnectionDetail }) {
   const { t } = useTranslation("settings");
   const verdict = detail.proxy_connection;
   const selected = detail.auths
@@ -42,11 +39,32 @@ export function DefaultConnectionSection({
   const selectedKey = verdict.imposed
     ? "integration.defaultConnection.direct.imposedAccount"
     : "integration.defaultConnection.direct.account";
-  const existingOnly = detail.auths.length === 0;
+  return (
+    <p className="text-sm" data-testid="default-connection-verdict">
+      {status === "ready" && selected
+        ? t(selectedKey, { account: connectionOptionLabel(selected) })
+        : t(directCallLabels[status])}
+    </p>
+  );
+}
+
+/**
+ * The Connexions tab's read of the space's default: what a call uses, for every member. It is set
+ * in Paramètres (`DefaultConnectionSettings`), which `settingsHref` opens for a configurer.
+ */
+export function DefaultConnectionSection({
+  detail,
+  settingsHref,
+}: {
+  detail: DefaultConnectionDetail;
+  /** Where the default is set; absent for a reader who cannot configure it. */
+  settingsHref?: string;
+}) {
+  const { t } = useTranslation(["settings", "common"]);
   return (
     <section
       id="default-connection"
-      className="mt-8 flex flex-col gap-6"
+      className="mt-8 flex flex-col gap-3"
       data-testid="default-connection"
     >
       <SettingsHeading
@@ -54,17 +72,34 @@ export function DefaultConnectionSection({
         title={t("integration.defaultConnection.title")}
         description={t("integration.defaultConnection.description")}
       />
-      <p className="text-sm">
-        {status === "ready" && selected
-          ? t(selectedKey, { account: connectionOptionLabel(selected) })
-          : t(directCallLabels[status])}
-      </p>
-      {canConfigure && (
-        <>
-          <OrgDefaultSection packageId={packageId} existingOnly={existingOnly} />
-          <PinManagementSection packageId={packageId} existingOnly={existingOnly} />
-        </>
-      )}
+      <div className="flex flex-wrap items-center gap-3">
+        <DefaultConnectionVerdict detail={detail} />
+        {settingsHref && (
+          <Button variant="outline" size="sm" asChild>
+            <Link to={settingsHref} data-testid="default-connection-edit">
+              {t("btn.edit", { ns: "common" })}
+            </Link>
+          </Button>
+        )}
+      </div>
     </section>
+  );
+}
+
+/** Paramètres › Connexion par défaut: the space's default and the per-agent exceptions. */
+export function DefaultConnectionSettings({
+  packageId,
+  detail,
+}: {
+  packageId: string;
+  detail: DefaultConnectionDetail;
+}) {
+  const existingOnly = detail.auths.length === 0;
+  return (
+    <div className="flex flex-col gap-6" data-testid="default-connection-settings">
+      <DefaultConnectionVerdict detail={detail} />
+      <OrgDefaultSection packageId={packageId} existingOnly={existingOnly} />
+      <PinManagementSection packageId={packageId} existingOnly={existingOnly} />
+    </div>
   );
 }

@@ -6,7 +6,8 @@ import { installFakeStorage } from "../../../test/fake-storage.ts";
 
 installFakeStorage({ __APP_CONFIG__: { features: {}, trustedOrigins: [] } });
 
-const { DefaultConnectionSection } = await import("../default-connection-section.tsx");
+const { DefaultConnectionSection, DefaultConnectionSettings } =
+  await import("../default-connection-section.tsx");
 const { render } = await import("../../../test/render.tsx");
 const i18nModule = await import("../../../i18n.ts");
 
@@ -22,6 +23,7 @@ const auths = [
     ],
   },
 ] as IntegrationDetailWire["auths"];
+const SETTINGS_HREF = "/integrations/@acme/gmail?integrationSettings=default-connection#settings";
 function section(
   proxy: IntegrationDetailWire["proxy_connection"],
   canConfigure = false,
@@ -29,9 +31,8 @@ function section(
 ) {
   return render(
     <DefaultConnectionSection
-      packageId="@acme/gmail"
       detail={{ active, auths, proxy_connection: proxy }}
-      canConfigure={canConfigure}
+      settingsHref={canConfigure ? SETTINGS_HREF : undefined}
     />,
   );
 }
@@ -43,6 +44,7 @@ describe("DefaultConnectionSection", () => {
       t("integration.defaultConnection.direct.imposedAccount", { account: "CRM équipe" }),
     );
     expect(html).not.toContain("Mon compte");
+    expect(html).not.toContain('data-testid="default-connection-edit"');
     expect(html).not.toContain('data-testid="org-default-section"');
     expect(html).not.toContain('data-testid="pin-management-section"');
   });
@@ -65,10 +67,23 @@ describe("DefaultConnectionSection", () => {
     ).toContain(t("integration.defaultConnection.direct.inactive"));
   });
 
-  it("is the tab's h2, anchored, with the configurer's exceptions as h3", () => {
+  it("is the tab's h2, anchored, and sends the configurer to its settings without editing in place", () => {
     const html = section({ status: "none", imposed: false }, true);
     expect(html).toContain('id="default-connection"');
     expect(html).toMatch(new RegExp(`<h2[^>]*>${t("integration.defaultConnection.title")}</h2>`));
+    expect(html).toContain(`href="${SETTINGS_HREF}"`);
+    expect(html).not.toContain('data-testid="org-default-section"');
+    expect(html).not.toContain('data-testid="pin-management-section"');
+  });
+
+  it("holds the space default and the agent exceptions in its settings, under the verdict", () => {
+    const html = render(
+      <DefaultConnectionSettings
+        packageId="@acme/gmail"
+        detail={{ active: true, auths, proxy_connection: { status: "none", imposed: false } }}
+      />,
+    );
+    expect(html).toContain(t("integration.defaultConnection.direct.none"));
     expect(html).toMatch(new RegExp(`<h3[^>]*>${t("integration.admin.exceptions.title")}</h3>`));
   });
 });

@@ -5,7 +5,13 @@
  * the query key's `init`, so switching org or space refetches instead of serving another scope's page.
  */
 
-import { useMutation, useQuery, useQueryClient, type QueryClient } from "@tanstack/react-query";
+import {
+  useMutation,
+  useQueries,
+  useQuery,
+  useQueryClient,
+  type QueryClient,
+} from "@tanstack/react-query";
 import type {
   ConsumingAgentSummary,
   IntegrationConnection,
@@ -15,6 +21,7 @@ import type {
 } from "@appstrate/shared-types";
 import { $api, client, type paths } from "../api/client";
 import { invalidatePaths } from "../lib/query-keys";
+import { spaceHeader } from "../lib/scoping-headers";
 import { splitPackageRef } from "../lib/package-paths";
 
 // Spec-pinned: the generated response shape verbatim (a rename/removal of any non-`manifest`
@@ -38,7 +45,8 @@ export type IntegrationClient = NonNullable<
   paths["/api/integrations/{packageId}/auths/{authKey}/clients"]["get"]["responses"]["200"]["content"]["application/json"]["data"]
 >[number];
 import { useOrgOnlyScope, useOrgScope, useSpaceReadScope } from "./use-org-scope";
-import { usePermissions } from "./use-permissions";
+import { usePermissions, useRowSpaceGrants } from "./use-permissions";
+import { useCurrentOrgId } from "./use-org";
 import { invalidateSchedules, warnSchedulesDisabled } from "./use-schedules";
 
 // The detail READ shape is NOT re-exported from shared-types: consumers use IntegrationDetailWire.
@@ -202,6 +210,45 @@ export function useIntegrationDetail(packageId: string | undefined, spaceId?: st
       select: (data) => data as IntegrationDetailWire,
     },
   );
+}
+
+/** One space's read of an integration: what a list spanning spaces merges. */
+export interface IntegrationDetailIn {
+  spaceId: string;
+  detail: IntegrationDetailWire;
+}
+
+/**
+ * The integration's detail in each of `spaceIds` the reader may read it in, on the same keys as
+ * {@link useIntegrationDetail} there. `sources` keeps `spaceIds`' order and holds only the answered
+ * spaces; `isLoading` until every one answered.
+ */
+export function useIntegrationDetailsIn(
+  packageId: string | undefined,
+  spaceIds: readonly string[],
+): { sources: IntegrationDetailIn[]; isLoading: boolean } {
+  const orgId = useCurrentOrgId();
+  const grants = useRowSpaceGrants();
+  const readable = spaceIds.filter((spaceId) => grants(spaceId, "integrations:read"));
+  return useQueries({
+    queries: readable.map((spaceId) => ({
+      ...$api.queryOptions("get", "/api/integrations/{packageId}", {
+        params: {
+          path: { packageId: packageId ?? "" },
+          header: { "X-Org-Id": orgId ?? undefined, "X-Space-Id": spaceId },
+        },
+      }),
+      enabled: !!orgId && !!packageId,
+    })),
+    combine: (results) => ({
+      sources: results.flatMap((result, i) =>
+        result.data
+          ? [{ spaceId: readable[i]!, detail: result.data as IntegrationDetailWire }]
+          : [],
+      ),
+      isLoading: results.some((result) => result.isLoading),
+    }),
+  });
 }
 
 export function useIntegrationConnections(packageId: string | undefined) {
@@ -479,8 +526,8 @@ export function useDeleteIntegrationOAuthClient(tier: IntegrationClientTier) {
 // Admin: block_user_connections + pins + connection metadata
 // ─────────────────────────────────────────────
 
-export function useIntegrationPins(packageId: string | undefined) {
-  const scope = useSpaceReadScope("integrations:read");
+export function useIntegrationPins(packageId: string | undefined, spaceId?: string) {
+  const scope = useSpaceReadScope("integrations:read", spaceId);
   return $api.useQuery(
     "get",
     "/api/integrations/{packageId}/pins",
@@ -495,8 +542,8 @@ export function useIntegrationPins(packageId: string | undefined) {
 }
 
 /** The space's agents that declare this integration as a dependency (feeds the "pin a new agent" picker). */
-export function useAgentsConsumingIntegration(packageId: string | undefined) {
-  const scope = useSpaceReadScope("integrations:read");
+export function useAgentsConsumingIntegration(packageId: string | undefined, spaceId?: string) {
+  const scope = useSpaceReadScope("integrations:read", spaceId);
   return $api.useQuery(
     "get",
     "/api/integrations/{packageId}/consuming-agents",
@@ -593,18 +640,26 @@ export function useRenameIntegrationConnection() {
 }
 
 /**
- * Share a connection into a space (idempotent) or withdraw it, through the space's door
- * (`packageId` set) or the account's. The mutation stays pending until the refetched sharing
+ * Share a connection into a space (idempotent) or withdraw it, through a space's door
+ * (`packageId` set: `doorSpaceId`, the working space when omitted) or the account's. The mutation
+ * stays pending until the refetched sharing
  * lands, so the share editor never re-enables on stale state. Withdrawing disables other
  * actors' schedules naming the connection.
  */
-export function useConnectionShare(op: "share" | "unshare", packageId?: string) {
+export function useConnectionShare(
+  op: "share" | "unshare",
+  packageId?: string,
+  doorSpaceId?: string,
+) {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async ({ connectionId, spaceId }: { connectionId: string; spaceId: string }) => {
       if (packageId) {
         const path = "/api/integrations/{packageId}/connections/{connectionId}/shares/{spaceId}";
-        const init = { params: { path: { packageId, connectionId, spaceId } } };
+        const init = {
+          params: { path: { packageId, connectionId, spaceId } },
+          ...spaceHeader(doorSpaceId),
+        };
         await (op === "share" ? client.PUT(path, init) : client.DELETE(path, init));
       } else {
         const path = "/api/me/connections/{connectionId}/shares/{spaceId}";
@@ -620,7 +675,7 @@ export function useConnectionShare(op: "share" | "unshare", packageId?: string) 
 }
 
 /** Explicit policy, atomically saved with current team-space shares by the server. */
-export function useConnectionShareAllSpaces(packageId?: string) {
+export function useConnectionShareAllSpaces(packageId?: string, doorSpaceId?: string) {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async ({ connectionId, enabled }: { connectionId: string; enabled: boolean }) => {
@@ -629,6 +684,7 @@ export function useConnectionShareAllSpaces(packageId?: string) {
         await client.PUT("/api/integrations/{packageId}/connections/{connectionId}/shares", {
           params: { path: { packageId, connectionId } },
           body,
+          ...spaceHeader(doorSpaceId),
         });
       } else {
         await client.PUT("/api/me/connections/{connectionId}/shares", {

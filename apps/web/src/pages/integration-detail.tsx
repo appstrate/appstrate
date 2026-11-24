@@ -33,6 +33,7 @@ import {
   LayoutGrid,
   Server,
   Settings2,
+  Star,
 } from "lucide-react";
 import { authMethodLabel } from "../lib/integration-presentation";
 import { AvailabilityBadge } from "../components/package-detail/availability-card";
@@ -52,7 +53,7 @@ import {
   type SettingsRailGroup,
 } from "../components/settings/settings-rail-view";
 import { PackageDetailBar } from "../components/package-detail/package-detail-bar";
-import { PackageDetailSkeleton } from "../components/loading-skeletons";
+import { ListTabSkeleton, PackageDetailSkeleton } from "../components/loading-skeletons";
 import { PackageActionsDropdown } from "../components/package-detail/package-actions-dropdown";
 import { SetupGuideSteps } from "../components/package-detail/setup-guide-steps";
 import { PackageCommonSection } from "../components/package-detail/package-common-section";
@@ -61,21 +62,24 @@ import { PackageOwnershipNotice } from "../components/package-detail/package-own
 import { ConfigAuthBlock } from "../components/integration-detail/config-auth-block";
 import { AccessRulesSection } from "../components/integration-detail/access-rules-section";
 import { ConnectionsTable } from "../components/integration-detail/connections-table";
-import { DefaultConnectionSection } from "../components/integration-detail/default-connection-section";
+import {
+  DefaultConnectionSection,
+  DefaultConnectionSettings,
+} from "../components/integration-detail/default-connection-section";
 import { IntegrationActivateButton } from "../components/integration-detail/integration-activate-button";
 import { ConfigurationSpace } from "../components/configuration-space";
-import { spaceLabel } from "../lib/space-label";
 import { RoleLimitNotice } from "../components/role-limit-notice";
 import { usePermissions, useHomeSpaceName } from "../hooks/use-permissions";
 import { readIntegrationSource } from "../lib/package-manifest";
 import {
   INTEGRATION_DEFINITION_SECTIONS,
+  isIntegrationSpaceSection,
   resolveIntegrationSettingsSection,
 } from "../lib/integration-settings-sections";
 import { isUnauthenticatedIntegration } from "@appstrate/core/integration";
 import { isVariableTemplate } from "@appstrate/afps-shared/connection-variables";
 import { usePackageDetail, usePackageDownload, type Versioned } from "../hooks/use-packages";
-import { useIntegrationDetail } from "../hooks/use-integrations";
+import { useIntegrationDetail, useIntegrationDetailsIn } from "../hooks/use-integrations";
 import { useCanReach } from "../hooks/use-can-reach";
 import { useIntegrationSpaceAction } from "../components/integration-detail/use-integration-space";
 import { useSpacesFor } from "../hooks/use-space-action";
@@ -97,6 +101,22 @@ const IntegrationDefinitionEditor = lazy(() =>
 
 /** Rail id → editor section. Contenu (`bundle`) is not one: it reads the bundle. */
 type DefinitionRailEntry = [IntegrationSettingsSection, IntegrationDefinitionSection];
+/** The heading of each section set in one space (`isIntegrationSpaceSection`). */
+const SPACE_SECTION_HEADINGS = {
+  authentication: {
+    title: "integration.presentation.authentication",
+    description: "integration.presentation.authenticationDescription",
+  },
+  access: {
+    title: "integration.admin.access.title",
+    description: "integration.config.accessDescription",
+  },
+  "default-connection": {
+    title: "integration.defaultConnection.title",
+    description: "integration.defaultConnection.description",
+  },
+} as const;
+
 const DEFINITION_RAIL: readonly DefinitionRailEntry[] = [
   ["identity", "general"],
   ["source", "source"],
@@ -196,6 +216,7 @@ export function IntegrationSettings({
             items: [
               item("authentication", KeyRound, t("integration.presentation.authentication")),
               item("access", ShieldCheck, t("integration.admin.access.title")),
+              item("default-connection", Star, t("integration.defaultConnection.title")),
             ],
           },
         ]
@@ -266,7 +287,7 @@ export function IntegrationSettings({
               allowUndeclaredTools={detail.allow_undeclared_tools}
             />
           </div>
-        ) : (
+        ) : isIntegrationSpaceSection(active) ? (
           // In « Tous les espaces » the space it is set in comes first.
           <div className="p-6">
             {overview && (
@@ -289,16 +310,8 @@ export function IntegrationSettings({
             ) : (
               <>
                 <SettingsHeading
-                  title={t(
-                    active === "access"
-                      ? "integration.admin.access.title"
-                      : "integration.presentation.authentication",
-                  )}
-                  description={t(
-                    active === "access"
-                      ? "integration.config.accessDescription"
-                      : "integration.presentation.authenticationDescription",
-                  )}
+                  title={t(SPACE_SECTION_HEADINGS[active].title)}
+                  description={t(SPACE_SECTION_HEADINGS[active].description)}
                 />
                 {active === "authentication" && (
                   <div className="flex flex-col gap-4">
@@ -349,10 +362,13 @@ export function IntegrationSettings({
                     blockUserConnections={blockUserConnections}
                   />
                 )}
+                {active === "default-connection" && (
+                  <DefaultConnectionSettings packageId={packageId} detail={detail} />
+                )}
               </>
             )}
           </div>
-        );
+        ) : null;
       }}
     </SettingsRailView>
   );
@@ -413,7 +429,8 @@ export function IntegrationDetailPage() {
   // The working space's verdict, for what acts in it.
   const canConfigure = can("integrations:configure");
   const configureIn = useIntegrationSpaceAction(packageId, "integrations:configure", spaceIds);
-  const connectionsIn = useIntegrationSpaceAction(packageId, "integrations:read", spaceIds);
+  // In « Tous les espaces », the integration as each space it is active in reads it.
+  const across = useIntegrationDetailsIn(packageId || undefined, overview ? spaceIds : []);
   const workingSpaceId = useCurrentSpaceId();
   const connectionsFromWorkingSpace = shownFromWorkingSpace(overview, workingSpaceId, spaceIds);
   // Hash-driven like the agent page, so the tab can be LINKED to. Needed
@@ -551,40 +568,48 @@ export function IntegrationDetailPage() {
 
       {/* One connected-accounts table, with each row retaining its auth context. */}
       <DetailTabPanel value="connections">
-        {/* Connections are a space's: in « Tous les espaces » the tab names the one it lists, and
-            changes it. */}
-        {overview && !pkgLoading && (connectionsIn.offered || connectionsFromWorkingSpace) && (
-          <ConfigurationSpace
-            label={t("integration.connections.spaceLabel")}
-            choiceLabel={t("integration.connections.spaceChoice")}
-            targetLabel={(space) =>
-              t("integration.connections.spaceChoiceIn", { space: spaceLabel(space, t) })
-            }
-            spaceIds={spaceIds}
-            enter={connectionsIn}
-          />
-        )}
-        {/* In the mode, the table is the working space's only when the line names it; active
-            nowhere the reader reaches, the hint. */}
-        {!connectionsFromWorkingSpace ? (
-          !pkgLoading && spaceIds.length === 0 && <ActivationHint />
+        {/* In « Tous les espaces » the list spans every space the integration is active in where
+            the reader reads it; active nowhere they reach, the hint. */}
+        {overview ? (
+          pkgLoading || across.isLoading ? (
+            <ListTabSkeleton />
+          ) : across.sources.length === 0 ? (
+            <ActivationHint />
+          ) : across.sources.every((source) => source.detail.auths.length === 0) ? (
+            <p className="text-muted-foreground text-sm">{t("integration.auth.none")}</p>
+          ) : (
+            <ConnectionsTable
+              packageId={packageId}
+              sources={across.sources}
+              spanning
+              addIn={connectionsFromWorkingSpace && active ? { detail, canConfigure } : undefined}
+              onConfigure={openAuthentication}
+            />
+          )
         ) : !active ? (
           <ActivationHint />
         ) : detail.auths.length === 0 ? (
           <p className="text-muted-foreground text-sm">{t("integration.auth.none")}</p>
         ) : (
-          <ConnectionsTable
-            packageId={packageId}
-            detail={detail}
-            canConfigure={canConfigure}
-            onConfigure={openAuthentication}
-          />
+          workingSpaceId && (
+            <ConnectionsTable
+              packageId={packageId}
+              sources={[{ spaceId: workingSpaceId, detail }]}
+              spanning={false}
+              addIn={{ detail, canConfigure }}
+              onConfigure={openAuthentication}
+            />
+          )
         )}
-        {connectionsFromWorkingSpace && (
+        {/* The default is one space's: « Tous les espaces » lists without it. */}
+        {!overview && (
           <DefaultConnectionSection
-            packageId={packageId}
             detail={detail}
-            canConfigure={canConfigure}
+            settingsHref={
+              canConfigure && active
+                ? integrationSettingsHref(location.pathname, "default-connection")
+                : undefined
+            }
           />
         )}
       </DetailTabPanel>
