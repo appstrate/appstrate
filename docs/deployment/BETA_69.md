@@ -17,6 +17,8 @@ Record the application's active version, full `MODULES` list, and any explicit r
 
 ## Maintenance window
 
+This window ends at beta.70 (core journal 110). To upgrade beta.68 directly to a release that includes core migration 0113, stop after step 2 and continue with [Upgrading through core migration 0113](UPGRADE_0113.md).
+
 1. Drain runs and stop the application, workers and other writers. Record one UTC timestamp for `0053 --before`. Use dump and restore clients matching PostgreSQL’s major version and verify a strict restore into an empty database. Back up PostgreSQL, both package buckets (`agent-packages` and `library-packages`), and any logos needed by 0049 at the same point.
 2. Run **0054 before Drizzle**. Dry-run with `--signing-dir DIR`; resolve every `UNFOLDED` line, including missing archives and publisher signatures. The reviewed dry-run must show zero unresolved entries before `--apply`. Preserve the signing directory across retries.
 3. Run the release's migrate service for core journal entries 0097–0109. On an unmodified beta.68 journal, the count goes from 97 to 110. Verify that the connection reference in `connection_calls` is nullable after 0109. Apply 0048, then 0049 on instances that previously served 0097, 0051, and 0053 with the recorded timestamp. Run 0047 and 0052 in the window. Compare placement counts, manifests, stored integrity, dependency indexes and run-read rows with the rehearsal. Re-run the idempotent scripts.

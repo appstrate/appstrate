@@ -1529,6 +1529,22 @@ If the candidate's `before-schema` check finds notifications outside their run's
 
 The last query lists identifiers of unresolved notifications. Check their recipients against the run and the historical membership or delivery records. A system run can have multiple recipients. Determine the intended tenant and recipient before an individual correction. Keep traffic closed until the preflight returns zero, including independently checked read markers and grants on later installations. Record the affected counts in the deployment log.
 
+## Historical chat messages — `before-traffic`
+
+`verify-beta68-upgrade.ts before-traffic` lists, under `chat · messages incompatible with history replay`, each stored message that `historicalChatMessageSchema` refuses, as `session_id=… seq=…`. The next turn in such a conversation is refused with a 400, so the check keeps chat closed. It prints identifiers only, never message content.
+
+On the restore, read the shape of each listed row without its text:
+
+```sql
+SELECT m.seq, m.content->>'role' AS role, p->>'type' AS part_type,
+       array(SELECT jsonb_object_keys(p)) AS part_keys
+FROM chat_messages m, jsonb_array_elements(coalesce(m.content->'parts', '[]'::jsonb)) AS p
+WHERE m.seq IN (/* listed seq values */)
+ORDER BY m.seq;
+```
+
+The refused shapes are: a role other than `user` or `assistant`, a message without a `parts` array, a text part without `text`, a file part without `mediaType` or without an `upload://` / `appfile://` URL, and a `data-agent-prompt` part outside a user message, repeated in one message, or whose `data` is not `{ name, title, text? }`. Repair them with the next numbered script, written against the exact shape found and rehearsed on the restore. Never edit the rows by hand in production. Re-run `before-traffic` until the count is `0`, then reopen chat.
+
 ## Detail — Marked OAuth refresh tokens deleted (script `0056`)
 
 **Run it once after deploying the release that ends OAuth tokens by deleting them (#2325), inside or after the deploy window; the app may keep running.** Better Auth reads a refresh token marked `revoked` and presented again outside the reuse window as stolen, and deletes every refresh token of that (client, user) pair on every resource, other orgs included. Until this release the platform marked tokens at member exit and at password change, and `0019` did the same; the code now deletes them, but the rows already marked are still in the database and each is a trigger a stale client can pull.

@@ -4,7 +4,7 @@
 import { getErrorMessage } from "@appstrate/core/errors";
 import { parseBefore, pendingRuntimeTools } from "./0053-migrate-runtime-tools.ts";
 import { pendingFileReadReceipts } from "./0055-chat-file-read-receipts.ts";
-import { countInvalidHistoricalChatMessages } from "./lib/historical-chat-messages.ts";
+import { findInvalidHistoricalChatMessages } from "./lib/historical-chat-messages.ts";
 import { describeDatabaseTarget, exitUnlessDatabaseNamed } from "./lib/database-target.ts";
 
 /** Run with writers stopped, immediately before the schema migration service. */
@@ -48,8 +48,20 @@ export async function checkBeforeSchema(execute?: (statement: string) => Promise
   return checks;
 }
 
+interface UpgradeCheck {
+  check: string;
+  pending: number;
+  /** The rows an operator reviews before correcting them, by identifier only. */
+  identifiers?: string[];
+}
+
+/** A pending count with the identifiers an operator needs to review each row. */
+function withIdentifiers(identifiers: string[]) {
+  return { pending: identifiers.length, identifiers };
+}
+
 /** The original 0053 cutoff is part of the data migration's identity on this installation. */
-export async function checkBeforeTraffic(before: Date) {
+export async function checkBeforeTraffic(before: Date): Promise<UpgradeCheck[]> {
   const { db, toRows } = await import("@appstrate/db/client");
   const [row] = toRows<{ pending: number }>(
     await db.execute(
@@ -79,7 +91,11 @@ export async function checkBeforeTraffic(before: Date) {
     { check: "0055 · messages to rewrite", pending: receipts.messages },
     {
       check: "chat · messages incompatible with history replay",
-      pending: await countInvalidHistoricalChatMessages(db),
+      ...withIdentifiers(
+        (await findInvalidHistoricalChatMessages(db)).map(
+          ({ sessionId, seq }) => `session_id=${sessionId} seq=${seq}`,
+        ),
+      ),
     },
   ];
 }
@@ -101,11 +117,14 @@ if (import.meta.main) {
   const { closeDb } = await import("@appstrate/db/client");
   try {
     process.stdout.write(`${await describeDatabaseTarget()}\n`);
-    const checks =
+    const checks: UpgradeCheck[] =
       before && "before" in before
         ? await checkBeforeTraffic(before.before)
         : await checkBeforeSchema();
-    for (const { check, pending } of checks) process.stdout.write(`${check}: ${pending}\n`);
+    for (const entry of checks) {
+      process.stdout.write(`${entry.check}: ${entry.pending}\n`);
+      for (const identifier of entry.identifiers ?? []) process.stdout.write(`  ${identifier}\n`);
+    }
     if (checks.some(({ pending }) => pending > 0)) process.exitCode = 1;
   } catch (error) {
     process.stderr.write(`Upgrade check failed: ${getErrorMessage(error)}\n`);

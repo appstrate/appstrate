@@ -5,12 +5,12 @@ import { sql } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
 import { chatSessions } from "@appstrate/db/schema";
 import { createTestContext } from "../../apps/api/test/helpers/auth.ts";
-import { countInvalidHistoricalChatMessages } from "../migration/lib/historical-chat-messages.ts";
+import { findInvalidHistoricalChatMessages } from "../migration/lib/historical-chat-messages.ts";
 
-it("counts only unreadable historical rows, including rows on the next page", async () => {
+it("identifies only unreadable historical rows, including rows on the next page", async () => {
   const ctx = await createTestContext({ orgSlug: "history-check" });
   await db.transaction(async (tx) => {
-    const before = await countInvalidHistoricalChatMessages(tx);
+    const before = (await findInvalidHistoricalChatMessages(tx)).length;
     const sessionId = `chs_${crypto.randomUUID()}`;
     await tx.insert(chatSessions).values({ id: sessionId, orgId: ctx.orgId, userId: ctx.user.id });
     const old = {
@@ -28,6 +28,8 @@ it("counts only unreadable historical rows, including rows on the next page", as
       FROM jsonb_array_elements(${JSON.stringify(rows)}::jsonb) WITH ORDINALITY AS entries(content, n)
       ORDER BY n
     `);
-    expect(await countInvalidHistoricalChatMessages(tx)).toBe(before + 2);
+    const invalid = await findInvalidHistoricalChatMessages(tx);
+    expect(invalid).toHaveLength(before + 2);
+    expect(invalid.filter((row) => row.sessionId === sessionId)).toHaveLength(2);
   });
 });
