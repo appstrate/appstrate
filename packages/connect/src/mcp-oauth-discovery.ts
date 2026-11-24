@@ -20,16 +20,12 @@
  *   discoverProtectedResourceMetadata → resolveOAuthEndpoints(issuer) →
  *   registerDynamicClient → persist.
  *
- * Resolution order (RFC 9728 §3, §5): explicit `resourceMetadataUrl`, the `WWW-Authenticate`
- * challenge, the path-inserted well-known location, the root one. A document is used only when its
- * `resource` equals the identifier its location was derived from (§3.3); else the next is tried.
- *
- * Best-effort throughout: any network/parse/validation failure falls through
- * to the next strategy and ultimately returns `null` (the caller then surfaces
- * the existing "register an OAuth client" error).
+ * Try the advertised document, then the path-specific and root well-known locations.
+ * A document must name the expected resource (§3.3). If the advertised document
+ * is temporarily unavailable and no valid alternative is found, the caller can retry.
  */
 
-import { guardedFetch } from "@appstrate/core/ssrf";
+import { guardedFetch, SsrfBlockedError } from "@appstrate/core/ssrf";
 import { readJsonUnder } from "./bounded-body.ts";
 import { sameUrlIdentifier } from "./oauth-discovery.ts";
 
@@ -52,11 +48,8 @@ export interface ProtectedResourceMetadata {
 export interface DiscoverProtectedResourceInput {
   /** The MCP server URL (AFPS `source.remote.url`). */
   resourceServerUrl: string;
-  /**
-   * Explicit metadata URL (e.g. the `resource_metadata` value from a
-   * `WWW-Authenticate` challenge). Tried first when present.
-   */
-  resourceMetadataUrl?: string;
+  /** Bearer challenge when the caller has already contacted the resource server. */
+  challenge?: BearerChallenge;
   /**
    * Testing seam — defaults to the SSRF-guarded {@link guardedFetch} (per-hop
    * DNS + blocklist, manual redirects, non-http(s) rejection). All metadata /
@@ -128,8 +121,13 @@ function* challengeFields(header: string) {
   if (!quoted) yield header.slice(start);
 }
 
+export interface BearerChallenge {
+  resourceMetadataUrl?: string;
+  scopes?: string[];
+}
+
 /** The first Bearer challenge, including only its own RFC 9110 auth-params. */
-export function bearerChallengeParameters(header: string): Map<string, string> | undefined {
+export function parseBearerChallenge(header: string): BearerChallenge | undefined {
   let bearer: Map<string, string> | undefined;
   for (const part of challengeFields(header)) {
     let field = part.trim();
@@ -147,16 +145,13 @@ export function bearerChallengeParameters(header: string): Map<string, string> |
       /^([!#$%&'*+.^_`|~\w-]+)\s*=\s*(?:"((?:\\.|[^"\\])*)"|([!#$%&'*+.^_`|~\w-]+))$/.exec(field);
     if (param) bearer.set(param[1]!.toLowerCase(), param[2]?.replace(/\\(.)/g, "$1") ?? param[3]!);
   }
-  return bearer;
-}
-
-export function parseResourceMetadataChallenge(header: string): string | undefined {
-  return bearerChallengeParameters(header)?.get("resource_metadata") || undefined;
-}
-
-export function parseScopeChallenge(header: string): string[] | undefined {
-  const scopes = bearerChallengeParameters(header)?.get("scope")?.split(/\s+/).filter(Boolean);
-  return scopes?.length ? scopes : undefined;
+  if (!bearer) return undefined;
+  const resourceMetadataUrl = bearer.get("resource_metadata");
+  const scopes = bearer.get("scope")?.split(/\s+/).filter(Boolean);
+  return {
+    ...(resourceMetadataUrl ? { resourceMetadataUrl } : {}),
+    ...(scopes?.length ? { scopes } : {}),
+  };
 }
 
 interface RawResourceMetadata {
@@ -205,11 +200,12 @@ function validateResourceMetadata(
   };
 }
 
-/** Best-effort GET + JSON parse of a metadata URL. Returns `null` on any failure. */
+const UNAVAILABLE = Symbol("unavailable");
+
 async function fetchResourceMetadata(
   url: string,
   fetchImpl: typeof fetch,
-): Promise<ProtectedResourceMetadata | null> {
+): Promise<ProtectedResourceMetadata | typeof UNAVAILABLE | null> {
   // Reject non-http(s) metadata URLs up front (the challenge / well-known value
   // is attacker-influencable). `guardedFetch` also rejects them, but failing
   // here keeps the guarantee independent of the injected `fetchImpl`.
@@ -220,63 +216,64 @@ async function fetchResourceMetadata(
       headers: { Accept: "application/json" },
       signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
     });
+    if (res.status === 429 || res.status >= 500) return UNAVAILABLE;
     if (!res.ok) return null;
     const json = await readJsonUnder(res);
     if (!json || typeof json !== "object") return null;
     return validateResourceMetadata(json as RawResourceMetadata);
-  } catch {
-    return null;
+  } catch (error) {
+    return error instanceof SsrfBlockedError && error.reason !== "resolution-failed"
+      ? null
+      : UNAVAILABLE;
   }
 }
 
-/**
- * Resolve the protected-resource metadata for an MCP server URL.
- * Returns `null` when no strategy yields a valid document.
- */
+/** Discover a valid document and distinguish an advertised server outage from absent metadata. */
 export async function discoverProtectedResourceMetadata(
   input: DiscoverProtectedResourceInput,
-): Promise<ProtectedResourceMetadata | null> {
+): Promise<{ metadata: ProtectedResourceMetadata | null; metadataUnreachable?: true }> {
   // Default MUST be the SSRF-guarded fetch, never raw global `fetch`: every URL
   // fetched below is attacker-influencable.
   const fetchImpl = input.fetchImpl ?? (guardedFetch as unknown as typeof fetch);
 
   // The resource server URL must be http(s); a bogus scheme cannot yield valid
   // metadata and must not reach the network layer.
-  if (!isHttpUrl(input.resourceServerUrl)) return null;
+  if (!isHttpUrl(input.resourceServerUrl)) return { metadata: null };
 
-  const fetchAt = async (
-    metadataUrl: string,
-    resource: string,
-  ): Promise<ProtectedResourceMetadata | null> => {
-    const md = await fetchResourceMetadata(metadataUrl, fetchImpl);
-    return md && sameUrlIdentifier(md.resource, resource) ? md : null;
-  };
-
-  if (input.resourceMetadataUrl) {
-    const md = await fetchAt(input.resourceMetadataUrl, input.resourceServerUrl);
-    if (md) return md;
-  }
-
-  try {
-    const res = await fetchImpl(input.resourceServerUrl, {
-      method: "GET",
-      headers: { Accept: "application/json" },
-      signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
-    });
-    const challenge = res.headers.get("www-authenticate");
-    const metadataUrl = challenge ? parseResourceMetadataChallenge(challenge) : undefined;
-    if (metadataUrl) {
-      const md = await fetchAt(metadataUrl, input.resourceServerUrl);
-      if (md) return md;
+  let challenge = input.challenge;
+  if (!challenge) {
+    try {
+      const res = await fetchImpl(input.resourceServerUrl, {
+        method: "GET",
+        headers: { Accept: "application/json" },
+        signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
+      });
+      const header = res.headers.get("www-authenticate");
+      if (header) challenge = parseBearerChallenge(header);
+    } catch {
+      // The well-known locations can still identify the protected resource.
     }
-  } catch {
-    // Best-effort.
   }
 
-  for (const location of buildProtectedResourceProbes(input.resourceServerUrl)) {
-    const md = await fetchAt(location.metadataUrl, location.resource);
-    if (md) return md;
+  const advertised = challenge?.resourceMetadataUrl;
+  const probes = buildProtectedResourceProbes(input.resourceServerUrl);
+  if (advertised) probes.unshift({ metadataUrl: advertised, resource: input.resourceServerUrl });
+  // A challenge can advertise a well-known URL. Read it once, checking the resource
+  // identifier for each location (the root location can identify the origin).
+  const responses = new Map<string, Awaited<ReturnType<typeof fetchResourceMetadata>>>();
+  for (const { metadataUrl, resource } of probes) {
+    let doc = responses.get(metadataUrl);
+    if (doc === undefined) {
+      doc = await fetchResourceMetadata(metadataUrl, fetchImpl);
+      responses.set(metadataUrl, doc);
+    }
+    if (doc && doc !== UNAVAILABLE && sameUrlIdentifier(doc.resource, resource))
+      return { metadata: doc };
   }
-
-  return null;
+  return {
+    metadata: null,
+    ...(advertised && responses.get(advertised) === UNAVAILABLE
+      ? { metadataUnreachable: true }
+      : {}),
+  };
 }

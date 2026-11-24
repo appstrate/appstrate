@@ -61,6 +61,8 @@ const HOSTS = [
   "mcp.nopkce.test",
   "mcp.manualnopkce.test",
   "mcp.busymetadata.test",
+  "mcp.prm-outage.test",
+  "mcp.prm-missing.test",
   "mcp.noscope.test",
   "mcp.guessoffline.test",
   "mcp.guessempty.test",
@@ -354,6 +356,63 @@ describe("discoverRemoteIntegration", () => {
     const auth = (manifest.auths as Record<string, Record<string, unknown>>).oauth!;
     expect(auth.default_scopes).toEqual(["ok"]);
     expect(auth.scope_catalog).toEqual([{ value: "ok", label: "ok" }]);
+  });
+
+  const outageHost = "mcp.prm-outage.test";
+  const outageOrigin = `https://${outageHost}`;
+  const outageResource = `${outageOrigin}/mcp`;
+  const advertisedUrl = `${outageOrigin}/.well-known/oauth-protected-resource/mcp`;
+
+  it.each([
+    ["HTTP 429", () => json({}, 429)],
+    ["HTTP 503", () => json({}, 503)],
+    [
+      "transport failure",
+      () => {
+        throw new TypeError("connection reset");
+      },
+    ],
+  ] as const)(
+    "asks to retry an explicitly advertised resource document after %s",
+    async (_, fail) => {
+      const { fetchImpl, seen } = fakeFetch({
+        [`POST ${outageResource}`]: () =>
+          unauthorized(`Bearer resource_metadata="${advertisedUrl}"`),
+        [`GET ${advertisedUrl}`]: fail,
+      });
+      const err = await refusal(
+        discoverRemoteIntegration({ url: outageResource, orgSlug: "acme" }, { fetchImpl }),
+      );
+      expect(err.status).toBe(502);
+      expect(err.message).toContain("protected-resource metadata");
+      expect(seen.filter((request) => request === `GET ${advertisedUrl}`)).toHaveLength(1);
+    },
+  );
+
+  it("uses valid root resource metadata after an advertised document returns 503", async () => {
+    const { fetchImpl } = fakeFetch({
+      ...protectedServer(outageHost, { challengeScope: "read:tools" }),
+      [`GET ${advertisedUrl}`]: () => json({}, 503),
+      [`GET ${outageOrigin}/.well-known/oauth-protected-resource`]: () =>
+        json({ resource: outageOrigin, authorization_servers: [outageOrigin] }),
+    });
+    const { manifest } = await discoverRemoteIntegration(
+      { url: outageResource, orgSlug: "acme" },
+      { fetchImpl },
+    );
+    expect(manifest.auths).toMatchObject({
+      oauth: { type: "oauth2", default_scopes: ["read:tools"] },
+    });
+  });
+
+  it("keeps the API-key fallback when the advertised resource document is absent", async () => {
+    const url = "https://mcp.prm-missing.test/mcp";
+    const { fetchImpl } = fakeFetch({
+      [`POST ${url}`]: () =>
+        unauthorized('Bearer resource_metadata="https://mcp.prm-missing.test/meta"'),
+    });
+    const { manifest } = await discoverRemoteIntegration({ url, orgSlug: "acme" }, { fetchImpl });
+    expect(manifest.auths).toMatchObject({ primary: { type: "api_key" } });
   });
 
   it("asks to retry a throttled issuer instead of proposing a manual client", async () => {

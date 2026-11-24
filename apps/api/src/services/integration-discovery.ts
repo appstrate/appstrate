@@ -15,9 +15,8 @@ import { parse as parseHost } from "tldts";
 import { createMcpHttpClient, httpStatusOf } from "@appstrate/mcp-transport";
 import {
   discoverProtectedResourceMetadata,
-  bearerChallengeParameters,
-  parseResourceMetadataChallenge,
-  parseScopeChallenge,
+  parseBearerChallenge,
+  type BearerChallenge,
   resolveOAuthEndpoints,
 } from "@appstrate/connect";
 import { isIconImage } from "@appstrate/core/appearance";
@@ -66,7 +65,7 @@ interface ProbedServer {
   transport: Transport;
   /** Whether the transport was seen answering, rather than guessed from the URL. */
   transportDetected: boolean;
-  challenge: string | undefined;
+  challenge: BearerChallenge | undefined;
   /** What the server says it is, when it answered `server/discover` or `initialize` openly. */
   identity: Implementation | undefined;
 }
@@ -224,7 +223,7 @@ async function probeServer(url: string, fetchImpl: typeof fetch): Promise<Probed
 
 interface ProbeObservation {
   /** The Bearer challenge of the last 401/403 offering one. */
-  challenge?: string;
+  challenge?: BearerChallenge;
   /** The status of the last answer. */
   status?: number;
   /** The fault of the last exchange that failed (a request, or its body cut short). */
@@ -332,10 +331,10 @@ export function serverIdentityFields(info: Implementation | undefined): {
  * The `WWW-Authenticate` of a 401/403 offering the Bearer scheme (MCP authorization), else
  * undefined: any other refusal is not an MCP server asking for a credential.
  */
-function bearerChallenge(res: Response): string | undefined {
+function bearerChallenge(res: Response): BearerChallenge | undefined {
   if (res.status !== 401 && res.status !== 403) return undefined;
   const challenge = res.headers.get("www-authenticate");
-  return challenge && bearerChallengeParameters(challenge) ? challenge : undefined;
+  return challenge ? parseBearerChallenge(challenge) : undefined;
 }
 
 async function reach(url: string, fetchImpl: typeof fetch, init: RequestInit): Promise<Response> {
@@ -389,17 +388,18 @@ interface DiscoveredAuth {
  */
 async function discoverAuth(
   url: string,
-  challenge: string,
+  challenge: BearerChallenge,
   fetchImpl: typeof fetch,
 ): Promise<DiscoveredAuth> {
   const origin = new URL(url).origin;
-  const resourceMetadataUrl = parseResourceMetadataChallenge(challenge);
-  const challengeScopes = parseScopeChallenge(challenge);
-  const md = await discoverProtectedResourceMetadata({
+  const challengeScopes = challenge.scopes;
+  const { metadata: md, metadataUnreachable } = await discoverProtectedResourceMetadata({
     resourceServerUrl: url,
-    ...(resourceMetadataUrl ? { resourceMetadataUrl } : {}),
+    challenge,
     fetchImpl,
   });
+  if (metadataUnreachable)
+    throw badGateway("The protected-resource metadata could not be read. Retry shortly.");
 
   if (md) {
     const advertised = md.authorizationServers[0]!;
