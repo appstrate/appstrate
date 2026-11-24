@@ -136,8 +136,8 @@ function validateSpaceFields(
   scope: OperationSpaceScope,
   { spec, pathItem, operation }: DocumentedRequest,
 ): void {
-  if (!("parameter" in scope)) return;
-  const source = scope.source ?? "path";
+  if (!("parameter" in scope) || !scope.parameter) return;
+  const source = scope.kind === "request" ? "body" : (scope.source ?? "path");
   const fail = (field: string): never => {
     throw new Error(
       `${operationId}: space field ${field} is absent from the documented ${source} of ${path}`,

@@ -182,12 +182,14 @@ describe("getCatalog — the route join", () => {
       level_parameter: "level",
       space_level: "space",
     };
+    expect(derive({ kind: "request", parameter: "team" }).kind).toBe("request");
     expect(derive(target).kind).toBe("target");
     expect(derive({ ...target, source: "query" }).kind).toBe("target");
     expect(derive({ ...target, source: "body" }).kind).toBe("target");
     expect(derive(query).kind).toBe("resource");
     expect(derive(body).kind).toBe("resource");
     for (const wrong of [
+      { kind: "request", parameter: "nestedOnly" },
       { ...target, parameter: "all" },
       { ...target, source: "query", parameter: "nested" },
       { ...target, source: "body", parameter: "nestedOnly" },

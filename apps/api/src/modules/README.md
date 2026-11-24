@@ -544,8 +544,9 @@ and fills it when the destination is already known.
 
 On a body- or query-selected resource, `space_permission` names the grant required on the space branch when the two levels use different permissions.
 
-Registration rejects a missing or unknown scope, a path target absent from the template, and a
-declaration contradicting mounted space middleware. Each route still enforces its own RBAC during
+Registration checks the declared fields against the documented path, query or JSON body and its
+discriminator variants. It rejects missing or unknown scopes and declarations that contradict the
+mounted space middleware. Each route still enforces its own RBAC during
 dispatch. For a row-addressed resource, the loader verifies its organization, credential reach and
 row-level permissions and returns the row with its `spaceId` (null for an organization row).
 Import `withAuthorizedRow` from `@appstrate/core/permissions` in built-in and npm modules.
