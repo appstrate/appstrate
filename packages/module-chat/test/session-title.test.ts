@@ -15,7 +15,7 @@ describe("the title derived from a first message", () => {
   });
 
   it("keeps a message of up to 60 characters whole", () => {
-    const text = "x".repeat(60);
+    const text = "X".repeat(60);
     expect(titleFromText(text)).toBe(text);
   });
 
@@ -29,7 +29,7 @@ describe("the title derived from a first message", () => {
   });
 
   it("keeps the head as is when it already ends on a word", () => {
-    const head = `${"a".repeat(28)} ${"b".repeat(28)}`;
+    const head = `${"A".repeat(28)} ${"b".repeat(28)}`;
     expect(titleFromText(`${head} ${"c".repeat(20)}`)).toBe(`${head}…`);
   });
 
@@ -39,7 +39,26 @@ describe("the title derived from a first message", () => {
     expect(titleFromText(text)).toBe(`${text.slice(0, 57)}…`);
   });
 
+  it("opens on a capital letter", () => {
+    expect(titleFromText("comment résumer ce fichier ?")).toBe("Comment résumer ce fichier ?");
+    expect(titleFromText("été 2026 : le bilan")).toBe("Été 2026 : le bilan");
+  });
+
+  it("leaves a title that does not open on a lowercase letter as it is", () => {
+    expect(titleFromText("Déjà en majuscule")).toBe("Déjà en majuscule");
+    expect(titleFromText("2026 en chiffres")).toBe("2026 en chiffres");
+    expect(titleFromText("« citation »")).toBe("« citation »");
+  });
+
+  it("capitalises a long message before cutting it", () => {
+    expect(
+      titleFromText(
+        "réponds simplement par le mot OK, sans rien ajouter d'autre que ce mot, et rien de plus.",
+      ),
+    ).toBe("Réponds simplement par le mot OK, sans rien ajouter…");
+  });
+
   it("cuts one unbroken word where the head ends", () => {
-    expect(titleFromText("x".repeat(80))).toBe(`${"x".repeat(57)}…`);
+    expect(titleFromText("X".repeat(80))).toBe(`${"X".repeat(57)}…`);
   });
 });

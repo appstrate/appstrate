@@ -501,6 +501,7 @@
   "library.cannotShareHere": "This package is not placed in this space and you may not share it here",
   "nav.sidebar": "Sidebar",
   "nav.sidebarDescription": "Displays the mobile sidebar.",
+  "nav.resizeSidebar": "Resize the sidebar",
   "nav.toggleSidebar": "Toggle sidebar",
   "nav.toggleSidebarIn": "Toggle sidebar ({{current}})",
   "nav.toggleSidebarUnread_one": "{{label}}, {{count}} unread run",

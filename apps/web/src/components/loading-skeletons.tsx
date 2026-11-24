@@ -1068,8 +1068,8 @@ export function ChatConversationSkeleton() {
 /**
  * The conversation list's shape, drawn while its permissions and chunk load:
  * the "new conversation" row (the chat's primary action, so it is real, not
- * grey) above a group of row skeletons — what `ChatConversationList` draws: a title line and the
- * space line under it, drawn by the module's own `ConversationRowSkeleton`.
+ * grey) above a group of row skeletons — what `ChatConversationList` draws: one line per row under
+ * a mouse, drawn by the module's own `ConversationRowSkeleton`.
  */
 export function ChatSidebarSkeleton() {
   const { t } = useTranslation("chat");
@@ -1087,7 +1087,7 @@ export function ChatSidebarSkeleton() {
       </SidebarGroup>
       <SidebarGroup className="min-h-0 flex-1 group-data-[collapsible=icon]:hidden">
         <SidebarGroupLabel className="text-sm md:text-xs">{t("threads.title")}</SidebarGroupLabel>
-        <SidebarMenu>
+        <SidebarMenu className="gap-0.5">
           {Array.from({ length: 5 }, (_, i) => (
             <SidebarMenuItem key={i}>
               <ConversationRowSkeleton />

@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { useEffect, Suspense, type ReactNode } from "react";
+import { useEffect, Suspense, type CSSProperties, type ReactNode } from "react";
+import { cn } from "@appstrate/ui/cn";
 import { Routes, Route, Outlet, useLocation, useSearchParams, Navigate } from "react-router-dom";
 import { PackageIndexPage } from "./pages/package-index";
 import { DashboardPage } from "./pages/dashboard";
@@ -55,7 +56,11 @@ import { useGlobalRunSync } from "./hooks/use-global-run-sync";
 import { useSpaceResolver } from "./hooks/use-current-space";
 import { useOverviewRules } from "./hooks/use-overview-mode";
 import { NotFoundPage, RouteGate } from "./components/route-gate";
-import { useChatSidebarStore, useSidebarStore } from "./stores/sidebar-store";
+import {
+  useChatSidebarStore,
+  useChatSidebarWidthStore,
+  useSidebarStore,
+} from "./stores/sidebar-store";
 import { Spinner } from "@appstrate/ui/components/spinner";
 import { HostedConnectPage } from "./pages/hosted-connect";
 import { SidebarInset, SidebarProvider } from "@appstrate/ui/components/sidebar";
@@ -461,6 +466,10 @@ function MainLayout({ search }: { search: string }) {
   const { pathname } = useLocation();
   const product = isUnder(pathname, "/chat") ? "chat" : "studio";
   const sidebar = product === "chat" ? chatSidebar : studioSidebar;
+  // The chat's sidebar is resizable on desktop (`ChatSidebarResizeHandle`); a phone's drawer sets
+  // its own width over this one.
+  const chatWidth = useChatSidebarWidthStore((state) => state.width);
+  const resizing = useChatSidebarWidthStore((state) => state.dragging);
   useSpaceResolver(search);
   useOverviewRules();
   useGlobalRunSync();
@@ -471,9 +480,18 @@ function MainLayout({ search }: { search: string }) {
       <SidebarProvider
         open={sidebar.open}
         onOpenChange={sidebar.setOpen}
+        style={
+          product === "chat" && chatWidth !== null
+            ? ({ "--sidebar-width": `${chatWidth}px` } as CSSProperties)
+            : undefined
+        }
         className={
           product === "chat"
-            ? `relative min-h-0 overflow-hidden ${KEYBOARD_VIEWPORT_CLASS}`
+            ? cn(
+                `relative min-h-0 overflow-hidden ${KEYBOARD_VIEWPORT_CLASS}`,
+                // The sidebar follows the pointer at once while it is dragged.
+                resizing && "[&>[data-side]>div]:!transition-none",
+              )
             : undefined
         }
       >

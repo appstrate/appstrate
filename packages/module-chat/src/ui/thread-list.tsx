@@ -20,7 +20,7 @@
  * fill as Studio's, or the two products would not read as one app.
  */
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { flushSync } from "react-dom";
 import { useQueryClient } from "@tanstack/react-query";
 import {
@@ -35,6 +35,7 @@ import {
 import { cn } from "@appstrate/ui/cn";
 import { useNowTick } from "@appstrate/ui/use-now-tick";
 import { Spinner } from "@appstrate/ui/components/spinner";
+import { ScrollArea } from "@appstrate/ui/components/scroll-area";
 import { Button } from "@appstrate/ui/components/button";
 import { Input } from "@appstrate/ui/components/input";
 import {
@@ -105,6 +106,32 @@ const GROUP_LABEL_KEY: Record<SessionGroupKey, string> = {
   month: "threads.group.month",
   older: "threads.group.older",
 };
+
+/**
+ * A date group: the rows sit close together, the groups apart, so « Aujourd'hui », « Hier »… read
+ * at a glance as the list's sections. Exported for the tests.
+ */
+export const GROUP_CLASS = "flex flex-col gap-0.5 not-first:mt-4";
+/** Its heading, set apart from the rows: semibold and muted, in small capitals under a mouse. */
+export const GROUP_LABEL_CLASS =
+  "text-sidebar-foreground/60 h-6 px-2 text-sm font-semibold md:text-[11px] md:tracking-wider md:uppercase";
+/** Its rows, one line each under a mouse (`ConversationRow`). */
+export const GROUP_ROWS_CLASS = "flex flex-col gap-0.5";
+
+/**
+ * The list's scroll, once it has rows: the design system's thin overlay scrollbar, not the
+ * browser's. The negative margins stretch it over the group's padding to the sidebar's edges, as
+ * Studio's nav scrolls. Radix lays its content out as a table, whose width follows the longest
+ * title: `block` keeps it to the sidebar's, so a title truncates.
+ */
+function ConversationScroll({ scrolls, children }: { scrolls: boolean; children: ReactNode }) {
+  if (!scrolls) return children;
+  return (
+    <ScrollArea className="-mr-2 -mb-2 min-h-0 flex-1 [&_[data-radix-scroll-area-viewport]>div]:!block">
+      {children}
+    </ScrollArea>
+  );
+}
 
 /** The trimmed search term, settled `delay` ms after the last keystroke (cleared at once). */
 function useDebouncedTerm(input: string, delay: number): string {
@@ -294,48 +321,42 @@ export function ChatConversationList({
           </SidebarGroupLabel>
         )}
         {/* Grows only with rows to scroll: an empty list must not push its
-            empty state to the bottom of the sidebar. The negative margins
-            stretch the scroll box over the group's padding to the sidebar's
-            edges, as Studio's nav scrolls; `w-auto` lets `-mr-2` widen it. */}
-        <SidebarMenu
-          className={
-            list.length > 0 || isLoading
-              ? "-mr-2 -mb-2 min-h-0 w-auto flex-1 overflow-y-auto pr-2 pb-2"
-              : undefined
-          }
-        >
-          {isLoading &&
-            Array.from({ length: 5 }, (_, i) => (
-              <SidebarMenuItem key={i}>
-                <ConversationRowSkeleton />
-              </SidebarMenuItem>
-            ))}
-          {searching
-            ? list.map(row)
-            : groups.map((group) => (
-                <li key={group.key} className="flex flex-col gap-1">
-                  <SidebarGroupLabel className="mt-1 h-6 px-2 text-sm md:text-[11px]">
-                    {t(GROUP_LABEL_KEY[group.key])}
-                  </SidebarGroupLabel>
-                  <ul className="flex flex-col gap-1">{group.sessions.map(row)}</ul>
-                </li>
+            empty state to the bottom of the sidebar. */}
+        <ConversationScroll scrolls={list.length > 0 || isLoading}>
+          <SidebarMenu className={cn("gap-0.5", (list.length > 0 || isLoading) && "pr-2 pb-2")}>
+            {isLoading &&
+              Array.from({ length: 5 }, (_, i) => (
+                <SidebarMenuItem key={i}>
+                  <ConversationRowSkeleton />
+                </SidebarMenuItem>
               ))}
-          {/* A plain button, not a menu row: a menu row closes the phone's
+            {searching
+              ? list.map(row)
+              : groups.map((group) => (
+                  <li key={group.key} className={GROUP_CLASS}>
+                    <SidebarGroupLabel className={GROUP_LABEL_CLASS}>
+                      {t(GROUP_LABEL_KEY[group.key])}
+                    </SidebarGroupLabel>
+                    <ul className={GROUP_ROWS_CLASS}>{group.sessions.map(row)}</ul>
+                  </li>
+                ))}
+            {/* A plain button, not a menu row: a menu row closes the phone's
               drawer, and loading more must leave it open on the list. */}
-          {hasNextPage && (
-            <SidebarMenuItem>
-              <button
-                type="button"
-                disabled={isFetchingNextPage}
-                onClick={() => void fetchNextPage()}
-                className="text-sidebar-foreground/70 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground focus-visible:ring-sidebar-ring flex h-7 w-full items-center rounded-md px-2 text-left text-base outline-none focus-visible:ring-2 disabled:opacity-50 md:text-xs"
-              >
-                {isFetchingNextPage && <Spinner className="mr-1.5 size-3" />}
-                {t("threads.showMore")}
-              </button>
-            </SidebarMenuItem>
-          )}
-        </SidebarMenu>
+            {hasNextPage && (
+              <SidebarMenuItem>
+                <button
+                  type="button"
+                  disabled={isFetchingNextPage}
+                  onClick={() => void fetchNextPage()}
+                  className="text-sidebar-foreground/70 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground focus-visible:ring-sidebar-ring flex h-7 w-full items-center rounded-md px-2 text-left text-base outline-none focus-visible:ring-2 disabled:opacity-50 md:text-xs"
+                >
+                  {isFetchingNextPage && <Spinner className="mr-1.5 size-3" />}
+                  {t("threads.showMore")}
+                </button>
+              </SidebarMenuItem>
+            )}
+          </SidebarMenu>
+        </ConversationScroll>
         {isError && list.length === 0 && (
           <div className="flex flex-col items-center gap-2 px-2 py-6 text-center">
             <p className={`text-sidebar-foreground/70 ${READING_TEXT_DENSE_CLASS}`}>
@@ -444,48 +465,51 @@ function ConversationRow({
         isActive={active}
         onClick={() => select?.(session.id)}
         size="lg"
-        // Room for the fixed-width right slot below, which is absolutely
-        // positioned and would otherwise sit on top of a long title. The host's stacked space tiles
-        // ring themselves in `--tile-ring`: the row's background in each of its states.
+        // One line under a mouse, as Studio's rows; a touch screen keeps its thumb's 48 px. Room
+        // for the fixed-width right slot below, which is absolutely positioned and would otherwise
+        // sit on top of a long title. The host's stacked space tiles ring themselves in
+        // `--tile-ring`: the row's background in each of its states.
         className={cn(
+          "desktop-pointer:h-8",
           canWrite ? "desktop-pointer:pr-16 pr-[4.5rem]" : "desktop-pointer:pr-16 pr-8",
           "[--tile-ring:var(--sidebar)] hover:[--tile-ring:var(--sidebar-accent)] active:[--tile-ring:var(--sidebar-accent)] data-[active=true]:[--tile-ring:var(--sidebar-accent)]",
         )}
       >
         <span
           className={cn(
-            "flex min-w-0 flex-1 flex-col gap-0.5",
-            canWrite && "max-md:flex-row max-md:items-center max-md:gap-2",
+            "flex min-w-0 flex-1 items-center gap-2",
+            !canWrite && "max-md:flex-col max-md:items-stretch max-md:gap-0.5",
           )}
         >
           <span
             className={cn(
-              "block truncate text-left leading-4 max-md:min-w-0 max-md:flex-1 max-md:text-base max-md:leading-5",
+              "block min-w-0 flex-1 truncate text-left leading-5 max-md:text-base",
               unread && "font-semibold",
             )}
           >
             {session.title ?? t("threads.new")}
           </span>
-          {/* The spaces are named on a line of their own: from `md` up, and on a phone for a reader,
-              whose row has no « … » panel to name them in... */}
-          <span
-            data-testid="chat-session-spaces"
-            className={cn(
-              "text-sidebar-foreground/70 flex h-4 min-w-0 items-center",
-              canWrite && "max-md:hidden",
-              NOTE_TEXT_CLASS,
-            )}
-          >
-            {sessionSpaces(session, renderSpaces, t)}
-          </span>
-          {/* ...and on a phone a writer's row closes the title's line with their tiles (the names
-              are in the « … » panel). */}
-          {canWrite && session.space_ids.length > 0 && (
+          {/* One line: the title, then the tiles of the spaces it touched, their names in the
+              tiles' tooltip and in the « … » menu... */}
+          {session.space_ids.length > 0 && (
             <span
               data-testid="chat-session-space-tiles"
-              className="hidden shrink-0 items-center max-md:flex"
+              className={cn("flex shrink-0 items-center", !canWrite && "max-md:hidden")}
             >
               {renderSpaces(session.space_ids, { tilesOnly: true })}
+            </span>
+          )}
+          {/* ...except a reader's row on a phone: no « … » panel and no hover to name them, so
+              they are named on a line of their own. */}
+          {!canWrite && (
+            <span
+              data-testid="chat-session-spaces"
+              className={cn(
+                "text-sidebar-foreground/70 flex h-4 min-w-0 items-center md:hidden",
+                NOTE_TEXT_CLASS,
+              )}
+            >
+              {sessionSpaces(session, renderSpaces, t)}
             </span>
           )}
         </span>

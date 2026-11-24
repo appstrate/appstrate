@@ -688,9 +688,13 @@ const TITLE_HEAD = 57;
  * A message's text as a title; null when empty. Past 60 chars it is cut to its
  * head plus an ellipsis — on the last word boundary, unless that sits before
  * char 30 (a short word, then a long unbroken token), where the word is cut.
+ * It opens on a capital, as a title does (« comment… » reads « Comment… »); only this derived
+ * title is touched, a name the user gives in the rename dialog is stored as typed.
  */
-export function titleFromText(text: string): string | null {
-  if (!text) return null;
+export function titleFromText(raw: string): string | null {
+  if (!raw) return null;
+  // `toUpperCase`, not the locale variant: the server's locale must not decide a title (Turkish « i »).
+  const text = raw.replace(/^\p{Ll}/u, (letter) => letter.toUpperCase());
   if (text.length <= 60) return toPgSafe(text);
   const head = text.slice(0, TITLE_HEAD);
   const midWord = /\S/.test(text.charAt(TITLE_HEAD)) && /\S$/.test(head);

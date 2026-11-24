@@ -22,8 +22,8 @@ const sessions: SessionSummary[] = [
   { ...base, id: "chs_3", title: "Fresh", space_ids: [] },
 ];
 
-/** The list under `filter` (`null`: « Tous les espaces »), seeded with `rows`. */
-function render(filter: string | null, rows = sessions): string {
+/** The list under `filter` (`null`: « Tous les espaces »), seeded with `rows`, for a writer or a reader. */
+function render(filter: string | null, rows = sessions, canWrite = true): string {
   const transport = transportOf(() => ({ "X-Org-Id": "org_1" }), filter);
   const qc = new QueryClient();
   qc.setQueryData<SessionsCache>(sessionsQueryKey(filter), {
@@ -38,7 +38,7 @@ function render(filter: string | null, rows = sessions): string {
             <ChatConversationList
               activeId={null}
               t={(key) => key}
-              can={() => true}
+              can={(permission) => canWrite || permission !== "chat:write"}
               renderSpaces={(ids) => <i data-spaces={ids.join(",")}>spaces</i>}
               formatAge={() => "age"}
             />
@@ -49,24 +49,32 @@ function render(filter: string | null, rows = sessions): string {
   );
 }
 
-describe("the conversation list's space line", () => {
+describe("the conversation list's spaces", () => {
   for (const [mode, filter] of [
     ["in « Tous les espaces »", null],
     ["under a selected space", "spc_a"],
   ] as const) {
-    it(`names the spaces every conversation touched ${mode}`, () => {
+    it(`shows the spaces every conversation touched ${mode}`, () => {
       const html = render(filter);
       expect(html).toContain('data-spaces="spc_a"');
       expect(html).toContain('data-spaces="spc_a,spc_b"');
     });
 
-    it(`says « Tous les espaces » for a conversation that touched no space ${mode}`, () => {
-      expect(render(filter)).toContain("common:overview.title");
+    it(`says « Tous les espaces » on a reader's line for a conversation that touched none ${mode}`, () => {
+      expect(render(filter, sessions, false)).toContain("common:overview.title");
     });
   }
 
-  it("draws a line on every row", () => {
-    // Three rows: three space lines, none of them skipped for being the filter's own space.
-    expect(render("spc_a").match(/data-testid="chat-session-spaces"/g)).toHaveLength(3);
+  it("closes the title's line with their tiles on every row that touched one", () => {
+    // Two rows touched a space, none skipped for being the filter's own space; the fresh one
+    // has no tiles, and a writer's row no second line.
+    const html = render("spc_a");
+    expect(html.match(/data-testid="chat-session-space-tiles"/g)).toHaveLength(2);
+    expect(html).not.toContain('data-testid="chat-session-spaces"');
+  });
+
+  it("names them on a line of their own for every reader's row on a phone", () => {
+    const html = render("spc_a", sessions, false);
+    expect(html.match(/data-testid="chat-session-spaces"/g)).toHaveLength(3);
   });
 });

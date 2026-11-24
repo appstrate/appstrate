@@ -48,4 +48,13 @@ const ScrollBar = React.forwardRef<
 ));
 ScrollBar.displayName = ScrollAreaPrimitive.ScrollAreaScrollbar.displayName;
 
-export { ScrollArea, ScrollBar };
+/**
+ * The two pieces `ScrollArea` assembles, for a scroll it cannot assemble: a viewport another
+ * library renders (the chat's thread, whose viewport is assistant-ui's), or a bar placed against a
+ * wider box than its viewport (the chat's, at the window's edge past the side panel). Under a root,
+ * a viewport and a `ScrollBar` anywhere in it.
+ */
+const ScrollAreaRoot = ScrollAreaPrimitive.Root;
+const ScrollAreaViewport = ScrollAreaPrimitive.Viewport;
+
+export { ScrollArea, ScrollAreaRoot, ScrollAreaViewport, ScrollBar };

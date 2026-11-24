@@ -58,9 +58,13 @@ export const ASSISTANT_MESSAGE_CLASS = "text-foreground text-base leading-relaxe
 export const MARKDOWN_PROSE_CLASS =
   "prose prose-base md:prose-sm dark:prose-invert max-w-none break-words [&_code]:text-[0.85em] [&_pre>code]:text-[1em] [&_pre]:rounded-md [&_pre]:p-3 [&_pre]:text-sm md:[&_pre]:text-xs";
 
-/** The transcript scroller: it keeps its scroll to itself (no rubber-band or pull-to-refresh of the page). */
+/**
+ * The transcript scroller (`ThreadViewport`): it keeps its scroll to itself (no rubber-band or
+ * pull-to-refresh of the page). Radix wraps the turns in a `display: table` box: the column layout
+ * (centred turns, the spacer, the sticky composer) goes on that box, `!` beating its inline style.
+ */
 export const THREAD_VIEWPORT_CLASS =
-  "relative flex min-h-0 flex-1 flex-col items-center overflow-y-auto overscroll-contain px-4 pt-6";
+  "relative min-h-0 flex-1 overscroll-contain [&>div]:!flex [&>div]:min-h-full [&>div]:flex-col [&>div]:items-center [&>div]:px-4 [&>div]:pt-6";
 
 /** The sticky footer holding the composer; `group/footer` lets the disclaimer react to the focus. */
 export const THREAD_FOOTER_CLASS =

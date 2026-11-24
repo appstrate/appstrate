@@ -42,6 +42,7 @@ import { MarkdownText, ReasoningText } from "./markdown-text.tsx";
 import { ReasoningGroup, ThinkingStatus } from "./reasoning.tsx";
 import { TurnSpaceChoice } from "./space-choice.tsx";
 import { ToolFallback } from "./tool-fallback.tsx";
+import { ThreadViewport } from "./thread-scroll.tsx";
 import {
   InvokeOperationToolUI,
   SearchToolUI,
@@ -188,7 +189,7 @@ export function Thread({
             descendants (the `sr-only` labels): placed against an ancestor
             outside this scroller, they overflow the page into a second
             scrollbar. */}
-            <ThreadPrimitive.Viewport className={THREAD_VIEWPORT_CLASS}>
+            <ThreadViewport className={THREAD_VIEWPORT_CLASS}>
               <ThreadPrimitive.Messages components={{ UserMessage, AssistantMessage }} />
 
               <div className="min-h-6 flex-grow" />
@@ -198,7 +199,7 @@ export function Thread({
                 <Composer tools={composerTools} queue={messageQueue} />
                 <Disclaimer />
               </ThreadPrimitive.ViewportFooter>
-            </ThreadPrimitive.Viewport>
+            </ThreadViewport>
           </AuiIf>
         </ThreadPrimitive.Root>
         {/* The app's dropzone in its drag-over state (the form file field, the

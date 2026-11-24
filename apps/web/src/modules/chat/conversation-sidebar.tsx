@@ -10,7 +10,7 @@ import { cn } from "@appstrate/ui/cn";
 import { Fact, FactGrid } from "@appstrate/ui/components/fact-grid";
 import { formatCompactTokens, formatTokenFigure } from "@appstrate/ui/context-window";
 import { Button } from "@appstrate/ui/components/button";
-import { Card } from "@appstrate/ui/components/card";
+import { ScrollArea } from "@appstrate/ui/components/scroll-area";
 import { Sheet, SheetContent, SheetTitle } from "@appstrate/ui/components/sheet";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@appstrate/ui/components/tabs";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@appstrate/ui/components/tooltip";
@@ -45,17 +45,24 @@ import {
   type StoredSidebarFile,
 } from "./conversation-sidebar-state";
 import { ChatAccessSummary } from "./chat-access-summary";
-import { PanelResizeHandle } from "./panel-resize";
+import { PanelResizeHandle } from "../../components/panel-resize";
 import { usePanelWidth, type PanelView } from "./use-panel-width";
 import { LG_AND_UP, useMediaQuery } from "../../hooks/use-media-query";
 
 const CONVERSATION_CONTEXT_PANEL_ID = "conversation-context-panel";
 
 /**
- * The panel's own frame: it floats beside the thread, so its cards (and the
- * previewed file) are rounder than a page's and lifted by a light shadow.
+ * The panel's own frame: it floats beside the thread, so its card (and the
+ * previewed file) is rounder than a page's and lifted by a light shadow.
  */
 const FLOATING_FRAME = "overflow-hidden rounded-2xl shadow-xs";
+
+/**
+ * A tab's scroll inside the card: the design system's thin overlay bar. Radix
+ * lays its content out as a table, whose width follows the longest name:
+ * `block` keeps it to the card's, so a name truncates.
+ */
+const TAB_SCROLL = "h-full [&_[data-radix-scroll-area-viewport]>div]:!block";
 
 /** The shell header's one control for the context panel, wherever it is drawn. */
 export function ConversationContextToggle({
@@ -194,13 +201,7 @@ export function ConversationRuns({
   if (!conversationId) {
     return <EmptyState message={t("context.unsaved")} icon={ActivityIcon} compact />;
   }
-  if (query.isLoading) {
-    return (
-      <Card className={FLOATING_FRAME}>
-        <TextSkeleton className="p-4" />
-      </Card>
-    );
-  }
+  if (query.isLoading) return <TextSkeleton className="p-4" />;
   if (query.error) return <ErrorState error={query.error} compact />;
   const runs = query.data?.data ?? [];
   if (runs.length === 0) {
@@ -208,7 +209,7 @@ export function ConversationRuns({
   }
 
   return (
-    <Card className={cn("divide-y", FLOATING_FRAME)}>
+    <div className="divide-y">
       {runs.map((run) => (
         <RunRow
           key={run.id}
@@ -222,7 +223,7 @@ export function ConversationRuns({
           className="px-3"
         />
       ))}
-    </Card>
+    </div>
   );
 }
 
@@ -248,13 +249,7 @@ export function ConversationFiles({
   if (!conversationId) {
     return <EmptyState message={t("context.unsaved")} icon={FilesIcon} compact />;
   }
-  if (query.isLoading) {
-    return (
-      <Card className={FLOATING_FRAME}>
-        <TextSkeleton className="p-4" />
-      </Card>
-    );
-  }
+  if (query.isLoading) return <TextSkeleton className="p-4" />;
   if (query.error) return <ErrorState error={query.error} compact />;
   const files = query.data?.data ?? [];
   if (files.length === 0) {
@@ -262,7 +257,7 @@ export function ConversationFiles({
   }
 
   return (
-    <Card className={cn("divide-y", FLOATING_FRAME)}>
+    <div className="divide-y">
       {files.map((file) => (
         <button
           key={file.id}
@@ -288,7 +283,7 @@ export function ConversationFiles({
           {named && <RowSpaceName spaceId={file.spaceId} />}
         </button>
       ))}
-    </Card>
+    </div>
   );
 }
 
@@ -498,7 +493,7 @@ function ConversationInfo({
       ? undefined
       : (detail.data ?? null);
   return (
-    <Card className={cn("divide-y", FLOATING_FRAME)}>
+    <div className="divide-y">
       <ConversationDetails conversationId={conversationId} active={active} />
       <div className="p-4">
         <ChatAccessSummary conversation={conversation} />
@@ -508,14 +503,16 @@ function ConversationInfo({
           <ConversationId id={conversationId} />
         </div>
       ) : null}
-    </Card>
+    </div>
   );
 }
 
 /**
- * The panel's content, in the desktop column or in the phone's sheet. The tabs
- * sit in a header band of their own (Radix wires the tab/tabpanel ARIA); a
- * shown file replaces all of it with the file's frame.
+ * The panel's content, in the desktop column or in the phone's sheet: one
+ * surface, the tabs in its header and the tab's content under them (Radix wires
+ * the tab/tabpanel ARIA). On desktop that surface is a card floating beside the
+ * thread; in the phone's sheet, the sheet itself. A shown file replaces all of
+ * it with the file's frame.
  */
 function ConversationContext({
   conversationId,
@@ -526,7 +523,10 @@ function ConversationContext({
   conversationId: string | null;
   state: ConversationSidebarState;
   dispatch: Dispatch<ConversationSidebarAction>;
-  /** The phone's sheet has no header toggle beside it: it carries its own close. */
+  /**
+   * The phone's sheet: it has no header toggle beside it, so it carries its own
+   * close, and it is the surface (no card floating in it).
+   */
   closable: boolean;
 }) {
   // The desktop column stays mounted while closed (for its transition): its
@@ -550,13 +550,16 @@ function ConversationContext({
     );
   }
 
-  return (
+  const panel = (
     <Tabs
       value={activeTab.id}
       onValueChange={(tab) => dispatch({ type: "select-tab", tab: tab as ConversationSidebarTab })}
-      className="flex h-full min-h-0 flex-col"
+      className={cn(
+        "flex h-full min-h-0 flex-col",
+        !closable && cn("bg-card border", FLOATING_FRAME),
+      )}
     >
-      <AgentDetailPaneHeader className="justify-end gap-2 border-b-0">
+      <AgentDetailPaneHeader className="h-12 min-h-12 gap-2 px-2">
         <TabsList className="h-9 min-w-0" aria-label={t("context.label")}>
           {tabs.map(({ id, Icon, label }) => (
             <TabsTrigger key={id} value={id} className="gap-1.5">
@@ -569,7 +572,7 @@ function ConversationContext({
           <Button
             variant="ghost"
             size="icon-sm"
-            className="shrink-0"
+            className="ml-auto shrink-0"
             aria-label={t("context.collapse")}
             onClick={() => dispatch({ type: "toggle" })}
           >
@@ -578,28 +581,28 @@ function ConversationContext({
         ) : null}
       </AgentDetailPaneHeader>
       {tabs.map(({ id }) => (
-        <TabsContent
-          key={id}
-          value={id}
-          className="mt-0 min-h-0 flex-1 overflow-auto px-3 pt-1 pb-3"
-        >
-          {id === "runs" ? (
-            <ConversationRuns conversationId={conversationId} active={active} />
-          ) : null}
-          {id === "files" ? (
-            <ConversationFiles
-              conversationId={conversationId}
-              active={active}
-              onSelect={(file) => dispatch({ type: "show-file", file, fromList: true })}
-            />
-          ) : null}
-          {id === "info" ? (
-            <ConversationInfo conversationId={conversationId} active={active} />
-          ) : null}
+        <TabsContent key={id} value={id} className="mt-0 min-h-0 flex-1">
+          <ScrollArea className={TAB_SCROLL}>
+            {id === "runs" ? (
+              <ConversationRuns conversationId={conversationId} active={active} />
+            ) : null}
+            {id === "files" ? (
+              <ConversationFiles
+                conversationId={conversationId}
+                active={active}
+                onSelect={(file) => dispatch({ type: "show-file", file, fromList: true })}
+              />
+            ) : null}
+            {id === "info" ? (
+              <ConversationInfo conversationId={conversationId} active={active} />
+            ) : null}
+          </ScrollArea>
         </TabsContent>
       ))}
     </Tabs>
   );
+  // On desktop the card floats in the column, inset as the shown file is.
+  return closable ? panel : <div className="h-full p-3">{panel}</div>;
 }
 
 export function ConversationSidebar({
@@ -631,7 +634,7 @@ export function ConversationSidebar({
           aria-describedby={undefined}
           // The panel's header carries the one close control.
           showCloseButton={false}
-          className="bg-canvas flex w-[min(92vw,36rem)] flex-col gap-0 p-0 sm:max-w-none"
+          className="bg-background flex w-[min(92vw,36rem)] flex-col gap-0 p-0 sm:max-w-none"
         >
           <SheetTitle className="sr-only">{t("context.label")}</SheetTitle>
           <ConversationContext

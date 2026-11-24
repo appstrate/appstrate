@@ -501,6 +501,7 @@
   "library.cannotShareHere": "Ce package n'est pas placé dans cet espace et vous n'avez pas la permission de l'y partager",
   "nav.sidebar": "Menu latéral",
   "nav.sidebarDescription": "Affiche le menu latéral sur mobile.",
+  "nav.resizeSidebar": "Redimensionner le menu latéral",
   "nav.toggleSidebar": "Afficher ou masquer le menu latéral",
   "nav.toggleSidebarIn": "Afficher ou masquer le menu latéral ({{current}})",
   "nav.toggleSidebarUnread_one": "{{label}}, {{count}} run non lu",

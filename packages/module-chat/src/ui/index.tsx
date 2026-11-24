@@ -37,6 +37,7 @@ import { ConversationSkeleton } from "./conversation-skeleton.tsx";
 import { useLatest } from "./use-latest.ts";
 import { recordUploadResolutions } from "./upload.ts";
 import { Thread } from "./thread.tsx";
+import { ThreadScrollArea } from "./thread-scroll.tsx";
 import { createMessageQueue } from "./message-queue.ts";
 import {
   ChatTransportProvider,
@@ -219,6 +220,11 @@ export interface ChatPageProps {
   linkInSpace: ChatHost["linkInSpace"];
   /** Names a space in plain text (see `ChatHost`). Pass a stable hook. */
   useSpaceLabelOf: ChatHost["useSpaceLabelOf"];
+  /**
+   * What the host sets beside the thread (its context panel). It sits inside the thread's scroll
+   * area, so the transcript's scrollbar runs along the right edge of both, not between them.
+   */
+  aside?: React.ReactNode;
 }
 
 export function ChatPage({
@@ -244,6 +250,7 @@ export function ChatPage({
   renderSpaces,
   linkInSpace,
   useSpaceLabelOf,
+  aside,
 }: ChatPageProps) {
   // The conversation the runtime is bound to. A persisted conversation's id
   // comes from the URL and wins; for a brand-new one (bare `/chat`) we mint an
@@ -424,22 +431,25 @@ export function ChatPage({
               `ChatConversationRenameButton`. What is left is the thread itself. */}
             {/* A plain div, not a `main`: the host shell's inset already IS the
               page's `main` landmark, and two nested ones name two pages. */}
-            <div className="bg-canvas flex size-full min-h-0 min-w-0 flex-col overflow-hidden">
-              <Conversation
-                key={activeId}
-                id={activeId}
-                transport={transport}
-                isPersisted={isPersisted}
-                initialComposerDraft={isPersisted ? undefined : initialComposerDraft}
-                onConversationChange={onConversationChange}
-                uploadFile={uploadFile}
-                canWrite={canWrite}
-                serverGenerating={serverGenerating}
-                serverUpdatedAt={serverUpdatedAt}
-                storedSpaceId={storedSpaceId}
-                storedRestricted={storedRestricted}
-              />
-            </div>
+            <ThreadScrollArea className="bg-canvas flex size-full min-h-0 min-w-0 overflow-hidden">
+              <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+                <Conversation
+                  key={activeId}
+                  id={activeId}
+                  transport={transport}
+                  isPersisted={isPersisted}
+                  initialComposerDraft={isPersisted ? undefined : initialComposerDraft}
+                  onConversationChange={onConversationChange}
+                  uploadFile={uploadFile}
+                  canWrite={canWrite}
+                  serverGenerating={serverGenerating}
+                  serverUpdatedAt={serverUpdatedAt}
+                  storedSpaceId={storedSpaceId}
+                  storedRestricted={storedRestricted}
+                />
+              </div>
+              {aside}
+            </ThreadScrollArea>
           </ModelPickerProvider>
         </ChatHostProvider>
       </SelectConversationProvider>

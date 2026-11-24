@@ -113,17 +113,18 @@ export function ComposerSkeleton({
 }
 
 /**
- * A row's place while the list loads, with the space line's: the same height and the same two
- * 16px lines as `ConversationRow`, so the list does not shift on load.
+ * A row's place while the list loads: the same height as `ConversationRow`, so the list does not
+ * shift on load. One line under a mouse; on touch the row's 48 px, with a second line for a
+ * reader's spaces.
  */
 export function ConversationRowSkeleton() {
   return (
     <div
       data-sidebar="menu-skeleton"
-      className="flex h-12 flex-col justify-center gap-0.5 rounded-md px-2"
+      className="desktop-pointer:h-8 flex h-12 flex-col justify-center gap-0.5 rounded-md px-2"
     >
       <Skeleton className="h-4 w-3/5" />
-      <Skeleton className="h-4 w-2/5" />
+      <Skeleton className="desktop-pointer:hidden h-4 w-2/5" />
     </div>
   );
 }

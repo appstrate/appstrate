@@ -112,7 +112,10 @@ they start with `packages/` or `e2e/`.
   under it, closed by its X or by a tap elsewhere while empty, then the recent conversations (one
   line each: the title, then the tiles of its spaces, two at most then « +N », named for a screen
   reader; the names are in the "…" panel). Then the footer every drawer has: Catalogue, Settings
-  and the account.
+  and the account. On desktop the conversations are the same one-line rows (32 px, the age at the
+  end), close together, under date groups set apart and headed in small semibold muted capitals;
+  the chat's sidebar is resizable there by its right edge (`PanelResizeHandle`, remembered per
+  browser, double-click resets).
 - **A phone's menus rise from the bottom**, and no screen decides it: `DropdownMenu` and `Popover`
   (`packages/ui`) draw their content below `md` as a panel from the bottom (`SheetMenuContent`,
   `packages/ui/src/components/sheet-menu.tsx`, on the bottom `Sheet`), with the same open state and
@@ -892,10 +895,16 @@ reasoning a collapsible group (`reasoning.tsx`), a run started from the chat a
 `ChatRunProgressCard`, the model picker `model-select.tsx`, whose list is the shared `ModelPickerList` (section 5). The thread sits on the
 canvas, surfaces on it are white cards, and heights hold across states (no jump).
 The context panel (`modules/chat/conversation-sidebar.tsx`) is transparent on that
-canvas and floats beside the thread: its cards and its previewed file are `Card` /
-`FileArtifact` with `FLOATING_FRAME` (`rounded-2xl shadow-xs`), the one place a card
-takes a shadow outside what floats over the page. Its width follows what it shows (a
-list, the details, a file), each remembered per browser.
+canvas and floats beside the thread as ONE card: the Runs / Fichiers / Infos tabs in
+its header, the tab's content under them in the same card (in the phone's sheet the
+sheet is that surface). The card and the previewed file take `FLOATING_FRAME`
+(`rounded-2xl shadow-xs`), the one place a card takes a shadow outside what floats over
+the page. Its width follows what it shows (a list, the details, a file), each
+remembered per browser. The panel sits inside the thread's scroll area (`ChatPage`'s
+`aside`, `thread-scroll.tsx`): the transcript has one scroll, its thin overlay bar
+(`ScrollArea`'s) at the window's right edge, past the panel, never a scrollbar between
+the two columns. Scrolls in the chat are `ScrollArea`s (the conversation list, the
+panel's tabs), not the browser's bar.
 
 ## 14. Modules and feature gating
 

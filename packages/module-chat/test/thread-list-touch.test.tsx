@@ -12,7 +12,12 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { SidebarProvider } from "@appstrate/ui/components/sidebar";
 import { TooltipProvider } from "@appstrate/ui/components/tooltip";
 
-import { ChatConversationList } from "../src/ui/thread-list.tsx";
+import {
+  ChatConversationList,
+  GROUP_CLASS,
+  GROUP_LABEL_CLASS,
+  GROUP_ROWS_CLASS,
+} from "../src/ui/thread-list.tsx";
 import { ChatTransportProvider } from "../src/ui/runtime-context.ts";
 import { sessionsQueryKey, type SessionsCache } from "../src/ui/sessions.ts";
 import { transportOf } from "./fake-request.ts";
@@ -79,9 +84,7 @@ describe("a conversation row's « … »", () => {
   it("is one menu named for the conversation, a thumb's size on touch", () => {
     const html = render(["chat:read", "chat:write"]);
     // One « … » per row, on every format.
-    expect(html.match(/aria-label="threads\.actions\.openFor"/g)).toHaveLength(
-      html.match(/data-testid="chat-session-spaces"/g)!.length,
-    );
+    expect(html.match(/aria-label="threads\.actions\.openFor"/g)).toHaveLength(2);
     expect(trigger()).toContain("w-11");
     expect(trigger()).toContain("h-12");
     expect(trigger()).not.toContain("desktop-pointer:hidden");
@@ -122,27 +125,55 @@ describe("the conversation search on a phone", () => {
   });
 });
 
-describe("a conversation's spaces on a phone", () => {
+describe("a conversation row's line", () => {
   const html = render(["chat:read", "chat:write"]);
+  const row = (markup: string) =>
+    markup.match(/<button[^>]*data-sidebar="menu-button" data-size="lg"[^>]*>/)?.[0] ?? "";
 
-  it("closes the title's line with their tiles, and keeps the names line for md and up", () => {
+  it("is one line under a mouse, a thumb's 48 px on touch", () => {
+    expect(row(html)).toContain("desktop-pointer:h-8");
+    expect(row(html)).toContain("h-12");
+  });
+
+  it("closes the title's line with the spaces' tiles, on every format", () => {
     const tiles = html.match(/<span[^>]*data-testid="chat-session-space-tiles"[^>]*>[^<]*/)?.[0];
-    expect(tiles).toContain("max-md:flex");
     expect(tiles).toContain("tiles:spc_a");
-    const names = html.match(/<span[^>]*data-testid="chat-session-spaces"[^>]*>/)?.[0];
-    expect(names).toContain("max-md:hidden");
+    expect(tiles).not.toContain("hidden");
+    // No second line: the names are in the tiles' tooltip and the « … » menu.
+    expect(html).not.toContain('data-testid="chat-session-spaces"');
+    expect(html).not.toMatch(/flex min-w-0 flex-1 items-center gap-2 max-md:flex-col/);
   });
 
-  it("puts the title and the tiles on one line below md", () => {
-    expect(html).toMatch(/flex min-w-0 flex-1 flex-col[^"]*max-md:flex-row/);
-  });
-
-  it("names them on a line of their own for a reader, whose row has no « … » to name them in", () => {
+  it("names them on a line of their own for a reader on a phone, whose row has no « … »", () => {
     const reader = render(["chat:read"]);
     const names = reader.match(/<span[^>]*data-testid="chat-session-spaces"[^>]*>/)?.[0];
-    expect(names).toBeDefined();
-    expect(names).not.toContain("max-md:hidden");
-    expect(reader).not.toContain("chat-session-space-tiles");
-    expect(reader).not.toMatch(/flex min-w-0 flex-1 flex-col[^"]*max-md:flex-row/);
+    expect(names).toContain("md:hidden");
+    // The tiles stay on the title's line under a mouse, where hovering names them.
+    const tiles = reader.match(/<span[^>]*data-testid="chat-session-space-tiles"[^>]*>/)?.[0];
+    expect(tiles).toContain("max-md:hidden");
+    expect(reader).toMatch(/flex min-w-0 flex-1 items-center gap-2 max-md:flex-col/);
+  });
+});
+
+describe("the list's date groups", () => {
+  const html = render(["chat:read", "chat:write"]);
+
+  it("sit apart while their rows sit close together", () => {
+    expect(GROUP_CLASS).toContain("not-first:mt-4");
+    expect(GROUP_ROWS_CLASS).toContain("gap-0.5");
+    expect(html).toContain(`<li class="${GROUP_CLASS}">`);
+    expect(html).toContain(`<ul class="${GROUP_ROWS_CLASS}">`);
+  });
+
+  it("head each group with a semibold, muted label, in small capitals under a mouse", () => {
+    expect(GROUP_LABEL_CLASS).toContain("font-semibold");
+    expect(GROUP_LABEL_CLASS).toContain("text-sidebar-foreground/60");
+    expect(GROUP_LABEL_CLASS).toContain("md:uppercase");
+    expect(html).toContain("threads.group.older");
+  });
+
+  it("scroll in the design system's scroll area, not the browser's scrollbar", () => {
+    expect(html).toContain("data-radix-scroll-area-viewport");
+    expect(html).not.toContain("overflow-y-auto pr-2");
   });
 });
