@@ -310,23 +310,45 @@ type ToolOutputSchema = NonNullable<Tool["outputSchema"]>;
 let runAndWaitOutputSchema: ToolOutputSchema | undefined;
 
 /**
- * `RunAndWaitResult` as `run_and_wait`'s self-contained `outputSchema` (refs as `$defs`, no
- * descriptions: the tool's own carries them). Built once: one object reaches the validator cache.
+ * The self-contained wire schema of `run_and_wait`. SDKs validate structured refusals too.
+ * The successful run uses the REST component verbatim. Build once for the validator cache.
  */
 export function getRunAndWaitOutputSchema(): ToolOutputSchema {
   if (runAndWaitOutputSchema) return runAndWaitOutputSchema;
   const { componentSchemas } = getCatalog();
   const root = componentSchemas.RunAndWaitResult;
-  const $defs = collectReferencedSchemas(root, componentSchemas);
-  runAndWaitOutputSchema = JSON.parse(
-    JSON.stringify({ ...(root as object), $defs }),
-    (key, value: unknown) => {
-      if (typeof value !== "string") return value;
-      if (key === "description") return undefined;
-      return key === "$ref" && value.startsWith(SCHEMA_REF_PREFIX)
-        ? `#/$defs/${value.slice(SCHEMA_REF_PREFIX.length)}`
-        : value;
-    },
-  ) as ToolOutputSchema;
+  const schema = {
+    type: "object",
+    oneOf: [
+      { $ref: "#/$defs/RunAndWaitResult" },
+      {
+        type: "object",
+        required: ["kind", "code", "error"],
+        properties: {
+          kind: { const: "tool_refusal" },
+          code: { type: "string" },
+          error: { type: "string" },
+        },
+      },
+      {
+        type: "object",
+        required: ["kind", "status"],
+        properties: { kind: { const: "route_refusal" }, status: { type: "integer" } },
+        // A route problem carries its body. A successful launch missing its run id carries the original response.
+        anyOf: [
+          { required: ["body"] },
+          { required: ["error", "launch"], properties: { error: { type: "string" } } },
+        ],
+      },
+    ],
+    $defs: { RunAndWaitResult: root, ...collectReferencedSchemas(root, componentSchemas) },
+  };
+  runAndWaitOutputSchema = JSON.parse(JSON.stringify(schema), (key, value: unknown) => {
+    if (typeof value !== "string") return value;
+    if (key === "description") return undefined;
+    return key === "$ref" && value.startsWith(SCHEMA_REF_PREFIX)
+      ? `#/$defs/${value.slice(SCHEMA_REF_PREFIX.length)}`
+      : value;
+  }) as ToolOutputSchema;
   return runAndWaitOutputSchema;
 }
