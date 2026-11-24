@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { useTranslation } from "react-i18next";
+import { Link } from "react-router-dom";
 import {
   Card,
   CardContent,
@@ -35,13 +36,16 @@ function FileTileImage({ file }: { file: FileDto }) {
   return <img src={src} alt="" className="size-full object-cover" />;
 }
 
+const TILE_TARGET =
+  "bg-muted/40 hover:bg-muted/50 focus-visible:ring-ring relative block aspect-square w-full outline-none focus-visible:ring-2 focus-visible:ring-inset";
+
 export function FileTile({
   file,
   isKeepPending,
   onDownload,
   onDelete,
   onKeep,
-  onPreview,
+  href,
   showRunLink,
   showSpace = false,
 }: {
@@ -50,14 +54,14 @@ export function FileTile({
   onDownload: (file: FileDto) => void;
   onDelete: (file: FileDto) => void;
   onKeep: (file: FileDto) => void;
-  onPreview: (file: FileDto) => void;
+  /** The file's page (the reader), when the caller may read it there. */
+  href?: string;
   showRunLink?: boolean;
   /** Name the space it lives in: a list spanning spaces. */
   showSpace?: boolean;
 }) {
   const { t } = useTranslation(["files", "common"]);
-  const { preview, download } = file.capabilities;
-  const activate = preview ? onPreview : download ? onDownload : undefined;
+  const { download } = file.capabilities;
   const media =
     download && isImageMime(file.mime) ? (
       <FileTileImage file={file} />
@@ -68,12 +72,16 @@ export function FileTile({
   return (
     <Card className="flex flex-col overflow-hidden">
       <CardContent className="p-0">
-        {activate ? (
+        {href ? (
+          <Link to={href} aria-label={`${t("row.open")}: ${file.name}`} className={TILE_TARGET}>
+            {media}
+          </Link>
+        ) : download ? (
           <button
             type="button"
-            onClick={() => activate(file)}
-            aria-label={`${preview ? t("row.preview") : t("common:btn.download")}: ${file.name}`}
-            className="bg-muted/40 hover:bg-muted/50 focus-visible:ring-ring relative block aspect-square w-full outline-none focus-visible:ring-2 focus-visible:ring-inset"
+            onClick={() => onDownload(file)}
+            aria-label={`${t("common:btn.download")}: ${file.name}`}
+            className={TILE_TARGET}
           >
             {media}
           </button>
@@ -90,7 +98,7 @@ export function FileTile({
             doc={file}
             isPending={isKeepPending}
             showRunLink={showRunLink}
-            onPreview={onPreview}
+            readerHref={href}
             onDownload={onDownload}
             onKeep={onKeep}
             onDelete={onDelete}

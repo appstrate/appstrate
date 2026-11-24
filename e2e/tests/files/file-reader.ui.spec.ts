@@ -83,7 +83,7 @@ async function stubFiles(context: BrowserContext, opts: StubOptions) {
 }
 
 test.describe("file reader page", () => {
-  test("renders HTML in the sandboxed iframe and opens from the preview modal in a new tab", async ({
+  test("renders HTML in the sandboxed iframe and opens from the Files list, its crumb leading back", async ({
     authedPage: page,
     browserCtx,
   }) => {
@@ -102,21 +102,21 @@ test.describe("file reader page", () => {
     // The new-tab action is hidden on the reader itself.
     await expect(page.getByRole("button", { name: "Ouvrir dans un nouvel onglet" })).toHaveCount(0);
 
-    // Preview modal over the Files page: the action opens the reader in a new page.
-    await page.goto("/files?preview=file_html");
-    const dialog = page.getByRole("dialog", { name: "rapport.html", exact: true });
-    await expect(dialog).toBeVisible();
-    const popupPromise = page.context().waitForEvent("page");
-    await dialog.getByRole("button", { name: "Ouvrir dans un nouvel onglet" }).click();
-    const popup = await popupPromise;
-    await popup.waitForLoadState("domcontentloaded");
-    const popupUrl = new URL(popup.url());
-    expect(popupUrl.pathname).toBe("/files/file_html");
-    expect(popupUrl.searchParams.get("org")).toBe(orgId);
-    expect(popupUrl.searchParams.get("space")).toBe(defaultSpaceId);
-    await expect(popup.frameLocator("iframe[sandbox]").locator("#hello")).toHaveText(
-      "Bonjour depuis le rapport",
+    // The Files list opens the same page, whatever the view; its crumb leads back to the list.
+    await page.goto("/files");
+    await page
+      .getByRole("link", { name: /rapport\.html/ })
+      .first()
+      .click();
+    await expect(page).toHaveURL(
+      new RegExp(`/files/file_html\\?org=${orgId}&space=${defaultSpaceId}`),
     );
+    await expect(page.getByRole("dialog")).toHaveCount(0);
+    await page
+      .locator("nav[data-trail]")
+      .getByRole("link", { name: "Fichiers", exact: true })
+      .click();
+    await expect(page).toHaveURL(/\/files$/);
   });
 
   test("a link to a file of another space opens without changing the current space", async ({

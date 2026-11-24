@@ -34,6 +34,7 @@ import {
   DashboardSkeleton,
   FormPageSkeleton,
   ListPageSkeleton,
+  FileReaderSkeleton,
   NotificationDetailSkeleton,
   OverlayPanelSkeleton,
   PackageDetailSkeleton,
@@ -393,6 +394,7 @@ function skeletonOf(path: RoutePath): ReactNode {
   if (path === "/agents/:scope/:name/runs/:runId") return <RunDetailSkeleton />;
   if (path === "/schedules/:id") return <ScheduleDetailSkeleton />;
   if (path === "/notifications/:id") return <NotificationDetailSkeleton />;
+  if (path === "/files/:fileId") return <FileReaderSkeleton />;
   const packageType = DETAIL_PACKAGE_TYPE.find(([prefix]) => path.startsWith(prefix))?.[1];
   if (packageType && path.includes("/:")) return <PackageDetailSkeleton type={packageType} />;
   const page = LIST_PAGE[path];

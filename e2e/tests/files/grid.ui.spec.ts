@@ -103,11 +103,11 @@ for (const appearance of [
     const cards = page.getByRole("radio", { name: "Vue cartes", exact: true });
     const table = page.getByRole("radio", { name: "Vue tableau", exact: true });
     await expect(cards).toBeChecked();
-    const preview = page.getByRole("button", { name: "Aperçu: capture.png", exact: true });
-    await expect(preview).toBeVisible();
+    const tile = page.getByRole("link", { name: "Ouvrir: capture.png", exact: true });
+    await expect(tile).toBeVisible();
     await expect
       .poll(() =>
-        preview
+        tile
           .locator("img")
           .evaluate((img: HTMLImageElement) => img.complete && img.naturalWidth > 0),
       )
@@ -122,11 +122,12 @@ for (const appearance of [
     );
     await page.screenshot({ path: testInfo.outputPath("files-grid.png"), fullPage: true });
 
-    await preview.click();
-    await expect(page.getByRole("dialog", { name: "capture.png", exact: true })).toBeVisible();
-    await expect(page).toHaveURL(/preview=file_grid/);
-    await page.keyboard.press("Escape");
-    await expect(preview).toBeFocused();
+    // A file opens on its page, never in a modal over the list.
+    await tile.click();
+    await expect(page).toHaveURL(/\/files\/file_grid\?/);
+    await expect(page.getByRole("dialog")).toHaveCount(0);
+    await page.goBack();
+    await expect(tile).toBeVisible();
 
     const menu = page.getByRole("button", { name: "Plus d'actions pour capture.png", exact: true });
     await menu.click();
@@ -151,7 +152,7 @@ for (const appearance of [
       page.getByText("Aucun document ne correspond à ce filtre.", { exact: true }),
     ).toBeVisible();
     await search.fill("");
-    await expect(preview).toBeVisible();
+    await expect(tile).toBeVisible();
     await menu.click();
     await menuItem(page, "Supprimer", { exact: true }).click();
     const confirm = page.getByRole("alertdialog");
@@ -160,7 +161,7 @@ for (const appearance of [
     await menu.click();
     await menuItem(page, "Supprimer", { exact: true }).click();
     await confirm.getByRole("button", { name: "Supprimer", exact: true }).click();
-    await expect(preview).toHaveCount(0);
+    await expect(tile).toHaveCount(0);
     expect(deleted).toBe(true);
   });
 }

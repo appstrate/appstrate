@@ -45,8 +45,27 @@ const file = fileFixture({
   },
 });
 
-it("offers a named preview and the shared action menu in the gallery grid", () => {
-  const html = render(
+/** Renders standing in `spc_1` of `org_1`: a static render reads each store's initial state. */
+function inSpace1(node: React.ReactElement): string {
+  const stubs = [
+    spyOn(orgStore, "getInitialState").mockReturnValue({
+      ...orgStore.getInitialState(),
+      id: "org_1",
+    }),
+    spyOn(spaceStore, "getInitialState").mockReturnValue({
+      ...spaceStore.getInitialState(),
+      id: "spc_1",
+    }),
+  ];
+  try {
+    return render(node);
+  } finally {
+    for (const stub of stubs) stub.mockRestore();
+  }
+}
+
+it("links each tile to its file's page and keeps the shared action menu in the grid", () => {
+  const html = inSpace1(
     <DocumentListPanel
       documents={[file]}
       display="cards"
@@ -55,7 +74,8 @@ it("offers a named preview and the shared action menu in the gallery grid", () =
       empty={{ message: "Vide" }}
     />,
   );
-  expect(html).toContain('aria-label="Aperçu: rapport.txt"');
+  expect(html).toContain('aria-label="Ouvrir: rapport.txt"');
+  expect(html).toContain(`href="/files/${file.id}?org=org_1&amp;space=spc_1"`);
   expect(html).toContain("Plus d'actions pour rapport.txt");
   expect(html).not.toContain("<table");
 });
@@ -120,24 +140,6 @@ it("keeps the same empty and error states in the grid", () => {
 });
 
 describe("a list spanning spaces", () => {
-  /** Renders standing in `spc_1` of `org_1`: a static render reads each store's initial state. */
-  function inSpace1(node: React.ReactElement): string {
-    const stubs = [
-      spyOn(orgStore, "getInitialState").mockReturnValue({
-        ...orgStore.getInitialState(),
-        id: "org_1",
-      }),
-      spyOn(spaceStore, "getInitialState").mockReturnValue({
-        ...spaceStore.getInitialState(),
-        id: "spc_1",
-      }),
-    ];
-    try {
-      return render(node);
-    } finally {
-      for (const stub of stubs) stub.mockRestore();
-    }
-  }
   const elsewhere = fileFixture({
     ...file,
     id: "file_ailleurs",
@@ -155,11 +157,11 @@ describe("a list spanning spaces", () => {
       />,
     );
 
-  it("opens a file of another space in the reader, in its own space, without switching", () => {
+  it("opens every file on the reader, in its own space, without switching", () => {
     const html = panel(true);
     expect(html).toContain(`href="/files/${elsewhere.id}?org=org_1&amp;space=spc_2"`);
-    // The current space's file keeps its in-place preview.
-    expect(html).not.toContain(`href="/files/${file.id}?`);
+    // The current space's file opens on the same page: no in-place preview.
+    expect(html).toContain(`href="/files/${file.id}?org=org_1&amp;space=spc_1"`);
   });
 
   it("names each row's space in a column, only when spanning", () => {
