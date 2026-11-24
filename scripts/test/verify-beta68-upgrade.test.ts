@@ -5,10 +5,11 @@ import { eq, sql } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
 import { notifications } from "@appstrate/db/schema";
 import { createTestContext } from "../../apps/api/test/helpers/auth.ts";
+import { journalPGlite } from "../../apps/api/test/helpers/journal.ts";
 import { truncateAll } from "../../apps/api/test/helpers/db.ts";
 import { seedAgent, seedRun } from "../../apps/api/test/helpers/seed.ts";
 import { recordRunFinished } from "../../apps/api/src/services/state/run-reads.ts";
-import { checkBeforeTraffic } from "../migration/verify-beta68-upgrade.ts";
+import { checkBeforeSchema, checkBeforeTraffic } from "../migration/verify-beta68-upgrade.ts";
 
 it("detects an unnamed beta.68 failure even after its recipient read state was copied", async () => {
   await truncateAll();
@@ -47,4 +48,61 @@ it("detects an unnamed beta.68 failure even after its recipient read state was c
     }
   });
   expect((await getChecks()).every(({ pending }) => pending === 0)).toBe(true);
+});
+
+it("stops an upgrade on a mis-scoped notification before 0103 renames it and 0052 copies it", async () => {
+  const pg = await journalPGlite({ through: "0096_connection_calls_and_model_invariants" });
+  const org = "e0000000-0000-4000-8000-000000000001";
+  const otherOrg = "e0000000-0000-4000-8000-000000000002";
+  const pending = async () =>
+    (await checkBeforeSchema((statement) => pg.query(statement))).filter(({ pending }) => pending);
+  const repair = await Bun.file(
+    new URL("../migration/0057-repair-run-notification-spaces.sql", import.meta.url),
+  ).text();
+  try {
+    await pg.exec(`
+      INSERT INTO organizations (id,name,slug) VALUES ('${org}','Alpha','alpha'), ('${otherOrg}','Beta','beta');
+      INSERT INTO spaces (id,org_id,name) VALUES ('spaceA','${org}','A'), ('spaceB','${otherOrg}','B');
+      INSERT INTO "user" (id,name,email,email_verified,created_at,updated_at)
+        VALUES ('alice','Alice','alice@example.com',true,now(),now());
+      INSERT INTO org_members (org_id,user_id,role) VALUES ('${org}','alice','member');
+      INSERT INTO packages (id,type) VALUES ('@upgrade/agent','agent');
+      INSERT INTO runs (id,package_id,org_id,space_id,user_id,status)
+        VALUES ('run1','@upgrade/agent','${org}','spaceA','alice','failed');
+      INSERT INTO notifications (org_id,space_id,recipient_type,recipient_id,type,run_id,payload)
+        VALUES ('${org}','spaceB','user','alice','run_completed','run1','{"status":"failed"}'),
+               ('${otherOrg}','spaceB','user','unverified','run_completed','run1','{"status":"failed"}');
+    `);
+    expect(await pending()).toEqual([
+      { check: "0052 · notifications outside their run's organization or space", pending: 2 },
+    ]);
+    await pg.exec(repair);
+    expect((await pending())[0]?.pending).toBe(1);
+    // A partially upgraded installation must get the same diagnosis under the renamed type.
+    await pg.exec("UPDATE notifications SET space_id = 'spaceB' WHERE recipient_id = 'alice'");
+    const dir = new URL("../../packages/db/drizzle/", import.meta.url);
+    const journal = await Bun.file(new URL("meta/_journal.json", dir)).json();
+    for (const { tag } of journal.entries.slice(97)) {
+      const sql = await Bun.file(new URL(tag + ".sql", dir)).text();
+      await pg.transaction((tx) => tx.exec(sql.replaceAll("--> statement-breakpoint", "")));
+    }
+    expect((await pending())[0]?.pending).toBe(2);
+    await pg.exec(repair);
+    expect((await pending())[0]?.pending).toBe(1);
+    await pg.exec(repair);
+    expect(
+      (await pg.query("SELECT space_id FROM notifications WHERE recipient_id = 'unverified'")).rows,
+    ).toEqual([{ space_id: "spaceB" }]);
+    // The operator reconciles the deliberately ambiguous fixture before copying any read state.
+    await pg.exec("DELETE FROM notifications WHERE recipient_id = 'unverified'");
+    expect(await pending()).toEqual([]);
+    await pg.exec(
+      await Bun.file(new URL("../migration/0052-run-reads.sql", import.meta.url)).text(),
+    );
+    expect((await pg.query("SELECT org_id, space_id, recipient_id FROM run_reads")).rows).toEqual([
+      { org_id: org, space_id: "spaceA", recipient_id: "alice" },
+    ]);
+  } finally {
+    await pg.close();
+  }
 });

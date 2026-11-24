@@ -23,14 +23,9 @@ import { safeValidateUIMessages, type FileUIPart, type UIMessage, type UIMessage
 import { z } from "zod";
 import { invalidRequest, conflict, forbidden } from "@appstrate/core/api-errors";
 import { readJsonBody } from "@appstrate/core/request-body";
-import { withByteCap } from "@appstrate/core/safe-json";
-import { isAttachmentUri, parseFileUri } from "@appstrate/core/file-uri";
+import { parseFileUri } from "@appstrate/core/file-uri";
 import { logger } from "./logger.ts";
-import {
-  AGENT_PROMPT_PART_TYPE,
-  agentPromptDataSchema,
-  clientAgentPromptDataSchema,
-} from "./agent-prompt.ts";
+import { chatThreadMessagesSchema } from "@appstrate/core/chat-message";
 import { resolveAgentPrompt, withStoredAgentPromptTexts } from "./agent-launch.ts";
 import { notifySessionUpdate } from "./realtime.ts";
 import { citedSkills } from "./message-text.ts";
@@ -124,8 +119,7 @@ export type ChatEngine = (input: PiChatInput) => Response;
  * accepted and discarded.
  */
 
-/** Ceiling on the turn's last (persisted) message; attachments ride as references. */
-export const CHAT_MESSAGE_MAX_BYTES = 256 * 1024;
+export { CHAT_MESSAGE_MAX_BYTES } from "@appstrate/core/chat-message";
 
 // The client (assistant-ui / useChat) posts the full thread plus optional
 // session/model/context extras. The last message's UIMessage shape is checked by
@@ -149,71 +143,7 @@ export const pinnedSkillIdsSchema = z
 export const chatStreamSchema = z
   .object({
     id: z.string().optional(),
-    messages: z
-      .array(
-        z.looseObject({
-          id: z.string().optional(),
-          role: z.enum(["user", "assistant"]),
-          parts: z.array(z.looseObject({ type: z.string() })),
-        }),
-      )
-      .min(1, "messages must not be empty")
-      .superRefine((messages, ctx) => {
-        messages.forEach((message, i) => {
-          const { role, parts } = message;
-          // The SDK requires an id on the submitted message. Earlier thread entries were
-          // accepted without one; only an entry with an id is eligible for a persisted lookup.
-          if (i === messages.length - 1 && message.id === undefined) {
-            ctx.addIssue({
-              code: "custom",
-              path: [i, "id"],
-              message: "The new message requires an id.",
-            });
-          }
-          let launches = 0;
-          parts.forEach((part, j) => {
-            const { type } = part;
-            if (type === "text" && typeof part.text !== "string") {
-              ctx.addIssue({
-                code: "custom",
-                message: "A text part requires text.",
-                path: [i, "parts", j, "text"],
-              });
-            }
-            if (type === AGENT_PROMPT_PART_TYPE) {
-              const shape =
-                i === messages.length - 1 ? clientAgentPromptDataSchema : agentPromptDataSchema;
-              const parsed = shape.safeParse((part as { data?: unknown }).data);
-              if (role !== "user" || ++launches > 1 || !parsed.success) {
-                ctx.addIssue({
-                  code: "custom",
-                  message:
-                    "A user message carries at most one agent launch: { name, title } on the new message (and the text a stored one holds).",
-                  path: [i, "parts", j, "data"],
-                });
-              }
-              return;
-            }
-            if (type !== "file") return;
-            if (typeof part.mediaType !== "string") {
-              ctx.addIssue({
-                code: "custom",
-                message: "A file part requires mediaType.",
-                path: [i, "parts", j, "mediaType"],
-              });
-            }
-            const url = (part as { url?: unknown }).url;
-            if (!isAttachmentUri(url)) {
-              ctx.addIssue({
-                code: "custom",
-                message: "File attachment URI must be an 'upload://' or 'appfile://' URI.",
-                path: [i, "parts", j, "url"],
-              });
-            }
-          });
-        });
-        withByteCap(CHAT_MESSAGE_MAX_BYTES)(messages.at(-1), ctx);
-      }),
+    messages: chatThreadMessagesSchema,
     modelId: z.string().optional(),
     /**
      * The origin space and limit of the conversation, read ONLY when this turn creates its

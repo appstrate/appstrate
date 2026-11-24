@@ -24,7 +24,8 @@ import {
 import { toPgSafe } from "@appstrate/db/pg-safe";
 import { invalidRequest, notFound } from "@appstrate/core/api-errors";
 import { uiMessageTitleText } from "./message-text.ts";
-import { AGENT_PROMPT_PART_TYPE, agentPromptOfParts } from "./agent-prompt.ts";
+import { AGENT_PROMPT_PART_TYPE } from "@appstrate/core/chat-message";
+import { agentPromptOfParts } from "./agent-prompt.ts";
 import { notifySessionUpdate } from "./realtime.ts";
 import type { ChatSkillSelection, PinnedSkill, SkillSettingsPatch } from "./skills.ts";
 import type { FileUIPart, UIMessage } from "ai";

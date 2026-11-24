@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { AGENT_PROMPT_PART_TYPE, agentPromptDataSchema } from "../agent-prompt.ts";
+import { AGENT_PROMPT_PART_TYPE, agentPromptDataSchema } from "@appstrate/core/chat-message";
 import { AGENT_DIRECTIVE, serializeDirective } from "../directives.ts";
 
 interface AgentChip {

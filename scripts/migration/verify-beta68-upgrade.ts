@@ -4,41 +4,46 @@
 import { getErrorMessage } from "@appstrate/core/errors";
 import { parseBefore, pendingRuntimeTools } from "./0053-migrate-runtime-tools.ts";
 import { pendingFileReadReceipts } from "./0055-chat-file-read-receipts.ts";
+import { countInvalidHistoricalChatMessages } from "./lib/historical-chat-messages.ts";
 import { describeDatabaseTarget, exitUnlessDatabaseNamed } from "./lib/database-target.ts";
 
 /** Run with writers stopped, immediately before the schema migration service. */
-export async function checkBeforeSchema() {
+export async function checkBeforeSchema(execute?: (statement: string) => Promise<unknown>) {
   const { db, toRows } = await import("@appstrate/db/client");
+  const query = execute ?? ((statement: string) => db.execute(statement));
+  const outsideRun = `NOT EXISTS (
+    SELECT 1 FROM public.runs r JOIN public.spaces s ON s.id = r.space_id AND s.org_id = r.org_id
+    WHERE r.id = n.run_id AND r.org_id = n.org_id AND r.space_id = n.space_id)`;
   const checks = [];
-  for (const [table, column] of [
-    ["packages", "type"],
-    ["package_version_dependencies", "dep_type"],
+  // 0103 renames beta.68 notifications; 0052 copies their scope after the journal has run.
+  for (const [table, check, predicate] of [
+    ["packages", "0054 · packages.type", "n.type::text = 'mcp-server'"],
+    [
+      "package_version_dependencies",
+      "0054 · package_version_dependencies.dep_type",
+      "n.dep_type::text = 'mcp-server'",
+    ],
+    [
+      "notifications",
+      "0052 · notifications outside their run's organization or space",
+      `n.type IN ('run_completed', 'run_failed') AND n.run_id IS NOT NULL AND ${outsideRun}`,
+    ],
+    ["run_reads", "0113 · read markers outside their run's organization or space", outsideRun],
+    [
+      "oauth_grant_states",
+      "0113 · grant space outside its organization",
+      `n.space_id IS NOT NULL AND NOT EXISTS (
+        SELECT 1 FROM public.spaces s WHERE s.id = n.space_id AND s.org_id = n.org_id)`,
+    ],
   ] as const) {
     const [relation] = toRows<{ present: boolean }>(
-      await db.execute(`SELECT to_regclass('public.${table}') IS NOT NULL AS present`),
+      await query(`SELECT to_regclass('public.${table}') IS NOT NULL AS present`),
     );
     if (!relation!.present) continue;
     const [row] = toRows<{ pending: number }>(
-      await db.execute(`SELECT count(*)::int AS pending FROM public.${table}
-        WHERE ${column}::text = 'mcp-server'`),
+      await query(`SELECT count(*)::int AS pending FROM public.${table} n WHERE ${predicate}`),
     );
-    checks.push({ check: `0054 · ${table}.${column}`, pending: row!.pending });
-  }
-  for (const table of ["run_reads", "oauth_grant_states"] as const) {
-    const [relation] = toRows<{ present: boolean }>(
-      await db.execute(`SELECT to_regclass('public.${table}') IS NOT NULL AS present`),
-    );
-    if (!relation!.present) continue;
-    const [row] = toRows<{ pending: number }>(
-      await db.execute(`SELECT count(*)::int AS pending FROM public.${table} r
-        WHERE r.space_id IS NOT NULL AND NOT EXISTS (
-          SELECT 1 FROM public.spaces s WHERE s.id = r.space_id AND s.org_id = r.org_id
-        )`),
-    );
-    checks.push({
-      check: `0113 · ${table} space belongs to another organization`,
-      pending: row!.pending,
-    });
+    checks.push({ check, pending: row!.pending });
   }
   return checks;
 }
@@ -72,6 +77,10 @@ export async function checkBeforeTraffic(before: Date) {
     { check: "0052 · notifications missing the recorded agent name", pending: unnamed!.pending },
     ...stores.map(({ store, pending }) => ({ check: `0053 · ${store}`, pending })),
     { check: "0055 · messages to rewrite", pending: receipts.messages },
+    {
+      check: "chat · messages incompatible with history replay",
+      pending: await countInvalidHistoricalChatMessages(db),
+    },
   ];
 }
 

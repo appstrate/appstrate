@@ -8,6 +8,7 @@
  * must flow through the file store).
  */
 
+import { historicalChatMessageSchema } from "@appstrate/core/chat-message";
 import { describe, it, expect } from "bun:test";
 import type { operations } from "../../../apps/web/src/api/schema.d.ts";
 import { chatStreamSchema } from "../src/chat-stream.ts";
@@ -92,6 +93,29 @@ describe("chatStreamSchema role validation", () => {
       ],
     });
     expect(result.success).toBe(true);
+  });
+
+  it("uses the same historical contract on one stored row and the replayed turn", () => {
+    const submitted = { id: "next", role: "user", parts: [{ type: "text", text: "continue" }] };
+    const examples = [
+      [{ role: "assistant", parts: [{ type: "data-extension", data: { count: 4 } }] }, true],
+      [{ role: "user", parts: [{ type: "text", text: "old" }] }, true],
+      [
+        {
+          role: "user",
+          parts: [
+            { type: "data-agent-prompt", data: { name: "run-a", title: "A", text: "stored" } },
+          ],
+        },
+        true,
+      ],
+      [{ role: "assistant", parts: [{ type: "text" }] }, false],
+      [{ role: "user", parts: [{ type: "file", url: "appfile://file_abcdefgh" }] }, false],
+    ] as const;
+    for (const [row, ok] of examples) {
+      expect(historicalChatMessageSchema.safeParse(row).success).toBe(ok);
+      expect(chatStreamSchema.safeParse({ messages: [row, submitted] }).success).toBe(ok);
+    }
   });
 
   it("accepts a history entry without an id but requires one on the new message", () => {
