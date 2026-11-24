@@ -122,6 +122,46 @@ async function spacesServedToOwner(
 }
 
 /**
+ * Where each row is renewed from the account surface, which acts from no space: the kickoff needs
+ * `integrations:connect` in a space the row serves. Its own or origin space first, else, for a row
+ * serving its whole org, the first space of it the caller may connect in. A row holding
+ * `reconnect` with no such space is absent, and the list withholds the action.
+ */
+async function reconnectSpaces(
+  caller: ConnectionCaller,
+  rows: readonly {
+    connectionId: string;
+    orgId: string;
+    userId: string | null;
+    endUserId: string | null;
+    spaceId: string | null;
+    originSpaceId: string | null;
+    accountId: string;
+  }[],
+  orgRoles: ReadonlyMap<string, OrgRole>,
+): Promise<Map<string, string>> {
+  const renewable = rows.filter((r) => connectionActions(r, caller, false).includes("reconnect"));
+  const connectIn = new Map(
+    await Promise.all(
+      [...new Set(renewable.map((r) => r.orgId))].map(async (orgId) => {
+        const orgRole = orgRoles.get(orgId);
+        const seen = orgRole ? await caller.spacesSeen(orgId, orgRole) : [];
+        const ids = seen.filter((s) => s.permissions.has("integrations:connect")).map((s) => s.id);
+        return [orgId, ids] as const;
+      }),
+    ),
+  );
+  const out = new Map<string, string>();
+  for (const r of renewable) {
+    const ids = connectIn.get(r.orgId) ?? [];
+    const home = r.spaceId ?? r.originSpaceId;
+    const spaceId = home !== null && ids.includes(home) ? home : r.spaceId === null ? ids[0] : null;
+    if (spaceId) out.set(r.connectionId, spaceId);
+  }
+  return out;
+}
+
+/**
  * Every connection the caller owns, within its credential's binding, grouped by integration; the
  * connections of a group keep the order of the query. The route derives the principal from the
  * credential, so a delegated credential is scoped to its own binding while a `person` principal
@@ -203,6 +243,7 @@ export async function listMeConnections(
     rows.map((r) => ({ ...r, id: r.connectionId })),
     orgRoles,
   );
+  const renewIn = await reconnectSpaces(caller, rows, orgRoles);
   const uniqueSpaceIds = [...new Set(rows.flatMap(reachedSpaces))];
   const spaceRows =
     uniqueSpaceIds.length === 0
@@ -337,6 +378,7 @@ export async function listMeConnections(
             ? claims.sub
             : (displayAccountId(row.accountId) ?? row.label);
 
+    const reconnectSpaceId = renewIn.get(row.connectionId) ?? null;
     const entry: MeConnectionEntry = {
       connection_id: row.connectionId,
       kind: "integration",
@@ -350,8 +392,11 @@ export async function listMeConnections(
       scope: reach.scope,
       shared_spaces: sharesOf(row.connectionId).flatMap((id) => spaceRef(id) ?? []),
       share_all_spaces: reach.share_all_spaces,
-      allowed_actions: connectionActions(row, caller, false, orgRoles.get(row.orgId)),
+      allowed_actions: connectionActions(row, caller, false, orgRoles.get(row.orgId)).filter(
+        (action) => action !== "reconnect" || reconnectSpaceId !== null,
+      ),
       shareable_spaces: shareable.get(row.connectionId) ?? [],
+      reconnect_space_id: reconnectSpaceId,
       locked_by: locks.get(row.connectionId) ?? null,
       reused_by_agents: reusingAgents(row),
       org: { id: row.orgId, name: orgName },

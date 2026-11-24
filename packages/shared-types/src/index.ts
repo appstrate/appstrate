@@ -540,6 +540,8 @@ export interface MeConnectionEntry {
   allowed_actions: ConnectionAction[];
   /** Spaces the caller may share this connection into. */
   shareable_spaces: { id: string; name: string }[];
+  /** The space its renewal is started in; `null` exactly when `reconnect` is not allowed. */
+  reconnect_space_id: string | null;
   /** What binds it for the whole space; while set, unshare and delete answer 409. */
   locked_by: "admin_pin" | "org_default" | null;
   /** Distinct agents declaring this integration, run where it serves: owner's spaces and shares. */

@@ -179,7 +179,8 @@ export function shareableIn(t: ShareTargets): SQL<string[]> {
  *
  * `reconnect` is the owner's too, whatever the row's health: renewing in place is refused unless
  * the stored account is identified (`persistCredentialBundle`), so an identity-less row never holds
- * it. Judged only where the row carries its `accountId` (the list surfaces).
+ * it. The account surface acts from no space: it also needs one to start the renewal in
+ * (`listMeConnections`).
  */
 export function connectionActions(
   row: {
@@ -187,7 +188,7 @@ export function connectionActions(
     userId: string | null;
     endUserId: string | null;
     spaceId: string | null;
-    accountId?: string;
+    accountId: string;
   },
   caller: ConnectionCaller,
   sharedHere: boolean,

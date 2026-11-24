@@ -47,6 +47,7 @@ const meConnectionEntrySchema = {
     "shared_spaces",
     "allowed_actions",
     "shareable_spaces",
+    "reconnect_space_id",
     "reused_by_agents",
     "locked_by",
     "org",
@@ -83,6 +84,11 @@ const meConnectionEntrySchema = {
     },
     allowed_actions: connectionActionsSchema,
     shareable_spaces: shareableSpacesSchema,
+    reconnect_space_id: {
+      type: ["string", "null"],
+      description:
+        "The space of `org` to start its renewal in (`X-Space-Id` of `POST /api/integrations/{packageId}/auths/{authKey}/connect/session` with `connection_id`): one where the caller holds `integrations:connect` and the connection serves, its own or origin space first. `null` exactly when `allowed_actions` lacks `reconnect`.",
+    },
     locked_by: lockedBySchema,
     org: {
       type: "object",

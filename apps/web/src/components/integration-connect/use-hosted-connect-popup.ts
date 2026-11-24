@@ -39,7 +39,7 @@ export function useHostedConnectPopup() {
       forceAccountSelect?: boolean;
       connectionId?: string;
       /** Where the kickoff acts when it is not the working org and space (the account surface). */
-      scope?: { orgId: string; spaceId: string };
+      space?: { orgId: string; spaceId: string };
     }): Promise<boolean> => {
       try {
         // Synchronous: some browsers block popups opened in async callbacks.
@@ -51,8 +51,8 @@ export function useHostedConnectPopup() {
         try {
           const session = await initiateConnect.mutateAsync({
             params: { path: { packageId: input.packageId, authKey: input.authKey } },
-            ...(input.scope
-              ? { headers: { "X-Org-Id": input.scope.orgId, "X-Space-Id": input.scope.spaceId } }
+            ...(input.space
+              ? { headers: { "X-Org-Id": input.space.orgId, "X-Space-Id": input.space.spaceId } }
               : {}),
             body: {
               scopes: input.scopes ?? [],

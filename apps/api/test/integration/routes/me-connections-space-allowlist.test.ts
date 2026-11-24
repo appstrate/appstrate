@@ -114,7 +114,13 @@ describe("its owner's connections under a space allowlist", () => {
       });
 
     const listed = (await (await call("/api/me/connections")).json()) as {
-      data: Array<{ connections: Array<{ connection_id: string; allowed_actions: string[] }> }>;
+      data: Array<{
+        connections: Array<{
+          connection_id: string;
+          allowed_actions: string[];
+          reconnect_space_id: string | null;
+        }>;
+      }>;
     };
     const actions = Object.fromEntries(
       listed.data.flatMap((group) =>
@@ -125,6 +131,12 @@ describe("its owner's connections under a space allowlist", () => {
       [inside]: ["rename", "reconnect", "share"],
       [orgWide]: ["share"],
     });
+    const renewIn = Object.fromEntries(
+      listed.data.flatMap((group) =>
+        group.connections.map((row) => [row.connection_id, row.reconnect_space_id] as const),
+      ),
+    );
+    expect(renewIn).toEqual({ [inside]: owner.defaultSpaceId, [orgWide]: null });
 
     // Outside the allowlist: not there, whatever the action.
     expect((await call(`/api/me/connections/${outside}`, "PATCH", { label: "x" })).status).toBe(

@@ -26,8 +26,6 @@ import { connectionLockHintKey } from "../../components/integration-connect/conn
 import { useCurrentOrgId } from "../../hooks/use-org";
 import { useSpaces } from "../../hooks/use-spaces";
 import { connectionRowConfigures } from "../../lib/space-lists";
-import { reconnectScopeOf } from "../../lib/integration-presentation";
-import { useCurrentSpaceId } from "../../hooks/use-current-space";
 import { useHostedConnectPopup } from "../../components/integration-connect/use-hosted-connect-popup";
 import { ConnectionScopeBadge } from "../../components/integration-connect/connection-scope-badge";
 import { ConnectionShareEditor } from "../../components/integration-connect/connection-share-editor";
@@ -63,8 +61,7 @@ function ConnectionRow({
   const lockHint = lockKey ? t(lockKey) : null;
   const canRename = conn.allowed_actions.includes("rename");
   const { openPopup, isPending: reconnecting } = useHostedConnectPopup();
-  const spaceId = useCurrentSpaceId();
-  const reconnectScope = reconnectScopeOf(conn, { orgId, spaceId });
+  const reconnectSpaceId = conn.reconnect_space_id;
   const canShare = conn.allowed_actions.includes("share");
   const canShareAllSpaces = conn.allowed_actions.includes("share_all_spaces");
   // Shareable spaces and the ones it is already shared into, one entry each.
@@ -204,14 +201,14 @@ function ConnectionRow({
             label: t("btn.reconnect", { ns: "common" }),
             icon: RefreshCw,
             onSelect: () =>
-              reconnectScope &&
+              reconnectSpaceId &&
               void openPopup({
                 packageId,
                 authKey: conn.auth_key,
                 connectionId: conn.connection_id,
-                scope: reconnectScope,
+                space: { orgId: conn.org.id, spaceId: reconnectSpaceId },
               }),
-            hidden: !reconnectScope,
+            hidden: reconnectSpaceId === null,
             testId: `connection-reconnect-${conn.connection_id}`,
           },
           {
