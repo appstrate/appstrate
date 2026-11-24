@@ -3,7 +3,7 @@
 import { expect, it } from "bun:test";
 import { eq, sql } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
-import { notifications } from "@appstrate/db/schema";
+import { chatMessages, chatSessions, notifications } from "@appstrate/db/schema";
 import { createTestContext } from "../../apps/api/test/helpers/auth.ts";
 import { journalPGlite } from "../../apps/api/test/helpers/journal.ts";
 import { truncateAll } from "../../apps/api/test/helpers/db.ts";
@@ -105,4 +105,31 @@ it("stops an upgrade on a mis-scoped notification before 0103 renames it and 005
   } finally {
     await pg.close();
   }
+});
+
+it("names a stored chat message whose parts is not an array instead of failing before-traffic", async () => {
+  await truncateAll();
+  const { orgId, user } = await createTestContext();
+  const sessionId = `chs_${crypto.randomUUID()}`;
+  await db.insert(chatSessions).values({ id: sessionId, orgId, userId: user.id });
+  // Matches the 0055 candidate filter (appfile:// and read_file) with an object `parts`.
+  const content = {
+    role: "assistant",
+    parts: { type: "tool-read_file", input: { uri: "appfile://file_1" } },
+  };
+  await db.execute(sql`
+    INSERT INTO chat_messages (session_id, message_id, content)
+    VALUES (${sessionId}, 'object-parts', ${JSON.stringify(content)}::jsonb)
+  `);
+  const [row] = await db
+    .select({ seq: chatMessages.seq })
+    .from(chatMessages)
+    .where(eq(chatMessages.sessionId, sessionId));
+  const checks = await checkBeforeTraffic(new Date("2026-01-01T00:00:00Z"));
+  expect(checks.find(({ check }) => check.startsWith("0055"))?.pending).toBe(0);
+  expect(checks.find(({ check }) => check.startsWith("chat ·"))).toEqual({
+    check: "chat · messages incompatible with history replay",
+    pending: 1,
+    identifiers: [`session_id=${sessionId} seq=${row!.seq}`],
+  });
 });

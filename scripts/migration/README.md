@@ -1533,17 +1533,23 @@ The last query lists identifiers of unresolved notifications. Check their recipi
 
 `verify-beta68-upgrade.ts before-traffic` lists, under `chat · messages incompatible with history replay`, each stored message that `historicalChatMessageSchema` refuses, as `session_id=… seq=…`. The next turn in such a conversation is refused with a 400, so the check keeps chat closed. It prints identifiers only, never message content.
 
-On the restore, read the shape of each listed row without its text:
+On the restore, read the shape of each listed row without its text. Every listed message keeps at least one line, whatever its JSON types:
 
 ```sql
-SELECT m.seq, m.content->>'role' AS role, p->>'type' AS part_type,
-       array(SELECT jsonb_object_keys(p)) AS part_keys
-FROM chat_messages m, jsonb_array_elements(coalesce(m.content->'parts', '[]'::jsonb)) AS p
+SELECT m.seq, jsonb_typeof(m.content) AS content_type, m.content->>'role' AS role,
+       jsonb_typeof(m.content->'parts') AS parts_type, p.position,
+       jsonb_typeof(p.part) AS part_json_type, p.part->>'type' AS part_type,
+       array(SELECT jsonb_object_keys(
+         CASE WHEN jsonb_typeof(p.part) = 'object' THEN p.part ELSE '{}'::jsonb END)) AS part_keys
+FROM chat_messages m
+LEFT JOIN LATERAL jsonb_array_elements(
+  CASE WHEN jsonb_typeof(m.content->'parts') = 'array' THEN m.content->'parts' ELSE '[]'::jsonb END
+) WITH ORDINALITY AS p(part, position) ON true
 WHERE m.seq IN (/* listed seq values */)
-ORDER BY m.seq;
+ORDER BY m.seq, p.position;
 ```
 
-The refused shapes are: a role other than `user` or `assistant`, a message without a `parts` array, a text part without `text`, a file part without `mediaType` or without an `upload://` / `appfile://` URL, and a `data-agent-prompt` part outside a user message, repeated in one message, or whose `data` is not `{ name, title, text? }`. Repair them with the next numbered script, written against the exact shape found and rehearsed on the restore. Never edit the rows by hand in production. Re-run `before-traffic` until the count is `0`, then reopen chat.
+The refused shapes are: content that is not an object, a role other than `user` or `assistant`, a message whose `parts` is missing or not an array, a part that is not an object, a text part without `text`, a file part without `mediaType` or without an `upload://` / `appfile://` URL, and a `data-agent-prompt` part outside a user message, repeated in one message, or whose `data` is not `{ name, title, text? }`. Repair them with the next numbered script, written against the exact shape found and rehearsed on the restore. Never edit the rows by hand in production. Re-run `before-traffic` until the count is `0`, then reopen chat.
 
 ## Detail — Marked OAuth refresh tokens deleted (script `0056`)
 

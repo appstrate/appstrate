@@ -132,7 +132,9 @@ async function scanFileReadReceipts(
       .orderBy(chatMessages.seq)
       .limit(100);
     for (const row of rows) {
-      const { parts, rewritten } = rewriteFileReads(row.content.parts ?? []);
+      // A row whose `parts` is not an array holds no file read to rewrite; the history check names it.
+      const stored: unknown = row.content.parts;
+      const { parts, rewritten } = rewriteFileReads(Array.isArray(stored) ? stored : []);
       if (rewritten === 0) continue;
       messages++;
       calls += rewritten;
