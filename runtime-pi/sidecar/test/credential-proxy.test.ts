@@ -56,6 +56,34 @@ function jarCookies(deps: ApiCallDeps, integrationId: string, url: string): stri
 }
 
 describe("executeApiCall — structured failures", () => {
+  it("passes cancellation through to an in-flight HTTP request", async () => {
+    const started = Promise.withResolvers<void>();
+    const controller = new AbortController();
+    const fetchFn = mock(async (_input: unknown, init?: RequestInit) => {
+      const signal = init!.signal!;
+      started.resolve();
+      return await new Promise<Response>((_resolve, reject) =>
+        signal.addEventListener("abort", () => reject(signal.reason), { once: true }),
+      );
+    });
+    const call = executeApiCall(
+      {
+        signal: controller.signal,
+        integrationId: "@test/api",
+        connectionId: "conn-1",
+        targetUrl: "https://api.example.com/sample",
+        method: "POST",
+        callerHeaders: {},
+        body: { kind: "none" },
+      },
+      makeDeps({ fetchFn: fetchFn as unknown as typeof fetch }),
+    );
+    await started.promise;
+    controller.abort(new Error("request cancelled"));
+    await expect(call).rejects.toThrow("request cancelled");
+    expect(fetchFn).toHaveBeenCalledTimes(1);
+  });
+
   it("rejects malformed integrationId without touching credentials", async () => {
     const fetchCredentials = mock(async () => ({}) as never);
     const result = await executeApiCall(

@@ -12,6 +12,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `AUTH_META_KEY`, `CONNECT_META_KEY`, `OAUTH_META_KEY` and their readers `appstrateAuthRequired`, `getAppstrateConnectMeta`, `getAppstrateOAuthMeta` describe the published integration metadata fields.
 - `recallMemoryOutputSchema` and `runHistoryOutputSchema` describe the structured results of the run history and recall tools.
 
+- `integrationSpawnSpecsSchema` in `@appstrate/core/sidecar-types` validates declared launch specs before integration boot.
+- `modelErrorReason` in `@appstrate/core/model-error` reads a known reason from the structured provider refusal carried by a terminal run.
+
 - `assistantVisibleMcpResult` in `@appstrate/core/mcp-result` projects tool results to their assistant audience before workspace, history, or model use.
 
 - **`@appstrate/core/skill-address`**: the `skill://` URI grammar alone — `SKILL_URI_PREFIX`,

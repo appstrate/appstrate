@@ -9,6 +9,8 @@
  * via environment variables at container start.
  */
 
+import { deliverySchema } from "@afps-spec/schema";
+import { z } from "zod";
 import type { IntegrationManifest } from "./integration.ts";
 
 /**
@@ -499,6 +501,83 @@ export interface IntegrationSpawnSpec {
     readonly access: "ro" | "rw";
   };
 }
+
+const strings = z.record(z.string(), z.string());
+const uris = z.array(z.string());
+
+/** The platform's per-connection launch contract, decoded before any integration is started. */
+export const integrationSpawnSpecsSchema = z.array(
+  z.object({
+    integrationId: z.string().min(1),
+    namespace: z.string().min(1),
+    connection: z
+      .object({ id: z.string(), label: z.string(), accountId: z.string().nullable() })
+      .optional(),
+    sourceKind: z.enum(["local", "remote", "none"]),
+    manifest: z.object({
+      name: z.string(),
+      version: z.string(),
+      server: z
+        .object({
+          type: z.string().optional(),
+          entry_point: z.string().optional(),
+          version: z.string().optional(),
+          url: z.string().optional(),
+          platformEndpoint: z.literal(true).optional(),
+          transport: z.enum(["streamable-http", "sse"]).optional(),
+        })
+        .optional(),
+    }),
+    apiCalls: z
+      .array(
+        z.object({
+          authKey: z.string(),
+          toolName: z.string(),
+          authorizedUris: uris,
+          allowAllUris: z.boolean().optional(),
+          uploadProtocols: uris.optional(),
+        }),
+      )
+      .optional(),
+    spawnEnv: strings,
+    fileMounts: z
+      .record(z.string(), z.object({ content_b64: z.string(), mode: z.string() }))
+      .optional(),
+    httpDeliveryAuths: z
+      .record(
+        z.string(),
+        z.object({
+          authType: z.string(),
+          headerName: z.string(),
+          headerPrefix: z.string(),
+          value: z.string(),
+          allowServerOverride: z.boolean(),
+          authorizedUris: uris,
+          expiresAtEpochMs: z.number().nullable(),
+        }),
+      )
+      .optional(),
+    egress: z
+      .object({ authorizedUris: uris, declaredUris: uris, allowAllUris: z.boolean() })
+      .optional(),
+    hiddenTools: uris.optional(),
+    toolAllowlist: uris.optional(),
+    connectLogin: z
+      .object({
+        toolName: z.string(),
+        produces: uris.optional(),
+        authKey: z.string(),
+        authType: z.string(),
+        authorizedUris: uris,
+        deliveryHttp: deliverySchema.shape.http.unwrap(),
+        variables: strings,
+        inputs: strings,
+        reauthOn: z.array(z.number()).optional(),
+      })
+      .optional(),
+    workspaceMount: z.object({ mount: z.string(), access: z.enum(["ro", "rw"]) }).optional(),
+  }) satisfies z.ZodType<IntegrationSpawnSpec>,
+);
 
 /**
  * Discriminated union covering the two LLM auth modes the sidecar can serve:

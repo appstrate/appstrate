@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
+import { readIntegrationSpecsFromEnv } from "../integrations-boot.ts";
 import { describe, it, expect } from "bun:test";
 import { parseSidecarEnv, SidecarEnvError } from "../env.ts";
 
@@ -107,6 +108,38 @@ describe("parseSidecarEnv", () => {
       parseSidecarEnv({});
     } catch (err) {
       expect((err as Error).message).not.toContain("\n");
+    }
+  });
+});
+
+describe("integration launch declarations", () => {
+  const spec = {
+    integrationId: "@test/notes",
+    namespace: "notes",
+    sourceKind: "none" as const,
+    manifest: { name: "notes", version: "1.0.0" },
+    spawnEnv: {},
+  };
+  const parse = (input: unknown) =>
+    readIntegrationSpecsFromEnv({ INTEGRATIONS_TO_SPAWN_JSON: JSON.stringify(input) });
+  it("keeps a valid spec and distinguishes an empty list from malformed JSON", () => {
+    expect(parse([spec])).toEqual([spec]);
+    expect(parse([])).toEqual([]);
+    expect(readIntegrationSpecsFromEnv({})).toBeNull();
+    expect(() => readIntegrationSpecsFromEnv({ INTEGRATIONS_TO_SPAWN_JSON: "{" })).toThrow(
+      "invalid JSON",
+    );
+    expect(() => parse({})).toThrow("expected an array");
+  });
+  it("fails a mixed list even for a malformed nested field and reports no input values", () => {
+    try {
+      parse([spec, { ...spec, connection: { id: 1, label: "private label", accountId: null } }]);
+      throw new Error("expected invalid integration");
+    } catch (error) {
+      expect(error).toMatchObject({
+        declaredConnections: 2,
+        issues: ["INTEGRATIONS_TO_SPAWN_JSON[1]: invalid connection"],
+      });
     }
   });
 });

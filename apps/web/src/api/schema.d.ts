@@ -7481,6 +7481,11 @@ export interface components {
             model_error: {
                 /** @enum {string} */
                 category: "credential_unavailable" | "rate_limited" | "upstream_unavailable" | "invalid_request" | "unknown";
+                /**
+                 * @description Known provider reason carried by the terminal refusal.
+                 * @enum {string}
+                 */
+                reason?: "runtime_version_too_old";
                 retryable: boolean;
                 status: number | null;
                 message: string | null;
@@ -18670,7 +18675,7 @@ export interface operations {
                 "application/json": {
                     /** @description Must match the pairing's pinned provider id. Mismatched → 400; provider deregistered after mint → 404. */
                     providerId: string;
-                    /** @description Display name for the credential. Optional — the platform derives one from the provider's `displayName` when omitted (`@appstrate/connect-helper` no longer invents one client-side). */
+                    /** @description Display name for the credential. When omitted, the platform derives it from the provider's `displayName`. */
                     label?: string;
                     access_token: string;
                     refresh_token: string;
@@ -29007,7 +29012,7 @@ export interface operations {
                     "application/json": components["schemas"]["SmtpConfigView"];
                 };
             };
-            /** @description Malformed space id — `spc_` + a UUID is the only accepted shape (a retired `app_` id names the un-run `app_` → `spc_` migration). */
+            /** @description Malformed space id. Expected `spc_` followed by a canonical UUID. */
             400: components["responses"]["ValidationError"];
             403: components["responses"]["Forbidden"];
             /** @description Space or configuration not found */
@@ -29076,7 +29081,7 @@ export interface operations {
                 };
                 content?: never;
             };
-            /** @description Malformed space id — `spc_` + a UUID is the only accepted shape (a retired `app_` id names the un-run `app_` → `spc_` migration). */
+            /** @description Malformed space id. Expected `spc_` followed by a canonical UUID. */
             400: components["responses"]["ValidationError"];
             403: components["responses"]["Forbidden"];
             /** @description Space or configuration not found */
@@ -29143,7 +29148,7 @@ export interface operations {
                     "application/json": components["schemas"]["SocialProviderView"];
                 };
             };
-            /** @description Malformed space id — `spc_` + a UUID is the only accepted shape (a retired `app_` id names the un-run `app_` → `spc_` migration). */
+            /** @description Malformed space id. Expected `spc_` followed by a canonical UUID. */
             400: components["responses"]["ValidationError"];
             403: components["responses"]["Forbidden"];
             /** @description Space or configuration not found */
@@ -29206,7 +29211,7 @@ export interface operations {
                 };
                 content?: never;
             };
-            /** @description Malformed space id — `spc_` + a UUID is the only accepted shape (a retired `app_` id names the un-run `app_` → `spc_` migration). */
+            /** @description Malformed space id. Expected `spc_` followed by a canonical UUID. */
             400: components["responses"]["ValidationError"];
             403: components["responses"]["Forbidden"];
             /** @description Space or configuration not found */

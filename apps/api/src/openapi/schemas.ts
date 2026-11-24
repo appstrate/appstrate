@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { MODEL_ERROR_CATEGORIES } from "@appstrate/core/model-error";
+import { MODEL_ERROR_CATEGORIES, MODEL_ERROR_REASONS } from "@appstrate/core/model-error";
 import {
   orgRoleEnum,
   packageSourceValues,
@@ -1766,6 +1766,11 @@ export const schemas = {
             required: ["category", "retryable", "status", "message"],
             properties: {
               category: { type: "string", enum: [...MODEL_ERROR_CATEGORIES] },
+              reason: {
+                type: "string",
+                enum: [...MODEL_ERROR_REASONS],
+                description: "Known provider reason carried by the terminal refusal.",
+              },
               retryable: { type: "boolean" },
               status: { type: ["integer", "null"], minimum: 100, maximum: 599 },
               message: { type: ["string", "null"] },

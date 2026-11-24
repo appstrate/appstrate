@@ -70,6 +70,12 @@ describe("runErrorText", () => {
       "Claude Code 2.1.280 does not support this model",
     );
     const run = { status: "failed", error: "400 …", model_error: refusal };
+    expect(
+      runErrorText(
+        { ...run, model_error: { ...run.model_error, reason: "runtime_version_too_old" } },
+        t,
+      ),
+    ).toBe("run.error.runtimeVersionTooOld");
     expect(runErrorText(run, t, "runtime_version_too_old")).toBe("run.error.runtimeVersionTooOld");
     // A cancellation stays a cancellation, whatever the journal says.
     expect(runErrorText({ status: "cancelled", error: null }, t, "runtime_version_too_old")).toBe(

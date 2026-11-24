@@ -16,3 +16,4 @@ export {
   type CloudEventEnvelope,
   type BuildEnvelopeOptions,
 } from "./cloudevents.ts";
+export { readRunDiagnostic } from "./diagnostics.ts";

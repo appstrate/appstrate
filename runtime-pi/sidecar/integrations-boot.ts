@@ -63,7 +63,11 @@ import {
   unresolvedPlaceholders,
 } from "@appstrate/afps-runtime/resolvers";
 import { matchesAuthorizedUriSpec } from "@appstrate/afps-shared/authorized-uris";
-import type { IntegrationSpawnSpec } from "@appstrate/core/sidecar-types";
+import {
+  integrationSpawnSpecsSchema,
+  type IntegrationSpawnSpec,
+} from "@appstrate/core/sidecar-types";
+import { SidecarEnvError } from "./env.ts";
 
 import type { CredentialBundle } from "@appstrate/connect/connect";
 
@@ -221,6 +225,15 @@ function connectionLabelOf(spec: IntegrationSpawnSpec): { connectionLabel?: stri
   return spec.connection ? { connectionLabel: spec.connection.label } : {};
 }
 
+export class IntegrationSpecsError extends SidecarEnvError {
+  constructor(
+    issues: string[],
+    readonly declaredConnections: number,
+  ) {
+    super(issues);
+  }
+}
+
 /**
  * Parse the `INTEGRATIONS_TO_SPAWN_JSON` env var. Returns `null` when the
  * env var is missing or empty — the caller proceeds without integrations.
@@ -231,25 +244,24 @@ export function readIntegrationSpecsFromEnv(env = process.env): IntegrationSpawn
   let parsed: unknown;
   try {
     parsed = JSON.parse(raw);
-  } catch (err) {
-    logger.warn("INTEGRATIONS_TO_SPAWN_JSON is not valid JSON; skipping integrations", {
-      error: err instanceof Error ? err.message : String(err),
+  } catch {
+    throw new IntegrationSpecsError(["INTEGRATIONS_TO_SPAWN_JSON: invalid JSON"], 0);
+  }
+  const result = integrationSpawnSpecsSchema.safeParse(parsed);
+  if (!result.success) {
+    // Values and map keys may carry credentials. Only the entry and its contract field are public.
+    const issues = result.error.issues.map(({ path }) => {
+      const [index, field] = path;
+      return typeof index === "number"
+        ? `INTEGRATIONS_TO_SPAWN_JSON[${index}]: invalid ${typeof field === "string" ? field : "entry"}`
+        : "INTEGRATIONS_TO_SPAWN_JSON: expected an array";
     });
-    return null;
-  }
-  if (!Array.isArray(parsed)) {
-    logger.warn("INTEGRATIONS_TO_SPAWN_JSON must be an array; skipping integrations");
-    return null;
-  }
-  return parsed.filter((s): s is IntegrationSpawnSpec => {
-    return (
-      typeof s === "object" &&
-      s !== null &&
-      typeof (s as IntegrationSpawnSpec).integrationId === "string" &&
-      typeof (s as IntegrationSpawnSpec).namespace === "string" &&
-      typeof (s as IntegrationSpawnSpec).manifest === "object"
+    throw new IntegrationSpecsError(
+      [...new Set(issues)],
+      Array.isArray(parsed) ? parsed.length : 0,
     );
-  });
+  }
+  return result.data;
 }
 
 /**

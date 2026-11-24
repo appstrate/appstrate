@@ -803,10 +803,10 @@ export function createApiCallToolDefs(
         // `api_upload` sibling points back at.
         _meta: { [API_CALL_TOOL_META_KEY]: { tool_key: toolName } satisfies ApiCallToolMeta },
       },
-      handler: async (rawArgs) =>
+      handler: async (rawArgs, { signal }) =>
         apiCallLimit
-          ? await apiCallLimit(() => credentialProxyInner(rawArgs, ctx))
-          : await credentialProxyInner(rawArgs, ctx),
+          ? await apiCallLimit(() => credentialProxyInner(rawArgs, ctx, signal))
+          : await credentialProxyInner(rawArgs, ctx, signal),
     };
   };
 
@@ -935,7 +935,9 @@ export function createApiCallToolDefs(
   async function credentialProxyInner(
     rawArgs: unknown,
     ctx: { proxyDeps: ApiCallDeps; integrationId: string; connectionId: string; label: string },
+    signal: AbortSignal | undefined,
   ): Promise<CallToolResult> {
+    signal?.throwIfAborted();
     {
       // `target`, `method` and `headers` arrive as `CREDENTIAL_PROXY_INPUT_SCHEMA`
       // declares them: Pi validates a model's call against it before `execute`
@@ -999,6 +1001,7 @@ export function createApiCallToolDefs(
           integrationId: ctx.integrationId,
           connectionId: ctx.connectionId,
           targetUrl: args.target,
+          signal,
           method,
           callerHeaders,
           body: resolved.body,

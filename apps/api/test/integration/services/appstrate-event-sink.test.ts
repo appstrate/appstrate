@@ -78,6 +78,19 @@ describe("persistRunEvent", () => {
       .orderBy(asc(runLogs.id));
   }
 
+  it("ignores malformed diagnostic fields and retains the event at its default level", async () => {
+    await persist(
+      event("appstrate.progress", {
+        message: { text: "wrong" },
+        data: ["not a record"],
+        level: "future",
+      }),
+    );
+    expect(await loadLogs()).toMatchObject([
+      { event: "progress", message: null, data: null, level: "debug" },
+    ]);
+  });
+
   it("output.emitted → one result/output run_log row per emission", async () => {
     await persist(event("output.emitted", { data: { a: 1, b: 2 } }));
     await persist(event("output.emitted", { data: { b: 3, c: 4 } }));
