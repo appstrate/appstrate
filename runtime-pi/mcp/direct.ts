@@ -174,6 +174,7 @@ async function planApiCall(
       let shaped: Awaited<ReturnType<typeof shapeApiCallResponse>>;
       try {
         shaped = await shapeApiCallResponse(result, {
+          signal,
           workspace: opts.workspace,
           ...(responseToFile !== undefined ? { toFile: responseToFile } : {}),
           toolCallId,
