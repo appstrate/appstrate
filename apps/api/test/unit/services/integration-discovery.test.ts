@@ -363,11 +363,15 @@ describe("discoverRemoteIntegration", () => {
   const outageResource = `${outageOrigin}/mcp`;
   const advertisedUrl = `${outageOrigin}/.well-known/oauth-protected-resource/mcp`;
 
-  it("follows a resource document advertised only on GET and keeps the POST challenge scopes", async () => {
+  it.each([
+    ['Bearer scope="tools:read"'],
+    [`Bearer scope="tools:read", resource_metadata="${outageOrigin}/unavailable"`],
+  ])("follows the GET document when POST sends %s and keeps its scopes", async (postChallenge) => {
     const metadataUrl = `${outageOrigin}/metadata/resource`;
     const { fetchImpl, seen } = fakeFetch({
       ...protectedServer(outageHost),
-      [`POST ${outageResource}`]: () => unauthorized('Bearer scope="tools:read"'),
+      [`POST ${outageResource}`]: () => unauthorized(postChallenge),
+      [`GET ${outageOrigin}/unavailable`]: () => json({}, 503),
       [`GET ${outageResource}`]: () => unauthorized(`Bearer resource_metadata="${metadataUrl}"`),
       [`GET ${metadataUrl}`]: () =>
         json({

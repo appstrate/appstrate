@@ -21,8 +21,8 @@
  *   registerDynamicClient → persist.
  *
  * Try the advertised document, then the path-specific and root well-known locations.
- * A document must name the expected resource (§3.3). If the advertised document
- * is temporarily unavailable and no valid alternative is found, the caller can retry.
+ * A document must name the expected resource (§3.3). If any candidate is temporarily
+ * unavailable and no valid alternative is found, the caller can retry.
  */
 
 import { isRetryableHttpStatus } from "@appstrate/afps-shared/backoff";
@@ -241,35 +241,42 @@ export async function discoverProtectedResourceMetadata(
   // metadata and must not reach the network layer.
   if (!isHttpUrl(input.resourceServerUrl)) return { metadata: null };
 
-  let advertised = input.challenge?.resourceMetadataUrl;
-  if (!advertised) {
-    try {
-      const res = await fetchImpl(input.resourceServerUrl, {
-        method: "GET",
-        headers: { Accept: "application/json" },
-        signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
-      });
-      const header = res.headers.get("www-authenticate");
-      await res.body?.cancel().catch(() => {});
-      if (header) advertised = parseBearerChallenge(header)?.resourceMetadataUrl;
-    } catch {
-      // The well-known locations can still identify the protected resource.
-    }
-  }
-
-  const probes = buildProtectedResourceProbes(input.resourceServerUrl);
-  if (advertised) probes.unshift({ metadataUrl: advertised, resource: input.resourceServerUrl });
   // A challenge can advertise a well-known URL. Read it once, checking the resource
   // identifier for each location (the root location can identify the origin).
   const responses = new Map<string, Awaited<ReturnType<typeof fetchResourceMetadata>>>();
-  for (const { metadataUrl, resource } of probes) {
+  const readAt = async (metadataUrl: string, resource: string) => {
     let doc = responses.get(metadataUrl);
     if (doc === undefined) {
       doc = await fetchResourceMetadata(metadataUrl, fetchImpl);
       responses.set(metadataUrl, doc);
     }
-    if (doc && doc !== UNAVAILABLE && sameUrlIdentifier(doc.resource, resource))
-      return { metadata: doc };
+    return doc && doc !== UNAVAILABLE && sameUrlIdentifier(doc.resource, resource) ? doc : null;
+  };
+
+  if (input.challenge?.resourceMetadataUrl) {
+    const metadata = await readAt(input.challenge.resourceMetadataUrl, input.resourceServerUrl);
+    if (metadata) return { metadata };
+  }
+  // GET may advertise a different document from the transport's POST.
+  try {
+    const res = await fetchImpl(input.resourceServerUrl, {
+      method: "GET",
+      headers: { Accept: "application/json" },
+      signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
+    });
+    const header = res.headers.get("www-authenticate");
+    await res.body?.cancel().catch(() => {});
+    const advertised = header && parseBearerChallenge(header)?.resourceMetadataUrl;
+    if (advertised) {
+      const metadata = await readAt(advertised, input.resourceServerUrl);
+      if (metadata) return { metadata };
+    }
+  } catch {
+    // The well-known locations can still identify the protected resource.
+  }
+  for (const { metadataUrl, resource } of buildProtectedResourceProbes(input.resourceServerUrl)) {
+    const metadata = await readAt(metadataUrl, resource);
+    if (metadata) return { metadata };
   }
   return {
     metadata: null,
