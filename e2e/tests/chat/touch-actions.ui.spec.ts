@@ -5,7 +5,7 @@ import { expect, test } from "../../fixtures/browser.fixture.ts";
 test.describe("chat actions on a touchscreen", () => {
   test.use({ hasTouch: true });
 
-  test("copy and conversation actions work in landscape and in the portrait drawer", async ({
+  test("copy and the conversation's « … » in its header work in landscape and in portrait", async ({
     authedPage: page,
     orgOnlyClient,
     browserCtx,
@@ -60,10 +60,14 @@ test.describe("chat actions on a touchscreen", () => {
       .poll(() => page.evaluate(() => navigator.clipboard.readText()))
       .toContain("Budget vérifié.");
     const menu = page.getByTestId("sheet-menu");
+    // On touch the rows have no « … »: the open conversation's header carries the one menu.
     const trigger = page.getByRole("button", { name: "Actions de « Budget »" });
+    await expect(trigger).toHaveCount(1);
+    await expect(trigger).toHaveAttribute("data-testid", "chat-conversation-menu");
     await expect(trigger).toHaveCSS("width", "44px");
     await trigger.tap();
-    // From `md` up the "…" opens a dropdown, whatever the pointer; the same two items.
+    // From `md` up the "…" opens a dropdown, whatever the pointer.
+    await expect(page.getByRole("menuitem", { name: "Infos", exact: true })).toBeVisible();
     await expect(page.getByRole("menuitem", { name: "Supprimer", exact: true })).toBeVisible();
     await page.getByRole("menuitem", { name: "Renommer", exact: true }).tap();
     const rename = page.getByRole("dialog", { name: "Renommer la conversation" });
@@ -76,7 +80,6 @@ test.describe("chat actions on a touchscreen", () => {
     await page.screenshot({ path: testInfo.outputPath("landscape.png"), animations: "disabled" });
 
     await page.setViewportSize({ width: 390, height: 844 });
-    await page.getByTestId("sidebar-opener").tap();
     // Below `md` the same "…" opens a panel from the bottom: its rows are buttons.
     await renamed.tap();
     await expect(menu.getByRole("button", { name: "Renommer", exact: true })).toBeVisible();
@@ -92,6 +95,8 @@ test.describe("chat actions on a touchscreen", () => {
     await renamed.tap();
     await remove.tap();
     await dialog.getByRole("button", { name: "Supprimer" }).tap();
+    // Deleting the open conversation leaves for a new one, which has no « … ».
+    await expect(page).toHaveURL(/\/chat$/);
     await expect(renamed).toHaveCount(0);
     await expect
       .poll(async () => (await orgOnlyClient.get(`${sessions}/${id}`)).status())

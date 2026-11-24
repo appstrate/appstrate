@@ -240,7 +240,11 @@ test("the trail shows a conversation's name, and « Renommer » renames it: Annu
   await expect(trail).toContainText("Rename A");
   await expect(trail.getByRole("textbox")).toHaveCount(0);
 
-  const openRename = () => page.getByRole("button", { name: "Renommer", exact: true }).click();
+  // « Renommer » is in the open conversation's « … », in the header.
+  const openRename = async () => {
+    await page.getByTestId("chat-conversation-menu").click();
+    await page.getByRole("menuitem", { name: "Renommer", exact: true }).click();
+  };
   const dialog = page.getByRole("dialog", { name: "Renommer la conversation" });
   await openRename();
   const name = dialog.getByRole("textbox", { name: "Nom" });

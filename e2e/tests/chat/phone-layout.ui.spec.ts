@@ -38,6 +38,8 @@ test("chat fields stay legible in both orientations and the search sheet fits th
   const search = page.getByRole("searchbox");
   const code = page.locator("pre > code");
   await expect(composer).toHaveCSS("font-size", "16px");
+  // The search is a magnifier that unfolds the field, on every format.
+  await page.getByTestId("chat-search-toggle").click();
   await expect(search).toHaveCSS("font-size", "16px");
   await expect(code).toHaveCSS("font-size", "12px");
   const send = page.getByRole("button", { name: "Envoyer", exact: true });
@@ -51,7 +53,7 @@ test("chat fields stay legible in both orientations and the search sheet fits th
   await expect(code).toHaveCSS("font-size", "14px");
   await page.getByTestId("sidebar-opener").click();
   const sheet = page.getByRole("dialog");
-  // Below md the search is a magnifier that unfolds the field.
+  // The drawer's list is a new mount: its search is folded again.
   await page.getByTestId("chat-search-toggle").click();
   await search.fill("Search destination");
   // Desktop Chromium has no on-screen keyboard. Feed a resize through the mounted hook.
