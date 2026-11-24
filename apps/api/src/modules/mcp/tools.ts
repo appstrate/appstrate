@@ -2800,17 +2800,15 @@ function withSpaceArgument(
         entered && resolved.kind === "space"
           ? [...new Set([spaces.current.id, ...(target ? [target] : [])])]
           : [];
-      if (
-        target &&
-        (spaces.bounded || spaces.beforeAct) &&
-        !spaces.reachable.some((s) => s.id === target)
-      ) {
-        return refusalResult({
-          code: "unknown_space",
-          error: "The target is outside the spaces this connection can use.",
-        });
-      }
       if (spaces.beforeAct && ids.length > 0) {
+        // Record only spaces in this conversation. Without a recorder, route guards
+        // return their normal response for a target outside the credential's allowlist.
+        if (target && !spaces.reachable.some((space) => space.id === target)) {
+          return refusalResult({
+            code: "unknown_space",
+            error: "The target is outside the spaces this conversation can use.",
+          });
+        }
         try {
           for (const id of ids) await spaces.beforeAct(id);
         } catch {
