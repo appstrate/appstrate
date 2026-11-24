@@ -13918,6 +13918,12 @@ export interface operations {
                             [key: string]: unknown;
                         };
                         connection_id?: string | null;
+                        /** @description The connection this session renews in place, so the form can name the account the new credentials must belong to; null on a fresh connect. */
+                        reconnecting?: {
+                            label: string;
+                            /** @description The upstream account the connection identifies; null when it identifies none. */
+                            account_id: string | null;
+                        } | null;
                         csrf?: string | null;
                         /** @description The connection variables the form collects (AFPS §7.12); null when the integration declares none. */
                         variables?: {

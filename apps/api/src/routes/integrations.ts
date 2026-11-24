@@ -118,7 +118,7 @@ import {
   deleteIntegrationOAuthClient,
   getIntegrationAuthStatuses,
   getIntegrationConnectionCredentialFields,
-  getIntegrationConnectionVariables,
+  getReconnectedConnection,
   listIntegrationClients,
   listIntegrationConnections,
   loadConnectionShares,
@@ -159,6 +159,7 @@ import {
 } from "../services/integration-manifest-helpers.ts";
 import {
   acquiresByConnectLogin,
+  displayAccountId,
   partitionScopesByAuthCatalog,
   scopesNotCovered,
   scopeTokenSchema,
@@ -1473,12 +1474,11 @@ export function createIntegrationsRouter() {
     const scope = scopeFromClaims(claims);
     const { manifest, auth } = await readIntegrationAuth(scope, claims.package_id, claims.auth_key);
     const variablesSchema = getVariablesSchema(manifest);
-    // A reconnect shows the values the connection was made with; `connection_id` rides signed
-    // claims minted after `assertConnectionBelongsToActor`.
-    const values =
-      variablesSchema && claims.connection_id
-        ? await getIntegrationConnectionVariables(claims.connection_id)
-        : null;
+    // A reconnect names the connection it renews and shows the values it was made with;
+    // `connection_id` rides signed claims minted after `assertConnectionBelongsToActor`.
+    const renewed = claims.connection_id
+      ? await getReconnectedConnection(claims.connection_id)
+      : null;
     return c.json({
       packageId: claims.package_id,
       auth_key: claims.auth_key,
@@ -1486,8 +1486,13 @@ export function createIntegrationsRouter() {
       icon: manifest.icon ?? null,
       auth: authWithoutMintedCredentials(claims.package_id, claims.auth_key, auth),
       connection_id: claims.connection_id ?? null,
+      reconnecting: renewed
+        ? { label: renewed.label, account_id: displayAccountId(renewed.accountId) }
+        : null,
       csrf: claims.csrf ?? null,
-      variables: variablesSchema ? { schema: variablesSchema, values: values ?? {} } : null,
+      variables: variablesSchema
+        ? { schema: variablesSchema, values: renewed?.variables ?? {} }
+        : null,
     });
   });
 

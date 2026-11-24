@@ -1924,6 +1924,20 @@ export const integrationsPaths = {
                       "The auth declaration the form renders. Credentials the platform mints (the `private_key` of `@appstrate/ssh`) are removed from `credentials.schema` — display only; submissions are validated against the full schema.",
                   },
                   connection_id: { type: ["string", "null"] },
+                  reconnecting: {
+                    type: ["object", "null"],
+                    required: ["label", "account_id"],
+                    properties: {
+                      label: { type: "string" },
+                      account_id: {
+                        type: ["string", "null"],
+                        description:
+                          "The upstream account the connection identifies; null when it identifies none.",
+                      },
+                    },
+                    description:
+                      "The connection this session renews in place, so the form can name the account the new credentials must belong to; null on a fresh connect.",
+                  },
                   csrf: { type: ["string", "null"] },
                   variables: {
                     type: ["object", "null"],

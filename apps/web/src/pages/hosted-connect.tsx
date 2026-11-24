@@ -259,10 +259,26 @@ export function HostedConnectPage() {
             <div className="flex items-center gap-3">
               <PackageIcon type="integration" icon={context.icon} />
               <h1 className="text-lg font-semibold">
-                {t("integration.connect.hosted.title", { display: context.display_name })}
+                {t(
+                  context.reconnecting
+                    ? "integration.connect.hosted.reconnectTitle"
+                    : "integration.connect.hosted.title",
+                  { display: context.display_name },
+                )}
               </h1>
             </div>
             <form className="flex flex-col gap-4" onSubmit={submit}>
+              {context.reconnecting && (
+                <p className="text-sm" data-testid="hosted-connect-reconnecting">
+                  {context.reconnecting.account_id
+                    ? t("integration.connect.hosted.reconnectAccount", {
+                        account: context.reconnecting.account_id,
+                      })
+                    : t("integration.connect.hosted.reconnectConnection", {
+                        label: context.reconnecting.label,
+                      })}
+                </p>
+              )}
               <p className="text-muted-foreground text-sm">
                 {isOAuth
                   ? t("integration.connect.variables.oauthSubtitle")

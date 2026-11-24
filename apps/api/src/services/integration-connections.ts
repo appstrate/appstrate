@@ -3297,16 +3297,20 @@ export function serializeIntegrationConnection(
   };
 }
 
-/** One connection's variables (AFPS §7.12); keyed by id alone — the caller checked ownership. */
-export async function getIntegrationConnectionVariables(
+/** What a reconnect shows of the connection it renews; keyed by id alone — the caller checked ownership. */
+export async function getReconnectedConnection(
   connectionId: string,
-): Promise<Record<string, string> | null> {
+): Promise<{ label: string; accountId: string; variables: Record<string, string> | null } | null> {
   const [row] = await db
-    .select({ variables: integrationConnections.variables })
+    .select({
+      label: integrationConnections.label,
+      accountId: integrationConnections.accountId,
+      variables: integrationConnections.variables,
+    })
     .from(integrationConnections)
     .where(eq(integrationConnections.id, connectionId))
     .limit(1);
-  return row?.variables ?? null;
+  return row ?? null;
 }
 
 // ─────────────────────────────────────────────

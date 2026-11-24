@@ -9758,6 +9758,20 @@
                     "connection_id": {
                       "type": ["string", "null"]
                     },
+                    "reconnecting": {
+                      "type": ["object", "null"],
+                      "required": ["label", "account_id"],
+                      "properties": {
+                        "label": {
+                          "type": "string"
+                        },
+                        "account_id": {
+                          "type": ["string", "null"],
+                          "description": "The upstream account the connection identifies; null when it identifies none."
+                        }
+                      },
+                      "description": "The connection this session renews in place, so the form can name the account the new credentials must belong to; null on a fresh connect."
+                    },
                     "csrf": {
                       "type": ["string", "null"]
                     },
