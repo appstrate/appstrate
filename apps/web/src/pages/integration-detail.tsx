@@ -62,10 +62,7 @@ import { PackageOwnershipNotice } from "../components/package-detail/package-own
 import { ConfigAuthBlock } from "../components/integration-detail/config-auth-block";
 import { AccessRulesSection } from "../components/integration-detail/access-rules-section";
 import { ConnectionsTable } from "../components/integration-detail/connections-table";
-import {
-  DefaultConnectionSection,
-  DefaultConnectionSettings,
-} from "../components/integration-detail/default-connection-section";
+import { DefaultConnectionSettings } from "../components/integration-detail/default-connection-section";
 import { IntegrationActivateButton } from "../components/integration-detail/integration-activate-button";
 import { ConfigurationSpace } from "../components/configuration-space";
 import { RoleLimitNotice } from "../components/role-limit-notice";
@@ -600,17 +597,6 @@ export function IntegrationDetailPage() {
               onConfigure={openAuthentication}
             />
           )
-        )}
-        {/* The default is one space's: « Tous les espaces » lists without it. */}
-        {!overview && (
-          <DefaultConnectionSection
-            detail={detail}
-            settingsHref={
-              canConfigure && active
-                ? integrationSettingsHref(location.pathname, "default-connection")
-                : undefined
-            }
-          />
         )}
       </DetailTabPanel>
 

@@ -1,11 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { useTranslation } from "react-i18next";
-import { Link } from "react-router-dom";
-import { Button } from "@appstrate/ui/components/button";
 import type { IntegrationDetailWire } from "../../hooks/use-integrations";
 import { connectionOptionLabel } from "../../lib/connection-set";
-import { SettingsHeading } from "../settings/settings-heading";
 import { OrgDefaultSection } from "./org-default-section";
 import { PinManagementSection } from "./pin-management-section";
 
@@ -45,44 +42,6 @@ function DefaultConnectionVerdict({ detail }: { detail: DefaultConnectionDetail 
         ? t(selectedKey, { account: connectionOptionLabel(selected) })
         : t(directCallLabels[status])}
     </p>
-  );
-}
-
-/**
- * The Connexions tab's read of the space's default: what a call uses, for every member. It is set
- * in Paramètres (`DefaultConnectionSettings`), which `settingsHref` opens for a configurer.
- */
-export function DefaultConnectionSection({
-  detail,
-  settingsHref,
-}: {
-  detail: DefaultConnectionDetail;
-  /** Where the default is set; absent for a reader who cannot configure it. */
-  settingsHref?: string;
-}) {
-  const { t } = useTranslation(["settings", "common"]);
-  return (
-    <section
-      id="default-connection"
-      className="mt-8 flex flex-col gap-3"
-      data-testid="default-connection"
-    >
-      <SettingsHeading
-        className="mb-0"
-        title={t("integration.defaultConnection.title")}
-        description={t("integration.defaultConnection.description")}
-      />
-      <div className="flex flex-wrap items-center gap-3">
-        <DefaultConnectionVerdict detail={detail} />
-        {settingsHref && (
-          <Button variant="outline" size="sm" asChild>
-            <Link to={settingsHref} data-testid="default-connection-edit">
-              {t("btn.edit", { ns: "common" })}
-            </Link>
-          </Button>
-        )}
-      </div>
-    </section>
   );
 }
 
