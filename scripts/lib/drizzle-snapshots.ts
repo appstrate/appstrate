@@ -4,6 +4,7 @@
 
 import { Glob } from "bun";
 import { dirname, join, relative } from "node:path";
+import { workspaceModuleRoots } from "./workspace-modules.ts";
 
 /** The subset of `meta/_journal.json` these gates read. */
 export interface DrizzleJournal {
@@ -57,27 +58,23 @@ interface ModuleTables {
   tables: Set<string>;
 }
 
-/** Every `packages/module-*` owning a migration tree, plus the root `ee/` package, with the
- * tables each declares. The journal glob matches at any depth — module trees nest `meta/` one
+/** Every workspace module package (`workspaceModuleRoots`) owning a migration tree, with the
+ * tables it declares. The journal glob matches at any depth — module trees nest `meta/` one
  * level deeper than the platform's. */
 export async function moduleOwnedTables(repoRoot: string): Promise<ModuleTables[]> {
   const found: ModuleTables[] = [];
-  const roots = [
-    { cwd: join(repoRoot, "packages"), pattern: "module-*/**/meta/_journal.json", id: null },
-    { cwd: repoRoot, pattern: "ee/**/meta/_journal.json", id: "enterprise" },
-  ];
-  for (const { cwd, pattern, id } of roots) {
-    for await (const rel of new Glob(pattern).scan({ cwd })) {
+  for (const { id, dir } of workspaceModuleRoots(repoRoot)) {
+    const packageDir = join(repoRoot, dir);
+    for await (const rel of new Glob("**/meta/_journal.json").scan({ cwd: packageDir })) {
       if (rel.includes("node_modules/")) continue;
-      const metaDir = join(cwd, dirname(rel));
+      const metaDir = join(packageDir, dirname(rel));
       const journal: DrizzleJournal = await Bun.file(join(metaDir, "_journal.json")).json();
       const snapshotName = latestSnapshotName(journal);
       const snapshotPath = join(metaDir, snapshotName);
       const snapshot: DrizzleSnapshot = await Bun.file(snapshotPath).json();
-      const dir = rel.split("/")[0]!;
       found.push({
-        id: id ?? dir.replace(/^module-/, ""),
-        packageDir: relative(repoRoot, join(cwd, dir)).split("\\").join("/"),
+        id,
+        packageDir: dir,
         snapshot: relative(repoRoot, snapshotPath).split("\\").join("/"),
         tables: declaredTables(snapshot),
       });

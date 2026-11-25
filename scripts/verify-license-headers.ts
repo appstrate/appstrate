@@ -14,15 +14,16 @@
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { SOURCE_GLOBS, trackedFiles } from "./lib/tracked-files.ts";
+import { COMMERCIAL_MODULE } from "./lib/workspace-modules.ts";
 
 const REPO_ROOT = join(import.meta.dir, "..");
 
 const HEADER_LINES = 3;
 
 /** The repository's one directory under the commercial licence (`ee/LICENSE`). */
-const COMMERCIAL_PREFIX = "ee/";
+const COMMERCIAL_PREFIX = `${COMMERCIAL_MODULE.dir}/`;
 
-export type ExpectedLicense = "Apache-2.0" | "LicenseRef-Appstrate-Commercial";
+type ExpectedLicense = "Apache-2.0" | "LicenseRef-Appstrate-Commercial";
 
 /** The licence `path` must declare. Pure; a prefix match, not a substring one. */
 export function expectedLicenseFor(path: string): ExpectedLicense {

@@ -15,8 +15,9 @@
  */
 import { readdirSync, existsSync, statSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import { dirname, join, resolve } from "node:path";
+import { basename, dirname, join, resolve } from "node:path";
 import type { AppstrateModule, OpenApiSchemaEntry } from "@appstrate/core/module";
+import { workspaceModuleRoots } from "./workspace-modules.ts";
 
 interface CollectedModuleOpenApi {
   /** OpenAPI 3.1 path items, keyed by path string. */
@@ -35,9 +36,9 @@ interface CollectedModuleOpenApi {
   ownedTagNames: Set<string>;
 }
 
-/** A discovered workspace-package module under `packages/module-*`, or the root `ee/`. */
+/** A discovered workspace-package module (`workspaceModuleRoots`) with a `src/index.ts`. */
 interface WorkspaceModuleDir {
-  /** Package directory name, e.g. "module-chat". */
+  /** Package directory name, e.g. "module-chat" or "ee". */
   name: string;
   /** Absolute path to the package's `src` directory. */
   srcDir: string;
@@ -46,36 +47,22 @@ interface WorkspaceModuleDir {
 }
 
 /**
- * Discover workspace-package modules — `packages/module-*` dirs that expose a
- * `src/index.ts` entry. SINGLE SOURCE OF TRUTH shared by `collectModuleOpenApi`
+ * Discover workspace-package modules — `packages/module-*` and the root `ee/`
+ * (`workspaceModuleRoots`) — that expose a `src/index.ts` entry. SINGLE SOURCE OF TRUTH shared by `collectModuleOpenApi`
  * (below) and the Code ⊆ Spec route scan in `scripts/verify-openapi.ts`, so the
  * two scripts can never drift on which modules they consider. Sorted by name
  * for deterministic ordering (readdir order is filesystem-dependent and shapes
  * the merged spec's key order, which generate-api-types.ts byte-compares).
  */
 export function discoverWorkspaceModuleDirs(packagesDir: string): WorkspaceModuleDir[] {
-  if (!existsSync(packagesDir)) return [];
-  // The commercial `ee/` package sits at the repository root, beside `packages/`.
-  const eeDir = join(packagesDir, "..", "ee");
-  const ee: WorkspaceModuleDir[] = existsSync(join(eeDir, "src/index.ts"))
-    ? [{ name: "ee", srcDir: join(eeDir, "src"), entryFile: join(eeDir, "src/index.ts") }]
-    : [];
-  return readdirSync(packagesDir)
-    .filter((name) => {
-      if (!name.startsWith("module-")) return false;
-      try {
-        return existsSync(join(packagesDir, name, "src/index.ts"));
-      } catch {
-        return false;
-      }
-    })
-    .sort()
-    .map((name) => ({
-      name,
-      srcDir: join(packagesDir, name, "src"),
-      entryFile: join(packagesDir, name, "src/index.ts"),
+  const repoRoot = join(packagesDir, "..");
+  return workspaceModuleRoots(repoRoot)
+    .map(({ dir }) => ({
+      name: basename(dir),
+      srcDir: join(repoRoot, dir, "src"),
+      entryFile: join(repoRoot, dir, "src/index.ts"),
     }))
-    .concat(ee);
+    .filter(({ entryFile }) => existsSync(entryFile));
 }
 
 /**

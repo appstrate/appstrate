@@ -35,6 +35,7 @@ import { Glob } from "bun";
 import { resolve, dirname, relative, sep, join } from "node:path";
 import { readGatePolicy } from "./lib/policy-env.ts";
 import { SOURCE_GLOBS, trackedFiles } from "./lib/tracked-files.ts";
+import { COMMERCIAL_MODULE, workspaceModuleRoots } from "./lib/workspace-modules.ts";
 import { REGEX_PRECEDERS, scanQuoted } from "./lib/ts-lexer.ts";
 
 // Under CI the override is ignored, so a green pipeline can never be bought
@@ -252,16 +253,14 @@ export function reviewPlatformModuleImports(imports: readonly PlatformImport[]):
  * The commercial tree: `ee/`, the repository's one non-Apache-2.0 directory, the
  * same prefix `verify-license-headers.ts` expects the commercial header under.
  */
-const COMMERCIAL_TREES: readonly { prefix: string; spec: string }[] = [
-  { prefix: "ee/", spec: "@appstrate/ee" },
-];
+const COMMERCIAL_PREFIX = `${COMMERCIAL_MODULE.dir}/`;
 
-function commercialTreeOf(imp: PlatformImport): { prefix: string } | undefined {
-  return COMMERCIAL_TREES.find(
-    ({ prefix, spec }) =>
-      imp.spec === spec ||
-      imp.spec.startsWith(`${spec}/`) ||
-      imp.resolved?.startsWith(prefix) === true,
+function reachesCommercialTree(imp: PlatformImport): boolean {
+  const { spec } = COMMERCIAL_MODULE;
+  return (
+    imp.spec === spec ||
+    imp.spec.startsWith(`${spec}/`) ||
+    imp.resolved?.startsWith(COMMERCIAL_PREFIX) === true
   );
 }
 
@@ -281,10 +280,9 @@ function commercialTreeOf(imp: PlatformImport): { prefix: string } | undefined {
 export function reviewCommercialDependencies(imports: readonly PlatformImport[]): string[] {
   const problems: string[] = [];
   for (const imp of imports) {
-    const tree = commercialTreeOf(imp);
-    if (!tree) continue;
+    if (!reachesCommercialTree(imp)) continue;
     problems.push(
-      `${imp.file} imports \`${imp.spec}\` → reaches into \`${tree.prefix}\`, a ` +
+      `${imp.file} imports \`${imp.spec}\` → reaches into \`${COMMERCIAL_PREFIX}\`, a ` +
         `source-available tree of this repository. No Apache-2.0 file may depend on it statically: ` +
         `the module is opt-in through MODULES and removable from a redistribution, so this import ` +
         `is both a licence leak and a build that dies with the directory.`,
@@ -337,40 +335,24 @@ if (import.meta.main) {
       process.exit(1);
     }
   }
-  // Workspace npm modules — root is the PACKAGE dir, since module code lives outside `src/` too.
-  {
-    const glob = new Glob("module-*/package.json");
-    for await (const rel of glob.scan({ cwd: resolve(ROOT, "packages") })) {
-      if (rel.includes("node_modules/")) continue;
-      const dir = rel.slice(0, rel.indexOf("/"));
-      const id = dir.replace(/^module-/, "");
-      // Refuse a collision rather than overwrite. This loop runs SECOND and wrote
-      // into the same map as the built-in discovery above, so extracting a
-      // built-in to `packages/module-<same-id>` would silently drop the built-in's
-      // root from the scan — `ownerOf()` returns null for it and every import into
-      // it becomes invisible. That is precisely the blind spot the hardcoded
-      // inventory used to have, reproduced without even the module count dropping.
-      if (MODULE_ROOTS[id]) {
-        console.error(
-          `❌ module id \`${id}\` is claimed twice: ${MODULE_ROOTS[id]} and ` +
-            `${resolve(ROOT, "packages", dir)}. One would shadow the other and ` +
-            `un-scan it in silence — rename one.`,
-        );
-        process.exit(1);
-      }
-      MODULE_ROOTS[id] = resolve(ROOT, "packages", dir);
-    }
-  }
-
-  // The commercial `ee/` package, a module of its own at the repository root (id `enterprise`).
-  if (await Bun.file(resolve(ROOT, "ee/src/index.ts")).exists()) {
-    if (MODULE_ROOTS.enterprise) {
+  // Workspace npm modules (`packages/module-*` and the root `ee/`) — root is the PACKAGE dir,
+  // since module code lives outside `src/` too.
+  for (const { id, dir } of workspaceModuleRoots(ROOT)) {
+    // Refuse a collision rather than overwrite. This loop runs SECOND and wrote
+    // into the same map as the built-in discovery above, so extracting a
+    // built-in to `packages/module-<same-id>` would silently drop the built-in's
+    // root from the scan — `ownerOf()` returns null for it and every import into
+    // it becomes invisible. That is precisely the blind spot the hardcoded
+    // inventory used to have, reproduced without even the module count dropping.
+    if (MODULE_ROOTS[id]) {
       console.error(
-        `❌ module id \`enterprise\` is claimed twice: ${MODULE_ROOTS.enterprise} and ${resolve(ROOT, "ee")}.`,
+        `❌ module id \`${id}\` is claimed twice: ${MODULE_ROOTS[id]} and ` +
+          `${resolve(ROOT, dir)}. One would shadow the other and ` +
+          `un-scan it in silence — rename one.`,
       );
       process.exit(1);
     }
-    MODULE_ROOTS.enterprise = resolve(ROOT, "ee");
+    MODULE_ROOTS[id] = resolve(ROOT, dir);
   }
 
   const problems: string[] = [];
@@ -467,7 +449,7 @@ if (import.meta.main) {
   // above already read can report twice: both lines are true and both are fatal.
   const commercialImports: PlatformImport[] = [];
   const licensedFiles = trackedFiles(SOURCE_GLOBS, "source file", "skip").filter(
-    (file) => !COMMERCIAL_TREES.some(({ prefix }) => file.startsWith(prefix)),
+    (file) => !file.startsWith(COMMERCIAL_PREFIX),
   );
   // Bounded batches: one `await` per file is I/O-bound enough to blow this gate's own test
   // timeout, and one `Promise.all` over everything would blow `ulimit -n`.
@@ -501,8 +483,7 @@ if (import.meta.main) {
     console.log(
       `✅ module isolation clean — ${filesScanned} files across ${Object.keys(MODULE_ROOTS).length} modules, ` +
         `${platformFilesScanned} platform files with no static module import, ` +
-        `${licensedFiles.length} tracked files with no static import of ` +
-        `${COMMERCIAL_TREES.map(({ prefix }) => prefix).join(" or ")}` +
+        `${licensedFiles.length} tracked files with no static import of ${COMMERCIAL_PREFIX}` +
         `${accepted > 0 ? `, ${accepted} accepted cross-module import(s)` : ", no cross-module imports"}.`,
     );
     for (const e of ACCEPTED_CROSS_MODULE_IMPORTS) {
