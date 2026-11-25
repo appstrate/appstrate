@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `@appstrate/core/www-authenticate` exports `parseBearerChallenge` and `BearerChallenge` (moved from `@appstrate/connect`, now with `error`), and `requiredScopesFromChallenge`, which reads the scopes a server asks for on a 401 or a 403 `insufficient_scope`.
 - `resolveEffectiveToolCatalog` and its types (`EffectiveToolEntry`, `EffectiveToolStatus`, `EffectiveToolOrigin`, `ToolSpacePolicy`, `ToolSnapshotView`, `ResolveEffectiveToolCatalogInput`) judge each tool of an integration against a space's approvals, blocks and the server's stored listings.
 - `validateAgentIntegrationScopes` takes `options.approvedTools`: names approved in the space count as known tools of a closed catalog.
 - `IntegrationSpawnSpec.approvedToolFingerprints` carries the approved definition fingerprints of the undeclared tools an agent selected; `IntegrationBootReport.spawned[].unavailableTools` (with `UnavailableToolReason`) names the selected tools a connection does not expose.

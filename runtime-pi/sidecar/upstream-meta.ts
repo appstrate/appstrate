@@ -12,6 +12,7 @@
  * value the runtime can consume verbatim.
  */
 
+import { requiredScopesFromChallenge } from "@appstrate/core/www-authenticate";
 import { UPSTREAM_HEADER_ALLOWLIST, type UpstreamMeta } from "@appstrate/mcp-transport";
 
 /**
@@ -37,9 +38,14 @@ export function projectAllowedHeaders(source: Headers): Record<string, string> {
  * owns it for `content[]` materialization.
  */
 export function buildUpstreamMeta(response: Response): UpstreamMeta {
+  const requiredScopes = requiredScopesFromChallenge(
+    response.status,
+    response.headers.get("www-authenticate"),
+  );
   return {
     status: response.status,
     headers: projectAllowedHeaders(response.headers),
+    ...(requiredScopes ? { required_scopes: requiredScopes } : {}),
   };
 }
 

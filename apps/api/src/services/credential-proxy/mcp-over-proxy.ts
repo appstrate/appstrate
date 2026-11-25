@@ -17,6 +17,7 @@ import {
 } from "@appstrate/mcp-transport";
 import { getErrorMessage } from "@appstrate/core/errors";
 import { SsrfBlockedError } from "@appstrate/core/ssrf";
+import { requiredScopesFromChallenge } from "@appstrate/core/www-authenticate";
 import type { Actor } from "../../lib/actor.ts";
 import { credentialMember, type CredentialStatus } from "../../lib/credential-status-header.ts";
 import { findCause } from "@appstrate/core/error-cause";
@@ -79,6 +80,8 @@ class McpCredentialRejectedError extends Error {
     readonly status: number,
     /** The proxy's verdict after its forced refresh, on a 401 it judged. */
     readonly credential: CredentialStatus | undefined,
+    /** The scopes the server's `WWW-Authenticate` challenge asks for. */
+    readonly requiredScopes: string[] | undefined,
   ) {
     super(`the MCP server refused the connection's credential (HTTP ${status})`);
     this.name = "McpCredentialRejectedError";
@@ -328,7 +331,13 @@ export function proxiedMcpOperation(input: ProxiedMcpOperationInput): McpOperati
     }
     reached(result.connectionId, String(result.status));
     if (result.status === 401 || result.status === 403) {
-      fail(new McpCredentialRejectedError(result.status, result.credential));
+      fail(
+        new McpCredentialRejectedError(
+          result.status,
+          result.credential,
+          requiredScopesFromChallenge(result.status, result.headers.get("www-authenticate")),
+        ),
+      );
     }
     const answered = result;
     const relayed = relayAnswer(result.body, {
@@ -630,6 +639,8 @@ export function mcpServerFailure(
       );
     }
     const credential = err instanceof McpCredentialRejectedError ? err.credential : undefined;
+    const requiredScopes =
+      err instanceof McpCredentialRejectedError ? err.requiredScopes : undefined;
     return new ApiError({
       status: 502,
       code: "upstream_credential_rejected",
@@ -638,9 +649,11 @@ export function mcpServerFailure(
         `${server} refused the connection's credential (HTTP ${status})` +
         (credential?.status === "needs_reconnection"
           ? ": the connection is now flagged for reconnection, and its owner must reconnect it."
-          : ": the credential may lack a permission the server requires, or have been revoked; reconnecting the integration renews it."),
+          : ": the credential may lack a permission the server requires, or have been revoked; reconnecting the integration renews it.") +
+        (requiredScopes ? ` The server asks for the scopes: ${requiredScopes.join(" ")}.` : ""),
       extensions: {
         upstream_status: status,
+        ...(requiredScopes ? { required_scopes: requiredScopes } : {}),
         ...(credential ? { credential: credentialMember(credential) } : {}),
       },
       headers: upstreamProxyStatus({ receivedStatus: status }),

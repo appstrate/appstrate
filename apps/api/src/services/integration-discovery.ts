@@ -14,12 +14,8 @@ import type { Implementation } from "@modelcontextprotocol/sdk/types.js";
 import { parse as parseHost } from "tldts";
 import { createMcpHttpClient, httpStatusOf } from "@appstrate/mcp-transport";
 import { isRetryableHttpStatus } from "@appstrate/afps-shared/backoff";
-import {
-  discoverProtectedResourceMetadata,
-  parseBearerChallenge,
-  type BearerChallenge,
-  resolveOAuthEndpoints,
-} from "@appstrate/connect";
+import { discoverProtectedResourceMetadata, resolveOAuthEndpoints } from "@appstrate/connect";
+import { parseBearerChallenge, type BearerChallenge } from "@appstrate/core/www-authenticate";
 import { isIconImage } from "@appstrate/core/appearance";
 import { getErrorMessage } from "@appstrate/core/errors";
 import { OAUTH_META_KEY, scopeTokenSchema } from "@appstrate/core/integration";

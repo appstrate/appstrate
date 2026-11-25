@@ -190,6 +190,20 @@ describe("shapeApiCallResponse — no toFile (status surfacing)", () => {
     expect((out.content[1] as { text: string }).text).toBe("hi");
   });
 
+  it("names the scopes the upstream asked for, and renders nothing extra without them", async () => {
+    const workspace = ws();
+    const asked = {
+      content: [],
+      _meta: { [UPSTREAM_META_KEY]: { status: 403, headers: {}, required_scopes: ["a", "b"] } },
+    };
+    const out = await shapeApiCallResponse(asked, baseOpts(workspace));
+    expect((out.content[0] as { text: string }).text).toBe(
+      "[api_call status=403 required_scopes=a,b]",
+    );
+    const plain = await shapeApiCallResponse(withStatus([], 403), baseOpts(workspace));
+    expect((plain.content[0] as { text: string }).text).toBe("[api_call status=403]");
+  });
+
   it("renders a sidecar failure's code beside status 0", async () => {
     const workspace = ws();
     const result = failed([{ type: "text", text: "blocked" }], "blocked_target");

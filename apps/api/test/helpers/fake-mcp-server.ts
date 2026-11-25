@@ -50,6 +50,8 @@ export interface FakeMcpServerOptions {
   bearer?: string;
   /** What another `Authorization` than `bearer` answers; 401 when omitted. */
   rejectStatus?: 401 | 403;
+  /** Sent as `WWW-Authenticate` on that refusal. */
+  challenge?: string;
   /** Answered as `Mcp-Session-Id` on every response: the client echoes it on each request. */
   sessionId?: string;
   /** The protocol era the server speaks; `legacy` when omitted. */
@@ -117,7 +119,10 @@ export function startFakeMcpServer(opts: FakeMcpServerOptions = {}): FakeMcpServ
       }
       if (new URL(req.url).pathname !== "/mcp") return new Response("not found", { status: 404 });
       if (opts.bearer && req.headers.get("authorization") !== `Bearer ${opts.bearer}`) {
-        return new Response("unauthorized", { status: opts.rejectStatus ?? 401 });
+        return new Response("unauthorized", {
+          status: opts.rejectStatus ?? 401,
+          ...(opts.challenge ? { headers: { "WWW-Authenticate": opts.challenge } } : {}),
+        });
       }
       const res = await handle(
         new Request(req.url, {

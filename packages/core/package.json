@@ -72,6 +72,7 @@
     "./system-packages": "./src/system-packages.ts",
     "./ssrf": "./src/ssrf.ts",
     "./sse": "./src/sse.ts",
+    "./www-authenticate": "./src/www-authenticate.ts",
     "./cache": "./src/cache.ts",
     "./map-with-concurrency": "./src/map-with-concurrency.ts",
     "./html": "./src/html.ts",

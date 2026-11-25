@@ -431,6 +431,32 @@ describe("the typed tools of a remote MCP integration", () => {
     });
   });
 
+  it("carries the scopes a refusing server asks for as `required_scopes`", async () => {
+    await withServer(
+      {
+        tools: ["search"],
+        bearer: "another-token",
+        rejectStatus: 403,
+        challenge: 'Bearer error="insufficient_scope", scope="a b"',
+      },
+      async (other) => {
+        await seedProxyIntegration(ctx, on(other, { tools_policy: { search: {} } }));
+        await seedProxyConnection(ctx, ID, "api_key", { token: TOKEN });
+
+        const res = await post("call", { integration_package_id: ID, name: "search" });
+        expect(res.status).toBe(502);
+        const problem = (await res.json()) as {
+          code: string;
+          detail: string;
+          required_scopes?: string[];
+        };
+        expect(problem.code).toBe("upstream_credential_rejected");
+        expect(problem.required_scopes).toEqual(["a", "b"]);
+        expect(problem.detail).toContain("a b");
+      },
+    );
+  });
+
   it("journals one row for a tool call whose handshake the server refuses", async () => {
     await withServer({ tools: ["search"], bearer: "another-token" }, async (other) => {
       await seedProxyIntegration(ctx, on(other, { tools_policy: { search: {} } }));

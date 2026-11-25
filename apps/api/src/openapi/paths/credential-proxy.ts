@@ -591,6 +591,15 @@ const upstreamMcpProblemSchema = {
           enum: [401, 403],
           description: "`upstream_credential_rejected`: the server's HTTP status.",
         },
+        required_scopes: {
+          type: "array",
+          items: { type: "string" },
+          maxItems: 20,
+          description:
+            "`upstream_credential_rejected`, when the server's `WWW-Authenticate` challenge " +
+            "(401, or 403 `insufficient_scope`) names the OAuth scopes it asks for: the scopes " +
+            "to reconnect with.",
+        },
         credential: {
           type: "object",
           required: ["status", "cause", "detail"],
