@@ -1,14 +1,28 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { describe, expect, it } from "bun:test";
-import { i18nReady } from "../../../i18n.ts";
-import { render } from "../../../test/render.tsx";
+import { afterAll, describe, expect, it } from "bun:test";
+import { installSpaStorage } from "../../../test/fake-storage.ts";
 import type { ToolPolicy } from "../../../lib/integration-tool-policy.ts";
-import {
-  IntegrationToolPolicySection,
-  ToolPolicyView,
-  type ToolDeclaration,
-} from "../integration-tool-policy-section.tsx";
+import type { ToolDeclaration } from "../integration-tool-policy-section.tsx";
+
+// The definition diff reaches the editor's theme store, which touches `matchMedia` and the
+// document root on import.
+installSpaStorage({ matchMedia: () => ({ matches: false, addEventListener: () => {} }) });
+Object.defineProperty(globalThis, "document", {
+  configurable: true,
+  value: {
+    documentElement: { classList: { add: () => {}, remove: () => {} } },
+    querySelector: () => null,
+  },
+});
+afterAll(() => {
+  Reflect.deleteProperty(globalThis, "document");
+});
+
+const { i18nReady } = await import("../../../i18n.ts");
+const { render } = await import("../../../test/render.tsx");
+const { IntegrationToolPolicySection, ToolPolicyView } =
+  await import("../integration-tool-policy-section.tsx");
 
 await i18nReady;
 
