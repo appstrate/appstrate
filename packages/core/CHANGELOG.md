@@ -9,15 +9,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- `@appstrate/core/www-authenticate` exports `parseBearerChallenge` and `BearerChallenge` (moved from `@appstrate/connect`, now with `error`), and `requiredScopesFromChallenge`, which reads the scopes a server asks for on a 401 or a 403 `insufficient_scope`.
-- `resolveEffectiveToolCatalog` and its types (`EffectiveToolEntry`, `EffectiveToolStatus`, `EffectiveToolOrigin`, `ToolSpacePolicy`, `ToolSnapshotView`, `ResolveEffectiveToolCatalogInput`) judge each tool of an integration against a space's approvals, blocks and the server's stored listings.
+- `@appstrate/core/www-authenticate` exports `parseBearerChallenge` and `BearerChallenge` (moved from `@appstrate/connect`, now with `error`), and `requiredScopesFromChallenge`, which reads the scopes a server asks for on a 401 or a 403 `insufficient_scope` (valid scope tokens of at most `MAX_REQUIRED_SCOPE_LENGTH` = 128 characters, 20 at most).
+- `@appstrate/core/sidecar-types` exports `OBSERVED_TOOLS_MAX_COUNT` and `OBSERVED_TOOL_NAME_MAX_LENGTH`, the bounds of the tools-observed report body that the sidecar caps to and the platform enforces.
+- `resolveEffectiveToolCatalog` and its types (`EffectiveToolEntry`, `EffectiveToolStatus`, `EffectiveToolOrigin`, `ToolSpacePolicy`, `ToolSnapshotView`, `ResolveEffectiveToolCatalogInput`) judge each tool of an integration against a space's approvals, blocks and the server's stored listings; a hidden tool never appears in it. `hiddenToolNames` is exported.
 - `validateAgentIntegrationScopes` takes `options.approvedTools`: names approved in the space count as known tools of a closed catalog.
 - `IntegrationSpawnSpec.approvedToolFingerprints` carries the approved definition fingerprints of the undeclared tools an agent selected; `IntegrationBootReport.spawned[].unavailableTools` (with `UnavailableToolReason`) names the selected tools a connection does not expose.
+- `@appstrate/core/sidecar-types` exports `OBSERVED_TOOLS_MAX_COUNT` and `OBSERVED_TOOL_NAME_MAX_LENGTH` (bounds of the tools-observed report); `@appstrate/core/www-authenticate` exports `MAX_REQUIRED_SCOPE_LENGTH`.
 - `isListedToolName` in `@appstrate/core/naming` tells whether a server-listed tool name is safe to quote to a model or a log.
 
 ### Fixed
 
-- `validateAgentIntegrationScopes` refuses an unknown tool name on a closed catalog that declares no tools; it used to accept any name there. A catalog with `allow_undeclared_tools` is not name-checked.
+- `validateAgentIntegrationScopes` refuses an unknown tool name on a closed `remote` catalog that declares no tools; it used to accept any name there. A catalog with `allow_undeclared_tools` is not name-checked, and a local source declaring no tools keeps the no-check rule of AFPS §7.1.
 
 ## [18.0.0] — 2026-11-24
 

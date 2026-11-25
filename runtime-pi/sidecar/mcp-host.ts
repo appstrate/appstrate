@@ -213,7 +213,7 @@ export interface McpHostRegistration {
   /** The ALLOCATED namespace — the `{namespace}__` prefix of every tool the upstream exposes. */
   namespace: string;
   unavailable: UnavailableTool[];
-  /** The tools the upstream listed, as the server returned them (before any filtering). */
+  /** The tools the upstream listed, as the server returned them (before the host's own filtering). */
   listed: readonly Tool[];
 }
 
@@ -438,8 +438,6 @@ export class McpHost {
     // the allowlist, so authors declare names exactly as the upstream
     // advertises them.
     const hiddenSet = upstream.hiddenTools ? new Set<string>(upstream.hiddenTools) : null;
-    // A slot served by several connections puts the selector on every tool it
-    // holds, so none of them may declare `connection` itself.
     const listedNames = new Set(tools.map((tool) => tool.name));
     const unavailable: UnavailableTool[] = (upstream.allowedTools ?? [])
       .filter((name) => !listedNames.has(name))
@@ -475,6 +473,8 @@ export class McpHost {
       }
       return false;
     });
+    // A slot served by several connections puts the selector on every tool it
+    // holds, so none of them may declare `connection` itself.
     const slotLabels = this.labelsBySlot().get(normalisedNs) ?? new Set<string>();
     if (admitted.length > 0 && [...slotLabels].some((other) => other !== label)) {
       const conflicting = [
@@ -586,7 +586,10 @@ export class McpHost {
               originalName: tool.name,
             },
           });
-          unavailable.push({ name: tool.name, reason: "name_collision" });
+          // Only a tool the agent selected is a loss; an unrestricted selection names none.
+          if (allowlist?.has(tool.name)) {
+            unavailable.push({ name: tool.name, reason: "name_collision" });
+          }
           continue;
         }
         descriptor = exposure.descriptor;

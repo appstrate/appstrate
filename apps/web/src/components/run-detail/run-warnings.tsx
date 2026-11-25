@@ -27,20 +27,23 @@ export function RunDegradedBadge({ metadata }: { metadata: unknown }) {
   return <MetaBadge label={t("run.degraded.badge")} title={t("run.degraded.hint")} />;
 }
 
-function unavailableReasonLabel(reason: string, t: (key: string) => string): string {
+function unavailableReasonLabel(
+  reason: UnavailableTool["reason"],
+  t: (key: string) => string,
+): string {
   switch (reason) {
     case "not_listed":
       return t("run.unavailableTools.reason.not_listed");
     case "hidden_tools":
       return t("run.unavailableTools.reason.hidden_tools");
-    case "allowlist":
-      return t("run.unavailableTools.reason.allowlist");
     case "definition_not_approved":
       return t("run.unavailableTools.reason.definition_not_approved");
     case "name_collision":
       return t("run.unavailableTools.reason.name_collision");
-    default:
+    case null:
       return t("run.unavailableTools.reason.unknown");
+    default:
+      return reason satisfies never;
   }
 }
 

@@ -46,6 +46,7 @@ import {
   serverSyncBody,
   type serverSyncAvailability,
 } from "../lib/integration-server-sync";
+import type { ToolSnapshotInfo } from "../lib/integration-tool-snapshot";
 import { fileTextOperation } from "../lib/package-file-drafts";
 import { encodeIconDataUri } from "../lib/icon-image";
 
@@ -307,6 +308,7 @@ function IntegrationEditorInner({
   packageId,
   tab,
   toolCatalog,
+  snapshot,
   sync: syncAvailability,
 }: {
   initialState: EditorState;
@@ -314,6 +316,8 @@ function IntegrationEditorInner({
   tab: PackageEditorTab;
   /** The saved package's tool catalog, shown with the draft's policy. */
   toolCatalog: IntegrationToolCatalogEntry[];
+  /** The server's last listing, summarised above the table. */
+  snapshot: ToolSnapshotInfo;
   /** Whether the draft's server can be asked for its tools; `null`: nothing to sync. */
   sync: ReturnType<typeof serverSyncAvailability>;
 }) {
@@ -428,6 +432,7 @@ function IntegrationEditorInner({
       {activeTab === "tools" && (
         <IntegrationToolsSection
           tools={toolCatalog}
+          snapshot={snapshot}
           edit={{ manifest: state.manifest, onChange: onManifestChange }}
           sync={
             syncAvailability
@@ -457,11 +462,13 @@ export function IntegrationDefinitionEditor({
   detail,
   section,
   toolCatalog,
+  snapshot,
   sync,
 }: {
   detail: Versioned<OrgPackageItemDetail>;
   section: IntegrationDefinitionSection;
   toolCatalog: IntegrationToolCatalogEntry[];
+  snapshot: ToolSnapshotInfo;
   /** Whether the draft's remote server can be asked for its tools; `null`: nothing to sync. */
   sync: ReturnType<typeof serverSyncAvailability>;
 }) {
@@ -472,6 +479,7 @@ export function IntegrationDefinitionEditor({
         packageId={detail.id}
         tab={section}
         toolCatalog={toolCatalog}
+        snapshot={snapshot}
         sync={sync}
       />
     </DraftEditorMount>

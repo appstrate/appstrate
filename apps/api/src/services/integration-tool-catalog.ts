@@ -6,7 +6,7 @@
  * and blocks. Every reader of "which tools may be used" goes through here.
  */
 
-import { and, eq } from "drizzle-orm";
+import { and, desc, eq } from "drizzle-orm";
 import {
   resolveEffectiveToolCatalog,
   type EffectiveToolEntry,
@@ -15,6 +15,7 @@ import {
 } from "@appstrate/core/integration";
 import { db } from "@appstrate/db/client";
 import { spaceIntegrationToolApprovals, spaceIntegrationToolBlocks } from "@appstrate/db/schema";
+import { ApiError } from "../lib/errors.ts";
 import { readToolSnapshots, type ToolSnapshot } from "./integration-tool-snapshots.ts";
 
 /** What `spaceId` approved and blocked among `packageId`'s tools. */
@@ -34,7 +35,8 @@ export async function loadToolSpacePolicy(
           eq(spaceIntegrationToolApprovals.spaceId, spaceId),
           eq(spaceIntegrationToolApprovals.packageId, packageId),
         ),
-      ),
+      )
+      .orderBy(desc(spaceIntegrationToolApprovals.approvedAt)),
     db
       .select({ toolName: spaceIntegrationToolBlocks.toolName })
       .from(spaceIntegrationToolBlocks)
@@ -48,7 +50,17 @@ export async function loadToolSpacePolicy(
   return { approvals, blocks: blocks.map((b) => b.toolName) };
 }
 
-/** Tool name → the fingerprints approved for it. */
+/** The refusal of a tool the space blocked, whichever door the call came through. */
+export function toolBlockedInSpace(integrationId: string, toolName: string): ApiError {
+  return new ApiError({
+    status: 403,
+    code: "tool_blocked_in_space",
+    title: "Tool Blocked In This Space",
+    detail: `Tool '${toolName}' of integration '${integrationId}' is blocked in this space.`,
+  });
+}
+
+/** Tool name → the fingerprints approved for it, most recently approved first. */
 export function approvedFingerprintsByTool(policy: ToolSpacePolicy): Map<string, string[]> {
   const byTool = new Map<string, string[]>();
   for (const { tool_name, fingerprint } of policy.approvals) {

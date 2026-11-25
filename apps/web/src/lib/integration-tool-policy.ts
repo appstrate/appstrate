@@ -12,51 +12,91 @@ export type ToolPolicy =
 
 type ToolDefinition = ToolPolicy["listed"][number]["definition"];
 
-/** One definition awaiting a verdict. */
+/** One tool awaiting a verdict. */
 export interface ReviewItem {
   name: string;
-  fingerprint: string;
-  /** `null`: past the snapshot's size cap, not kept. */
+  /** `null`: no stored listing carries the tool, so there is no definition to approve yet. */
+  fingerprint: string | null;
+  /** `null`: not listed, or past the snapshot's size cap and not kept. */
   definition: ToolDefinition;
   description: string | null;
   /** The definition approved before, when this one replaces it. */
   approved: { fingerprint: string; definition: ToolDefinition } | null;
 }
 
+type Approval = ToolPolicy["approvals"][number];
+
+/** The newest approval of each tool: the one the policy shows and a changed definition is compared to. */
+export function latestApprovals(approvals: readonly Approval[]): Map<string, Approval> {
+  const latest = new Map<string, Approval>();
+  for (const approval of approvals) {
+    const kept = latest.get(approval.tool_name);
+    if (!kept || approval.approved_at > kept.approved_at) latest.set(approval.tool_name, approval);
+  }
+  return latest;
+}
+
 /**
- * The listed definitions of the catalog's `pending` tools that no approval covers, one per
- * fingerprint (two connections may list two).
+ * The catalog's `pending` tools to review: one per listed definition no approval covers (two
+ * connections may list two), and one without a definition for a tool no listing carries.
  */
 export function reviewItems(
   catalog: readonly { name: string; status?: string }[],
   policy: Pick<ToolPolicy, "listed" | "approvals">,
 ): ReviewItem[] {
-  const pending = new Set(catalog.filter((tool) => tool.status === "pending").map((t) => t.name));
+  const pending = catalog.filter((tool) => tool.status === "pending").map((tool) => tool.name);
   const approvedFingerprints = new Set(
     policy.approvals.map((approval) => `${approval.tool_name}\0${approval.fingerprint}`),
   );
-  return policy.listed
-    .filter(
-      (listed) =>
-        pending.has(listed.name) &&
-        !approvedFingerprints.has(`${listed.name}\0${listed.fingerprint}`),
-    )
-    .map((listed) => {
-      const approval = policy.approvals.find((a) => a.tool_name === listed.name);
-      const description = listed.definition?.description;
-      return {
-        name: listed.name,
-        fingerprint: listed.fingerprint,
-        definition: listed.definition,
-        description: typeof description === "string" ? description : null,
-        approved: approval
-          ? { fingerprint: approval.fingerprint, definition: approval.definition }
-          : null,
-      };
-    });
+  const latest = latestApprovals(policy.approvals);
+  const approvedOf = (name: string) => {
+    const approval = latest.get(name);
+    return approval ? { fingerprint: approval.fingerprint, definition: approval.definition } : null;
+  };
+  return pending.flatMap((name): ReviewItem[] => {
+    const listings = policy.listed.filter((listed) => listed.name === name);
+    if (listings.length === 0) {
+      return [
+        {
+          name,
+          fingerprint: null,
+          definition: null,
+          description: null,
+          approved: approvedOf(name),
+        },
+      ];
+    }
+    return listings
+      .filter((listed) => !approvedFingerprints.has(`${name}\0${listed.fingerprint}`))
+      .map((listed) => {
+        const description = listed.definition?.description;
+        return {
+          name,
+          fingerprint: listed.fingerprint,
+          definition: listed.definition,
+          description: typeof description === "string" ? description : null,
+          approved: approvedOf(name),
+        };
+      });
+  });
 }
 
-export const approvalBody = (item: Pick<ReviewItem, "name" | "fingerprint">) => ({
+/** A definition as canonical JSON (keys sorted at every depth): two equal definitions read alike. */
+export function canonicalDefinitionJson(definition: unknown): string {
+  const sorted = (value: unknown): unknown =>
+    Array.isArray(value)
+      ? value.map(sorted)
+      : value !== null && typeof value === "object"
+        ? Object.fromEntries(
+            Object.entries(value)
+              .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
+              .map(([key, inner]) => [key, sorted(inner)]),
+          )
+        : value;
+  return JSON.stringify(sorted(definition), null, 2);
+}
+
+export const approvalBody = (item: { name: string; fingerprint: string }) => ({
   tools: [{ name: item.name, fingerprint: item.fingerprint }],
 });
 

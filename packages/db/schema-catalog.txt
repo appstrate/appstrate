@@ -603,7 +603,7 @@ column session.user_agent text
 column session.user_id text not null
 column space_integration_tool_approvals.approved_at timestamp with time zone not null default now()
 column space_integration_tool_approvals.approved_by text
-column space_integration_tool_approvals.definition jsonb
+column space_integration_tool_approvals.definition jsonb not null
 column space_integration_tool_approvals.fingerprint text not null
 column space_integration_tool_approvals.id uuid not null default gen_random_uuid()
 column space_integration_tool_approvals.org_id uuid not null
@@ -823,7 +823,7 @@ constraint integration_pins integration_pins_package_id_packages_id_fk FOREIGN K
 constraint integration_pins integration_pins_pkey PRIMARY KEY (id)
 constraint integration_pins integration_pins_space_id_spaces_id_fk FOREIGN KEY (space_id) REFERENCES spaces(id) ON DELETE CASCADE
 constraint integration_pins integration_pins_user_id_user_id_fk FOREIGN KEY (user_id) REFERENCES "user"(id) ON DELETE CASCADE
-constraint integration_tool_snapshots integration_tool_snapshots_connection_id_integration_connection FOREIGN KEY (connection_id) REFERENCES integration_connections(id) ON DELETE CASCADE
+constraint integration_tool_snapshots integration_tool_snapshots_connection_org_fk FOREIGN KEY (connection_id, org_id) REFERENCES integration_connections(id, org_id) ON DELETE CASCADE
 constraint integration_tool_snapshots integration_tool_snapshots_org_id_organizations_id_fk FOREIGN KEY (org_id) REFERENCES organizations(id) ON DELETE CASCADE
 constraint integration_tool_snapshots integration_tool_snapshots_package_id_packages_id_fk FOREIGN KEY (package_id) REFERENCES packages(id) ON DELETE CASCADE
 constraint integration_tool_snapshots integration_tool_snapshots_pkey PRIMARY KEY (id)

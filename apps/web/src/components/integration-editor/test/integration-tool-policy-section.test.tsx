@@ -4,7 +4,10 @@ import { describe, expect, it } from "bun:test";
 import { i18nReady } from "../../../i18n.ts";
 import { render } from "../../../test/render.tsx";
 import type { ToolPolicy } from "../../../lib/integration-tool-policy.ts";
-import { ToolPolicyView } from "../integration-tool-policy-section.tsx";
+import {
+  IntegrationToolPolicySection,
+  ToolPolicyView,
+} from "../integration-tool-policy-section.tsx";
 
 await i18nReady;
 
@@ -23,7 +26,7 @@ const view = (policy: ToolPolicy, tools: { name: string; status?: string }[]) =>
   );
 
 describe("ToolPolicyView", () => {
-  it("shows a pending tool with its definition, and both definitions when it replaces one", () => {
+  it("shows a pending tool with its definition, as a diff against the approval it replaces", () => {
     const html = view(
       {
         listed: [{ name: "search", fingerprint: "b", definition: { description: "Search v2" } }],
@@ -43,10 +46,34 @@ describe("ToolPolicyView", () => {
     expect(html).toContain('data-testid="tool-review-search"');
     expect(html).toContain("Approuver");
     expect(html).toContain("Bloquer");
+    // The diff's header names both sides; its Monaco body renders client-side only.
     expect(html).toContain("Définition approuvée");
+    expect(html).toContain("Définition actuelle");
+    expect(html).not.toContain("Search v1");
+    expect(html).toContain("Retirer l’approbation");
+  });
+
+  it("shows a first definition as a JSON tree, with no diff", () => {
+    const html = view(
+      {
+        listed: [{ name: "search", fingerprint: "a", definition: { description: "Search v1" } }],
+        approvals: [],
+        blocks: [],
+      },
+      [{ name: "search", status: "pending" }],
+    );
     expect(html).toContain("Search v1");
-    expect(html).toContain("Search v2");
-    expect(html).toContain("Retirer l&#x27;approbation".replace("&#x27;", "’"));
+    expect(html).not.toContain("Définition approuvée");
+  });
+
+  it("lists a pending tool no listing carries, with the way to read the server and nothing to approve", () => {
+    const html = view({ listed: [], approvals: [], blocks: [] }, [
+      { name: "ghost", status: "pending" },
+    ]);
+    expect(html).toContain('data-testid="tool-review-ghost"');
+    expect(html).toContain("Relire le serveur");
+    expect(html).not.toContain("Approuver");
+    expect(html).toContain("Bloquer");
   });
 
   it("explains a definition too large to keep", () => {
@@ -69,5 +96,11 @@ describe("ToolPolicyView", () => {
     expect(html).toContain("Aucun outil à examiner");
     expect(html).toContain('data-testid="tool-policy-export"');
     expect(html).toContain("Débloquer");
+  });
+});
+
+describe("IntegrationToolPolicySection", () => {
+  it("renders nothing without integrations:configure in the space", () => {
+    expect(render(<IntegrationToolPolicySection packageId="@acme/crm" tools={[]} />)).toBe("");
   });
 });

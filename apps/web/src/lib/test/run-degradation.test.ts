@@ -19,7 +19,18 @@ describe("parseUnavailableTools", () => {
       parseUnavailableTools({
         unavailable_tools: [null, { name: "a" }, { integration_id: "i", name: "b" }],
       }),
-    ).toEqual([{ integrationId: "i", name: "b", reason: "" }]);
+    ).toEqual([{ integrationId: "i", name: "b", reason: null }]);
+  });
+
+  it("narrows the reason to the platform's, and keeps an unknown one as null", () => {
+    const reasons = parseUnavailableTools({
+      unavailable_tools: [
+        { integration_id: "i", name: "a", reason: "definition_not_approved" },
+        { integration_id: "i", name: "b", reason: "from_the_future" },
+        { integration_id: "i", name: "c", reason: "toString" },
+      ],
+    }).map((tool) => tool.reason);
+    expect(reasons).toEqual(["definition_not_approved", null, null]);
   });
 });
 

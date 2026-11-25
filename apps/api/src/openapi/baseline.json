@@ -8325,7 +8325,7 @@
             }
           },
           "400": {
-            "description": "`validation_failed` — the body is invalid; `tool_already_declared` — the manifest declares the named tools (`tools`): a declared tool needs no approval.",
+            "description": "`validation_failed` — the body is invalid; `tool_already_declared` — the manifest declares the named tools (`tools`): a declared tool needs no approval; `invalid_request` — the integration allows undeclared tools (none needs an approval), or a named tool is one the platform hides (`hidden_tools`, the connect tool).",
             "headers": {
               "Request-Id": {
                 "$ref": "#/components/headers/RequestId"
@@ -8364,7 +8364,7 @@
             "$ref": "#/components/responses/NotFound"
           },
           "409": {
-            "description": "`tool_snapshot_stale` — the server no longer lists the named tools (`tools`) at that fingerprint: refresh the snapshot and review again.",
+            "description": "`tool_snapshot_stale` — the server no longer lists the named tools (`tools`) at that fingerprint: refresh the snapshot and review again; `tool_definition_unavailable` — the listed definition of the named tools (`tools`) was too large to keep, so it cannot be reviewed nor approved.",
             "headers": {
               "Request-Id": {
                 "$ref": "#/components/headers/RequestId"
@@ -8389,7 +8389,7 @@
         "operationId": "revokeIntegrationToolApproval",
         "tags": ["Integrations"],
         "summary": "Withdraw every approval of a tool in the space",
-        "description": "Removes all approved fingerprints of the tool in this space. Answers 204 whether or not there was one (the audit event `integration.tool.approval_revoked` is recorded only when one was removed). Requires `integrations:configure` and a dashboard session.",
+        "description": "Removes all approved fingerprints of the tool in this space. Answers 204 whether or not there was one. Audited as `integration.tool.approval_revoked`, one event per approval removed (tool and fingerprint). Requires `integrations:configure` and a dashboard session.",
         "parameters": [
           {
             "$ref": "#/components/parameters/XOrgId"
@@ -8891,7 +8891,7 @@
                       "type": "array",
                       "items": {
                         "type": "object",
-                        "required": ["name", "status", "origin", "modified", "fingerprint"],
+                        "required": ["name", "status", "origin", "modified"],
                         "properties": {
                           "name": {
                             "type": "string"
@@ -8911,11 +8911,7 @@
                           },
                           "modified": {
                             "type": "boolean",
-                            "description": "A listing carries a definition that changed since first seen, or that differs from every approval. A declared tool whose definition changed stays `available`."
-                          },
-                          "fingerprint": {
-                            "type": ["string", "null"],
-                            "description": "Fingerprint of the definition the first stored listing carries; `null` when none lists the tool."
+                            "description": "Declared tool: a listing carries a definition that changed since first seen (a signal only: it stays `available`, and nothing acknowledges it). Approved undeclared tool: a listed definition is not one the space approved."
                           },
                           "policy": {
                             "type": "object",
@@ -11928,7 +11924,7 @@
                       "type": "array",
                       "items": {
                         "type": "object",
-                        "required": ["name", "status", "origin", "modified", "fingerprint"],
+                        "required": ["name", "status", "origin", "modified"],
                         "properties": {
                           "name": {
                             "type": "string"
@@ -11948,11 +11944,7 @@
                           },
                           "modified": {
                             "type": "boolean",
-                            "description": "A listing carries a definition that changed since first seen, or that differs from every approval. A declared tool whose definition changed stays `available`."
-                          },
-                          "fingerprint": {
-                            "type": ["string", "null"],
-                            "description": "Fingerprint of the definition the first stored listing carries; `null` when none lists the tool."
+                            "description": "Declared tool: a listing carries a definition that changed since first seen (a signal only: it stays `available`, and nothing acknowledges it). Approved undeclared tool: a listed definition is not one the space approved."
                           },
                           "policy": {
                             "type": "object",
@@ -20948,7 +20940,7 @@
         },
         "tags": ["Internal"],
         "summary": "Report the tools a run's boot listed from a remote integration",
-        "description": "Sidecar-only. Same Bearer run token and agent-dependency and activation checks as the GET endpoint. `connection_id` names a connection this run bound to the integration, as for `upstream-success`; it is omitted only for an integration that binds none (an unauthenticated one). Called once per connection, fire-and-forget, after the sidecar registered the integration's tools. `tools` are the MCP descriptors as the server returned them (the platform computes their fingerprints itself); the sidecar cuts them at 1 MiB and sets `truncated`. `unavailable` lists the tools the agent selected that this run does not expose, each with its reason; the run's `metadata.unavailable_tools[]` is stamped with them (`integration_id`, `name`, `reason`, at most 50 per integration). The listing becomes the integration's tool snapshot only when the run is executed by the platform: a remote-origin run's sidecar is on the caller's machine and is no authority on organization state, so its listing is dropped.",
+        "description": "Sidecar-only. Same Bearer run token and agent-dependency and activation checks as the GET endpoint. `connection_id` names a connection this run bound to the integration, as for `upstream-success`; it is omitted only for an integration that binds none (an unauthenticated one). Called once per connection, fire-and-forget, after the sidecar registered the integration's tools. `tools` are the MCP descriptors as the server returned them (the platform computes their fingerprints itself); the sidecar cuts them at 1 MiB and sets `truncated`. A descriptor that is not a valid tool (no name, no object `inputSchema`) is dropped on its own and marks the listing truncated: it never refuses the report. `unavailable` lists the tools the agent selected that this run does not expose, each with its reason; the run's `metadata.unavailable_tools[]` is stamped with them (`integration_id`, `name`, `reason`; only the first 50 of one report are kept). The listing becomes the integration's tool snapshot only when the run is executed by the platform: a remote-origin run's sidecar is on the caller's machine and is no authority on organization state, so its listing is dropped.",
         "security": [
           {
             "bearerExecToken": []
@@ -20986,6 +20978,7 @@
                     "maxItems": 500,
                     "items": {
                       "type": "object",
+                      "description": "A valid descriptor; any other entry is dropped.",
                       "required": ["name", "inputSchema"],
                       "properties": {
                         "name": {
@@ -21027,7 +21020,6 @@
                           "enum": [
                             "not_listed",
                             "hidden_tools",
-                            "allowlist",
                             "definition_not_approved",
                             "name_collision"
                           ]
@@ -31631,7 +31623,7 @@
             "$ref": "#/components/responses/Unauthorized"
           },
           "403": {
-            "description": "`forbidden` — the principal holds neither `credential-proxy:call-own` nor `credential-proxy:call`, or authenticates with a session cookie or another credential the bearer-only proxy refuses (the chat's MCP loopback bearer included); `credential_proxy_closed` — the space's `credential_proxy_open` is `false`, whatever the caller's role; `call_permission_required` — an enforced org default governs the integration and the caller holds `credential-proxy:call-own` without `credential-proxy:call` (`Proxy-Status` error `http_request_denied`); the proxy's refusals of the server URL, before anything is sent: `unauthorized_target` (`http_request_denied`), `blocked_target` (`destination_ip_prohibited`), `credential_exfiltration_refused` (`http_request_denied`). `blocked_target` also answers the egress guard refusing a redirect hop, after the first hop was sent; for an integration declaring no auths, also plain `http` to a host the operator does not trust, on the server URL (nothing sent) or a hop.",
+            "description": "`forbidden` — the principal holds neither `credential-proxy:call-own` nor `credential-proxy:call`, or authenticates with a session cookie or another credential the bearer-only proxy refuses (the chat's MCP loopback bearer included); `credential_proxy_closed` — the space's `credential_proxy_open` is `false`, whatever the caller's role; `call_permission_required` — an enforced org default governs the integration and the caller holds `credential-proxy:call-own` without `credential-proxy:call` (`Proxy-Status` error `http_request_denied`); the proxy's refusals of the server URL, before anything is sent: `unauthorized_target` (`http_request_denied`), `blocked_target` (`destination_ip_prohibited`), `credential_exfiltration_refused` (`http_request_denied`). `blocked_target` also answers the egress guard refusing a redirect hop, after the first hop was sent; for an integration declaring no auths, also plain `http` to a host the operator does not trust, on the server URL (nothing sent) or a hop; `tool_blocked_in_space` — the space blocked that tool (declared or not), before any exchange.",
             "headers": {
               "Proxy-Status": {
                 "description": "RFC 9209. `appstrate; received-status=<n>`: the upstream's response, relayed. `appstrate; error=<type>` (RFC 9209 §2.3 error type): the proxy's own response. Bare `appstrate`: served by the proxy without contacting the upstream (a cache hit).",
@@ -31650,7 +31642,7 @@
             }
           },
           "404": {
-            "description": "`not_found` — the integration is not active in this space, has no published version, or its catalog offers no tool of that `name` (hidden, the connect tool, an `api_call` tool, or undeclared while `allow_undeclared_tools` is not `true`), before any exchange; `credential_not_found` — no connection the caller reaches, or `connection_id` names nothing the caller reaches (the same body whether it is another member's connection out of reach or no connection at all), or `connection_id` is passed for an integration that declares no authentication (call it without `connection_id`).",
+            "description": "`not_found` — the integration is not active in this space, has no published version, or its catalog offers no tool of that `name` (hidden, the connect tool, an `api_call` tool, or undeclared while `allow_undeclared_tools` is not `true` and the space approved none of its definitions), before any exchange; `credential_not_found` — no connection the caller reaches, or `connection_id` names nothing the caller reaches (the same body whether it is another member's connection out of reach or no connection at all), or `connection_id` is passed for an integration that declares no authentication (call it without `connection_id`).",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -31660,7 +31652,7 @@
             }
           },
           "409": {
-            "description": "The connection selection of `/api/credential-proxy/proxy` refused, judged for the named tool: `must_choose_connection` (`errors[0].candidate_connections`, each with its `missing_scopes` for the tool; retry with one `id` in `connection_id`), `needs_reconnection`, `pinned_connection_unavailable`, and under an enforced org default that cannot bind `required_integration_unbound` (an empty set) or `connection_set_too_large`; `insufficient_scopes` — the connection lacks scopes the tool's `tools_policy` entry requires (`errors[0].missing_scopes`, `required_scopes`, `auth_key`, `connection_id`, `owned_by_actor`, `remedy`). With `X-Appstrate-Connect-Offers: 1` and `integrations:connect`, an item a connect flow clears carries a `connect_url` (a reconnection of the caller's own connection; never `insufficient_scopes`, whose `remedy` says what to do).",
+            "description": "The connection selection of `/api/credential-proxy/proxy` refused, judged for the named tool: `must_choose_connection` (`errors[0].candidate_connections`, each with its `missing_scopes` for the tool; retry with one `id` in `connection_id`), `needs_reconnection`, `pinned_connection_unavailable`, and under an enforced org default that cannot bind `required_integration_unbound` (an empty set) or `connection_set_too_large`; `tool_definition_not_approved` — the tool is undeclared on a closed catalog and the server lists it at a definition this space did not approve (review it in the integration's settings); `insufficient_scopes` — the connection lacks scopes the tool's `tools_policy` entry requires (`errors[0].missing_scopes`, `required_scopes`, `auth_key`, `connection_id`, `owned_by_actor`, `remedy`). With `X-Appstrate-Connect-Offers: 1` and `integrations:connect`, an item a connect flow clears carries a `connect_url` (a reconnection of the caller's own connection; never `insufficient_scopes`, whose `remedy` says what to do).",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -31839,7 +31831,7 @@
             }
           },
           "503": {
-            "description": "`encryption_key_unavailable` — the connection's stored credential is encrypted under a key id missing from the platform's keyring; nothing was sent (`Proxy-Status` error `proxy_configuration_error`).",
+            "description": "`encryption_key_unavailable` — the connection's stored credential is encrypted under a key id missing from the platform's keyring; nothing was sent (`Proxy-Status` error `proxy_configuration_error`); `tool_catalog_unavailable` — the server's catalog could not be read to judge an approved undeclared tool, nothing was sent; retry once a listing reads it.",
             "headers": {
               "Proxy-Status": {
                 "description": "RFC 9209. `appstrate; received-status=<n>`: the upstream's response, relayed. `appstrate; error=<type>` (RFC 9209 §2.3 error type): the proxy's own response. Bare `appstrate`: served by the proxy without contacting the upstream (a cache hit).",
@@ -32075,7 +32067,7 @@
             }
           },
           "403": {
-            "description": "Forbidden. `unauthorized_target` — the target carries userinfo (`user:pass@host`), or is not in `authorized_uris`, or, on a call that substitutes a `{{credential_field}}`, a redirect hop is not (any other call gets that 3xx back unfollowed), or the connection does not render the declared list (`Proxy-Status` error `http_request_denied`); `blocked_target` — it resolves into a blocked network range (`destination_ip_prohibited`); `credential_exfiltration_refused` — the call carries a credential and the allowlist does not name its hosts: it is empty or has an entry that leaves the host to the caller, or every entry matching the target reaches it through a wildcard past the registrable domain written under it, judged with the Public Suffix List (the message then names the host to list) (`http_request_denied`); `call_permission_required` — no `X-Run-Id`, an enforced org default governs the integration in this space and the caller holds `credential-proxy:call-own` without `credential-proxy:call` (`http_request_denied`); `credential_proxy_closed` — no `X-Run-Id`, and the space's `credential_proxy_open` is `false`, whatever the caller's role (`proxy_internal_response`); `forbidden` — the principal lacks the permission of the path the call takes (`credential-proxy:call` with `X-Run-Id`, `credential-proxy:call-own` or `credential-proxy:call` without), session bound to a different principal, cookie session used, or `X-Run-Id` names another actor's run or a run the platform executes.",
+            "description": "Forbidden. `unauthorized_target` — the target carries userinfo (`user:pass@host`), or is not in `authorized_uris`, or, on a call that substitutes a `{{credential_field}}`, a redirect hop is not (any other call gets that 3xx back unfollowed), or the connection does not render the declared list (`Proxy-Status` error `http_request_denied`); `blocked_target` — it resolves into a blocked network range (`destination_ip_prohibited`); `credential_exfiltration_refused` — the call carries a credential and the allowlist does not name its hosts: it is empty or has an entry that leaves the host to the caller, or every entry matching the target reaches it through a wildcard past the registrable domain written under it, judged with the Public Suffix List (the message then names the host to list) (`http_request_denied`); `call_permission_required` — no `X-Run-Id`, an enforced org default governs the integration in this space and the caller holds `credential-proxy:call-own` without `credential-proxy:call` (`http_request_denied`); `credential_proxy_closed` — no `X-Run-Id`, and the space's `credential_proxy_open` is `false`, whatever the caller's role (`proxy_internal_response`); `tool_blocked_in_space` — the connection's auth backs an `api_call` tool the space blocked; `forbidden` — the principal lacks the permission of the path the call takes (`credential-proxy:call` with `X-Run-Id`, `credential-proxy:call-own` or `credential-proxy:call` without), session bound to a different principal, cookie session used, or `X-Run-Id` names another actor's run or a run the platform executes.",
             "headers": {
               "Proxy-Status": {
                 "description": "RFC 9209. `appstrate; received-status=<n>`: the upstream's response, relayed. `appstrate; error=<type>` (RFC 9209 §2.3 error type): the proxy's own response. Bare `appstrate`: served by the proxy without contacting the upstream (a cache hit).",
@@ -32441,7 +32433,7 @@
             }
           },
           "403": {
-            "description": "Forbidden. `unauthorized_target` — the target carries userinfo (`user:pass@host`), or is not in `authorized_uris`, or, on a call that substitutes a `{{credential_field}}`, a redirect hop is not (any other call gets that 3xx back unfollowed), or the connection does not render the declared list (`Proxy-Status` error `http_request_denied`); `blocked_target` — it resolves into a blocked network range (`destination_ip_prohibited`); `credential_exfiltration_refused` — the call carries a credential and the allowlist does not name its hosts: it is empty or has an entry that leaves the host to the caller, or every entry matching the target reaches it through a wildcard past the registrable domain written under it, judged with the Public Suffix List (the message then names the host to list) (`http_request_denied`); `call_permission_required` — no `X-Run-Id`, an enforced org default governs the integration in this space and the caller holds `credential-proxy:call-own` without `credential-proxy:call` (`http_request_denied`); `credential_proxy_closed` — no `X-Run-Id`, and the space's `credential_proxy_open` is `false`, whatever the caller's role (`proxy_internal_response`); `forbidden` — the principal lacks the permission of the path the call takes (`credential-proxy:call` with `X-Run-Id`, `credential-proxy:call-own` or `credential-proxy:call` without), session bound to a different principal, cookie session used, or `X-Run-Id` names another actor's run or a run the platform executes.",
+            "description": "Forbidden. `unauthorized_target` — the target carries userinfo (`user:pass@host`), or is not in `authorized_uris`, or, on a call that substitutes a `{{credential_field}}`, a redirect hop is not (any other call gets that 3xx back unfollowed), or the connection does not render the declared list (`Proxy-Status` error `http_request_denied`); `blocked_target` — it resolves into a blocked network range (`destination_ip_prohibited`); `credential_exfiltration_refused` — the call carries a credential and the allowlist does not name its hosts: it is empty or has an entry that leaves the host to the caller, or every entry matching the target reaches it through a wildcard past the registrable domain written under it, judged with the Public Suffix List (the message then names the host to list) (`http_request_denied`); `call_permission_required` — no `X-Run-Id`, an enforced org default governs the integration in this space and the caller holds `credential-proxy:call-own` without `credential-proxy:call` (`http_request_denied`); `credential_proxy_closed` — no `X-Run-Id`, and the space's `credential_proxy_open` is `false`, whatever the caller's role (`proxy_internal_response`); `tool_blocked_in_space` — the connection's auth backs an `api_call` tool the space blocked; `forbidden` — the principal lacks the permission of the path the call takes (`credential-proxy:call` with `X-Run-Id`, `credential-proxy:call-own` or `credential-proxy:call` without), session bound to a different principal, cookie session used, or `X-Run-Id` names another actor's run or a run the platform executes.",
             "headers": {
               "Proxy-Status": {
                 "description": "RFC 9209. `appstrate; received-status=<n>`: the upstream's response, relayed. `appstrate; error=<type>` (RFC 9209 §2.3 error type): the proxy's own response. Bare `appstrate`: served by the proxy without contacting the upstream (a cache hit).",
@@ -32814,7 +32806,7 @@
             }
           },
           "403": {
-            "description": "Forbidden. `unauthorized_target` — the target carries userinfo (`user:pass@host`), or is not in `authorized_uris`, or, on a call that substitutes a `{{credential_field}}`, a redirect hop is not (any other call gets that 3xx back unfollowed), or the connection does not render the declared list (`Proxy-Status` error `http_request_denied`); `blocked_target` — it resolves into a blocked network range (`destination_ip_prohibited`); `credential_exfiltration_refused` — the call carries a credential and the allowlist does not name its hosts: it is empty or has an entry that leaves the host to the caller, or every entry matching the target reaches it through a wildcard past the registrable domain written under it, judged with the Public Suffix List (the message then names the host to list) (`http_request_denied`); `call_permission_required` — no `X-Run-Id`, an enforced org default governs the integration in this space and the caller holds `credential-proxy:call-own` without `credential-proxy:call` (`http_request_denied`); `credential_proxy_closed` — no `X-Run-Id`, and the space's `credential_proxy_open` is `false`, whatever the caller's role (`proxy_internal_response`); `forbidden` — the principal lacks the permission of the path the call takes (`credential-proxy:call` with `X-Run-Id`, `credential-proxy:call-own` or `credential-proxy:call` without), session bound to a different principal, cookie session used, or `X-Run-Id` names another actor's run or a run the platform executes.",
+            "description": "Forbidden. `unauthorized_target` — the target carries userinfo (`user:pass@host`), or is not in `authorized_uris`, or, on a call that substitutes a `{{credential_field}}`, a redirect hop is not (any other call gets that 3xx back unfollowed), or the connection does not render the declared list (`Proxy-Status` error `http_request_denied`); `blocked_target` — it resolves into a blocked network range (`destination_ip_prohibited`); `credential_exfiltration_refused` — the call carries a credential and the allowlist does not name its hosts: it is empty or has an entry that leaves the host to the caller, or every entry matching the target reaches it through a wildcard past the registrable domain written under it, judged with the Public Suffix List (the message then names the host to list) (`http_request_denied`); `call_permission_required` — no `X-Run-Id`, an enforced org default governs the integration in this space and the caller holds `credential-proxy:call-own` without `credential-proxy:call` (`http_request_denied`); `credential_proxy_closed` — no `X-Run-Id`, and the space's `credential_proxy_open` is `false`, whatever the caller's role (`proxy_internal_response`); `tool_blocked_in_space` — the connection's auth backs an `api_call` tool the space blocked; `forbidden` — the principal lacks the permission of the path the call takes (`credential-proxy:call` with `X-Run-Id`, `credential-proxy:call-own` or `credential-proxy:call` without), session bound to a different principal, cookie session used, or `X-Run-Id` names another actor's run or a run the platform executes.",
             "headers": {
               "Proxy-Status": {
                 "description": "RFC 9209. `appstrate; received-status=<n>`: the upstream's response, relayed. `appstrate; error=<type>` (RFC 9209 §2.3 error type): the proxy's own response. Bare `appstrate`: served by the proxy without contacting the upstream (a cache hit).",
@@ -33187,7 +33179,7 @@
             }
           },
           "403": {
-            "description": "Forbidden. `unauthorized_target` — the target carries userinfo (`user:pass@host`), or is not in `authorized_uris`, or, on a call that substitutes a `{{credential_field}}`, a redirect hop is not (any other call gets that 3xx back unfollowed), or the connection does not render the declared list (`Proxy-Status` error `http_request_denied`); `blocked_target` — it resolves into a blocked network range (`destination_ip_prohibited`); `credential_exfiltration_refused` — the call carries a credential and the allowlist does not name its hosts: it is empty or has an entry that leaves the host to the caller, or every entry matching the target reaches it through a wildcard past the registrable domain written under it, judged with the Public Suffix List (the message then names the host to list) (`http_request_denied`); `call_permission_required` — no `X-Run-Id`, an enforced org default governs the integration in this space and the caller holds `credential-proxy:call-own` without `credential-proxy:call` (`http_request_denied`); `credential_proxy_closed` — no `X-Run-Id`, and the space's `credential_proxy_open` is `false`, whatever the caller's role (`proxy_internal_response`); `forbidden` — the principal lacks the permission of the path the call takes (`credential-proxy:call` with `X-Run-Id`, `credential-proxy:call-own` or `credential-proxy:call` without), session bound to a different principal, cookie session used, or `X-Run-Id` names another actor's run or a run the platform executes.",
+            "description": "Forbidden. `unauthorized_target` — the target carries userinfo (`user:pass@host`), or is not in `authorized_uris`, or, on a call that substitutes a `{{credential_field}}`, a redirect hop is not (any other call gets that 3xx back unfollowed), or the connection does not render the declared list (`Proxy-Status` error `http_request_denied`); `blocked_target` — it resolves into a blocked network range (`destination_ip_prohibited`); `credential_exfiltration_refused` — the call carries a credential and the allowlist does not name its hosts: it is empty or has an entry that leaves the host to the caller, or every entry matching the target reaches it through a wildcard past the registrable domain written under it, judged with the Public Suffix List (the message then names the host to list) (`http_request_denied`); `call_permission_required` — no `X-Run-Id`, an enforced org default governs the integration in this space and the caller holds `credential-proxy:call-own` without `credential-proxy:call` (`http_request_denied`); `credential_proxy_closed` — no `X-Run-Id`, and the space's `credential_proxy_open` is `false`, whatever the caller's role (`proxy_internal_response`); `tool_blocked_in_space` — the connection's auth backs an `api_call` tool the space blocked; `forbidden` — the principal lacks the permission of the path the call takes (`credential-proxy:call` with `X-Run-Id`, `credential-proxy:call-own` or `credential-proxy:call` without), session bound to a different principal, cookie session used, or `X-Run-Id` names another actor's run or a run the platform executes.",
             "headers": {
               "Proxy-Status": {
                 "description": "RFC 9209. `appstrate; received-status=<n>`: the upstream's response, relayed. `appstrate; error=<type>` (RFC 9209 §2.3 error type): the proxy's own response. Bare `appstrate`: served by the proxy without contacting the upstream (a cache hit).",
@@ -33560,7 +33552,7 @@
             }
           },
           "403": {
-            "description": "Forbidden. `unauthorized_target` — the target carries userinfo (`user:pass@host`), or is not in `authorized_uris`, or, on a call that substitutes a `{{credential_field}}`, a redirect hop is not (any other call gets that 3xx back unfollowed), or the connection does not render the declared list (`Proxy-Status` error `http_request_denied`); `blocked_target` — it resolves into a blocked network range (`destination_ip_prohibited`); `credential_exfiltration_refused` — the call carries a credential and the allowlist does not name its hosts: it is empty or has an entry that leaves the host to the caller, or every entry matching the target reaches it through a wildcard past the registrable domain written under it, judged with the Public Suffix List (the message then names the host to list) (`http_request_denied`); `call_permission_required` — no `X-Run-Id`, an enforced org default governs the integration in this space and the caller holds `credential-proxy:call-own` without `credential-proxy:call` (`http_request_denied`); `credential_proxy_closed` — no `X-Run-Id`, and the space's `credential_proxy_open` is `false`, whatever the caller's role (`proxy_internal_response`); `forbidden` — the principal lacks the permission of the path the call takes (`credential-proxy:call` with `X-Run-Id`, `credential-proxy:call-own` or `credential-proxy:call` without), session bound to a different principal, cookie session used, or `X-Run-Id` names another actor's run or a run the platform executes.",
+            "description": "Forbidden. `unauthorized_target` — the target carries userinfo (`user:pass@host`), or is not in `authorized_uris`, or, on a call that substitutes a `{{credential_field}}`, a redirect hop is not (any other call gets that 3xx back unfollowed), or the connection does not render the declared list (`Proxy-Status` error `http_request_denied`); `blocked_target` — it resolves into a blocked network range (`destination_ip_prohibited`); `credential_exfiltration_refused` — the call carries a credential and the allowlist does not name its hosts: it is empty or has an entry that leaves the host to the caller, or every entry matching the target reaches it through a wildcard past the registrable domain written under it, judged with the Public Suffix List (the message then names the host to list) (`http_request_denied`); `call_permission_required` — no `X-Run-Id`, an enforced org default governs the integration in this space and the caller holds `credential-proxy:call-own` without `credential-proxy:call` (`http_request_denied`); `credential_proxy_closed` — no `X-Run-Id`, and the space's `credential_proxy_open` is `false`, whatever the caller's role (`proxy_internal_response`); `tool_blocked_in_space` — the connection's auth backs an `api_call` tool the space blocked; `forbidden` — the principal lacks the permission of the path the call takes (`credential-proxy:call` with `X-Run-Id`, `credential-proxy:call-own` or `credential-proxy:call` without), session bound to a different principal, cookie session used, or `X-Run-Id` names another actor's run or a run the platform executes.",
             "headers": {
               "Proxy-Status": {
                 "description": "RFC 9209. `appstrate; received-status=<n>`: the upstream's response, relayed. `appstrate; error=<type>` (RFC 9209 §2.3 error type): the proxy's own response. Bare `appstrate`: served by the proxy without contacting the upstream (a cache hit).",

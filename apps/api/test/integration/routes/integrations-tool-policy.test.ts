@@ -217,4 +217,75 @@ describe("integration tool policy routes", () => {
       .where(eq(auditEvents.action, "integration.tool.blocked"));
     expect(approved!.after).toEqual({ toolName: "a_tool" });
   });
+
+  it("audits every approval a revoke removes, with its fingerprint", async () => {
+    await listed(tool("write_file", "Writes"));
+    await approve({ name: "write_file", fingerprint: fp("write_file", "Writes") });
+    await listed(tool("write_file", "Writes, v2"));
+    await approve({ name: "write_file", fingerprint: fp("write_file", "Writes, v2") });
+    await send("DELETE", "/approvals/write_file");
+
+    const rows = await db
+      .select({ after: auditEvents.after })
+      .from(auditEvents)
+      .where(eq(auditEvents.action, "integration.tool.approval_revoked"));
+    expect(
+      rows.map((r) => r.after).sort((a, b) => JSON.stringify(a).localeCompare(JSON.stringify(b))),
+    ).toEqual(
+      [
+        { toolName: "write_file", fingerprint: fp("write_file", "Writes") },
+        { toolName: "write_file", fingerprint: fp("write_file", "Writes, v2") },
+      ].sort((a, b) => JSON.stringify(a).localeCompare(JSON.stringify(b))),
+    );
+  });
+
+  it("refuses a definition too large to have been kept, with tool_definition_unavailable", async () => {
+    const tools = Array.from({ length: 400 }, (_, i) => tool(`t${i}`, "x".repeat(2000)));
+    await listed(...tools);
+    const last = (await view()).listed.find((t) => t.definition === null)!;
+    expect(last).toBeDefined();
+    const res = await approve({ name: last.name, fingerprint: last.fingerprint });
+    expect(res.status).toBe(409);
+    expect(await res.json()).toMatchObject({
+      code: "tool_definition_unavailable",
+      tools: [last.name],
+    });
+    expect(await db.select().from(spaceIntegrationToolApprovals)).toHaveLength(0);
+  });
+
+  it("refuses to approve a hidden tool, and any tool of an open catalog", async () => {
+    const hiddenId = "@acme/hidden";
+    await seedProxyIntegration(ctx, {
+      ...remoteIntegrationManifest({ name: hiddenId, displayName: "Hidden", tools_policy: {} }),
+      hidden_tools: ["secret_tool"],
+    } as never);
+    const openId = "@acme/open";
+    await seedProxyIntegration(ctx, {
+      ...remoteIntegrationManifest({ name: openId, displayName: "Open", tools_policy: {} }),
+      allow_undeclared_tools: true,
+    } as never);
+    for (const id of [hiddenId, openId]) {
+      await recordToolSnapshot({
+        orgId: ctx.orgId,
+        packageId: id,
+        connectionId: null,
+        tools: [tool("secret_tool")],
+        truncated: false,
+      });
+      const res = await app.request(`/api/integrations/${id}/tool-policy/approvals`, {
+        method: "POST",
+        headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
+        body: JSON.stringify({ tools: [{ name: "secret_tool", fingerprint: fp("secret_tool") }] }),
+      });
+      expect({
+        id,
+        status: res.status,
+        code: ((await res.json()) as { code: string }).code,
+      }).toEqual({
+        id,
+        status: 400,
+        code: "invalid_request",
+      });
+    }
+  });
 });

@@ -346,9 +346,8 @@ describe("GET /api/integrations/:packageId", () => {
         status: "available",
         origin: "declared",
         modified: false,
-        fingerprint: null,
       },
-      { name: "send", status: "available", origin: "declared", modified: false, fingerprint: null },
+      { name: "send", status: "available", origin: "declared", modified: false },
     ]);
   });
 

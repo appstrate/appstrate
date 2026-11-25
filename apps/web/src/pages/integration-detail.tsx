@@ -70,6 +70,7 @@ import { IntegrationActivateButton } from "../components/integration-detail/inte
 import { ConfigurationSpace } from "../components/configuration-space";
 import { RoleLimitNotice } from "../components/role-limit-notice";
 import { usePermissions, useHomeSpaceName } from "../hooks/use-permissions";
+import { toolSnapshotInfo } from "../lib/integration-tool-snapshot";
 import { readIntegrationSource } from "../lib/package-manifest";
 import {
   INTEGRATION_DEFINITION_SECTIONS,
@@ -174,10 +175,32 @@ export function IntegrationSettings({
   const draftSource = definition
     ? readIntegrationSource((definition.manifest as Record<string, unknown>).source)
     : null;
-  // Only a remote integration lists tools a space can review.
+  const toolSnapshot = toolSnapshotInfo(packageId, detail);
+  // Only a remote integration lists tools a space can review. The review is one space's: it
+  // follows the sections set in a space (`isIntegrationSpaceSection`) in « Tous les espaces ».
   const toolPolicy =
-    detail.manifest.source?.kind === "remote" ? (
-      <IntegrationToolPolicySection packageId={packageId} tools={detail.tool_catalog ?? []} />
+    toolSnapshot.remote && canConfigure ? (
+      <div className="flex flex-col gap-4" data-testid="integration-tool-policy-area">
+        {overview && (
+          <ConfigurationSpace
+            label={t("detail.configuration.spaceLabel", { ns: "agents" })}
+            choiceLabel={t("detail.configuration.spaceChoice", { ns: "agents" })}
+            spaceIds={spaceIds}
+            enter={configureIn}
+          />
+        )}
+        {!fromWorkingSpace ? null : !detail.active ? (
+          <ActivationHint />
+        ) : overview && !can("integrations:configure") ? (
+          workingSpace && (
+            <RoleLimitNotice>
+              {t("integration.config.roleLimitIn", { space: workingSpace })}
+            </RoleLimitNotice>
+          )
+        ) : (
+          <IntegrationToolPolicySection packageId={packageId} tools={detail.tool_catalog ?? []} />
+        )}
+      </div>
     ) : null;
   const syncAvailability = serverSyncAvailability(draftSource, {
     unauthenticated: isUnauthenticatedIntegration(definition?.manifest ?? {}),
@@ -260,6 +283,7 @@ export function IntegrationSettings({
                 detail={definition}
                 section={definitionSection}
                 toolCatalog={detail.tool_catalog ?? []}
+                snapshot={toolSnapshot}
                 sync={syncAvailability}
               />
             </Suspense>
@@ -289,12 +313,7 @@ export function IntegrationSettings({
             <IntegrationToolsSection
               tools={detail.tool_catalog ?? []}
               allowUndeclaredTools={detail.allow_undeclared_tools}
-              snapshot={{
-                packageId,
-                summary: detail.tool_snapshot,
-                remote: detail.manifest.source?.kind === "remote",
-                oauth: detail.auths.some((auth) => auth.type === "oauth2"),
-              }}
+              snapshot={toolSnapshot}
             />
             {toolPolicy && <div className="mt-8">{toolPolicy}</div>}
           </div>

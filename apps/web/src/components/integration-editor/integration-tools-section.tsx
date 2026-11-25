@@ -17,10 +17,8 @@
  */
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Pencil, Plus, Trash2 } from "lucide-react";
+import { Pencil, Plus, RefreshCw, Trash2 } from "lucide-react";
 import type { IntegrationToolCatalogEntry } from "@appstrate/shared-types";
-import { RefreshCw } from "lucide-react";
-import { Spinner } from "@appstrate/ui/components/spinner";
 import { useQueryClient } from "@tanstack/react-query";
 import { $api } from "../../api/client";
 import { invalidateIntegrationQueries } from "../../hooks/use-integrations";
@@ -28,9 +26,11 @@ import { usePermissions } from "../../hooks/use-permissions";
 import { formatDateField } from "../../lib/format-date";
 import { errorMessage } from "../../lib/mutation-error";
 import { countToolsWithoutScopes } from "../../lib/integration-tool-scopes";
+import type { ToolSnapshotInfo } from "../../lib/integration-tool-snapshot";
 import { SyncConnectionChoice } from "./sync-connection-choice";
 import { Alert, AlertDescription, AlertTitle } from "@appstrate/ui/components/alert";
 import { Button } from "@appstrate/ui/components/button";
+import { Spinner } from "@appstrate/ui/components/spinner";
 import { Switch } from "@appstrate/ui/components/switch";
 import { FormItem } from "@/components/app-ui/form-item";
 import { Input } from "@appstrate/ui/components/input";
@@ -57,22 +57,6 @@ import {
 type CatalogTool = IntegrationToolCatalogEntry &
   Partial<Pick<PackageTool, "status" | "origin" | "modified">>;
 
-/** The server's last stored listing, with what the read-only view needs to ask for another. */
-export interface ToolSnapshotInfo {
-  packageId: string;
-  /** `tool_snapshot` of the integration detail. */
-  summary: {
-    listed_at: string;
-    added: number;
-    missing: number;
-    modified: number;
-  } | null;
-  /** The integration's source is a remote server: a listing can be asked for. */
-  remote: boolean;
-  /** An OAuth integration: its tools without a scope are counted. */
-  oauth: boolean;
-}
-
 export function IntegrationToolsSection({
   tools,
   allowUndeclaredTools,
@@ -82,7 +66,7 @@ export function IntegrationToolsSection({
 }: {
   /** The saved package's effective tool catalog (`tool_catalog`). */
   tools: CatalogTool[];
-  /** Read-only: the server's last listing. */
+  /** The server's last listing. */
   snapshot?: ToolSnapshotInfo;
   /** Read-only: whether the saved package lets agents call undeclared tools. */
   allowUndeclaredTools?: boolean;
@@ -126,7 +110,7 @@ export function IntegrationToolsSection({
   return (
     <div className="flex flex-col gap-4">
       {edit && sync && <SyncFromServer {...sync} />}
-      {!edit && snapshot && <ToolSnapshotSummary snapshot={snapshot} tools={tools} />}
+      {snapshot && <ToolSnapshotSummary snapshot={snapshot} tools={entries} />}
       {edit ? (
         <AllowUndeclaredToggle manifest={edit.manifest} onChange={edit.onChange} />
       ) : (
@@ -218,13 +202,17 @@ export function IntegrationToolsSection({
   );
 }
 
-/** The last listing of the server, its counters, the scope-less tools, and the button that lists again. */
+/**
+ * The last listing of the server (when, with which connection, what moved), the tools without a
+ * declared permission, and the button that lists again. `tools` is what the table shows: in the
+ * editor, the draft's policy.
+ */
 function ToolSnapshotSummary({
   snapshot,
   tools,
 }: {
   snapshot: ToolSnapshotInfo;
-  tools: CatalogTool[];
+  tools: PackageTool[];
 }) {
   const { t } = useTranslation("agents");
   const { can } = usePermissions();
@@ -239,7 +227,14 @@ function ToolSnapshotSummary({
       params: { path: { packageId: snapshot.packageId } },
       body: connectionId ? { connection_id: connectionId } : {},
     });
-  const withoutScopes = snapshot.oauth ? countToolsWithoutScopes(tools) : 0;
+  const withoutScopes = snapshot.oauth
+    ? countToolsWithoutScopes(
+        tools.map((tool) => ({
+          status: tool.status,
+          policy: { required_scopes: tool.permissions },
+        })),
+      )
+    : 0;
   const { summary } = snapshot;
   return (
     <div className="flex flex-col gap-2" data-testid="integration-tool-snapshot">
@@ -253,6 +248,16 @@ function ToolSnapshotSummary({
             })
           : t("integrationTools.snapshot.never")}
       </p>
+      {snapshot.connectionLabel && (
+        <p className="text-muted-foreground text-sm">
+          {t("integrationTools.snapshot.connection", { label: snapshot.connectionLabel })}
+        </p>
+      )}
+      {summary?.truncated && (
+        <p className="text-warning text-sm" data-testid="integration-tool-snapshot-truncated">
+          {t("integrationTools.snapshot.truncated")}
+        </p>
+      )}
       {withoutScopes > 0 && (
         <p className="text-warning text-sm">
           {t("integrationTools.withoutScopes", { count: withoutScopes })}

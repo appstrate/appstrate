@@ -190,8 +190,13 @@ describe("IntegrationToolPicker — tool status", () => {
     expect(html).toContain(i18n.t("agents:packageTools.reason.blocked"));
     expect(html).toContain("Absent du serveur à la dernière lecture (");
     expect(html).toContain(i18n.t("agents:packageTools.modified"));
-    // missing, pending, blocked: three disabled boxes; the usable one is not.
-    expect(html.match(/disabled=""/g)?.length ?? 0).toBeGreaterThanOrEqual(3);
+    const disabled = (name: string) =>
+      html
+        .match(new RegExp(`<button[^>]*aria-label="Sélectionner ${name}"[^>]*>`))?.[0]
+        ?.includes('disabled=""');
+    // missing, pending, blocked: not addable; the usable one is.
+    expect(["gone_tool", "new_tool", "no_tool"].map(disabled)).toEqual([true, true, true]);
+    expect(disabled("ok_tool")).toBe(false);
     expect(html).not.toContain("tool-warning-");
   });
 
@@ -200,5 +205,48 @@ describe("IntegrationToolPicker — tool status", () => {
     expect(html).toContain("tool-warning-gone_tool");
     expect(html).toContain(i18n.t("agents:packageTools.unavailableSelected"));
     expect(html).not.toContain("tool-warning-ok_tool");
+  });
+});
+
+// The scopes of an approved undeclared tool are unknown only where a connection is made for scopes.
+describe("IntegrationToolPicker — unknown permissions", () => {
+  const DETAIL_KEY = $api.queryOptions("get", "/api/integrations/{packageId}", {
+    params: {
+      path: { packageId: ID },
+      header: { "X-Org-Id": undefined, "X-Space-Id": undefined },
+    },
+  }).queryKey;
+
+  function renderWith(authType: string): string {
+    const qc = new QueryClient();
+    qc.setQueryData(DETAIL_KEY, {
+      manifest: { auths: {} },
+      auths: [{ auth_key: "primary", type: authType, connections: [] }],
+      active: true,
+      allow_undeclared_tools: false,
+      tool_catalog: [
+        {
+          name: "extra",
+          status: "available",
+          origin: "approved",
+          modified: false,
+          fingerprint: "f",
+        },
+      ],
+    });
+    return render(
+      <IntegrationToolPicker
+        packageId={ID}
+        entry={{ id: ID, version: "*", tools: [] }}
+        onChange={() => {}}
+      />,
+      { queryClient: qc },
+    );
+  }
+
+  it("flags them on an OAuth integration only", () => {
+    const flag = i18n.t("agents:packageTools.scopesUnknown");
+    expect(renderWith("oauth2")).toContain(flag);
+    expect(renderWith("api_key")).not.toContain(flag);
   });
 });

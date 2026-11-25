@@ -165,6 +165,7 @@ import {
   toPublicClient,
   updateIntegrationOAuthClient,
   type IntegrationConnectionSummary,
+  type ProxyReach,
   type ReconnectTarget,
   type WidenedConnection,
 } from "../services/integration-connections.ts";
@@ -192,6 +193,7 @@ import {
 import {
   acquiresByConnectLogin,
   displayAccountId,
+  isUnauthenticatedIntegration,
   partitionScopesByAuthCatalog,
   scopesNotCovered,
   scopeTokenSchema,
@@ -1167,12 +1169,17 @@ export function createIntegrationsRouter() {
       const scope = getSpaceScope(c);
       await assertIsIntegration(scope, packageId);
       const body = await readJsonBody(c, syncFromServerSchema, { allowEmpty: true });
-      assertPermission(c, "credential-proxy", "call-own");
-      const reach = reachOutsideRun(callerPermissions(c), c.get("space")!);
       await assertActiveOutsideRun(scope, packageId);
       const loaded = await readIntegrationManifestForProxy(packageId, scope.orgId, null);
       if (!loaded.ok) throw notFound(`Integration '${packageId}' has no published version`);
       const manifest = streamableRemote(packageId, loaded.manifest);
+      // As `/discover`: an unauthenticated server (AFPS §7.2) is reached directly and asks no
+      // proxy right; an authenticated one rides the credential proxy.
+      let reach: ProxyReach = "own";
+      if (!isUnauthenticatedIntegration(manifest)) {
+        assertPermission(c, "credential-proxy", "call-own");
+        reach = reachOutsideRun(callerPermissions(c), c.get("space")!);
+      }
       const caller = {
         scope,
         actor: getActor(c),
@@ -1189,6 +1196,7 @@ export function createIntegrationsRouter() {
         { ...caller, integrationId: packageId, connectionId: body.connection_id },
         manifest,
       );
+      const startedAt = new Date();
       const catalog = await listRemoteTools({
         ...caller,
         integrationId: packageId,
@@ -1201,12 +1209,21 @@ export function createIntegrationsRouter() {
         packageId,
         connectionIds: [connectionId],
       });
-      if (!catalog.listed || !snapshot) {
+      if (!catalog.listed) {
         throw new ApiError({
           status: 502,
           code: "bad_gateway",
           title: "Bad Gateway",
           detail: `The server of integration '${packageId}' could not be listed${catalog.listingFailure ? ` (${catalog.listingFailure})` : ""}.`,
+        });
+      }
+      // A listing whose snapshot did not land would answer with the one before it.
+      if (!snapshot || snapshot.listedAt < startedAt) {
+        throw new ApiError({
+          status: 502,
+          code: "bad_gateway",
+          title: "Bad Gateway",
+          detail: `The tools of integration '${packageId}' were listed but the snapshot could not be recorded.`,
         });
       }
       return c.json({
@@ -1280,9 +1297,8 @@ export function createIntegrationsRouter() {
       const packageId = c.req.param("packageId")!;
       await assertIsIntegration(scope, packageId);
       const toolName = toolNameParam(c);
-      if (await revokeToolApproval(scope, packageId, toolName)) {
-        await toolPolicyAudit(c, "integration.tool.approval_revoked", [{ toolName }]);
-      }
+      const revoked = await revokeToolApproval(scope, packageId, toolName);
+      await toolPolicyAudit(c, "integration.tool.approval_revoked", revoked);
       return c.body(null, 204);
     },
   );

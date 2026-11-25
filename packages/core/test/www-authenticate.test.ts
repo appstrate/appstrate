@@ -74,4 +74,8 @@ describe("requiredScopesFromChallenge", () => {
     const many = Array.from({ length: 30 }, (_, i) => `s${i}`).join(" ");
     expect(requiredScopesFromChallenge(401, `Bearer scope="${many}"`)).toHaveLength(20);
   });
+  it("drops scope tokens over 128 characters", () => {
+    const header = `Bearer scope="${"x".repeat(129)} ${"y".repeat(128)}"`;
+    expect(requiredScopesFromChallenge(401, header)).toEqual(["y".repeat(128)]);
+  });
 });

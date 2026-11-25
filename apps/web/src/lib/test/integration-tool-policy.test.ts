@@ -5,6 +5,8 @@ import {
   approvalBody,
   blockBody,
   blockableTools,
+  canonicalDefinitionJson,
+  latestApprovals,
   reviewItems,
   type ToolPolicy,
 } from "../integration-tool-policy";
@@ -50,6 +52,50 @@ describe("reviewItems", () => {
     expect(items).toEqual([
       { name: "export", fingerprint: "fp-e", definition: null, description: null, approved: null },
     ]);
+  });
+});
+
+describe("latestApprovals / newest approval", () => {
+  const approval = (fingerprint: string, approved_at: string, description: string) => ({
+    tool_name: "search",
+    fingerprint,
+    definition: { description },
+    approved_by: null,
+    approved_at,
+  });
+
+  it("keeps the newest approval of a tool, whatever the order", () => {
+    const approvals = [
+      approval("fp-b", "2026-11-05T00:00:00.000Z", "B"),
+      approval("fp-a", "2026-11-01T00:00:00.000Z", "A"),
+    ];
+    expect(latestApprovals(approvals).get("search")?.fingerprint).toBe("fp-b");
+    const items = reviewItems([{ name: "search", status: "pending" }], {
+      listed: [{ name: "search", fingerprint: "fp-c", definition: {} }],
+      approvals,
+    });
+    expect(items[0]?.approved).toEqual({ fingerprint: "fp-b", definition: { description: "B" } });
+  });
+});
+
+describe("a pending tool no listing carries", () => {
+  it("is reviewed without a fingerprint, so there is nothing to approve yet", () => {
+    expect(
+      reviewItems([{ name: "ghost", status: "pending" }], { listed: [], approvals: [] }),
+    ).toEqual([
+      { name: "ghost", fingerprint: null, definition: null, description: null, approved: null },
+    ]);
+  });
+});
+
+describe("canonicalDefinitionJson", () => {
+  it("sorts keys at every depth", () => {
+    expect(canonicalDefinitionJson({ b: 1, a: { d: [{ y: 1, x: 2 }], c: null } })).toBe(
+      canonicalDefinitionJson({ a: { c: null, d: [{ x: 2, y: 1 }] }, b: 1 }),
+    );
+    expect(canonicalDefinitionJson({ b: 1, a: 2 }).indexOf('"a"')).toBeLessThan(
+      canonicalDefinitionJson({ b: 1, a: 2 }).indexOf('"b"'),
+    );
   });
 });
 

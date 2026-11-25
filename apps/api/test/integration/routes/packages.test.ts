@@ -1769,6 +1769,36 @@ describe("Packages API", () => {
       expect(res.status).toBe(201);
     });
 
+    it("judges a package's selection against its home space's approvals, not the request's", async () => {
+      await seedGmailIntegration();
+      await db.insert(spaceIntegrationToolApprovals).values({
+        spaceId: ctx.defaultSpaceId,
+        orgId: ctx.orgId,
+        packageId: integrationId,
+        toolName: "delete_message",
+        fingerprint: "a".repeat(64),
+        definition: {},
+      });
+      const body = buildAgentBody({ version: "^1.0.0", tools: ["delete_message"] }, "homed");
+      const created = await app.request("/api/packages/agents", {
+        method: "POST",
+        headers: authHeaders(ctx, { "Content-Type": "application/json" }),
+        body: JSON.stringify(body),
+      });
+      expect(created.status).toBe(201);
+      const other = await seedSpace({ orgId: ctx.orgId, name: "Other", createdBy: ctx.user.id });
+      const res = await app.request("/api/packages/agents/@pkgorg/agent-homed", {
+        method: "PATCH",
+        headers: {
+          ...authHeaders(ctx, { "Content-Type": "application/json" }),
+          "X-Space-Id": other.id,
+          ...ifMatch(etagVersion(created)),
+        },
+        body: JSON.stringify({ ...body, content: "Edited" }),
+      });
+      expect(res.status, await res.clone().text()).toBe(200);
+    });
+
     it("rejects a tool selection when a closed catalog declares nothing", async () => {
       const bare = gmailIntegrationManifest();
       delete bare.tools_policy;

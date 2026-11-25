@@ -87,6 +87,9 @@ export const CREDENTIAL_PROXY_PATH = "/api/credential-proxy/proxy";
 export const INTEGRATION_TOOLS_PATH = "/api/credential-proxy/tools";
 export const REMOTE_TOOLS_CALL_PATH = "/api/credential-proxy/tools/call";
 
+/** The four writes of a space's tool policy: a person's decision on the dashboard, never an operation. */
+const TOOL_POLICY_WRITE_PREFIX = "/api/integrations/{packageId}/tool-policy/";
+
 /** The served-skill routes of the package API, which `appstrate code sync` reads. */
 const SERVED_SKILLS_PATHS: ReadonlySet<string> = new Set([
   "/api/packages/skills/served",
@@ -104,7 +107,8 @@ const RUN_TOOLS_MCP_PATHS: ReadonlySet<string> = new Set(["/internal/mcp", "/api
  * operations), the spec document and its viewer, which `describe`
  * already serves piecewise, and the credential proxy and its tool routes, which
  * `call_integration_tool` and the `integration_tool` kind of `search` and `describe`
- * alone reach (`integration-tools.ts`).
+ * alone reach (`integration-tools.ts`), and the writes of a space's tool policy, which only the
+ * dashboard's own session makes (`requireDashboardSession`).
  */
 function isExcludedPath(pathTemplate: string): boolean {
   return (
@@ -116,7 +120,8 @@ function isExcludedPath(pathTemplate: string): boolean {
     pathTemplate === "/api/docs" ||
     pathTemplate === CREDENTIAL_PROXY_PATH ||
     pathTemplate === INTEGRATION_TOOLS_PATH ||
-    pathTemplate === REMOTE_TOOLS_CALL_PATH
+    pathTemplate === REMOTE_TOOLS_CALL_PATH ||
+    pathTemplate.startsWith(TOOL_POLICY_WRITE_PREFIX)
   );
 }
 

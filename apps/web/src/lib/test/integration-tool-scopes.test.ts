@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { describe, expect, it } from "bun:test";
-import { countToolsWithoutScopes } from "../integration-tool-scopes.ts";
+import { countToolsWithoutScopes, hasOAuthAuth } from "../integration-tool-scopes.ts";
 
 describe("countToolsWithoutScopes", () => {
   it("counts the available tools with no required scope", () => {
@@ -23,5 +23,13 @@ describe("countToolsWithoutScopes", () => {
         { status: "blocked" },
       ]),
     ).toBe(0);
+  });
+});
+
+describe("hasOAuthAuth", () => {
+  it("is true only for an OAuth auth", () => {
+    expect(hasOAuthAuth([{ type: "api_key" }, { type: "oauth2" }])).toBe(true);
+    expect(hasOAuthAuth([{ type: "api_key" }, { type: "basic" }])).toBe(false);
+    expect(hasOAuthAuth([])).toBe(false);
   });
 });

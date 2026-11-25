@@ -42,7 +42,11 @@ import type {
 } from "@appstrate/connect/integration-credentials";
 import type { ActiveConnectInputs, MitmCredentialSource } from "./integration-mitm-listener.ts";
 import { matchesAuthorizedUriSpec } from "@appstrate/afps-shared/authorized-uris";
-import type { UnavailableToolReason } from "@appstrate/core/sidecar-types";
+import {
+  OBSERVED_TOOLS_MAX_COUNT,
+  OBSERVED_TOOL_NAME_MAX_LENGTH,
+  type UnavailableToolReason,
+} from "@appstrate/core/sidecar-types";
 import { logger } from "./logger.ts";
 
 /**
@@ -691,11 +695,30 @@ function postIntegrationUpstreamSuccess(
 }
 
 /** Cap on the serialised `tools` of a tools-observed report. */
-export const OBSERVED_TOOLS_MAX_BYTES = 1024 * 1024;
+const OBSERVED_TOOLS_MAX_BYTES = 1024 * 1024;
+
+function isObservableName(name: unknown): name is string {
+  return (
+    typeof name === "string" && name.length > 0 && name.length <= OBSERVED_TOOL_NAME_MAX_LENGTH
+  );
+}
+
+/** A tool the platform accepts: a bounded name and an object `inputSchema` of type "object". */
+function isObservableTool(tool: unknown): boolean {
+  if (typeof tool !== "object" || tool === null) return false;
+  const { name, inputSchema } = tool as { name?: unknown; inputSchema?: unknown };
+  return (
+    isObservableName(name) &&
+    typeof inputSchema === "object" &&
+    inputSchema !== null &&
+    (inputSchema as { type?: unknown }).type === "object"
+  );
+}
 
 /**
- * The longest prefix of `tools` whose serialisation fits `maxBytes`, and whether any tool was
- * dropped. A single tool larger than the cap is dropped too.
+ * The tools the platform would accept, longest prefix first: tools it would refuse are dropped
+ * (they would fail the whole body), then the list is cut at the platform's count and at
+ * `maxBytes` of serialisation. `truncated` says any tool was left out.
  */
 export function capObservedTools<T>(
   tools: readonly T[],
@@ -704,12 +727,25 @@ export function capObservedTools<T>(
   const encoder = new TextEncoder();
   let bytes = 2; // "[]"
   const kept: T[] = [];
+  let truncated = false;
   for (const tool of tools) {
+    if (!isObservableTool(tool)) {
+      truncated = true;
+      continue;
+    }
     bytes += encoder.encode(JSON.stringify(tool)).byteLength + (kept.length > 0 ? 1 : 0);
-    if (bytes > maxBytes) return { tools: kept, truncated: true };
+    if (kept.length >= OBSERVED_TOOLS_MAX_COUNT || bytes > maxBytes)
+      return { tools: kept, truncated: true };
     kept.push(tool);
   }
-  return { tools: kept, truncated: false };
+  return { tools: kept, truncated };
+}
+
+/** The unavailable tools the platform would accept: a bounded name, at most its count. */
+export function capObservedUnavailable<T extends { name: string }>(unavailable: readonly T[]): T[] {
+  return unavailable
+    .filter(({ name }) => isObservableName(name))
+    .slice(0, OBSERVED_TOOLS_MAX_COUNT);
 }
 
 /** What a run's remote upstream listed, reported so the platform can snapshot it. */

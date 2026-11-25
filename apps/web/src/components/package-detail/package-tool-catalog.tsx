@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import type { ReactNode } from "react";
+import { useState, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { Wrench } from "lucide-react";
 import { cn } from "@appstrate/ui/cn";
@@ -14,6 +14,7 @@ import { rowActionsColumn } from "../row-actions-column";
 import { useLocalListParams } from "../../lib/list-params";
 import { matchesSearch } from "../../lib/strings";
 import { formatDateField } from "../../lib/format-date";
+import { isToolToggleDisabled } from "../../lib/tool-toggle";
 
 export interface PackageTool {
   name: string;
@@ -46,10 +47,13 @@ function ToolNameCell({
   tool,
   listedAt,
   selection,
+  saved,
 }: {
   tool: PackageTool;
   listedAt: string | null | undefined;
   selection: { values: ReadonlySet<string>; onToggle: (name: string) => void } | undefined;
+  /** The selection the catalog opened with. */
+  saved: ReadonlySet<string>;
 }) {
   const { t } = useTranslation("agents");
   const reason = useUnavailableReason(tool, listedAt);
@@ -61,8 +65,11 @@ function ToolNameCell({
           className="mt-0.5"
           aria-label={t("packageTools.select", { name: tool.name })}
           checked={selected}
-          // A selected tool stays toggleable so the author can drop it; an unusable one cannot be added.
-          disabled={reason !== null && !selected}
+          disabled={isToolToggleDisabled({
+            unusable: reason !== null,
+            selected,
+            saved: saved.has(tool.name),
+          })}
           onCheckedChange={() => selection.onToggle(tool.name)}
         />
       )}
@@ -115,6 +122,8 @@ export function PackageToolCatalog({
   };
 }) {
   const { t } = useTranslation("agents");
+  // Read once: the selection as saved, before this session's toggles.
+  const [saved] = useState<ReadonlySet<string>>(() => new Set(selection?.values));
   const authKeys = [
     ...new Set(
       tools.flatMap((tool) =>
@@ -137,7 +146,9 @@ export function PackageToolCatalog({
       header: t("log.tool"),
       width: 160,
       elastic: true,
-      cell: (tool) => <ToolNameCell tool={tool} listedAt={listedAt} selection={selection} />,
+      cell: (tool) => (
+        <ToolNameCell tool={tool} listedAt={listedAt} selection={selection} saved={saved} />
+      ),
     },
     {
       id: "description",

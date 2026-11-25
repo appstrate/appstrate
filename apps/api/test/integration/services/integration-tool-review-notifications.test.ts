@@ -8,7 +8,8 @@
 import { beforeEach, describe, expect, it } from "bun:test";
 import type { Tool } from "@modelcontextprotocol/sdk/types.js";
 import { eq } from "drizzle-orm";
-import { notifications, organizations } from "@appstrate/db/schema";
+import { notifications, organizations, spaceIntegrationToolApprovals } from "@appstrate/db/schema";
+import { toolDefinitionFingerprint } from "@appstrate/mcp-transport";
 import { db, truncateAll } from "../../helpers/db.ts";
 import {
   addOrgMember,
@@ -24,6 +25,7 @@ import {
 } from "../../helpers/credential-proxy-fixtures.ts";
 import { remoteIntegrationManifest } from "../../helpers/integration-manifests.ts";
 import { seedSpace, seedSpacePackage } from "../../helpers/seed.ts";
+import { drainAudits } from "../../../src/services/audit.ts";
 import { recordToolSnapshot } from "../../../src/services/integration-tool-snapshots.ts";
 
 const ID = "@acme/files";
@@ -37,8 +39,17 @@ const tool = (name: string, description = `Tool ${name}`): Tool => ({
 describe("tool review notifications", () => {
   let ctx: TestContext;
 
-  const list = (tools: Tool[], connectionId: string | null = null) =>
-    recordToolSnapshot({ orgId: ctx.orgId, packageId: ID, connectionId, tools, truncated: false });
+  /** The fan-out runs off the listing's path: flushed before anything reads its notices. */
+  const list = async (tools: Tool[], connectionId: string | null = null) => {
+    await recordToolSnapshot({
+      orgId: ctx.orgId,
+      packageId: ID,
+      connectionId,
+      tools,
+      truncated: false,
+    });
+    await drainAudits(5000);
+  };
 
   /** `space:user` pairs of the unread review notices. */
   const notices = async (): Promise<string[]> => {
@@ -144,5 +155,32 @@ describe("tool review notifications", () => {
     await list([tool("write_file", "changed")]);
     // `operator` holds no integrations:configure: the cap leaves nothing to review.
     expect(await notices()).not.toContain(`${personal.id}:${owner.id}`);
+  });
+
+  it("asks only the holders whose own usable connections include the snapshot's", async () => {
+    await seed();
+    const holder = await memberHolding(ctx, ["integrations:configure"]);
+    const connectionId = await seedProxyConnection(ctx, ID, "default", {});
+
+    await list([tool("write_file")], connectionId);
+
+    const asked = await notices();
+    expect(asked).toContain(`${ctx.defaultSpaceId}:${ctx.user.id}`);
+    expect(asked).not.toContain(`${ctx.defaultSpaceId}:${holder.user.id}`);
+  });
+
+  it("stays silent about a tool the space already approved at its current definition", async () => {
+    await seed();
+    const write = tool("write_file");
+    await db.insert(spaceIntegrationToolApprovals).values({
+      spaceId: ctx.defaultSpaceId,
+      orgId: ctx.orgId,
+      packageId: ID,
+      toolName: "write_file",
+      fingerprint: toolDefinitionFingerprint(write),
+      definition: {},
+    });
+    await list([write]);
+    expect(await notices()).toEqual([]);
   });
 });

@@ -27,7 +27,11 @@ import { serveRunMcp } from "../services/run-tools-mcp.ts";
 import { RUN_ROUTE_RATE_PER_MIN, rateLimitByBearer } from "../middleware/rate-limit.ts";
 import { recordRunDegradedIntegration, recordRunUnavailableTools } from "../services/state/runs.ts";
 import { recordToolSnapshot } from "../services/integration-tool-snapshots.ts";
-import type { UnavailableToolReason } from "@appstrate/core/sidecar-types";
+import {
+  OBSERVED_TOOL_NAME_MAX_LENGTH,
+  OBSERVED_TOOLS_MAX_COUNT,
+  type UnavailableToolReason,
+} from "@appstrate/core/sidecar-types";
 import { readJsonBody } from "@appstrate/core/request-body";
 import {
   getRunEffectiveAgent,
@@ -221,29 +225,29 @@ const EMPTY_CREDENTIALS_WIRE = {
 const UNAVAILABLE_TOOL_REASONS = [
   "not_listed",
   "hidden_tools",
-  "allowlist",
   "definition_not_approved",
   "name_collision",
 ] as const satisfies readonly UnavailableToolReason[];
 
-/** At most this many tools in one report: the sidecar lists at most `MAX_LISTED_TOOLS`. */
-const MAX_OBSERVED_TOOLS = 500;
-const toolNameSchema = z.string().min(1).max(256);
+const toolNameSchema = z.string().min(1).max(OBSERVED_TOOL_NAME_MAX_LENGTH);
+
+/** One raw MCP descriptor as the platform can fingerprint it. */
+const observedToolSchema = z.looseObject({
+  name: toolNameSchema,
+  inputSchema: z.looseObject({ type: z.literal("object") }),
+});
 
 export const toolsObservedSchema = z.strictObject({
-  /** The descriptors as the server returned them; the platform fingerprints them itself. */
-  tools: z
-    .array(
-      z.looseObject({
-        name: toolNameSchema,
-        inputSchema: z.looseObject({ type: z.literal("object") }),
-      }),
-    )
-    .max(MAX_OBSERVED_TOOLS),
+  /**
+   * The descriptors as the server returned them, each judged on its own: a malformed one is
+   * dropped (the listing counts as truncated) and never refuses the report, which also carries the
+   * run's unavailable tools. The platform fingerprints the rest itself.
+   */
+  tools: z.array(z.unknown()).max(OBSERVED_TOOLS_MAX_COUNT),
   truncated: z.boolean(),
   unavailable: z
     .array(z.strictObject({ name: toolNameSchema, reason: z.enum(UNAVAILABLE_TOOL_REASONS) }))
-    .max(MAX_OBSERVED_TOOLS),
+    .max(OBSERVED_TOOLS_MAX_COUNT),
 });
 
 export function createInternalRouter(ratePerMin = RUN_ROUTE_RATE_PER_MIN) {
@@ -594,12 +598,16 @@ export function createInternalRouter(ratePerMin = RUN_ROUTE_RATE_PER_MIN) {
     const body = await readJsonBody(c, toolsObservedSchema);
     await recordRunUnavailableTools(runId, packageId, body.unavailable);
     if (run.runOrigin === "platform") {
+      const tools = body.tools.flatMap((tool) => {
+        const parsed = observedToolSchema.safeParse(tool);
+        return parsed.success ? [parsed.data] : [];
+      });
       await recordToolSnapshot({
         orgId: run.orgId,
         packageId,
         connectionId,
-        tools: body.tools,
-        truncated: body.truncated,
+        tools,
+        truncated: body.truncated || tools.length < body.tools.length,
       }).catch((err: unknown) =>
         logger.warn("tools-observed: tool snapshot not recorded", {
           runId,

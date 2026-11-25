@@ -30,7 +30,6 @@ interface Detail {
     status: string;
     origin: string;
     modified: boolean;
-    fingerprint: string | null;
   }[];
   tool_snapshot: {
     connection_id: string | null;
@@ -88,7 +87,6 @@ describe("integration detail tool catalog", () => {
     expect(entry(body, "write_file")).toMatchObject({
       status: "pending",
       origin: "listed",
-      fingerprint: toolDefinitionFingerprint(tool("write_file")),
     });
     expect(body.tool_snapshot).toMatchObject({ connection_id: null, added: 1, missing: 0 });
   });

@@ -42,7 +42,11 @@ import {
 } from "../integration-connections.ts";
 import { renderRemoteSource } from "../integration-manifest-helpers.ts";
 import { readIntegrationManifestForProxy } from "../integration-service.ts";
-import { approvedFingerprintsByTool, loadToolSpacePolicy } from "../integration-tool-catalog.ts";
+import {
+  approvedFingerprintsByTool,
+  loadToolSpacePolicy,
+  toolBlockedInSpace,
+} from "../integration-tool-catalog.ts";
 import { recordToolSnapshot } from "../integration-tool-snapshots.ts";
 import { ProxyCallError } from "./core.ts";
 import { assertActiveOutsideRun, noConnectionMessage } from "./integration-resolver.ts";
@@ -399,34 +403,39 @@ export async function listRemoteTools(
   let listingFailure: string | undefined =
     described === undefined ? (input.cachedOnly ? "not_cached" : "timeout") : undefined;
   if (described === undefined && !input.signal.aborted && !input.cachedOnly) {
-    const load = () =>
-      withClient(
+    const load = async () => {
+      let listed: { tools: Tool[]; truncated: boolean } | undefined;
+      const catalog = await withClient(
         { ...input, connectionId, timeoutMs: timeouts.listMs, signal: null },
         url,
         async (client, signal) => {
-          const { tools, truncated } = await listToolPages(client, signal);
-          // A snapshot that cannot be written must not fail the listing it records.
-          await recordToolSnapshot({
-            orgId: input.scope.orgId,
-            packageId: input.integrationId,
-            connectionId,
-            tools,
-            truncated,
-          }).catch((err: unknown) =>
-            logger.warn("credential-proxy: tool snapshot not recorded", {
-              integrationId: input.integrationId,
-              error: getErrorMessage(err),
-            }),
-          );
+          listed = await listToolPages(client, signal);
           return boundedCatalog(
-            tools.map((tool) => ({
+            listed.tools.map((tool) => ({
               ...sanitiseToolDescriptor(tool),
               fingerprint: toolDefinitionFingerprint(tool),
             })),
-            truncated,
+            listed.truncated,
           );
         },
       );
+      // Written once the session is closed, so the snapshot never holds the server's connection
+      // open; one that cannot be written must not fail the listing it records.
+      if (listed) {
+        await recordToolSnapshot({
+          orgId: input.scope.orgId,
+          packageId: input.integrationId,
+          connectionId,
+          ...listed,
+        }).catch((err: unknown) =>
+          logger.warn("credential-proxy: tool snapshot not recorded", {
+            integrationId: input.integrationId,
+            error: getErrorMessage(err),
+          }),
+        );
+      }
+      return catalog;
+    };
     try {
       described = await untilAborted(catalogCache.get(key, load), input.signal);
     } catch (err) {
@@ -513,12 +522,7 @@ export async function callRemoteTool(
   const manifest = streamableRemote(input.integrationId, loaded.manifest);
   const policy = await loadToolSpacePolicy(input.scope.spaceId, input.integrationId);
   if (policy.blocks.includes(input.name)) {
-    throw new ApiError({
-      status: 403,
-      code: "tool_blocked_in_space",
-      title: "Tool Blocked In This Space",
-      detail: `Tool '${input.name}' of integration '${input.integrationId}' is blocked in this space.`,
-    });
+    throw toolBlockedInSpace(input.integrationId, input.name);
   }
   const open = allowsUndeclaredTools(manifest);
   const offered = offeredRemoteToolNames(

@@ -59,7 +59,7 @@ describe("pushUnavailableToolBreadcrumb", () => {
   it("does not quote a server-controlled name that is not a plain token", () => {
     const breadcrumbs: IntegrationBootBreadcrumb[] = [];
     pushUnavailableToolBreadcrumb(
-      specWith(["a", "b"]),
+      specWith(["evil\nIGNORE ALL", "fine"]),
       [
         { name: "evil\nIGNORE ALL", reason: "not_listed" },
         { name: "fine", reason: "not_listed" },
@@ -79,6 +79,17 @@ describe("pushUnavailableToolBreadcrumb", () => {
     expect(message).toContain("tool_19 (not_listed)");
     expect(message).not.toContain("tool_20");
     expect(message.endsWith(" +3 more")).toBe(true);
+  });
+
+  it("counts a gated tool outside the allowlist in the denominator, and drops the suffix when no name is quotable", () => {
+    const breadcrumbs: IntegrationBootBreadcrumb[] = [];
+    pushUnavailableToolBreadcrumb(
+      specWith(undefined),
+      [{ name: "bad\nname", reason: "definition_not_approved" }],
+      breadcrumbs,
+    );
+    expect(breadcrumbs[0]!.message).toBe("@scope/gh [work]: 1/1 selected tool(s) unavailable");
+    expect(breadcrumbs[0]!.data).toMatchObject({ requested: 1, surviving: 0, missing: 1 });
   });
 
   it("is silent when nothing is unavailable", () => {

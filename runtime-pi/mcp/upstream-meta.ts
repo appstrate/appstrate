@@ -22,6 +22,7 @@
  */
 
 import { scopeTokenSchema } from "@appstrate/core/integration";
+import { MAX_REQUIRED_SCOPE_LENGTH } from "@appstrate/core/www-authenticate";
 import {
   API_CALL_ERROR_META_KEY,
   UPSTREAM_HEADER_ALLOWLIST,
@@ -68,7 +69,14 @@ export function readUpstreamMeta(result: CallToolResult): UpstreamMeta {
   // never a protocol violation.
   const scopes = (raw as { required_scopes?: unknown }).required_scopes;
   const requiredScopes = Array.isArray(scopes)
-    ? scopes.filter((s) => scopeTokenSchema.safeParse(s).success).slice(0, 20)
+    ? scopes
+        .filter(
+          (s) =>
+            typeof s === "string" &&
+            s.length <= MAX_REQUIRED_SCOPE_LENGTH &&
+            scopeTokenSchema.safeParse(s).success,
+        )
+        .slice(0, 20)
     : [];
   return {
     status: obj.status,

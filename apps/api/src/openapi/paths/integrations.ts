@@ -621,7 +621,7 @@ const authStatusSchema = {
 
 const toolCatalogEntrySchema = {
   type: "object",
-  required: ["name", "status", "origin", "modified", "fingerprint"],
+  required: ["name", "status", "origin", "modified"],
   properties: {
     name: { type: "string" },
     description: { type: "string" },
@@ -640,12 +640,7 @@ const toolCatalogEntrySchema = {
     modified: {
       type: "boolean",
       description:
-        "A listing carries a definition that changed since first seen, or that differs from every approval. A declared tool whose definition changed stays `available`.",
-    },
-    fingerprint: {
-      type: ["string", "null"],
-      description:
-        "Fingerprint of the definition the first stored listing carries; `null` when none lists the tool.",
+        "Declared tool: a listing carries a definition that changed since first seen (a signal only: it stays `available`, and nothing acknowledges it). Approved undeclared tool: a listed definition is not one the space approved.",
     },
     policy: {
       type: "object",
@@ -1675,7 +1670,7 @@ export const integrationsPaths = {
         "204": { description: "Approved", headers: STD_RESPONSE_HEADERS },
         "400": {
           description:
-            "`validation_failed` — the body is invalid; `tool_already_declared` — the manifest declares the named tools (`tools`): a declared tool needs no approval.",
+            "`validation_failed` — the body is invalid; `tool_already_declared` — the manifest declares the named tools (`tools`): a declared tool needs no approval; `invalid_request` — the integration allows undeclared tools (none needs an approval), or a named tool is one the platform hides (`hidden_tools`, the connect tool).",
           headers: STD_RESPONSE_HEADERS,
           content: problemJson,
         },
@@ -1688,7 +1683,7 @@ export const integrationsPaths = {
         "404": { $ref: "#/components/responses/NotFound" },
         "409": {
           description:
-            "`tool_snapshot_stale` — the server no longer lists the named tools (`tools`) at that fingerprint: refresh the snapshot and review again.",
+            "`tool_snapshot_stale` — the server no longer lists the named tools (`tools`) at that fingerprint: refresh the snapshot and review again; `tool_definition_unavailable` — the listed definition of the named tools (`tools`) was too large to keep, so it cannot be reviewed nor approved.",
           headers: STD_RESPONSE_HEADERS,
           content: problemJson,
         },
@@ -1701,7 +1696,7 @@ export const integrationsPaths = {
       tags: ["Integrations"],
       summary: "Withdraw every approval of a tool in the space",
       description:
-        "Removes all approved fingerprints of the tool in this space. Answers 204 whether or not there was one (the audit event `integration.tool.approval_revoked` is recorded only when one was removed). Requires `integrations:configure` and a dashboard session.",
+        "Removes all approved fingerprints of the tool in this space. Answers 204 whether or not there was one. Audited as `integration.tool.approval_revoked`, one event per approval removed (tool and fingerprint). Requires `integrations:configure` and a dashboard session.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XSpaceId" },

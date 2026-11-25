@@ -1349,10 +1349,11 @@ export type EffectiveToolOrigin = "declared" | "approved" | "listed";
 export interface EffectiveToolEntry extends IntegrationToolCatalogEntry {
   status: EffectiveToolStatus;
   origin: EffectiveToolOrigin;
-  /** A listing carries a definition that changed since first seen, or differs from every approval. */
+  /**
+   * Declared tool: a listing carries a definition that changed since first seen (a signal only,
+   * nothing acknowledges it). Undeclared approved tool: a listed fingerprint is not approved.
+   */
   modified: boolean;
-  /** Fingerprint of the first snapshot listing the tool, `null` when none does. */
-  fingerprint: string | null;
 }
 
 /** The space's decisions on one integration's tools. */
@@ -1387,13 +1388,15 @@ export function resolveEffectiveToolCatalog(
   const { integration, policy, snapshots } = input;
   const declared = resolveIntegrationToolCatalog({ integration });
   const declaredNames = new Set(declared.map((e) => e.name));
+  // Hidden tools are neither declared nor approvable: the server may list them, the space never sees them.
+  const hidden = hiddenToolNames(integration);
   const open = allowsUndeclaredTools(integration);
   const blocked = new Set(policy?.blocks ?? []);
 
   // A manifest that declares the tool wins over an approval of it.
   const approvals = new Map<string, Set<string>>();
   for (const a of policy?.approvals ?? []) {
-    if (declaredNames.has(a.tool_name)) continue;
+    if (declaredNames.has(a.tool_name) || hidden.has(a.tool_name)) continue;
     const set = approvals.get(a.tool_name) ?? new Set<string>();
     set.add(a.fingerprint);
     approvals.set(a.tool_name, set);
@@ -1420,23 +1423,25 @@ export function resolveEffectiveToolCatalog(
     if (!listed) {
       status = absenceIsMissing ? "missing" : "available";
     } else {
-      modified = listed.some((l) => l.changed_at !== null);
       const approved = approvals.get(entry.name);
+      modified =
+        origin === "declared"
+          ? listed.some((l) => l.changed_at !== null)
+          : approved !== undefined && listed.some((l) => !approved.has(l.fingerprint));
       if (origin === "declared" || open) {
         status = "available";
       } else if (approved && listed.some((l) => approved.has(l.fingerprint))) {
         status = "available";
       } else {
         status = "pending";
-        modified = approved !== undefined;
       }
     }
     if (blocked.has(entry.name)) status = "blocked";
-    return { ...entry, status, origin, modified, fingerprint: listed?.[0]?.fingerprint ?? null };
+    return { ...entry, status, origin, modified };
   };
 
   const undeclared = [...new Set([...listings.keys(), ...approvals.keys()])]
-    .filter((name) => !declaredNames.has(name))
+    .filter((name) => !declaredNames.has(name) && !hidden.has(name))
     .sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));
 
   return [
@@ -1445,9 +1450,10 @@ export function resolveEffectiveToolCatalog(
   ];
 }
 
-function hiddenToolNames(
+/** Names the platform withholds from every surface: `hidden_tools`, connect primitives, hidden uploads. */
+export function hiddenToolNames(
   integration: IntegrationManifest,
-  apiCallConfigs: readonly ApiCallConfig[],
+  apiCallConfigs: readonly ApiCallConfig[] = getApiCallConfigs(integration),
 ): Set<string> {
   const hidden = new Set<string>([
     ...(integration.hidden_tools ?? []),
@@ -1590,7 +1596,7 @@ function unexposedDefaultTools(manifest: IntegrationManifest): {
   const catalog = new Set(
     resolveIntegrationToolCatalog({ integration: manifest }).map((e) => e.name),
   );
-  const hidden = hiddenToolNames(manifest, getApiCallConfigs(manifest));
+  const hidden = hiddenToolNames(manifest);
   return [...new Set(defaults)]
     .filter((name) => hidden.has(name) || (catalogIsKnown && !catalog.has(name)))
     .map((name) => ({
@@ -1938,7 +1944,11 @@ export function validateAgentIntegrationScopes(
       });
     }
   } else if (selection.tools && selection.tools.length > 0) {
-    if (!allowsUndeclaredTools(integrationManifest)) {
+    // AFPS §7.1: a local source declaring no tools has no catalog to check against.
+    const catalogIsEmptyAdvisory =
+      getIntegrationSourceKind(integrationManifest) !== "remote" &&
+      resolveIntegrationToolCatalog({ integration: integrationManifest }).length === 0;
+    if (!allowsUndeclaredTools(integrationManifest) && !catalogIsEmptyAdvisory) {
       const allowed = new Set([
         ...resolveIntegrationToolCatalog({ integration: integrationManifest }).map((e) => e.name),
         ...(options?.approvedTools ?? []),

@@ -72,6 +72,7 @@ describe("upstream-meta — sidecar→wire→runtime end-to-end filter", () => {
       } as never);
     expect(parse(["a", "b"]).required_scopes).toEqual(["a", "b"]);
     expect(parse(["a", 3, "b c"]).required_scopes).toEqual(["a"]);
+    expect(parse(["x".repeat(129), "ok"]).required_scopes).toEqual(["ok"]);
     expect(parse("a").required_scopes).toBeUndefined();
     expect(parse([]).required_scopes).toBeUndefined();
   });

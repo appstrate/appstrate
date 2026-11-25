@@ -64,15 +64,11 @@ describe("resolveEffectiveToolCatalog — declared tools", () => {
       status: "available",
       origin: "declared",
       modified: false,
-      fingerprint: FP_A,
     });
     expect(one(m, "t", null, [snap({ t: { changed: true } })]).modified).toBe(true);
   });
   it("missing when a snapshot exists and lacks it", () => {
-    expect(one(m, "t", null, [snap({ x: {} })])).toMatchObject({
-      status: "missing",
-      fingerprint: null,
-    });
+    expect(one(m, "t", null, [snap({ x: {} })]).status).toBe("missing");
   });
   it("available without any snapshot", () => {
     expect(one(m, "t", null, []).status).toBe("available");
@@ -82,17 +78,16 @@ describe("resolveEffectiveToolCatalog — declared tools", () => {
   });
   it("missing only when every snapshot lacks it; present in one is enough", () => {
     expect(one(m, "t", null, [snap({ x: {} }), snap({ y: {} })]).status).toBe("missing");
-    expect(one(m, "t", null, [snap({ x: {} }), snap({ t: { fp: FP_B } })])).toMatchObject({
-      status: "available",
-      fingerprint: FP_B,
-    });
+    expect(one(m, "t", null, [snap({ x: {} }), snap({ t: { fp: FP_B } })]).status).toBe(
+      "available",
+    );
   });
-  it("modified when any listing snapshot changed; fingerprint = first listing", () => {
+  it("modified when any listing snapshot changed", () => {
     const e = one(m, "t", null, [
       snap({ t: { fp: FP_A } }),
       snap({ t: { fp: FP_B, changed: true } }),
     ]);
-    expect(e).toMatchObject({ modified: true, fingerprint: FP_A });
+    expect(e.modified).toBe(true);
   });
   it("blocked wins", () => {
     expect(one(m, "t", policy([], ["t"]), [snap({ t: {} })]).status).toBe("blocked");
@@ -152,8 +147,31 @@ describe("resolveEffectiveToolCatalog — undeclared tools on a closed catalog",
     expect(one(m, "u", policy([["u", FP_A]]), []).status).toBe("available");
     expect(one(m, "u", policy([["u", FP_A]]), [snap({ d: {} }, true)]).status).toBe("available");
   });
+  it("approved tool: modified is a listed fingerprint nobody approved, not changed_at", () => {
+    expect(one(m, "u", policy([["u", FP_A]]), [snap({ u: { changed: true } })]).modified).toBe(
+      false,
+    );
+    expect(
+      one(m, "u", policy([["u", FP_A]]), [snap({ u: {} }), snap({ u: { fp: FP_B } })]),
+    ).toMatchObject({ status: "available", modified: true });
+  });
   it("blocked wins over approval", () => {
     expect(one(m, "u", policy([["u", FP_A]], ["u"]), [snap({ u: {} })]).status).toBe("blocked");
+  });
+});
+
+describe("resolveEffectiveToolCatalog — hidden tools", () => {
+  const hiddenManifest = (open: boolean) =>
+    ({ ...manifest({ declared: ["d"], open }), hidden_tools: ["h"] }) as IntegrationManifest;
+  it("never listed nor approved, closed or open catalog", () => {
+    for (const open of [false, true]) {
+      const names = resolveEffectiveToolCatalog({
+        integration: hiddenManifest(open),
+        policy: policy([["h", FP_A]]),
+        snapshots: [snap({ d: {}, h: {}, u: {} })],
+      }).map((e) => e.name);
+      expect(names).toEqual(["d", "u"]);
+    }
   });
 });
 
@@ -188,9 +206,16 @@ describe("validateAgentIntegrationScopes — approved tools and empty catalogs",
     expect(validateAgentIntegrationScopes(sel(["u"]), m)).toHaveLength(1);
     expect(validateAgentIntegrationScopes(sel(["u"]), m, { approvedTools: ["u"] })).toEqual([]);
   });
-  it("a closed catalog declaring nothing refuses any explicit name", () => {
+  it("a closed remote catalog declaring nothing refuses any explicit name", () => {
     const errors = validateAgentIntegrationScopes(sel(["x"]), manifest({}));
     expect(errors.map((e) => e.code)).toEqual(["unknown_tool"]);
+  });
+  it("a local source declaring no tools is not name-checked (AFPS §7.1)", () => {
+    const local = {
+      ...manifest({}),
+      source: { kind: "local", server: { runtime: "node", entrypoint: "x.js" } },
+    } as unknown as IntegrationManifest;
+    expect(validateAgentIntegrationScopes(sel(["x"]), local)).toEqual([]);
   });
   it('an open catalog still accepts "*" and explicit names', () => {
     const m = manifest({ open: true });

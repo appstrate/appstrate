@@ -15,6 +15,7 @@ import {
   type ToolDefinition,
   type ToolSnapshotEntry,
 } from "@appstrate/db/schema";
+import { trackAudit } from "./audit.ts";
 import { scheduleToolReviewNotifications } from "./state/notifications.ts";
 
 /** Past this many serialised bytes of definitions in one snapshot, the rest keep only their identity. */
@@ -118,13 +119,18 @@ export async function recordToolSnapshot(
     return { added, changed };
   });
   const names = [...result.added, ...result.changed];
-  if (names.length > 0)
-    await scheduleToolReviewNotifications({
-      orgId: input.orgId,
-      packageId: input.packageId,
-      connectionId: input.connectionId,
-      names,
-    });
+  // Off the listing's path: the fan-out reads policies and reach of every space, and logs its own
+  // failures. Tracked so shutdown (and a test) can flush it.
+  if (names.length > 0) {
+    void trackAudit(
+      scheduleToolReviewNotifications({
+        orgId: input.orgId,
+        packageId: input.packageId,
+        connectionId: input.connectionId,
+        names,
+      }),
+    );
+  }
   return result;
 }
 

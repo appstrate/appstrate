@@ -22,11 +22,16 @@
 import { describe, it, expect, spyOn } from "bun:test";
 import {
   capObservedTools,
+  capObservedUnavailable,
   createIntegrationCredentialsSource,
   fetchInitialIntegrationCredentials,
   postIntegrationToolsObserved,
   type IntegrationCredentialsWire,
 } from "../integration-credentials-source.ts";
+import {
+  OBSERVED_TOOLS_MAX_COUNT,
+  OBSERVED_TOOL_NAME_MAX_LENGTH,
+} from "@appstrate/core/sidecar-types";
 import { logger } from "../logger.ts";
 
 function makePayload(token: string): IntegrationCredentialsWire {
@@ -824,15 +829,17 @@ describe("postIntegrationToolsObserved", () => {
 });
 
 describe("capObservedTools", () => {
+  const t = (name: string, pad = "") => ({ name, inputSchema: { type: "object" }, pad });
+
   it("keeps everything under the cap", () => {
-    expect(capObservedTools([{ a: 1 }, { a: 2 }], 1000)).toEqual({
-      tools: [{ a: 1 }, { a: 2 }],
+    expect(capObservedTools([t("a"), t("b")], 1000)).toEqual({
+      tools: [t("a"), t("b")],
       truncated: false,
     });
   });
 
   it("drops trailing tools past the cap and flags truncation", () => {
-    const tools = [{ d: "x".repeat(40) }, { d: "y".repeat(40) }, { d: "z".repeat(40) }];
+    const tools = [t("a", "x".repeat(40)), t("b", "y".repeat(40)), t("c", "z".repeat(40))];
     const one = JSON.stringify(tools[0]).length;
     const capped = capObservedTools(tools, 2 + one * 2 + 1);
     expect(capped.tools).toEqual([tools[0]!, tools[1]!]);
@@ -841,6 +848,47 @@ describe("capObservedTools", () => {
   });
 
   it("drops a single tool larger than the cap", () => {
-    expect(capObservedTools([{ d: "x".repeat(100) }], 50)).toEqual({ tools: [], truncated: true });
+    expect(capObservedTools([t("a", "x".repeat(100))], 50)).toEqual({ tools: [], truncated: true });
+  });
+
+  it("keeps at most the platform's tool count", () => {
+    const tools = Array.from({ length: OBSERVED_TOOLS_MAX_COUNT + 1 }, (_, i) => t(`t${i}`));
+    const capped = capObservedTools(tools);
+    expect(capped.tools).toHaveLength(OBSERVED_TOOLS_MAX_COUNT);
+    expect(capped.truncated).toBe(true);
+  });
+
+  it("drops the tools the platform would refuse, so the rest still gets through", () => {
+    const refused = [
+      { name: "x".repeat(OBSERVED_TOOL_NAME_MAX_LENGTH + 1), inputSchema: { type: "object" } },
+      { name: "", inputSchema: { type: "object" } },
+      { name: "no_schema" },
+      { name: "string_schema", inputSchema: "object" },
+      { name: "array_schema", inputSchema: { type: "array" } },
+      { inputSchema: { type: "object" } },
+      null,
+    ];
+    expect(capObservedTools([t("ok"), ...refused, t("also_ok")])).toEqual({
+      tools: [t("ok"), t("also_ok")],
+      truncated: true,
+    });
+  });
+});
+
+describe("capObservedUnavailable", () => {
+  it("drops names the platform would refuse and caps the count", () => {
+    const ok = { name: "a", reason: "not_listed" as const };
+    expect(
+      capObservedUnavailable([
+        ok,
+        { name: "", reason: "not_listed" as const },
+        { name: "x".repeat(OBSERVED_TOOL_NAME_MAX_LENGTH + 1), reason: "not_listed" as const },
+      ]),
+    ).toEqual([ok]);
+    const many = Array.from({ length: OBSERVED_TOOLS_MAX_COUNT + 5 }, (_, i) => ({
+      name: `t${i}`,
+      reason: "not_listed" as const,
+    }));
+    expect(capObservedUnavailable(many)).toHaveLength(OBSERVED_TOOLS_MAX_COUNT);
   });
 });

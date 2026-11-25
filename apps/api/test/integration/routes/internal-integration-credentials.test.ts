@@ -613,6 +613,24 @@ describe("GET /internal/integration-credentials/:scope/:name", () => {
     expect(await db.select().from(integrationToolSnapshots)).toHaveLength(0);
   });
 
+  it("tools-observed: drops one malformed descriptor, keeps the rest and still stamps the unavailable tools", async () => {
+    await seedIntegration(INTEGRATION, true);
+    const connectionId = await seedConnectionRow(INTEGRATION);
+    await bindConnectionsToRun(runId, { [INTEGRATION]: [connectionId] });
+
+    const res = await observed(connectionId, {
+      ...report,
+      tools: [report.tools[0], { name: "broken" }, { inputSchema: { type: "object" } }, "junk"],
+    });
+    expect(res.status).toBe(204);
+
+    const [run] = await db.select({ metadata: runs.metadata }).from(runs).where(eq(runs.id, runId));
+    expect(run!.metadata).toHaveProperty("unavailable_tools");
+    const [snapshot] = await db.select().from(integrationToolSnapshots);
+    expect(snapshot!.tools.map((t) => t.name)).toEqual(["search"]);
+    expect(snapshot!.truncated).toBe(true);
+  });
+
   it("DENY: tools-observed for a connection the run did not bind is a 400, and a malformed body too", async () => {
     await seedIntegration(INTEGRATION, true);
     const connectionId = await seedConnectionRow(INTEGRATION);

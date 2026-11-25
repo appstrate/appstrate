@@ -110,6 +110,7 @@ import type { ProxyReach } from "../services/integration-connections.ts";
 import type { AppEnv } from "../types/index.ts";
 
 import { getCookieJarStore } from "../infra/index.ts";
+import { loadToolSpacePolicy } from "../services/integration-tool-catalog.ts";
 import { getCredentialProxyLimits } from "../services/proxy-limits.ts";
 
 const listIntegrationToolsQuerySchema = z.strictObject({
@@ -357,6 +358,7 @@ export function createCredentialProxyRouter() {
           spaceId,
           actor,
           ...(explicitConnectionId ? { connectionId: explicitConnectionId } : {}),
+          toolPolicy: await loadToolSpacePolicy(spaceId, integrationId),
           ...(run ? { run } : { reach: reach! }),
           integrationId,
           method,

@@ -121,6 +121,9 @@ interface ResolveIntegrationsInput {
  */
 export type IntegrationDropReason = keyof typeof UNAVAILABLE_INTEGRATION_REASONS;
 
+/** The sidecar spec's cap on the fingerprints approved per tool; the most recent ones are kept. */
+const MAX_APPROVED_FINGERPRINTS = 32;
+
 /** One declared integration the run will start WITHOUT, plus why. */
 export interface DroppedIntegration {
   readonly integrationId: string;
@@ -367,18 +370,26 @@ async function resolveOne(
   // privilege: the catch-all tool is never auto-granted). `authorized_uris`
   // come from each api_call auth. Each api_call belongs to ONE auth: a spec
   // keeps only its connection's (below).
-  const selectedApiCalls: ApiCallSpec[] = selectedApiCallConfigs(manifest, effectiveSelection).map(
-    (cfg) => {
+  // What the space decided about this integration's tools: blocked ones are hidden, and on a
+  // closed remote catalog an undeclared tool the agent names is offered only at a definition the
+  // space approved (declared tools are never held back by a changed definition).
+  const policy = await loadToolSpacePolicy(spaceId, integrationId);
+  const blocked = new Set(policy.blocks);
+  const selectedApiCalls: ApiCallSpec[] = selectedApiCallConfigs(manifest, effectiveSelection)
+    // An `api_upload` dispatches through its `api_call`: blocking the call removes both.
+    .filter((cfg) => !blocked.has(cfg.toolName))
+    .map((cfg) => {
       const auth = manifest.auths?.[cfg.authKey] as AfpsManifestAuth | undefined;
+      const upload =
+        cfg.uploadProtocols.length > 0 && !(cfg.uploadToolName && blocked.has(cfg.uploadToolName));
       return {
         authKey: cfg.authKey,
         toolName: cfg.toolName,
         authorizedUris: [...(auth?.authorized_uris ?? [])],
         ...(auth?.allow_all_uris ? { allowAllUris: true } : {}),
-        ...(cfg.uploadProtocols.length > 0 ? { uploadProtocols: cfg.uploadProtocols } : {}),
+        ...(upload ? { uploadProtocols: cfg.uploadProtocols } : {}),
       } satisfies ApiCallSpec;
-    },
-  );
+    });
   const apiCallAuthKeys = new Set(selectedApiCalls.map((cfg) => cfg.authKey));
 
   // ── Resolve the sidecar server spec from the AFPS `source`
@@ -501,10 +512,6 @@ async function resolveOne(
     },
     ...workspaceMount,
   });
-  // What the space decided about this integration's tools: blocked ones are hidden, and on a
-  // closed remote catalog an undeclared tool the agent names is offered only at a definition the
-  // space approved (declared tools are never held back by a changed definition).
-  const policy = await loadToolSpacePolicy(spaceId, integrationId);
   const approvedByTool = approvedFingerprintsByTool(policy);
   const declaredNames = new Set(
     resolveIntegrationToolCatalog({ integration: manifest }).map((e) => e.name),
@@ -514,7 +521,10 @@ async function resolveOne(
       ? Object.fromEntries(
           ((effectiveSelection ?? []) as readonly string[])
             .filter((name) => !declaredNames.has(name))
-            .map((name) => [name, approvedByTool.get(name) ?? []]),
+            .map((name) => [
+              name,
+              (approvedByTool.get(name) ?? []).slice(0, MAX_APPROVED_FINGERPRINTS),
+            ]),
         )
       : {};
   // The tools a spec exposes. A connection's login primitive is its auth's, never the agent's.

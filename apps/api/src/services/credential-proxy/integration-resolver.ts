@@ -28,6 +28,7 @@ import {
   type AfpsHttpDelivery as ConnectAfpsHttpDelivery,
   type ProxyCredentialsPayload,
 } from "@appstrate/connect";
+import { getApiCallConfigs, type ToolSpacePolicy } from "@appstrate/core/integration";
 import { credentialTemplateRefs } from "@appstrate/afps-shared/credential-template";
 import {
   renderAuthAuthorizedUris,
@@ -55,6 +56,7 @@ import {
   type ResolvedConnectionRow,
   type RunBoundSelection,
 } from "../integration-connections.ts";
+import { toolBlockedInSpace } from "../integration-tool-catalog.ts";
 import { listOrgDefaultsForResolver } from "../integration-org-defaults-service.ts";
 import { listActivePackages } from "../space-packages.ts";
 import type { ConnectionVariables } from "../connect/connection-variables.ts";
@@ -142,6 +144,8 @@ type ResolveIntegrationProxyInput = {
   connectionId?: string;
   /** How the caller names `connectionId`; the header when omitted. */
   connectionNaming?: ConnectionNaming;
+  /** Set by the `api_call` door: refuses a connection whose auth's `api_call` the space blocked. */
+  toolPolicy?: ToolSpacePolicy;
 } & ProxyCallPath;
 
 interface ResolvedIntegrationProxyCredentials {
@@ -177,6 +181,14 @@ export async function resolveIntegrationProxyCredentials(
   const connection = await resolveConnection(input, manifest);
   if (!connection) throw new IntegrationCredentialNotFoundError(noConnectionMessage(input));
 
+  for (const config of getApiCallConfigs(manifest)) {
+    if (
+      config.authKey === connection.authKey &&
+      input.toolPolicy?.blocks.includes(config.toolName)
+    ) {
+      throw toolBlockedInSpace(input.integrationId, config.toolName);
+    }
+  }
   const payload = buildPayload(input.integrationId, manifest, connection);
   return {
     payload,

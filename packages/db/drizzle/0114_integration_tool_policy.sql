@@ -17,7 +17,7 @@ CREATE TABLE "space_integration_tool_approvals" (
 	"package_id" text NOT NULL,
 	"tool_name" text NOT NULL,
 	"fingerprint" text NOT NULL,
-	"definition" jsonb,
+	"definition" jsonb NOT NULL,
 	"approved_by" text,
 	"approved_at" timestamp with time zone DEFAULT now() NOT NULL
 );
@@ -35,7 +35,7 @@ CREATE TABLE "space_integration_tool_blocks" (
 ALTER TABLE "notifications" DROP CONSTRAINT "notifications_type_valid";--> statement-breakpoint
 ALTER TABLE "integration_tool_snapshots" ADD CONSTRAINT "integration_tool_snapshots_org_id_organizations_id_fk" FOREIGN KEY ("org_id") REFERENCES "public"."organizations"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "integration_tool_snapshots" ADD CONSTRAINT "integration_tool_snapshots_package_id_packages_id_fk" FOREIGN KEY ("package_id") REFERENCES "public"."packages"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "integration_tool_snapshots" ADD CONSTRAINT "integration_tool_snapshots_connection_id_integration_connections_id_fk" FOREIGN KEY ("connection_id") REFERENCES "public"."integration_connections"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "integration_tool_snapshots" ADD CONSTRAINT "integration_tool_snapshots_connection_org_fk" FOREIGN KEY ("connection_id","org_id") REFERENCES "public"."integration_connections"("id","org_id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "space_integration_tool_approvals" ADD CONSTRAINT "space_integration_tool_approvals_package_id_packages_id_fk" FOREIGN KEY ("package_id") REFERENCES "public"."packages"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "space_integration_tool_approvals" ADD CONSTRAINT "space_integration_tool_approvals_approved_by_user_id_fk" FOREIGN KEY ("approved_by") REFERENCES "public"."user"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "space_integration_tool_approvals" ADD CONSTRAINT "space_integration_tool_approvals_space_org_fk" FOREIGN KEY ("space_id","org_id") REFERENCES "public"."spaces"("id","org_id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint

@@ -35,7 +35,6 @@ import { ApiError, forbidden, invalidRequest, notFound, validationFailed } from 
 import { readJsonBody } from "@appstrate/core/request-body";
 import { asJSONSchemaObject } from "@appstrate/core/form";
 import { getSpaceScope } from "../lib/scope.ts";
-import { connectionCaller } from "./integrations.ts";
 import { selectedApprovedTools } from "../services/integration-tool-policy.ts";
 import { callerSpaceGrant, type SpaceGrant } from "../lib/permissions.ts";
 import { loadSchedule } from "../services/scheduler.ts";
@@ -797,11 +796,7 @@ export function createAgentsRouter() {
         // the package file explorer and `download` guard.
         await requireBundleDependencyReadPermissions(c, bundle, { orgId, accessible });
         approvedTools = await selectedApprovedTools(
-          {
-            scope,
-            caller: connectionCaller(c, scope.spaceId),
-            orgRole: c.get("orgRole") ?? null,
-          },
+          scope,
           bundle.packages.get(bundle.root)!.manifest,
         );
         // Serialization stays inside the try: `writeBundleToBuffer` re-validates

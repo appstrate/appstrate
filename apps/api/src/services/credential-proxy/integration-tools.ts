@@ -273,10 +273,12 @@ interface ListedIntegration {
   connections: readonly ConnectionOutsideRun[];
   /** Exposed name → `api_call` tool name. */
   apiCallNames: ReadonlyMap<string, string>;
+  /** What the space approved and blocked among the integration's tools. */
+  policy: ToolSpacePolicy;
 }
 
 function apiCallTools(entry: ListedIntegration): ApiCallTool[] {
-  const { id, namespace, manifest, connections } = entry;
+  const { id, namespace, manifest, connections, policy } = entry;
   const configs = getApiCallConfigs(manifest);
   const described = typeof manifest.description === "string" ? manifest.description.trim() : "";
   // A sentence follows it: a description left open is closed.
@@ -284,6 +286,7 @@ function apiCallTools(entry: ListedIntegration): ApiCallTool[] {
     described ? ` ${/[.!?…]$/.test(described) ? described : `${described}.`}` : ""
   }`;
   return configs.flatMap((config): ApiCallTool[] => {
+    if (policy.blocks.includes(config.toolName)) return [];
     const name = apiCallToolName(namespace, config.toolName);
     const reached = connections.filter((c) => c.auth_key === config.authKey);
     if (entry.apiCallNames.get(name) !== config.toolName || reached.length === 0) return [];
@@ -371,8 +374,7 @@ async function remoteTools(
   entry: ListedIntegration,
   query: Pick<IntegrationToolQuery, "name" | "connectionId" | "cachedOnly">,
 ): Promise<RemoteListing> {
-  const { id: integrationId, namespace, manifest, connections } = entry;
-  const policy = await loadToolSpacePolicy(caller.scope.spaceId, integrationId);
+  const { id: integrationId, namespace, manifest, connections, policy } = entry;
   if (
     query.name !== undefined &&
     query.connectionId !== undefined &&
@@ -525,19 +527,22 @@ export async function listIntegrationTools(
     byIntegration.set(id, [...(byIntegration.get(id) ?? []), connection]);
   }
   const namespaces = integrationNamespaces(activeIds);
-  const integrations = [...byIntegration]
-    .sort(([a], [b]) => a.localeCompare(b))
-    .map(([id, connections]): ListedIntegration => {
-      const namespace = namespaces.get(id)!;
-      const manifest = manifests.get(id)!;
-      return {
-        id,
-        namespace,
-        manifest,
-        connections,
-        apiCallNames: apiCallToolNames(id, namespace, manifest),
-      };
-    });
+  const integrations = await Promise.all(
+    [...byIntegration]
+      .sort(([a], [b]) => a.localeCompare(b))
+      .map(async ([id, connections]): Promise<ListedIntegration> => {
+        const namespace = namespaces.get(id)!;
+        const manifest = manifests.get(id)!;
+        return {
+          id,
+          namespace,
+          manifest,
+          connections,
+          apiCallNames: apiCallToolNames(id, namespace, manifest),
+          policy: await loadToolSpacePolicy(scope.spaceId, id),
+        };
+      }),
+  );
 
   const httpTools = new Map(integrations.map((entry) => [entry.id, apiCallTools(entry)]));
   const named = (tools: IntegrationTool[]) =>

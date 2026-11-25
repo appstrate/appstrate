@@ -8,7 +8,12 @@
 
 import { and, eq } from "drizzle-orm";
 import { parseManifestIntegrations } from "@appstrate/core/dependencies";
-import { resolveIntegrationToolCatalog } from "@appstrate/core/integration";
+import {
+  allowsUndeclaredTools,
+  hiddenToolNames,
+  resolveIntegrationToolCatalog,
+  type IntegrationManifest,
+} from "@appstrate/core/integration";
 import type { OrgRole } from "@appstrate/core/permissions";
 import { db } from "@appstrate/db/client";
 import {
@@ -16,16 +21,16 @@ import {
   spaceIntegrationToolBlocks,
   type ToolDefinition,
 } from "@appstrate/db/schema";
-import { ApiError, conflict } from "../lib/errors.ts";
+import { ApiError, conflict, invalidRequest } from "../lib/errors.ts";
 import type { SpaceScope } from "../lib/scope.ts";
 import type { ConnectionCaller } from "./connection-reach.ts";
 import {
-  listIntegrationConnections,
+  listReachableConnections,
   loadManifestOrThrow,
   toolSnapshotConnectionIds,
 } from "./integration-connections.ts";
 import { readIntegrationManifestForConnect } from "./integration-service.ts";
-import { loadEffectiveToolCatalog } from "./integration-tool-catalog.ts";
+import { loadToolSpacePolicy } from "./integration-tool-catalog.ts";
 import { readToolSnapshots } from "./integration-tool-snapshots.ts";
 
 export interface ToolPolicyTarget {
@@ -41,15 +46,22 @@ export interface ListedTool {
   definition: ToolDefinition | null;
 }
 
-/** Every distinct (name, fingerprint) the caller's connections last listed, and the manifest's declared names. */
+/** The tool names the manifest declares, and those the platform withholds from every surface. */
+function declaredAndHidden(manifest: IntegrationManifest) {
+  return {
+    declared: new Set(resolveIntegrationToolCatalog({ integration: manifest }).map((e) => e.name)),
+    hidden: hiddenToolNames(manifest),
+  };
+}
+
+/** Every distinct (name, fingerprint) the caller's usable connections last listed. */
 async function loadListedTools(target: ToolPolicyTarget) {
   const { scope, packageId } = target;
   const manifest = await loadManifestOrThrow(scope, packageId);
-  const connections = await listIntegrationConnections(
-    scope,
-    packageId,
-    target.caller,
-    target.orgRole,
+  const connections = await listReachableConnections(
+    { spaceId: scope.spaceId, actor: target.caller.principal.actor },
+    "usable",
+    [packageId],
   );
   const snapshots = await readToolSnapshots({
     orgId: scope.orgId,
@@ -65,10 +77,7 @@ async function loadListedTools(target: ToolPolicyTarget) {
       else known.definition ??= definition;
     }
   }
-  const declared = new Set(
-    resolveIntegrationToolCatalog({ integration: manifest }).map((e) => e.name),
-  );
-  return { listed, declared };
+  return { manifest, listed, ...declaredAndHidden(manifest) };
 }
 
 /** What the space can review: the tools listed, its approvals and its blocks. */
@@ -123,7 +132,12 @@ export async function approveTools(
   tools: readonly { name: string; fingerprint: string }[],
   approvedBy: string | null,
 ): Promise<{ toolName: string; fingerprint: string }[]> {
-  const { listed, declared } = await loadListedTools(target);
+  const { manifest, listed, declared, hidden } = await loadListedTools(target);
+  if (allowsUndeclaredTools(manifest)) {
+    throw invalidRequest(
+      `Integration '${target.packageId}' allows undeclared tools: none needs an approval.`,
+    );
+  }
   const alreadyDeclared = namesOf(tools.filter((t) => declared.has(t.name)));
   if (alreadyDeclared.length > 0) {
     throw new ApiError({
@@ -134,6 +148,12 @@ export async function approveTools(
       extensions: { tools: alreadyDeclared },
     });
   }
+  const withheld = namesOf(tools.filter((t) => hidden.has(t.name)));
+  if (withheld.length > 0) {
+    throw invalidRequest(
+      `The platform withholds ${withheld.join(", ")} from every space: a hidden tool cannot be approved.`,
+    );
+  }
   const stale = namesOf(tools.filter((t) => !listed.has(`${t.name}\u0000${t.fingerprint}`)));
   if (stale.length > 0) {
     throw conflict(
@@ -143,16 +163,27 @@ export async function approveTools(
     );
   }
   const distinct = [...new Map(tools.map((t) => [`${t.name}\u0000${t.fingerprint}`, t])).values()];
-  const inserted = await db
+  const definitions = distinct.map(
+    (t) => listed.get(`${t.name}\u0000${t.fingerprint}`)!.definition,
+  );
+  const unreadable = namesOf(distinct.filter((_, i) => definitions[i] === null));
+  if (unreadable.length > 0) {
+    throw conflict(
+      "tool_definition_unavailable",
+      `The definition of ${unreadable.join(", ")} was too large to keep: it cannot be reviewed, so it cannot be approved.`,
+      { tools: unreadable },
+    );
+  }
+  return db
     .insert(spaceIntegrationToolApprovals)
     .values(
-      distinct.map(({ name, fingerprint }) => ({
+      distinct.map(({ name, fingerprint }, i) => ({
         spaceId: target.scope.spaceId,
         orgId: target.scope.orgId,
         packageId: target.packageId,
         toolName: name,
         fingerprint,
-        definition: listed.get(`${name}\u0000${fingerprint}`)!.definition,
+        definition: definitions[i]!,
         approvedBy,
       })),
     )
@@ -161,16 +192,15 @@ export async function approveTools(
       toolName: spaceIntegrationToolApprovals.toolName,
       fingerprint: spaceIntegrationToolApprovals.fingerprint,
     });
-  return inserted;
 }
 
-/** Withdraws every approval of the tool in the space; answers whether there was any. */
+/** Withdraws every approval of the tool in the space; answers the rows withdrawn. */
 export async function revokeToolApproval(
   scope: SpaceScope,
   packageId: string,
   toolName: string,
-): Promise<boolean> {
-  const deleted = await db
+): Promise<{ toolName: string; fingerprint: string }[]> {
+  return db
     .delete(spaceIntegrationToolApprovals)
     .where(
       and(
@@ -179,8 +209,10 @@ export async function revokeToolApproval(
         eq(spaceIntegrationToolApprovals.toolName, toolName),
       ),
     )
-    .returning({ id: spaceIntegrationToolApprovals.id });
-  return deleted.length > 0;
+    .returning({
+      toolName: spaceIntegrationToolApprovals.toolName,
+      fingerprint: spaceIntegrationToolApprovals.fingerprint,
+    });
 }
 
 /** Blocks tools in the space, declared or not; answers the names newly blocked. */
@@ -230,33 +262,22 @@ export async function unblockTool(
  * usable: what an export carries out of the space without the approval that backs it.
  */
 export async function selectedApprovedTools(
-  target: Omit<ToolPolicyTarget, "packageId">,
+  scope: SpaceScope,
   agentManifest: Record<string, unknown>,
 ): Promise<string[]> {
-  const { scope } = target;
   const selections = parseManifestIntegrations(agentManifest).filter(
     (entry) => Array.isArray(entry.tools) && entry.tools.length > 0,
   );
   const perIntegration = await Promise.all(
     selections.map(async (entry) => {
       const read = await readIntegrationManifestForConnect(scope, entry.id);
-      if (!read.ok) return [];
-      const connections = await listIntegrationConnections(
-        scope,
-        entry.id,
-        target.caller,
-        target.orgRole,
-      );
-      const { catalog } = await loadEffectiveToolCatalog({
-        orgId: scope.orgId,
-        spaceId: scope.spaceId,
-        packageId: entry.id,
-        manifest: read.manifest,
-        connectionIds: toolSnapshotConnectionIds(read.manifest, connections),
-      });
-      const approved = new Set(catalog.filter((e) => e.origin === "approved").map((e) => e.name));
+      // An open catalog needs no approval; a declared or hidden tool never stands on one.
+      if (!read.ok || allowsUndeclaredTools(read.manifest)) return [];
+      const { declared, hidden } = declaredAndHidden(read.manifest);
+      const policy = await loadToolSpacePolicy(scope.spaceId, entry.id);
+      const approved = new Set(policy.approvals.map((a) => a.tool_name));
       return (entry.tools as string[])
-        .filter((tool) => approved.has(tool))
+        .filter((tool) => approved.has(tool) && !declared.has(tool) && !hidden.has(tool))
         .map((tool) => `${entry.id}:${tool}`);
     }),
   );

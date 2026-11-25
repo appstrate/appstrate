@@ -51,9 +51,7 @@ export const integrationToolSnapshots = pgTable(
     packageId: text("package_id")
       .notNull()
       .references(() => packages.id, { onDelete: "cascade" }),
-    connectionId: uuid("connection_id").references(() => integrationConnections.id, {
-      onDelete: "cascade",
-    }),
+    connectionId: uuid("connection_id"),
     listedAt: timestamp("listed_at", { withTimezone: true }).defaultNow().notNull(),
     truncated: boolean("truncated").notNull().default(false),
     tools: jsonb("tools").$type<ToolSnapshotEntry[]>().notNull().default([]),
@@ -65,6 +63,13 @@ export const integrationToolSnapshots = pgTable(
       table.packageId,
       sql`coalesce(${table.connectionId}::text, '')`,
     ),
+    // Composite so a snapshot can only point at a connection of its own organization; MATCH SIMPLE
+    // leaves the unauthenticated row (NULL connection) unconstrained.
+    foreignKey({
+      name: "integration_tool_snapshots_connection_org_fk",
+      columns: [table.connectionId, table.orgId],
+      foreignColumns: [integrationConnections.id, integrationConnections.orgId],
+    }).onDelete("cascade"),
     // FK cascade on connection delete.
     index("idx_integration_tool_snapshots_connection")
       .on(table.connectionId)
@@ -87,7 +92,7 @@ export const spaceIntegrationToolApprovals = pgTable(
       .references(() => packages.id, { onDelete: "cascade" }),
     toolName: text("tool_name").notNull(),
     fingerprint: text("fingerprint").notNull(),
-    definition: jsonb("definition").$type<ToolDefinition>(),
+    definition: jsonb("definition").$type<ToolDefinition>().notNull(),
     approvedBy: text("approved_by").references(() => user.id, { onDelete: "set null" }),
     approvedAt: timestamp("approved_at", { withTimezone: true }).defaultNow().notNull(),
   },

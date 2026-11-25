@@ -46,6 +46,7 @@ import {
 } from "@appstrate/afps-runtime/resolvers";
 import { InvalidHeaderValueError } from "@appstrate/afps-shared/delivery-http";
 import type { HostResolver } from "@appstrate/core/ssrf";
+import type { ToolSpacePolicy } from "@appstrate/core/integration";
 import { isAllowedInternalIdpHost } from "@appstrate/connect";
 import type { Actor } from "../../lib/actor.ts";
 import { logger } from "../../lib/logger.ts";
@@ -91,6 +92,8 @@ type ProxyCallInput = {
   connectionId?: string;
   /** How the caller names `connectionId`; the header when omitted. */
   connectionNaming?: ConnectionNaming;
+  /** The space's tool policy, for the `api_call` door: a blocked `api_call` is refused. */
+  toolPolicy?: ToolSpacePolicy;
 
   /** Scoped integration package name (e.g. `@afps/gmail`). */
   integrationId: string;
@@ -236,6 +239,7 @@ export async function proxyCall(input: ProxyCallInput): Promise<ProxyCallResult>
     actor: input.actor,
     ...(input.connectionId ? { connectionId: input.connectionId } : {}),
     ...(input.connectionNaming ? { connectionNaming: input.connectionNaming } : {}),
+    ...(input.toolPolicy ? { toolPolicy: input.toolPolicy } : {}),
     ...(input.run
       ? { run: input.run }
       : { reach: input.reach, ...(input.version ? { version: input.version } : {}) }),

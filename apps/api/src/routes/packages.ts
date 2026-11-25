@@ -257,7 +257,15 @@ async function validateManifestForRoute(
   expectedType: PackageType,
   c: Context<AppEnv>,
   direction: "author" | "stored",
-  opts: { requireCallableTools?: boolean; previous?: Record<string, unknown> } = {},
+  opts: {
+    requireCallableTools?: boolean;
+    previous?: Record<string, unknown>;
+    /**
+     * The space whose approved tools the selection is judged against: an existing package's home,
+     * the space that governs its edits. Absent (a new package), the request's own.
+     */
+    homeSpaceId?: string | null;
+  } = {},
 ): Promise<Record<string, unknown> & { name: string }> {
   const result = validateManifest(
     manifest,
@@ -291,7 +299,7 @@ async function validateManifestForRoute(
   await assertAgentIntegrationScopesValid(
     validated,
     c.get("orgId"),
-    c.get("spaceId"),
+    opts.homeSpaceId ?? c.get("spaceId"),
     opts.requireCallableTools,
   );
   return validated;
@@ -961,7 +969,7 @@ function makeUpdateHandler(rcfg: PackageRouteConfig) {
       rcfg.cfg.type,
       c,
       authoredManifest ? "author" : "stored",
-      { previous: asRecord(existing.manifest) },
+      { previous: asRecord(existing.manifest), homeSpaceId: existing.homeSpaceId },
     );
     const manifestText = JSON.stringify(validatedManifest, null, 2);
 
@@ -1187,7 +1195,7 @@ function makeCreateVersionHandler(rcfg: PackageRouteConfig) {
       throw forbidden(`${rcfg.cfg.labelSingular} '${itemId}' is a system package`);
     }
 
-    await loadOrgItemOr404(rcfg, orgId, itemId);
+    const existing = await loadOrgItemOr404(rcfg, orgId, itemId);
 
     // Parse optional version override from request body. The body itself is
     // optional (OpenAPI `requestBody.required: false` — the SPA omits it
@@ -1212,6 +1220,7 @@ function makeCreateVersionHandler(rcfg: PackageRouteConfig) {
       validateManifest: (manifest, type) =>
         validateManifestForRoute(manifest, type, c, "stored", {
           requireCallableTools: true,
+          homeSpaceId: existing.homeSpaceId,
         }),
     });
 
@@ -2440,7 +2449,7 @@ export function createPackagesRouter() {
     await assertAgentIntegrationScopesValid(
       manifest as Record<string, unknown>,
       orgId,
-      c.get("spaceId"),
+      existing?.homeSpaceId ?? c.get("spaceId"),
       true,
     );
     if (existing) {

@@ -100,7 +100,9 @@ describe("integration tool snapshots", () => {
     expect(stored.at(-1)!.fingerprint).toBeString();
   });
 
-  it("merges two concurrent listings of one target into one row", async () => {
+  // PGlite serialises its queries: this proves the merge and the single row, not the `FOR UPDATE`
+  // that orders two listings on a real PostgreSQL.
+  it("merges two truncated listings issued together into one row", async () => {
     await Promise.all(
       [["a"], ["b"]].map((names) =>
         recordToolSnapshot({ ...target, tools: names.map((n) => tool(n!)), truncated: true }),

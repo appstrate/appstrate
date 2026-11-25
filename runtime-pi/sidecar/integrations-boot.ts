@@ -90,6 +90,7 @@ import {
   createIntegrationCredentialsSource,
   fetchInitialIntegrationCredentials,
   capObservedTools,
+  capObservedUnavailable,
   isCredentialRejectedResult,
   postIntegrationCredentialsRefresh,
   postIntegrationToolsObserved,
@@ -1397,7 +1398,12 @@ export function pushUnavailableToolBreadcrumb(
   breadcrumbs: IntegrationBootBreadcrumb[],
 ): void {
   if (unavailable.length === 0) return;
-  const requested = (spec.toolAllowlist ?? []).filter((t) => !isSyntheticApiToolName(t)).length;
+  // The selection, plus any gated tool outside it: the denominator never falls below the shortfall.
+  const requested = new Set(
+    [...(spec.toolAllowlist ?? []), ...unavailable.map(({ name }) => name)].filter(
+      (name) => !isSyntheticApiToolName(name),
+    ),
+  ).size;
   // Server-controlled names reach the run log: only plain tokens are quoted.
   const quotable = unavailable.filter(({ name }) => isListedToolName(name));
   const named = quotable
@@ -1407,14 +1413,14 @@ export function pushUnavailableToolBreadcrumb(
   const rest = quotable.length - UNAVAILABLE_TOOLS_NAMED_MAX;
   breadcrumbs.push({
     message:
-      `${specTag(spec)}: ${unavailable.length}/${Math.max(requested, unavailable.length)} ` +
-      `selected tool(s) unavailable: ${named}${rest > 0 ? ` +${rest} more` : ""}`,
+      `${specTag(spec)}: ${unavailable.length}/${requested} selected tool(s) unavailable` +
+      (named ? `: ${named}${rest > 0 ? ` +${rest} more` : ""}` : ""),
     level: "warn",
     data: {
       integrationId: spec.integrationId,
       ...connectionLabelOf(spec),
       requested,
-      surviving: Math.max(requested - unavailable.length, 0),
+      surviving: requested - unavailable.length,
       missing: unavailable.length,
     },
   });
@@ -1449,7 +1455,7 @@ function reportToolsObserved(
   postIntegrationToolsObserved(
     spec.integrationId,
     spec.connection?.id,
-    { tools, truncated, unavailable },
+    { tools, truncated, unavailable: capObservedUnavailable(unavailable) },
     opts,
   ).then(
     (res) => {
@@ -2050,7 +2056,7 @@ export async function bootIntegrations(
         assertIntegrationExposesTools(spec, added + apiCallAdded);
         spawned.push({
           integrationId: spec.integrationId,
-          namespace: spec.namespace,
+          namespace: allocatedNs,
           ...connectionLabelOf(spec),
           toolCount: added + apiCallAdded,
           ...(unavailableTools.length > 0 ? { unavailableTools } : {}),
@@ -2107,6 +2113,8 @@ export async function bootIntegrations(
           ...(nativeHiddenTools ? { hiddenTools: nativeHiddenTools } : {}),
         },
       );
+      // Local integrations' unavailable tools are reported in the boot report only, never POSTed:
+      // local sources are out of scope of the tool snapshots.
       const unavailableTools = selectedUnavailableTools(unavailable);
       pushUnavailableToolBreadcrumb(spec, unavailableTools, breadcrumbs);
 
@@ -2131,7 +2139,7 @@ export async function bootIntegrations(
       assertIntegrationExposesTools(spec, added + apiCallAdded);
       spawned.push({
         integrationId: spec.integrationId,
-        namespace: spec.namespace,
+        namespace: allocatedNs,
         ...connectionLabelOf(spec),
         toolCount: added + apiCallAdded,
         ...(unavailableTools.length > 0 ? { unavailableTools } : {}),

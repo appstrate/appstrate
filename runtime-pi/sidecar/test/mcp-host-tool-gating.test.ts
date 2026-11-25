@@ -12,6 +12,7 @@ import {
   wrapClient,
   type AppstrateToolDefinition,
 } from "@appstrate/mcp-transport";
+import { fnv1a64Hex } from "@appstrate/afps-shared/mcp-naming";
 import { McpHost } from "../mcp-host.ts";
 
 const CONN = { label: "work", accountId: null };
@@ -135,5 +136,63 @@ describe("McpHost — unavailable report", () => {
     } finally {
       await close();
     }
+  });
+
+  it("reports every allowlisted name as not_listed when the server does not advertise tools", async () => {
+    const pair = await createInProcessPair([tool("a", "a")]);
+    const client = wrapClient(pair.client, { close: () => Promise.resolve() });
+    const noTools = new Proxy(client, {
+      get(target, key) {
+        if (key === "getServerCapabilities") return () => ({});
+        const value = Reflect.get(target, key, target);
+        return typeof value === "function" ? value.bind(target) : value;
+      },
+    });
+    try {
+      const registration = await new McpHost().register({
+        integrationId: "@scope/gh",
+        namespace: "gh",
+        connection: CONN,
+        client: noTools,
+        allowedTools: ["a", "b"],
+      });
+      expect(registration.unavailable).toEqual([
+        { name: "a", reason: "not_listed" },
+        { name: "b", reason: "not_listed" },
+      ]);
+      expect(registration.listed).toEqual([]);
+    } finally {
+      await pair.close();
+    }
+  });
+
+  describe("name_collision", () => {
+    // `a.b` normalises to `a_b`; the three names below hold its plain name and both re-hashed ones.
+    const squatters = [
+      "a_b",
+      `a_b_${fnv1a64Hex("a.b").slice(0, 8)}`,
+      `a_b_${fnv1a64Hex("a.b\0").slice(0, 8)}`,
+    ];
+    const listing = () => [...squatters, "a.b"].map((name) => tool(name, name));
+
+    it("reports a selected tool left without a free name", async () => {
+      const { registration, close } = await register(listing(), {
+        allowedTools: [...squatters, "a.b"],
+      });
+      try {
+        expect(registration.unavailable).toEqual([{ name: "a.b", reason: "name_collision" }]);
+      } finally {
+        await close();
+      }
+    });
+
+    it("reports nothing when the selection is open: nobody selected the tool", async () => {
+      const { registration, close } = await register(listing(), {});
+      try {
+        expect(registration.unavailable).toEqual([]);
+      } finally {
+        await close();
+      }
+    });
   });
 });

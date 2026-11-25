@@ -194,11 +194,13 @@ describe("shapeApiCallResponse — no toFile (status surfacing)", () => {
     const workspace = ws();
     const asked = {
       content: [],
-      _meta: { [UPSTREAM_META_KEY]: { status: 403, headers: {}, required_scopes: ["a", "b"] } },
+      _meta: {
+        [UPSTREAM_META_KEY]: { status: 403, headers: {}, required_scopes: ["a", "b]=x,c"] },
+      },
     };
     const out = await shapeApiCallResponse(asked, baseOpts(workspace));
     expect((out.content[0] as { text: string }).text).toBe(
-      "[api_call status=403 required_scopes=a,b]",
+      '[api_call status=403 required_scopes=["a","b]=x,c"]]',
     );
     const plain = await shapeApiCallResponse(withStatus([], 403), baseOpts(workspace));
     expect((plain.content[0] as { text: string }).text).toBe("[api_call status=403]");
