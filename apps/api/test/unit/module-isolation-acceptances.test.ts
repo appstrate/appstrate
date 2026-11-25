@@ -24,6 +24,7 @@ import { describe, it, expect } from "bun:test";
 import {
   importSpecifiers,
   isScannedSource,
+  reviewCommercialDependencies,
   reviewCrossModuleImports,
   reviewPlatformModuleImports,
   type AcceptedCrossModuleImport,
@@ -146,6 +147,28 @@ describe("reviewPlatformModuleImports", () => {
           spec: "../../modules-registry/src/index.ts",
           resolved: "packages/modules-registry/src/index.ts",
         },
+      ]),
+    ).toEqual([]);
+  });
+});
+
+describe("reviewCommercialDependencies", () => {
+  it("reports the package specifier, a subpath of it, and a relative path into ee/", () => {
+    const problems = reviewCommercialDependencies([
+      { file: "apps/api/test/x.test.ts", spec: "@appstrate/ee" },
+      { file: "apps/web/src/x.ts", spec: "@appstrate/ee/src/sso/policy.ts" },
+      { file: "scripts/x.ts", spec: "../ee/src/index.ts", resolved: "ee/src/index.ts" },
+    ]);
+    expect(problems).toHaveLength(3);
+    expect(problems[0]).toContain("reaches into `ee/`");
+  });
+
+  it("passes imports that only look alike", () => {
+    expect(
+      reviewCommercialDependencies([
+        { file: "apps/api/src/x.ts", spec: "@appstrate/eex" },
+        { file: "apps/web/src/x.ts", spec: "./ee/x.ts", resolved: "apps/web/src/ee/x.ts" },
+        { file: "apps/api/src/x.ts", spec: "@appstrate/core/module" },
       ]),
     ).toEqual([]);
   });

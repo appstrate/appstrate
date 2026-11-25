@@ -724,7 +724,12 @@ describe("module-loader", () => {
         mockCtx(),
       );
 
-      await callAllHooks("beforeSignup", "user@example.com", { headers: null });
+      await callAllHooks("beforeSignup", "user@example.com", {
+        headers: null,
+        path: null,
+        query: null,
+        realm: async () => "platform",
+      });
       expect(calls).toEqual(["a", "b"]);
     });
   });
