@@ -79,7 +79,8 @@ const eeModule: AppstrateModule = {
     ];
   },
 
-  features: { enterpriseSso: true },
+  // `emergencySignIn`: the hosted OIDC login page offers the owners' emergency password sign-in.
+  features: { enterpriseSso: true, emergencySignIn: true },
 
   // Org-level and session-bound: never on an API key nor an end-user token.
   // Admins read; owners change (whoever sets the identity provider holds every

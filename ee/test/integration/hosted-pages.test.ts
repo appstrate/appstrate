@@ -94,6 +94,15 @@ describe("hosted login page", () => {
       };
     }
 
+    it("is offered on platform clients only, never on a space-level (end-user) client", async () => {
+      const offered = async (id: string) =>
+        (
+          await (await app.request(`/api/oauth/login?client_id=${encodeURIComponent(id)}`)).text()
+        ).includes("Connexion d'urgence");
+      expect(await offered(instanceClientId)).toBe(true);
+      expect(await offered(clientId)).toBe(false);
+    });
+
     it("lets an owner of the enforcing organization in", async () => {
       const owner = await createTestUser({ email: `owner@${DOMAIN}`, emailVerified: true });
       await addOrgMember(ctx.orgId, owner.id, "owner");

@@ -65,8 +65,8 @@ interface LoginPageProps {
    */
   refreshUrl?: string;
   /**
-   * Offer the discreet emergency password sign-in (an enterprise sign-in
-   * module is loaded): owners of an organization that requires Microsoft keep
+   * Offer the discreet emergency password sign-in (a module contributes the
+   * `emergencySignIn` feature): owners of an organization that requires Microsoft keep
    * it for the day Microsoft is unavailable. It submits the same form with
    * `emergency=1`; anyone else gets the ordinary wrong-password answer.
    */

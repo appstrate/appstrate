@@ -262,7 +262,11 @@ interface PageContext {
     socialGoogle: boolean;
     socialGithub: boolean;
     socialMicrosoft: boolean;
-    /** An organization sign-in policy module is loaded: offer its emergency sign-in. */
+    /**
+     * A loaded module contributes the `emergencySignIn` app-config feature (an
+     * organization sign-in policy): offer its emergency sign-in. Platform
+     * accounts only, so never on a space-level (end-user) client.
+     */
     emergencySignIn: boolean;
   };
   smtp: ResolvedSmtpConfig | null;
@@ -388,7 +392,8 @@ async function loadPageContext(
         socialGoogle,
         socialGithub,
         socialMicrosoft,
-        emergencySignIn: getAppConfig().features.enterpriseSso === true,
+        emergencySignIn:
+          record.level !== "space" && getAppConfig().features.emergencySignIn === true,
       },
       smtp,
       socialProviders: { google: socialGoogle, github: socialGithub, microsoft: socialMicrosoft },
@@ -457,31 +462,40 @@ function allowSignupForClient(client: { allowSignup: boolean }): boolean {
 }
 
 /**
- * Map an `?error=<code>` from the Better Auth social callback redirect (or
- * from our own error-callback URL) to a user-facing French banner on the
- * login page. Codes we don't recognize fall back to a generic message so the
- * user isn't left with a silent white screen.
+ * Refusals an organization sign-in policy module raises (by its Better Auth
+ * error `code`), as the sentence a hosted page shows: the address belongs to a
+ * domain that requires Microsoft, or the Microsoft account comes from another
+ * tenant than the one the organization bound.
  */
-/**
- * Refusals from an organization's sign-in policy (the commercial enterprise
- * sign-in module): the address belongs to a domain that requires Microsoft, or
- * the Microsoft account comes from another tenant than the organization's.
- */
-const SSO_REFUSAL_MESSAGES: Readonly<Record<string, string>> = {
+const SIGN_IN_POLICY_REFUSALS: Readonly<Record<string, string>> = {
   sso_required:
     "Votre organisation exige la connexion avec Microsoft pour cette adresse. Utilisez « Continuer avec Microsoft ».",
   sso_tenant_mismatch:
     "Ce compte Microsoft n'est pas celui de cette adresse dans l'organisation qui la détient. Connectez-vous avec votre propre compte professionnel.",
 };
 
-/** The policy refusal a Better Auth error body carries, if any. */
-function ssoRefusalIn(bodyText: string): string | null {
-  const code = Object.keys(SSO_REFUSAL_MESSAGES).find((c) => bodyText.includes(`"${c}"`));
-  return code ? SSO_REFUSAL_MESSAGES[code]! : null;
+/** The sentence of the sign-in policy refusal a Better Auth error `code` names, if it names one. */
+function policyRefusalOf(code: unknown): string | null {
+  return typeof code === "string" ? (SIGN_IN_POLICY_REFUSALS[code] ?? null) : null;
 }
 
+/** The `code` of a Better Auth error response body, if it carries one. */
+function errorCodeOf(bodyText: string): unknown {
+  try {
+    return (JSON.parse(bodyText) as { code?: unknown } | null)?.code;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * Map an `?error=<code>` from the Better Auth social callback redirect (or
+ * from our own error-callback URL) to a user-facing French banner on the
+ * login page. Codes we don't recognize fall back to a generic message so the
+ * user isn't left with a silent white screen.
+ */
 function mapLoginErrorCode(code: string): string {
-  const refusal = SSO_REFUSAL_MESSAGES[code];
+  const refusal = policyRefusalOf(code);
   if (refusal) return refusal;
   switch (code) {
     case "signup_disabled":
@@ -1226,7 +1240,7 @@ export function createOidcRouter() {
         logger.error("oidc: signInEmail infra error", { error: msg, email });
         return renderError("Erreur serveur temporaire, veuillez réessayer.", 500, email);
       }
-      const refusal = ssoRefusalIn(JSON.stringify((err as { body?: unknown }).body ?? null));
+      const refusal = policyRefusalOf((err as { body?: { code?: unknown } } | null)?.body?.code);
       if (refusal) return renderError(refusal, 403, email);
       logger.warn("oidc: signInEmail threw", { error: msg, email });
       return renderError("Email ou mot de passe incorrect.", 401, email);
@@ -1253,7 +1267,7 @@ export function createOidcRouter() {
         });
         return c.html(sentPage.value);
       }
-      const refusal = ssoRefusalIn(bodyText);
+      const refusal = policyRefusalOf(errorCodeOf(bodyText));
       if (refusal) return renderError(refusal, 403, email);
       return renderError("Email ou mot de passe incorrect.", 401, email);
     }
@@ -1554,7 +1568,7 @@ export function createOidcRouter() {
       )) as Response;
     } catch (err) {
       const msg = getErrorMessage(err);
-      const refusal = ssoRefusalIn(JSON.stringify((err as { body?: unknown }).body ?? null));
+      const refusal = policyRefusalOf((err as { body?: { code?: unknown } } | null)?.body?.code);
       if (refusal) return renderRegError(refusal, 403, email, name);
       logger.error("oidc: signUpEmail failed", { error: msg, email });
       if (msg.includes("already exists") || msg.includes("duplicate")) {
@@ -1575,7 +1589,7 @@ export function createOidcRouter() {
         body: bodyText.slice(0, 400),
         email,
       });
-      const refusal = ssoRefusalIn(bodyText);
+      const refusal = policyRefusalOf(errorCodeOf(bodyText));
       if (refusal) return renderRegError(refusal, 403, email, name);
       if (authResponse.status === 422 || bodyText.includes("already exists")) {
         return renderRegError(
