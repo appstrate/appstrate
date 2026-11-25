@@ -470,7 +470,7 @@ export {
 export { exposeTool, toolExclusion, withToolIntegration } from "./tool-exposure.ts";
 
 // Identity of a listed tool definition (what an approval binds to) and the approval check.
-export { definitionApproved, toolDefinitionFingerprint } from "./tool-fingerprint.ts";
+export { toolDefinitionFingerprint } from "./tool-fingerprint.ts";
 
 // The `fetch` an MCP client transport is given, built from a `(url, init)` sender.
 export { boundResourceResponse } from "./resource-response.ts";

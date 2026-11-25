@@ -1423,7 +1423,7 @@ export function pushUnavailableToolBreadcrumb(
       integrationId: spec.integrationId,
       ...connectionLabelOf(spec),
       requested,
-      surviving: requested - unavailable.length,
+      surviving: Math.max(0, requested - unavailable.length),
       missing: unavailable.length,
     },
   });
@@ -1894,14 +1894,14 @@ export async function bootIntegrations(
     connection: BoundConnection | undefined,
     source: IntegrationCredentialsSource | null,
     intoNamespace?: string,
-  ): Promise<number> => {
+  ): Promise<{ count: number; namespace: string }> => {
     const apiCalls = spec.apiCalls ?? [];
-    if (apiCalls.length === 0) return 0;
+    if (apiCalls.length === 0) return { count: 0, namespace: intoNamespace ?? spec.namespace };
     if (!apiCallDeps) {
       logger.warn("integration declares api_call but sidecar has no proxy deps; skipping", {
         integrationId: spec.integrationId,
       });
-      return 0;
+      return { count: 0, namespace: intoNamespace ?? spec.namespace };
     }
     if (!source || !connection) {
       throw new Error(
@@ -1995,7 +1995,7 @@ export async function bootIntegrations(
         toolCount: count,
       });
     }
-    return total;
+    return { count: total, namespace: sharedNamespace ?? spec.namespace };
   };
 
   const prepared = await mapWithConcurrency(specs, INTEGRATION_BOOT_CONCURRENCY, prepareConnection);
@@ -2013,7 +2013,11 @@ export async function bootIntegrations(
       const nativeHiddenTools = hiddenToolsForNativeUpstream(spec);
 
       if (upstream.kind === "serverless") {
-        const apiCallToolCount = await attachApiCall(spec, connection, source);
+        const { count: apiCallToolCount, namespace: apiCallNamespace } = await attachApiCall(
+          spec,
+          connection,
+          source,
+        );
         const ms = elapsedMs();
         // Contract gate FIRST, breadcrumb second — otherwise a single failure
         // prints the same diagnosis twice, at `warn` here and at `error` from
@@ -2022,7 +2026,7 @@ export async function bootIntegrations(
         pushServerlessReadyBreadcrumb(spec, apiCallToolCount, ms, breadcrumbs);
         spawned.push({
           integrationId: spec.integrationId,
-          namespace: spec.namespace,
+          namespace: apiCallNamespace,
           ...connectionLabelOf(spec),
           toolCount: apiCallToolCount,
         });
@@ -2054,11 +2058,11 @@ export async function bootIntegrations(
         const added = host.routeCount() - sizeBefore;
         const unavailableTools = selectedUnavailableTools(registration.unavailable);
         pushUnavailableToolBreadcrumb(spec, unavailableTools, breadcrumbs);
-        // The platform's own endpoint serves a catalog it already knows: nothing to snapshot.
-        if (!spec.manifest.server?.platformEndpoint)
-          reportToolsObserved(spec, registration.listed, unavailableTools, bundleFetchOpts);
+        // Always reported, the platform's own endpoint included: the unavailable tools are the
+        // only channel to the run's degraded marking (the platform records no snapshot for it).
+        reportToolsObserved(spec, registration.listed, unavailableTools, bundleFetchOpts);
         // Attach the in-process api_call tool alongside the remote MCP's tools.
-        const apiCallAdded = await attachApiCall(spec, connection, source, allocatedNs);
+        const { count: apiCallAdded } = await attachApiCall(spec, connection, source, allocatedNs);
         assertIntegrationExposesTools(spec, added + apiCallAdded);
         spawned.push({
           integrationId: spec.integrationId,
@@ -2141,7 +2145,7 @@ export async function bootIntegrations(
 
       // Attach the in-process api_call tool alongside the spawned server's
       // native tools, under the same (allocated) namespace.
-      const apiCallAdded = await attachApiCall(spec, connection, source, allocatedNs);
+      const { count: apiCallAdded } = await attachApiCall(spec, connection, source, allocatedNs);
 
       assertIntegrationExposesTools(spec, added + apiCallAdded);
       spawned.push({

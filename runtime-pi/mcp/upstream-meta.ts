@@ -21,8 +21,7 @@
  * this is the second layer behind the sidecar's own filter.
  */
 
-import { scopeTokenSchema } from "@appstrate/core/integration";
-import { MAX_REQUIRED_SCOPE_LENGTH } from "@appstrate/core/www-authenticate";
+import { sanitiseRequiredScopes } from "@appstrate/core/www-authenticate";
 import {
   API_CALL_ERROR_META_KEY,
   UPSTREAM_HEADER_ALLOWLIST,
@@ -68,16 +67,7 @@ export function readUpstreamMeta(result: CallToolResult): UpstreamMeta {
   // Optional and advisory: rendered into the model's status line, so re-validated here and
   // never a protocol violation.
   const scopes = (raw as { required_scopes?: unknown }).required_scopes;
-  const requiredScopes = Array.isArray(scopes)
-    ? scopes
-        .filter(
-          (s) =>
-            typeof s === "string" &&
-            s.length <= MAX_REQUIRED_SCOPE_LENGTH &&
-            scopeTokenSchema.safeParse(s).success,
-        )
-        .slice(0, 20)
-    : [];
+  const requiredScopes = sanitiseRequiredScopes(Array.isArray(scopes) ? scopes : undefined);
   return {
     status: obj.status,
     headers,

@@ -47,6 +47,19 @@ describe("unavailableToolsNote", () => {
     );
   });
 
+  it("quotes the upstream name of a name collision, not the exposed sibling's allocated name", () => {
+    expect(
+      unavailableToolsNote([
+        {
+          integrationId: "@scope/gh",
+          namespace: "gh",
+          toolCount: 1,
+          unavailableTools: [{ name: "a.b", reason: "name_collision" }],
+        },
+      ]),
+    ).toBe("\n\n<unavailable_tools>\n@scope/gh: a.b (name_collision)\n</unavailable_tools>");
+  });
+
   it("drops names and integration ids that are not plain tokens", () => {
     expect(
       unavailableToolsNote([

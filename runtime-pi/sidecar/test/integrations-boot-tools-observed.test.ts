@@ -36,7 +36,7 @@ const echo: AppstrateToolDefinition = {
   handler: async () => ({ content: [{ type: "text", text: "ok" }] }),
 };
 
-async function bootWith(observed: () => Response | Promise<Response>) {
+async function bootWith(observed: () => Response | Promise<Response>, attempts: number) {
   const serve = handlerFetch(modernMcpHandler({ tools: [echo] }));
   const reports: unknown[] = [];
   globalThis.fetch = (async (input: Parameters<typeof fetch>[0], init?: RequestInit) => {
@@ -54,8 +54,12 @@ async function bootWith(observed: () => Response | Promise<Response>) {
       platformApiUrl: "http://platform.local",
       runToken: "run-token",
     });
-    // The report is not awaited by the boot: let it settle.
-    await new Promise((resolve) => setTimeout(resolve, 20));
+    // The report is not awaited by the boot: wait for its last attempt, retries included, so none
+    // outlives the stubbed fetch.
+    const deadline = Date.now() + 5_000;
+    while (reports.length < attempts && Date.now() < deadline) {
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    }
     return { result, reports };
   } finally {
     if (previous === undefined) delete process.env.INTEGRATION_RUNTIME_ADAPTER;
@@ -64,14 +68,15 @@ async function bootWith(observed: () => Response | Promise<Response>) {
 }
 
 describe("bootIntegrations — tools-observed report", () => {
-  for (const [label, answer] of [
-    ["rejects", () => Promise.reject(new Error("network down"))],
-    ["answers 400", () => new Response("{}", { status: 400 })],
+  for (const [label, answer, attempts] of [
+    // A network failure is retried twice; a 4xx is not.
+    ["rejects", () => Promise.reject(new Error("network down")), 3],
+    ["answers 400", () => new Response("{}", { status: 400 }), 1],
   ] as const) {
     it(`keeps the integration registered when the report ${label}`, async () => {
-      const { result, reports } = await bootWith(answer);
+      const { result, reports } = await bootWith(answer, attempts);
       try {
-        expect(reports).toHaveLength(1);
+        expect(reports).toHaveLength(attempts);
         expect(reports[0]).toMatchObject({
           truncated: false,
           unavailable: [{ name: "gone", reason: "not_listed" }],

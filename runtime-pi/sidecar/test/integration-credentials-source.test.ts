@@ -828,6 +828,54 @@ describe("postIntegrationToolsObserved", () => {
   });
 });
 
+describe("postIntegrationToolsObserved — resilience", () => {
+  const observed = { tools: [], truncated: false, unavailable: [] };
+  const opts = { platformApiUrl: "http://api", runToken: "tok", retryDelaysMs: [0, 0] };
+
+  it("retries a network error and a 5xx, then returns the answer", async () => {
+    const answers = [new Error("down"), new Response(null, { status: 503 }), 204] as const;
+    let calls = 0;
+    const fetchFn = (async (_url: string, init: RequestInit) => {
+      expect(init.signal).toBeInstanceOf(AbortSignal);
+      const answer = answers[calls++]!;
+      if (answer instanceof Error) throw answer;
+      return answer instanceof Response ? answer : new Response(null, { status: answer });
+    }) as unknown as typeof fetch;
+    const res = await postIntegrationToolsObserved("@scope/name", undefined, observed, {
+      ...opts,
+      fetchFn,
+    });
+    expect(res.status).toBe(204);
+    expect(calls).toBe(3);
+  });
+
+  it("does not retry a 4xx", async () => {
+    let calls = 0;
+    const fetchFn = (async () => {
+      calls++;
+      return new Response(null, { status: 400 });
+    }) as unknown as typeof fetch;
+    const res = await postIntegrationToolsObserved("@scope/name", undefined, observed, {
+      ...opts,
+      fetchFn,
+    });
+    expect(res.status).toBe(400);
+    expect(calls).toBe(1);
+  });
+
+  it("gives up after the bounded retries", async () => {
+    let calls = 0;
+    const fetchFn = (async () => {
+      calls++;
+      throw new Error("down");
+    }) as unknown as typeof fetch;
+    await expect(
+      postIntegrationToolsObserved("@scope/name", undefined, observed, { ...opts, fetchFn }),
+    ).rejects.toThrow("down");
+    expect(calls).toBe(3);
+  });
+});
+
 describe("capObservedTools", () => {
   const t = (name: string, pad = "") => ({ name, inputSchema: { type: "object" }, pad });
 

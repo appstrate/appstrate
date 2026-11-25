@@ -213,3 +213,44 @@ describe("McpHost — unavailable report", () => {
     });
   });
 });
+
+describe("McpHost — a name listed twice", () => {
+  it("judges it once, on its first occurrence, and reports it once", async () => {
+    const listed = [
+      { name: "dup", description: "first", inputSchema: { type: "object" } },
+      { name: "dup", description: "second", inputSchema: { type: "object" } },
+    ];
+    const client = {
+      getServerVersion: () => undefined,
+      getServerCapabilities: () => ({ tools: {} }),
+      getProtocol: () => undefined,
+      listTools: async () => ({ tools: listed }),
+      callTool: async () => ({ content: [] }),
+    } as unknown as Parameters<McpHost["register"]>[0]["client"];
+    const approve = (host: McpHost) =>
+      host.register({
+        integrationId: "@scope/gh",
+        namespace: "gh",
+        connection: CONN,
+        client,
+        allowedTools: ["dup", "dup", "gone", "gone"],
+        approvedToolFingerprints: { dup: [toolDefinitionFingerprint(listed[0] as never)] },
+      });
+    const host = new McpHost();
+    const registration = await approve(host);
+    expect(exposed(host)).toEqual(["gh__dup"]);
+    expect(registration.unavailable).toEqual([{ name: "gone", reason: "not_listed" }]);
+
+    // Approved only for the second definition: the first one decides, once.
+    const other = new McpHost();
+    const refused = await other.register({
+      integrationId: "@scope/gh",
+      namespace: "gh",
+      connection: CONN,
+      client,
+      approvedToolFingerprints: { dup: [toolDefinitionFingerprint(listed[1] as never)] },
+    });
+    expect(exposed(other)).toEqual([]);
+    expect(refused.unavailable).toEqual([{ name: "dup", reason: "definition_not_approved" }]);
+  });
+});

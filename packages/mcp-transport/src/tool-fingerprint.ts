@@ -23,13 +23,3 @@ export function toolDefinitionFingerprint(tool: Tool): string {
   );
   return new Bun.CryptoHasher("sha256").update(canonicalJsonStringify(payload)).digest("hex");
 }
-
-/** True when the tool needs no approval, or its live fingerprint is among the approved ones. */
-export function definitionApproved(
-  name: string,
-  fingerprint: string,
-  approved: Readonly<Record<string, readonly string[]>> | undefined,
-): boolean {
-  const fingerprints = approved?.[name];
-  return fingerprints === undefined || fingerprints.includes(fingerprint);
-}

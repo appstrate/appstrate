@@ -40,7 +40,6 @@ import {
 } from "@appstrate/core/naming";
 import type { IntegrationSpawnSpec, UnavailableToolReason } from "@appstrate/core/sidecar-types";
 import {
-  definitionApproved,
   exposeTool,
   notifyDetached,
   sanitiseTextField,
@@ -338,12 +337,9 @@ export class McpHost {
   }
 
   /**
-   * Register an upstream MCP server. Snapshots its `tools/list` once;
-   * subsequent server-side `notifications/tools/list_changed` are NOT
-   * tracked yet (third-party MCP servers rarely emit them in practice).
-   */
-  /**
-   * Ingest an upstream MCP server. The registration carries the ALLOCATED namespace — the
+   * Ingest an upstream MCP server. Its `tools/list` is snapshotted once, here: server-side
+   * `notifications/tools/list_changed` are not tracked, so the boot listing is the pinned
+   * definition for the run. The registration carries the ALLOCATED namespace — the
    * normalised slug, possibly disambiguated with a `_2`/`_3`/… suffix on collision — and the tools
    * the agent selected that the upstream does not expose, with the reason.
    */
@@ -445,21 +441,22 @@ export class McpHost {
     const hiddenSet = upstream.hiddenTools ? new Set<string>(upstream.hiddenTools) : null;
     const blockedSet = upstream.blockedTools ? new Set<string>(upstream.blockedTools) : null;
     const listedNames = new Set(tools.map((tool) => tool.name));
-    const unavailable: UnavailableTool[] = (upstream.allowedTools ?? [])
+    const unavailable: UnavailableTool[] = [...new Set(upstream.allowedTools ?? [])]
       .filter((name) => !listedNames.has(name))
       .map((name) => ({ name, reason: "not_listed" as const }));
+    // A name listed twice is judged once, on its first occurrence: a later duplicate must not
+    // add a contradictory effect (admitted and unavailable, or a second route) for one name.
+    const seenNames = new Set<string>();
     const admitted = tools.filter((tool) => {
+      if (seenNames.has(tool.name)) return false;
+      seenNames.add(tool.name);
       const exclusion =
         toolExclusion(tool.name, allowlist, hiddenSet) ??
         (blockedSet?.has(tool.name) ? "blocked_in_space" : null);
       if (exclusion === null) {
-        if (
-          definitionApproved(
-            tool.name,
-            toolDefinitionFingerprint(tool),
-            upstream.approvedToolFingerprints,
-          )
-        ) {
+        // Only a tool with an approved entry is fingerprinted (declared and open catalogs have none).
+        const approved = upstream.approvedToolFingerprints?.[tool.name];
+        if (approved === undefined || approved.includes(toolDefinitionFingerprint(tool))) {
           return true;
         }
         this.options.onLog?.({
@@ -639,7 +636,12 @@ export class McpHost {
       if (!siblings.has(key)) siblings.set(key, finalName);
     }
 
-    return { namespace: normalisedNs, unavailable, listed: tools };
+    const reported = new Set<string>();
+    return {
+      namespace: normalisedNs,
+      unavailable: unavailable.filter(({ name }) => !reported.has(name) && reported.add(name)),
+      listed: tools,
+    };
   }
 
   private routeFor(upstream: McpHostUpstream, originalName: string): ToolRoute {

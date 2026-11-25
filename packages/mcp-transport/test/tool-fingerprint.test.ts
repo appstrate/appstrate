@@ -2,7 +2,7 @@
 
 import { describe, it, expect } from "bun:test";
 import type { Tool } from "@modelcontextprotocol/sdk/types.js";
-import { definitionApproved, toolDefinitionFingerprint } from "../src/tool-fingerprint.ts";
+import { toolDefinitionFingerprint } from "../src/tool-fingerprint.ts";
 
 const base: Tool = {
   name: "search",
@@ -72,27 +72,5 @@ describe("toolDefinitionFingerprint", () => {
       inputSchema: { type: "object", enum: ["a", undefined], properties: { x: undefined } },
     } as unknown as Tool;
     expect(() => toolDefinitionFingerprint(odd)).not.toThrow();
-  });
-});
-
-describe("definitionApproved", () => {
-  it("approves any tool when there is no approval map", () => {
-    expect(definitionApproved("search", "aaa", undefined)).toBe(true);
-  });
-
-  it("approves a tool absent from the map", () => {
-    expect(definitionApproved("search", "aaa", { other: ["bbb"] })).toBe(true);
-  });
-
-  it("approves a tool whose fingerprint is among the approved ones", () => {
-    expect(definitionApproved("search", "bbb", { search: ["aaa", "bbb"] })).toBe(true);
-  });
-
-  it("refuses a tool whose fingerprint is not approved", () => {
-    expect(definitionApproved("search", "ccc", { search: ["aaa", "bbb"] })).toBe(false);
-  });
-
-  it("refuses a tool listed with no approved fingerprint", () => {
-    expect(definitionApproved("search", "aaa", { search: [] })).toBe(false);
   });
 });

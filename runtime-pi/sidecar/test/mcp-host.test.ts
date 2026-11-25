@@ -302,33 +302,16 @@ describe("McpHost — buildTools", () => {
     }
   });
 
-  it("drops, with a warning, a tool listed more times than the allocator can name", async () => {
+  it("exposes a tool listed several times once, on its first occurrence", async () => {
     const upstream = await makeUpstream(notionTool());
     const listed = (await upstream.client.listTools()).tools[0]!;
-    // One name listed four times: plain, hash, salted hash, then nothing left —
-    // the fourth is dropped and must not abort the others.
     const client = Object.assign(Object.create(upstream.client), {
       listTools: async () => ({ tools: [listed, listed, listed, listed] }),
     }) as typeof upstream.client;
     try {
-      const logs: { level: string; data: unknown }[] = [];
-      const host = new McpHost({ onLog: (e) => logs.push(e) });
+      const host = new McpHost();
       await host.register({ integrationId: "notion", namespace: "notion", client });
-      const names = host.buildTools().map((t) => t.descriptor.name);
-      expect(names).toHaveLength(3);
-      expect(names[0]).toBe("notion__search_pages");
-      expect(new Set(names).size).toBe(3);
-      expect(logs).toContainEqual(
-        expect.objectContaining({
-          level: "warn",
-          data: {
-            event: "tool_rejected",
-            reason: "name_collision",
-            namespace: "notion",
-            originalName: "search_pages",
-          },
-        }),
-      );
+      expect(host.buildTools().map((t) => t.descriptor.name)).toEqual(["notion__search_pages"]);
     } finally {
       await upstream.pair.close();
     }

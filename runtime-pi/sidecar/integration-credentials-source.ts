@@ -43,8 +43,10 @@ import type {
 import type { ActiveConnectInputs, MitmCredentialSource } from "./integration-mitm-listener.ts";
 import { matchesAuthorizedUriSpec } from "@appstrate/afps-shared/authorized-uris";
 import {
+  OBSERVED_TOOLS_MAX_BYTES,
   OBSERVED_TOOLS_MAX_COUNT,
-  OBSERVED_TOOL_NAME_MAX_LENGTH,
+  observedToolNameSchema,
+  observedToolSchema,
   type UnavailableToolReason,
 } from "@appstrate/core/sidecar-types";
 import { logger } from "./logger.ts";
@@ -694,27 +696,6 @@ function postIntegrationUpstreamSuccess(
   );
 }
 
-/** Cap on the serialised `tools` of a tools-observed report. */
-const OBSERVED_TOOLS_MAX_BYTES = 1024 * 1024;
-
-function isObservableName(name: unknown): name is string {
-  return (
-    typeof name === "string" && name.length > 0 && name.length <= OBSERVED_TOOL_NAME_MAX_LENGTH
-  );
-}
-
-/** A tool the platform accepts: a bounded name and an object `inputSchema` of type "object". */
-function isObservableTool(tool: unknown): boolean {
-  if (typeof tool !== "object" || tool === null) return false;
-  const { name, inputSchema } = tool as { name?: unknown; inputSchema?: unknown };
-  return (
-    isObservableName(name) &&
-    typeof inputSchema === "object" &&
-    inputSchema !== null &&
-    (inputSchema as { type?: unknown }).type === "object"
-  );
-}
-
 /**
  * The tools the platform would accept, longest prefix first: tools it would refuse are dropped
  * (they would fail the whole body), then the list is cut at the platform's count and at
@@ -729,7 +710,7 @@ export function capObservedTools<T>(
   const kept: T[] = [];
   let truncated = false;
   for (const tool of tools) {
-    if (!isObservableTool(tool)) {
+    if (!observedToolSchema.safeParse(tool).success) {
       truncated = true;
       continue;
     }
@@ -744,12 +725,20 @@ export function capObservedTools<T>(
 /** The unavailable tools the platform would accept: a bounded name, at most its count. */
 export function capObservedUnavailable<T extends { name: string }>(unavailable: readonly T[]): T[] {
   return unavailable
-    .filter(({ name }) => isObservableName(name))
+    .filter(({ name }) => observedToolNameSchema.safeParse(name).success)
     .slice(0, OBSERVED_TOOLS_MAX_COUNT);
 }
 
-/** What a run's remote upstream listed, reported so the platform can snapshot it. */
-export function postIntegrationToolsObserved(
+/** Per-attempt budget of a tools-observed report. */
+const TOOLS_OBSERVED_TIMEOUT_MS = 10_000;
+/** Pauses before each retry: the route is idempotent, so a network error or 5xx is retried. */
+const TOOLS_OBSERVED_RETRY_DELAYS_MS = [500, 2_000] as const;
+
+/**
+ * What a run's remote upstream listed, reported so the platform can snapshot it. Each attempt is
+ * bounded; a network error or a 5xx is retried after a short pause, any other answer is final.
+ */
+export async function postIntegrationToolsObserved(
   integrationId: string,
   connectionId: string | undefined,
   observed: {
@@ -757,17 +746,33 @@ export function postIntegrationToolsObserved(
     truncated: boolean;
     unavailable: readonly { name: string; reason: UnavailableToolReason }[];
   },
-  opts: { platformApiUrl: string; runToken: string; fetchFn?: typeof fetch },
+  opts: {
+    platformApiUrl: string;
+    runToken: string;
+    fetchFn?: typeof fetch;
+    /** Pauses before each retry; tests shorten them. */
+    retryDelaysMs?: readonly number[];
+  },
 ): Promise<Response> {
   const fetchFn = opts.fetchFn ?? fetch;
-  return fetchFn(
-    `${opts.platformApiUrl}/internal/integration-credentials/${integrationId}/tools-observed${credentialsQuery(connectionId)}`,
-    {
-      method: "POST",
-      headers: { Authorization: `Bearer ${opts.runToken}`, "Content-Type": "application/json" },
-      body: JSON.stringify(observed),
-    },
-  );
+  const delays = opts.retryDelaysMs ?? TOOLS_OBSERVED_RETRY_DELAYS_MS;
+  const url = `${opts.platformApiUrl}/internal/integration-credentials/${integrationId}/tools-observed${credentialsQuery(connectionId)}`;
+  const body = JSON.stringify(observed);
+  for (let attempt = 0; ; attempt++) {
+    const last = attempt >= delays.length;
+    try {
+      const res = await fetchFn(url, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${opts.runToken}`, "Content-Type": "application/json" },
+        body,
+        signal: AbortSignal.timeout(TOOLS_OBSERVED_TIMEOUT_MS),
+      });
+      if (res.status < 500 || last) return res;
+    } catch (err) {
+      if (last) throw err;
+    }
+    await Bun.sleep(delays[attempt]!);
+  }
 }
 
 /**

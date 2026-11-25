@@ -24,10 +24,15 @@ export function unavailableToolsNote(spawned: IntegrationBootReport["spawned"]):
             : "";
         return (entry.unavailableTools ?? [])
           .filter(({ name }) => isListedToolName(name))
-          .map(
-            ({ name, reason }) =>
-              `${entry.integrationId}: ${allocateMcpToolName(entry.namespace, name, () => false)}${label} (${reasonText(reason)})`,
-          );
+          .map(({ name, reason }) => {
+            // The plain `ns__body` of a name collision is a sibling tool that IS exposed: quote
+            // the upstream name instead.
+            const shown =
+              reason === "name_collision"
+                ? name
+                : allocateMcpToolName(entry.namespace, name, () => false);
+            return `${entry.integrationId}: ${shown}${label} (${reasonText(reason)})`;
+          });
       }),
   );
   if (lines.size === 0) return "";
