@@ -19,6 +19,7 @@ import {
 } from "@appstrate/core/mcp-presentation";
 import { asRecord } from "@appstrate/core/safe-json";
 import { getCatalog } from "./catalog.ts";
+import { toolIcons } from "./tool-icons.ts";
 
 /** `result` with `presentation` stamped, replacing any stamp it carried. */
 export function withPresentation(
@@ -92,6 +93,13 @@ function presentCaller(descriptor: Tool, result: CallToolResult): ToolPresentati
   };
 }
 
+/** `descriptor` with the icons the platform draws it with, unless it declares its own. */
+function withIcons(descriptor: Tool): Tool {
+  if (descriptor.icons) return descriptor;
+  const icons = toolIcons(descriptor.name);
+  return icons ? { ...descriptor, icons } : descriptor;
+}
+
 type Presenter = (
   descriptor: Tool,
   args: Record<string, unknown>,
@@ -103,10 +111,11 @@ const PRESENTERS: Partial<Record<string, Presenter>> = {
   get_me: (descriptor, _args, result) => presentCaller(descriptor, result),
 };
 
-/** Every tool's results stamped with their presentation. */
+/** Every tool's results stamped with their presentation, and its descriptor with its icons. */
 export function presentTools(tools: AppstrateToolDefinition[]): AppstrateToolDefinition[] {
   return tools.map((tool) => ({
     ...tool,
+    descriptor: withIcons(tool.descriptor),
     handler: async (args, extra) => {
       const result = await tool.handler(args, extra);
       if (result._meta?.[TOOL_PRESENTATION_META_KEY] !== undefined) return result;

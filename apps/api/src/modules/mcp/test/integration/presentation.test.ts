@@ -126,3 +126,27 @@ describe("presentTools", () => {
     expect(result._meta?.[TOOL_PRESENTATION_META_KEY]).toBeDefined();
   });
 });
+
+describe("tool icons", () => {
+  const [presented] = presentTools([tool({ name: "search" }, text({}))]);
+  const icons = presented!.descriptor.icons ?? [];
+
+  it("gives a platform tool one inline SVG per theme", () => {
+    expect(icons.map((i) => i.theme)).toEqual(["light", "dark"]);
+    for (const icon of icons) {
+      expect(icon.mimeType).toBe("image/svg+xml");
+      expect(icon.src.startsWith("data:image/svg+xml;base64,")).toBe(true);
+      expect(atob(icon.src.slice("data:image/svg+xml;base64,".length))).toContain("<svg");
+    }
+  });
+
+  it("leaves a tool it draws no icon for, and one declaring its own, as they are", () => {
+    const own = [{ src: "data:image/png;base64,AA==" }];
+    const [unknown, declared] = presentTools([
+      tool({ name: "x" }, text({})),
+      tool({ name: "search", icons: own }, text({})),
+    ]);
+    expect(unknown!.descriptor.icons).toBeUndefined();
+    expect(declared!.descriptor.icons).toEqual(own);
+  });
+});
