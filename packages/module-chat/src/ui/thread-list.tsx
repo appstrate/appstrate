@@ -296,11 +296,13 @@ export function ChatConversationList({
         {/* Grows only with rows to scroll: an empty list must not push its
             empty state to the bottom of the sidebar. The negative margins
             stretch the scroll box over the group's padding to the sidebar's
-            edges, as Studio's nav scrolls; `w-auto` lets `-mr-2` widen it. */}
+            edges, as Studio's nav scrolls; `w-auto` lets `-mr-2` widen it.
+            `scroll-fade-y` fades the edge that hides rows, as the dashboard's
+            agent row does sideways. */}
         <SidebarMenu
           className={
             list.length > 0 || isLoading
-              ? "-mr-2 -mb-2 min-h-0 w-auto flex-1 overflow-y-auto pr-2 pb-2"
+              ? "scroll-fade-y -mr-2 -mb-2 min-h-0 w-auto flex-1 overflow-y-auto pr-2 pb-2"
               : undefined
           }
         >
