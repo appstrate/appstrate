@@ -490,7 +490,12 @@ describe("the tools panel's limit rows", () => {
     const host = testHost({
       t: (key, options) => (options ? `${key}|${String(options.name)}` : key),
       actingSpaceIds,
-      renderSpaces: (ids) => <i data-spaces={ids.join(",")}>{names[ids[0]!]}</i>,
+      renderSpaces: (ids, options) =>
+        options?.tilesOnly ? (
+          <i data-tiles={ids.join(",")} />
+        ) : (
+          <i data-spaces={ids.join(",")}>{names[ids[0]!]}</i>
+        ),
       useSpaceLabelOf: () => (id) => (id ? names[id] : undefined),
     });
     return renderToStaticMarkup(
@@ -524,9 +529,13 @@ describe("the tools panel's limit rows", () => {
   it("choose level: lists the acting spaces, each a row the host names", () => {
     const out = entry(conversationScope(), ["spc_a", "spc_b"], <LimitLevel onPicked={() => {}} />);
     expect(out).toContain('data-testid="composer-limit-spaces"');
-    expect(out).toContain('data-spaces="spc_a"');
-    expect(out).toContain('data-spaces="spc_b"');
-    expect(out).not.toMatch(/disabled=""[^>]*>\s*<i data-spaces/);
+    // A row's label: the tile alone where the icons sit, the name in the row's own text.
+    expect(out).toContain('data-tiles="spc_a"');
+    expect(out).toContain('data-tiles="spc_b"');
+    expect(out).toContain('<span class="min-w-0 truncate">Studio</span>');
+    expect(out).toContain('<span class="min-w-0 truncate">Atelier</span>');
+    expect(out).not.toContain("data-spaces=");
+    expect(out).not.toContain('disabled=""');
   });
 
   it("choose level: inert while a change is in flight", () => {

@@ -107,24 +107,42 @@ function LimitRows({ onChoose }: { onChoose: () => void }) {
  * level is open (a turn starts generating), the limit's row says why in its place.
  */
 export function LimitLevel({ onPicked }: { onPicked: () => void }) {
-  const { actingSpaceIds, renderSpaces } = useChatHost();
+  const { actingSpaceIds, renderSpaces, useSpaceLabelOf } = useChatHost();
+  const labelOf = useSpaceLabelOf();
   const scope = useConversationScope();
   const limit = limitAvailability(scope, actingSpaceIds);
   if (limit.kind !== "choose") return <LimitRows onChoose={() => {}} />;
   return (
     <div className="flex flex-col" data-testid="composer-limit-spaces">
-      {limit.spaceIds.map((id) => (
-        <SheetMenuRow
-          key={id}
-          disabled={scope.pending}
-          onClick={() => {
-            scope.limitTo(id);
-            onPicked();
-          }}
-        >
-          {renderSpaces([id])}
-        </SheetMenuRow>
-      ))}
+      {limit.spaceIds.map((id) => {
+        const label = labelOf(id);
+        return (
+          <SheetMenuRow
+            key={id}
+            disabled={scope.pending}
+            onClick={() => {
+              scope.limitTo(id);
+              onPicked();
+            }}
+          >
+            {label ? (
+              // A row's label, not an inline mention: the tile sits where the other rows' icons
+              // do, the name takes the row's text.
+              <>
+                <span
+                  aria-hidden
+                  className="desktop-pointer:size-4 flex size-5 shrink-0 items-center justify-center"
+                >
+                  {renderSpaces([id], { tilesOnly: true })}
+                </span>
+                <span className="min-w-0 truncate">{label}</span>
+              </>
+            ) : (
+              renderSpaces([id])
+            )}
+          </SheetMenuRow>
+        );
+      })}
     </div>
   );
 }
