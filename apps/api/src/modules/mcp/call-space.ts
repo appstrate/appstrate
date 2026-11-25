@@ -15,15 +15,25 @@ export const TOOL_SPACE_RULES = {
   run_and_wait: { kind: "run", grant: "runs" },
   list_files: { kind: "request", grant: "listsFiles" },
   read: { kind: "read", grant: null },
-  validate_package_file: { kind: "request", grant: "validatesPackages" },
+  // The preflight judges conflicts in the space an import would land in: import's own.
+  validate_package_file: { kind: "personal", grant: "validatesPackages" },
   import_package_file: { kind: "personal", grant: "importsPackages" },
   call_integration_tool: { kind: "personal", grant: "proxies" },
-  get_me: { kind: "request", grant: null },
+  get_me: { kind: "optional", grant: null },
   get_runtime_capabilities: { kind: "none", grant: null },
 } as const satisfies Record<
   McpToolName,
   {
-    kind: "none" | "search" | "describe" | "operation" | "run" | "request" | "read" | "personal";
+    kind:
+      | "none"
+      | "search"
+      | "describe"
+      | "operation"
+      | "run"
+      | "request"
+      | "optional"
+      | "read"
+      | "personal";
     grant: keyof McpSurface | null;
   }
 >;
@@ -115,6 +125,11 @@ export function resolveCallSpace(
       return explicit === undefined ? { kind: "none" } : direct();
     case "request":
       return direct();
+    case "optional": {
+      // A designated space when there is one; with none, the call acts in no space.
+      const id = destination();
+      return id === undefined ? { kind: "none" } : { kind: "space", id };
+    }
     case "personal":
       return direct(true);
     case "run":

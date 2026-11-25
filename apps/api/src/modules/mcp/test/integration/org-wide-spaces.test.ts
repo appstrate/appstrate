@@ -107,6 +107,39 @@ describe("mcp org-wide connection", () => {
     expect(instructions).not.toContain(`Gestion (\`${gestion.id}\``);
   });
 
+  it("answers get_me without a space: identity, org role and the spaces reached", async () => {
+    const me = payload(await call("get_me", {}));
+    expect(me.isError).toBe(false);
+    expect(me.data.status).toBe(200);
+    const body = me.data.body as Record<string, unknown>;
+    expect(Object.keys(body).sort()).toEqual(["org", "user"]);
+    expect(body.user).toMatchObject({ id: callerId });
+    expect(body.org).toMatchObject({ role: "member" });
+    const spaces = me.data.spaces as Array<{ id: string }>;
+    expect(spaces.map((s) => s.id).sort()).toEqual([defaultSpaceId, gestion.id, lecture.id].sort());
+
+    // A named space still answers with its lists.
+    const inGestion = payload(await call("get_me", { space_id: gestion.id }));
+    const scoped = inGestion.data.body as { space: { id: string }; connections: unknown };
+    expect(scoped.space.id).toBe(gestion.id);
+    expect(Array.isArray(scoped.connections)).toBe(true);
+  });
+
+  it("validates a package file in the personal space by default, as import does", async () => {
+    await seedSpace({
+      orgId: headers["X-Org-Id"]!,
+      name: "Perso",
+      ownerUserId: callerId,
+      visibility: "private",
+    });
+    const validated = payload(
+      await call("validate_package_file", { file_uri: "appfile://file_missing00" }),
+    );
+    expect(validated.isError).toBe(true);
+    // Past the destination: the file itself is what is missing.
+    expect(validated.data.code).toBe("not_found");
+  });
+
   it("marks the caller's own personal space, where a new package goes by default", async () => {
     const perso = await seedSpace({
       orgId: headers["X-Org-Id"]!,

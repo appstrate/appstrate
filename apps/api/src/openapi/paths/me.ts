@@ -819,7 +819,8 @@ export const mePaths = {
         "direct API/MCP callers — so an agent can prefer already-connected integrations and " +
         "respect the caller's role (operations beyond it 403 at invoke time). The space is " +
         "the one the credential (API key, token) is bound to — an `X-Space-Id` naming another " +
-        "is refused — else the one `X-Space-Id` names; with neither the request is a 400.",
+        "is refused — else the one `X-Space-Id` names. With neither, the answer holds `user` " +
+        "and `org` alone: every other field belongs to one space.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XSpaceId" },
@@ -832,19 +833,7 @@ export const mePaths = {
             "application/json": {
               schema: {
                 type: "object",
-                required: [
-                  "user",
-                  "org",
-                  "space",
-                  "connections",
-                  "recent_runs",
-                  "agents",
-                  "agents_truncated",
-                  "agents_total",
-                  "skills",
-                  "skills_truncated",
-                  "skills_total",
-                ],
+                required: ["user", "org"],
                 properties: {
                   user: {
                     type: "object",
@@ -874,7 +863,8 @@ export const mePaths = {
                   space: {
                     type: "object",
                     description:
-                      "The space this request resolved to. Every list in this payload is " +
+                      "The space this request resolved to, absent when it named none (as is " +
+                      "every list). Every list in this payload is " +
                       "scoped to it. An empty list means nothing of that kind is available to " +
                       "this caller in this space, this is not the space you meant, or the " +
                       "caller's permissions do not cover that list.",

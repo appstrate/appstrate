@@ -2245,7 +2245,7 @@ export interface paths {
         };
         /**
          * The caller's working context for an AI agent
-         * @description Returns the caller's identity, their role in the pinned org, and the integrations they could attach when building an agent in the current space (their own, or shared into it). One payload powering the MCP `get_me` tool and direct API/MCP callers — so an agent can prefer already-connected integrations and respect the caller's role (operations beyond it 403 at invoke time). The space is the one the credential (API key, token) is bound to — an `X-Space-Id` naming another is refused — else the one `X-Space-Id` names; with neither the request is a 400.
+         * @description Returns the caller's identity, their role in the pinned org, and the integrations they could attach when building an agent in the current space (their own, or shared into it). One payload powering the MCP `get_me` tool and direct API/MCP callers — so an agent can prefer already-connected integrations and respect the caller's role (operations beyond it 403 at invoke time). The space is the one the credential (API key, token) is bound to — an `X-Space-Id` naming another is refused — else the one `X-Space-Id` names. With neither, the answer holds `user` and `org` alone: every other field belongs to one space.
          */
         get: operations["getMyContext"];
         put?: never;
@@ -17856,8 +17856,8 @@ export interface operations {
                             /** @description Organization slug. */
                             slug?: string | null;
                         };
-                        /** @description The space this request resolved to. Every list in this payload is scoped to it. An empty list means nothing of that kind is available to this caller in this space, this is not the space you meant, or the caller's permissions do not cover that list. */
-                        space: {
+                        /** @description The space this request resolved to, absent when it named none (as is every list). Every list in this payload is scoped to it. An empty list means nothing of that kind is available to this caller in this space, this is not the space you meant, or the caller's permissions do not cover that list. */
+                        space?: {
                             id: string;
                             /** @description Human-readable space name. */
                             name: string;
@@ -17865,7 +17865,7 @@ export interface operations {
                             personal: boolean;
                         };
                         /** @description The caller's own most recent runs (actor-scoped), newest first — lets an agent reference a recent or failed run without a discovery round-trip. */
-                        recent_runs: {
+                        recent_runs?: {
                             packageId: string;
                             status: string;
                             runNumber?: number | null;
@@ -17875,7 +17875,7 @@ export interface operations {
                             error?: string | null;
                         }[];
                         /** @description Integrations the caller holds a connection usable in this space for, active here or not (`active`). */
-                        connections: {
+                        connections?: {
                             integration_package_id: string;
                             name: string;
                             /** @enum {string} */
@@ -17908,7 +17908,7 @@ export interface operations {
                             default_tools?: string[] | "*";
                         }[];
                         /** @description Agents ACTIVE in the current space (capped), each with the required integrations that keep it from launching here. Only present when the caller holds the `agents:run` permission; empty otherwise. When `agents_truncated` is true, the full list is reachable via the `listAgents` operation. */
-                        agents: {
+                        agents?: {
                             /** @description Invokable identifier, e.g. "@appstrate/triage". */
                             packageId: string;
                             display_name: string;
@@ -17925,11 +17925,11 @@ export interface operations {
                             source: "local" | "system";
                         }[];
                         /** @description True when the agent list was capped (full list via `listAgents`). */
-                        agents_truncated: boolean;
+                        agents_truncated?: boolean;
                         /** @description Total active agents before the cap. */
-                        agents_total: number;
+                        agents_total?: number;
                         /** @description Skills the caller could attach to an agent in the current space (capped). A catalogue read, not a runnable hint: only present when the caller holds the `skills:read` permission; empty otherwise. Skills are not run directly — declare them under an agent manifest's `dependencies.skills`. When `skills_truncated` is true, the full list is reachable via the `listSkills` operation. */
-                        skills: {
+                        skills?: {
                             /** @description Attachable identifier, e.g. "@appstrate/web-research". Declare under dependencies.skills. */
                             packageId: string;
                             display_name: string;
@@ -17944,9 +17944,9 @@ export interface operations {
                             source: "local" | "system";
                         }[];
                         /** @description True when the skill list was capped (full list via `listSkills`). */
-                        skills_truncated: boolean;
+                        skills_truncated?: boolean;
                         /** @description Total active skills before the cap. */
-                        skills_total: number;
+                        skills_total?: number;
                     };
                 };
             };
