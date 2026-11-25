@@ -994,48 +994,6 @@ export function getRemoteSource(
   return { url, transport };
 }
 
-/** Lower-cased, percent-decoded path with repeated and trailing slashes collapsed. */
-function normalisedPath(url: URL): string {
-  let path = url.pathname;
-  try {
-    path = decodeURIComponent(path);
-  } catch {
-    // A malformed escape stays as written: the comparison is then on the raw path.
-  }
-  return path
-    .toLowerCase()
-    .replace(/\/{2,}/g, "/")
-    .replace(/\/+$/, "");
-}
-
-/** A remote MCP server as its integration declares it: `server.url` and `server.transport`. */
-export interface McpEndpoint {
-  url: string;
-  transport?: string;
-}
-
-/**
- * Whether `target` falls on the MCP endpoint: same origin (scheme, host without a trailing dot,
- * port), and
- *   - over SSE, any path: the server announces the endpoint its messages are POSTed to, at a path
- *     of its choosing on that origin (often outside `server.url`'s), so the whole origin is it;
- *   - otherwise, a path equal to the endpoint's or under it (`<path>/…`), compared
- *     case-insensitively after percent-decoding, with repeated and trailing slashes collapsed;
- *     query and fragment ignored. An endpoint at the origin root matches the root path only, so
- *     the other paths of that host stay reachable.
- */
-export function targetsMcpEndpoint(target: string | URL, endpoint: McpEndpoint): boolean {
-  if (!URL.canParse(String(target)) || !URL.canParse(endpoint.url)) return false;
-  const t = new URL(target);
-  const e = new URL(endpoint.url);
-  const host = (u: URL) => u.hostname.replace(/\.$/, "");
-  if (t.protocol !== e.protocol || host(t) !== host(e) || t.port !== e.port) return false;
-  if (endpoint.transport === "sse") return true;
-  const base = normalisedPath(e);
-  const path = normalisedPath(t);
-  return path === base || (base !== "" && path.startsWith(`${base}/`));
-}
-
 /**
  * Narrowed view of a single auth method's `delivery` (AFPS §7.6). The
  * canonical schema is `looseObject` so the fields are optional/unknown at the
@@ -1435,10 +1393,8 @@ export function resolveEffectiveToolCatalog(
   const open = allowsUndeclaredTools(integration);
   const blocked = new Set(policy?.blocks ?? []);
 
-  // A manifest that declares the tool wins over an approval of it.
   const approvals = new Map<string, Set<string>>();
-  for (const a of policy?.approvals ?? []) {
-    if (declaredNames.has(a.tool_name) || hidden.has(a.tool_name)) continue;
+  for (const a of judgeToolApprovals(integration, policy?.approvals ?? [])) {
     const set = approvals.get(a.tool_name) ?? new Set<string>();
     set.add(a.fingerprint);
     approvals.set(a.tool_name, set);
@@ -1490,6 +1446,24 @@ export function resolveEffectiveToolCatalog(
     ...declared.map((entry) => judge(entry, "declared")),
     ...undeclared.map((name) => judge({ name }, approvals.has(name) ? "approved" : "listed")),
   ];
+}
+
+/**
+ * The approvals of a space that can still count for an integration: an approval of a tool the
+ * manifest declares, of a name the platform withholds ({@link hiddenToolNames}), or on a catalog
+ * that is open (`allow_undeclared_tools`, where nothing needs approving) is dropped. Generic over
+ * the row: whatever else it carries is kept.
+ */
+export function judgeToolApprovals<T extends { tool_name: string }>(
+  manifest: IntegrationManifest,
+  approvals: readonly T[],
+): T[] {
+  if (allowsUndeclaredTools(manifest)) return [];
+  const declared = new Set(
+    resolveIntegrationToolCatalog({ integration: manifest }).map((e) => e.name),
+  );
+  const hidden = hiddenToolNames(manifest);
+  return approvals.filter((a) => !declared.has(a.tool_name) && !hidden.has(a.tool_name));
 }
 
 /** Names the platform withholds from every surface: `hidden_tools`, connect primitives, hidden uploads. */
@@ -1961,7 +1935,8 @@ export interface AgentIntegrationScopeError {
  *     tool-name validation: the server's own listing is the authority. A
  *     closed catalog refuses any name it neither declares nor has approved,
  *     including every name when it declares nothing.
- *   - `options.approvedTools`: names the space approved; they count as known.
+ *   - `options.approvedTools`: names the space approved; they count as known, except a hidden
+ *     name ({@link judgeToolApprovals}).
  *   - No `scope_catalog` on any auth → any scope accepted (the IdP is the
  *     ultimate authority at consent time).
  */
@@ -1986,12 +1961,18 @@ export function validateAgentIntegrationScopes(
       });
     }
   } else if (selection.tools && selection.tools.length > 0) {
-    // AFPS §7.1: a local source declaring no tools has no catalog to check against.
+    // AFPS §7.1: a `local` or `none` source declaring no tools has no catalog to check against;
+    // a remote source, or one of unknown kind, declaring none is a closed empty catalog.
     const catalog = resolveIntegrationToolCatalog({ integration: integrationManifest });
+    const sourceKind = getIntegrationSourceKind(integrationManifest);
     const catalogIsEmptyAdvisory =
-      getIntegrationSourceKind(integrationManifest) !== "remote" && catalog.length === 0;
+      (sourceKind === "local" || sourceKind === "none") && catalog.length === 0;
     if (!allowsUndeclaredTools(integrationManifest) && !catalogIsEmptyAdvisory) {
-      const allowed = new Set([...catalog.map((e) => e.name), ...(options?.approvedTools ?? [])]);
+      const approved = judgeToolApprovals(
+        integrationManifest,
+        (options?.approvedTools ?? []).map((tool_name) => ({ tool_name })),
+      );
+      const allowed = new Set([...catalog.map((e) => e.name), ...approved.map((a) => a.tool_name)]);
       for (const tool of selection.tools) {
         if (allowed.has(tool)) continue;
         errors.push({

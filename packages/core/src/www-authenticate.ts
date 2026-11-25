@@ -11,7 +11,7 @@ import { scopeTokenSchema } from "./integration.ts";
 const MAX_REQUIRED_SCOPES = 20;
 
 /** Longest scope token kept: the scopes reach the model, and the header is server-controlled. */
-export const MAX_REQUIRED_SCOPE_LENGTH = 128;
+const MAX_REQUIRED_SCOPE_LENGTH = 128;
 
 /** Split the challenge list in one pass, preserving quoted commas and quoted-pairs. */
 function* challengeFields(header: string) {
@@ -80,7 +80,8 @@ export function sanitiseRequiredScopes(list: readonly unknown[] | undefined): st
 /**
  * The scopes a server asks for when it refuses a call: only on a 401, or a 403
  * `insufficient_scope` (RFC 6750 §3.1). Tokens that are not valid scope tokens
- * and tokens over 128 characters are dropped; at most 20 are kept.
+ * and tokens over {@link MAX_REQUIRED_SCOPE_LENGTH} characters are dropped; at most
+ * {@link MAX_REQUIRED_SCOPES} are kept.
  */
 export function requiredScopesFromChallenge(
   status: number,

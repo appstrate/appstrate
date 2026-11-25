@@ -6,7 +6,6 @@ import {
   parseBearerChallenge,
   requiredScopesFromChallenge,
   sanitiseRequiredScopes,
-  MAX_REQUIRED_SCOPE_LENGTH,
 } from "../src/www-authenticate.ts";
 
 describe("Bearer resource metadata (RFC 9728 §5.1)", () => {
@@ -94,9 +93,7 @@ describe("sanitiseRequiredScopes", () => {
   });
 
   it("drops tokens over the length bound", () => {
-    expect(sanitiseRequiredScopes(["a".repeat(MAX_REQUIRED_SCOPE_LENGTH + 1), "ok"])).toEqual([
-      "ok",
-    ]);
+    expect(sanitiseRequiredScopes(["a".repeat(129), "ok"])).toEqual(["ok"]);
   });
 
   it("caps the list at 20", () => {

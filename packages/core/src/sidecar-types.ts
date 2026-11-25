@@ -539,8 +539,8 @@ const toolNames = z.array(observedToolNameSchema).max(OBSERVED_TOOLS_MAX_COUNT);
 
 /** Approved definitions the space may hold for one tool: the spawn spec's bound, enforced on write. */
 export const MAX_APPROVED_FINGERPRINTS_PER_TOOL = 32;
-/** SHA-256 hex, as `toolDefinitionFingerprint` (`@appstrate/mcp-transport`) produces. */
-const toolFingerprint = z.string().regex(/^[0-9a-f]{64}$/);
+/** A tool definition fingerprint: SHA-256 as 64 lowercase hex characters, as `toolDefinitionFingerprint` (`@appstrate/mcp-transport`) produces. */
+export const toolFingerprintSchema = z.string().regex(/^[0-9a-f]{64}$/);
 
 /** The platform's per-connection launch contract, decoded before any integration is started. */
 export const integrationSpawnSpecSchema = z.object({
@@ -600,7 +600,10 @@ export const integrationSpawnSpecSchema = z.object({
   blockedTools: toolNames.optional(),
   toolAllowlist: uris.optional(),
   approvedToolFingerprints: z
-    .record(z.string(), z.array(toolFingerprint).max(MAX_APPROVED_FINGERPRINTS_PER_TOOL))
+    .record(
+      observedToolNameSchema,
+      z.array(toolFingerprintSchema).max(MAX_APPROVED_FINGERPRINTS_PER_TOOL),
+    )
     .refine((byTool) => Object.keys(byTool).length <= OBSERVED_TOOLS_MAX_COUNT, {
       message: `approvedToolFingerprints names more than ${OBSERVED_TOOLS_MAX_COUNT} tools`,
     })

@@ -469,7 +469,7 @@ export {
 // the sidecar's McpHost and the CLI.
 export { exposeTool, toolExclusion, withToolIntegration } from "./tool-exposure.ts";
 
-// Identity of a listed tool definition (what an approval binds to) and the approval check.
+// Identity of a listed tool definition (what an approval binds to).
 export { toolDefinitionFingerprint } from "./tool-fingerprint.ts";
 
 // The `fetch` an MCP client transport is given, built from a `(url, init)` sender.

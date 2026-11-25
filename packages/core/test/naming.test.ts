@@ -11,6 +11,7 @@ import {
   isReservedScope,
   INLINE_SHADOW_SCOPE,
   isValidToolName,
+  isListedToolName,
   TOOL_NAME_MAX_LEN,
   sanitizeFilename,
   attachmentDisposition,
@@ -441,5 +442,18 @@ describe("extensionForMime", () => {
   it("returns null for unknown or missing types", () => {
     expect(extensionForMime("image/x-unknown")).toBeNull();
     expect(extensionForMime(undefined)).toBeNull();
+  });
+});
+
+describe("isListedToolName", () => {
+  it("accepts plain tokens up to 128 characters, with `/`, `.`, `-` and `_`", () => {
+    for (const name of ["a", "get_issue", "repos/list.all", "a-b.c/d", "a".repeat(128)]) {
+      expect({ name, ok: isListedToolName(name) }).toEqual({ name, ok: true });
+    }
+  });
+  it("refuses empty, over-long and free-text names", () => {
+    for (const name of ["", "a".repeat(129), "has space", "line\nbreak", "a:b", "é", "a`b"]) {
+      expect({ name, ok: isListedToolName(name) }).toEqual({ name, ok: false });
+    }
   });
 });

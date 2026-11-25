@@ -4,7 +4,8 @@ import { describe, it, expect } from "bun:test";
 import {
   resolveEffectiveToolCatalog,
   validateAgentIntegrationScopes,
-  targetsMcpEndpoint,
+  judgeToolApprovals,
+  hiddenToolNames,
   type IntegrationManifest,
   type ToolSnapshotView,
 } from "../src/integration.ts";
@@ -274,56 +275,55 @@ describe("integrationSpawnSpecSchema — blockedTools and bounds", () => {
   });
 });
 
-describe("targetsMcpEndpoint", () => {
-  it("matches the endpoint path and below it, on the same origin only", () => {
-    const endpoint = { url: "https://mcp.example.com/v1/mcp", transport: "streamable-http" };
-    expect(targetsMcpEndpoint("https://mcp.example.com/v1/mcp", endpoint)).toBe(true);
-    expect(targetsMcpEndpoint("https://mcp.example.com/v1/mcp/?x=1#f", endpoint)).toBe(true);
-    expect(targetsMcpEndpoint("https://mcp.example.com/v1/mcp/sse", endpoint)).toBe(true);
-    expect(targetsMcpEndpoint("https://mcp.example.com/v1/mcpx", endpoint)).toBe(false);
-    expect(targetsMcpEndpoint("https://mcp.example.com/v1", endpoint)).toBe(false);
-    expect(targetsMcpEndpoint("http://mcp.example.com/v1/mcp", endpoint)).toBe(false);
-    expect(targetsMcpEndpoint("https://mcp.example.com:8443/v1/mcp", endpoint)).toBe(false);
-    expect(targetsMcpEndpoint("https://other.example.com/v1/mcp", endpoint)).toBe(false);
+describe("judgeToolApprovals", () => {
+  const rows = [
+    { tool_name: "d", fingerprint: FP_A, note: 1 },
+    { tool_name: "h", fingerprint: FP_A, note: 2 },
+    { tool_name: "u", fingerprint: FP_B, note: 3 },
+  ];
+  const hidden = (open: boolean) =>
+    ({ ...manifest({ declared: ["d"], open }), hidden_tools: ["h"] }) as IntegrationManifest;
+  it("drops declared and hidden names on a closed catalog, keeps the row as given", () => {
+    expect(judgeToolApprovals(hidden(false), rows)).toEqual(rows.slice(2));
   });
+  it("drops every approval on an open catalog", () => {
+    expect(judgeToolApprovals(hidden(true), rows)).toEqual([]);
+  });
+  it("an approval of a platform-hidden name never counts", () => {
+    const m = manifest({});
+    const connect = [...hiddenToolNames(m)];
+    const judged = judgeToolApprovals(
+      m,
+      connect.map((tool_name) => ({ tool_name })),
+    );
+    expect(judged).toEqual([]);
+  });
+});
 
-  it("normalises the host, the default port, slashes, case, escapes and the query", () => {
-    const endpoint = { url: "https://mcp.example.com/v1/mcp" };
-    for (const target of [
-      "https://MCP.Example.COM/v1/mcp",
-      "https://mcp.example.com./v1/mcp",
-      "https://mcp.example.com:443/v1/mcp",
-      "https://mcp.example.com/v1/mcp/",
-      "https://mcp.example.com/v1/mcp?token=x",
-      "https://mcp.example.com/V1/MCP",
-      "https://mcp.example.com//v1///mcp",
-      "https://mcp.example.com/v1/%6Dcp",
-    ]) {
-      expect({ target, hit: targetsMcpEndpoint(target, endpoint) }).toEqual({ target, hit: true });
+describe("validateAgentIntegrationScopes — hidden approvals and source kinds", () => {
+  const sel = (tools: string[]) => ({ id: "@me/remote", tools });
+  it("an approved hidden name never validates", () => {
+    const m = { ...manifest({ declared: ["d"] }), hidden_tools: ["h"] } as IntegrationManifest;
+    const errors = validateAgentIntegrationScopes(sel(["h"]), m, { approvedTools: ["h"] });
+    expect(errors.map((e) => e.code)).toEqual(["unknown_tool"]);
+  });
+  it("only local and none sources declaring no tools skip the check", () => {
+    const withSource = (source: unknown) =>
+      ({ ...manifest({}), source }) as unknown as IntegrationManifest;
+    for (const [source, refused] of [
+      [{ kind: "local", server: { type: "binary", entry_point: "x" } }, false],
+      [{ kind: "none" }, false],
+      [{ kind: "remote", url: "https://mcp.example.com/mcp" }, true],
+      [undefined, true],
+    ] as const) {
+      const errors = validateAgentIntegrationScopes(sel(["x"]), withSource(source));
+      expect({
+        kind: (source as { kind?: string } | undefined)?.kind,
+        refused: errors.length > 0,
+      }).toEqual({
+        kind: (source as { kind?: string } | undefined)?.kind,
+        refused,
+      });
     }
-    // The same normalisation applies to the declared endpoint.
-    expect(
-      targetsMcpEndpoint("https://mcp.example.com/v1/mcp", {
-        url: "https://MCP.example.com:443/v1/mcp/?a=1",
-      }),
-    ).toBe(true);
-    // A different explicit port or a sibling path is still another endpoint.
-    expect(targetsMcpEndpoint("https://mcp.example.com:444/v1/mcp", endpoint)).toBe(false);
-    expect(targetsMcpEndpoint("https://mcp.example.com/v1/mcp-other", endpoint)).toBe(false);
-  });
-
-  it("matches only the root path for an endpoint at the origin root", () => {
-    const endpoint = { url: "https://mcp.example.com/" };
-    expect(targetsMcpEndpoint("https://mcp.example.com", endpoint)).toBe(true);
-    expect(targetsMcpEndpoint("https://mcp.example.com/?a=b", endpoint)).toBe(true);
-    expect(targetsMcpEndpoint("https://mcp.example.com/v1/items", endpoint)).toBe(false);
-  });
-
-  it("matches every path of the origin for an SSE endpoint, and that origin only", () => {
-    const endpoint = { url: "https://mcp.example.com/v1/sse", transport: "sse" };
-    expect(targetsMcpEndpoint("https://mcp.example.com/messages?sessionId=1", endpoint)).toBe(true);
-    expect(targetsMcpEndpoint("https://mcp.example.com/", endpoint)).toBe(true);
-    expect(targetsMcpEndpoint("https://other.example.com/messages", endpoint)).toBe(false);
-    expect(targetsMcpEndpoint("http://mcp.example.com/messages", endpoint)).toBe(false);
   });
 });
