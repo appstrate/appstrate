@@ -122,6 +122,7 @@ export function OrgSettingsRolesPage() {
             const invitations = Number(err.details?.pending_invitation_count ?? 0);
             setDeleteError(
               [
+                err.details?.org_default === true ? t("roles.inUseOrgDefault") : null,
                 members > 0 ? t("roles.inUse", { count: members }) : null,
                 invitations > 0 ? t("roles.inUseInvitations", { count: invitations }) : null,
               ]

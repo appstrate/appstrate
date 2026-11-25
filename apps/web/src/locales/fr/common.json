@@ -221,7 +221,7 @@
   "apiError.redundant_space_role": "Les propriétaires et administrateurs gèrent déjà tous les espaces : un rôle d'espace ne leur apporterait rien.",
   "apiError.organization_has_no_default_space": "L'organisation n'a pas d'espace par défaut où rattacher ce package.",
   "apiError.role_key_taken": "Un rôle porte déjà cet identifiant. Choisissez-en un autre.",
-  "apiError.role_in_use": "Ce rôle est encore attribué : {{message}}",
+  "apiError.role_in_use": "Ce rôle est encore utilisé (membres, invitations ou rôle par défaut des espaces personnels) : {{message}}",
   "apiError.external_id_taken": "Cet identifiant externe est déjà utilisé dans cet espace.",
   "apiError.webhook_limit_reached": "Nombre maximal de webhooks atteint : {{message}}",
   "apiError.blocked_url": "Adresse refusée, elle pointe vers un réseau privé ou réservé : {{message}}",

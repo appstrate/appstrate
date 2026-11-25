@@ -1,9 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * The « personal space role » switch of Settings › General: ON is today's default (`admin`), OFF
- * is the cap (`operator`); it is offered to `org:settings` alone, and each flip writes the stored
- * value. The web runner has no DOM, so a flip is pinned through the body it builds.
+ * The « personal space role » picker of Settings › General: it lists the presets and the org's
+ * custom roles, shows the stored value (a preset key or an `srl_` id), is offered to `org:settings`
+ * alone, and writes the stored value. The web runner has no DOM, so a pick is pinned through the
+ * body it builds.
  */
 
 import { describe, expect, it, spyOn } from "bun:test";
@@ -18,6 +19,9 @@ installFakeStorage({
 const { PersonalSpaceRoleSetting } =
   await import("../../components/settings/personal-space-role-setting.tsx");
 const { toggleBody } = await import("../../lib/org-setting-toggle-body.ts");
+const { orgPersonalSpaceRoleBody, storedRoleToSelectValue } =
+  await import("../../lib/personal-space-role.ts");
+const { useSpaceRoleOptions } = await import("../../hooks/use-roles.ts");
 const { client, $api } = await import("../../api/client.ts");
 const { useUpdateOrgSettings } = await import("../../hooks/use-org-settings.ts");
 const { ApiError } = await import("../../api/errors.ts");
@@ -31,12 +35,22 @@ await i18nModule.default.changeLanguage("fr");
 const ORG_ID = "org_a";
 const CREATED = "2026-07-01T10:00:00.000Z";
 
-function renderSetting(permissions: string[], role: "admin" | "operator" | null): string {
+const CUSTOM_ID = "srl_triage";
+const ROLES = [
+  { id: null, kind: "preset", key: "admin", name: "admin" },
+  { id: null, kind: "preset", key: "operator", name: "operator" },
+  { id: CUSTOM_ID, kind: "custom", key: "triage", name: "Triage" },
+];
+
+function renderSetting(permissions: string[], role: string | null): string {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retryOnMount: false } } });
   queryClient.setQueryData(
     ["orgs"],
     [{ id: ORG_ID, name: "Acme", slug: "acme", role: "admin", permissions, createdAt: CREATED }],
   );
+  queryClient.setQueryData(["get", "/api/roles", { params: { header: { "X-Org-Id": ORG_ID } } }], {
+    data: ROLES,
+  });
   if (role) {
     queryClient.setQueryData(
       ["get", "/api/orgs/{orgId}/settings", { params: { path: { orgId: ORG_ID } } }],
@@ -54,33 +68,82 @@ function renderSetting(permissions: string[], role: "admin" | "operator" | null)
   }
 }
 
-const switchOf = (html: string) => /<button[^>]*id="personal-space-role"[^>]*>/.exec(html)?.[0];
+const pickerOf = (html: string) =>
+  /<button[^>]*id="personal-space-role"[^>]*>[\s\S]*?<\/button>/.exec(html)?.[0];
 
-describe("the personal space role switch", () => {
-  it("is ON when members are admin of their personal space", () => {
-    const html = renderSetting(["org:settings"], "admin");
+describe("the personal space role picker", () => {
+  // A closed Radix select draws no value or item under `renderToStaticMarkup`, so the picker's
+  // catalogue and the label of a stored value are read from the same hook and mapping it uses.
+  function optionLabels(stored: string): { labels: string[]; shown: string | undefined } {
+    const qc = new QueryClient();
+    qc.setQueryData(
+      ["orgs"],
+      [
+        {
+          id: ORG_ID,
+          name: "Acme",
+          slug: "acme",
+          role: "admin",
+          permissions: ["roles:read"],
+          createdAt: CREATED,
+        },
+      ],
+    );
+    qc.setQueryData(["get", "/api/roles", { params: { header: { "X-Org-Id": ORG_ID } } }], {
+      data: ROLES,
+    });
+    let result = { labels: [] as string[], shown: undefined as string | undefined };
+    function Probe() {
+      const { options } = useSpaceRoleOptions();
+      result = {
+        labels: options.map((o) => o.label),
+        shown: options.find((o) => o.value === storedRoleToSelectValue(stored))?.label,
+      };
+      return null;
+    }
+    const snapshot = spyOn(orgStore, "getInitialState").mockReturnValue({
+      ...orgStore.getInitialState(),
+      id: ORG_ID,
+    });
+    try {
+      render(<Probe />, { queryClient: qc });
+    } finally {
+      snapshot.mockRestore();
+    }
+    return result;
+  }
+
+  it("offers the presets then the org's custom roles", () => {
+    expect(optionLabels("admin").labels).toEqual([
+      settingsFr["roles.preset.admin"],
+      settingsFr["roles.preset.operator"],
+      "Triage",
+    ]);
+  });
+
+  it("shows the stored preset, and the name of a stored custom role", () => {
+    expect(optionLabels("operator").shown).toBe(settingsFr["roles.preset.operator"]);
+    expect(optionLabels(CUSTOM_ID).shown).toBe("Triage");
+  });
+
+  it("draws the title, the explanation and the picker", () => {
+    const html = renderSetting(["org:settings"], CUSTOM_ID);
     expect(html).toContain(settingsFr["orgSettings.personalSpaceRoleTitle"]);
-    expect(switchOf(html)).toContain('aria-checked="true"');
+    expect(pickerOf(html)).toBeDefined();
   });
 
-  it("is OFF when members are capped to operator", () => {
-    expect(switchOf(renderSetting(["org:settings"], "operator"))).toContain('aria-checked="false"');
-  });
-
-  it("is a skeleton, not a switch, until the settings load", () => {
-    expect(switchOf(renderSetting(["org:settings"], null))).toBeUndefined();
+  it("is a skeleton, not a picker, until the settings load", () => {
+    expect(pickerOf(renderSetting(["org:settings"], null))).toBeUndefined();
   });
 
   it("is disabled without org:settings", () => {
-    expect(switchOf(renderSetting([], "admin"))).toContain("disabled");
+    expect(pickerOf(renderSetting([], "admin"))).toContain("disabled");
   });
 
-  it("writes operator when flipped OFF, then admin when flipped back ON", () => {
-    expect(toggleBody("personal_space_role", false)).toEqual({
-      personal_space_role: "operator",
-    });
-    expect(toggleBody("personal_space_role", true)).toEqual({
-      personal_space_role: "admin",
+  it("writes a preset key or a custom role id", () => {
+    expect(orgPersonalSpaceRoleBody("preset:builder")).toEqual({ personal_space_role: "builder" });
+    expect(orgPersonalSpaceRoleBody(`custom:${CUSTOM_ID}`)).toEqual({
+      personal_space_role: CUSTOM_ID,
     });
   });
 
@@ -105,7 +168,7 @@ it("keeps the cached toggle after a refused PATCH and refreshes it after a succe
   const patch = spyOn(client, "PATCH")
     .mockRejectedValueOnce(new ApiError("forbidden", "Refused", 403))
     .mockResolvedValueOnce({ data: { ...saved, personal_space_role: "operator" } });
-  const input = { params, body: toggleBody("personal_space_role", false) };
+  const input = { params, body: orgPersonalSpaceRoleBody("preset:operator") };
   try {
     await expect(updates[0]!.mutateAsync(input)).rejects.toMatchObject({ status: 403 });
     expect(qc.getQueryData(key)).toEqual(saved);

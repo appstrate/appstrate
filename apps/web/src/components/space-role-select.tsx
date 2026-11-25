@@ -27,6 +27,7 @@ export function SpaceRoleSelect({
   loading,
   id,
   ariaLabel,
+  ariaLabelledBy,
   placeholder,
   className,
 }: {
@@ -38,6 +39,7 @@ export function SpaceRoleSelect({
   loading?: boolean;
   id?: string;
   ariaLabel?: string;
+  ariaLabelledBy?: string;
   placeholder?: string;
   className?: string;
 }) {
@@ -50,6 +52,7 @@ export function SpaceRoleSelect({
       disabled={disabled}
       id={id}
       aria-label={ariaLabel}
+      aria-labelledby={ariaLabelledBy}
       className={className}
       placeholder={placeholder}
       options={options}

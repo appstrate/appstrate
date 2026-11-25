@@ -11,11 +11,13 @@ import { exitViewAs, serializeViewAs, type ViewAsPersona } from "../stores/view-
 import { useAutoSelect } from "./use-auto-select";
 import {
   invalidateOrgDetail,
+  invalidatePackageCaches,
   invalidatePaths,
   orgKeys,
   removeOrgScopedQueries,
 } from "../lib/query-keys";
 import { invalidateIntegrationQueries } from "./use-integrations";
+import { memberPersonalSpaceRoleRequest } from "../lib/personal-space-role";
 import { viewAsRefusalCode } from "../lib/view-as-refusal";
 
 // Reactive hook for query key usage — re-renders when org changes
@@ -84,6 +86,36 @@ export function useMemberDepartureImpact(orgId: string | undefined, userId: stri
     { params: { path: { orgId: orgId ?? "", userId: userId ?? "" } } },
     { enabled: !!orgId && !!userId, staleTime: 0, gcTime: 0, select: (envelope) => envelope.data },
   );
+}
+
+/**
+ * A member's own role in their personal space: PUT sets it, DELETE returns them to the
+ * organization default. The member list carries it; the space's permissions and the package
+ * verdicts follow it.
+ */
+export function useSetMemberPersonalSpaceRole() {
+  const qc = useQueryClient();
+  const orgId = useCurrentOrgId();
+  const put = $api.useMutation("put", "/api/orgs/{orgId}/members/{userId}/personal-space-role");
+  const clear = $api.useMutation(
+    "delete",
+    "/api/orgs/{orgId}/members/{userId}/personal-space-role",
+  );
+  const settle = () => {
+    void invalidateOrgDetail(qc);
+    void invalidatePaths(qc, ["/api/spaces", "/api/spaces/{id}"]);
+    invalidatePackageCaches(qc);
+  };
+  return {
+    isPending: put.isPending || clear.isPending,
+    apply: (userId: string, selectValue: string) => {
+      if (!orgId) return;
+      const params = { path: { orgId, userId } };
+      const request = memberPersonalSpaceRoleRequest(selectValue);
+      if (request.method === "DELETE") clear.mutate({ params }, { onSuccess: settle });
+      else put.mutate({ params, body: request.body }, { onSuccess: settle });
+    },
+  };
 }
 
 export function useChangeMemberRole() {
