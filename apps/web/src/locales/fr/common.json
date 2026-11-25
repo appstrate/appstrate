@@ -208,7 +208,6 @@
   "apiError.invitation_accepted": "Cette invitation a déjà été acceptée.",
   "apiError.email_mismatch": "Cette invitation est destinée à une autre adresse email.",
   "apiError.not_granted": "Vos droits ne permettent pas cette action.",
-  "apiError.space_mismatch": "L’espace demandé diffère de l’espace sélectionné.",
   "apiError.not_a_space_member": "Vous n'avez pas accès à cet espace.",
   "apiError.personal_space_takes_no_keys": "Un espace personnel n'accepte pas de clé API. Créez la clé dans un espace d'équipe.",
   "apiError.personal_space_takes_no_end_users": "Un espace personnel n'accepte pas d'end-user. Créez-le dans un espace d'équipe.",

@@ -23,6 +23,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `validateAgentIntegrationScopes` on a catalog with `allow_undeclared_tools` accepts an explicit tool name the source does not declare; it used to refuse it as `unknown_tool`.
 - **BREAKING** — `validateAgentIntegrationScopes` treats a `remote` source that declares no tools as a closed catalog: every explicit tool selection is refused unless the tool is approved in the space (`options.approvedTools`); it used to accept any name. Only a `local` or `none` source declaring no tools keeps the no-check rule of AFPS §7.1.
 
+### Removed
+
+- **`SPACE_CHOICE_META_KEY`** — BREAKING (`@appstrate/core/mcp-spaces`). An MCP call that needs a
+  space and names none is refused with the eligible spaces in the refusal alone (`accepted`, and
+  by name in `error`): the chat no longer renders a picker from result metadata, its model asks
+  the user.
+- **`AuthResolution.orgSlug`** — BREAKING (`@appstrate/core/module`). No strategy supplied it, so a
+  bearer resolved inline reached routes without an organization slug or name; the platform now
+  reads both from the organization `orgId` names, for every inline resolution.
+
 ## [18.0.0] — 2026-11-24
 
 ### Added

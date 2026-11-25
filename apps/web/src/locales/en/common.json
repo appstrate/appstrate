@@ -208,7 +208,6 @@
   "apiError.invitation_accepted": "This invitation was already accepted.",
   "apiError.email_mismatch": "This invitation is meant for another email address.",
   "apiError.not_granted": "Your permissions do not allow this action.",
-  "apiError.space_mismatch": "The requested space differs from the selected space.",
   "apiError.not_a_space_member": "You do not have access to this space.",
   "apiError.personal_space_takes_no_keys": "A personal space takes no API key. Create the key in a team space.",
   "apiError.personal_space_takes_no_end_users": "A personal space takes no end-user. Create it in a team space.",

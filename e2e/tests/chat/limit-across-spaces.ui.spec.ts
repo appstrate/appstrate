@@ -2,8 +2,8 @@
 
 /**
  * Conversation destinations from « Tous les espaces ». A conversation with no origin space has
- * nothing to confine it to, so « Limiter à un espace » asks which space among those the chat acts
- * in; the space picked becomes its origin, in one `PATCH { spaceId, restricted: true }`. From
+ * nothing to confine it to, so « Limiter à un espace » opens a level of the tools panel asking which
+ * space among those the chat acts in; the space picked becomes its origin, in one `PATCH { spaceId, restricted: true }`. From
  * then on it is listed under that space's filter and no other's (before, holding no space, it
  * belonged to every filter).
  */
@@ -55,12 +55,12 @@ test("a conversation with no origin is limited to the space picked from « Tous 
     const chip = page.getByTestId("composer-limit-chip");
     await expect(chip).toHaveCount(0);
 
-    // The tools panel › « Limiter à… » › the acting spaces, one row each.
+    // The tools panel › « Limiter à un espace » › its level: the acting spaces, one row each.
     await page.getByTestId("composer-settings-trigger").click();
-    const choices = page.getByRole("group", { name: "Limiter à…", exact: true });
-    await expect(choices).toBeVisible();
-    await expect(choices).toHaveAttribute("data-testid", "composer-limit-item");
-    const entries = choices.getByRole("button");
+    const panel = page.getByTestId("composer-panel");
+    await panel.getByTestId("composer-limit-item").click();
+    await expect(panel.getByText("Limiter à un espace", { exact: true })).toBeVisible();
+    const entries = panel.getByTestId("composer-limit-spaces").getByRole("button");
     await expect(entries.filter({ hasText: alpha.name })).toHaveCount(1);
     await expect(entries.filter({ hasText: beta.name })).toHaveCount(1);
 
@@ -73,6 +73,8 @@ test("a conversation with no origin is limited to the space picked from « Tous 
     const response = await patched;
     expect(response.request().postDataJSON()).toEqual({ spaceId: alpha.id, restricted: true });
     expect(response.status()).toBe(204);
+    // The pick ends the errand: the panel closes, the chip names the limit.
+    await expect(panel).toHaveCount(0);
     await expect(chip).toBeVisible();
   } finally {
     await context.close();

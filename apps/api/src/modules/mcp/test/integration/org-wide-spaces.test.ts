@@ -20,7 +20,7 @@ import { seedApiKey, seedSpace, seedSpaceMember } from "../../../../../test/help
 import { MCP_ACCEPT, mcpRpc, type JsonRpcEnvelope } from "../../../../../test/helpers/mcp.ts";
 import { registerTestPlatformApp } from "../../../../../test/helpers/platform-app.ts";
 import { drainAudits } from "../../../../services/audit.ts";
-import { OPERATION_SPACES_META_KEY, SPACE_CHOICE_META_KEY } from "@appstrate/core/mcp-spaces";
+import { OPERATION_SPACES_META_KEY } from "@appstrate/core/mcp-spaces";
 
 const app = getTestApp();
 await registerTestPlatformApp();
@@ -43,6 +43,7 @@ describe("mcp org-wide connection", () => {
   let foreign: { id: string };
   let callerId: string;
   let orgSlug: string;
+  let orgName: string;
 
   beforeEach(async () => {
     await truncateAll();
@@ -50,6 +51,7 @@ describe("mcp org-wide connection", () => {
     const caller = await memberContext(owner, "member", "operator");
     callerId = caller.user.id;
     orgSlug = owner.org.slug;
+    orgName = owner.org.name;
     defaultSpaceId = owner.defaultSpaceId;
     gestion = await seedSpace({ orgId: owner.orgId, name: "Gestion", visibility: "closed" });
     lecture = await seedSpace({ orgId: owner.orgId, name: "Lecture", visibility: "closed" });
@@ -105,6 +107,40 @@ describe("mcp org-wide connection", () => {
     // The spaces are listed by the `space_id` schema, not repeated here.
     expect(instructions).toContain("Space names are not unique");
     expect(instructions).not.toContain(`Gestion (\`${gestion.id}\``);
+  });
+
+  it("answers get_me without a space: identity, org role and the spaces reached", async () => {
+    const me = payload(await call("get_me", {}));
+    expect(me.isError).toBe(false);
+    expect(me.data.status).toBe(200);
+    const body = me.data.body as Record<string, unknown>;
+    expect(Object.keys(body).sort()).toEqual(["org", "user"]);
+    expect(body.user).toMatchObject({ id: callerId });
+    // An org-pinned bearer resolves inline, past org context: its org still has a name.
+    expect(body.org).toMatchObject({ role: "member", name: orgName, slug: orgSlug });
+    const spaces = me.data.spaces as Array<{ id: string }>;
+    expect(spaces.map((s) => s.id).sort()).toEqual([defaultSpaceId, gestion.id, lecture.id].sort());
+
+    // A named space still answers with its lists.
+    const inGestion = payload(await call("get_me", { space_id: gestion.id }));
+    const scoped = inGestion.data.body as { space: { id: string }; connections: unknown };
+    expect(scoped.space.id).toBe(gestion.id);
+    expect(Array.isArray(scoped.connections)).toBe(true);
+  });
+
+  it("validates a package file in the personal space by default, as import does", async () => {
+    await seedSpace({
+      orgId: headers["X-Org-Id"]!,
+      name: "Perso",
+      ownerUserId: callerId,
+      visibility: "private",
+    });
+    const validated = payload(
+      await call("validate_package_file", { file_uri: "appfile://file_missing00" }),
+    );
+    expect(validated.isError).toBe(true);
+    // Past the destination: the file itself is what is missing.
+    expect(validated.data.code).toBe("not_found");
   });
 
   it("marks the caller's own personal space, where a new package goes by default", async () => {
@@ -210,7 +246,7 @@ describe("mcp org-wide connection", () => {
       prompt: "Summarize the request.",
     };
     const missing = await call("invoke_operation", { operation_id, body: { source } });
-    expect(missing.result?._meta).toMatchObject({ [SPACE_CHOICE_META_KEY]: [gestion.id] });
+    expect(payload(missing).data.accepted).toEqual([gestion.id]);
 
     const personal = await seedSpace({
       orgId: headers["X-Org-Id"]!,
@@ -327,9 +363,7 @@ describe("mcp org-wide connection", () => {
         code: "missing_argument",
         arguments: ["space_id"],
       });
-      expect(missing.result?._meta).toMatchObject({
-        [SPACE_CHOICE_META_KEY]: expect.arrayContaining([gestion.id]),
-      });
+      expect(payload(missing).data.accepted).toEqual(expect.arrayContaining([gestion.id]));
       const resolved = await call("invoke_operation", { operation_id: id, space_id: gestion.id });
       expect(payload(resolved).data).toMatchObject({
         status: 200,

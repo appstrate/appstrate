@@ -86,6 +86,7 @@ interface ValidatedApiKey {
   name: string;
   orgId: string;
   orgSlug: string;
+  orgName: string;
   spaceId: string;
   scopes: string[];
   creatorRole: OrgRole;
@@ -112,6 +113,7 @@ export async function validateApiKey(rawKey: string): Promise<ValidatedApiKey | 
       userName: userTable.name,
       userEmail: userTable.email,
       orgSlug: organizations.slug,
+      orgName: organizations.name,
       creatorRole: organizationMembers.role,
     })
     .from(apiKeys)
@@ -154,6 +156,7 @@ export async function validateApiKey(rawKey: string): Promise<ValidatedApiKey | 
     name: row.userName,
     orgId: row.orgId,
     orgSlug: row.orgSlug,
+    orgName: row.orgName,
     spaceId: row.spaceId,
     scopes: row.scopes,
     creatorRole: row.creatorRole,

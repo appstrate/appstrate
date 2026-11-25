@@ -60,7 +60,7 @@ import { connectionPrincipal } from "../lib/connection-principal.ts";
 import { listCallerOrganizations } from "../lib/principal-permissions.ts";
 import { callerOrgRole, resolveListingViewAs } from "../lib/view-as.ts";
 import { callerPermissions } from "../lib/permissions.ts";
-import { requireSpaceContext } from "../middleware/space-context.ts";
+import { optionalSpaceContext, requireSpaceContext } from "../middleware/space-context.ts";
 import { requireCeiling } from "../middleware/require-permission.ts";
 import { rateLimit } from "../middleware/rate-limit.ts";
 import { getSpaceScope } from "../lib/scope.ts";
@@ -467,18 +467,22 @@ router.get(
  * role (operations beyond it will 403 at invoke time).
  *
  * Space context resolves as `requireSpaceContext` does: the credential's
- * space, else `X-Space-Id`; with neither, a 400. The payload names that space: an empty list alone cannot
- * tell an agent whether nothing is there for it or it is in the wrong space.
+ * space, else `X-Space-Id`; with neither, the answer is the organization-level
+ * part alone (identity and org role): every list belongs to one space. With a
+ * space, the payload names it: an empty list alone cannot tell an agent whether
+ * nothing is there for it or it is in the wrong space.
  */
-router.get("/context", requireSpaceContext(), async (c) => {
+router.get("/context", optionalSpaceContext(), async (c) => {
   const actor = getActor(c);
-  const scope = getSpaceScope(c);
-  // Always set here: `requireSpaceContext` admits the space or throws.
-  const space = c.get("space")!;
+  // Set exactly when the request named a space: `optionalSpaceContext` admitted it.
+  const space = c.get("space");
+  // Always set: unlike `/orgs` and `/connections`, this route runs inside org context.
+  const orgId = c.get("orgId")!;
 
   let identity: { id: string; name: string | null; email: string | null };
   if (actor.type === "end_user") {
-    const eu = await getEndUser(scope, actor.id);
+    // An end-user credential is always bound to its space.
+    const eu = await getEndUser(getSpaceScope(c), actor.id);
     identity = { id: eu.id, name: eu.name ?? null, email: eu.email ?? null };
   } else {
     const user = c.get("user");
@@ -489,6 +493,9 @@ router.get("/context", requireSpaceContext(), async (c) => {
   // The persona's while previewing: this payload tells the model what the caller
   // may do, and every operation it names is checked against the persona.
   const role = (callerOrgRole(c) as string | undefined) ?? "end_user";
+  const org = { id: orgId, role, name: c.get("orgName"), slug: c.get("orgSlug") };
+  if (!space) return c.json({ user: identity, org });
+  const scope = getSpaceScope(c);
 
   // Agents are a runnable-hint: only surface them when the caller actually holds
   // `agents:run` (otherwise the model would propose agents that 403 at invoke).
@@ -537,12 +544,7 @@ router.get("/context", requireSpaceContext(), async (c) => {
 
   return c.json({
     user: identity,
-    org: {
-      id: scope.orgId,
-      role,
-      name: (c.get("orgName") as string | undefined) ?? null,
-      slug: (c.get("orgSlug") as string | undefined) ?? null,
-    },
+    org,
     // `personal` as the spaces routes derive it (`spaceWireForCaller`).
     space: { id: space.id, name: space.name, personal: space.ownerUserId !== null },
     connections,
