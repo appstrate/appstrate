@@ -188,6 +188,7 @@ const OPERATOR_PRESET_PERMISSIONS: ReadonlySet<SpaceLevelPermission> =
     "credential-proxy:call-own",
     "end-users:read",
     "end-users:write",
+    "studio:read",
   ]);
 
 /**
@@ -210,6 +211,7 @@ const RUNNER_PRESET_PERMISSIONS: ReadonlySet<SpaceLevelPermission> = new Set<Spa
   "integrations:read",
   "integrations:connect",
   "integrations:disconnect",
+  "studio:read",
 ]);
 
 /** `viewer`: look — the `:read` actions of `operator`. */

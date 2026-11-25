@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `studio:read`, a space-level core permission (`CoreResources.studio`): it opens the Studio's
+  screens in the dashboard and gates no API route.
+
 ### Removed
 
 - **`SPACE_CHOICE_META_KEY`** — BREAKING (`@appstrate/core/mcp-spaces`). An MCP call that needs a
