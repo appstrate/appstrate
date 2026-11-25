@@ -190,6 +190,19 @@ export function useCloseOverlay(): () => void {
   };
 }
 
+/**
+ * Sends the reader to another page. Under an overlay only the page beneath moves, so a redirect
+ * of the page an overlay floats over (a pasted settings link) does not close the overlay.
+ */
+export function useReplacePage(): (pathname: string, search: string) => void {
+  const exit = useContext(OverlayExitContext);
+  const navigate = useNavigate();
+  return (pathname, search) => {
+    if (exit) exit.replaceBackground(pathname);
+    else navigate({ pathname, search }, { replace: true });
+  };
+}
+
 export function orgSwitchLanding(pagePath: string): "/" | "/chat" {
   return isUnder(pagePath, "/chat") ? "/chat" : "/";
 }
