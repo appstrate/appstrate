@@ -82,7 +82,7 @@ describe("resolveSpaceRole on a personal space", () => {
     }
   });
 
-  it("gives a GUEST owner preset operator — receive and run, never author", () => {
+  it("gives a GUEST owner preset operator under the admin default — receive and run, never author", () => {
     // A guest is an external identity invited to use one thing (§3.2). `admin`
     // in their own space would let them author and launch arbitrary agents on
     // the organization's LLM budget, which is what their org role withholds.
@@ -187,11 +187,33 @@ describe("resolveSpaceRole under an org default other than admin", () => {
     }
   });
 
-  it("leaves a guest at plain operator, with no delete permissions", () => {
-    for (const fallback of [preset("operator"), preset("builder"), CUSTOM, ADMIN_ROLE_REF]) {
+  it("caps a guest to plain operator, no deletes, under a default that lets them author", () => {
+    const authoring: SpaceRoleRef = {
+      kind: "custom",
+      role: {
+        id: "srl_55555555-5555-4555-8555-555555555555",
+        key: "author",
+        name: "Author",
+        permissions: ["agents:read", "agents:write"],
+      },
+    };
+    for (const fallback of [ADMIN_ROLE_REF, preset("builder"), authoring]) {
       expect(resolveSpaceRole("guest", personal, null, OWNER, fallback)).toEqual(
         preset("operator"),
       );
+    }
+    // A member takes the authoring custom default with the floor.
+    expect(resolveSpaceRole("member", personal, null, OWNER, authoring)).toEqual({
+      ...authoring,
+      plus: FLOOR,
+    });
+  });
+
+  it("gives a guest any default that does not author, plus the floor, like a member", () => {
+    for (const fallback of [preset("operator"), preset("runner"), preset("viewer"), CUSTOM]) {
+      const expected = { ...fallback, plus: FLOOR };
+      expect(resolveSpaceRole("guest", personal, null, OWNER, fallback)).toEqual(expected);
+      expect(resolveSpaceRole("member", personal, null, OWNER, fallback)).toEqual(expected);
     }
   });
 
@@ -255,17 +277,17 @@ describe("personalSpaceDefaultRef", () => {
     expect(stored(CUSTOM.role.id, JSON.stringify(CUSTOM.role))).toEqual(CUSTOM);
   });
 
-  it("fails closed to operator on a dangling id or a stray value, never admin", () => {
+  it("fails closed to viewer on a dangling id or a stray value, never admin", () => {
     if (CUSTOM.kind !== "custom") throw new Error("unreachable");
-    expect(stored(CUSTOM.role.id, null)).toEqual(preset("operator"));
+    expect(stored(CUSTOM.role.id, null)).toEqual(preset("viewer"));
     expect(stored("srl_44444444-4444-4444-8444-444444444444", CUSTOM.role)).toEqual(
-      preset("operator"),
+      preset("viewer"),
     );
-    expect(stored("superuser")).toEqual(preset("operator"));
+    expect(stored("superuser")).toEqual(preset("viewer"));
     // …and the resolver adds the floor on top, as for any non-admin default.
     expect(resolveSpaceRole("member", personal, null, OWNER, stored(CUSTOM.role.id))).toEqual({
       kind: "preset",
-      preset: "operator",
+      preset: "viewer",
       plus: FLOOR,
     });
   });

@@ -454,7 +454,7 @@ export const organizationsPaths = {
       tags: ["Organizations"],
       summary: "Set a member's role in their personal space",
       description:
-        "Give one member or guest their own role in their personal space, overriding the organization's `personal_space_role` default (and, for a guest, the `operator` they hold otherwise). Body: exactly one of `preset_role` / `custom_role_id`; a `custom_role_id` must name a role of this organization (404 otherwise). Any role short of `admin` also grants `agents:delete`, `skills:delete`, `integrations:delete` and `schedules:delete` there. The personal space is provisioned if the member has none yet. Owners and admins always hold `admin` in their own personal space: targeting one is `409 redundant_space_role`. The override is dropped when the member is promoted to owner or admin and when they leave or are removed; a later demotion or re-invite does not restore it. A custom role named by an override cannot be deleted (`409 role_in_use`). Same guard as `changeMemberRole` (`members:change-role`).",
+        "Give one member or guest their own role in their personal space, overriding the organization's `personal_space_role` default (and, for a guest, the `operator` they hold otherwise when the default lets them author agents). Body: exactly one of `preset_role` / `custom_role_id`; a `custom_role_id` must name a role of this organization (404 otherwise). Any role short of `admin` also grants `agents:delete`, `skills:delete`, `integrations:delete` and `schedules:delete` there. The personal space is provisioned if the member has none yet. Owners and admins always hold `admin` in their own personal space: targeting one is `409 redundant_space_role`. The override is dropped on every change of the member's org role (promotion, demotion to guest, back to member) and when they leave or are removed; nothing restores it. A custom role named by an override cannot be deleted (`409 role_in_use`). Same guard as `changeMemberRole` (`members:change-role`).",
       parameters: [
         { name: "orgId", in: "path", required: true, schema: { type: "string" } },
         { name: "userId", in: "path", required: true, schema: { type: "string" } },
@@ -507,7 +507,7 @@ export const organizationsPaths = {
       tags: ["Organizations"],
       summary: "Return a member to the organization default in their personal space",
       description:
-        "Drop the member's own role in their personal space, so they hold the organization's `personal_space_role` again (`operator` for a guest). Idempotent: 204 whether or not an override was set. 404 when the user is not a member of the organization. Same guard as `changeMemberRole` (`members:change-role`).",
+        "Drop the member's own role in their personal space, so they hold the organization's `personal_space_role` again (for a guest, `operator` when that default lets them author agents). Idempotent: 204 whether or not an override was set. 404 when the user is not a member of the organization. Same guard as `changeMemberRole` (`members:change-role`).",
       parameters: [
         { name: "orgId", in: "path", required: true, schema: { type: "string" } },
         { name: "userId", in: "path", required: true, schema: { type: "string" } },

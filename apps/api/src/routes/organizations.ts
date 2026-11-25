@@ -257,7 +257,10 @@ async function buildOrgDetail(c: Context<AppEnv>, orgId: string) {
     readsMembers ? getOrgMembers(orgId) : Promise.resolve([]),
     permissions?.has("members:invite") ? getOrgInvitations(orgId) : Promise.resolve([]),
     readsMembers ? memberSpacesForCaller(c, orgId) : Promise.resolve(new Map()),
-    readsMembers ? listPersonalSpaceRoleOverrides(orgId) : Promise.resolve(new Map()),
+    // Only a caller who may change it sees a member's personal-space override; `null` otherwise.
+    permissions?.has("members:change-role")
+      ? listPersonalSpaceRoleOverrides(orgId)
+      : Promise.resolve(new Map()),
   ]);
   if (!org) {
     throw notFound("Organization not found");
@@ -621,7 +624,9 @@ async function memberDto(c: Context<AppEnv>, orgId: string, userId: string) {
   const [member, memberSpaces, overrides] = await Promise.all([
     getOrgMemberWithProfile(orgId, userId),
     memberSpacesForCaller(c, orgId),
-    listPersonalSpaceRoleOverrides(orgId, [userId]),
+    c.get("permissions")?.has("members:change-role")
+      ? listPersonalSpaceRoleOverrides(orgId, [userId])
+      : Promise.resolve(new Map<string, never>()),
   ]);
   if (!member) throw notFound("Member not found");
   return {

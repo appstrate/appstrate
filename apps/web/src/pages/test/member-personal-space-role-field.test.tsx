@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-/** The « Rôle dans son espace personnel » field of the user sheet, in its three states. */
+/** The « Rôle dans son espace personnel » field of the user sheet, for a caller who may change it. */
 
 import { describe, expect, it, spyOn } from "bun:test";
 import { QueryClient } from "@tanstack/react-query";
@@ -43,9 +43,9 @@ function renderField(m: OrgMember, permissions: string[]): string {
   );
   queryClient.setQueryData(["get", "/api/roles", { params: { header: { "X-Org-Id": ORG_ID } } }], {
     data: [
-      { id: null, kind: "preset", key: "admin", name: "admin" },
-      { id: null, kind: "preset", key: "operator", name: "operator" },
-      { id: CUSTOM_ID, kind: "custom", key: "triage", name: "Triage" },
+      { id: null, kind: "preset", key: "admin", name: "admin", permissions: ["agents:write"] },
+      { id: null, kind: "preset", key: "operator", name: "operator", permissions: ["agents:run"] },
+      { id: CUSTOM_ID, kind: "custom", key: "triage", name: "Triage", permissions: [] },
     ],
   });
   queryClient.setQueryData(
@@ -87,25 +87,44 @@ describe("the personal space role field of the user sheet", () => {
     expect(memberOverrideToSelectValue(null)).toBe(FOLLOW_ORG_DEFAULT);
   });
 
-  it("names the org default a member follows; a guest holds operator", () => {
+  it("names the org default a member or guest follows; a guest holds operator when it authors", () => {
     const options = [
       { value: "preset:operator", label: "Opérateur" },
       { value: "preset:admin", label: "Admin" },
+      { value: "preset:viewer", label: "Lecteur" },
       { value: `custom:${CUSTOM_ID}`, label: "Triage" },
     ];
     expect(followLabel(member("member", null), options, "operator", "?")).toBe("Opérateur");
     expect(followLabel(member("member", null), options, CUSTOM_ID, "?")).toBe("Triage");
     expect(followLabel(member("member", null), options, undefined, "?")).toBe("Admin");
-    expect(followLabel(member("guest", null), options, CUSTOM_ID, "?")).toBe("Opérateur");
+    expect(followLabel(member("guest", null), options, "viewer", "?")).toBe("Lecteur");
+    // Without the catalogue: the authoring presets only.
+    expect(followLabel(member("guest", null), options, CUSTOM_ID, "?")).toBe("Triage");
+    for (const stored of [undefined, "admin", "builder"]) {
+      expect(followLabel(member("guest", null), options, stored, "?")).toBe("Opérateur");
+    }
+    // With it: the stored role's permissions decide, custom roles included.
+    const catalog = (customPermissions: string[]) => [
+      { kind: "preset", key: "admin", id: null, permissions: ["agents:read", "agents:write"] },
+      { kind: "preset", key: "viewer", id: null, permissions: ["agents:read"] },
+      { kind: "custom", key: "triage", id: CUSTOM_ID, permissions: customPermissions },
+    ];
+    const guest = member("guest", null);
+    expect(followLabel(guest, options, CUSTOM_ID, "?", catalog(["agents:write"]))).toBe(
+      "Opérateur",
+    );
+    expect(followLabel(guest, options, CUSTOM_ID, "?", catalog(["agents:read"]))).toBe("Triage");
+    expect(followLabel(guest, options, "admin", "?", catalog([]))).toBe("Opérateur");
+    expect(followLabel(guest, options, "viewer", "?", catalog([]))).toBe("Lecteur");
     expect(followLabel(member("member", null), options, "srl_gone", "Rôle personnalisé")).toBe(
       "Rôle personnalisé",
     );
   });
 
-  it("is read-only without members:change-role", () => {
-    const html = renderField(member("member", null), []);
-    expect(selectOf(html)).toBeUndefined();
-    expect(html).toContain(settingsFr["userDetail.personalSpaceRoleFollowOrgBare"]);
+  it("renders nothing without members:change-role, whatever the target", () => {
+    for (const role of ["member", "guest", "admin", "owner"] as const) {
+      expect(renderField(member(role, null), [])).toBe("");
+    }
   });
 
   it("is a fixed « Administrateur » for an admin or owner target", () => {

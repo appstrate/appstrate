@@ -12,8 +12,11 @@
 import { and, eq, sql } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
 import { orgInvitations, organizations, spaceMembers, spaceRoles } from "@appstrate/db/schema";
-import { SPACE_ROLE_PRESETS, type SpaceRolePreset } from "@appstrate/core/permissions";
-import { isForeignKeyViolation } from "@appstrate/db/errors";
+import {
+  isSpaceRolePreset,
+  SPACE_ROLE_PRESETS,
+  type SpaceRolePreset,
+} from "@appstrate/core/permissions";
 import { isUniqueViolation, type DbOrTx } from "../lib/db-helpers.ts";
 import { conflict, invalidRequest, notFound } from "../lib/errors.ts";
 import { prefixedId } from "@appstrate/db/ids";
@@ -51,8 +54,6 @@ export interface SpaceRoleInput {
   description?: string | null;
   permissions: string[];
 }
-
-const PRESET_KEYS: ReadonlySet<string> = new Set<string>(SPACE_ROLE_PRESETS);
 
 type SpaceRoleRow = typeof spaceRoles.$inferSelect;
 
@@ -159,7 +160,7 @@ function normalizePermissions(permissions: string[]): string[] {
 
 /** The DB CHECK backs this; a constraint violation would be a 500 naming nothing readable. */
 function assertNotPresetKey(key: string): void {
-  if (!PRESET_KEYS.has(key)) return;
+  if (!isSpaceRolePreset(key)) return;
   throw invalidRequest(
     `'${key}' is a built-in preset and cannot be redefined. ` +
       `Reserved keys: ${SPACE_ROLE_PRESETS.join(", ")}.`,
@@ -316,47 +317,32 @@ function roleInUse(key: string, counts: RoleHolders): never {
 }
 
 /**
- * The loser of a delete/assign race gets the same 409 as the pre-count, not a
- * 500 naming a constraint — the same shape {@link asKeyConflict} gives the
- * create/update races. `space_members.custom_role_id` is ON DELETE RESTRICT,
- * so an assignment committing between the count and the delete fires the
- * referential-integrity violation; recount to name who now holds the role.
- */
-async function asRoleInUse(err: unknown, orgId: string, id: string, key: string): Promise<never> {
-  if (!isForeignKeyViolation(err)) throw err;
-  roleInUse(key, await countRoleHolders(orgId, id));
-}
-
-/**
  * Holders are counted rather than left to `ON DELETE RESTRICT`, whose error
  * names neither the role nor how many people would lose access. The role row is
  * locked `FOR UPDATE` before the count: the org-settings write that names a custom
  * role as the personal-space default share-locks the same row (`FOR KEY SHARE`,
- * `updateOrgSettings`), so the two serialize — the setting has no FK to hold it.
- * {@link asRoleInUse} still turns an FK violation into the same 409.
+ * `updateOrgSettings`, `setPersonalSpaceRoleOverride`), so the two serialize — the setting
+ * has no FK to hold it. A `space_members` insert naming the role takes the same KEY SHARE lock
+ * through its FK check, so it either commits before the count (and is counted) or fails its
+ * own FK after the delete: the delete never meets an FK violation. A pending invitation names
+ * the role in jsonb with no lock, so one saved concurrently can still slip past the count;
+ * acceptance then skips the assignment as a role that no longer exists.
  */
 export async function deleteSpaceRole(orgId: string, id: string): Promise<SpaceRoleWire> {
-  let key: string | undefined;
-  return db
-    .transaction(async (tx) => {
-      const [row] = await tx
-        .select()
-        .from(spaceRoles)
-        .where(and(eq(spaceRoles.id, id), eq(spaceRoles.orgId, orgId)))
-        .for("update");
-      if (!row) throw notFound(`Role '${id}' not found in this organization`);
-      key = row.key;
+  return db.transaction(async (tx) => {
+    const [row] = await tx
+      .select()
+      .from(spaceRoles)
+      .where(and(eq(spaceRoles.id, id), eq(spaceRoles.orgId, orgId)))
+      .for("update");
+    if (!row) throw notFound(`Role '${id}' not found in this organization`);
 
-      const counts = await countRoleHolders(orgId, id, tx);
-      if (counts.memberCount > 0 || counts.pendingInvitationCount > 0 || counts.orgDefault) {
-        roleInUse(row.key, counts);
-      }
+    const counts = await countRoleHolders(orgId, id, tx);
+    if (counts.memberCount > 0 || counts.pendingInvitationCount > 0 || counts.orgDefault) {
+      roleInUse(row.key, counts);
+    }
 
-      await tx.delete(spaceRoles).where(and(eq(spaceRoles.id, id), eq(spaceRoles.orgId, orgId)));
-      return toWire(row);
-    })
-    .catch((err: unknown) =>
-      // Outside the transaction: an FK violation aborts it, so the recount reads afresh.
-      key === undefined ? Promise.reject(err) : asRoleInUse(err, orgId, id, key),
-    );
+    await tx.delete(spaceRoles).where(and(eq(spaceRoles.id, id), eq(spaceRoles.orgId, orgId)));
+    return toWire(row);
+  });
 }

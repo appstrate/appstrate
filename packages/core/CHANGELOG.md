@@ -11,7 +11,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - `studio:read`, a space-level core permission (`CoreResources.studio`): it opens the Studio's
   screens in the dashboard and gates no API route.
-- `personalSpaceRoleSchema` and `SPACE_ROLE_ID_REGEX` in `@appstrate/core/permissions`.
+- `personalSpaceRoleSchema`, `SPACE_ROLE_ID_REGEX` and `isSpaceRolePreset` in `@appstrate/core/permissions`.
 
 ### Changed
 

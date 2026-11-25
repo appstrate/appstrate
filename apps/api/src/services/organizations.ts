@@ -208,7 +208,7 @@ export async function updateOrganization(
 import {
   orgSettingsReadSchema,
   orgSettingsSchema as orgSettingsBaseSchema,
-  SPACE_ROLE_PRESETS,
+  isSpaceRolePreset,
 } from "@appstrate/core/permissions";
 
 /**
@@ -296,8 +296,7 @@ export async function updateOrgSettings(
   updates: Partial<OrgSettings>,
 ): Promise<OrgSettings> {
   const customRoleId =
-    updates.personal_space_role !== undefined &&
-    !(SPACE_ROLE_PRESETS as readonly string[]).includes(updates.personal_space_role)
+    updates.personal_space_role !== undefined && !isSpaceRolePreset(updates.personal_space_role)
       ? updates.personal_space_role
       : null;
   const row = await db.transaction(async (tx) => {
@@ -852,6 +851,12 @@ export async function updateMemberRole(
           extra: [eq(organizationMembers.userId, targetUserId)],
         }),
       );
+    // Any effective role change drops the member's own role in their personal space: it was
+    // set for the role they held (a `builder` override must not survive a demotion to guest),
+    // and an owner or admin never reads it. Deleted FIRST, so the promotion's `revoked` below
+    // never lists the personal space — its id is hidden from admins (RBAC spec §3.6), and the
+    // override is not a space assignment the audit reports.
+    if (role !== target.role) await deletePersonalSpaceOverride(tx, orgId, targetUserId);
     // An admin/owner's explicit space rows are unreadable (the org role answers
     // first) and would silently restore on a later demotion (RBAC spec §3.2).
     const revoked =
@@ -885,6 +890,33 @@ type PersonalSpaceRoleColumns = {
 };
 
 /**
+ * Delete `userId`'s own row on their personal spaces of the org (the override of the org's
+ * `personal_space_role`), live or orphaned. Returns the deleted role, `null` when there was none.
+ */
+async function deletePersonalSpaceOverride(
+  tx: Pick<typeof db, "select" | "delete">,
+  orgId: string,
+  userId: string,
+): Promise<PersonalSpaceRoleColumns | null> {
+  const deleted = await tx
+    .delete(spaceMembers)
+    .where(
+      and(
+        eq(spaceMembers.userId, userId),
+        inArray(
+          spaceMembers.spaceId,
+          tx
+            .select({ id: spaces.id })
+            .from(spaces)
+            .where(and(eq(spaces.orgId, orgId), eq(spaces.ownerUserId, userId))),
+        ),
+      ),
+    )
+    .returning({ presetRole: spaceMembers.presetRole, customRoleId: spaceMembers.customRoleId });
+  return deleted[0] ?? null;
+}
+
+/**
  * Set (`assignment`) or clear (`null`) `targetUserId`'s own role in their personal space —
  * the one `space_members` row a personal space holds, read by `resolveSpaceRole` ahead of the
  * org's `personal_space_role` (RBAC spec §3.6). The only door writing that row: the generic
@@ -913,25 +945,7 @@ export async function setPersonalSpaceRoleOverride(
     if (assignment === null) {
       // Idempotent: an owner or admin holds no row (a promotion deletes it), so there is
       // nothing to clear and nothing to refuse.
-      const deleted = await tx
-        .delete(spaceMembers)
-        .where(
-          and(
-            eq(spaceMembers.userId, targetUserId),
-            inArray(
-              spaceMembers.spaceId,
-              tx
-                .select({ id: spaces.id })
-                .from(spaces)
-                .where(and(eq(spaces.orgId, orgId), eq(spaces.ownerUserId, targetUserId))),
-            ),
-          ),
-        )
-        .returning({
-          presetRole: spaceMembers.presetRole,
-          customRoleId: spaceMembers.customRoleId,
-        });
-      return { previous: deleted[0] ?? null };
+      return { previous: await deletePersonalSpaceOverride(tx, orgId, targetUserId) };
     }
 
     if (administers) {
@@ -948,7 +962,9 @@ export async function setPersonalSpaceRoleOverride(
         .select({ id: spaceRoles.id })
         .from(spaceRoles)
         .where(and(eq(spaceRoles.id, assignment.custom_role_id), eq(spaceRoles.orgId, orgId)))
-        .limit(1);
+        .for("key share");
+      // Held to commit: `deleteSpaceRole` locks the row `FOR UPDATE` before counting holders,
+      // so a concurrent delete either waits and counts this row (409) or wins first (404 here).
       if (!role) throw notFound("Space role not found");
       values = { presetRole: null, customRoleId: role.id };
     }

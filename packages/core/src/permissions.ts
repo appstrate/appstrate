@@ -476,6 +476,13 @@ export const SPACE_ROLE_PRESETS = ["admin", "builder", "operator", "runner", "vi
 /** Space-role preset union — `"admin" | "builder" | "operator" | "runner" | "viewer"`. */
 export type SpaceRolePreset = (typeof SPACE_ROLE_PRESETS)[number];
 
+const SPACE_ROLE_PRESET_SET: ReadonlySet<string> = new Set<string>(SPACE_ROLE_PRESETS);
+
+/** Whether `value` is a preset key — the one test, wherever a stored role may also be a custom id. */
+export function isSpaceRolePreset(value: unknown): value is SpaceRolePreset {
+  return typeof value === "string" && SPACE_ROLE_PRESET_SET.has(value);
+}
+
 /** Org roles holding every org-level permission in every space, without a `space_members` row. */
 export const ORG_ROLES_WITH_FULL_ACCESS = ["owner", "admin"] as const;
 
@@ -568,7 +575,8 @@ export const orgSettingsSchema = z.object({
   personal_model_credentials: z.boolean().optional(),
   // Absent = `admin`. The role an org member holds by default in their own personal space:
   // a preset key, or the id of one of the org's custom space roles (whether it IS one of
-  // them is the platform's check, at write). Below `admin` it carries a delete floor.
+  // them is the platform's check, at write). Below `admin` it carries a delete floor; a guest
+  // takes it too, unless it lets them author agents (`agents:write`): then `operator`.
   personal_space_role: personalSpaceRoleSchema.optional(),
 });
 

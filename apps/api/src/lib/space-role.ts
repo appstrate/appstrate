@@ -13,7 +13,7 @@ import { and, eq, sql } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
 import { organizations, spaceMembers, spaceRoles, spaces } from "@appstrate/db/schema";
 import {
-  SPACE_ROLE_PRESETS,
+  isSpaceRolePreset,
   type OrgRole,
   type SpaceRolePreset,
   type SpaceVisibility,
@@ -46,8 +46,9 @@ export type SpaceRoleRef =
 export const ADMIN_ROLE_REF: SpaceRoleRef = { kind: "preset", preset: "admin" };
 
 /**
- * Granted on top of any role short of `admin` a member holds in their own personal space, so
- * nothing they already own there becomes impossible to stop or remove (RBAC spec §3.6).
+ * Granted on top of the role short of `admin` an owner holds in their own personal space through
+ * an override or the org default, so nothing they already own there becomes impossible to stop
+ * or remove (RBAC spec §3.6). A guest capped to `operator` holds none of it.
  */
 export const PERSONAL_CAP_DELETE_PERMISSIONS: readonly Permission[] = [
   "agents:delete",
@@ -80,8 +81,6 @@ interface PersonalSpaceDefaultColumns {
   personalSpaceCustomRole: unknown;
 }
 
-const PRESET_KEYS: ReadonlySet<string> = new Set<string>(SPACE_ROLE_PRESETS);
-
 function toCustomSpaceRole(value: unknown): CustomSpaceRole | null {
   const parsed = typeof value === "string" ? (JSON.parse(value) as unknown) : value;
   if (parsed === null || typeof parsed !== "object") return null;
@@ -94,15 +93,15 @@ function toCustomSpaceRole(value: unknown): CustomSpaceRole | null {
 /**
  * The org default for a member's own personal space, before the floor. Absent = `admin`. A value
  * naming no role of the org (a custom role deleted in a race, a stray stored string) is
- * fail-closed: `operator`, never `admin`.
+ * fail-closed: `viewer`, the narrowest preset, never `admin`.
  */
 export function personalSpaceDefaultRef(row: PersonalSpaceDefaultColumns): SpaceRoleRef {
   const stored = row.storedPersonalSpaceRole;
   if (stored === null) return ADMIN_ROLE_REF;
-  if (PRESET_KEYS.has(stored)) return { kind: "preset", preset: stored as SpaceRolePreset };
+  if (isSpaceRolePreset(stored)) return { kind: "preset", preset: stored };
   const custom = toCustomSpaceRole(row.personalSpaceCustomRole);
   if (custom && custom.id === stored) return { kind: "custom", role: custom };
-  return { kind: "preset", preset: "operator" };
+  return { kind: "preset", preset: "viewer" };
 }
 
 export interface SpaceMemberRow {
@@ -139,16 +138,21 @@ export function resolveSpaceRole(
   //
   // The owner: an org owner or admin always holds `admin`. Anyone else holds, in
   // order, their own explicit row on the space (the per-member override, written
-  // only by `PUT /api/orgs/{orgId}/members/{userId}/personal-space-role`), else
-  // `operator` for a GUEST (an external identity invited to USE one thing, not to
-  // author agents on the organization's LLM budget), else the org default. Any of
-  // those short of `admin` carries the delete floor, so the owner can still stop
-  // and remove what they own.
+  // only by `PUT /api/orgs/{orgId}/members/{userId}/personal-space-role`), else the
+  // org default. A GUEST (an external identity invited to USE one thing, not to
+  // author agents on the organization's LLM budget) takes the default too, unless
+  // it lets them author agents (`agents:write`: the `admin` and `builder` presets,
+  // or a custom role granting it), in which case they hold plain `operator`; a
+  // narrower default applies to them as to a member. The override, and the default as a
+  // member or guest takes it, carry the delete floor short of `admin`, so the
+  // owner can still stop and remove what they own; the guest's `operator` does not.
   if (space.ownerUserId !== null) {
     if (space.ownerUserId !== callerId) return null;
     if (orgRole === "owner" || orgRole === "admin") return ADMIN_ROLE_REF;
     if (memberRow) return withPersonalSpaceFloor(memberRow.ref);
-    if (orgRole === "guest") return { kind: "preset", preset: "operator" };
+    if (orgRole === "guest" && spacePermissions(personalSpaceDefault).has("agents:write")) {
+      return { kind: "preset", preset: "operator" };
+    }
     return withPersonalSpaceFloor(personalSpaceDefault);
   }
   // By org role, which is why an explicit row for them is refused at write.

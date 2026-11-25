@@ -18,14 +18,16 @@ type OrgMember = components["schemas"]["OrgMember"];
 
 /**
  * « Rôle dans son espace personnel » of the user sheet: the member's own override, or the
- * organization's default. Owners and admins always administer theirs, so they get a fixed value
- * and no control; everyone else's is a select for `members:change-role`, a plain line otherwise.
+ * organization's default. Shown only to a caller holding `members:change-role` — the API returns
+ * the override to nobody else. Owners and admins always administer theirs, so they get a fixed
+ * value and no control; everyone else's is a select.
  */
 export function PersonalSpaceRoleField({ member }: { member: OrgMember }) {
   const { t } = useTranslation("settings");
   const { can } = usePermissions();
   const label = t("userDetail.personalSpaceRole");
 
+  if (!can("members:change-role")) return null;
   if (member.role === "owner" || member.role === "admin") {
     return (
       <SettingRow
@@ -37,32 +39,46 @@ export function PersonalSpaceRoleField({ member }: { member: OrgMember }) {
       </SettingRow>
     );
   }
-  return can("members:change-role") ? (
-    <EditableField member={member} label={label} />
-  ) : (
-    <ReadOnlyField member={member} label={label} />
-  );
+  return <EditableField member={member} label={label} />;
 }
 
-/** What « selon l'organisation » resolves to: the org setting, except a guest, who holds `operator`. */
+/** The role catalogue entries `followLabel` reads (`GET /api/roles`), permissions included. */
+type RoleCatalogEntry = { kind: string; key: string; id: string | null; permissions: string[] };
+
+/**
+ * What « selon l'organisation » resolves to: the org setting — for a guest too, unless it lets
+ * them author agents (`agents:write`), in which case a guest holds `operator`. Judged on the
+ * catalogue entry's permissions; before the catalogue answers, on the authoring presets.
+ */
 export function followLabel(
   member: OrgMember,
   options: SpaceRoleOption[],
   stored: unknown,
   unknown: string,
+  roles?: readonly RoleCatalogEntry[],
 ): string {
-  const value =
-    member.role === "guest"
-      ? spaceRoleValue({ preset_role: "operator" })
-      : storedRoleToSelectValue(stored);
-  return options.find((option) => option.value === value)?.label ?? unknown;
+  const value = storedRoleToSelectValue(stored);
+  const entry = roles?.find(
+    (role) =>
+      spaceRoleValue({
+        preset_role: role.kind === "preset" ? role.key : null,
+        custom_role_id: role.id,
+      }) === value,
+  );
+  const authors = entry
+    ? entry.permissions.includes("agents:write")
+    : value === spaceRoleValue({ preset_role: "admin" }) ||
+      value === spaceRoleValue({ preset_role: "builder" });
+  const shown =
+    member.role === "guest" && authors ? spaceRoleValue({ preset_role: "operator" }) : value;
+  return options.find((option) => option.value === shown)?.label ?? unknown;
 }
 
 function EditableField({ member, label }: { member: OrgMember; label: string }) {
   const { t } = useTranslation("settings");
   const { currentOrg } = useOrg();
   const { data: orgSettings, isLoading } = useOrgSettings();
-  const { options, isLoading: rolesLoading } = useSpaceRoleOptions();
+  const { options, roles, isLoading: rolesLoading } = useSpaceRoleOptions();
   const write = useSetMemberPersonalSpaceRole();
   if (!currentOrg) return null;
 
@@ -75,6 +91,7 @@ function EditableField({ member, label }: { member: OrgMember; label: string }) 
           options,
           orgSettings?.personal_space_role,
           t("orgSettings.personalSpaceRoleUnknown"),
+          roles,
         ),
       }),
     },
@@ -96,23 +113,6 @@ function EditableField({ member, label }: { member: OrgMember; label: string }) 
           onValueChange={(value) => write.apply(member.userId, value)}
         />
       )}
-    </SettingRow>
-  );
-}
-
-function ReadOnlyField({ member, label }: { member: OrgMember; label: string }) {
-  const { t } = useTranslation("settings");
-  const { options } = useSpaceRoleOptions();
-  const unknown = t("orgSettings.personalSpaceRoleUnknown");
-  const override = member.personal_space_role;
-  return (
-    <SettingRow label={label} className="pb-0">
-      <span className="text-sm">
-        {override
-          ? (options.find((o) => o.value === memberOverrideToSelectValue(override))?.label ??
-            unknown)
-          : t("userDetail.personalSpaceRoleFollowOrgBare")}
-      </span>
     </SettingRow>
   );
 }

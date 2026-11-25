@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
+import { isSpaceRolePreset } from "@appstrate/core/permissions";
 import type { components } from "../api/client";
 import { spaceRoleAssignment, spaceRoleValue, type SpaceRolePreset } from "../hooks/use-roles";
 
@@ -14,9 +15,9 @@ const DEFAULT_STORED_ROLE = "admin";
 /** A stored org setting is a preset key or a custom role id (`srl_…`); a select carries `preset:<key>` / `custom:<id>`. */
 export function storedRoleToSelectValue(stored: unknown): string {
   const key = typeof stored === "string" && stored ? stored : DEFAULT_STORED_ROLE;
-  return key.startsWith("srl_")
-    ? spaceRoleValue({ custom_role_id: key })
-    : spaceRoleValue({ preset_role: key });
+  return isSpaceRolePreset(key)
+    ? spaceRoleValue({ preset_role: key })
+    : spaceRoleValue({ custom_role_id: key });
 }
 
 /** The org setting's PATCH body for a picked select value. */
