@@ -17,8 +17,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   bearer resolved inline reached routes without an organization slug or name; the platform now
   reads both from the organization `orgId` names, for every inline resolution.
 
-## [18.0.0] — 2026-11-24
-
 ### Added
 
 - **`RunLimits`, `ModuleHooks.runLimits`** (`@appstrate/core/module`): a first-match hook a module
@@ -32,6 +30,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   them, ordered by `(completedAt, id)` with an exclusive `after` keyset. A metering module settles a
   run's compute time from it without a SQL join into `runs`. A consumer must re-read a bounded
   window below its watermark: `completedAt` is stamped before the closing transaction commits.
+
+## [18.0.0] — 2026-11-24
+
+### Added
+
 - `@appstrate/core/chat-message` exports `historicalChatMessageSchema` for persisted messages and
   `chatThreadMessagesSchema` for submitted threads. The chat module and upgrade check share these
   validators. `AGENT_PROMPT_PART_TYPE` and `agentPromptDataSchema` describe an agent launch part,
