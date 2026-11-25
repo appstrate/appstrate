@@ -309,7 +309,7 @@ export function ChatConversationList({
           {isLoading &&
             Array.from({ length: 5 }, (_, i) => (
               <SidebarMenuItem key={i}>
-                <ConversationRowSkeleton />
+                <ConversationRowSkeleton oneLine={canWrite} />
               </SidebarMenuItem>
             ))}
           {searching
@@ -449,45 +449,47 @@ function ConversationRow({
         // Room for the fixed-width right slot below, which is absolutely
         // positioned and would otherwise sit on top of a long title. The host's stacked space tiles
         // ring themselves in `--tile-ring`: the row's background in each of its states.
+        // A writer's row is one line (the title, then the tiles): a thumb's 48px on touch, Studio's
+        // 32px rows under a mouse. A reader's keeps the spaces' line, so the 48px of two lines.
         className={cn(
-          canWrite ? "desktop-pointer:pr-16 pr-[4.5rem]" : "desktop-pointer:pr-16 pr-8",
+          canWrite
+            ? "desktop-pointer:pr-16 desktop-pointer:h-8 pr-[4.5rem]"
+            : "desktop-pointer:pr-16 pr-8",
           "[--tile-ring:var(--sidebar)] hover:[--tile-ring:var(--sidebar-accent)] active:[--tile-ring:var(--sidebar-accent)] data-[active=true]:[--tile-ring:var(--sidebar-accent)]",
         )}
       >
         <span
           className={cn(
-            "flex min-w-0 flex-1 flex-col gap-0.5",
-            canWrite && "max-md:flex-row max-md:items-center max-md:gap-2",
+            "flex min-w-0 flex-1",
+            canWrite ? "flex-row items-center gap-2" : "flex-col gap-0.5",
           )}
         >
           <span
             className={cn(
-              "block truncate text-left leading-4 max-md:min-w-0 max-md:flex-1 max-md:text-base max-md:leading-5",
+              "block min-w-0 truncate text-left leading-4 max-md:text-base max-md:leading-5",
+              canWrite && "flex-1",
               unread && "font-semibold",
             )}
           >
             {session.title ?? t("threads.new")}
           </span>
-          {/* The spaces are named on a line of their own: from `md` up, and on a phone for a reader,
-              whose row has no « … » panel to name them in... */}
-          <span
-            data-testid="chat-session-spaces"
-            className={cn(
-              "text-sidebar-foreground/70 flex h-4 min-w-0 items-center",
-              canWrite && "max-md:hidden",
-              NOTE_TEXT_CLASS,
-            )}
-          >
-            {sessionSpaces(session, renderSpaces, t)}
-          </span>
-          {/* ...and on a phone a writer's row closes the title's line with their tiles (the names
-              are in the « … » panel). */}
-          {canWrite && session.space_ids.length > 0 && (
+          {/* A writer's row closes the title's line with their tiles, on every format: the names
+              are in the « … » menu. A reader has no « … », so the names take a line of their own. */}
+          {canWrite ? (
+            session.space_ids.length > 0 && (
+              <span data-testid="chat-session-space-tiles" className="flex shrink-0 items-center">
+                {renderSpaces(session.space_ids, { tilesOnly: true })}
+              </span>
+            )
+          ) : (
             <span
-              data-testid="chat-session-space-tiles"
-              className="hidden shrink-0 items-center max-md:flex"
+              data-testid="chat-session-spaces"
+              className={cn(
+                "text-sidebar-foreground/70 flex h-4 min-w-0 items-center",
+                NOTE_TEXT_CLASS,
+              )}
             >
-              {renderSpaces(session.space_ids, { tilesOnly: true })}
+              {sessionSpaces(session, renderSpaces, t)}
             </span>
           )}
         </span>
@@ -545,7 +547,7 @@ function ConversationRow({
               className="min-w-40"
               sheetTitle={session.title ?? t("threads.new")}
             >
-              {/* The spaces it reaches: a phone's row shows their tiles alone. */}
+              {/* The spaces it reaches: the row shows their tiles alone. */}
               <DropdownMenuLabel
                 data-testid="chat-menu-spaces"
                 className={`text-muted-foreground flex min-w-0 items-center font-normal [--tile-ring:var(--popover)] max-md:[--tile-ring:var(--background)] ${NOTE_TEXT_CLASS}`}

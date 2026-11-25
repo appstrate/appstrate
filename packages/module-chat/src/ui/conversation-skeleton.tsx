@@ -113,17 +113,20 @@ export function ComposerSkeleton({
 }
 
 /**
- * A row's place while the list loads, with the space line's: the same height and the same two
- * 16px lines as `ConversationRow`, so the list does not shift on load.
+ * A row's place while the list loads, the same height and lines as `ConversationRow`, so the list
+ * does not shift on load: a writer's one line (title, tiles), a reader's two (title, spaces).
  */
-export function ConversationRowSkeleton() {
+export function ConversationRowSkeleton({ oneLine }: { oneLine: boolean }) {
   return (
     <div
       data-sidebar="menu-skeleton"
-      className="flex h-12 flex-col justify-center gap-0.5 rounded-md px-2"
+      className={cn(
+        "flex h-12 justify-center gap-0.5 rounded-md px-2",
+        oneLine ? "desktop-pointer:h-8 flex-row items-center gap-2" : "flex-col",
+      )}
     >
       <Skeleton className="h-4 w-3/5" />
-      <Skeleton className="h-4 w-2/5" />
+      <Skeleton className={oneLine ? "ml-auto size-4 shrink-0 rounded-sm" : "h-4 w-2/5"} />
     </div>
   );
 }
