@@ -5,6 +5,7 @@
  * whose definition no approval covers, and the bodies of the writes that settle them.
  */
 
+import { asRecord } from "@appstrate/core/safe-json";
 import type { paths } from "../api/client";
 
 export type ToolPolicy =
@@ -109,4 +110,23 @@ export function blockableTools(
 ): string[] {
   const blocked = new Set(blocks.map((block) => block.tool_name));
   return catalog.map((tool) => tool.name).filter((name) => !blocked.has(name));
+}
+
+/** The catalog's tools the integration does not declare yet (listed or approved only). */
+export function declarableTools(catalog: readonly { name: string; origin?: string }[]): string[] {
+  return catalog.filter((tool) => tool.origin !== "declared").map((tool) => tool.name);
+}
+
+/** The manifest with an empty `tools_policy` entry appended per name not declared yet. */
+export function declareTools(
+  manifest: Record<string, unknown>,
+  names: readonly string[],
+): Record<string, unknown> {
+  const policy = asRecord(manifest.tools_policy);
+  const added = names.filter((name) => !Object.prototype.hasOwnProperty.call(policy, name));
+  if (added.length === 0) return manifest;
+  return {
+    ...manifest,
+    tools_policy: { ...policy, ...Object.fromEntries(added.map((name) => [name, {}])) },
+  };
 }

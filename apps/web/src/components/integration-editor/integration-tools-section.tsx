@@ -41,8 +41,6 @@ import { PageActionsMenu } from "../page-actions-menu";
 import { PackageToolCatalog, type PackageTool } from "../package-detail/package-tool-catalog";
 import { TableRowActions } from "../table-row-actions";
 import { RequiredScopesField } from "./required-scopes-field";
-import type { ServerSyncBlock } from "../../lib/integration-server-sync";
-import { SyncFromServer, type ServerSyncResult } from "./sync-from-server";
 import {
   getAllowUndeclaredTools,
   getAuths,
@@ -62,7 +60,6 @@ export function IntegrationToolsSection({
   allowUndeclaredTools,
   snapshot,
   edit,
-  sync,
 }: {
   /** The saved package's effective tool catalog (`tool_catalog`). */
   tools: CatalogTool[];
@@ -72,14 +69,6 @@ export function IntegrationToolsSection({
   allowUndeclaredTools?: boolean;
   /** The draft manifest, when the reader may change the package. */
   edit?: { manifest: Record<string, unknown>; onChange: (next: Record<string, unknown>) => void };
-  /** Offered for a remote integration; `blockedBy` disables it with the reason. */
-  sync?: {
-    run: (connectionId?: string) => void;
-    isPending: boolean;
-    error: unknown;
-    result: ServerSyncResult | null;
-    blockedBy: ServerSyncBlock | null;
-  };
 }) {
   const { t } = useTranslation(["agents", "settings", "common"]);
   // The tool being edited, or "new" for a tool added by name.
@@ -109,7 +98,6 @@ export function IntegrationToolsSection({
 
   return (
     <div className="flex flex-col gap-4">
-      {edit && sync && <SyncFromServer {...sync} />}
       {snapshot && <ToolSnapshotSummary snapshot={snapshot} tools={entries} />}
       {edit ? (
         <AllowUndeclaredToggle manifest={edit.manifest} onChange={edit.onChange} />

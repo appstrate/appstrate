@@ -16,7 +16,10 @@ import { useTabWithHash } from "../hooks/use-tab-with-hash";
 import { IntegrationOverview } from "../components/package-detail/integration-overview";
 import { IntegrationFunctioning } from "../components/package-detail/integration-structure";
 import { IntegrationToolsSection } from "../components/integration-editor/integration-tools-section";
-import { IntegrationToolPolicySection } from "../components/integration-editor/integration-tool-policy-section";
+import {
+  IntegrationToolPolicySection,
+  type ToolDeclaration,
+} from "../components/integration-editor/integration-tool-policy-section";
 
 const INTEGRATION_TABS = ["overview", "connections", "settings"] as const;
 import { useTranslation } from "react-i18next";
@@ -40,7 +43,6 @@ import { authMethodLabel } from "../lib/integration-presentation";
 import { AvailabilityBadge } from "../components/package-detail/availability-card";
 import { Button } from "@appstrate/ui/components/button";
 import { Alert, AlertDescription, AlertTitle } from "@appstrate/ui/components/alert";
-import { serverSyncAvailability } from "../lib/integration-server-sync";
 import { needsWizardFinish, wizardResumePath } from "../lib/integration-wizard";
 import { Badge } from "@appstrate/ui/components/badge";
 import { Skeleton } from "@appstrate/ui/components/skeleton";
@@ -71,13 +73,11 @@ import { ConfigurationSpace } from "../components/configuration-space";
 import { RoleLimitNotice } from "../components/role-limit-notice";
 import { usePermissions, useHomeSpaceName } from "../hooks/use-permissions";
 import { toolSnapshotInfo } from "../lib/integration-tool-snapshot";
-import { readIntegrationSource } from "../lib/package-manifest";
 import {
   INTEGRATION_DEFINITION_SECTIONS,
   isIntegrationSpaceSection,
   resolveIntegrationSettingsSection,
 } from "../lib/integration-settings-sections";
-import { isUnauthenticatedIntegration } from "@appstrate/core/integration";
 import { usePackageDetail, usePackageDownload, type Versioned } from "../hooks/use-packages";
 import { useIntegrationDetail, useIntegrationDetailsIn } from "../hooks/use-integrations";
 import { useCanReach } from "../hooks/use-can-reach";
@@ -171,42 +171,48 @@ export function IntegrationSettings({
     if (clientTarget !== null && !hasClientTable) closeClient();
   }, [clientTarget, hasClientTable, closeClient]);
 
-  // The sync calls the server of the DRAFT, published or not: the copy this editor writes.
-  const draftSource = definition
-    ? readIntegrationSource((definition.manifest as Record<string, unknown>).source)
-    : null;
   const toolSnapshot = toolSnapshotInfo(packageId, detail);
   // Only a remote integration lists tools a space can review. The review is one space's: it
   // follows the sections set in a space (`isIntegrationSpaceSection`) in « Tous les espaces ».
+  // An author of the draft reads it too, to declare the listed tools.
   const toolPolicy =
-    toolSnapshot.remote && canConfigure ? (
-      <div className="flex flex-col gap-4" data-testid="integration-tool-policy-area">
-        {overview && (
-          <ConfigurationSpace
-            label={t("detail.configuration.spaceLabel", { ns: "agents" })}
-            choiceLabel={t("detail.configuration.spaceChoice", { ns: "agents" })}
-            spaceIds={spaceIds}
-            enter={configureIn}
-          />
-        )}
-        {!fromWorkingSpace ? null : !detail.active ? (
-          <ActivationHint />
-        ) : overview && !can("integrations:configure") ? (
-          workingSpace && (
-            <RoleLimitNotice>
-              {t("integration.config.roleLimitIn", { space: workingSpace })}
-            </RoleLimitNotice>
-          )
-        ) : (
-          <IntegrationToolPolicySection packageId={packageId} tools={detail.tool_catalog ?? []} />
-        )}
-      </div>
-    ) : null;
-  const syncAvailability = serverSyncAvailability(draftSource, {
-    unauthenticated: isUnauthenticatedIntegration(definition?.manifest ?? {}),
-    mayProxy: can("credential-proxy:call-own"),
-    hasConnection: detail.auths.some((auth) => auth.connections.length > 0),
-  });
+    toolSnapshot.remote && (canConfigure || !!definition)
+      ? (declaration?: ToolDeclaration) => {
+          // The decisions are the working space's; declaring is the integration's, whatever the space.
+          const spaceLine = canConfigure && fromWorkingSpace;
+          const review = spaceLine && detail.active && can("integrations:configure");
+          return (
+            <div className="flex flex-col gap-4" data-testid="integration-tool-policy-area">
+              {canConfigure && overview && (
+                <ConfigurationSpace
+                  label={t("detail.configuration.spaceLabel", { ns: "agents" })}
+                  choiceLabel={t("detail.configuration.spaceChoice", { ns: "agents" })}
+                  spaceIds={spaceIds}
+                  enter={configureIn}
+                />
+              )}
+              {spaceLine &&
+                (!detail.active ? (
+                  <ActivationHint />
+                ) : (
+                  overview &&
+                  !can("integrations:configure") &&
+                  workingSpace && (
+                    <RoleLimitNotice>
+                      {t("integration.config.roleLimitIn", { space: workingSpace })}
+                    </RoleLimitNotice>
+                  )
+                ))}
+              <IntegrationToolPolicySection
+                packageId={packageId}
+                tools={detail.tool_catalog ?? []}
+                review={review}
+                declaration={declaration}
+              />
+            </div>
+          );
+        }
+      : undefined;
   const resolve = (requested: string | null): IntegrationSettingsSection =>
     resolveIntegrationSettingsSection(requested, {
       canConfigure,
@@ -283,7 +289,6 @@ export function IntegrationSettings({
               section={definitionSection}
               toolCatalog={detail.tool_catalog ?? []}
               snapshot={toolSnapshot}
-              sync={syncAvailability}
               toolPolicy={toolPolicy}
             />
           </Suspense>
@@ -313,7 +318,7 @@ export function IntegrationSettings({
               allowUndeclaredTools={detail.allow_undeclared_tools}
               snapshot={toolSnapshot}
             />
-            {toolPolicy && <div className="mt-8">{toolPolicy}</div>}
+            {toolPolicy && <div className="mt-8">{toolPolicy()}</div>}
           </div>
         ) : isIntegrationSpaceSection(active) ? (
           // In « Tous les espaces » the space it is set in comes first.

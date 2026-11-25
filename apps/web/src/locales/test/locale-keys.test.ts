@@ -259,7 +259,6 @@ const DYNAMIC_KEY_PREFIXES = [
   "settings:creation.title.", // components/creation-handoff-modal.tsx — one per package type
   "files:type.", // components/document-columns.tsx, components/file-artifact.tsx — t(`type.${mimeKind(…)}`)
   "agents:integrationEditor.discover.warning.", // components/integration-editor/discovery-warnings.tsx — one key per warning code
-  "agents:integrationEditor.sync.blocked.", // components/integration-editor/sync-from-server.tsx — one reason per ServerSyncBlock
   "integration.admin.creation.", // components/integration-detail/access-rules-section.tsx
   "integration.admin.orgDefault.connection.", // components/integration-detail/org-default-section.tsx — forced / default
   "integration.admin.usage.", // components/integration-detail/org-default-section.tsx — t(`integration.admin.usage.${mode}Help`)

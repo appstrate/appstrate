@@ -2,21 +2,29 @@
 
 import { describe, expect, it } from "bun:test";
 import { i18nReady } from "../../../i18n.ts";
+import { ToolPolicySkeleton } from "../../loading-skeletons.tsx";
 import { render } from "../../../test/render.tsx";
 import type { ToolPolicy } from "../../../lib/integration-tool-policy.ts";
 import {
   IntegrationToolPolicySection,
   ToolPolicyView,
+  type ToolDeclaration,
 } from "../integration-tool-policy-section.tsx";
 
 await i18nReady;
 
 const noop = () => {};
-const view = (policy: ToolPolicy, tools: { name: string; status?: string }[]) =>
+const view = (
+  policy: ToolPolicy,
+  tools: { name: string; status?: string; origin?: string }[],
+  options: { review?: boolean; declaration?: ToolDeclaration } = {},
+) =>
   render(
     <ToolPolicyView
       policy={policy}
       tools={tools}
+      review={options.review ?? true}
+      declaration={options.declaration}
       busy={false}
       onApprove={noop}
       onBlock={noop}
@@ -99,8 +107,76 @@ describe("ToolPolicyView", () => {
   });
 });
 
+describe("ToolPolicyView declaration", () => {
+  const empty: ToolPolicy = { listed: [], approvals: [], blocks: [] };
+  const catalog = [
+    { name: "search", status: "pending", origin: "listed" },
+    { name: "open", status: "available", origin: "listed" },
+    { name: "mine", status: "available", origin: "declared" },
+  ];
+  const declaration = (declared: string[] = []): ToolDeclaration => ({
+    declared: new Set(declared),
+    declare: noop,
+  });
+
+  it("offers to declare reviewed and unreviewed listed tools, never the declared ones", () => {
+    const html = view(empty, catalog, { declaration: declaration() });
+    expect(html).toContain('data-testid="tool-declare-search"');
+    expect(html).toContain('data-testid="tool-undeclared-open"');
+    expect(html).toContain('data-testid="tool-declare-open"');
+    expect(html).not.toContain('data-testid="tool-declare-mine"');
+    expect(html).toContain("Déclarer dans l’intégration");
+    expect(html).toContain('data-testid="tool-declare-all"');
+  });
+
+  it("offers nothing to declare without a declaration", () => {
+    const html = view(empty, catalog);
+    expect(html).not.toContain("tool-declare-");
+    expect(html).not.toContain("Déclarer");
+  });
+
+  it("says a tool is declared in the draft, and drops the bulk action when none remains", () => {
+    const html = view(empty, catalog, { declaration: declaration(["search", "open"]) });
+    expect(html).toContain('data-testid="tool-declared-search"');
+    expect(html).toContain("Déclaré dans le brouillon");
+    expect(html).not.toContain('data-testid="tool-declare-open"');
+    expect(html).not.toContain('data-testid="tool-declare-all"');
+  });
+
+  it("keeps the declarations and drops the decisions for a reader who cannot configure", () => {
+    const html = view(empty, catalog, { review: false, declaration: declaration() });
+    expect(html).toContain('data-testid="tool-undeclared-search"');
+    expect(html).toContain('data-testid="tool-declare-all"');
+    expect(html).not.toContain('data-testid="tool-review-search"');
+    expect(html).not.toContain("Approuver");
+    expect(html).not.toContain("Bloquer");
+  });
+});
+
 describe("IntegrationToolPolicySection", () => {
-  it("renders nothing without integrations:configure in the space", () => {
-    expect(render(<IntegrationToolPolicySection packageId="@acme/crm" tools={[]} />)).toBe("");
+  const declaration: ToolDeclaration = { declared: new Set(), declare: noop };
+
+  it("renders nothing without a space review nor a declaration", () => {
+    expect(
+      render(<IntegrationToolPolicySection packageId="@acme/crm" tools={[]} review={false} />),
+    ).toBe("");
+  });
+
+  it("still loads (declare controls) for a reader outside the review when a declaration is given", () => {
+    const html = render(
+      <IntegrationToolPolicySection
+        packageId="@acme/crm"
+        tools={[]}
+        review={false}
+        declaration={declaration}
+      />,
+    );
+    expect(html).not.toBe("");
+  });
+
+  it("draws a skeleton per shape", () => {
+    expect(render(<ToolPolicySkeleton review />)).not.toBe(
+      render(<ToolPolicySkeleton review={false} />),
+    );
   });
 });

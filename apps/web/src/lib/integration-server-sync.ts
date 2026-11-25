@@ -16,26 +16,6 @@ export type ServerSyncProposal =
 
 type Manifest = Record<string, unknown>;
 
-/** Why the sync of a draft cannot run yet; the control is shown disabled with this reason. */
-export type ServerSyncBlock = "sse" | "no_permission" | "no_connection";
-
-/**
- * Whether a draft's server can be asked for its tools: `null` when there is nothing to sync (not a
- * remote source), `"available"`, or the reason it cannot yet. A templated URL is not a reason: the
- * server renders it with the chosen connection's variables.
- */
-export function serverSyncAvailability(
-  source: { kind: string; transport?: string } | null | undefined,
-  access: { unauthenticated: boolean; mayProxy: boolean; hasConnection: boolean },
-): "available" | ServerSyncBlock | null {
-  if (source?.kind !== "remote") return null;
-  if (source.transport === "sse") return "sse";
-  // A draft declaring no auths (AFPS §7.2) is read without the credential proxy nor a connection.
-  if (access.unauthenticated) return "available";
-  if (!access.mayProxy) return "no_permission";
-  return access.hasConnection ? "available" : "no_connection";
-}
-
 /** Where a sync proposes the server's instructions; an existing file is never replaced. */
 export const INTEGRATION_DOC = "INTEGRATION.md";
 

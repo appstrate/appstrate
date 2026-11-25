@@ -6,6 +6,8 @@ import {
   blockBody,
   blockableTools,
   canonicalDefinitionJson,
+  declarableTools,
+  declareTools,
   latestApprovals,
   reviewItems,
   type ToolPolicy,
@@ -109,5 +111,42 @@ describe("bodies", () => {
 
   it("offers only tools not blocked yet", () => {
     expect(blockableTools(catalog, policy.blocks)).toEqual(["declared", "search"]);
+  });
+});
+
+describe("declarableTools", () => {
+  it("keeps the tools the integration does not declare", () => {
+    expect(
+      declarableTools([
+        { name: "a", origin: "declared" },
+        { name: "b", origin: "listed" },
+        { name: "c", origin: "approved" },
+        { name: "d" },
+      ]),
+    ).toEqual(["b", "c", "d"]);
+  });
+});
+
+describe("declareTools", () => {
+  it("appends an empty entry per undeclared name, keeping everything else", () => {
+    const manifest = {
+      name: "x",
+      default_tools: ["a"],
+      tools_policy: { a: { required_scopes: ["s"] } },
+    };
+    const next = declareTools(manifest, ["b", "a", "c"]);
+    expect(next).toEqual({
+      name: "x",
+      default_tools: ["a"],
+      tools_policy: { a: { required_scopes: ["s"] }, b: {}, c: {} },
+    });
+    expect(Object.keys(next.tools_policy as object)).toEqual(["a", "b", "c"]);
+    expect(manifest.tools_policy).toEqual({ a: { required_scopes: ["s"] } });
+  });
+
+  it("creates tools_policy when absent and is a no-op when all are declared", () => {
+    expect(declareTools({ name: "x" }, ["b"])).toEqual({ name: "x", tools_policy: { b: {} } });
+    const manifest = { tools_policy: { a: {} } };
+    expect(declareTools(manifest, ["a"])).toBe(manifest);
   });
 });

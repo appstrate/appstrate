@@ -4,7 +4,8 @@
  * The working space's verdict on a remote integration's tools: the undeclared tools the server
  * lists that wait for a review (approve or block), the definitions approved, the tools blocked.
  * What the agents may call follows from it (`tool_catalog` statuses); only a reader who may
- * configure the integration in the space sees it.
+ * configure the integration in the space sees it. An author editing the draft also reads the
+ * listed tools here, to declare them in the integration.
  */
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
@@ -14,12 +15,12 @@ import {
   useIntegrationToolPolicy,
   useIntegrationToolPolicyActions,
 } from "../../hooks/use-integrations";
-import { usePermissions } from "../../hooks/use-permissions";
 import {
   approvalBody,
   blockBody,
   blockableTools,
   canonicalDefinitionJson,
+  declarableTools,
   latestApprovals,
   reviewItems,
   type ReviewItem,
@@ -34,27 +35,39 @@ import { ErrorState } from "../page-states";
 import { OptionSelect } from "../app-ui/option-select";
 import { SettingsGroup } from "../settings/setting-row";
 
-type CatalogTool = { name: string; status?: string };
+type CatalogTool = { name: string; status?: string; origin?: string };
+
+/** What the draft editor lends the review: the declared names and the way to declare more. */
+export interface ToolDeclaration {
+  declared: ReadonlySet<string>;
+  declare: (names: string[]) => void;
+}
 
 export function IntegrationToolPolicySection({
   packageId,
   tools,
+  review,
+  declaration,
 }: {
   packageId: string;
   /** The detail's `tool_catalog`: the statuses that say which tools wait. */
   tools: readonly CatalogTool[];
+  /** The working space's decisions (approve, block) are offered: the caller's verdict. */
+  review: boolean;
+  /** Present when the reader edits the draft: tools can be declared in the integration. */
+  declaration?: ToolDeclaration;
 }) {
-  const { can } = usePermissions();
-  const canConfigure = can("integrations:configure");
-  const query = useIntegrationToolPolicy(packageId, canConfigure);
+  const query = useIntegrationToolPolicy(packageId, review || !!declaration);
   const actions = useIntegrationToolPolicyActions(packageId);
-  if (!canConfigure) return null;
-  if (query.isLoading) return <ToolPolicySkeleton />;
+  if (!review && !declaration) return null;
+  if (query.isLoading) return <ToolPolicySkeleton review={review} />;
   if (query.error || !query.data) return <ErrorState error={query.error} />;
   return (
     <ToolPolicyView
       policy={query.data}
       tools={tools}
+      review={review}
+      declaration={declaration}
       busy={actions.isPending}
       onApprove={(item) => actions.approve(approvalBody(item))}
       onBlock={(name) => actions.block(blockBody(name))}
@@ -68,6 +81,8 @@ export function IntegrationToolPolicySection({
 export function ToolPolicyView({
   policy,
   tools,
+  review,
+  declaration,
   busy,
   onApprove,
   onBlock,
@@ -76,6 +91,9 @@ export function ToolPolicyView({
 }: {
   policy: ToolPolicy;
   tools: readonly CatalogTool[];
+  /** Approve, block and their lists: the space's decisions. */
+  review: boolean;
+  declaration?: ToolDeclaration;
   busy: boolean;
   onApprove: (item: { name: string; fingerprint: string }) => void;
   onBlock: (name: string) => void;
@@ -86,74 +104,117 @@ export function ToolPolicyView({
   // Blocking and withdrawing an approval take a tool from every agent of the space, like
   // deactivating a package there (which asks): they ask too. Approving and unblocking give back.
   const [confirm, setConfirm] = useState<{ kind: "block" | "revoke"; name: string } | null>(null);
-  const items = reviewItems(tools, policy);
+  const items = review ? reviewItems(tools, policy) : [];
+  const declarable = declaration ? declarableTools(tools) : [];
+  const declarableSet = new Set(declarable);
+  const reviewed = new Set(items.map((item) => item.name));
+  const unreviewed = declarable.filter((name) => !reviewed.has(name));
+  const toDeclare = declarable.filter((name) => !declaration?.declared.has(name));
   const approved = [...latestApprovals(policy.approvals).values()];
   const blockable = blockableTools(tools, policy.blocks);
   return (
     <div className="flex flex-col gap-2" data-testid="integration-tool-policy">
-      <SettingsGroup title={t("integrationTools.policy.review.title")}>
-        <p className="text-muted-foreground mb-3 text-sm">
-          {t("integrationTools.policy.review.description")}
-        </p>
-        {items.length === 0 ? (
-          <p className="text-muted-foreground text-sm">
-            {t("integrationTools.policy.review.none")}
+      {declaration && toDeclare.length > 0 && (
+        <div className="flex justify-end">
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            onClick={() => declaration.declare(toDeclare)}
+            data-testid="tool-declare-all"
+          >
+            {t("integrationTools.policy.declare.all")}
+          </Button>
+        </div>
+      )}
+      {review && (
+        <SettingsGroup title={t("integrationTools.policy.review.title")}>
+          <p className="text-muted-foreground mb-3 text-sm">
+            {t("integrationTools.policy.review.description")}
           </p>
-        ) : (
-          <ul className="flex flex-col gap-3">
-            {items.map((item) => {
-              const { fingerprint } = item;
-              return (
-                <li
-                  key={`${item.name}:${item.fingerprint}`}
-                  className="flex flex-col gap-3 rounded-lg border p-4"
-                  data-testid={`tool-review-${item.name}`}
-                >
-                  <div className="flex flex-wrap items-start justify-between gap-3">
-                    <div className="flex min-w-0 flex-col gap-1">
-                      <span className="text-sm font-medium break-words">{item.name}</span>
-                      {item.description && (
-                        <span className="text-muted-foreground text-sm break-words">
-                          {item.description}
-                        </span>
-                      )}
-                      {item.approved && (
-                        <Badge variant="outline" className="w-fit">
-                          {t("integrationTools.policy.review.changed")}
-                        </Badge>
-                      )}
-                    </div>
-                    <div className="flex shrink-0 gap-2">
-                      {fingerprint !== null && (
+          {items.length === 0 ? (
+            <p className="text-muted-foreground text-sm">
+              {t("integrationTools.policy.review.none")}
+            </p>
+          ) : (
+            <ul className="flex flex-col gap-3">
+              {items.map((item) => {
+                const { fingerprint } = item;
+                return (
+                  <li
+                    key={`${item.name}:${item.fingerprint}`}
+                    className="flex flex-col gap-3 rounded-lg border p-4"
+                    data-testid={`tool-review-${item.name}`}
+                  >
+                    <div className="flex flex-wrap items-start justify-between gap-3">
+                      <div className="flex min-w-0 flex-col gap-1">
+                        <span className="text-sm font-medium break-words">{item.name}</span>
+                        {item.description && (
+                          <span className="text-muted-foreground text-sm break-words">
+                            {item.description}
+                          </span>
+                        )}
+                        {item.approved && (
+                          <Badge variant="outline" className="w-fit">
+                            {t("integrationTools.policy.review.changed")}
+                          </Badge>
+                        )}
+                      </div>
+                      <div className="flex shrink-0 gap-2">
+                        {fingerprint !== null && (
+                          <Button
+                            type="button"
+                            size="sm"
+                            disabled={busy}
+                            onClick={() => onApprove({ name: item.name, fingerprint })}
+                          >
+                            {t("integrationTools.policy.approve")}
+                          </Button>
+                        )}
                         <Button
                           type="button"
                           size="sm"
+                          variant="outline"
                           disabled={busy}
-                          onClick={() => onApprove({ name: item.name, fingerprint })}
+                          onClick={() => setConfirm({ kind: "block", name: item.name })}
                         >
-                          {t("integrationTools.policy.approve")}
+                          {t("integrationTools.policy.block")}
                         </Button>
-                      )}
-                      <Button
-                        type="button"
-                        size="sm"
-                        variant="outline"
-                        disabled={busy}
-                        onClick={() => setConfirm({ kind: "block", name: item.name })}
-                      >
-                        {t("integrationTools.policy.block")}
-                      </Button>
+                      </div>
                     </div>
-                  </div>
-                  <DefinitionCompare item={item} />
-                </li>
-              );
-            })}
-          </ul>
-        )}
-      </SettingsGroup>
+                    {declaration && declarableSet.has(item.name) && (
+                      <DeclareControl name={item.name} declaration={declaration} />
+                    )}
+                    <DefinitionCompare item={item} />
+                  </li>
+                );
+              })}
+            </ul>
+          )}
+        </SettingsGroup>
+      )}
 
-      {approved.length > 0 && (
+      {declaration && unreviewed.length > 0 && (
+        <SettingsGroup title={t("integrationTools.policy.declare.title")}>
+          <p className="text-muted-foreground mb-3 text-sm">
+            {t("integrationTools.policy.declare.description")}
+          </p>
+          <ul className="divide-y rounded-lg border">
+            {unreviewed.map((name) => (
+              <li
+                key={name}
+                className="flex flex-wrap items-center justify-between gap-3 p-3"
+                data-testid={`tool-undeclared-${name}`}
+              >
+                <span className="min-w-0 text-sm font-medium break-words">{name}</span>
+                <DeclareControl name={name} declaration={declaration} />
+              </li>
+            ))}
+          </ul>
+        </SettingsGroup>
+      )}
+
+      {review && approved.length > 0 && (
         <SettingsGroup title={t("integrationTools.policy.approved.title")}>
           <ul className="divide-y rounded-lg border">
             {approved.map((approval) => (
@@ -172,38 +233,40 @@ export function ToolPolicyView({
         </SettingsGroup>
       )}
 
-      <SettingsGroup title={t("integrationTools.policy.blocked.title")}>
-        <p className="text-muted-foreground mb-3 text-sm">
-          {t("integrationTools.policy.blocked.description")}
-        </p>
-        {policy.blocks.length > 0 && (
-          <ul className="mb-3 divide-y rounded-lg border">
-            {policy.blocks.map((block) => (
-              <ToolRow
-                key={block.tool_name}
-                name={block.tool_name}
-                meta={t("integrationTools.policy.blocked.since", {
-                  date: formatDateField(block.blocked_at),
-                })}
-                action={t("integrationTools.policy.unblock")}
-                busy={busy}
-                onAction={() => onUnblock(block.tool_name)}
-              />
-            ))}
-          </ul>
-        )}
-        {blockable.length > 0 && (
-          <OptionSelect
-            value={undefined}
-            onValueChange={(name) => setConfirm({ kind: "block", name })}
-            disabled={busy}
-            className="max-w-sm"
-            placeholder={t("integrationTools.policy.blocked.add")}
-            aria-label={t("integrationTools.policy.blocked.add")}
-            options={blockable.map((name) => ({ value: name, label: name }))}
-          />
-        )}
-      </SettingsGroup>
+      {review && (
+        <SettingsGroup title={t("integrationTools.policy.blocked.title")}>
+          <p className="text-muted-foreground mb-3 text-sm">
+            {t("integrationTools.policy.blocked.description")}
+          </p>
+          {policy.blocks.length > 0 && (
+            <ul className="mb-3 divide-y rounded-lg border">
+              {policy.blocks.map((block) => (
+                <ToolRow
+                  key={block.tool_name}
+                  name={block.tool_name}
+                  meta={t("integrationTools.policy.blocked.since", {
+                    date: formatDateField(block.blocked_at),
+                  })}
+                  action={t("integrationTools.policy.unblock")}
+                  busy={busy}
+                  onAction={() => onUnblock(block.tool_name)}
+                />
+              ))}
+            </ul>
+          )}
+          {blockable.length > 0 && (
+            <OptionSelect
+              value={undefined}
+              onValueChange={(name) => setConfirm({ kind: "block", name })}
+              disabled={busy}
+              className="max-w-sm"
+              placeholder={t("integrationTools.policy.blocked.add")}
+              aria-label={t("integrationTools.policy.blocked.add")}
+              options={blockable.map((name) => ({ value: name, label: name }))}
+            />
+          )}
+        </SettingsGroup>
+      )}
 
       <ConfirmModal
         open={confirm !== null}
@@ -231,6 +294,31 @@ export function ToolPolicyView({
           setConfirm(null);
         }}
       />
+    </div>
+  );
+}
+
+/** The author's action on one tool: declare it in the draft, or say it already is. */
+function DeclareControl({ name, declaration }: { name: string; declaration: ToolDeclaration }) {
+  const { t } = useTranslation("agents");
+  if (declaration.declared.has(name)) {
+    return (
+      <p className="text-muted-foreground text-sm" data-testid={`tool-declared-${name}`}>
+        {t("integrationTools.policy.declare.declared")}
+      </p>
+    );
+  }
+  return (
+    <div>
+      <Button
+        type="button"
+        size="sm"
+        variant="outline"
+        onClick={() => declaration.declare([name])}
+        data-testid={`tool-declare-${name}`}
+      >
+        {t("integrationTools.policy.declare.button")}
+      </Button>
     </div>
   );
 }

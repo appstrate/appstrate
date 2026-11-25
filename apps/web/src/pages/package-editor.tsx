@@ -9,7 +9,7 @@ import type {
   OrgPackageItemDetail,
 } from "@appstrate/shared-types";
 import { dropRetiredDependencyKeys } from "@appstrate/core/dependencies";
-import { $api } from "../api/client";
+import { asRecord } from "@appstrate/core/safe-json";
 import type { AgentDefinitionSection } from "../lib/settings-section-href";
 import { EditorDirtyReportContext, type EditorState } from "../hooks/use-editor-state";
 import { FormField } from "../components/form-field";
@@ -30,7 +30,7 @@ import { getSource, isRemoteSourceUrl } from "../components/integration-editor/u
 import { IntegrationIconField } from "../components/integration-editor/integration-icon-field";
 import { AuthsSection } from "../components/integration-editor/auths-section";
 import { IntegrationToolsSection } from "../components/integration-editor/integration-tools-section";
-import type { ServerSyncResult } from "../components/integration-editor/sync-from-server";
+import type { ToolDeclaration } from "../components/integration-editor/integration-tool-policy-section";
 
 import {
   manifestToSchemaFields,
@@ -40,15 +40,8 @@ import {
   fieldsToSchema,
 } from "../components/agent-editor/utils";
 import type { ResourceEntry, SchemaField } from "../components/agent-editor/types";
-import {
-  INTEGRATION_DOC,
-  mergeServerSync,
-  serverSyncBody,
-  type serverSyncAvailability,
-} from "../lib/integration-server-sync";
+import { declareTools } from "../lib/integration-tool-policy";
 import type { ToolSnapshotInfo } from "../lib/integration-tool-snapshot";
-import { fileTextOperation } from "../lib/package-file-drafts";
-import { encodeIconDataUri } from "../lib/icon-image";
 
 const asNumber = (value: unknown) => (typeof value === "number" ? value : undefined);
 
@@ -314,7 +307,6 @@ function IntegrationEditorInner({
   tab,
   toolCatalog,
   snapshot,
-  sync: syncAvailability,
   toolPolicy,
 }: {
   initialState: EditorState;
@@ -324,10 +316,8 @@ function IntegrationEditorInner({
   toolCatalog: IntegrationToolCatalogEntry[];
   /** The server's last listing, summarised above the table. */
   snapshot: ToolSnapshotInfo;
-  /** Whether the draft's server can be asked for its tools; `null`: nothing to sync. */
-  sync: ReturnType<typeof serverSyncAvailability>;
-  /** The space's review and blocks, under the Tools section. */
-  toolPolicy?: ReactNode;
+  /** The space's review and blocks, under the Tools section, given the draft's declaration. */
+  toolPolicy?: (declaration: ToolDeclaration) => ReactNode;
 }) {
   const { t } = useTranslation(["agents", "common"]);
   // Set by `validate` when it refuses the local server: the Source tab flags its empty fields.
@@ -356,42 +346,12 @@ function IntegrationEditorInner({
   const isLocal = getSource(state.manifest).kind === "local";
   const fileIndex = usePackageFileIndex(isLocal ? packageId : undefined);
   const serverFiles = fileIndex.data?.data.map((file) => file.path);
-  const [syncResult, setSyncResult] = useState<ServerSyncResult | null>(null);
-
-  // A raster the manifest does not accept as is (ICO, large PNG) is re-encoded here; one the
-  // browser cannot decode is skipped. The encoding is async: the icon lands only if the draft
-  // still has none.
-  const fillIcon = (proposal: { icon_source: string | null; manifest: { icon?: string } }) => {
-    if (!proposal.icon_source || proposal.manifest.icon) return;
-    void encodeIconDataUri(proposal.icon_source)
-      .then((icon) => {
-        editor.setState((s) => (s.manifest.icon ? s : { ...s, manifest: { ...s.manifest, icon } }));
-      })
-      .catch(() => {});
+  // Declaring a listed tool edits the draft; saving and publishing stay the author's.
+  const declaration: ToolDeclaration = {
+    declared: new Set(Object.keys(asRecord(state.manifest.tools_policy))),
+    declare: (names) =>
+      editor.setState((s) => ({ ...s, manifest: declareTools(s.manifest, names) })),
   };
-
-  const sync = $api.useMutation("post", "/api/integrations/{packageId}/discover", {
-    meta: { errorHandledByCaller: true },
-    onSuccess: (proposal) => {
-      editor.setState((s) => ({ ...s, manifest: mergeServerSync(s.manifest, proposal) }));
-      // `null` when the package already has an `INTEGRATION.md`, which a sync never replaces.
-      const { instructions } = proposal;
-      setSyncResult({
-        count: proposal.tools.length,
-        warnings: proposal.warnings,
-        docProposed: Boolean(instructions),
-      });
-      if (instructions) {
-        const operation = fileTextOperation(INTEGRATION_DOC, instructions);
-        editor.setState((s) =>
-          (s.operations ?? []).some((o) => o.op === "write" && o.path === INTEGRATION_DOC)
-            ? s
-            : { ...s, operations: [...(s.operations ?? []), operation] },
-        );
-      }
-      fillIcon(proposal);
-    },
-  });
 
   return (
     <PackageEditorFrame
@@ -409,7 +369,7 @@ function IntegrationEditorInner({
         auths: t("integrationEditor.description.auths"),
         tools: t("integrationEditor.description.tools"),
       }}
-      after={activeTab === "tools" ? toolPolicy : undefined}
+      after={activeTab === "tools" ? toolPolicy?.(declaration) : undefined}
     >
       {activeTab === "general" && (
         <MetadataSection
@@ -443,21 +403,6 @@ function IntegrationEditorInner({
           tools={toolCatalog}
           snapshot={snapshot}
           edit={{ manifest: state.manifest, onChange: onManifestChange }}
-          sync={
-            syncAvailability
-              ? {
-                  blockedBy: syncAvailability === "available" ? null : syncAvailability,
-                  run: (connectionId) =>
-                    sync.mutate({
-                      params: { path: { packageId } },
-                      body: serverSyncBody(connectionId),
-                    }),
-                  isPending: sync.isPending,
-                  error: sync.error,
-                  result: syncResult,
-                }
-              : undefined
-          }
         />
       )}
     </PackageEditorFrame>
@@ -472,17 +417,14 @@ export function IntegrationDefinitionEditor({
   section,
   toolCatalog,
   snapshot,
-  sync,
   toolPolicy,
 }: {
   detail: Versioned<OrgPackageItemDetail>;
   section: IntegrationDefinitionSection;
   toolCatalog: IntegrationToolCatalogEntry[];
   snapshot: ToolSnapshotInfo;
-  /** Whether the draft's remote server can be asked for its tools; `null`: nothing to sync. */
-  sync: ReturnType<typeof serverSyncAvailability>;
   /** The space's review and blocks, drawn under the Tools section. */
-  toolPolicy?: ReactNode;
+  toolPolicy?: (declaration: ToolDeclaration) => ReactNode;
 }) {
   return (
     <DraftEditorMount id={detail.id} etag={detail.etag}>
@@ -492,7 +434,6 @@ export function IntegrationDefinitionEditor({
         tab={section}
         toolCatalog={toolCatalog}
         snapshot={snapshot}
-        sync={sync}
         toolPolicy={toolPolicy}
       />
     </DraftEditorMount>
