@@ -83,8 +83,6 @@ import {
   ABSOLUTE_MAX_RESPONSE_SIZE,
   MAX_MCP_ENVELOPE_SIZE,
   MAX_REQUEST_BODY_SIZE,
-  MAX_RESPONSE_SIZE,
-  concatAndRelease,
   readRequestBodyBounded,
 } from "./helpers.ts";
 import { TokenBudget } from "./token-budget.ts";
@@ -805,10 +803,10 @@ export function createApiCallToolDefs(
         // `api_upload` sibling points back at.
         _meta: { [API_CALL_TOOL_META_KEY]: { tool_key: toolName } satisfies ApiCallToolMeta },
       },
-      handler: async (rawArgs) =>
+      handler: async (rawArgs, { signal }) =>
         apiCallLimit
-          ? await apiCallLimit(() => credentialProxyInner(rawArgs, ctx))
-          : await credentialProxyInner(rawArgs, ctx),
+          ? await apiCallLimit(() => credentialProxyInner(rawArgs, ctx, signal))
+          : await credentialProxyInner(rawArgs, ctx, signal),
     };
   };
 
@@ -937,7 +935,9 @@ export function createApiCallToolDefs(
   async function credentialProxyInner(
     rawArgs: unknown,
     ctx: { proxyDeps: ApiCallDeps; integrationId: string; connectionId: string; label: string },
+    signal: AbortSignal | undefined,
   ): Promise<CallToolResult> {
+    signal?.throwIfAborted();
     {
       // `target`, `method` and `headers` arrive as `CREDENTIAL_PROXY_INPUT_SCHEMA`
       // declares them: Pi validates a model's call against it before `execute`
@@ -1001,6 +1001,7 @@ export function createApiCallToolDefs(
           integrationId: ctx.integrationId,
           connectionId: ctx.connectionId,
           targetUrl: args.target,
+          signal,
           method,
           callerHeaders,
           body: resolved.body,
@@ -1024,7 +1025,7 @@ export function createApiCallToolDefs(
         };
       }
       return responseToToolResult(result.response, {
-        ...(blobStore ? { blobStore } : {}),
+        blobStore,
         tokenBudget,
         source: `${ctx.label}:${ctx.integrationId}`,
       });
@@ -1050,7 +1051,9 @@ export function createApiCallToolDefs(
 function buildBlobResourceProvider(blobStore: BlobStore) {
   return {
     list: (): Resource[] => [],
-    read: (uri: string): ReadResourceResult => {
+    read: async (uri: string, extra: { signal?: AbortSignal }): Promise<ReadResourceResult> => {
+      const linked = await blobStore.readLink(uri, extra.signal, ABSOLUTE_MAX_RESPONSE_SIZE);
+      if (linked) return linked;
       const record = blobStore.read(uri);
       if (!record) {
         // -32002 maps to InvalidParams in the SDK error code enum and
@@ -1088,7 +1091,7 @@ function buildBlobResourceProvider(blobStore: BlobStore) {
 
 interface ResponseToToolResultOptions {
   /** Run-scoped blob store; required to spill non-text or oversized responses. */
-  blobStore?: BlobStore;
+  blobStore: BlobStore;
   /**
    * Run-scoped token budget. The inline-vs-spill decision for text
    * responses is made on **estimated tokens**, not raw bytes; dense
@@ -1186,28 +1189,8 @@ async function responseToToolResult(
   const isText = isTextShapedContentType(ct);
 
   if (!isText) {
-    if (!options.blobStore) {
-      return withMeta({
-        content: [
-          {
-            type: "text",
-            text:
-              `api_call: non-text response of type '${ct || "unknown"}' is not supported on ` +
-              `this path without a configured blob store. Binary upstream responses are linked as ` +
-              `MCP resources — verify the sidecar was started with a runId.`,
-          },
-        ],
-        isError: true,
-      });
-    }
-    // Spill to blob store and return a resource_link.
-    // When a blob store is available, raise the cap to ABSOLUTE_MAX_RESPONSE_SIZE:
-    // the spillover path exists precisely for bodies larger than MAX_RESPONSE_SIZE,
-    // so capping the read at MAX_RESPONSE_SIZE refuses real-world binaries
-    // (PDFs 1-10 MB, images, ZIPs) that the agent would consume via pdf-toolkit,
-    // vision, etc. Symmetrical to the text path below.
-    const binaryReadCap = options.blobStore ? ABSOLUTE_MAX_RESPONSE_SIZE : MAX_RESPONSE_SIZE;
-    const bytes = await readBodyToBuffer(res, binaryReadCap);
+    const binaryReadCap = ABSOLUTE_MAX_RESPONSE_SIZE;
+    const bytes = await readRequestBodyBounded(res, binaryReadCap);
     if (bytes === "exceeded") {
       return withMeta({
         content: [
@@ -1251,13 +1234,7 @@ async function responseToToolResult(
   // res.text() directly so a hypothetical multi-GB response can never
   // be fully materialised before the cap kicks in.
   //
-  // When a blob store is available, raise the cap to ABSOLUTE_MAX_RESPONSE_SIZE:
-  // the spillover path exists precisely to handle bodies larger than
-  // MAX_RESPONSE_SIZE, so capping the read at MAX_RESPONSE_SIZE before deciding
-  // to spill silently truncated text bodies above 256 KB (they were spilled,
-  // but with a `[truncated]` marker poisoning the JSON). Without a blob store
-  // there's no recovery path, so the conservative cap stays.
-  const readCap = options.blobStore ? ABSOLUTE_MAX_RESPONSE_SIZE : MAX_RESPONSE_SIZE;
+  const readCap = ABSOLUTE_MAX_RESPONSE_SIZE;
   const text = await readBodyBounded(res, readCap);
 
   // Token-aware spill decision, shared with third-party MCP tool results.
@@ -1267,40 +1244,6 @@ async function responseToToolResult(
   });
   const content: Result["content"] = [replacement ?? { type: "text", text }];
   return withMeta(res.ok ? { content } : { content, isError: true });
-}
-
-/**
- * Read a Response body as raw bytes, refusing the read if `maxBytes`
- * is breached. Returns `"exceeded"` on overflow — for binary spills we
- * never want a partial body that the agent might mistake for the full
- * content.
- *
- * The concat releases each chunk as it is copied ({@link concatAndRelease}),
- * so a body near {@link ABSOLUTE_MAX_RESPONSE_SIZE} does not pin 2× its size
- * at once — the sidecar's cgroup is 256 MiB and up to
- * `DEFAULT_API_CALL_CONCURRENCY` of these run in parallel.
- */
-async function readBodyToBuffer(res: Response, maxBytes: number): Promise<Uint8Array | "exceeded"> {
-  if (!res.body) return new Uint8Array(0);
-  const reader = res.body.getReader();
-  const chunks: Uint8Array[] = [];
-  let total = 0;
-  try {
-    while (true) {
-      const { value, done } = await reader.read();
-      if (done) break;
-      if (!value) continue;
-      if (total + value.byteLength > maxBytes) {
-        await reader.cancel();
-        return "exceeded";
-      }
-      chunks.push(value);
-      total += value.byteLength;
-    }
-  } finally {
-    reader.releaseLock();
-  }
-  return concatAndRelease(chunks, total);
 }
 
 /**
@@ -1400,7 +1343,7 @@ export interface ApiCallIntegrationConfig {
  */
 export interface ApiCallToolDeps {
   proxyDeps: ApiCallBaseDeps;
-  blobStore?: BlobStore;
+  blobStore: BlobStore;
   tokenBudget: TokenBudget;
   apiCallLimit?: LimitFunction;
 }

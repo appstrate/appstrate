@@ -13,11 +13,13 @@ import type { Hono } from "hono";
 import type { AppEnv } from "../types/index.ts";
 import { buildOpenApiSpec } from "../openapi/index.ts";
 import { deriveRouteRequirements, type RouteRequirement } from "./route-requirements.ts";
-import { dispatchSpacePinEnv } from "./internal-dispatch.ts";
+import { operationSpaceScope, type OperationSpaceScope } from "./operation-space.ts";
+import { dispatchPinEnv, type DispatchPin } from "./internal-dispatch.ts";
 import {
   getModuleOpenApiPaths,
   getModuleOpenApiComponentSchemas,
   getModuleOpenApiTags,
+  getModulePublicPaths,
 } from "./modules/module-loader.ts";
 
 const OPERATION_METHODS = ["get", "post", "put", "patch", "delete"] as const;
@@ -31,6 +33,7 @@ interface PlatformOperation {
   readonly pathTemplate: string;
   readonly node: Record<string, unknown>;
   readonly requirement: RouteRequirement;
+  readonly spaceScope: OperationSpaceScope;
 }
 
 /** Fresh per registration, so a derivation can be cached on its identity. */
@@ -52,6 +55,7 @@ export function registerPlatformApp(app: Hono<AppEnv>): void {
     getModuleOpenApiComponentSchemas(),
     getModuleOpenApiTags(),
   );
+  const publicPaths = getModulePublicPaths();
   const requirementFor = deriveRouteRequirements(app.routes);
   const operations: PlatformOperation[] = [];
   const orphans: string[] = [];
@@ -76,6 +80,14 @@ export function registerPlatformApp(app: Hono<AppEnv>): void {
         pathTemplate,
         node: node as Record<string, unknown>,
         requirement,
+        spaceScope: operationSpaceScope(
+          operationId,
+          pathTemplate,
+          requirement.spaceContext,
+          (node as Record<string, unknown>)["x-appstrate-space"],
+          publicPaths,
+          { spec, pathItem, operation: node },
+        ),
       });
     }
   }
@@ -99,10 +111,10 @@ function getRegistered(use: string): { app: Hono<AppEnv>; operations: PlatformOp
  * Re-enter the fully-wired platform app in-process (no socket hop). `app.fetch`
  * returns `Response | Promise<Response>`; the async wrapper normalizes it to the
  * `Promise<Response>` callers (the `inProcess` service, the MCP router) expect.
- * `spacePin` confines the call to one space (`dispatchSpacePin`).
+ * `pin` confines the call to one space (`dispatchPin`).
  */
-export function dispatchInProcess(request: Request, spacePin?: string): Promise<Response> {
-  const env = spacePin === undefined ? undefined : dispatchSpacePinEnv(spacePin);
+export function dispatchInProcess(request: Request, pin?: DispatchPin): Promise<Response> {
+  const env = pin === undefined ? undefined : dispatchPinEnv(pin);
   return Promise.resolve(getRegistered("in-process dispatch").app.fetch(request, env));
 }
 

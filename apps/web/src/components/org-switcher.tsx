@@ -27,6 +27,7 @@ import { useEnterSpace } from "../hooks/use-enter-space";
 import { useCanCreateOrg } from "../hooks/use-auth";
 import { useViewer } from "../hooks/use-viewer";
 import { useOverviewMode } from "../hooks/use-overview-mode";
+import { useContextNames } from "../hooks/use-context-names";
 import { routeOf } from "../lib/route-match";
 import { holdsOverview, isSpaceEnterable, overviewOffered } from "../lib/space-lists";
 import { Command, CommandInput } from "@appstrate/ui/components/command";
@@ -168,23 +169,20 @@ const NEW_SPACE_ADDRESS = `/org-settings/spaces?${NEW_SPACE_PARAM}=1`;
 /** A column's rows: it scrolls past eight of them, under a header that stays. */
 const LIST_BOX = "max-h-80 overflow-y-auto";
 
-/** The trigger's box per shape, shared by the live control and its loading placeholder. */
-const TRIGGER_BOX = {
-  brand: "h-11 w-full",
-  mobile: "h-11 min-w-0 flex-1",
-};
+/** The trigger's box, shared by the live control and its loading placeholder. */
+const TRIGGER_BOX = "h-11 w-full";
 
-export function OrgSwitcher({ variant }: { variant: "brand" | "mobile" }) {
+/** The sidebar's head: the organization and the working space, and the panel that changes them. */
+export function OrgSwitcher() {
   const { t } = useTranslation();
   const landAfterOrgSwitch = useLandAfterOrgSwitch();
   const openOverlayAfterOrgSwitch = useOpenOverlayAfterOrgSwitch();
   const { currentOrg, orgs, loading, switchOrg } = useOrg();
-  const { data: spaces, isPending: spacesPending } = useSpaces();
+  const { isPending: spacesPending } = useSpaces();
   const currentSpaceId = useCurrentSpaceId();
   const enterSpace = useEnterSpace();
   const { isMobile, setOpenMobile } = useSidebar();
   const canCreateOrg = useCanCreateOrg();
-  const viewer = useViewer();
   const overview = useOverviewMode();
   const { pathname } = useLocation();
   const navigate = useNavigate();
@@ -194,12 +192,9 @@ export function OrgSwitcher({ variant }: { variant: "brand" | "mobile" }) {
   const [exploredOrgId, setExploredOrgId] = useState<string | null>(null);
   const spacesColumnId = useId();
 
-  const currentSpace = spaces?.find((s) => s.id === currentSpaceId) ?? null;
+  const { contextLabel: currentContextLabel, names: contextNames } = useContextNames();
   const exploredId = exploredOrgId ?? currentOrg?.id ?? null;
   const isExploringElsewhere = exploredId !== null && exploredId !== currentOrg?.id;
-  // A phone presents the panel under the trigger, in one column; everywhere else the
-  // organizations sit beside their spaces, even when there is only one.
-  const mobilePresentation = variant === "mobile" || isMobile;
   const closeSwitcherAndSidebar = () => {
     setOpen(false);
     setOpenMobile(false);
@@ -211,7 +206,7 @@ export function OrgSwitcher({ variant }: { variant: "brand" | "mobile" }) {
   // The trigger's own box (avatar + name), so the column does not move when the org lands.
   if (loading) {
     return (
-      <div className={cn("flex items-center gap-2 px-2", TRIGGER_BOX[variant])} aria-hidden>
+      <div className={cn("flex items-center gap-2 px-2", TRIGGER_BOX)} aria-hidden>
         <Skeleton className="mr-1 size-8 shrink-0 rounded-lg" />
         <div className="flex flex-col gap-1.5">
           <Skeleton className="h-3.5 w-28" />
@@ -276,23 +271,6 @@ export function OrgSwitcher({ variant }: { variant: "brand" | "mobile" }) {
   const offersOverview =
     overviewOffered(exploredSpaces.data) && matchesSearch(query, [overviewLabel]);
 
-  const currentContextLabel = overview.on
-    ? overviewLabel
-    : currentSpace
-      ? spaceLabel(currentSpace, t)
-      : undefined;
-  // The space's tile is a badge on the organization's, ringed in the trigger's background.
-  // « Tous les espaces » is no space: no badge, its name on the second line says it.
-  const spaceBadge: ReactNode =
-    currentSpace && !overview.on ? (
-      <IdentityTile
-        {...spaceTile(currentSpace, viewer)}
-        className={cn(
-          "absolute -right-1 -bottom-1 size-4 rounded-[5px] ring-2",
-          variant === "mobile" ? "ring-background" : "ring-sidebar",
-        )}
-      />
-    ) : null;
   const spaceName: ReactNode = currentContextLabel ? (
     <span className="truncate" title={currentContextLabel}>
       {currentContextLabel}
@@ -313,27 +291,21 @@ export function OrgSwitcher({ variant }: { variant: "brand" | "mobile" }) {
       }}
     >
       <PopoverTrigger asChild>
-        {/* Two shapes, one control: `brand` heads the sidebar, `mobile` the phone header. It
-            replaces the whole context, which the coloured avatar and the up/down chevron
+        {/* It replaces the whole context, which the coloured avatar and the up/down chevron
             (never a right chevron) say. The workspace stays visible even when there is only
             one: a level nobody ever sees is a level nobody learns. */}
         <button
           type="button"
           data-testid="org-switcher-button"
-          aria-label={t("switcher.ariaLabel", {
-            current: [currentOrg.name, currentContextLabel].filter(Boolean).join(", "),
-          })}
+          aria-label={t("switcher.ariaLabel", { current: contextNames })}
           className={cn(
             // No hover fill: the chevron answers the pointer, a focus ring the keyboard.
             "group/trigger focus-visible:ring-ring flex items-center gap-2 rounded-lg px-2 text-sm outline-none focus-visible:ring-2",
-            TRIGGER_BOX[variant],
+            TRIGGER_BOX,
           )}
         >
           {/* The organization's tile, the space's as a badge on its corner. */}
-          <span className="relative mr-1 shrink-0">
-            <IdentityTile {...orgTile(currentOrg)} className="size-8 rounded-lg" />
-            {spaceBadge}
-          </span>
+          <OrgSpaceTile ring="ring-sidebar" className="mr-1" />
           {/* Two lines, each truncating by itself: a long organization name never hides the space. */}
           <span className="flex min-w-0 flex-1 flex-col text-left leading-tight">
             <span className="truncate font-semibold" title={currentOrg.name}>
@@ -348,16 +320,11 @@ export function OrgSwitcher({ variant }: { variant: "brand" | "mobile" }) {
       </PopoverTrigger>
       <PopoverContent
         align="start"
-        side={mobilePresentation ? "bottom" : "right"}
-        sideOffset={variant === "mobile" ? 47 : 6}
-        className={cn(
-          // Beside the sidebar the panel takes what the viewport leaves it, never more.
-          "max-w-[min(calc(100vw-2rem),calc(var(--radix-popover-content-available-width)-0.5rem))] overflow-hidden rounded-xl p-0",
-          mobilePresentation ? "w-[340px]" : "w-[660px]",
-          mobilePresentation && "max-h-[calc(100svh-4.5rem)] overflow-y-auto",
-          variant === "mobile" && "w-[calc(100vw-1rem)] max-w-none",
-          isMobile && variant !== "mobile" && "w-[calc(100vw-1rem)] max-w-[17rem]",
-        )}
+        side="right"
+        sideOffset={6}
+        // Beside the sidebar the panel takes what the viewport leaves it, never more. Below `md`
+        // the primitive draws a bottom sheet, which scrolls: only the popover clips.
+        className="w-[660px] max-w-[min(calc(100vw-2rem),calc(var(--radix-popover-content-available-width)-0.5rem))] rounded-xl p-0 md:overflow-hidden"
       >
         {/* The lists filter themselves (`matchesSearch`); cmdk only supplies the field. */}
         <Command shouldFilter={false} className="h-auto overflow-visible">
@@ -369,10 +336,10 @@ export function OrgSwitcher({ variant }: { variant: "brand" | "mobile" }) {
             aria-label={t("switcher.searchAriaLabel")}
           />
 
-          <div className={cn("grid", mobilePresentation ? "grid-cols-1" : "grid-cols-2")}>
+          <div className={cn("grid", isMobile ? "grid-cols-1" : "grid-cols-2")}>
             <div className="flex min-h-0 flex-col p-2">
               <ColumnHeader label={t("switcher.orgsColumn")} />
-              <div className={cn("flex flex-col gap-1", !mobilePresentation && LIST_BOX)}>
+              <div className={cn("flex flex-col gap-1", !isMobile && LIST_BOX)}>
                 {shownOrgs.map((org) => {
                   const isCurrent = org.id === currentOrg.id;
                   const isExplored = org.id === exploredId;
@@ -395,7 +362,7 @@ export function OrgSwitcher({ variant }: { variant: "brand" | "mobile" }) {
                       settings={{
                         to: "/org-settings",
                         label: t("switcher.settingsOf", { name: org.name }),
-                        pinned: isCurrent || mobilePresentation,
+                        pinned: isCurrent || isMobile,
                         onPick: settingsPick("/org-settings", { orgId: org.id }),
                       }}
                       onNavigate={closeSwitcherAndSidebar}
@@ -427,10 +394,7 @@ export function OrgSwitcher({ variant }: { variant: "brand" | "mobile" }) {
 
             <div
               id={spacesColumnId}
-              className={cn(
-                "flex min-h-0 flex-col p-2",
-                mobilePresentation ? "border-t" : "border-l",
-              )}
+              className={cn("flex min-h-0 flex-col p-2", isMobile ? "border-t" : "border-l")}
             >
               <ColumnHeader label={t("switcher.workspacesColumn")} />
               {exploredSpaces.isPending ? (
@@ -445,7 +409,7 @@ export function OrgSwitcher({ variant }: { variant: "brand" | "mobile" }) {
                   {t("switcher.workspacesEmpty")}
                 </p>
               ) : (
-                <div className={cn("flex flex-col gap-1", !mobilePresentation && LIST_BOX)}>
+                <div className={cn("flex flex-col gap-1", !isMobile && LIST_BOX)}>
                   {/* Not a space: a mode over the working space, set apart above them. */}
                   {offersOverview && (
                     <div className="border-b pb-1">
@@ -486,7 +450,7 @@ export function OrgSwitcher({ variant }: { variant: "brand" | "mobile" }) {
                             ? {
                                 to: "/workspace-settings",
                                 label: t("switcher.settingsOf", { name: spaceLabel(space, t) }),
-                                pinned: isCurrent || mobilePresentation,
+                                pinned: isCurrent || isMobile,
                                 onPick: settingsPick("/workspace-settings", {
                                   orgId: exploredId ?? currentOrg.id,
                                   spaceId: space.id,
@@ -539,5 +503,29 @@ export function OrgSwitcher({ variant }: { variant: "brand" | "mobile" }) {
         </Command>
       </PopoverContent>
     </Popover>
+  );
+}
+
+/**
+ * The organization's tile with the space's as a badge on its corner, ringed in `ring` (the
+ * background it sits on). The switcher's trigger and the shell's sidebar opener draw it alike.
+ * « Tous les espaces » is no space: no badge, the name beside it says it.
+ */
+export function OrgSpaceTile({ ring, className }: { ring: string; className?: string }) {
+  const { currentOrg, loading } = useOrg();
+  const { currentSpace } = useContextNames();
+  const viewer = useViewer();
+  if (loading) return <Skeleton className={cn("size-8 shrink-0 rounded-lg", className)} />;
+  if (!currentOrg) return null;
+  return (
+    <span className={cn("relative shrink-0", className)} aria-hidden="true">
+      <IdentityTile {...orgTile(currentOrg)} className="size-8 rounded-lg" />
+      {currentSpace && (
+        <IdentityTile
+          {...spaceTile(currentSpace, viewer)}
+          className={cn("absolute -right-1 -bottom-1 size-4 rounded-[5px] ring-2", ring)}
+        />
+      )}
+    </span>
   );
 }

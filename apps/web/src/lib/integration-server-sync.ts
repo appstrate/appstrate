@@ -7,6 +7,7 @@ import {
   resolveIntegrationToolCatalog,
   type IntegrationManifest,
 } from "@appstrate/core/integration";
+import { asRecord } from "@appstrate/core/safe-json";
 import { ApiError } from "../api/errors";
 import type { components, paths } from "../api/schema";
 
@@ -27,10 +28,6 @@ const isEmpty = (v: unknown) =>
 /** Own keys only: a tool may be named `constructor`. */
 function hasOwn(record: Manifest, key: string): boolean {
   return Object.prototype.hasOwnProperty.call(record, key);
-}
-
-function asRecord(v: unknown): Manifest {
-  return typeof v === "object" && v !== null && !Array.isArray(v) ? (v as Manifest) : {};
 }
 
 const SYNC_IDENTITY = ["display_name", "description", "homepage", "icon"] as const;

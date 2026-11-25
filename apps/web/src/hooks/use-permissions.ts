@@ -42,7 +42,7 @@ export function useHomeSpaceName(homeSpaceId: string | null | undefined): string
 
 /**
  * Permission gating for the UI (enforcement stays server-side). `can` answers over the org-level
- * effective set (`GET /api/orgs`) union the current space's (`GET /api/spaces`), both computed
+ * effective set when no space is selected and the current space's effective set otherwise, both computed
  * server-side: never derive a permission from a role name. `orgRole` serves labels and the few
  * rules the server keys on the role ({@link hasFullOrgAccess}).
  */
@@ -56,8 +56,8 @@ export function usePermissions() {
   const spacePermissions = space?.permissions;
 
   const granted = useMemo(
-    () => new Set<string>([...(orgPermissions ?? []), ...(spacePermissions ?? [])]),
-    [orgPermissions, spacePermissions],
+    () => new Set<string>(spaceId ? spacePermissions : orgPermissions),
+    [spaceId, orgPermissions, spacePermissions],
   );
 
   const can = useCallback((permission: GateablePermission) => granted.has(permission), [granted]);
@@ -79,8 +79,7 @@ export function usePermissions() {
 
 /**
  * The caller's standing in ONE named space (`maySetPackageActive`). Activation is judged in the
- * TARGET space and owning it is its own authorization — neither survives the org∪space union
- * `can` computes. Works for a space the caller is not standing in; the server already unions the
+ * TARGET space and owning it is its own authorization — the working space cannot answer for another space. Works for a space the caller is not standing in; the server already unions the
  * org half into every row (`effectiveInSpace`). `undefined` (loading, no space, unreached) reads
  * as "not yet", never as a refusal.
  */
@@ -100,10 +99,8 @@ export function useRowSpaceGrants(): (spaceId: string | undefined, permission: s
   const { can } = usePermissions();
   const workingSpaceId = useCurrentSpaceId();
   const { data: spaces } = useSpaces();
-  const orgPermissions = useOrg().currentOrg?.permissions;
   return useCallback(
-    (spaceId, permission) =>
-      grantsInRowSpace(spaceId, workingSpaceId, can, spaces, orgPermissions, permission),
-    [can, workingSpaceId, spaces, orgPermissions],
+    (spaceId, permission) => grantsInRowSpace(spaceId, workingSpaceId, can, spaces, permission),
+    [can, workingSpaceId, spaces],
   );
 }

@@ -8,12 +8,15 @@
  * ≈ 72K tokens), so instead we expose a tiny fixed surface and let the model
  * discover on demand:
  *
- *   - `search_operations`   — keyword/tag search over the catalog; a keyword
- *                             hit also returns the top match's full schema as
- *                             `best_match`, so the common single-target case
- *                             skips the separate describe step
- *   - `describe_operation`  — full input schema for one operation
+ *   - `search`              — keyword search over every kind the caller acts on
+ *                             (operations, integration tools, agents, skills)
+ *   - `describe`            — everything needed to act on one item
  *   - `invoke_operation`    — execute one operation
+ *
+ * A root tool exists only when it does what `invoke_operation` cannot: relay a
+ * third-party tool result (`call_integration_tool`), launch and wait
+ * (`run_and_wait`), read bytes (`read`), import a package archive. Discovery is
+ * one tool for every kind, description one tool for every kind.
  *
  * `invoke_operation` dispatches **in-process** through the platform's own
  * Hono app (`app.fetch`), re-entering the full auth pipeline + RBAC. The
@@ -53,6 +56,8 @@ import {
 import type { ResolutionFieldError } from "@appstrate/core/api-errors";
 import type { RunLogEvent } from "@appstrate/shared-types";
 import { FILE_NAME_META_KEY, parseFileUri, fileUri } from "@appstrate/core/file-uri";
+import { parseScopedName } from "@appstrate/core/naming";
+import { SKILL_URI_PREFIX } from "@appstrate/core/skill-address";
 import {
   CONNECTION_RESOLUTION_WARNING_CODES,
   MAX_CONNECTIONS_PER_INTEGRATION,
@@ -67,7 +72,11 @@ import {
   operationIdGranted,
   type CatalogOperation,
 } from "./catalog.ts";
-import { internalDispatchHeader } from "../../lib/internal-dispatch.ts";
+import {
+  internalDispatchHeader,
+  onDispatchSpaces,
+  onDispatchTarget,
+} from "../../lib/internal-dispatch.ts";
 import { withoutConnectOffers } from "../../services/connect/preflight-connect-offer.ts";
 import {
   credentialProxyClosedDetail,
@@ -75,7 +84,7 @@ import {
 } from "../../services/credential-proxy/access.ts";
 import type { SpaceContextRow } from "../../lib/space-lookup.ts";
 import { logger } from "../../lib/logger.ts";
-import { ceilingHolds } from "../../lib/route-requirements.ts";
+import { ceilingHolds, holdsEach } from "../../lib/route-requirements.ts";
 import type { SpaceScope } from "../../lib/scope.ts";
 import {
   resolveFileAcrossSpaces,
@@ -86,7 +95,7 @@ import {
 } from "../../services/files.ts";
 import { isTextShapedMime, normalizeMime } from "../../services/mime-policy.ts";
 import { isTextShapedContentType } from "@appstrate/core/mime";
-import { VIEW_AS_HEADER } from "@appstrate/core/permissions";
+import { canComposeInline, VIEW_AS_HEADER } from "@appstrate/core/permissions";
 import { filePurposeValues } from "@appstrate/db/schema";
 import {
   asRecord,
@@ -97,8 +106,17 @@ import {
   ToolRefusal,
   trySetHeader,
   type Refusal,
+  type RouteRefusal,
 } from "./tool-results.ts";
-import { buildIntegrationTools } from "./integration-tools.ts";
+import {
+  buildCallIntegrationToolTool,
+  describeIntegrationTool,
+  INTEGRATION_KIND_ANNOTATIONS,
+  INTEGRATION_TOOLS_DESCRIPTION,
+  observeListingRefusal,
+  searchIntegrationTools,
+  type IntegrationToolContext,
+} from "./integration-tools.ts";
 import {
   DEFAULT_SEARCH_LIMIT,
   MAX_SEARCH_LIMIT,
@@ -106,16 +124,48 @@ import {
   searchLimit,
   searchTokens,
 } from "./search.ts";
+import {
+  describeAgent,
+  describeSkill,
+  listAgents,
+  listSkills,
+  readSpaces,
+  skillSpaceRefusal,
+  spacesShown,
+  unsearched,
+  type AgentHit,
+  type McpSkillReader,
+} from "./discovery.ts";
 import { buildPackageFileTools } from "./package-file-tools.ts";
-import { describeSpace } from "@appstrate/core/mcp-spaces";
+import {
+  ACTIVE_SPACES_META_KEY,
+  OPERATION_SPACES_META_KEY,
+  SPACE_CHOICE_META_KEY,
+  describeSpace,
+  projectActiveInSpaces,
+} from "@appstrate/core/mcp-spaces";
+import {
+  resourceAddress,
+  resolveCallSpace,
+  withOperationTarget,
+  isInlineRunSource,
+  effectiveOperationScope,
+  chosenCallSpace,
+  TOOL_SPACE_RULES,
+} from "./call-space.ts";
+import { forbidden, notFound } from "../../lib/errors.ts";
+import type { DispatchContext } from "./api-call-batch.ts";
 import {
   grantedIn,
   grantedSpaces,
+  spaceIdsWhere,
   spaceArgumentRefusal,
+  recordOperationSpaces,
   spaceRef,
   NO_FALLBACK_HINT,
   type McpSpace,
   type OrgWideSpaces,
+  type OrgWideToolSpaces,
 } from "./spaces.ts";
 import { connectionIdSetJsonSchema } from "../../openapi/paths/integrations.ts";
 
@@ -124,16 +174,15 @@ export type Dispatch = (req: Request) => Promise<Response>;
 
 /** The tools, named for telemetry/audit. */
 export type McpToolName =
-  | "search_operations"
-  | "describe_operation"
+  | "search"
+  | "describe"
   | "invoke_operation"
   | "run_and_wait"
   | "list_files"
-  | "read_file"
+  | "read"
   | "validate_package_file"
   | "import_package_file"
   | "get_runtime_capabilities"
-  | "search_integration_tools"
   | "call_integration_tool"
   | "get_me";
 
@@ -156,10 +205,14 @@ export interface McpToolEvent {
   durationMs: number;
   /** Rows returned to the caller (after `limit`), not rows matched; `call_integration_tool`: its entries. */
   shownCount?: number;
-  /** `search_operations`: matches withheld for lack of permission. */
+  /** `search` on the organization endpoint: the spaces it searched. */
+  spaceIds?: string[];
+  /** `search`: operations withheld for lack of permission. */
   deniedCount?: number;
   /** `invoke_operation`: which operation, its method/path, and the outcome. */
   operationId?: string;
+  /** Effective space of the dispatched operation; null when it acts outside any single space. */
+  operationSpaceId?: string | null;
   method?: string;
   path?: string;
   status?: number;
@@ -203,19 +256,18 @@ export interface McpToolContext {
   followRunLogs: (runId: string, onLog: (log: RunLogEvent) => void) => () => void;
   /** In-process dispatcher (defaults to the platform app at request time). */
   dispatch: Dispatch;
-  /**
-   * Optional sink for audit + telemetry events. Defaults to a no-op so unit
-   * tests and any non-HTTP caller need not provide one.
-   */
-  observe?: McpObserver;
+  /** Sink for audit and telemetry events from this request. */
+  observe: McpObserver;
   /** Org-wide connection only: its spaces; `permissions` and `scope` are the entered one's. */
-  orgSpaces?: OrgWideSpaces;
+  orgSpaces?: OrgWideToolSpaces;
+  /** The skills the connection reaches, through the Skills extension's reader (`./skills.ts`). */
+  skills: McpSkillReader;
 }
 
 /** Never let an observer error affect the tool result. */
 function emit(ctx: McpToolContext, event: McpToolEvent): void {
   try {
-    ctx.observe?.(event);
+    ctx.observe(event);
   } catch {
     // Telemetry/audit is best-effort; swallow.
   }
@@ -291,26 +343,44 @@ function fileResourceLink(doc: RunAndWaitFile): {
     name: doc.name,
     mimeType: doc.mime,
     size: doc.size,
-    description: `File published by this run — read it with read_file or pass its URI to a follow-up run_and_wait input file field.`,
+    description: `File published by this run — read it with read or pass its URI to a follow-up run_and_wait input file field.`,
   };
 }
 
 /**
  * The full, invoke-ready definition of one operation: parameters, request body,
  * responses, and every referenced component schema inlined. This is the payload
- * `describe_operation` returns, and it is also embedded as `search_operations`'
- * `best_match` so a clear single-hit search needs no follow-up describe call.
+ * `describe` returns for an operation.
  */
 function describePayload(
   op: CatalogOperation,
   componentSchemas: Record<string, unknown>,
   ctx: Pick<McpToolContext, "permissions" | "ceiling" | "orgSpaces">,
+  namedSpace: unknown,
 ): Record<string, unknown> {
-  const granted = operationGranted(op, ctx.permissions, ctx.ceiling);
+  const scope = effectiveOperationScope(op, ctx.orgSpaces?.orgPermissions ?? ctx.permissions);
+  const organization = scope.kind === "organization";
+  const selected = !ctx.orgSpaces || namedSpace !== undefined;
+  const permissions = organization
+    ? (ctx.orgSpaces?.orgPermissions ?? ctx.permissions)
+    : ctx.permissions;
+  const granted =
+    selected || organization ? operationGranted(op, permissions, ctx.ceiling) : undefined;
   return {
-    ...(ctx.orgSpaces ? { space: spaceRef(ctx.orgSpaces.current) } : {}),
-    ...grantedIn(ctx.orgSpaces, (s) => operationGranted(op, s.permissions, ctx.ceiling)),
-    operation_id: op.operationId,
+    scope: scope.kind,
+    space_rule: scope.kind === "resource" ? asRecord(op.operation)?.["x-appstrate-space"] : scope,
+    ...(ctx.orgSpaces && selected && !organization
+      ? { space: spaceRef(ctx.orgSpaces.current) }
+      : {}),
+    ...(ctx.orgSpaces && !organization
+      ? {
+          granted_in: spaceIdsWhere(ctx.orgSpaces.reachable, (s) =>
+            operationGranted(op, s.permissions, ctx.ceiling),
+          ),
+        }
+      : {}),
+    kind: "operation",
+    id: op.operationId,
     method: op.method,
     path: op.pathTemplate,
     path_params: op.pathParams,
@@ -322,8 +392,8 @@ function describePayload(
     target_space_permissions: op.requirement.targetSpaceRequirements,
     // Asked of a delegated credential's scopes only, never of the role.
     ceiling_permissions: op.requirement.ceilingRequirements,
-    granted,
-    ...(ctx.orgSpaces && !granted ? { hint: NO_FALLBACK_HINT } : {}),
+    ...(granted === undefined ? {} : { granted }),
+    ...(ctx.orgSpaces && !organization && granted === false ? { hint: NO_FALLBACK_HINT } : {}),
     parameters: op.operation.parameters ?? [],
     request_body: op.operation.requestBody ?? null,
     responses: op.operation.responses ?? {},
@@ -363,40 +433,223 @@ function notGrantedRefusal(
   };
 }
 
-function buildSearchTool(ctx: McpToolContext, invokes: boolean): AppstrateToolDefinition {
+/** The kinds of things `search` finds and `describe` details. */
+type DiscoveryKind = "operation" | "integration_tool" | "agent" | "skill";
+
+/** What a kind's searcher is given: the call's arguments and the spaces it searches. */
+interface SearchCall {
+  ctx: McpToolContext;
+  integrations: IntegrationToolContext;
+  /** An org-wide call's spaces (the one it named, else every space reached); `undefined` when pinned. */
+  spaces: readonly McpSpace[] | undefined;
+  tokens: readonly string[];
+  limit: number;
+  tag: string | undefined;
+  integration: string | undefined;
+  /** `kinds` lists this kind: only then are remote catalogs read from their servers. */
+  live: boolean;
+  start: number;
+  signal: AbortSignal | undefined;
+}
+
+/**
+ * A kind's section (`denied`: operations withheld; `searched`: the spaces its shown entries name),
+ * or the refusal that answers a call naming it.
+ */
+type KindSearch = (
+  call: SearchCall,
+) => Promise<
+  | { section: Record<string, unknown>; denied?: number; searched?: string[] }
+  | { refused: Refusal | RouteRefusal }
+>;
+
+/**
+ * Per kind: its section of `search`, the tool that acts on it (named only to a caller whose
+ * surface holds `act`), the argument that filters it, whether the caller is offered it (`granted`:
+ * a read granted in some space reached) and its searcher. A kind whose search is refused is left
+ * out unless the call named it, and then the refusal answers the call.
+ */
+const KINDS: Record<
+  DiscoveryKind,
+  {
+    section: string;
+    use: { tool: string; act?: "invokes" | "proxies" | "runs" };
+    filter?: "tag" | "integration";
+    declared: (granted: (operationId: string) => boolean, surface: McpSurface) => boolean;
+    search: KindSearch;
+  }
+> = {
+  operation: {
+    section: "operations",
+    use: { tool: "invoke_operation", act: "invokes" },
+    filter: "tag",
+    declared: () => true,
+    search: searchOperations,
+  },
+  integration_tool: {
+    section: "integration_tools",
+    use: { tool: "call_integration_tool", act: "proxies" },
+    filter: "integration",
+    declared: (_granted, surface) => surface.proxies,
+    search: searchIntegrationKind,
+  },
+  agent: {
+    section: "agents",
+    use: { tool: "run_and_wait", act: "runs" },
+    declared: (g) => g("listAgents"),
+    search: searchAgentKind,
+  },
+  skill: {
+    section: "skills",
+    use: { tool: "read" },
+    declared: (g) => g("listSkills"),
+    search: searchSkillKind,
+  },
+};
+
+const kindsOf = Object.keys(KINDS) as DiscoveryKind[];
+
+/** The kinds this caller may search and describe: each is declared only where its read is granted. */
+function discoveryKinds(ctx: McpToolContext, surface: McpSurface): DiscoveryKind[] {
+  const granted = (operationId: string): boolean =>
+    ctx.orgSpaces
+      ? ctx.orgSpaces.reachable.some((s) =>
+          operationIdGranted(operationId, s.permissions, ctx.ceiling),
+        )
+      : operationIdGranted(operationId, ctx.permissions, ctx.ceiling);
+  return kindsOf.filter((kind) => KINDS[kind].declared(granted, surface));
+}
+
+/**
+ * The kinds a call searches, and those it named. Omitted `kinds` is every declared kind, or the
+ * kinds of the filters passed; named kinds are checked against the declared ones and against the
+ * filters, which a kind not searched cannot honour.
+ */
+function requestedKinds(
+  args: Record<string, unknown>,
+  declared: readonly DiscoveryKind[],
+): { kinds: DiscoveryKind[]; named: ReadonlySet<DiscoveryKind> } | Refusal {
+  const raw = args.kinds;
+  const filtered = kindsOf.flatMap((kind) => {
+    const { filter } = KINDS[kind];
+    return filter && args[filter] !== undefined ? [{ kind, filter }] : [];
+  });
+  if (raw === undefined) {
+    const named = new Set(filtered.map((f) => f.kind));
+    return { kinds: declared.filter((kind) => named.size === 0 || named.has(kind)), named };
+  }
+  const valid = Array.isArray(raw) && raw.length > 0 && raw.every((k) => typeof k === "string");
+  const unknown = valid
+    ? (raw as string[]).filter((k) => !declared.includes(k as DiscoveryKind))
+    : [];
+  if (!valid || unknown.length > 0) {
+    return {
+      code: "invalid_argument",
+      error: valid
+        ? `Unknown kind(s): ${unknown.join(", ")}.`
+        : "kinds must be a non-empty array of kinds.",
+      arguments: ["kinds"],
+      accepted: [...declared],
+    };
+  }
+  const kinds = declared.filter((k) => (raw as string[]).includes(k));
+  const stray = filtered.find((f) => !kinds.includes(f.kind));
+  if (stray) {
+    return {
+      code: "invalid_argument",
+      error: `\`${stray.filter}\` filters ${stray.kind} items, and kinds does not include ${stray.kind}.`,
+      arguments: [stray.filter],
+    };
+  }
+  return { kinds, named: new Set(kinds) };
+}
+
+/** A filter passed empty or malformed would widen the search instead of narrowing it: refuse it. */
+function invalidFilter(args: Record<string, unknown>): Refusal | undefined {
+  if (args.integration !== undefined) {
+    const id = args.integration;
+    if (typeof id !== "string" || parseScopedName(id) === null) {
+      return {
+        code: "invalid_argument",
+        error: "`integration` must be an integration's package id, `@scope/name`.",
+        arguments: ["integration"],
+      };
+    }
+  }
+  if (args.tag !== undefined && (typeof args.tag !== "string" || args.tag.trim() === "")) {
+    return {
+      code: "invalid_argument",
+      error: "`tag` must be a non-empty string.",
+      arguments: ["tag"],
+    };
+  }
+  return undefined;
+}
+
+/** Read-only, unless the kind of integration tools is declared: reading its catalog reaches third-party servers. */
+function discoveryAnnotations(title: string, kinds: readonly DiscoveryKind[]): Tool["annotations"] {
+  return kinds.includes("integration_tool")
+    ? { title, ...INTEGRATION_KIND_ANNOTATIONS }
+    : { title, readOnlyHint: true, idempotentHint: true, openWorldHint: false };
+}
+
+function buildSearchTool(
+  ctx: McpToolContext,
+  surface: McpSurface,
+  integrations: IntegrationToolContext,
+): AppstrateToolDefinition {
+  const kinds = discoveryKinds(ctx, surface);
+  const uses = kinds
+    .filter((kind) => !KINDS[kind].use.act || surface[KINDS[kind].use.act!])
+    .map((kind) => `${KINDS[kind].section} → ${KINDS[kind].use.tool}`)
+    .join(", ");
   const descriptor: Tool = {
-    name: "search_operations",
+    name: "search",
     description:
-      "Search the Appstrate API for operations by keyword and/or tag. Returns matching " +
-      "operationIds with their HTTP method, path, and summary. Use this first to discover " +
-      "which operation to call. For a keyword search, the response also includes a " +
-      "`best_match` carrying the top result's full input schema" +
-      (invokes
-        ? " — when it matches your intent you can call invoke_operation directly, no " +
-          "describe_operation needed. "
-        : ", so a clear single hit needs no follow-up describe_operation call. ") +
-      "Operations your role may not invoke are listed separately under `denied` with the " +
-      "permissions they need in YOUR space: report that to the user instead of trying them. " +
-      "`total` counts the matches you may invoke, `denied_total` the rest; both lists are " +
-      "capped at `limit`.",
-    annotations: {
-      title: "Search API operations",
-      readOnlyHint: true,
-      idempotentHint: true,
-      openWorldHint: false,
-    },
+      `Search what you can act on, by keyword: ${kinds.map((k) => KINDS[k].section).join(", ")}. ` +
+      "Returns one section per kind searched, each with its `total` and its `items`, capped at " +
+      "`limit`; every item carries the `id` describe takes. " +
+      (uses ? `Each kind is used by its own tool: ${uses}. ` : "") +
+      "Without keywords, a section lists its kind (`tag` narrows operations). Operations your " +
+      "role may not invoke are listed apart under `denied`, with the permissions they need: " +
+      "report that to the user instead of trying them." +
+      (kinds.includes("integration_tool") ? INTEGRATION_TOOLS_DESCRIPTION : ""),
+    annotations: discoveryAnnotations("Search", kinds),
     inputSchema: {
       type: "object",
       additionalProperties: false,
       properties: {
         query: {
           type: "string",
-          description: "Free-text keywords matched against id/summary/path/tags.",
+          description:
+            "Free-text keywords, matched against each item's id or name and its description.",
         },
-        tag: { type: "string", description: "Restrict to a single OpenAPI tag (e.g. 'Agents')." },
+        kinds: {
+          type: "array",
+          items: { type: "string", enum: [...kinds] },
+          uniqueItems: true,
+          description:
+            `What to search: ${kinds.map((k) => `\`${k}\``).join(", ")}. Omitted, every kind is ` +
+            "searched, or only the kinds whose filter (`tag`, `integration`) is passed.",
+        },
+        tag: {
+          type: "string",
+          description: "Operations only: restrict to one OpenAPI tag (e.g. 'Agents').",
+        },
+        ...(kinds.includes("integration_tool")
+          ? {
+              integration: {
+                type: "string",
+                description:
+                  "Integration tools only: restrict to one integration, by package id " +
+                  "(`@scope/name`). Its remote catalog is read from its server only when `kinds` " +
+                  "lists `integration_tool`.",
+              },
+            }
+          : {}),
         limit: {
           type: "integer",
-          description: `Max results (default ${DEFAULT_SEARCH_LIMIT}, max ${MAX_SEARCH_LIMIT}).`,
+          description: `Max items per kind (default ${DEFAULT_SEARCH_LIMIT}, max ${MAX_SEARCH_LIMIT}).`,
           minimum: 1,
           maximum: MAX_SEARCH_LIMIT,
         },
@@ -404,137 +657,386 @@ function buildSearchTool(ctx: McpToolContext, invokes: boolean): AppstrateToolDe
     },
   };
 
-  const handler = async (args: Record<string, unknown>): Promise<CallToolResult> => {
+  const handler = async (
+    args: Record<string, unknown>,
+    extra: AppstrateRequestExtra,
+  ): Promise<CallToolResult> => {
     const start = performance.now();
-    const { operations, componentSchemas } = getCatalog();
-    const tag = asString(args.tag)?.toLowerCase();
-    const limit = searchLimit(args.limit);
-    const tokens = searchTokens(args.query);
-
-    let matches = [...operations.values()];
-    if (tag) matches = matches.filter((op) => op.tags.some((t) => t.toLowerCase() === tag));
-
-    const scored = rankByKeywords(
-      matches.sort((a, b) => a.operationId.localeCompare(b.operationId)),
-      tokens,
-      (op) => ({
-        name: op.operationId,
-        text: `${op.summary} ${op.description} ${op.pathTemplate} ${op.tags.join(" ")}`,
+    const invalid = invalidFilter(args);
+    if (invalid) return refusalResult(invalid);
+    const requested = requestedKinds(args, kinds);
+    if ("code" in requested) return refusalResult(requested);
+    const call = {
+      ctx,
+      integrations,
+      // Org-wide: the space named, else every space reached; pinned: the one the endpoint is in.
+      spaces: ctx.orgSpaces
+        ? args.space_id !== undefined
+          ? [ctx.orgSpaces.current]
+          : ctx.orgSpaces.reachable
+        : undefined,
+      tokens: searchTokens(args.query),
+      limit: searchLimit(args.limit),
+      tag: asString(args.tag)?.toLowerCase(),
+      integration: asString(args.integration),
+      start,
+      signal: extra.signal,
+    };
+    const outcomes = await Promise.all(
+      requested.kinds.map(async (kind) => {
+        const named = requested.named.has(kind);
+        const live = Array.isArray(args.kinds) && named;
+        return { kind, named, outcome: await KINDS[kind].search({ ...call, live }) };
       }),
     );
-
-    // A denied match is answered, not hidden — its id and requirement only.
-    const granted: CatalogOperation[] = [];
-    const denied: CatalogOperation[] = [];
-    for (const op of scored) {
-      (operationGranted(op, ctx.permissions, ctx.ceiling) ? granted : denied).push(op);
+    const sections: Record<string, unknown> = {};
+    let shown = 0;
+    let denied: number | undefined;
+    const searched = new Set<string>();
+    for (const { kind, named, outcome } of outcomes) {
+      if ("refused" in outcome) {
+        if (named) return refusalResult(outcome.refused);
+        continue;
+      }
+      sections[KINDS[kind].section] = outcome.section;
+      shown += Array.isArray(outcome.section.items) ? outcome.section.items.length : 0;
+      denied = outcome.denied ?? denied;
+      for (const id of outcome.searched ?? []) searched.add(id);
     }
-    const shown = granted.slice(0, limit);
-
     emit(ctx, {
-      tool: "search_operations",
+      tool: "search",
       durationMs: performance.now() - start,
-      shownCount: shown.length,
-      deniedCount: denied.length,
+      shownCount: shown,
+      ...(call.spaces ? { spaceIds: call.spaces.map((space) => space.id) } : {}),
+      ...(denied !== undefined ? { deniedCount: denied } : {}),
     });
-
-    // Only the top granted hit carries its schema: one describe saved, response bounded.
-    const top = shown[0];
-    const bestMatch =
-      tokens.length > 0 && top ? describePayload(top, componentSchemas, ctx) : undefined;
-
+    // Without `space_id`, the spaces that contributed an entry to the result: what the chat records.
+    const readSpaceIds = ctx.orgSpaces && args.space_id === undefined ? [...searched] : [];
     return jsonResult({
-      total: granted.length,
-      operations: shown.map((op) => ({
-        operation_id: op.operationId,
-        method: op.method,
-        path: op.pathTemplate,
-        summary: op.summary,
-        tags: op.tags,
-        ...grantedIn(ctx.orgSpaces, (s) => operationGranted(op, s.permissions, ctx.ceiling)),
-      })),
-      denied_total: denied.length,
-      denied: denied.slice(0, limit).map((op) => ({
-        operation_id: op.operationId,
-        required_permissions: op.requirement.requirements,
-        ...deniedCeiling(op, ctx),
-        ...grantedIn(ctx.orgSpaces, (s) => operationGranted(op, s.permissions, ctx.ceiling)),
-      })),
-      best_match: bestMatch,
+      ...sections,
+      ...(readSpaceIds.length > 0 ? { searched_spaces: readSpaceIds } : {}),
     });
   };
 
   return { descriptor, handler };
 }
 
-function buildDescribeTool(ctx: McpToolContext, invokes: boolean): AppstrateToolDefinition {
-  const descriptor: Tool = {
-    name: "describe_operation",
-    description:
-      "Return the full OpenAPI definition for one operation (parameters, request body, " +
-      "responses) with all referenced component schemas inlined, " +
-      (invokes
-        ? "so you can construct a valid invoke_operation call. "
-        : "so you can see exactly what it takes and what it answers with. ") +
-      "It also reports whether your role clears the route's guards (`granted`) and which " +
-      "permissions the route requires in YOUR space (`required_permissions`). " +
-      "`target_space_permissions` is separate on purpose: those are decided in the space the " +
-      "path names, not here, so they never make an operation unavailable to you. " +
-      "`ceiling_permissions` apply only when you act through a delegated credential (API key, " +
-      "OAuth token): its scopes must include each, so they make an operation unavailable when " +
-      "your credential's scopes omit one, whatever your role holds. A granted " +
-      "operation can still be refused on the record it acts on; that refusal names its reason.",
-    annotations: {
-      title: "Describe API operation",
-      readOnlyHint: true,
-      idempotentHint: true,
-      openWorldHint: false,
+/** A dispatch context reading in `space`, or in the one space a pinned connection enters. */
+function readingIn(ctx: McpToolContext, space: McpSpace | undefined): DispatchContext {
+  return space && ctx.orgSpaces
+    ? {
+        origin: ctx.origin,
+        authHeaders: ctx.authHeaders,
+        dispatch: ctx.orgSpaces.dispatchIn(space.id),
+      }
+    : ctx;
+}
+
+async function searchOperations({ ctx, spaces, tokens, tag, limit }: SearchCall) {
+  let matches = [...getCatalog().operations.values()];
+  if (tag) matches = matches.filter((op) => op.tags.some((t) => t.toLowerCase() === tag));
+  const scored = rankByKeywords(
+    matches.sort((a, b) => a.operationId.localeCompare(b.operationId)),
+    tokens,
+    (op) => ({
+      name: op.operationId,
+      text: `${op.summary} ${op.description} ${op.pathTemplate} ${op.tags.join(" ")}`,
+    }),
+  );
+  const grantedHere = (op: CatalogOperation) => (space: McpSpace) =>
+    operationGranted(op, space.permissions, ctx.ceiling);
+
+  // A denied match is answered, not hidden — its id and requirement only.
+  const granted: CatalogOperation[] = [];
+  const denied: CatalogOperation[] = [];
+  for (const { item } of scored) {
+    const listed = spaces
+      ? spaces.some(grantedHere(item))
+      : operationGranted(item, ctx.permissions, ctx.ceiling);
+    (listed ? granted : denied).push(item);
+  }
+  return {
+    denied: denied.length,
+    section: {
+      total: granted.length,
+      items: granted.slice(0, limit).map((op) => ({
+        id: op.operationId,
+        method: op.method,
+        path: op.pathTemplate,
+        summary: op.summary,
+        tags: op.tags,
+        scope: effectiveOperationScope(op, ctx.orgSpaces?.orgPermissions ?? ctx.permissions).kind,
+        ...(spaces &&
+        effectiveOperationScope(op, ctx.orgSpaces?.orgPermissions ?? ctx.permissions).kind !==
+          "organization"
+          ? { granted_in: spaceIdsWhere(spaces, grantedHere(op)) }
+          : {}),
+      })),
+      ...(denied.length > 0
+        ? {
+            denied_total: denied.length,
+            denied: denied.slice(0, limit).map((op) => ({
+              id: op.operationId,
+              required_permissions: op.requirement.requirements,
+              ...deniedCeiling(op, ctx),
+              // Not searched spaces: where it is granted instead, so the user can be pointed there.
+              ...(ctx.orgSpaces
+                ? { granted_in: spaceIdsWhere(ctx.orgSpaces.reachable, grantedHere(op)) }
+                : {}),
+            })),
+          }
+        : {}),
     },
+  };
+}
+
+async function searchAgentKind({ ctx, spaces, tokens, limit, signal }: SearchCall) {
+  const { answered, refused } = await readSpaces(spaces, (space) =>
+    listAgents(readingIn(ctx, space), signal),
+  );
+  // A space whose route refuses is reported; all refusing answers the first.
+  if (answered.length === 0 && refused[0]) return { refused: refused[0].refused };
+  const merged = new Map<string, { hit: AgentHit; spaceIds: string[] }>();
+  for (const { space, value } of answered) {
+    for (const hit of value.agents) {
+      const found = merged.get(hit.id) ?? { hit, spaceIds: [] };
+      if (space) found.spaceIds.push(space.id);
+      merged.set(hit.id, found);
+    }
+  }
+  const matches = rankByKeywords([...merged.values()], tokens, ({ hit }) => ({
+    name: hit.id,
+    text: `${hit.display_name} ${hit.description}`,
+  }));
+  const items = matches.slice(0, limit).map(({ item: { hit, spaceIds } }) => {
+    // The appearance is the launch prompts' business, not part of what a search answers.
+    const { icon: _icon, color: _color, ...listed } = hit;
+    return { ...listed, ...(spaces ? { granted_in: spaceIds } : {}) };
+  });
+  return {
+    section: { total: matches.length, items, ...unsearched(refused) },
+    searched: spacesShown(items),
+  };
+}
+
+async function searchSkillKind({ ctx, spaces, tokens, limit }: SearchCall) {
+  // A skill kind is searched where `listSkills` is granted; elsewhere the space is refused.
+  const targets = spaces ?? [{ id: ctx.scope.spaceId, permissions: ctx.permissions }];
+  const readable = targets.filter((space) =>
+    operationIdGranted("listSkills", space.permissions, ctx.ceiling),
+  );
+  const { answered, refused: unreadable } = await readSpaces(readable, (space) =>
+    listSkills(ctx.skills, space.id, ctx.requestId),
+  );
+  const refused = [
+    ...targets
+      .filter((space) => !readable.includes(space))
+      .map((space) => ({
+        space,
+        refused: {
+          status: 403,
+          body: {
+            code: "not_granted",
+            error: `Your role does not allow listing skills in space ${space.id}.`,
+          },
+        },
+      })),
+    ...unreadable,
+  ].map((entry) => ({ ...entry, space: spaces ? entry.space : undefined }));
+  if (answered.length === 0 && refused[0]) return { refused: refused[0].refused };
+  const matches = rankByKeywords(
+    answered.flatMap(({ value }) => value.skills),
+    tokens,
+    (skill) => ({ name: skill.name, text: `${skill.packageId} ${skill.description}` }),
+  );
+  const items = matches
+    .slice(0, limit)
+    .map(({ item: { granted_in, ...hit } }) => ({ ...hit, ...(spaces ? { granted_in } : {}) }));
+  return {
+    section: { total: matches.length, items, ...unsearched(refused) },
+    searched: spacesShown(items),
+  };
+}
+
+/**
+ * Why integration tools may not be searched or described in the space an org-wide call names: the
+ * space's closed credential proxy, or the caller's role there; `undefined` when they may. A pinned
+ * connection declares the kind only where they may.
+ */
+function integrationKindRefusal(ctx: McpToolContext): Refusal | undefined {
+  return ctx.orgSpaces ? spaceActRefusal(ctx.orgSpaces, "proxies", "integration tools") : undefined;
+}
+
+/**
+ * The integration tools section: remote catalogs are read from their servers only when `kinds`
+ * lists the kind, from the cache otherwise; across spaces, in those that allow it.
+ */
+async function searchIntegrationKind({
+  ctx,
+  integrations,
+  spaces,
+  tokens,
+  limit,
+  integration,
+  live,
+  start,
+  signal,
+}: SearchCall) {
+  const allowed = spaces?.filter((space) => space.surface.proxies);
+  const refusal = allowed?.length === 0 ? integrationKindRefusal(ctx) : undefined;
+  if (refusal) return { refused: refusal };
+  const found = await searchIntegrationTools(
+    allowed,
+    (space) => ({ ...integrations, dispatch: readingIn(ctx, space).dispatch }),
+    {
+      tokens,
+      limit,
+      cachedOnly: !live,
+      ...(integration !== undefined ? { integration } : {}),
+    },
+    signal,
+  );
+  if ("refused" in found) observeListingRefusal(integrations, "search", start, found.refused);
+  return found;
+}
+
+function buildDescribeTool(
+  ctx: McpToolContext,
+  surface: McpSurface,
+  integrations: IntegrationToolContext,
+): AppstrateToolDefinition {
+  const { invokes } = surface;
+  const kinds = discoveryKinds(ctx, surface);
+  const descriptor: Tool = {
+    name: "describe",
+    description:
+      "Return everything needed to act on one item search returned, by its `kind` and `id`. " +
+      "An `operation`: its full OpenAPI definition (parameters, request body, responses) with " +
+      "every referenced component schema inlined and its space_rule for invocation. An operation can be described before choosing a space" +
+      (invokes ? ", to build a valid invoke_operation call (its `id` is the `operation_id`)" : "") +
+      "; whether your role clears the route's guards (`granted`) and the permissions it requires " +
+      "in the space of the call (`required_permissions`). `target_space_permissions` are decided in the " +
+      "space the path names, never here; `ceiling_permissions` apply only through a delegated " +
+      "credential (API key, OAuth token), whose scopes must include each. A granted operation " +
+      "can still be refused on the record it acts on; that refusal names its reason." +
+      (kinds.includes("agent")
+        ? " An `agent`: its launch contract at the definition a launch by you runs (input " +
+          "schema, stored values, locked fields, output, declared integrations)" +
+          (surface.runs ? " and the `run_with` call that launches it." : ".")
+        : "") +
+      (kinds.includes("skill")
+        ? " A `skill`: its frontmatter and the `skill://` URI of each of its files, to read " +
+          "with read."
+        : "") +
+      (kinds.includes("integration_tool")
+        ? " An `integration_tool`: its `input_schema`, a typed tool's `output_schema` when its " +
+          "server declares one, the `connections` it reaches and its `usage`: how to call it " +
+          "with call_integration_tool, how to read its result and what its connections' fields " +
+          "mean. Its remote catalog is read from its server when not cached."
+        : ""),
+    annotations: discoveryAnnotations("Describe", kinds),
     inputSchema: {
       type: "object",
       additionalProperties: false,
       properties: {
-        operation_id: {
+        kind: {
+          type: "string",
+          enum: [...kinds],
+          description: "The item's kind, as search returned it.",
+        },
+        id: {
           type: "string",
           description:
-            "The operationId, as returned by search_operations (or already known). Not " +
-            "needed when search_operations already returned a matching best_match.",
+            "The item's `id`, as search returned it (or already known: an operationId, an agent's " +
+            "`@scope/name`, a skill's `skill://` URI, an integration tool's name).",
         },
       },
-      required: ["operation_id"],
+      required: ["kind", "id"],
     },
   };
 
-  const handler = async (args: Record<string, unknown>): Promise<CallToolResult> => {
+  const handler = async (
+    args: Record<string, unknown>,
+    extra: AppstrateRequestExtra,
+  ): Promise<CallToolResult> => {
     const start = performance.now();
-    const operationId = asString(args.operation_id);
+    const kind = asString(args.kind) as DiscoveryKind | undefined;
+    const id = asString(args.id);
     // A malformed call is a refusal result, not a failed execution: the model
     // sees what is missing and can self-correct.
-    if (!operationId) {
+    const missing = [...(kind ? [] : ["kind"]), ...(id ? [] : ["id"])];
+    if (missing.length > 0) {
       return refusalResult({
         code: "missing_argument",
-        error: "operation_id is required.",
-        arguments: ["operation_id"],
+        error: missing.map((name) => `${name} is required.`).join(" "),
+        arguments: missing,
       });
     }
-
-    const { operations, componentSchemas } = getCatalog();
-    const op = operations.get(operationId);
-    if (!op) {
+    if (!kinds.includes(kind!)) {
       return refusalResult({
-        code: "unknown_operation",
-        error: `Unknown operationId: ${operationId}. Find it with search_operations.`,
-        arguments: ["operation_id"],
+        code: "invalid_argument",
+        error: `Unknown kind: ${kind}.`,
+        arguments: ["kind"],
+        accepted: [...kinds],
       });
     }
+    if (kind === "integration_tool") {
+      const refusal = integrationKindRefusal(ctx);
+      return refusal
+        ? refusalResult(refusal)
+        : describeIntegrationTool(integrations, id!, extra.signal);
+    }
+    const result = await describeItem(kind!, id!, args.space_id);
+    // An unknown operationId is not an event.
+    if (kind !== "operation" || !result.isError) {
+      emit(ctx, {
+        tool: "describe",
+        durationMs: performance.now() - start,
+        ...(kind === "operation" ? { operationId: id } : {}),
+      });
+    }
+    return result;
+  };
 
-    emit(ctx, {
-      tool: "describe_operation",
-      durationMs: performance.now() - start,
-      operationId,
-    });
-
-    return jsonResult(describePayload(op, componentSchemas, ctx));
+  const describeItem = async (
+    kind: DiscoveryKind,
+    id: string,
+    namedSpace: unknown,
+  ): Promise<CallToolResult> => {
+    switch (kind) {
+      case "agent": {
+        const current = ctx.orgSpaces?.current;
+        const described = await describeAgent(
+          ctx,
+          id,
+          (current ? current.surface.runs : surface.runs) ? { spaceId: current?.id } : null,
+        );
+        if ("refused" in described) return refusalResult(described.refused);
+        if ("refusal" in described) return refusalResult(described.refusal);
+        return jsonResult({
+          kind: "agent",
+          ...described.agent,
+          ...(current ? { space: spaceRef(current) } : {}),
+        });
+      }
+      case "skill": {
+        const described = await describeSkill(ctx.skills, id, ctx.scope.spaceId);
+        return "skill" in described
+          ? jsonResult({ kind: "skill", ...described.skill })
+          : refusalResult(described.refusal);
+      }
+      default: {
+        const { operations, componentSchemas } = getCatalog();
+        const op = operations.get(id);
+        return op
+          ? jsonResult(describePayload(op, componentSchemas, ctx, namedSpace))
+          : refusalResult({
+              code: "unknown_operation",
+              error: `Unknown operationId: ${id}. Find it with search.`,
+              arguments: ["id"],
+            });
+      }
+    }
   };
 
   return { descriptor, handler };
@@ -637,6 +1139,7 @@ function interpolatePath(op: CatalogOperation, pathParams: Record<string, unknow
 export async function readResponse(
   response: Response,
   extra?: Record<string, unknown>,
+  eligibleLaunchSpaces?: () => readonly { id: string }[],
 ): Promise<CallToolResult> {
   const contentType = (response.headers.get("content-type") ?? "").toLowerCase();
   const isError = response.status >= 400;
@@ -675,24 +1178,40 @@ export async function readResponse(
   }
 
   let raw = await response.text();
-  let truncated = false;
-  if (raw.length > MAX_RESPONSE_CHARS) {
-    raw = raw.slice(0, MAX_RESPONSE_CHARS);
-    truncated = true;
-  }
-
   let body: unknown = raw;
-  if (!truncated && contentType.includes("json") && raw) {
+  let spaceIds: string[] = [];
+  const launchProblem =
+    eligibleLaunchSpaces &&
+    (response.status === 403 || response.status === 404 || response.status === 409);
+  if (contentType.includes("json") && raw && (raw.length <= MAX_RESPONSE_CHARS || launchProblem)) {
     try {
       body = JSON.parse(raw);
     } catch {
-      body = raw;
+      // A non-JSON response under a JSON content type stays text.
     }
+    if (launchProblem) {
+      const projected = projectActiveInSpaces(body, eligibleLaunchSpaces);
+      if (projected) {
+        body = projected.body;
+        raw = JSON.stringify(body);
+        spaceIds = projected.ids;
+      }
+    }
+  }
+  const truncated = raw.length > MAX_RESPONSE_CHARS;
+  if (truncated) {
+    // A text prefix cannot carry a reliable list of the spaces it reveals. Keep the
+    // diagnostic and omit all alternatives before slicing, including partial names.
+    if (spaceIds.length) {
+      raw = JSON.stringify(projectActiveInSpaces(body, () => [])!.body);
+      spaceIds = [];
+    }
+    body = raw.slice(0, MAX_RESPONSE_CHARS);
   }
 
   // The version to send back as `if_match` on the next write to this resource.
   const etag = response.headers.get("etag");
-  return jsonResult(
+  const result = jsonResult(
     {
       status: response.status,
       ...(etag ? { etag } : {}),
@@ -702,13 +1221,20 @@ export async function readResponse(
     },
     isError,
   );
+  if (spaceIds.length) result._meta = { [ACTIVE_SPACES_META_KEY]: spaceIds };
+  return result;
 }
 
-function applyQuery(url: URL, query: Record<string, unknown>): void {
+function applyQuery(
+  url: URL,
+  query: Record<string, unknown>,
+  csvParams?: ReadonlySet<string>,
+): void {
   for (const [key, value] of Object.entries(query)) {
     if (value === undefined || value === null) continue;
     if (Array.isArray(value)) {
-      for (const item of value) url.searchParams.append(key, String(item));
+      if (csvParams?.has(key)) url.searchParams.set(key, value.join(","));
+      else for (const item of value) url.searchParams.append(key, String(item));
     } else {
       url.searchParams.set(key, String(value));
     }
@@ -719,7 +1245,7 @@ function buildInvokeTool(ctx: McpToolContext): AppstrateToolDefinition {
   const descriptor: Tool = {
     name: "invoke_operation",
     description:
-      "Execute an Appstrate API operation. Call describe_operation first to learn its " +
+      "Execute an Appstrate API operation. Call describe first to learn its " +
       "path_params, query, and body shapes. Runs with your own credentials and permissions; " +
       "the request is validated and authorized exactly as the equivalent REST call. " +
       "Optimistic concurrency: a result carries `etag` when the resource is versioned — " +
@@ -812,13 +1338,25 @@ function buildInvokeTool(ctx: McpToolContext): AppstrateToolDefinition {
       });
       return refusalResult({
         code: "unknown_operation",
-        error: `Unknown operationId: ${operationId}. Find it with search_operations.`,
+        error: `Unknown operationId: ${operationId}. Find it with search.`,
         arguments: ["operation_id"],
       });
     }
 
+    const resolved = ctx.orgSpaces
+      ? resolveCallSpace("invoke_operation", args, ctx.orgSpaces)
+      : undefined;
+    args = withOperationTarget(
+      op,
+      args,
+      ctx.orgSpaces
+        ? resolved?.kind === "space"
+          ? ctx.scope.spaceId
+          : undefined
+        : ctx.scope.spaceId,
+    );
     const pathParams = asRecord(args.path_params) ?? {};
-    const query = asRecord(args.query) ?? {};
+    const query = { ...asRecord(args.query) };
     const nonScalar = findNonScalarParam(op, pathParams, query);
     if (nonScalar !== null) {
       emit(ctx, {
@@ -869,6 +1407,18 @@ function buildInvokeTool(ctx: McpToolContext): AppstrateToolDefinition {
       });
     };
     const headers = new Headers(ctx.authHeaders);
+    // An organization-level operation called without `space_id` acts in no space: the one this
+    // request entered only opened the endpoint, so the route is not handed it.
+    const spaceless =
+      resolved?.kind === "none" || (resolved?.kind === "row" && resolved.id === undefined);
+    let operationSpaceId: string | null =
+      spaceless ||
+      op.spaceScope.kind === "organization" ||
+      (op.spaceScope.kind === "resource" && op.spaceScope.source === "row") ||
+      (op.spaceScope.kind === "aggregate" && ctx.orgSpaces && !ctx.orgSpaces.bounded)
+        ? null
+        : ((resolved?.kind === "space" ? resolved.target : undefined) ?? ctx.scope.spaceId);
+    if (spaceless) headers.delete("x-space-id");
     const ifMatch = asString(args.if_match);
     if (ifMatch && !trySetHeader(headers, "If-Match", ifMatch))
       return rejectHeader("If-Match", "if_match");
@@ -899,7 +1449,7 @@ function buildInvokeTool(ctx: McpToolContext): AppstrateToolDefinition {
     }
 
     const url = new URL(path, ctx.origin);
-    applyQuery(url, query);
+    applyQuery(url, query, op.csvQueryParams);
 
     // Every Appstrate API request body is a JSON object. A model that passes
     // an array or primitive as `body` would otherwise have it silently
@@ -938,9 +1488,59 @@ function buildInvokeTool(ctx: McpToolContext): AppstrateToolDefinition {
       body: sendBody ? JSON.stringify(body) : undefined,
     });
 
+    const spaces = ctx.orgSpaces;
+    const enteredId =
+      resolved && resolved.kind !== "none" && typeof resolved.id === "string"
+        ? resolved.id
+        : undefined;
+    const additional = recordOperationSpaces(
+      spaces,
+      resolved?.kind === "space" && typeof resolved.id === "string" ? [resolved.id] : [],
+    );
+    if (additional.record) onDispatchSpaces(request, additional.record);
+    if (op.spaceScope.kind === "resource") {
+      const reaches = (spaceId: string) =>
+        spaces
+          ? spaces.reachable.some((space) => space.id === spaceId)
+          : spaceId === ctx.scope.spaceId;
+      if (op.spaceScope.source === "row") {
+        onDispatchTarget(request, async (spaceId, targetPermissions) => {
+          if (spaceId !== null) {
+            if (!reaches(spaceId)) throw notFound("Resource not found");
+            // With no explicit entry, the authorized row determines where MCP is invoked.
+            // An explicit entry has checked its own grant; REST authorizes the row in its space.
+            if ((!enteredId || enteredId === spaceId) && !targetPermissions?.has("mcp:invoke"))
+              throw forbidden("This space does not grant mcp:invoke");
+            if (additional.record)
+              await additional.record(enteredId ? [enteredId, spaceId] : [spaceId]);
+          }
+          operationSpaceId = spaceId;
+        });
+      } else {
+        const address = resourceAddress(op.spaceScope, args);
+        let refusal: Refusal | undefined;
+        if (address.kind === "invalid")
+          refusal = {
+            code: "invalid_argument",
+            error: "Resource scope parameters must each have a single value.",
+          };
+        else if (
+          address.kind === "target" &&
+          typeof address.spaceId === "string" &&
+          !reaches(address.spaceId)
+        )
+          refusal = {
+            code: "unknown_space",
+            error: "The resource is outside the spaces this connection can use.",
+          };
+        if (refusal)
+          return { ...refusalResult(refusal), _meta: { [OPERATION_SPACES_META_KEY]: [] } };
+      }
+    }
     const response = await ctx.dispatch(request);
     emit(ctx, {
       tool: "invoke_operation",
+      operationSpaceId,
       durationMs: performance.now() - start,
       operationId,
       method: op.method,
@@ -950,12 +1550,31 @@ function buildInvokeTool(ctx: McpToolContext): AppstrateToolDefinition {
     });
     // Only a 403 the permission set explains gets the permission answer; one the
     // ROW decided (a file ACL, `draft_not_writable`) already names its reason.
+    const denialContext =
+      spaceless && spaces
+        ? { permissions: spaces.orgPermissions ?? ctx.permissions, ceiling: ctx.ceiling }
+        : ctx;
     const denial =
-      response.status === 403 && !operationGranted(op, ctx.permissions, ctx.ceiling)
-        ? notGrantedRefusal(op, ctx)
+      response.status === 403 && !operationGranted(op, denialContext.permissions, ctx.ceiling)
+        ? notGrantedRefusal(op, denialContext)
         : undefined;
-    const space = ctx.orgSpaces ? { space: spaceRef(ctx.orgSpaces.current) } : undefined;
-    return readResponse(response, space || denial ? { ...space, ...denial } : undefined);
+    const actedIn = spaces?.reachable.find((s) => s.id === operationSpaceId);
+    const space = actedIn ? { space: spaceRef(actedIn) } : undefined;
+    const result = await readResponse(
+      response,
+      space || denial ? { ...space, ...denial } : undefined,
+      () =>
+        (ctx.orgSpaces?.reachable ?? []).filter(
+          (s) => s.surface.invokes && operationGranted(op, s.permissions, ctx.ceiling),
+        ),
+    );
+    const recordedIds = new Set<string>();
+    if (operationSpaceId) {
+      if (enteredId) recordedIds.add(enteredId);
+      recordedIds.add(operationSpaceId);
+    }
+    if (additional.record) for (const id of additional.ids) recordedIds.add(id);
+    return { ...result, _meta: { ...result._meta, [OPERATION_SPACES_META_KEY]: [...recordedIds] } };
   };
 
   return { descriptor, handler };
@@ -1070,11 +1689,6 @@ function startRunProgress(
   };
 }
 
-/** What a caller composing an inline run tells it about the `log` tool. */
-export const INLINE_LOG_INSTRUCTION =
-  "The chat shows ONLY lines the run emits via `log`, so instruct it in the top-level " +
-  "`prompt` to log meaningful steps whenever that tool is selected.";
-
 /**
  * `run_and_wait` arguments that exist only for `kind:"inline"`. Declared only
  * to a caller whose surface `composes`; another caller sending one gets the
@@ -1091,8 +1705,10 @@ const INLINE_ONLY_RUN_AND_WAIT_PROPERTIES: Record<string, object> = {
       display_name: {
         type: "string",
         description:
-          "Task-specific human title. When name is omitted, the platform derives " +
-          "@inline/<slug> from this value.",
+          "Concise human title, in the user's language, of the exact action or outcome of THIS " +
+          'run (for example "Analyse des 3 derniers e-mails"): the run card, run lists and run ' +
+          "page show it. Never an id or a generic name such as `one-shot` or `task`. When " +
+          "`name` is omitted the platform derives @inline/<slug> from it.",
       },
       name: {
         type: "string",
@@ -1102,12 +1718,19 @@ const INLINE_ONLY_RUN_AND_WAIT_PROPERTIES: Record<string, object> = {
       },
       dependencies: {
         type: "object",
-        description: "Exact AFPS dependencies override.",
+        description:
+          "Exact AFPS dependencies override. `integrations` maps each `@scope/name` to its " +
+          "version: take both from `get_me` (`integration_package_id`, `version`).",
         additionalProperties: true,
       },
       integrations_configuration: {
         type: "object",
-        description: "Exact AFPS integration configuration override.",
+        description:
+          "Exact AFPS integration configuration override. Per integration, `tools` lists the " +
+          "exact tool names the task needs and no more (`api_call` covers most third-party REST " +
+          "calls; omit it only to take the integration's whole `default_tools`; `getIntegration` " +
+          "returns `default_tools` and the full `tool_catalog`). A declared integration is " +
+          "optional unless `required: true`.",
         additionalProperties: true,
       },
       output: {
@@ -1123,21 +1746,23 @@ const INLINE_ONLY_RUN_AND_WAIT_PROPERTIES: Record<string, object> = {
     description:
       "REQUIRED for kind:inline. The inline run's system prompt, as a top-level argument " +
       "alongside `manifest` (never nested inside it). Tell the run to call the `log` tool " +
-      "to report each meaningful step — those lines are what the chat shows live. When the " +
-      "run produces files, require descriptive, task-specific names that remain clear " +
-      `outside this run; never generic names such as ${CONTEXT_FREE_FILENAMES_PHRASE}.`,
+      "to report each meaningful step whenever it is selected — the chat shows only those " +
+      "lines, live.",
   },
   context_files: {
     type: "array",
     items: { type: "string" },
     description:
-      "kind:inline ONLY. `appfile://` URIs — typically straight from a previous run's " +
+      "kind:inline ONLY. `appfile://` URIs only (an `upload://` one goes in a declared file " +
+      "field of `input`) — typically straight from a previous run's " +
       "`files` result — mounted read-only into this run's `files/` directory and " +
       "listed in its prompt. This is how you chain runs: to give a run the output of " +
       "earlier runs, pass their `appfile://` URIs here VERBATIM. Never copy a previous " +
       "run's content into `prompt`: re-typing it costs tokens twice, and every URL, figure " +
       "and date you retype is one you can get wrong — the file itself cannot be. No " +
-      "manifest change is needed; the platform declares the input field for you. For " +
+      "manifest change is needed; the platform declares the input field for you. Naming a " +
+      "URI in `prompt` mounts nothing: a prompt naming a file the input does not mount is " +
+      "refused (400). For " +
       "kind:agent this argument is rejected — a published agent's input schema is a " +
       "versioned contract, so pass the URI through one of its declared file fields instead.",
   },
@@ -1156,17 +1781,16 @@ function buildRunAndWaitTool(ctx: McpToolContext, inline: boolean): AppstrateToo
           "by `manifest`+`prompt`)"
         : 'a run of an existing agent (`kind:"agent"`, by `scope`/`name`)') +
       ", exposes the created run to chat for live progress, then returns " +
-      "`{ id, packageId, status, done:true, result?, error?, warnings }` when the run reaches a " +
-      "terminal status; `error` is the run's own failure. `warnings` (`[]` when none) lists the " +
+      "`{ id, packageId, status, done:true, result?, error?, warnings, files?" +
+      (ctx.orgSpaces ? ", space" : "") +
+      " }` when the run reaches a terminal status; `error` is the run's own failure" +
+      (ctx.orgSpaces ? " and `space` the space it ran in" : "") +
+      ". `warnings` (`[]` when none) lists the " +
       "integrations the run started without, each with the code that state raises as an error " +
       `on a required integration (${WARNING_CODES_PHRASE}; ` +
       "`integration_unbound` alone: a pin or override bound none). If its wait ends first, it " +
       `returns \`done:false\` with the run \`id\`. ${RUN_AND_WAIT_RESUME_INSTRUCTION} ` +
       "After `done:true`, do NOT call `getRun` to wait; the run is over. " +
-      (inline
-        ? `${INLINE_MANIFEST_RULE} ${INLINE_LOG_INSTRUCTION} ` +
-          "Never use an id or a generic display name such as `one-shot`. "
-        : "") +
       "File deliverables: every file the run writes under its workspace `outputs/` directory is " +
       "published as a file when the run ends and returned here as a `resource_link`" +
       (inline
@@ -1241,6 +1865,8 @@ function buildRunAndWaitTool(ctx: McpToolContext, inline: boolean): AppstrateToo
           description:
             "Which connections to use per integration" +
             (inline ? " (either kind)" : "") +
+            " — set it when the request names a connection, resolving its id from `get_me`'s " +
+            "`connections` before launching" +
             ': `{ "@scope/integration": ' +
             `["<connection_id>", ...] }\`, 0 to ${MAX_CONNECTIONS_PER_INTEGRATION} connection ids per ` +
             "integration — always an ARRAY, even for a single one (a bare string is a 400). " +
@@ -1358,7 +1984,13 @@ function buildRunAndWaitTool(ctx: McpToolContext, inline: boolean): AppstrateToo
           ? { method: "POST", status: launchStatus, outcome: "invoked" as const }
           : { outcome: "rejected" as const }),
       });
-      return jsonResult({ ...launched.step.payload, ...space }, true);
+      const payload = launched.step.payload;
+      const projected = projectActiveInSpaces(payload.body, () =>
+        (ctx.orgSpaces?.reachable ?? []).filter((s) =>
+          args.kind === "inline" ? s.surface.composes : s.surface.runs,
+        ),
+      );
+      return jsonResult({ ...payload, ...(projected && { body: projected.body }), ...space }, true);
     }
 
     // Any caller of this handler (an agent run included) may persist what it returns; the
@@ -1480,7 +2112,7 @@ function buildListFilesTool(ctx: McpToolContext): AppstrateToolDefinition {
       "(`user_upload`) and deliverables agents published from runs (`agent_output`). Filter by " +
       "`runId`, `chat_session_id`, or `purpose`. Each row carries an `appfile://` URI you can " +
       "pass verbatim into a run_and_wait input file field (to feed a file to another agent) " +
-      "or read with read_file. Returns `{ files: [...], hasMore }`.",
+      "or read with read. Returns `{ files: [...], hasMore }`.",
     annotations: {
       title: "List files",
       readOnlyHint: true,
@@ -1551,15 +2183,19 @@ function buildListFilesTool(ctx: McpToolContext): AppstrateToolDefinition {
   return { descriptor, handler };
 }
 
-function buildReadFileTool(ctx: McpToolContext): AppstrateToolDefinition {
+function buildReadTool(ctx: McpToolContext): AppstrateToolDefinition {
   const descriptor: Tool = {
-    name: "read_file",
+    name: "read",
     description:
-      "Read an appfile:// URI through the same file ACL and storage path as resources/read. " +
-      "Small text and binary files are returned as embedded MCP resources; oversized or " +
-      "non-downloadable files return capability-aware metadata.",
+      "Read a resource by its URI: an `appfile://` file (from list_files, a run's output or an " +
+      "attachment) through the file's own ACL, or a skill file by its `skill://` URI (from " +
+      "search or describe of a skill), the same bytes `resources/read` " +
+      "serves. A skill's `SKILL.md` is at its `uri`; each of its other files is a " +
+      "`resources[].uri` of its entry (describe, or `skills/get`). Small text and binary files are returned " +
+      "as embedded MCP resources; an oversized or non-downloadable file returns " +
+      "capability-aware metadata.",
     annotations: {
-      title: "Read file",
+      title: "Read resource",
       readOnlyHint: true,
       idempotentHint: true,
       openWorldHint: false,
@@ -1569,7 +2205,10 @@ function buildReadFileTool(ctx: McpToolContext): AppstrateToolDefinition {
       additionalProperties: false,
       required: ["uri"],
       properties: {
-        uri: { type: "string", description: "An appfile:// URI returned by list_files." },
+        uri: {
+          type: "string",
+          description: "An `appfile://` or `skill://` URI, verbatim as a tool returned it.",
+        },
       },
     },
   };
@@ -1585,9 +2224,14 @@ function buildReadFileTool(ctx: McpToolContext): AppstrateToolDefinition {
       });
     }
     try {
-      const result = await readFile(uri);
+      const inferred = args.space_id === undefined && ctx.orgSpaces !== undefined;
+      const ids: string[] = [];
+      const result = uri.startsWith(SKILL_URI_PREFIX)
+        ? await readSkillResource(ctx, uri)
+        : await readFile(uri, inferred ? (spaceId) => ids.push(spaceId) : undefined);
       return {
         content: result.contents.map((resource) => ({ type: "resource", resource })),
+        ...(inferred && { _meta: { [OPERATION_SPACES_META_KEY]: ids } }),
         isError: false,
       } as CallToolResult;
     } catch (err) {
@@ -1598,10 +2242,31 @@ function buildReadFileTool(ctx: McpToolContext): AppstrateToolDefinition {
   return { descriptor, handler };
 }
 
+/**
+ * A `skill://` read through the Skills extension's reader, its JSON-RPC errors as the refusals a
+ * tool result carries: an unknown or unreadable URI is `not_found`, a malformed one
+ * `invalid_argument`.
+ */
+async function readSkillResource(ctx: McpToolContext, uri: string): Promise<ReadResourceResult> {
+  const mismatch = skillSpaceRefusal(uri, ctx.scope.spaceId, "uri");
+  if (mismatch) throw new ToolRefusal(mismatch);
+  try {
+    return await ctx.skills.read(uri);
+  } catch (err) {
+    if (!(err instanceof McpError)) throw err;
+    throw new ToolRefusal({
+      code: err.code === RESOURCE_NOT_FOUND_ERROR_CODE ? "not_found" : "invalid_argument",
+      error:
+        err.code === RESOURCE_NOT_FOUND_ERROR_CODE ? `Skill file not found: ${uri}` : err.message,
+      arguments: ["uri"],
+    });
+  }
+}
+
 // --- resources/read for appfile:// ----------------------------------------
 
 /**
- * The file read shared by `read_file` and `resources/read`, through the files
+ * The file read shared by `read` and `resources/read`, through the files
  * service's container ACL in the file's own space (`resolveFileAcrossSpaces`) and straight
  * from storage (`readStoredFileBytes`, so no presigned redirect to follow). A bad
  * or unknown URI throws a {@link ToolRefusal}; each caller maps it.
@@ -1612,7 +2277,7 @@ function buildReadFileTool(ctx: McpToolContext): AppstrateToolDefinition {
  * may not download it), degraded per the caller's {@link FileCapabilities}.
  */
 function buildFileResourceReader(ctx: McpToolContext): {
-  read: (uri: string) => Promise<ReadResourceResult>;
+  read: (uri: string, onRead?: (spaceId: string) => void) => Promise<ReadResourceResult>;
 } {
   /** Metadata-only JSON block — degraded per the caller's capabilities. */
   const metadataOnly = (
@@ -1646,7 +2311,7 @@ function buildFileResourceReader(ctx: McpToolContext): {
   };
 
   return {
-    read: async (uri: string): Promise<ReadResourceResult> => {
+    read: async (uri, onRead): Promise<ReadResourceResult> => {
       const docId = parseFileUri(uri);
       if (!docId) {
         throw new ToolRefusal({
@@ -1658,12 +2323,8 @@ function buildFileResourceReader(ctx: McpToolContext): {
 
       // `files:read` is asked in the file's own space, which may be another reached space or,
       // for the issuing conversation's upload, the personal space.
-      const resolved = await resolveFileAcrossSpaces(
-        ctx.scope.orgId,
-        ctx.actor,
-        docId,
-        await ctx.fileAccess(),
-      );
+      const access = await ctx.fileAccess();
+      const resolved = await resolveFileAcrossSpaces(ctx.scope.orgId, ctx.actor, docId, access);
       if (!resolved) {
         throw new ToolRefusal({
           code: "not_found",
@@ -1672,6 +2333,32 @@ function buildFileResourceReader(ctx: McpToolContext): {
         });
       }
       const { row, capabilities } = resolved;
+      if (onRead) {
+        // A conversation reads its own personal uploads through their container, even
+        // outside its admitted spaces. That read contributes no team destination.
+        const memberSpace = ctx.orgSpaces?.reachable.find((s) => s.id === row.spaceId);
+        const ownUpload =
+          access.conversationId !== undefined &&
+          row.chatSessionId === access.conversationId &&
+          (!memberSpace || memberSpace.personal);
+        if (!ownUpload) {
+          if (!memberSpace || memberSpace.id !== ctx.scope.spaceId)
+            throw new ToolRefusal({
+              code: "not_found",
+              error: `File not found: ${uri}`,
+              arguments: ["uri"],
+            });
+          try {
+            await ctx.orgSpaces?.beforeAct?.(memberSpace.id);
+          } catch {
+            throw new ToolRefusal({
+              code: "spaces_not_recorded",
+              error: "The space could not be recorded on the conversation.",
+            });
+          }
+          onRead(memberSpace.id);
+        }
+      }
       // Canonicalise the URI to the resolved id (the caller may have passed any
       // valid form) so the returned `contents[].uri` is stable.
       const canonicalUri = fileUri(row.id);
@@ -1749,23 +2436,35 @@ function buildGetMeTool(ctx: McpToolContext, surface: McpSurface): AppstrateTool
   const descriptor: Tool = {
     name: "get_me",
     description:
-      "Return the caller's working context: identity (name, email), role in this organization, " +
-      "the space the request resolved to (every list returned is scoped to it), " +
-      "and the integrations the caller already has connected and could attach to an agent: one " +
-      "entry per integration active in that space with a connection the caller may bind there, " +
-      "its own or shared into the space. An entry flagged `needs_reconnection` has no healthy " +
-      "connection: its owner must reconnect it before use. " +
+      "Return the caller's working context in the space of the call: `user`, `org` (with the " +
+      "organization `role`), `space`, `connections`, `agents`, `skills` and `recent_runs`" +
+      (ctx.orgSpaces
+        ? ", and `spaces`: your role in each space you reach, which, not the organization role, decides each call"
+        : "") +
+      ". `connections` holds one entry per " +
+      "integration with a connection the caller may bind in THIS space, its own or shared into it " +
+      "(team-space sharing grants colleagues access only in team spaces; the owner can still use an " +
+      "organization-scoped connection in their personal space when own connections are allowed), each listing those " +
+      "`connections` (`id`, `label`, `account_id`, `owned_by_actor`, `needs_reconnection`). On the " +
+      "integration entry, not on a connection: `active` (`false`: the integration is switched off " +
+      "in this space, so a run there cannot use it until it is activated — `activatePackage`, or " +
+      "for an organization owner or admin offered to the organization: from chat, in the " +
+      "organization catalog; otherwise `offerPackageToOrg` with an unconfined user credential. An " +
+      "offer activates the integration, never a connection, and a space's own switched-off row " +
+      "still wins); `via` (`home`, `shared`, `system`, `organization`: why it is placed here, " +
+      "`null` when the caller holds a connection but it is not placed); `version` and " +
+      "`default_tools`, present only when active; `needs_reconnection` (no healthy connection: " +
+      "its owner must reconnect it). " +
       (surface.proxies
-        ? "The integration tools you can call with them are listed by `search_integration_tools`, " +
-          "with those of active integrations that need no connection; integrations active in the " +
-          "space that need one and lack a usable connection are listed there under `not_ready`. "
+        ? "The tools of these integrations are listed by `search` (`integration_tool` kind), with " +
+          "those of active integrations that need no connection; active ones that need one and " +
+          "lack a usable connection are listed there under `not_ready`. "
         : surface.proxiesClosed
           ? "You cannot call them directly here: an admin closed this space's credential proxy " +
             "outside a run. Agents you run still use them. "
           : "") +
-      "Call this first to ground who you are acting for, what the " +
-      "caller's role allows (operations beyond it fail at invoke time), and which integrations " +
-      "to prefer when building or configuring an agent.",
+      "`agents` and `skills` are capped (`agents_truncated`, `skills_truncated`): `search` finds " +
+      "the rest by keyword.",
     annotations: {
       title: "Get caller context",
       readOnlyHint: true,
@@ -1796,6 +2495,7 @@ function buildGetMeTool(ctx: McpToolContext, surface: McpSurface): AppstrateTool
       id: s.id,
       name: s.name,
       role: s.role,
+      personal: s.personal,
     }));
     return readResponse(response, spaces ? { spaces } : undefined);
   };
@@ -1819,13 +2519,17 @@ export interface McpSurface {
   composes: boolean;
   /** Creating an agent through `invoke_operation`. */
   authors: boolean;
+  /** May create a package of at least one type (agent, skill or integration). */
+  creates: boolean;
   listsFiles: boolean;
   importsPackages: boolean;
-  /** `search_integration_tools` and `call_integration_tool`: the credential proxy outside a run. */
+  /** `validate_package_file`: before an import, or of the archive an inline run wrote. */
+  validatesPackages: boolean;
+  /** `search`'s and `describe`'s integration tools, and `call_integration_tool`: the credential proxy outside a run. */
   proxies: boolean;
   /**
-   * Those two tools are withheld by the space's setting alone (`credential_proxy_open`), not by
-   * the caller's grants: `get_me` says so, since an undeclared tool explains nothing.
+   * The integration tools are withheld by the space's setting alone (`credential_proxy_open`),
+   * not by the caller's grants: `get_me` says so, since an undeclared tool explains nothing.
    */
   proxiesClosed: boolean;
 }
@@ -1847,16 +2551,22 @@ export function deriveMcpSurface(
   // route, which guards as `/proxy` does. `mcp:invoke` is checked here and nowhere else.
   const mayProxy = invokes && proxyAcceptsCredential && granted("listCredentialProxyConnections");
   const closed = reachOutsideRunIfPermitted(permissions, space) === "closed";
+  const composes = runs && granted("runInline");
+  // `import_package_file` calls the import service directly: it re-checks
+  // each package's `write`, but `mcp:invoke` and the user actor (the import
+  // is recorded under a user id) are checked here and nowhere else.
+  const importsPackages = invokes && actor.type === "user" && granted("importBundle");
   return {
     invokes,
     runs,
-    composes: runs && granted("runInline"),
+    composes,
     authors: invokes && granted("createAgent"),
+    creates:
+      invokes &&
+      (granted("createAgent") || granted("createSkill") || granted("createIntegrationPackage")),
     listsFiles: granted("listFiles"),
-    // `import_package_file` calls the import service directly: it re-checks
-    // each package's `write`, but `mcp:invoke` and the user actor (the import
-    // is recorded under a user id) are checked here and nowhere else.
-    importsPackages: invokes && actor.type === "user" && granted("importBundle"),
+    importsPackages,
+    validatesPackages: importsPackages || composes,
     proxies: mayProxy && !closed,
     proxiesClosed: mayProxy && closed,
   };
@@ -1910,23 +2620,22 @@ function refuseUndeclaredArguments(
  * and re-lists, where an alias would be a permanent second dispatch path.
  */
 export function buildMcpTools(ctx: McpToolContext, surface: McpSurface): AppstrateToolDefinition[] {
+  const integrations: IntegrationToolContext = {
+    origin: ctx.origin,
+    authHeaders: ctx.authHeaders,
+    dispatch: ctx.dispatch,
+    observe: (event) => emit(ctx, event),
+    runs: surface.runs,
+  };
   const tools = [
-    buildSearchTool(ctx, surface.invokes),
-    buildDescribeTool(ctx, surface.invokes),
+    buildSearchTool(ctx, surface, integrations),
+    buildDescribeTool(ctx, surface, integrations),
     ...(surface.invokes ? [buildInvokeTool(ctx)] : []),
     ...(surface.runs ? [buildRunAndWaitTool(ctx, surface.composes)] : []),
     ...(surface.listsFiles ? [buildListFilesTool(ctx)] : []),
-    buildReadFileTool(ctx),
-    ...buildPackageFileTools(ctx, surface.importsPackages),
-    ...(surface.proxies
-      ? buildIntegrationTools({
-          origin: ctx.origin,
-          authHeaders: ctx.authHeaders,
-          dispatch: ctx.dispatch,
-          observe: (event) => emit(ctx, event),
-          runs: surface.runs,
-        })
-      : []),
+    buildReadTool(ctx),
+    ...buildPackageFileTools(ctx, surface),
+    ...(surface.proxies ? [buildCallIntegrationToolTool(integrations)] : []),
     buildGetMeTool(ctx, surface),
   ];
   const { orgSpaces } = ctx;
@@ -1936,36 +2645,59 @@ export function buildMcpTools(ctx: McpToolContext, surface: McpSurface): Appstra
   );
 }
 
-/**
- * What each tool needs in the space an org-wide call names: `false` no space
- * (no `space_id`), `null` the route guard alone, else the surface act
- * re-checked there. Exhaustive, so a new tool must decide.
- */
-const SPACE_ACTS: Record<McpToolName, keyof McpSurface | null | false> = {
-  search_operations: null,
-  describe_operation: null,
-  invoke_operation: "invokes",
-  run_and_wait: "runs",
-  list_files: "listsFiles",
-  read_file: null,
-  validate_package_file: null,
-  import_package_file: "importsPackages",
-  search_integration_tools: "proxies",
-  call_integration_tool: "proxies",
-  get_me: null,
-  get_runtime_capabilities: false,
-};
+const ORGANIZATION_LEVEL_SPACE_ID =
+  ' An organization-level operation (`describe` gives `scope: "organization"`) acts in no ' +
+  "space: omit `space_id` for it, and never ask the user for a space.";
 
 /** `space_id`, listing the spaces itself: clients truncate server instructions. */
-function spaceIdProperty(spaces: OrgWideSpaces): Record<string, unknown> {
+function spaceIdProperty(
+  spaces: OrgWideSpaces,
+  optional: boolean,
+  perOperation: boolean,
+): Record<string, unknown> {
+  const reached = spaces.reachable.map(describeSpace).join("; ");
   return {
     type: "string",
     enum: spaces.reachable.map((s) => s.id),
-    description:
-      `The space this call acts in, by id: ${spaces.reachable.map(describeSpace).join("; ")}. ` +
-      "Take it from the user's request, or, when it names none, from the space your context " +
-      "designates for such a request; with neither, when several could serve, ask the user which " +
-      "one instead of choosing. The server picks no default space.",
+    description: optional
+      ? `The one space to search, by id: ${reached}. Pass it when the request or context designates a space, ` +
+        "including when that space has no matches. Omit it for an explicitly cross-space search or when the space is unknown. " +
+        "Each item's `granted_in` names the spaces where you reach it."
+      : `The space this call acts in, by id: ${reached}. Choose it in the order given in the ` +
+        "server instructions." +
+        (perOperation ? ORGANIZATION_LEVEL_SPACE_ID : ""),
+  };
+}
+
+/**
+ * The refusal of an act the space an org-wide call entered does not grant the caller, or
+ * `undefined`: in the proxy route's order, its permission first (`not_granted`), then the space's
+ * barrier (`credential_proxy_closed`), met only by a caller the permission admits. `what` names
+ * the act in the refusal.
+ */
+function spaceActRefusal(
+  spaces: OrgWideSpaces,
+  need: keyof McpSurface | null,
+  what: string,
+): Refusal | undefined {
+  const holds = (space: McpSpace) => need === null || space.surface[need];
+  const { current } = spaces;
+  if (need === "proxies" && current.surface.proxiesClosed) {
+    return {
+      code: "credential_proxy_closed",
+      error: credentialProxyClosedDetail(current),
+      space: spaceRef(current),
+      ...grantedIn(spaces, holds),
+      hint: NO_FALLBACK_HINT,
+    };
+  }
+  if (holds(current)) return undefined;
+  return {
+    code: "not_granted",
+    error: `Your role in ${describeSpace(current)} does not allow ${what}.`,
+    space: spaceRef(current),
+    ...grantedIn(spaces, holds),
+    hint: NO_FALLBACK_HINT,
   };
 }
 
@@ -1974,8 +2706,13 @@ function withSpaceArgument(
   tool: AppstrateToolDefinition,
   spaces: OrgWideSpaces,
 ): AppstrateToolDefinition {
-  const act = SPACE_ACTS[tool.descriptor.name as McpToolName];
-  if (act === false) return tool;
+  const name = tool.descriptor.name as McpToolName;
+  const declared = TOOL_SPACE_RULES[name];
+  if (declared.kind === "none") return tool;
+  const optional = declared.kind === "search";
+  // Required unless the operation the call names acts in no space.
+  const perOperation = name === "invoke_operation" || name === "describe";
+  const act = declared.grant;
   const holds = (need: keyof McpSurface | null) => (space: McpSpace) =>
     need === null || space.surface[need];
   const granted = grantedSpaces(spaces, holds(act));
@@ -1988,42 +2725,116 @@ function withSpaceArgument(
       : tool.descriptor.description,
     inputSchema: {
       ...schema,
-      properties: { ...schema.properties, space_id: spaceIdProperty(spaces) },
-      required: [...(schema.required ?? []), "space_id"],
+      properties: {
+        ...schema.properties,
+        space_id: spaceIdProperty(spaces, optional, perOperation),
+      },
     },
   };
   return {
     descriptor,
     handler: async (args, extra) => {
-      const refusal = spaceArgumentRefusal(spaces, args.space_id);
-      if (refusal) return refusalResult(refusal);
-      // `kind:"inline"` is the `composes` act, a narrower grant than `runs`.
+      const resolved = resolveCallSpace(name, args, spaces);
+      const chosen = chosenCallSpace(name, args, spaces);
+      if (
+        chosen !== undefined &&
+        ((args.space_id !== undefined && args.space_id !== chosen) ||
+          (resolved.kind === "space" &&
+            resolved.target !== undefined &&
+            resolved.target !== chosen))
+      ) {
+        return refusalResult({
+          code: "space_mismatch",
+          error: "The call must use the space the user chose.",
+          arguments: ["space_id"],
+        });
+      }
+      const entered =
+        resolved.kind !== "none" && (resolved.kind === "space" || resolved.id !== undefined);
       const need = act === "runs" && args.kind === "inline" ? "composes" : act;
-      const { current } = spaces;
-      // In the proxy route's order: its permission first (`not_granted` below), then the space's
-      // barrier, met only by a caller the permission admits. The credential kind never reaches
-      // here: the proxy refuses it for every space of the request, so neither tool is declared.
-      if (need === "proxies" && current.surface.proxiesClosed) {
-        return refusalResult({
-          code: "credential_proxy_closed",
-          error: credentialProxyClosedDetail(current),
-          space: spaceRef(current),
-          ...grantedIn(spaces, holds(need)),
-          hint: NO_FALLBACK_HINT,
-        });
+      if (entered) {
+        const refusal = spaceArgumentRefusal(spaces, resolved.id);
+        if (refusal) {
+          if (refusal.code !== "missing_argument") return refusalResult(refusal);
+          const op =
+            name === "invoke_operation" && typeof args.operation_id === "string"
+              ? getCatalog().operations.get(args.operation_id)
+              : undefined;
+          const rule = op?.spaceScope;
+          const targetGrant =
+            rule?.kind === "resource" && rule.source !== "row" ? rule.spacePermission : undefined;
+          const inline = isInlineRunSource(rule, args.body);
+          const candidates = spaces.reachable.filter((space) => {
+            if (inline && !canComposeInline((p) => space.permissions.has(p))) return false;
+            if (need && !space.surface[need]) return false;
+            if (targetGrant && !space.permissions.has(targetGrant)) return false;
+            // With no named caller or destination, a selection serves as both. Cross-space
+            // acts with distinct, explicitly supplied arguments keep their REST guards.
+            return (
+              !op ||
+              (operationGranted(op, space.permissions, spaces.ceiling) &&
+                holdsEach(op.requirement.targetSpaceRequirements, space.permissions))
+            );
+          });
+          if (candidates.length === 0)
+            return refusalResult({
+              code: "not_granted",
+              error: "No reachable space grants this operation.",
+              granted_in: [],
+            });
+          const missing = spaceArgumentRefusal({ ...spaces, reachable: candidates }, resolved.id)!;
+          return {
+            ...refusalResult(missing),
+            _meta: { [SPACE_CHOICE_META_KEY]: candidates.map((s) => s.id) },
+          };
+        }
       }
-      if (!holds(need)(current)) {
-        return refusalResult({
-          code: "not_granted",
-          error: `Your role in ${describeSpace(current)} does not allow ${tool.descriptor.name}${need === "composes" ? ' with kind:"inline"' : ""}.`,
-          space: spaceRef(current),
-          ...grantedIn(spaces, holds(need)),
-          hint: NO_FALLBACK_HINT,
-        });
+      if (entered || (name === "invoke_operation" && need === "invokes")) {
+        const unmet = spaceActRefusal(
+          spaces,
+          need,
+          `${name}${need === "composes" ? ' with kind:"inline"' : ""}`,
+        );
+        if (unmet) return refusalResult(unmet);
       }
-      // Consumed: `run_and_wait` validates its own arguments.
+      const target = resolved.kind === "space" ? resolved.target : undefined;
+      const ids =
+        entered && resolved.kind === "space"
+          ? [...new Set([spaces.current.id, ...(target ? [target] : [])])]
+          : [];
+      if (spaces.beforeAct && ids.length > 0) {
+        // Record only spaces in this conversation. Without a recorder, route guards
+        // return their normal response for a target outside the credential's allowlist.
+        if (target && !spaces.reachable.some((space) => space.id === target)) {
+          return refusalResult({
+            code: "unknown_space",
+            error: "The target is outside the spaces this conversation can use.",
+          });
+        }
+        try {
+          for (const id of ids) await spaces.beforeAct(id);
+        } catch {
+          return refusalResult({
+            code: "spaces_not_recorded",
+            error: "The space could not be recorded on the conversation.",
+          });
+        }
+      }
       const { space_id: _entered, ...rest } = args;
-      return tool.handler(rest, extra);
+      const resolvedArgs = entered ? { ...args, space_id: spaces.current.id } : args;
+      const result = await tool.handler(
+        perOperation || optional || name === "read" ? resolvedArgs : rest,
+        extra,
+      );
+      // A row-addressed operation determines its actual target inside REST. Its receipt wins.
+      if (
+        (name === "invoke_operation" || name === "read" || name === "import_package_file") &&
+        result._meta?.[OPERATION_SPACES_META_KEY] !== undefined
+      )
+        return result;
+      const meta: Record<string, unknown> = { ...result._meta, [OPERATION_SPACES_META_KEY]: ids };
+      if (name === "call_integration_tool") delete meta[SPACE_CHOICE_META_KEY];
+      return { ...result, _meta: meta };
     },
   };
 }

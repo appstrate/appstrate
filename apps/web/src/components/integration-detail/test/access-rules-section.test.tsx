@@ -96,4 +96,11 @@ describe("who may create connections", () => {
       expect(toggle).not.toContain("data-disabled");
     }
   });
+
+  it("holds that toggle alone: the default and the per-agent exceptions live in Connexions", () => {
+    const html = renderSection(false);
+    expect(html).toContain('data-testid="block-user-connections-section"');
+    expect(html).not.toContain('data-testid="org-default-section"');
+    expect(html).not.toContain('data-testid="pin-management-section"');
+  });
 });

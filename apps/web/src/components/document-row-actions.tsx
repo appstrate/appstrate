@@ -9,14 +9,14 @@ import { TableRowActions } from "./table-row-actions";
 
 /**
  * The « … » menu of one file row, shared by the table and the compact list.
- * Each action is gated by the server-computed `capabilities`; `onPreview` is
- * absent where a click on the row already previews.
+ * Each action is gated by the server-computed `capabilities`; `readerHref` (the
+ * file's page) is absent where a click on the row already opens it.
  */
 export function DocumentRowActions({
   doc,
   isPending,
   showRunLink,
-  onPreview,
+  readerHref,
   onDownload,
   onKeep,
   onDelete,
@@ -24,7 +24,7 @@ export function DocumentRowActions({
   doc: FileDto;
   isPending: boolean;
   showRunLink?: boolean;
-  onPreview?: (doc: FileDto) => void;
+  readerHref?: string;
   onDownload: (doc: FileDto) => void;
   onKeep: (doc: FileDto) => void;
   onDelete: (doc: FileDto) => void;
@@ -40,11 +40,11 @@ export function DocumentRowActions({
       isPending={isPending}
       actions={[
         {
-          id: "preview",
-          label: t("row.preview"),
+          id: "open",
+          label: t("row.open"),
           icon: Eye,
-          onSelect: () => onPreview?.(doc),
-          hidden: !(Boolean(onPreview) && doc.capabilities.preview),
+          to: readerHref,
+          hidden: !readerHref,
         },
         {
           id: "download",

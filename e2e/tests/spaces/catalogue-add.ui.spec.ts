@@ -131,3 +131,84 @@ test("« Ajouter » adds to the working space, and in « Tous les espaces » to 
   expect(row).toBeDefined();
   expect(row?.enabled).not.toBe(false);
 });
+
+test("Ajouter previews the published dependencies and reports what the chosen space still needs", async ({
+  browser,
+  browserCtx,
+  apiClient,
+  orgOnlyClient,
+}) => {
+  const scope = `@${browserCtx.org.orgSlug}`;
+  const service = `${scope}/calendar`;
+  const agent = `${scope}/report`;
+  const integration = await apiClient.post("/packages/integrations", {
+    publish: true,
+    manifest: {
+      schema_version: "0.1",
+      type: "integration",
+      name: service,
+      version: "1.0.0",
+      display_name: "Calendar",
+      source: {
+        kind: "remote",
+        remote: { url: "https://calendar.example.com/mcp", transport: "streamable-http" },
+      },
+      tools_policy: { search: {} },
+    },
+  });
+  expect(integration.status(), await integration.text()).toBe(201);
+  const definition = {
+    schema_version: "0.1",
+    type: "agent",
+    name: agent,
+    version: "1.0.0",
+    display_name: "Calendar report",
+  };
+  const created = await apiClient.post("/packages/agents", {
+    manifest: {
+      ...definition,
+      dependencies: { integrations: { [service]: "1.0.0" } },
+      integrations_configuration: { [service]: { required: true, tools: ["search"] } },
+    },
+    content: "Report on my calendar.",
+  });
+  expect(created.status(), await created.text()).toBe(201);
+  const path = `/packages/agents/${agent}`;
+  const detail = await apiClient.get(path);
+  const saved = await apiClient.patch(
+    path,
+    {
+      manifest: {
+        ...definition,
+        dependencies: { integrations: {} },
+        integrations_configuration: {},
+      },
+    },
+    { "If-Match": detail.headers()["etag"]! },
+  );
+  expect(saved.status(), await saved.text()).toBe(200);
+  const target = await createSpace(orgOnlyClient, "Reports");
+  const context = await createAuthedContext(
+    browser,
+    browserCtx.auth,
+    browserCtx.org.orgId,
+    target.id,
+  );
+  try {
+    const page = await context.newPage();
+    await page.goto("/catalogue/agent");
+    await catalogueCard(page, "Calendar report")
+      .getByRole("button", { name: "Ajouter", exact: true })
+      .click();
+    const dialog = page.getByRole("dialog", { name: /Calendar report/ });
+    await expect(dialog.getByText("Calendar", { exact: true })).toBeVisible();
+    await dialog.getByRole("button", { name: /agent seul/i }).click();
+    await expect(
+      page.getByText(`Activez ${service} pour pouvoir lancer ${agent} dans cet espace.`, {
+        exact: true,
+      }),
+    ).toBeVisible();
+  } finally {
+    await context.close();
+  }
+});

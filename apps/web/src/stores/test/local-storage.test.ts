@@ -50,6 +50,26 @@ describe("createKeyedLocalStore", () => {
     expect(createKeyedLocalStore("t-corrupt-", strings, empty).read("runs")).toBe(empty);
   });
 
+  it("refreshes the cached value after another tab writes, removes or clears it", () => {
+    const store = createKeyedLocalStore("t-other-", strings, []);
+    const notify = (key: string | null, area: unknown = storage) =>
+      globalThis.dispatchEvent(Object.assign(new Event("storage"), { key, storageArea: area }));
+    store.write("runs", ["old"]);
+    storage.setItem("t-other-runs", '["new"]');
+    notify("unrelated");
+    notify("t-other-runs", {});
+    expect(store.read("runs")).toEqual(["old"]);
+    notify("t-other-runs");
+    expect(store.read("runs")).toEqual(["new"]);
+    storage.removeItem("t-other-runs");
+    notify("t-other-runs");
+    expect(store.read("runs")).toEqual([]);
+    store.write("runs", ["again"]);
+    storage.clear();
+    notify(null);
+    expect(store.read("runs")).toEqual([]);
+  });
+
   it("reads a value of the wrong shape through its parser", () => {
     storage.setItem("t-shape-runs", '{"status":true}');
     expect(createKeyedLocalStore("t-shape-", strings, []).read("runs")).toEqual([]);

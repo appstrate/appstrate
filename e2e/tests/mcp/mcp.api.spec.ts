@@ -141,16 +141,15 @@ test.describe("MCP over an API key (full stack)", () => {
     // `apps/api/src/modules/mcp/tools.ts` (`buildMcpTools`).
     expect(names).toEqual([
       "call_integration_tool",
-      "describe_operation",
+      "describe",
       "get_me",
       "get_runtime_capabilities",
       "import_package_file",
       "invoke_operation",
       "list_files",
-      "read_file",
+      "read",
       "run_and_wait",
-      "search_integration_tools",
-      "search_operations",
+      "search",
       "validate_package_file",
     ]);
 
@@ -158,14 +157,15 @@ test.describe("MCP over an API key (full stack)", () => {
       jsonrpc: "2.0",
       id: 3,
       method: "tools/call",
-      params: { name: "search_operations", arguments: { query: "space", limit: 5 } },
+      params: { name: "search", arguments: { query: "space", limit: 5, kinds: ["operation"] } },
     });
     const searchPayload = toolPayload(search.envelope);
     expect(searchPayload.isError).toBe(false);
     // `total` counts the matches this key may invoke (#1493 split the result
     // into granted and `denied`); the owner-inherited key is granted some.
-    expect(searchPayload.data.total).toBeGreaterThan(0);
-    expect(searchPayload.data.operations).not.toHaveLength(0);
+    const operations = searchPayload.data.operations as { total: number; items: unknown[] };
+    expect(operations.total).toBeGreaterThan(0);
+    expect(operations.items).not.toHaveLength(0);
 
     // invoke a stable, side-effect-free GET (lists the org's spaces).
     const invoke = await mcpRpc(request, url, headers, {
@@ -424,6 +424,57 @@ test.describe("MCP over a self-service OAuth client (DCR + PKCE)", () => {
         headers: { ...headers, "X-Space-Id": orgContext.org.defaultSpaceId },
       });
       expect(lifted.status()).toBe(401);
+    } finally {
+      await anon.dispose();
+    }
+  });
+
+  test("reads the same offered integration placement through a minted MCP token and the session", async ({
+    playwright,
+    orgContext,
+    apiClient,
+  }) => {
+    const id = "@appstrate/airtable";
+    const offer = await apiClient.put(`/packages/${id}/org-offer`);
+    expect(offer.ok(), await offer.text()).toBe(true);
+    const detail = await apiClient.get(`/integrations/${id}`);
+    expect(detail.ok(), await detail.text()).toBe(true);
+    const { availability } = await detail.json();
+    expect(availability).toMatchObject({ state: "active", offered_to_org: true });
+
+    const anon = await playwright.request.newContext();
+    try {
+      const url = mcpUrlForOrg(orgContext.org.orgId);
+      const clientId = await registerDcrClient(anon);
+      const { code, verifier } = await authorizeToCode(anon, orgContext.auth.cookie, clientId);
+      const token = await exchange(anon, clientId, code, verifier, url);
+      expect(token.status).toBe(200);
+      const result = await mcpRpc(
+        anon,
+        url,
+        { Authorization: `Bearer ${token.body.access_token}` },
+        {
+          jsonrpc: "2.0",
+          id: 1,
+          method: "tools/call",
+          params: {
+            name: "invoke_operation",
+            arguments: {
+              operation_id: "getIntegration",
+              path_params: { packageId: id },
+              space_id: orgContext.org.defaultSpaceId,
+            },
+          },
+        },
+      );
+      const { data, isError } = toolPayload(result.envelope);
+      expect(isError).toBe(false);
+      // A credential's ceiling may change org_offerable, but not the placement.
+      const { via, state, offered_to_org, shared_by } = availability;
+      expect(data).toMatchObject({
+        status: 200,
+        body: { availability: { via, state, offered_to_org, shared_by } },
+      });
     } finally {
       await anon.dispose();
     }

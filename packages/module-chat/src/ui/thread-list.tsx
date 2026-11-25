@@ -21,27 +21,29 @@
  */
 
 import { useEffect, useRef, useState } from "react";
+import { flushSync } from "react-dom";
 import { useQueryClient } from "@tanstack/react-query";
 import {
   EllipsisIcon,
   MessagesSquareIcon,
+  PencilIcon,
   PlusIcon,
   SearchIcon,
-  Settings2Icon,
   Trash2Icon,
   XIcon,
 } from "lucide-react";
-import { relativeAge } from "@appstrate/core/format";
 import { cn } from "@appstrate/ui/cn";
+import { useNowTick } from "@appstrate/ui/use-now-tick";
 import { Spinner } from "@appstrate/ui/components/spinner";
 import { Button } from "@appstrate/ui/components/button";
+import { Input } from "@appstrate/ui/components/input";
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuLabel,
   DropdownMenuTrigger,
 } from "@appstrate/ui/components/dropdown-menu";
-import { Input } from "@appstrate/ui/components/input";
 import { Label } from "@appstrate/ui/components/label";
 import {
   Dialog,
@@ -85,7 +87,12 @@ import {
 } from "./sessions.ts";
 import { ConversationRowSkeleton } from "./conversation-skeleton.tsx";
 import { groupSessionsByDate, type SessionGroupKey } from "./session-groups.ts";
-import { NOTE_TEXT_CLASS, READING_TEXT_DENSE_CLASS, SEARCH_INPUT_CLASS } from "./phone-text.ts";
+import {
+  NEW_CONVERSATION_CLASS,
+  NOTE_TEXT_CLASS,
+  READING_TEXT_DENSE_CLASS,
+  SEARCH_INPUT_CLASS,
+} from "./phone-text.ts";
 import { useSessions } from "./use-sessions.ts";
 
 const SEARCH_DEBOUNCE_MS = 250;
@@ -111,42 +118,6 @@ function useDebouncedTerm(input: string, delay: number): string {
 }
 
 /**
- * ISO timestamp → compact relative time ("5 min", "2 h", "3 j"), as of `now`.
- * `Intl.RelativeTimeFormat` always prefixes "il y a" / "ago", three words more
- * than a 56px column holds, so the unit comes from the bundle (plural rules
- * included) and only the number is computed here.
- */
-const AGE_KEY = {
-  now: "threads.age.now",
-  minute: "threads.age.minutes",
-  hour: "threads.age.hours",
-  day: "threads.age.days",
-  month: "threads.age.months",
-  year: "threads.age.years",
-} as const;
-
-function relativeTime(iso: string, now: number, t: ChatTranslate): string {
-  const age = relativeAge(iso, now);
-  return age ? t(AGE_KEY[age.unit], { count: age.count }) : "";
-}
-
-/**
- * Re-render clock for the relative-time labels. Freshness of the list DATA is
- * event-driven (SSE + safety-net refetch), but React Query's structural sharing
- * keeps `data` referentially stable when the payload is unchanged — no
- * re-render, so a label computed at render time would freeze (the "now" label
- * forever on a quiet list). 30s granularity matches the coarsest visible unit.
- */
-function useNowTick(): number {
-  const [now, setNow] = useState(() => Date.now());
-  useEffect(() => {
-    const timer = setInterval(() => setNow(Date.now()), 30_000);
-    return () => clearInterval(timer);
-  }, []);
-  return now;
-}
-
-/**
  * The chat's navigation, in the host shell's sidebar vocabulary (same groups,
  * rows and active fill as Studio's nav — the two products must read as one
  * app). "Nouvelle conversation" sits ABOVE the group rather than as a discreet
@@ -158,23 +129,33 @@ function useNowTick(): number {
  * unread until it is opened; `activeId` is never counted, since looking at it
  * IS reading it.
  *
- * `t` and `can` arrive as props, not from `useChatHost()`: the shell mounts
- * this list outside `ChatPage`, where the host bag is published.
+ * `t`, `can` and `formatAge` arrive as props, not from `useChatHost()`: the
+ * shell mounts this list outside `ChatPage`, where the host bag is published.
  */
 export function ChatConversationList({
   activeId,
   t,
   can,
   renderSpaces,
+  formatAge,
 }: {
   activeId: string | null;
   t: ChatTranslate;
   can: ChatCan;
   /** Names spaces: every row shows the spaces its conversation touched. */
   renderSpaces: RenderSpaces;
+  /**
+   * How old an ISO date is as of `now`, as a bare quantity in the host's
+   * language (« 5 min », « 3 j »): a row's age column is 56px.
+   */
+  formatAge: (iso: string, now: number) => string;
 }) {
   const select = useSelectConversation();
   const [input, setInput] = useState("");
+  // On a phone the search is a magnifier beside "New conversation" that unfolds the field; from
+  // `md` up the field is always there.
+  const [searchOpen, setSearchOpen] = useState(false);
+  const searchField = useRef<HTMLInputElement>(null);
   const term = useDebouncedTerm(input, SEARCH_DEBOUNCE_MS);
   const searching = term !== "";
   // The plain list always runs (same key as the nav badge): it decides whether
@@ -197,6 +178,8 @@ export function ChatConversationList({
   const canWrite = can("chat:write");
   const hasAny = (base.data?.length ?? 0) > 0;
   const showSearch = hasAny || input !== "";
+  // Gone once the field shows: it carries its own magnifier.
+  const showSearchToggle = showSearch && !searchOpen && input === "";
 
   const row = (s: SessionSummary) => (
     <ConversationRow
@@ -204,7 +187,7 @@ export function ChatConversationList({
       session={s}
       active={s.id === activeId}
       unread={s.unread && s.id !== activeId}
-      now={now}
+      age={formatAge(s.updatedAt, now)}
       t={t}
       canWrite={canWrite}
       renderSpaces={renderSpaces}
@@ -212,51 +195,99 @@ export function ChatConversationList({
   );
   return (
     <>
-      {/* Starting a conversation is a write: a reader only rereads its own. */}
-      {canWrite && (
-        <SidebarGroup className="pb-0">
+      {/* Starting a conversation is a write: a reader only rereads its own, and on a phone still
+          gets the magnifier that unfolds the search. */}
+      {(canWrite || showSearchToggle) && (
+        <SidebarGroup className={cn("pb-0", !canWrite && "md:hidden")}>
           <SidebarMenu>
             <SidebarMenuItem>
-              <SidebarMenuButton onClick={() => select?.(null)} tooltip={t("threads.new")}>
-                <PlusIcon />
-                <span>{t("threads.new")}</span>
-              </SidebarMenuButton>
+              {canWrite && (
+                <SidebarMenuButton
+                  onClick={() => select?.(null)}
+                  tooltip={t("threads.new")}
+                  className={cn(NEW_CONVERSATION_CLASS, showSearch && "max-md:pr-12")}
+                >
+                  {/* A phone's row has its icon in a round tile, as the rows below it have theirs. */}
+                  <span className="max-md:bg-sidebar-accent max-md:flex max-md:size-8 max-md:items-center max-md:justify-center max-md:rounded-full md:contents">
+                    <PlusIcon />
+                  </span>
+                  <span>{t("threads.new")}</span>
+                </SidebarMenuButton>
+              )}
+              {showSearchToggle && (
+                <button
+                  type="button"
+                  aria-label={t("threads.search.open")}
+                  data-testid="chat-search-toggle"
+                  onClick={() => {
+                    // The field is hidden until this state lands: commit it now so the focus stays
+                    // inside the tap, the only place iOS opens the keyboard from.
+                    flushSync(() => setSearchOpen(true));
+                    searchField.current?.focus();
+                  }}
+                  className={cn(
+                    "text-sidebar-foreground/70 active:bg-sidebar-accent flex size-11 items-center justify-center rounded-md md:hidden",
+                    canWrite ? "absolute top-0 right-0" : "ml-auto",
+                  )}
+                >
+                  <SearchIcon className="size-5" />
+                </button>
+              )}
             </SidebarMenuItem>
           </SidebarMenu>
         </SidebarGroup>
       )}
-      <SidebarGroup className="min-h-0 flex-1 group-data-[collapsible=icon]:hidden">
-        {showSearch && (
-          <div className="relative mb-1">
-            <SearchIcon className="text-sidebar-foreground/50 pointer-events-none absolute top-1/2 left-2 size-3.5 -translate-y-1/2" />
-            <SidebarInput
-              type="search"
-              value={input}
-              maxLength={SEARCH_MAX_LENGTH}
-              placeholder={t("threads.search.placeholder")}
-              aria-label={t("threads.search.placeholder")}
-              onChange={(event) => setInput(event.target.value)}
-              onKeyDown={(event) => {
-                if (event.key === "Escape" && input !== "") {
-                  event.preventDefault();
-                  setInput("");
-                }
+      {showSearch && (
+        <div
+          className={cn(
+            "relative px-2 pt-2 pb-1 group-data-[collapsible=icon]:hidden",
+            !searchOpen && input === "" && "max-md:hidden",
+          )}
+        >
+          <SearchIcon className="text-sidebar-foreground/50 pointer-events-none absolute top-1/2 left-4 size-3.5 -translate-y-1/2 max-md:left-6 max-md:size-4" />
+          <SidebarInput
+            ref={searchField}
+            type="search"
+            value={input}
+            maxLength={SEARCH_MAX_LENGTH}
+            placeholder={t("threads.search.placeholder")}
+            aria-label={t("threads.search.placeholder")}
+            onChange={(event) => setInput(event.target.value)}
+            // An empty field folds back into its magnifier on a phone.
+            onBlur={() => input === "" && setSearchOpen(false)}
+            onKeyDown={(event) => {
+              if (event.key === "Escape" && input !== "") {
+                event.preventDefault();
+                setInput("");
+              }
+            }}
+            className={SEARCH_INPUT_CLASS}
+          />
+          {/* Clears the field; on a phone it also folds it back into its magnifier, and stays there
+              to close an empty one. */}
+          {(input !== "" || searchOpen) && (
+            <button
+              type="button"
+              aria-label={t(input !== "" ? "threads.search.clear" : "threads.search.close")}
+              title={t(input !== "" ? "threads.search.clear" : "threads.search.close")}
+              data-testid="chat-search-clear"
+              onClick={() => {
+                setInput("");
+                setSearchOpen(false);
               }}
-              className={SEARCH_INPUT_CLASS}
-            />
-            {input !== "" && (
-              <button
-                type="button"
-                aria-label={t("threads.search.clear")}
-                title={t("threads.search.clear")}
-                onClick={() => setInput("")}
-                className="text-sidebar-foreground/70 hover:text-sidebar-foreground absolute top-1/2 right-1.5 -translate-y-1/2 rounded-md p-0.5"
-              >
-                <XIcon className="size-3.5" />
-              </button>
-            )}
-          </div>
-        )}
+              className={cn(
+                "text-sidebar-foreground/70 hover:text-sidebar-foreground absolute top-1/2 right-3.5 -translate-y-1/2 rounded-md p-0.5 max-md:right-1 max-md:p-3.5",
+                input === "" && "md:hidden",
+              )}
+            >
+              <XIcon className="size-3.5 max-md:size-4" />
+            </button>
+          )}
+        </div>
+      )}
+      <SidebarGroup
+        className={cn("min-h-0 flex-1 group-data-[collapsible=icon]:hidden", showSearch && "pt-0")}
+      >
         {(searching || groups.length === 0) && (
           <SidebarGroupLabel className={NOTE_TEXT_CLASS}>
             {t(searching ? "threads.results" : "threads.title")}
@@ -265,18 +296,20 @@ export function ChatConversationList({
         {/* Grows only with rows to scroll: an empty list must not push its
             empty state to the bottom of the sidebar. The negative margins
             stretch the scroll box over the group's padding to the sidebar's
-            edges, as Studio's nav scrolls; `w-auto` lets `-mr-2` widen it. */}
+            edges, as Studio's nav scrolls; `w-auto` lets `-mr-2` widen it.
+            `scroll-fade-y` fades the edge that hides rows, as the dashboard's
+            agent row does sideways. */}
         <SidebarMenu
           className={
             list.length > 0 || isLoading
-              ? "-mr-2 -mb-2 min-h-0 w-auto flex-1 overflow-y-auto pr-2 pb-2"
+              ? "scroll-fade-y -mr-2 -mb-2 min-h-0 w-auto flex-1 overflow-y-auto pr-2 pb-2"
               : undefined
           }
         >
           {isLoading &&
             Array.from({ length: 5 }, (_, i) => (
               <SidebarMenuItem key={i}>
-                <ConversationRowSkeleton />
+                <ConversationRowSkeleton oneLine={canWrite} />
               </SidebarMenuItem>
             ))}
           {searching
@@ -346,7 +379,7 @@ function ConversationRow({
   session,
   active,
   unread,
-  now,
+  age,
   t,
   canWrite,
   renderSpaces,
@@ -354,7 +387,8 @@ function ConversationRow({
   session: SessionSummary;
   active: boolean;
   unread: boolean;
-  now: number;
+  /** How old the conversation is, already rendered (« 5 min »). */
+  age: string;
   t: ChatTranslate;
   canWrite: boolean;
   renderSpaces: RenderSpaces;
@@ -362,11 +396,11 @@ function ConversationRow({
   const transport = useChatTransport();
   const select = useSelectConversation();
   const queryClient = useQueryClient();
-  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [renaming, setRenaming] = useState(false);
   const [confirmingDelete, setConfirmingDelete] = useState(false);
+  // Closing a dialog opened from a row hands the focus back to what opened it.
   const dialogTrigger = useRef<HTMLButtonElement | null>(null);
   const menuTrigger = useRef<HTMLButtonElement>(null);
-  const menuAction = useRef<"settings" | "delete" | null>(null);
   const restoreDialogFocus = (event: Event) => {
     if (dialogTrigger.current?.isConnected) {
       event.preventDefault();
@@ -375,6 +409,16 @@ function ConversationRow({
   };
   const [deleting, setDeleting] = useState(false);
   const [deleteFailed, setDeleteFailed] = useState(false);
+  // The « … »'s two items; selecting one closes the menu.
+  const openRename = () => {
+    dialogTrigger.current = menuTrigger.current;
+    setRenaming(true);
+  };
+  const openDelete = () => {
+    dialogTrigger.current = menuTrigger.current;
+    setDeleteFailed(false);
+    setConfirmingDelete(true);
+  };
 
   // The dialog stays open while the delete is in flight and on failure (it says
   // so); it closes only once the row is gone.
@@ -404,33 +448,56 @@ function ConversationRow({
         size="lg"
         // Room for the fixed-width right slot below, which is absolutely
         // positioned and would otherwise sit on top of a long title. The host's stacked space tiles
-        // ring themselves in `--space-tile-ring`: the row's background in each of its states.
+        // ring themselves in `--tile-ring`: the row's background in each of its states.
+        // A writer's row is one line (the title, then the tiles): a thumb's 48px on touch, Studio's
+        // 32px rows under a mouse. A reader's keeps the spaces' line, so the 48px of two lines.
         className={cn(
-          canWrite ? "desktop-pointer:pr-16 pr-[4.5rem]" : "desktop-pointer:pr-16 pr-8",
-          "[--space-tile-ring:var(--sidebar)] hover:[--space-tile-ring:var(--sidebar-accent)] active:[--space-tile-ring:var(--sidebar-accent)] data-[active=true]:[--space-tile-ring:var(--sidebar-accent)]",
+          canWrite
+            ? "desktop-pointer:pr-16 desktop-pointer:h-8 pr-[4.5rem]"
+            : "desktop-pointer:pr-16 pr-8",
+          "[--tile-ring:var(--sidebar)] hover:[--tile-ring:var(--sidebar-accent)] active:[--tile-ring:var(--sidebar-accent)] data-[active=true]:[--tile-ring:var(--sidebar-accent)]",
         )}
       >
-        <span className="flex min-w-0 flex-1 flex-col gap-0.5">
+        <span
+          className={cn(
+            "flex min-w-0 flex-1",
+            canWrite ? "flex-row items-center gap-2" : "flex-col gap-0.5",
+          )}
+        >
           <span
             className={cn(
-              "block truncate text-left leading-4 max-md:text-base max-md:leading-5",
+              "block min-w-0 truncate text-left leading-4 max-md:text-base max-md:leading-5",
+              canWrite && "flex-1",
               unread && "font-semibold",
             )}
           >
             {session.title ?? t("threads.new")}
           </span>
-          <span
-            data-testid="chat-session-spaces"
-            className={`text-sidebar-foreground/70 flex h-4 min-w-0 items-center max-md:h-5 ${NOTE_TEXT_CLASS}`}
-          >
-            {sessionSpaces(session, renderSpaces, t)}
-          </span>
+          {/* A writer's row closes the title's line with their tiles, on every format: the names
+              are in the « … » menu. A reader has no « … », so the names take a line of their own. */}
+          {canWrite ? (
+            session.space_ids.length > 0 && (
+              <span data-testid="chat-session-space-tiles" className="flex shrink-0 items-center">
+                {renderSpaces(session.space_ids, { tilesOnly: true })}
+              </span>
+            )
+          ) : (
+            <span
+              data-testid="chat-session-spaces"
+              className={cn(
+                "text-sidebar-foreground/70 flex h-4 min-w-0 items-center",
+                NOTE_TEXT_CLASS,
+              )}
+            >
+              {sessionSpaces(session, renderSpaces, t)}
+            </span>
+          )}
         </span>
       </SidebarMenuButton>
       {/* Fixed-width right slot: spinner / unread dot / timestamp have different
           natural widths — without w-14 the title's truncation point reflows on
           every generating↔idle transition. Hover swaps them for the row's
-          actions; a reader has none, so for them hover changes nothing. */}
+          « … »; a reader has none, so for them hover changes nothing. */}
       <div
         className={cn(
           "desktop-pointer:w-14 pointer-events-none absolute top-1 right-1 flex h-6 w-6 items-center justify-end rounded-md",
@@ -453,93 +520,51 @@ function ConversationRow({
           <span
             className={`text-sidebar-foreground/70 desktop-pointer:inline hidden text-xs transition-opacity ${canWrite ? "desktop-pointer:group-hover/menu-item:opacity-0 desktop-pointer:group-focus-within/menu-item:opacity-0" : ""}`}
           >
-            {relativeTime(session.updatedAt, now, t)}
+            {age}
           </span>
-        )}
-        {/* pointer-events must track visibility: opacity-0 alone keeps the
-            invisible buttons tappable. Touchscreens use the separate 44 px menu trigger. */}
-        {canWrite && (
-          <div className="desktop-pointer:flex pointer-events-none absolute right-0 hidden items-center gap-0.5 rounded-md p-0.5 opacity-0 transition-opacity group-focus-within/menu-item:pointer-events-auto group-focus-within/menu-item:opacity-100 group-hover/menu-item:pointer-events-auto group-hover/menu-item:opacity-100">
-            <button
-              type="button"
-              aria-label={t("threads.settings.openFor", {
-                title: session.title ?? t("threads.new"),
-              })}
-              title={t("threads.settings.title")}
-              onClick={(event) => {
-                dialogTrigger.current = event.currentTarget;
-                setSettingsOpen(true);
-              }}
-              className="text-sidebar-foreground/70 hover:text-sidebar-foreground hover:bg-sidebar-border rounded-md p-0.5"
-            >
-              <Settings2Icon className="size-3.5" />
-            </button>
-            <button
-              type="button"
-              aria-label={t("common:btn.delete")}
-              title={t("common:btn.delete")}
-              onClick={(event) => {
-                dialogTrigger.current = event.currentTarget;
-                setDeleteFailed(false);
-                setConfirmingDelete(true);
-              }}
-              className="text-sidebar-foreground/70 hover:text-destructive hover:bg-destructive/10 rounded-md p-0.5"
-            >
-              <Trash2Icon className="size-3.5" />
-            </button>
-          </div>
         )}
       </div>
       {canWrite && (
-        <DropdownMenu>
-          <DropdownMenuTrigger asChild>
-            <button
-              type="button"
-              aria-label={t("threads.actions.openFor", {
-                title: session.title ?? t("threads.new"),
-              })}
-              ref={menuTrigger}
-              className="text-sidebar-foreground/70 active:bg-sidebar-accent desktop-pointer:hidden absolute top-0 right-0 flex h-12 w-11 items-center justify-center rounded-md"
+        <>
+          {/* One « … », the same items on every format: always there and a thumb's size on
+              touch, revealed by hover or focus under a mouse. Below `md` the menu is a panel from
+              the bottom, titled by the conversation. */}
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <button
+                type="button"
+                aria-label={t("threads.actions.openFor", {
+                  title: session.title ?? t("threads.new"),
+                })}
+                ref={menuTrigger}
+                className="text-sidebar-foreground/70 active:bg-sidebar-accent desktop-pointer:top-1 desktop-pointer:right-1 desktop-pointer:size-6 desktop-pointer:opacity-0 desktop-pointer:group-hover/menu-item:opacity-100 desktop-pointer:group-focus-within/menu-item:opacity-100 desktop-pointer:data-[state=open]:opacity-100 desktop-pointer:hover:bg-sidebar-border desktop-pointer:hover:text-sidebar-foreground absolute top-0 right-0 flex h-12 w-11 items-center justify-center rounded-md transition-opacity"
+              >
+                <EllipsisIcon className="desktop-pointer:size-3.5 size-5" />
+              </button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent
+              align="end"
+              className="min-w-40"
+              sheetTitle={session.title ?? t("threads.new")}
             >
-              <EllipsisIcon className="size-5" />
-            </button>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent
-            align="end"
-            className="min-w-48"
-            onCloseAutoFocus={(event) => {
-              const action = menuAction.current;
-              if (!action) return;
-              event.preventDefault();
-              menuAction.current = null;
-              dialogTrigger.current = menuTrigger.current;
-              if (action === "settings") setSettingsOpen(true);
-              else {
-                setDeleteFailed(false);
-                setConfirmingDelete(true);
-              }
-            }}
-          >
-            <DropdownMenuItem
-              className="min-h-11"
-              onSelect={() => {
-                menuAction.current = "settings";
-              }}
-            >
-              <Settings2Icon />
-              {t("threads.settings.title")}
-            </DropdownMenuItem>
-            <DropdownMenuItem
-              className="text-destructive focus:text-destructive min-h-11"
-              onSelect={() => {
-                menuAction.current = "delete";
-              }}
-            >
-              <Trash2Icon />
-              {t("common:btn.delete")}
-            </DropdownMenuItem>
-          </DropdownMenuContent>
-        </DropdownMenu>
+              {/* The spaces it reaches: the row shows their tiles alone. */}
+              <DropdownMenuLabel
+                data-testid="chat-menu-spaces"
+                className={`text-muted-foreground flex min-w-0 items-center font-normal [--tile-ring:var(--popover)] max-md:[--tile-ring:var(--background)] ${NOTE_TEXT_CLASS}`}
+              >
+                {sessionSpaces(session, renderSpaces, t)}
+              </DropdownMenuLabel>
+              <DropdownMenuItem onSelect={openRename}>
+                <PencilIcon />
+                {t("threads.rename")}
+              </DropdownMenuItem>
+              <DropdownMenuItem variant="destructive" onSelect={openDelete}>
+                <Trash2Icon />
+                {t("common:btn.delete")}
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+        </>
       )}
       <AlertDialog
         open={confirmingDelete}
@@ -571,12 +596,12 @@ function ConversationRow({
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
-      {settingsOpen && (
-        <ConversationSettingsDialog
+      {renaming && (
+        <ConversationRenameDialog
           session={session}
           t={t}
           onCloseAutoFocus={restoreDialogFocus}
-          onClose={() => setSettingsOpen(false)}
+          onClose={() => setRenaming(false)}
         />
       )}
     </SidebarMenuItem>
@@ -584,18 +609,18 @@ function ConversationRow({
 }
 
 /**
- * The open conversation's settings button, for the host's header actions. Renders
- * nothing until the conversation is known, or for a reader (settings are writes).
+ * « Renommer » for the open conversation, a pencil in the host's header on every format. Renders
+ * nothing until the conversation is known, or for a reader (renaming is a write).
  */
-export function ChatConversationSettingsButton(props: {
+export function ChatConversationRenameButton(props: {
   activeId: string | null;
   t: ChatTranslate;
   can: ChatCan;
 }) {
-  return <ConversationSettingsButton key={props.activeId} {...props} />;
+  return <ConversationRenameButton key={props.activeId} {...props} />;
 }
 
-function ConversationSettingsButton({
+function ConversationRenameButton({
   activeId,
   t,
   can,
@@ -613,27 +638,24 @@ function ConversationSettingsButton({
       <Button
         type="button"
         variant="ghost"
-        size="icon"
-        className="size-8"
-        aria-label={t("threads.settings.title")}
-        title={t("threads.settings.title")}
+        size="icon-sm"
+        aria-label={t("threads.rename")}
+        title={t("threads.rename")}
         onClick={() => setOpen(true)}
       >
-        <Settings2Icon className="size-4" />
+        <PencilIcon className="size-4" />
       </Button>
-      {open && (
-        <ConversationSettingsDialog session={session} t={t} onClose={() => setOpen(false)} />
-      )}
+      {open && <ConversationRenameDialog session={session} t={t} onClose={() => setOpen(false)} />}
     </>
   );
 }
 
 /**
- * The conversation's settings: its name, saved explicitly (Enregistrer or Enter),
+ * Renaming the conversation: its name, saved explicitly (« Renommer » or Enter),
  * never on blur. The dialog stays open on a refusal and says so: the chat's own
  * fetch is not toasted by the app's mutation cache.
  */
-function ConversationSettingsDialog({
+function ConversationRenameDialog({
   session,
   t,
   onClose,
@@ -674,18 +696,18 @@ function ConversationSettingsDialog({
     <Dialog open onOpenChange={(open) => !open && !saving && onClose()}>
       <DialogContent onCloseAutoFocus={onCloseAutoFocus}>
         <DialogHeader>
-          <DialogTitle>{t("threads.settings.title")}</DialogTitle>
-          <DialogDescription>{t("threads.settings.description")}</DialogDescription>
+          <DialogTitle>{t("threads.renameDialog.title")}</DialogTitle>
+          <DialogDescription>{t("threads.renameDialog.description")}</DialogDescription>
         </DialogHeader>
         <form
-          id="chat-conversation-settings"
+          id="chat-conversation-rename"
           className="flex flex-col gap-2"
           onSubmit={(event) => {
             event.preventDefault();
             void save();
           }}
         >
-          <Label htmlFor="chat-conversation-name">{t("threads.settings.name")}</Label>
+          <Label htmlFor="chat-conversation-name">{t("threads.renameDialog.name")}</Label>
           <Input
             id="chat-conversation-name"
             autoFocus
@@ -704,9 +726,9 @@ function ConversationSettingsDialog({
           <Button type="button" variant="outline" disabled={saving} onClick={onClose}>
             {t("common:btn.cancel")}
           </Button>
-          <Button type="submit" form="chat-conversation-settings" disabled={saving || !dirty}>
+          <Button type="submit" form="chat-conversation-rename" disabled={saving || !dirty}>
             {saving && <Spinner className="mr-1.5 size-3.5" />}
-            {t("common:btn.save")}
+            {t("threads.rename")}
           </Button>
         </DialogFooter>
       </DialogContent>

@@ -98,10 +98,17 @@ export async function withLocalChatModel<T>(
   }
 }
 
-/** Selects the model in the composer's picker. */
+/** Selects the model from the composer's tools panel (desktop width), which names it after. */
 export async function pickModel(page: Page, modelId: string): Promise<void> {
-  await page.getByTitle("Modèle et génération").click();
-  await page.getByRole("option", { name: new RegExp(modelId) }).click();
+  const trigger = page.getByTestId("composer-settings-trigger");
+  const panel = page.getByTestId("composer-panel");
+  await trigger.click();
+  await panel.getByTestId("composer-panel-model").click();
+  await panel.getByRole("option", { name: new RegExp(modelId) }).click();
+  // A pick closes the panel.
+  await expect(panel).toBeHidden();
+  await trigger.click();
+  await expect(panel.getByTestId("composer-panel-model")).toContainText(modelId);
   await page.keyboard.press("Escape");
-  await expect(page.getByTitle("Modèle et génération")).toHaveText(modelId);
+  await expect(panel).toBeHidden();
 }

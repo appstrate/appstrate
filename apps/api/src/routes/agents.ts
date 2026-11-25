@@ -24,8 +24,9 @@ import { db } from "@appstrate/db/client";
 import { updateSpacePackage, getSpacePackageSettings } from "../services/space-packages.ts";
 import { resolveAgentRunVersion } from "../services/agent-version-resolver.ts";
 import { asRecord } from "@appstrate/core/safe-json";
+import { launchSpacesLookup } from "../lib/launch-spaces.ts";
 import { requireActiveAgent, requireAgent, requireAgentOrInlineRun } from "../middleware/guards.ts";
-import { requirePermission } from "../middleware/require-permission.ts";
+import { assertPermission, requirePermission } from "../middleware/require-permission.ts";
 import { getActor } from "../lib/actor.ts";
 import { parseScopedName } from "@appstrate/core/naming";
 import { computeIntegrity } from "@appstrate/core/integrity";
@@ -35,6 +36,7 @@ import { readJsonBody } from "@appstrate/core/request-body";
 import { asJSONSchemaObject } from "@appstrate/core/form";
 import { getSpaceScope } from "../lib/scope.ts";
 import { callerSpaceGrant, type SpaceGrant } from "../lib/permissions.ts";
+import { loadSchedule } from "../services/scheduler.ts";
 import { resolveAgentConnectionReadiness } from "../services/integration-pins-service.ts";
 import {
   assertExplicitModelExists,
@@ -273,10 +275,20 @@ export async function respondAgentPersistence(
   });
 }
 
-/** The agent index over `grants`: `GET /api/agents` and `GET /api/orgs/{orgId}/agents`. */
-export async function respondAgentIndex(c: Context<AppEnv>, orgId: string, grants: SpaceGrant[]) {
+/**
+ * The agent index over `grants`: `GET /api/agents` (`singleSpaceId`: its space) and
+ * `GET /api/orgs/{orgId}/agents`.
+ */
+export async function respondAgentIndex(
+  c: Context<AppEnv>,
+  orgId: string,
+  grants: SpaceGrant[],
+  singleSpaceId?: string,
+) {
   return c.json(
-    listResponse(await listAgentIndex(orgId, grants, getActor(c), packageAccessSpaces(c))),
+    listResponse(
+      await listAgentIndex(orgId, grants, getActor(c), packageAccessSpaces(c), singleSpaceId),
+    ),
   );
 }
 
@@ -284,9 +296,10 @@ export function createAgentsRouter() {
   const router = new Hono<AppEnv>();
 
   // GET /api/agents — the agents index of the current space (`listAgentIndex`)
-  router.get("/", requireAgentRead, (c) =>
-    respondAgentIndex(c, getSpaceScope(c).orgId, [callerSpaceGrant(c)]),
-  );
+  router.get("/", requireAgentRead, (c) => {
+    const scope = getSpaceScope(c);
+    return respondAgentIndex(c, scope.orgId, [callerSpaceGrant(c)], scope.spaceId);
+  });
 
   // PUT /api/agents/:scope/:name/input-settings — save the agent's stored
   // input defaults + field locks (admin-only).
@@ -409,13 +422,25 @@ export function createAgentsRouter() {
     requireAgent(),
     async (c) => {
       const agent = c.get("package");
+      const scope = getSpaceScope(c);
+      const scheduleId = c.req.query("scheduleId");
+      let dependencyOverrides: Record<string, string> | null = null;
+      if (scheduleId !== undefined) {
+        assertPermission(c, "schedules", "read");
+        const schedule = await loadSchedule(scheduleId, scope);
+        if (!schedule || schedule.packageId !== agent.id) throw notFound("Schedule not found");
+        // The schedule write authorized these stored pins. This read may reuse them but
+        // cannot select a new dependency draft or resolve connections as the schedule's actor.
+        dependencyOverrides = schedule.dependency_overrides;
+      }
       // Resolved ONCE and handed to both: the gate and the default selector ask
       // the same question of the same package, and each one resolving the
       // caller's spaces for itself is two full space walks per badge.
       await assertDraftSelectorAllowed(c, agent.id, c.req.query("version"));
       return c.json(
         await resolveAgentConnectionReadiness({
-          scope: getSpaceScope(c),
+          scope,
+          dependencyOverrides,
           agentPackageId: agent.id,
           principal: connectionPrincipal(c),
           // Drive `can_add_connection` with the connect routes' own guard and
@@ -651,7 +676,16 @@ export function createAgentsRouter() {
     rateLimit(30),
     requirePermission("agents", "read"),
     requireAgent(),
-    requireActiveAgent(),
+    // An export checks no integration activation, so neither does `active_in_spaces`.
+    requireActiveAgent(async (c) => {
+      const agent = c.get("package");
+      const source = c.req.query("source");
+      await assertDraftSelectorAllowed(c, agent.id, source);
+      return launchSpacesLookup(c, ["agents:read"], { integrations: false, version: source })({
+        packageId: agent.id,
+        manifest: agent.manifest,
+      });
+    }),
     async (c) => {
       const scopeParam = c.req.param("scope")!;
       const nameParam = c.req.param("name")!;

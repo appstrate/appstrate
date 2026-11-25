@@ -30,12 +30,11 @@
 
 import type { Context } from "hono";
 import {
-  parseSkillUri,
   SKILL_LOCK_VERSION_META_KEY,
   SKILL_MAX_TOTAL_BYTES,
-  type SkillAddress,
   type SkillEntry,
 } from "@appstrate/core/skill-uri";
+import { parseSkillUri, type SkillAddress } from "@appstrate/core/skill-address";
 import { mapWithConcurrency } from "@appstrate/core/map-with-concurrency";
 import { PACKAGE_MANIFEST_FILE } from "@appstrate/core/package-files";
 import type { AppEnv } from "../types/index.ts";
@@ -67,7 +66,11 @@ const LIST_CONCURRENCY = 8;
 export interface ServedSkillsContext {
   /** The spaces reached, in listing order. */
   spaceIds: readonly string[];
-  listActiveSkills: (definition: SkillDefinitionSelector) => Promise<
+  /** The active skills of `spaceIds` (every space reached when omitted): other spaces' archives are never read. */
+  listActiveSkills: (
+    definition: SkillDefinitionSelector,
+    spaceIds?: readonly string[],
+  ) => Promise<
     {
       spaceId: string;
       read: () => Promise<SkillRead | null>;
@@ -111,8 +114,11 @@ export function isInjectedDraftChanged(err: unknown): err is ApiError {
 }
 
 export interface ServedSkills {
-  /** The entries of `definition` the caller may read. */
-  list: (definition: SkillDefinitionSelector) => Promise<SkillEntry[]>;
+  /** The entries of `definition` the caller may read, in `spaceIds` (every space reached when omitted). */
+  list: (
+    definition: SkillDefinitionSelector,
+    spaceIds?: readonly string[],
+  ) => Promise<SkillEntry[]>;
   /** The entry whose `SKILL.md` is at `uri`; `null` when none is readable there. */
   entry: (uri: string) => Promise<SkillEntry | null>;
   /** The bytes served for a `skill://` URI; `null` when none are readable there. */
@@ -205,8 +211,11 @@ export function buildServedSkills(ctx: ServedSkillsContext): ServedSkills {
     return served.skill.files[address.path]!;
   };
 
-  const list = async (definition: SkillDefinitionSelector): Promise<SkillEntry[]> => {
-    const listed = await ctx.listActiveSkills(definition);
+  const list = async (
+    definition: SkillDefinitionSelector,
+    spaceIds?: readonly string[],
+  ): Promise<SkillEntry[]> => {
+    const listed = await ctx.listActiveSkills(definition, spaceIds);
     const entries = await mapWithConcurrency(listed, LIST_CONCURRENCY, async (skill) => {
       try {
         const served = await load(skill.spaceId, definition, skill.read);
@@ -238,9 +247,11 @@ export function servedSkillsContext(
   const bySpace = new Map(spaces.map((space) => [space.spaceId, { ...space, orgId }]));
   return {
     spaceIds: [...bySpace.keys()],
-    listActiveSkills: async (definition) => {
+    listActiveSkills: async (definition, spaceIds) => {
       const placements = new Map(
-        spaces.map(({ spaceId }) => [spaceId, [] as ServedSkillPlacement[]]),
+        spaces
+          .filter(({ spaceId }) => !spaceIds || spaceIds.includes(spaceId))
+          .map(({ spaceId }) => [spaceId, [] as ServedSkillPlacement[]]),
       );
       const active = await listServedSkillPlacements(orgId, [...placements.keys()]);
       for (const row of active) {

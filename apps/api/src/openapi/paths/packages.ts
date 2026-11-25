@@ -334,6 +334,7 @@ export const packagesPaths = {
   "/api/orgs/{orgId}/packages/skills": {
     get: {
       operationId: "listOrgSkills",
+      "x-appstrate-space": { kind: "aggregate" },
       tags: ["Packages"],
       summary: "List skills across the organization's spaces",
       description: orgPackageIndexDescription("skills", "GET /api/packages/skills", "skills:read"),
@@ -347,6 +348,7 @@ export const packagesPaths = {
   "/api/orgs/{orgId}/packages/integrations": {
     get: {
       operationId: "listOrgIntegrationPackages",
+      "x-appstrate-space": { kind: "aggregate" },
       tags: ["Packages"],
       summary: "List integration packages across the organization's spaces",
       description: orgPackageIndexDescription(
@@ -364,6 +366,7 @@ export const packagesPaths = {
   "/api/packages/import-bundle": {
     post: {
       operationId: "importBundle",
+      "x-appstrate-space": { kind: "request", default: "personal" },
       tags: ["Packages"],
       summary: "Import a multi-package .afps-bundle",
       description:
@@ -459,7 +462,7 @@ export const packagesPaths = {
                     type: "array",
                     items: { type: "string" },
                     description:
-                      "Non-blocking import-time warnings — e.g. `_meta` soft-fails, a retired AFPS 1.x `dependencies` key, or an agent `timeout` above this deployment's ceiling. Empty when nothing is degraded.",
+                      "Non-blocking import-time warnings — e.g. `_meta` soft-fails, a retired AFPS 1.x `dependencies` key, or an agent `timeout` above this deployment's ceiling — and, when `root_active` and the root is an agent, one per integration it declares that is not active in this space, in the `integration_not_active` wording of `POST /api/spaces/{id}/packages`' `warnings[]` (a launch here is refused until a required one is activated). Empty when nothing is degraded.",
                   },
                 },
               },
@@ -495,6 +498,7 @@ export const packagesPaths = {
   "/api/packages/import": {
     post: {
       operationId: "importPackage",
+      "x-appstrate-space": { kind: "request", default: "personal" },
       tags: ["Packages"],
       summary: "Import a package from ZIP",
       description:
@@ -554,7 +558,7 @@ export const packagesPaths = {
                     type: "array",
                     items: { type: "string" },
                     description:
-                      "Non-blocking import-time warnings — e.g. `_meta` soft-fails or an agent `timeout` above this deployment's ceiling. Present only when warnings were emitted.",
+                      "Non-blocking import-time warnings — e.g. `_meta` soft-fails or an agent `timeout` above this deployment's ceiling — and, for an agent switched on in this space, one per integration it declares that is not active there, in the `integration_not_active` wording of `POST /api/spaces/{id}/packages`' `warnings[]` (a launch here is refused until a required one is activated). Present only when warnings were emitted.",
                   },
                 },
               },
@@ -591,6 +595,7 @@ export const packagesPaths = {
   "/api/packages/import-github": {
     post: {
       operationId: "importPackageFromGithub",
+      "x-appstrate-space": { kind: "request", default: "personal" },
       tags: ["Packages"],
       summary: "Import a package from a GitHub URL",
       description:
@@ -643,7 +648,7 @@ export const packagesPaths = {
                     type: "array",
                     items: { type: "string" },
                     description:
-                      "Non-blocking import-time warnings — e.g. `_meta` soft-fails or an agent `timeout` above this deployment's ceiling. Present only when warnings were emitted.",
+                      "Non-blocking import-time warnings — e.g. `_meta` soft-fails or an agent `timeout` above this deployment's ceiling — and, for an agent switched on in this space, one per integration it declares that is not active there, in the `integration_not_active` wording of `POST /api/spaces/{id}/packages`' `warnings[]` (a launch here is refused until a required one is activated). Present only when warnings were emitted.",
                   },
                 },
               },
@@ -1038,6 +1043,7 @@ export const packagesPaths = {
     },
     post: {
       operationId: "createSkill",
+      "x-appstrate-space": { kind: "request", default: "personal" },
       tags: ["Packages"],
       summary: "Create a skill",
       description: "Create a new skill in the organization packages.",
@@ -1585,6 +1591,7 @@ export const packagesPaths = {
     },
     post: {
       operationId: "createAgent",
+      "x-appstrate-space": { kind: "request", default: "personal" },
       tags: ["Packages"],
       summary: "Create a user agent",
       description:
@@ -2036,7 +2043,7 @@ export const packagesPaths = {
       tags: ["Packages"],
       summary: "Move a package to another home space",
       description:
-        "Change the package's home space — the space whose `<type>:write` authorizes editing, publishing, renaming and deleting it. The caller must hold that permission in BOTH the current home and the destination space, which must be one the caller can reach; an unreachable destination answers 404 rather than confirming it exists. The destination can never be a PERSONAL space (`409 home_move_into_personal_space`): a personal space homes only what is created or forked in it, and every member but a guest holds `admin` (hence `<type>:write`) in their own, so the move would otherwise put a team's package beyond every administrator's reach (RBAC spec §3.6 gives no admin a way in) for as long as its owner stays a member. `POST /api/packages/{scope}/{name}/fork` is the private copy. `home_space_id` is required and cannot be null: every package of the organization is homed in one of its spaces, and one that belongs to no team is homed in the organization's default space. Every other space keeps its `space_packages` row, which goes on placing the package there; the old home keeps the package through its own row unless `keep_in_previous_home` is `false`. The destination is ACTIVATED through the activation door itself — a package lives where it is written, exactly as creating one activates it at home — which writes the same `package.activated` audit entry a click on the switch would. A destination that had deliberately switched the package OFF keeps that decision: the move transfers authority over a package, not a verdict about what a space runs. The row the old home keeps now places the package outside its home, so `GET /api/packages/{scope}/{name}/shares` lists it (with a null sharer when nobody had placed it there), and revoking it removes the package from that space like any other revocation. The draft itself is edited through `PATCH /api/packages/{type}/{scope}/{name}`, under its `If-Match`.",
+        "Change the package's home space — the space whose `<type>:write` authorizes editing, publishing and renaming it. Deletion requires `<type>:delete` in the home. To move it, the caller must hold the type's `write` in BOTH the current home and the destination space, which must be one the caller can reach; an unreachable destination answers 404 rather than confirming it exists. The destination can never be a PERSONAL space (`409 home_move_into_personal_space`): a personal space homes only what is created or forked in it. Organization administrators cannot enter another member's personal space (RBAC §3.6). `POST /api/packages/{scope}/{name}/fork` is the private copy. `home_space_id` is required and cannot be null: every package of the organization is homed in one of its spaces, and one that belongs to no team is homed in the organization's default space. Every other space keeps its `space_packages` row, which goes on placing the package there; the old home keeps the package through its own row unless `keep_in_previous_home` is `false`. The destination is ACTIVATED through the activation door itself — a package lives where it is written, exactly as creating one activates it at home — which writes the same `package.activated` audit entry a click on the switch would. A destination that had deliberately switched the package OFF keeps that decision: the move transfers authority over a package, not a verdict about what a space runs. The row the old home keeps now places the package outside its home, so `GET /api/packages/{scope}/{name}/shares` lists it (with a null sharer when nobody had placed it there), and revoking it removes the package from that space like any other revocation. The draft itself is edited through `PATCH /api/packages/{type}/{scope}/{name}`, under its `If-Match`.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XSpaceId" },
@@ -2151,7 +2158,7 @@ export const packagesPaths = {
       tags: ["Packages"],
       summary: "Share a package with a person or a space",
       description:
-        "Place the package in a space outside its home — one `space_packages` row, the same placement `POST /api/spaces/{id}/packages` creates when it activates a package that is not there yet. The row lands switched ON when the caller may activate in the target (their own personal space, or a space where they hold the type's activation grant) and OFF otherwise: the package runs with the target's credentials, so its members switch it on themselves through `POST /api/spaces/{id}/packages`. Requires the package type's `share` permission in the package's home space; `share` is carried by the `admin` and `builder` presets and by no API key. A `user` target additionally requires `members:read` and is resolved server-side to that member's personal space, created if they have none (never by a share that is refused) — the sharer never learns its id. A `space` target must be a space the caller can reach, so another member's personal space is not targetable by id (404). Sharing a package with the space it already lives in is `409 share_target_is_home`. EVERY target requires the package to have a published version (`409 package_has_no_version`): outside its home a package runs its latest published version, so a placement with nothing published places nothing runnable. A share landing ON is an activation: the row it creates is audited `package.activated` as the activation door audits one. Idempotent: sharing the same pair twice answers 200 with the same entry and leaves an existing row's state as it stands.",
+        "Place the package in a space outside its home — one `space_packages` row, the same placement `POST /api/spaces/{id}/packages` creates when it activates a package that is not there yet. The row lands switched ON when the caller may activate in the target (their own personal space, or a space where they hold the type's activation grant) and OFF otherwise: the package runs with the target's credentials, so its members switch it on themselves through `POST /api/spaces/{id}/packages`. Requires the package type's `share` permission in the package's home space; `share` is carried by the `admin` and `builder` presets and by no API key. A `user` target additionally requires `members:read` and is resolved server-side to that member's personal space, created if they have none (never by a share that is refused) — the sharer never learns its id. A `space` target must be a space the caller can reach, so another member's personal space is not targetable by id (404). Sharing a package with the space it already lives in is `409 share_target_is_home`. EVERY target requires the package to have a published version (`409 package_has_no_version`): outside its home a package runs its latest published version, so a placement with nothing published places nothing runnable. A share landing ON is an activation: the row it creates is audited `package.activated` as the activation door audits one. Idempotent: sharing the same pair twice answers 201 with the same entry and leaves an existing row's state as it stands. `warnings[]` follows `ActivationWarnings`: an AGENT whose row is ON in the target, when the caller may activate there (the row's state alone is not enough: a recipient may have switched it on themselves), carries, in `warnings[]`, each integration it declares that is not active there (`code: integration_not_active`, `required` saying whether a launch there is refused until it is activated, or starts without it): the share activates nothing else — the remedy is `POST /api/spaces/{id}/packages` with the integration's `packageId`.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XSpaceId" },
@@ -2177,7 +2184,12 @@ export const packagesPaths = {
           headers: STD_RESPONSE_HEADERS,
           content: {
             "application/json": {
-              schema: { $ref: "#/components/schemas/PackageShare" },
+              schema: {
+                allOf: [
+                  { $ref: "#/components/schemas/PackageShare" },
+                  { $ref: "#/components/schemas/ActivationWarnings" },
+                ],
+              },
             },
           },
         },
@@ -2229,9 +2241,68 @@ export const packagesPaths = {
       },
     },
   },
+  "/api/packages/{scope}/{name}/org-offer": {
+    put: {
+      operationId: "offerPackageToOrg",
+      tags: ["Packages"],
+      summary: "Offer a package to the organization",
+      description:
+        "Offer the package to its organization: it is then placed and ACTIVE in every space of the organization that holds no `space_packages` row of its own, personal spaces included. A space's own row always wins, so a space keeps the package off with an `enabled = false` row (sticky opt-out); with no offer and no row the deployment's default is unchanged. Requires an owner or admin user credential of the organization whose scope ceiling leaves the type's `share`, never a credential confined to spaces; for a package homed in a space it ALSO requires the package type's `share` permission in that home, re-judged under lock like a placement (a system package has no home, so the organization role alone decides). A package homed in a space needs a published version (`409 package_has_no_version`): outside its home it runs its latest published version. A package already active by the deployment's default (`active_by_default`) takes no new offer: `400`. Idempotent: offering twice answers 200 and leaves the offer as it is. Audited as `package.offered_to_org` (once, when the offer is created).",
+      parameters: [
+        { $ref: "#/components/parameters/XOrgId" },
+        { $ref: "#/components/parameters/XSpaceId" },
+        { $ref: "#/components/parameters/PackageScope" },
+        { $ref: "#/components/parameters/PackageName" },
+      ],
+      responses: {
+        "200": {
+          description: "The package is offered to the organization (new or already offered).",
+          headers: STD_RESPONSE_HEADERS,
+          content: {
+            "application/json": {
+              schema: { $ref: "#/components/schemas/PackageOrgOffer" },
+            },
+          },
+        },
+        "400": { $ref: "#/components/responses/ValidationError" },
+        "401": { $ref: "#/components/responses/Unauthorized" },
+        "403": { $ref: "#/components/responses/Forbidden" },
+        "404": { $ref: "#/components/responses/NotFound" },
+        "409": {
+          description:
+            "The package has no published version to offer (`package_has_no_version` — publish one, then offer). RFC 9457 problem+json.",
+          content: {
+            "application/problem+json": {
+              schema: { $ref: "#/components/schemas/ProblemDetail" },
+            },
+          },
+        },
+      },
+    },
+    delete: {
+      operationId: "withdrawPackageOrgOffer",
+      tags: ["Packages"],
+      summary: "Withdraw a package's offer to the organization",
+      description:
+        "Remove the offer. A space holding a row of its own that is a real placement (a share) is unaffected. A row that only decided about the offer (the space switched the package off or configured it while it was offered; `placed_by_offer`) goes with the offer, schedules disabled like any withdrawal. Every other space of the organization stops placing and activating the package through the offer, and in the same transaction every enabled schedule of the package there is disabled (`disabled_reason: package_removed`, jobs removed) — except in the package's home, which stays placed (its schedules, like any deactivated package's, fail visibly), and everywhere when the deployment's default still activates the package. Same authority as `PUT`. Idempotent: answers 204 when there was no offer. Audited as `package.offer_withdrawn`, with the `disabledScheduleIds` when any.",
+      parameters: [
+        { $ref: "#/components/parameters/XOrgId" },
+        { $ref: "#/components/parameters/XSpaceId" },
+        { $ref: "#/components/parameters/PackageScope" },
+        { $ref: "#/components/parameters/PackageName" },
+      ],
+      responses: {
+        "204": { description: "Offer withdrawn (or there was none)." },
+        "401": { $ref: "#/components/responses/Unauthorized" },
+        "403": { $ref: "#/components/responses/Forbidden" },
+        "404": { $ref: "#/components/responses/NotFound" },
+      },
+    },
+  },
   "/api/packages/{scope}/{name}/fork": {
     post: {
       operationId: "forkPackage",
+      "x-appstrate-space": { kind: "request", default: "personal" },
       tags: ["Packages"],
       summary: "Fork a package to your organization",
       description:
@@ -2343,6 +2414,7 @@ export const packagesPaths = {
     },
     post: {
       operationId: "createIntegrationPackage",
+      "x-appstrate-space": { kind: "request", default: "personal" },
       tags: ["Packages"],
       summary: "Create an integration package, including a remote MCP",
       description:

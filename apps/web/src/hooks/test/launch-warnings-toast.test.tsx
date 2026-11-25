@@ -12,6 +12,8 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it, spyOn } from "bun:test";
+import { ApiError } from "../../api/errors";
+import { scheduleKeys } from "../../lib/query-keys";
 import { QueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { installFakeStorage } from "../../test/fake-storage.ts";
@@ -124,6 +126,28 @@ describe("launch warnings, wired", () => {
     expect(warned.mock.calls[0]![0]).toBe(EXPECTED_SCHEDULE);
   });
 
+  it("sends the displayed schedule revision, refreshes on conflict and retries only with the reviewed revision", async () => {
+    const qc = cachedClient();
+    const key = scheduleKeys.detail("org", "space", "sch_1");
+    qc.setQueryData(key, SCHEDULE);
+    const patch = spyOn(client, "PATCH")
+      .mockRejectedValueOnce(new ApiError("precondition_failed", "Changed", 412))
+      .mockResolvedValueOnce({ data: { ...SCHEDULE, warnings: null } });
+    stubs.push(patch);
+    const update = capture(() => useUpdateSchedule(), qc);
+    const first = { id: "sch_1", etag: '"1"', enabled: false };
+    await expect(update.mutateAsync(first)).rejects.toMatchObject({ status: 412 });
+    expect(qc.getQueryState(key)?.isInvalidated).toBe(true);
+    expect(patch).toHaveBeenCalledTimes(1);
+    await update.mutateAsync({ ...first, etag: '"2"' });
+    for (const [index, etag] of ['"1"', '"2"'].entries()) {
+      expect(patch).toHaveBeenNthCalledWith(index + 1, "/api/schedules/{id}", {
+        params: { path: { id: "sch_1" }, header: { "If-Match": etag } },
+        body: { enabled: false },
+      });
+    }
+  });
+
   it("a schedule update toasts its warnings", async () => {
     stubs.push(
       spyOn(client, "PATCH").mockResolvedValue({
@@ -131,7 +155,7 @@ describe("launch warnings, wired", () => {
       }),
     );
     const update = capture(() => useUpdateSchedule(), cachedClient());
-    await update.mutateAsync({ id: "sch_1", enabled: true });
+    await update.mutateAsync({ id: "sch_1", etag: '"v1"', enabled: true });
     await Bun.sleep(0);
     expect(warned).toHaveBeenCalledTimes(1);
     expect(warned.mock.calls[0]![0]).toBe(EXPECTED_SCHEDULE);
@@ -184,7 +208,7 @@ describe("schedule writes — the toast follows the server's verdict", () => {
       await create.mutateAsync({ cron_expression: "0 9 * * *" });
     } else {
       const update = capture(() => useUpdateSchedule(), cachedClient());
-      await update.mutateAsync({ id: "sch_1", name: "Renamed" });
+      await update.mutateAsync({ id: "sch_1", etag: '"v1"', name: "Renamed" });
     }
     await Bun.sleep(0);
     return warned.mock.calls.length;
@@ -206,7 +230,7 @@ describe("loadIntegrationNames", () => {
   const readable = { header, enabled: true };
   const GMAIL = ["@acme/gmail"];
   const detailResponse = () => ({
-    data: GMAIL_DETAIL,
+    data: { data: [{ id: "@acme/gmail", ...GMAIL_DETAIL }] },
     error: undefined,
     response: new Response(null),
   });
@@ -219,7 +243,7 @@ describe("loadIntegrationNames", () => {
     expect(get).not.toHaveBeenCalled();
   });
 
-  it("fetches only the warned integrations, once, through the query the detail hook caches", async () => {
+  it("fetches only the warned integrations, once, through the scoped catalogue", async () => {
     const get = spyOn(client, "GET").mockResolvedValue(detailResponse());
     stubs.push(get);
     const qc = new QueryClient();
@@ -228,9 +252,25 @@ describe("loadIntegrationNames", () => {
     // An id it was not asked for is not looked up.
     expect((await loadIntegrationNames(qc, readable, GMAIL))("@acme/slack")).toBe("@acme/slack");
     expect(get.mock.calls as unknown[][]).toHaveLength(1);
-    const [path, init] = get.mock.calls[0] as unknown as [string, { params: { path: unknown } }];
-    expect(path).toBe("/api/integrations/{packageId}");
-    expect(init.params.path).toEqual({ packageId: "@acme/gmail" });
+    const [path, init] = get.mock.calls[0] as unknown as [string, { params: { query: unknown } }];
+    expect(path).toBe("/api/integrations");
+    expect(init.params.query).toEqual({ id: GMAIL, limit: 100 });
+  });
+
+  it("resolves 101 missing names in two reads and preserves the successful batch", async () => {
+    const ids = Array.from({ length: 101 }, (_, i) => `@acme/item-${String(i).padStart(3, "0")}`);
+    const get = spyOn(client, "GET")
+      .mockResolvedValueOnce({
+        data: {
+          data: ids.slice(0, 100).map((id) => ({ id, manifest: { display_name: "Known" } })),
+        },
+      })
+      .mockRejectedValueOnce(new Error("offline"));
+    stubs.push(get);
+    const nameOf = await loadIntegrationNames(new QueryClient(), readable, [...ids, ids[0]!]);
+    expect(nameOf(ids[0]!)).toBe("Known");
+    expect(nameOf(ids[100]!)).toBe(ids[100]!);
+    expect(get).toHaveBeenCalledTimes(2);
   });
 
   it("falls back to the id when the fetch fails", async () => {

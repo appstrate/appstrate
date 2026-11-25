@@ -12,11 +12,6 @@ import { AssistantRuntimeProvider, useLocalRuntime } from "@assistant-ui/react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { TooltipProvider } from "@appstrate/ui/components/tooltip";
-import {
-  DropdownMenu,
-  DropdownMenuSub,
-  DropdownMenuSubContent,
-} from "@appstrate/ui/components/dropdown-menu";
 
 import { creationFields, useConversationLimit } from "../src/ui/conversation-limit.ts";
 import {
@@ -25,11 +20,11 @@ import {
   limitedSpaceOf,
   type ConversationScope,
 } from "../src/ui/conversation-scope.ts";
-import { ComposerTools, LimitMenuEntry } from "../src/ui/composer-tools.tsx";
+import { ComposerTools } from "../src/ui/composer-tools.tsx";
+import { ComposerToolsPanel, LimitLevel } from "../src/ui/composer-tools-panel.tsx";
 import {
   ChatHostProvider,
   ChatTransportProvider,
-  type SpaceChoiceMenu,
   type AttachTarget,
 } from "../src/ui/runtime-context.ts";
 import {
@@ -41,6 +36,7 @@ import {
 } from "../src/ui/sessions.ts";
 import { useSessions, useSessionDetail } from "../src/ui/use-sessions.ts";
 import { transportOf, transportOver } from "./fake-request.ts";
+import { DEFAULT_STORED_SKILLS } from "../src/ui/chat-skills.ts";
 import { conversationScope, testHost } from "./test-host.ts";
 
 /** The assistant-ui runtime the attach button reads. */
@@ -126,7 +122,7 @@ describe("changing the limit of an existing conversation", () => {
         ...row,
         ...changes,
         messages: [],
-        skills: { skillMode: "auto", pinnedSkills: [] },
+        skills: DEFAULT_STORED_SKILLS,
         createdAt: "",
       });
       qc.setQueryData<SessionsCache>(listKey, {
@@ -261,6 +257,42 @@ describe("changing the limit of a conversation created in this mount", () => {
     );
     expect(seen).toMatchObject({ originSpaceId: "spc_b", restricted: true, pending: true });
   });
+
+  it("stops following the selection once the first message is sent", () => {
+    const qc = new QueryClient();
+    const taken: unknown[] = [];
+    let seen!: ConversationScope;
+    let step = 0;
+    function Harness() {
+      const [selected, setSelected] = useState("spc_a");
+      const limit = useConversationLimit({
+        id: "chs_new",
+        transport: undefined,
+        persistedAtMount: false,
+        stored: undefined,
+        selectedSpaceId: selected,
+        generating: false,
+      });
+      seen = limit.scope;
+      if (step === 0) {
+        step = 1;
+        taken.push(limit.getCreation());
+        setSelected("spc_c");
+      } else if (step === 1) {
+        step = 2;
+        taken.push(limit.getCreation());
+      }
+      return null;
+    }
+    renderToStaticMarkup(
+      <QueryClientProvider client={qc}>
+        <Harness />
+      </QueryClientProvider>,
+    );
+    const first = { spaceId: "spc_a", restricted: true };
+    expect(taken).toEqual([first, first]);
+    expect(seen).toMatchObject({ originSpaceId: "spc_a", restricted: true });
+  });
 });
 
 describe("the space a limited conversation acts in", () => {
@@ -384,9 +416,6 @@ describe("the composer's limit chip", () => {
               <TooltipProvider>
                 <ComposerTools
                   transport={transportOf(() => ({ "X-Space-Id": "spc_a" }))}
-                  selection={{ skillMode: "auto", pinnedSkills: [] }}
-                  onSelectionChange={() => {}}
-                  showPicker={false}
                   authorsPackages={false}
                 />
               </TooltipProvider>
@@ -407,20 +436,32 @@ describe("the composer's limit chip", () => {
     );
   });
 
-  it("hides every tool after attach while a phone's composer rests", () => {
+  it('keeps the desktop\'s tools out of a phone and gives it one "+"', () => {
     const out = html(conversationScope({ originSpaceId: "spc_a", restricted: true }));
-    // The markup escapes the `&` and `>` of the arbitrary variant.
-    expect(out).toContain("max-md:group-data-[rest]/composer:[&amp;&gt;:not(:first-child)]:hidden");
-    // Chips wrap inside the cluster rather than squeezing each other.
-    expect(out).toContain("max-md:flex-wrap");
-    // Attach is the cluster's first child; settings and the chip come after it.
-    const cluster = out.slice(out.indexOf("max-md:group-data-[rest]/composer"));
-    expect(cluster.indexOf('aria-label="composer.attach"')).toBeLessThan(
-      cluster.indexOf('data-testid="composer-settings-trigger"'),
+    // The cluster (attach, settings, chips) is hidden below md; the "+" is hidden from md.
+    expect(out).toMatch(/class="flex min-w-0 items-center gap-1\.5 max-md:hidden"/);
+    expect(out).toContain('data-testid="composer-plus"');
+    expect(out).toMatch(
+      /class="[^"]*md:hidden[^"]*"[^>]*aria-label="composer\.tools"|aria-label="composer\.tools"[^>]*class="[^"]*md:hidden/,
     );
-    expect(cluster.indexOf('data-testid="composer-settings-trigger"')).toBeLessThan(
-      cluster.indexOf('data-testid="composer-limit-chip"'),
-    );
+    // One line: nothing wraps the cluster.
+    expect(out).not.toContain("flex-wrap");
+    // The limit narrows where the agent acts: the phone's "+" says it, as the desktop's chip does.
+    expect(out).toContain("composer-plus-dot");
+    expect(out).toContain("composer-settings-dot");
+  });
+
+  it('shows no dot on the "+" or the settings button while every setting is at its default', () => {
+    const out = html(conversationScope({ originSpaceId: "spc_a" }));
+    expect(out).toContain('data-testid="composer-plus"');
+    expect(out).not.toContain("composer-plus-dot");
+    expect(out).not.toContain("composer-settings-dot");
+  });
+
+  it("draws no model pill: the model is a level of the tools panel", () => {
+    const out = html(conversationScope({ originSpaceId: "spc_a" }));
+    expect(out).not.toContain("model.select");
+    expect(out).toContain('aria-label="composer.tools"');
   });
 
   it("cannot be lifted while a turn generates or a change is in flight", () => {
@@ -438,65 +479,90 @@ describe("the composer's limit chip", () => {
   });
 });
 
-describe("the composer's limit entry", () => {
-  const picked: string[] = [];
-  // The host's menu of spaces, drawn as a marker naming what it was handed.
-  const HostSubmenu: SpaceChoiceMenu = ({ label, spaceIds, onPick, testId }) => {
-    onPick("spc_probe");
-    return <u data-testid={testId} data-label={label} data-choice={spaceIds.join(",")} />;
-  };
+describe("the tools panel's limit rows", () => {
   const names: Record<string, string> = { spc_a: "Studio", spc_b: "Atelier" };
 
-  function entry(scope: ConversationScope, actingSpaceIds: string[]) {
+  function entry(
+    scope: ConversationScope,
+    actingSpaceIds: string[],
+    body: ReactNode = <ComposerToolsPanel authorsPackages={false} />,
+  ) {
     const host = testHost({
       t: (key, options) => (options ? `${key}|${String(options.name)}` : key),
       actingSpaceIds,
-      renderSpaces: (ids) => <i data-spaces={ids.join(",")}>{names[ids[0]!]}</i>,
+      renderSpaces: (ids, options) =>
+        options?.tilesOnly ? (
+          <i data-tiles={ids.join(",")} />
+        ) : (
+          <i data-spaces={ids.join(",")}>{names[ids[0]!]}</i>
+        ),
       useSpaceLabelOf: () => (id) => (id ? names[id] : undefined),
-      SpaceChoiceMenu: HostSubmenu,
     });
-    // A sub-menu's content renders without a portal: the entry is drawn as the open menu draws it.
     return renderToStaticMarkup(
-      <ChatHostProvider value={host}>
-        <ConversationScopeProvider value={scope}>
-          <DropdownMenu open>
-            <DropdownMenuSub open>
-              <DropdownMenuSubContent forceMount>
-                <LimitMenuEntry />
-              </DropdownMenuSubContent>
-            </DropdownMenuSub>
-          </DropdownMenu>
-        </ConversationScopeProvider>
-      </ChatHostProvider>,
+      <QueryClientProvider client={new QueryClient()}>
+        <ChatHostProvider value={host}>
+          <ConversationScopeProvider value={scope}>
+            <Runtime>{body}</Runtime>
+          </ConversationScopeProvider>
+        </ChatHostProvider>
+      </QueryClientProvider>,
     );
   }
 
   it("toggle: limits in one click, naming the space", () => {
     const out = entry(conversationScope({ originSpaceId: "spc_a" }), ["spc_a", "spc_b"]);
-    expect(out).toContain('role="menuitemcheckbox"');
-    expect(out).toContain('aria-label="composer.limit|Studio"');
-    expect(out).toContain('data-spaces="spc_a"');
-    expect(out).not.toContain("data-choice");
+    expect(out).toContain('role="switch"');
+    expect(out).toContain("composer.limit|Studio");
+    expect(out).toContain('data-testid="composer-limit-item"');
+    expect(out).not.toContain('role="group"');
   });
 
-  it("choose: hands the host's sub-menu the acting spaces, a pick limiting there", () => {
-    picked.length = 0;
-    const out = entry(conversationScope({ limitTo: (spaceId) => picked.push(spaceId) }), [
-      "spc_a",
-      "spc_b",
-    ]);
+  it("choose: a row opening a level, the spaces kept off the panel's rows", () => {
+    const out = entry(conversationScope(), ["spc_a", "spc_b"]);
     expect(out).toContain('data-testid="composer-limit-item"');
-    expect(out).toContain('data-label="composer.limit.choose"');
-    expect(out).toContain('data-choice="spc_a,spc_b"');
-    expect(out).not.toContain('role="menuitemcheckbox"');
-    expect(picked).toEqual(["spc_probe"]);
+    expect(out).toContain("composer.limit.generic");
+    expect(out).toContain("lucide-chevron-right");
+    expect(out).not.toContain("data-spaces=");
+    expect(out).not.toContain('role="switch"');
+  });
+
+  it("choose level: lists the acting spaces, each a row the host names", () => {
+    const out = entry(conversationScope(), ["spc_a", "spc_b"], <LimitLevel onPicked={() => {}} />);
+    expect(out).toContain('data-testid="composer-limit-spaces"');
+    // A row's label: the tile alone where the icons sit, the name in the row's own text.
+    expect(out).toContain('data-tiles="spc_a"');
+    expect(out).toContain('data-tiles="spc_b"');
+    expect(out).toContain('<span class="min-w-0 truncate">Studio</span>');
+    expect(out).toContain('<span class="min-w-0 truncate">Atelier</span>');
+    expect(out).not.toContain("data-spaces=");
+    expect(out).not.toContain('disabled=""');
+  });
+
+  it("choose level: inert while a change is in flight", () => {
+    const out = entry(
+      conversationScope({ pending: true }),
+      ["spc_a", "spc_b"],
+      <LimitLevel onPicked={() => {}} />,
+    );
+    expect(out.match(/disabled=""/g)?.length).toBe(2);
+  });
+
+  it("choose level: says why once the choice is no longer offered", () => {
+    const out = entry(
+      conversationScope({ generating: true }),
+      ["spc_a", "spc_b"],
+      <LimitLevel onPicked={() => {}} />,
+    );
+    expect(out).not.toContain("composer-limit-spaces");
+    expect(out).toMatch(/disabled=""[^>]*data-testid="composer-limit-item"/);
+    expect(out).toContain("composer.limit.generating");
   });
 
   it("unavailable: inert, with its reason", () => {
     const out = entry(conversationScope({ originSpaceId: "spc_x" }), ["spc_a"]);
-    expect(out).toContain('data-disabled=""');
+    expect(out).toMatch(/disabled=""[^>]*data-testid="composer-limit-item"/);
     expect(out).toContain("composer.limit.outside");
-    expect(out).not.toContain("data-choice");
+    expect(out).not.toContain('role="switch"');
   });
 });
 
@@ -510,13 +576,7 @@ describe("the composer's attach button", () => {
         <ChatTransportProvider value={transport}>
           <Runtime>
             <TooltipProvider>
-              <ComposerTools
-                transport={transport}
-                selection={{ skillMode: "auto", pinnedSkills: [] }}
-                onSelectionChange={() => {}}
-                showPicker={false}
-                authorsPackages={false}
-              />
+              <ComposerTools authorsPackages={false} />
             </TooltipProvider>
           </Runtime>
         </ChatTransportProvider>

@@ -6,18 +6,34 @@ import { DetailSectionCard } from "../detail-section-card";
 import { Markdown } from "../markdown";
 import { skillBody } from "../../lib/skill-frontmatter";
 import { SkeletonLine } from "../skeleton-line";
+import type { PackageType } from "@appstrate/core/validation";
+import type { PackageAvailability } from "@appstrate/shared-types";
+import { useOverviewMode } from "../../hooks/use-overview-mode";
+import { AvailabilityCard, AvailabilityCardSkeleton } from "./availability-card";
 
 /**
- * What a skill does here: its instructions, usage and files. What it IS (description,
- * version, origin, manifest metadata) is the catalogue sheet's and the header's, not repeated here.
+ * What a skill does here: whether the working space runs it, its instructions, usage and files.
+ * What it IS (description, version, origin, manifest metadata) is the catalogue sheet's and the
+ * header's, not repeated here.
  */
 export function PackageOverview({
+  packageId,
+  type,
+  name,
+  availability,
+  catalogueVersion,
   content,
   historical,
   agentCount,
   onOpenFiles,
   onOpenUsage,
 }: {
+  packageId: string;
+  type: PackageType;
+  name: string;
+  availability: PackageAvailability | undefined;
+  /** The version the card's catalogue link opens on, as the actions menu (`catalogueVersionFor`). */
+  catalogueVersion?: string;
   content?: string | null;
   historical: boolean;
   /** The agents the « Utilisé par » tab lists; `undefined` while read, `null` when unknown. */
@@ -26,9 +42,20 @@ export function PackageOverview({
   onOpenUsage: () => void;
 }) {
   const { t } = useTranslation("agents");
+  const { on: overview } = useOverviewMode();
   const instructions = content ? skillBody(content) : "";
   return (
     <div className="flex flex-col gap-6" data-testid="package-overview">
+      {/* The working space's: « Tous les espaces » has none to say. */}
+      {!overview && availability && (
+        <AvailabilityCard
+          type={type}
+          packageId={packageId}
+          name={name}
+          availability={availability}
+          catalogueVersion={catalogueVersion}
+        />
+      )}
       <div className="grid items-start gap-6 lg:grid-cols-2">
         <DetailSectionCard
           title={t("packageOverview.instructions")}
@@ -88,8 +115,11 @@ export function PackageOverview({
  */
 export function PackageOverviewSkeleton() {
   const { t } = useTranslation("agents");
+  const { on: overview } = useOverviewMode();
   return (
     <div className="flex flex-col gap-6">
+      {/* Drawn out of « Tous les espaces », where the card exists. */}
+      {!overview && <AvailabilityCardSkeleton />}
       <div className="grid items-start gap-6 lg:grid-cols-2">
         <DetailSectionCard title={t("packageOverview.instructions")} icon={FileCode}>
           {/* A real SKILL.md fills the clipped `max-h-52` box. */}

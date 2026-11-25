@@ -30,16 +30,36 @@ import { requireAnyPermission } from "../middleware/require-permission.ts";
 import { getOrgMember, getOrgSettings } from "../services/organizations.ts";
 import type { PackageType } from "@appstrate/core/validation";
 import type { PackageHome } from "@appstrate/shared-types";
-import type { OrgRole } from "@appstrate/core/permissions";
+import { ORG_ROLES_WITH_FULL_ACCESS, type OrgRole } from "@appstrate/core/permissions";
 import type { AppEnv } from "../types/index.ts";
 import type { SpaceScope } from "./scope.ts";
-import { callerPermissions, readsAgentContent, type Permission } from "./permissions.ts";
+import {
+  callerPermissions,
+  ceilingAllows,
+  readsAgentContent,
+  type Permission,
+} from "./permissions.ts";
 import { isUserPrincipal } from "./principal.ts";
-import { callerOrgRole, callerPersonalOwnerId, credentialAdmitsSpace } from "./view-as.ts";
+import { recordDispatchSpaces } from "./internal-dispatch.ts";
+import {
+  callerOrgRole,
+  callerPersonalOwnerId,
+  credentialAdmitsSpace,
+  credentialConfinedToSpaces,
+} from "./view-as.ts";
 import { orgOrSystemFilter, notEphemeralFilter } from "./package-helpers.ts";
 import { ApiError, forbidden, notFound, invalidRequest } from "./errors.ts";
-import { callerReachableSpaces, unnameableSpace, type ReachableSpace } from "./reachable-spaces.ts";
-import { placementReadFilter, placementRowJoin } from "../services/package-placement.ts";
+import {
+  callerReachableSpaces,
+  credentialReachableSpaces,
+  unnameableSpace,
+  type ReachableSpace,
+} from "./reachable-spaces.ts";
+import {
+  placedSpaceIds,
+  placementReadFilter,
+  placementRowJoin,
+} from "../services/package-placement.ts";
 
 /**
  * The read guard of the three agent routes `agents:run` also opens: the list,
@@ -75,7 +95,7 @@ export async function assertExistingPackageActivationAccess(
         eq(packages.id, packageId),
         orgOrSystemFilter(c.get("orgId")),
         notEphemeralFilter(),
-        activeHereSql(),
+        activeHereSql(target),
       ),
     )
     .limit(1);
@@ -141,9 +161,21 @@ export async function packageAccessSpaces(
 }
 
 /**
+ * The reach of a WRITE that places a package outside its home or withdraws it, judged in the home
+ * while it acts in the target: the credential's own ({@link credentialReachableSpaces}), so a
+ * credential bound to a set judges it the same whichever of its spaces the call entered. Every
+ * read keeps {@link packageAccessSpaces}; so does an end-user (its own space).
+ */
+export function placementAccessSpaces(c: Context<AppEnv>): Promise<PackageAccessSpace[]> {
+  return c.get("principalKind") === "end_user"
+    ? packageAccessSpaces(c)
+    : credentialReachableSpaces(c, c.get("orgId"));
+}
+
+/**
  * Does the package's placement grant read from these spaces? The in-memory form
- * of `placementReadFilter` (RBAC spec §6.9, §6.10): homed there or holding a row
- * there. `<type>:read` stays with each reader. Read only: running also needs
+ * of `placementReadFilter` (RBAC spec §6.9, §6.10): homed there or placed there
+ * (`placedIn`: a row, or an offer to the organization). `<type>:read` stays with each reader. Read only: running also needs
  * activity ({@link agentExecutionBlock}).
  */
 export function placementGrantsRead(
@@ -271,11 +303,26 @@ export async function assertCatalogPackageAccess(
   packageId: string,
   source?: ForeignOrgStanding,
 ) {
+  return assertPackageReachable(c, packageId, packageAccessSpaces, source);
+}
+
+/** {@link assertCatalogPackageAccess} over {@link placementAccessSpaces}: the activation door, which may place. */
+export async function assertPackageReachableForPlacement(c: Context<AppEnv>, packageId: string) {
+  return assertPackageReachable(c, packageId, placementAccessSpaces);
+}
+
+/** The one reachability read; the callers differ only in the spaces the credential reaches. */
+async function assertPackageReachable(
+  c: Context<AppEnv>,
+  packageId: string,
+  reach: (c: Context<AppEnv>, source?: ForeignOrgStanding) => Promise<PackageAccessSpace[]>,
+  source?: ForeignOrgStanding,
+) {
   const sourceOrgId = source?.orgId ?? c.get("orgId");
   const [pkg, accessible, placedIn] = await Promise.all([
     loadPackageRow(packageId, sourceOrgId),
-    packageAccessSpaces(c, source),
-    loadPlacementSpaces(packageId, sourceOrgId),
+    reach(c, source),
+    placedSpaceIds(sourceOrgId, packageId),
   ]);
   assertPackageIsReachable(packageId, pkg, placedIn, accessible);
   return pkg;
@@ -313,24 +360,6 @@ async function loadPackageRow(packageId: string, orgId: string) {
   const pkg = await findPackageRow(packageId, orgId);
   if (!pkg) throw notFound(`Package '${packageId}' not found`);
   return pkg;
-}
-
-/**
- * Every space of `orgId` holding a `space_packages` row for the package — the
- * placements {@link placementGrantsRead} needs beyond the home, which is a
- * column on the package row itself.
- *
- * Split out from the row read because the write path never needs it: authority
- * is the home alone, so the placements are loaded only when a refusal has to
- * decide between 403 and 404.
- */
-async function loadPlacementSpaces(packageId: string, orgId: string): Promise<string[]> {
-  const placed = await db
-    .select({ spaceId: spacePackages.spaceId })
-    .from(spacePackages)
-    .innerJoin(spaces, eq(spaces.id, spacePackages.spaceId))
-    .where(and(eq(spacePackages.packageId, packageId), eq(spaces.orgId, orgId)));
-  return placed.map((row) => row.spaceId);
 }
 
 /**
@@ -445,18 +474,20 @@ async function holdsPackageWriteAuthority(c: Context<AppEnv>, packageId: string)
 }
 
 /**
- * {@link assertPackageShareAccess} as a question, for bundle import: place the
+ * {@link assertPackageShareAccessForPlacement} as a question, for bundle import: place the
  * root here when the caller may ({@link callerPlacementAuthority}), else `null`
  * and `root_active: false`.
  */
 export async function heldPlacementAuthority(
   c: Context<AppEnv>,
   packageId: string,
+  visibleSpaceId: string,
+  record?: (ids: readonly string[]) => Promise<boolean>,
 ): Promise<PlacementAuthority | null> {
   const orgId = c.get("orgId");
   const pkg = await findPackageRow(packageId, orgId);
   if (!pkg || isSystemPackageRow(pkg) || pkg.orgId !== orgId) return null;
-  const authority = await callerPlacementAuthority(c, pkg.type);
+  const authority = await callerPlacementAuthority(c, pkg, { visibleSpaceId, record });
   return authority.authorizeHome(pkg.homeSpaceId) ? authority : null;
 }
 
@@ -585,17 +616,99 @@ export async function assertPackageShareAccess(
   return assertHomeAuthority(c, packageId, "share");
 }
 
+/** {@link assertPackageShareAccess} for a placement WRITE, over {@link placementAccessSpaces}. */
+export async function assertPackageShareAccessForPlacement(
+  c: Context<AppEnv>,
+  packageId: string,
+): Promise<PackageAccessRow> {
+  return assertHomeAuthority(c, packageId, "share", placementAccessSpaces);
+}
+
 /** The caller as a placer: `shared_by` plus the share rule as a predicate `placePackage` re-asks against the locked home. */
 export async function callerPlacementAuthority(
   c: Context<AppEnv>,
-  type: PackageType,
+  pkg: Pick<PackageAccessRow, "type" | "homeSpaceId">,
+  destination: {
+    visibleSpaceId: string | null;
+    record?: (ids: readonly string[]) => Promise<boolean>;
+  },
 ): Promise<PlacementAuthority> {
-  const accessible = await packageAccessSpaces(c);
-  const permission = packagePermission(type, "share");
+  const accessible = await placementAccessSpaces(c);
+  const permission = packagePermission(pkg.type, "share");
+  // Import may ask whether the caller can place before it knows the answer. Only record an
+  // authorized home. A user share addresses a person and never exposes their private space.
+  const record = destination.record ?? ((ids: readonly string[]) => recordDispatchSpaces(c, ids));
+  const tracked =
+    holdsHomeAuthority(pkg, accessible, permission) &&
+    (await record([pkg.homeSpaceId, destination.visibleSpaceId].filter((id) => id !== null)));
   return {
     sharedBy: c.get("user").id,
-    authorizeHome: (homeSpaceId) => holdsHomeAuthority({ homeSpaceId }, accessible, permission),
+    // The transaction rechecks the locked home. A concurrent move must not turn a tracked
+    // operation into a write under an unseen home's authority.
+    authorizeHome: (homeSpaceId) =>
+      (!tracked || homeSpaceId === pkg.homeSpaceId) &&
+      holdsHomeAuthority({ homeSpaceId }, accessible, permission),
   };
+}
+
+/** An organization owner or admin acting through a user credential unconfined to spaces: the role half of the offer door. */
+function callerAdministersOrg(c: Context<AppEnv>): boolean {
+  return (
+    isUserPrincipal(c) &&
+    !credentialConfinedToSpaces(c) &&
+    (ORG_ROLES_WITH_FULL_ACCESS as readonly OrgRole[]).includes(callerOrgRole(c))
+  );
+}
+
+/** {@link callerAdministersOrg}, and the credential's scope ceiling leaves `<type>:share` in reach (RBAC spec §7.1). */
+export function callerMayOffer(c: Context<AppEnv>, type: PackageType): boolean {
+  return callerAdministersOrg(c) && ceilingAllows(c, packagePermission(type, "share"));
+}
+
+/**
+ * Authority to OFFER a package to its organization, or to withdraw the offer
+ * (RBAC spec §6.10): an owner or admin of the organization, acting with a user
+ * credential unconfined to spaces whose scope ceiling leaves `<type>:share`,
+ * AND for a package homed in a space, `<type>:share` in that home. A system
+ * package has no home, so the role and the ceiling alone decide. The role is asked before the package is read, so a member
+ * learns nothing about which ids exist. Returns the loaded row and the home
+ * rule as a predicate, which the offer service re-asks against the locked home.
+ */
+export async function assertPackageOfferAccess(
+  c: Context<AppEnv>,
+  packageId: string,
+): Promise<{
+  pkg: PackageAccessRow;
+  authorizeHome: PlacementAuthority["authorizeHome"];
+}> {
+  const orgId = c.get("orgId");
+  if (!callerAdministersOrg(c)) {
+    throw forbidden(
+      "Offering a package to the organization requires an owner or admin user credential, unconfined to spaces.",
+    );
+  }
+  const pkg = await loadPackageRow(packageId, orgId);
+  if (!callerMayOffer(c, pkg.type)) {
+    throw forbidden(
+      `Offering '${packageId}' to the organization is outside this credential's scope: it needs '${packagePermission(pkg.type, "share")}'.`,
+    );
+  }
+  if (isSystemPackageRow(pkg)) return { pkg, authorizeHome: () => true };
+  const accessible = await placementAccessSpaces(c);
+  const share = packagePermission(pkg.type, "share");
+  const authorizeHome: PlacementAuthority["authorizeHome"] = (homeSpaceId) =>
+    holdsHomeAuthority({ homeSpaceId }, accessible, share);
+  if (!authorizeHome(pkg.homeSpaceId)) {
+    await refuseHomeAuthority(
+      c,
+      packageId,
+      pkg,
+      accessible,
+      share,
+      `Offering '${packageId}' to the organization requires '${share}' in its home space.`,
+    );
+  }
+  return { pkg, authorizeHome };
 }
 
 /** Which side's authority withdrew a placement — recorded on `package.unshared`. */
@@ -612,6 +725,7 @@ export async function assertPlacementRemovalAccess(
   c: Context<AppEnv>,
   packageId: string,
   targetSpaceId: string,
+  targetKind: "space" | "user",
 ): Promise<{
   pkg: PackageAccessRow;
   authorityFor: (homeSpaceId: string | null) => PlacementRemovalAuthority | null;
@@ -619,7 +733,12 @@ export async function assertPlacementRemovalAccess(
   // The target is a space the credential may name, whichever side's authority acts: home
   // authority reaches the package, not every space it could be placed in.
   if (!credentialAdmitsSpace(c, targetSpaceId)) throw unnameableSpace(c, targetSpaceId);
-  const { pkg, accessible } = await loadGovernedPackage(c, packageId, "share");
+  const { pkg, accessible } = await loadGovernedPackage(
+    c,
+    packageId,
+    "share",
+    placementAccessSpaces,
+  );
   const share = packagePermission(pkg.type, "share");
   const target = accessible.find((space) => space.id === targetSpaceId);
   const ownerId = callerPersonalOwnerId(c, c.get("orgId"));
@@ -639,7 +758,7 @@ export async function assertPlacementRemovalAccess(
     assertPackageIsReachable(
       packageId,
       pkg,
-      await loadPlacementSpaces(packageId, c.get("orgId")),
+      await placedSpaceIds(c.get("orgId"), packageId),
       accessible,
     );
   } else if (authority === null) {
@@ -652,16 +771,31 @@ export async function assertPlacementRemovalAccess(
       `Withdrawing '${packageId}' from that space requires '${share}' in its home space, or '${spacePackagePermission(pkg.type, "deactivate")}' in that space.`,
     );
   }
-  return { pkg, authorityFor };
+  const tracked = await recordDispatchSpaces(c, [
+    ...(authority === "home" && pkg.homeSpaceId ? [pkg.homeSpaceId] : []),
+    ...(targetKind === "space" && target ? [target.id] : []),
+  ]);
+  return {
+    pkg,
+    authorityFor(homeSpaceId) {
+      const lockedAuthority = authorityFor(homeSpaceId);
+      if (tracked && lockedAuthority === "home" && homeSpaceId !== pkg.homeSpaceId) return null;
+      return lockedAuthority;
+    },
+  };
 }
+
+/** The spaces the home rule reads: {@link packageAccessSpaces}, or {@link placementAccessSpaces} for a placement write. */
+type GovernedReach = (c: Context<AppEnv>) => Promise<PackageAccessSpace[]>;
 
 /** The home rule itself, for each of the three verbs that ask it. */
 async function assertHomeAuthority(
   c: Context<AppEnv>,
   packageId: string,
   action: "write" | "delete" | "share",
+  reach: GovernedReach = packageAccessSpaces,
 ): Promise<PackageAccessRow> {
-  const { pkg, accessible } = await loadGovernedPackage(c, packageId, action);
+  const { pkg, accessible } = await loadGovernedPackage(c, packageId, action, reach);
   const permission = packagePermission(pkg.type, action);
   if (holdsHomeAuthority(pkg, accessible, permission)) return pkg;
   const verb = action === "share" ? "Sharing" : "Modifying";
@@ -680,12 +814,10 @@ async function loadGovernedPackage(
   c: Context<AppEnv>,
   packageId: string,
   action: "write" | "delete" | "share",
+  reach: GovernedReach,
 ): Promise<{ pkg: PackageAccessRow; accessible: PackageAccessSpace[] }> {
   const orgId = c.get("orgId");
-  const [pkg, accessible] = await Promise.all([
-    loadPackageRow(packageId, orgId),
-    packageAccessSpaces(c),
-  ]);
+  const [pkg, accessible] = await Promise.all([loadPackageRow(packageId, orgId), reach(c)]);
   // The catalog read above is `orgOrSystemFilter`ed, so another org's package
   // never loads at all (404). A row whose org does not match is a SYSTEM one —
   // the `source` column says the same thing, and {@link isSystemPackageRow} is
@@ -713,7 +845,7 @@ async function refuseHomeAuthority(
   assertPackageIsReachable(
     packageId,
     pkg,
-    await loadPlacementSpaces(packageId, c.get("orgId")),
+    await placedSpaceIds(c.get("orgId"), packageId),
     accessible,
   );
   reportPermissionDenial(c, permission);
@@ -1033,10 +1165,33 @@ function manifestPackageRefs(
 }
 
 /** Caller-authored references need live source read access; unchanged references need no new scope. */
-export async function assertPackageDependenciesAccessible(
+export function assertPackageDependenciesAccessible(
   c: Context<AppEnv>,
   manifest: Record<string, unknown>,
   previous: Record<string, unknown> = {},
+): Promise<void> {
+  return assertDependenciesReachable(c, manifest, previous, assertCatalogPackageAccess);
+}
+
+/**
+ * {@link assertPackageDependenciesAccessible} for a launch (an inline run's posted manifest): a
+ * dependency is judged over the credential's own reach ({@link credentialReachableSpaces}), not the
+ * entered space alone. A credential bound to a set of spaces (the chat's bearer) names a package
+ * homed in another of its spaces and not placed in the entered one; the readiness gate then answers
+ * its actionable `integration_not_active`, the same answer a session gets, instead of an opaque 404.
+ */
+export function assertLaunchDependenciesAccessible(
+  c: Context<AppEnv>,
+  manifest: Record<string, unknown>,
+): Promise<void> {
+  return assertDependenciesReachable(c, manifest, {}, assertPackageReachableForPlacement);
+}
+
+async function assertDependenciesReachable(
+  c: Context<AppEnv>,
+  manifest: Record<string, unknown>,
+  previous: Record<string, unknown>,
+  assertReachable: (c: Context<AppEnv>, packageId: string) => Promise<unknown>,
 ): Promise<void> {
   const previousIds = new Set(manifestPackageRefs(previous).map((ref) => ref.id));
   const seen = new Set<string>();
@@ -1062,5 +1217,5 @@ export async function assertPackageDependenciesAccessible(
       ),
     );
   // Readiness keeps the existing missing-dependency errors; known but inaccessible sources are hidden.
-  for (const { id } of existing) await assertCatalogPackageAccess(c, id);
+  for (const { id } of existing) await assertReachable(c, id);
 }

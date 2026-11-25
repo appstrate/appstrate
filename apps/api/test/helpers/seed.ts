@@ -14,6 +14,7 @@ import { db } from "./db.ts";
 import { prefixedId, SPACE_ID_RE } from "@appstrate/db/ids";
 import {
   packages,
+  orgPackageOffers,
   spacePackages,
   runs,
   runLogs,
@@ -162,6 +163,11 @@ export async function seedPackageShare(
     .insert(spacePackages)
     .values({ spaceId, packageId, enabled: false, sharedBy })
     .onConflictDoNothing();
+}
+
+/** Offer a package to its organization (`org_package_offers`), bypassing the door. */
+export async function seedOrgOffer(orgId: string, packageId: string): Promise<void> {
+  await db.insert(orgPackageOffers).values({ orgId, packageId }).onConflictDoNothing();
 }
 
 /**

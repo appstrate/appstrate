@@ -4,6 +4,7 @@ export const metaPaths = {
   "/api/openapi.json": {
     get: {
       operationId: "getOpenApiSpec",
+      "x-appstrate-space": { kind: "organization" },
       tags: ["Meta"],
       summary: "OpenAPI specification",
       description:
@@ -54,6 +55,7 @@ export const metaPaths = {
   "/api/docs": {
     get: {
       operationId: "getSwaggerUI",
+      "x-appstrate-space": { kind: "organization" },
       tags: ["Meta"],
       summary: "Swagger UI",
       description: "Interactive API documentation via Swagger UI.",

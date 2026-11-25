@@ -6,6 +6,7 @@ export const invitationsPaths = {
   "/invite/{token}/info": {
     get: {
       operationId: "getInvitationInfo",
+      "x-appstrate-space": { kind: "organization" },
       tags: ["Invitations"],
       summary: "Get invitation info",
       description: "Public endpoint. Returns invitation metadata (email, org name, role, inviter).",
@@ -92,6 +93,7 @@ export const invitationsPaths = {
   "/invite/{token}/accept": {
     post: {
       operationId: "acceptInvitation",
+      "x-appstrate-space": { kind: "organization" },
       tags: ["Invitations"],
       summary: "Accept invitation",
       description:

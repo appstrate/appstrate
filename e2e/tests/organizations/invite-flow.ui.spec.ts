@@ -15,6 +15,7 @@
 
 import { test, expect } from "../../fixtures/browser.fixture.ts";
 import { registerUser } from "../../helpers/seed.ts";
+import { menuItem } from "../../helpers/menu.ts";
 import type { Browser, Page } from "@playwright/test";
 
 function uid() {
@@ -30,7 +31,7 @@ const STANDARD_ROLE = /^(Membre|Member)\b/;
  */
 async function openInviteDialog(page: Page) {
   await page.getByRole("button", { name: "Actions", exact: true }).click();
-  await page.getByRole("menuitem", { name: INVITE }).click();
+  await menuItem(page, INVITE).click();
   const dialog = page.getByRole("dialog", { name: INVITE });
   await expect(dialog).toBeVisible();
   return dialog;

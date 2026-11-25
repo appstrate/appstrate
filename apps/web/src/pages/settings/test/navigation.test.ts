@@ -1,12 +1,21 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { describe, expect, it } from "bun:test";
-import { isUnder, routeVerdict, SETTINGS_INDEX } from "../../../lib/route-access";
+import {
+  isUnder,
+  routeVerdict,
+  SETTINGS_INDEX,
+  settingsScopeFromPath,
+} from "../../../lib/route-access";
+import {
+  inSurface,
+  settingsSurfaceFromPath,
+  type SettingsSurface,
+} from "../../../lib/settings-surface";
 import {
   activeSettingsItem,
   firstSettingsPath,
   settingsContentKey,
-  settingsScopeFromPath,
   visibleSettingsSections,
 } from "../navigation";
 
@@ -72,14 +81,14 @@ describe("unified settings navigation", () => {
   it("keeps a module's screen behind its module, whatever the permission", () => {
     const withoutModules = destinations(NO_FEATURES, [
       "oauth-clients:read",
-      "cli-sessions:read",
+      "access-grants:read",
       "billing:read",
       "org-sso:read",
       "webhooks:read",
       "space-settings:write",
     ]);
     expect(withoutModules).not.toContain("/org-settings/oauth");
-    expect(withoutModules).not.toContain("/org-settings/cli-sessions");
+    expect(withoutModules).not.toContain("/org-settings/access-grants");
     expect(withoutModules).not.toContain("/org-settings/billing");
     expect(withoutModules).not.toContain("/org-settings/enterprise-sso");
     expect(withoutModules).not.toContain("/workspace-settings/auth");
@@ -164,7 +173,6 @@ describe("account section (/preferences)", () => {
     "/preferences/general",
     "/preferences/appearance",
     "/preferences/security",
-    "/preferences/devices",
     "/preferences/connections",
     "/preferences/mcp-access",
   ];
@@ -176,20 +184,36 @@ describe("account section (/preferences)", () => {
     expect(firstSettingsPath(sections, "account")).toBe("/preferences/general");
   });
 
+  it("lists devices and apps only with the oidc module, which issues them", () => {
+    expect(destinations(NO_FEATURES, [])).not.toContain("/preferences/devices");
+    expect(destinations(ALL_FEATURES, [])).toContain("/preferences/devices");
+  });
+
   it("lists the caller's model keys only where their route opens", () => {
     expect(destinations(NO_FEATURES, [])).not.toContain("/preferences/models");
     expect(destinations(NO_FEATURES, ["model-provider-credentials:read"])).toContain(
       "/preferences/models",
     );
   });
+});
 
-  it("sits in the same rail as the organization and workspace sections", () => {
-    const sections = sectionsFor(ALL_FEATURES, [...GUEST, "space-settings:write"]);
-    expect(sections.map((section) => section.scope)).toEqual([
-      "organization",
-      "workspace",
-      "account",
-    ]);
+describe("settings surfaces", () => {
+  const sections = sectionsFor(ALL_FEATURES, [...GUEST, "space-settings:write"]);
+  const scopes = (surface: SettingsSurface) =>
+    inSurface(sections, surface).map((section) => section.scope);
+
+  it("lists what the caller administers in Settings and their own account in Preferences", () => {
+    expect(scopes("settings")).toEqual(["organization", "workspace"]);
+    expect(scopes("preferences")).toEqual(["account"]);
+  });
+
+  it("reads the dialog off the URL", () => {
+    expect(settingsSurfaceFromPath("/org-settings/models")).toBe("settings");
+    expect(settingsSurfaceFromPath("/workspace-settings/webhooks/wh_1")).toBe("settings");
+    expect(settingsSurfaceFromPath("/preferences")).toBe("preferences");
+    expect(settingsSurfaceFromPath("/preferences/models")).toBe("preferences");
+    expect(settingsSurfaceFromPath("/catalogue/installed/agent")).toBeUndefined();
+    expect(settingsSurfaceFromPath("/preferencesx")).toBeUndefined();
   });
 });
 

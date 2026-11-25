@@ -167,7 +167,7 @@ interface PreviewCsp {
  * can be the fake login form itself and carry the typed-in credentials out in a
  * navigation URL — a channel no CSP directive covers.
  *
- * Where active HTML IS served — a nested frame, the SPA's preview modal — that
+ * Where active HTML IS served — a nested frame, the SPA's preview frame — that
  * same self-navigation freedom means the agent document can replace its OWN
  * frame. Nothing THIS policy carries can bound that; the control lives on the
  * PARENT document, whose CSP `frame-src` names the preview origin and nothing

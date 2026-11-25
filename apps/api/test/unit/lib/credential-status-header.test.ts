@@ -45,6 +45,19 @@ describe("X-Appstrate-Credential-Status", () => {
   });
 
   it("reads nothing from a value the platform does not write", () => {
+    for (const suffix of [
+      "; failures=1",
+      "; failures=-1; max-failures=3",
+      "; failures=; max-failures=1",
+      "; cause=unrefreshable",
+      "; failures=1; max-failures=1.5",
+      "; failures=10000000000000000000; max-failures=2",
+    ]) {
+      expect(parseCredentialStatus(`in_use; cause=unrefreshable${suffix}`)).toBeNull();
+    }
+    expect(
+      parseCredentialStatus("needs_reconnection; cause=unrefreshable; failures=1; max-failures=2"),
+    ).toBeNull();
     expect(parseCredentialStatus(null)).toBeNull();
     expect(parseCredentialStatus("kept")).toBeNull();
     expect(parseCredentialStatus("needs_reconnection")).toBeNull();

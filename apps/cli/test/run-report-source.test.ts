@@ -118,6 +118,55 @@ describe("startReportSession — source discrimination", () => {
 
   afterEach(() => stub.restore());
 
+  it("uses the announced service addresses on a rewritten same-origin gateway", async () => {
+    stub.restore();
+    stub = installStubFetch(() =>
+      ok({
+        ...SUCCESS_BODY,
+        url: "https://app.example.com/custom/log",
+        mcp_url: "https://app.example.com/gateway/reports/tools",
+        heartbeat_url: "https://app.example.com/gateway/reports/pulse",
+      }),
+    );
+    const session = await startReportSession(
+      { kind: "inline", bundle: makeBundle() },
+      REPORT_CTX,
+      { mode: "true", fallback: "abort" },
+      SNAPSHOT,
+    );
+    expect(session?.mcpUrl).toBe("https://app.example.com/gateway/reports/tools");
+    expect(session?.heartbeatUrl).toBe("https://app.example.com/gateway/reports/pulse");
+  });
+
+  for (const [field, endpoint] of [
+    ["url", "events"],
+    ["finalize_url", "finalize"],
+    ["mcp_url", "mcp"],
+    ["heartbeat_url", "heartbeat"],
+  ] as const) {
+    it(`refuses a registration whose ${field} leaves the selected instance`, async () => {
+      stub.restore();
+      stub = installStubFetch(() =>
+        ok({ ...SUCCESS_BODY, [field]: "https://other.example.org/sink" }),
+      );
+      const resolve = (reportFallback: "console" | "abort") =>
+        resolveReportSession(
+          { bundle: "./agent.afps", report: "true", reportFallback, json: true },
+          makeBundle(),
+          { kind: "path", path: "./agent.afps", label: "./agent.afps" },
+          REPORT_CTX,
+        );
+      await expect(resolve("abort")).rejects.toThrow(
+        `Invalid ${endpoint} service URL for this run origin
+    Check that the server's APP_URL and your CLI instance use the same scheme, hostname and port (https://app.example.com).`,
+      );
+      expect(await resolve("console")).toBeNull();
+      expect(stub.calls.map(({ url }) => url)).toEqual(
+        Array(2).fill(REPORT_CTX.instance + "/api/runs/remote"),
+      );
+    });
+  }
+
   it("posts kind: inline with manifest+prompt for path-mode bundles", async () => {
     const reportSource: ReportSource = { kind: "inline", bundle: makeBundle() };
     await startReportSession(

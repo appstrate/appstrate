@@ -49,7 +49,8 @@ import { piSkillsDir } from "./bundle-extensions.ts";
 import { createIsolatedResourceLoader } from "./isolated-resource-loader.ts";
 import { integrationOf } from "./tool-integration.ts";
 import type { ToolIntegration } from "@appstrate/core/integration";
-import { addRequestUsage, DEFAULT_CONTEXT_WINDOW } from "./pi-model.ts";
+import { addRequestUsage } from "./pi-model.ts";
+import { DEFAULT_CONTEXT_WINDOW } from "@appstrate/core/token-budget";
 import { ALIAS_PI_PROVIDER_KEY, PI_SDK_VERSION, PI_SDK_VERSION_HEADER } from "./provider-map.ts";
 import type { ModelCost } from "@appstrate/core/module";
 import type { ModelApiShape } from "@appstrate/core/sidecar-types";
@@ -70,7 +71,7 @@ import {
   buildTurnProgress,
   emptyRunResult,
   finalizeThrownFailure,
-  reduceEvents,
+  foldEvent,
   truncateToolResult,
   zeroTokenUsage,
   type RunError,
@@ -175,10 +176,8 @@ function prepareProviderBaseUrl(model: PiModelConfig): PiModelConfig {
  *    collapses `xhigh` AND `max` onto its `high` budget
  *    (`pi-ai/api/simple-options.js` → `clampReasoning`).
  *
- * Pre-0.84 this function also routed `max` through Pi's `xhigh` slot, since
- * `max` did not exist as a selector. It does now; the disguise is gone —
- * it clobbered the model's own `xhigh` mapping for the duration of the turn,
- * which the adaptive-Anthropic path reads back (`mapThinkingLevelToEffort`).
+ * Pass `max` through its own selector. Reusing the `xhigh` slot would overwrite the
+ * model mapping that the adaptive Anthropic path reads in `mapThinkingLevelToEffort`.
  */
 export function prepareRequestedThinkingLevel(
   model: PiModelConfig,
@@ -297,6 +296,8 @@ export interface PiRunnerOptions {
   modelRetry?: boolean;
   /** Pi SDK context compaction. Default `true`; see {@link derivePiCompactionSettings}. */
   modelCompaction?: boolean;
+  /** {@link model}'s window is `DEFAULT_CONTEXT_WINDOW`, the launcher declared none: turns say so. */
+  contextWindowAssumed?: true;
   /** Per-tool-result byte cap on the event sink. Default `DEFAULT_TOOL_RESULT_BYTE_LIMIT`. */
   toolResultByteLimit?: number;
 }
@@ -311,6 +312,9 @@ const MIN_KEEP_RECENT_TOKENS = 20_000;
 /** Fraction of the context window to keep verbatim after a compaction pass. */
 const KEEP_RECENT_FRACTION = 0.1;
 
+type EnabledCompaction = { enabled: true; reserveTokens: number; keepRecentTokens: number };
+type ContextModel = { contextWindow?: number | null; maxTokens?: number | null };
+
 /**
  * Derive Pi SDK compaction settings from a resolved model. Pure function
  * so the env-driven (`SYSTEM_PROVIDER_KEYS`) and DB-driven (`org_models`)
@@ -319,7 +323,7 @@ const KEEP_RECENT_FRACTION = 0.1;
  *
  * | Knob               | Mapping                                | Why                                                                                                                                                                              |
  * |--------------------|----------------------------------------|----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
- * | `reserveTokens`    | `deriveResponseReserveTokens(ctx, max)`| Response budget. Honours `max_tokens` so the first call post-compaction does not underflow into the upstream 400 ("prompt is too long") — critical for Claude Sonnet thinking mode (`maxTokens: 64000`). An impossible `max_tokens >= contextWindow` (corrupt catalog data) is clamped to a derived default instead of pinning the threshold at ≤0. |
+ * | `reserveTokens`    | `deriveResponseReserveTokens(ctx, max)`| Response budget. Room kept for a reply and the summary trigger (`contextWindow - reserve`): honours a usable `max_tokens` up to an absolute 64k ceiling (pi-ai clamps the `max_tokens` it sends, so this is not an upstream-400 guard); 1M window / 384k max output → 64k. An impossible `max_tokens >= contextWindow` (corrupt catalog data) is clamped to a derived default instead of pinning the threshold at ≤0. |
  * | `keepRecentTokens` | `max(20000, 10% × contextWindow)`      | Preserves the ratio across model sizes: 20k on Claude 200k, ~100k on GPT-4.1 1M, ~200k on Gemini 2M. The floor stops small windows from over-compacting away recent context.    |
  *
  * `enabled: false` turns compaction off entirely — useful when stacking
@@ -339,20 +343,24 @@ const KEEP_RECENT_FRACTION = 0.1;
  * third party's settings object. Under this shape that is `TS2559` at the call
  * site — the boundary is enforced by the compiler instead of by a convention.
  */
-export function derivePiCompactionSettings(
-  model: { contextWindow?: number | null; maxTokens?: number | null },
-  { enabled = true }: { enabled?: boolean } = {},
-): {
-  compaction:
-    { enabled: false } | { enabled: true; reserveTokens: number; keepRecentTokens: number };
+export function derivePiCompactionSettings(model: ContextModel): {
+  compaction: EnabledCompaction;
   contextWindow: number;
-} {
+};
+export function derivePiCompactionSettings(
+  model: ContextModel,
+  options: { enabled?: boolean },
+): { compaction: { enabled: false } | EnabledCompaction; contextWindow: number };
+export function derivePiCompactionSettings(
+  model: ContextModel,
+  { enabled = true }: { enabled?: boolean } = {},
+): { compaction: { enabled: false } | EnabledCompaction; contextWindow: number } {
   const contextWindow = model.contextWindow ?? DEFAULT_CONTEXT_WINDOW;
   if (!enabled) {
     return { compaction: { enabled: false }, contextWindow };
   }
   // Shared clamp (see `@appstrate/core/token-budget`): honours a usable
-  // `maxTokens`, but treats an impossible `maxTokens >= contextWindow`
+  // `maxTokens` up to RESERVE_CEILING_TOKENS, but treats an impossible `maxTokens >= contextWindow`
   // (corrupt catalog/override data) as unset and derives a sane reserve —
   // otherwise the compaction threshold `contextWindow - reserveTokens`
   // collapses to ≤0 and the agent compacts on every turn.
@@ -421,10 +429,10 @@ export class PiRunner {
     signal?.throwIfAborted();
 
     const runId = context.runId;
-    const events: RunEvent[] = [];
+    const output = emptyRunResult();
 
     const emit = async (event: RunEvent): Promise<void> => {
-      events.push(event);
+      foldEvent(output, event);
       await eventSink.handle(event);
     };
 
@@ -500,7 +508,7 @@ export class PiRunner {
       if (timedOut && !signal?.aborted) {
         const bridge = bridgeRef.current;
         await finalizeThrownFailure({
-          events,
+          output,
           err,
           signal,
           runId,
@@ -550,6 +558,7 @@ export class PiRunner {
               ...(upstream
                 ? {
                     context: {
+                      error_category: classifyModelError({ message: upstream.message }).category,
                       upstream: {
                         stop_reason: upstream.stopReason,
                         message: upstream.message.slice(0, UPSTREAM_MESSAGE_MAX_CHARS),
@@ -574,7 +583,7 @@ export class PiRunner {
       // new, so reducing before vs after it is equivalent.
       const bridge = bridgeRef.current;
       await finalizeThrownFailure({
-        events,
+        output,
         err,
         signal,
         runId,
@@ -605,7 +614,7 @@ export class PiRunner {
     // adapter-error trail post-hoc (issue: run_fd977eb6).
     const terminalError = bridgeRef.current?.getTerminalError();
     const result: TerminalRunResult = {
-      ...(events.length === 0 ? emptyRunResult() : reduceEvents(events)),
+      ...output,
       status: terminalError ? "failed" : "success",
       ...(terminalError ? { error: terminalError } : {}),
     };
@@ -761,6 +770,7 @@ export class PiRunner {
     const bridge = installSessionBridge(session, internalSink, context.runId, {
       outputRequired,
       contextWindow: budget.contextWindow,
+      ...(this.opts.contextWindowAssumed ? { contextWindowAssumed: true as const } : {}),
       cost: sessionModel.cost,
       ...(this.opts.unpriced ? { unpriced: true } : {}),
       ...(this.opts.toolResultByteLimit !== undefined
@@ -1432,6 +1442,8 @@ interface SessionBridgeOptions {
    * it.
    */
   contextWindow?: number;
+  /** {@link contextWindow} is the fallback, not a window the model declared. */
+  contextWindowAssumed?: true;
   /** No rates back this session's model — see {@link PiRunnerOptions.unpriced}. */
   unpriced?: boolean;
   /** The session model's rate card: its tiers band the cumulative usage. */
@@ -1625,6 +1637,7 @@ export function installSessionBridge(
                   ...(options.contextWindow !== undefined
                     ? { contextWindow: options.contextWindow }
                     : {}),
+                  ...(options.contextWindowAssumed ? { contextWindowAssumed: true } : {}),
                 },
               ),
             );
@@ -1704,8 +1717,8 @@ export function installSessionBridge(
           runId,
           message:
             before !== undefined && after !== undefined
-              ? `Context compacted — ${before} → ${after} tokens`
-              : "Context compacted",
+              ? `Context summarized — ${before} → ${after} tokens`
+              : "Context summarized",
           data: {
             event: COMPACTION_EVENT,
             ...(e.reason !== undefined ? { reason: e.reason } : {}),
@@ -1830,14 +1843,11 @@ export function installSessionBridge(
         return undefined;
       }
       const message = terminalErrorMessage(lastAssistantErrorMessage);
-      // `message` stays the RAW provider text: the run surface is a debugging
-      // surface and the operator reading `runs.error` wants the upstream
-      // sentence verbatim (the chat surface deliberately does the opposite and
-      // ships only the class). The CLASSIFICATION of this same turn travels the
-      // `appstrate.error` event emitted above, never this `RunError`: the
-      // finalize body is parsed by a closed schema (`message`/`stack`/`code`),
-      // so a `context` here would be dropped at ingestion and reach no reader.
-      return { code: "adapter_error", message };
+      return {
+        code: "adapter_error",
+        message,
+        context: { error_category: classifyModelError({ message }).category },
+      };
     },
     getLastUpstreamError(): { stopReason: string; message: string } | undefined {
       if (lastUpstreamStopReason === undefined) return undefined;

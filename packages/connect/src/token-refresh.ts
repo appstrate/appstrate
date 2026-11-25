@@ -75,6 +75,7 @@ export class RefreshError extends Error {
      * `preserve-caught-error` cannot see custom classes, so this is on us.
      */
     options?: ErrorOptions,
+    public readonly oauthError?: string,
   ) {
     super(message, options);
     this.name = "RefreshError";
@@ -112,7 +113,7 @@ const PLATFORM_OWNED_PARAMS = [
 export async function performTokenRequest(
   ctx: RefreshContext,
   grant: Readonly<Record<string, string>>,
-  opts: { label: string; keepRefreshToken?: string },
+  opts: { label: string; keepRefreshToken?: string; requireTokenType?: boolean },
 ): Promise<RefreshExchangeResult> {
   // A malformed grant is a configuration fault, never a `RefreshError`: nothing is sent.
   if (!grant.grant_type) throw new Error(`${opts.label}: the grant carries no grant_type`);
@@ -179,7 +180,7 @@ export async function performTokenRequest(
   // caller's current token substituted: on a refresh that would persist the very
   // token it exists to replace and reset `needsReconnection` / the failure
   // streak on a dead credential.
-  const read = await readTokenResponse(response);
+  const read = await readTokenResponse(response, opts.requireTokenType);
   if (!read.ok) {
     throw new RefreshError(
       `${opts.label} failed: ${read.summary}`,
@@ -187,6 +188,7 @@ export async function performTokenRequest(
       read.status,
       read.body,
       read.cause === undefined ? undefined : { cause: read.cause },
+      read.error,
     );
   }
 

@@ -7,7 +7,8 @@
 
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import type { AppstrateRequestExtra } from "@appstrate/mcp-transport";
-import { buildServerInstructions } from "../../../../src/modules/mcp/router.ts";
+import { buildServerInstructions, unionSurface } from "../../../../src/modules/mcp/router.ts";
+import type { McpSpace } from "../../../../src/modules/mcp/spaces.ts";
 import {
   buildMcpTools,
   deriveMcpSurface,
@@ -19,9 +20,13 @@ import {
  * reads off the request's auth method; the contexts built here forward a bearer. `proxyOpen`:
  * the space's `credential_proxy_open`.
  */
-export function toolsFor(ctx: McpToolContext, proxyAcceptsCredential = true, proxyOpen = true) {
+export function toolsFor(
+  ctx: Omit<McpToolContext, "observe"> & Partial<Pick<McpToolContext, "observe">>,
+  proxyAcceptsCredential = true,
+  proxyOpen = true,
+) {
   return buildMcpTools(
-    ctx,
+    { observe: () => {}, ...ctx },
     deriveMcpSurface(ctx.permissions, ctx.ceiling, ctx.actor, proxyAcceptsCredential, {
       credentialProxyOpen: proxyOpen,
     }),
@@ -39,6 +44,36 @@ export function instructionsFor(permissions: Iterable<string>, rendersCards = fa
     }),
     rendersCards,
   );
+}
+
+/** A space of an org-wide connection, its acts derived from `permissions` as the router does. */
+export function orgSpace(
+  id: string,
+  name: string,
+  role: string,
+  personal: boolean,
+  permissions: readonly string[],
+): McpSpace {
+  const set = new Set(permissions);
+  return {
+    id,
+    name,
+    role,
+    personal,
+    permissions: set,
+    surface: deriveMcpSurface(set, undefined, { type: "user", id: "user_1" }, true, {
+      credentialProxyOpen: true,
+    }),
+  };
+}
+
+/** The instructions an org-wide connection reaching `spaces` is served (the first is the entered one). */
+export function orgWideInstructionsFor(spaces: readonly McpSpace[], rendersCards = false): string {
+  const union = new Set(spaces.flatMap((space) => [...space.permissions]));
+  return buildServerInstructions(union, undefined, unionSurface(spaces), rendersCards, {
+    reachable: spaces,
+    current: spaces[0]!,
+  });
 }
 
 /** The handlers that ignore `extra` take this typed placeholder. */

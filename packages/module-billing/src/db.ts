@@ -97,10 +97,8 @@ const MIGRATION_ADVISORY_LOCK_KEY = 4827392010;
  * no-op). Drizzle's migrator takes no lock of its own — it reads the journal
  * BEFORE opening its transaction — so without this, two replicas would both
  * read an empty journal and one would crash at boot ("relation already exists").
- * The lock does NOT serialize this migrator against the PLATFORM's, which runs
- * unserialised in the same database: the two are safe only because their object
- * sets are disjoint, `CREATE SCHEMA IF NOT EXISTS drizzle` being the one
- * statement they share and the core migrator committing it first.
+ * Core and billing use separate locks and journals. Core migrations create the shared
+ * drizzle schema before billing initializes.
  */
 export async function migrateBillingDb(databaseUrl: string): Promise<void> {
   const migrationsFolder = resolve(

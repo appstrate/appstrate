@@ -17,7 +17,7 @@ export const source = loader({
   },
 });
 
-// Written before the build by ../../scripts/export-openapi.ts.
+// Prepared for the reference by scripts/sync-content.ts.
 export const openapi = createOpenAPI({
-  input: ['./openapi.json'],
+  input: ['./openapi.reference.json'],
 });

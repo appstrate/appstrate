@@ -13,6 +13,31 @@ import { Sidebar } from "../../pages/sidebar.ts";
 import { WebhooksPage } from "../../pages/webhooks-page.ts";
 
 test.describe("Agent visibility in UI", () => {
+  test("a bookmarked agent run filter survives a reload and sends the same status", async ({
+    authedPage: page,
+    apiClient,
+    browserCtx,
+  }) => {
+    const { id } = await createAgent(apiClient, `@${browserCtx.org.orgSlug}`, "bookmark-runs");
+    const filteredRead = () =>
+      page.waitForResponse((response) => {
+        const url = new URL(response.url());
+        return (
+          response.request().method() === "GET" &&
+          url.pathname.endsWith("/runs") &&
+          url.searchParams.get("status") === "failed"
+        );
+      });
+    const first = filteredRead();
+    await page.goto(`/agents/${id}?agentRunStatus=failed#runs`);
+    expect((await first).ok()).toBe(true);
+    await expect(page).toHaveURL(/agentRunStatus=failed#runs$/);
+    const again = filteredRead();
+    await page.reload();
+    expect((await again).ok()).toBe(true);
+    await expect(page).toHaveURL(/agentRunStatus=failed#runs$/);
+  });
+
   test("Default space shows the agents authored in it on /agents", async ({
     authedPage: page,
     apiClient,

@@ -248,7 +248,7 @@ export function RunResultsContent({
       railClassName="p-3"
       rail={
         <nav
-          className="flex flex-col gap-0.5 max-md:flex-row max-md:overflow-x-auto"
+          className="max-md:no-scrollbar max-md:scroll-fade-x flex flex-col gap-0.5 max-md:flex-row max-md:overflow-x-auto"
           aria-label={t("run.tabResults")}
         >
           {sections.map((section) => (

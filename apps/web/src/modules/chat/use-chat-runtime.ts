@@ -7,7 +7,7 @@ import { useTranslation } from "react-i18next";
 import { buildScopingHeaders } from "../../lib/scoping-headers";
 import { useViewAsHeader } from "../../stores/view-as-store";
 import { useCurrentSpaceId } from "../../hooks/use-current-space";
-import { useCurrentOrgId, useOrg } from "../../hooks/use-org";
+import { useCurrentOrgId } from "../../hooks/use-org";
 import { useOverviewMode } from "../../hooks/use-overview-mode";
 import { useSpaces } from "../../hooks/use-spaces";
 import { actingSpaces, grantedInSomeActingSpace } from "../../lib/space-lists";
@@ -80,10 +80,9 @@ export function useChatTranslate() {
  */
 export function useChatCan() {
   const { data: spaces } = useSpaces();
-  const orgPermissions = useOrg().currentOrg?.permissions;
   return useCallback(
-    (permission: string) => grantedInSomeActingSpace(spaces, orgPermissions, permission),
-    [spaces, orgPermissions],
+    (permission: string) => grantedInSomeActingSpace(spaces, permission),
+    [spaces],
   );
 }
 
@@ -94,9 +93,5 @@ export function useChatCan() {
  */
 export function useChatActingSpaceIds(): string[] | null {
   const { data: spaces } = useSpaces();
-  const orgPermissions = useOrg().currentOrg?.permissions;
-  return useMemo(
-    () => (spaces ? actingSpaces(spaces, orgPermissions).map((space) => space.id) : null),
-    [spaces, orgPermissions],
-  );
+  return useMemo(() => (spaces ? actingSpaces(spaces).map((space) => space.id) : null), [spaces]);
 }

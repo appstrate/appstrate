@@ -97,6 +97,35 @@ they start with `packages/` or `e2e/`.
   state is not duplicated: the header's trail is not drawn by the page, a
   `PageHeader` publishes its `breadcrumbs` to `stores/breadcrumb-store.ts` and
   `ShellBreadcrumb` draws them.
+- **One header, one sidebar, every product and format** (`ShellHeader` and `AppSidebar`,
+  `components/app-shell.tsx`). While the sidebar is off screen (a phone, a collapsed desktop) one
+  control opens it (`SidebarOpener`): a burger, then the organization's avatar with the space's on
+  its corner (`OrgSpaceTile`, the switcher's own, stacked, never side by side), no names; its
+  accessible name says them, and it carries the unread dot of the Runs entry it hides. Then the
+  trail (the last segment alone on a phone), the page's controls and the notification bell.
+  Controls are 44 px on touch. In the chat the trail is the conversation's name and the controls are
+  its spaces, the pencil that renames it and the context panel.
+- **The sidebar is the whole screen on a phone**: the organization switcher and a close button on
+  its first row, then the Studio/Chat switch and the product's navigation. In the chat: "Nouvelle
+  conversation" (a left-aligned row with its icon in a round tile, like the conversations below)
+  with the search as a magnifier at the end of that row, which unfolds a filled field (no border)
+  under it, closed by its X or by a tap elsewhere while empty, then the recent conversations (one
+  line each: the title, then the tiles of its spaces, two at most then « +N », named for a screen
+  reader; the names are in the "…" panel). Then the footer every drawer has: Catalogue, Settings
+  and the account.
+- **A phone's menus rise from the bottom**, and no screen decides it: `DropdownMenu` and `Popover`
+  (`packages/ui`) draw their content below `md` as a panel from the bottom (`SheetMenuContent`,
+  `packages/ui/src/components/sheet-menu.tsx`, on the bottom `Sheet`), with the same open state and
+  the same items; from `md` up they stay a dropdown and a popover. A menu's rows are 48 px tall
+  there, the destructive one in red and asking before it acts; a sub-menu is a group of rows under
+  its trigger's words; `sheetTitle` on a `DropdownMenuContent` names the panel in its heading. Never
+  choose the container by hand (`useIsMobile` + a `Sheet`): use the primitive. The chat composer is one line for good on a phone:
+  "+" (attach, skills, model, space limit, creation mode, the disclaimer), the field, send; the model is
+  named in the field's placeholder and chosen from the "+" panel's "Modèle" row, so no chip or tool
+  button stays beside the field. A dot on the "+" says a setting is off its default (never the space
+  limit, which is on whenever a space is selected). The model panel has no tabs: one icon at the end of
+  each model that has settings picks it and opens them, with a back arrow; the panel itself has a back
+  arrow to the "+" panel it was opened from, and picking a model closes it.
 - Settings and the catalogue are **routed overlays**: one dialog, `OverlayFrame`
   (`components/overlay-frame.tsx`, a layout route of the overlay tree), around
   `PanelLayout` (`components/panel-layout.tsx`, a rail on the left, one scroll
@@ -111,10 +140,12 @@ they start with `packages/` or `e2e/`.
   page that drew a `Dialog` of its own would be unmounted and mounted in turn,
   and the backdrop and the zoom would play twice (#2008). Rail pieces:
   `RailHeader`, `RailGroup`, `RailLink`, `ContextSelector`
-  (`components/settings/`). Settings are ONE shell (`pages/settings/layout.tsx`)
-  whose rail lists three sections — Organisation, Espace de travail, Compte
-  (`/preferences`) — built in `pages/settings/navigation.ts` from what each
-  route lets the caller reach.
+  (`components/settings/`). ONE shell (`pages/settings/layout.tsx`) draws two
+  dialogs, chosen by the URL (`lib/settings-surface.ts`): **Paramètres**, whose
+  rail lists Organisation and Espace de travail and ends on the link « Ouvrir les
+  préférences », and **Préférences** (`/preferences`), whose rail lists Compte.
+  The sections are built in `pages/settings/navigation.ts` from what each route
+  lets the caller reach.
 - A detail page that draws its title in the header (the agent, run, schedule and
   integration pages, and the skill and tool pages, through `DetailBar`,
   `components/detail-bar.tsx`) fills three slots the header
@@ -172,10 +203,13 @@ Top to bottom, every detail page (agent, run, schedule, integration, skill):
    (the trigger is then the menu of the spaces), and no entry when none grants it. Build it with
    `components/space-deed.ts`, and never twice on one page: an integration's « Activer » is its
    header button, not a menu entry. A space is named with `SpaceName`/`SpaceNameOf`, several with
-   `SpaceTileStack`. A per-space section or tab shown in the mode opens with the space it is read
-   in (`ConfigurationSpace`, `components/configuration-space.tsx`: the working space when the
-   header names it, « Configurer dans {space} » for the one other, the menu of several),
-   entered through the page's `useSpaceEntry`.
+   `SpaceTileStack`; the integrations an agent connects to, on its card or row, with
+   `IntegrationLogoStack`. Both are `TileStack` (`components/tile-stack.tsx`), the one overlapping
+   stack: a new kind of stacked tile renders through it, never a stack of its own. A per-space
+   section or tab shown in the mode opens with the space it is read in (`ConfigurationSpace`,
+   `components/configuration-space.tsx`: the working space when the header names it,
+   « Configurer dans {space} » for the one other, the menu of several), entered through the
+   page's `useSpaceEntry`.
 3. **The band** between the header and the tabs, for a **present state that
    blocks and asks for an act** only: a model missing, an agent switched off
    here (`AgentInactiveAlert`), a schedule the platform disabled. An `Alert`
@@ -575,11 +609,11 @@ credentials (`lib/model-picker.ts`); a new surface that picks a model uses this 
     (`knownModels`, `lib/model-choice.ts`).
   - **Delete a key** (`components/delete-key-confirm.tsx`, its copy in
     `lib/key-deletion.ts`): the server refuses an organization key that model rows still
-    reference (`credential_in_use`, `ON DELETE RESTRICT`), so the confirmation names every model
-    using it, switched off ones included, and where they go (« La clé « Prod » est utilisée par
-    2 modèles : A, B. Supprimez ces modèles ou liez-les à une autre clé (« Choisir les modèles »,
-    puis « Réglages avancés ») avant de supprimer la clé. ») and offers only Annuler. Only a key
-    no model uses is deleted. A member's personal key serves no model of its own: its
+    reference (`credential_in_use`, `ON DELETE RESTRICT`). The confirmation uses the server's
+    reference count, including disabled models and models outside the reader's list. A positive
+    count disables deletion. After a concurrent refusal the dialog waits for the key to be read
+    again. Returning to the tab refreshes the count, so a key freed elsewhere can be deleted
+    in the same dialog. A member's personal key serves no model of its own: its
     confirmation says the member will have to add a new one.
 - **Packages** (agents, skills, integrations, the organisation catalogue) are one
   list: `components/package-collection.tsx`, with `PackageCard` and
@@ -806,8 +840,9 @@ credentials (`lib/model-picker.ts`); a new surface that picks a model uses this 
   in a dialog sets `text-foreground` itself; only an unavailable option is greyed.
 - An action the role cannot perform is **not offered**. When it must stay
   visible to explain itself, it is disabled with its reason
-  (`DisabledReasonTooltip`, `components/disabled-reason-tooltip.tsx`). Never a
-  button that ends in a 403 toast.
+  (`DisabledReasonTooltip`, `components/disabled-reason-tooltip.tsx`); a table row
+  whose actions are out of the caller's reach keeps its « … », disabled with the
+  reason (`TableRowActions disabledReason`). Never a button that ends in a 403 toast.
 - A row's controls (a connection's rename and share, a model credential's edit,
   test, delete and reconnect) follow the row's `allowed_actions`, which the API
   computes for the caller; never re-derive them from permissions and ownership
@@ -824,12 +859,14 @@ credentials (`lib/model-picker.ts`); a new surface that picks a model uses this 
 
 ## 12. Files, editors and content
 
-- **A file shown anywhere** (run deliverable, preview modal, chat side panel)
+- **A file shown anywhere** (run deliverable, the file's page, chat side panel)
   wears `FileArtifact` (`components/file-artifact.tsx`, on
   `packages/ui/src/components/artifact.tsx`) around `FileViewer`
   (`components/file-viewer.tsx`, by the server's `preview_kind`; its HTML sandbox
   is `allow-scripts` only, never loosen it). A file list is `DocumentListPanel`
-  (table, cards or compact list), a preview is addressable as `?preview=<id>`.
+  (table, cards or compact list); every row opens the file's one page, the reader
+  (`pages/file-reader.tsx`, `/files/:fileId?org=…&space=…`, built by `fileReaderPath`),
+  never a modal, from every list and every space.
 - **A package's files** are one explorer in Paramètres › Explorer
   (`components/package-files/`: `FileTree` is a virtualised WAI-ARIA tree,
   `PackageFilesView` the editor). Edits stay in the package draft until the save
@@ -856,6 +893,11 @@ import from `apps/web`. A tool call is a `ToolCallCard` (`tool-uis.tsx`),
 reasoning a collapsible group (`reasoning.tsx`), a run started from the chat a
 `ChatRunProgressCard`, the model picker `model-select.tsx`, whose list is the shared `ModelPickerList` (section 5). The thread sits on the
 canvas, surfaces on it are white cards, and heights hold across states (no jump).
+The context panel (`modules/chat/conversation-sidebar.tsx`) is transparent on that
+canvas and floats beside the thread: its cards and its previewed file are `Card` /
+`FileArtifact` with `FLOATING_FRAME` (`rounded-2xl shadow-xs`), the one place a card
+takes a shadow outside what floats over the page. Its width follows what it shows (a
+list, the details, a file), each remembered per browser.
 
 ## 14. Modules and feature gating
 

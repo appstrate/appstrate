@@ -26,6 +26,7 @@ import { ConfirmModal } from "../../components/confirm-modal";
 import { SaveFeedback } from "../../components/settings/save-feedback";
 import { fieldWriteState } from "../../lib/field-write-state";
 import { OrgSettingToggle } from "../../components/settings/org-setting-toggle";
+import { PersonalSpaceRoleSetting } from "../../components/settings/personal-space-role-setting";
 import { PersonalCredentialsSetting } from "../../components/settings/personal-credentials-setting";
 import { EmptyState } from "../../components/page-states";
 import { errorMessage } from "../../lib/mutation-error";
@@ -227,6 +228,10 @@ export function OrgSettingsGeneralPage() {
               label={t("orgSettings.restrictCopyTitle")}
               description={t("orgSettings.restrictCopyDesc")}
             />
+          </SettingsGroup>
+
+          <SettingsGroup title={t("orgSettings.personalSpacesTitle")}>
+            <PersonalSpaceRoleSetting />
           </SettingsGroup>
 
           <SettingsGroup title={t("providers.col.models")}>

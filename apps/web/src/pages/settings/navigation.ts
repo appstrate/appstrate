@@ -23,6 +23,7 @@ import {
 import {
   isUnder,
   SETTINGS_INDEX,
+  settingsScopeFromPath,
   type RoutePath,
   type SettingsScope,
 } from "../../lib/route-access";
@@ -67,7 +68,7 @@ export function visibleSettingsSections(
         entry("/org-settings/models", BrainCircuit, "providers.col.models"),
         entry("/org-settings/proxies", Globe, "proxies.tabTitle"),
         entry("/org-settings/oauth", KeyRound, "orgSettings.tabOauth"),
-        entry("/org-settings/cli-sessions", Laptop, "orgSettings.tabCliSessions"),
+        entry("/org-settings/access-grants", Laptop, "orgSettings.tabAccessGrants"),
         entry("/org-settings/billing", CreditCard, "billing.tabTitle"),
         entry("/org-settings/enterprise-sso", LockKeyhole, "orgSso.tabTitle"),
       ],
@@ -124,11 +125,6 @@ export function activeSettingsItem(
   pathname: string,
 ): UnifiedSettingsNavItem | undefined {
   return sections.flatMap((section) => section.items).find((item) => isUnder(pathname, item.to));
-}
-
-export function settingsScopeFromPath(pathname: string): SettingsScope {
-  const scopes = Object.keys(SETTINGS_INDEX) as SettingsScope[];
-  return scopes.find((scope) => isUnder(pathname, SETTINGS_INDEX[scope])) ?? "organization";
 }
 
 /** Keys the content outlet: a context switch remounts the page instead of flashing the previous scope's data. */

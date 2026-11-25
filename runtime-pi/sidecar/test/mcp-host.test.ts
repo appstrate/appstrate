@@ -1326,23 +1326,6 @@ describe("McpHost — capability discovery (V7)", () => {
   });
 });
 
-describe("McpHost — emitLog (D4.5 transducer)", () => {
-  it("forwards source/level/data via onLog", () => {
-    const events: Array<{ source: string; level: string; data: unknown }> = [];
-    const host = new McpHost({ onLog: (e) => events.push(e) });
-    host.emitLog("tool:notion", "info", { msg: "search done" });
-    expect(events).toEqual([
-      { source: "tool:notion", level: "info", data: { msg: "search done" } },
-    ]);
-  });
-
-  it("is a no-op when onLog is unset", () => {
-    const host = new McpHost();
-    // No throw; nothing observable.
-    host.emitLog("any", "info", {});
-  });
-});
-
 describe("McpHost — intoNamespace (attachable api_call)", () => {
   // Simulates the attachable-api_call wiring: a spawned server registers under
   // a namespace, then the in-process api_call tool merges into it.
@@ -1508,7 +1491,49 @@ describe("McpHost — one integration, several connections", () => {
     }
   });
 
-  it("drops a second connection's tool too large once sanitised, although a sibling serves it", async () => {
+  it("exposes a tool over the schema budget, reduced, and logs the reduction", async () => {
+    const [oversized] = sshTool("web-1");
+    const properties = Object.fromEntries(
+      Array.from({ length: 600 }, (_, i) => [`p${i}`, { type: "string" }]),
+    );
+    const work = await makeUpstream([
+      {
+        ...oversized!,
+        descriptor: { ...oversized!.descriptor, inputSchema: { type: "object", properties } },
+      },
+    ]);
+    try {
+      const logs: Array<{ level: string; data: unknown }> = [];
+      const host = new McpHost({ onLog: (e) => logs.push(e) });
+      await host.register({
+        integrationId: "@orga/ssh",
+        namespace: "@orga/ssh",
+        client: work.client,
+        connection: CONN_A,
+      });
+      const tools = host.buildTools();
+      expect(tools.map((t) => t.descriptor.name)).toEqual(["orga_ssh__ssh_exec"]);
+      expect(tools[0]!.descriptor.inputSchema).toEqual({ type: "object" });
+      expect(logs).toContainEqual(
+        expect.objectContaining({
+          level: "warn",
+          data: {
+            event: "tool_descriptor_reduced",
+            namespace: "orga_ssh",
+            originalName: "ssh_exec",
+            name: "orga_ssh__ssh_exec",
+            reduced: ["schema_documentation", "input_schema"],
+          },
+        }),
+      );
+      const result = await tools[0]!.handler({ command: "uptime" }, {} as never);
+      expect(result.content).toEqual([{ type: "text", text: "web-1:uptime" }]);
+    } finally {
+      await work.pair.close();
+    }
+  });
+
+  it("routes a second connection's tool over the schema budget through its sibling", async () => {
     const [oversized] = sshTool("db");
     const properties = Object.fromEntries(
       Array.from({ length: 600 }, (_, i) => [`p${i}`, { type: "string" }]),
@@ -1535,13 +1560,10 @@ describe("McpHost — one integration, several connections", () => {
         client: perso.client,
         connection: CONN_B,
       });
-      expect(host.routeCount()).toBe(1);
-      expect(logs.map((e) => e.data)).toContainEqual(
-        expect.objectContaining({
-          event: "tool_rejected",
-          reason: "schema_too_large_after_sanitisation",
-          originalName: "ssh_exec",
-        }),
+      expect(host.buildTools().length).toBe(1);
+      expect(host.routeCount()).toBe(2);
+      expect(logs.map((e) => e.data)).not.toContainEqual(
+        expect.objectContaining({ event: "tool_rejected" }),
       );
     } finally {
       await work.pair.close();
@@ -2062,6 +2084,30 @@ describe("McpHost — tool output budget", () => {
     }
   }
 
+  it("filters user-only content before the hosted budget and drops its structured mirror", async () => {
+    const blobStore = newStore();
+    const secret = "private-probe".repeat(1000);
+    const result = await callDump(
+      {
+        content: [
+          { type: "text", text: secret, annotations: { audience: ["user"] } },
+          { ...IMAGE, annotations: { audience: ["user"] } },
+          { ...LINK, annotations: { audience: ["user"] } },
+          { type: "text", text: "shared", annotations: { audience: ["assistant", "user"] } },
+        ],
+        structuredContent: { secret },
+        isError: true,
+      },
+      { tokenBudget: newBudget(), blobStore },
+    );
+    expect(JSON.stringify(result)).not.toContain("private-probe");
+    expect(result.content.map((block) => block.type)).toEqual(["text", "text", "text", "text"]);
+    expect(result.content.at(-1)).toMatchObject({ text: "shared" });
+    expect(result.isError).toBe(true);
+    expect(result.structuredContent).toBeUndefined();
+    expect(blobStore.bytesUsed()).toBe(0);
+  });
+
   it("spills an oversized text result to the blob store as one resource_link", async () => {
     const big = "line of a very large directory tree\n".repeat(200);
     const tokenBudget = newBudget();
@@ -2135,7 +2181,10 @@ describe("McpHost — tool output budget", () => {
     ]);
     expect(result.content[0]).toEqual(IMAGE);
     expect(result.content[2]).toEqual(RESOURCE);
-    expect(result.content[3]).toEqual(LINK);
+    expect(result.content[3]).toMatchObject({
+      ...LINK,
+      uri: expect.stringContaining("appstrate://tool-output/run-test/"),
+    });
     const spilled = result.content[1] as { uri: string };
     expect(new TextDecoder().decode(blobStore.read(spilled.uri)!.bytes)).toBe(`${half}\n${half}`);
   });
@@ -2213,7 +2262,7 @@ describe("McpHost — tool output budget", () => {
     })) as McpError;
     const plain = (await callFailing(
       fail,
-      { tokenBudget: newBudget() },
+      { tokenBudget: newBudget(), blobStore: newStore() },
       { trusted: true },
     )) as McpError;
     expect(bounded).toBeInstanceOf(McpError);
@@ -2270,16 +2319,16 @@ describe("McpHost — tool output budget", () => {
     expect(result.isError).toBe(true);
   });
 
-  it("without a blob store cuts the oversized text to the inline cap", async () => {
+  it("when the store refuses mixed text and image blocks cuts the oversized text to the inline cap", async () => {
     const big = `${"H".repeat(1000)}${"y".repeat(2000)}${"T".repeat(1000)}`;
     const tokenBudget = newBudget();
     const result = await callDump(
       { content: [IMAGE, { type: "text", text: big }, { type: "text", text: "more" }] },
-      { tokenBudget },
+      { tokenBudget, blobStore: new BlobStore("run-test", { maxTotalBytes: 100 }) },
     );
     expect(result.content.map((b) => b.type)).toEqual(["image", "text"]);
     const text = (result.content[1] as { text: string }).text;
-    expectCut(text, `${big}\nmore`, "spill unavailable: no blob store", tokenBudget);
+    expectCut(text, `${big}\nmore`, "spill unavailable: blob store full", tokenBudget);
     expect(tokenBudget.consumedTokens()).toBe(tokenBudget.estimate(text));
   });
 
@@ -2299,11 +2348,14 @@ describe("McpHost — tool output budget", () => {
     expect(tokenBudget.consumedTokens()).toBe(tokenBudget.estimate(text));
   });
 
-  it("without a blob store delivers a cap-sized text whole once the run budget is spent", async () => {
+  it("delivers a cap-sized text whole once the run budget is spent", async () => {
     const tokenBudget = new TokenBudget({ inlineCapTokens: 100, runBudgetTokens: 100 });
     tokenBudget.record(90);
     const fits = "w".repeat(300); // 86 tokens: under the cap, over what the run has left
-    const result = await callDump({ content: [{ type: "text", text: fits }] }, { tokenBudget });
+    const result = await callDump(
+      { content: [{ type: "text", text: fits }] },
+      { tokenBudget, blobStore: new BlobStore("run-test", { maxTotalBytes: 100 }) },
+    );
     expect(result.content).toEqual([{ type: "text", text: fits }]);
   });
 

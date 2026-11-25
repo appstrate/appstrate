@@ -3,7 +3,7 @@
 /**
  * `X-Appstrate-Credential-Status`: what the credential proxy concluded about the connection's
  * credential when it relays an upstream 401 after a forced refresh that did not serve a replay.
- * An RFC 8941 Item, a token and its parameters:
+ * The platform emits these two forms of RFC 8941 Item:
  *
  *   in_use; cause=unrefreshable; failures=1; max-failures=5
  *   needs_reconnection; cause=refresh_token_revoked
@@ -55,23 +55,20 @@ const CAUSES: ReadonlySet<string> = new Set(CREDENTIAL_FAILURE_CAUSES);
 /** The status a header value carries, or `null` for a value this platform does not write. */
 export function parseCredentialStatus(value: string | null): CredentialStatus | null {
   if (value === null) return null;
-  const [status, ...params] = value.split(";").map((part) => part.trim());
-  const named = new Map<string, string>();
-  for (const param of params) {
-    const eq = param.indexOf("=");
-    if (eq <= 0) return null;
-    named.set(param.slice(0, eq), param.slice(eq + 1));
-  }
-  const cause = named.get("cause");
-  if (cause === undefined || !CAUSES.has(cause)) return null;
-  const known = cause as CredentialFailureCause;
-  if (status === "needs_reconnection") return { status, cause: known };
-  if (status !== "in_use") return null;
-  const failures = Number(named.get("failures"));
-  const maxFailures = Number(named.get("max-failures"));
+  const match =
+    /^(in_use|needs_reconnection); *cause=([a-z_]+)(?:; *failures=(\d+); *max-failures=(\d+))?$/.exec(
+      value,
+    );
+  if (!match || !CAUSES.has(match[2]!)) return null;
+  const cause = match[2] as CredentialFailureCause;
+  if (match[1] === "needs_reconnection")
+    return match[3] === undefined ? { status: "needs_reconnection", cause } : null;
+  if (match[3] === undefined) return { status: "in_use", cause };
+  const failures = Number(match[3]);
+  const maxFailures = Number(match[4]);
   return Number.isSafeInteger(failures) && Number.isSafeInteger(maxFailures)
-    ? { status, cause: known, failures, maxFailures }
-    : { status, cause: known };
+    ? { status: "in_use", cause, failures, maxFailures }
+    : null;
 }
 
 /** A {@link CredentialStatus} on the wire: an `api_call` entry's or a tool call refusal's `credential`. */

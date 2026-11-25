@@ -240,8 +240,8 @@ function FieldRow({
         <Button
           type="button"
           variant="ghost"
-          size="icon"
-          className="text-muted-foreground size-7 cursor-grab active:cursor-grabbing"
+          size="icon-sm"
+          className="text-muted-foreground desktop-pointer:size-7 cursor-grab active:cursor-grabbing"
           aria-label={t("editor.fieldReorder", { name: field.key })}
           {...attributes}
           {...listeners}

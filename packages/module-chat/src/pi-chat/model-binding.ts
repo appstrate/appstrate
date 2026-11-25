@@ -23,14 +23,28 @@ import {
   type ExtensionFactory,
   type Model,
 } from "@appstrate/runner-pi";
-import { buildPiModel } from "@appstrate/runner-pi/pi-model";
+import type { ModelInputModality } from "@appstrate/core/module";
+import { buildPiModel, resolvePiContextWindow } from "@appstrate/runner-pi/pi-model";
 import type { OrgModel } from "../llm.ts";
+import { UNKNOWN_INPUT_MODALITIES } from "../file-input.ts";
+
+/**
+ * Unknown modalities are not a refusal (`fileDelivery`): Pi drops every image of a text-only
+ * model, so the chat hands it text and image instead of `buildPiModel`'s text default.
+ */
+function chatInputModalities(
+  input: readonly ModelInputModality[] | null | undefined,
+): readonly ModelInputModality[] {
+  return input ?? UNKNOWN_INPUT_MODALITIES;
+}
 
 interface PiChatModelBindingBase {
   /** Fully resolved Pi model. No provider secret is ever stored on this object. */
   model: Model<Api>;
   /** AuthStorage key: the model's Pi provider key. */
   provider: string;
+  /** The row declares no window: {@link model} runs on `buildPiModel`'s fallback. */
+  windowAssumed?: true;
 }
 
 export interface PiProxyModelBinding extends PiChatModelBindingBase {
@@ -111,7 +125,7 @@ export function createPiProxyModelBinding(args: {
     reasoning:
       args.model.reasoning ??
       (support && support !== "unknown" ? support === "supported" : undefined),
-    input: args.model.input,
+    input: chatInputModalities(args.model.input),
     cost: args.model.cost,
     contextWindow: args.model.contextWindow,
     maxTokens: args.model.maxTokens,
@@ -120,6 +134,9 @@ export function createPiProxyModelBinding(args: {
   return {
     authMode: "proxy",
     model,
+    ...(resolvePiContextWindow(args.model.contextWindow).assumed
+      ? { windowAssumed: true as const }
+      : {}),
     provider: model.provider,
     runtimeApiKey: "proxy",
     authExtension: createPiProxyAuthExtension(args.mintBearer),
@@ -138,7 +155,7 @@ export function createPiOAuthModelBinding(
     piProvider: listed.pi_provider,
     baseUrl: model.baseUrl,
     reasoning: model.reasoning,
-    input: model.input,
+    input: chatInputModalities(model.input),
     cost: model.cost,
     contextWindow: model.contextWindow,
     maxTokens: model.maxTokens,
@@ -146,6 +163,9 @@ export function createPiOAuthModelBinding(
   return {
     authMode: "oauth2",
     model: piModel,
+    ...(resolvePiContextWindow(model.contextWindow).assumed
+      ? { windowAssumed: true as const }
+      : {}),
     provider: piModel.provider,
     runtimeApiKey: model.accessToken,
     metering: { kind: "inline", cost: model.cost },

@@ -8,8 +8,7 @@ import { OAuthPairingBody } from "./oauth-pairing-body";
 
 /**
  * The OAuth pairing in its modal: closing it while a pairing is in flight asks
- * first. `children` sits above the pairing body; `showPairing` off leaves only
- * those (a credential with nothing to re-pair).
+ * first. `children` sits above the pairing body.
  */
 export function PairingModal({
   title,
@@ -17,7 +16,6 @@ export function PairingModal({
   providerId,
   target,
   onConnected,
-  showPairing = true,
   children,
 }: {
   title: string;
@@ -25,7 +23,6 @@ export function PairingModal({
   providerId: string;
   target: PairingTarget;
   onConnected: (credentialId: string) => void;
-  showPairing?: boolean;
   children?: ReactNode;
 }) {
   const dismiss = usePairingDismissConfirm(onClose);
@@ -34,15 +31,13 @@ export function PairingModal({
       <Modal onClose={dismiss.requestClose} title={title}>
         <div className="flex flex-col gap-4">
           {children}
-          {showPairing && (
-            <OAuthPairingBody
-              key={providerId}
-              providerId={providerId}
-              target={target}
-              onConnected={onConnected}
-              onBusyChange={dismiss.onBusyChange}
-            />
-          )}
+          <OAuthPairingBody
+            key={providerId}
+            providerId={providerId}
+            target={target}
+            onConnected={onConnected}
+            onBusyChange={dismiss.onBusyChange}
+          />
         </div>
       </Modal>
       {dismiss.confirmDialog}

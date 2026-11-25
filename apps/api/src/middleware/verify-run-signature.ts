@@ -24,7 +24,9 @@
  *   - 401 `missing_signature_headers` | `invalid_timestamp`
  *         | `timestamp_out_of_tolerance` | `invalid_signature`
  *
- * Error codes are stable wire contract — do not rename without a deprecation.
+ * Clients sign `webhook-id.webhook-timestamp.body` and send a Standard Webhooks
+ * `v1,<base64 HMAC>` in `webhook-signature`. The streaming file uploader signs an
+ * empty body and consumes the message id once.
  *
  * ## Ordering
  *

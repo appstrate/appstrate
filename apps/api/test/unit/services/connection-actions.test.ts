@@ -2,8 +2,9 @@
 
 /**
  * `connectionActions`: the write controls a row offers, which the edit services enforce. The owner
- * renames and shares; a governor of the request space withdraws a colleague's row shared here and
- * renames one scoped here; a credential bound to a space renames rows of it only.
+ * renames, renews an identified row and shares; a governor of the request space withdraws a
+ * colleague's row shared here and renames one scoped here; a credential bound to a space renames
+ * and renews rows of it only.
  */
 
 import { describe, it, expect } from "bun:test";
@@ -21,12 +22,20 @@ const COLLEAGUE = "user_2";
 const HERE = "spc_here";
 const ELSEWHERE = "spc_elsewhere";
 
-const orgRow = (userId = OWNER) => ({ orgId: "org_1", userId, endUserId: null, spaceId: null });
+// `default`: the account is not identified, so the rows hold no `reconnect` unless a test says so.
+const orgRow = (userId = OWNER) => ({
+  orgId: "org_1",
+  userId,
+  endUserId: null,
+  spaceId: null,
+  accountId: "default",
+});
 const spaceRow = (userId = OWNER, spaceId = HERE) => ({
   orgId: "org_1",
   userId,
   endUserId: null,
   spaceId,
+  accountId: "default",
 });
 
 function reader(overrides: Partial<ConnectionCaller> = {}): ConnectionCaller {
@@ -124,7 +133,13 @@ describe("connectionActions", () => {
 
   it("never offers share on an end user's row", () => {
     const endUser = { type: "end_user" as const, id: "eu_1" };
-    const row = { orgId: "org_1", userId: null, endUserId: "eu_1", spaceId: HERE };
+    const row = {
+      orgId: "org_1",
+      userId: null,
+      endUserId: "eu_1",
+      spaceId: HERE,
+      accountId: "default",
+    };
     const bound = reader({
       principal: {
         kind: "delegated",
@@ -161,16 +176,23 @@ describe("connectionActions", () => {
     expect(connectionActions(spaceRow(), bound, false, "owner")).toEqual(["rename", "share"]);
   });
 
-  it("a delegated credential pinning no space renames like the person", () => {
-    const unpinned = reader({
-      principal: {
-        kind: "delegated",
-        actor: { type: "user", id: OWNER },
-        binding: { orgId: "org_1", spaceIds: null },
-      },
-    });
-    expect(connectionActions(orgRow(), unpinned, false)).toEqual(["rename", "share"]);
-  });
+  it.each([HERE, null])(
+    "an unpinned delegate renews only space rows (list space: %s)",
+    (spaceId) => {
+      const unpinned = reader({
+        spaceId,
+        principal: {
+          kind: "delegated",
+          actor: { type: "user", id: OWNER },
+          binding: { orgId: "org_1", spaceIds: null },
+        },
+      });
+      const orgConnection = { ...orgRow(), accountId: "alice@example.com" };
+      const spaceConnection = { ...orgConnection, spaceId: HERE };
+      expect(connectionActions(orgConnection, unpinned, false)).toEqual(["rename", "share"]);
+      expect(connectionActions(spaceConnection, unpinned, false)).toContain("reconnect");
+    },
+  );
 });
 
 describe("withinSpaces", () => {
@@ -187,5 +209,43 @@ describe("withinSpaces", () => {
     expect(render(withinSpaces([HERE, ELSEWHERE], inSpace))).toBe(
       "(space_id = $1 or space_id = $2)",
     );
+  });
+});
+
+describe("connectionActions: reconnect", () => {
+  const identified = { ...orgRow(), accountId: "alice@example.com" };
+
+  it("gives the owner reconnect on an identified row, whatever its health", () => {
+    expect(connectionActions(identified, reader(), false)).toEqual([
+      "rename",
+      "reconnect",
+      "share",
+    ]);
+  });
+
+  it("withholds it from a row whose upstream account is not identified", () => {
+    expect(connectionActions({ ...orgRow(), accountId: "default" }, reader(), false)).toEqual([
+      "rename",
+      "share",
+    ]);
+  });
+
+  it("never gives it to a governor on a colleague's row", () => {
+    const row = { ...spaceRow(COLLEAGUE), accountId: "bob@example.com" };
+    expect(connectionActions(row, reader({ governs: true }), true)).not.toContain("reconnect");
+  });
+
+  it("follows the bound credential's write rule: only a row scoped to one of its spaces", () => {
+    const bound = reader({
+      principal: {
+        kind: "delegated",
+        actor: { type: "user", id: OWNER },
+        binding: { orgId: "org_1", spaceIds: [HERE] },
+      },
+    });
+    expect(connectionActions(identified, bound, false)).not.toContain("reconnect");
+    expect(
+      connectionActions({ ...spaceRow(), accountId: "alice@example.com" }, bound, false),
+    ).toContain("reconnect");
   });
 });

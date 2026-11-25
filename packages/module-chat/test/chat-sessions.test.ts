@@ -885,10 +885,7 @@ describe("ensureSession", () => {
       ctx.user.id,
       readable,
       undefined,
-      () => ({
-        spaceId: other,
-        restricted: true,
-      }),
+      () => ({ spaceId: other, restricted: true }),
     );
     expect(created).toMatchObject({ spaceId: other, restricted: true });
     // An existing conversation keeps its own, whatever a later turn carries.
@@ -898,10 +895,7 @@ describe("ensureSession", () => {
       ctx.user.id,
       readable,
       undefined,
-      () => ({
-        spaceId: ctx.defaultSpaceId,
-        restricted: false,
-      }),
+      () => ({ spaceId: ctx.defaultSpaceId, restricted: false }),
     );
     expect(again).toMatchObject({ spaceId: other, restricted: true });
     // The overview has none.
@@ -911,6 +905,26 @@ describe("ensureSession", () => {
     });
     // Nothing is recorded as touched by an origin space.
     expect(await touchedBy("chs_origin")).toEqual([]);
+  });
+
+  it("writes the skill selection only when it creates the row", async () => {
+    await truncateAll();
+    const ctx = await createTestContext({ orgSlug: "ensureskills" });
+    const created = await ensureSession("chs_skills", ctx.orgId, ctx.user.id, [], {
+      pinnedSkills: ["@acme/a"],
+      skillDiscovery: false,
+    });
+    expect(created).toMatchObject({
+      selection: { pinnedSkills: ["@acme/a"], skillDiscovery: false },
+    });
+    // An existing conversation keeps its own: the skills PATCH alone changes it.
+    const again = await ensureSession("chs_skills", ctx.orgId, ctx.user.id, [], {
+      pinnedSkills: ["@acme/b"],
+      skillDiscovery: true,
+    });
+    expect(again).toMatchObject({
+      selection: { pinnedSkills: ["@acme/a"], skillDiscovery: false },
+    });
   });
 });
 
@@ -925,10 +939,7 @@ describe("touchSessionSpace", () => {
       ctx.user.id,
       [ctx.defaultSpaceId, other],
       undefined,
-      () => ({
-        spaceId: ctx.defaultSpaceId,
-        restricted: false,
-      }),
+      () => ({ spaceId: ctx.defaultSpaceId, restricted: false }),
     );
     const session = {
       id: "chs_touch",

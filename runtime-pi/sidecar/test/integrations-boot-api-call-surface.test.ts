@@ -17,6 +17,7 @@
 import { describe, expect, it } from "bun:test";
 import type { IntegrationSpawnSpec } from "@appstrate/core/sidecar-types";
 import type { ApiCallToolDeps } from "../mcp.ts";
+import { BlobStore } from "../blob-store.ts";
 import { TokenBudget } from "../token-budget.ts";
 import { bootIntegrations, hiddenToolsForNativeUpstream } from "../integrations-boot.ts";
 import { HERMETIC_PROCESS_ADAPTER_ID } from "./helpers/hermetic-process-adapter.ts";
@@ -28,6 +29,7 @@ const unreachableFetch = (async () => {
 }) as unknown as typeof fetch;
 
 const apiCallDeps: ApiCallToolDeps = {
+  blobStore: new BlobStore("run-test", { maxTotalBytes: 1024 }),
   proxyDeps: {
     config: {
       runToken: "run-token",

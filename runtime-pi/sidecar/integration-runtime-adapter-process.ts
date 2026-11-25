@@ -284,10 +284,7 @@ function planSubprocess(spec: IntegrationSpawnSpec, bundleRoot: string): Subproc
  * ENTIRELY the shared floor: {@link isPathSafeForMount} refuses every surface
  * the system reads on its own initiative — kernel-managed trees, the PATH and
  * loader search directories, the loader/shell/cron/auth files, the system
- * trust store, and the per-run `/workspace/` tree. `/usr/` and `/workspace/`
- * used to be passed here as this adapter's extras; they are not
- * adapter-specific and both adapters passed them, so they moved into the floor
- * along with the rest of the class `/usr/` was refused for.
+ * trust store, and the per-run workspace shared with the agent.
  *
  * Why the floor matters MORE here than under docker: this adapter has FEWER
  * containment layers, not more. It is the Tier-0 default and what the

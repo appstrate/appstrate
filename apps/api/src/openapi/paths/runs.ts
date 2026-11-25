@@ -1,6 +1,15 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { connectionConflictContent, jsonRpcRequestBody, problemContent } from "../responses.ts";
+import { MODEL_ERROR_CATEGORIES } from "@appstrate/core/model-error";
+import {
+  agentNotActiveContent,
+  connectionConflictContent,
+  inlineRunForbiddenContent,
+  jsonRpcRequestBody,
+  problemContent,
+  runListPage,
+  scopedRunListValidationError,
+} from "../responses.ts";
 import {
   RUN_TOOLS_MCP_DESCRIPTION,
   runToolsMcpMethodNotAllowed,
@@ -9,6 +18,7 @@ import {
 import { STD_RESPONSE_HEADERS, REQUEST_ID_ONLY_HEADERS } from "../headers.ts";
 import { MAX_CONNECTIONS_PER_INTEGRATION } from "@appstrate/core/integration";
 import { connectionIdSetJsonSchema } from "./integrations.ts";
+import { SPACE_ID_RE } from "@appstrate/db/ids";
 import { MAX_WAIT_SECONDS } from "../../lib/run-wait-limits.ts";
 import { terminalRunStatusValues } from "@appstrate/core/run-status";
 import { FILE_BY_ID_READ, ORG_READ_REACH, packageIdFilterParameter } from "../parameters.ts";
@@ -91,13 +101,46 @@ const runListQueryParameters = [
       "Filter runs by kind. Omit (or send an empty value) for every kind. Any value outside the enum is rejected with `400`; it is never ignored, so a filtered response is never silently widened.",
   },
   { $ref: "#/components/parameters/RunStatusFilter" },
-  { name: "start_date", in: "query", schema: { type: "string", format: "date-time" } },
-  { name: "end_date", in: "query", schema: { type: "string", format: "date-time" } },
+  {
+    name: "start_date",
+    in: "query",
+    description: "RFC 3339 date and time with an explicit timezone offset or Z.",
+    schema: { type: "string", format: "date-time" },
+  },
+  {
+    name: "end_date",
+    in: "query",
+    description: "RFC 3339 date and time with an explicit timezone offset or Z.",
+    schema: { type: "string", format: "date-time" },
+  },
   {
     name: "chat_session_id",
     in: "query",
     schema: { type: "string" },
     description: "Return only runs launched from this chat session.",
+  },
+  {
+    name: "space_kind",
+    in: "query",
+    required: false,
+    schema: { type: "string", enum: ["team", "personal"] },
+    description:
+      "Narrow the list to the runs of team spaces (`team`) or of personal spaces (`personal`) among the spaces the caller reaches. It only narrows, never widens: when no reached space matches, the page is empty (`total: 0`). Omit (or send an empty value) for every reached space. Any value outside the enum is rejected with `400`.",
+  },
+  {
+    name: "spaceId",
+    in: "query",
+    required: false,
+    style: "form" as const,
+    explode: false,
+    schema: {
+      type: "array",
+      maxItems: 100,
+      items: { type: "string", pattern: SPACE_ID_RE.source },
+      example: ["spc_0b5c7e1a-3f2d-4c6b-9a18-7d4e2f1c5b30"],
+    },
+    description:
+      "Narrow the list to the runs of these spaces, comma-separated on the wire (`spaceId=spc_a,spc_b`). It only narrows, never widens: a space the caller does not reach matches nothing, so when none is reached the page is empty (`total: 0`). Composes with `space_kind`. A value that is not a space id, or more than 100 ids, is rejected with `400`. Omit (or send an empty value) for every reached space.",
   },
   packageIdFilterParameter("runs", "page"),
   { $ref: "#/components/parameters/RunSearch" },
@@ -112,30 +155,7 @@ const runListQueryParameters = [
 
 /** The page and the refusal both run lists answer. */
 const runListPageResponses = {
-  "200": {
-    description: "Paginated run list",
-    headers: {
-      ...STD_RESPONSE_HEADERS,
-      Link: { $ref: "#/components/headers/Link" },
-    },
-    content: {
-      "application/json": {
-        schema: {
-          type: "object",
-          required: ["object", "data", "total", "hasMore"],
-          properties: {
-            object: { type: "string", enum: ["list"] },
-            data: {
-              type: "array",
-              items: { $ref: "#/components/schemas/Run" },
-            },
-            total: { type: "integer" },
-            hasMore: { type: "boolean" },
-          },
-        },
-      },
-    },
-  },
+  "200": runListPage,
   "400": {
     description:
       "Invalid query: a parameter the list does not take, an unknown `user` value, a malformed date, …",
@@ -464,9 +484,10 @@ const canonicalRunsPaths = {
             "Insufficient permissions — including `draft_not_writable` when `version=draft`, or a `dependency_overrides` entry spelled `draft`, names a package the caller cannot WRITE (the message names it).",
         },
         "404": {
-          $ref: "#/components/responses/NotFound",
           description:
-            "`agent_not_found` when this space holds no placement for the agent (homed here, holding a row here, or system), and `agent_not_active_in_space` when it holds one that is switched OFF — an execution refusal, raised by this door and not by the reads: `GET /api/packages/agents/{scope}/{name}` still answers 200 with `active: false`. Switch it back on with `POST /api/spaces/{id}/packages`.",
+            "`agent_not_found` when this space holds no placement for the agent (homed here, holding a row here, or system), and `agent_not_active_in_space` when it holds one that is switched OFF — an execution refusal, raised by this door and not by the reads: `GET /api/packages/agents/{scope}/{name}` still answers 200 with `active: false`. Switch it back on with `POST /api/spaces/{id}/packages`, or launch it in one of the problem's `active_in_spaces`.",
+          headers: REQUEST_ID_ONLY_HEADERS,
+          content: agentNotActiveContent,
         },
         "409": {
           description:
@@ -529,7 +550,7 @@ const canonicalRunsPaths = {
       tags: ["Runs"],
       summary: "List runs for an agent",
       description:
-        "List runs for a specific agent (org-scoped, newest first, keyset-paginated with `startingAfter`; default limit 20).",
+        "List the visible runs of one agent in the selected space, newest first. Supports status and text or run-number search, with `startingAfter` pagination and a default limit of 20.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XSpaceId" },
@@ -551,34 +572,8 @@ const canonicalRunsPaths = {
         { $ref: "#/components/parameters/RunSearch" },
       ],
       responses: {
-        "200": {
-          description: "Paginated run list",
-          headers: {
-            ...STD_RESPONSE_HEADERS,
-            Link: { $ref: "#/components/headers/Link" },
-          },
-          content: {
-            "application/json": {
-              schema: {
-                type: "object",
-                properties: {
-                  object: { type: "string", enum: ["list"] },
-                  data: {
-                    type: "array",
-                    items: { $ref: "#/components/schemas/Run" },
-                  },
-                  total: { type: "integer" },
-                  hasMore: { type: "boolean" },
-                },
-                required: ["object", "data", "total", "hasMore"],
-              },
-            },
-          },
-        },
-        "400": {
-          $ref: "#/components/responses/ValidationError",
-          description: "`limit` outside its declared range (`param` names it).",
-        },
+        "200": runListPage,
+        "400": scopedRunListValidationError,
         "401": { $ref: "#/components/responses/Unauthorized" },
         // A READ: `requireAgent()` asks placement only, so the 404 is the opaque
         // `agent_not_found` and nothing else — an agent switched off here still
@@ -649,6 +644,7 @@ const canonicalRunsPaths = {
   "/api/runs/inline": {
     post: {
       operationId: "runInline",
+      "x-appstrate-space": { kind: "request", default: "personal" },
       tags: ["Runs"],
       summary: "Execute an inline agent (no persisted package)",
       description:
@@ -848,7 +844,12 @@ const canonicalRunsPaths = {
           },
         },
         "401": { $ref: "#/components/responses/Unauthorized" },
-        "403": { $ref: "#/components/responses/Forbidden" },
+        "403": {
+          description:
+            "`inline_run_not_allowed_in_space` when the caller's role in this space does not allow composing an inline run (`agents:write` and `agents:run` are both required): `active_in_spaces` names the caller's other spaces where it does. Any other 403 is an insufficient permission or a draft the caller cannot write.",
+          headers: REQUEST_ID_ONLY_HEADERS,
+          content: inlineRunForbiddenContent,
+        },
         "404": { $ref: "#/components/responses/NotFound" },
         "409": { $ref: "#/components/responses/RunAdmissionConflict" },
         "413": {
@@ -894,6 +895,7 @@ const canonicalRunsPaths = {
   "/api/runs/inline/validate": {
     post: {
       operationId: "validateInlineRun",
+      "x-appstrate-space": { kind: "request", default: "personal" },
       tags: ["Runs"],
       summary: "Validate an inline manifest without firing a run",
       description:
@@ -993,7 +995,12 @@ const canonicalRunsPaths = {
           },
         },
         "401": { $ref: "#/components/responses/Unauthorized" },
-        "403": { $ref: "#/components/responses/Forbidden" },
+        "403": {
+          description:
+            "`inline_run_not_allowed_in_space` when the caller's role in this space does not allow composing an inline run (`agents:write` and `agents:run` are both required): `active_in_spaces` names the caller's other spaces where it does. Any other 403 is an insufficient permission or a draft the caller cannot write.",
+          headers: REQUEST_ID_ONLY_HEADERS,
+          content: inlineRunForbiddenContent,
+        },
         "404": { $ref: "#/components/responses/NotFound" },
         "429": { $ref: "#/components/responses/RateLimited" },
         "500": { $ref: "#/components/responses/InternalServerError" },
@@ -1006,7 +1013,7 @@ const canonicalRunsPaths = {
       tags: ["Runs"],
       summary: "List runs across the space (global view)",
       description:
-        "Org + space scoped paginated list. Supports filtering by `user=me` (self-owned, also implicit for end-user impersonation), `kind` (all, package, inline), `status`, a date range, and the chat session that launched the run. Every filter composes: `user=me` narrows to the caller's own runs and the remaining filters still apply on top of it. Inline runs surface via `package_ephemeral: true` on each row.",
+        "Org + space scoped paginated list. Supports filtering by `user=me` (self-owned, also implicit for end-user impersonation), `kind` (all, package, inline), `status`, text or run-number search (`q`), a date range, and the chat session that launched the run. Every filter composes: `user=me` narrows to the caller's own runs and the remaining filters still apply on top of it. Inline runs surface via `package_ephemeral: true` on each row.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XSpaceId" },
@@ -1023,6 +1030,7 @@ const canonicalRunsPaths = {
   "/api/orgs/{orgId}/runs": {
     get: {
       operationId: "listOrgRuns",
+      "x-appstrate-space": { kind: "aggregate" },
       tags: ["Runs"],
       summary: "List runs across the organization's spaces",
       description:
@@ -1121,6 +1129,7 @@ const canonicalRunsPaths = {
   "/api/orgs/{orgId}/runs/{id}": {
     get: {
       operationId: "getOrgRun",
+      "x-appstrate-space": { kind: "aggregate" },
       tags: ["Runs"],
       summary: "Get a run in any space of the organization",
       description:
@@ -1308,10 +1317,15 @@ const canonicalRunsPaths = {
   "/api/runs/remote": {
     post: {
       operationId: "createRemoteRun",
+      "x-appstrate-space": {
+        kind: "request",
+        parameter: "spaceId",
+        default: "personal_for_inline_source",
+      },
       tags: ["Runs"],
       summary: "Create a remote-backed run (caller executes the agent)",
       description:
-        "Create a run whose agent process runs on the caller's host (CLI, GitHub Action, self-hosted runner) instead of inside a platform container. Returns ephemeral HMAC-signed sink credentials the caller plugs into `HttpSink` to stream `RunEvent`s back via `POST /api/runs/{id}/events`. The secret is returned exactly once and is never retrievable afterwards. Status lifecycle (`pending` → `running` → terminal) flows through the signed-event ingestion routes. Matches the quota/rate-limit gates of classic runs: `per_org_global_rate_per_min` and `max_concurrent_per_org` both apply.\n\nA remote runner addresses one connection per integration (its `api_call` tool carries no connection argument), so a run whose connection cascade binds several connections to an integration is refused with `409 missing_integration_connection` carrying one `remote_binds_one_connection` item per such integration (`field: integrations.<id>`): name one in `connection_overrides` or pick one with a member pin (a set an admin pin or an enforced org default imposes is bound whole and no override or member pin narrows it: only an admin changes it), or run the agent on the platform.\n\n**Permission:** `agents:run`; an `inline` source (a manifest the body carries) also requires `agents:write`." +
+        "Create a run whose agent process runs on the caller's host (CLI, GitHub Action, self-hosted runner) instead of inside a platform container. Returns ephemeral HMAC-signed sink credentials the caller plugs into `HttpSink` to stream `RunEvent`s back via `POST /api/runs/{id}/events`. The secret is returned exactly once and is never retrievable afterwards. Status lifecycle (`pending` → `running` → terminal) flows through the signed-event ingestion routes. Matches the quota/rate-limit gates of classic runs: `per_org_global_rate_per_min` and `max_concurrent_per_org` both apply.\n\nA remote runner addresses one connection per integration (its `api_call` tool carries no connection argument), so a run whose connection cascade binds several connections to an integration is refused with `409 missing_integration_connection` carrying one `remote_binds_one_connection` item per such integration (`field: integrations.<id>`): name one in `connection_overrides` or pick one with a member pin (a set an admin pin or an enforced org default imposes is bound whole and no override or member pin narrows it: only an admin changes it), or run the agent on the platform.\n\n**Permission:** `agents:run`; an `inline` source (a manifest the body carries) also requires `agents:write`. A caller missing either half is refused an `inline` source with `403 inline_run_not_allowed_in_space` (carrying `active_in_spaces`), the same refusal as `POST /api/runs/inline`; a `registry` source asks `agents:run` alone and keeps the plain `403 forbidden`." +
         inlineDependencyAuthorization,
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
@@ -1445,7 +1459,17 @@ const canonicalRunsPaths = {
                     type: "object",
                     description:
                       "Operation envelope (not the run resource): the one-time sink credentials plus the created run's `id`. Fetch the resource itself via `GET /runs/{id}`.",
-                    required: ["id", "url", "finalize_url", "secret", "expiresAt"],
+                    required: [
+                      "id",
+                      "url",
+                      "finalize_url",
+                      "mcp_url",
+                      "heartbeat_url",
+                      "workspace_url",
+                      "files_url",
+                      "secret",
+                      "expiresAt",
+                    ],
                     properties: {
                       id: { type: "string", description: "The created run's id." },
                       url: {
@@ -1457,6 +1481,26 @@ const canonicalRunsPaths = {
                         type: "string",
                         format: "uri",
                         description: "Absolute URL for `HttpSink.finalizeUrl`.",
+                      },
+                      mcp_url: {
+                        type: "string",
+                        format: "uri",
+                        description: "Run-scoped MCP endpoint.",
+                      },
+                      heartbeat_url: {
+                        type: "string",
+                        format: "uri",
+                        description: "Endpoint for signed heartbeat requests.",
+                      },
+                      workspace_url: {
+                        type: "string",
+                        format: "uri",
+                        description: "Endpoint for fetching the run workspace.",
+                      },
+                      files_url: {
+                        type: "string",
+                        format: "uri",
+                        description: "Endpoint for the run's input files and output uploads.",
                       },
                       secret: {
                         type: "string",
@@ -1489,14 +1533,15 @@ const canonicalRunsPaths = {
           },
         },
         "403": {
-          $ref: "#/components/responses/Forbidden",
+          headers: REQUEST_ID_ONLY_HEADERS,
+          content: inlineRunForbiddenContent,
           description:
-            'Insufficient permissions — including `draft_not_writable` when `stage: "draft"`, or a `dependency_overrides` entry spelled `draft`, names a package the caller cannot WRITE. Resolution precedes the refusal, so a package id that does not exist, or one this space does not hold, answers 404 `package_not_found` whatever `stage` says — deliberately: 403-ing it would confirm the existence of a package the caller is not entitled to know about, and "not yours" and "not there" must read the same. The 403 therefore only concerns a package the caller can already reach.',
+            '`inline_run_not_allowed_in_space` when a `kind: "inline"` source is posted by a caller who cannot compose here (`agents:write` or `agents:run` missing; `active_in_spaces` names the spaces where they can). Otherwise insufficient permissions — including `draft_not_writable` when `stage: "draft"`, or a `dependency_overrides` entry spelled `draft`, names a package the caller cannot WRITE. Resolution precedes the refusal, so a package id that does not exist, or one this space does not hold, answers 404 `package_not_found` whatever `stage` says — deliberately: 403-ing it would confirm the existence of a package the caller is not entitled to know about, and "not yours" and "not there" must read the same. The 403 therefore only concerns a package the caller can already reach.',
         },
         "404": { $ref: "#/components/responses/NotFound" },
         "409": {
           description:
-            "`idempotency_in_progress`, `org_deleting` or `missing_integration_connection` as on the other launch routes — a `must_choose_connection` item is cleared by naming one of its `candidate_connections` in `connection_overrides`; a `remote_binds_one_connection` item names an integration the cascade binds several connections to (see above).",
+            "`idempotency_in_progress`, `org_deleting` or `missing_integration_connection` as on the other launch routes (with `active_in_spaces` on an `integration_not_active` item) — a `must_choose_connection` item is cleared by naming one of its `candidate_connections` in `connection_overrides`; a `remote_binds_one_connection` item names an integration the cascade binds several connections to (see above).",
           headers: REQUEST_ID_ONLY_HEADERS,
           content: connectionConflictContent,
         },
@@ -1518,6 +1563,7 @@ const canonicalRunsPaths = {
   "/api/runs/{id}/events": {
     post: {
       operationId: "ingestRunEvent",
+      "x-appstrate-space": { kind: "organization" },
       tags: ["Runs"],
       summary: "Ingest one signed CloudEvent (HMAC)",
       description:
@@ -1616,6 +1662,7 @@ const canonicalRunsPaths = {
   "/api/runs/{id}/events/finalize": {
     post: {
       operationId: "finalizeRemoteRun",
+      "x-appstrate-space": { kind: "organization" },
       tags: ["Runs"],
       summary: "Terminal RunResult — close the sink (HMAC, idempotent)",
       description:
@@ -1639,7 +1686,21 @@ const canonicalRunsPaths = {
                 output: {},
                 error: {
                   type: "object",
+                  required: ["message"],
                   properties: {
+                    code: { type: "string", maxLength: 64 },
+                    context: {
+                      type: "object",
+                      additionalProperties: true,
+                      properties: {
+                        error_category: {
+                          type: "string",
+                          examples: [...MODEL_ERROR_CATEGORIES],
+                          description:
+                            "Model-call classification from the runner. Unknown categories fall back to the server classifier.",
+                        },
+                      },
+                    },
                     message: { type: "string" },
                     stack: { type: "string" },
                   },
@@ -1712,6 +1773,7 @@ const canonicalRunsPaths = {
   "/api/runs/{id}/events/heartbeat": {
     post: {
       operationId: "heartbeatRemoteRun",
+      "x-appstrate-space": { kind: "organization" },
       tags: ["Runs"],
       summary: "Runner liveness keep-alive (HMAC)",
       description:
@@ -1758,6 +1820,7 @@ const canonicalRunsPaths = {
   "/api/runs/{id}/workspace": {
     get: {
       operationId: "fetchRunWorkspace",
+      "x-appstrate-space": { kind: "organization" },
       tags: ["Runs"],
       summary: "Fetch the run bundle archive (HMAC)",
       description:
@@ -1792,6 +1855,7 @@ const canonicalRunsPaths = {
   "/api/runs/{id}/files": {
     get: {
       operationId: "fetchRunFilesManifest",
+      "x-appstrate-space": { kind: "organization" },
       tags: ["Runs"],
       summary: "List the run's input files (HMAC)",
       description:
@@ -1837,6 +1901,7 @@ const canonicalRunsPaths = {
     },
     post: {
       operationId: "publishRunFile",
+      "x-appstrate-space": { kind: "organization" },
       tags: ["Runs"],
       summary: "Publish an agent-produced file (HMAC, streaming)",
       description:
@@ -1952,6 +2017,7 @@ const canonicalRunsPaths = {
   "/api/runs/{id}/files/{name}": {
     get: {
       operationId: "fetchRunFile",
+      "x-appstrate-space": { kind: "organization" },
       tags: ["Runs"],
       summary: "Fetch a single run input file (HMAC)",
       description:
@@ -2039,6 +2105,7 @@ const canonicalRunsPaths = {
   "/api/runs/{id}/mcp": {
     post: {
       operationId: "runToolsMcpPost",
+      "x-appstrate-space": { kind: "organization" },
       tags: ["Runs"],
       summary: "Run MCP server of a remote run (HMAC)",
       description:
@@ -2072,6 +2139,7 @@ const canonicalRunsPaths = {
     },
     get: {
       operationId: "runToolsMcpGet",
+      "x-appstrate-space": { kind: "organization" },
       tags: ["Runs"],
       summary: "Run MCP server of a remote run (GET)",
       description:

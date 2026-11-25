@@ -39,6 +39,7 @@ import {
   packageDetailSpaces,
 } from "../lib/package-access.ts";
 import { runVisibilityFilter } from "../lib/run-visibility.ts";
+import { packageAvailabilityIn } from "../services/package-library.ts";
 
 /**
  * The agent's dependency groups, split by who is entitled to them.
@@ -322,10 +323,24 @@ export async function buildAgentDetailDto(
   return { body, lockVersion: authoring && definition === "draft" ? rawItem.lockVersion : null };
 }
 
+/**
+ * `GET` agent detail: the DTO plus `availability`, the library's projection for
+ * the current space (`packageAvailabilityIn`). A summary read omits it: the
+ * library lists a package to the callers holding `agents:read`, which a
+ * launcher does not.
+ */
 export async function agentDetailHandler(c: Context<AppEnv>) {
+  const itemId = getItemId(c);
   const detail = await buildAgentDetailDto(c, { version: c.req.query("version") });
   if (!detail) {
-    throw notFound(`Agent '${getItemId(c)}' not found`);
+    throw notFound(`Agent '${itemId}' not found`);
   }
-  return sendPackageDetail(c, detail);
+  // After the detail: an agent this space cannot read answers the detail's own 404.
+  const availability = agentReadIsSummary(c)
+    ? undefined
+    : await packageAvailabilityIn(c, itemId, c.get("spaceId"), "agents:read");
+  return sendPackageDetail(
+    c,
+    availability ? { ...detail, body: { ...detail.body, availability } } : detail,
+  );
 }

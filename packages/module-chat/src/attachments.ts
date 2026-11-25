@@ -23,6 +23,8 @@ import type { ResolvedChatAttachment } from "@appstrate/core/chat-contract";
 import { parseFileUri, UPLOAD_URI_PREFIX } from "@appstrate/core/file-uri";
 import { formatBytes } from "@appstrate/core/format";
 import { isImageMime } from "@appstrate/core/mime";
+import type { FileDelivery } from "./file-input.ts";
+import { withModelText } from "./message-text.ts";
 import { UNNAMED_FILE } from "./ui/run-events.ts";
 
 /** Is `part` an ai-SDK `file` part? */
@@ -58,8 +60,8 @@ function attachmentTextBlock(part: FileUIPart, imageNote: string): string {
 /** What the pointer line of an image says about its pixels, so the model never guesses at them. */
 interface AttachmentContext {
   pdfReceipts?: ReadonlyMap<string, string>;
-  /** Whether the model of this turn accepts images at all. */
-  modelSeesImages: boolean;
+  /** What this turn sends the model (`fileDelivery`). */
+  fileDelivery: FileDelivery;
   /** The user messages' image parts whose pixels ride this request, by message id then URI. */
   sent: ReadonlyMap<string, ReadonlyMap<string, unknown>>;
 }
@@ -70,7 +72,7 @@ function imageNote(
   context: AttachmentContext | undefined,
 ): string {
   if (!context || !isImageMime(part.mediaType)) return "";
-  if (!context.modelSeesImages) {
+  if (!context.fileDelivery.image) {
     return " — you cannot view images with this model: say so rather than guess its content";
   }
   return context.sent.get(message.id)?.has(part.url)
@@ -82,13 +84,15 @@ function imageNote(
  * Return a copy of the thread with every file part replaced by a compact text
  * part (the {@link attachmentTextBlock}) so the model sees the attachment as
  * text it can act on. Messages without file parts are returned unchanged (no
- * copy). Used when projecting the thread into the engine's transcript so the model-facing serialization lives in one place.
+ * copy). A resolved agent launch replaces the text (`withModelText`). Used when projecting the
+ * thread into the engine's transcript so the model-facing serialization lives in one place.
  */
 export function messagesWithAttachmentsAsText(
   messages: UIMessage[],
   context?: AttachmentContext,
 ): UIMessage[] {
-  return messages.map((message) => {
+  return messages.map((sent) => {
+    const message = withModelText(sent);
     const parts = message.parts;
     if (message.role !== "user" || !parts?.some(isFileUIPart)) return message;
     return {
@@ -99,7 +103,7 @@ export function messagesWithAttachmentsAsText(
               type: "text" as const,
               text: [
                 attachmentTextBlock(part, imageNote(message, part, context)),
-                message === messages[messages.length - 1] && part.mediaType === "application/pdf"
+                sent === messages[messages.length - 1] && part.mediaType === "application/pdf"
                   ? context?.pdfReceipts?.get(part.url)
                   : undefined,
               ]

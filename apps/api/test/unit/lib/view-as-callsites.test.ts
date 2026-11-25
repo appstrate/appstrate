@@ -17,7 +17,7 @@ describe("persona-sensitive call sites", () => {
    *
    * `.get("orgRole")` — the real role, which a preview deliberately leaves
    * untouched ({@link callerOrgRole} is the previewed one).
-   * `loadSpaceMember(` / `loadSpaceAccess(` / `membershipOn(` — the caller's
+   * `loadSpaceMember(` / `loadSpaceAccess[ForIds](` / `membershipOn(` — the caller's
    * own rows, which a preview replaces with its overlay (`callerSpaceAccess`,
    * `personaMemberships`).
    * `orgPermissions(` — a role's org grants, which a preview intersects
@@ -64,8 +64,8 @@ describe("persona-sensitive call sites", () => {
           "the real role a connection list's share targets are judged under; `orgHalfFor` applies the persona",
         ],
         [
-          "packages/module-chat/src/chat-stream.ts",
-          "the fallback under the persona's role, which is what the turn is answered as",
+          "packages/module-chat/src/platform-mcp.ts",
+          "the fallback under the persona's role (`actingOrgRole`), which is what a turn and the composer's commands are answered as",
         ],
         [
           "packages/module-chat/src/prompt.ts",
@@ -74,8 +74,8 @@ describe("persona-sensitive call sites", () => {
       ],
     },
     {
-      what: "`loadSpaceMember(` / `loadSpaceAccess(` / `membershipOn(`",
-      pattern: /(?:loadSpaceMember|loadSpaceAccess|membershipOn)\(/,
+      what: "`loadSpaceMember(` / `loadSpaceAccess[ForIds](` / `membershipOn(`",
+      pattern: /(?:loadSpaceMember|loadSpaceAccess(?:ForIds)?|membershipOn)\(/,
       control: "apps/api/src/lib/view-as.ts",
       allowlist: [
         ["apps/api/src/lib/space-role.ts", "defines `loadSpaceMember` and `membershipOn`"],

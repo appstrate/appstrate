@@ -547,11 +547,16 @@ export const orgSettingsSchema = z.object({
   restrict_package_copy: z.boolean().optional(),
   // Absent = allowed. `false` refuses new personal model credentials, and the chain ignores existing ones.
   personal_model_credentials: z.boolean().optional(),
+  // Absent = `admin`. `operator` caps the role an org member holds in their own personal space.
+  personal_space_role: z.enum(["admin", "operator"]).optional(),
 });
 
 /** The org settings as served: each defaulted policy read as its effective value; other stored keys kept. */
 export const orgSettingsReadSchema = orgSettingsSchema
-  .extend({ personal_model_credentials: z.boolean().default(true) })
+  .extend({
+    personal_model_credentials: z.boolean().default(true),
+    personal_space_role: z.enum(["admin", "operator"]).default("admin"),
+  })
   .loose();
 
 // ---------------------------------------------------------------------------
@@ -786,6 +791,41 @@ export async function enterSpaceContext(c: HonoContextLike, spaceId?: string): P
     );
   }
   await _spaceContextApplier(c, spaceId);
+}
+
+/** Platform marker for the row-checked terminal of a module route, including external modules. */
+export const AUTHORIZED_ROW_MARKER = Symbol.for("appstrate.authorizedRow");
+
+type RowTargetChecker = (c: HonoContextLike, spaceId: string | null) => Promise<void>;
+let rowTargetChecker: RowTargetChecker | null = null;
+
+/** Platform boot wiring, like setSpaceContextApplier. A missing checker refuses the action. */
+export function setRowTargetChecker(check: RowTargetChecker | null): void {
+  rowTargetChecker = check;
+}
+
+/**
+ * Wrap a by-id operation whose acting space comes from the authorized row. The loader applies
+ * the module's own ACL and returns that row with its spaceId (null for an organization row).
+ * The API checks the actual destination before the action receives the row or reads a write body.
+ */
+export function withAuthorizedRow<
+  C extends HonoContextLike,
+  Row extends { spaceId: string | null },
+>(
+  loadAndAuthorize: (c: C) => Promise<Row>,
+  act: (c: C, row: Row) => Response | Promise<Response>,
+): (c: C) => Promise<Response> {
+  const handler = async (c: C) => {
+    const check = rowTargetChecker;
+    if (!check)
+      throw new Error("withAuthorizedRow: no row target checker registered by the platform");
+    const row = await loadAndAuthorize(c);
+    await check(c, row.spaceId);
+    return act(c, row);
+  };
+  Object.defineProperty(handler, AUTHORIZED_ROW_MARKER, { value: true });
+  return handler;
 }
 
 // ---------------------------------------------------------------------------

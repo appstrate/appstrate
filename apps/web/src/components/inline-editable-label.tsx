@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { inlineEditingAttributes } from "../lib/keep-open-while-renaming";
 import { Input } from "@appstrate/ui/components/input";
 import { Button } from "@appstrate/ui/components/button";
 import { commitRename } from "../lib/inline-rename";
@@ -79,7 +80,7 @@ export function InlineEditableLabel({
       <Input
         ref={inputRef}
         // Read by the dialogs: Escape here cancels the rename, not the overlay.
-        data-inline-editing=""
+        {...inlineEditingAttributes}
         // The field has no visible label: it is named by the name it renames.
         aria-label={t("renameField", { name: value })}
         value={draft}

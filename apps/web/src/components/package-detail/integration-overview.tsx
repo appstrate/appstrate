@@ -18,6 +18,7 @@ import { isOauthAuthConnectable } from "../integration-connect/connectable-auth-
 import { DetailSectionCard } from "../detail-section-card";
 import { SkeletonLine } from "../skeleton-line";
 import { OperationalStat } from "../operational-stat";
+import { AvailabilityCard, AvailabilityCardSkeleton } from "./availability-card";
 
 export function IntegrationOverview({
   packageId,
@@ -111,6 +112,15 @@ export function IntegrationOverview({
 
   return (
     <div className="flex flex-col gap-6" data-testid="integration-overview">
+      {/* The working space's: « Tous les espaces » has none to say. */}
+      {!on && (
+        <AvailabilityCard
+          type="integration"
+          packageId={packageId}
+          name={detail.manifest.display_name ?? packageId}
+          availability={detail.availability}
+        />
+      )}
       {issues.length > 0 && (
         <HealthCard
           title={t("integration.health.title")}
@@ -213,15 +223,18 @@ export function IntegrationOverview({
 }
 
 /**
- * The integration's overview while it loads: the three summary cards drawn by the same components, labels included. The health
+ * The integration's overview while it loads: the availability card (out of the mode) and the three summary cards drawn by the same components, labels included. The health
  * card above them only exists when something needs fixing, so it is not drawn.
  */
 export function IntegrationOverviewSkeleton() {
   const { t } = useTranslation("settings");
+  const { on } = useOverviewMode();
   const value = <SkeletonLine className="w-10" />;
   return (
     <>
       <div className="flex flex-col gap-6">
+        {/* Drawn out of « Tous les espaces », where the card exists. */}
+        {!on && <AvailabilityCardSkeleton />}
         <div className="grid items-start gap-4 lg:grid-cols-3">
           <DetailSectionCard
             title={t("integration.tabs.connections")}

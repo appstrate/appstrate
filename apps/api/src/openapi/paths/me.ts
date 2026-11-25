@@ -3,7 +3,7 @@
 import { packageSourceValues } from "@appstrate/db/schema";
 import { MAX_CONNECTIONS_PER_INTEGRATION } from "@appstrate/core/integration";
 import { STD_RESPONSE_HEADERS } from "../headers.ts";
-import { APPEARANCE_PROPERTIES } from "../schemas.ts";
+import { APPEARANCE_PROPERTIES, INACTIVE_REQUIRED_INTEGRATIONS } from "../schemas.ts";
 import {
   agentPackageIdParam,
   connectionActionsSchema,
@@ -47,6 +47,7 @@ const meConnectionEntrySchema = {
     "shared_spaces",
     "allowed_actions",
     "shareable_spaces",
+    "reconnect_space_id",
     "reused_by_agents",
     "locked_by",
     "org",
@@ -83,6 +84,11 @@ const meConnectionEntrySchema = {
     },
     allowed_actions: connectionActionsSchema,
     shareable_spaces: shareableSpacesSchema,
+    reconnect_space_id: {
+      type: ["string", "null"],
+      description:
+        "The space of `org` to start its renewal in (`X-Space-Id` of `POST /api/integrations/{packageId}/auths/{authKey}/connect/session` with `connection_id`): one where the caller holds `integrations:connect`, the integration is placed, and the connection serves. Its own or origin space is preferred. The current connect manifest must declare the auth method. An OAuth method needs a client usable at the connection's scope or support for automatic client provisioning. `null` exactly when `allowed_actions` lacks `reconnect`.",
+    },
     locked_by: lockedBySchema,
     org: {
       type: "object",
@@ -120,6 +126,7 @@ export const mePaths = {
   "/api/me/orgs": {
     get: {
       operationId: "listMyOrgs",
+      "x-appstrate-space": { kind: "organization" },
       tags: ["Profile"],
       summary: "List orgs the authenticated caller belongs to",
       description:
@@ -198,6 +205,7 @@ export const mePaths = {
   "/api/me/connections": {
     get: {
       operationId: "listMyConnections",
+      "x-appstrate-space": { kind: "organization" },
       tags: ["Profile"],
       summary: "List the caller's connections across every org/space",
       description:
@@ -257,9 +265,12 @@ export const mePaths = {
     put: {
       ...connectionShareAllSpacesOperation,
       operationId: "setMeConnectionShareAllSpaces",
+      "x-appstrate-space": { kind: "organization" },
       tags: ["Me"],
       summary: "Share an owned connection with current and future team spaces",
       parameters: [
+        { $ref: "#/components/parameters/XOrgId" },
+        { $ref: "#/components/parameters/XViewAs" },
         {
           name: "connectionId",
           in: "path",
@@ -267,11 +278,20 @@ export const mePaths = {
           schema: { type: "string", format: "uuid" },
         },
       ],
+      responses: {
+        ...connectionShareAllSpacesOperation.responses,
+        "400": {
+          $ref: "#/components/responses/ViewAsRefused",
+          description: "Invalid sharing request, or a refused persona switch.",
+        },
+        "401": { $ref: "#/components/responses/Unauthorized" },
+      },
     },
   },
   "/api/me/connections/{connectionId}/shares/{spaceId}": {
     put: {
       operationId: "shareMyConnection",
+      "x-appstrate-space": { kind: "target", parameter: "spaceId" },
       tags: ["Profile"],
       summary: "Share one of the caller's connections into a space",
       description:
@@ -313,6 +333,7 @@ export const mePaths = {
     },
     delete: {
       operationId: "unshareMyConnection",
+      "x-appstrate-space": { kind: "target", parameter: "spaceId" },
       tags: ["Profile"],
       summary: "Withdraw one of the caller's connections from a space",
       description:
@@ -524,6 +545,7 @@ export const mePaths = {
   "/api/me/connections/{connectionId}/delete-impact": {
     get: {
       operationId: "getMyConnectionDeleteImpact",
+      "x-appstrate-space": { kind: "organization" },
       tags: ["Profile"],
       summary: "The caller's pins and schedules a connection delete would rewrite",
       description:
@@ -639,6 +661,7 @@ export const mePaths = {
   "/api/me/connections/{connectionId}": {
     patch: {
       operationId: "updateMyConnection",
+      "x-appstrate-space": { kind: "organization" },
       tags: ["Profile"],
       summary: "Rename one of the caller's own connections",
       description:
@@ -682,6 +705,7 @@ export const mePaths = {
     },
     delete: {
       operationId: "deleteMyConnection",
+      "x-appstrate-space": { kind: "organization" },
       tags: ["Profile"],
       summary: "Delete one of the caller's own connections (destructive)",
       description:
@@ -741,6 +765,7 @@ export const mePaths = {
   "/api/me/connections/{connectionId}/handoff": {
     get: {
       operationId: "getMyConnectionHandoff",
+      "x-appstrate-space": { kind: "organization" },
       tags: ["Profile"],
       summary: "What is due on the target when this connection is deleted",
       description:
@@ -887,14 +912,63 @@ export const mePaths = {
                   },
                   connections: {
                     type: "array",
-                    description: "Integrations the caller could attach to an agent.",
+                    description:
+                      "Integrations the caller holds a connection usable in this space for, active here or not (`active`).",
                     items: {
                       type: "object",
-                      required: ["integration_package_id", "name", "source"],
+                      required: [
+                        "integration_package_id",
+                        "name",
+                        "source",
+                        "active",
+                        "via",
+                        "connections",
+                      ],
                       properties: {
                         integration_package_id: { type: "string" },
                         name: { type: "string" },
                         source: { type: "string", enum: ["own", "shared", "both"] },
+                        active: {
+                          type: "boolean",
+                          description:
+                            "Whether the integration is active in this space. False: the caller holds a connection usable here, but a run binds nothing of the integration until it is activated (or offered to the organization) here; `version` and `default_tools` are then absent.",
+                        },
+                        via: {
+                          type: ["string", "null"],
+                          enum: ["home", "shared", "system", "organization", null],
+                          description:
+                            "Why the integration is placed in this space (`PackagePlacement.via`, one definition for the library, the integration sheet and this list); `null` when it is not placed here: the caller holds a connection usable here, but the integration itself does not reach this space.",
+                        },
+                        connections: {
+                          type: "array",
+                          description:
+                            "The connections the caller may bind to this integration in the space, oldest first: resolve a connection the user names by `label` or `account_id`, then pass its `id` in `connection_overrides`.",
+                          items: {
+                            type: "object",
+                            required: [
+                              "id",
+                              "label",
+                              "account_id",
+                              "owned_by_actor",
+                              "needs_reconnection",
+                            ],
+                            properties: {
+                              id: { type: "string" },
+                              label: { type: "string" },
+                              account_id: { type: "string" },
+                              owned_by_actor: {
+                                type: "boolean",
+                                description:
+                                  "False: a colleague's connection shared into the space. Use it only when the user named it.",
+                              },
+                              needs_reconnection: {
+                                type: "boolean",
+                                description:
+                                  "True: the credentials died; a run naming it fails until its owner reconnects it.",
+                              },
+                            },
+                          },
+                        },
                         version: {
                           type: "string",
                           description:
@@ -920,7 +994,8 @@ export const mePaths = {
                   agents: {
                     type: "array",
                     description:
-                      "Agents the caller can run in the current space (capped). Only " +
+                      "Agents ACTIVE in the current space (capped), each with the required " +
+                      "integrations that keep it from launching here. Only " +
                       "present when the caller holds the `agents:run` permission; empty otherwise. " +
                       "When `agents_truncated` is true, the full list is reachable via the " +
                       "`listAgents` operation.",
@@ -931,6 +1006,7 @@ export const mePaths = {
                         "display_name",
                         "description",
                         "takes_input",
+                        "inactive_required_integrations",
                         "published",
                         "home_writable",
                         "source",
@@ -947,6 +1023,7 @@ export const mePaths = {
                           description:
                             "Whether the agent declares an input schema with properties.",
                         },
+                        inactive_required_integrations: INACTIVE_REQUIRED_INTEGRATIONS,
                         published: {
                           type: "boolean",
                           description:
@@ -973,7 +1050,7 @@ export const mePaths = {
                   },
                   agents_total: {
                     type: "integer",
-                    description: "Total runnable agents before the cap.",
+                    description: "Total active agents before the cap.",
                   },
                   skills: {
                     type: "array",
@@ -1045,11 +1122,37 @@ export const mePaths = {
                   personal: false,
                 },
                 connections: [
-                  { integration_package_id: "@appstrate/gmail", name: "Gmail", source: "own" },
+                  {
+                    integration_package_id: "@appstrate/gmail",
+                    name: "Gmail",
+                    source: "own",
+                    active: true,
+                    via: "system",
+                    connections: [
+                      {
+                        id: "conn_1",
+                        label: "ada@acme.com",
+                        account_id: "ada@acme.com",
+                        owned_by_actor: true,
+                        needs_reconnection: false,
+                      },
+                    ],
+                  },
                   {
                     integration_package_id: "@appstrate/clickup",
                     name: "ClickUp",
                     source: "shared",
+                    active: true,
+                    via: "organization",
+                    connections: [
+                      {
+                        id: "conn_2",
+                        label: "Acme workspace",
+                        account_id: "acme",
+                        owned_by_actor: false,
+                        needs_reconnection: false,
+                      },
+                    ],
                   },
                 ],
                 recent_runs: [
@@ -1067,6 +1170,7 @@ export const mePaths = {
                     display_name: "Inbox Triage",
                     description: "Sorts and labels incoming email.",
                     takes_input: false,
+                    inactive_required_integrations: [],
                     published: true,
                     home_writable: false,
                     source: "system",

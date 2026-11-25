@@ -111,17 +111,6 @@ export interface AfpsManifestConnect {
   _meta?: Record<string, unknown>;
 }
 
-/** `connect._meta["dev.appstrate/connect"]`: the run policy AFPS leaves to the consumer. */
-interface AppstrateConnectMeta {
-  tool?: string;
-  run_at?: "link" | "run-start";
-  reauth_on?: number[];
-  produces?: string[];
-  persist_login_secret?: boolean;
-}
-
-const APPSTRATE_CONNECT_META_KEY = "dev.appstrate/connect";
-
 /**
  * A `delivery.env` / `delivery.files` template rendered for one connection; `null` when it renders
  * empty, so an entry whose credential field is absent is skipped rather than injected blank.
@@ -298,11 +287,4 @@ export function usesAutoProvisionedClient(
     auth.token_endpoint_auth_method === "none" &&
     (getRemoteSource(manifest) !== null || hasPerConnectionAuthServer(manifest, auth))
   );
-}
-
-export function getAppstrateConnectMeta(
-  connect: AfpsManifestConnect | undefined,
-): AppstrateConnectMeta | undefined {
-  const meta = connect?._meta?.[APPSTRATE_CONNECT_META_KEY];
-  return meta && typeof meta === "object" ? (meta as AppstrateConnectMeta) : undefined;
 }

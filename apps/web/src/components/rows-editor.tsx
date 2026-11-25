@@ -45,8 +45,8 @@ export function RowsEditor<T>({
             <Button
               type="button"
               variant="ghost"
-              size="icon"
-              className="size-8 shrink-0"
+              size="icon-sm"
+              className="shrink-0"
               aria-label={t("btn.delete")}
               onClick={() => onChange(rows.filter((_, i) => i !== index))}
             >

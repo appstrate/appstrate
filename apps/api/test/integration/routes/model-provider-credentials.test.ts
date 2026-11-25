@@ -466,7 +466,7 @@ describe("Model Provider Keys API", () => {
       expect(found).toBeUndefined();
     });
 
-    it("returns 409 CREDENTIAL_IN_USE when an org_models row still references it", async () => {
+    it("counts the actual model bindings on GET and refuses DELETE if the earlier zero is stale", async () => {
       // Create a credential.
       const createRes = await app.request("/api/model-provider-credentials", {
         method: "POST",
@@ -479,7 +479,19 @@ describe("Model Provider Keys API", () => {
       });
       const { id: credId } = (await createRes.json()) as { id: string };
 
-      // Attach a model to it so the FK is non-empty.
+      async function usage() {
+        const response = await app.request("/api/model-provider-credentials", {
+          headers: authHeaders(ctx),
+        });
+        expect(response.status).toBe(200);
+        const { data } = (await response.json()) as {
+          data: { id: string; referencing_model_count: number }[];
+        };
+        return data.find((credential) => credential.id === credId)!.referencing_model_count;
+      }
+      expect(await usage()).toBe(0);
+
+      // A model binding can be created after the settings page read its verdict.
       const modelRes = await app.request("/api/models", {
         method: "POST",
         headers: authHeaders(ctx, { "Content-Type": "application/json" }),
@@ -502,6 +514,31 @@ describe("Model Provider Keys API", () => {
       expect(res.status).toBe(409);
       const body = (await res.json()) as { code?: string };
       expect(body.code).toBe("credential_in_use");
+      expect(await usage()).toBe(1);
+      const second = await app.request("/api/models", {
+        method: "POST",
+        headers: authHeaders(ctx, { "Content-Type": "application/json" }),
+        body: JSON.stringify({
+          label: "Disabled binding",
+          credentialId: credId,
+          modelId: "claude-haiku-4-5-20251001",
+        }),
+      });
+      expect(second.status, await second.clone().text()).toBe(201);
+      const { id: secondId } = (await second.json()) as { id: string };
+      const disable = await app.request(`/api/models/${secondId}`, {
+        method: "PATCH",
+        headers: authHeaders(ctx, { "Content-Type": "application/json" }),
+        body: JSON.stringify({ enabled: false }),
+      });
+      expect(disable.status).toBe(200);
+      expect(await usage()).toBe(2);
+      const detach = await app.request(`/api/models/${secondId}`, {
+        method: "DELETE",
+        headers: authHeaders(ctx),
+      });
+      expect(detach.status).toBe(204);
+      expect(await usage()).toBe(1);
     });
   });
 

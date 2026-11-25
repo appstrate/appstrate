@@ -186,6 +186,22 @@ describe("buildTurnProgress", () => {
     expect("contextWindow" in data).toBe(false);
   });
 
+  it("marks a fallback window as assumed, and only then", () => {
+    const turn = {
+      index: 1,
+      inputTokens: 1,
+      outputTokens: 1,
+      cacheReadTokens: 0,
+      cacheWriteTokens: 0,
+      contextWindow: 128_000,
+    };
+    expect(buildTurnProgress(BASE, { ...turn, contextWindowAssumed: true }).data).toMatchObject({
+      contextWindow: 128_000,
+      contextWindowAssumed: true,
+    });
+    expect(buildTurnProgress(BASE, turn).data).not.toHaveProperty("contextWindowAssumed");
+  });
+
   it("carries the discriminator and the envelope identity", () => {
     const ev = buildTurnProgress(BASE, {
       index: 2,

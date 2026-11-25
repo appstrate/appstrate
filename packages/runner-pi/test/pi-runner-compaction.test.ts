@@ -14,7 +14,7 @@
 
 import { describe, it, expect } from "bun:test";
 import { derivePiCompactionSettings } from "../src/pi-runner.ts";
-import { DEFAULT_CONTEXT_WINDOW } from "../src/pi-model.ts";
+import { DEFAULT_CONTEXT_WINDOW } from "@appstrate/core/token-budget";
 
 describe("derivePiCompactionSettings — reserveTokens", () => {
   it("uses model.maxTokens when populated", () => {
@@ -23,6 +23,12 @@ describe("derivePiCompactionSettings — reserveTokens", () => {
     // Claude Sonnet 4.5 in thinking mode declares maxTokens=64000 —
     // reserveTokens MUST track this or the first post-compaction call
     // underflows and we see the same upstream 400.
+    expect(result.compaction.reserveTokens).toBe(64_000);
+  });
+
+  it("caps the reserve at 64k on a large window (1M / 384k max output)", () => {
+    const result = derivePiCompactionSettings({ contextWindow: 1_000_000, maxTokens: 384_000 }, {});
+    if (result.compaction.enabled === false) throw new Error("compaction should be enabled");
     expect(result.compaction.reserveTokens).toBe(64_000);
   });
 
@@ -110,7 +116,7 @@ describe("derivePiCompactionSettings — compaction opt-out", () => {
     process.env.MODEL_COMPACTION_ENABLED = "false";
     try {
       const result = derivePiCompactionSettings({ contextWindow: 200_000, maxTokens: 16_384 });
-      if (result.compaction.enabled === false) throw new Error("compaction should be enabled");
+      expect(result.compaction.enabled).toBe(true);
       expect(result.compaction.reserveTokens).toBe(16_384);
       expect(result.compaction.keepRecentTokens).toBe(20_000);
     } finally {

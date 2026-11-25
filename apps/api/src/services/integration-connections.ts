@@ -40,7 +40,6 @@ import {
   encryptCredentialEnvelope,
   decryptCredentials,
   decryptCredentialsToStringMap,
-  isClientMetadataRedirectTag,
 } from "@appstrate/connect";
 import { issuerOfClientMetadataDocumentRef } from "../lib/integration-client-metadata.ts";
 import {
@@ -49,8 +48,12 @@ import {
   listSystemIntegrationClientsFor,
   type SystemIntegrationClientDefinition,
 } from "./integration-client-registry.ts";
-import { isActiveHere } from "./package-activation.ts";
-import { placementReadFilter, placementRowJoin } from "./package-placement.ts";
+import { isActiveHere, placementVia, type PlacementVia } from "./package-activation.ts";
+import {
+  listOfferedToSpaceOrg,
+  placementReadFilter,
+  placementRowJoin,
+} from "./package-placement.ts";
 import {
   setExactlyOneDefault,
   isUniqueViolation,
@@ -58,6 +61,7 @@ import {
   type DbOrTx,
   type Tx,
 } from "../lib/db-helpers.ts";
+import { nextScheduleVersion } from "../lib/schedule-version.ts";
 import { logger } from "../lib/logger.ts";
 import {
   decryptForDisplay,
@@ -93,7 +97,12 @@ import {
   type ConnectionCaller,
 } from "./connection-reach.ts";
 import { shareableSpaces } from "./connection-shares.ts";
-import { boundSpacesOf, type ConnectionPrincipal } from "../lib/connection-principal.ts";
+import { readOAuthClientRegistrations, reconnectMethods } from "./reconnect-methods.ts";
+import {
+  boundSpacesOf,
+  reconnectScopeAllows,
+  type ConnectionPrincipal,
+} from "../lib/connection-principal.ts";
 import type { OrgRole } from "@appstrate/core/permissions";
 import { readReconnectTarget } from "./integration-scope-resolver.ts";
 import {
@@ -104,12 +113,15 @@ import {
 import {
   integrationCallbackUrl,
   authorizationServerTag,
-  redirectTagOf,
+  taggedCallbackOf,
 } from "../lib/integration-callback-url.ts";
 import { CONNECTION_LABEL_MAX, toMintedLabel } from "../lib/connection-label.ts";
 import { dedupeLabel } from "@appstrate/core/dedupe-label";
 import type { Actor, AuthorizationServerBinding, ResolvedOAuthClient } from "@appstrate/connect";
 import {
+  appstrateAuthRequired,
+  PLACEHOLDER_ACCOUNT_ID,
+  displayAccountId,
   allowsUndeclaredTools,
   isUnauthenticatedIntegration,
   resolveIntegrationToolCatalog,
@@ -121,12 +133,7 @@ import {
 } from "@appstrate/core/integration";
 import type { ConnectionReach, IntegrationToolCatalogEntry } from "@appstrate/shared-types";
 import type { ConnectionVariables } from "./connect/connection-variables.ts";
-import {
-  PLACEHOLDER_ACCOUNT_ID,
-  connectionVariablesOf,
-  displayAccountId,
-  sameConnectionVariables,
-} from "../lib/connection-identity.ts";
+import { connectionVariablesOf, sameConnectionVariables } from "../lib/connection-identity.ts";
 import {
   hasPerConnectionAuthServer,
   toSupportedTokenEndpointAuthMethod,
@@ -149,6 +156,7 @@ import { lockIntegrationGovernance } from "./integration-pins-service.ts";
 import {
   actorIdentityOf,
   candidateOf,
+  isUserConnectionCreationBlocked,
   proxyRequirement,
   resolveConnections,
   toLaunchOverrides,
@@ -161,7 +169,11 @@ import {
 import { requireRunBoundMember } from "../lib/run-bound-connection.ts";
 import type { AfpsManifestAuth } from "./integration-manifest-helpers.ts";
 import type { IntegrationAuthStatus } from "@appstrate/shared-types";
-import { readIntegrationManifestForConnect } from "./integration-service.ts";
+import {
+  readIntegrationManifestForConnect,
+  readIntegrationManifestForProxy,
+  readPublishedIntegrationManifests,
+} from "./integration-service.ts";
 import { assertSpaceInScope } from "./spaces.ts";
 
 // ─────────────────────────────────────────────
@@ -261,17 +273,37 @@ export interface ReconnectTarget {
   scopesGranted: string[];
 }
 
-// IDOR guard on a client-supplied reconnect target. Ownership, not usability:
-// `block_user_connections` never stops a renewal.
-export async function assertConnectionBelongsToActor(
-  connectionId: string,
-  input: { spaceId: string; integrationId: string; authKey: string },
-  principal: ConnectionPrincipal,
-): Promise<ReconnectTarget> {
-  const target = await readReconnectTarget({ ...input, connectionId, actor: principal.actor });
-  if (!target) throw notFound("Connection not found");
-  assertDelegatedReconnect(principal.binding !== null, target.spaceId, input.spaceId);
-  return target;
+/**
+ * Authorize a credential write before the interactive, direct or run-offered connect flow starts.
+ * An existing connection must be the caller's own in the requested scope. Only a creation is
+ * subject to the space's block, which an integration governor may override.
+ */
+export async function connectTarget(
+  input: { spaceId: string; integrationId: string; authKey: string; connectionId?: string },
+  writer: { actor: Actor; delegated: boolean; canConfigure: boolean },
+): Promise<ReconnectTarget | null> {
+  if (input.connectionId) {
+    const target = await readReconnectTarget({
+      ...input,
+      connectionId: input.connectionId,
+      actor: writer.actor,
+    });
+    if (!target) throw notFound("Connection not found");
+    assertDelegatedReconnect(writer.delegated, target.spaceId, input.spaceId);
+    return target;
+  }
+  if (
+    !writer.canConfigure &&
+    (await isUserConnectionCreationBlocked(input.spaceId, input.integrationId))
+  ) {
+    throw new ApiError({
+      status: 403,
+      code: "connection_blocked_by_admin",
+      title: "Connection Blocked by Admin",
+      detail: `Creation of personal connections to '${input.integrationId}' is disabled by an admin of this space. Use the shared connection instead.`,
+    });
+  }
+  return null;
 }
 
 /**
@@ -283,7 +315,7 @@ function assertDelegatedReconnect(
   rowSpaceId: string | null,
   spaceId: string,
 ): void {
-  if (delegated && rowSpaceId !== spaceId) {
+  if (!reconnectScopeAllows(delegated, rowSpaceId, spaceId)) {
     throw forbidden(
       "A credential bound to spaces cannot reconnect a connection serving the whole organization: its owner reconnects it from their own session",
     );
@@ -563,7 +595,7 @@ async function selectConnection(
  * The connection an unnamed credential-proxy call outside a run gets for the caller, as one status:
  * {@link selectAccessibleConnection}'s outcome under `reach`, judged against `manifest` — the one
  * the integration detail serves (its latest published version, else the draft while none is), which
- * the proxy authorizes against. It names no connection and no colleague; `active` reports the
+ * the proxy authorizes against. Only a connection visible on the detail may be named; `active` reports the
  * other condition the proxy checks.
  *
  *   - `ready`: one connection binds and passes its health checks.
@@ -577,6 +609,9 @@ async function selectConnection(
  *   - `unusable`: `insufficient_scopes`, `auth_serves_no_selected_tool`, or another refusal (logged).
  *   - `proxy_closed`: the space closes the credential proxy outside a run, whatever the caller's
  *     role: only a run reaches its connections.
+ *   - `not_published`: the integration has no published version, which the proxy answers 404
+ *     (`readIntegrationManifestForProxy`); it outranks every other status, since no call can
+ *     succeed. A saved draft is read by the detail, never by the proxy.
  *
  * `imposed`: an enforced org default governs the integration here — the space's admins decide.
  */
@@ -589,19 +624,28 @@ export type ProxyConnectionStatus =
   | "default_unavailable"
   | "unusable"
   | "proxy_closed"
-  | "not_required";
+  | "not_required"
+  | "not_published";
 
-export async function proxyConnectionVerdict(
+async function proxyConnectionVerdict(
   packageId: string,
   manifest: IntegrationManifest,
-  context: { spaceId: string; actor: Actor; reach: ReachOutsideRun },
-): Promise<{ status: ProxyConnectionStatus; imposed: boolean }> {
-  const { status, imposed } = await proxyConnectionOutcome(packageId, manifest, {
+  context: { orgId: string; spaceId: string; actor: Actor; reach: ReachOutsideRun },
+  auths: IntegrationAuthStatus[],
+): Promise<{ status: ProxyConnectionStatus; imposed: boolean; connection_id?: string }> {
+  // Read once, for `imposed` and for the selection.
+  const orgDefaults = await listOrgDefaultsForResolver(context.spaceId);
+  const proxyRead = await readIntegrationManifestForProxy(packageId, context.orgId, null);
+  if (!proxyRead.ok && proxyRead.failure.kind === "not_published") {
+    return { status: "not_published", imposed: orgDefaults[packageId]?.enforce === true };
+  }
+  const { status, imposed, connectionId } = await proxyConnectionOutcome(packageId, manifest, {
     ...context,
-    // Read once, for `imposed` and for the selection.
-    orgDefaults: await listOrgDefaultsForResolver(context.spaceId),
+    orgDefaults,
   });
-  return { status, imposed };
+  const visible =
+    connectionId && auths.some((auth) => auth.connections.some((c) => c.id === connectionId));
+  return { status, imposed, ...(visible ? { connection_id: connectionId } : {}) };
 }
 
 /**
@@ -618,7 +662,12 @@ async function proxyConnectionOutcome(
     reach: ReachOutsideRun;
     orgDefaults: Record<string, OrgDefaultPick>;
   },
-): Promise<{ status: ProxyConnectionStatus; imposed: boolean; refusal?: ResolutionFieldError }> {
+): Promise<{
+  status: ProxyConnectionStatus;
+  imposed: boolean;
+  connectionId?: string;
+  refusal?: ResolutionFieldError;
+}> {
   const { orgDefaults, reach } = context;
   const imposed = orgDefaults[packageId]?.enforce === true;
   if (isUnauthenticatedIntegration(manifest)) return { status: "not_required", imposed };
@@ -629,7 +678,7 @@ async function proxyConnectionOutcome(
   return selectConnection(packageId, manifest, null, selection).then(
     ({ row, notConnected }) =>
       row
-        ? { status: "ready" as const, imposed }
+        ? { status: "ready" as const, imposed, connectionId: row.id }
         : { status: "none" as const, imposed, ...(notConnected ? { refusal: notConnected } : {}) },
     (err: unknown) => {
       if (!(err instanceof ApiError)) throw err;
@@ -781,6 +830,8 @@ function resolutionConflict(error: ConnectionResolutionError): ApiError {
 /** An integration's activation in a space; `blockUserConnections` is `false` without a row. */
 interface IntegrationActivation {
   active: boolean;
+  /** Why the integration is placed in the space (`placementVia`); `null`: it is not placed there. */
+  via: PlacementVia | null;
   blockUserConnections: boolean;
 }
 
@@ -788,8 +839,9 @@ interface IntegrationActivation {
  * The activation of each integration of `packageIds` in the space, in one SELECT, by the rule
  * {@link isActiveHere} states for every package type: a `space_packages` row's `enabled` wins (a
  * deactivated system integration keeps an `enabled = false` row: the opt-out is sticky); without a
- * row, a system integration (`SYSTEM_INTEGRATIONS`) is active and any other is not. Every
- * requested id is in the map.
+ * row, a system integration (`SYSTEM_INTEGRATIONS`) is active and any other is not. Beside it, the
+ * provenance of the placement ({@link placementVia}), read off the same rows. Every requested id is
+ * in the map, a package the catalogue does not hold included.
  */
 export async function resolveIntegrationActivations(
   packageIds: readonly string[],
@@ -799,24 +851,36 @@ export async function resolveIntegrationActivations(
   if (packageIds.length === 0) return result;
   const rows = await db
     .select({
+      id: packages.id,
+      type: packages.type,
+      source: packages.source,
+      homeSpaceId: packages.homeSpaceId,
       packageId: spacePackages.packageId,
       enabled: spacePackages.enabled,
+      placedByOffer: spacePackages.placedByOffer,
       blockUserConnections: spacePackages.blockUserConnections,
     })
-    .from(spacePackages)
-    .where(
-      and(
-        eq(spacePackages.spaceId, spaceId),
-        inArray(spacePackages.packageId, packageIds as string[]),
-      ),
-    );
-  const byId = new Map(rows.map((r) => [r.packageId, r]));
+    .from(packages)
+    .leftJoin(spacePackages, placementRowJoin(packages.id, spaceId))
+    .where(inArray(packages.id, packageIds as string[]));
+  const byId = new Map(rows.map((r) => [r.id, r]));
+  const offered = await listOfferedToSpaceOrg(spaceId, packageIds);
   for (const id of packageIds) {
-    const row = byId.get(id);
+    const found = byId.get(id);
+    const pkg = {
+      id,
+      type: found?.type ?? "integration",
+      source: found?.source ?? null,
+      homeSpaceId: found?.homeSpaceId ?? null,
+      offeredToOrg: offered.has(id),
+    };
+    const row = found?.packageId
+      ? { enabled: found.enabled!, placedByOffer: found.placedByOffer! }
+      : undefined;
     result.set(id, {
-      // `source` is not read for an integration: `SYSTEM_INTEGRATIONS` is the offer.
-      active: isActiveHere({ id, type: "integration", source: null }, row),
-      blockUserConnections: row?.blockUserConnections === true,
+      active: isActiveHere(pkg, row),
+      via: placementVia(pkg, spaceId, row),
+      blockUserConnections: found?.blockUserConnections === true,
     });
   }
   return result;
@@ -1386,27 +1450,21 @@ function assertConnectClientUsable(client: IntegrationOAuthClientWithSecret): vo
  * The per-server callbacks are each trusted for one server by what the flow's state holds. A row an
  * admin registers on one would carry its tag into a state requiring nothing — a hostile server's
  * code delivered on that row's flow (mix-up). Only an auto-provisioned row carries a plain tag.
- */
-function isReservedRedirectTag(tag: string, autoProvisioned: boolean): boolean {
-  // Write side; the connect side is the stricter {@link assertRedirectBoundToFlow}.
-  return isClientMetadataRedirectTag(tag) || !autoProvisioned;
-}
-
-/**
+ *
  * Refuse a row's per-server redirect URI unless it is this flow's server's: a plain tag on an
  * auto-provisioned row, for the issuer the flow resolved; a `cimd/` tag on no row. Anything else
  * would send another server's tag with this flow's token endpoint.
  */
 function assertRedirectBoundToFlow(
   client: IntegrationOAuthClientWithSecret,
-  tag: string,
+  callback: NonNullable<ReturnType<typeof taggedCallbackOf>>,
   flowIssuer: string | undefined,
 ): void {
   const bound =
-    !isClientMetadataRedirectTag(tag) &&
+    callback.kind === "registered" &&
     client.autoProvisioned &&
     flowIssuer !== undefined &&
-    tag === authorizationServerTag(flowIssuer);
+    callback.tag === authorizationServerTag(flowIssuer);
   if (!bound) {
     throw new ApiError({
       status: 403,
@@ -1422,8 +1480,8 @@ function assertRedirectUriNotReserved(
   redirectUri: string | null | undefined,
   autoProvisioned: boolean,
 ): void {
-  const tag = redirectUri ? redirectTagOf(redirectUri) : undefined;
-  if (tag !== undefined && isReservedRedirectTag(tag, autoProvisioned)) {
+  const callback = redirectUri ? taggedCallbackOf(redirectUri) : undefined;
+  if (callback && (callback.kind === "metadata_document" || !autoProvisioned)) {
     throw new ApiError({
       status: 400,
       code: "redirect_uri_reserved",
@@ -1449,12 +1507,12 @@ function customConnectClient(
 ): ResolvedConnectClient {
   // Before the authorize redirect, never after the user has consented.
   assertConnectClientUsable(client);
-  const redirectTag = client.redirect_uri ? redirectTagOf(client.redirect_uri) : undefined;
-  if (redirectTag !== undefined) assertRedirectBoundToFlow(client, redirectTag, flowIssuer);
+  const callback = client.redirect_uri ? taggedCallbackOf(client.redirect_uri) : undefined;
+  if (callback) assertRedirectBoundToFlow(client, callback, flowIssuer);
   return {
     clientId: client.client_id,
     redirectUri: client.redirect_uri ?? null,
-    ...(redirectTag ? { redirectTag } : {}),
+    ...(callback ? { redirectTag: callback.tag } : {}),
     clientRef: client.id,
   };
 }
@@ -2290,10 +2348,7 @@ export async function persistCredentialBundle(
       eq(integrationConnections.authKey, target.authKey),
       ownRowInSpace(target.scope.spaceId, target.actor),
     );
-    // A reconnect stays on the same upstream account and instance (AFPS §7.12); "default" never
-    // blocks. Read and write share one `FOR UPDATE` transaction, so no update slips between.
-    const checksAccount =
-      input.accountId !== undefined && input.accountId !== PLACEHOLDER_ACCOUNT_ID;
+    // Compare identities under the write lock. A placeholder names no known account.
     const checksVariables = input.variables !== undefined && input.variables !== null;
     const row = await db.transaction(async (tx) => {
       // A re-stamped client re-decides the scope: see {@link writesOrgScope}.
@@ -2328,11 +2383,13 @@ export async function persistCredentialBundle(
       if (clientSpace !== null && existing.spaceId !== clientSpace) {
         throw scopeNarrowingRefused("It was widened while this reconnect ran: reconnect it again.");
       }
-      if (
-        checksAccount &&
-        existing.accountId !== PLACEHOLDER_ACCOUNT_ID &&
-        existing.accountId !== input.accountId
-      ) {
+      if (!displayAccountId(input.accountId) || !displayAccountId(existing.accountId)) {
+        throw conflict(
+          "identity_mismatch",
+          "The upstream account could not be verified. Use a different connection, or ask a space administrator to provide one. Existing shares, pins and schedules still use the original connection.",
+        );
+      }
+      if (existing.accountId !== input.accountId) {
         throw conflict(
           "identity_mismatch",
           `This connection is linked to a different account (${existing.accountId}). Reconnect with the same account, or create a new connection.`,
@@ -2594,12 +2651,24 @@ export async function listIntegrationConnections(
   packageId: string,
   caller: ConnectionCaller,
   orgRole: OrgRole | null,
+  methodAvailable?: ReturnType<typeof reconnectMethods>,
 ): Promise<IntegrationConnectionSummary[]> {
   await assertSpaceInScope(scope);
   const actor = caller.principal.actor;
   const rows = await listReachableConnections({ spaceId: scope.spaceId, actor }, "usable", [
     packageId,
   ]);
+  if (rows.length === 0) return [];
+  if (!methodAvailable) {
+    const [read, registrations] = await Promise.all([
+      readIntegrationManifestForConnect(scope, packageId),
+      readOAuthClientRegistrations(scope.orgId, [packageId], [scope.spaceId]),
+    ]);
+    methodAvailable = reconnectMethods(
+      new Map(read.ok ? [[packageId, read.manifest]] : []),
+      registrations,
+    );
+  }
   const ownerName = await resolveConnectionOwnerNames(rows);
   const own = rows.filter((row) => actorOwns(actor, row)).map((row) => row.id);
   const others = rows.filter((row) => !actorOwns(actor, row)).map((row) => row.id);
@@ -2623,7 +2692,14 @@ export async function listIntegrationConnections(
       ...serializeIntegrationConnection(row, view),
       owner_name: ownerName(row),
       locked_by: locks.get(row.id) ?? null,
-      allowed_actions: connectionActions(row, caller, rowShares.includes(scope.spaceId), orgRole),
+      allowed_actions: connectionActions(
+        row,
+        caller,
+        rowShares.includes(scope.spaceId),
+        orgRole,
+      ).filter(
+        (action) => action !== "reconnect" || methodAvailable(packageId, row.authKey, row.spaceId),
+      ),
       ...(view.owner && row.userId !== null
         ? { shareable_spaces: shareable.get(row.id) ?? [] }
         : {}),
@@ -2636,18 +2712,42 @@ interface UsableIntegration {
   integration_package_id: string;
   name: string;
   source: "own" | "shared" | "both";
+  /**
+   * Whether the integration is active in the space. False: the actor holds a connection usable here
+   * but a run could bind nothing of it until the integration is switched on (or offered) here.
+   */
+  active: boolean;
   /** The integration's own manifest version, so a caller pins a satisfiable range. */
   version?: string;
   /** AFPS §4.4 `default_tools`: what an agent inherits without a `tools` selection. */
   default_tools?: readonly string[] | "*";
+  /** Why it is placed in the space (`placementVia`); `null` when it is not placed there. */
+  via: PlacementVia | null;
   /** Present (true) when none of the actor's usable connections of it is healthy. */
   needs_reconnection?: true;
+  /** The connections the actor may bind there, oldest first: a label resolves to an id here. */
+  connections: UsableConnection[];
+}
+
+/** One connection the actor may bind in the space (what `connection_overrides` names). */
+interface UsableConnection {
+  id: string;
+  label: string;
+  account_id: string;
+  /** False: a colleague's connection shared into the space, never bound without being named. */
+  owned_by_actor: boolean;
+  needs_reconnection: boolean;
 }
 
 /**
- * The integrations the actor could attach to an agent here, one per integration with a connection
- * it may bind ({@link usableInSpace}) and active in the space, as a run or a proxy call requires;
- * `source`: own, shared, or both.
+ * The integrations the actor holds a connection it may bind ({@link usableInSpace}) for, one per
+ * integration; `source`: own, shared, or both. `active` says whether the integration is switched on
+ * in the space, as a run or a proxy call requires: an inactive one binds nothing here, and is listed
+ * so the actor can be told its connection exists and why a run does not use it. A connection whose
+ * auth the integration no longer declares binds nowhere and is left out, with an integration left
+ * with none. Declared auths are the published manifest's; the draft's only while the integration
+ * has no published version at all (the sheet's fallback); an integration whose versions exist but
+ * none resolves declares none, as the sheet answers 404 there.
  */
 export async function listUsableIntegrationsForActor(
   scope: SpaceScope,
@@ -2656,33 +2756,71 @@ export async function listUsableIntegrationsForActor(
   await assertSpaceInScope(scope);
   const rows = await db
     .select({
+      id: integrationConnections.id,
       integrationId: integrationConnections.integrationId,
+      label: integrationConnections.label,
+      authKey: integrationConnections.authKey,
+      accountId: integrationConnections.accountId,
       userId: integrationConnections.userId,
       endUserId: integrationConnections.endUserId,
       shared: sql<boolean>`${sharedInto(scope.spaceId)}`,
       needsReconnection: integrationConnections.needsReconnection,
     })
     .from(integrationConnections)
-    .where(usableInSpace(scope.spaceId, actor));
+    .where(usableInSpace(scope.spaceId, actor))
+    .orderBy(...OLDEST_FIRST);
   if (rows.length === 0) return [];
 
-  const acc = new Map<string, { own: boolean; shared: boolean; healthy: boolean }>();
-  for (const row of rows) {
-    const entry = acc.get(row.integrationId) ?? { own: false, shared: false, healthy: false };
-    entry.own ||= actorOwns(actor, row);
+  const listedIds = [...new Set(rows.map((row) => row.integrationId))];
+  const [pkgRows, { manifests: published, unpublished }] = await Promise.all([
+    db
+      .select({ id: packages.id, draftManifest: packages.draftManifest })
+      .from(packages)
+      .where(inArray(packages.id, listedIds)),
+    readPublishedIntegrationManifests(listedIds, scope.orgId),
+  ]);
+  const draftAuths = new Map(
+    pkgRows.map((p) => [p.id, (p.draftManifest as IntegrationManifest | null)?.auths] as const),
+  );
+  const declaresAuth = (row: { integrationId: string; authKey: string }) => {
+    const manifest = published.get(row.integrationId);
+    const auths = manifest
+      ? manifest.auths
+      : unpublished.has(row.integrationId)
+        ? draftAuths.get(row.integrationId)
+        : undefined;
+    return Object.hasOwn(auths ?? {}, row.authKey);
+  };
+
+  const acc = new Map<
+    string,
+    { own: boolean; shared: boolean; healthy: boolean; connections: UsableConnection[] }
+  >();
+  for (const row of rows.filter(declaresAuth)) {
+    const entry = acc.get(row.integrationId) ?? {
+      own: false,
+      shared: false,
+      healthy: false,
+      connections: [],
+    };
+    const owned = actorOwns(actor, row);
+    entry.own ||= owned;
     entry.shared ||= row.shared;
     entry.healthy ||= !row.needsReconnection;
+    entry.connections.push({
+      id: row.id,
+      label: row.label,
+      account_id: row.accountId,
+      owned_by_actor: owned,
+      needs_reconnection: row.needsReconnection,
+    });
     acc.set(row.integrationId, entry);
   }
 
   // Sorted on purpose: an unordered SELECT may permute it between identical calls.
-  const active = await listActiveIntegrationIds([...acc.keys()], scope.spaceId);
-  const ids = [...active].sort();
+  const ids = [...acc.keys()].sort();
   if (ids.length === 0) return [];
-  const pkgRows = await db
-    .select({ id: packages.id, draftManifest: packages.draftManifest })
-    .from(packages)
-    .where(inArray(packages.id, ids));
+  const activations = await resolveIntegrationActivations(ids, scope.spaceId);
   const nameMap = new Map(pkgRows.map((p) => [p.id, getPackageDisplayName(p)]));
   // The integration's own version, off the selected draft manifest: a caller pinning a
   // `dependencies.integrations` range needs no guess.
@@ -2698,15 +2836,24 @@ export async function listUsableIntegrationsForActor(
   );
 
   return ids.map((integrationId) => {
-    const { own, shared, healthy } = acc.get(integrationId)!;
+    const { own, shared, healthy, connections } = acc.get(integrationId)!;
     const source: UsableIntegration["source"] = own && shared ? "both" : own ? "own" : "shared";
+    const { active: isActive, via } = activations.get(integrationId)!;
     return {
       integration_package_id: integrationId,
       name: nameMap.get(integrationId) ?? integrationId,
       source,
-      version: versionMap.get(integrationId),
-      default_tools: defaultToolsMap.get(integrationId),
+      active: isActive,
+      via,
+      // What a run would bind: nothing of an inactive integration.
+      ...(isActive
+        ? {
+            version: versionMap.get(integrationId),
+            default_tools: defaultToolsMap.get(integrationId),
+          }
+        : {}),
       ...(healthy ? {} : { needs_reconnection: true as const }),
+      connections,
     };
   });
 }
@@ -2938,7 +3085,7 @@ async function forgetDeletedConnection(
         ...(schedule.disables
           ? { enabled: false, disabledReason: "connection_deleted" as const, nextRunAt: null }
           : {}),
-        updatedAt: new Date(),
+        updatedAt: nextScheduleVersion,
       })
       .where(eq(schedules.id, schedule.id));
   }
@@ -3191,16 +3338,20 @@ export function serializeIntegrationConnection(
   };
 }
 
-/** One connection's variables (AFPS §7.12); keyed by id alone — the caller checked ownership. */
-export async function getIntegrationConnectionVariables(
+/** What a reconnect shows of the connection it renews; keyed by id alone — the caller checked ownership. */
+export async function getReconnectedConnection(
   connectionId: string,
-): Promise<Record<string, string> | null> {
+): Promise<{ label: string; accountId: string; variables: Record<string, string> | null } | null> {
   const [row] = await db
-    .select({ variables: integrationConnections.variables })
+    .select({
+      label: integrationConnections.label,
+      accountId: integrationConnections.accountId,
+      variables: integrationConnections.variables,
+    })
     .from(integrationConnections)
     .where(eq(integrationConnections.id, connectionId))
     .limit(1);
-  return row?.variables ?? null;
+  return row ?? null;
 }
 
 // ─────────────────────────────────────────────
@@ -3224,8 +3375,6 @@ export async function getIntegrationAuthStatuses(
   default_tools: readonly string[] | "*" | undefined;
   /** AFPS §7.8, verbatim: gates the editor's "include all upstream tools" toggle. */
   allow_undeclared_tools: boolean;
-  /** Whether the integration is active in this space (the list endpoint's `active`). */
-  active: boolean;
   /** Only org admins may create personal connections here (`false` when not active). */
   block_user_connections: boolean;
   /**
@@ -3235,7 +3384,7 @@ export async function getIntegrationAuthStatuses(
    */
   platform_redirect_uri: string;
   /** What an unnamed proxy call outside a run gets for this caller ({@link proxyConnectionVerdict}). */
-  proxy_connection: { status: ProxyConnectionStatus; imposed: boolean };
+  proxy_connection: Awaited<ReturnType<typeof proxyConnectionVerdict>>;
 }> {
   await assertSpaceInScope(scope);
   const manifest = await loadManifestOrThrow(scope, packageId);
@@ -3245,18 +3394,22 @@ export async function getIntegrationAuthStatuses(
     integration: manifest,
   });
 
-  const allConnections = await listIntegrationConnections(scope, packageId, caller, orgRole);
-  // The settings list's precedence: env-backed system integrations stay active.
-  const activation = (await resolveIntegrationActivations([packageId], scope.spaceId)).get(
+  const oauthClients = await readOAuthClientRegistrations(
+    scope.orgId,
+    [packageId],
+    [scope.spaceId],
+  );
+  const allConnections = await listIntegrationConnections(
+    scope,
     packageId,
-  )!;
-  const oauthClients = await db
-    .select({
-      authKey: integrationOauthClients.authKey,
-      autoProvisioned: integrationOauthClients.autoProvisioned,
-    })
-    .from(integrationOauthClients)
-    .where(and(spaceVisibleFilter(scope), eq(integrationOauthClients.integrationId, packageId)));
+    caller,
+    orgRole,
+    reconnectMethods(new Map([[packageId, manifest]]), oauthClients),
+  );
+  const [settings] = await db
+    .select({ blocked: spacePackages.blockUserConnections })
+    .from(spacePackages)
+    .where(and(eq(spacePackages.packageId, packageId), eq(spacePackages.spaceId, scope.spaceId)));
   // The clients a connect of the auth can use: a classic auth chooses among the manual rows only
   // (`loadClientTiers`), so a leftover auto-provisioned row does not make it connectable.
   const hasUsableOAuthClient = (key: string, autoProvisioned: boolean) =>
@@ -3265,14 +3418,12 @@ export async function getIntegrationAuthStatuses(
   const auths: IntegrationAuthStatus[] = Object.entries(authsMap).map(([key, rawAuth]) => {
     // The run-policy `required` flag lives under `_meta["dev.appstrate/auth"]` (absent = false).
     const auth = rawAuth as AfpsManifestAuth;
-    const authMeta = (auth._meta?.["dev.appstrate/auth"] ?? undefined) as
-      { required?: boolean } | undefined;
     const resource = auth.resource ?? null;
     const keyConnections = allConnections.filter((c) => c.auth_key === key);
     return {
       auth_key: key,
       type: auth.type,
-      required: authMeta?.required === true,
+      required: appstrateAuthRequired(auth),
       scopes: auth.default_scopes ?? [],
       resource,
       connections: keyConnections,
@@ -3294,14 +3445,19 @@ export async function getIntegrationAuthStatuses(
     tool_catalog: toolCatalog,
     default_tools: readDefaultTools(manifest),
     allow_undeclared_tools: allowsUndeclaredTools(manifest),
-    active: activation.active,
-    block_user_connections: activation.blockUserConnections,
+    block_user_connections: settings?.blocked === true,
     platform_redirect_uri: integrationCallbackUrl(),
-    proxy_connection: await proxyConnectionVerdict(packageId, manifest, {
-      spaceId: scope.spaceId,
-      actor: caller.principal.actor,
-      reach,
-    }),
+    proxy_connection: await proxyConnectionVerdict(
+      packageId,
+      manifest,
+      {
+        orgId: scope.orgId,
+        spaceId: scope.spaceId,
+        actor: caller.principal.actor,
+        reach,
+      },
+      auths,
+    ),
   };
 }
 

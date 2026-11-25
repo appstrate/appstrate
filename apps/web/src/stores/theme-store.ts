@@ -2,6 +2,7 @@
 
 import { create } from "zustand";
 import { persistedValue } from "./local-storage";
+import { THEME_COLORS } from "./theme-colors";
 
 export type Theme = "dark" | "light" | "system";
 
@@ -15,6 +16,9 @@ function applyTheme(resolved: "dark" | "light") {
   const root = document.documentElement;
   root.classList.remove("light", "dark");
   root.classList.add(resolved);
+  document
+    .querySelector('meta[name="theme-color"]')
+    ?.setAttribute("content", THEME_COLORS[resolved]);
 }
 
 interface ThemeState {

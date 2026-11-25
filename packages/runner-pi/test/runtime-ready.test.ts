@@ -28,7 +28,7 @@ describe("emitRuntimeReady", () => {
     await emitRuntimeReady(
       sink,
       "run_abc",
-      { bundleLoaded: true, extensions: 4, bootDurationMs: 1234 },
+      { extensions: 4, bootDurationMs: 1234 },
       () => 1_700_000_000_000,
     );
 
@@ -41,7 +41,6 @@ describe("emitRuntimeReady", () => {
     expect(raw.message).toBe("runtime ready in 1234ms");
     expect(raw.level).toBe("info");
     expect(raw.data).toEqual({
-      bundleLoaded: true,
       extensions: 4,
       totalToReadyMs: 1234,
     });
@@ -53,7 +52,6 @@ describe("emitRuntimeReady", () => {
       sink,
       "run_phases",
       {
-        bundleLoaded: false,
         extensions: 2,
         bootDurationMs: 500,
         phaseTimings: { provisioningMs: 120, sdkImportMs: 200 },
@@ -62,7 +60,6 @@ describe("emitRuntimeReady", () => {
     );
     const raw = events[0]! as unknown as { data: Record<string, unknown> };
     expect(raw.data).toEqual({
-      bundleLoaded: false,
       extensions: 2,
       totalToReadyMs: 500,
       provisioningMs: 120,
@@ -73,7 +70,6 @@ describe("emitRuntimeReady", () => {
   it("rounds fractional boot durations so the message stays integer-millisecond", async () => {
     const { sink, events } = collectingSink();
     await emitRuntimeReady(sink, "run_y", {
-      bundleLoaded: true,
       extensions: 0,
       bootDurationMs: 12.7,
     });
@@ -85,7 +81,6 @@ describe("emitRuntimeReady", () => {
   it("is NOT a run.started event — the webhook + openapi contracts stay untouched", async () => {
     const { sink, events } = collectingSink();
     await emitRuntimeReady(sink, "run_x", {
-      bundleLoaded: false,
       extensions: 0,
       bootDurationMs: 0,
     });
@@ -107,7 +102,6 @@ describe("emitRuntimeReady", () => {
     };
     await expect(
       emitRuntimeReady(failingSink, "run_x", {
-        bundleLoaded: false,
         extensions: 0,
         bootDurationMs: 0,
       }),

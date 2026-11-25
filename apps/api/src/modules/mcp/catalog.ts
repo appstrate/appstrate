@@ -8,6 +8,8 @@
 import type { Tool } from "@modelcontextprotocol/sdk/types.js";
 import { getPlatformOperations, type PlatformOperations } from "../../lib/platform-app.ts";
 import { isGranted, type RouteRequirement } from "../../lib/route-requirements.ts";
+import type { OperationSpaceScope } from "../../lib/operation-space.ts";
+export type { OperationSpaceScope } from "../../lib/operation-space.ts";
 
 /** Minimal shape of an OpenAPI operation node we depend on. */
 interface OperationNode {
@@ -31,14 +33,18 @@ export interface CatalogOperation {
   pathParams: string[];
   /** Names of OpenAPI `in: header` parameters this operation declares. */
   headerParams: string[];
+  /** Form-style array parameters sent in one comma-separated query value. */
+  csvQueryParams: Set<string>;
   requirement: RouteRequirement;
-  /** Raw OpenAPI operation node (for `describe_operation`). */
+  /** The REST route’s registered space contract. */
+  spaceScope: OperationSpaceScope;
+  /** Raw OpenAPI operation node (for `describe`). */
   operation: OperationNode;
 }
 
 interface OperationCatalog {
   operations: Map<string, CatalogOperation>;
-  /** Component schemas, for resolving `$ref`s in `describe_operation`. */
+  /** Component schemas, for resolving `$ref`s in `describe`. */
   componentSchemas: Record<string, unknown>;
 }
 
@@ -77,7 +83,7 @@ function extractHeaderParams(node: OperationNode): string[] {
 /** The credential proxy's route: kept out of the catalog, dispatched to by `call_integration_tool` alone. */
 export const CREDENTIAL_PROXY_PATH = "/api/credential-proxy/proxy";
 
-/** The integration tool routes: kept out of the catalog, dispatched to by the two integration tools alone. */
+/** The integration tool routes: kept out of the catalog, dispatched to by `call_integration_tool` and the `integration_tool` kind of `search` and `describe` alone. */
 export const INTEGRATION_TOOLS_PATH = "/api/credential-proxy/tools";
 export const REMOTE_TOOLS_CALL_PATH = "/api/credential-proxy/tools/call";
 
@@ -95,9 +101,10 @@ const RUN_TOOLS_MCP_PATHS: ReadonlySet<string> = new Set(["/internal/mcp", "/api
  * 9728 well-known (no recursive self-invocation), the run MCP server (a transport
  * for the process executing a run, not an operation), the served-skill
  * routes (the endpoint serves skills through the Skills extension, not as
- * operations), the spec document and its viewer, which `describe_operation`
+ * operations), the spec document and its viewer, which `describe`
  * already serves piecewise, and the credential proxy and its tool routes, which
- * the two integration tools alone reach (`integration-tools.ts`).
+ * `call_integration_tool` and the `integration_tool` kind of `search` and `describe`
+ * alone reach (`integration-tools.ts`).
  */
 function isExcludedPath(pathTemplate: string): boolean {
   return (
@@ -123,11 +130,50 @@ export function getCatalog(): OperationCatalog {
   return catalog;
 }
 
+/** Inline OpenAPI Reference Objects while keeping JSON Schema refs in the returned schema table. */
+function resolveOperationRefs(
+  node: unknown,
+  components: Record<string, unknown>,
+  seen = new Set<string>(),
+): unknown {
+  if (Array.isArray(node)) return node.map((item) => resolveOperationRefs(item, components, seen));
+  if (!node || typeof node !== "object") return node;
+  const { $ref, ...siblings } = node as Record<string, unknown>;
+  if (typeof $ref === "string" && !seen.has($ref)) {
+    const match = /^#\/components\/(parameters|responses|requestBodies|headers)\/([^/]+)$/.exec(
+      $ref,
+    );
+    if (match) {
+      const entries = components[match[1]!] as Record<string, unknown> | undefined;
+      const target = entries?.[match[2]!];
+      if (target && typeof target === "object")
+        return resolveOperationRefs(
+          { ...target, ...siblings },
+          components,
+          new Set([...seen, $ref]),
+        );
+    }
+  }
+  return Object.fromEntries(
+    Object.entries(node).map(([key, value]) => [
+      key,
+      resolveOperationRefs(value, components, seen),
+    ]),
+  );
+}
+
 function buildCatalog(source: PlatformOperations): OperationCatalog {
   const operations = new Map<string, CatalogOperation>();
-  for (const { operationId, method, pathTemplate, node, requirement } of source.operations) {
+  for (const {
+    operationId,
+    method,
+    pathTemplate,
+    node,
+    requirement,
+    spaceScope,
+  } of source.operations) {
     if (isExcludedPath(pathTemplate)) continue;
-    const operation = node as OperationNode;
+    const operation = resolveOperationRefs(node, source.spec.components) as OperationNode;
     operations.set(operationId, {
       operationId,
       method,
@@ -139,7 +185,21 @@ function buildCatalog(source: PlatformOperations): OperationCatalog {
       description: typeof operation.description === "string" ? operation.description : "",
       pathParams: extractPathParams(pathTemplate),
       headerParams: extractHeaderParams(operation),
+      csvQueryParams: new Set(
+        Array.isArray(operation.parameters)
+          ? operation.parameters
+              .filter(
+                (p) =>
+                  p?.in === "query" &&
+                  p.explode === false &&
+                  (p.style ?? "form") === "form" &&
+                  p.schema?.type === "array",
+              )
+              .map((p) => p.name as string)
+          : [],
+      ),
       requirement,
+      spaceScope,
       operation,
     });
   }
@@ -226,7 +286,7 @@ function indexByTag(ops: CatalogOperation[], label: (id: string) => string = (id
 
 const SCHEMA_REF_PREFIX = "#/components/schemas/";
 
-/** Every component schema reachable from `root` via `$ref`, for describe_operation to inline. */
+/** Every component schema reachable from `root` via `$ref`, for describe to inline. */
 export function collectReferencedSchemas(
   root: unknown,
   componentSchemas: Record<string, unknown>,
@@ -262,23 +322,45 @@ type ToolOutputSchema = NonNullable<Tool["outputSchema"]>;
 let runAndWaitOutputSchema: ToolOutputSchema | undefined;
 
 /**
- * `RunAndWaitResult` as `run_and_wait`'s self-contained `outputSchema` (refs as `$defs`, no
- * descriptions: the tool's own carries them). Built once: one object reaches the validator cache.
+ * The self-contained wire schema of `run_and_wait`. SDKs validate structured refusals too.
+ * The successful run uses the REST component verbatim. Build once for the validator cache.
  */
 export function getRunAndWaitOutputSchema(): ToolOutputSchema {
   if (runAndWaitOutputSchema) return runAndWaitOutputSchema;
   const { componentSchemas } = getCatalog();
   const root = componentSchemas.RunAndWaitResult;
-  const $defs = collectReferencedSchemas(root, componentSchemas);
-  runAndWaitOutputSchema = JSON.parse(
-    JSON.stringify({ ...(root as object), $defs }),
-    (key, value: unknown) => {
-      if (typeof value !== "string") return value;
-      if (key === "description") return undefined;
-      return key === "$ref" && value.startsWith(SCHEMA_REF_PREFIX)
-        ? `#/$defs/${value.slice(SCHEMA_REF_PREFIX.length)}`
-        : value;
-    },
-  ) as ToolOutputSchema;
+  const schema = {
+    type: "object",
+    oneOf: [
+      { $ref: "#/$defs/RunAndWaitResult" },
+      {
+        type: "object",
+        required: ["kind", "code", "error"],
+        properties: {
+          kind: { const: "tool_refusal" },
+          code: { type: "string" },
+          error: { type: "string" },
+        },
+      },
+      {
+        type: "object",
+        required: ["kind", "status"],
+        properties: { kind: { const: "route_refusal" }, status: { type: "integer" } },
+        // A route problem carries its body. A successful launch missing its run id carries the original response.
+        anyOf: [
+          { required: ["body"] },
+          { required: ["error", "launch"], properties: { error: { type: "string" } } },
+        ],
+      },
+    ],
+    $defs: { RunAndWaitResult: root, ...collectReferencedSchemas(root, componentSchemas) },
+  };
+  runAndWaitOutputSchema = JSON.parse(JSON.stringify(schema), (key, value: unknown) => {
+    if (typeof value !== "string") return value;
+    if (key === "description") return undefined;
+    return key === "$ref" && value.startsWith(SCHEMA_REF_PREFIX)
+      ? `#/$defs/${value.slice(SCHEMA_REF_PREFIX.length)}`
+      : value;
+  }) as ToolOutputSchema;
   return runAndWaitOutputSchema;
 }

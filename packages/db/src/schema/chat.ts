@@ -20,7 +20,6 @@ import {
 import { organizations } from "./organizations.ts";
 import { spaces } from "./spaces.ts";
 import { user } from "./auth.ts";
-import { chatSkillModeEnum } from "./enums.ts";
 
 // Chat tables — owned by the core schema (modules own no tables), consumed by
 // the `@appstrate/module-chat` workspace module. Created by the system
@@ -72,12 +71,19 @@ export const chatSessions = pgTable(
     // DTO so only a boolean crosses the wire.
     lastAssistantSeq: bigint("last_assistant_seq", { mode: "number" }),
     lastReadSeq: bigint("last_read_seq", { mode: "number" }),
-    skillMode: chatSkillModeEnum("skill_mode").notNull().default("auto"),
+    // `false`: the turn holds no `skills:*`; the pinned skills are still injected.
+    skillDiscovery: boolean("skill_discovery").notNull().default(true),
     // No FK: re-resolved every turn, a missing package becomes a notice.
     pinnedSkills: text("pinned_skills")
       .array()
       .notNull()
       .default(sql`'{}'::text[]`),
+    // What the last turn that claimed the conversation did with each pin it evaluated. A pin
+    // without an entry has not been evaluated yet; a key no longer pinned is ignored.
+    skillStatus: jsonb("skill_status")
+      .$type<Partial<Record<string, ChatSkillStatusEntry>>>()
+      .notNull()
+      .default({}),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },
@@ -200,3 +206,18 @@ export const chatMessages = pgTable(
     index("idx_chat_messages_session_seq").on(table.sessionId, table.seq),
   ],
 );
+
+/** What a turn did with a pinned skill (`chat_sessions.skill_status`): `injected`, or why it left it out. */
+export const chatSkillStatusValues = [
+  "injected",
+  "over_budget",
+  "unavailable",
+  "unreadable",
+] as const;
+export type ChatSkillStatus = (typeof chatSkillStatusValues)[number];
+
+/** A turn's verdict on one pin; `chars`: its SKILL.md length, when the turn read it. */
+export interface ChatSkillStatusEntry {
+  status: ChatSkillStatus;
+  chars?: number | null;
+}

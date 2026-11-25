@@ -53,6 +53,7 @@ export const realtimePaths = {
   "/api/realtime/runs": {
     get: {
       operationId: "streamAllRuns",
+      "x-appstrate-space": { kind: "target", source: "query", parameter: "spaceId" },
       tags: ["Realtime"],
       summary: "SSE: all run status changes",
       description:
@@ -84,6 +85,7 @@ export const realtimePaths = {
   "/api/realtime/runs/{id}": {
     get: {
       operationId: "streamRun",
+      "x-appstrate-space": { kind: "target", source: "query", parameter: "spaceId" },
       tags: ["Realtime"],
       summary: "SSE: single run events",
       description:
@@ -115,6 +117,7 @@ export const realtimePaths = {
   "/api/realtime/agents/{packageId}/runs": {
     get: {
       operationId: "streamAgentRuns",
+      "x-appstrate-space": { kind: "target", source: "query", parameter: "spaceId" },
       tags: ["Realtime"],
       summary: "SSE: agent run changes",
       description:

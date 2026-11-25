@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
+import { TOOL_DESCRIPTOR_REDUCTIONS } from "@appstrate/mcp-transport";
 import { PROXY_STATUS_HEADER, STD_RESPONSE_HEADERS } from "../headers.ts";
 import { problemContent } from "../responses.ts";
 import { proxyConnectionVerdictProperties } from "./integrations.ts";
@@ -551,7 +552,7 @@ const notReadyIntegrationSchema = {
         "What a call naming no connection gets for this caller, as the integration detail's " +
         "`proxy_connection` states it, judged against the latest published version: one of " +
         "`none`, `needs_reconnection`, `not_permitted`, `default_unavailable`, `unusable` " +
-        "(`proxy_closed` never: a closed space refuses the listing itself).",
+        "(`proxy_closed` never: a closed space refuses the listing itself; nor `not_published`: only integrations with a published version are listed).",
       properties: proxyConnectionVerdictProperties,
     },
     refusal: {
@@ -692,6 +693,16 @@ const integrationToolSchema = {
       description:
         "`remote` only, when the server declares one: the schema of the tool's " +
         "`structuredContent`, sanitised as in a run.",
+    },
+    schema_reduced: {
+      type: "array",
+      items: { type: "string", enum: [...TOOL_DESCRIPTOR_REDUCTIONS] },
+      description:
+        "`remote` only, when the server's schemas exceeded the size bound: the steps applied, in " +
+        "order, so the schemas shown are partial. `output_schema`: dropped; " +
+        "`schema_documentation`: documentation keywords (descriptions, titles, examples, " +
+        "annotations) stripped from `input_schema`; " +
+        "`input_schema`: replaced by an empty object schema, the server validating the arguments.",
     },
     catalog_unreadable: {
       type: "boolean",
@@ -858,6 +869,17 @@ export const credentialProxyPaths = {
             "`X-Connection-Id` names one on `/api/credential-proxy/proxy`.",
           schema: { type: "string", format: "uuid" },
         },
+        {
+          name: "catalogs",
+          in: "query",
+          required: false,
+          description:
+            "`live` (the default) reads a remote catalog the cache does not hold from its " +
+            "server, as described above. `cached` reads the cache alone: a catalog not in it is " +
+            "not listed, so no server is contacted, no credential sent and no call journaled; its " +
+            "declared tools are listed `catalog_unreadable`, and the integration in `uncached`.",
+          schema: { type: "string", enum: ["live", "cached"] },
+        },
       ],
       responses: {
         "200": {
@@ -872,7 +894,14 @@ export const credentialProxyPaths = {
             "application/json": {
               schema: {
                 type: "object",
-                required: ["tools", "connections", "not_ready", "unlisted", "truncated_catalogs"],
+                required: [
+                  "tools",
+                  "connections",
+                  "not_ready",
+                  "unlisted",
+                  "truncated_catalogs",
+                  "uncached",
+                ],
                 additionalProperties: false,
                 properties: {
                   tools: { type: "array", items: integrationToolSchema },
@@ -914,6 +943,13 @@ export const credentialProxyPaths = {
                         },
                       },
                     },
+                  },
+                  uncached: {
+                    type: "array",
+                    description:
+                      "With `catalogs=cached`: the remote integrations whose catalog the cache " +
+                      "did not hold, listed by their declared tools. Empty otherwise.",
+                    items: { type: "string" },
                   },
                 },
               },
@@ -1044,7 +1080,7 @@ export const credentialProxyPaths = {
             "`invalid_request` — the body is not valid JSON; `validation_failed` — it is not the " +
             "schema's object (a missing or empty `integration_package_id` or `name`, a " +
             "`connection_id` that is not a uuid, `arguments` that is not an object, an unknown " +
-            "field such as the retired `integration_id`); `connection_not_in_org_default` — an " +
+            "field); `connection_not_in_org_default` — an " +
             "enforced org default governs the integration and `connection_id` names a connection " +
             "outside its set (a holder of `credential-proxy:call`); the proxy's refusals of an " +
             "exchange before it is sent: `unresolved_placeholder` — the server URL holds a " +

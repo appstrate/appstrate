@@ -32,9 +32,30 @@
 import { beforeEach, describe, expect, it } from "bun:test";
 import { getTestApp } from "../../helpers/app.ts";
 import { truncateAll } from "../../helpers/db.ts";
-import { authHeaders, createTestContext, type TestContext } from "../../helpers/auth.ts";
-import { seedAgent, seedSpacePackage, seedUnreachableSpace } from "../../helpers/seed.ts";
+import {
+  addOrgMember,
+  authHeaders,
+  createTestContext,
+  createTestUser,
+  type TestContext,
+} from "../../helpers/auth.ts";
+import {
+  seedAgent,
+  seedApiKey,
+  seedEndUser,
+  seedPackage,
+  seedPublishedVersion,
+  seedSpace,
+  seedSpaceGrant,
+  seedSpaceMember,
+  seedSpacePackage,
+  seedUnreachableSpace,
+} from "../../helpers/seed.ts";
 import { isActiveAgentGate, isAgentLookup } from "../../../src/middleware/guards.ts";
+import {
+  httpHeaderDelivery,
+  localIntegrationManifest,
+} from "../../helpers/integration-manifests.ts";
 
 const app = getTestApp();
 
@@ -55,10 +76,10 @@ function executionDoors(packageId: string) {
   const json = { ...h, "Content-Type": "application/json" };
   return {
     run: () =>
-      app.request(`/api/agents/${packageId}/run`, {
+      app.request(`/api/agents/${packageId}/run?version=draft`, {
         method: "POST",
         headers: json,
-        body: JSON.stringify({ version: "draft" }),
+        body: JSON.stringify({}),
       }),
     rerun: () =>
       app.request(`/api/agents/${packageId}/run`, {
@@ -178,9 +199,147 @@ describe("a placed-but-switched-off agent", () => {
 
   it("names the space and the door that fixes it", async () => {
     const res = await executionDoors(OFF).run();
-    const body = (await res.json()) as { detail?: string };
+    const body = (await res.json()) as { detail?: string; active_in_spaces?: unknown };
     expect(body.detail).toContain(ctx.defaultSpaceId);
     expect(body.detail).toContain(`POST /api/spaces/${ctx.defaultSpaceId}/packages`);
+    expect(body.active_in_spaces).toEqual([]);
+  });
+
+  it("lists the caller's other spaces where the agent is active, and no space it cannot read", async () => {
+    const on = await seedSpace({ orgId: ctx.orgId, name: "On" });
+    const off = await seedSpace({ orgId: ctx.orgId, name: "Off" });
+    await seedSpacePackage(on.id, OFF);
+    await seedSpacePackage(off.id, OFF, { enabled: false });
+    await seedSpacePackage(await seedUnreachableSpace(ctx.orgId), OFF);
+
+    const body = (await (await executionDoors(OFF).run()).json()) as { active_in_spaces?: unknown };
+    expect(body.active_in_spaces).toEqual([{ id: on.id, name: "On" }]);
+  });
+
+  it("offers another space only when there is one, and none to a credential pinned here", async () => {
+    const detailOf = async (res: Response) =>
+      (await res.json()) as { detail?: string; active_in_spaces?: unknown };
+    const alone = await detailOf(await executionDoors(OFF).run());
+    expect(alone.detail).not.toContain("active_in_spaces");
+
+    const on = await seedSpace({ orgId: ctx.orgId, name: "On" });
+    await seedSpacePackage(on.id, OFF);
+    const session = await detailOf(await executionDoors(OFF).run());
+    expect(session.active_in_spaces).toEqual([{ id: on.id, name: "On" }]);
+    expect(session.detail).toContain("or use it in one of active_in_spaces");
+
+    // The same caller through a key pinned to this space, then impersonating an end-user of it.
+    const key = await seedApiKey({
+      orgId: ctx.orgId,
+      spaceId: ctx.defaultSpaceId,
+      createdBy: ctx.user.id,
+      scopes: ["agents:read", "agents:run"],
+    });
+    const endUser = await seedEndUser({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId });
+    const pinned = { Authorization: `Bearer ${key.rawKey}`, "Content-Type": "application/json" };
+    for (const h of [pinned, { ...pinned, "Appstrate-User": endUser.id }]) {
+      const res = await app.request(`/api/agents/${OFF}/run`, {
+        method: "POST",
+        headers: h,
+        body: JSON.stringify({}),
+      });
+      expect(res.status).toBe(404);
+      const body = await detailOf(res);
+      expect(body.active_in_spaces).toEqual([]);
+      expect(body.detail).not.toContain("active_in_spaces");
+    }
+  });
+
+  it("matches alternatives to the dependencies of the requested run or schedule version", async () => {
+    // Requires A and B. S1 holds the agent and B, not A; S2 holds all three.
+    const [A, B] = ["@doors/svc-a", "@doors/svc-b"];
+    const NEEDY = "@doors/needy";
+    await seedAgent({
+      id: NEEDY,
+      orgId: ctx.orgId,
+      homeSpaceId: ctx.defaultSpaceId,
+      draftManifest: {
+        name: NEEDY,
+        version: "1.0.0",
+        type: "agent",
+        schema_version: "0.2",
+        display_name: "Needy",
+        dependencies: { integrations: { [A]: "^1.0.0", [B]: "^1.0.0" } },
+        integrations_configuration: {
+          [A]: { tools: ["search"], required: true },
+          [B]: { tools: ["search"], required: true },
+        },
+      },
+    });
+    await seedSpacePackage(ctx.defaultSpaceId, NEEDY, { enabled: false });
+    for (const id of [A, B]) {
+      await seedPackage({
+        id,
+        orgId: ctx.orgId,
+        homeSpaceId: ctx.defaultSpaceId,
+        type: "integration",
+        source: "local",
+        draftManifest: localIntegrationManifest({
+          name: id,
+          auths: {
+            primary: {
+              type: "api_key",
+              authorizedUris: ["https://api.example.com/**"],
+              credentialFields: ["api_key"],
+              delivery: httpHeaderDelivery({ name: "Authorization", field: "api_key" }),
+            },
+          },
+          tools_policy: { search: {} },
+        }) as unknown as Record<string, unknown>,
+      });
+    }
+    for (const id of [A, B]) await seedPublishedVersion(id, "1.0.0");
+    const s1 = await seedSpace({ orgId: ctx.orgId, name: "S1" });
+    const s2 = await seedSpace({ orgId: ctx.orgId, name: "S2" });
+    for (const space of [s1, s2]) {
+      await seedSpacePackage(space.id, NEEDY);
+      await seedSpacePackage(space.id, B);
+    }
+    await seedSpacePackage(s2.id, A);
+
+    await seedPublishedVersion(NEEDY, "1.0.0");
+    await seedPublishedVersion(NEEDY, "2.0.0", {
+      manifest: {
+        name: NEEDY,
+        version: "2.0.0",
+        type: "agent",
+        schema_version: "0.2",
+        dependencies: { integrations: { [B]: "^1.0.0" } },
+        integrations_configuration: { [B]: { tools: ["search"], required: true } },
+      },
+    });
+
+    const json = { ...headers(), "Content-Type": "application/json" };
+    for (const [version, expected] of [
+      [undefined, [s1.id, s2.id]],
+      ["1.x", [s2.id]],
+      ["draft", [s2.id]],
+      ["3.0.0", []],
+    ] as const) {
+      const run = await app.request(
+        `/api/agents/${NEEDY}/run${version ? `?version=${version}` : ""}`,
+        {
+          method: "POST",
+          headers: json,
+        },
+      );
+      const schedule = await app.request(`/api/agents/${NEEDY}/schedules`, {
+        method: "POST",
+        headers: json,
+        body: JSON.stringify({ cron_expression: "0 3 * * *", version_override: version }),
+      });
+      for (const res of [run, schedule]) {
+        expect(res.status).toBe(404);
+        const body = (await res.json()) as { code: string; active_in_spaces: { id: string }[] };
+        expect(body.code).toBe("agent_not_active_in_space");
+        expect(body.active_in_spaces.map((space) => space.id).sort()).toEqual([...expected].sort());
+      }
+    }
   });
 
   it("answers every READ and every CONFIGURE as if the switch did not exist", async () => {
@@ -278,6 +437,162 @@ describe("a placed-but-switched-off agent", () => {
         activationRefused: false,
       });
     }
+  });
+});
+
+describe("`active_in_spaces` asks each door's own permissions", () => {
+  type Preset = "builder" | "operator" | "runner";
+
+  /** A member who is `builder` here, holds `presets` elsewhere, and exactly `grants` beyond. */
+  async function memberWith(
+    presets: [spaceId: string, preset: Preset][],
+    grants: [spaceId: string, permissions: string[]][] = [],
+  ) {
+    const user = await createTestUser();
+    await addOrgMember(ctx.orgId, user.id, "member");
+    for (const [spaceId, presetRole] of [[ctx.defaultSpaceId, "builder"] as const, ...presets]) {
+      await seedSpaceMember({ spaceId, userId: user.id, presetRole });
+    }
+    for (const [spaceId, permissions] of grants) {
+      await seedSpaceGrant({ orgId: ctx.orgId, spaceId, userId: user.id, permissions });
+    }
+    return { Cookie: user.cookie, "X-Org-Id": ctx.orgId, "X-Space-Id": ctx.defaultSpaceId };
+  }
+
+  async function activeInSpacesOf(res: Response) {
+    expect(res.status, await res.clone().text()).toBe(404);
+    return ((await res.json()) as { active_in_spaces?: unknown }).active_in_spaces;
+  }
+
+  it("lists for a schedule only the spaces granting both `schedules:write` and `agents:run`", async () => {
+    await seedPublishedVersion(OFF, "1.0.0");
+    const runOnly = await seedSpace({ orgId: ctx.orgId, name: "Run only" });
+    const writeOnly = await seedSpace({ orgId: ctx.orgId, name: "Write only" });
+    const both = await seedSpace({ orgId: ctx.orgId, name: "Both" });
+    for (const space of [runOnly, writeOnly, both]) await seedSpacePackage(space.id, OFF);
+    const h = await memberWith(
+      [
+        [runOnly.id, "operator"],
+        [both.id, "builder"],
+      ],
+      [[writeOnly.id, ["agents:read", "schedules:read", "schedules:write"]]],
+    );
+
+    const res = await app.request(`/api/agents/${OFF}/schedules`, {
+      method: "POST",
+      headers: { ...h, "Content-Type": "application/json" },
+      body: JSON.stringify({ name: "Nightly", cron_expression: "0 3 * * *" }),
+    });
+    expect(await activeInSpacesOf(res)).toEqual([{ id: both.id, name: "Both" }]);
+  });
+
+  it("offers only spaces where the chosen schedule actor may run", async () => {
+    await seedPublishedVersion(OFF, "1.0.0");
+    const writerOnly = await seedSpace({
+      orgId: ctx.orgId,
+      name: "Writer only",
+      visibility: "private",
+    });
+    const both = await seedSpace({
+      orgId: ctx.orgId,
+      name: "Writer and actor",
+      visibility: "private",
+    });
+    for (const space of [writerOnly, both]) await seedSpacePackage(space.id, OFF);
+    const member = await createTestUser();
+    await addOrgMember(ctx.orgId, member.id, "member");
+    await seedSpaceMember({ spaceId: both.id, userId: member.id, presetRole: "runner" });
+    const endUser = await seedEndUser({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId });
+
+    const schedule = (actor: { userId?: string; endUserId?: string }, h: Record<string, string>) =>
+      app.request(`/api/agents/${OFF}/schedules`, {
+        method: "POST",
+        headers: { ...h, "Content-Type": "application/json" },
+        body: JSON.stringify({ actor, cron_expression: "0 3 * * *" }),
+      });
+    expect(await activeInSpacesOf(await schedule({ userId: member.id }, headers()))).toEqual([
+      { id: both.id, name: "Writer and actor" },
+    ]);
+    expect(await activeInSpacesOf(await schedule({ endUserId: endUser.id }, headers()))).toEqual(
+      [],
+    );
+    const builder = await memberWith([[both.id, "builder"]]);
+    expect(await activeInSpacesOf(await schedule({ userId: member.id }, builder))).toEqual([]);
+  });
+
+  it("preserves the activation 404 without offering an unauthorized draft", async () => {
+    await seedPublishedVersion(OFF, "1.0.0");
+    const other = await seedSpace({ orgId: ctx.orgId, name: "Other" });
+    await seedSpacePackage(other.id, OFF);
+    const member = await createTestUser();
+    await addOrgMember(ctx.orgId, member.id, "member");
+    for (const spaceId of [ctx.defaultSpaceId, other.id])
+      await seedSpaceMember({ spaceId, userId: member.id, presetRole: "runner" });
+    const run = (selector: string) =>
+      app.request(`/api/agents/${OFF}/run?version=${selector}`, {
+        method: "POST",
+        headers: { Cookie: member.cookie, "X-Org-Id": ctx.orgId, "X-Space-Id": ctx.defaultSpaceId },
+      });
+    expect(await activeInSpacesOf(await run("draft"))).toEqual([]);
+    expect(await activeInSpacesOf(await run("1.0.0"))).toEqual([{ id: other.id, name: "Other" }]);
+  });
+
+  it("lists for a bundle a space whose required integration is off, and none lacking `agents:read`", async () => {
+    const SVC = "@doors/svc";
+    const NEEDY = "@doors/needy-bundle";
+    await seedAgent({
+      id: NEEDY,
+      orgId: ctx.orgId,
+      homeSpaceId: ctx.defaultSpaceId,
+      draftManifest: {
+        name: NEEDY,
+        version: "1.0.0",
+        type: "agent",
+        schema_version: "0.2",
+        display_name: "Needy",
+        dependencies: { integrations: { [SVC]: "^1.0.0" } },
+        integrations_configuration: { [SVC]: { tools: ["search"], required: true } },
+      },
+    });
+    await seedSpacePackage(ctx.defaultSpaceId, NEEDY, { enabled: false });
+    await seedPackage({
+      id: SVC,
+      orgId: ctx.orgId,
+      homeSpaceId: ctx.defaultSpaceId,
+      type: "integration",
+      source: "local",
+      draftManifest: localIntegrationManifest({
+        name: SVC,
+        auths: {
+          primary: {
+            type: "api_key",
+            authorizedUris: ["https://api.example.com/**"],
+            credentialFields: ["api_key"],
+            delivery: httpHeaderDelivery({ name: "Authorization", field: "api_key" }),
+          },
+        },
+        tools_policy: { search: {} },
+      }) as unknown as Record<string, unknown>,
+    });
+    // The agent is on in both, the integration it requires in neither.
+    const readable = await seedSpace({ orgId: ctx.orgId, name: "Readable" });
+    const runnerOnly = await seedSpace({ orgId: ctx.orgId, name: "Runner only" });
+    for (const space of [readable, runnerOnly]) await seedSpacePackage(space.id, NEEDY);
+    const h = await memberWith([
+      [readable.id, "builder"],
+      [runnerOnly.id, "runner"],
+    ]);
+
+    const bundle = await app.request(`/api/agents/${NEEDY}/bundle?source=draft`, { headers: h });
+    expect(await activeInSpacesOf(bundle)).toEqual([{ id: readable.id, name: "Readable" }]);
+
+    // Control: the run door does check the integration, so it lists neither.
+    const run = await app.request(`/api/agents/${NEEDY}/run?version=draft`, {
+      method: "POST",
+      headers: { ...h, "Content-Type": "application/json" },
+      body: JSON.stringify({}),
+    });
+    expect(await activeInSpacesOf(run)).toEqual([]);
   });
 });
 

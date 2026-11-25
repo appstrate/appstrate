@@ -13,13 +13,9 @@ import { expect, type Locator, type Page } from "@playwright/test";
 export class Sidebar {
   constructor(private page: Page) {}
 
-  /**
-   * The shell mounts the switcher twice (the sidebar's `brand` row and the
-   * header's `mobile` chip, one of them hidden by the breakpoint), so only the
-   * one on screen counts.
-   */
+  /** The switcher's trigger, at the head of the sidebar. */
   get switcherButton() {
-    return this.page.getByTestId("org-switcher-button").locator("visible=true");
+    return this.page.getByTestId("org-switcher-button");
   }
 
   /** The switcher popover (for scoped locators). */

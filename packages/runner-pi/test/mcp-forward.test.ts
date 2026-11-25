@@ -79,6 +79,53 @@ describe("mcpToolForwardFactory", () => {
     expect(await Bun.file(path.join(workspace, "resources/call_2-r.txt")).text()).toBe("body");
   });
 
+  it("projects mixed model audiences before either reading a link or writing a workspace file", async () => {
+    const raw: CallToolResult = {
+      content: [
+        { type: "text", text: "visible", annotations: { audience: ["assistant"] } },
+        { type: "text", text: "unrestricted" },
+        {
+          type: "resource",
+          resource: { uri: "file:///private.txt", text: "private text" },
+          annotations: { audience: ["user"] },
+        },
+        {
+          type: "image",
+          data: "cHJpdmF0ZQ==",
+          mimeType: "image/png",
+          annotations: { audience: ["user"] },
+        },
+        {
+          type: "resource_link",
+          name: "private",
+          uri: "file:///private",
+          annotations: { audience: ["user"] },
+        },
+      ],
+      structuredContent: { also: "private text" },
+    };
+    let reads = 0;
+    const { tool, events } = forward(raw, {
+      mcp: {
+        callTool: async () => raw,
+        readResource: async () => {
+          reads++;
+          return { contents: [] };
+        },
+      },
+    });
+    const result = await tool.execute("audience", {});
+    expect(JSON.stringify(result)).toContain("visible");
+    expect(JSON.stringify(result)).toContain("unrestricted");
+    expect(JSON.stringify(result)).not.toContain("private");
+    expect(reads).toBe(0);
+    expect(events.map((e) => e.type)).not.toContain("resource.spilled");
+    expect(await Bun.file(path.join(workspace, "resources/audience-private.txt")).exists()).toBe(
+      false,
+    );
+    expect(raw.structuredContent).toBeDefined();
+  });
+
   it("ends a call its plan refuses without reaching the server", async () => {
     const { tool, calls, events } = forward(text("unused"), {
       plan: async () => ({ error: "no such file" }),

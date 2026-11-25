@@ -16,6 +16,7 @@ import { buildDownloadHeaders } from "@appstrate/core/integrity";
 import { eq, and } from "drizzle-orm";
 import { packages } from "@appstrate/db/schema";
 import { db } from "@appstrate/db/client";
+import { parseStrictQuery } from "../lib/list-query.ts";
 import { listResponse } from "@appstrate/core/list-query";
 import { postInstallPackage } from "../services/post-install-package.ts";
 import { bundleImportAuditRecords, handleImportBundle } from "../services/bundle-import.ts";
@@ -23,9 +24,11 @@ import { assertImportedType, readExpectedImportType } from "../lib/import-type.t
 import {
   activatePackage,
   activatePackageWithin,
+  activationWarnings,
   assertHasPublishedVersion,
 } from "../services/space-packages.ts";
 import { listPackageShares, revokePackageShare, sharePackage } from "../services/package-shares.ts";
+import { offerPackageToOrg, withdrawOrgOffer } from "../services/package-org-offers.ts";
 import { reconcilePlacementsAfterRehome } from "../services/package-placement.ts";
 import { removeScheduleJobs } from "../services/scheduler.ts";
 import { ensurePersonalSpaceFor, findPersonalSpace } from "../services/spaces.ts";
@@ -79,6 +82,7 @@ import {
   deletePackageVersion,
 } from "../services/package-versions.ts";
 import { agentDetailHandler, buildAgentDetailDto } from "./agent-detail-handler.ts";
+import { packageAvailabilityIn } from "../services/package-library.ts";
 import { readJsonBody } from "@appstrate/core/request-body";
 import { rateLimit } from "../middleware/rate-limit.ts";
 import { VERSION_SELECTOR_DRAFT } from "../services/agent-version-resolver.ts";
@@ -92,6 +96,8 @@ import {
   authorizeBundlePackages,
   assertExistingPackageActivationAccess,
   assertPackageMutationAccess,
+  assertPackageShareAccessForPlacement,
+  assertPackageOfferAccess,
   assertPackageShareAccess,
   assertPlacementRemovalAccess,
   callerPlacementAuthority,
@@ -99,6 +105,7 @@ import {
   homeWireForCaller,
   isPackageReadableInSpace,
   packageAccessSpaces,
+  placementAccessSpaces,
   packageDetailSpaces,
   holdsHomeAuthority,
   requireAgentRead,
@@ -401,10 +408,7 @@ export const createVersionBodySchema = z.object({ version: z.string().min(1).opt
  * never be mistaken for the draft editor: the draft is `PATCH`, under its
  * `If-Match`.
  *
- * The id is SHAPE-CHECKED, like every other space id arriving in a body
- * (`lib/space-role-assignment.ts`): a retired `app_` spelling resolves to no
- * space, and without the refinement this route reports that as "space not
- * found" — the silence `SPACE_ID_RE` exists to end.
+ * Validate the destination ID before resolving access to the space.
  */
 export const packageHomeSpaceSchema = z
   .object({
@@ -896,8 +900,15 @@ function makeGetHandler(rcfg: PackageRouteConfig) {
     if (!detail) {
       throw notFound(`${rcfg.cfg.labelSingular} '${itemId}' not found`);
     }
+    // `availability`: the library's projection for this space, never a second computation.
+    const availability = await packageAvailabilityIn(
+      c,
+      itemId,
+      spaceId,
+      packagePermission(rcfg.cfg.type, "read"),
+    );
 
-    return sendPackageDetail(c, detail);
+    return sendPackageDetail(c, { ...detail, body: { ...detail.body, availability } });
   };
 }
 
@@ -1681,16 +1692,16 @@ export function createPackagesRouter() {
   // paths. Registered before the per-type routes all the same, so a literal
   // segment always comes first.
   const readSkills = requirePermission("skills", "read");
+  const servedQuery = z.strictObject({
+    definition: z.enum(["published", "draft"]).default("published"),
+  });
+  const archiveQuery = z.strictObject({ uri: z.string().min(1) });
   router.get("/skills/served", rateLimit(50), readSkills, async (c) => {
-    const definition = c.req.query("definition") ?? "published";
-    if (definition !== "published" && definition !== "draft") {
-      throw invalidRequest("`definition` must be `published` or `draft`", "definition");
-    }
+    const { definition } = parseStrictQuery(c, servedQuery);
     return c.json(listResponse(await requestServedSkills(c).list(definition)));
   });
   router.get("/skills/served/archive", rateLimit(50), readSkills, async (c) => {
-    const uri = c.req.query("uri");
-    if (!uri) throw invalidRequest("The `uri` query parameter is required", "uri");
+    const { uri } = parseStrictQuery(c, archiveQuery);
     const files = await requestServedSkills(c).skillFiles(uri);
     if (!files) throw notFound(`No skill readable at ${uri}`);
     return new Response(new Uint8Array(zipArtifact(files)), {
@@ -2058,9 +2069,10 @@ export function createPackagesRouter() {
   router.post(`/${SCOPED_PACKAGE_ROUTE}/shares`, async (c) => {
     const packageId = getItemId(c);
     const orgId = c.get("orgId");
-    const accessible = await packageAccessSpaces(c);
+    // Home and target are two spaces of one act: the credential's reach, not the call's.
+    const accessible = await placementAccessSpaces(c);
     // Authority before the body is read.
-    const pkg = await assertPackageShareAccess(c, packageId);
+    const pkg = await assertPackageShareAccessForPlacement(c, packageId);
     const { target } = await readJsonBody(c, shareTargetSchema);
 
     let spaceId: string;
@@ -2107,7 +2119,9 @@ export function createPackagesRouter() {
       packageId,
       spaceId,
       orgId,
-      placeAs: await callerPlacementAuthority(c, pkg.type),
+      placeAs: await callerPlacementAuthority(c, pkg, {
+        visibleSpaceId: target.kind === "space" ? spaceId : null,
+      }),
       enabled,
     });
     if (created) {
@@ -2155,7 +2169,13 @@ export function createPackagesRouter() {
       logger.error("Share could not be re-read", { packageId, spaceId, orgId });
       throw internalError();
     }
-    return c.json({ object: "package_share", ...view }, 201);
+    // `warnings` only where this caller may activate AND the row is ON: a stored ON state
+    // set by the recipient must not leak their personal space's integration state (§3.6).
+    const warnings =
+      enabled && view.enabled
+        ? await activationWarnings({ orgId, spaceId }, packageId, pkg.type)
+        : [];
+    return c.json({ object: "package_share", ...view, warnings }, 201);
   });
 
   router.get(`/${SCOPED_PACKAGE_ROUTE}/shares`, async (c) => {
@@ -2181,7 +2201,7 @@ export function createPackagesRouter() {
       assertSpaceId(target, "target");
       spaceId = target;
       // The caller's own personal space is audited as its owner, like a `user` target.
-      const own = (await packageAccessSpaces(c)).find(
+      const own = (await placementAccessSpaces(c)).find(
         (space) => space.id === target && space.ownerUserId !== null,
       );
       if (own) recipientUserId = own.ownerUserId;
@@ -2191,7 +2211,7 @@ export function createPackagesRouter() {
         throw forbidden("A credential confined to spaces cannot address a person");
       }
       // Home authority is asked before the directory read: no membership leak.
-      if (target !== ownerId) await assertPackageShareAccess(c, packageId);
+      if (target !== ownerId) await assertPackageShareAccessForPlacement(c, packageId);
       const membership = await getOrgMember(orgId, target);
       if (!membership) throw notFound(`User '${target}' not found in this organization`);
       // Read-only: a revoke must not create the personal space.
@@ -2201,7 +2221,12 @@ export function createPackagesRouter() {
       recipientUserId = target;
     }
 
-    const { authorityFor } = await assertPlacementRemovalAccess(c, packageId, spaceId);
+    const { authorityFor } = await assertPlacementRemovalAccess(
+      c,
+      packageId,
+      spaceId,
+      target.startsWith("spc_") ? "space" : "user",
+    );
     const { authority, disabledScheduleIds } = await revokePackageShare({
       packageId,
       spaceId,
@@ -2223,6 +2248,56 @@ export function createPackagesRouter() {
         ...(disabledScheduleIds.length > 0 ? { disabledScheduleIds } : {}),
       },
     });
+    return c.body(null, 204);
+  });
+
+  // --- Offer to the organization (RBAC spec §6.10) ---
+  //
+  // An owner/admin session, plus `<type>:share` in the home of a homed package
+  // (`assertPackageOfferAccess`). Both verbs are idempotent.
+
+  router.put(`/${SCOPED_PACKAGE_ROUTE}/org-offer`, async (c) => {
+    const packageId = getItemId(c);
+    const orgId = c.get("orgId");
+    const { authorizeHome } = await assertPackageOfferAccess(c, packageId);
+    const { created } = await offerPackageToOrg({
+      orgId,
+      packageId,
+      offeredBy: c.get("user").id,
+      authorizeHome,
+    });
+    if (created) {
+      await recordAuditFromContext(c, {
+        action: "package.offered_to_org",
+        resourceType: "package",
+        resourceId: packageId,
+        after: { orgId },
+      });
+    }
+    return c.json({ object: "package_org_offer", packageId, offered_to_org: true });
+  });
+
+  router.delete(`/${SCOPED_PACKAGE_ROUTE}/org-offer`, async (c) => {
+    const packageId = getItemId(c);
+    const orgId = c.get("orgId");
+    const { authorizeHome } = await assertPackageOfferAccess(c, packageId);
+    const { removed, disabledScheduleIds } = await withdrawOrgOffer({
+      orgId,
+      packageId,
+      authorizeHome,
+    });
+    await removeScheduleJobs(disabledScheduleIds);
+    if (removed) {
+      await recordAuditFromContext(c, {
+        action: "package.offer_withdrawn",
+        resourceType: "package",
+        resourceId: packageId,
+        after: {
+          orgId,
+          ...(disabledScheduleIds.length > 0 ? { disabledScheduleIds } : {}),
+        },
+      });
+    }
     return c.body(null, 204);
   });
 
@@ -2450,11 +2525,15 @@ export function createPackagesRouter() {
     // placement rule is satisfied and the upsert cannot conflict. WARN so a
     // silent non-activation is still visible.
     const spaceId = c.get("spaceId");
-    if (spaceId) {
-      await activatePackage({ orgId, spaceId }, packageId).catch((e: unknown) =>
-        logger.warn("auto-activation skipped", { packageId, spaceId, err: getErrorMessage(e) }),
-      );
-    }
+    const activated =
+      !!spaceId &&
+      (await activatePackage({ orgId, spaceId }, packageId).then(
+        () => true,
+        (e: unknown) => {
+          logger.warn("auto-activation skipped", { packageId, spaceId, err: getErrorMessage(e) });
+          return false;
+        },
+      ));
 
     logger.info("Package imported", { packageId, type: packageType, orgId });
     await recordAuditFromContext(c, {
@@ -2475,10 +2554,15 @@ export function createPackagesRouter() {
     // No retired-dependency-key warning here, unlike the bundle path: this
     // route parses through `parseZipWithSkillFallback`, which rejects them
     // outright, so such a manifest is a 400 long before this line.
+    // And, for an agent now on here, each declared integration not active in the space.
     const importWarnings = [
       ...collectMetaWarnings(manifest),
       ...collectAgentImportWarnings(manifest),
       ...collectLoginCriteriaWarnings(manifest),
+      ...(activated
+        ? await activationWarnings({ orgId, spaceId }, packageId, packageType)
+        : []
+      ).map((w) => w.message),
     ];
     return c.json(
       {
@@ -2525,7 +2609,7 @@ export function createPackagesRouter() {
         // A root that already lives in another space is placed here by the same
         // rule as any activation: through the placement door, when this caller
         // holds the share authority.
-        (packageId) => heldPlacementAuthority(c, packageId),
+        (packageId) => heldPlacementAuthority(c, packageId, spaceId),
         expectedType,
       );
     } catch (err) {

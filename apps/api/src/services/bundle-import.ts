@@ -43,6 +43,7 @@ import { parsePackageZip } from "@appstrate/core/zip";
 import { db } from "@appstrate/db/client";
 import { packages, packageVersions } from "@appstrate/db/schema";
 import { and, eq, notExists, sql } from "drizzle-orm";
+import { isPackageReadableInSpace } from "../lib/package-access.ts";
 import { conflict, invalidRequest, validationFailed } from "../lib/errors.ts";
 import type { ValidationFieldError } from "../lib/errors.ts";
 import {
@@ -63,7 +64,7 @@ import { assertVersionNotLower, findHigherPublishedVersion } from "./package-ver
 import { packageStorageDeletionJobs } from "./package-storage-deletion.ts";
 import { enqueueStorageDeletion } from "./storage-deletion.ts";
 import { buildBundleFromUploadedAfps, type BundleAssemblyScope } from "./bundle-assembly.ts";
-import { activatePackage, type PlacementAuthority } from "./space-packages.ts";
+import { activatePackage, activationWarnings, type PlacementAuthority } from "./space-packages.ts";
 import { downloadVersionZip } from "./package-storage.ts";
 import { logger } from "../lib/logger.ts";
 import {
@@ -604,7 +605,8 @@ export async function importBundle(
   // `activatePackage` refuses and the result says `root_active: false`.
   let rootActive = false;
   try {
-    const placeAs = await placeRootAs(rootParsed.packageId);
+    const alreadyPlaced = await isPackageReadableInSpace(scope.spaceId, rootParsed.packageId);
+    const placeAs = alreadyPlaced ? null : await placeRootAs(rootParsed.packageId);
     await activatePackage(scope, rootParsed.packageId, placeAs ? { placeAs } : undefined);
     rootActive = true;
   } catch (err) {
@@ -614,6 +616,14 @@ export async function importBundle(
       spaceId: scope.spaceId,
       err: getErrorMessage(err),
     });
+  }
+
+  // An agent root now on here: each declared integration it would run without, or be refused on.
+  if (rootActive) {
+    const rootType = bundleRootType(bundle);
+    for (const w of await activationWarnings(scope, rootParsed.packageId, rootType)) {
+      warnings.push(`${bundle.root}: ${w.message}`);
+    }
   }
 
   return {

@@ -9,6 +9,7 @@ import { auditSpaceAssignments, spaceAssignmentSchema } from "../lib/space-role-
 import { listCallerOrganizations } from "../lib/principal-permissions.ts";
 import { callerReachableSpaces } from "../lib/reachable-spaces.ts";
 import { isUserPrincipal } from "../lib/principal.ts";
+import { credentialAdmitsSpace } from "../lib/view-as.ts";
 import {
   createOrganization,
   getOrgById,
@@ -18,9 +19,9 @@ import {
   getOrgMembers,
   getOrgMemberWithProfile,
   leaveOrganization,
+  memberDepartureImpact,
   removeMember,
   updateMemberRole,
-  isSlugAvailable,
   getOrgSettings,
   updateOrgSettings,
   orgSettingsPatchSchema,
@@ -80,21 +81,13 @@ export const updateOrgSchema = z
  * the platform owns (`isReservedScope`) nor another organization's. Checked on
  * create and on rename — the only two doors that write a slug.
  */
-async function assertSlugClaimable(slug: string): Promise<void> {
+function assertSlugNotReserved(slug: string): void {
   if (isReservedScope(slug)) {
     throw new ApiError({
       status: 400,
       code: "slug_reserved",
       title: "Bad Request",
       detail: `Slug '${slug}' is reserved by the platform`,
-    });
-  }
-  if (!(await isSlugAvailable(slug))) {
-    throw new ApiError({
-      status: 400,
-      code: "slug_taken",
-      title: "Bad Request",
-      detail: `Slug '${slug}' is already in use`,
     });
   }
 }
@@ -175,7 +168,7 @@ router.post("/", async (c) => {
     throw invalidRequest("Invalid slug (kebab-case required)");
   }
 
-  await assertSlugClaimable(slug);
+  assertSlugNotReserved(slug);
 
   const org = await createOrganization(data.name.trim(), slug, user.id);
 
@@ -315,7 +308,7 @@ router.patch("/:orgId", requirePermission("org", "update"), async (c) => {
   const orgId = c.req.param("orgId")!;
   const data = await readJsonBody(c, updateOrgSchema);
 
-  if (data.slug) await assertSlugClaimable(data.slug);
+  if (data.slug) assertSlugNotReserved(data.slug);
 
   const updates = {
     ...(data.name?.trim() ? { name: data.name.trim() } : {}),
@@ -530,6 +523,23 @@ router.patch(
   },
 );
 
+// GET /api/orgs/:orgId/members/:userId/departure-impact — what the removal would stop
+// Same guard and same per-target rule as the DELETE below: a preview of an act the
+// caller may not perform is refused the same way.
+router.get(
+  "/:orgId/members/:userId/departure-impact",
+  requirePermission("members", "remove"),
+  async (c) => {
+    const items = await memberDepartureImpact(
+      c.req.param("orgId")!,
+      c.req.param("userId")!,
+      memberActor(c),
+    );
+    // A confined credential sees nothing of the spaces it may not name, as `GET /api/spaces`.
+    return c.json(listResponse(items.filter((item) => credentialAdmitsSpace(c, item.space.id))));
+  },
+);
+
 // DELETE /api/orgs/:orgId/members/:userId — remove a member (admin+)
 // The guard answers "may remove members at all"; the target's
 // row, read by the service under lock, answers "may remove THIS one".
@@ -690,6 +700,8 @@ router.patch("/:orgId/settings", requirePermission("org", "settings"), async (c)
       apiVersion: data.api_version,
       dashboardSsoEnabled: data.dashboard_sso_enabled,
       restrictPackageCopy: data.restrict_package_copy,
+      personalModelCredentials: data.personal_model_credentials,
+      personalSpaceRole: data.personal_space_role,
     },
     orgIdOverride: orgId,
   });

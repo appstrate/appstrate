@@ -877,8 +877,8 @@ export function LogEntryInspector({
         <h2 className="min-w-0 flex-1 truncate text-sm font-semibold">{t("log.inspectorTitle")}</h2>
         <Button
           variant="ghost"
-          size="icon"
-          className="text-muted-foreground size-7"
+          size="icon-sm"
+          className="text-muted-foreground desktop-pointer:size-7"
           onClick={onClose}
           aria-label={t("common:btn.close")}
         >

@@ -2,7 +2,9 @@
 
 import {
   MODEL_ERROR_RETRYABLE_BY_CATEGORY,
+  modelErrorReason,
   type ModelErrorCategory,
+  type ModelErrorReason,
 } from "@appstrate/core/model-error";
 import type { z } from "zod";
 import type { ModelCost, ModelInputModality } from "@appstrate/core/module";
@@ -35,7 +37,6 @@ export type {
   ConsumingAgentSummary,
   IntegrationAgentResolution,
   IntegrationAuthStatus,
-  IntegrationAuthType,
   IntegrationCandidate,
   IntegrationConnection,
   IntegrationManifestAuth,
@@ -83,6 +84,8 @@ import type { PricingStatus as _PricingStatus } from "@appstrate/db/pricing-stat
  */
 /** A model-call failure as a run carries it on the wire. */
 export interface RunModelError {
+  /** Stable reason named by the provider in the terminal refusal, when present. */
+  reason?: ModelErrorReason;
   category: ModelErrorCategory;
   /** Whether a new attempt, unchanged, might succeed — derived from `category`. */
   retryable: boolean;
@@ -94,12 +97,15 @@ export interface RunModelError {
 
 /** The one projection of the `model_error_*` columns onto {@link RunModelError}. */
 export function runModelErrorWire(columns: {
+  terminalError?: string | null;
   category: ModelErrorCategory | null;
   status: number | null;
   message: string | null;
 }): RunModelError | null {
   if (!columns.category) return null;
+  const reason = columns.terminalError ? modelErrorReason(columns.terminalError) : undefined;
   return {
+    ...(reason && { reason }),
     category: columns.category,
     retryable: MODEL_ERROR_RETRYABLE_BY_CATEGORY[columns.category],
     status: columns.status,
@@ -535,6 +541,8 @@ export interface MeConnectionEntry {
   allowed_actions: ConnectionAction[];
   /** Spaces the caller may share this connection into. */
   shareable_spaces: { id: string; name: string }[];
+  /** The space its renewal is started in; `null` exactly when `reconnect` is not allowed. */
+  reconnect_space_id: string | null;
   /** What binds it for the whole space; while set, unshare and delete answer 409. */
   locked_by: "admin_pin" | "org_default" | null;
   /** Distinct agents declaring this integration, run where it serves: owner's spaces and shares. */
@@ -575,6 +583,18 @@ export interface BasePackageListItem {
   forked_from?: string | null;
 }
 
+/** One integration an agent of the index uses, named and drawn from its pinned manifest. */
+export interface AgentListIntegration {
+  id: string;
+  /** The manifest's `display_name`, the id when it declares none. */
+  name: string;
+  /** The manifest's `icon`, `null` when it declares none. */
+  icon: string | null;
+  required: boolean;
+  /** Declares `auths`; `false` for an unauthenticated integration, which binds no connection. */
+  authenticated: boolean;
+}
+
 export interface AgentListItem extends BasePackageListItem {
   /** The spaces of the index where the agent is active, its home first when it is one of them, then in the order of the space listing. */
   space_ids: string[];
@@ -593,6 +613,10 @@ export interface AgentListItem extends BasePackageListItem {
     skills?: Record<string, string>;
     integrations: Record<string, string>;
   };
+  /** The integrations a launch with `version` omitted uses (inert ones, and on a single-space index optional inactive ones, left out). */
+  integrations: AgentListIntegration[];
+  /** Required integrations not active in the space (they refuse the launch); single-space index only. */
+  inactive_required_integrations?: string[];
   running_runs: number;
   /** Runs of this agent the caller has not read yet (per recipient, like a schedule's). */
   unread_count: number;
@@ -601,6 +625,22 @@ export interface AgentListItem extends BasePackageListItem {
   type: PackageType;
   /** Always emitted by the agent-list mapper (`@scope` or null). */
   scope: string | null;
+}
+
+/**
+ * What the library says about one package in the space a detail was read from:
+ * why it is placed there (`via`), whether the space runs it (`state`), who
+ * shared it, and the organization offer. A projection of the library's cell,
+ * never a second computation (`packageAvailabilityIn`).
+ */
+export interface PackageAvailability {
+  via: "home" | "shared" | "system" | "organization";
+  state: "active" | "inactive" | "none";
+  shared_by: { user_id: string; name: string } | null;
+  offered_to_org: boolean;
+  org_offerable: boolean;
+  /** A system package the deployment activates in every space: it takes no offer. */
+  active_by_default: boolean;
 }
 
 export interface AgentDetail {
@@ -745,6 +785,8 @@ export interface AgentDetail {
    * answer there would only ever be `true`.
    */
   active: boolean;
+  /** `GET` only; a summary read and a write's echo omit it. */
+  availability?: PackageAvailability;
   /**
    * The spaces the caller reaches where the agent is active, as its row of the
    * org agent index names them: its home first when it is one of them, then in
@@ -856,6 +898,8 @@ export interface OrgPackageItemDetail extends Omit<
    */
   definition: "draft" | "published";
   read_space_ids: string[];
+  /** `GET` only; a write's echo omits it. */
+  availability?: PackageAvailability;
   /**
    * Present but nullable — the `draft_content` column is nullable, and a
    * published projection reads the archive entry this type is authored around.
@@ -1155,6 +1199,8 @@ export interface ModelProviderCredentialInfo {
   allowed_actions: ModelProviderCredentialAction[];
   /** Whether an organization model may be bound to this credential: `true` for an organization one (API key or subscription), `false` for a personal or a built-in one. */
   bindable: boolean;
+  /** Organization model rows referencing this credential, including disabled models. A positive count prevents deletion. */
+  referencing_model_count: number;
   /**
    * On a personal credential, the organization models left to members' own credentials that it
    * pays for (`servesModel`: the same service, or a subscription offering the model on its
@@ -1285,7 +1331,7 @@ export interface SpaceInfo {
   default_role: "admin" | "builder" | "operator" | "viewer";
   /**
    * Whether members may use the space's connections through the credential proxy outside a
-   * run (REST without `X-Run-Id`, MCP `search_integration_tools` /
+   * run (REST without `X-Run-Id`, MCP `search` / `describe` of integration tools and
    * `call_integration_tool`). `false` closes that
    * door for every role; runs keep their connections. Always `true` on a personal space.
    */

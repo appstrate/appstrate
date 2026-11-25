@@ -13,6 +13,7 @@
  * the injected `fetch` (the credential proxy) or in static headers.
  */
 
+import { boundResourceResponse } from "./resource-response.ts";
 import type { Client as LegacyClient } from "@modelcontextprotocol/sdk/client/index.js";
 import {
   Client as DualEraClient,
@@ -28,12 +29,16 @@ import type { SkillEntry, SkillResource } from "@appstrate/core/skill-uri";
 import { readToolListPage } from "./tool-list.ts";
 import {
   ErrorCode,
+  GetPromptResultSchema,
+  ListPromptsResultSchema,
   ListToolsResultSchema,
   McpError,
   ResultSchema,
   type CallToolResult,
+  type GetPromptResult,
   type Implementation,
   type Progress,
+  type Prompt,
   type ReadResourceResult,
   type ServerCapabilities,
   type Tool,
@@ -161,12 +166,22 @@ export interface AppstrateMcpClient {
   /**
    * Every `skills/list` page of the Skills extension (SEP-2640), `meta` sent as each request's
    * `_meta` (a provider parameter). Throws, with no partial list, on an answer that is not a list
-   * of entries, a server repeating its cursor, or one still paginating past {@link MAX_SKILL_PAGES}.
+   * of entries, a server repeating its cursor, or one still paginating past {@link MAX_LIST_PAGES}.
    */
   listSkills(options?: {
     meta?: Record<string, unknown>;
     signal?: AbortSignal;
   }): Promise<{ skills: ListedSkillEntry[] }>;
+  /**
+   * Every `prompts/list` page. Throws, with no partial list, on a malformed page, a server
+   * repeating its cursor, or one still paginating past {@link MAX_LIST_PAGES}.
+   */
+  listPrompts(options?: { signal?: AbortSignal }): Promise<{ prompts: Prompt[] }>;
+  /** One `prompts/get`: a name the server does not serve is its `-32602` error. */
+  getPrompt(
+    args: { name: string; arguments?: Record<string, string> },
+    options?: { signal?: AbortSignal },
+  ): Promise<GetPromptResult>;
   close(): Promise<void>;
 }
 
@@ -289,7 +304,11 @@ async function connectAttempt(
     const method = postedMethod(init);
     if (method !== undefined && method !== "server/discover") pastProbe = true;
     try {
-      return await baseFetch(input, init);
+      const response = await baseFetch(input, init);
+      if (method === "resources/read") return boundResourceResponse(response, "request");
+      if ((init?.method ?? "GET") === "GET")
+        return boundResourceResponse(response, "shared-stream");
+      return response;
     } catch (err) {
       if (typeof err === "object" && err !== null) injectedFetchFaults.add(err);
       throw err;
@@ -336,9 +355,18 @@ function isInconclusiveProbe(err: unknown): boolean {
   return isRequestTimeout(err);
 }
 
+/** A server-authored JSON-RPC failure in either supported protocol era. */
+export function isMcpProtocolError(err: unknown): err is McpError | ProtocolError {
+  return err instanceof McpError || err instanceof ProtocolError;
+}
+
 /** The SDK gave up waiting for an answer: its own timeout, or the request's signal aborting. */
 export function isRequestTimeout(err: unknown): boolean {
-  return err instanceof SdkError && err.code === SdkErrorCode.RequestTimeout;
+  return (
+    (err instanceof SdkError && err.code === SdkErrorCode.RequestTimeout) ||
+    (err instanceof McpError && err.code === ErrorCode.RequestTimeout) ||
+    err instanceof McpConnectDeadlineError
+  );
 }
 
 /** A 401/403: the credential's verdict, which no other era would change. */
@@ -550,6 +578,8 @@ function isFatalConnectError(err: unknown): boolean {
   return true;
 }
 
+class McpConnectDeadlineError extends Error {}
+
 function buildDeadlineExceededError(
   deadlineMs: number,
   lastError: unknown,
@@ -557,7 +587,7 @@ function buildDeadlineExceededError(
 ): Error {
   const lastMsg = lastError instanceof Error ? lastError.message : String(lastError);
   const codeHint = lastErrorCode ? ` ${lastErrorCode}` : "";
-  const err = new Error(
+  const err = new McpConnectDeadlineError(
     `MCP connect deadline exceeded after ${deadlineMs}ms (last error:${codeHint} ${lastMsg})`,
   );
   (err as { cause?: unknown }).cause = lastError;
@@ -632,7 +662,8 @@ export type ListedSkillEntry = Omit<SkillEntry, "resources"> & {
   resources: SkillResource[] | "dynamic";
 };
 
-const MAX_SKILL_PAGES = 64;
+/** Ceiling on the pages of one paginated list (`skills/list`, `prompts/list`). */
+const MAX_LIST_PAGES = 64;
 
 function isSkillEntry(value: unknown): value is ListedSkillEntry {
   const entry = value as Partial<ListedSkillEntry> | null;
@@ -654,7 +685,7 @@ function isSkillEntry(value: unknown): value is ListedSkillEntry {
 }
 
 /** One `skills/list` page; any malformed entry fails the whole list. */
-function readSkillPage(raw: unknown): { skills: ListedSkillEntry[]; nextCursor?: string } {
+function readSkillPage(raw: unknown): { items: ListedSkillEntry[]; nextCursor?: string } {
   const page = raw as { skills?: unknown; nextCursor?: unknown } | null;
   const skills = page?.skills;
   if (!Array.isArray(skills)) throw new Error("skills/list answered without a `skills` array");
@@ -663,10 +694,14 @@ function readSkillPage(raw: unknown): { skills: ListedSkillEntry[]; nextCursor?:
   if (page?.nextCursor !== undefined && typeof page.nextCursor !== "string") {
     throw new Error("skills/list answered a `nextCursor` that is not a string");
   }
-  return {
-    skills: skills as ListedSkillEntry[],
-    ...(page?.nextCursor === undefined ? {} : { nextCursor: page.nextCursor }),
-  };
+  return { items: skills as ListedSkillEntry[], nextCursor: page?.nextCursor };
+}
+
+/** One `prompts/list` page. */
+function readPromptPage(raw: unknown): { items: Prompt[]; nextCursor?: string } {
+  const page = ListPromptsResultSchema.safeParse(raw);
+  if (!page.success) throw new Error("prompts/list answered a page that is not a prompt list");
+  return { items: page.data.prompts, nextCursor: page.data.nextCursor };
 }
 
 /** MCP 2026-07-28 `HeaderMismatch`. */
@@ -742,7 +777,12 @@ function dualEraSession(
       }
     },
     async readResource(args, options) {
-      return (await client.readResource(args, options)) as ReadResourceResult;
+      // The SDK cache bounds entry count, not bytes. Retaining resource bodies across calls
+      // would bypass the read budget even when only one upstream request is active.
+      return (await client.readResource(args, {
+        ...options,
+        cacheMode: "bypass",
+      })) as ReadResourceResult;
     },
     // The SDK sends a method outside the spec only with a result schema.
     request: (method, params, options) => client.request({ method, params }, ResultSchema, options),
@@ -798,6 +838,36 @@ function buildClient(
 ): AppstrateMcpClient {
   let closed = false;
   const signalOption = (signal: AbortSignal | undefined) => (signal ? { signal } : {});
+  const requestOptions = (signal: AbortSignal | undefined) => ({
+    ...signalOption(signal),
+    ...(defaultTimeoutMs ? { timeout: defaultTimeoutMs } : {}),
+  });
+  /** Every page of a cursor-paginated list; `method` names the list in its errors. */
+  const listAll = async <T>(
+    method: string,
+    params: Record<string, unknown>,
+    signal: AbortSignal | undefined,
+    readPage: (raw: unknown) => { items: T[]; nextCursor?: string | undefined },
+  ): Promise<T[]> => {
+    const items: T[] = [];
+    let cursor: string | undefined;
+    for (let n = 0; n < MAX_LIST_PAGES; n++) {
+      const page = readPage(
+        await session.request(
+          method,
+          { ...(cursor === undefined ? {} : { cursor }), ...params },
+          requestOptions(signal),
+        ),
+      );
+      items.push(...page.items);
+      if (page.nextCursor === undefined) return items;
+      if (page.nextCursor === cursor) {
+        throw new Error(`${method} repeated its cursor '${cursor}': the listing would never end`);
+      }
+      cursor = page.nextCursor;
+    }
+    throw new Error(`${method} did not end within ${MAX_LIST_PAGES} pages`);
+  };
   // The v2 SDK answers a request on a closed client with an empty list: a closed client must
   // fail its calls, never read as a server without tools.
   const live = () => {
@@ -862,32 +932,26 @@ function buildClient(
     },
     async listSkills(options) {
       live();
-      const skills: ListedSkillEntry[] = [];
-      let cursor: string | undefined;
-      for (let n = 0; n < MAX_SKILL_PAGES; n++) {
-        const page = readSkillPage(
-          await session.request(
-            "skills/list",
-            {
-              ...(cursor === undefined ? {} : { cursor }),
-              ...(options?.meta ? { _meta: options.meta } : {}),
-            },
-            {
-              ...signalOption(options?.signal),
-              ...(defaultTimeoutMs ? { timeout: defaultTimeoutMs } : {}),
-            },
-          ),
-        );
-        skills.push(...page.skills);
-        if (page.nextCursor === undefined) return { skills };
-        if (page.nextCursor === cursor) {
-          throw new Error(
-            `skills/list repeated its cursor '${cursor}': the listing would never end`,
-          );
-        }
-        cursor = page.nextCursor;
-      }
-      throw new Error(`skills/list did not end within ${MAX_SKILL_PAGES} pages`);
+      const skills = await listAll<ListedSkillEntry>(
+        "skills/list",
+        options?.meta ? { _meta: options.meta } : {},
+        options?.signal,
+        readSkillPage,
+      );
+      return { skills };
+    },
+    async listPrompts(options) {
+      live();
+      return {
+        prompts: await listAll<Prompt>("prompts/list", {}, options?.signal, readPromptPage),
+      };
+    },
+    async getPrompt(args, options) {
+      live();
+      const raw = await session.request("prompts/get", args, requestOptions(options?.signal));
+      const result = GetPromptResultSchema.safeParse(raw);
+      if (!result.success) throw new Error("prompts/get answered a result that is not a prompt");
+      return result.data;
     },
     async close() {
       if (closed) return;

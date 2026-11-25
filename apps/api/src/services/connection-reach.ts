@@ -13,6 +13,7 @@
 import { and, asc, eq, isNull, not, or, sql, type SQL, type SQLWrapper } from "drizzle-orm";
 import type { ConnectionAction } from "@appstrate/shared-types";
 import type { OrgRole } from "@appstrate/core/permissions";
+import { displayAccountId } from "@appstrate/core/integration";
 import {
   integrationConnectionShares as shares,
   integrationConnections as c,
@@ -20,7 +21,12 @@ import {
   spaces,
 } from "@appstrate/db/schema";
 import { actorFilter, actorOwns, type Actor } from "../lib/actor.ts";
-import { boundSpacesOf, type ConnectionPrincipal } from "../lib/connection-principal.ts";
+import {
+  boundSpacesOf,
+  reconnectScopeAllows,
+  writesDelegated,
+  type ConnectionPrincipal,
+} from "../lib/connection-principal.ts";
 import type { Permission } from "../lib/permissions.ts";
 
 function orgOf(spaceId: string): SQL {
@@ -127,7 +133,7 @@ export function withinSpaces(
 export interface SpaceSeen {
   id: string;
   name: string;
-  permissions: ReadonlySet<Permission>;
+  permissions: ReadonlySet<string>;
 }
 
 /** Who acts on connections, from where, and what they hold: every connection surface's one caller. */
@@ -146,7 +152,7 @@ export interface ConnectionCaller {
   /** The caller's permissions in one space of `orgId` (empty outside it). */
   permissionsIn: (spaceId: string, orgId: string) => Promise<ReadonlySet<Permission>>;
   /** Every space of `orgId` the caller sees under its role `orgRole` there, in one read. */
-  spacesSeen: (orgId: string, orgRole: OrgRole) => Promise<SpaceSeen[]>;
+  spacesSeen: (orgId: string, orgRole: OrgRole | undefined) => Promise<SpaceSeen[]>;
 }
 
 /** Where the owner may share: `integrations:connect` there; `configures` also holds `configure`. */
@@ -175,9 +181,20 @@ export function shareableIn(t: ShareTargets): SQL<string[]> {
  * the whole org) and shares a member's row;
  * a governor of the request space renames a colleague's row scoped to it and withdraws one shared
  * into it. Sharing is the owner's consent: a governor never shares.
+ *
+ * `reconnect` is the owner's too, whatever the row's health: renewing in place is refused unless
+ * the stored account is identified (`persistCredentialBundle`), so an identity-less row never holds
+ * it. The account surface acts from no space: it also needs one to start the renewal in
+ * (`listMeConnections`).
  */
 export function connectionActions(
-  row: { orgId: string; userId: string | null; endUserId: string | null; spaceId: string | null },
+  row: {
+    orgId: string;
+    userId: string | null;
+    endUserId: string | null;
+    spaceId: string | null;
+    accountId: string;
+  },
   caller: ConnectionCaller,
   sharedHere: boolean,
   orgRole?: OrgRole | null,
@@ -186,8 +203,15 @@ export function connectionActions(
   const actions: ConnectionAction[] = [];
   if (actorOwns(caller.principal.actor, row)) {
     const bound = boundSpacesOf(caller.principal);
-    if (bound === null || (row.spaceId !== null && bound.includes(row.spaceId)))
-      actions.push("rename");
+    const writesRow = bound === null || (row.spaceId !== null && bound.includes(row.spaceId));
+    if (writesRow) actions.push("rename");
+    if (
+      writesRow &&
+      displayAccountId(row.accountId) !== null &&
+      reconnectScopeAllows(writesDelegated(caller.principal), row.spaceId, caller.spaceId)
+    ) {
+      actions.push("reconnect");
+    }
     if (row.userId !== null) {
       actions.push("share");
       if (

@@ -139,13 +139,9 @@ export const runs = pgTable(
     modelErrorCategory: text("model_error_category").$type<ModelErrorCategory>(),
     modelErrorStatus: integer("model_error_status"),
     modelErrorMessage: text("model_error_message"),
-    // Snake-case keys: matches the wire format produced by every runner
-    // (PiRunner emits `input_tokens` / `output_tokens` / … directly from
-    // the Pi SDK), the AFPS `tokenUsageSchema` validated on ingestion in
-    // `apps/api/src/services/adapters/types.ts`, and the frontend reader
-    // in `run-execution-tab.tsx`. Do NOT rename to camelCase without a data
-    // migration and a coordinated wire-schema bump — the JSONB payloads
-    // already in production use snake_case.
+    // The persisted usage follows the snake_case wire validated by
+    // @appstrate/core/token-usage. A field rename needs a data migration and
+    // a coordinated protocol change for deployed runners.
     tokenUsage: jsonb("token_usage").$type<TokenUsage>(),
     startedAt: timestamp("started_at", { withTimezone: true }).defaultNow().notNull(),
     completedAt: timestamp("completed_at", { withTimezone: true }),
@@ -503,10 +499,6 @@ export const runLogs = pgTable(
  *   prompt on every run. When false, the row only surfaces if the agent
  *   calls `recall_memory`. Checkpoints are pinned by default; memories
  *   default to false.
- *
- * Mapping from the legacy `kind` enum (pre-0011):
- *   `kind='checkpoint'` ≡ `key='checkpoint'`, `pinned=true`.
- *   `kind='memory'`     ≡ `key IS NULL`,      `pinned=false`.
  *
  * Actor columns mirror the `runs` convention: `actor_type ∈
  * {'user', 'end_user', 'shared'}`, `actor_id` NULL iff `actor_type='shared'`.

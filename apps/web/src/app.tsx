@@ -34,6 +34,7 @@ import {
   DashboardSkeleton,
   FormPageSkeleton,
   ListPageSkeleton,
+  FileReaderSkeleton,
   NotificationDetailSkeleton,
   OverlayPanelSkeleton,
   PackageDetailSkeleton,
@@ -104,7 +105,6 @@ const NotificationDetailPage = lazyPage(
   () => import("./pages/notification-detail"),
   "NotificationDetailPage",
 );
-const SkillsPage = lazyPage(() => import("./pages/skills-page"), "SkillsPage");
 const IntegrationsPage = lazyPage(() => import("./pages/integrations-page"), "IntegrationsPage");
 const IntegrationDetailPage = lazyPage(
   () => import("./pages/integration-detail"),
@@ -174,9 +174,9 @@ const OrgSettingsEnterpriseSsoPage = lazyPage(
   () => import("./pages/org-settings/enterprise-sso"),
   "OrgSettingsEnterpriseSsoPage",
 );
-const OrgSettingsCliSessionsPage = lazyPage(
-  () => import("./pages/org-settings/cli-sessions"),
-  "OrgSettingsCliSessionsPage",
+const OrgSettingsAccessGrantsPage = lazyPage(
+  () => import("./pages/org-settings/access-grants"),
+  "OrgSettingsAccessGrantsPage",
 );
 const OrgSettingsRolesPage = lazyPage(
   () => import("./pages/org-settings/roles"),
@@ -285,7 +285,7 @@ const PAGES: Record<RoutePath, ReactNode> = {
   "/schedules": <SchedulesListPage />,
   "/schedules/:id": <ScheduleDetailPage />,
   "/notifications/:id": <NotificationDetailPage />,
-  "/skills": <SkillsPage />,
+  "/skills": <PackageIndexPage type="skill" />,
   "/skills/:scope/:name": <UnifiedPackageDetailPage type="skill" />,
   "/skills/:scope/:name/:version": <UnifiedPackageDetailPage type="skill" />,
   "/integrations": <IntegrationsPage />,
@@ -312,7 +312,7 @@ const PAGES: Record<RoutePath, ReactNode> = {
   "/org-settings/models": <OrgSettingsModelsPage />,
   "/org-settings/proxies": <OrgSettingsProxiesPage />,
   "/org-settings/oauth": <OrgSettingsOAuthPage />,
-  "/org-settings/cli-sessions": <OrgSettingsCliSessionsPage />,
+  "/org-settings/access-grants": <OrgSettingsAccessGrantsPage />,
   "/org-settings/billing": <OrgSettingsBillingPage />,
   "/org-settings/enterprise-sso": <OrgSettingsEnterpriseSsoPage />,
   // Workspace settings are scoped by `X-Space-Id`, except webhooks, which also manages the org's own (`org-webhooks:read`).
@@ -374,13 +374,13 @@ const LIST_PAGE: Partial<
 
 /** The settings pages that are a table, not rows of fields; the value says what leads the table. */
 const SETTINGS_TABLES: Partial<
-  Record<RoutePath, { toolbar?: boolean; columns?: boolean; intro?: "heading" | "hint" }>
+  Record<RoutePath, { toolbar?: boolean; columns?: boolean; intro?: "hint"; groups?: number }>
 > = {
   "/org-settings/members": { toolbar: true },
   "/org-settings/spaces": {},
   "/org-settings/proxies": {},
-  "/org-settings/cli-sessions": { intro: "heading" },
-  "/preferences/devices": { intro: "heading" },
+  "/org-settings/access-grants": { intro: "hint", groups: 2 },
+  "/preferences/devices": { intro: "hint", groups: 2 },
   "/workspace-settings/members": { toolbar: true, intro: "hint" },
   "/workspace-settings/api-keys": { toolbar: true },
   "/workspace-settings/webhooks": {},
@@ -399,6 +399,7 @@ function skeletonOf(path: RoutePath): ReactNode {
   if (path === "/agents/:scope/:name/runs/:runId") return <RunDetailSkeleton />;
   if (path === "/schedules/:id") return <ScheduleDetailSkeleton />;
   if (path === "/notifications/:id") return <NotificationDetailSkeleton />;
+  if (path === "/files/:fileId") return <FileReaderSkeleton />;
   const packageType = DETAIL_PACKAGE_TYPE.find(([prefix]) => path.startsWith(prefix))?.[1];
   if (packageType && path.includes("/:")) return <PackageDetailSkeleton type={packageType} />;
   const page = LIST_PAGE[path];
@@ -494,12 +495,11 @@ function MainLayout({ search }: { search: string }) {
           <ShellHeader />
           {/* Must stay visible on every route, permission-denied pages included. */}
           <ViewAsBanner />
-          {/* Full-bleed surfaces opt out with `data-full-bleed` on their root. */}
           <div
             className={
               product === "chat"
                 ? "flex min-h-0 min-w-0 flex-1 *:flex-1"
-                : "max-w-page px-gutter mx-auto w-full pt-8 pb-18 has-[[data-full-bleed]]:max-w-none has-[[data-full-bleed]]:p-0"
+                : "max-w-page px-gutter mx-auto w-full pt-8 pb-18"
             }
           >
             <ErrorBoundary resetKey={pathname}>

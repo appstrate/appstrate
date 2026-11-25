@@ -1,99 +1,124 @@
 // SPDX-License-Identifier: Apache-2.0
 
-/** The skill picker's data and pure rules. */
+/** The skill picker's pure rules. */
 
 import { describe, expect, it } from "bun:test";
-import { fetchSkills, skillPickerRows, togglePinned } from "../src/ui/chat-skills.ts";
-import { requestAnswering, transportOver } from "./fake-request.ts";
+import { CHAT_SKILLS_CONTENT_BUDGET_CHARS, type PinnedSkill } from "../src/skills.ts";
+import {
+  canResetSkills,
+  citedSkillIds,
+  effectiveSkills,
+  exceedsBudget,
+  loadsSkill,
+  selectionOf,
+  skillBudget,
+  skillPickerRows,
+  skillRowState,
+  withPin,
+  withSelection,
+  type StoredSkills,
+} from "../src/ui/chat-skills.ts";
 
-describe("fetchSkills", () => {
-  it("GETs the organization listing and parses its rows", async () => {
-    const request = requestAnswering(() =>
-      Response.json({
-        data: [
-          {
-            id: "@acme/tone",
-            name: "Tone",
-            description: null,
-            version: "1.2.0",
-            space_ids: ["spc_a"],
-          },
-        ],
+const pin = (
+  id: string,
+  status: PinnedSkill["status"] = "injected",
+  chars: number | null = null,
+): PinnedSkill => ({ id, status, chars });
+const stored = (pins: PinnedSkill[] = [], skillDiscovery = true): StoredSkills => ({
+  skillDiscovery,
+  pins,
+});
+
+describe("withSelection", () => {
+  it("writes the full set: kept pins keep their verdict, new ones have none, sorted", () => {
+    const base = stored([pin("@a/kept", "over_budget", 70_000), pin("@a/dropped")]);
+    expect(
+      withSelection(base, {
+        skillDiscovery: false,
+        pinnedSkills: ["@a/new", "@a/kept", "@a/new"],
       }),
-    );
-
-    const got = await fetchSkills(transportOver(request), ["spc_a"]);
-
-    expect(request.calls.map((c) => c.path)).toEqual(["/api/orgs/org_1/packages/skills"]);
-    expect(got).toEqual([
-      { packageId: "@acme/tone", display_name: "Tone", description: null, version: "1.2.0" },
-    ]);
-  });
-
-  it("keeps the skills active in a space the chat acts in", async () => {
-    const row = (id: string, ...space_ids: string[]) => ({
-      id,
-      name: id,
-      description: null,
-      version: "1.0.0",
-      space_ids,
+    ).toEqual({
+      skillDiscovery: false,
+      pins: [pin("@a/kept", "over_budget", 70_000), pin("@a/new", null)],
     });
-    const request = requestAnswering(() =>
-      Response.json({
-        data: [
-          row("@acme/a", "spc_view"),
-          row("@acme/b", "spc_other", "spc_act"),
-          row("@acme/c", "spc_act"),
-        ],
-      }),
-    );
-    const transport = transportOver(request);
-
-    const got = await fetchSkills(transport, ["spc_act"]);
-
-    expect(request.calls.map((c) => c.path)).toEqual(["/api/orgs/org_1/packages/skills"]);
-    expect(got.map((skill) => skill.packageId)).toEqual(["@acme/b", "@acme/c"]);
-    // No acting space: nothing is offered.
-    expect(await fetchSkills(transport, [])).toEqual([]);
   });
 
-  it("drops a row that lists no spaces", async () => {
-    const request = requestAnswering(() =>
-      Response.json({
-        data: [
-          { id: "@acme/a", name: "A", description: null, version: "1.0.0" },
-          { id: "@acme/b", name: "B", description: null, version: "1.0.0", space_ids: "spc_a" },
-          { id: "@acme/c", name: "C", description: null, version: "1.0.0", space_ids: ["spc_a"] },
-        ],
-      }),
-    );
-    const got = await fetchSkills(transportOver(request), ["spc_a"]);
-    expect(got.map((skill) => skill.packageId)).toEqual(["@acme/c"]);
-  });
-
-  it("throws on a refusal, as the host raised it", async () => {
-    const request = requestAnswering(() => new Response(null, { status: 403 }));
-    await expect(fetchSkills(transportOver(request), [])).rejects.toMatchObject({ status: 403 });
+  it("round-trips the server's state through its selection", () => {
+    const base = stored([pin("@a/x"), pin("@a/y", null)], false);
+    expect(withSelection(base, selectionOf(base))).toEqual(base);
   });
 });
 
-describe("togglePinned", () => {
-  it("adds and removes", () => {
-    expect(togglePinned(["@b/x"], "@a/y")).toEqual(["@b/x", "@a/y"]);
-    expect(togglePinned(["@a/y", "@b/x"], "@a/y")).toEqual(["@b/x"]);
+describe("withPin", () => {
+  it("adds a pin once, sorted, and removes one", () => {
+    const s = { skillDiscovery: true, pinnedSkills: ["@a/b"] };
+    expect(withPin(s, "@a/a", true).pinnedSkills).toEqual(["@a/a", "@a/b"]);
+    expect(withPin(s, "@a/b", true).pinnedSkills).toEqual(["@a/b"]);
+    expect(withPin(s, "@a/b", false).pinnedSkills).toEqual([]);
+  });
+});
+
+describe("skillRowState", () => {
+  const skills = stored([
+    pin("@a/mine"),
+    pin("@a/unseen", null),
+    pin("@a/big", "over_budget"),
+    pin("@a/gone", "unavailable"),
+    pin("@a/broken", "unreadable"),
+  ]);
+  const state = (id: string) => skillRowState(skills, id);
+
+  it("reads each pin as the server reported it, pending until a turn judged it", () => {
+    expect(state("@a/mine")).toEqual({ kind: "loaded" });
+    expect(state("@a/unseen")).toEqual({ kind: "pending" });
+    expect(state("@a/big")).toEqual({ kind: "refused", reason: "over_budget" });
+    expect(state("@a/gone")).toEqual({ kind: "refused", reason: "unavailable" });
+    expect(state("@a/broken")).toEqual({ kind: "refused", reason: "unreadable" });
+    expect(state("@a/other")).toEqual({ kind: "off" });
+  });
+
+  it("counts a loaded or pending pin as loaded, never a refused pin or an unpinned skill", () => {
+    expect(loadsSkill(state("@a/mine"))).toBe(true);
+    expect(loadsSkill(state("@a/unseen"))).toBe(true);
+    expect(loadsSkill(state("@a/big"))).toBe(false);
+    expect(loadsSkill(state("@a/other"))).toBe(false);
+  });
+});
+
+describe("skillBudget", () => {
+  const skills = stored([
+    pin("@a/loaded", "injected", 10_000),
+    pin("@a/new", null),
+    pin("@a/big", "over_budget", 90_000),
+  ]);
+  const catalogue = [
+    { id: "@a/new", bytes: 3_000 },
+    { id: "@a/cited", bytes: 2_000 },
+    { id: "@a/candidate", bytes: 60_000 },
+  ];
+
+  it("sums a loaded pin's chars and the listed size of a pending or cited skill, never a refused one", () => {
+    const budget = skillBudget(
+      skills,
+      effectiveSkills(["@a/loaded", "@a/new", "@a/big"], ["@a/cited"]),
+      catalogue,
+    );
+    expect(budget).toEqual({ used: 15_000, max: CHAT_SKILLS_CONTENT_BUDGET_CHARS });
+  });
+
+  it("warns before pinning a skill that would take the total past the budget", () => {
+    const budget = skillBudget(skills, effectiveSkills(["@a/loaded"], []), catalogue);
+    expect(exceedsBudget(budget, 60_000)).toBe(true);
+    expect(exceedsBudget(budget, 3_000)).toBe(false);
+    expect(exceedsBudget(budget, null)).toBe(false);
   });
 });
 
 describe("skillPickerRows", () => {
-  const tone = {
-    packageId: "@acme/tone",
-    display_name: "Tone",
-    description: null,
-    version: "1.0.0",
-  };
+  const tone = { id: "@acme/tone", name: "Tone", description: "", version: "1.0.0", bytes: 120 };
 
   it("lists the catalogue as available rows, in its order", () => {
-    const pdf = { ...tone, packageId: "@acme/pdf" };
+    const pdf = { ...tone, id: "@acme/pdf" };
     expect(skillPickerRows([tone, pdf], ["@acme/pdf"])).toEqual([
       { skill: tone, available: true },
       { skill: pdf, available: true },
@@ -103,18 +128,55 @@ describe("skillPickerRows", () => {
   it("appends every pin the catalogue no longer lists, so it can be unpinned", () => {
     expect(skillPickerRows([tone], ["@acme/gone", "@acme/tone", "@z/deleted"])).toEqual([
       { skill: tone, available: true },
-      { skill: { packageId: "@acme/gone", display_name: "gone" }, available: false },
-      { skill: { packageId: "@z/deleted", display_name: "deleted" }, available: false },
+      {
+        skill: { id: "@acme/gone", name: "gone", description: "", version: null, bytes: null },
+        available: false,
+      },
+      {
+        skill: { id: "@z/deleted", name: "deleted", description: "", version: null, bytes: null },
+        available: false,
+      },
     ]);
   });
 
   it("still lists dead pins when the catalogue is empty", () => {
     expect(skillPickerRows([], ["@acme/gone"])).toEqual([
-      { skill: { packageId: "@acme/gone", display_name: "gone" }, available: false },
+      {
+        skill: { id: "@acme/gone", name: "gone", description: "", version: null, bytes: null },
+        available: false,
+      },
     ]);
   });
 
   it("has no rows for an empty catalogue and no pins", () => {
     expect(skillPickerRows([], [])).toEqual([]);
+  });
+});
+
+const sk = (n: string) => `:skill[${n}]{name=@acme/${n}}`;
+
+describe("citedSkillIds", () => {
+  it("lists the skills a draft cites, once each, ignoring agents and plain text", () => {
+    expect(citedSkillIds(`${sk("a")} x ${sk("b")} ${sk("a")} :agent[R]{name=run-r} /c`)).toEqual([
+      "@acme/a",
+      "@acme/b",
+    ]);
+    expect(citedSkillIds("nothing")).toEqual([]);
+  });
+});
+
+describe("effectiveSkills", () => {
+  it("is pinned then cited, a skill once, with the cited flag", () => {
+    const e = effectiveSkills(["@acme/a", "@acme/b"], ["@acme/b", "@acme/c"]);
+    expect(e.ids).toEqual(["@acme/a", "@acme/b", "@acme/c"]);
+    expect([...e.cited]).toEqual(["@acme/b", "@acme/c"]);
+  });
+});
+
+describe("canResetSkills", () => {
+  it("is true with a pin or with discovery off, false on the default selection", () => {
+    expect(canResetSkills(stored([pin("@acme/a")]))).toBe(true);
+    expect(canResetSkills(stored([], false))).toBe(true);
+    expect(canResetSkills(stored())).toBe(false);
   });
 });

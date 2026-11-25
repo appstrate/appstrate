@@ -176,6 +176,7 @@ export function runUpdateToRunPatch(evt: RunUpdateEvent): Partial<RunWireDto> {
     scheduleId: evt.scheduleId,
     error: evt.error,
     model_error: runModelErrorWire({
+      terminalError: evt.error,
       category: evt.modelError?.category ?? null,
       status: evt.modelError?.status ?? null,
       message: evt.modelError?.message ?? null,

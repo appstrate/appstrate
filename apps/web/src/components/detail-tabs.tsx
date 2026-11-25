@@ -8,42 +8,6 @@ import { cn } from "@appstrate/ui/cn";
 import { ShellHeaderTabs } from "@/components/shell-header-slots";
 import { INTEGRATED_TABLE_SURFACE } from "@/lib/table-surface";
 
-/** The fade is drawn on the edge that hides tabs, nothing when they all fit. */
-const FADE_EDGE = {
-  none: "",
-  start: "[mask-image:linear-gradient(to_right,transparent,#000_2rem)]",
-  end: "[mask-image:linear-gradient(to_right,#000_calc(100%-2rem),transparent)]",
-  both: "[mask-image:linear-gradient(to_right,transparent,#000_2rem,#000_calc(100%-2rem),transparent)]",
-} as const;
-
-function useScrollEdges() {
-  const ref = React.useRef<HTMLDivElement>(null);
-  const [edge, setEdge] = React.useState<keyof typeof FADE_EDGE>("none");
-
-  React.useEffect(() => {
-    const el = ref.current;
-    if (!el) return;
-    const measure = () => {
-      const hiddenStart = el.scrollLeft > 1;
-      const hiddenEnd = el.scrollLeft + el.clientWidth < el.scrollWidth - 1;
-      setEdge(
-        hiddenStart && hiddenEnd ? "both" : hiddenStart ? "start" : hiddenEnd ? "end" : "none",
-      );
-    };
-    measure();
-    el.addEventListener("scroll", measure, { passive: true });
-    const observer = new ResizeObserver(measure);
-    observer.observe(el);
-    if (el.firstElementChild) observer.observe(el.firstElementChild);
-    return () => {
-      el.removeEventListener("scroll", measure);
-      observer.disconnect();
-    };
-  }, []);
-
-  return { ref, edge };
-}
-
 export interface DetailTab<T extends string> {
   value: T;
   label: string;
@@ -80,16 +44,11 @@ export function UnderlineTabList<T extends string>({
   tabs: readonly DetailTab<T>[];
   end?: React.ReactNode;
 }) {
-  const { ref, edge } = useScrollEdges();
   return (
     <div className="flex items-center justify-between gap-4">
-      <div
-        ref={ref}
-        className={cn(
-          "min-w-0 [scrollbar-width:none] overflow-x-auto [&::-webkit-scrollbar]:hidden",
-          FADE_EDGE[edge],
-        )}
-      >
+      {/* The dashboard's recent agents row fades the same way: shadcn's
+          scroll-driven `scroll-fade-x`, on the edge that hides tabs only. */}
+      <div className="no-scrollbar scroll-fade-x min-w-0 overflow-x-auto">
         <TabsList className="h-11 w-max justify-start gap-1 rounded-none bg-transparent p-0 md:gap-2">
           {tabs.map(({ value, label, icon: Icon }) => (
             <TabsTrigger

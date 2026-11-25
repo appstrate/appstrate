@@ -28,7 +28,13 @@ import { ConnectionCheckboxList } from "./connection-checkbox-list";
  * The default is a SET (up to `MAX_CONNECTIONS_PER_INTEGRATION`), and
  * the mode and set are saved together after explicit confirmation.
  */
-export function OrgDefaultSection({ packageId }: { packageId: string }) {
+export function OrgDefaultSection({
+  packageId,
+  existingOnly = false,
+}: {
+  packageId: string;
+  existingOnly?: boolean;
+}) {
   const { t } = useTranslation("settings");
   const { data: orgDefault, isLoading, isError, refetch } = useIntegrationOrgDefault(packageId);
   const { data: connections, isLoading: connectionsLoading } = useIntegrationConnections(packageId);
@@ -82,6 +88,8 @@ export function OrgDefaultSection({ packageId }: { packageId: string }) {
   const connectionsLabel = t(
     `integration.admin.orgDefault.connection.${mode === "forced" ? "forced" : "default"}`,
   );
+
+  if (existingOnly && !isLoading && !isError && !orgDefault) return null;
 
   return (
     <div className="flex flex-col gap-4" data-testid="org-default-section">

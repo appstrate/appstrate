@@ -30,7 +30,7 @@ import {
   type ModelGenerationSettings,
 } from "@appstrate/core/model-generation";
 import { isModelSelectable } from "@appstrate/core/model-selectable";
-import { readsPdfNatively } from "../pdf-input.ts";
+import { fileDelivery, type FileDelivery } from "../file-input.ts";
 
 const KEY = "appstrate.chat.modelPick";
 const GENERATION_KEY = "appstrate.chat.generation";
@@ -175,27 +175,24 @@ function defaultCapabilities(): ModelGenerationCapabilities | undefined {
   return id === null ? undefined : generationCapabilities.get(id);
 }
 
-/**
- * Whether the selected model reads images: `false` when its catalog entry lists
- * its modalities and `image` is not one of them, `null` when they are not known
- * (a model alias hides them, and so does a catalog still loading) — the composer
- * warns on `false` only, never on a guess.
- */
-export function getSelectedModelAcceptsImages(): boolean | null {
+function selectedModelDelivery(): FileDelivery {
   const id = getSelectedModel();
-  const input = id === null ? undefined : inputModalities.get(id);
-  return input ? input.includes("image") : null;
+  return id === null
+    ? fileDelivery({})
+    : fileDelivery({ api: apiShapes.get(id), input: inputModalities.get(id) });
 }
 
 /**
- * Whether the selected model reads a PDF ({@link readsPdfNatively}), `null` when its modalities or
- * its API shape are not known: the composer warns on `false` only.
+ * Whether the selected model is sent an image or a PDF ({@link fileDelivery}): `false` only when
+ * the catalog declares it impossible, so the composer never warns on a guess. Two primitive
+ * getters, as `useSyncExternalStore` compares snapshots by identity.
  */
-export function getSelectedModelReadsPdf(): boolean | null {
-  const id = getSelectedModel();
-  const input = id === null ? undefined : inputModalities.get(id);
-  const api = id === null ? undefined : apiShapes.get(id);
-  return input && api ? readsPdfNatively({ api, input }) : null;
+export function getSelectedModelSendsImages(): boolean {
+  return selectedModelDelivery().image;
+}
+
+export function getSelectedModelSendsPdf(): boolean {
+  return selectedModelDelivery().pdf;
 }
 
 export function subscribeGeneration(listener: () => void): () => void {

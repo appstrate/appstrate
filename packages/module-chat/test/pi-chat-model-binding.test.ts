@@ -127,6 +127,21 @@ describe("Pi chat model binding", () => {
     expect(binding?.model.baseUrl).toBe(`${ORIGIN}/api/llm-proxy/openai-completions/v1`);
   });
 
+  // Pi drops every image of a model whose modalities say text only, so unknown ones must not.
+  it("hands Pi text and image for unknown modalities, and declared ones as declared", () => {
+    expect(proxyBinding(orgModel({ input: null }), "openai")?.model.input).toEqual([
+      "text",
+      "image",
+    ]);
+    expect(proxyBinding(orgModel(), "openai")?.model.input).toEqual(["text"]);
+    expect(
+      createPiOAuthModelBinding(oauthModel({ input: null }), listed("anthropic")).model.input,
+    ).toEqual(["text", "image"]);
+    expect(
+      createPiOAuthModelBinding(oauthModel({ input: ["text"] }), listed("anthropic")).model.input,
+    ).toEqual(["text"]);
+  });
+
   // OpenCode Go is unknown to Pi's provider-level detection: the dialect comes
   // from Pi's record for the upstream model, never the wire id.
   it("takes the dialect the platform listed, under the preset id", () => {
@@ -239,6 +254,16 @@ describe("Pi chat model binding", () => {
     ).model;
     expect(model.provider).toBe("openai-codex");
     expect(model.compat).toEqual({ ...record.compat, ...PLATFORM_MODEL_COMPAT });
+  });
+
+  it("flags a model that declares no window, on both credential modes", () => {
+    expect(proxyBinding(orgModel(), "openai")?.windowAssumed).toBeUndefined();
+    expect(proxyBinding(orgModel({ contextWindow: null }), "openai")?.windowAssumed).toBe(true);
+    const anthropic = listed("anthropic");
+    expect(createPiOAuthModelBinding(oauthModel(), anthropic).windowAssumed).toBeUndefined();
+    expect(
+      createPiOAuthModelBinding(oauthModel({ contextWindow: null }), anthropic).windowAssumed,
+    ).toBe(true);
   });
 
   it("resolves auth mode before the engine branch", () => {

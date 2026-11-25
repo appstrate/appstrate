@@ -199,6 +199,28 @@ describe("readTokenResponse", () => {
     });
   }
 
+  it("validates the token delivery type and supports an omitted type only on compatible flows", async () => {
+    for (const requireTokenType of [false, true]) {
+      expect(
+        await readTokenResponse(
+          json({ access_token: "tok", token_type: "bEaReR" }, 200),
+          requireTokenType,
+        ),
+      ).toMatchObject({ ok: true });
+      expect(
+        await readTokenResponse(
+          json({ access_token: "tok", token_type: "MAC" }, 200),
+          requireTokenType,
+        ),
+      ).toMatchObject({ ok: false, error: "unsupported_token_type" });
+    }
+    expect(await readTokenResponse(json({ access_token: "tok" }, 200), true)).toMatchObject({
+      ok: false,
+      error: "unsupported_token_type",
+    });
+    expect(await readTokenResponse(json({ access_token: "tok" }, 200))).toMatchObject({ ok: true });
+  });
+
   it("returns the body of a 2xx that carries an access_token", async () => {
     const read = await readTokenResponse(json({ access_token: "tok", scope: "a" }, 200));
     expect(read).toEqual({ ok: true, raw: { access_token: "tok", scope: "a" } });

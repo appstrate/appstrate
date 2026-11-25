@@ -47,7 +47,7 @@ is readable in any client's configuration and usable by a client that sends no
 custom header (a claude.ai connector), which a header pin is not. The endpoint
 therefore reads no `X-Space-Id`: a request carrying one is a `400` naming the
 URL form, never a header silently ignored (`docs/NO_TRANSITIONAL_CODE.md`). The
-in-process chat uses the organization endpoint, every space-acting call naming its `space_id` (#1886). The CLI's Claude Code plugin pinned by URL too
+in-process chat uses the organization endpoint, each space-dependent call resolving its destination (#1886). The CLI's Claude Code plugin pinned by URL too
 until #1972 moved it to the organization URL.
 
 It is its own OAuth resource, `<APP_URL>/api/mcp/o/:org/s/:space`, with its own
@@ -80,7 +80,7 @@ role }]`. The REST route is unchanged.
 `SPACE_ACTS` (`modules/mcp/tools.ts`) states, for EVERY tool, whether it acts
 in a space and which act of its surface it needs there. It is exhaustive over
 `McpToolName`, so a new tool cannot silently act in whichever space the request
-entered. `get_runtime_capabilities` alone acts in none.
+entered. Organization operations and `get_runtime_capabilities` need no destination.
 
 - **One space per HTTP request.** The transport is stateless and a
   `tools/call` request carries one call, so the router reads that call's
@@ -88,8 +88,8 @@ entered. `get_runtime_capabilities` alone acts in none.
   space through the header's own door, `enterSpaceById`. Everything downstream
   is single-space: the request context holds that space's role, so the
   direct-service readers (`skill://` reads, the file resource provider, the package
-  file tools) need no change. A request naming no space (`initialize`,
-  `tools/list`) enters a reachable one only to pass the `mcp:read` guard.
+  file tools) need no change. An admission-only request or an organization operation enters a reachable space
+  for the endpoint guard. That admission alone supplies no destination.
 - **The schema carries the spaces.** `space_id` is an `enum` of the reachable
   ids, its description naming each space and the caller's role there. The
   server instructions state the rules but not the list: clients truncate them
@@ -103,8 +103,7 @@ entered. `get_runtime_capabilities` alone acts in none.
 - **Validation:** an id outside the reachable list is an `unknown_space` refusal
   naming the reachable spaces. The argument is never trusted as such: the router admits
   the space with the caller's membership, as for the header.
-- **Dispatched tools** carry `X-Space-Id` for the space entered, pinned or
-  org-wide alike, so the re-entered `requireSpaceContext` decides with the role
+- **Space-dependent dispatches** carry `X-Space-Id` for their resolved space, so the re-entered `requireSpaceContext` decides with the role
   of that space and nothing else. `x-space-id` stays protected in the `headers`
   argument: the only way to change space is the typed argument.
 - **The tool's own grant is re-checked in the space entered.** The declared
@@ -115,15 +114,9 @@ entered. `get_runtime_capabilities` alone acts in none.
 - **In pinned mode** `space_id` is not declared at all, so passing one is an
   `unknown_argument` refusal.
 
-### 4. Every call names its space
+### 4. Resolving an operation's destination
 
-`space_id` is **required** on every tool that acts in a space, reads and writes
-alike, whether the caller reaches one space or several: one schema, no default
-space, no single-space exception. A missing one is a `missing_argument` refusal
-naming the spaces and the caller's role in each, so a model recovers in one turn.
-`invoke_operation`, `run_and_wait` and `describe_operation` results name the
-space they ran in (`space: { id, name }`; `run_and_wait`'s `outputSchema`
-declares it).
+`describe` exposes an operation's scope before a space is chosen. An organization operation needs no destination. Space-dependent calls can derive their destination from the route arguments, the connection or a named `space_id`. The server requests a choice when those inputs leave the destination open. The effective scope is also the one recorded in conversation history and the MCP audit event. See [the current space contract](../architecture/SPACES.md#resolving-the-space-on-the-wire).
 
 ### 5. Refusals forbid the fallback
 
@@ -155,7 +148,7 @@ same rule once.
 ### 7. Trace
 
 The `mcp.operation.invoked` audit row and the `mcp.tool_call` log line carry
-`spaceId`.
+the effective `spaceId`, null for an organization operation.
 
 ### 8. No default-space fallback
 

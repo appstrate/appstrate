@@ -86,7 +86,7 @@ export const ROUTE_ACCESS = {
   "/preferences/general": OWN_ACCOUNT,
   "/preferences/appearance": OWN_ACCOUNT,
   "/preferences/security": OWN_ACCOUNT,
-  "/preferences/devices": OWN_ACCOUNT,
+  "/preferences/devices": { ...OWN_ACCOUNT, feature: "oidc" },
   "/preferences/connections": OWN_ACCOUNT,
   "/preferences/mcp-access": OWN_ACCOUNT,
   // Its one read is the list, guarded read|connect; a personal credential's actions need `connect`.
@@ -123,10 +123,10 @@ export const ROUTE_ACCESS = {
     anyOf: ["oauth-clients:read"],
     operations: ["listOAuthClients"],
   },
-  "/org-settings/cli-sessions": {
+  "/org-settings/access-grants": {
     feature: "oidc",
-    anyOf: ["cli-sessions:read"],
-    operations: ["listOrgCliSessions"],
+    anyOf: ["access-grants:read"],
+    operations: ["listOrgAccessGrants"],
   },
   "/org-settings/billing": {
     feature: "billing",
@@ -201,6 +201,12 @@ const SETTINGS_PREFIXES = Object.values(SETTINGS_INDEX);
 
 export const isSettingsPath = (path: string) =>
   SETTINGS_PREFIXES.some((prefix) => isUnder(path, prefix));
+
+/** The scope a settings URL lies under; `organization` for any other URL. */
+export function settingsScopeFromPath(pathname: string): SettingsScope {
+  const scopes = Object.keys(SETTINGS_INDEX) as SettingsScope[];
+  return scopes.find((scope) => isUnder(pathname, SETTINGS_INDEX[scope])) ?? "organization";
+}
 
 /** The routed modals: mounted over the screen they were opened from, never in the main tree. */
 export const OVERLAY_PREFIXES = [...SETTINGS_PREFIXES, "/catalogue"];

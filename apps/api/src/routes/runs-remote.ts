@@ -30,7 +30,11 @@ import { FILE_URI_PREFIX, UPLOAD_URI_PREFIX } from "@appstrate/core/file-uri";
 import { logger } from "../lib/logger.ts";
 import { rateLimit } from "../middleware/rate-limit.ts";
 import { idempotency } from "../middleware/idempotency.ts";
-import { assertPermission, requirePermission } from "../middleware/require-permission.ts";
+import {
+  assertCanComposeInline,
+  requireInlineComposeForInlineSource,
+} from "../middleware/guards.ts";
+import { requirePermission } from "../middleware/require-permission.ts";
 import {
   invalidRequest,
   notFound,
@@ -44,7 +48,7 @@ import { runVisibilityFilter } from "../lib/run-visibility.ts";
 import { recordAuditFromContext } from "../services/audit.ts";
 import { getPlatformRunLimits } from "../services/run-limits.ts";
 import {
-  assertPackageDependenciesAccessible,
+  assertLaunchDependenciesAccessible,
   assertDraftSelectorAllowed,
   assertDependencyDraftOverridesAllowed,
 } from "../lib/package-access.ts";
@@ -67,7 +71,8 @@ import { resolveRegistryAgent } from "../services/registry-run-resolver.ts";
 import { validateInput } from "../services/schema.ts";
 import { getSpacePackageSettings } from "../services/space-packages.ts";
 import { resolveEffectiveInput } from "../services/input-resolution.ts";
-import { validateAgentReadiness } from "../services/agent-readiness.ts";
+import { resolveRunPreflight } from "../services/run-pipeline.ts";
+import { launchSpacesLookup } from "../lib/launch-spaces.ts";
 import {
   toLaunchOverrides,
   type LaunchOverrides,
@@ -212,11 +217,13 @@ function assertNoPlatformFileRefs(
 export function createRunsRemoteRouter() {
   const router = new Hono<AppEnv>();
 
-  // The mounted guard is `agents:run`; the inline branch asks `agents:write` on
-  // top of it from inside the handler, on the request's own shape.
+  // The mounted guard is `agents:run`; an inline source also needs `agents:write`. The body
+  // names the source, so the in-front middleware gives a caller who cannot compose the inline
+  // refusal, and the handler re-asserts it on the parsed shape.
   router.post(
     "/runs/remote",
     rateLimit(getPlatformRunLimits().per_org_global_rate_per_min),
+    requireInlineComposeForInlineSource(),
     requirePermission("agents", "run"),
     idempotency(),
     async (c) => {
@@ -257,9 +264,8 @@ export function createRunsRemoteRouter() {
       // track the inline-vs-registry split over time.
       let attributionPath: "registry" | "inline_shadow";
       let warnings: ResolutionFieldError[];
-      // Seeded by the inline preflight only — the registry branch resolves no
-      // pins of its own, so `createRun` creates its own Map there.
-      let manifestCache: IntegrationManifestCache | undefined;
+      // Both preflights seed the versions used for this launch.
+      let manifestCache: IntegrationManifestCache;
       let launchOverrides: LaunchOverrides | null;
       // Normalize an empty map to null (mirrors the platform run route): a
       // non-null map on the row means the run carried explicit overrides.
@@ -352,19 +358,25 @@ export function createRunsRemoteRouter() {
           }
         }
 
-        // Readiness gate — same checks the inline preflight ends with.
-        warnings = await validateAgentReadiness({
+        manifestCache = new Map();
+        warnings = await resolveRunPreflight({
+          manifestCache,
+          dependencyOverrides,
           agent: agentForRun,
           versionRef: versionRefOf(overrideVersionLabel),
           orgId,
           spaceId,
           actor,
           launchOverrides,
+          launchSpaces: launchSpacesLookup(c, ["agents:run"], {
+            version: src.stage,
+            dependencyOverrides,
+          }),
         });
       } else {
         // Composing: `agents:write` on top of the route's `agents:run` —
         // mirror of `canComposeInline` (@appstrate/core/permissions).
-        assertPermission(c, "agents", "write");
+        await assertCanComposeInline(c);
         // Inline path — the runner ships a manifest+prompt blob. Validate
         // structurally, then create a shadow LoadedPackage. All inline
         // runs land on a shadow ephemeral package ("Inline" badge in UI);
@@ -375,7 +387,10 @@ export function createRunsRemoteRouter() {
         await assertDependencyDraftOverridesAllowed(c, dependencyOverrides, src.manifest);
 
         const preflight = await runInlinePreflight({
-          authorizeDependencies: (manifest) => assertPackageDependenciesAccessible(c, manifest),
+          authorizeDependencies: (manifest) => assertLaunchDependenciesAccessible(c, manifest),
+          launchSpaces: launchSpacesLookup(c, ["agents:write", "agents:run"], {
+            dependencyOverrides,
+          }),
           orgId,
           spaceId,
           actor,
@@ -441,7 +456,7 @@ export function createRunsRemoteRouter() {
           contextSnapshot: body.contextSnapshot,
           runnerName: runner.name,
           runnerKind: runner.kind,
-          ...(manifestCache ? { manifestCache } : {}),
+          manifestCache,
         });
       } catch (err) {
         // A refused inline run leaves no run row, so its shadow package is purged.

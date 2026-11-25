@@ -49,7 +49,7 @@ test("a limited conversation lifts its limit, survives a space switch and the de
   const lifted = page.waitForRequest(
     (req) => req.method() === "PATCH" && req.url().endsWith(`${chatRoute}/sessions/${session.id}`),
   );
-  await chip.getByRole("button").click();
+  await page.getByRole("button", { name: /^Lever la limite/ }).click();
   expect(((await lifted).postDataJSON() as { restricted?: boolean }).restricted).toBe(false);
   await expect(chip).toHaveCount(0);
   await expect.poll(async () => (await read()).restricted).toBe(false);

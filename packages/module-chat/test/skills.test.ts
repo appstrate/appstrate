@@ -4,7 +4,6 @@ import { describe, expect, it } from "bun:test";
 import {
   CHAT_SKILLS_CONTENT_BUDGET_CHARS as BUDGET,
   injectedSkills,
-  parseSkillList,
   resolveChatSkills,
   type ChatSkillSelection,
   type SkillContent,
@@ -22,37 +21,38 @@ const resolve = (selection: ChatSkillSelection, contents: SkillContent[] = []) =
   resolveChatSkills(selection, new Map(contents.map((skill) => [skill.packageId, skill])));
 
 describe("resolveChatSkills", () => {
-  it("auto: injects nothing and notices nothing — the chosen skills are kept but unused", () => {
-    expect(resolve({ skillMode: "auto", pinnedSkills: ["@a/one"] }, [content("@a/one")])).toEqual({
-      chosen: [],
+  it("injects nothing when no skill is pinned", () => {
+    expect(resolve({ skillDiscovery: true, pinnedSkills: [] })).toEqual({
+      injected: [],
       notices: [],
+      skillStatus: {},
     });
   });
 
-  for (const skillMode of ["manual", "strict"] as const) {
-    it(`${skillMode}: injects the chosen skills in their stored order`, () => {
-      const result = resolve({ skillMode, pinnedSkills: ["@a/first", "@z/last"] }, [
+  for (const skillDiscovery of [true, false]) {
+    it(`discovery ${skillDiscovery ? "on" : "off"}: injects the pinned skills in their stored order`, () => {
+      const result = resolve({ skillDiscovery, pinnedSkills: ["@a/first", "@z/last"] }, [
         content("@z/last"),
         content("@a/first"),
       ]);
-      expect(result.chosen.map((s) => s.packageId)).toEqual(["@a/first", "@z/last"]);
+      expect(result.injected.map((s) => s.packageId)).toEqual(["@a/first", "@z/last"]);
       expect(result.notices).toEqual([]);
     });
   }
 
-  it("notices a chosen skill that is not active here or could not be read", () => {
-    const result = resolve({ skillMode: "manual", pinnedSkills: ["@a/gone", "@z/gone"] });
-    expect(result.chosen).toEqual([]);
+  it("notices a pinned skill that is not active here or could not be read", () => {
+    const result = resolve({ skillDiscovery: true, pinnedSkills: ["@a/gone", "@z/gone"] });
+    expect(result.injected).toEqual([]);
     expect(result.notices).toHaveLength(2);
     expect(result.notices[0]).toContain("`@a/gone`");
     expect(result.notices[0]).toContain("not available");
     expect(result.notices[1]).toContain("`@z/gone`");
   });
 
-  it("spends one budget across the chosen skills, in stored order", () => {
+  it("spends one budget across the pinned skills, in stored order", () => {
     const third = Math.floor(BUDGET / 3);
     const result = resolve(
-      { skillMode: "strict", pinnedSkills: ["@a/one", "@a/two", "@a/three"] },
+      { skillDiscovery: false, pinnedSkills: ["@a/one", "@a/two", "@a/three"] },
       [
         content("@a/one", "x".repeat(third * 2)),
         // Over what is left after `@a/one`, though under the budget on its own.
@@ -60,53 +60,66 @@ describe("resolveChatSkills", () => {
         content("@a/three", "z".repeat(BUDGET - third * 2)),
       ],
     );
-    expect(result.chosen.map((s) => s.packageId)).toEqual(["@a/one", "@a/three"]);
+    expect(result.injected.map((s) => s.packageId)).toEqual(["@a/one", "@a/three"]);
     expect(result.notices).toEqual([
-      `The skill \`@a/two\` was chosen for this conversation but does not fit (${third * 2} characters; the injected skills share ${BUDGET}, ${BUDGET - third * 2} left).`,
+      `The skill \`@a/two\` is pinned to this conversation but does not fit (${third * 2} characters; the injected skills share ${BUDGET}, ${BUDGET - third * 2} left).`,
     ]);
   });
 
   it("injects one long skill that fits the budget", () => {
-    const result = resolve({ skillMode: "manual", pinnedSkills: ["@a/art"] }, [
+    const result = resolve({ skillDiscovery: true, pinnedSkills: ["@a/art"] }, [
       content("@a/art", "a".repeat(19_735)),
     ]);
-    expect(result.chosen.map((s) => s.packageId)).toEqual(["@a/art"]);
+    expect(result.injected.map((s) => s.packageId)).toEqual(["@a/art"]);
     expect(result.notices).toEqual([]);
+  });
+
+  it("injects the cited skills after the pins, out of what the pins left, without a verdict", () => {
+    const half = BUDGET / 2;
+    const result = resolveChatSkills(
+      { skillDiscovery: false, pinnedSkills: ["@a/pin"] },
+      new Map([
+        ["@a/pin", content("@a/pin", "p".repeat(half))],
+        ["@a/new", content("@a/new", "n".repeat(half))],
+        ["@a/late", content("@a/late", "l")],
+      ]),
+      ["@a/new", "@a/pin", "@a/late", "@a/gone"],
+    );
+    expect(result.injected.map((s) => s.packageId)).toEqual(["@a/pin", "@a/new"]);
+    expect(result.notices).toEqual([
+      `The skill \`@a/late\` named in this conversation does not fit (1 characters; the injected skills share ${BUDGET}, 0 left).`,
+      "The skill `@a/gone` named in this conversation is not available here — it may have been removed, deactivated, or be out of your reach.",
+    ]);
+    expect(Object.keys(result.skillStatus)).toEqual(["@a/pin"]);
   });
 });
 
-describe("parseSkillList", () => {
-  it("projects each row of the listing and drops a malformed one", () => {
-    expect(
-      parseSkillList({
-        object: "list",
-        data: [
-          { id: "@acme/tone", name: "Tone", description: "Adjusts tone", version: "1.2.0" },
-          { id: "@acme/bare", name: "@acme/bare", description: null, version: null },
-          { id: 42 },
-        ],
-      }),
-    ).toEqual([
-      {
-        packageId: "@acme/tone",
-        display_name: "Tone",
-        description: "Adjusts tone",
-        version: "1.2.0",
-      },
-      { packageId: "@acme/bare", display_name: "@acme/bare", description: null, version: null },
-    ]);
-  });
-
-  it("reads an unreadable body as no skills", () => {
-    expect(parseSkillList(null)).toEqual([]);
-    expect(parseSkillList({ data: "nope" })).toEqual([]);
+describe("resolveChatSkills statuses", () => {
+  it("gives each pin its verdict and the SKILL.md length counted against the budget", () => {
+    const result = resolveChatSkills(
+      { skillDiscovery: true, pinnedSkills: ["@a/big", "@a/gone", "@a/odd", "@a/ok", "@a/over"] },
+      new Map<string, SkillContent | null>([
+        ["@a/big", content("@a/big", "x".repeat(BUDGET - 10))],
+        ["@a/odd", null],
+        ["@a/ok", content("@a/ok", "y".repeat(4))],
+        ["@a/over", content("@a/over", "z".repeat(7))],
+      ]),
+    );
+    expect(result.skillStatus).toEqual({
+      "@a/big": { status: "injected", chars: BUDGET - 10 },
+      "@a/gone": { status: "unavailable", chars: null },
+      "@a/odd": { status: "unreadable", chars: null },
+      "@a/ok": { status: "injected", chars: 4 },
+      // 7 characters over the 6 the injected ones leave.
+      "@a/over": { status: "over_budget", chars: 7 },
+    });
   });
 });
 
 describe("injectedSkills", () => {
   it("names exactly the injected definitions, never a noticed or over-budget one", () => {
     const result = resolve(
-      { skillMode: "strict", pinnedSkills: ["@a/mine", "@a/gone", "@a/big"] },
+      { skillDiscovery: false, pinnedSkills: ["@a/mine", "@a/gone", "@a/big"] },
       [
         {
           ...content("@a/mine"),
@@ -120,18 +133,18 @@ describe("injectedSkills", () => {
     });
   });
 
-  it("notices a chosen skill the platform answered malformed, and names it nowhere", () => {
+  it("notices a pinned skill the platform answered malformed, and names it nowhere", () => {
     const result = resolveChatSkills(
-      { skillMode: "manual", pinnedSkills: ["@a/odd"] },
+      { skillDiscovery: true, pinnedSkills: ["@a/odd"] },
       new Map([["@a/odd", null]]),
     );
     expect(result.notices).toEqual([
-      "The skill `@a/odd` was chosen for this conversation but could not be read.",
+      "The skill `@a/odd` is pinned to this conversation but could not be read.",
     ]);
     expect(injectedSkills(result)).toEqual({});
   });
 
   it("is empty when nothing is injected", () => {
-    expect(injectedSkills(resolve({ skillMode: "auto", pinnedSkills: ["@a/mine"] }))).toEqual({});
+    expect(injectedSkills(resolve({ skillDiscovery: true, pinnedSkills: [] }))).toEqual({});
   });
 });

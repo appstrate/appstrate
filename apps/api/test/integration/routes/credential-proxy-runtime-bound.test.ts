@@ -92,6 +92,7 @@ describe("a runtime-bound integration outside a run", () => {
         not_ready: [],
         unlisted: [],
         truncated_catalogs: [],
+        uncached: [],
       });
     }
     await expectServerUntouched();

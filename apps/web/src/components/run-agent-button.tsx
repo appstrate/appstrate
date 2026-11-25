@@ -46,7 +46,7 @@ interface RunAgentButtonProps {
   disabled?: boolean;
   disabledTitle?: string;
   variant?: "default" | "ghost" | "outline";
-  size?: "default" | "sm" | "icon";
+  size?: "default" | "sm" | "icon" | "icon-sm";
   className?: string;
   showLabel?: boolean;
   /**

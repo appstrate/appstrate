@@ -28,7 +28,7 @@
   "filter.user_upload": "Importés",
   "purpose.agent_output": "Sortie d'agent",
   "purpose.user_upload": "Importé",
-  "row.preview": "Aperçu",
+  "row.open": "Ouvrir",
   "row.keep": "Conserver",
   "row.moreActions": "Plus d'actions pour {{name}}",
   "expiry.expired": "Expiré",

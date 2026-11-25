@@ -97,6 +97,7 @@ export type ApiCallRequestBody =
     };
 
 interface ApiCallArgs {
+  signal?: AbortSignal;
   integrationId: string;
   connectionId: string;
   targetUrl: string;
@@ -405,6 +406,7 @@ export async function executeApiCall(args: ApiCallArgs, deps: ApiCallDeps): Prom
     /** Whether this attempt used the platform credential or an allowed caller override. */
     credentialInjection: "inject" | "caller_override" | "none";
   }> => {
+    args.signal?.throwIfAborted();
     const { headers: resolvedHeaders, credentialHeaders } = caller;
     // Server-side credential injection (Authorization, X-Api-Key, …).
     const credentialInjection = applyInjectedCredentialHeader(resolvedHeaders, activeCreds);
@@ -441,6 +443,7 @@ export async function executeApiCall(args: ApiCallArgs, deps: ApiCallDeps): Prom
       method,
       headers: resolvedHeaders,
       body: buildBody(caller),
+      signal: args.signal,
       proxy: args.proxyUrl || undefined,
     };
     const sent = await fetchApiCall({
@@ -494,6 +497,7 @@ export async function executeApiCall(args: ApiCallArgs, deps: ApiCallDeps): Prom
     credentialInjection = r.credentialInjection;
     answered = r.credentialInjection === "inject" && r.credentialsForwarded ? creds : null;
   } catch (err) {
+    args.signal?.throwIfAborted();
     return wrapRequestError(err, integrationId, targetHost);
   }
 
@@ -502,6 +506,7 @@ export async function executeApiCall(args: ApiCallArgs, deps: ApiCallDeps): Prom
   //     is terminally dead (revoked / unrefreshable / a non-oauth2 auth that
   //     401'd), so a `null` result means "do not retry". A non-null result is
   //     a genuine token rotation; replay once.
+  args.signal?.throwIfAborted();
   if (
     upstream.status === 401 &&
     refreshCredentials &&
@@ -532,6 +537,7 @@ export async function executeApiCall(args: ApiCallArgs, deps: ApiCallDeps): Prom
         credentialInjection = r.credentialInjection;
         answered = r.credentialInjection === "inject" && r.credentialsForwarded ? fresh : null;
       } catch (err) {
+        args.signal?.throwIfAborted();
         return wrapRequestError(err, integrationId, targetHost);
       }
     }

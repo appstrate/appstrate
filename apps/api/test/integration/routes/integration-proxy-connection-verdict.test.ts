@@ -15,7 +15,7 @@ import {
   spaces,
 } from "@appstrate/db/schema";
 import { getTestApp } from "../../helpers/app.ts";
-import { seedApiKey, seedPackage } from "../../helpers/seed.ts";
+import { seedApiKey, seedPackage, seedPublishedVersion } from "../../helpers/seed.ts";
 import { truncateAll } from "../../helpers/db.ts";
 import { flushRedis } from "../../helpers/redis.ts";
 import {
@@ -51,7 +51,9 @@ const manifest = localIntegrationManifest({
 const verdict = async (ctx: TestContext) => {
   const res = await getTestApp().request(`/api/integrations/${ID}`, { headers: authHeaders(ctx) });
   expect(res.status).toBe(200);
-  const body = (await res.json()) as { proxy_connection: { status: string; imposed: boolean } };
+  const body = (await res.json()) as {
+    proxy_connection: { status: string; imposed: boolean; connection_id?: string };
+  };
   return body.proxy_connection;
 };
 
@@ -101,8 +103,8 @@ describe("GET /api/integrations/{packageId} — proxy_connection", () => {
     });
 
   it("is ready on the caller's own healthy connection", async () => {
-    await seedProxyConnection(ctx, ID, "api", { api_key: "sk" });
-    expect(await verdict(ctx)).toEqual({ status: "ready", imposed: false });
+    const id = await seedProxyConnection(ctx, ID, "api", { api_key: "sk" });
+    expect(await verdict(ctx)).toEqual({ status: "ready", imposed: false, connection_id: id });
   });
 
   it("is not_required for an integration declaring no auths (AFPS §7.2)", async () => {
@@ -126,6 +128,19 @@ describe("GET /api/integrations/{packageId} — proxy_connection", () => {
     await seedProxyConnection(ctx, ID, "api", { api_key: "b" }, "acct-2");
     expect(await verdict(ctx)).toEqual({ status: "must_choose", imposed: false });
     expect((await proxied(ctx)).code).toBe("must_choose_connection");
+  });
+
+  it("identifies the imposed shared account for a member who also has a personal account", async () => {
+    const shared = await seedProxyConnection(ctx, ID, "api", { api_key: "org" }, "org");
+    await shareIntoSpace(shared);
+    await enforce([shared]);
+    const member = await memberHolding(ctx, ["integrations:read", "credential-proxy:call"]);
+    await seedProxyConnection(member, ID, "api", { api_key: "personal" }, "personal");
+    expect(await verdict(member)).toEqual({
+      status: "ready",
+      imposed: true,
+      connection_id: shared,
+    });
   });
 
   it("is not ready when the enforced org default is dead, whatever the caller's own connection", async () => {
@@ -192,7 +207,7 @@ describe("GET /api/integrations/{packageId} — proxy_connection", () => {
     expect(await verdict(caller)).toEqual({ status: "not_permitted", imposed: false });
   });
 
-  it("judges a never-published integration on its draft, the manifest the detail serves", async () => {
+  it("answers not_published for a never-published integration, with or without a connection, then ready once published", async () => {
     const draftOnly = "@verdict/draft";
     await seedPackage({
       id: draftOnly,
@@ -222,9 +237,11 @@ describe("GET /api/integrations/{packageId} — proxy_connection", () => {
       getTestApp().request(`/api/integrations/${id}`, { headers: authHeaders(ctx) });
     const read = async () =>
       ((await (await res(draftOnly)).json()) as { proxy_connection: unknown }).proxy_connection;
-    expect(await read()).toEqual({ status: "none", imposed: false });
-    await seedProxyConnection(ctx, draftOnly, "draft_auth", { api_key: "sk" });
-    expect(await read()).toEqual({ status: "ready", imposed: false });
+    expect(await read()).toEqual({ status: "not_published", imposed: false });
+    const id = await seedProxyConnection(ctx, draftOnly, "draft_auth", { api_key: "sk" });
+    expect(await read()).toEqual({ status: "not_published", imposed: false });
+    await seedPublishedVersion(draftOnly, "1.0.0");
+    expect(await read()).toEqual({ status: "ready", imposed: false, connection_id: id });
   });
 
   it("lets a call caller reach a colleague's shared connection only by naming it", async () => {

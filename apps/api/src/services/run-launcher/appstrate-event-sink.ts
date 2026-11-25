@@ -14,11 +14,10 @@
  */
 
 import type { RunEvent } from "@appstrate/afps-runtime/types";
-import { isPlainObject } from "@appstrate/core/safe-json";
+import { readRunDiagnostic } from "@appstrate/afps-runtime/events";
 import { fileUri, PUBLISHED_FILE_LOG_EVENT } from "@appstrate/core/file-uri";
 import type { Db } from "@appstrate/db/client";
 import { modelCostSchema, type ModelCost } from "@appstrate/core/module";
-import { parseTokenUsage } from "@appstrate/afps-shared/token-usage";
 import type { TokenPricingStatus } from "@appstrate/afps-runtime/runner";
 import type { ModelPayer } from "@appstrate/core/model-payer";
 import { recordLlmUsageReliably } from "../llm-usage-retry.ts";
@@ -100,27 +99,25 @@ export async function persistRunEvent(
       }
       return null;
     }
-
+  }
+  const diagnostic = readRunDiagnostic(event);
+  switch (diagnostic?.type) {
     case "appstrate.progress": {
-      const message = typeof event.message === "string" ? event.message : null;
-      const data = isPlainObject(event.data) ? event.data : null;
-      const level = resolveLogLevel(event.level) ?? "debug";
+      const { message, data, level } = diagnostic;
       await appendRunLog(scope, runId, "progress", "progress", message, data, level, executor);
       return null;
     }
-
     case "appstrate.error": {
-      const message = typeof event.message === "string" ? event.message : null;
-      const data = isPlainObject(event.data) ? event.data : null;
+      const { message, data } = diagnostic;
       await appendRunLog(scope, runId, "system", "adapter_error", message, data, "error", executor);
       return message;
     }
-
     case "appstrate.metric": {
-      const usage = parseMetricUsage(runId, event.usage);
-      // Advisory on a platform run (see {@link resolveRunnerCost}); the
-      // recorded cost only for a remote-origin run.
-      const cost = typeof event.cost === "number" ? event.cost : null;
+      const { usage, cost } = diagnostic;
+      if (diagnostic.invalidUsage)
+        logger.warn("appstrate.metric: malformed usage dropped", { runId });
+      if (diagnostic.tiersDropped)
+        logger.warn("usage: malformed tier bands dropped", { runId, seam: "metric" });
 
       // Token usage is a running-total snapshot on the run row.
       if (usage) {
@@ -161,22 +158,6 @@ export async function persistRunEvent(
       // Third-party — no run_logs row.
       return null;
   }
-}
-
-/** The metric's usage, or null: a malformed one is logged, never thrown (replayed). */
-function parseMetricUsage(runId: string, value: unknown): TokenUsage | null {
-  if (value == null) return null;
-  const { usage, tiersDropped } = parseTokenUsage(value);
-  if (!usage) logger.warn("appstrate.metric: malformed usage dropped", { runId });
-  if (tiersDropped) logger.warn("usage: malformed tier bands dropped", { runId, seam: "metric" });
-  return usage;
-}
-
-function resolveLogLevel(value: unknown): "debug" | "info" | "warn" | "error" | null {
-  if (value === "debug" || value === "info" || value === "warn" || value === "error") {
-    return value;
-  }
-  return null;
 }
 
 /**

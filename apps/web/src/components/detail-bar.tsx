@@ -56,7 +56,7 @@ export function DetailBarId({ id }: { id: string }) {
   return (
     <>
       <code className="truncate font-mono">{id}</code>
-      <CopyButton value={id} className="size-5 shrink-0 [&_svg]:size-3" />
+      <CopyButton value={id} className="desktop-pointer:size-5 shrink-0 [&_svg]:size-3" />
     </>
   );
 }
@@ -132,6 +132,7 @@ export function DetailBarSkeleton({
   tabCount = 4,
   meta = true,
   spaces = false,
+  actions = true,
 }: {
   title?: string;
   trail?: readonly BreadcrumbEntry[];
@@ -140,6 +141,8 @@ export function DetailBarSkeleton({
   spaces?: boolean;
   /** The page draws a line under its title (a package's id); without it the line's box stays empty. */
   meta?: boolean;
+  /** The page draws an action at the bar's end. */
+  actions?: boolean;
 }) {
   usePageBreadcrumb([...(trail ?? []), ...(title ? [{ label: title }] : [])]);
 
@@ -166,9 +169,11 @@ export function DetailBarSkeleton({
           </div>
         </div>
       </ShellHeaderLead>
-      <ShellHeaderActions>
-        <Skeleton className="h-8 w-20" />
-      </ShellHeaderActions>
+      {actions && (
+        <ShellHeaderActions>
+          <Skeleton className="h-8 w-20" />
+        </ShellHeaderActions>
+      )}
       {tabCount > 0 && (
         <ShellHeaderTabs>
           <div className="flex h-11 items-center gap-4">

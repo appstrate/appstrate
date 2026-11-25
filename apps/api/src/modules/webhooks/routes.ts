@@ -34,7 +34,11 @@ import {
 import type { WebhookInfo } from "@appstrate/shared-types";
 import { ApiError, forbidden, notFound } from "../../lib/errors.ts";
 import { readJsonBody } from "@appstrate/core/request-body";
-import { enterSpaceContext, makePermissionGuard } from "@appstrate/core/permissions";
+import {
+  enterSpaceContext,
+  makePermissionGuard,
+  withAuthorizedRow,
+} from "@appstrate/core/permissions";
 import { getOrgScope, type SpaceScope, type OrgScope } from "../../lib/scope.ts";
 import { assertSpaceId } from "../../lib/ids.ts";
 import { validateSpaceInOrg } from "../../lib/space-lookup.ts";
@@ -43,23 +47,8 @@ import { setCursorLinkHeader } from "../../lib/pagination-link.ts";
 import { credentialAdmitsSpace, credentialConfinedToSpaces } from "../../lib/view-as.ts";
 
 /**
- * Assert that a space belongs to the given org.
- *
- * Throws the platform's UNIFORM space 404 — worded exactly as `getSpace`,
- * `assertSpaceInScope` and `applySpacePermissions` word it (`services/spaces.ts`,
- * `middleware/space-context.ts`) — whether the space does not exist or is one
- * this caller may not see. A `forbidden` here made the route an existence
- * oracle: a nonexistent id answered 403, while a LIVE personal space of another
- * member passed this check (the row does belong to the org) and was refused
- * further down by `enterSpaceContext` with a 404. Two different answers told an
- * org owner or admin exactly which ids are somebody's private space — the thing
- * every other space read is careful never to say (RBAC spec §3.6).
- *
- * Delegates to the canonical `validateSpaceInOrg` — same SELECT, plus the
- * `assertSpaceId` shape guard this copy did not have. Both call sites already
- * assert the shape with a `spaceId` param name, so that guard is a backstop
- * here rather than the primary diagnostic; its 400 stays a 400, because a
- * malformed id is not a hidden row.
+ * A missing space and a space the caller cannot access must return the same 404.
+ * The caller validates the request's spaceId before this organization lookup.
  */
 async function assertSpaceBelongsToOrg(spaceId: string, orgId: string): Promise<void> {
   if (!(await validateSpaceInOrg(spaceId, orgId))) {
@@ -98,12 +87,7 @@ const createOrgWebhookSchema = z
 const createSpaceWebhookSchema = z
   .object({
     level: z.literal("space"),
-    // Shape deliberately NOT re-encoded here: `assertSpaceId` (called by the
-    // handler right after parse) is the single implementation of the space-id
-    // shape check AND of its two diagnostics — a retired `app_` id must say "run
-    // the `app_` → `spc_` migration" on this route exactly as it does on
-    // `X-Space-Id`. A `.regex()` here would win the race and answer with a
-    // generic message instead.
+    // The handler applies assertSpaceId so body and header IDs have the same 400 response.
     spaceId: z.string(),
     url: z.url("url must be a valid URL"),
     events: z.array(webhookEventSchema).min(1, "events is required"),
@@ -295,124 +279,136 @@ export function createWebhooksRouter() {
   });
 
   /** Load the by-id row, then gate on its level. Without any webhook permission, a miss is 403. */
-  async function loadWebhookForAction(
-    c: Context<AppEnv>,
-    action: "read" | "write" | "delete",
-  ): Promise<WebhookInfo> {
-    let webhook: WebhookInfo;
-    try {
-      webhook = await getWebhook(webhookScope(c), c.req.param("id")!);
-      // A row outside what the credential reaches is a row that does not exist, in the same
-      // words: an org-level row spans every space, so a confined credential never sees it, and a
-      // space row outside the credential's pin or allowlist would otherwise confirm its id, and
-      // name its space, through the space refusal below.
-      if (
-        (webhook.level === "org" && credentialConfinedToSpaces(c)) ||
-        (webhook.level === "space" && !credentialAdmitsSpace(c, webhook.spaceId))
-      ) {
-        throw notFound(`Webhook '${webhook.id}' not found`);
+  const authorizedWebhook =
+    (action: "read" | "write" | "delete") =>
+    async (c: Context<AppEnv>): Promise<WebhookInfo> => {
+      let webhook: WebhookInfo;
+      try {
+        webhook = await getWebhook(webhookScope(c), c.req.param("id")!);
+        // A row outside what the credential reaches is a row that does not exist, in the same
+        // words: an org-level row spans every space, so a confined credential never sees it, and a
+        // space row outside the credential's pin or allowlist would otherwise confirm its id, and
+        // name its space, through the space refusal below.
+        if (
+          (webhook.level === "org" && credentialConfinedToSpaces(c)) ||
+          (webhook.level === "space" && !credentialAdmitsSpace(c, webhook.spaceId))
+        ) {
+          throw notFound(`Webhook '${webhook.id}' not found`);
+        }
+      } catch (err) {
+        // ONLY the 404 is convertible; laundering a DB failure into 403 would hide an outage.
+        if (!(err instanceof ApiError && err.status === 404)) throw err;
+        await requireAnyPermission(ANY_WEBHOOK_READ)(c, async () => {});
+        throw err;
       }
-    } catch (err) {
-      // ONLY the 404 is convertible; laundering a DB failure into 403 would hide an outage.
-      if (!(err instanceof ApiError && err.status === 404)) throw err;
-      await requireAnyPermission(ANY_WEBHOOK_READ)(c, async () => {});
-      throw err;
-    }
-    // The row's own space decides the permission; it need not be the one entered above.
-    if (webhook.level === "space" && webhook.spaceId) {
-      await enterSpaceContext(c, webhook.spaceId);
-    }
-    await assertWebhookPermission(c, webhook.level, action);
-    return webhook;
-  }
+      // The row's own space decides the permission; it need not be the one entered above.
+      if (webhook.level === "space" && webhook.spaceId) {
+        await enterSpaceContext(c, webhook.spaceId);
+      }
+      await assertWebhookPermission(c, webhook.level, action);
+      return webhook;
+    };
 
   // GET /api/webhooks/:id — get webhook detail.
   //
-  // Every by-id route mounts no permission guard: `loadWebhookForAction` enters the ROW's
-  // space and judges there.
-  router.get("/api/webhooks/:id", rateLimit(300), async (c) => {
-    return c.json(await loadWebhookForAction(c, "read"));
-  });
+  // Each action receives the webhook only after authorization in the row's own space.
+  router.get(
+    "/api/webhooks/:id",
+    rateLimit(300),
+    withAuthorizedRow(authorizedWebhook("read"), (c, webhook) => c.json(webhook)),
+  );
 
   // PATCH /api/webhooks/:id — update webhook (url, events, filters — not secret/level)
-  router.patch("/api/webhooks/:id", rateLimit(10), async (c) => {
-    // Permission check must still precede reading the body.
-    await loadWebhookForAction(c, "write");
-    const data = await readJsonBody(c, updateWebhookSchema);
+  router.patch(
+    "/api/webhooks/:id",
+    rateLimit(10),
+    withAuthorizedRow(authorizedWebhook("write"), async (c, webhook) => {
+      const data = await readJsonBody(c, updateWebhookSchema);
 
-    const result = await updateWebhook(webhookScope(c), c.req.param("id")!, data);
-    await recordAuditFromContext(c, {
-      action: "webhook.updated",
-      resourceType: "webhook",
-      resourceId: c.req.param("id")!,
-      after: data,
-    });
-    return c.json(result);
-  });
+      const result = await updateWebhook(webhookScope(c), webhook.id, data);
+      await recordAuditFromContext(c, {
+        action: "webhook.updated",
+        resourceType: "webhook",
+        resourceId: webhook.id,
+        after: data,
+      });
+      return c.json(result);
+    }),
+  );
 
   // DELETE /api/webhooks/:id — delete webhook
-  router.delete("/api/webhooks/:id", rateLimit(10), async (c) => {
-    const id = c.req.param("id")!;
-    await loadWebhookForAction(c, "delete");
-    await deleteWebhook(webhookScope(c), id);
-    await recordAuditFromContext(c, {
-      action: "webhook.deleted",
-      resourceType: "webhook",
-      resourceId: id,
-    });
-    return c.body(null, 204);
-  });
+  router.delete(
+    "/api/webhooks/:id",
+    rateLimit(10),
+    withAuthorizedRow(authorizedWebhook("delete"), async (c, { id }) => {
+      await deleteWebhook(webhookScope(c), id);
+      await recordAuditFromContext(c, {
+        action: "webhook.deleted",
+        resourceType: "webhook",
+        resourceId: id,
+      });
+      return c.body(null, 204);
+    }),
+  );
 
   // POST /api/webhooks/:id/test — queue a signed test.ping delivery (one
   // attempt). The 200 confirms it was queued, not that it was delivered.
-  router.post("/api/webhooks/:id/test", rateLimit(5), async (c) => {
-    const webhook = await loadWebhookForAction(c, "write");
-    const result = await sendTestPing(webhook);
-    // An outbound signed request on the caller's say-so, like a rotation.
-    await recordAuditFromContext(c, {
-      action: "webhook.test_sent",
-      resourceType: "webhook",
-      resourceId: webhook.id,
-      after: { eventId: result.eventId },
-    });
-    return c.json(result);
-  });
+  router.post(
+    "/api/webhooks/:id/test",
+    rateLimit(5),
+    withAuthorizedRow(authorizedWebhook("write"), async (c, webhook) => {
+      const result = await sendTestPing(webhook);
+      // An outbound signed request on the caller's say-so, like a rotation.
+      await recordAuditFromContext(c, {
+        action: "webhook.test_sent",
+        resourceType: "webhook",
+        resourceId: webhook.id,
+        after: { eventId: result.eventId },
+      });
+      return c.json(result);
+    }),
+  );
 
   // POST /api/webhooks/:id/rotate — open a dual-signature rotation window.
   // Body is optional: `{ windowSeconds?: number }` overrides the default
   // 7-day window (capped at 30 days). The response carries both the new
   // secret (for consumer migration) and the previous one (still valid
   // until the window closes), plus the deadline.
-  router.post("/api/webhooks/:id/rotate", rateLimit(5), async (c) => {
-    const id = c.req.param("id")!;
-    await loadWebhookForAction(c, "write");
-    const parsed = await readJsonBody(c, rotateSecretSchema, { allowEmpty: true });
-    const result = await rotateSecret(webhookScope(c), id, parsed);
-    await recordAuditFromContext(c, {
-      action: "webhook.secret_rotated",
-      resourceType: "webhook",
-      resourceId: id,
-      after: { rotationWindowEndsAt: result.rotationWindowEndsAt },
-    });
-    return c.json(result);
-  });
+  router.post(
+    "/api/webhooks/:id/rotate",
+    rateLimit(5),
+    withAuthorizedRow(authorizedWebhook("write"), async (c, { id }) => {
+      const parsed = await readJsonBody(c, rotateSecretSchema, { allowEmpty: true });
+      const result = await rotateSecret(webhookScope(c), id, parsed);
+      await recordAuditFromContext(c, {
+        action: "webhook.secret_rotated",
+        resourceType: "webhook",
+        resourceId: id,
+        after: { rotationWindowEndsAt: result.rotationWindowEndsAt },
+      });
+      return c.json(result);
+    }),
+  );
 
   // GET /api/webhooks/:id/deliveries — delivery history, keyset-paginated on
   // `?startingAfter=<delivery id>` (follow the `Link: rel="next"` header).
-  router.get("/api/webhooks/:id/deliveries", rateLimit(300), async (c) => {
-    await loadWebhookForAction(c, "read");
-    // Coerce + bound the limit: a raw `Number("-5")`/`Number("x")` (NaN)
-    // would otherwise reach the query and 500. Anything but 1..100 is a 400 —
-    // `parseListPagination` owns that rule.
-    const { limit } = parseListPagination(c, { defaultLimit: 20 });
-    const startingAfter = c.req.query("startingAfter");
-    const { data, hasMore } = await listDeliveries(webhookScope(c), c.req.param("id")!, {
-      limit,
-      ...(startingAfter ? { startingAfter } : {}),
-    });
-    setCursorLinkHeader({ c, hasMore, lastId: data.at(-1)?.id });
-    return c.json(listResponse(data, { hasMore }));
-  });
+  router.get(
+    "/api/webhooks/:id/deliveries",
+    rateLimit(300),
+    withAuthorizedRow(authorizedWebhook("read"), async (c, webhook) => {
+      // Coerce + bound the limit: a raw `Number("-5")`/`Number("x")` (NaN)
+      // would otherwise reach the query and 500. Anything but 1..100 is a 400 —
+      // `parseListPagination` owns that rule.
+      const { limit } = parseListPagination(c, { defaultLimit: 20 });
+      const startingAfter = c.req.query("startingAfter");
+      const { data, hasMore } = await listDeliveries(webhookScope(c), webhook.id, {
+        limit,
+        ...(startingAfter ? { startingAfter } : {}),
+      });
+      setCursorLinkHeader({ c, hasMore, lastId: data.at(-1)?.id });
+      return c.json(listResponse(data, { hasMore }));
+    }),
+  );
 
   return router;
 }

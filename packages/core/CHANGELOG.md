@@ -21,6 +21,109 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   or `end_user:<spaceId>`), resolved on demand. All three are always set by the platform.
   **`AfterSignupContext.path` and `.query`**: the same endpoint and query.
 
+## [18.0.0] — 2026-11-24
+
+### Added
+
+- `@appstrate/core/chat-message` exports `historicalChatMessageSchema` for persisted messages and
+  `chatThreadMessagesSchema` for submitted threads. The chat module and upgrade check share these
+  validators. `AGENT_PROMPT_PART_TYPE` and `agentPromptDataSchema` describe an agent launch part,
+  and `CHAT_MESSAGE_MAX_BYTES` sets the submitted message size limit.
+
+- `displayAccountId` and `PLACEHOLDER_ACCOUNT_ID` identify integration connections that can be renewed on the same upstream account.
+
+- `AUTH_META_KEY`, `CONNECT_META_KEY`, `OAUTH_META_KEY` and their readers `appstrateAuthRequired`, `getAppstrateConnectMeta`, `getAppstrateOAuthMeta` describe the published integration metadata fields.
+- `recallMemoryOutputSchema` and `runHistoryOutputSchema` describe the structured results of the run history and recall tools.
+
+- `resourceReadWithinLimits`, `MCP_RESOURCE_MAX_ITEMS` and `MCP_RESOURCE_MAX_BYTES` bound a complete MCP resource read across the sidecar and runner.
+- `integrationSpawnSpecSchema` and `integrationSpawnSpecsSchema` in `@appstrate/core/sidecar-types` validate declared launch specs before integration boot.
+- `modelErrorReason` in `@appstrate/core/model-error` reads a known reason from the structured provider refusal carried by a terminal run.
+
+- `assistantVisibleMcpResult` in `@appstrate/core/mcp-result` projects tool results to their assistant audience before workspace, history, or model use.
+
+- **`@appstrate/core/skill-address`**: the `skill://` URI grammar alone — `SKILL_URI_PREFIX`,
+  `skillFileUri`, `parseSkillUri`, `parseSkillUriPackage` and the `SkillAddress` type — with no
+  server-only import, so a browser bundle can parse a skill URI.
+- **`personal_space_role`** org setting (`orgSettingsSchema`, `admin` | `operator`, read as `admin` when
+  absent): `operator` caps the role an org member holds in their own personal space.
+- **`AuthResolution.spaceIdsRestricted`** (`@appstrate/core/module`, #2336): whether `spaceIds` is a
+  restriction the person chose (default `true`). `false` marks the set as the spaces the person acts
+  in, so the credential acts on connections as the person while staying confined everywhere else.
+- **`formatRelativeTime(at, now, locale?, style?)`, `formatAge(at, now, locale?)`**
+  (`@appstrate/core/format`): `at` relative to `now`, both epoch milliseconds, in either
+  direction, rendered by `Intl` in the given locale (English when absent or malformed, as
+  `formatBytes`). A non-finite `at` (an unparseable date) renders `""`; neither throws. `formatRelativeTime` is
+  a phrase (`Intl.RelativeTimeFormat`: « dans 3 h », « il y a 5 min », « maintenant »);
+  `formatAge` the same span as a bare quantity for a narrow column (`Intl.NumberFormat` units:
+  « 5 min », « 3 j »). One unit ladder for both: minutes, hours, days under 30, months of 30
+  days, years; counts truncated toward zero, days as 24-hour spans rather than calendar days.
+- `@appstrate/core/permissions` exports `withAuthorizedRow(loadAndAuthorize, act)` for module
+  routes whose space comes from a row. The action receives the authorized row after the platform
+  checks its destination. `setRowTargetChecker` wires that check at boot and
+  `AUTHORIZED_ROW_MARKER` lets registration verify the mounted handler.
+- `@appstrate/core/mcp-spaces` exports `defaultMcpSpaceId` for resolving the designated
+  destination of an MCP call. `OPERATION_SPACES_META_KEY` identifies the spaces the call used
+  and `SPACE_CHOICE_META_KEY` identifies the eligible destinations when a user choice is required.
+- `projectActiveInSpaces` in `@appstrate/core/mcp-spaces` filters launch alternatives by the spaces
+  where the tool can repeat the operation. `ACTIVE_IN_SPACES_HINT` is the optional instruction
+  accompanying those alternatives. `ACTIVE_SPACES_META_KEY` identifies the disclosed space IDs
+  in MCP result metadata so a chat can record them before showing the result.
+- **`RESERVE_CEILING_TOKENS`** (`@appstrate/core/token-budget`, #2324): the absolute cap on the
+  response reserve (64 000), see the `### Changed` entry below.
+- **`DEFAULT_CONTEXT_WINDOW`, `DEFAULT_MAX_TOKENS`** (`@appstrate/core/token-budget`, #2324): the
+  limits of a model nothing else sizes (128 000 / 16 384), moved from `@appstrate/runner-pi` so
+  the chat's gauge sizes a catalog row as the runner does.
+- **`AppstrateTurnContext.windowAssumed`** (`@appstrate/core/chat-turn-metadata`, #2324): `true`
+  when the model declares no window and `window` is the engine's fallback. Optional and additive.
+- **`AppstrateTurnContext`, `AppstrateTurnMetadata.context`** (`@appstrate/core/chat-turn-metadata`,
+  #2318): the context of a chat turn's last settled model call (`tokens`), the window the engine
+  ran against (`window`) and its compaction threshold (`compactAt`). Optional and additive: a
+  turn that measured nothing carries none.
+- **`NamedSpace.personal`** (`@appstrate/core/mcp-spaces`, #2328): optional flag for the
+  caller's own personal space; `describeSpace` then appends `, your personal space`. Additive:
+  a space without it is described exactly as before.
+
+- **`AppstrateTurnSummary`, `AppstrateTurnMetadata.summary`** (`@appstrate/core/chat-turn-metadata`,
+  #2324): the summary of the history a chat turn made (`text`), the first message kept beside it
+  (`keptFrom: { messageId, offset }`) and the context size before summarizing (`tokensBefore`).
+  Later turns on the branch start from it instead of summarizing the whole history again.
+  Optional and additive: a turn that summarized nothing carries none.
+
+### Changed
+
+- Upgrading the platform requires modules to declare `x-appstrate-space` on OpenAPI operations
+  whose scope the mounted guards do not supply. Registration fails at startup on a missing or
+  contradictory contract. Modules with row-scoped operations must use `withAuthorizedRow` from
+  `@appstrate/core/permissions`. See the [module authoring guide](../../apps/api/src/modules/README.md#openapi-contributions).
+
+- `validateManifest` now rejects a root `runtime_tools` field on an agent when validating new packages.
+  Select the tools of the `@appstrate/platform` integration through `integrations_configuration`.
+  Stored packages read with `retiredDependencyKeys: "tolerate"` retain their previous behavior.
+- Integration manifest validation now reports malformed `dev.appstrate/auth`, `dev.appstrate/oauth`
+  and `dev.appstrate/connect` metadata at the offending field. The metadata keys remain optional.
+- `ConnectionResolutionError.remedy` is now also set on `needs_reconnection` when the connection
+  has no identified upstream account (`PLACEHOLDER_ACCOUNT_ID`). Such a connection cannot be
+  renewed in place: `remedy` names the binding to change (`new_connection`, `rebind_by_admin` or
+  `rebind_by_schedule_owner`) instead. Its absence still means the owner can reconnect it.
+
+- **`deriveResponseReserveTokens` caps the reserve at `RESERVE_CEILING_TOKENS` (64 000)**
+  (`@appstrate/core/token-budget`): pi-ai clamps the `max_tokens` it sends, so the reserve is room
+  for a reply plus the summary trigger, not the model's max output. On a 1M window, a 384k
+  `maxTokens` now summarizes at 936k instead of 616k, and a null `maxTokens` (reserve 20 % of the
+  window: 200k → 64k) at 936k instead of 800k. Reserves already below 64k are unchanged.
+
+### Removed
+
+- **`SKILL_URI_PREFIX`, `skillFileUri`, `parseSkillUri`, `parseSkillUriPackage`, `SkillAddress`
+  from `@appstrate/core/skill-uri`** — BREAKING. They live in `@appstrate/core/skill-address`
+  alone; import them from there. `skill-uri` keeps the entries, limits, `_meta` keys and
+  `skillFileDigest` (`node:crypto`).
+- **`relativeAge`, `RelativeAgeUnit`** — BREAKING (`@appstrate/core/format`). They returned a
+  past-only `{ unit, count }` that every caller translated with its own keys, rounding where the
+  schedules needed truncation and clamping every future date to now. Use `formatRelativeTime`
+  (a phrase) or `formatAge` (a bare quantity), which render through `Intl` and read the future
+  as well as the past.
+
 ## [17.0.0] — 2026-11-19
 
 ### Added

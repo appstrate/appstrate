@@ -3,39 +3,31 @@
 /**
  * Server-authoritative chat persistence.
  *
- * Why server-side: persistence used to be 100% client-driven (assistant-ui's
- * `useExternalHistory` POSTed the user+assistant pair only AFTER a run completed,
- * in one debounced batch). Leaving the conversation mid-inference dropped BOTH
- * messages and they never reappeared. The server now writes each message as soon
- * as it is known — the user turn before inference starts, the assistant turn when
- * the stream finalizes (driven to completion independently of the client by the
- * resumable-stream producer) — so a disconnect cannot lose data.
- *
- * Storage stays byte-compatible with assistant-ui's `ai-sdk/v6`
- * MessageFormatAdapter so the existing client history-adapter LOAD path keeps
- * working unchanged: `content` = the UIMessage WITHOUT its `id` (the id lives in
- * `message_id`). Ordering is `chat_messages.seq` and nothing else. The `format`
- * and `parent_id` columns were dropped by `0054` — a constant and a re-encoding
- * of that same `seq` order, neither of which any reader ever looked at; see the
- * `chatMessages` table doc. The message a new one FOLLOWS is still computed
- * here, because `deterministicMessageId` hashes it.
+ * Write the user turn before inference and the assistant turn when the stream
+ * finalizes on the server, so a client disconnect cannot lose either turn.
+ * The message payload preserves the UIMessage and seq orders the conversation.
+ * deterministicMessageId uses the predecessor to identify a retried append.
  */
 
 import { and, desc, eq, inArray, isNull, ne, or, sql, type SQL } from "drizzle-orm";
+import { z } from "zod";
 import { isForeignKeyViolation } from "@appstrate/db/errors";
 import { db } from "@appstrate/db/client";
 import {
   chatMessages,
   chatSessions,
   chatSessionSpaces,
+  chatSkillStatusValues,
   files,
   type ChatMessageContent,
 } from "@appstrate/db/schema";
 import { toPgSafe } from "@appstrate/db/pg-safe";
 import { invalidRequest, notFound } from "@appstrate/core/api-errors";
-import { uiMessageText } from "./message-text.ts";
+import { uiMessageTitleText } from "./message-text.ts";
+import { AGENT_PROMPT_PART_TYPE } from "@appstrate/core/chat-message";
+import { agentPromptOfParts } from "./agent-prompt.ts";
 import { notifySessionUpdate } from "./realtime.ts";
-import type { ChatSkillSelection } from "./skills.ts";
+import type { ChatSkillSelection, PinnedSkill, SkillSettingsPatch } from "./skills.ts";
 import type { FileUIPart, UIMessage } from "ai";
 
 /**
@@ -197,9 +189,9 @@ export interface TurnConversation {
 type ConversationOriginRequest = () => { spaceId: string; restricted: boolean } | undefined;
 
 /**
- * Create the session row if it does not exist yet (idempotent). The client
- * mints the id; the stream route creates the row through here, writing the
- * turn's skill `selection` in the same statement when it carries one. The
+ * Create the session row if it does not exist yet (idempotent). The client mints the id. The
+ * `selection` (the composer's buffered skill settings) is written only by the insert: an
+ * existing conversation keeps its own, changed by the skills PATCH alone. The
  * `origin` request (origin space and limit) is called ONLY when this call creates the row:
  * an existing conversation keeps its own and the request is never evaluated. A turn naming an
  * origin runs in a transaction that evaluates it once the row is known to be new (a refusal
@@ -215,7 +207,7 @@ export async function ensureSession(
    * space it touched is among them.
    */
   readable: readonly string[],
-  selection?: ChatSkillSelection,
+  selection?: Partial<ChatSkillSelection>,
   origin?: ConversationOriginRequest,
 ): Promise<TurnConversation> {
   // The id is client-minted, so a caller could send an id that already belongs
@@ -243,8 +235,7 @@ export async function ensureSession(
       .values({ id, orgId, userId, title: null, ...selection })
       .onConflictDoUpdate({
         target: chatSessions.id,
-        // `updatedAt` stays either way, so a pin never reorders the sidebar.
-        set: selection ?? { id: sql`${chatSessions.id}` },
+        set: { id: sql`${chatSessions.id}` },
         setWhere: and(
           eq(chatSessions.orgId, orgId),
           eq(chatSessions.userId, userId),
@@ -254,7 +245,7 @@ export async function ensureSession(
       .returning({
         orgId: chatSessions.orgId,
         userId: chatSessions.userId,
-        skillMode: chatSessions.skillMode,
+        skillDiscovery: chatSessions.skillDiscovery,
         pinnedSkills: chatSessions.pinnedSkills,
         spaceId: chatSessions.spaceId,
         restricted: chatSessions.restricted,
@@ -277,10 +268,70 @@ export async function ensureSession(
     throw notFound("Chat session not found");
   }
   return {
-    selection: { skillMode: row.skillMode, pinnedSkills: row.pinnedSkills },
+    selection: { skillDiscovery: row.skillDiscovery, pinnedSkills: row.pinnedSkills },
     spaceId: row.spaceId,
     restricted: row.restricted,
   };
+}
+
+/**
+ * Write a session's skill settings (the skills PATCH): `pinnedSkills` replaces the set, dropping
+ * the `skill_status` of every skill it no longer holds (a new pin has none until a turn evaluates
+ * it). Leaves `updated_at`, so a pin never reorders the sidebar. A turn in flight keeps what it
+ * read; the next one reads this. Returns the row, or undefined when it is gone.
+ */
+export async function updateSessionSkills(
+  session: SQL,
+  change: SkillSettingsPatch,
+): Promise<typeof chatSessions.$inferSelect | undefined> {
+  const { pin, pins } = change;
+  // PostgreSQL evaluates the update against the latest locked row, including another tab's
+  // committed pin changes. "C" matches the JS sort order of the ASCII package ids.
+  const pinUpdate = pin?.pinned
+    ? {
+        pinnedSkills: sql`ARRAY(SELECT DISTINCT id COLLATE "C" FROM unnest(array_append(${chatSessions.pinnedSkills}, ${pin.id}::text)) AS ids(id) ORDER BY 1)`,
+      }
+    : pin
+      ? {
+          pinnedSkills: sql`array_remove(${chatSessions.pinnedSkills}, ${pin.id}::text)`,
+          skillStatus: sql`${chatSessions.skillStatus} - ${pin.id}::text`,
+        }
+      : undefined;
+  const [row] = await db
+    .update(chatSessions)
+    .set({
+      skillDiscovery: change.skill_discovery,
+      ...pinUpdate,
+      ...(pins !== undefined && {
+        pinnedSkills: pins,
+        skillStatus: sql`(SELECT coalesce(jsonb_object_agg(key, value), '{}'::jsonb) FROM jsonb_each(${chatSessions.skillStatus}) WHERE key IN (SELECT jsonb_array_elements_text(${JSON.stringify(pins)}::jsonb)))`,
+      }),
+    })
+    .where(session)
+    .returning();
+  return row;
+}
+
+const skillStatusEntrySchema = z.object({
+  status: z.enum(chatSkillStatusValues),
+  chars: z.int().nonnegative().nullable().catch(null),
+});
+
+/**
+ * The pins of a session row as its DTOs carry them (`pins`); every write stores them sorted.
+ * `skill_status` is jsonb, which no CHECK holds to the contract: an entry off it reads as not
+ * evaluated (`null`), a `chars` that is not a non-negative integer as `null`. Here, not in
+ * `skills.ts`: the narrowing needs the values at run time, which the browser-safe `skills.ts`
+ * cannot import from `@appstrate/db/schema`.
+ */
+export function pinnedSkillsOf(row: {
+  pinnedSkills: readonly string[];
+  skillStatus: Readonly<Record<string, unknown>>;
+}): PinnedSkill[] {
+  return row.pinnedSkills.map((id) => {
+    const entry = skillStatusEntrySchema.safeParse(row.skillStatus[id]);
+    return entry.success ? { id, ...entry.data } : { id, status: null, chars: null };
+  });
 }
 
 /** Most recent message id in a session — the one a new message follows, or null. */
@@ -360,14 +411,17 @@ async function upsertMessage(
 }
 
 /**
- * The file parts of the session's stored messages among `messageIds` that hold any, by message
- * id: what an earlier turn of a conversation attached, as the server materialized it.
+ * What the session's stored messages among `messageIds` carry, by message id: the file parts an
+ * earlier turn attached, as the server materialized them, and the resolved launch text of an
+ * agent launch (`agent-prompt.ts`), the one source of an earlier message's launch text.
  */
-export async function storedFileParts(
+export async function storedHistory(
   sessionId: string,
   messageIds: readonly string[],
-): Promise<Map<string, FileUIPart[]>> {
-  if (!messageIds.length) return new Map();
+): Promise<{ files: Map<string, FileUIPart[]>; launches: Map<string, string> }> {
+  const files = new Map<string, FileUIPart[]>();
+  const launches = new Map<string, string>();
+  if (!messageIds.length) return { files, launches };
   const rows = await db
     .select({ messageId: chatMessages.messageId, content: chatMessages.content })
     .from(chatMessages)
@@ -375,17 +429,18 @@ export async function storedFileParts(
       and(
         eq(chatMessages.sessionId, sessionId),
         inArray(chatMessages.messageId, [...messageIds]),
-        sql`${chatMessages.content}->'parts' @> '[{"type":"file"}]'::jsonb`,
+        sql`(${chatMessages.content}->'parts' @> '[{"type":"file"}]'::jsonb OR ${chatMessages.content}->'parts' @> ${JSON.stringify([{ type: AGENT_PROMPT_PART_TYPE }])}::jsonb)`,
       ),
     );
-  return new Map(
-    rows.map((row) => [
-      row.messageId,
-      row.content.parts.filter(
-        (part): part is FileUIPart => (part as { type?: unknown }).type === "file",
-      ),
-    ]),
-  );
+  for (const row of rows) {
+    const fileParts = row.content.parts.filter(
+      (part): part is FileUIPart => (part as { type?: unknown }).type === "file",
+    );
+    if (fileParts.length) files.set(row.messageId, fileParts);
+    const text = agentPromptOfParts(row.content.parts)?.data.text;
+    if (text) launches.set(row.messageId, text);
+  }
+  return { files, launches };
 }
 
 /**
@@ -624,7 +679,7 @@ async function touchSession(
  */
 function titleCandidate(message: UIMessage): string | null {
   if (message.role !== "user") return null;
-  return titleFromText(uiMessageText(message.parts));
+  return titleFromText(uiMessageTitleText(message.parts));
 }
 
 const TITLE_HEAD = 57;
@@ -677,7 +732,7 @@ async function deriveTitle(client: ChatDbClient, sessionId: string): Promise<str
   for (const row of rows) {
     const content = row.content as { role?: string; parts?: unknown[] };
     if (content?.role !== "user" || !Array.isArray(content.parts)) continue;
-    const title = titleFromText(uiMessageText(content.parts));
+    const title = titleFromText(uiMessageTitleText(content.parts));
     if (title !== null) return title;
   }
   return null;

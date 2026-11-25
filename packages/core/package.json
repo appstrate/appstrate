@@ -1,6 +1,6 @@
 {
   "name": "@appstrate/core",
-  "version": "17.0.0",
+  "version": "18.0.0",
   "description": "Shared validation, storage, and utility library for Appstrate packages",
   "license": "Apache-2.0",
   "type": "module",
@@ -61,6 +61,7 @@
     "./package-file-operations": "./src/package-file-operations.ts",
     "./naming": "./src/naming.ts",
     "./skill-uri": "./src/skill-uri.ts",
+    "./skill-address": "./src/skill-address.ts",
     "./image-ref": "./src/image-ref.ts",
     "./mime": "./src/mime.ts",
     "./dependencies": "./src/dependencies.ts",
@@ -93,6 +94,7 @@
     "./pairing-token": "./src/pairing-token.ts",
     "./jwt": "./src/jwt.ts",
     "./dedupe-label": "./src/dedupe-label.ts",
+    "./chat-message": "./src/chat-message.ts",
     "./chat-contract": "./src/chat-contract.ts",
     "./file-uri": "./src/file-uri.ts",
     "./appearance": "./src/appearance.ts",
@@ -112,7 +114,7 @@
   },
   "dependencies": {
     "@afps-spec/schema": "^0.13.0",
-    "@appstrate/afps-shared": "^0.14.0",
+    "@appstrate/afps-shared": "^0.14.1",
     "@types/json-schema": "7.0.15",
     "@types/semver": "^7.8.0",
     "ajv": "^8.20.0",

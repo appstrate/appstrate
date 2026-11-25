@@ -60,6 +60,7 @@ import { listActivePackages } from "../space-packages.ts";
 import type { ConnectionVariables } from "../connect/connection-variables.ts";
 import {
   readIntegrationManifestForProxy,
+  readPublishedIntegrationManifests,
   type ResolvedIntegrationVersion,
 } from "../integration-service.ts";
 import { refreshConnectionCredential } from "../integration-token-refresh.ts";
@@ -319,19 +320,13 @@ export async function listConnectionsOutsideRun(
  * The published manifest of each of `integrationIds` that has one: the version a call outside a
  * run is authorized against.
  */
-export async function publishedManifests(
+export function publishedManifests(
   orgId: string,
   integrationIds: readonly string[],
 ): Promise<Map<string, IntegrationManifest>> {
-  const loaded = await Promise.all(
-    integrationIds.map((id) => readIntegrationManifestForProxy(id, orgId, null)),
+  return readPublishedIntegrationManifests(integrationIds, orgId).then(
+    ({ manifests }) => manifests,
   );
-  const manifests = new Map<string, IntegrationManifest>();
-  integrationIds.forEach((id, i) => {
-    const result = loaded[i]!;
-    if (result.ok) manifests.set(id, result.manifest);
-  });
-  return manifests;
 }
 
 /**

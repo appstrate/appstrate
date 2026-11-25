@@ -109,7 +109,7 @@ export function parseResume(text: string): ResumeMeta | null {
     const meta = JSON.parse(json) as ResumeMeta;
     if (meta && typeof meta.packageId === "string") return meta;
   } catch {
-    // Older resume messages had no meta payload — treat as a bare notice.
+    // Show a bare notice when the metadata cannot be decoded.
   }
   return { packageId: "" };
 }

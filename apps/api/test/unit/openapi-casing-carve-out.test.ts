@@ -60,10 +60,6 @@ const WEBHOOKS = {
   reason: "4n headless-platform DTO (webhook CRUD)",
   within: ["#/components/schemas/WebhookObject/", "#/paths/~1api~1webhooks"],
 };
-const CLI_SESSIONS = {
-  reason: "5d Better Auth plugin mirror (CLI sessions)",
-  within: ["#/paths/~1api~1auth~1cli~1", "#/paths/~1api~1orgs~1{orgId}~1cli-sessions"],
-};
 const AUTH_EMAIL_SIGN_IN_UP = {
   reason: "4c Better Auth sign-up/sign-in mirror (where the verification link lands)",
   within: ["#/paths/~1api~1auth~1sign-up~1email", "#/paths/~1api~1auth~1sign-in~1email"],
@@ -146,15 +142,13 @@ export const CAMEL_CASE_CARVE_OUTS: Record<string, CarveOut> = {
   signupSpaceAssignments: OAUTH_CLIENTS,
   referencedOrgId: OAUTH_CLIENTS,
   referencedSpaceId: OAUTH_CLIENTS,
-  familyId: CLI_SESSIONS,
-  deviceName: CLI_SESSIONS,
-  userAgent: CLI_SESSIONS,
-  createdIp: CLI_SESSIONS,
-  lastUsedIp: CLI_SESSIONS,
-  userName: CLI_SESSIONS,
-  userEmail: CLI_SESSIONS,
-  revokedCount: CLI_SESSIONS,
   structuredContent: MCP_TOOL_RESULT,
+  mediaType: {
+    reason: "AI SDK FileUIPart wire field",
+    within: [
+      "#/paths/~1api~1orgs~1{orgId}~1chat/post/requestBody/content/application~1json/schema/properties/messages/items/properties/parts/items/",
+    ],
+  },
 };
 
 /**
@@ -185,6 +179,7 @@ const SNAKE_TWIN_EXCEPTIONS = new Set([
   // The enumerated counter-exception of the placement / share family.
   "#/components/schemas/PackagePlacement/properties/space_id",
   "#/components/schemas/PackagePlacement/properties/shared_by/properties/user_id",
+  "#/components/schemas/PackageAvailability/properties/shared_by/properties/user_id",
   "#/components/schemas/PackageShare/properties/shared_by/properties/user_id",
   // Internal sidecar↔platform wire, documented snake_case end to end.
   "#/components/schemas/IntegrationCredentialsResponse/properties/auths/items/properties/expires_at",

@@ -338,7 +338,10 @@ interface ShareTargetSpace {
  */
 export async function shareableSpaces(
   caller: ConnectionCaller,
-  rows: readonly Pick<ConnectionRow, "id" | "orgId" | "userId" | "endUserId" | "spaceId">[],
+  rows: readonly Pick<
+    ConnectionRow,
+    "id" | "orgId" | "userId" | "endUserId" | "spaceId" | "accountId"
+  >[],
   orgRoles: ReadonlyMap<string, OrgRole>,
 ): Promise<Map<string, ShareTargetSpace[]>> {
   const out = new Map<string, ShareTargetSpace[]>();
