@@ -2657,17 +2657,17 @@ const ORGANIZATION_LEVEL_SPACE_ID =
 /** `space_id`, listing the spaces itself: clients truncate server instructions. */
 function spaceIdProperty(
   spaces: OrgWideSpaces,
-  optional: "search" | "context" | undefined,
+  kind: (typeof TOOL_SPACE_RULES)[McpToolName]["kind"],
   perOperation: boolean,
 ): Record<string, unknown> {
   const reached = spaces.reachable.map(describeSpace).join("; ");
   let description: string;
-  if (optional === "search")
+  if (kind === "search")
     description =
       `The one space to search, by id: ${reached}. Pass it when the request or context designates a space, ` +
       "including when that space has no matches. Omit it for an explicitly cross-space search or when the space is unknown. " +
       "Each item's `granted_in` names the spaces where you reach it.";
-  else if (optional === "context")
+  else if (kind === "optional")
     description =
       `The space whose context to return, by id: ${reached}. Omit it when no space is designated: ` +
       "the answer then holds your identity, your organization role and `spaces`, without the " +
@@ -2720,8 +2720,7 @@ function withSpaceArgument(
   const name = tool.descriptor.name as McpToolName;
   const declared = TOOL_SPACE_RULES[name];
   if (declared.kind === "none") return tool;
-  const optional =
-    declared.kind === "search" ? "search" : declared.kind === "optional" ? "context" : undefined;
+  const optional = declared.kind === "search" || declared.kind === "optional";
   // Required unless the operation the call names acts in no space.
   const perOperation = name === "invoke_operation" || name === "describe";
   const act = declared.grant;
@@ -2739,7 +2738,7 @@ function withSpaceArgument(
       ...schema,
       properties: {
         ...schema.properties,
-        space_id: spaceIdProperty(spaces, optional, perOperation),
+        space_id: spaceIdProperty(spaces, declared.kind, perOperation),
       },
     },
   };

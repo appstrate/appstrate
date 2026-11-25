@@ -834,6 +834,19 @@ export const mePaths = {
               schema: {
                 type: "object",
                 required: ["user", "org"],
+                // The space-level part comes whole or not at all.
+                dependentRequired: {
+                  space: [
+                    "connections",
+                    "recent_runs",
+                    "agents",
+                    "agents_truncated",
+                    "agents_total",
+                    "skills",
+                    "skills_truncated",
+                    "skills_total",
+                  ],
+                },
                 properties: {
                   user: {
                     type: "object",

@@ -468,8 +468,9 @@ router.get(
  *
  * Space context resolves as `requireSpaceContext` does: the credential's
  * space, else `X-Space-Id`; with neither, the answer is the organization-level
- * part alone (identity and org role) — the lists below belong to one space. The payload names that space: an empty list alone cannot
- * tell an agent whether nothing is there for it or it is in the wrong space.
+ * part alone (identity and org role): every list belongs to one space. With a
+ * space, the payload names it: an empty list alone cannot tell an agent whether
+ * nothing is there for it or it is in the wrong space.
  */
 router.get("/context", optionalSpaceContext(), async (c) => {
   const actor = getActor(c);
