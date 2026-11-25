@@ -2,7 +2,6 @@
 
 import { describe, expect, it } from "bun:test";
 import { i18nReady } from "../../../i18n.ts";
-import { ToolPolicySkeleton } from "../../loading-skeletons.tsx";
 import { render } from "../../../test/render.tsx";
 import type { ToolPolicy } from "../../../lib/integration-tool-policy.ts";
 import {
@@ -162,21 +161,16 @@ describe("IntegrationToolPolicySection", () => {
     ).toBe("");
   });
 
-  it("still loads (declare controls) for a reader outside the review when a declaration is given", () => {
+  it("offers the declare controls to an author outside the review, without the space policy", () => {
     const html = render(
       <IntegrationToolPolicySection
         packageId="@acme/crm"
-        tools={[]}
+        tools={[{ name: "export_notes", status: "pending", origin: "listed" }]}
         review={false}
         declaration={declaration}
       />,
     );
-    expect(html).not.toBe("");
-  });
-
-  it("draws a skeleton per shape", () => {
-    expect(render(<ToolPolicySkeleton review />)).not.toBe(
-      render(<ToolPolicySkeleton review={false} />),
-    );
+    expect(html).toContain('data-testid="tool-declare-export_notes"');
+    expect(html).not.toContain("Approuver");
   });
 });

@@ -3,9 +3,9 @@
 /**
  * The working space's verdict on a remote integration's tools: the undeclared tools the server
  * lists that wait for a review (approve or block), the definitions approved, the tools blocked.
- * What the agents may call follows from it (`tool_catalog` statuses); only a reader who may
- * configure the integration in the space sees it. An author editing the draft also reads the
- * listed tools here, to declare them in the integration.
+ * What the agents may call follows from it (`tool_catalog` statuses). Those decisions are for a
+ * reader who may configure the integration in the space; an author editing the draft also finds
+ * here the listed tools to declare in the integration, which needs no space policy.
  */
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
@@ -43,6 +43,9 @@ export interface ToolDeclaration {
   declare: (names: string[]) => void;
 }
 
+/** What an author without the space review works with: no listing, approval nor block. */
+const NO_POLICY: ToolPolicy = { listed: [], approvals: [], blocks: [] };
+
 export function IntegrationToolPolicySection({
   packageId,
   tools,
@@ -57,14 +60,15 @@ export function IntegrationToolPolicySection({
   /** Present when the reader edits the draft: tools can be declared in the integration. */
   declaration?: ToolDeclaration;
 }) {
-  const query = useIntegrationToolPolicy(packageId, review || !!declaration);
+  // Only the space's decisions read the policy: declaring works from the catalog alone.
+  const query = useIntegrationToolPolicy(packageId, review);
   const actions = useIntegrationToolPolicyActions(packageId);
   if (!review && !declaration) return null;
-  if (query.isLoading) return <ToolPolicySkeleton review={review} />;
-  if (query.error || !query.data) return <ErrorState error={query.error} />;
+  if (review && query.isLoading) return <ToolPolicySkeleton />;
+  if (review && (query.error || !query.data)) return <ErrorState error={query.error} />;
   return (
     <ToolPolicyView
-      policy={query.data}
+      policy={query.data ?? NO_POLICY}
       tools={tools}
       review={review}
       declaration={declaration}
