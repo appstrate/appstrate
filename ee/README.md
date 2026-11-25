@@ -7,7 +7,7 @@ description is [`docs/site/features/enterprise-sign-in.mdx`](../docs/site/featur
 **This directory is not Apache-2.0.** It is source-available under the Appstrate
 Commercial License in `LICENSE` beside this file. Every `.ts` file carries
 `// SPDX-License-Identifier: LicenseRef-Appstrate-Commercial`, and
-`bun run verify:license-boundary` fails the build if one does not. No
+`bun run verify:license-headers` fails the build if one does not. No
 Apache-2.0 file may import it statically (`verify:module-isolation`).
 
 ## In this monorepo
@@ -34,18 +34,12 @@ Apache-2.0 file may import it statically (`verify:module-isolation`).
   (an owner, from a dashboard session), so every door gets it.
 - `src/sso/routes.ts` + `src/sso/openapi.ts`: `/api/org-sso`.
 
-## Known limits (documented for the IT administrator)
+## Known limits
 
-- A member removed by an owner joins again at their next Microsoft sign-in
-  while their Entra account is enabled: deprovision in Entra too.
-- Only dashboard sessions are capped at 24 h. CLI logins and OAuth/MCP tokens
-  obtained after enforcement started, and API keys, live until the person is
-  removed from the organization. Enforcement itself ends the domain's sessions,
-  CLI logins and OAuth refresh tokens (the platform's credential-change
-  revocation).
-- The owners' emergency password can be reset by email: it is only as strong as
-  their mailbox.
-- A domain proof is checked once, at verification, never again.
+What an IT administrator must know (re-joining after removal, which sessions and
+tokens the 24 h cap and the revocation reach, the emergency password, the one-time
+domain proof) is documented once, in
+[`docs/site/features/enterprise-sign-in.mdx`](../docs/site/features/enterprise-sign-in.mdx).
 
 ## Testing
 

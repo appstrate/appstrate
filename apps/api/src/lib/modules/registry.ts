@@ -40,6 +40,9 @@ import type { AppEnv } from "../../types/index.ts";
 // Init context builder
 // ---------------------------------------------------------------------------
 
+/** The only roles `members.provision` gives: a module never mints an admin or owner. */
+const MODULE_PROVISIONABLE_ROLES: ReadonlySet<string> = new Set(["member", "guest"]);
+
 /**
  * Wire concrete platform services into the structural `PlatformServices`
  * contract declared in `@appstrate/core/module`. The surface is intentionally
@@ -51,8 +54,6 @@ import type { AppEnv } from "../../types/index.ts";
  * records usage, and gates through here because it has no DB access. See the
  * `PlatformServices` doc in core for the razor.
  */
-const MODULE_PROVISIONABLE_ROLES: ReadonlySet<string> = new Set(["member", "guest"]);
-
 function buildPlatformServices(): PlatformServices {
   return {
     logger,
