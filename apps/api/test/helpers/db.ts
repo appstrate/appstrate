@@ -192,7 +192,12 @@ function buildTruncateSql(): string {
 export async function truncateAll(): Promise<void> {
   // Work tracked off the response path (audits, notification fan-out) lands in the next test's
   // database, or fails on rows already deleted, if it is not flushed first.
-  await drainAudits(5_000);
+  const drain = await drainAudits(5_000);
+  if (!drain.drained) {
+    throw new Error(
+      `truncateAll: ${drain.pending} tracked audit/notification write(s) still pending after 5s; truncating now would let them land in the next test's database`,
+    );
+  }
   const truncateSql = (cachedTruncateSql ??= buildTruncateSql());
   await withDeadlockRetry(() => db.execute(sql.raw(truncateSql)), {
     onRetry: (err, attempt) => {

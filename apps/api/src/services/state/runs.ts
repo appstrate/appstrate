@@ -997,7 +997,8 @@ const MAX_UNAVAILABLE_TOOLS_PER_INTEGRATION = 50;
  * Stamp `metadata.unavailable_tools[]` with the tools of `integrationId` the run selected and
  * could not expose, `{ integration_id, name, reason }` each, so the finished run says why a tool
  * was missing. Same atomic append and dedupe as {@link recordRunDegradedIntegration}, keyed by
- * integration and tool name. Best-effort: never throws into the caller.
+ * integration and tool name; an integration keeps at most {@link MAX_UNAVAILABLE_TOOLS_PER_INTEGRATION}
+ * entries over every report. Best-effort: never throws into the caller.
  */
 export async function recordRunUnavailableTools(
   runId: string,
@@ -1019,13 +1020,18 @@ export async function recordRunUnavailableTools(
           FROM (
             SELECT DISTINCT ON (e ->> 'name') e
             FROM jsonb_array_elements(${JSON.stringify(entries)}::jsonb) AS e
+            WHERE NOT EXISTS (
+              SELECT 1
+              FROM jsonb_array_elements(COALESCE(${runs.metadata} -> 'unavailable_tools', '[]'::jsonb)) AS seen
+              WHERE seen ->> 'integration_id' = ${integrationId}
+                AND seen ->> 'name' = e ->> 'name'
+            )
+            LIMIT GREATEST(${MAX_UNAVAILABLE_TOOLS_PER_INTEGRATION}::int - (
+              SELECT count(*)
+              FROM jsonb_array_elements(COALESCE(${runs.metadata} -> 'unavailable_tools', '[]'::jsonb)) AS kept
+              WHERE kept ->> 'integration_id' = ${integrationId}
+            ), 0)
           ) AS fresh
-          WHERE NOT EXISTS (
-            SELECT 1
-            FROM jsonb_array_elements(COALESCE(${runs.metadata} -> 'unavailable_tools', '[]'::jsonb)) AS seen
-            WHERE seen ->> 'integration_id' = ${integrationId}
-              AND seen ->> 'name' = fresh.e ->> 'name'
-          )
         ), '[]'::jsonb)
       )
       WHERE ${runs.id} = ${runId}

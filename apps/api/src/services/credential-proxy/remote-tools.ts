@@ -464,7 +464,7 @@ export async function listRemoteTools(
   const offered = offeredRemoteToolNames(
     manifest,
     described?.tools.map(({ tool, fingerprint }) => ({ ...tool, fingerprint })),
-    await loadToolSpacePolicy(input.scope.spaceId, input.integrationId, manifest),
+    await loadToolSpacePolicy(input.scope, input.integrationId, manifest),
   );
   if (described === undefined) {
     return {
@@ -521,7 +521,7 @@ export async function callRemoteTool(
   );
   if (!loaded.ok) throw notFound(`Integration '${input.integrationId}' has no published version`);
   const manifest = streamableRemote(input.integrationId, loaded.manifest);
-  const policy = await loadToolSpacePolicy(input.scope.spaceId, input.integrationId, manifest);
+  const policy = await loadToolSpacePolicy(input.scope, input.integrationId, manifest);
   if (policy.blocks.includes(input.name)) {
     throw toolBlockedInSpace(input.integrationId, input.name);
   }

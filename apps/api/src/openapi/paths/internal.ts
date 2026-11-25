@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { MAX_CONNECTIONS_PER_INTEGRATION } from "@appstrate/core/integration";
-import { CREDENTIAL_FAILURE_CAUSES } from "@appstrate/core/sidecar-types";
+import { CREDENTIAL_FAILURE_CAUSES, UNAVAILABLE_TOOL_REASONS } from "@appstrate/core/sidecar-types";
 import { CREDENTIAL_FAILURE_SENTENCES } from "../../lib/credential-failure.ts";
 import { jsonRpcRequestBody } from "../responses.ts";
 import {
@@ -353,7 +353,7 @@ export const internalPaths = {
       tags: ["Internal"],
       summary: "Report the tools a run's boot listed from a remote integration",
       description:
-        "Sidecar-only. Same Bearer run token and agent-dependency and activation checks as the GET endpoint. `connection_id` names a connection this run bound to the integration, as for `upstream-success`; it is omitted only for an integration that binds none (an unauthenticated one). Called once per connection, fire-and-forget, after the sidecar registered the integration's tools. `tools` are the MCP descriptors as the server returned them (the platform computes their fingerprints itself); the sidecar cuts them at 1 MiB and sets `truncated`. A descriptor that is not a valid tool (no name, no object `inputSchema`) is dropped on its own and marks the listing truncated: it never refuses the report. `unavailable` lists the tools the agent selected that this run does not expose, each with its reason; the run's `metadata.unavailable_tools[]` is stamped with them (`integration_id`, `name`, `reason`; only the first 50 of one report are kept). The listing becomes the integration's tool snapshot only when the run is executed by the platform: a remote-origin run's sidecar is on the caller's machine and is no authority on organization state, so its listing is dropped.",
+        "Sidecar-only. Same Bearer run token and agent-dependency and activation checks as the GET endpoint. `connection_id` names a connection this run bound to the integration, as for `upstream-success`; it is omitted only for an integration that binds none (an unauthenticated one). Called once per connection, fire-and-forget, after the sidecar registered the integration's tools. `tools` are the MCP descriptors as the server returned them (the platform computes their fingerprints itself); the sidecar cuts them at 1 MiB and sets `truncated`. A descriptor that is not a valid tool (no name, no object `inputSchema`) is dropped on its own and marks the listing truncated: it never refuses the report. `unavailable` lists the tools the agent selected that this run does not expose, each with its reason; the run's `metadata.unavailable_tools[]` is stamped with them (`integration_id`, `name`, `reason`; only the first 50 of one report are kept). The listing becomes the integration's tool snapshot only when the run is executed by the platform: a remote-origin run's sidecar is on the caller's machine and is no authority on organization state, so its listing is dropped; the platform's own endpoint integration never gets a snapshot.",
       security: [{ bearerExecToken: [] }],
       parameters: [
         { $ref: "#/components/parameters/PackageScope" },
@@ -394,12 +394,7 @@ export const internalPaths = {
                       name: { type: "string", minLength: 1, maxLength: 256 },
                       reason: {
                         type: "string",
-                        enum: [
-                          "not_listed",
-                          "hidden_tools",
-                          "definition_not_approved",
-                          "name_collision",
-                        ],
+                        enum: [...UNAVAILABLE_TOOL_REASONS],
                       },
                     },
                   },

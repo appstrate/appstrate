@@ -85,7 +85,7 @@ async function loadListedTools(target: ToolPolicyTarget) {
 export async function getToolPolicy(target: ToolPolicyTarget) {
   const [{ listed }, { approvals, blocks }] = await Promise.all([
     loadListedTools(target),
-    readToolSpaceRows(target.scope.spaceId, target.packageId),
+    readToolSpaceRows(target.scope, target.packageId),
   ]);
   return {
     listed: [...listed.values()],
@@ -148,7 +148,7 @@ export async function approveTools(
     );
   }
   // What a run's spec carries per tool: past it an approval would be silently left out.
-  const { approvals: held } = await readToolSpaceRows(target.scope.spaceId, target.packageId);
+  const { approvals: held } = await readToolSpaceRows(target.scope, target.packageId);
   const fingerprints = new Map<string, Set<string>>();
   for (const { tool_name, fingerprint } of [
     ...held,
@@ -196,6 +196,7 @@ export async function revokeToolApproval(
     .delete(spaceIntegrationToolApprovals)
     .where(
       and(
+        eq(spaceIntegrationToolApprovals.orgId, scope.orgId),
         eq(spaceIntegrationToolApprovals.spaceId, scope.spaceId),
         eq(spaceIntegrationToolApprovals.packageId, packageId),
         eq(spaceIntegrationToolApprovals.toolName, toolName),
@@ -240,6 +241,7 @@ export async function unblockTool(
     .delete(spaceIntegrationToolBlocks)
     .where(
       and(
+        eq(spaceIntegrationToolBlocks.orgId, scope.orgId),
         eq(spaceIntegrationToolBlocks.spaceId, scope.spaceId),
         eq(spaceIntegrationToolBlocks.packageId, packageId),
         eq(spaceIntegrationToolBlocks.toolName, toolName),
@@ -266,7 +268,7 @@ export async function selectedApprovedTools(
       // An open catalog needs no approval; a declared or hidden tool never stands on one.
       if (!read.ok || allowsUndeclaredTools(read.manifest)) return [];
       const { declared, hidden } = declaredAndHidden(read.manifest);
-      const policy = await loadToolSpacePolicy(scope.spaceId, entry.id, read.manifest);
+      const policy = await loadToolSpacePolicy(scope, entry.id, read.manifest);
       const approved = new Set(policy.approvals.map((a) => a.tool_name));
       return (entry.tools as string[])
         .filter((tool) => approved.has(tool) && !declared.has(tool) && !hidden.has(tool))

@@ -121,7 +121,13 @@ describe("the tool policy writes, through every door", () => {
 
   it("refuses a minted MCP instance token", async () => {
     const res = await approve({ Authorization: await mintOrgToken(), "X-Org-Id": ctx.orgId });
-    expect([401, 403]).toContain(res.status);
+    // Bound to the MCP resource, the token never reaches the route's dashboard-session guard:
+    // the REST pipeline answers 401 first, which is the exact refusal a minted token meets.
+    expect(res.status).toBe(401);
+    expect(await res.json()).toMatchObject({
+      code: "unauthorized",
+      detail: "Access token is bound to a different resource and cannot be used on this route.",
+    });
     await nothingWritten();
   });
 

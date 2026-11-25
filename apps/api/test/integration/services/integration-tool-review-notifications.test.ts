@@ -8,8 +8,7 @@
 import { beforeEach, describe, expect, it } from "bun:test";
 import type { Tool } from "@modelcontextprotocol/sdk/types.js";
 import { eq } from "drizzle-orm";
-import { notifications, organizations, spaceIntegrationToolApprovals } from "@appstrate/db/schema";
-import { toolDefinitionFingerprint } from "@appstrate/mcp-transport";
+import { notifications, organizations } from "@appstrate/db/schema";
 import { db, truncateAll } from "../../helpers/db.ts";
 import {
   addOrgMember,
@@ -24,17 +23,12 @@ import {
   seedProxyIntegration,
 } from "../../helpers/credential-proxy-fixtures.ts";
 import { remoteIntegrationManifest } from "../../helpers/integration-manifests.ts";
+import { insertToolApprovals, tool, toolFingerprint } from "../../helpers/tool-policy.ts";
 import { seedSpace, seedSpacePackage } from "../../helpers/seed.ts";
 import { drainAudits } from "../../../src/services/audit.ts";
 import { recordToolSnapshot } from "../../../src/services/integration-tool-snapshots.ts";
 
 const ID = "@acme/files";
-
-const tool = (name: string, description = `Tool ${name}`): Tool => ({
-  name,
-  description,
-  inputSchema: { type: "object", properties: {} },
-});
 
 describe("tool review notifications", () => {
   let ctx: TestContext;
@@ -172,14 +166,9 @@ describe("tool review notifications", () => {
   it("stays silent about a tool the space already approved at its current definition", async () => {
     await seed();
     const write = tool("write_file");
-    await db.insert(spaceIntegrationToolApprovals).values({
-      spaceId: ctx.defaultSpaceId,
-      orgId: ctx.orgId,
-      packageId: ID,
-      toolName: "write_file",
-      fingerprint: toolDefinitionFingerprint(write),
-      definition: {},
-    });
+    await insertToolApprovals({ ...ctx, spaceId: ctx.defaultSpaceId, packageId: ID }, [
+      { toolName: "write_file", fingerprint: toolFingerprint("write_file") },
+    ]);
     await list([write]);
     expect(await notices()).toEqual([]);
   });

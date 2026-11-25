@@ -8,15 +8,12 @@
 import { describe, it, expect, beforeAll, afterAll, beforeEach } from "bun:test";
 import { eq } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
-import {
-  integrationToolSnapshots,
-  spaceIntegrationToolApprovals,
-  spaceIntegrationToolBlocks,
-} from "@appstrate/db/schema";
+import { integrationToolSnapshots, spaceIntegrationToolBlocks } from "@appstrate/db/schema";
 import { clearAllCachesLocally } from "@appstrate/core/cache";
 import { toolDefinitionFingerprint } from "@appstrate/mcp-transport";
 import { forgetProtocolEras } from "@appstrate/mcp-transport/testing";
 import type { IntegrationManifest } from "@appstrate/core/integration";
+import { insertToolApprovals } from "../../helpers/tool-policy.ts";
 import { getTestApp } from "../../helpers/app.ts";
 import { truncateAll } from "../../helpers/db.ts";
 import { seedApiKey } from "../../helpers/seed.ts";
@@ -93,14 +90,9 @@ describe("the space tool policy over a remote integration's typed tools", () => 
     return row!.tools.find((t) => t.name === tool)!.fingerprint;
   };
   const approve = (tool: string, fingerprint: string) =>
-    db.insert(spaceIntegrationToolApprovals).values({
-      spaceId: ctx.defaultSpaceId,
-      orgId: ctx.orgId,
-      packageId: ID,
-      toolName: tool,
-      fingerprint,
-      definition: {},
-    });
+    insertToolApprovals({ ...ctx, spaceId: ctx.defaultSpaceId, packageId: ID }, [
+      { toolName: tool, fingerprint },
+    ]);
 
   beforeEach(async () => {
     await truncateAll();

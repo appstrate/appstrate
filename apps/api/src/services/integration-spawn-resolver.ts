@@ -54,13 +54,21 @@ import type {
 } from "@appstrate/core/integration";
 import { isToolsWildcard, parseManifestIntegrations } from "@appstrate/core/dependencies";
 import { effectiveMcpServerType, getMcpServerWorkspaceMount } from "@appstrate/core/mcp-server";
-import type { IntegrationSpawnSpec, ApiCallSpec } from "@appstrate/core/sidecar-types";
+import type {
+  IntegrationSpawnSpec,
+  ApiCallSpec,
+  UnavailableToolReason,
+} from "@appstrate/core/sidecar-types";
 
 import { UNAVAILABLE_INTEGRATION_REASONS } from "@appstrate/afps-runtime/bundle";
 import { isVariableTemplate } from "@appstrate/afps-shared/connection-variables";
 import { checkEgressUrl } from "../lib/egress-host-guard.ts";
 import { logger } from "../lib/logger.ts";
-import { approvedFingerprintsByTool, loadToolSpacePolicy } from "./integration-tool-catalog.ts";
+import {
+  approvedFingerprintsByTool,
+  approvedToolNames,
+  loadToolSpacePolicy,
+} from "./integration-tool-catalog.ts";
 import {
   decryptStoredCredential,
   EncryptionKeyUnavailableError,
@@ -85,6 +93,7 @@ import {
 } from "./integration-manifest-helpers.ts";
 
 interface ResolveIntegrationsInput {
+  orgId: string;
   spaceId: string;
   /** The actor whose connections to lookup — `null` skips integration resolution entirely. */
   actor: Actor | null;
@@ -142,9 +151,18 @@ export interface DroppedIntegration {
  * an integration it declared is otherwise indistinguishable from an agent
  * that simply never called that integration's tools.
  */
+/** A tool the agent selected that the run cannot expose, as `metadata.unavailable_tools` records it. */
+export interface UnavailableSelectedTool {
+  integrationId: string;
+  name: string;
+  reason: UnavailableToolReason;
+}
+
 interface ResolveIntegrationSpawnsResult {
   readonly specs: IntegrationSpawnSpec[];
   readonly dropped: DroppedIntegration[];
+  /** Selected `api_call`/`api_upload` tools the space blocks: removed here, so no sidecar reports them. */
+  readonly unavailable: UnavailableSelectedTool[];
 }
 
 type IntegrationDrop = Omit<DroppedIntegration, "integrationId">;
@@ -152,6 +170,7 @@ type IntegrationDrop = Omit<DroppedIntegration, "integrationId">;
 interface ResolveOneResult {
   readonly specs: readonly IntegrationSpawnSpec[];
   readonly drops: readonly IntegrationDrop[];
+  readonly unavailable?: readonly { name: string; reason: UnavailableToolReason }[];
 }
 
 function drop(reason: IntegrationDropReason, detail?: string): ResolveOneResult {
@@ -224,17 +243,17 @@ async function renderConnectionRemoteUrl(
 export async function resolveIntegrationSpawns(
   input: ResolveIntegrationsInput,
 ): Promise<ResolveIntegrationSpawnsResult> {
-  const { spaceId, actor, agentManifest, resolvedConnections } = input;
+  const { orgId, spaceId, actor, agentManifest, resolvedConnections } = input;
   // No actor → no actor-scoped connections to resolve. Scheduled runs are
   // fail-fasted upstream when actor-less + integrations are declared
   // (scheduler.ts `isScheduleActorValid`, which disables the schedule and
   // records a VISIBLE failed run); request-triggered runs always carry an
   // actor (`getActor` is non-null), so this stays an empty return rather than
   // a throw.
-  if (!actor) return { specs: [], dropped: [] };
+  if (!actor) return { specs: [], dropped: [], unavailable: [] };
 
   const entries = parseManifestIntegrations(agentManifest);
-  if (entries.length === 0) return { specs: [], dropped: [] };
+  if (entries.length === 0) return { specs: [], dropped: [], unavailable: [] };
   // Resolve every declared integration concurrently — each resolution is an
   // independent chain of DB reads + storage fetch + credential decrypt, and
   // the sequential version paid their latencies back-to-back on the run
@@ -245,6 +264,7 @@ export async function resolveIntegrationSpawns(
       try {
         return await resolveOne(
           entry.id,
+          orgId,
           spaceId,
           actor,
           entry.tools,
@@ -275,18 +295,21 @@ export async function resolveIntegrationSpawns(
 
   const specs: IntegrationSpawnSpec[] = [];
   const dropped: DroppedIntegration[] = [];
-  // Declaration order is preserved on both lists (map-then-partition).
+  const unavailable: UnavailableSelectedTool[] = [];
+  // Declaration order is preserved on every list (map-then-partition).
   outcomes.forEach((outcome, i) => {
     const integrationId = entries[i]!.id;
     specs.push(...outcome.specs);
     for (const entry of outcome.drops) dropped.push({ integrationId, ...entry });
+    for (const tool of outcome.unavailable ?? []) unavailable.push({ integrationId, ...tool });
   });
-  return { specs, dropped };
+  return { specs, dropped, unavailable };
 }
 
 /** One spec per bound connection; `toolAllowlist: undefined` is the §4.4 wildcard. */
 async function resolveOne(
   integrationId: string,
+  orgId: string,
   spaceId: string,
   actor: Actor,
   agentToolSelection: readonly string[] | "*" | undefined,
@@ -371,9 +394,19 @@ async function resolveOne(
   // What the space decided about this integration's tools: blocked ones are hidden, and on a
   // closed remote catalog an undeclared tool the agent names is offered only at a definition the
   // space approved (declared tools are never held back by a changed definition).
-  const policy = await loadToolSpacePolicy(spaceId, integrationId, manifest);
+  const policy = await loadToolSpacePolicy({ orgId, spaceId }, integrationId, manifest);
   const blocked = new Set(policy.blocks);
-  const selectedApiCalls: ApiCallSpec[] = selectedApiCallConfigs(manifest, effectiveSelection)
+  const selectedConfigs = selectedApiCallConfigs(manifest, effectiveSelection);
+  // Selected and blocked: removed below, so the run says why the tool is missing.
+  const unavailableTools = selectedConfigs
+    .flatMap((cfg) => {
+      if (blocked.has(cfg.toolName)) return [cfg.toolName];
+      return cfg.uploadProtocols.length > 0 && cfg.uploadToolName && blocked.has(cfg.uploadToolName)
+        ? [cfg.uploadToolName]
+        : [];
+    })
+    .map((name) => ({ name, reason: "blocked_in_space" as const }));
+  const selectedApiCalls: ApiCallSpec[] = selectedConfigs
     // An `api_upload` dispatches through its `api_call`: blocking the call removes both.
     .filter((cfg) => !blocked.has(cfg.toolName))
     .map((cfg) => {
@@ -511,13 +544,19 @@ async function resolveOne(
     ...workspaceMount,
   });
   const approvedByTool = approvedFingerprintsByTool(policy);
-  const declaredNames = new Set(
-    resolveIntegrationToolCatalog({ integration: manifest }).map((e) => e.name),
-  );
+  const catalogNames = resolveIntegrationToolCatalog({ integration: manifest }).map((e) => e.name);
+  const declaredNames = new Set(catalogNames);
+  const closedRemote = sourceKind === "remote" && !allowsUndeclaredTools(manifest);
+  // A wildcard on a closed remote catalog is not "every tool the server lists": it is what the
+  // manifest declares plus what the space approved, named like an explicit selection.
+  const closedWildcard = wildcardSelection && closedRemote;
+  const namedSelection: readonly string[] = closedWildcard
+    ? [...catalogNames, ...approvedToolNames(policy)]
+    : ((effectiveSelection ?? []) as readonly string[]);
   const approvedToolFingerprints =
-    sourceKind === "remote" && !allowsUndeclaredTools(manifest) && !wildcardSelection
+    closedRemote && (!wildcardSelection || closedWildcard)
       ? Object.fromEntries(
-          ((effectiveSelection ?? []) as readonly string[])
+          namedSelection
             .filter((name) => !declaredNames.has(name))
             .map((name) => [name, approvedByTool.get(name) ?? []]),
         )
@@ -535,13 +574,11 @@ async function resolveOne(
   const blockedSurface = blockedTools.length > 0 ? { blockedTools } : {};
   const toolSurface = (loginToolName: string | undefined) => {
     const hiddenTools = [...new Set(manifest.hidden_tools ?? [])];
-    if (wildcardSelection) {
+    if (wildcardSelection && !closedWildcard) {
       if (loginToolName && !hiddenTools.includes(loginToolName)) hiddenTools.push(loginToolName);
       return { ...(hiddenTools.length > 0 ? { hiddenTools } : {}), ...blockedSurface };
     }
-    const toolAllowlist = ((effectiveSelection ?? []) as readonly string[]).filter(
-      (t) => t !== loginToolName,
-    );
+    const toolAllowlist = namedSelection.filter((t) => t !== loginToolName);
     return {
       toolAllowlist,
       ...(hiddenTools.length > 0 ? { hiddenTools } : {}),
@@ -562,6 +599,7 @@ async function resolveOne(
         } satisfies IntegrationSpawnSpec,
       ],
       drops: [],
+      unavailable: unavailableTools,
     };
   }
 
@@ -634,7 +672,7 @@ async function resolveOne(
       });
     }
   }
-  return { specs, drops };
+  return { specs, drops, ...(specs.length > 0 ? { unavailable: unavailableTools } : {}) };
 }
 
 /** The spec's `manifest.server`: the fields the sidecar reads, those unset left out. */

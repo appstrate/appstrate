@@ -688,6 +688,6 @@ describe("an inline run selecting no tool of @appstrate/platform", () => {
       agentManifest: manifest,
       resolvedConnections: {},
     });
-    expect(spawns).toEqual({ specs: [], dropped: [] });
+    expect(spawns).toEqual({ specs: [], dropped: [], unavailable: [] });
   });
 });

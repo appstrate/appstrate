@@ -22,7 +22,12 @@ import { getErrorMessage } from "@appstrate/core/errors";
 import { logger } from "../../lib/logger.ts";
 import { listSpacePermissionHolders } from "../../lib/space-role.ts";
 import { listReachableConnections } from "../integration-connections.ts";
-import { loadEffectiveToolCatalog } from "../integration-tool-catalog.ts";
+import {
+  effectiveCatalogOf,
+  judgeToolSpacePolicy,
+  readToolSpaceRowsForSpaces,
+} from "../integration-tool-catalog.ts";
+import { readToolSnapshots } from "../integration-tool-snapshots.ts";
 import { readIntegrationManifestForConnect } from "../integration-service.ts";
 import { spacesActiveForAll } from "../space-packages.ts";
 import type { ListEnvelope } from "@appstrate/shared-types";
@@ -211,14 +216,17 @@ export async function scheduleToolReviewNotifications(params: {
       packageId,
       display_name: read.manifest.display_name ?? packageId,
     };
+    // Read once for every space: the snapshot, then the approvals and blocks of all of them.
+    const [snapshots, rowsBySpace] = await Promise.all([
+      readToolSnapshots({ orgId, packageId, connectionIds: [connectionId] }),
+      readToolSpaceRowsForSpaces(orgId, [...active], packageId),
+    ]);
     for (const spaceId of active) {
-      const { catalog } = await loadEffectiveToolCatalog({
-        orgId,
-        spaceId,
-        packageId,
-        manifest: read.manifest,
-        connectionIds: [connectionId],
-      });
+      const catalog = effectiveCatalogOf(
+        read.manifest,
+        judgeToolSpacePolicy(rowsBySpace.get(spaceId)!, read.manifest),
+        snapshots,
+      );
       if (!catalog.some((entry) => entry.status === "pending" && names.includes(entry.name))) {
         continue;
       }

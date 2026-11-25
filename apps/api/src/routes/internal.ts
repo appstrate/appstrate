@@ -17,7 +17,10 @@ import { zipArtifact } from "@appstrate/core/zip";
 import { getLocalServer } from "@appstrate/core/integration";
 import { downloadVersionZipForExecution } from "../services/package-storage.ts";
 import { readPackageSnapshot } from "../services/package-files.ts";
-import { getSystemPackages } from "../services/system-packages.ts";
+import {
+  getSystemPackages,
+  listRuntimeBoundSystemIntegrationIds,
+} from "../services/system-packages.ts";
 import { logger } from "../lib/logger.ts";
 import { isInvalidTextRepresentation } from "../lib/db-helpers.ts";
 import { parseSignedToken } from "../lib/run-token.ts";
@@ -28,9 +31,10 @@ import { RUN_ROUTE_RATE_PER_MIN, rateLimitByBearer } from "../middleware/rate-li
 import { recordRunDegradedIntegration, recordRunUnavailableTools } from "../services/state/runs.ts";
 import { recordToolSnapshot } from "../services/integration-tool-snapshots.ts";
 import {
-  OBSERVED_TOOL_NAME_MAX_LENGTH,
   OBSERVED_TOOLS_MAX_COUNT,
-  type UnavailableToolReason,
+  UNAVAILABLE_TOOL_REASONS,
+  observedToolNameSchema,
+  observedToolSchema,
 } from "@appstrate/core/sidecar-types";
 import { readJsonBody } from "@appstrate/core/request-body";
 import {
@@ -221,21 +225,6 @@ const EMPTY_CREDENTIALS_WIRE = {
   deliveryPlans: {},
   expiresAtEpochMs: {},
 };
-
-const UNAVAILABLE_TOOL_REASONS = [
-  "not_listed",
-  "hidden_tools",
-  "definition_not_approved",
-  "name_collision",
-] as const satisfies readonly UnavailableToolReason[];
-
-const observedToolNameSchema = z.string().min(1).max(OBSERVED_TOOL_NAME_MAX_LENGTH);
-
-/** One raw MCP descriptor as the platform can fingerprint it. */
-const observedToolSchema = z.looseObject({
-  name: observedToolNameSchema,
-  inputSchema: z.looseObject({ type: z.literal("object") }),
-});
 
 export const toolsObservedSchema = z.strictObject({
   /**
@@ -581,8 +570,8 @@ export function createInternalRouter(ratePerMin = RUN_ROUTE_RATE_PER_MIN) {
   // Sidecar-only: what a run's boot listed from a remote integration's server (the raw MCP
   // descriptors) and which selected tools it could not expose. Same run checks as `upstream-success`.
   // The run's metadata always records the unavailable tools; the listing becomes the integration's
-  // snapshot only for a platform-origin run, since a remote-origin sidecar runs on the caller's
-  // machine and is no authority on org state.
+  // snapshot only for a platform-origin run (a remote-origin sidecar runs on the caller's
+  // machine and is no authority on org state) and never for the platform's own endpoint integration.
   router.post(`/integration-credentials/${SCOPED_PACKAGE_ROUTE}/tools-observed`, async (c) => {
     const packageId = `${c.req.param("scope")}/${c.req.param("name")}`;
     await refuseConnectRun(c, packageId);
@@ -599,7 +588,10 @@ export function createInternalRouter(ratePerMin = RUN_ROUTE_RATE_PER_MIN) {
     }
     const body = await readJsonBody(c, toolsObservedSchema);
     await recordRunUnavailableTools(runId, packageId, body.unavailable);
-    if (run.runOrigin === "platform") {
+    if (
+      run.runOrigin === "platform" &&
+      !listRuntimeBoundSystemIntegrationIds().includes(packageId)
+    ) {
       const tools = body.tools.flatMap((tool) => {
         const parsed = observedToolSchema.safeParse(tool);
         return parsed.success ? [parsed.data] : [];

@@ -8,6 +8,7 @@
 
 import type { Tool } from "@modelcontextprotocol/sdk/types.js";
 import { and, eq, inArray, isNull, or } from "drizzle-orm";
+import { OBSERVED_TOOLS_MAX_COUNT } from "@appstrate/core/sidecar-types";
 import { sanitiseToolDescriptor, toolDefinitionFingerprint } from "@appstrate/mcp-transport";
 import { db } from "@appstrate/db/client";
 import {
@@ -76,7 +77,10 @@ export async function recordToolSnapshot(
       })
       .onConflictDoNothing();
     const [previous] = await tx
-      .select({ tools: integrationToolSnapshots.tools })
+      .select({
+        tools: integrationToolSnapshots.tools,
+        truncated: integrationToolSnapshots.truncated,
+      })
       .from(integrationToolSnapshots)
       .where(targetMatches(input))
       .for("update");
@@ -101,7 +105,24 @@ export async function recordToolSnapshot(
       });
     }
     if (input.truncated) {
-      for (const [name, entry] of before) if (!listed.has(name)) merged.push(entry);
+      // The tools this listing did not return stay, the most recently seen first, within the cap.
+      const unlisted = [...before.values()]
+        .filter((entry) => !listed.has(entry.name))
+        .sort((a, b) =>
+          (b.changed_at ?? b.first_seen_at).localeCompare(a.changed_at ?? a.first_seen_at),
+        );
+      merged.push(...unlisted.slice(0, Math.max(0, OBSERVED_TOOLS_MAX_COUNT - merged.length)));
+    }
+
+    // The same tools at the same definitions: only the listing time moved.
+    const sameSet =
+      previous !== undefined &&
+      previous.truncated === input.truncated &&
+      merged.length === before.size &&
+      merged.every((entry) => before.get(entry.name)?.fingerprint === entry.fingerprint);
+    if (sameSet) {
+      await tx.update(integrationToolSnapshots).set({ listedAt: now }).where(targetMatches(input));
+      return { added, changed };
     }
 
     const encoder = new TextEncoder();

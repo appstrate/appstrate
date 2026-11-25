@@ -6,8 +6,8 @@
  * operation of `mcp-over-proxy.ts`: through the credential proxy (`proxyCall`) once a connection
  * exists, so connection selection, `authorized_uris`, the egress guard and the 401 refresh are the
  * proxy's; for an unauthenticated integration (AFPS §7.2), which has nothing to inject, directly,
- * egress-guarded on every hop. Either is journaled like a call outside a run. Persists only the
- * tools snapshot.
+ * egress-guarded on every hop. Either is journaled like a call outside a run. Persists nothing: it
+ * reads the draft, and the tool snapshot is the observed truth of the published integration.
  */
 
 import type { Implementation, Tool } from "@modelcontextprotocol/sdk/types.js";
@@ -16,14 +16,12 @@ import { isUnauthenticatedIntegration } from "@appstrate/core/integration";
 import { isIconImage } from "@appstrate/core/appearance";
 import { PACKAGE_CONTENT_ENTRY } from "@appstrate/core/package-files";
 import type { Actor } from "../lib/actor.ts";
-import { getErrorMessage } from "@appstrate/core/errors";
 import { ApiError } from "../lib/errors.ts";
 import { fetchWithin } from "../lib/egress-host-guard.ts";
 import { logger } from "../lib/logger.ts";
 import type { SpaceScope } from "../lib/scope.ts";
 import { ProxyCallError } from "./credential-proxy/core.ts";
 import { resolveRemoteConnection } from "./credential-proxy/remote-tools.ts";
-import { recordToolSnapshot } from "./integration-tool-snapshots.ts";
 import {
   directMcpOperation,
   listToolPages,
@@ -186,19 +184,6 @@ export async function syncIntegrationFromServer(input: {
     operation.settle();
     await client?.close().catch(() => {});
   }
-  // A snapshot that cannot be written must not fail the sync that read the tools.
-  await recordToolSnapshot({
-    orgId: scope.orgId,
-    packageId,
-    connectionId,
-    tools: exchanged.tools,
-    truncated: exchanged.truncated,
-  }).catch((err: unknown) =>
-    logger.warn("integration sync: tool snapshot not recorded", {
-      packageId,
-      error: getErrorMessage(err),
-    }),
-  );
   return proposalFromServer(
     {
       url,

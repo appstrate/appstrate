@@ -5,15 +5,14 @@
  */
 import { describe, it, expect, beforeEach } from "bun:test";
 import { zipSync } from "fflate";
-import type { Tool } from "@modelcontextprotocol/sdk/types.js";
-import { toolDefinitionFingerprint } from "@appstrate/mcp-transport";
 import { db } from "@appstrate/db/client";
-import { packageDistTags, spaceIntegrationToolApprovals } from "@appstrate/db/schema";
+import { packageDistTags } from "@appstrate/db/schema";
 import * as storage from "@appstrate/db/storage";
 import { computeIntegrity } from "@appstrate/core/integrity";
 import { getTestApp } from "../../helpers/app.ts";
 import { truncateAll } from "../../helpers/db.ts";
 import { authHeaders, createTestContext, type TestContext } from "../../helpers/auth.ts";
+import { insertToolApprovals, tool, toolFingerprint } from "../../helpers/tool-policy.ts";
 import { seedPackage, seedPackageVersion } from "../../helpers/seed.ts";
 import { remoteIntegrationManifest } from "../../helpers/integration-manifests.ts";
 import { activatePackage } from "../../../src/services/space-packages.ts";
@@ -25,12 +24,6 @@ const INTEG = "@acme/files" as const;
 const HEADER = "Appstrate-Space-Approved-Tools";
 const app = getTestApp();
 const enc = (s: string) => new TextEncoder().encode(s);
-
-const tool = (name: string): Tool => ({
-  name,
-  description: `Tool ${name}`,
-  inputSchema: { type: "object", properties: {} },
-});
 
 async function publish(
   id: `@${string}/${string}`,
@@ -95,14 +88,9 @@ describe("bundle export: space-approved tools header", () => {
   });
 
   it("names the selected tools that run here only by the space's approval", async () => {
-    await db.insert(spaceIntegrationToolApprovals).values({
-      spaceId: ctx.defaultSpaceId,
-      orgId: ctx.orgId,
-      packageId: INTEG,
-      toolName: "write_file",
-      fingerprint: toolDefinitionFingerprint(tool("write_file")),
-      definition: {},
-    });
+    await insertToolApprovals({ ...ctx, spaceId: ctx.defaultSpaceId, packageId: INTEG }, [
+      { toolName: "write_file", fingerprint: toolFingerprint("write_file") },
+    ]);
     const res = await exportBundle(["read_file", "write_file"])();
     expect(res.status, await res.clone().text()).toBe(200);
     expect(res.headers.get(HEADER)).toBe(`${INTEG}:write_file`);

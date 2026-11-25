@@ -242,14 +242,12 @@ function selectsNoCallableTool(
   surfaceIsKnown: boolean,
 ): boolean {
   const effective = resolveEffectiveToolSelection(entry.tools, integrationManifest);
-  if (isToolsWildcard(effective))
-    return surfaceIsKnown && catalog.length + approvedTools.length === 0;
+  if (isToolsWildcard(effective)) return surfaceIsKnown && catalog.length === 0;
   if (effective === undefined || effective.length === 0) return true;
   // Intersect only when the catalog is KNOWABLE here. A remote integration that
   // enumerates nothing in its manifest discovers its tools at connect time, so
   // an empty catalog means "unknown", not "none" — intersecting would refuse a
-  // perfectly good publish. Same reason `validateAgentIntegrationScopes` skips
-  // its own subset check on an empty catalog.
+  // perfectly good publish.
   //
   // A DECLARED surface that `hidden_tools` empties is the opposite case and must
   // refuse: the integration told us its tools and then hid all of them, so the
@@ -442,9 +440,13 @@ export async function validateAgentIntegrationSelections(
     const approvedTools = toolPolicySpaceId
       ? [
           ...new Set(
-            (await loadToolSpacePolicy(toolPolicySpaceId, entry.id, judgedManifest)).approvals.map(
-              (a) => a.tool_name,
-            ),
+            (
+              await loadToolSpacePolicy(
+                { orgId, spaceId: toolPolicySpaceId },
+                entry.id,
+                judgedManifest,
+              )
+            ).approvals.map((a) => a.tool_name),
           ),
         ]
       : [];

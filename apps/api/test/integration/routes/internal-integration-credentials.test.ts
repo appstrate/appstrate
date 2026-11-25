@@ -38,6 +38,10 @@ import {
   seedRun,
 } from "../../helpers/seed.ts";
 import { signRunToken } from "../../../src/lib/run-token.ts";
+import {
+  _setSystemPackagesForTesting,
+  type SystemPackageEntry,
+} from "../../../src/services/system-packages.ts";
 import { activatePackage } from "../../../src/services/space-packages.ts";
 import { leaveOrganization } from "../../../src/services/organizations.ts";
 import {
@@ -607,6 +611,52 @@ describe("GET /internal/integration-credentials/:scope/:name", () => {
     await db.update(runs).set({ runOrigin: "remote" }).where(eq(runs.id, runId));
 
     expect((await observed(connectionId, report)).status).toBe(204);
+
+    const [run] = await db.select({ metadata: runs.metadata }).from(runs).where(eq(runs.id, runId));
+    expect(run!.metadata).toHaveProperty("unavailable_tools");
+    expect(await db.select().from(integrationToolSnapshots)).toHaveLength(0);
+  });
+
+  it("tools-observed: stamps a blocked_in_space entry", async () => {
+    await seedIntegration(INTEGRATION, true);
+    const connectionId = await seedConnectionRow(INTEGRATION);
+    await bindConnectionsToRun(runId, { [INTEGRATION]: [connectionId] });
+
+    const res = await observed(connectionId, {
+      ...report,
+      unavailable: [{ name: "send", reason: "blocked_in_space" }],
+    });
+    expect(res.status).toBe(204);
+
+    const [run] = await db.select({ metadata: runs.metadata }).from(runs).where(eq(runs.id, runId));
+    expect(run!.metadata).toEqual({
+      unavailable_tools: [
+        { integration_id: INTEGRATION, name: "send", reason: "blocked_in_space" },
+      ],
+    });
+  });
+
+  it("tools-observed: stamps but never snapshots the platform's own endpoint integration", async () => {
+    await seedIntegration(INTEGRATION, true);
+    const connectionId = await seedConnectionRow(INTEGRATION);
+    await bindConnectionsToRun(runId, { [INTEGRATION]: [connectionId] });
+    const restore = _setSystemPackagesForTesting(
+      new Map([
+        [
+          INTEGRATION,
+          {
+            packageId: INTEGRATION,
+            type: "integration",
+            manifest: { _meta: { "dev.appstrate/platform": {} } },
+          } as unknown as SystemPackageEntry,
+        ],
+      ]),
+    );
+    try {
+      expect((await observed(connectionId, report)).status).toBe(204);
+    } finally {
+      restore();
+    }
 
     const [run] = await db.select({ metadata: runs.metadata }).from(runs).where(eq(runs.id, runId));
     expect(run!.metadata).toHaveProperty("unavailable_tools");

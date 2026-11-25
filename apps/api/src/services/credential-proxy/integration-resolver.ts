@@ -190,7 +190,11 @@ export async function resolveIntegrationProxyCredentials(
 
   let remoteMcp: McpEndpoint | null = null;
   if (input.applySpacePolicy) {
-    const policy = await loadToolSpacePolicy(input.spaceId, input.integrationId, manifest);
+    const policy = await loadToolSpacePolicy(
+      { orgId: input.orgId, spaceId: input.spaceId },
+      input.integrationId,
+      manifest,
+    );
     for (const config of getApiCallConfigs(manifest)) {
       if (config.authKey === connection.authKey && policy.blocks.includes(config.toolName)) {
         throw toolBlockedInSpace(input.integrationId, config.toolName);

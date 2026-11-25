@@ -6,22 +6,17 @@
  */
 
 import { beforeEach, describe, expect, it } from "bun:test";
-import type { Tool } from "@modelcontextprotocol/sdk/types.js";
+import { OBSERVED_TOOLS_MAX_COUNT } from "@appstrate/core/sidecar-types";
 import { toolDefinitionFingerprint } from "@appstrate/mcp-transport";
 import { integrationToolSnapshots } from "@appstrate/db/schema";
 import { db, truncateAll } from "../../helpers/db.ts";
 import { createTestContext, type TestContext } from "../../helpers/auth.ts";
+import { tool } from "../../helpers/tool-policy.ts";
 import { seedAgent } from "../../helpers/seed.ts";
 import {
   readToolSnapshots,
   recordToolSnapshot,
 } from "../../../src/services/integration-tool-snapshots.ts";
-
-const tool = (name: string, description = `Tool ${name}`): Tool => ({
-  name,
-  description,
-  inputSchema: { type: "object", properties: {} },
-});
 
 describe("integration tool snapshots", () => {
   let ctx: TestContext;
@@ -111,5 +106,39 @@ describe("integration tool snapshots", () => {
 
     expect(await db.select().from(integrationToolSnapshots)).toHaveLength(1);
     expect((await read())!.tools.map((t) => t.name).sort()).toEqual(["a", "b"]);
+  });
+
+  it("moves only listed_at when the same fingerprints are listed again", async () => {
+    await recordToolSnapshot({ ...target, tools: [tool("a"), tool("b")], truncated: false });
+    const first = (await read())!;
+    await new Promise((resolve) => setTimeout(resolve, 5));
+
+    const result = await recordToolSnapshot({
+      ...target,
+      tools: [tool("b"), tool("a")],
+      truncated: false,
+    });
+
+    expect(result).toEqual({ added: [], changed: [] });
+    const second = (await read())!;
+    expect(second.listedAt.getTime()).toBeGreaterThan(first.listedAt.getTime());
+    // Untouched, order included: the rows were not rewritten.
+    expect(second.tools).toEqual(first.tools);
+  });
+
+  it("rewrites the row when only the truncated flag differs", async () => {
+    await recordToolSnapshot({ ...target, tools: [tool("a")], truncated: false });
+    await recordToolSnapshot({ ...target, tools: [tool("a")], truncated: true });
+    expect((await read())!.truncated).toBe(true);
+  });
+
+  it("caps what a truncated listing keeps to the observed-tools maximum, newest first", async () => {
+    const many = Array.from({ length: OBSERVED_TOOLS_MAX_COUNT }, (_, i) => tool(`old${i}`));
+    await recordToolSnapshot({ ...target, tools: many, truncated: false });
+    await recordToolSnapshot({ ...target, tools: [tool("fresh")], truncated: true });
+
+    const stored = (await read())!.tools;
+    expect(stored).toHaveLength(OBSERVED_TOOLS_MAX_COUNT);
+    expect(stored[0]!.name).toBe("fresh");
   });
 });

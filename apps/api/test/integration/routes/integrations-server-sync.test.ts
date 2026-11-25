@@ -12,6 +12,7 @@ import {
   integrationConnectionShares,
   integrationConnections,
   integrationOrgDefaults,
+  integrationToolSnapshots,
   packages,
   spacePackages,
   spaces,
@@ -46,7 +47,7 @@ import {
   type FakeMcpTool,
 } from "../../helpers/fake-mcp-server.ts";
 import { uploadPackageFiles } from "../../../src/services/package-items/storage.ts";
-import { serverSyncBody } from "../../../../web/src/lib/integration-server-sync.ts";
+import { connectionChoiceBody } from "../../../../web/src/lib/integration-server-sync.ts";
 import type { IntegrationAuthStatus } from "@appstrate/shared-types";
 
 /** A 1×1 PNG header: what `isIconImage` reads (signature + `IHDR` size). */
@@ -175,6 +176,8 @@ describe("POST /api/integrations/{packageId}/discover", () => {
     // pages, each carrying the injected credential; the standalone GET stream is never opened.
     expect(server.methods).toEqual(["POST", "POST", "POST", "POST", "POST", "POST"]);
     expect(server.authorizations.every((a) => a === `Bearer ${TOKEN}`)).toBe(true);
+    // The draft is read, the snapshot is the published integration's: nothing recorded.
+    expect(await db.select().from(integrationToolSnapshots)).toHaveLength(0);
   });
 
   it("is refused in a space whose credential proxy is closed, before any exchange", async () => {
@@ -299,7 +302,7 @@ describe("POST /api/integrations/{packageId}/discover", () => {
     const detail = (await listed.json()) as { auths: IntegrationAuthStatus[] };
     expect(detail.auths.flatMap((auth) => auth.connections.map((c) => c.id))).toContain(own);
 
-    const res = await sync(caller, serverSyncBody());
+    const res = await sync(caller, connectionChoiceBody());
     expect(res.status).toBe(200);
     expect(
       ((await res.json()) as { manifest: { default_tools: string[] } }).manifest.default_tools,

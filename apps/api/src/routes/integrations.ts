@@ -129,14 +129,14 @@ import {
   unblockTool,
   type ToolPolicyTarget,
 } from "../services/integration-tool-policy.ts";
-import { isListedToolName } from "@appstrate/core/naming";
+import { observedToolNameSchema } from "@appstrate/core/sidecar-types";
 import {
   listRemoteTools,
   resolveRemoteConnection,
   streamableRemote,
 } from "../services/credential-proxy/remote-tools.ts";
 import { assertActiveOutsideRun } from "../services/credential-proxy/integration-resolver.ts";
-import { connectOfferPolicyFromRequest } from "../lib/connect-offer-policy.ts";
+import { remoteToolsCaller } from "../lib/remote-tools-caller.ts";
 import {
   reachOutsideRun,
   reachOutsideRunIfPermitted,
@@ -165,7 +165,6 @@ import {
   toPublicClient,
   updateIntegrationOAuthClient,
   type IntegrationConnectionSummary,
-  type ProxyReach,
   type ReconnectTarget,
   type WidenedConnection,
 } from "../services/integration-connections.ts";
@@ -353,7 +352,8 @@ export const discoverIntegrationSchema = z
   })
   .strict();
 
-const policyToolNameSchema = z.string().refine(isListedToolName, "not a tool name");
+// Any name observation accepts, so any listed tool can be approved or blocked.
+const policyToolNameSchema = observedToolNameSchema;
 
 export const approveToolsSchema = z
   .object({
@@ -1180,19 +1180,7 @@ export function createIntegrationsRouter() {
       // Whoever can already call: an unauthenticated server (AFPS §7.2) is listed directly, but
       // the listing is still a call of the caller's, written to a snapshot others read.
       assertPermission(c, "credential-proxy", "call-own");
-      const reach: ProxyReach = reachOutsideRun(callerPermissions(c), c.get("space")!);
-      const caller = {
-        scope,
-        actor: getActor(c),
-        reach,
-        caller: {
-          apiKeyId: c.get("apiKeyId") || null,
-          authMethod: c.get("authMethod"),
-          requestId: c.get("requestId"),
-        },
-        signal: c.req.raw.signal,
-        connectOffers: connectOfferPolicyFromRequest(c),
-      };
+      const caller = remoteToolsCaller(c);
       const { connectionId } = await resolveRemoteConnection(
         { ...caller, integrationId: packageId, connectionId: body.connection_id },
         manifest,
@@ -1215,11 +1203,11 @@ export function createIntegrationsRouter() {
           `The server of integration '${packageId}' could not be listed${catalog.listingFailure ? ` (${catalog.listingFailure})` : ""}.`,
         );
       }
-      // A listing whose snapshot did not land would answer with the one before it.
+      // A listing whose snapshot did not land would answer with the one before it: the platform's
+      // own failure, not the server's.
       if (!snapshot || snapshot.listedAt < startedAt) {
-        throw refreshFailed(
-          `The tools of integration '${packageId}' were listed but the snapshot could not be recorded.`,
-        );
+        logger.error("tool snapshot refresh: listed but not recorded", { packageId });
+        throw internalError();
       }
       return c.json({
         tool_snapshot: {
@@ -1256,8 +1244,9 @@ export function createIntegrationsRouter() {
     );
   const toolNameParam = (c: Context<AppEnv>) => {
     const name = c.req.param("toolName")!;
-    if (!isListedToolName(name)) throw invalidRequest("toolName is not a tool name", "toolName");
-    return name;
+    const parsed = observedToolNameSchema.safeParse(name);
+    if (!parsed.success) throw invalidRequest("toolName is not a tool name", "toolName");
+    return parsed.data;
   };
 
   router.get(
@@ -1271,6 +1260,7 @@ export function createIntegrationsRouter() {
 
   router.post(
     "/:packageId{@[^/]+/[^/]+}/tool-policy/approvals",
+    rateLimit(30),
     configureToolPolicy,
     requireDashboardSession,
     async (c) => {
@@ -1285,6 +1275,7 @@ export function createIntegrationsRouter() {
 
   router.delete(
     "/:packageId{@[^/]+/[^/]+}/tool-policy/approvals/:toolName",
+    rateLimit(30),
     configureToolPolicy,
     requireDashboardSession,
     async (c) => {
@@ -1300,6 +1291,7 @@ export function createIntegrationsRouter() {
 
   router.post(
     "/:packageId{@[^/]+/[^/]+}/tool-policy/blocks",
+    rateLimit(30),
     configureToolPolicy,
     requireDashboardSession,
     async (c) => {
@@ -1319,6 +1311,7 @@ export function createIntegrationsRouter() {
 
   router.delete(
     "/:packageId{@[^/]+/[^/]+}/tool-policy/blocks/:toolName",
+    rateLimit(30),
     configureToolPolicy,
     requireDashboardSession,
     async (c) => {

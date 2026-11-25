@@ -5,9 +5,9 @@
  */
 import { describe, it, expect, beforeEach } from "bun:test";
 import type { Tool } from "@modelcontextprotocol/sdk/types.js";
-import { toolDefinitionFingerprint } from "@appstrate/mcp-transport";
 import { db } from "@appstrate/db/client";
-import { spaceIntegrationToolApprovals, spaceIntegrationToolBlocks } from "@appstrate/db/schema";
+import { spaceIntegrationToolBlocks } from "@appstrate/db/schema";
+import { insertToolApprovals, tool, toolFingerprint } from "../../helpers/tool-policy.ts";
 import { getTestApp } from "../../helpers/app.ts";
 import { truncateAll } from "../../helpers/db.ts";
 import { authHeaders, createTestContext, type TestContext } from "../../helpers/auth.ts";
@@ -17,12 +17,6 @@ import { recordToolSnapshot } from "../../../src/services/integration-tool-snaps
 
 const ID = "@acme/files";
 const app = getTestApp();
-
-const tool = (name: string, description = `Tool ${name}`): Tool => ({
-  name,
-  description,
-  inputSchema: { type: "object", properties: {} },
-});
 
 interface Detail {
   tool_catalog: {
@@ -108,14 +102,9 @@ describe("integration detail tool catalog", () => {
 
   it("lists an approved tool as available, then pending and modified once its definition moved", async () => {
     await listed(tool("read_file"), tool("write_file"));
-    await db.insert(spaceIntegrationToolApprovals).values({
-      spaceId: ctx.defaultSpaceId,
-      orgId: ctx.orgId,
-      packageId: ID,
-      toolName: "write_file",
-      fingerprint: toolDefinitionFingerprint(tool("write_file")),
-      definition: {},
-    });
+    await insertToolApprovals({ ...ctx, spaceId: ctx.defaultSpaceId, packageId: ID }, [
+      { toolName: "write_file", fingerprint: toolFingerprint("write_file") },
+    ]);
     expect(entry(await detail(), "write_file")).toMatchObject({
       status: "available",
       origin: "approved",

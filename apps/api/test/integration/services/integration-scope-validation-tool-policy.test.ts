@@ -7,11 +7,11 @@
  */
 
 import { describe, it, expect, beforeEach } from "bun:test";
-import { db, truncateAll } from "../../helpers/db.ts";
+import { truncateAll } from "../../helpers/db.ts";
 import { createTestContext, type TestContext } from "../../helpers/auth.ts";
 import { seedProxyIntegration } from "../../helpers/credential-proxy-fixtures.ts";
 import { remoteIntegrationManifest } from "../../helpers/integration-manifests.ts";
-import { spaceIntegrationToolApprovals } from "@appstrate/db/schema";
+import { insertToolApprovals } from "../../helpers/tool-policy.ts";
 import { validateAgentIntegrationSelections } from "../../../src/services/integration-scope-validation.ts";
 
 const ID = "@acme/files";
@@ -44,14 +44,9 @@ describe("validateAgentIntegrationSelections — approved tools", () => {
   });
 
   const approveWrite = () =>
-    db.insert(spaceIntegrationToolApprovals).values({
-      spaceId: ctx.defaultSpaceId,
-      orgId: ctx.orgId,
-      packageId: ID,
-      toolName: "write_file",
-      fingerprint: "a".repeat(64),
-      definition: {},
-    });
+    insertToolApprovals({ ...ctx, spaceId: ctx.defaultSpaceId, packageId: ID }, [
+      { toolName: "write_file", fingerprint: "a".repeat(64) },
+    ]);
 
   it("knows an undeclared tool the space approved", async () => {
     await seedProxyIntegration(

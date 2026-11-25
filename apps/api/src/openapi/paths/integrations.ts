@@ -95,8 +95,9 @@ const toolNameParam = {
   name: "toolName",
   in: "path",
   required: true,
-  description: "The tool's name as the server lists it (percent-encode a `/`).",
-  schema: { type: "string", pattern: "^[A-Za-z0-9_\\-./]{1,128}$" },
+  description:
+    "The tool's name as the server lists it, 1 to 256 characters (percent-encode a `/`).",
+  schema: { type: "string", minLength: 1, maxLength: 256 },
 } as const;
 
 export const authKeyParam = {
@@ -1290,7 +1291,7 @@ export const integrationsPaths = {
       tags: ["Integrations"],
       summary: "Propose manifest fields from the integration's connected MCP server",
       description:
-        "Reads the remote MCP server of the integration's draft (the working copy being edited, published or not) and returns a proposal for that draft: manifest fields (`display_name`, `homepage`, `tools`, `tools_policy`, `default_tools`), an icon, the server's instructions and warnings. It writes nothing to the draft: the caller merges the proposal and saves. It does record the server's complete listing as the tool snapshot of the connection used (of the integration alone when it declares no auths), the same record as `POST /api/integrations/{packageId}/tool-snapshot/refresh` (best-effort: a snapshot that cannot be written does not fail the read). This is the read of the integration creation wizard, where there is no published version and no recorded snapshot yet; the integration editor works from the tool snapshot instead. The server is reached through the credential proxy, authorized against the draft — the same connection selection outside a run, `authorized_uris` allowlist, egress guard and 401 refresh as `/api/credential-proxy/proxy`, its listing journaled as one call of the connection (`GET /api/integrations/calls`); the server's own values (`Mcp-Session-Id`, cursors) are sent back as written, never substituted; an integration declaring no auths (AFPS §7.2) has nothing to inject, and its server is reached directly, egress-guarded on every hop, without a connection. The proposal holds: every tool of `tools/list` (cursor pagination, at most 500 tools over 20 pages of at most 2 MiB each) as an empty `tools_policy` entry each and as an entry of `tools`, and as `default_tools` only the tools annotated `readOnlyHint: true` and not `destructiveHint: true`, `serverInfo.title` (else `name`) as `display_name`, `description`, `websiteUrl` as `homepage`, a raster of `serverInfo.icons` (else the site's icon) as `icon_source`, and `instructions` (at most 32 KiB, cut at a line boundary with an `instructions_truncated` warning; omitted when the package already has its own `INTEGRATION.md`). The whole read is bounded to 20 seconds, the icon lookup included (best-effort: past the bound it finds none). Only a Streamable HTTP server is supported. Requires write authority on the package in its home space and, when the draft declares auths, `credential-proxy:call-own` in the current space (with `credential-proxy:call`, a connection shared into the space is usable too). Rate limited to 10 requests per minute.",
+        "Reads the remote MCP server of the integration's draft (the working copy being edited, published or not) and returns a proposal for that draft: manifest fields (`display_name`, `homepage`, `tools`, `tools_policy`, `default_tools`), an icon, the server's instructions and warnings. It writes nothing, neither to the draft (the caller merges the proposal and saves) nor to the tool snapshot: the snapshot is what the PUBLISHED integration's server listed, recorded by runs and by `POST /api/integrations/{packageId}/tool-snapshot/refresh`, and this read speaks for the draft. This is the read of the integration creation wizard, where there is no published version and no recorded snapshot yet; the integration editor works from the tool snapshot instead. The server is reached through the credential proxy, authorized against the draft — the same connection selection outside a run, `authorized_uris` allowlist, egress guard and 401 refresh as `/api/credential-proxy/proxy`, its listing journaled as one call of the connection (`GET /api/integrations/calls`); the server's own values (`Mcp-Session-Id`, cursors) are sent back as written, never substituted; an integration declaring no auths (AFPS §7.2) has nothing to inject, and its server is reached directly, egress-guarded on every hop, without a connection. The proposal holds: every tool of `tools/list` (cursor pagination, at most 500 tools over 20 pages of at most 2 MiB each) as an empty `tools_policy` entry each and as an entry of `tools`, and as `default_tools` only the tools annotated `readOnlyHint: true` and not `destructiveHint: true`, `serverInfo.title` (else `name`) as `display_name`, `description`, `websiteUrl` as `homepage`, a raster of `serverInfo.icons` (else the site's icon) as `icon_source`, and `instructions` (at most 32 KiB, cut at a line boundary with an `instructions_truncated` warning; omitted when the package already has its own `INTEGRATION.md`). The whole read is bounded to 20 seconds, the icon lookup included (best-effort: past the bound it finds none). Only a Streamable HTTP server is supported. Requires write authority on the package in its home space and, when the draft declares auths, `credential-proxy:call-own` in the current space (with `credential-proxy:call`, a connection shared into the space is usable too). Rate limited to 10 requests per minute.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XSpaceId" },
@@ -1459,7 +1460,7 @@ export const integrationsPaths = {
       tags: ["Integrations"],
       summary: "List the remote server's tools again into the integration's snapshot",
       description:
-        "Lists the tools of the integration's published remote MCP server now, bypassing the cached listing, through the credential proxy with the connection the caller's selection picks (or `connection_id`): the same selection, `authorized_uris` allowlist and egress guard as a credential-proxy call outside a run, journaled as one call of the connection. The listing is recorded as the snapshot of that connection (of the integration alone when it declares no auths); it feeds the per-space tool review (approve or block a tool) and the author's action to declare a listed tool in the integration (`tools_policy` of the draft, then saved and published). Requires `integrations:read` and `credential-proxy:call-own`. Rate limited to 10 requests per minute.",
+        "Lists the tools of the integration's published remote MCP server now, bypassing the cached listing, through the credential proxy with the connection the caller's selection picks (or `connection_id`): the same selection, `authorized_uris` allowlist and egress guard as a credential-proxy call outside a run, journaled as one call of the connection. It reads the latest published version, not the draft: it is refused (`404`) before any version is published, and for an integration whose server speaks SSE (`422 integration_not_remote`, only Streamable HTTP is listed). The listing is recorded as the snapshot of that connection (of the integration alone when it declares no auths); an upstream refusal is relayed as the proxy's own problem (`upstream_credential_rejected` with its `required_scopes`, `needs_reconnection`), and a listing that succeeded but whose snapshot could not be recorded is a platform failure (`500`). It feeds the per-space tool review (approve or block a tool) and the author's action to declare a listed tool in the integration (`tools_policy` of the draft, then saved and published). Requires `integrations:read` and `credential-proxy:call-own`. Rate limited to 10 requests per minute.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XSpaceId" },
@@ -1544,6 +1545,12 @@ export const integrationsPaths = {
           content: problemJson,
         },
         "429": { $ref: "#/components/responses/RateLimited" },
+        "500": {
+          description:
+            "`internal_error` — the server was listed but the snapshot could not be recorded.",
+          headers: STD_RESPONSE_HEADERS,
+          content: problemJson,
+        },
         "502": {
           description:
             "`bad_gateway` — the server could not be listed; `upstream_credential_rejected` — it refused the connection's credential.",
@@ -1635,7 +1642,7 @@ export const integrationsPaths = {
       tags: ["Integrations"],
       summary: "Approve the current definition of undeclared tools in the space",
       description:
-        "Approves each `{ name, fingerprint }` as the server last listed it, for an undeclared tool of the integration. Another fingerprint already approved for the same tool stays approved. Requires `integrations:configure` AND a dashboard session: an API key, an OIDC/MCP/CLI token or the chat loopback is refused with `403 dashboard_session_required`. Audited as `integration.tool.approved`, one event per tool newly approved.",
+        "Approves each `{ name, fingerprint }` as the server last listed it, for an undeclared tool of the integration. Another fingerprint already approved for the same tool stays approved. Requires `integrations:configure` AND a dashboard session: an API key, an OIDC/MCP/CLI token or the chat loopback is refused with `403 dashboard_session_required`. Audited as `integration.tool.approved`, one event per tool newly approved. Rate limited to 30 requests per minute.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XSpaceId" },
@@ -1656,7 +1663,10 @@ export const integrationsPaths = {
                   items: {
                     type: "object",
                     required: ["name", "fingerprint"],
-                    properties: { name: { type: "string" }, fingerprint: { type: "string" } },
+                    properties: {
+                      name: { type: "string", minLength: 1, maxLength: 256 },
+                      fingerprint: { type: "string", minLength: 1, maxLength: 128 },
+                    },
                     additionalProperties: false,
                   },
                 },
@@ -1680,6 +1690,7 @@ export const integrationsPaths = {
           headers: STD_RESPONSE_HEADERS,
           content: problemJson,
         },
+        "429": { $ref: "#/components/responses/RateLimited" },
         "404": { $ref: "#/components/responses/NotFound" },
         "409": {
           description:
@@ -1696,7 +1707,7 @@ export const integrationsPaths = {
       tags: ["Integrations"],
       summary: "Withdraw every approval of a tool in the space",
       description:
-        "Removes all approved fingerprints of the tool in this space. Answers 204 whether or not there was one. Audited as `integration.tool.approval_revoked`, one event per approval removed (tool and fingerprint). Requires `integrations:configure` and a dashboard session.",
+        "Removes all approved fingerprints of the tool in this space. Answers 204 whether or not there was one. Audited as `integration.tool.approval_revoked`, one event per approval removed (tool and fingerprint). Requires `integrations:configure` and a dashboard session. Rate limited to 30 requests per minute.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XSpaceId" },
@@ -1712,6 +1723,7 @@ export const integrationsPaths = {
           headers: STD_RESPONSE_HEADERS,
           content: problemJson,
         },
+        "429": { $ref: "#/components/responses/RateLimited" },
         "404": { $ref: "#/components/responses/NotFound" },
       },
     },
@@ -1722,7 +1734,7 @@ export const integrationsPaths = {
       tags: ["Integrations"],
       summary: "Block tools of the integration in the space",
       description:
-        "Blocks the named tools, declared or not: a blocked tool is neither offered nor callable in this space. Already blocked names are ignored. Blocking an `api_call` tool also removes its `api_upload` companion; blocking an `api_upload` tool alone takes effect in runs only (the credential proxy has no upload tool to refuse). Requires `integrations:configure` and a dashboard session. Audited as `integration.tool.blocked`, one event per tool newly blocked.",
+        "Blocks the named tools, declared or not: a blocked tool is neither offered nor callable in this space. Already blocked names are ignored. Blocking an `api_call` tool also removes its `api_upload` companion; blocking an `api_upload` tool alone takes effect in runs only (the credential proxy has no upload tool to refuse). Requires `integrations:configure` and a dashboard session. Audited as `integration.tool.blocked`, one event per tool newly blocked. Rate limited to 30 requests per minute.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XSpaceId" },
@@ -1736,7 +1748,12 @@ export const integrationsPaths = {
               type: "object",
               required: ["tools"],
               properties: {
-                tools: { type: "array", minItems: 1, maxItems: 100, items: { type: "string" } },
+                tools: {
+                  type: "array",
+                  minItems: 1,
+                  maxItems: 100,
+                  items: { type: "string", minLength: 1, maxLength: 256 },
+                },
               },
               additionalProperties: false,
             },
@@ -1752,6 +1769,7 @@ export const integrationsPaths = {
           headers: STD_RESPONSE_HEADERS,
           content: problemJson,
         },
+        "429": { $ref: "#/components/responses/RateLimited" },
         "404": { $ref: "#/components/responses/NotFound" },
       },
     },
@@ -1762,7 +1780,7 @@ export const integrationsPaths = {
       tags: ["Integrations"],
       summary: "Lift the block on a tool in the space",
       description:
-        "Answers 204 whether or not the tool was blocked (the audit event `integration.tool.unblocked` is recorded only when a block was lifted). Requires `integrations:configure` and a dashboard session.",
+        "Answers 204 whether or not the tool was blocked (the audit event `integration.tool.unblocked` is recorded only when a block was lifted). Requires `integrations:configure` and a dashboard session. Rate limited to 30 requests per minute.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XSpaceId" },
@@ -1778,6 +1796,7 @@ export const integrationsPaths = {
           headers: STD_RESPONSE_HEADERS,
           content: problemJson,
         },
+        "429": { $ref: "#/components/responses/RateLimited" },
         "404": { $ref: "#/components/responses/NotFound" },
       },
     },

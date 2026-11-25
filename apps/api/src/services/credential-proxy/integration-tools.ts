@@ -539,7 +539,7 @@ export async function listIntegrationTools(
           manifest,
           connections,
           apiCallNames: apiCallToolNames(id, namespace, manifest),
-          policy: await loadToolSpacePolicy(scope.spaceId, id, manifest),
+          policy: await loadToolSpacePolicy(scope, id, manifest),
         };
       }),
   );

@@ -1,16 +1,19 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Spawn resolver — the space's tool policy reaches the sidecar: X * `blockedTools`, and on a closed remote catalog the fingerprints approved for each undeclared
+ * Spawn resolver — the space's tool policy reaches the sidecar: the blocked tools through
+ * `blockedTools`, and on a closed remote catalog the fingerprints approved for each undeclared
  * tool the agent names through `approvedToolFingerprints` (never for a declared tool, never on an
  * open catalog).
  */
 
 import { describe, it, expect, beforeEach } from "bun:test";
+import { MAX_APPROVED_FINGERPRINTS_PER_TOOL } from "@appstrate/core/sidecar-types";
 import { db } from "@appstrate/db/client";
-import { spaceIntegrationToolApprovals, spaceIntegrationToolBlocks } from "@appstrate/db/schema";
+import { spaceIntegrationToolBlocks } from "@appstrate/db/schema";
 import { resolveIntegrationSpawns } from "../../helpers/spawn-resolver.ts";
 import { truncateAll } from "../../helpers/db.ts";
+import { insertToolApprovals } from "../../helpers/tool-policy.ts";
 import { createTestContext, type TestContext } from "../../helpers/auth.ts";
 import { seedPackage, seedSpacePackage } from "../../helpers/seed.ts";
 import { integrationConnections } from "@appstrate/db/schema";
@@ -71,14 +74,9 @@ describe("resolveIntegrationSpawns — space tool policy", () => {
   }
 
   const approve = (toolName: string) =>
-    db.insert(spaceIntegrationToolApprovals).values({
-      spaceId: ctx.defaultSpaceId,
-      orgId: ctx.orgId,
-      packageId: INTEG,
-      toolName,
-      fingerprint: FINGERPRINT,
-      definition: {},
-    });
+    insertToolApprovals({ ...ctx, spaceId: ctx.defaultSpaceId, packageId: INTEG }, [
+      { toolName, fingerprint: FINGERPRINT },
+    ]);
 
   beforeEach(async () => {
     await truncateAll();
@@ -111,6 +109,38 @@ describe("resolveIntegrationSpawns — space tool policy", () => {
     expect(spec.approvedToolFingerprints).toBeUndefined();
   });
 
+  it("expands a wildcard on a closed catalog to the declared and approved tools", async () => {
+    await seed();
+    await approve("write");
+    const spec = await spawn("*" as unknown as string[]);
+    expect(spec.toolAllowlist).toEqual(["search", "write"]);
+    expect(spec.approvedToolFingerprints).toEqual({ write: [FINGERPRINT] });
+  });
+
+  it("leaves a wildcard on an open catalog unrestricted", async () => {
+    await seed(true);
+    await approve("write");
+    const spec = await spawn("*" as unknown as string[]);
+    expect(spec.toolAllowlist).toBeUndefined();
+    expect(spec.approvedToolFingerprints).toBeUndefined();
+  });
+
+  it("caps a tool's fingerprints to the spec limit, the newest approvals first", async () => {
+    await seed();
+    const total = MAX_APPROVED_FINGERPRINTS_PER_TOOL + 3;
+    await insertToolApprovals(
+      { ...ctx, spaceId: ctx.defaultSpaceId, packageId: INTEG },
+      Array.from({ length: total }, (_, i) => ({
+        toolName: "write",
+        fingerprint: i.toString(16).padStart(64, "0"),
+        approvedAt: new Date(Date.UTC(2026, 0, 1, 0, 0, i)),
+      })),
+    );
+    const sent = (await spawn(["write"])).approvedToolFingerprints!.write!;
+    expect(sent).toHaveLength(MAX_APPROVED_FINGERPRINTS_PER_TOOL);
+    expect(sent[0]).toBe((total - 1).toString(16).padStart(64, "0"));
+  });
+
   it("does not gate an open catalog", async () => {
     await seed(true);
     const spec = await spawn(["search", "write"]);
@@ -119,14 +149,11 @@ describe("resolveIntegrationSpawns — space tool policy", () => {
 
   it("sends every approved fingerprint of a tool, whatever their number: the approval door bounds it", async () => {
     await seed();
-    await db.insert(spaceIntegrationToolApprovals).values(
+    await insertToolApprovals(
+      { ...ctx, spaceId: ctx.defaultSpaceId, packageId: INTEG },
       Array.from({ length: 5 }, (_, i) => ({
-        spaceId: ctx.defaultSpaceId,
-        orgId: ctx.orgId,
-        packageId: INTEG,
         toolName: "write",
         fingerprint: i.toString(16).padStart(64, "0"),
-        definition: {},
       })),
     );
     expect((await spawn(["write"])).approvedToolFingerprints!.write).toHaveLength(5);
@@ -136,6 +163,8 @@ describe("resolveIntegrationSpawns — space tool policy", () => {
 describe("resolveIntegrationSpawns — a blocked api_call", () => {
   const API = "@orga/driveish";
   let ctx: TestContext;
+
+  let unavailable: { integrationId: string; name: string; reason: string }[] = [];
 
   async function spawnApi(blocks: string[]) {
     await seedPackage({
@@ -183,7 +212,7 @@ describe("resolveIntegrationSpawns — a blocked api_call", () => {
         toolName,
       });
     }
-    const { specs } = await resolveIntegrationSpawns({
+    const result = await resolveIntegrationSpawns({
       spaceId: ctx.defaultSpaceId,
       actor: { type: "user", id: ctx.user.id },
       agentManifest: {
@@ -197,7 +226,8 @@ describe("resolveIntegrationSpawns — a blocked api_call", () => {
       },
       resolvedConnections: await bindAllConnections(API),
     });
-    return specs[0]!;
+    unavailable = result.unavailable;
+    return result.specs[0]!;
   }
 
   beforeEach(async () => {
@@ -208,13 +238,17 @@ describe("resolveIntegrationSpawns — a blocked api_call", () => {
   it("is not granted to the run, upload companion included", async () => {
     const spec = await spawnApi(["api_call"]);
     expect(spec.apiCalls).toBeUndefined();
-    // Removed here: the sidecar is told of no `api_call` block.
+    // Removed here: the sidecar is told of no `api_call` block, so the resolver reports it.
     expect(spec.blockedTools).toBeUndefined();
+    expect(unavailable).toEqual([
+      { integrationId: API, name: "api_call", reason: "blocked_in_space" },
+    ]);
   });
 
   it("keeps the call when only its upload companion is blocked", async () => {
     const spec = await spawnApi(["api_upload"]);
     expect(spec.apiCalls).toHaveLength(1);
     expect(spec.apiCalls![0]!.uploadProtocols).toBeUndefined();
+    expect(unavailable.map((t) => t.name)).toEqual(["api_upload"]);
   });
 });

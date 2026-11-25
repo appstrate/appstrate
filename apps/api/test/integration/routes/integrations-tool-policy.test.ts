@@ -7,20 +7,29 @@
 import { describe, it, expect, beforeEach } from "bun:test";
 import { eq } from "drizzle-orm";
 import type { Tool } from "@modelcontextprotocol/sdk/types.js";
-import { toolDefinitionFingerprint } from "@appstrate/mcp-transport";
 import { MAX_APPROVED_FINGERPRINTS_PER_TOOL } from "@appstrate/core/sidecar-types";
 import { db } from "@appstrate/db/client";
-import { auditEvents, spaceIntegrationToolApprovals } from "@appstrate/db/schema";
+import {
+  auditEvents,
+  spaceIntegrationToolApprovals,
+  spaceIntegrationToolBlocks,
+  spacePackages,
+} from "@appstrate/db/schema";
 import { getTestApp } from "../../helpers/app.ts";
 import { truncateAll } from "../../helpers/db.ts";
-import { seedApiKey } from "../../helpers/seed.ts";
+import { seedApiKey, seedSpace } from "../../helpers/seed.ts";
+import { insertToolApprovals, tool, toolFingerprint as fp } from "../../helpers/tool-policy.ts";
 import {
   authHeaders,
   createTestContext,
   memberContext,
   type TestContext,
 } from "../../helpers/auth.ts";
-import { seedProxyIntegration } from "../../helpers/credential-proxy-fixtures.ts";
+import {
+  bearerApiKeyAuth,
+  seedProxyConnection,
+  seedProxyIntegration,
+} from "../../helpers/credential-proxy-fixtures.ts";
 import { remoteIntegrationManifest } from "../../helpers/integration-manifests.ts";
 import { recordToolSnapshot } from "../../../src/services/integration-tool-snapshots.ts";
 
@@ -28,16 +37,11 @@ const ID = "@acme/files";
 const BASE = `/api/integrations/${ID}/tool-policy`;
 const app = getTestApp();
 
-const tool = (name: string, description = `Tool ${name}`): Tool => ({
-  name,
-  description,
-  inputSchema: { type: "object", properties: {} },
-});
-const fp = (name: string, description?: string) =>
-  toolDefinitionFingerprint(tool(name, description));
-
 interface Detail {
   tool_catalog: { name: string; status: string; origin: string }[];
+}
+interface Problem {
+  code: string;
 }
 interface View {
   listed: { name: string; fingerprint: string; definition: Record<string, unknown> | null }[];
@@ -124,8 +128,47 @@ describe("integration tool policy routes", () => {
       },
     );
     expect(res.status).toBe(403);
-    expect(((await res.json()) as { code: string }).code).toBe("dashboard_session_required");
+    expect(((await res.json()) as Problem).code).toBe("dashboard_session_required");
     expect(await db.select().from(spaceIntegrationToolApprovals)).toHaveLength(0);
+  });
+
+  it("refuses all four writes to an API key with dashboard_session_required, changing nothing", async () => {
+    await listed(tool("write_file"), tool("other_tool"));
+    await approve({ name: "write_file", fingerprint: fp("write_file") });
+    await send("POST", "/blocks", { tools: ["other_tool"] });
+    const { rawKey } = await seedApiKey({
+      orgId: ctx.orgId,
+      spaceId: ctx.defaultSpaceId,
+      createdBy: ctx.user.id,
+      scopes: ["integrations:read", "integrations:configure"],
+    });
+    const keyHeaders = {
+      Authorization: `Bearer ${rawKey}`,
+      "X-Org-Id": ctx.orgId,
+      "X-Space-Id": ctx.defaultSpaceId,
+    };
+    const writes: [string, string, string, unknown?][] = [
+      [
+        "POST approvals",
+        "POST",
+        "/approvals",
+        { tools: [{ name: "other_tool", fingerprint: fp("other_tool") }] },
+      ],
+      ["DELETE approvals/:toolName", "DELETE", "/approvals/write_file"],
+      ["POST blocks", "POST", "/blocks", { tools: ["write_file"] }],
+      ["DELETE blocks/:toolName", "DELETE", "/blocks/other_tool"],
+    ];
+    for (const [label, method, path, body] of writes) {
+      const res = await send(method, path, body, keyHeaders);
+      expect({ label, status: res.status, code: ((await res.json()) as Problem).code }).toEqual({
+        label,
+        status: 403,
+        code: "dashboard_session_required",
+      });
+    }
+    const after = await view();
+    expect(after.approvals.map((a) => a.tool_name)).toEqual(["write_file"]);
+    expect(after.blocks.map((b) => b.tool_name)).toEqual(["other_tool"]);
   });
 
   it("refuses a session without integrations:configure", async () => {
@@ -180,27 +223,57 @@ describe("integration tool policy routes", () => {
     expect((await send("DELETE", "/approvals/write_file")).status).toBe(204);
   });
 
-  it("refuses a 33rd approved definition of one tool, and still accepts one already approved", async () => {
+  const holdFingerprints = (count: number) =>
+    insertToolApprovals(
+      { ...ctx, spaceId: ctx.defaultSpaceId, packageId: ID },
+      Array.from({ length: count }, (_, i) => ({
+        toolName: "write_file",
+        fingerprint: i.toString(16).padStart(64, "0"),
+      })),
+    );
+
+  it("accepts the 32nd approved definition of one tool", async () => {
     await listed(tool("write_file", "live"));
-    const held = Array.from({ length: MAX_APPROVED_FINGERPRINTS_PER_TOOL }, (_, i) => ({
-      spaceId: ctx.defaultSpaceId,
-      orgId: ctx.orgId,
-      packageId: ID,
-      toolName: "write_file",
-      fingerprint: i.toString(16).padStart(64, "0"),
-      definition: {},
-    }));
-    await db.insert(spaceIntegrationToolApprovals).values(held);
+    await holdFingerprints(MAX_APPROVED_FINGERPRINTS_PER_TOOL - 1);
 
-    const refused = await approve({ name: "write_file", fingerprint: fp("write_file", "live") });
-    expect(refused.status).toBe(409);
-    expect(((await refused.json()) as { code: string }).code).toBe("tool_approvals_limit");
-    expect((await view()).approvals).toHaveLength(MAX_APPROVED_FINGERPRINTS_PER_TOOL);
-
-    await send("DELETE", "/approvals/write_file");
     expect(
       (await approve({ name: "write_file", fingerprint: fp("write_file", "live") })).status,
     ).toBe(204);
+    expect((await view()).approvals).toHaveLength(MAX_APPROVED_FINGERPRINTS_PER_TOOL);
+  });
+
+  it("refuses a 33rd approved definition of one tool with tool_approvals_limit", async () => {
+    await listed(tool("write_file", "live"));
+    await holdFingerprints(MAX_APPROVED_FINGERPRINTS_PER_TOOL);
+    expect(await db.select().from(spaceIntegrationToolApprovals)).toHaveLength(32);
+
+    const refused = await approve({ name: "write_file", fingerprint: fp("write_file", "live") });
+    expect(refused.status).toBe(409);
+    expect(await refused.json()).toMatchObject({
+      code: "tool_approvals_limit",
+      tools: ["write_file"],
+    });
+    expect(await db.select().from(spaceIntegrationToolApprovals)).toHaveLength(32);
+
+    // Withdrawing the tool's approvals frees the room.
+    expect((await send("DELETE", "/approvals/write_file")).status).toBe(204);
+    expect(
+      (await approve({ name: "write_file", fingerprint: fp("write_file", "live") })).status,
+    ).toBe(204);
+  });
+
+  it("still accepts, at the limit, a definition already among the approved ones", async () => {
+    await listed(tool("write_file", "live"));
+    await holdFingerprints(MAX_APPROVED_FINGERPRINTS_PER_TOOL - 1);
+    expect(
+      (await approve({ name: "write_file", fingerprint: fp("write_file", "live") })).status,
+    ).toBe(204);
+    expect(await db.select().from(spaceIntegrationToolApprovals)).toHaveLength(32);
+
+    expect(
+      (await approve({ name: "write_file", fingerprint: fp("write_file", "live") })).status,
+    ).toBe(204);
+    expect(await db.select().from(spaceIntegrationToolApprovals)).toHaveLength(32);
   });
 
   it("blocks a tool, declared or not, and lifts the block", async () => {
@@ -213,9 +286,29 @@ describe("integration tool policy routes", () => {
     expect(await catalogEntry("read_file")).toMatchObject({ status: "available" });
   });
 
-  it("rejects a malformed tool name", async () => {
-    const res = await send("POST", "/blocks", { tools: ["not a name!"] });
-    expect(res.status).toBe(400);
+  it("rejects an empty or over-long tool name", async () => {
+    for (const name of ["", "x".repeat(257)]) {
+      const res = await send("POST", "/blocks", { tools: [name] });
+      expect(res.status).toBe(400);
+      expect(((await res.json()) as Problem).code).toBe("validation_failed");
+    }
+    expect(await db.select().from(spaceIntegrationToolBlocks)).toHaveLength(0);
+  });
+
+  it("approves and blocks any listed name: a colon, 200 characters", async () => {
+    const colon = "ns:do_thing";
+    const long = "t".repeat(200);
+    await listed(tool(colon), tool(long));
+
+    expect((await approve({ name: colon, fingerprint: fp(colon) })).status).toBe(204);
+    expect((await send("POST", "/blocks", { tools: [long] })).status).toBe(204);
+
+    const body = await view();
+    expect(body.approvals.map((a) => a.tool_name)).toEqual([colon]);
+    expect(body.blocks.map((b) => b.tool_name)).toEqual([long]);
+    expect((await send("DELETE", `/blocks/${long}`)).status).toBe(204);
+    expect((await send("DELETE", `/approvals/${encodeURIComponent(colon)}`)).status).toBe(204);
+    expect((await view()).approvals).toHaveLength(0);
   });
 
   it("audits each decision, one event per tool", async () => {
@@ -235,11 +328,11 @@ describe("integration tool policy routes", () => {
       "integration.tool.blocked",
       "integration.tool.unblocked",
     ]);
-    const [approved] = await db
+    const [blockedEvent] = await db
       .select({ after: auditEvents.after })
       .from(auditEvents)
       .where(eq(auditEvents.action, "integration.tool.blocked"));
-    expect(approved!.after).toEqual({ toolName: "a_tool" });
+    expect(blockedEvent!.after).toEqual({ toolName: "a_tool" });
   });
 
   it("audits every approval a revoke removes, with its fingerprint", async () => {
@@ -311,5 +404,125 @@ describe("integration tool policy routes", () => {
         code: "invalid_request",
       });
     }
+  });
+
+  describe("isolation", () => {
+    it("keeps an approval and a block of one space out of another space of the org", async () => {
+      await listed(tool("read_file"), tool("write_file"));
+      await approve({ name: "write_file", fingerprint: fp("write_file") });
+      await send("POST", "/blocks", { tools: ["read_file"] });
+
+      const spaceB = await seedSpace({ orgId: ctx.orgId, name: "Team B" });
+      await db.insert(spacePackages).values({ enabled: true, spaceId: spaceB.id, packageId: ID });
+      const inB = authHeaders(ctx, { "X-Space-Id": spaceB.id });
+
+      const res = await send("GET", "", undefined, inB);
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as View;
+      expect(body.approvals).toEqual([]);
+      expect(body.blocks).toEqual([]);
+      // The listing is the server's: org-wide, so B still sees what it could review.
+      expect(body.listed.map((t) => t.name).sort()).toEqual(["read_file", "write_file"]);
+
+      const detail = await app.request(`/api/integrations/${ID}`, { headers: inB });
+      const catalog = ((await detail.json()) as Detail).tool_catalog;
+      expect(catalog.find((t) => t.name === "write_file")).toMatchObject({
+        status: "pending",
+        origin: "listed",
+      });
+      expect(catalog.find((t) => t.name === "read_file")).toMatchObject({ status: "available" });
+
+      // And A keeps its own decisions.
+      const inA = await view();
+      expect(inA.approvals.map((a) => a.tool_name)).toEqual(["write_file"]);
+      expect(inA.blocks.map((b) => b.tool_name)).toEqual(["read_file"]);
+    });
+
+    it("answers a caller of another organization with a 404 and writes nothing", async () => {
+      await listed(tool("write_file"));
+      await approve({ name: "write_file", fingerprint: fp("write_file") });
+      const other = await createTestContext({ orgSlug: "other" });
+
+      const read = await send("GET", "", undefined, authHeaders(other));
+      expect(read.status).toBe(404);
+
+      const attempts: [string, string, unknown?][] = [
+        ["POST", "/approvals", { tools: [{ name: "write_file", fingerprint: fp("write_file") }] }],
+        ["DELETE", "/approvals/write_file"],
+        ["POST", "/blocks", { tools: ["write_file"] }],
+        ["DELETE", "/blocks/write_file"],
+      ];
+      for (const [method, path, body] of attempts) {
+        const res = await send(method, path, body, authHeaders(other));
+        expect({ method, path, status: res.status }).toEqual({ method, path, status: 404 });
+      }
+      const after = await view();
+      expect(after.approvals.map((a) => a.tool_name)).toEqual(["write_file"]);
+      expect(after.blocks).toEqual([]);
+    });
+
+    it("refuses an outsider naming organization A in X-Org-Id", async () => {
+      await listed(tool("write_file"));
+      const other = await createTestContext({ orgSlug: "other" });
+      const res = await send("GET", "", undefined, {
+        Cookie: other.cookie,
+        "X-Org-Id": ctx.orgId,
+        "X-Space-Id": ctx.defaultSpaceId,
+      });
+      expect(res.status).toBe(403);
+      const post = await send(
+        "POST",
+        "/blocks",
+        { tools: ["write_file"] },
+        {
+          Cookie: other.cookie,
+          "X-Org-Id": ctx.orgId,
+          "X-Space-Id": ctx.defaultSpaceId,
+        },
+      );
+      expect(post.status).toBe(403);
+      expect(await db.select().from(spaceIntegrationToolBlocks)).toHaveLength(0);
+    });
+
+    it("keeps the tools a connection listed from a colleague who cannot use that connection", async () => {
+      const authedId = "@acme/authed";
+      await seedProxyIntegration(
+        ctx,
+        remoteIntegrationManifest({
+          name: authedId,
+          displayName: "Authed",
+          url: "https://mcp.example.com/authed",
+          tools_policy: { read_file: {} },
+          auths: { api_key: bearerApiKeyAuth(["https://mcp.example.com/**"]) },
+        }),
+      );
+      const connectionId = await seedProxyConnection(ctx, authedId, "api_key", { token: "t" });
+      await recordToolSnapshot({
+        orgId: ctx.orgId,
+        packageId: authedId,
+        connectionId,
+        tools: [tool("read_file"), tool("private_tool")],
+        truncated: false,
+      });
+      const policy = (who: TestContext) =>
+        app.request(`/api/integrations/${authedId}/tool-policy`, { headers: authHeaders(who) });
+      const catalog = async (who: TestContext) => {
+        const res = await app.request(`/api/integrations/${authedId}`, {
+          headers: authHeaders(who),
+        });
+        expect(res.status).toBe(200);
+        return ((await res.json()) as Detail).tool_catalog.map((t) => t.name);
+      };
+
+      const owner = (await (await policy(ctx)).json()) as View;
+      expect(owner.listed.map((t) => t.name).sort()).toEqual(["private_tool", "read_file"]);
+      expect(await catalog(ctx)).toContain("private_tool");
+
+      const colleague = await memberContext(ctx, "member", "viewer");
+      const res = await policy(colleague);
+      expect(res.status).toBe(200);
+      expect(((await res.json()) as View).listed).toEqual([]);
+      expect(await catalog(colleague)).not.toContain("private_tool");
+    });
   });
 });
