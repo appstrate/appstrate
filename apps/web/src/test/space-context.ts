@@ -56,13 +56,18 @@ export function renderInSpace(
 
 const NAMES: Record<string, string> = { spc_a: "Atelier", spc_b: "Studio", spc_c: "Coffre" };
 
-/** Every preset opens the Studio, so a fixture space does too: a test withholding it filters it out. */
-export const testSpace = (id: string, permissions: string[], name = NAMES[id] ?? id) => ({
+/** Every preset opens the Studio, so a fixture space does too unless `studio: false` (a chat-only role). */
+export const testSpace = (
+  id: string,
+  permissions: string[],
+  name = NAMES[id] ?? id,
+  { studio = true }: { studio?: boolean } = {},
+) => ({
   id,
   object: "space",
   orgId: "org_1",
   access: "member",
-  permissions: [STUDIO_PERMISSION, ...permissions],
+  permissions: studio ? [STUDIO_PERMISSION, ...permissions] : permissions,
   personal: false,
   isDefault: id === "spc_a",
   name,

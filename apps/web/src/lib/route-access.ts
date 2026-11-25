@@ -216,11 +216,12 @@ export const OVERLAY_NOT_FOUND_PATHS = OVERLAY_PREFIXES.map((prefix) => `${prefi
 export const STUDIO_PERMISSION = "studio:read";
 
 /**
- * The Studio's screens: every route a permission opens, outside the chat and the settings. An
- * `open` route (a file, a notification) states its own rule; the settings stand over either product.
+ * The Studio's screens: every route a permission opens, outside the chat and the overlays. An
+ * `open` route (a file, a notification) states its own rule; an overlay (the settings, the
+ * catalogue) stands over either product.
  */
 function requiresStudio(path: RoutePath): boolean {
-  return "anyOf" in ROUTE_ACCESS[path] && !isUnder(path, "/chat") && !isSettingsPath(path);
+  return "anyOf" in ROUTE_ACCESS[path] && !isUnder(path, "/chat") && !isOverlayPath(path);
 }
 
 /** Whether a set of grants opens a gated route: its own permissions, and the Studio's for its screens. */

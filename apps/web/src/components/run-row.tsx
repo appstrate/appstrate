@@ -17,7 +17,8 @@ import { SpaceNameOf } from "./space-name";
  * table's « Run » column), then the run's space in a list spanning spaces (the runs table's
  * « Espace » cell), then its status.
  * The row is the run's link when the run still has an agent to live under and its page opens
- * for the reader.
+ * for the reader: in its own space (one withholding the Studio lists the run, unlinked), or in
+ * « Tous les espaces » where some space admits the run's page.
  */
 export function RunRow({
   run,

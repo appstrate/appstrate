@@ -17,6 +17,7 @@ const {
   holdsOverview,
   isListRow,
   listAdmits,
+  listAdmitsOn,
   spanningRouteVerdict,
   overviewOffered,
   spaceChoice,
@@ -80,9 +81,12 @@ describe("listAdmits", () => {
     expect(listAdmits("skills")(gate("agents:read", "integrations:read"))).toBe(false);
   });
 
-  it("admits no list of the Studio in a space withholding the Studio", () => {
+  it("judges the data alone: a space withholding the Studio admits the list for the chat, not for the Studio", () => {
     const withoutStudio = (permission: string) => permission === "runs:read-all";
-    expect(listAdmits("runs")(withoutStudio)).toBe(false);
+    expect(listAdmits("runs")(withoutStudio)).toBe(true);
+    expect(listAdmitsOn("runs", "chat")(withoutStudio)).toBe(true);
+    expect(listAdmitsOn("runs", "studio")(withoutStudio)).toBe(false);
+    expect(listAdmitsOn("runs", "studio")(gate("runs:read-all"))).toBe(true);
   });
 
   it("judges each space by its own set, through spacesWhere", () => {

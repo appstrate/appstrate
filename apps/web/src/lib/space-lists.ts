@@ -7,7 +7,14 @@
 
 import { chatActsIn } from "@appstrate/core/chat-contract";
 import { CORE_RESOURCE_LEVELS } from "@appstrate/core/permissions";
-import { grantsRoute, isUnder, ROUTE_ACCESS, SETTINGS_INDEX, type RoutePath } from "./route-access";
+import {
+  grantsRoute,
+  isUnder,
+  ROUTE_ACCESS,
+  SETTINGS_INDEX,
+  STUDIO_PERMISSION,
+  type RoutePath,
+} from "./route-access";
 
 /** Only `member` access enters: scoping to a listed `access: "none"` space 403s every request. */
 export function isSpaceEnterable(space: { access: string }): boolean {
@@ -38,14 +45,28 @@ export type SpaceGate = (permission: string) => boolean;
 const accessOf = (path: RoutePath) =>
   ROUTE_ACCESS[path] as { anyOf?: readonly string[]; spansSpaces?: boolean };
 
-/** A space admits a route where its gate opens it. */
+/** A space admits a route where its gate opens it: the screen's rule, the Studio included. */
 const routeAdmits =
   (path: RoutePath) =>
   (can: SpaceGate): boolean =>
     grantsRoute(path, can);
 
-/** A space admits a list where its gate opens the list's route. */
-export const listAdmits = (list: SpaceList) => routeAdmits(LIST_ROUTE[list]);
+/**
+ * A space admits a list where its gate grants the list route's own permissions: the data rule,
+ * whichever product reads the rows (the chat's context panel lists them without the Studio).
+ */
+export const listAdmits =
+  (list: SpaceList) =>
+  (can: SpaceGate): boolean =>
+    ROUTE_ACCESS[LIST_ROUTE[list]].anyOf.some(can);
+
+/** The product a list is shown in: the Studio's screens also ask the Studio of each space. */
+export type ListSurface = "studio" | "chat";
+
+export const listAdmitsOn =
+  (list: SpaceList, surface: ListSurface) =>
+  (can: SpaceGate): boolean =>
+    listAdmits(list)(can) && (surface === "chat" || can(STUDIO_PERMISSION));
 
 interface ListedSpace {
   id: string;
@@ -115,8 +136,7 @@ export function spaceChoice(
  * The Studio is not asked: the chat holds the mode too, for a role without the Studio as well.
  */
 export function overviewOffered(spaces: readonly ListedSpace[] | undefined): boolean {
-  const admits = (can: SpaceGate) =>
-    SPACE_LISTS.some((list) => accessOf(LIST_ROUTE[list]).anyOf?.some(can) ?? false);
+  const admits = (can: SpaceGate) => SPACE_LISTS.some((list) => listAdmits(list)(can));
   return spacesWhere(spaces, admits).length >= 2;
 }
 

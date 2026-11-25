@@ -131,14 +131,14 @@ describe("routeVerdict", () => {
     const withoutStudio = (p: string) => p !== STUDIO_PERMISSION;
     expect(routeVerdict("/runs", withoutStudio, {}, false)).toBe("denied");
     expect(routeVerdict("/agents/:scope/:name", withoutStudio, {}, false)).toBe("denied");
-    expect(routeVerdict("/catalogue/:type", withoutStudio, {}, false)).toBe("denied");
   });
 
-  it("keeps the chat, the settings and the reader pages without the Studio", () => {
+  it("keeps the chat, the overlays and the reader pages without the Studio", () => {
     const withoutStudio = (p: string) => p !== STUDIO_PERMISSION;
     expect(routeVerdict("/chat", withoutStudio, { chat: true }, false)).toBe("granted");
     expect(routeVerdict("/workspace-settings/general", withoutStudio, {}, false)).toBe("granted");
     expect(routeVerdict("/org-settings/members", withoutStudio, {}, false)).toBe("granted");
+    expect(routeVerdict("/catalogue/:type", withoutStudio, {}, false)).toBe("granted");
     expect(routeVerdict("/files/:fileId", none, {}, false)).toBe("granted");
     expect(routeVerdict("/notifications/:id", none, {}, false)).toBe("granted");
     expect(routeVerdict("/", none, {}, false)).toBe("granted");

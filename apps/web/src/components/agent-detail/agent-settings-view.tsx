@@ -100,7 +100,7 @@ export function AgentSettingsView({
   // placements; the schedules, which span spaces, where some space admits their list. With a
   // space selected, each is that space's verdict.
   const { on: overview } = useOverviewMode();
-  const scheduleSpaces = useAdmittingSpaces("schedules");
+  const scheduleSpaces = useAdmittingSpaces("schedules", "studio");
   const readsSchedules = overview ? scheduleSpaces.length > 0 : can("schedules:read");
   const configures = useSpacesFor({ permission: "agents:configure" }, detail.space_ids).offered;
   const readsIntegrations = useSpacesFor(

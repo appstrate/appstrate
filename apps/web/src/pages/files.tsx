@@ -38,7 +38,7 @@ function FilesCollection({ spanning }: { spanning: boolean }) {
   const purposes = list.values("purpose", PURPOSES);
   const effectivePurpose = purposes.length === 1 ? purposes[0] : undefined;
   const { t } = useTranslation(["files", "common"]);
-  const runSpaces = useAdmittingSpaces("runs");
+  const runSpaces = useAdmittingSpaces("runs", "studio");
   const [view, setView] = useListView("documents");
   const searchPlaceholder = useSearchPlaceholder(t("common:nav.files"));
   const { storage, limitBytes: limit, usageLabel } = useOrgStorage();
