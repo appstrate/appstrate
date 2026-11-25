@@ -968,6 +968,7 @@
   "workspaceSettings.sectionGeneral": "Workspace",
   "unifiedSettings.organizationSelector": "Choose an organization",
   "unifiedSettings.workspaceSelector": "Choose a workspace",
+  "unifiedSettings.openPreferences": "Open preferences",
   "spaces.visibilityLabel": "Visibility",
   "spaces.visibilityHint": "Choose who can discover and access this space.",
   "spaces.visibility.open": "Open",

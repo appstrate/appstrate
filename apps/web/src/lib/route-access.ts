@@ -197,6 +197,12 @@ const SETTINGS_PREFIXES = Object.values(SETTINGS_INDEX);
 export const isSettingsPath = (path: string) =>
   SETTINGS_PREFIXES.some((prefix) => isUnder(path, prefix));
 
+/** The scope a settings URL lies under; `organization` for any other URL. */
+export function settingsScopeFromPath(pathname: string): SettingsScope {
+  const scopes = Object.keys(SETTINGS_INDEX) as SettingsScope[];
+  return scopes.find((scope) => isUnder(pathname, SETTINGS_INDEX[scope])) ?? "organization";
+}
+
 /** The routed modals: mounted over the screen they were opened from, never in the main tree. */
 export const OVERLAY_PREFIXES = [...SETTINGS_PREFIXES, "/catalogue"];
 

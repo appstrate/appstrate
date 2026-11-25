@@ -1,12 +1,21 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { describe, expect, it } from "bun:test";
-import { isUnder, routeVerdict, SETTINGS_INDEX } from "../../../lib/route-access";
+import {
+  isUnder,
+  routeVerdict,
+  SETTINGS_INDEX,
+  settingsScopeFromPath,
+} from "../../../lib/route-access";
+import {
+  inSurface,
+  settingsSurfaceFromPath,
+  type SettingsSurface,
+} from "../../../lib/settings-surface";
 import {
   activeSettingsItem,
   firstSettingsPath,
   settingsContentKey,
-  settingsScopeFromPath,
   visibleSettingsSections,
 } from "../navigation";
 
@@ -177,14 +186,25 @@ describe("account section (/preferences)", () => {
       "/preferences/models",
     );
   });
+});
 
-  it("sits in the same rail as the organization and workspace sections", () => {
-    const sections = sectionsFor(ALL_FEATURES, [...GUEST, "space-settings:write"]);
-    expect(sections.map((section) => section.scope)).toEqual([
-      "organization",
-      "workspace",
-      "account",
-    ]);
+describe("settings surfaces", () => {
+  const sections = sectionsFor(ALL_FEATURES, [...GUEST, "space-settings:write"]);
+  const scopes = (surface: SettingsSurface) =>
+    inSurface(sections, surface).map((section) => section.scope);
+
+  it("lists what the caller administers in Settings and their own account in Preferences", () => {
+    expect(scopes("settings")).toEqual(["organization", "workspace"]);
+    expect(scopes("preferences")).toEqual(["account"]);
+  });
+
+  it("reads the dialog off the URL", () => {
+    expect(settingsSurfaceFromPath("/org-settings/models")).toBe("settings");
+    expect(settingsSurfaceFromPath("/workspace-settings/webhooks/wh_1")).toBe("settings");
+    expect(settingsSurfaceFromPath("/preferences")).toBe("preferences");
+    expect(settingsSurfaceFromPath("/preferences/models")).toBe("preferences");
+    expect(settingsSurfaceFromPath("/catalogue/installed/agent")).toBeUndefined();
+    expect(settingsSurfaceFromPath("/preferencesx")).toBeUndefined();
   });
 });
 
