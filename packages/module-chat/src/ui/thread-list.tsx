@@ -173,7 +173,7 @@ function useCollapsedGroups() {
 function ConversationScroll({ scrolls, children }: { scrolls: boolean; children: ReactNode }) {
   if (!scrolls) return children;
   return (
-    <ScrollArea className="-mr-2 -mb-2 min-h-0 flex-1 [&_[data-radix-scroll-area-viewport]>div]:!block">
+    <ScrollArea className="[&_[data-radix-scroll-area-viewport]]:scroll-fade-y -mr-2 -mb-2 min-h-0 flex-1 [&_[data-radix-scroll-area-viewport]>div]:!block">
       {children}
     </ScrollArea>
   );

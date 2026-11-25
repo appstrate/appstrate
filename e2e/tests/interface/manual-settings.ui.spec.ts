@@ -89,11 +89,9 @@ test("single choices apply at once, and a failed save from the leave dialog keep
   });
   await page.goto("/workspace-settings/general");
   await page.getByRole("textbox", { name: "Nom", exact: true }).fill("Saved on leave");
+  // Settings' rail ends on the way to Preferences, the other dialog.
   const leave = () =>
-    page
-      .getByRole("navigation", { name: "Compte", exact: true })
-      .getByRole("link", { name: "Général", exact: true })
-      .click();
+    page.getByRole("link", { name: "Ouvrir les préférences", exact: true }).click();
   const dialog = page.getByRole("alertdialog", { name: "Modifications non enregistrées" });
   await leave();
   await dialog.getByRole("button", { name: "Enregistrer", exact: true }).click();
@@ -134,21 +132,22 @@ test("a form that outlives a space switch drops its draft and stays guarded", as
   orgOnlyClient,
 }) => {
   const target = await createSpace(orgOnlyClient, `Manual survivor ${Date.now()}`);
-  await page.goto("/preferences/general");
-  const name = page.getByRole("textbox", { name: "Nom d'affichage", exact: true });
+  // The organization's page does not depend on the space, so it stays mounted across the switch.
+  await page.goto("/org-settings/general");
+  const name = page.getByRole("textbox", { name: "Nom", exact: true });
   const original = await name.inputValue();
   const save = page.getByRole("button", { name: "Enregistrer", exact: true });
   const dialog = page.getByRole("alertdialog", { name: "Modifications non enregistrées" });
   await name.fill("Draft before the switch");
   await new Sidebar(page).switchSpaceInSettings(target.name);
   await dialog.getByRole("button", { name: "Quitter sans enregistrer" }).click();
-  // The account preference stays mounted: the draft is gone, not left unguarded.
+  // The organization's form stays mounted: the draft is gone, not left unguarded.
   await expect(name).toHaveValue(original);
   await expect(save).toHaveCount(0);
   await name.fill("Draft after the switch");
   await page
-    .getByRole("navigation", { name: "Compte", exact: true })
-    .getByRole("link", { name: "Apparence", exact: true })
+    .getByRole("navigation", { name: "Organisation", exact: true })
+    .getByRole("link", { name: "Utilisateurs", exact: true })
     .click();
   await expect(dialog).toBeVisible();
   await dialog.getByRole("button", { name: "Annuler", exact: true }).click();

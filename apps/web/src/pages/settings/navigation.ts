@@ -22,6 +22,7 @@ import {
 import {
   isUnder,
   SETTINGS_INDEX,
+  settingsScopeFromPath,
   type RoutePath,
   type SettingsScope,
 } from "../../lib/route-access";
@@ -122,11 +123,6 @@ export function activeSettingsItem(
   pathname: string,
 ): UnifiedSettingsNavItem | undefined {
   return sections.flatMap((section) => section.items).find((item) => isUnder(pathname, item.to));
-}
-
-export function settingsScopeFromPath(pathname: string): SettingsScope {
-  const scopes = Object.keys(SETTINGS_INDEX) as SettingsScope[];
-  return scopes.find((scope) => isUnder(pathname, SETTINGS_INDEX[scope])) ?? "organization";
 }
 
 /** Keys the content outlet: a context switch remounts the page instead of flashing the previous scope's data. */

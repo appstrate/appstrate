@@ -16,7 +16,7 @@ import type { IntegrationConnection } from "../../../hooks/use-integrations.ts";
 installFakeStorage({ __APP_CONFIG__: { features: {}, trustedOrigins: [] } });
 
 const { OrgDefaultSection } = await import("../org-default-section.tsx");
-const { DefaultConnectionSection } = await import("../default-connection-section.tsx");
+const { DefaultConnectionSettings } = await import("../default-connection-section.tsx");
 const { orgStore } = await import("../../../stores/org-store.ts");
 const { spaceStore } = await import("../../../stores/space-store.ts");
 const { render } = await import("../../../test/render.tsx");
@@ -150,9 +150,8 @@ function section(
   try {
     return render(
       retiredAuth ? (
-        <DefaultConnectionSection
+        <DefaultConnectionSettings
           packageId={INTEGRATION}
-          canConfigure
           detail={{
             active: true,
             auths: [],

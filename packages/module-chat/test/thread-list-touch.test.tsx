@@ -213,6 +213,10 @@ describe("the list's date groups", () => {
     expect(html).toContain("data-radix-scroll-area-viewport");
     expect(html).not.toContain("overflow-y-auto pr-2");
   });
+
+  it("fade the edge that hides rows, on the viewport that scrolls", () => {
+    expect(html).toContain("[&amp;_[data-radix-scroll-area-viewport]]:scroll-fade-y");
+  });
 });
 
 describe("the open conversation's « … » in the header", () => {
