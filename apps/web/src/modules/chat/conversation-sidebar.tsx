@@ -51,6 +51,9 @@ import { LG_AND_UP, useMediaQuery } from "../../hooks/use-media-query";
 
 const CONVERSATION_CONTEXT_PANEL_ID = "conversation-context-panel";
 
+/** The room left at the area's right edge for the thread's scrollbar, beside the floating panel. */
+const SCROLLBAR_GUTTER = "1rem";
+
 /**
  * The panel's own frame: it floats beside the thread, so its cards (and the
  * previewed file) are rounder than a page's and lifted by a light shadow.
@@ -606,10 +609,13 @@ export function ConversationSidebar({
   conversationId,
   state,
   dispatch,
+  children,
 }: {
   conversationId: string | null;
   state: ConversationSidebarState;
   dispatch: Dispatch<ConversationSidebarAction>;
+  /** The thread: the panel opens over its right side. */
+  children: ReactNode;
 }) {
   const { t } = useTranslation("chat");
   const desktop = useMediaQuery(LG_AND_UP);
@@ -621,54 +627,57 @@ export function ConversationSidebar({
 
   if (!desktop) {
     return (
-      <Sheet
-        open={state.expanded}
-        onOpenChange={(open) => open !== state.expanded && dispatch({ type: "toggle" })}
-      >
-        <SheetContent
-          id={CONVERSATION_CONTEXT_PANEL_ID}
-          side="right"
-          aria-describedby={undefined}
-          // The panel's header carries the one close control.
-          showCloseButton={false}
-          className="bg-canvas flex w-[min(92vw,36rem)] flex-col gap-0 p-0 sm:max-w-none"
+      <div className="flex min-h-0 min-w-0 flex-1">
+        <div className="min-w-0 flex-1">{children}</div>
+        <Sheet
+          open={state.expanded}
+          onOpenChange={(open) => open !== state.expanded && dispatch({ type: "toggle" })}
         >
-          <SheetTitle className="sr-only">{t("context.label")}</SheetTitle>
-          <ConversationContext
-            conversationId={conversationId}
-            state={state}
-            dispatch={dispatch}
-            closable
-          />
-        </SheetContent>
-      </Sheet>
+          <SheetContent
+            id={CONVERSATION_CONTEXT_PANEL_ID}
+            side="right"
+            aria-describedby={undefined}
+            // The panel's header carries the one close control.
+            showCloseButton={false}
+            className="bg-canvas flex w-[min(92vw,36rem)] flex-col gap-0 p-0 sm:max-w-none"
+          >
+            <SheetTitle className="sr-only">{t("context.label")}</SheetTitle>
+            <ConversationContext
+              conversationId={conversationId}
+              state={state}
+              dispatch={dispatch}
+              closable
+            />
+          </SheetContent>
+        </Sheet>
+      </div>
     );
   }
 
-  // The column keeps its place in the layout and animates its width: closed,
-  // it is 0 wide and `inert` (out of the tab order and the accessibility tree).
-  // Its content keeps the full width so nothing reflows mid-transition, and is
-  // anchored right: switching views (list, details, file) widens or narrows
-  // the column from its left edge, toward the thread.
+  // The panel floats over the thread's right side, inside the conversation: the thread keeps the
+  // whole width, so its scrollbar stays at the right edge, outside the panel (`right-4`, the
+  // scrollbar's gutter). The thread reserves the room the panel and that gutter take
+  // (`--chat-context-inset`, read by the module's side padding), so nothing reads under it and
+  // the column stays centered in what is left. Closed, the panel is `inert` (out of the tab order
+  // and the accessibility tree) and lets the pointer through. Its content keeps the full width so
+  // nothing reflows mid-transition.
+  const inset = state.expanded ? `calc(${size.width}px + ${SCROLLBAR_GUTTER})` : undefined;
   return (
-    <aside
-      ref={panelRef}
-      id={CONVERSATION_CONTEXT_PANEL_ID}
-      aria-label={t("context.label")}
-      inert={!state.expanded}
-      className={cn(
-        "relative shrink-0 overflow-hidden",
-        !dragging && "ease-surface transition-[width]",
-        state.expanded ? "duration-base" : "duration-fast",
-      )}
-      style={{ width: state.expanded ? size.width : 0 }}
+    <div
+      className="relative flex min-h-0 min-w-0 flex-1"
+      style={{ ["--chat-context-inset" as string]: inset }}
     >
-      <div
+      <div className={cn("min-w-0 flex-1", dragging && "[&_*]:transition-none")}>{children}</div>
+      <aside
+        ref={panelRef}
+        id={CONVERSATION_CONTEXT_PANEL_ID}
+        aria-label={t("context.label")}
+        inert={!state.expanded}
         className={cn(
-          "ease-surface absolute inset-y-0 right-0 transition-[opacity,translate]",
+          "ease-surface absolute inset-y-0 right-4 transition-[opacity,translate]",
           state.expanded
             ? "duration-base translate-x-0 opacity-100"
-            : "duration-fast translate-x-6 opacity-0",
+            : "duration-fast pointer-events-none translate-x-6 opacity-0",
         )}
         style={{ width: size.width }}
       >
@@ -689,7 +698,7 @@ export function ConversationSidebar({
           dispatch={dispatch}
           closable={false}
         />
-      </div>
-    </aside>
+      </aside>
+    </div>
   );
 }

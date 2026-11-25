@@ -17,6 +17,7 @@
  *    `GET /api/orgs/:orgId/chat/sessions/:id/stream`.
  */
 
+import { THREAD_SIDE_PADDING_CLASS } from "./phone-text.ts";
 import {
   memo,
   useCallback,
@@ -584,7 +585,7 @@ function ConversationNotFound({
     <div
       role="status"
       data-testid="chat-conversation-not-found"
-      className="flex h-full flex-col items-center justify-center gap-3 px-4 text-center"
+      className={`flex h-full flex-col items-center justify-center gap-3 text-center ${THREAD_SIDE_PADDING_CLASS}`}
     >
       <p className="text-sm font-medium">{t("conversation.notFound.title")}</p>
       <p className="text-muted-foreground max-w-sm text-sm">{t("conversation.notFound.hint")}</p>

@@ -7,7 +7,7 @@
  * they are about.
  *
  * And what of the composer's settings departs from its default, decided once: the desktop draws
- * it as chips, the phone as the dot on its "+".
+ * it as chips, the phone's panel names it.
  */
 
 import { createContext, createElement, useContext, useMemo, useState, type ReactNode } from "react";
@@ -77,11 +77,11 @@ export const DEPARTURE_LEVEL: Record<ComposerDeparture, ComposerPanelLevel> = {
 
 /**
  * The composer's settings that depart from their default, in the order the desktop's chips show
- * them. The phone's "+" wears a dot while the list is not empty.
+ * them.
  *
  * The space limit is counted whenever it is on, though a conversation started in a selected space
  * starts limited to it: it narrows where the agent acts, which nothing in a reply shows, so every
- * format says it — the desktop by its chip naming the space, the phone by the dot.
+ * format says it — the desktop by its chip naming the space, the phone by its panel.
  */
 export function useComposerDepartures(authorsPackages: boolean): readonly ComposerDeparture[] {
   const conversation = useConversationSkillsContext();

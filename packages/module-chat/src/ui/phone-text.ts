@@ -59,8 +59,16 @@ export const MARKDOWN_PROSE_CLASS =
   "prose prose-base md:prose-sm dark:prose-invert max-w-none break-words [&_code]:text-[0.85em] [&_pre>code]:text-[1em] [&_pre]:rounded-md [&_pre]:p-3 [&_pre]:text-sm md:[&_pre]:text-xs";
 
 /** The transcript scroller: it keeps its scroll to itself (no rubber-band or pull-to-refresh of the page). */
-export const THREAD_VIEWPORT_CLASS =
-  "relative flex min-h-0 flex-1 flex-col items-center overflow-y-auto overscroll-contain px-4 pt-6";
+/**
+ * The conversation's side padding. The host's context panel floats over the thread's right side and
+ * publishes the width it takes as `--chat-context-inset` (unset while it is closed): the thread keeps
+ * its full width, so its scrollbar stays at the window's right edge, and reserves that width on its
+ * right, so the column stays centered in what the panel leaves.
+ */
+export const THREAD_SIDE_PADDING_CLASS =
+  "pl-4 pr-[calc(1rem+var(--chat-context-inset,0px))] duration-base ease-surface transition-[padding]";
+
+export const THREAD_VIEWPORT_CLASS = `relative flex min-h-0 flex-1 flex-col items-center overflow-y-auto overscroll-contain pt-6 ${THREAD_SIDE_PADDING_CLASS}`;
 
 /** The sticky footer holding the composer; `group/footer` lets the disclaimer react to the focus. */
 export const THREAD_FOOTER_CLASS =
