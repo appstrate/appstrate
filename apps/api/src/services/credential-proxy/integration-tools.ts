@@ -324,6 +324,7 @@ async function readRemoteCatalog(
       ...caller,
       integrationId: entry.id,
       manifest: entry.manifest,
+      policy: entry.policy,
       ...(id ? { connectionId: id } : {}),
       cachedOnly,
     });

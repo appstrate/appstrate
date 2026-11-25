@@ -1805,7 +1805,7 @@ describe("the typed tools of a remote MCP integration", () => {
         enforce: true,
       });
 
-    it("answers 422 integration_not_remote for an integration without a Streamable HTTP server, before any exchange", async () => {
+    it("answers 422 integration_not_remote (not remote) or sync_transport_unsupported (SSE) for an integration without a Streamable HTTP server, before any exchange", async () => {
       const httpOnly = "@acme/http";
       await seedProxyIntegration(
         ctx,
@@ -1831,7 +1831,9 @@ describe("the typed tools of a remote MCP integration", () => {
       for (const id of [httpOnly, sse]) {
         const res = await post("call", { integration_package_id: id, name: "search" });
         expect(res.status).toBe(422);
-        expect((await problemOf(res)).code).toBe("integration_not_remote");
+        expect((await problemOf(res)).code).toBe(
+          id === sse ? "sync_transport_unsupported" : "integration_not_remote",
+        );
       }
       expect(server.requests).toEqual([]);
     });

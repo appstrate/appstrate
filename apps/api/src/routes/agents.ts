@@ -850,9 +850,14 @@ export function createAgentsRouter() {
           "X-Bundle-Integrity": wireIntegrity,
           "X-Bundle-Version": versionLabel,
           // Tools that run here only because this space approved them: the archive does not carry
-          // that approval, so the importer is told which ones to review.
+          // that approval, so the importer is told which ones to review. Each element is
+          // percent-encoded: a tool name may carry the "," that separates them.
           ...(approvedTools.length > 0
-            ? { "Appstrate-Space-Approved-Tools": approvedTools.join(",") }
+            ? {
+                "Appstrate-Space-Approved-Tools": approvedTools
+                  .map((tool) => encodeURIComponent(tool))
+                  .join(","),
+              }
             : {}),
         },
       });

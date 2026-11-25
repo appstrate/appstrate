@@ -353,7 +353,7 @@ export const internalPaths = {
       tags: ["Internal"],
       summary: "Report the tools a run's boot listed from a remote integration",
       description:
-        "Sidecar-only. Same Bearer run token and agent-dependency and activation checks as the GET endpoint. `connection_id` names a connection this run bound to the integration, as for `upstream-success`; it is omitted only for an integration that binds none (an unauthenticated one). Called once per connection, fire-and-forget, after the sidecar registered the integration's tools. `tools` are the MCP descriptors as the server returned them (the platform computes their fingerprints itself); the sidecar cuts them at 1 MiB and sets `truncated`. A descriptor that is not a valid tool (no name, no object `inputSchema`) is dropped on its own and marks the listing truncated: it never refuses the report. `unavailable` lists the tools the agent selected that this run does not expose, each with its reason; the run's `metadata.unavailable_tools[]` is stamped with them (`integration_id`, `name`, `reason`; only the first 50 of one report are kept). The listing becomes the integration's tool snapshot only when the run is executed by the platform: a remote-origin run's sidecar is on the caller's machine and is no authority on organization state, so its listing is dropped; the platform's own endpoint integration never gets a snapshot.",
+        "Sidecar-only. Same Bearer run token and agent-dependency and activation checks as the GET endpoint. `connection_id` names a connection this run bound to the integration, as for `upstream-success`; it is omitted only for an integration that binds none (an unauthenticated one). Called once per connection, fire-and-forget, after the sidecar registered the integration's tools. `tools` are the MCP descriptors as the server returned them (the platform computes their fingerprints itself); the sidecar cuts them at 1 MiB and sets `truncated`, which is sent with `tools` and only with them. A report without `tools` (a local integration's unavailable list) records only `unavailable`, never a snapshot. The body is bounded at 1 MiB plus a 256 KiB envelope margin (`413` past it). A descriptor that is not a valid tool (no name, no object `inputSchema`) is dropped on its own and marks the listing truncated: it never refuses the report. `unavailable` lists the tools the agent selected that this run does not expose, each with its reason; the run's `metadata.unavailable_tools[]` is stamped with them (`integration_id`, `name`, `reason`; only the first 50 of one report are kept). The listing becomes the integration's tool snapshot only when the run is executed by the platform: a remote-origin run's sidecar is on the caller's machine and is no authority on organization state, so its listing is dropped; the platform's own endpoint integration never gets a snapshot.",
       security: [{ bearerExecToken: [] }],
       parameters: [
         { $ref: "#/components/parameters/PackageScope" },
@@ -372,7 +372,7 @@ export const internalPaths = {
             schema: {
               type: "object",
               additionalProperties: false,
-              required: ["tools", "truncated", "unavailable"],
+              required: ["unavailable"],
               properties: {
                 tools: {
                   type: "array",
@@ -408,7 +408,7 @@ export const internalPaths = {
         "204": { description: "Report recorded." },
         "400": {
           ...connectionSelector400,
-          description: `${connectionSelector400.description} A malformed body is an \`invalid_request\` too.`,
+          description: `${connectionSelector400.description} A body that is not parseable JSON is an \`invalid_request\`; JSON of the wrong shape (or \`truncated\` without \`tools\`) is a \`validation_failed\`.`,
         },
         "401": { $ref: "#/components/responses/Unauthorized" },
         "403": { $ref: "#/components/responses/Forbidden" },
@@ -417,6 +417,12 @@ export const internalPaths = {
           ...integrationCredentialsConflict409,
           description:
             "The definition this run executes is no longer readable (`run_definition_gone` / `run_agent_deleted`, as on the GET endpoint), so the run token's authorization set cannot be decided; or `connect_run_no_refresh` — the caller is an ephemeral connect run.",
+        },
+        "413": {
+          description: "The body exceeds 1 MiB plus the 256 KiB envelope margin.",
+          content: {
+            "application/problem+json": { schema: { $ref: "#/components/schemas/ProblemDetail" } },
+          },
         },
         "500": { $ref: "#/components/responses/InternalServerError" },
       },

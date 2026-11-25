@@ -738,7 +738,7 @@ export const agentsPaths = {
             },
             "Appstrate-Space-Approved-Tools": {
               description:
-                "Comma-separated `<integrationId>:<tool>` list, present only when the exported agent selects tools that run in the current space because the space approved their definition (undeclared tools of a closed catalog). The archive does not carry that approval: whoever imports it elsewhere must review those tools there.",
+                'Comma-separated list, each element `encodeURIComponent("<integrationId>:<tool>")` (a tool name may itself contain a comma or non-ASCII characters; decode each element after splitting on `,`). Present only when the exported agent selects tools that run in the current space because the space approved their definition (undeclared tools of a closed catalog). The archive does not carry that approval: whoever imports it elsewhere must review those tools there.',
               schema: { type: "string" },
             },
           },

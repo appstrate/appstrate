@@ -8,60 +8,132 @@
 
 import { and, desc, eq, inArray } from "drizzle-orm";
 import {
-  allowsUndeclaredTools,
-  hiddenToolNames,
+  judgeToolApprovals,
   resolveEffectiveToolCatalog,
-  resolveIntegrationToolCatalog,
   type EffectiveToolEntry,
   type IntegrationManifest,
   type ToolSpacePolicy,
 } from "@appstrate/core/integration";
 import { MAX_APPROVED_FINGERPRINTS_PER_TOOL } from "@appstrate/core/sidecar-types";
 import { db } from "@appstrate/db/client";
-import { spaceIntegrationToolApprovals, spaceIntegrationToolBlocks } from "@appstrate/db/schema";
+import {
+  spaceIntegrationToolApprovals,
+  spaceIntegrationToolBlocks,
+  type ToolDefinition,
+} from "@appstrate/db/schema";
 import { ApiError } from "../lib/errors.ts";
 import type { SpaceScope } from "../lib/scope.ts";
 import { readToolSnapshots, type ToolSnapshot } from "./integration-tool-snapshots.ts";
 
-/** Every approval and block row the space holds on `packageId`, approvals newest first. */
-export async function readToolSpaceRows(scope: SpaceScope, packageId: string) {
+/** What a run-path read of the space's decisions needs: names, fingerprints, and recency. */
+interface PolicyRows {
+  approvals: { tool_name: string; fingerprint: string; approved_at: Date }[];
+  blocks: { tool_name: string }[];
+}
+
+/** What the review read adds: each approval's reviewed definition and author, each block's. */
+interface ReviewRows {
+  approvals: (PolicyRows["approvals"][number] & {
+    definition: ToolDefinition;
+    approved_by: string | null;
+  })[];
+  blocks: { tool_name: string; blocked_by: string | null; blocked_at: Date }[];
+}
+
+/**
+ * The rows of every space in `spaceIds` on `packageId`: one query each for approvals (newest
+ * first) and blocks. `review: false` selects only what judging a policy reads; `review: true`
+ * adds the definitions and authors the review surface shows.
+ */
+export async function readToolSpaceRowsForSpaces(
+  orgId: string,
+  spaceIds: readonly string[],
+  packageId: string,
+): Promise<Map<string, PolicyRows>>;
+export async function readToolSpaceRowsForSpaces(
+  orgId: string,
+  spaceIds: readonly string[],
+  packageId: string,
+  review: true,
+): Promise<Map<string, ReviewRows>>;
+export async function readToolSpaceRowsForSpaces(
+  orgId: string,
+  spaceIds: readonly string[],
+  packageId: string,
+  review = false,
+): Promise<Map<string, PolicyRows | ReviewRows>> {
+  const bySpace = new Map<string, { approvals: object[]; blocks: object[] }>(
+    spaceIds.map((id) => [id, { approvals: [], blocks: [] }]),
+  );
+  if (spaceIds.length === 0) return bySpace as Map<string, PolicyRows>;
+  const approvalColumns = {
+    spaceId: spaceIntegrationToolApprovals.spaceId,
+    tool_name: spaceIntegrationToolApprovals.toolName,
+    fingerprint: spaceIntegrationToolApprovals.fingerprint,
+    approved_at: spaceIntegrationToolApprovals.approvedAt,
+  };
+  const blockColumns = {
+    spaceId: spaceIntegrationToolBlocks.spaceId,
+    tool_name: spaceIntegrationToolBlocks.toolName,
+  };
   const [approvals, blocks] = await Promise.all([
     db
-      .select({
-        tool_name: spaceIntegrationToolApprovals.toolName,
-        fingerprint: spaceIntegrationToolApprovals.fingerprint,
-        definition: spaceIntegrationToolApprovals.definition,
-        approved_by: spaceIntegrationToolApprovals.approvedBy,
-        approved_at: spaceIntegrationToolApprovals.approvedAt,
-      })
+      .select(
+        review
+          ? {
+              ...approvalColumns,
+              definition: spaceIntegrationToolApprovals.definition,
+              approved_by: spaceIntegrationToolApprovals.approvedBy,
+            }
+          : approvalColumns,
+      )
       .from(spaceIntegrationToolApprovals)
       .where(
         and(
-          eq(spaceIntegrationToolApprovals.orgId, scope.orgId),
-          eq(spaceIntegrationToolApprovals.spaceId, scope.spaceId),
+          eq(spaceIntegrationToolApprovals.orgId, orgId),
+          inArray(spaceIntegrationToolApprovals.spaceId, [...spaceIds]),
           eq(spaceIntegrationToolApprovals.packageId, packageId),
         ),
       )
       .orderBy(desc(spaceIntegrationToolApprovals.approvedAt)),
     db
-      .select({
-        tool_name: spaceIntegrationToolBlocks.toolName,
-        blocked_by: spaceIntegrationToolBlocks.blockedBy,
-        blocked_at: spaceIntegrationToolBlocks.blockedAt,
-      })
+      .select(
+        review
+          ? {
+              ...blockColumns,
+              blocked_by: spaceIntegrationToolBlocks.blockedBy,
+              blocked_at: spaceIntegrationToolBlocks.blockedAt,
+            }
+          : blockColumns,
+      )
       .from(spaceIntegrationToolBlocks)
       .where(
         and(
-          eq(spaceIntegrationToolBlocks.orgId, scope.orgId),
-          eq(spaceIntegrationToolBlocks.spaceId, scope.spaceId),
+          eq(spaceIntegrationToolBlocks.orgId, orgId),
+          inArray(spaceIntegrationToolBlocks.spaceId, [...spaceIds]),
           eq(spaceIntegrationToolBlocks.packageId, packageId),
         ),
       ),
   ]);
-  return { approvals, blocks };
+  for (const { spaceId, ...row } of approvals) bySpace.get(spaceId)?.approvals.push(row);
+  for (const { spaceId, ...row } of blocks) bySpace.get(spaceId)?.blocks.push(row);
+  return bySpace as Map<string, PolicyRows | ReviewRows>;
 }
 
-type ToolRows = Awaited<ReturnType<typeof readToolSpaceRows>>;
+/** The rows of one space: {@link readToolSpaceRowsForSpaces} of that space alone. */
+async function readToolSpaceRows(scope: SpaceScope, packageId: string): Promise<PolicyRows> {
+  const rows = await readToolSpaceRowsForSpaces(scope.orgId, [scope.spaceId], packageId);
+  return rows.get(scope.spaceId)!;
+}
+
+/** What the review surface shows of the space's decisions: definitions and authors included. */
+export async function readToolSpaceReviewRows(
+  scope: SpaceScope,
+  packageId: string,
+): Promise<ReviewRows> {
+  const rows = await readToolSpaceRowsForSpaces(scope.orgId, [scope.spaceId], packageId, true);
+  return rows.get(scope.spaceId)!;
+}
 
 /**
  * Judges stored rows for every reader: an approval of a tool the manifest declares or hides, or of
@@ -69,20 +141,15 @@ type ToolRows = Awaited<ReturnType<typeof readToolSpaceRows>>;
  * recorded before it changed).
  */
 export function judgeToolSpacePolicy(
-  rows: { approvals: ToolRows["approvals"]; blocks: ToolRows["blocks"] },
+  rows: PolicyRows,
   manifest: IntegrationManifest,
 ): ToolSpacePolicy {
-  const blocks = rows.blocks.map((b) => b.tool_name);
-  if (allowsUndeclaredTools(manifest)) return { approvals: [], blocks };
-  const declared = new Set(
-    resolveIntegrationToolCatalog({ integration: manifest }).map((e) => e.name),
-  );
-  const hidden = hiddenToolNames(manifest);
   return {
-    approvals: rows.approvals
-      .filter((a) => !declared.has(a.tool_name) && !hidden.has(a.tool_name))
-      .map(({ tool_name, fingerprint }) => ({ tool_name, fingerprint })),
-    blocks,
+    approvals: judgeToolApprovals(manifest, rows.approvals).map(({ tool_name, fingerprint }) => ({
+      tool_name,
+      fingerprint,
+    })),
+    blocks: rows.blocks.map((b) => b.tool_name),
   };
 }
 
@@ -95,56 +162,6 @@ export async function loadToolSpacePolicy(
   return judgeToolSpacePolicy(await readToolSpaceRows(scope, packageId), manifest);
 }
 
-/** The rows of every space in `spaceIds` on `packageId`: one query each for approvals and blocks. */
-export async function readToolSpaceRowsForSpaces(
-  orgId: string,
-  spaceIds: readonly string[],
-  packageId: string,
-): Promise<Map<string, ToolRows>> {
-  const bySpace = new Map<string, ToolRows>(
-    spaceIds.map((id) => [id, { approvals: [], blocks: [] }]),
-  );
-  if (spaceIds.length === 0) return bySpace;
-  const [approvals, blocks] = await Promise.all([
-    db
-      .select({
-        spaceId: spaceIntegrationToolApprovals.spaceId,
-        tool_name: spaceIntegrationToolApprovals.toolName,
-        fingerprint: spaceIntegrationToolApprovals.fingerprint,
-        definition: spaceIntegrationToolApprovals.definition,
-        approved_by: spaceIntegrationToolApprovals.approvedBy,
-        approved_at: spaceIntegrationToolApprovals.approvedAt,
-      })
-      .from(spaceIntegrationToolApprovals)
-      .where(
-        and(
-          eq(spaceIntegrationToolApprovals.orgId, orgId),
-          inArray(spaceIntegrationToolApprovals.spaceId, [...spaceIds]),
-          eq(spaceIntegrationToolApprovals.packageId, packageId),
-        ),
-      )
-      .orderBy(desc(spaceIntegrationToolApprovals.approvedAt)),
-    db
-      .select({
-        spaceId: spaceIntegrationToolBlocks.spaceId,
-        tool_name: spaceIntegrationToolBlocks.toolName,
-        blocked_by: spaceIntegrationToolBlocks.blockedBy,
-        blocked_at: spaceIntegrationToolBlocks.blockedAt,
-      })
-      .from(spaceIntegrationToolBlocks)
-      .where(
-        and(
-          eq(spaceIntegrationToolBlocks.orgId, orgId),
-          inArray(spaceIntegrationToolBlocks.spaceId, [...spaceIds]),
-          eq(spaceIntegrationToolBlocks.packageId, packageId),
-        ),
-      ),
-  ]);
-  for (const { spaceId, ...row } of approvals) bySpace.get(spaceId)?.approvals.push(row);
-  for (const { spaceId, ...row } of blocks) bySpace.get(spaceId)?.blocks.push(row);
-  return bySpace;
-}
-
 /** The refusal of a tool the space blocked, whichever door the call came through. */
 export function toolBlockedInSpace(integrationId: string, toolName: string): ApiError {
   return new ApiError({
@@ -153,6 +170,24 @@ export function toolBlockedInSpace(integrationId: string, toolName: string): Api
     title: "Tool Blocked In This Space",
     detail: `Tool '${toolName}' of integration '${integrationId}' is blocked in this space.`,
   });
+}
+
+/**
+ * What the space's blocks take away from one `api_call` config, whichever door the call comes
+ * through: blocking the call removes its upload too (an upload dispatches through its call);
+ * blocking the upload alone leaves the call. The one rule the spawn spec and the credential proxy share.
+ */
+export function apiCallBlocks(
+  cfg: { toolName: string; uploadToolName?: string; uploadProtocols: readonly string[] },
+  blocks: readonly string[],
+): { callBlocked: boolean; uploadBlocked: boolean } {
+  const callBlocked = blocks.includes(cfg.toolName);
+  const uploadBlocked =
+    callBlocked ||
+    (cfg.uploadProtocols.length > 0 &&
+      cfg.uploadToolName !== undefined &&
+      blocks.includes(cfg.uploadToolName));
+  return { callBlocked, uploadBlocked };
 }
 
 /** The refusal of raw HTTP to a remote integration's MCP endpoint: its tools are the way in. */

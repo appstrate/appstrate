@@ -604,6 +604,24 @@ describe("GET /internal/integration-credentials/:scope/:name", () => {
     expect(snapshots[0]!.tools.map((t) => t.name)).toEqual(["search"]);
   });
 
+  it("tools-observed: a report without tools records the unavailable tools and never a snapshot", async () => {
+    await seedIntegration(INTEGRATION, true);
+    const connectionId = await seedConnectionRow(INTEGRATION);
+    await bindConnectionsToRun(runId, { [INTEGRATION]: [connectionId] });
+
+    expect((await observed(connectionId, { unavailable: report.unavailable })).status).toBe(204);
+    // `truncated` qualifies `tools`: alone it is a malformed report.
+    expect(
+      (await observed(connectionId, { truncated: true, unavailable: report.unavailable })).status,
+    ).toBe(400);
+
+    const [run] = await db.select({ metadata: runs.metadata }).from(runs).where(eq(runs.id, runId));
+    expect(run!.metadata).toEqual({
+      unavailable_tools: [{ integration_id: INTEGRATION, name: "send", reason: "not_listed" }],
+    });
+    expect(await db.select().from(integrationToolSnapshots)).toHaveLength(0);
+  });
+
   it("tools-observed: stamps a remote-origin run but writes no snapshot", async () => {
     await seedIntegration(INTEGRATION, true);
     const connectionId = await seedConnectionRow(INTEGRATION);

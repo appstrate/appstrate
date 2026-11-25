@@ -2181,7 +2181,7 @@
                 }
               },
               "Appstrate-Space-Approved-Tools": {
-                "description": "Comma-separated `<integrationId>:<tool>` list, present only when the exported agent selects tools that run in the current space because the space approved their definition (undeclared tools of a closed catalog). The archive does not carry that approval: whoever imports it elsewhere must review those tools there.",
+                "description": "Comma-separated list, each element `encodeURIComponent(\"<integrationId>:<tool>\")` (a tool name may itself contain a comma or non-ASCII characters; decode each element after splitting on `,`). Present only when the exported agent selects tools that run in the current space because the space approved their definition (undeclared tools of a closed catalog). The archive does not carry that approval: whoever imports it elsewhere must review those tools there.",
                 "schema": {
                   "type": "string"
                 }
@@ -7941,7 +7941,7 @@
         "operationId": "refreshIntegrationToolSnapshot",
         "tags": ["Integrations"],
         "summary": "List the remote server's tools again into the integration's snapshot",
-        "description": "Lists the tools of the integration's published remote MCP server now, bypassing the cached listing, through the credential proxy with the connection the caller's selection picks (or `connection_id`): the same selection, `authorized_uris` allowlist and egress guard as a credential-proxy call outside a run, journaled as one call of the connection. It reads the latest published version, not the draft: it is refused (`404`) before any version is published, and for an integration whose server speaks SSE (`422 integration_not_remote`, only Streamable HTTP is listed). The listing is recorded as the snapshot of that connection (of the integration alone when it declares no auths); an upstream refusal is relayed as the proxy's own problem (`upstream_credential_rejected` with its `required_scopes`, `needs_reconnection`), and a listing that succeeded but whose snapshot could not be recorded is a platform failure (`500`). It feeds the per-space tool review (approve or block a tool) and the author's action to declare a listed tool in the integration (`tools_policy` of the draft, then saved and published). Requires `integrations:read` and `credential-proxy:call-own`. Rate limited to 10 requests per minute.",
+        "description": "Lists the tools of the integration's published remote MCP server now, bypassing the cached listing, through the credential proxy with the connection the caller's selection picks (or `connection_id`): the same selection, `authorized_uris` allowlist and egress guard as a credential-proxy call outside a run, journaled as one call of the connection. It reads the latest published version, not the draft: it is refused (`404`) before any version is published, and for an integration whose server speaks SSE (`422 sync_transport_unsupported`, only Streamable HTTP is listed) or is not remote (`422 integration_not_remote`). The listing is recorded as the snapshot of that connection (of the integration alone when it declares no auths); an upstream refusal is relayed as the proxy's own problem (`upstream_credential_rejected` with its `required_scopes`, `needs_reconnection`), and a listing that succeeded but whose snapshot could not be recorded is a platform failure (`500`). It feeds the per-space tool review (approve or block a tool) and the author's action to declare a listed tool in the integration (`tools_policy` of the draft, then saved and published). Requires `integrations:read` and `credential-proxy:call-own`. Rate limited to 10 requests per minute.",
         "parameters": [
           {
             "$ref": "#/components/parameters/XOrgId"
@@ -8044,7 +8044,7 @@
             }
           },
           "403": {
-            "description": "`credential-proxy:call-own` missing, `credential_proxy_closed` — the space's `credential_proxy_open` is `false`, whatever the caller's role —, or the proxy refused the call (`unauthorized_target`, `blocked_target`).",
+            "description": "`integrations:read` or `credential-proxy:call-own` missing, `credential_proxy_closed` — the space's `credential_proxy_open` is `false`, whatever the caller's role —, or the proxy refused the call (`unauthorized_target`, `blocked_target`).",
             "headers": {
               "Request-Id": {
                 "$ref": "#/components/headers/RequestId"
@@ -8062,7 +8062,22 @@
             }
           },
           "404": {
-            "$ref": "#/components/responses/NotFound"
+            "description": "The integration is unknown, has no published version, or is not active in the space; `credential_not_found` — the caller has no connection of the integration to list with (or the one named by `connection_id`).",
+            "headers": {
+              "Request-Id": {
+                "$ref": "#/components/headers/RequestId"
+              },
+              "Appstrate-Version": {
+                "$ref": "#/components/headers/AppstrateVersion"
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
           },
           "409": {
             "description": "The proxy's connection-selection conflicts: `must_choose_connection` when the caller holds several usable connections and the body names none, `needs_reconnection`.",
@@ -8083,7 +8098,7 @@
             }
           },
           "422": {
-            "description": "`integration_not_remote` — the integration is not backed by a Streamable HTTP MCP server; `remote_url_unrenderable` — the connection's variables do not render the server URL.",
+            "description": "`integration_not_remote` — the integration is not backed by a remote MCP server; `sync_transport_unsupported` — its server uses the SSE transport (only Streamable HTTP is listed); `remote_url_unrenderable` — the connection's variables do not render the server URL.",
             "headers": {
               "Request-Id": {
                 "$ref": "#/components/headers/RequestId"
@@ -8122,7 +8137,7 @@
             }
           },
           "502": {
-            "description": "`bad_gateway` — the server could not be listed; `upstream_credential_rejected` — it refused the connection's credential.",
+            "description": "`bad_gateway` — the server could not be listed (no `Proxy-Status`); `upstream_credential_rejected` — it refused the connection's credential; `credential_unusable` — the stored credential cannot be sent as the integration declares; the proxy's other relayed codes carry their `Proxy-Status`.",
             "headers": {
               "Request-Id": {
                 "$ref": "#/components/headers/RequestId"
@@ -8206,7 +8221,8 @@
                             "type": ["object", "null"],
                             "additionalProperties": true
                           }
-                        }
+                        },
+                        "additionalProperties": false
                       }
                     },
                     "approvals": {
@@ -8228,8 +8244,9 @@
                             "type": "string"
                           },
                           "definition": {
-                            "type": ["object", "null"],
-                            "additionalProperties": true
+                            "type": "object",
+                            "additionalProperties": true,
+                            "description": "The definition the space reviewed when it approved."
                           },
                           "approved_by": {
                             "type": ["string", "null"]
@@ -8238,7 +8255,8 @@
                             "type": "string",
                             "format": "date-time"
                           }
-                        }
+                        },
+                        "additionalProperties": false
                       }
                     },
                     "blocks": {
@@ -8257,7 +8275,8 @@
                             "type": "string",
                             "format": "date-time"
                           }
-                        }
+                        },
+                        "additionalProperties": false
                       }
                     }
                   }
@@ -8321,8 +8340,8 @@
                         },
                         "fingerprint": {
                           "type": "string",
-                          "minLength": 1,
-                          "maxLength": 128
+                          "pattern": "^[0-9a-f]{64}$",
+                          "description": "A SHA-256 tool definition fingerprint, as the tool policy lists it."
                         }
                       },
                       "additionalProperties": false
@@ -8347,7 +8366,7 @@
             }
           },
           "400": {
-            "description": "`validation_failed` — the body is invalid; `tool_already_declared` — the manifest declares the named tools (`tools`): a declared tool needs no approval; `invalid_request` — the integration allows undeclared tools (none needs an approval), or a named tool is one the platform hides (`hidden_tools`, the connect tool).",
+            "description": "`validation_failed` — the body is invalid.",
             "headers": {
               "Request-Id": {
                 "$ref": "#/components/headers/RequestId"
@@ -8386,7 +8405,7 @@
             "$ref": "#/components/responses/NotFound"
           },
           "409": {
-            "description": "`tool_snapshot_stale` — the server no longer lists the named tools (`tools`) at that fingerprint: refresh the snapshot and review again; `tool_definition_unavailable` — the listed definition of the named tools (`tools`) was too large to keep, so it cannot be reviewed nor approved; `tool_approvals_limit` — the named tools (`tools`) would exceed 32 approved definitions: withdraw one first.",
+            "description": "`tool_snapshot_stale` — the server no longer lists the named tools (`tools`) at that fingerprint: refresh the snapshot and review again; `tool_definition_unavailable` — the listed definition of the named tools (`tools`) was too large to keep, so it cannot be reviewed nor approved; `tool_approvals_limit` — the named tools (`tools`) would exceed 32 approved definitions; a withdrawal removes every approved definition of a tool, so withdraw the tool's approvals first, then approve the definition to keep; the count and the insert are one transaction, so the limit is exact. Refusals by the manifest's state: `tool_already_declared` — the manifest declares the named tools (`tools`): a declared tool needs no approval; `tool_catalog_open` — the integration allows undeclared tools (none needs an approval; `tools` names the request's tools); `tool_hidden` — the named tools (`tools`) are ones the platform hides (`hidden_tools`, the connect tool).",
             "headers": {
               "Request-Id": {
                 "$ref": "#/components/headers/RequestId"
@@ -8491,7 +8510,7 @@
         "operationId": "blockIntegrationTools",
         "tags": ["Integrations"],
         "summary": "Block tools of the integration in the space",
-        "description": "Blocks the named tools, declared or not: a blocked tool is neither offered nor callable in this space. Already blocked names are ignored. Blocking an `api_call` tool also removes its `api_upload` companion; blocking an `api_upload` tool alone takes effect in runs only (the credential proxy has no upload tool to refuse). Requires `integrations:configure` and a dashboard session. Audited as `integration.tool.blocked`, one event per tool newly blocked. Rate limited to 30 requests per minute.",
+        "description": "Blocks the named tools, declared or not: a blocked tool is neither offered nor callable in this space. Already blocked names are ignored. Blocking an `api_call` tool also removes its `api_upload` companion; blocking an `api_upload` tool alone leaves the `api_call` and refuses an upload (a streamed request) through the credential proxy as it does in runs. A space blocks at most 500 tools per integration (`409 tool_blocks_limit`). Requires `integrations:configure` and a dashboard session. Audited as `integration.tool.blocked`, one event per tool newly blocked. Rate limited to 30 requests per minute.",
         "parameters": [
           {
             "$ref": "#/components/parameters/XOrgId"
@@ -8569,6 +8588,24 @@
           },
           "404": {
             "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "description": "`tool_blocks_limit` — the space would block more than 500 tools of this integration (`tools` names the ones it would add): lift a block first.",
+            "headers": {
+              "Request-Id": {
+                "$ref": "#/components/headers/RequestId"
+              },
+              "Appstrate-Version": {
+                "$ref": "#/components/headers/AppstrateVersion"
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
           },
           "429": {
             "$ref": "#/components/responses/RateLimited"
@@ -20978,7 +21015,7 @@
         },
         "tags": ["Internal"],
         "summary": "Report the tools a run's boot listed from a remote integration",
-        "description": "Sidecar-only. Same Bearer run token and agent-dependency and activation checks as the GET endpoint. `connection_id` names a connection this run bound to the integration, as for `upstream-success`; it is omitted only for an integration that binds none (an unauthenticated one). Called once per connection, fire-and-forget, after the sidecar registered the integration's tools. `tools` are the MCP descriptors as the server returned them (the platform computes their fingerprints itself); the sidecar cuts them at 1 MiB and sets `truncated`. A descriptor that is not a valid tool (no name, no object `inputSchema`) is dropped on its own and marks the listing truncated: it never refuses the report. `unavailable` lists the tools the agent selected that this run does not expose, each with its reason; the run's `metadata.unavailable_tools[]` is stamped with them (`integration_id`, `name`, `reason`; only the first 50 of one report are kept). The listing becomes the integration's tool snapshot only when the run is executed by the platform: a remote-origin run's sidecar is on the caller's machine and is no authority on organization state, so its listing is dropped; the platform's own endpoint integration never gets a snapshot.",
+        "description": "Sidecar-only. Same Bearer run token and agent-dependency and activation checks as the GET endpoint. `connection_id` names a connection this run bound to the integration, as for `upstream-success`; it is omitted only for an integration that binds none (an unauthenticated one). Called once per connection, fire-and-forget, after the sidecar registered the integration's tools. `tools` are the MCP descriptors as the server returned them (the platform computes their fingerprints itself); the sidecar cuts them at 1 MiB and sets `truncated`, which is sent with `tools` and only with them. A report without `tools` (a local integration's unavailable list) records only `unavailable`, never a snapshot. The body is bounded at 1 MiB plus a 256 KiB envelope margin (`413` past it). A descriptor that is not a valid tool (no name, no object `inputSchema`) is dropped on its own and marks the listing truncated: it never refuses the report. `unavailable` lists the tools the agent selected that this run does not expose, each with its reason; the run's `metadata.unavailable_tools[]` is stamped with them (`integration_id`, `name`, `reason`; only the first 50 of one report are kept). The listing becomes the integration's tool snapshot only when the run is executed by the platform: a remote-origin run's sidecar is on the caller's machine and is no authority on organization state, so its listing is dropped; the platform's own endpoint integration never gets a snapshot.",
         "security": [
           {
             "bearerExecToken": []
@@ -21009,7 +21046,7 @@
               "schema": {
                 "type": "object",
                 "additionalProperties": false,
-                "required": ["tools", "truncated", "unavailable"],
+                "required": ["unavailable"],
                 "properties": {
                   "tools": {
                     "type": "array",
@@ -21057,7 +21094,7 @@
             "description": "Report recorded."
           },
           "400": {
-            "description": "The `connection_id` selector is missing, malformed, or names a connection this run did not bind. `invalid_request` — absent or not a uuid; the platform never picks a connection on the caller's behalf. `connection_not_in_run` — a well-formed id that is not in `runs.resolved_connections` for this integration; the run token authorises this run's bound set only. A malformed body is an `invalid_request` too.",
+            "description": "The `connection_id` selector is missing, malformed, or names a connection this run did not bind. `invalid_request` — absent or not a uuid; the platform never picks a connection on the caller's behalf. `connection_not_in_run` — a well-formed id that is not in `runs.resolved_connections` for this integration; the run token authorises this run's bound set only. A body that is not parseable JSON is an `invalid_request`; JSON of the wrong shape (or `truncated` without `tools`) is a `validation_failed`.",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -21077,6 +21114,16 @@
           },
           "409": {
             "description": "The definition this run executes is no longer readable (`run_definition_gone` / `run_agent_deleted`, as on the GET endpoint), so the run token's authorization set cannot be decided; or `connect_run_no_refresh` — the caller is an ephemeral connect run.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "The body exceeds 1 MiB plus the 256 KiB envelope margin.",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -32087,7 +32134,7 @@
             }
           },
           "403": {
-            "description": "Forbidden. `unauthorized_target` — the target carries userinfo (`user:pass@host`), or is not in `authorized_uris`, or, on a call that substitutes a `{{credential_field}}`, a redirect hop is not (any other call gets that 3xx back unfollowed), or the connection does not render the declared list (`Proxy-Status` error `http_request_denied`); `blocked_target` — it resolves into a blocked network range (`destination_ip_prohibited`); `credential_exfiltration_refused` — the call carries a credential and the allowlist does not name its hosts: it is empty or has an entry that leaves the host to the caller, or every entry matching the target reaches it through a wildcard past the registrable domain written under it, judged with the Public Suffix List (the message then names the host to list) (`http_request_denied`); `call_permission_required` — no `X-Run-Id`, an enforced org default governs the integration in this space and the caller holds `credential-proxy:call-own` without `credential-proxy:call` (`http_request_denied`); `credential_proxy_closed` — no `X-Run-Id`, and the space's `credential_proxy_open` is `false`, whatever the caller's role (`proxy_internal_response`); `tool_blocked_in_space` — the connection's auth backs an `api_call` tool the space blocked; `remote_mcp_endpoint_not_proxied` — `X-Target` is the connection's remote MCP endpoint (same origin and path, query and trailing slash ignored; the whole origin of an SSE endpoint): that server is reached through its tools, which apply the space's tool policy; `forbidden` — the principal lacks the permission of the path the call takes (`credential-proxy:call` with `X-Run-Id`, `credential-proxy:call-own` or `credential-proxy:call` without), session bound to a different principal, cookie session used, or `X-Run-Id` names another actor's run or a run the platform executes.",
+            "description": "Forbidden. `unauthorized_target` — the target carries userinfo (`user:pass@host`), or is not in `authorized_uris`, or, on a call that substitutes a `{{credential_field}}`, a redirect hop is not (any other call gets that 3xx back unfollowed), or the connection does not render the declared list (`Proxy-Status` error `http_request_denied`); `blocked_target` — it resolves into a blocked network range (`destination_ip_prohibited`); `credential_exfiltration_refused` — the call carries a credential and the allowlist does not name its hosts: it is empty or has an entry that leaves the host to the caller, or every entry matching the target reaches it through a wildcard past the registrable domain written under it, judged with the Public Suffix List (the message then names the host to list) (`http_request_denied`); `call_permission_required` — no `X-Run-Id`, an enforced org default governs the integration in this space and the caller holds `credential-proxy:call-own` without `credential-proxy:call` (`http_request_denied`); `credential_proxy_closed` — no `X-Run-Id`, and the space's `credential_proxy_open` is `false`, whatever the caller's role (`proxy_internal_response`); `tool_blocked_in_space` — the connection's auth backs an `api_call` tool the space blocked, or (on a streamed upload, `X-Stream-Request`) an `api_upload` tool it blocked; `remote_mcp_endpoint_not_proxied` — `X-Target`, or a redirect hop, is the connection's remote MCP endpoint (same origin and path, query and trailing slash ignored; the whole origin of an SSE endpoint): that server is reached through its tools, which apply the space's tool policy; `forbidden` — the principal lacks the permission of the path the call takes (`credential-proxy:call` with `X-Run-Id`, `credential-proxy:call-own` or `credential-proxy:call` without), session bound to a different principal, cookie session used, or `X-Run-Id` names another actor's run or a run the platform executes.",
             "headers": {
               "Proxy-Status": {
                 "description": "RFC 9209. `appstrate; received-status=<n>`: the upstream's response, relayed. `appstrate; error=<type>` (RFC 9209 §2.3 error type): the proxy's own response. Bare `appstrate`: served by the proxy without contacting the upstream (a cache hit).",
@@ -32453,7 +32500,7 @@
             }
           },
           "403": {
-            "description": "Forbidden. `unauthorized_target` — the target carries userinfo (`user:pass@host`), or is not in `authorized_uris`, or, on a call that substitutes a `{{credential_field}}`, a redirect hop is not (any other call gets that 3xx back unfollowed), or the connection does not render the declared list (`Proxy-Status` error `http_request_denied`); `blocked_target` — it resolves into a blocked network range (`destination_ip_prohibited`); `credential_exfiltration_refused` — the call carries a credential and the allowlist does not name its hosts: it is empty or has an entry that leaves the host to the caller, or every entry matching the target reaches it through a wildcard past the registrable domain written under it, judged with the Public Suffix List (the message then names the host to list) (`http_request_denied`); `call_permission_required` — no `X-Run-Id`, an enforced org default governs the integration in this space and the caller holds `credential-proxy:call-own` without `credential-proxy:call` (`http_request_denied`); `credential_proxy_closed` — no `X-Run-Id`, and the space's `credential_proxy_open` is `false`, whatever the caller's role (`proxy_internal_response`); `tool_blocked_in_space` — the connection's auth backs an `api_call` tool the space blocked; `remote_mcp_endpoint_not_proxied` — `X-Target` is the connection's remote MCP endpoint (same origin and path, query and trailing slash ignored; the whole origin of an SSE endpoint): that server is reached through its tools, which apply the space's tool policy; `forbidden` — the principal lacks the permission of the path the call takes (`credential-proxy:call` with `X-Run-Id`, `credential-proxy:call-own` or `credential-proxy:call` without), session bound to a different principal, cookie session used, or `X-Run-Id` names another actor's run or a run the platform executes.",
+            "description": "Forbidden. `unauthorized_target` — the target carries userinfo (`user:pass@host`), or is not in `authorized_uris`, or, on a call that substitutes a `{{credential_field}}`, a redirect hop is not (any other call gets that 3xx back unfollowed), or the connection does not render the declared list (`Proxy-Status` error `http_request_denied`); `blocked_target` — it resolves into a blocked network range (`destination_ip_prohibited`); `credential_exfiltration_refused` — the call carries a credential and the allowlist does not name its hosts: it is empty or has an entry that leaves the host to the caller, or every entry matching the target reaches it through a wildcard past the registrable domain written under it, judged with the Public Suffix List (the message then names the host to list) (`http_request_denied`); `call_permission_required` — no `X-Run-Id`, an enforced org default governs the integration in this space and the caller holds `credential-proxy:call-own` without `credential-proxy:call` (`http_request_denied`); `credential_proxy_closed` — no `X-Run-Id`, and the space's `credential_proxy_open` is `false`, whatever the caller's role (`proxy_internal_response`); `tool_blocked_in_space` — the connection's auth backs an `api_call` tool the space blocked, or (on a streamed upload, `X-Stream-Request`) an `api_upload` tool it blocked; `remote_mcp_endpoint_not_proxied` — `X-Target`, or a redirect hop, is the connection's remote MCP endpoint (same origin and path, query and trailing slash ignored; the whole origin of an SSE endpoint): that server is reached through its tools, which apply the space's tool policy; `forbidden` — the principal lacks the permission of the path the call takes (`credential-proxy:call` with `X-Run-Id`, `credential-proxy:call-own` or `credential-proxy:call` without), session bound to a different principal, cookie session used, or `X-Run-Id` names another actor's run or a run the platform executes.",
             "headers": {
               "Proxy-Status": {
                 "description": "RFC 9209. `appstrate; received-status=<n>`: the upstream's response, relayed. `appstrate; error=<type>` (RFC 9209 §2.3 error type): the proxy's own response. Bare `appstrate`: served by the proxy without contacting the upstream (a cache hit).",
@@ -32826,7 +32873,7 @@
             }
           },
           "403": {
-            "description": "Forbidden. `unauthorized_target` — the target carries userinfo (`user:pass@host`), or is not in `authorized_uris`, or, on a call that substitutes a `{{credential_field}}`, a redirect hop is not (any other call gets that 3xx back unfollowed), or the connection does not render the declared list (`Proxy-Status` error `http_request_denied`); `blocked_target` — it resolves into a blocked network range (`destination_ip_prohibited`); `credential_exfiltration_refused` — the call carries a credential and the allowlist does not name its hosts: it is empty or has an entry that leaves the host to the caller, or every entry matching the target reaches it through a wildcard past the registrable domain written under it, judged with the Public Suffix List (the message then names the host to list) (`http_request_denied`); `call_permission_required` — no `X-Run-Id`, an enforced org default governs the integration in this space and the caller holds `credential-proxy:call-own` without `credential-proxy:call` (`http_request_denied`); `credential_proxy_closed` — no `X-Run-Id`, and the space's `credential_proxy_open` is `false`, whatever the caller's role (`proxy_internal_response`); `tool_blocked_in_space` — the connection's auth backs an `api_call` tool the space blocked; `remote_mcp_endpoint_not_proxied` — `X-Target` is the connection's remote MCP endpoint (same origin and path, query and trailing slash ignored; the whole origin of an SSE endpoint): that server is reached through its tools, which apply the space's tool policy; `forbidden` — the principal lacks the permission of the path the call takes (`credential-proxy:call` with `X-Run-Id`, `credential-proxy:call-own` or `credential-proxy:call` without), session bound to a different principal, cookie session used, or `X-Run-Id` names another actor's run or a run the platform executes.",
+            "description": "Forbidden. `unauthorized_target` — the target carries userinfo (`user:pass@host`), or is not in `authorized_uris`, or, on a call that substitutes a `{{credential_field}}`, a redirect hop is not (any other call gets that 3xx back unfollowed), or the connection does not render the declared list (`Proxy-Status` error `http_request_denied`); `blocked_target` — it resolves into a blocked network range (`destination_ip_prohibited`); `credential_exfiltration_refused` — the call carries a credential and the allowlist does not name its hosts: it is empty or has an entry that leaves the host to the caller, or every entry matching the target reaches it through a wildcard past the registrable domain written under it, judged with the Public Suffix List (the message then names the host to list) (`http_request_denied`); `call_permission_required` — no `X-Run-Id`, an enforced org default governs the integration in this space and the caller holds `credential-proxy:call-own` without `credential-proxy:call` (`http_request_denied`); `credential_proxy_closed` — no `X-Run-Id`, and the space's `credential_proxy_open` is `false`, whatever the caller's role (`proxy_internal_response`); `tool_blocked_in_space` — the connection's auth backs an `api_call` tool the space blocked, or (on a streamed upload, `X-Stream-Request`) an `api_upload` tool it blocked; `remote_mcp_endpoint_not_proxied` — `X-Target`, or a redirect hop, is the connection's remote MCP endpoint (same origin and path, query and trailing slash ignored; the whole origin of an SSE endpoint): that server is reached through its tools, which apply the space's tool policy; `forbidden` — the principal lacks the permission of the path the call takes (`credential-proxy:call` with `X-Run-Id`, `credential-proxy:call-own` or `credential-proxy:call` without), session bound to a different principal, cookie session used, or `X-Run-Id` names another actor's run or a run the platform executes.",
             "headers": {
               "Proxy-Status": {
                 "description": "RFC 9209. `appstrate; received-status=<n>`: the upstream's response, relayed. `appstrate; error=<type>` (RFC 9209 §2.3 error type): the proxy's own response. Bare `appstrate`: served by the proxy without contacting the upstream (a cache hit).",
@@ -33199,7 +33246,7 @@
             }
           },
           "403": {
-            "description": "Forbidden. `unauthorized_target` — the target carries userinfo (`user:pass@host`), or is not in `authorized_uris`, or, on a call that substitutes a `{{credential_field}}`, a redirect hop is not (any other call gets that 3xx back unfollowed), or the connection does not render the declared list (`Proxy-Status` error `http_request_denied`); `blocked_target` — it resolves into a blocked network range (`destination_ip_prohibited`); `credential_exfiltration_refused` — the call carries a credential and the allowlist does not name its hosts: it is empty or has an entry that leaves the host to the caller, or every entry matching the target reaches it through a wildcard past the registrable domain written under it, judged with the Public Suffix List (the message then names the host to list) (`http_request_denied`); `call_permission_required` — no `X-Run-Id`, an enforced org default governs the integration in this space and the caller holds `credential-proxy:call-own` without `credential-proxy:call` (`http_request_denied`); `credential_proxy_closed` — no `X-Run-Id`, and the space's `credential_proxy_open` is `false`, whatever the caller's role (`proxy_internal_response`); `tool_blocked_in_space` — the connection's auth backs an `api_call` tool the space blocked; `remote_mcp_endpoint_not_proxied` — `X-Target` is the connection's remote MCP endpoint (same origin and path, query and trailing slash ignored; the whole origin of an SSE endpoint): that server is reached through its tools, which apply the space's tool policy; `forbidden` — the principal lacks the permission of the path the call takes (`credential-proxy:call` with `X-Run-Id`, `credential-proxy:call-own` or `credential-proxy:call` without), session bound to a different principal, cookie session used, or `X-Run-Id` names another actor's run or a run the platform executes.",
+            "description": "Forbidden. `unauthorized_target` — the target carries userinfo (`user:pass@host`), or is not in `authorized_uris`, or, on a call that substitutes a `{{credential_field}}`, a redirect hop is not (any other call gets that 3xx back unfollowed), or the connection does not render the declared list (`Proxy-Status` error `http_request_denied`); `blocked_target` — it resolves into a blocked network range (`destination_ip_prohibited`); `credential_exfiltration_refused` — the call carries a credential and the allowlist does not name its hosts: it is empty or has an entry that leaves the host to the caller, or every entry matching the target reaches it through a wildcard past the registrable domain written under it, judged with the Public Suffix List (the message then names the host to list) (`http_request_denied`); `call_permission_required` — no `X-Run-Id`, an enforced org default governs the integration in this space and the caller holds `credential-proxy:call-own` without `credential-proxy:call` (`http_request_denied`); `credential_proxy_closed` — no `X-Run-Id`, and the space's `credential_proxy_open` is `false`, whatever the caller's role (`proxy_internal_response`); `tool_blocked_in_space` — the connection's auth backs an `api_call` tool the space blocked, or (on a streamed upload, `X-Stream-Request`) an `api_upload` tool it blocked; `remote_mcp_endpoint_not_proxied` — `X-Target`, or a redirect hop, is the connection's remote MCP endpoint (same origin and path, query and trailing slash ignored; the whole origin of an SSE endpoint): that server is reached through its tools, which apply the space's tool policy; `forbidden` — the principal lacks the permission of the path the call takes (`credential-proxy:call` with `X-Run-Id`, `credential-proxy:call-own` or `credential-proxy:call` without), session bound to a different principal, cookie session used, or `X-Run-Id` names another actor's run or a run the platform executes.",
             "headers": {
               "Proxy-Status": {
                 "description": "RFC 9209. `appstrate; received-status=<n>`: the upstream's response, relayed. `appstrate; error=<type>` (RFC 9209 §2.3 error type): the proxy's own response. Bare `appstrate`: served by the proxy without contacting the upstream (a cache hit).",
@@ -33572,7 +33619,7 @@
             }
           },
           "403": {
-            "description": "Forbidden. `unauthorized_target` — the target carries userinfo (`user:pass@host`), or is not in `authorized_uris`, or, on a call that substitutes a `{{credential_field}}`, a redirect hop is not (any other call gets that 3xx back unfollowed), or the connection does not render the declared list (`Proxy-Status` error `http_request_denied`); `blocked_target` — it resolves into a blocked network range (`destination_ip_prohibited`); `credential_exfiltration_refused` — the call carries a credential and the allowlist does not name its hosts: it is empty or has an entry that leaves the host to the caller, or every entry matching the target reaches it through a wildcard past the registrable domain written under it, judged with the Public Suffix List (the message then names the host to list) (`http_request_denied`); `call_permission_required` — no `X-Run-Id`, an enforced org default governs the integration in this space and the caller holds `credential-proxy:call-own` without `credential-proxy:call` (`http_request_denied`); `credential_proxy_closed` — no `X-Run-Id`, and the space's `credential_proxy_open` is `false`, whatever the caller's role (`proxy_internal_response`); `tool_blocked_in_space` — the connection's auth backs an `api_call` tool the space blocked; `remote_mcp_endpoint_not_proxied` — `X-Target` is the connection's remote MCP endpoint (same origin and path, query and trailing slash ignored; the whole origin of an SSE endpoint): that server is reached through its tools, which apply the space's tool policy; `forbidden` — the principal lacks the permission of the path the call takes (`credential-proxy:call` with `X-Run-Id`, `credential-proxy:call-own` or `credential-proxy:call` without), session bound to a different principal, cookie session used, or `X-Run-Id` names another actor's run or a run the platform executes.",
+            "description": "Forbidden. `unauthorized_target` — the target carries userinfo (`user:pass@host`), or is not in `authorized_uris`, or, on a call that substitutes a `{{credential_field}}`, a redirect hop is not (any other call gets that 3xx back unfollowed), or the connection does not render the declared list (`Proxy-Status` error `http_request_denied`); `blocked_target` — it resolves into a blocked network range (`destination_ip_prohibited`); `credential_exfiltration_refused` — the call carries a credential and the allowlist does not name its hosts: it is empty or has an entry that leaves the host to the caller, or every entry matching the target reaches it through a wildcard past the registrable domain written under it, judged with the Public Suffix List (the message then names the host to list) (`http_request_denied`); `call_permission_required` — no `X-Run-Id`, an enforced org default governs the integration in this space and the caller holds `credential-proxy:call-own` without `credential-proxy:call` (`http_request_denied`); `credential_proxy_closed` — no `X-Run-Id`, and the space's `credential_proxy_open` is `false`, whatever the caller's role (`proxy_internal_response`); `tool_blocked_in_space` — the connection's auth backs an `api_call` tool the space blocked, or (on a streamed upload, `X-Stream-Request`) an `api_upload` tool it blocked; `remote_mcp_endpoint_not_proxied` — `X-Target`, or a redirect hop, is the connection's remote MCP endpoint (same origin and path, query and trailing slash ignored; the whole origin of an SSE endpoint): that server is reached through its tools, which apply the space's tool policy; `forbidden` — the principal lacks the permission of the path the call takes (`credential-proxy:call` with `X-Run-Id`, `credential-proxy:call-own` or `credential-proxy:call` without), session bound to a different principal, cookie session used, or `X-Run-Id` names another actor's run or a run the platform executes.",
             "headers": {
               "Proxy-Status": {
                 "description": "RFC 9209. `appstrate; received-status=<n>`: the upstream's response, relayed. `appstrate; error=<type>` (RFC 9209 §2.3 error type): the proxy's own response. Bare `appstrate`: served by the proxy without contacting the upstream (a cache hit).",

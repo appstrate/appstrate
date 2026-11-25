@@ -25,7 +25,10 @@ import {
   seedProxyConnection,
   seedProxyIntegration,
 } from "../../helpers/credential-proxy-fixtures.ts";
-import { remoteIntegrationManifest } from "../../helpers/integration-manifests.ts";
+import {
+  apiIntegrationManifest,
+  remoteIntegrationManifest,
+} from "../../helpers/integration-manifests.ts";
 import { startFakeMcpServer, type FakeMcpServer } from "../../helpers/fake-mcp-server.ts";
 
 const ID = "@acme/files";
@@ -247,6 +250,82 @@ describe("the space tool policy over a remote integration's typed tools", () => 
       await withAuth(server);
       const res = await proxy(`${server.origin}/other`);
       expect(res.status).not.toBe(403);
+    });
+  });
+
+  describe("blocks on the api_call / api_upload pair, over raw HTTP", () => {
+    const API_ID = "@acme/drive";
+    const send = (origin: string, streamed: boolean) =>
+      getTestApp().request("/api/credential-proxy/proxy", {
+        method: "POST",
+        headers: {
+          ...headers(),
+          "Content-Type": "application/octet-stream",
+          "X-Integration-Id": API_ID,
+          "X-Target": `${origin}/files`,
+          "X-Session-Id": crypto.randomUUID(),
+          ...(streamed ? { "X-Stream-Request": "1" } : {}),
+        },
+        body: "bytes",
+      });
+    const setup = async (blocked: string[]) => {
+      const server = serve("Writes a file.");
+      await seedProxyIntegration(
+        ctx,
+        apiIntegrationManifest({
+          name: API_ID,
+          apiCall: { authKey: "primary", uploadProtocols: ["google-resumable"] },
+          auths: {
+            primary: {
+              type: "api_key",
+              authorizedUris: [`${server.origin}/**`],
+              credentialFields: ["api_key"],
+            },
+          },
+        }),
+      );
+      await seedProxyConnection(ctx, API_ID, "primary", { api_key: "k" });
+      await db.insert(spaceIntegrationToolBlocks).values(
+        blocked.map((toolName) => ({
+          spaceId: ctx.defaultSpaceId,
+          orgId: ctx.orgId,
+          packageId: API_ID,
+          toolName,
+        })),
+      );
+      clearAllCachesLocally();
+      server.requests.length = 0;
+      return server;
+    };
+    const codeOf = async (res: Response) => {
+      try {
+        return ((await res.json()) as { code?: string }).code;
+      } catch {
+        return undefined; // an upstream body that is not a problem document
+      }
+    };
+
+    it("blocking api_upload alone refuses a streamed upload and leaves a plain call", async () => {
+      const server = await setup(["api_upload"]);
+
+      const streamed = await send(server.origin, true);
+      expect(streamed.status).toBe(403);
+      expect(await codeOf(streamed)).toBe("tool_blocked_in_space");
+      expect(server.requests).toHaveLength(0);
+
+      const plain = await send(server.origin, false);
+      expect(await codeOf(plain)).not.toBe("tool_blocked_in_space");
+    });
+
+    it("blocking api_call refuses the plain call and the streamed upload", async () => {
+      const server = await setup(["api_call"]);
+
+      for (const streamed of [false, true]) {
+        const res = await send(server.origin, streamed);
+        expect(res.status).toBe(403);
+        expect(await codeOf(res)).toBe("tool_blocked_in_space");
+      }
+      expect(server.requests).toHaveLength(0);
     });
   });
 

@@ -28,7 +28,8 @@ import {
   type AfpsHttpDelivery as ConnectAfpsHttpDelivery,
   type ProxyCredentialsPayload,
 } from "@appstrate/connect";
-import { getApiCallConfigs, type McpEndpoint } from "@appstrate/core/integration";
+import { getApiCallConfigs } from "@appstrate/core/integration";
+import type { McpEndpoint } from "@appstrate/core/mcp-endpoint";
 import { credentialTemplateRefs } from "@appstrate/afps-shared/credential-template";
 import {
   renderAuthAuthorizedUris,
@@ -57,7 +58,11 @@ import {
   type RunBoundSelection,
 } from "../integration-connections.ts";
 import { renderRemoteSource } from "../integration-manifest-helpers.ts";
-import { loadToolSpacePolicy, toolBlockedInSpace } from "../integration-tool-catalog.ts";
+import {
+  apiCallBlocks,
+  loadToolSpacePolicy,
+  toolBlockedInSpace,
+} from "../integration-tool-catalog.ts";
 import { listOrgDefaultsForResolver } from "../integration-org-defaults-service.ts";
 import { listActivePackages } from "../space-packages.ts";
 import type { ConnectionVariables } from "../connect/connection-variables.ts";
@@ -146,11 +151,14 @@ type ResolveIntegrationProxyInput = {
   /** How the caller names `connectionId`; the header when omitted. */
   connectionNaming?: ConnectionNaming;
   /**
-   * Set by the `api_call` door: the space's tool policy applies. A connection whose auth's
-   * `api_call` the space blocked is refused, and the result names the remote MCP endpoint the
-   * call must not reach (it is open to the MCP tool doors only).
+   * The call is the remote MCP transport itself: the space's tool policy is the caller's, per
+   * tool, and the MCP endpoint is its own to reach. Otherwise the policy applies here: a
+   * connection whose auth's `api_call` the space blocked is refused (its `api_upload` too, on a
+   * streamed `upload`), and the result names the remote MCP endpoint the call must not reach.
    */
-  applySpacePolicy?: true;
+  mcpTransport?: true;
+  /** A streamed upload (the `api_upload` door). */
+  upload?: true;
 } & ProxyCallPath;
 
 interface ResolvedIntegrationProxyCredentials {
@@ -165,7 +173,7 @@ interface ResolvedIntegrationProxyCredentials {
   authKey: string;
   /** Consecutive upstream rejections counted before this call (`upstreamRejectionStreak`). */
   rejectionStreak: number;
-  /** With `applySpacePolicy`: the connection's rendered remote MCP endpoint, `null` when it has none. */
+  /** Unless `mcpTransport`: the connection's rendered remote MCP endpoint, `null` when it has none. */
   remoteMcp: McpEndpoint | null;
 }
 
@@ -189,15 +197,18 @@ export async function resolveIntegrationProxyCredentials(
   if (!connection) throw new IntegrationCredentialNotFoundError(noConnectionMessage(input));
 
   let remoteMcp: McpEndpoint | null = null;
-  if (input.applySpacePolicy) {
+  if (!input.mcpTransport) {
     const policy = await loadToolSpacePolicy(
       { orgId: input.orgId, spaceId: input.spaceId },
       input.integrationId,
       manifest,
     );
     for (const config of getApiCallConfigs(manifest)) {
-      if (config.authKey === connection.authKey && policy.blocks.includes(config.toolName)) {
-        throw toolBlockedInSpace(input.integrationId, config.toolName);
+      if (config.authKey !== connection.authKey) continue;
+      const { callBlocked, uploadBlocked } = apiCallBlocks(config, policy.blocks);
+      if (callBlocked) throw toolBlockedInSpace(input.integrationId, config.toolName);
+      if (input.upload && uploadBlocked) {
+        throw toolBlockedInSpace(input.integrationId, config.uploadToolName!);
       }
     }
     remoteMcp = renderRemoteSource(manifest, connection.variables);

@@ -728,13 +728,7 @@ export async function prepareAndExecuteRun(params: RunPipelineParams): Promise<v
   // every healthy run, and it swallows its own write failures, so it can
   // neither slow down nor fail a normal kickoff.
   await recordDroppedIntegrations({ orgId }, runId, droppedIntegrations, integrationsUnbound);
-  for (const integrationId of new Set(unavailableTools.map((t) => t.integrationId))) {
-    await recordRunUnavailableTools(
-      runId,
-      integrationId,
-      unavailableTools.filter((t) => t.integrationId === integrationId),
-    );
-  }
+  await recordRunUnavailableTools(orgId, runId, unavailableTools);
   await recordDroppedGenerationSettings({ orgId }, runId, modelLabel, droppedGenerationSettings);
   await recordModelFallback({ orgId }, runId, modelLabel, unavailablePinnedModelId);
 

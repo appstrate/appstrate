@@ -314,6 +314,7 @@ export function proxiedMcpOperation(input: ProxiedMcpOperationInput): McpOperati
         actor: input.actor,
         ...(input.connectionId ? { connectionId: input.connectionId } : {}),
         connectionNaming: "connection_id",
+        mcpTransport: true,
         reach: input.reach,
         ...(input.version ? { version: input.version } : {}),
         integrationId: input.integrationId,

@@ -357,7 +357,7 @@ export function createCredentialProxyRouter() {
           spaceId,
           actor,
           ...(explicitConnectionId ? { connectionId: explicitConnectionId } : {}),
-          applySpacePolicy: true,
+          ...(streamRequest ? { upload: true as const } : {}),
           ...(run ? { run } : { reach: reach! }),
           integrationId,
           method,

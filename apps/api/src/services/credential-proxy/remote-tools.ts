@@ -143,12 +143,20 @@ type RemoteToolsInput = RemoteToolsCaller & { integrationId: string };
 
 export function streamableRemote(integrationId: string, manifest: IntegrationManifest) {
   const source = manifest.source;
-  if (source?.kind !== "remote" || source.remote.transport === "sse") {
+  if (source?.kind !== "remote") {
     throw new ApiError({
       status: 422,
       code: "integration_not_remote",
       title: "Not a Remote Integration",
-      detail: `Integration '${integrationId}' is not backed by a Streamable HTTP MCP server.`,
+      detail: `Integration '${integrationId}' is not backed by a remote MCP server.`,
+    });
+  }
+  if (source.remote.transport === "sse") {
+    throw new ApiError({
+      status: 422,
+      code: "sync_transport_unsupported",
+      title: "Transport Not Supported",
+      detail: `Integration '${integrationId}' uses the SSE transport; only Streamable HTTP servers can be listed.`,
     });
   }
   return manifest;
@@ -387,6 +395,8 @@ export async function listRemoteTools(
     cachedOnly?: boolean;
     /** List again whatever is cached: the caller asked for the server's catalog as it is now. */
     fresh?: boolean;
+    /** The space's policy on this integration when the caller already read it: read once, not again. */
+    policy?: ToolSpacePolicy;
   },
 ): Promise<RemoteToolCatalog> {
   const manifest = streamableRemote(input.integrationId, input.manifest);
@@ -464,7 +474,7 @@ export async function listRemoteTools(
   const offered = offeredRemoteToolNames(
     manifest,
     described?.tools.map(({ tool, fingerprint }) => ({ ...tool, fingerprint })),
-    await loadToolSpacePolicy(input.scope, input.integrationId, manifest),
+    input.policy ?? (await loadToolSpacePolicy(input.scope, input.integrationId, manifest)),
   );
   if (described === undefined) {
     return {
@@ -543,6 +553,7 @@ export async function callRemoteTool(
     const catalog = await listRemoteTools({
       ...input,
       manifest,
+      policy,
       ...(connectionId ? { connectionId } : {}),
     });
     if (!catalog.listed) {

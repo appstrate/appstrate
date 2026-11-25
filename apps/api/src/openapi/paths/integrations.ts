@@ -1460,7 +1460,7 @@ export const integrationsPaths = {
       tags: ["Integrations"],
       summary: "List the remote server's tools again into the integration's snapshot",
       description:
-        "Lists the tools of the integration's published remote MCP server now, bypassing the cached listing, through the credential proxy with the connection the caller's selection picks (or `connection_id`): the same selection, `authorized_uris` allowlist and egress guard as a credential-proxy call outside a run, journaled as one call of the connection. It reads the latest published version, not the draft: it is refused (`404`) before any version is published, and for an integration whose server speaks SSE (`422 integration_not_remote`, only Streamable HTTP is listed). The listing is recorded as the snapshot of that connection (of the integration alone when it declares no auths); an upstream refusal is relayed as the proxy's own problem (`upstream_credential_rejected` with its `required_scopes`, `needs_reconnection`), and a listing that succeeded but whose snapshot could not be recorded is a platform failure (`500`). It feeds the per-space tool review (approve or block a tool) and the author's action to declare a listed tool in the integration (`tools_policy` of the draft, then saved and published). Requires `integrations:read` and `credential-proxy:call-own`. Rate limited to 10 requests per minute.",
+        "Lists the tools of the integration's published remote MCP server now, bypassing the cached listing, through the credential proxy with the connection the caller's selection picks (or `connection_id`): the same selection, `authorized_uris` allowlist and egress guard as a credential-proxy call outside a run, journaled as one call of the connection. It reads the latest published version, not the draft: it is refused (`404`) before any version is published, and for an integration whose server speaks SSE (`422 sync_transport_unsupported`, only Streamable HTTP is listed) or is not remote (`422 integration_not_remote`). The listing is recorded as the snapshot of that connection (of the integration alone when it declares no auths); an upstream refusal is relayed as the proxy's own problem (`upstream_credential_rejected` with its `required_scopes`, `needs_reconnection`), and a listing that succeeded but whose snapshot could not be recorded is a platform failure (`500`). It feeds the per-space tool review (approve or block a tool) and the author's action to declare a listed tool in the integration (`tools_policy` of the draft, then saved and published). Requires `integrations:read` and `credential-proxy:call-own`. Rate limited to 10 requests per minute.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XSpaceId" },
@@ -1527,11 +1527,16 @@ export const integrationsPaths = {
         },
         "403": {
           description:
-            "`credential-proxy:call-own` missing, `credential_proxy_closed` — the space's `credential_proxy_open` is `false`, whatever the caller's role —, or the proxy refused the call (`unauthorized_target`, `blocked_target`).",
+            "`integrations:read` or `credential-proxy:call-own` missing, `credential_proxy_closed` — the space's `credential_proxy_open` is `false`, whatever the caller's role —, or the proxy refused the call (`unauthorized_target`, `blocked_target`).",
           headers: STD_RESPONSE_HEADERS,
           content: problemJson,
         },
-        "404": { $ref: "#/components/responses/NotFound" },
+        "404": {
+          description:
+            "The integration is unknown, has no published version, or is not active in the space; `credential_not_found` — the caller has no connection of the integration to list with (or the one named by `connection_id`).",
+          headers: STD_RESPONSE_HEADERS,
+          content: problemJson,
+        },
         "409": {
           description:
             "The proxy's connection-selection conflicts: `must_choose_connection` when the caller holds several usable connections and the body names none, `needs_reconnection`.",
@@ -1540,7 +1545,7 @@ export const integrationsPaths = {
         },
         "422": {
           description:
-            "`integration_not_remote` — the integration is not backed by a Streamable HTTP MCP server; `remote_url_unrenderable` — the connection's variables do not render the server URL.",
+            "`integration_not_remote` — the integration is not backed by a remote MCP server; `sync_transport_unsupported` — its server uses the SSE transport (only Streamable HTTP is listed); `remote_url_unrenderable` — the connection's variables do not render the server URL.",
           headers: STD_RESPONSE_HEADERS,
           content: problemJson,
         },
@@ -1553,7 +1558,7 @@ export const integrationsPaths = {
         },
         "502": {
           description:
-            "`bad_gateway` — the server could not be listed; `upstream_credential_rejected` — it refused the connection's credential.",
+            "`bad_gateway` — the server could not be listed (no `Proxy-Status`); `upstream_credential_rejected` — it refused the connection's credential; `credential_unusable` — the stored credential cannot be sent as the integration declares; the proxy's other relayed codes carry their `Proxy-Status`.",
           headers: { ...STD_RESPONSE_HEADERS, ...PROXY_STATUS_HEADER },
           content: problemJson,
         },
@@ -1592,6 +1597,7 @@ export const integrationsPaths = {
                         fingerprint: { type: "string" },
                         definition: { type: ["object", "null"], additionalProperties: true },
                       },
+                      additionalProperties: false,
                     },
                   },
                   approvals: {
@@ -1608,10 +1614,15 @@ export const integrationsPaths = {
                       properties: {
                         tool_name: { type: "string" },
                         fingerprint: { type: "string" },
-                        definition: { type: ["object", "null"], additionalProperties: true },
+                        definition: {
+                          type: "object",
+                          additionalProperties: true,
+                          description: "The definition the space reviewed when it approved.",
+                        },
                         approved_by: { type: ["string", "null"] },
                         approved_at: { type: "string", format: "date-time" },
                       },
+                      additionalProperties: false,
                     },
                   },
                   blocks: {
@@ -1624,6 +1635,7 @@ export const integrationsPaths = {
                         blocked_by: { type: ["string", "null"] },
                         blocked_at: { type: "string", format: "date-time" },
                       },
+                      additionalProperties: false,
                     },
                   },
                 },
@@ -1665,7 +1677,12 @@ export const integrationsPaths = {
                     required: ["name", "fingerprint"],
                     properties: {
                       name: { type: "string", minLength: 1, maxLength: 256 },
-                      fingerprint: { type: "string", minLength: 1, maxLength: 128 },
+                      fingerprint: {
+                        type: "string",
+                        pattern: "^[0-9a-f]{64}$",
+                        description:
+                          "A SHA-256 tool definition fingerprint, as the tool policy lists it.",
+                      },
                     },
                     additionalProperties: false,
                   },
@@ -1679,8 +1696,7 @@ export const integrationsPaths = {
       responses: {
         "204": { description: "Approved", headers: STD_RESPONSE_HEADERS },
         "400": {
-          description:
-            "`validation_failed` — the body is invalid; `tool_already_declared` — the manifest declares the named tools (`tools`): a declared tool needs no approval; `invalid_request` — the integration allows undeclared tools (none needs an approval), or a named tool is one the platform hides (`hidden_tools`, the connect tool).",
+          description: "`validation_failed` — the body is invalid.",
           headers: STD_RESPONSE_HEADERS,
           content: problemJson,
         },
@@ -1694,7 +1710,7 @@ export const integrationsPaths = {
         "404": { $ref: "#/components/responses/NotFound" },
         "409": {
           description:
-            "`tool_snapshot_stale` — the server no longer lists the named tools (`tools`) at that fingerprint: refresh the snapshot and review again; `tool_definition_unavailable` — the listed definition of the named tools (`tools`) was too large to keep, so it cannot be reviewed nor approved; `tool_approvals_limit` — the named tools (`tools`) would exceed 32 approved definitions: withdraw one first.",
+            "`tool_snapshot_stale` — the server no longer lists the named tools (`tools`) at that fingerprint: refresh the snapshot and review again; `tool_definition_unavailable` — the listed definition of the named tools (`tools`) was too large to keep, so it cannot be reviewed nor approved; `tool_approvals_limit` — the named tools (`tools`) would exceed 32 approved definitions; a withdrawal removes every approved definition of a tool, so withdraw the tool's approvals first, then approve the definition to keep; the count and the insert are one transaction, so the limit is exact. Refusals by the manifest's state: `tool_already_declared` — the manifest declares the named tools (`tools`): a declared tool needs no approval; `tool_catalog_open` — the integration allows undeclared tools (none needs an approval; `tools` names the request's tools); `tool_hidden` — the named tools (`tools`) are ones the platform hides (`hidden_tools`, the connect tool).",
           headers: STD_RESPONSE_HEADERS,
           content: problemJson,
         },
@@ -1734,7 +1750,7 @@ export const integrationsPaths = {
       tags: ["Integrations"],
       summary: "Block tools of the integration in the space",
       description:
-        "Blocks the named tools, declared or not: a blocked tool is neither offered nor callable in this space. Already blocked names are ignored. Blocking an `api_call` tool also removes its `api_upload` companion; blocking an `api_upload` tool alone takes effect in runs only (the credential proxy has no upload tool to refuse). Requires `integrations:configure` and a dashboard session. Audited as `integration.tool.blocked`, one event per tool newly blocked. Rate limited to 30 requests per minute.",
+        "Blocks the named tools, declared or not: a blocked tool is neither offered nor callable in this space. Already blocked names are ignored. Blocking an `api_call` tool also removes its `api_upload` companion; blocking an `api_upload` tool alone leaves the `api_call` and refuses an upload (a streamed request) through the credential proxy as it does in runs. A space blocks at most 500 tools per integration (`409 tool_blocks_limit`). Requires `integrations:configure` and a dashboard session. Audited as `integration.tool.blocked`, one event per tool newly blocked. Rate limited to 30 requests per minute.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XSpaceId" },
@@ -1771,6 +1787,12 @@ export const integrationsPaths = {
         },
         "429": { $ref: "#/components/responses/RateLimited" },
         "404": { $ref: "#/components/responses/NotFound" },
+        "409": {
+          description:
+            "`tool_blocks_limit` — the space would block more than 500 tools of this integration (`tools` names the ones it would add): lift a block first.",
+          headers: STD_RESPONSE_HEADERS,
+          content: problemJson,
+        },
       },
     },
   },

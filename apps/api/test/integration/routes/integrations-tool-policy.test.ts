@@ -193,7 +193,7 @@ describe("integration tool policy routes", () => {
   it("refuses to approve a tool the manifest declares", async () => {
     await listed(tool("read_file"));
     const res = await approve({ name: "read_file", fingerprint: fp("read_file") });
-    expect(res.status).toBe(400);
+    expect(res.status).toBe(409);
     expect(await res.json()).toMatchObject({ code: "tool_already_declared", tools: ["read_file"] });
   });
 
@@ -284,6 +284,19 @@ describe("integration tool policy routes", () => {
 
     expect((await send("DELETE", "/blocks/read_file")).status).toBe(204);
     expect(await catalogEntry("read_file")).toMatchObject({ status: "available" });
+  });
+
+  it("refuses a block past 500 per integration with 409 tool_blocks_limit, writing nothing", async () => {
+    const names = Array.from({ length: 500 }, (_, i) => `tool_${i}`);
+    for (let i = 0; i < names.length; i += 100) {
+      expect((await send("POST", "/blocks", { tools: names.slice(i, i + 100) })).status).toBe(204);
+    }
+    const res = await send("POST", "/blocks", { tools: ["one_more", "tool_1"] });
+    expect(res.status).toBe(409);
+    expect(await res.json()).toMatchObject({ code: "tool_blocks_limit", tools: ["one_more"] });
+    expect(await db.select().from(spaceIntegrationToolBlocks)).toHaveLength(500);
+    // Names already blocked stay accepted at the limit.
+    expect((await send("POST", "/blocks", { tools: ["tool_1"] })).status).toBe(204);
   });
 
   it("rejects an empty or over-long tool name", async () => {
@@ -394,14 +407,12 @@ describe("integration tool policy routes", () => {
         headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
         body: JSON.stringify({ tools: [{ name: "secret_tool", fingerprint: fp("secret_tool") }] }),
       });
-      expect({
+      const problem = (await res.json()) as { code: string; tools: string[] };
+      expect({ id, status: res.status, code: problem.code, tools: problem.tools }).toEqual({
         id,
-        status: res.status,
-        code: ((await res.json()) as { code: string }).code,
-      }).toEqual({
-        id,
-        status: 400,
-        code: "invalid_request",
+        status: 409,
+        code: id === hiddenId ? "tool_hidden" : "tool_catalog_open",
+        tools: ["secret_tool"],
       });
     }
   });

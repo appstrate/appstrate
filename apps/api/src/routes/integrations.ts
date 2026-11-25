@@ -66,6 +66,7 @@ import type { IntegrationOAuthClient } from "@appstrate/shared-types";
 import { logger } from "../lib/logger.ts";
 import {
   ApiError,
+  badGateway,
   invalidRequest,
   internalError,
   notFound,
@@ -129,7 +130,7 @@ import {
   unblockTool,
   type ToolPolicyTarget,
 } from "../services/integration-tool-policy.ts";
-import { observedToolNameSchema } from "@appstrate/core/sidecar-types";
+import { observedToolNameSchema, toolFingerprintSchema } from "@appstrate/core/sidecar-types";
 import {
   listRemoteTools,
   resolveRemoteConnection,
@@ -352,14 +353,11 @@ export const discoverIntegrationSchema = z
   })
   .strict();
 
-// Any name observation accepts, so any listed tool can be approved or blocked.
-const policyToolNameSchema = observedToolNameSchema;
-
 export const approveToolsSchema = z
   .object({
     tools: z
       .array(
-        z.object({ name: policyToolNameSchema, fingerprint: z.string().min(1).max(128) }).strict(),
+        z.object({ name: observedToolNameSchema, fingerprint: toolFingerprintSchema }).strict(),
       )
       .min(1)
       .max(100),
@@ -367,7 +365,7 @@ export const approveToolsSchema = z
   .strict();
 
 export const blockToolsSchema = z
-  .object({ tools: z.array(policyToolNameSchema).min(1).max(100) })
+  .object({ tools: z.array(observedToolNameSchema).min(1).max(100) })
   .strict();
 
 export const syncFromServerSchema = z.object({ connection_id: z.uuid().optional() }).strict();
@@ -1159,15 +1157,14 @@ export function createIntegrationsRouter() {
     });
   });
 
-  const refreshFailed = (detail: string) =>
-    new ApiError({ status: 502, code: "bad_gateway", title: "Bad Gateway", detail });
-
   // The server's tools, listed again now, into the snapshot: what the editor and a space's policy
-  // read. It is a credential call outside a run, under the access rule of `/discover`, whether or not the server is authenticated.
+  // read. Read access to the integration plus the right to call outside a run, whether or not the
+  // server is authenticated: the listing is a call of the caller's, written to a snapshot others read.
   router.post(
     "/:packageId{@[^/]+/[^/]+}/tool-snapshot/refresh",
     rateLimit(10),
     requirePermission("integrations", "read"),
+    requirePermission("credential-proxy", "call-own"),
     async (c) => {
       const packageId = c.req.param("packageId")!;
       const scope = getSpaceScope(c);
@@ -1177,9 +1174,6 @@ export function createIntegrationsRouter() {
       const loaded = await readIntegrationManifestForProxy(packageId, scope.orgId, null);
       if (!loaded.ok) throw notFound(`Integration '${packageId}' has no published version`);
       const manifest = streamableRemote(packageId, loaded.manifest);
-      // Whoever can already call: an unauthenticated server (AFPS §7.2) is listed directly, but
-      // the listing is still a call of the caller's, written to a snapshot others read.
-      assertPermission(c, "credential-proxy", "call-own");
       const caller = remoteToolsCaller(c);
       const { connectionId } = await resolveRemoteConnection(
         { ...caller, integrationId: packageId, connectionId: body.connection_id },
@@ -1193,16 +1187,16 @@ export function createIntegrationsRouter() {
         ...(connectionId ? { connectionId } : {}),
         fresh: true,
       });
+      if (!catalog.listed) {
+        throw badGateway(
+          `The server of integration '${packageId}' could not be listed${catalog.listingFailure ? ` (${catalog.listingFailure})` : ""}.`,
+        );
+      }
       const [snapshot] = await readToolSnapshots({
         orgId: scope.orgId,
         packageId,
         connectionIds: [connectionId],
       });
-      if (!catalog.listed) {
-        throw refreshFailed(
-          `The server of integration '${packageId}' could not be listed${catalog.listingFailure ? ` (${catalog.listingFailure})` : ""}.`,
-        );
-      }
       // A listing whose snapshot did not land would answer with the one before it: the platform's
       // own failure, not the server's.
       if (!snapshot || snapshot.listedAt < startedAt) {

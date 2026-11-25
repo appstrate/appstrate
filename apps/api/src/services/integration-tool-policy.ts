@@ -6,7 +6,7 @@
  * connections the detail view uses; every write is one the dashboard makes for a person.
  */
 
-import { and, eq } from "drizzle-orm";
+import { and, eq, inArray } from "drizzle-orm";
 import { parseManifestIntegrations } from "@appstrate/core/dependencies";
 import {
   allowsUndeclaredTools,
@@ -14,7 +14,10 @@ import {
   resolveIntegrationToolCatalog,
   type IntegrationManifest,
 } from "@appstrate/core/integration";
-import { MAX_APPROVED_FINGERPRINTS_PER_TOOL } from "@appstrate/core/sidecar-types";
+import {
+  MAX_APPROVED_FINGERPRINTS_PER_TOOL,
+  OBSERVED_TOOLS_MAX_COUNT,
+} from "@appstrate/core/sidecar-types";
 import type { OrgRole } from "@appstrate/core/permissions";
 import { db } from "@appstrate/db/client";
 import {
@@ -22,7 +25,7 @@ import {
   spaceIntegrationToolBlocks,
   type ToolDefinition,
 } from "@appstrate/db/schema";
-import { ApiError, conflict, invalidRequest } from "../lib/errors.ts";
+import { conflict } from "../lib/errors.ts";
 import type { SpaceScope } from "../lib/scope.ts";
 import type { ConnectionCaller } from "./connection-reach.ts";
 import {
@@ -31,7 +34,7 @@ import {
   toolSnapshotConnectionIds,
 } from "./integration-connections.ts";
 import { readIntegrationManifestForConnect } from "./integration-service.ts";
-import { loadToolSpacePolicy, readToolSpaceRows } from "./integration-tool-catalog.ts";
+import { loadToolSpacePolicy, readToolSpaceReviewRows } from "./integration-tool-catalog.ts";
 import { readToolSnapshots } from "./integration-tool-snapshots.ts";
 
 export interface ToolPolicyTarget {
@@ -85,7 +88,7 @@ async function loadListedTools(target: ToolPolicyTarget) {
 export async function getToolPolicy(target: ToolPolicyTarget) {
   const [{ listed }, { approvals, blocks }] = await Promise.all([
     loadListedTools(target),
-    readToolSpaceRows(target.scope, target.packageId),
+    readToolSpaceReviewRows(target.scope, target.packageId),
   ]);
   return {
     listed: [...listed.values()],
@@ -107,24 +110,26 @@ export async function approveTools(
 ): Promise<{ toolName: string; fingerprint: string }[]> {
   const { manifest, listed, declared, hidden } = await loadListedTools(target);
   if (allowsUndeclaredTools(manifest)) {
-    throw invalidRequest(
+    throw conflict(
+      "tool_catalog_open",
       `Integration '${target.packageId}' allows undeclared tools: none needs an approval.`,
+      { tools: namesOf(tools) },
     );
   }
   const alreadyDeclared = namesOf(tools.filter((t) => declared.has(t.name)));
   if (alreadyDeclared.length > 0) {
-    throw new ApiError({
-      status: 400,
-      code: "tool_already_declared",
-      title: "Tool Already Declared",
-      detail: `The manifest already declares ${alreadyDeclared.join(", ")}: a declared tool needs no approval.`,
-      extensions: { tools: alreadyDeclared },
-    });
+    throw conflict(
+      "tool_already_declared",
+      `The manifest already declares ${alreadyDeclared.join(", ")}: a declared tool needs no approval.`,
+      { tools: alreadyDeclared },
+    );
   }
   const withheld = namesOf(tools.filter((t) => hidden.has(t.name)));
   if (withheld.length > 0) {
-    throw invalidRequest(
+    throw conflict(
+      "tool_hidden",
       `The platform withholds ${withheld.join(", ")} from every space: a hidden tool cannot be approved.`,
+      { tools: withheld },
     );
   }
   const stale = namesOf(tools.filter((t) => !listed.has(`${t.name}\u0000${t.fingerprint}`)));
@@ -147,43 +152,64 @@ export async function approveTools(
       { tools: unreadable },
     );
   }
-  // What a run's spec carries per tool: past it an approval would be silently left out.
-  const { approvals: held } = await readToolSpaceRows(target.scope, target.packageId);
-  const fingerprints = new Map<string, Set<string>>();
-  for (const { tool_name, fingerprint } of [
-    ...held,
-    ...distinct.map((t) => ({ tool_name: t.name, fingerprint: t.fingerprint })),
-  ]) {
-    fingerprints.set(tool_name, (fingerprints.get(tool_name) ?? new Set()).add(fingerprint));
-  }
-  const overLimit = namesOf(
-    distinct.filter((t) => fingerprints.get(t.name)!.size > MAX_APPROVED_FINGERPRINTS_PER_TOOL),
-  );
-  if (overLimit.length > 0) {
-    throw conflict(
-      "tool_approvals_limit",
-      `At most ${MAX_APPROVED_FINGERPRINTS_PER_TOOL} definitions of one tool can be approved: withdraw the approval of ${overLimit.join(", ")} before approving another.`,
-      { tools: overLimit },
+  // Counted and inserted in one transaction holding the tool's existing rows, so two approvals
+  // of the same tool serialize and the limit is exact. What a run's spec carries per tool: past
+  // it an approval would be silently left out.
+  return db.transaction(async (tx) => {
+    const held = await tx
+      .select({
+        tool_name: spaceIntegrationToolApprovals.toolName,
+        fingerprint: spaceIntegrationToolApprovals.fingerprint,
+      })
+      .from(spaceIntegrationToolApprovals)
+      .where(
+        and(
+          eq(spaceIntegrationToolApprovals.orgId, target.scope.orgId),
+          eq(spaceIntegrationToolApprovals.spaceId, target.scope.spaceId),
+          eq(spaceIntegrationToolApprovals.packageId, target.packageId),
+          inArray(
+            spaceIntegrationToolApprovals.toolName,
+            distinct.map((t) => t.name),
+          ),
+        ),
+      )
+      .for("update");
+    const fingerprints = new Map<string, Set<string>>();
+    for (const { tool_name, fingerprint } of [
+      ...held,
+      ...distinct.map((t) => ({ tool_name: t.name, fingerprint: t.fingerprint })),
+    ]) {
+      fingerprints.set(tool_name, (fingerprints.get(tool_name) ?? new Set()).add(fingerprint));
+    }
+    const overLimit = namesOf(
+      distinct.filter((t) => fingerprints.get(t.name)!.size > MAX_APPROVED_FINGERPRINTS_PER_TOOL),
     );
-  }
-  return db
-    .insert(spaceIntegrationToolApprovals)
-    .values(
-      distinct.map(({ name, fingerprint }, i) => ({
-        spaceId: target.scope.spaceId,
-        orgId: target.scope.orgId,
-        packageId: target.packageId,
-        toolName: name,
-        fingerprint,
-        definition: definitions[i]!,
-        approvedBy,
-      })),
-    )
-    .onConflictDoNothing()
-    .returning({
-      toolName: spaceIntegrationToolApprovals.toolName,
-      fingerprint: spaceIntegrationToolApprovals.fingerprint,
-    });
+    if (overLimit.length > 0) {
+      throw conflict(
+        "tool_approvals_limit",
+        `At most ${MAX_APPROVED_FINGERPRINTS_PER_TOOL} definitions of one tool can be approved, and a withdrawal removes every approved definition of the tool: withdraw the approvals of ${overLimit.join(", ")} first, then approve the definition to keep.`,
+        { tools: overLimit },
+      );
+    }
+    return tx
+      .insert(spaceIntegrationToolApprovals)
+      .values(
+        distinct.map(({ name, fingerprint }, i) => ({
+          spaceId: target.scope.spaceId,
+          orgId: target.scope.orgId,
+          packageId: target.packageId,
+          toolName: name,
+          fingerprint,
+          definition: definitions[i]!,
+          approvedBy,
+        })),
+      )
+      .onConflictDoNothing()
+      .returning({
+        toolName: spaceIntegrationToolApprovals.toolName,
+        fingerprint: spaceIntegrationToolApprovals.fingerprint,
+      });
+  });
 }
 
 /** Withdraws every approval of the tool in the space; answers the rows withdrawn. */
@@ -208,27 +234,55 @@ export async function revokeToolApproval(
     });
 }
 
-/** Blocks tools in the space, declared or not; answers the names newly blocked. */
+/**
+ * Blocks tools in the space, declared or not; answers the names newly blocked. A space holds at
+ * most `OBSERVED_TOOLS_MAX_COUNT` blocks per integration (the bound a spawn spec carries): past it,
+ * `409 tool_blocks_limit`.
+ */
 export async function blockTools(
   scope: SpaceScope,
   packageId: string,
   names: readonly string[],
   blockedBy: string | null,
 ): Promise<string[]> {
-  const inserted = await db
-    .insert(spaceIntegrationToolBlocks)
-    .values(
-      [...new Set(names)].map((toolName) => ({
-        spaceId: scope.spaceId,
-        orgId: scope.orgId,
-        packageId,
-        toolName,
-        blockedBy,
-      })),
-    )
-    .onConflictDoNothing()
-    .returning({ toolName: spaceIntegrationToolBlocks.toolName });
-  return inserted.map((r) => r.toolName);
+  const wanted = [...new Set(names)];
+  return db.transaction(async (tx) => {
+    const held = await tx
+      .select({ toolName: spaceIntegrationToolBlocks.toolName })
+      .from(spaceIntegrationToolBlocks)
+      .where(
+        and(
+          eq(spaceIntegrationToolBlocks.orgId, scope.orgId),
+          eq(spaceIntegrationToolBlocks.spaceId, scope.spaceId),
+          eq(spaceIntegrationToolBlocks.packageId, packageId),
+        ),
+      )
+      .for("update");
+    const heldNames = new Set(held.map((r) => r.toolName));
+    const fresh = wanted.filter((name) => !heldNames.has(name));
+    if (heldNames.size + fresh.length > OBSERVED_TOOLS_MAX_COUNT) {
+      throw conflict(
+        "tool_blocks_limit",
+        `A space blocks at most ${OBSERVED_TOOLS_MAX_COUNT} tools of one integration: lift a block before adding another.`,
+        { tools: fresh },
+      );
+    }
+    if (fresh.length === 0) return [];
+    const inserted = await tx
+      .insert(spaceIntegrationToolBlocks)
+      .values(
+        fresh.map((toolName) => ({
+          spaceId: scope.spaceId,
+          orgId: scope.orgId,
+          packageId,
+          toolName,
+          blockedBy,
+        })),
+      )
+      .onConflictDoNothing()
+      .returning({ toolName: spaceIntegrationToolBlocks.toolName });
+    return inserted.map((r) => r.toolName);
+  });
 }
 
 /** Lifts the block on a tool; answers whether there was one. */
@@ -265,13 +319,12 @@ export async function selectedApprovedTools(
   const perIntegration = await Promise.all(
     selections.map(async (entry) => {
       const read = await readIntegrationManifestForConnect(scope, entry.id);
-      // An open catalog needs no approval; a declared or hidden tool never stands on one.
-      if (!read.ok || allowsUndeclaredTools(read.manifest)) return [];
-      const { declared, hidden } = declaredAndHidden(read.manifest);
+      // The policy is judged: an open catalog, a declared or a hidden tool stands on no approval.
+      if (!read.ok) return [];
       const policy = await loadToolSpacePolicy(scope, entry.id, read.manifest);
       const approved = new Set(policy.approvals.map((a) => a.tool_name));
       return (entry.tools as string[])
-        .filter((tool) => approved.has(tool) && !declared.has(tool) && !hidden.has(tool))
+        .filter((tool) => approved.has(tool))
         .map((tool) => `${entry.id}:${tool}`);
     }),
   );

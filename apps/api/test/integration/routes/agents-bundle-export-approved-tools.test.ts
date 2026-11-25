@@ -93,7 +93,22 @@ describe("bundle export: space-approved tools header", () => {
     ]);
     const res = await exportBundle(["read_file", "write_file"])();
     expect(res.status, await res.clone().text()).toBe(200);
-    expect(res.headers.get(HEADER)).toBe(`${INTEG}:write_file`);
+    expect(res.headers.get(HEADER)).toBe(encodeURIComponent(`${INTEG}:write_file`));
+  });
+
+  it("percent-encodes each element, so a tool name with a comma or a non-ASCII character survives", async () => {
+    const odd = "écrire,fichier";
+    await insertToolApprovals({ ...ctx, spaceId: ctx.defaultSpaceId, packageId: INTEG }, [
+      { toolName: "write_file", fingerprint: toolFingerprint("write_file") },
+      { toolName: odd, fingerprint: toolFingerprint(odd) },
+    ]);
+    const res = await exportBundle(["write_file", odd])();
+    expect(res.status, await res.clone().text()).toBe(200);
+    const elements = res.headers.get(HEADER)!.split(",");
+    expect(elements.map((e) => decodeURIComponent(e)).sort()).toEqual(
+      [`${INTEG}:write_file`, `${INTEG}:${odd}`].sort(),
+    );
+    expect(elements).toHaveLength(2);
   });
 
   it("sets no header when nothing selected depends on an approval", async () => {

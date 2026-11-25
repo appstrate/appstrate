@@ -17,7 +17,7 @@ import {
   type ToolSnapshotEntry,
 } from "@appstrate/db/schema";
 import { trackAudit } from "./audit.ts";
-import { scheduleToolReviewNotifications } from "./state/notifications.ts";
+import { scheduleToolReviewNotifications } from "./integration-tool-review.ts";
 
 /** Past this many serialised bytes of definitions in one snapshot, the rest keep only their identity. */
 const MAX_DEFINITION_BYTES = 512 * 1024;
@@ -114,17 +114,6 @@ export async function recordToolSnapshot(
       merged.push(...unlisted.slice(0, Math.max(0, OBSERVED_TOOLS_MAX_COUNT - merged.length)));
     }
 
-    // The same tools at the same definitions: only the listing time moved.
-    const sameSet =
-      previous !== undefined &&
-      previous.truncated === input.truncated &&
-      merged.length === before.size &&
-      merged.every((entry) => before.get(entry.name)?.fingerprint === entry.fingerprint);
-    if (sameSet) {
-      await tx.update(integrationToolSnapshots).set({ listedAt: now }).where(targetMatches(input));
-      return { added, changed };
-    }
-
     const encoder = new TextEncoder();
     let bytes = 0;
     const tools = merged.map((entry) => {
@@ -132,6 +121,24 @@ export async function recordToolSnapshot(
       bytes += encoder.encode(JSON.stringify(entry.definition)).byteLength;
       return bytes > MAX_DEFINITION_BYTES ? { ...entry, definition: null } : entry;
     });
+
+    // The same tools at the same definitions: only the listing time moved. A definition now in
+    // hand for an entry stored without one (past the cap before) is a change: it is rewritten.
+    const sameSet =
+      previous !== undefined &&
+      previous.truncated === input.truncated &&
+      tools.length === before.size &&
+      tools.every((entry) => {
+        const known = before.get(entry.name);
+        return (
+          known?.fingerprint === entry.fingerprint &&
+          !(known.definition === null && entry.definition !== null)
+        );
+      });
+    if (sameSet) {
+      await tx.update(integrationToolSnapshots).set({ listedAt: now }).where(targetMatches(input));
+      return { added, changed };
+    }
 
     await tx
       .update(integrationToolSnapshots)

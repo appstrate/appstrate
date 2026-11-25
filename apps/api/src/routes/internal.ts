@@ -31,12 +31,14 @@ import { RUN_ROUTE_RATE_PER_MIN, rateLimitByBearer } from "../middleware/rate-li
 import { recordRunDegradedIntegration, recordRunUnavailableTools } from "../services/state/runs.ts";
 import { recordToolSnapshot } from "../services/integration-tool-snapshots.ts";
 import {
+  OBSERVED_TOOLS_MAX_BYTES,
   OBSERVED_TOOLS_MAX_COUNT,
   UNAVAILABLE_TOOL_REASONS,
   observedToolNameSchema,
   observedToolSchema,
 } from "@appstrate/core/sidecar-types";
 import { readJsonBody } from "@appstrate/core/request-body";
+import { bodyLimit } from "../middleware/body-limit.ts";
 import {
   getRunEffectiveAgent,
   runAgentGoneDetail,
@@ -226,20 +228,38 @@ const EMPTY_CREDENTIALS_WIRE = {
   expiresAtEpochMs: {},
 };
 
-export const toolsObservedSchema = z.strictObject({
-  /**
-   * The descriptors as the server returned them, each judged on its own: a malformed one is
-   * dropped (the listing counts as truncated) and never refuses the report, which also carries the
-   * run's unavailable tools. The platform fingerprints the rest itself.
-   */
-  tools: z.array(z.unknown()).max(OBSERVED_TOOLS_MAX_COUNT),
-  truncated: z.boolean(),
-  unavailable: z
-    .array(
-      z.strictObject({ name: observedToolNameSchema, reason: z.enum(UNAVAILABLE_TOOL_REASONS) }),
-    )
-    .max(OBSERVED_TOOLS_MAX_COUNT),
-});
+/**
+ * The body bound: the sidecar cuts `tools` at `OBSERVED_TOOLS_MAX_BYTES`; the rest is the envelope
+ * (`truncated`, and up to `OBSERVED_TOOLS_MAX_COUNT` unavailable entries of ~300 bytes each),
+ * which the margin covers with room for JSON escaping.
+ */
+const TOOLS_OBSERVED_MAX_BODY_BYTES = OBSERVED_TOOLS_MAX_BYTES + 256 * 1024;
+
+export const toolsObservedSchema = z
+  .strictObject({
+    /**
+     * The descriptors as the server returned them, each judged on its own: a malformed one is
+     * dropped (the listing counts as truncated) and never refuses the report, which also carries the
+     * run's unavailable tools. The platform fingerprints the rest itself. Absent for a local
+     * integration, whose server's catalog is no listing of a remote one: only `unavailable` counts.
+     */
+    tools: z.array(z.unknown()).max(OBSERVED_TOOLS_MAX_COUNT).optional(),
+    /** Whether the listing was cut short; meaningful only with `tools`. */
+    truncated: z.boolean().optional(),
+    unavailable: z
+      .array(
+        z.strictObject({ name: observedToolNameSchema, reason: z.enum(UNAVAILABLE_TOOL_REASONS) }),
+      )
+      .max(OBSERVED_TOOLS_MAX_COUNT),
+  })
+  .refine((body) => body.tools !== undefined || body.truncated === undefined, {
+    message: "`truncated` qualifies `tools`: send it only with them",
+    path: ["truncated"],
+  })
+  .refine((body) => body.tools === undefined || body.truncated !== undefined, {
+    message: "`truncated` is required with `tools`",
+    path: ["truncated"],
+  });
 
 export function createInternalRouter(ratePerMin = RUN_ROUTE_RATE_PER_MIN) {
   const router = new Hono();
@@ -426,11 +446,12 @@ export function createInternalRouter(ratePerMin = RUN_ROUTE_RATE_PER_MIN) {
    */
   async function recordTerminalCredentialFailure(
     err: unknown,
+    orgId: string,
     runId: string,
     packageId: string,
   ): Promise<void> {
     if (err instanceof ApiError && err.status === 410) {
-      await recordRunDegradedIntegration(runId, packageId);
+      await recordRunDegradedIntegration(orgId, runId, packageId);
     }
   }
 
@@ -480,7 +501,7 @@ export function createInternalRouter(ratePerMin = RUN_ROUTE_RATE_PER_MIN) {
         resolvedIntegrationVersions: run.resolvedIntegrationVersions,
       });
     } catch (err) {
-      await recordTerminalCredentialFailure(err, runId, packageId);
+      await recordTerminalCredentialFailure(err, run.orgId, runId, packageId);
       throw err;
     }
     logger.info("Integration credentials delivered", {
@@ -531,7 +552,7 @@ export function createInternalRouter(ratePerMin = RUN_ROUTE_RATE_PER_MIN) {
       // 410 = the connection was flagged needsReconnection (terminal). Record
       // it on the run so the run-detail banner can surface it, then re-throw so
       // the sidecar sees the 410 and stops retrying.
-      await recordTerminalCredentialFailure(err, runId, packageId);
+      await recordTerminalCredentialFailure(err, run.orgId, runId, packageId);
       throw err;
     }
     logger.info("Integration credentials refreshed", {
@@ -572,46 +593,57 @@ export function createInternalRouter(ratePerMin = RUN_ROUTE_RATE_PER_MIN) {
   // The run's metadata always records the unavailable tools; the listing becomes the integration's
   // snapshot only for a platform-origin run (a remote-origin sidecar runs on the caller's
   // machine and is no authority on org state) and never for the platform's own endpoint integration.
-  router.post(`/integration-credentials/${SCOPED_PACKAGE_ROUTE}/tools-observed`, async (c) => {
-    const packageId = `${c.req.param("scope")}/${c.req.param("name")}`;
-    await refuseConnectRun(c, packageId);
-    const { runId, run } = await verifyRunToken(c);
-    await assertAgentDeclaresIntegration(packageId, run, runId);
-    let connectionId: string | null = null;
-    if (c.req.query("connection_id") !== undefined) {
-      connectionId = requireBoundConnection(c, packageId, run, runId).connectionId;
-    } else if ((run.resolvedConnections?.[packageId] ?? []).length > 0) {
-      throw invalidRequest(
-        `\`connection_id\` is required: this run bound connections to '${packageId}'.`,
-        "connection_id",
+  router.post(
+    `/integration-credentials/${SCOPED_PACKAGE_ROUTE}/tools-observed`,
+    bodyLimit(TOOLS_OBSERVED_MAX_BODY_BYTES),
+    async (c) => {
+      const packageId = `${c.req.param("scope")}/${c.req.param("name")}`;
+      await refuseConnectRun(c, packageId);
+      const { runId, run } = await verifyRunToken(c);
+      await assertAgentDeclaresIntegration(packageId, run, runId);
+      let connectionId: string | null = null;
+      if (c.req.query("connection_id") !== undefined) {
+        connectionId = requireBoundConnection(c, packageId, run, runId).connectionId;
+      } else if ((run.resolvedConnections?.[packageId] ?? []).length > 0) {
+        throw invalidRequest(
+          `\`connection_id\` is required: this run bound connections to '${packageId}'.`,
+          "connection_id",
+        );
+      }
+      const body = await readJsonBody(c, toolsObservedSchema);
+      await recordRunUnavailableTools(
+        run.orgId,
+        runId,
+        body.unavailable.map((tool) => ({ integrationId: packageId, ...tool })),
       );
-    }
-    const body = await readJsonBody(c, toolsObservedSchema);
-    await recordRunUnavailableTools(runId, packageId, body.unavailable);
-    if (
-      run.runOrigin === "platform" &&
-      !listRuntimeBoundSystemIntegrationIds().includes(packageId)
-    ) {
-      const tools = body.tools.flatMap((tool) => {
-        const parsed = observedToolSchema.safeParse(tool);
-        return parsed.success ? [parsed.data] : [];
-      });
-      await recordToolSnapshot({
-        orgId: run.orgId,
-        packageId,
-        connectionId,
-        tools,
-        truncated: body.truncated || tools.length < body.tools.length,
-      }).catch((err: unknown) =>
-        logger.warn("tools-observed: tool snapshot not recorded", {
-          runId,
+      if (
+        body.tools !== undefined &&
+        body.truncated !== undefined &&
+        run.runOrigin === "platform" &&
+        !listRuntimeBoundSystemIntegrationIds().includes(packageId)
+      ) {
+        const listed = body.tools;
+        const tools = listed.flatMap((tool) => {
+          const parsed = observedToolSchema.safeParse(tool);
+          return parsed.success ? [parsed.data] : [];
+        });
+        await recordToolSnapshot({
+          orgId: run.orgId,
           packageId,
-          error: err instanceof Error ? err.message : String(err),
-        }),
-      );
-    }
-    return c.body(null, 204);
-  });
+          connectionId,
+          tools,
+          truncated: body.truncated || tools.length < listed.length,
+        }).catch((err: unknown) =>
+          logger.warn("tools-observed: tool snapshot not recorded", {
+            runId,
+            packageId,
+            error: err instanceof Error ? err.message : String(err),
+          }),
+        );
+      }
+      return c.body(null, 204);
+    },
+  );
 
   // GET /internal/integration-bundle/:scope/:name[?version=]
   // Returns a LOCAL integration's own archive (manifest, INTEGRATION.md and the runnable server

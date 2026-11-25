@@ -46,7 +46,7 @@ import {
 } from "@appstrate/afps-runtime/resolvers";
 import { InvalidHeaderValueError } from "@appstrate/afps-shared/delivery-http";
 import type { HostResolver } from "@appstrate/core/ssrf";
-import { targetsMcpEndpoint, type McpEndpoint } from "@appstrate/core/integration";
+import { targetsMcpEndpoint, type McpEndpoint } from "@appstrate/core/mcp-endpoint";
 import { isAllowedInternalIdpHost } from "@appstrate/connect";
 import type { Actor } from "../../lib/actor.ts";
 import { logger } from "../../lib/logger.ts";
@@ -93,8 +93,15 @@ type ProxyCallInput = {
   connectionId?: string;
   /** How the caller names `connectionId`; the header when omitted. */
   connectionNaming?: ConnectionNaming;
-  /** The `api_call` door: the space's tool policy applies (a blocked `api_call`, the MCP endpoint). */
-  applySpacePolicy?: true;
+  /**
+   * The call IS the remote MCP transport (`mcp-over-proxy.ts`): the endpoint it targets is its own,
+   * and the caller applies the space's tool policy per tool. Every other call applies the policy
+   * here: a blocked `api_call` (or a blocked `api_upload` on a streamed upload) is refused, and
+   * the integration's MCP endpoint is refused at the target and at every redirect hop.
+   */
+  mcpTransport?: true;
+  /** A streamed upload (the `api_upload` door): a blocked `api_upload` refuses it too. */
+  upload?: true;
 
   /** Scoped integration package name (e.g. `@afps/gmail`). */
   integrationId: string;
@@ -240,7 +247,8 @@ export async function proxyCall(input: ProxyCallInput): Promise<ProxyCallResult>
     actor: input.actor,
     ...(input.connectionId ? { connectionId: input.connectionId } : {}),
     ...(input.connectionNaming ? { connectionNaming: input.connectionNaming } : {}),
-    ...(input.applySpacePolicy ? { applySpacePolicy: true as const } : {}),
+    ...(input.mcpTransport ? { mcpTransport: true as const } : {}),
+    ...(input.upload ? { upload: true as const } : {}),
     ...(input.run
       ? { run: input.run }
       : { reach: input.reach, ...(input.version ? { version: input.version } : {}) }),
@@ -382,6 +390,16 @@ export async function proxyCall(input: ProxyCallInput): Promise<ProxyCallResult>
         // The platform's network is not the manifest author's to declare: a literal
         // `authorized_uris` host skips the SSRF gate only when `EGRESS_ALLOW_INTERNAL_HOSTS` lists it.
         internalHost: isAllowedInternalIdpHost,
+        // The MCP endpoint is refused on every hop, not only the first target: a redirect from an
+        // allowlisted URL onto it would otherwise reach the server without the tool policy.
+        ...(remoteMcp !== null
+          ? {
+              refusedTarget: {
+                matches: (url: URL) => targetsMcpEndpoint(url, remoteMcp),
+                message: remoteMcpEndpointNotProxied(input.integrationId).message,
+              },
+            }
+          : {}),
         ...(cookies ? { cookies } : {}),
         integrationId: input.integrationId,
         ...(input.fetch ? { fetchFn: input.fetch } : {}),

@@ -59,12 +59,14 @@ import type {
   ApiCallSpec,
   UnavailableToolReason,
 } from "@appstrate/core/sidecar-types";
+import { OBSERVED_TOOLS_MAX_COUNT } from "@appstrate/core/sidecar-types";
 
 import { UNAVAILABLE_INTEGRATION_REASONS } from "@appstrate/afps-runtime/bundle";
 import { isVariableTemplate } from "@appstrate/afps-shared/connection-variables";
 import { checkEgressUrl } from "../lib/egress-host-guard.ts";
 import { logger } from "../lib/logger.ts";
 import {
+  apiCallBlocks,
   approvedFingerprintsByTool,
   approvedToolNames,
   loadToolSpacePolicy,
@@ -145,12 +147,6 @@ export interface DroppedIntegration {
   readonly connectionLabel?: string;
 }
 
-/**
- * The resolver's full verdict: what will spawn, and what was declared but
- * will not. `dropped` is the degradation MARKER — a run that starts without
- * an integration it declared is otherwise indistinguishable from an agent
- * that simply never called that integration's tools.
- */
 /** A tool the agent selected that the run cannot expose, as `metadata.unavailable_tools` records it. */
 export interface UnavailableSelectedTool {
   integrationId: string;
@@ -158,6 +154,12 @@ export interface UnavailableSelectedTool {
   reason: UnavailableToolReason;
 }
 
+/**
+ * The resolver's full verdict: what will spawn, and what was declared but
+ * will not. `dropped` is the degradation MARKER — a run that starts without
+ * an integration it declared is otherwise indistinguishable from an agent
+ * that simply never called that integration's tools.
+ */
 interface ResolveIntegrationSpawnsResult {
   readonly specs: IntegrationSpawnSpec[];
   readonly dropped: DroppedIntegration[];
@@ -395,24 +397,22 @@ async function resolveOne(
   // closed remote catalog an undeclared tool the agent names is offered only at a definition the
   // space approved (declared tools are never held back by a changed definition).
   const policy = await loadToolSpacePolicy({ orgId, spaceId }, integrationId, manifest);
-  const blocked = new Set(policy.blocks);
   const selectedConfigs = selectedApiCallConfigs(manifest, effectiveSelection);
   // Selected and blocked: removed below, so the run says why the tool is missing.
   const unavailableTools = selectedConfigs
     .flatMap((cfg) => {
-      if (blocked.has(cfg.toolName)) return [cfg.toolName];
-      return cfg.uploadProtocols.length > 0 && cfg.uploadToolName && blocked.has(cfg.uploadToolName)
-        ? [cfg.uploadToolName]
-        : [];
+      const { callBlocked, uploadBlocked } = apiCallBlocks(cfg, policy.blocks);
+      if (callBlocked) return [cfg.toolName];
+      return uploadBlocked ? [cfg.uploadToolName!] : [];
     })
     .map((name) => ({ name, reason: "blocked_in_space" as const }));
   const selectedApiCalls: ApiCallSpec[] = selectedConfigs
     // An `api_upload` dispatches through its `api_call`: blocking the call removes both.
-    .filter((cfg) => !blocked.has(cfg.toolName))
+    .filter((cfg) => !apiCallBlocks(cfg, policy.blocks).callBlocked)
     .map((cfg) => {
       const auth = manifest.auths?.[cfg.authKey] as AfpsManifestAuth | undefined;
       const upload =
-        cfg.uploadProtocols.length > 0 && !(cfg.uploadToolName && blocked.has(cfg.uploadToolName));
+        cfg.uploadProtocols.length > 0 && !apiCallBlocks(cfg, policy.blocks).uploadBlocked;
       return {
         authKey: cfg.authKey,
         toolName: cfg.toolName,
@@ -550,26 +550,31 @@ async function resolveOne(
   // A wildcard on a closed remote catalog is not "every tool the server lists": it is what the
   // manifest declares plus what the space approved, named like an explicit selection.
   const closedWildcard = wildcardSelection && closedRemote;
-  const namedSelection: readonly string[] = closedWildcard
-    ? [...catalogNames, ...approvedToolNames(policy)]
-    : ((effectiveSelection ?? []) as readonly string[]);
-  const approvedToolFingerprints =
-    closedRemote && (!wildcardSelection || closedWildcard)
-      ? Object.fromEntries(
-          namedSelection
-            .filter((name) => !declaredNames.has(name))
-            .map((name) => [name, approvedByTool.get(name) ?? []]),
-        )
-      : {};
-  // The tools a spec exposes. A connection's login primitive is its auth's, never the agent's.
-  // Blocked by the space, not hidden by the manifest: the sidecar reports them as such.
-  // The `api_call` tools are removed above, never sent.
+  // The synthetic `api_call`/`api_upload` names are the platform's, granted by the selection of
+  // their own, never named to the server.
   const platformTools = new Set(
     getApiCallConfigs(manifest).flatMap((cfg) => [
       cfg.toolName,
       cfg.uploadToolName ?? cfg.toolName,
     ]),
   );
+  const namedSelection: readonly string[] = closedWildcard
+    ? [
+        ...catalogNames,
+        // Bounded like the fingerprints map the sidecar validates: past it the extra approvals are left out (closed).
+        ...[...approvedToolNames(policy)].slice(0, OBSERVED_TOOLS_MAX_COUNT),
+      ].filter((name) => !platformTools.has(name))
+    : ((effectiveSelection ?? []) as readonly string[]);
+  const approvedToolFingerprints = closedRemote
+    ? Object.fromEntries(
+        namedSelection
+          .filter((name) => !declaredNames.has(name))
+          .map((name) => [name, approvedByTool.get(name) ?? []]),
+      )
+    : {};
+  // The tools a spec exposes. A connection's login primitive is its auth's, never the agent's.
+  // Blocked by the space, not hidden by the manifest: the sidecar reports them as such.
+  // The `api_call` tools are removed above, never sent.
   const blockedTools = policy.blocks.filter((name) => !platformTools.has(name));
   const blockedSurface = blockedTools.length > 0 ? { blockedTools } : {};
   const toolSurface = (loginToolName: string | undefined) => {
