@@ -436,6 +436,13 @@ export interface IntegrationSpawnSpec {
    */
   toolAllowlist?: readonly string[];
   /**
+   * Fingerprints the space approved, per selected tool the manifest does not declare on a closed
+   * catalog (`allow_undeclared_tools` absent). The sidecar offers such a tool only when its
+   * listed definition hashes to one of them; an empty array means none is approved. Declared
+   * tools never appear here.
+   */
+  approvedToolFingerprints?: Record<string, string[]>;
+  /**
    * connect.tool substrate — `runAt: "run-start"` acquisition (P2). When
    * set, the integration's session is NOT pre-resolved at spawn: only the
    * login secret (`inputs`) was stored at dashboard connect. The sidecar
@@ -507,6 +514,9 @@ export interface IntegrationSpawnSpec {
 const strings = z.record(z.string(), z.string());
 const uris = z.array(z.string());
 
+/** SHA-256 hex, as `toolDefinitionFingerprint` (`@appstrate/mcp-transport`) produces. */
+const toolFingerprint = z.string().regex(/^[0-9a-f]{64}$/);
+
 /** The platform's per-connection launch contract, decoded before any integration is started. */
 export const integrationSpawnSpecSchema = z.object({
   integrationId: z.string().min(1),
@@ -563,6 +573,10 @@ export const integrationSpawnSpecSchema = z.object({
     .optional(),
   hiddenTools: uris.optional(),
   toolAllowlist: uris.optional(),
+  approvedToolFingerprints: z
+    .record(z.string(), z.array(toolFingerprint).max(32))
+    .refine((byTool) => Object.keys(byTool).length <= 500)
+    .optional(),
   connectLogin: z
     .object({
       toolName: z.string(),
@@ -826,6 +840,10 @@ export interface IntegrationBootBreadcrumb {
   data?: Record<string, unknown>;
 }
 
+/** Why a tool the agent selected is not callable in this run. */
+export type UnavailableToolReason =
+  "not_listed" | "hidden_tools" | "allowlist" | "definition_not_approved" | "name_collision";
+
 /**
  * Result of the sidecar's integration boot pass, fetched by the agent from
  * `GET /integrations/boot-report` after the MCP handshake. The agent emits the
@@ -847,6 +865,8 @@ export interface IntegrationBootReport {
     /** Tells apart N entries sharing `integrationId` + `namespace`. */
     connectionLabel?: string;
     toolCount: number;
+    /** Selected tools this connection does not expose, with the reason. */
+    unavailableTools?: Array<{ name: string; reason: UnavailableToolReason }>;
   }>;
   /**
    * Per-connection failure — the error that prevented spawn/connect/register,

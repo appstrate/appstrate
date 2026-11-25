@@ -19,6 +19,16 @@ import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Pencil, Plus, Trash2 } from "lucide-react";
 import type { IntegrationToolCatalogEntry } from "@appstrate/shared-types";
+import { RefreshCw } from "lucide-react";
+import { Spinner } from "@appstrate/ui/components/spinner";
+import { useQueryClient } from "@tanstack/react-query";
+import { $api } from "../../api/client";
+import { invalidateIntegrationQueries } from "../../hooks/use-integrations";
+import { usePermissions } from "../../hooks/use-permissions";
+import { formatDateField } from "../../lib/format-date";
+import { errorMessage } from "../../lib/mutation-error";
+import { countToolsWithoutScopes } from "../../lib/integration-tool-scopes";
+import { SyncConnectionChoice } from "./sync-connection-choice";
 import { Alert, AlertDescription, AlertTitle } from "@appstrate/ui/components/alert";
 import { Button } from "@appstrate/ui/components/button";
 import { Switch } from "@appstrate/ui/components/switch";
@@ -43,14 +53,37 @@ import {
   type ToolPolicyState,
 } from "./utils";
 
+/** What the catalog's tools carry beyond the manifest's entry: the space's verdict on each. */
+type CatalogTool = IntegrationToolCatalogEntry &
+  Partial<Pick<PackageTool, "status" | "origin" | "modified">>;
+
+/** The server's last stored listing, with what the read-only view needs to ask for another. */
+export interface ToolSnapshotInfo {
+  packageId: string;
+  /** `tool_snapshot` of the integration detail. */
+  summary: {
+    listed_at: string;
+    added: number;
+    missing: number;
+    modified: number;
+  } | null;
+  /** The integration's source is a remote server: a listing can be asked for. */
+  remote: boolean;
+  /** An OAuth integration: its tools without a scope are counted. */
+  oauth: boolean;
+}
+
 export function IntegrationToolsSection({
   tools,
   allowUndeclaredTools,
+  snapshot,
   edit,
   sync,
 }: {
   /** The saved package's effective tool catalog (`tool_catalog`). */
-  tools: IntegrationToolCatalogEntry[];
+  tools: CatalogTool[];
+  /** Read-only: the server's last listing. */
+  snapshot?: ToolSnapshotInfo;
   /** Read-only: whether the saved package lets agents call undeclared tools. */
   allowUndeclaredTools?: boolean;
   /** The draft manifest, when the reader may change the package. */
@@ -78,6 +111,9 @@ export function IntegrationToolsSection({
       permissions: policies
         ? policies.find((policy) => policy.name === tool.name)?.requiredScopes
         : tool.policy?.required_scopes,
+      status: tool.status,
+      origin: tool.origin,
+      modified: tool.modified,
     })),
     ...(policies ?? [])
       .filter((policy) => !tools.some((tool) => tool.name === policy.name))
@@ -90,6 +126,7 @@ export function IntegrationToolsSection({
   return (
     <div className="flex flex-col gap-4">
       {edit && sync && <SyncFromServer {...sync} />}
+      {!edit && snapshot && <ToolSnapshotSummary snapshot={snapshot} tools={tools} />}
       {edit ? (
         <AllowUndeclaredToggle manifest={edit.manifest} onChange={edit.onChange} />
       ) : (
@@ -107,6 +144,7 @@ export function IntegrationToolsSection({
       <div>
         <PackageToolCatalog
           tools={entries}
+          listedAt={snapshot?.summary?.listed_at}
           actions={
             edit && (
               <PageActionsMenu
@@ -175,6 +213,70 @@ export function IntegrationToolsSection({
             }}
           />
         </Modal>
+      )}
+    </div>
+  );
+}
+
+/** The last listing of the server, its counters, the scope-less tools, and the button that lists again. */
+function ToolSnapshotSummary({
+  snapshot,
+  tools,
+}: {
+  snapshot: ToolSnapshotInfo;
+  tools: CatalogTool[];
+}) {
+  const { t } = useTranslation("agents");
+  const { can } = usePermissions();
+  const qc = useQueryClient();
+  const refresh = $api.useMutation("post", "/api/integrations/{packageId}/tool-snapshot/refresh", {
+    // The refusal is shown under the button, with the connection choice it may offer.
+    meta: { errorHandledByCaller: true },
+    onSuccess: () => invalidateIntegrationQueries(qc),
+  });
+  const run = (connectionId?: string) =>
+    refresh.mutate({
+      params: { path: { packageId: snapshot.packageId } },
+      body: connectionId ? { connection_id: connectionId } : {},
+    });
+  const withoutScopes = snapshot.oauth ? countToolsWithoutScopes(tools) : 0;
+  const { summary } = snapshot;
+  return (
+    <div className="flex flex-col gap-2" data-testid="integration-tool-snapshot">
+      <p className="text-muted-foreground text-sm">
+        {summary
+          ? t("integrationTools.snapshot.summary", {
+              date: formatDateField(summary.listed_at),
+              added: summary.added,
+              missing: summary.missing,
+              modified: summary.modified,
+            })
+          : t("integrationTools.snapshot.never")}
+      </p>
+      {withoutScopes > 0 && (
+        <p className="text-warning text-sm">
+          {t("integrationTools.withoutScopes", { count: withoutScopes })}
+        </p>
+      )}
+      {snapshot.remote && can("credential-proxy:call-own") && (
+        <div className="flex flex-col items-start gap-2">
+          <Button
+            type="button"
+            variant="outline"
+            disabled={refresh.isPending}
+            onClick={() => run()}
+            data-testid="integration-tool-snapshot-refresh"
+          >
+            {refresh.isPending ? <Spinner /> : <RefreshCw />}
+            {t("integrationTools.snapshot.refresh")}
+          </Button>
+          {refresh.error != null && (
+            <p role="alert" className="text-destructive text-sm">
+              {errorMessage(refresh.error)}
+            </p>
+          )}
+          <SyncConnectionChoice error={refresh.error} onChoose={run} disabled={refresh.isPending} />
+        </div>
       )}
     </div>
   );

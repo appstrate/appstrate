@@ -277,6 +277,8 @@
   "apiError.integration_not_connected": "Connectez d'abord cette intégration : aucune connexion utilisable dans cet espace ne permet d'interroger son serveur.",
   "apiError.integration_not_remote": "Cette intégration n'est pas servie par un serveur MCP distant.",
   "apiError.remote_url_unrenderable": "Cette intégration construit l'URL de son serveur à partir des informations de la connexion, et elles ne donnent pas d'URL valide. Reconnectez-la avec des valeurs valides.",
+  "apiError.tool_blocked_in_space": "Cet outil est bloqué dans cet espace.",
+  "apiError.tool_definition_not_approved": "La définition de cet outil n'est pas celle que cet espace a approuvée : vérifiez-la dans les réglages de l'intégration.",
   "apiError.upstream_credential_rejected": "Le serveur MCP de l'intégration a refusé l'identifiant de la connexion : reconnectez l'intégration, ou vérifiez que son compte a la permission dont l'outil a besoin.",
   "apiError.tool_catalog_unavailable": "Le catalogue d'outils du serveur MCP de l'intégration n'a pas pu être lu à temps ; rien n'a été envoyé. Réessayez.",
   "apiError.upstream_invalid_params": "Le serveur MCP de l'intégration a refusé les arguments ou le nom de l'outil appelé.",

@@ -67,6 +67,17 @@ export function parseScopedName(scopedName: string): { scope: string; name: stri
   return { scope: match[1]!, name: match[3]! };
 }
 
+const LISTED_TOOL_NAME_REGEX = /^[A-Za-z0-9_\-./]{1,128}$/;
+
+/**
+ * Whether a tool name an MCP server listed is safe to quote in a prompt or a log line: a plain
+ * token, never free text. Distinct from {@link isValidToolName}, which grammar-checks the
+ * namespaced name the platform exposes.
+ */
+export function isListedToolName(name: string): boolean {
+  return LISTED_TOOL_NAME_REGEX.test(name);
+}
+
 /** Scope of the system packages the deployment ships (`@appstrate/<name>`, no owning organization). */
 const SYSTEM_PACKAGE_SCOPE = "appstrate";
 

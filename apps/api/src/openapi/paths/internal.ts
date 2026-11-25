@@ -346,6 +346,96 @@ export const internalPaths = {
       },
     },
   },
+  "/internal/integration-credentials/{scope}/{name}/tools-observed": {
+    post: {
+      operationId: "reportIntegrationToolsObserved",
+      "x-appstrate-space": { kind: "organization" },
+      tags: ["Internal"],
+      summary: "Report the tools a run's boot listed from a remote integration",
+      description:
+        "Sidecar-only. Same Bearer run token and agent-dependency and activation checks as the GET endpoint. `connection_id` names a connection this run bound to the integration, as for `upstream-success`; it is omitted only for an integration that binds none (an unauthenticated one). Called once per connection, fire-and-forget, after the sidecar registered the integration's tools. `tools` are the MCP descriptors as the server returned them (the platform computes their fingerprints itself); the sidecar cuts them at 1 MiB and sets `truncated`. `unavailable` lists the tools the agent selected that this run does not expose, each with its reason; the run's `metadata.unavailable_tools[]` is stamped with them (`integration_id`, `name`, `reason`, at most 50 per integration). The listing becomes the integration's tool snapshot only when the run is executed by the platform: a remote-origin run's sidecar is on the caller's machine and is no authority on organization state, so its listing is dropped.",
+      security: [{ bearerExecToken: [] }],
+      parameters: [
+        { $ref: "#/components/parameters/PackageScope" },
+        { $ref: "#/components/parameters/PackageName" },
+        {
+          ...boundConnectionIdParam,
+          required: false,
+          description:
+            "The connection this run bound to the integration (a member of `runs.resolved_connections[<integration id>]`). Required unless the run bound none. An id the run did not bind is a `400 connection_not_in_run`.",
+        },
+      ],
+      requestBody: {
+        required: true,
+        content: {
+          "application/json": {
+            schema: {
+              type: "object",
+              additionalProperties: false,
+              required: ["tools", "truncated", "unavailable"],
+              properties: {
+                tools: {
+                  type: "array",
+                  maxItems: 500,
+                  items: {
+                    type: "object",
+                    required: ["name", "inputSchema"],
+                    properties: {
+                      name: { type: "string", minLength: 1, maxLength: 256 },
+                      inputSchema: {
+                        type: "object",
+                        required: ["type"],
+                        properties: { type: { type: "string", enum: ["object"] } },
+                      },
+                    },
+                  },
+                },
+                truncated: { type: "boolean" },
+                unavailable: {
+                  type: "array",
+                  maxItems: 500,
+                  items: {
+                    type: "object",
+                    additionalProperties: false,
+                    required: ["name", "reason"],
+                    properties: {
+                      name: { type: "string", minLength: 1, maxLength: 256 },
+                      reason: {
+                        type: "string",
+                        enum: [
+                          "not_listed",
+                          "hidden_tools",
+                          "allowlist",
+                          "definition_not_approved",
+                          "name_collision",
+                        ],
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+      responses: {
+        "204": { description: "Report recorded." },
+        "400": {
+          ...connectionSelector400,
+          description: `${connectionSelector400.description} A malformed body is an \`invalid_request\` too.`,
+        },
+        "401": { $ref: "#/components/responses/Unauthorized" },
+        "403": { $ref: "#/components/responses/Forbidden" },
+        "404": { $ref: "#/components/responses/NotFound" },
+        "409": {
+          ...integrationCredentialsConflict409,
+          description:
+            "The definition this run executes is no longer readable (`run_definition_gone` / `run_agent_deleted`, as on the GET endpoint), so the run token's authorization set cannot be decided; or `connect_run_no_refresh` — the caller is an ephemeral connect run.",
+        },
+        "500": { $ref: "#/components/responses/InternalServerError" },
+      },
+    },
+  },
   "/internal/integration-bundle/{scope}/{name}": {
     get: {
       operationId: "getIntegrationBundle",

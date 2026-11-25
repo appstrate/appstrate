@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `resolveEffectiveToolCatalog` and its types (`EffectiveToolEntry`, `EffectiveToolStatus`, `EffectiveToolOrigin`, `ToolSpacePolicy`, `ToolSnapshotView`, `ResolveEffectiveToolCatalogInput`) judge each tool of an integration against a space's approvals, blocks and the server's stored listings.
+- `validateAgentIntegrationScopes` takes `options.approvedTools`: names approved in the space count as known tools of a closed catalog.
+- `IntegrationSpawnSpec.approvedToolFingerprints` carries the approved definition fingerprints of the undeclared tools an agent selected; `IntegrationBootReport.spawned[].unavailableTools` (with `UnavailableToolReason`) names the selected tools a connection does not expose.
+- `isListedToolName` in `@appstrate/core/naming` tells whether a server-listed tool name is safe to quote to a model or a log.
+
+### Fixed
+
+- `validateAgentIntegrationScopes` refuses an unknown tool name on a closed catalog that declares no tools; it used to accept any name there. A catalog with `allow_undeclared_tools` is not name-checked.
+
 ## [18.0.0] — 2026-11-24
 
 ### Added

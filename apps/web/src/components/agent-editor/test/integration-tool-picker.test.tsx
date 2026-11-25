@@ -147,3 +147,58 @@ describe("IntegrationToolPicker — inferred scopes", () => {
     }
   });
 });
+
+// A tool the space cannot serve (absent from the server, awaiting approval, blocked) is greyed and
+// cannot be added; one already selected stays selected and says it will not be there at launch.
+describe("IntegrationToolPicker — tool status", () => {
+  const DETAIL_KEY = $api.queryOptions("get", "/api/integrations/{packageId}", {
+    params: {
+      path: { packageId: ID },
+      header: { "X-Org-Id": undefined, "X-Space-Id": undefined },
+    },
+  }).queryKey;
+
+  function renderOver(tools: string[]): string {
+    const qc = new QueryClient();
+    const base = { modified: false, fingerprint: null, origin: "declared" };
+    qc.setQueryData(DETAIL_KEY, {
+      manifest: { auths: {} },
+      auths: [],
+      active: true,
+      allow_undeclared_tools: false,
+      tool_snapshot: { listed_at: "2026-11-20T10:00:00.000Z" },
+      tool_catalog: [
+        { ...base, name: "ok_tool", status: "available" },
+        { ...base, name: "gone_tool", status: "missing" },
+        { ...base, name: "new_tool", status: "pending", origin: "listed" },
+        { ...base, name: "no_tool", status: "blocked", modified: true },
+      ],
+    });
+    return render(
+      <IntegrationToolPicker
+        packageId={ID}
+        entry={{ id: ID, version: "*", tools }}
+        onChange={() => {}}
+      />,
+      { queryClient: qc },
+    );
+  }
+
+  it("shows the reason of each unusable tool and disables adding it", () => {
+    const html = renderOver([]);
+    expect(html).toContain(i18n.t("agents:packageTools.reason.pending"));
+    expect(html).toContain(i18n.t("agents:packageTools.reason.blocked"));
+    expect(html).toContain("Absent du serveur à la dernière lecture (");
+    expect(html).toContain(i18n.t("agents:packageTools.modified"));
+    // missing, pending, blocked: three disabled boxes; the usable one is not.
+    expect(html.match(/disabled=""/g)?.length ?? 0).toBeGreaterThanOrEqual(3);
+    expect(html).not.toContain("tool-warning-");
+  });
+
+  it("keeps a selected unusable tool selected, with a warning", () => {
+    const html = renderOver(["gone_tool"]);
+    expect(html).toContain("tool-warning-gone_tool");
+    expect(html).toContain(i18n.t("agents:packageTools.unavailableSelected"));
+    expect(html).not.toContain("tool-warning-ok_tool");
+  });
+});

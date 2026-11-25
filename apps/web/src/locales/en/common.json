@@ -277,6 +277,8 @@
   "apiError.integration_not_connected": "Connect this integration first: no connection usable in this space can reach its server.",
   "apiError.integration_not_remote": "This integration is not served by a remote MCP server.",
   "apiError.remote_url_unrenderable": "This integration builds its server URL from the connection's details, and they do not produce a valid URL. Reconnect it with valid values.",
+  "apiError.tool_blocked_in_space": "This tool is blocked in this space.",
+  "apiError.tool_definition_not_approved": "This tool's definition is not the one this space approved: review it in the integration's settings.",
   "apiError.upstream_credential_rejected": "The integration's MCP server refused the connection's credential: reconnect the integration, or check that its account has the permission the tool needs.",
   "apiError.tool_catalog_unavailable": "The integration's MCP server tool catalog could not be read in time; nothing was sent. Retry.",
   "apiError.upstream_invalid_params": "The integration's MCP server refused the tool call's arguments or tool name.",

@@ -33,6 +33,7 @@ import {
 } from "@appstrate/connect";
 import type { AfpsHttpDelivery as ConnectAfpsHttpDelivery } from "@appstrate/connect";
 import {
+  allowsUndeclaredTools,
   displayAccountId,
   getAppstrateConnectMeta,
   getIntegrationSourceKind,
@@ -42,6 +43,7 @@ import {
   getLocalServerEnv,
   isUnauthenticatedIntegration,
   resolveEffectiveToolSelection,
+  resolveIntegrationToolCatalog,
   selectedApiCallConfigs,
 } from "@appstrate/core/integration";
 import type {
@@ -57,6 +59,7 @@ import { UNAVAILABLE_INTEGRATION_REASONS } from "@appstrate/afps-runtime/bundle"
 import { isVariableTemplate } from "@appstrate/afps-shared/connection-variables";
 import { checkEgressUrl } from "../lib/egress-host-guard.ts";
 import { logger } from "../lib/logger.ts";
+import { approvedFingerprintsByTool, loadToolSpacePolicy } from "./integration-tool-catalog.ts";
 import {
   decryptStoredCredential,
   EncryptionKeyUnavailableError,
@@ -498,9 +501,25 @@ async function resolveOne(
     },
     ...workspaceMount,
   });
+  // What the space decided about this integration's tools: blocked ones are hidden, and on a
+  // closed remote catalog an undeclared tool the agent names is offered only at a definition the
+  // space approved (declared tools are never held back by a changed definition).
+  const policy = await loadToolSpacePolicy(spaceId, integrationId);
+  const approvedByTool = approvedFingerprintsByTool(policy);
+  const declaredNames = new Set(
+    resolveIntegrationToolCatalog({ integration: manifest }).map((e) => e.name),
+  );
+  const approvedToolFingerprints =
+    sourceKind === "remote" && !allowsUndeclaredTools(manifest) && !wildcardSelection
+      ? Object.fromEntries(
+          ((effectiveSelection ?? []) as readonly string[])
+            .filter((name) => !declaredNames.has(name))
+            .map((name) => [name, approvedByTool.get(name) ?? []]),
+        )
+      : {};
   // The tools a spec exposes. A connection's login primitive is its auth's, never the agent's.
   const toolSurface = (loginToolName: string | undefined) => {
-    const hiddenTools = [...new Set(manifest.hidden_tools ?? [])];
+    const hiddenTools = [...new Set([...(manifest.hidden_tools ?? []), ...policy.blocks])];
     if (wildcardSelection) {
       if (loginToolName && !hiddenTools.includes(loginToolName)) hiddenTools.push(loginToolName);
       return hiddenTools.length > 0 ? { hiddenTools } : {};
@@ -508,7 +527,11 @@ async function resolveOne(
     const toolAllowlist = ((effectiveSelection ?? []) as readonly string[]).filter(
       (t) => t !== loginToolName,
     );
-    return { toolAllowlist, ...(hiddenTools.length > 0 ? { hiddenTools } : {}) };
+    return {
+      toolAllowlist,
+      ...(hiddenTools.length > 0 ? { hiddenTools } : {}),
+      ...(Object.keys(approvedToolFingerprints).length > 0 ? { approvedToolFingerprints } : {}),
+    };
   };
 
   // AFPS §7.2 — an unauthenticated integration binds no connection: one spec, nothing injected.

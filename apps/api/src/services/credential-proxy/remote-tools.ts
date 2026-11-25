@@ -13,6 +13,7 @@ import {
   isRequestTimeout,
   sanitiseToolDescriptor,
   stripReservedResultMeta,
+  toolDefinitionFingerprint,
   type AppstrateMcpClient,
   type ToolDescriptorReduction,
 } from "@appstrate/mcp-transport";
@@ -24,11 +25,12 @@ import {
   isUnauthenticatedIntegration,
   resolveIntegrationToolCatalog,
   type IntegrationManifest,
+  type ToolSpacePolicy,
 } from "@appstrate/core/integration";
 import type { Actor } from "../../lib/actor.ts";
 import type { ConnectOfferPolicy } from "../../lib/connect-offer-policy.ts";
 import { findCause } from "@appstrate/core/error-cause";
-import { ApiError, notFound, type ResolutionFieldError } from "../../lib/errors.ts";
+import { ApiError, conflict, notFound, type ResolutionFieldError } from "../../lib/errors.ts";
 import { logger } from "../../lib/logger.ts";
 import { isProxyRefusal, proxyProblem } from "../../lib/proxy-status.ts";
 import type { SpaceScope } from "../../lib/scope.ts";
@@ -40,6 +42,7 @@ import {
 } from "../integration-connections.ts";
 import { renderRemoteSource } from "../integration-manifest-helpers.ts";
 import { readIntegrationManifestForProxy } from "../integration-service.ts";
+import { approvedFingerprintsByTool, loadToolSpacePolicy } from "../integration-tool-catalog.ts";
 import { recordToolSnapshot } from "../integration-tool-snapshots.ts";
 import { ProxyCallError } from "./core.ts";
 import { assertActiveOutsideRun, noConnectionMessage } from "./integration-resolver.ts";
@@ -84,6 +87,8 @@ const MAX_CACHED_CATALOGS = 128;
 interface SanitisedTool {
   tool: Tool;
   reduced: ToolDescriptorReduction[];
+  /** Of the descriptor as listed, before sanitising: what a space approves. */
+  fingerprint: string;
 }
 
 interface ReadCatalog {
@@ -218,21 +223,39 @@ async function withConnectOffers(
   return err.with({ errors });
 }
 
-/** The catalog's `"*"` selection, less the `api_call` tools the platform itself serves. */
+/**
+ * The catalog's `"*"` selection, less the `api_call` tools the platform itself serves, and what the
+ * space blocked. On a closed catalog a listed tool the manifest does not declare is offered only
+ * at a definition the space approved; `listed` unread, only the declared tools are.
+ */
 export function offeredRemoteToolNames(
   manifest: IntegrationManifest,
-  listed: readonly Pick<Tool, "name" | "description">[] | undefined,
+  listed: readonly (Pick<Tool, "name" | "description"> & { fingerprint?: string })[] | undefined,
+  policy: ToolSpacePolicy,
 ): Set<string> {
+  const open = allowsUndeclaredTools(manifest);
   const catalog = resolveIntegrationToolCatalog({
     integration: manifest,
-    ...(allowsUndeclaredTools(manifest) && listed ? { listedTools: listed } : {}),
+    ...(open && listed ? { listedTools: listed } : {}),
   });
+  const approved = approvedFingerprintsByTool(policy);
+  const approvedListed = open
+    ? []
+    : (listed ?? []).filter(
+        (tool) =>
+          tool.fingerprint !== undefined && approved.get(tool.name)?.includes(tool.fingerprint),
+      );
   const synthetic = new Set(
     getApiCallConfigs(manifest).flatMap((config) =>
       config.uploadToolName ? [config.toolName, config.uploadToolName] : [config.toolName],
     ),
   );
-  return new Set(catalog.map((entry) => entry.name).filter((name) => !synthetic.has(name)));
+  const blocked = new Set(policy.blocks);
+  return new Set(
+    [...catalog, ...approvedListed]
+      .map((entry) => entry.name)
+      .filter((name) => !synthetic.has(name) && !blocked.has(name)),
+  );
 }
 
 /** A failed operation, with the HTTP status of the last exchange its server answered. */
@@ -310,6 +333,28 @@ interface ServerTool {
   schema_reduced?: ToolDescriptorReduction[];
 }
 
+/**
+ * The catalog could not be read to prove what `name` calls, `listing_failure` saying why when
+ * known. Retryable: a later listing may read it.
+ */
+export function catalogUnavailable(
+  integrationId: string,
+  name: string,
+  listingFailure: string | undefined,
+): ApiError {
+  return new ApiError({
+    status: 503,
+    code: "tool_catalog_unavailable",
+    title: "Tool Catalog Unavailable",
+    detail:
+      `The catalog of ${integrationId}'s MCP server could not be read` +
+      (listingFailure ? ` (${listingFailure})` : "") +
+      `, and only it can say which of its tools '${name}' names; nothing was sent. ` +
+      `The call may be retried once a listing reads the catalog.`,
+    ...(listingFailure ? { extensions: { listing_failure: listingFailure } } : {}),
+  });
+}
+
 export interface RemoteToolCatalog {
   tools: ServerTool[];
   listed: boolean;
@@ -373,7 +418,13 @@ export async function listRemoteTools(
               error: getErrorMessage(err),
             }),
           );
-          return boundedCatalog(tools.map(sanitiseToolDescriptor), truncated);
+          return boundedCatalog(
+            tools.map((tool) => ({
+              ...sanitiseToolDescriptor(tool),
+              fingerprint: toolDefinitionFingerprint(tool),
+            })),
+            truncated,
+          );
         },
       );
     try {
@@ -402,7 +453,8 @@ export async function listRemoteTools(
   }
   const offered = offeredRemoteToolNames(
     manifest,
-    described?.tools.map(({ tool }) => tool),
+    described?.tools.map(({ tool, fingerprint }) => ({ ...tool, fingerprint })),
+    await loadToolSpacePolicy(input.scope.spaceId, input.integrationId),
   );
   if (described === undefined) {
     return {
@@ -459,14 +511,45 @@ export async function callRemoteTool(
   );
   if (!loaded.ok) throw notFound(`Integration '${input.integrationId}' has no published version`);
   const manifest = streamableRemote(input.integrationId, loaded.manifest);
+  const policy = await loadToolSpacePolicy(input.scope.spaceId, input.integrationId);
+  if (policy.blocks.includes(input.name)) {
+    throw new ApiError({
+      status: 403,
+      code: "tool_blocked_in_space",
+      title: "Tool Blocked In This Space",
+      detail: `Tool '${input.name}' of integration '${input.integrationId}' is blocked in this space.`,
+    });
+  }
+  const open = allowsUndeclaredTools(manifest);
   const offered = offeredRemoteToolNames(
     manifest,
-    allowsUndeclaredTools(manifest) ? [{ name: input.name }] : undefined,
+    open ? [{ name: input.name }] : undefined,
+    policy,
   );
-  if (!offered.has(input.name)) {
+  // On a closed catalog, an undeclared tool the space approved is judged on the listing below.
+  const approvedUndeclared =
+    !offered.has(input.name) && !open && approvedFingerprintsByTool(policy).has(input.name);
+  if (!offered.has(input.name) && !approvedUndeclared) {
     throw notFound(`Integration '${input.integrationId}' offers no tool named '${input.name}'`);
   }
   const { connectionId, url } = await resolveRemoteConnection(input, manifest, input.name);
+  if (approvedUndeclared) {
+    // The listing offers it only at a definition the space approved.
+    const catalog = await listRemoteTools({
+      ...input,
+      manifest,
+      ...(connectionId ? { connectionId } : {}),
+    });
+    if (!catalog.listed) {
+      throw catalogUnavailable(input.integrationId, input.name, catalog.listingFailure);
+    }
+    if (!catalog.tools.some((tool) => tool.name === input.name)) {
+      throw conflict(
+        "tool_definition_not_approved",
+        `The definition of tool '${input.name}' on integration '${input.integrationId}' is not one this space approved; review it in the integration's settings.`,
+      );
+    }
+  }
   // Set once the session is open: a failure after it is the `tools/call` exchange's. No tool
   // definition was listed on this client, so the SDK validates no output and raises no -32602
   // of its own after the call: one caught here is the server's.

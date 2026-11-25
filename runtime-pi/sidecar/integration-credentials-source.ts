@@ -42,6 +42,7 @@ import type {
 } from "@appstrate/connect/integration-credentials";
 import type { ActiveConnectInputs, MitmCredentialSource } from "./integration-mitm-listener.ts";
 import { matchesAuthorizedUriSpec } from "@appstrate/afps-shared/authorized-uris";
+import type { UnavailableToolReason } from "@appstrate/core/sidecar-types";
 import { logger } from "./logger.ts";
 
 /**
@@ -685,6 +686,50 @@ function postIntegrationUpstreamSuccess(
     {
       method: "POST",
       headers: { Authorization: `Bearer ${opts.runToken}` },
+    },
+  );
+}
+
+/** Cap on the serialised `tools` of a tools-observed report. */
+export const OBSERVED_TOOLS_MAX_BYTES = 1024 * 1024;
+
+/**
+ * The longest prefix of `tools` whose serialisation fits `maxBytes`, and whether any tool was
+ * dropped. A single tool larger than the cap is dropped too.
+ */
+export function capObservedTools<T>(
+  tools: readonly T[],
+  maxBytes: number = OBSERVED_TOOLS_MAX_BYTES,
+): { tools: T[]; truncated: boolean } {
+  const encoder = new TextEncoder();
+  let bytes = 2; // "[]"
+  const kept: T[] = [];
+  for (const tool of tools) {
+    bytes += encoder.encode(JSON.stringify(tool)).byteLength + (kept.length > 0 ? 1 : 0);
+    if (bytes > maxBytes) return { tools: kept, truncated: true };
+    kept.push(tool);
+  }
+  return { tools: kept, truncated: false };
+}
+
+/** What a run's remote upstream listed, reported so the platform can snapshot it. */
+export function postIntegrationToolsObserved(
+  integrationId: string,
+  connectionId: string | undefined,
+  observed: {
+    tools: readonly unknown[];
+    truncated: boolean;
+    unavailable: readonly { name: string; reason: UnavailableToolReason }[];
+  },
+  opts: { platformApiUrl: string; runToken: string; fetchFn?: typeof fetch },
+): Promise<Response> {
+  const fetchFn = opts.fetchFn ?? fetch;
+  return fetchFn(
+    `${opts.platformApiUrl}/internal/integration-credentials/${integrationId}/tools-observed${credentialsQuery(connectionId)}`,
+    {
+      method: "POST",
+      headers: { Authorization: `Bearer ${opts.runToken}`, "Content-Type": "application/json" },
+      body: JSON.stringify(observed),
     },
   );
 }

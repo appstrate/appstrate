@@ -280,6 +280,12 @@ export function IntegrationSettings({
             <IntegrationToolsSection
               tools={detail.tool_catalog ?? []}
               allowUndeclaredTools={detail.allow_undeclared_tools}
+              snapshot={{
+                packageId,
+                summary: detail.tool_snapshot,
+                remote: detail.manifest.source?.kind === "remote",
+                oauth: detail.auths.some((auth) => auth.type === "oauth2"),
+              }}
             />
           </div>
         ) : isIntegrationSpaceSection(active) ? (

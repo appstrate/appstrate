@@ -990,6 +990,55 @@ export async function recordRunDegradedIntegration(
   }
 }
 
+/** Unavailable tools kept per integration on a run: a report past it is cut, not refused. */
+const MAX_UNAVAILABLE_TOOLS_PER_INTEGRATION = 50;
+
+/**
+ * Stamp `metadata.unavailable_tools[]` with the tools of `integrationId` the run selected and
+ * could not expose, `{ integration_id, name, reason }` each, so the finished run says why a tool
+ * was missing. Same atomic append and dedupe as {@link recordRunDegradedIntegration}, keyed by
+ * integration and tool name. Best-effort: never throws into the caller.
+ */
+export async function recordRunUnavailableTools(
+  runId: string,
+  integrationId: string,
+  tools: readonly { name: string; reason: string }[],
+): Promise<void> {
+  if (tools.length === 0) return;
+  const entries = tools
+    .slice(0, MAX_UNAVAILABLE_TOOLS_PER_INTEGRATION)
+    .map(({ name, reason }) => ({ integration_id: integrationId, name, reason }));
+  try {
+    await db.execute(sql`
+      UPDATE ${runs}
+      SET metadata = jsonb_set(
+        COALESCE(${runs.metadata}, '{}'::jsonb),
+        '{unavailable_tools}',
+        COALESCE(${runs.metadata} -> 'unavailable_tools', '[]'::jsonb) || COALESCE((
+          SELECT jsonb_agg(fresh.e)
+          FROM (
+            SELECT DISTINCT ON (e ->> 'name') e
+            FROM jsonb_array_elements(${JSON.stringify(entries)}::jsonb) AS e
+          ) AS fresh
+          WHERE NOT EXISTS (
+            SELECT 1
+            FROM jsonb_array_elements(COALESCE(${runs.metadata} -> 'unavailable_tools', '[]'::jsonb)) AS seen
+            WHERE seen ->> 'integration_id' = ${integrationId}
+              AND seen ->> 'name' = fresh.e ->> 'name'
+          )
+        ), '[]'::jsonb)
+      )
+      WHERE ${runs.id} = ${runId}
+    `);
+  } catch (err) {
+    logger.warn("Failed to record unavailable tools on run metadata", {
+      runId,
+      integrationId,
+      error: err instanceof Error ? err.message : String(err),
+    });
+  }
+}
+
 /**
  * SQL boolean — is this ledger row something OTHER than the runner mirror of a
  * proxy-metered run? The single expression of the no-double-count rule, applied

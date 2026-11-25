@@ -470,7 +470,7 @@ describe("McpHost — integration identity", () => {
     ]);
     try {
       const host = new McpHost();
-      const ns = await host.register({
+      const { namespace: ns } = await host.register({
         connection: CONN_A,
         integrationId: "@acme/notion",
         namespace: "@acme/notion",
@@ -1046,7 +1046,7 @@ describe("McpHost — trusted (first-party) bypass of the poisoning sanitiser", 
     ]);
     try {
       const host = new McpHost();
-      const namespace = await host.register({
+      const { namespace } = await host.register({
         connection: CONN_A,
         integrationId: "drive",
         namespace: "drive",
@@ -1089,7 +1089,7 @@ describe("McpHost — trusted (first-party) bypass of the poisoning sanitiser", 
     ]);
     try {
       const host = new McpHost();
-      const namespace = await host.register({
+      const { namespace } = await host.register({
         connection: CONN_A,
         integrationId: "drive",
         namespace: "drive",
@@ -1343,13 +1343,13 @@ describe("McpHost — intoNamespace (attachable api_call)", () => {
     const apiCall = await makeUpstream(apiCallTool());
     const host = new McpHost();
     try {
-      const ns = await host.register({
+      const { namespace: ns } = await host.register({
         connection: CONN_A,
         integrationId: "kijiji",
         namespace: "kijiji",
         client: server.client,
       });
-      const merged = await host.register({
+      const { namespace: merged } = await host.register({
         connection: CONN_A,
         integrationId: "kijiji",
         namespace: "kijiji",
@@ -1372,7 +1372,7 @@ describe("McpHost — intoNamespace (attachable api_call)", () => {
     const apiCall = await makeUpstream(apiCallTool());
     const host = new McpHost();
     try {
-      const ns = await host.register({
+      const { namespace: ns } = await host.register({
         connection: CONN_A,
         integrationId: "kijiji",
         namespace: "kijiji",

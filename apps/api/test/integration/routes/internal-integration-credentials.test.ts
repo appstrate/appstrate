@@ -48,6 +48,7 @@ import { encryptCredentialEnvelope, encryptCredentials } from "@appstrate/connec
 import {
   integrationConnections,
   integrationOauthClients,
+  integrationToolSnapshots,
   packages,
   runs,
   integrationConnectionShares,
@@ -554,6 +555,72 @@ describe("GET /internal/integration-credentials/:scope/:name", () => {
     const [runRow] = await db.select().from(runs).where(eq(runs.id, runId));
     const meta = runRow!.metadata as { degraded_integrations?: string[] } | null;
     expect(meta?.degraded_integrations ?? []).not.toContain(INTEGRATION);
+  });
+
+  // ─── tools-observed ────────────────────────────────────
+
+  const observed = (connectionId: string, body: unknown, bearer = token) =>
+    app.request(
+      `/internal/integration-credentials/${INTEGRATION}/tools-observed?connection_id=${connectionId}`,
+      {
+        method: "POST",
+        headers: { Authorization: `Bearer ${bearer}`, "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      },
+    );
+  const report = {
+    tools: [{ name: "search", description: "Searches", inputSchema: { type: "object" } }],
+    truncated: false,
+    unavailable: [{ name: "send", reason: "not_listed" }],
+  };
+
+  it("tools-observed: refuses a forged run token", async () => {
+    await seedIntegration(INTEGRATION, true);
+    const connectionId = await seedConnectionRow(INTEGRATION);
+    await bindConnectionsToRun(runId, { [INTEGRATION]: [connectionId] });
+    expect((await observed(connectionId, report, "not-a-real-token")).status).toBe(401);
+    expect(await db.select().from(integrationToolSnapshots)).toHaveLength(0);
+  });
+
+  it("tools-observed: stamps the run's unavailable tools once and snapshots a platform run's listing", async () => {
+    await seedIntegration(INTEGRATION, true);
+    const connectionId = await seedConnectionRow(INTEGRATION);
+    await bindConnectionsToRun(runId, { [INTEGRATION]: [connectionId] });
+
+    expect((await observed(connectionId, report)).status).toBe(204);
+    expect((await observed(connectionId, report)).status).toBe(204);
+
+    const [run] = await db.select({ metadata: runs.metadata }).from(runs).where(eq(runs.id, runId));
+    expect(run!.metadata).toEqual({
+      unavailable_tools: [{ integration_id: INTEGRATION, name: "send", reason: "not_listed" }],
+    });
+    const snapshots = await db.select().from(integrationToolSnapshots);
+    expect(snapshots).toHaveLength(1);
+    expect(snapshots[0]).toMatchObject({ connectionId, packageId: INTEGRATION });
+    expect(snapshots[0]!.tools.map((t) => t.name)).toEqual(["search"]);
+  });
+
+  it("tools-observed: stamps a remote-origin run but writes no snapshot", async () => {
+    await seedIntegration(INTEGRATION, true);
+    const connectionId = await seedConnectionRow(INTEGRATION);
+    await bindConnectionsToRun(runId, { [INTEGRATION]: [connectionId] });
+    await db.update(runs).set({ runOrigin: "remote" }).where(eq(runs.id, runId));
+
+    expect((await observed(connectionId, report)).status).toBe(204);
+
+    const [run] = await db.select({ metadata: runs.metadata }).from(runs).where(eq(runs.id, runId));
+    expect(run!.metadata).toHaveProperty("unavailable_tools");
+    expect(await db.select().from(integrationToolSnapshots)).toHaveLength(0);
+  });
+
+  it("DENY: tools-observed for a connection the run did not bind is a 400, and a malformed body too", async () => {
+    await seedIntegration(INTEGRATION, true);
+    const connectionId = await seedConnectionRow(INTEGRATION);
+    expect((await observed(connectionId, report)).status).toBe(400);
+
+    await bindConnectionsToRun(runId, { [INTEGRATION]: [connectionId] });
+    expect((await observed(connectionId, { ...report, truncated: "no" })).status).toBe(400);
+    expect(await db.select().from(integrationToolSnapshots)).toHaveLength(0);
   });
 });
 

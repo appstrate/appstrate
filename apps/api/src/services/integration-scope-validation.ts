@@ -51,6 +51,7 @@ import {
 import type { IntegrationManifest } from "@appstrate/core/integration";
 import type { ValidationFieldError } from "@appstrate/core/api-errors";
 import { db } from "@appstrate/db/client";
+import { loadToolSpacePolicy } from "./integration-tool-catalog.ts";
 import { packageDistTags, packageVersions, packages } from "@appstrate/db/schema";
 import { and, eq, isNull, or } from "drizzle-orm";
 
@@ -164,6 +165,11 @@ interface ValidateAgentIntegrationSelectionsInput {
   manifest: Record<string, unknown>;
   /** Org owning the agent — bounds the integration visibility lookup. */
   orgId: string;
+  /**
+   * The space whose approved tools count as selectable. `null` when no space is in play (a
+   * whole-organization audit): only the manifest's own catalog is.
+   */
+  toolPolicySpaceId: string | null;
   /**
    * Also refuse a DECLARED integration whose effective tool selection is
    * empty (AFPS §4.4) — the state `assertIntegrationExposesTools` turns into
@@ -329,6 +335,7 @@ export async function validateAgentIntegrationSelections(
   const {
     manifest,
     orgId,
+    toolPolicySpaceId,
     requireCallableTools = false,
     dependencyOverrides,
     extraManifests,
@@ -429,9 +436,19 @@ export async function validateAgentIntegrationSelections(
     // ONE catalog, both checks. `resolveIntegrationToolCatalog` already
     // subtracts `hidden_tools` and appends the synthetic api_call/api_upload
     // entries, so this is the set the sidecar will actually register.
-    const catalog = resolveIntegrationToolCatalog({
-      integration: judgedManifest,
-    });
+    const approvedTools = toolPolicySpaceId
+      ? [
+          ...new Set(
+            (await loadToolSpacePolicy(toolPolicySpaceId, entry.id)).approvals.map(
+              (a) => a.tool_name,
+            ),
+          ),
+        ]
+      : [];
+    const catalog = [
+      ...resolveIntegrationToolCatalog({ integration: judgedManifest }),
+      ...approvedTools.map((name) => ({ name })),
+    ];
 
     // The integration told us its tool surface when it declares `tools_policy`,
     // or when its local server enumerates `tools`. Absent both, the surface is
@@ -473,6 +490,7 @@ export async function validateAgentIntegrationSelections(
     const issues = validateAgentIntegrationScopes(
       { id: entry.id, tools: entry.tools, scopes: entry.scopes },
       judgedManifest,
+      { approvedTools },
     );
     for (const issue of issues) {
       errors.push({

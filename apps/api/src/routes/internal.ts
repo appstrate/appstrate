@@ -25,7 +25,10 @@ import { verifyRunToken } from "../lib/verify-run-token.ts";
 import { requireRunBoundMember } from "../lib/run-bound-connection.ts";
 import { serveRunMcp } from "../services/run-tools-mcp.ts";
 import { RUN_ROUTE_RATE_PER_MIN, rateLimitByBearer } from "../middleware/rate-limit.ts";
-import { recordRunDegradedIntegration } from "../services/state/runs.ts";
+import { recordRunDegradedIntegration, recordRunUnavailableTools } from "../services/state/runs.ts";
+import { recordToolSnapshot } from "../services/integration-tool-snapshots.ts";
+import type { UnavailableToolReason } from "@appstrate/core/sidecar-types";
+import { readJsonBody } from "@appstrate/core/request-body";
 import {
   getRunEffectiveAgent,
   runAgentGoneDetail,
@@ -214,6 +217,34 @@ const EMPTY_CREDENTIALS_WIRE = {
   deliveryPlans: {},
   expiresAtEpochMs: {},
 };
+
+const UNAVAILABLE_TOOL_REASONS = [
+  "not_listed",
+  "hidden_tools",
+  "allowlist",
+  "definition_not_approved",
+  "name_collision",
+] as const satisfies readonly UnavailableToolReason[];
+
+/** At most this many tools in one report: the sidecar lists at most `MAX_LISTED_TOOLS`. */
+const MAX_OBSERVED_TOOLS = 500;
+const toolNameSchema = z.string().min(1).max(256);
+
+export const toolsObservedSchema = z.strictObject({
+  /** The descriptors as the server returned them; the platform fingerprints them itself. */
+  tools: z
+    .array(
+      z.looseObject({
+        name: toolNameSchema,
+        inputSchema: z.looseObject({ type: z.literal("object") }),
+      }),
+    )
+    .max(MAX_OBSERVED_TOOLS),
+  truncated: z.boolean(),
+  unavailable: z
+    .array(z.strictObject({ name: toolNameSchema, reason: z.enum(UNAVAILABLE_TOOL_REASONS) }))
+    .max(MAX_OBSERVED_TOOLS),
+});
 
 export function createInternalRouter(ratePerMin = RUN_ROUTE_RATE_PER_MIN) {
   const router = new Hono();
@@ -535,6 +566,46 @@ export function createInternalRouter(ratePerMin = RUN_ROUTE_RATE_PER_MIN) {
         packageId,
         { spaceId: run.spaceId, actor },
         revision,
+      );
+    }
+    return c.body(null, 204);
+  });
+
+  // POST /internal/integration-credentials/:scope/:name/tools-observed
+  // Sidecar-only: what a run's boot listed from a remote integration's server (the raw MCP
+  // descriptors) and which selected tools it could not expose. Same run checks as `upstream-success`.
+  // The run's metadata always records the unavailable tools; the listing becomes the integration's
+  // snapshot only for a platform-origin run, since a remote-origin sidecar runs on the caller's
+  // machine and is no authority on org state.
+  router.post(`/integration-credentials/${SCOPED_PACKAGE_ROUTE}/tools-observed`, async (c) => {
+    const packageId = `${c.req.param("scope")}/${c.req.param("name")}`;
+    await refuseConnectRun(c, packageId);
+    const { runId, run } = await verifyRunToken(c);
+    await assertAgentDeclaresIntegration(packageId, run, runId);
+    let connectionId: string | null = null;
+    if (c.req.query("connection_id") !== undefined) {
+      connectionId = requireBoundConnection(c, packageId, run, runId).connectionId;
+    } else if ((run.resolvedConnections?.[packageId] ?? []).length > 0) {
+      throw invalidRequest(
+        `\`connection_id\` is required: this run bound connections to '${packageId}'.`,
+        "connection_id",
+      );
+    }
+    const body = await readJsonBody(c, toolsObservedSchema);
+    await recordRunUnavailableTools(runId, packageId, body.unavailable);
+    if (run.runOrigin === "platform") {
+      await recordToolSnapshot({
+        orgId: run.orgId,
+        packageId,
+        connectionId,
+        tools: body.tools,
+        truncated: body.truncated,
+      }).catch((err: unknown) =>
+        logger.warn("tools-observed: tool snapshot not recorded", {
+          runId,
+          packageId,
+          error: err instanceof Error ? err.message : String(err),
+        }),
       );
     }
     return c.body(null, 204);

@@ -411,10 +411,18 @@ function IntegrationToolPanel({ packageId, spaceId, entry, onChange }: Integrati
             {t("agentEditor.integrations.tools.explicitNotice")}
           </p>
           <PackageToolCatalog
+            listedAt={detail.tool_snapshot?.listed_at}
             tools={nativeCatalog.map((tool) => ({
               name: tool.name,
               description: tool.description,
               permissions: tool.policy?.required_scopes,
+              status: tool.status,
+              origin: tool.origin,
+              modified: tool.modified,
+              scopesUnknown:
+                tool.origin === "approved" &&
+                detail.auths.length > 0 &&
+                Object.values(tool.policy?.required_scopes ?? {}).every((s) => s.length === 0),
             }))}
             selection={{ values: selectedTools, onToggle: toggleTool }}
           />

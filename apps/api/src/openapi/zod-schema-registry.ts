@@ -38,6 +38,7 @@ import {
 // --- API Key schemas (routes/api-keys.ts) ---
 import { createApiKeySchema } from "../routes/api-keys.ts";
 import { callRemoteToolSchema } from "../routes/credential-proxy.ts";
+import { toolsObservedSchema } from "../routes/internal.ts";
 
 // --- Organization schemas (routes/organizations.ts) ---
 import {
@@ -562,6 +563,14 @@ const coreSchemas: OpenApiSchemaEntry[] = [
   },
 
   // ─── Package draft file tree ────────────────────────────────────────────
+
+  // ─── Sidecar reports ────────────────────────────────────────────────────
+  {
+    method: "POST",
+    path: "/internal/integration-credentials/{scope}/{name}/tools-observed",
+    jsonSchema: toJsonSchema(toolsObservedSchema),
+    description: "Report the tools a run listed from a remote integration",
+  },
 
   // ─── Credential proxy ───────────────────────────────────────────────────
   {

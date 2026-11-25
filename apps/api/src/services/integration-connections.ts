@@ -124,14 +124,16 @@ import {
   displayAccountId,
   allowsUndeclaredTools,
   isUnauthenticatedIntegration,
-  resolveIntegrationToolCatalog,
   readDefaultTools,
+  type EffectiveToolEntry,
   type ConnectionCandidate,
   type ConnectionOverrides,
   type ConnectionResolutionError,
   type IntegrationManifest,
 } from "@appstrate/core/integration";
-import type { ConnectionReach, IntegrationToolCatalogEntry } from "@appstrate/shared-types";
+import type { ConnectionReach } from "@appstrate/shared-types";
+import { loadEffectiveToolCatalog } from "./integration-tool-catalog.ts";
+import type { ToolSnapshot } from "./integration-tool-snapshots.ts";
 import type { ConnectionVariables } from "./connect/connection-variables.ts";
 import { connectionVariablesOf, sameConnectionVariables } from "../lib/connection-identity.ts";
 import {
@@ -3358,6 +3360,38 @@ export async function getReconnectedConnection(
 // Aggregate views for the marketplace UI
 // ─────────────────────────────────────────────
 
+export interface ToolSnapshotSummary {
+  connection_id: string | null;
+  listed_at: string;
+  truncated: boolean;
+  /** Tools the server lists that the manifest does not declare. */
+  added: number;
+  /** Tools the manifest or an approval names that no listing returns. */
+  missing: number;
+  /** Tools whose definition changed since first seen. */
+  modified: number;
+}
+
+/** The most recent snapshot, with what the catalog says of the tools it listed. */
+function summariseToolSnapshot(
+  snapshots: readonly ToolSnapshot[],
+  catalog: readonly EffectiveToolEntry[],
+): ToolSnapshotSummary | null {
+  const latest = snapshots.reduce<ToolSnapshot | null>(
+    (best, s) => (best === null || s.listedAt > best.listedAt ? s : best),
+    null,
+  );
+  if (latest === null) return null;
+  return {
+    connection_id: latest.connectionId,
+    listed_at: latest.listedAt.toISOString(),
+    truncated: latest.truncated,
+    added: catalog.filter((e) => e.origin === "listed" && e.status !== "blocked").length,
+    missing: catalog.filter((e) => e.status === "missing").length,
+    modified: catalog.filter((e) => e.modified).length,
+  };
+}
+
 /** Marketplace detail view: the manifest and the per-auth status for the calling actor. */
 export async function getIntegrationAuthStatuses(
   scope: SpaceScope,
@@ -3369,8 +3403,10 @@ export async function getIntegrationAuthStatuses(
 ): Promise<{
   manifest: IntegrationManifest;
   auths: IntegrationAuthStatus[];
-  /** The agent-facing tool catalog ({@link resolveIntegrationToolCatalog}). */
-  tool_catalog: IntegrationToolCatalogEntry[];
+  /** The agent-facing tool catalog as this space can use it ({@link loadEffectiveToolCatalog}). */
+  tool_catalog: EffectiveToolEntry[];
+  /** The latest listing of the server behind it, summarised; `null` when none was recorded. */
+  tool_snapshot: ToolSnapshotSummary | null;
   /** AFPS §4.4: the tools an agent inherits without a `tools` selection; `undefined` when none. */
   default_tools: readonly string[] | "*" | undefined;
   /** AFPS §7.8, verbatim: gates the editor's "include all upstream tools" toggle. */
@@ -3390,10 +3426,6 @@ export async function getIntegrationAuthStatuses(
   const manifest = await loadManifestOrThrow(scope, packageId);
   const authsMap = manifest.auths ?? {};
 
-  const toolCatalog: IntegrationToolCatalogEntry[] = resolveIntegrationToolCatalog({
-    integration: manifest,
-  });
-
   const oauthClients = await readOAuthClientRegistrations(
     scope.orgId,
     [packageId],
@@ -3410,6 +3442,15 @@ export async function getIntegrationAuthStatuses(
     .select({ blocked: spacePackages.blockUserConnections })
     .from(spacePackages)
     .where(and(eq(spacePackages.packageId, packageId), eq(spacePackages.spaceId, scope.spaceId)));
+  const { catalog: toolCatalog, snapshots } = await loadEffectiveToolCatalog({
+    orgId: scope.orgId,
+    spaceId: scope.spaceId,
+    packageId,
+    manifest,
+    connectionIds: isUnauthenticatedIntegration(manifest)
+      ? [null]
+      : allConnections.map((c) => c.id),
+  });
   // The clients a connect of the auth can use: a classic auth chooses among the manual rows only
   // (`loadClientTiers`), so a leftover auto-provisioned row does not make it connectable.
   const hasUsableOAuthClient = (key: string, autoProvisioned: boolean) =>
@@ -3443,6 +3484,7 @@ export async function getIntegrationAuthStatuses(
     manifest,
     auths,
     tool_catalog: toolCatalog,
+    tool_snapshot: summariseToolSnapshot(snapshots, toolCatalog),
     default_tools: readDefaultTools(manifest),
     allow_undeclared_tools: allowsUndeclaredTools(manifest),
     block_user_connections: settings?.blocked === true,

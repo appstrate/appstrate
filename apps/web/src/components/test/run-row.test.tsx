@@ -32,3 +32,29 @@ describe("RunRow", () => {
     expect(row(false)).not.toContain("Studio");
   });
 });
+
+describe("RunRow — degraded badge", () => {
+  function rowWith(metadata: unknown): string {
+    return renderInSpace(
+      <RunRow run={makeRun({ packageId: "@acme/reporter", metadata })} agentName="Reporter" />,
+      { overview: false, queryClient: memberSpaceClient([]) },
+    );
+  }
+
+  it("flags a run that lost an integration or a tool", () => {
+    const label = i18n.t("agents:run.degraded.badge");
+    expect(rowWith({ degraded_integrations: ["@acme/gmail"] })).toContain(label);
+    expect(
+      rowWith({
+        unavailable_tools: [{ integration_id: "@acme/gmail", name: "x", reason: "allowlist" }],
+      }),
+    ).toContain(label);
+  });
+
+  it("flags nothing for a clean run", () => {
+    const label = i18n.t("agents:run.degraded.badge");
+    expect(rowWith({})).not.toContain(label);
+    expect(rowWith(null)).not.toContain(label);
+    expect(rowWith({ unavailable_tools: [] })).not.toContain(label);
+  });
+});

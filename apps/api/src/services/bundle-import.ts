@@ -682,6 +682,7 @@ function carriedVersionsById(bundle: Bundle): Map<string, CarriedVersion[]> {
 async function assertBundleAgentsExposeCallableTools(
   bundle: Bundle,
   orgId: string,
+  spaceId: string,
   carried: ReadonlyMap<string, CarriedVersion[]>,
 ): Promise<void> {
   const errors: ValidationFieldError[] = [];
@@ -693,6 +694,7 @@ async function assertBundleAgentsExposeCallableTools(
     const packageErrors = await validateAgentIntegrationSelections({
       manifest: pkg.manifest as unknown as Record<string, unknown>,
       orgId,
+      toolPolicySpaceId: spaceId,
       requireCallableTools: true,
       extraManifests: carried,
     });
@@ -770,7 +772,7 @@ export async function preflightBundleImport(
   assertBundleRuntimeBindingsSystemOnly(bundle);
   await authorize(bundle);
   const carried = carriedVersionsById(bundle);
-  await assertBundleAgentsExposeCallableTools(bundle, scope.orgId, carried);
+  await assertBundleAgentsExposeCallableTools(bundle, scope.orgId, scope.spaceId, carried);
   const conflicts = await detectBundleConflicts(bundle, scope);
   return { bundle, conflicts };
 }

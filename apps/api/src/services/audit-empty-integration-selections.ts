@@ -76,6 +76,7 @@ async function emptySelections(
   const errors = await validateAgentIntegrationSelections({
     manifest: agentManifest,
     orgId,
+    toolPolicySpaceId: null,
     requireCallableTools: true,
     ...(dependencyOverrides ? { dependencyOverrides } : {}),
   });

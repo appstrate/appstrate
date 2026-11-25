@@ -22,6 +22,7 @@ import {
   missingScopesForConnection,
   resolveIntegrationToolCatalog,
   type IntegrationManifest,
+  type ToolSpacePolicy,
 } from "@appstrate/core/integration";
 import { mapWithConcurrency } from "@appstrate/core/map-with-concurrency";
 import { API_CALL_TOOL_NAME, API_UPLOAD_TOOL_NAME } from "@appstrate/afps-shared/api-tool-naming";
@@ -37,6 +38,7 @@ import type { ToolDescriptorReduction } from "@appstrate/mcp-transport";
 import { ApiError, notFound } from "../../lib/errors.ts";
 import { logger } from "../../lib/logger.ts";
 import type { ProxyConnectionStatus } from "../integration-connections.ts";
+import { loadToolSpacePolicy } from "../integration-tool-catalog.ts";
 import {
   activeIntegrationIds,
   connectionsOutsideRun,
@@ -46,6 +48,7 @@ import {
   type IntegrationOutsideRun,
 } from "./integration-resolver.ts";
 import {
+  catalogUnavailable,
   connectionIdRefusedWithoutAuth,
   listingDeadline,
   listRemoteTools,
@@ -344,36 +347,19 @@ type RemoteListing =
  * Whether `name` may be one of a remote integration's tools, its server unread: any name of its
  * namespace when it allows undeclared tools, else one of its declared tools' names.
  */
-function mayNameRemoteTool(entry: ListedIntegration, name: string): boolean {
+function mayNameRemoteTool(
+  entry: ListedIntegration,
+  policy: ToolSpacePolicy,
+  name: string,
+): boolean {
   if (!name.startsWith(`${entry.namespace}__`)) return false;
   if (allowsUndeclaredTools(entry.manifest)) return true;
-  return exposeRemoteTools(
-    entry.id,
-    entry.namespace,
-    offeredRemoteToolNames(entry.manifest, undefined),
-  ).has(name);
-}
-
-/**
- * The catalog could not be read to prove what `name` calls, `listing_failure` saying why when
- * known. Retryable: a later listing may read it.
- */
-function catalogUnavailable(
-  integrationId: string,
-  name: string,
-  listingFailure: string | undefined,
-): ApiError {
-  return new ApiError({
-    status: 503,
-    code: "tool_catalog_unavailable",
-    title: "Tool Catalog Unavailable",
-    detail:
-      `The catalog of ${integrationId}'s MCP server could not be read` +
-      (listingFailure ? ` (${listingFailure})` : "") +
-      `, and only it can say which of its tools '${name}' names; nothing was sent. ` +
-      `The call may be retried once a listing reads the catalog.`,
-    ...(listingFailure ? { extensions: { listing_failure: listingFailure } } : {}),
-  });
+  const offered = offeredRemoteToolNames(entry.manifest, undefined, policy);
+  // An approved tool is named like a declared one; its listing says whether it is offered.
+  for (const { tool_name } of policy.approvals) {
+    if (!policy.blocks.includes(tool_name)) offered.add(tool_name);
+  }
+  return exposeRemoteTools(entry.id, entry.namespace, offered).has(name);
 }
 
 /**
@@ -386,13 +372,14 @@ async function remoteTools(
   query: Pick<IntegrationToolQuery, "name" | "connectionId" | "cachedOnly">,
 ): Promise<RemoteListing> {
   const { id: integrationId, namespace, manifest, connections } = entry;
+  const policy = await loadToolSpacePolicy(caller.scope.spaceId, integrationId);
   if (
     query.name !== undefined &&
     query.connectionId !== undefined &&
     isUnauthenticatedIntegration(manifest)
   ) {
     // A call naming a connection of an integration that binds none: refused before any exchange.
-    if (!mayNameRemoteTool(entry, query.name)) return { tools: [], truncatedAt: null };
+    if (!mayNameRemoteTool(entry, policy, query.name)) return { tools: [], truncatedAt: null };
     return {
       unlisted: {
         integration_package_id: integrationId,
@@ -407,7 +394,7 @@ async function remoteTools(
     catalog = await readRemoteCatalog(caller, entry, query.connectionId, query.cachedOnly === true);
   } catch (err) {
     if (!(err instanceof ApiError)) throw err;
-    if (query.name !== undefined && !mayNameRemoteTool(entry, query.name)) {
+    if (query.name !== undefined && !mayNameRemoteTool(entry, policy, query.name)) {
       return { tools: [], truncatedAt: null };
     }
     return {
@@ -472,6 +459,9 @@ async function remoteTools(
     // Its server unread, an undeclared tool is called by the name it was given, when that name
     // is its own; any other name needs the catalog.
     const upstream = selfNamedUpstream(namespace, named);
+    if (upstream !== undefined && policy.blocks.includes(upstream)) {
+      return { tools: [], truncatedAt: null };
+    }
     if (upstream === undefined) {
       return {
         unlisted: {

@@ -21,8 +21,10 @@
 
 import { describe, it, expect, spyOn } from "bun:test";
 import {
+  capObservedTools,
   createIntegrationCredentialsSource,
   fetchInitialIntegrationCredentials,
+  postIntegrationToolsObserved,
   type IntegrationCredentialsWire,
 } from "../integration-credentials-source.ts";
 import { logger } from "../logger.ts";
@@ -787,5 +789,58 @@ describe("fetchInitialIntegrationCredentials", () => {
     );
     expect(source.deliveryPlans().session?.value).toBe("sess-1");
     expect(source.current().auths).toHaveLength(1);
+  });
+});
+
+describe("postIntegrationToolsObserved", () => {
+  it("posts the raw tools, the truncation flag and the unavailable list to the tools-observed route", async () => {
+    const calls: Array<{ url: string; init: RequestInit }> = [];
+    const fetchFn = (async (url: string, init: RequestInit) => {
+      calls.push({ url, init });
+      return new Response(null, { status: 204 });
+    }) as unknown as typeof fetch;
+    const res = await postIntegrationToolsObserved(
+      "@scope/name",
+      "conn-a",
+      {
+        tools: [{ name: "a", inputSchema: { type: "object" } }],
+        truncated: false,
+        unavailable: [{ name: "b", reason: "not_listed" }],
+      },
+      { platformApiUrl: "http://api", runToken: "tok", fetchFn },
+    );
+    expect(res.status).toBe(204);
+    expect(calls[0]!.url).toBe(
+      "http://api/internal/integration-credentials/@scope/name/tools-observed?connection_id=conn-a",
+    );
+    expect(calls[0]!.init.method).toBe("POST");
+    expect((calls[0]!.init.headers as Record<string, string>).Authorization).toBe("Bearer tok");
+    expect(JSON.parse(calls[0]!.init.body as string)).toEqual({
+      tools: [{ name: "a", inputSchema: { type: "object" } }],
+      truncated: false,
+      unavailable: [{ name: "b", reason: "not_listed" }],
+    });
+  });
+});
+
+describe("capObservedTools", () => {
+  it("keeps everything under the cap", () => {
+    expect(capObservedTools([{ a: 1 }, { a: 2 }], 1000)).toEqual({
+      tools: [{ a: 1 }, { a: 2 }],
+      truncated: false,
+    });
+  });
+
+  it("drops trailing tools past the cap and flags truncation", () => {
+    const tools = [{ d: "x".repeat(40) }, { d: "y".repeat(40) }, { d: "z".repeat(40) }];
+    const one = JSON.stringify(tools[0]).length;
+    const capped = capObservedTools(tools, 2 + one * 2 + 1);
+    expect(capped.tools).toEqual([tools[0]!, tools[1]!]);
+    expect(capped.truncated).toBe(true);
+    expect(JSON.stringify(capped.tools).length).toBeLessThanOrEqual(2 + one * 2 + 1);
+  });
+
+  it("drops a single tool larger than the cap", () => {
+    expect(capObservedTools([{ d: "x".repeat(100) }], 50)).toEqual({ tools: [], truncated: true });
   });
 });

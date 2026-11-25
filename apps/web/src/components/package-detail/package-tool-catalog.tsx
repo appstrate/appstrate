@@ -3,6 +3,7 @@
 import type { ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { Wrench } from "lucide-react";
+import { cn } from "@appstrate/ui/cn";
 import { Checkbox } from "@appstrate/ui/components/checkbox";
 import { Badge } from "@appstrate/ui/components/badge";
 import { DataTable, type DataColumn } from "../data-table";
@@ -12,11 +13,85 @@ import { CellEmpty } from "../table-cells";
 import { rowActionsColumn } from "../row-actions-column";
 import { useLocalListParams } from "../../lib/list-params";
 import { matchesSearch } from "../../lib/strings";
+import { formatDateField } from "../../lib/format-date";
 
 export interface PackageTool {
   name: string;
   description?: string;
   permissions?: Readonly<Record<string, readonly string[]>>;
+  /** What the space can do with the tool; absent for a catalog that carries no verdict. */
+  status?: "available" | "missing" | "pending" | "blocked";
+  /** `approved`: undeclared, validated in this space. */
+  origin?: "declared" | "approved" | "listed";
+  /** The listed definition changed since first seen. */
+  modified?: boolean;
+  /** Required scopes are unknown on an authenticated integration. */
+  scopesUnknown?: boolean;
+}
+
+/** Why a tool is not usable here, as the line under its name; `null` for a usable tool. */
+function useUnavailableReason(tool: PackageTool, listedAt: string | null | undefined) {
+  const { t } = useTranslation("agents");
+  if (tool.status === "missing") {
+    return listedAt
+      ? t("packageTools.reason.missingAt", { date: formatDateField(listedAt) })
+      : t("packageTools.reason.missing");
+  }
+  if (tool.status === "pending") return t("packageTools.reason.pending");
+  if (tool.status === "blocked") return t("packageTools.reason.blocked");
+  return null;
+}
+
+function ToolNameCell({
+  tool,
+  listedAt,
+  selection,
+}: {
+  tool: PackageTool;
+  listedAt: string | null | undefined;
+  selection: { values: ReadonlySet<string>; onToggle: (name: string) => void } | undefined;
+}) {
+  const { t } = useTranslation("agents");
+  const reason = useUnavailableReason(tool, listedAt);
+  const selected = selection?.values.has(tool.name) ?? false;
+  return (
+    <div className="flex items-start gap-2">
+      {selection && (
+        <Checkbox
+          className="mt-0.5"
+          aria-label={t("packageTools.select", { name: tool.name })}
+          checked={selected}
+          // A selected tool stays toggleable so the author can drop it; an unusable one cannot be added.
+          disabled={reason !== null && !selected}
+          onCheckedChange={() => selection.onToggle(tool.name)}
+        />
+      )}
+      <div className={cn("flex min-w-0 flex-col gap-1", reason !== null && "opacity-60")}>
+        <span className="text-foreground text-sm font-medium break-words">{tool.name}</span>
+        {reason && (
+          <span className="text-muted-foreground text-xs" data-testid={`tool-reason-${tool.name}`}>
+            {reason}
+          </span>
+        )}
+        {reason && selected && (
+          <span className="text-warning text-xs" data-testid={`tool-warning-${tool.name}`}>
+            {t("packageTools.unavailableSelected")}
+          </span>
+        )}
+        <div className="flex flex-wrap gap-1.5 empty:hidden">
+          {tool.origin === "approved" && (
+            <Badge variant="secondary">{t("packageTools.approved")}</Badge>
+          )}
+          {tool.scopesUnknown && <Badge variant="outline">{t("packageTools.scopesUnknown")}</Badge>}
+          {tool.modified && (
+            <span className="text-muted-foreground text-xs italic">
+              {t("packageTools.modified")}
+            </span>
+          )}
+        </div>
+      </div>
+    </div>
+  );
 }
 
 /** One tool catalog for read-only package details and optional bundle selection. */
@@ -25,12 +100,15 @@ export function PackageToolCatalog({
   selection,
   actions,
   rowActions,
+  listedAt,
 }: {
   /** The list's one "Actions" menu, when the catalog is edited where it is read. */
   actions?: ReactNode;
   /** A row's "…" menu, likewise. */
   rowActions?: (tool: PackageTool) => ReactNode;
   tools: PackageTool[];
+  /** When the server was last read, named by a « missing » tool's reason. */
+  listedAt?: string | null;
   selection?: {
     values: ReadonlySet<string>;
     onToggle: (name: string) => void;
@@ -59,19 +137,7 @@ export function PackageToolCatalog({
       header: t("log.tool"),
       width: 160,
       elastic: true,
-      cell: (tool) => (
-        <div className="flex items-start gap-2">
-          {selection && (
-            <Checkbox
-              className="mt-0.5"
-              aria-label={t("packageTools.select", { name: tool.name })}
-              checked={selection.values.has(tool.name)}
-              onCheckedChange={() => selection.onToggle(tool.name)}
-            />
-          )}
-          <span className="text-foreground text-sm font-medium break-words">{tool.name}</span>
-        </div>
-      ),
+      cell: (tool) => <ToolNameCell tool={tool} listedAt={listedAt} selection={selection} />,
     },
     {
       id: "description",

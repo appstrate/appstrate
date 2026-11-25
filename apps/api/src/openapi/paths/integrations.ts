@@ -613,10 +613,32 @@ const authStatusSchema = {
 
 const toolCatalogEntrySchema = {
   type: "object",
-  required: ["name"],
+  required: ["name", "status", "origin", "modified", "fingerprint"],
   properties: {
     name: { type: "string" },
     description: { type: "string" },
+    status: {
+      type: "string",
+      enum: ["available", "missing", "pending", "blocked"],
+      description:
+        "What this space can do with the tool. `available`: usable. `missing`: the manifest or an approval names it and the server no longer lists it. `pending`: the server lists an undeclared tool (or a new definition of an approved one) on a closed catalog and the space has not approved it. `blocked`: the space refuses it, whatever its definition.",
+    },
+    origin: {
+      type: "string",
+      enum: ["declared", "approved", "listed"],
+      description:
+        "`declared`: in the manifest's catalog. `approved`: undeclared, approved in this space. `listed`: only the server lists it.",
+    },
+    modified: {
+      type: "boolean",
+      description:
+        "A listing carries a definition that changed since first seen, or that differs from every approval. A declared tool whose definition changed stays `available`.",
+    },
+    fingerprint: {
+      type: ["string", "null"],
+      description:
+        "Fingerprint of the definition the first stored listing carries; `null` when none lists the tool.",
+    },
     policy: {
       type: "object",
       properties: {
@@ -665,6 +687,7 @@ const integrationDetailSchema = {
     "manifest",
     "auths",
     "tool_catalog",
+    "tool_snapshot",
     "allow_undeclared_tools",
     "active",
     "block_user_connections",
@@ -682,6 +705,34 @@ const integrationDetailSchema = {
     // auto-hidden connect.tool primitives. Falls back to
     // `manifest.tools_policy` keys when a local server declares no catalog.
     tool_catalog: { type: "array", items: toolCatalogEntrySchema },
+    tool_snapshot: {
+      oneOf: [
+        {
+          type: "object",
+          required: ["connection_id", "listed_at", "truncated", "added", "missing", "modified"],
+          properties: {
+            connection_id: { type: ["string", "null"], format: "uuid" },
+            listed_at: { type: "string", format: "date-time" },
+            truncated: { type: "boolean" },
+            added: {
+              type: "integer",
+              description: "Tools the server lists that the manifest does not declare.",
+            },
+            missing: {
+              type: "integer",
+              description: "Tools the manifest or an approval names that no listing returns.",
+            },
+            modified: {
+              type: "integer",
+              description: "Tools whose definition changed since first seen.",
+            },
+          },
+        },
+        { type: "null" },
+      ],
+      description:
+        "The latest stored listing of the server behind `tool_catalog`, summarised; `null` when none was recorded yet.",
+    },
     // AFPS §4.4 — the tool(s) an agent inherits when it declares this
     // integration without an `integrations_configuration.<id>.tools`
     // selection. Pairs with `tool_catalog` so a builder sees what is on by

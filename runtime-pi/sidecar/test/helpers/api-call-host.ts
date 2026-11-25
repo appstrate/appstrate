@@ -35,7 +35,7 @@ export async function buildApiCallHost(
       serverInfo: { name: `test-api-call-${integ.integrationId}`, version: "1" },
     });
     const sharedNamespace = allocatedByRequested.get(integ.namespace);
-    const allocated = await host.register({
+    const { namespace: allocated } = await host.register({
       integrationId: integ.namespace,
       namespace: integ.namespace,
       client: wrapClient(pair.client, { close: () => pair.close() }),

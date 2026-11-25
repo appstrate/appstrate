@@ -1341,6 +1341,110 @@ export function resolveIntegrationToolCatalog(
   return out;
 }
 
+export type EffectiveToolStatus = "available" | "missing" | "pending" | "blocked";
+/** `declared`: in the manifest's catalog; `approved`: undeclared, approved in the space; `listed`: only the server lists it. */
+export type EffectiveToolOrigin = "declared" | "approved" | "listed";
+
+/** A catalog entry with what the space policy and the live server listings say about it. */
+export interface EffectiveToolEntry extends IntegrationToolCatalogEntry {
+  status: EffectiveToolStatus;
+  origin: EffectiveToolOrigin;
+  /** A listing carries a definition that changed since first seen, or differs from every approval. */
+  modified: boolean;
+  /** Fingerprint of the first snapshot listing the tool, `null` when none does. */
+  fingerprint: string | null;
+}
+
+/** The space's decisions on one integration's tools. */
+export interface ToolSpacePolicy {
+  approvals: readonly { tool_name: string; fingerprint: string }[];
+  blocks: readonly string[];
+}
+
+/** One stored listing of the server (one per connection). */
+export interface ToolSnapshotView {
+  tools: readonly { name: string; fingerprint: string; changed_at: string | null }[];
+  truncated: boolean;
+}
+
+export interface ResolveEffectiveToolCatalogInput {
+  integration: IntegrationManifest;
+  /** `null`: no space context, nothing approved or blocked. */
+  policy: ToolSpacePolicy | null;
+  snapshots: readonly ToolSnapshotView[];
+}
+
+/**
+ * The catalog an agent can actually use in a space: the manifest's declared tools, plus the
+ * undeclared ones the server lists, judged against the space's approvals and blocks.
+ * Declared tools are never held back by a changed definition (`modified` only signals it);
+ * on a closed catalog an undeclared tool needs an approval of its current fingerprint.
+ * Declared tools first in catalog order, the rest by name.
+ */
+export function resolveEffectiveToolCatalog(
+  input: ResolveEffectiveToolCatalogInput,
+): EffectiveToolEntry[] {
+  const { integration, policy, snapshots } = input;
+  const declared = resolveIntegrationToolCatalog({ integration });
+  const declaredNames = new Set(declared.map((e) => e.name));
+  const open = allowsUndeclaredTools(integration);
+  const blocked = new Set(policy?.blocks ?? []);
+
+  // A manifest that declares the tool wins over an approval of it.
+  const approvals = new Map<string, Set<string>>();
+  for (const a of policy?.approvals ?? []) {
+    if (declaredNames.has(a.tool_name)) continue;
+    const set = approvals.get(a.tool_name) ?? new Set<string>();
+    set.add(a.fingerprint);
+    approvals.set(a.tool_name, set);
+  }
+
+  const listings = new Map<string, { fingerprint: string; changed_at: string | null }[]>();
+  for (const snapshot of snapshots) {
+    for (const tool of snapshot.tools) {
+      const list = listings.get(tool.name) ?? [];
+      list.push(tool);
+      listings.set(tool.name, list);
+    }
+  }
+  // Absence proves nothing once a listing was cut short, or when nothing was ever listed.
+  const absenceIsMissing = snapshots.length > 0 && !snapshots.some((s) => s.truncated);
+
+  const judge = (
+    entry: IntegrationToolCatalogEntry,
+    origin: EffectiveToolOrigin,
+  ): EffectiveToolEntry => {
+    const listed = listings.get(entry.name);
+    let status: EffectiveToolStatus;
+    let modified = false;
+    if (!listed) {
+      status = absenceIsMissing ? "missing" : "available";
+    } else {
+      modified = listed.some((l) => l.changed_at !== null);
+      const approved = approvals.get(entry.name);
+      if (origin === "declared" || open) {
+        status = "available";
+      } else if (approved && listed.some((l) => approved.has(l.fingerprint))) {
+        status = "available";
+      } else {
+        status = "pending";
+        modified = approved !== undefined;
+      }
+    }
+    if (blocked.has(entry.name)) status = "blocked";
+    return { ...entry, status, origin, modified, fingerprint: listed?.[0]?.fingerprint ?? null };
+  };
+
+  const undeclared = [...new Set([...listings.keys(), ...approvals.keys()])]
+    .filter((name) => !declaredNames.has(name))
+    .sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));
+
+  return [
+    ...declared.map((entry) => judge(entry, "declared")),
+    ...undeclared.map((name) => judge({ name }, approvals.has(name) ? "approved" : "listed")),
+  ];
+}
+
 function hiddenToolNames(
   integration: IntegrationManifest,
   apiCallConfigs: readonly ApiCallConfig[],
@@ -1805,14 +1909,18 @@ export interface AgentIntegrationScopeError {
  * the sparse `tools_policy` table (the resolver falls back to its keys).
  *
  * Default semantics:
- *   - Empty resolved catalog → no tool validation (caller is responsible
- *     for surfacing "no exposable tools").
+ *   - A catalog that allows undeclared tools (`allow_undeclared_tools`) → no
+ *     tool-name validation: the server's own listing is the authority. A
+ *     closed catalog refuses any name it neither declares nor has approved,
+ *     including every name when it declares nothing.
+ *   - `options.approvedTools`: names the space approved; they count as known.
  *   - No `scope_catalog` on any auth → any scope accepted (the IdP is the
  *     ultimate authority at consent time).
  */
 export function validateAgentIntegrationScopes(
   selection: Pick<ManifestIntegrationEntry, "id" | "tools" | "scopes">,
   integrationManifest: IntegrationManifest,
+  options?: { approvedTools?: readonly string[] },
 ): AgentIntegrationScopeError[] {
   const errors: AgentIntegrationScopeError[] = [];
 
@@ -1830,11 +1938,11 @@ export function validateAgentIntegrationScopes(
       });
     }
   } else if (selection.tools && selection.tools.length > 0) {
-    const catalog = resolveIntegrationToolCatalog({
-      integration: integrationManifest,
-    });
-    if (catalog.length > 0) {
-      const allowed = new Set(catalog.map((e) => e.name));
+    if (!allowsUndeclaredTools(integrationManifest)) {
+      const allowed = new Set([
+        ...resolveIntegrationToolCatalog({ integration: integrationManifest }).map((e) => e.name),
+        ...(options?.approvedTools ?? []),
+      ]);
       for (const tool of selection.tools) {
         if (allowed.has(tool)) continue;
         errors.push({

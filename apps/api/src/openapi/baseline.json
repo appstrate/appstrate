@@ -8168,6 +8168,7 @@
                     "manifest",
                     "auths",
                     "tool_catalog",
+                    "tool_snapshot",
                     "allow_undeclared_tools",
                     "active",
                     "block_user_connections",
@@ -8400,13 +8401,31 @@
                       "type": "array",
                       "items": {
                         "type": "object",
-                        "required": ["name"],
+                        "required": ["name", "status", "origin", "modified", "fingerprint"],
                         "properties": {
                           "name": {
                             "type": "string"
                           },
                           "description": {
                             "type": "string"
+                          },
+                          "status": {
+                            "type": "string",
+                            "enum": ["available", "missing", "pending", "blocked"],
+                            "description": "What this space can do with the tool. `available`: usable. `missing`: the manifest or an approval names it and the server no longer lists it. `pending`: the server lists an undeclared tool (or a new definition of an approved one) on a closed catalog and the space has not approved it. `blocked`: the space refuses it, whatever its definition."
+                          },
+                          "origin": {
+                            "type": "string",
+                            "enum": ["declared", "approved", "listed"],
+                            "description": "`declared`: in the manifest's catalog. `approved`: undeclared, approved in this space. `listed`: only the server lists it."
+                          },
+                          "modified": {
+                            "type": "boolean",
+                            "description": "A listing carries a definition that changed since first seen, or that differs from every approval. A declared tool whose definition changed stays `available`."
+                          },
+                          "fingerprint": {
+                            "type": ["string", "null"],
+                            "description": "Fingerprint of the definition the first stored listing carries; `null` when none lists the tool."
                           },
                           "policy": {
                             "type": "object",
@@ -8424,6 +8443,50 @@
                           }
                         }
                       }
+                    },
+                    "tool_snapshot": {
+                      "oneOf": [
+                        {
+                          "type": "object",
+                          "required": [
+                            "connection_id",
+                            "listed_at",
+                            "truncated",
+                            "added",
+                            "missing",
+                            "modified"
+                          ],
+                          "properties": {
+                            "connection_id": {
+                              "type": ["string", "null"],
+                              "format": "uuid"
+                            },
+                            "listed_at": {
+                              "type": "string",
+                              "format": "date-time"
+                            },
+                            "truncated": {
+                              "type": "boolean"
+                            },
+                            "added": {
+                              "type": "integer",
+                              "description": "Tools the server lists that the manifest does not declare."
+                            },
+                            "missing": {
+                              "type": "integer",
+                              "description": "Tools the manifest or an approval names that no listing returns."
+                            },
+                            "modified": {
+                              "type": "integer",
+                              "description": "Tools whose definition changed since first seen."
+                            }
+                          }
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ],
+                      "description": "The latest stored listing of the server behind `tool_catalog`, summarised; `null` when none was recorded yet."
                     },
                     "default_tools": {
                       "oneOf": [
@@ -11142,6 +11205,7 @@
                     "manifest",
                     "auths",
                     "tool_catalog",
+                    "tool_snapshot",
                     "allow_undeclared_tools",
                     "active",
                     "block_user_connections",
@@ -11374,13 +11438,31 @@
                       "type": "array",
                       "items": {
                         "type": "object",
-                        "required": ["name"],
+                        "required": ["name", "status", "origin", "modified", "fingerprint"],
                         "properties": {
                           "name": {
                             "type": "string"
                           },
                           "description": {
                             "type": "string"
+                          },
+                          "status": {
+                            "type": "string",
+                            "enum": ["available", "missing", "pending", "blocked"],
+                            "description": "What this space can do with the tool. `available`: usable. `missing`: the manifest or an approval names it and the server no longer lists it. `pending`: the server lists an undeclared tool (or a new definition of an approved one) on a closed catalog and the space has not approved it. `blocked`: the space refuses it, whatever its definition."
+                          },
+                          "origin": {
+                            "type": "string",
+                            "enum": ["declared", "approved", "listed"],
+                            "description": "`declared`: in the manifest's catalog. `approved`: undeclared, approved in this space. `listed`: only the server lists it."
+                          },
+                          "modified": {
+                            "type": "boolean",
+                            "description": "A listing carries a definition that changed since first seen, or that differs from every approval. A declared tool whose definition changed stays `available`."
+                          },
+                          "fingerprint": {
+                            "type": ["string", "null"],
+                            "description": "Fingerprint of the definition the first stored listing carries; `null` when none lists the tool."
                           },
                           "policy": {
                             "type": "object",
@@ -11398,6 +11480,50 @@
                           }
                         }
                       }
+                    },
+                    "tool_snapshot": {
+                      "oneOf": [
+                        {
+                          "type": "object",
+                          "required": [
+                            "connection_id",
+                            "listed_at",
+                            "truncated",
+                            "added",
+                            "missing",
+                            "modified"
+                          ],
+                          "properties": {
+                            "connection_id": {
+                              "type": ["string", "null"],
+                              "format": "uuid"
+                            },
+                            "listed_at": {
+                              "type": "string",
+                              "format": "date-time"
+                            },
+                            "truncated": {
+                              "type": "boolean"
+                            },
+                            "added": {
+                              "type": "integer",
+                              "description": "Tools the server lists that the manifest does not declare."
+                            },
+                            "missing": {
+                              "type": "integer",
+                              "description": "Tools the manifest or an approval names that no listing returns."
+                            },
+                            "modified": {
+                              "type": "integer",
+                              "description": "Tools whose definition changed since first seen."
+                            }
+                          }
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ],
+                      "description": "The latest stored listing of the server behind `tool_catalog`, summarised; `null` when none was recorded yet."
                     },
                     "default_tools": {
                       "oneOf": [
@@ -20310,6 +20436,145 @@
           },
           "409": {
             "description": "The definition this run executes is no longer readable (`run_definition_gone` / `run_agent_deleted`, as on the GET endpoint), so the run token's authorization set cannot be decided; or `connect_run_no_refresh` — the caller is an ephemeral connect run, which holds no stored credential.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalServerError"
+          }
+        }
+      }
+    },
+    "/internal/integration-credentials/{scope}/{name}/tools-observed": {
+      "post": {
+        "operationId": "reportIntegrationToolsObserved",
+        "x-appstrate-space": {
+          "kind": "organization"
+        },
+        "tags": ["Internal"],
+        "summary": "Report the tools a run's boot listed from a remote integration",
+        "description": "Sidecar-only. Same Bearer run token and agent-dependency and activation checks as the GET endpoint. `connection_id` names a connection this run bound to the integration, as for `upstream-success`; it is omitted only for an integration that binds none (an unauthenticated one). Called once per connection, fire-and-forget, after the sidecar registered the integration's tools. `tools` are the MCP descriptors as the server returned them (the platform computes their fingerprints itself); the sidecar cuts them at 1 MiB and sets `truncated`. `unavailable` lists the tools the agent selected that this run does not expose, each with its reason; the run's `metadata.unavailable_tools[]` is stamped with them (`integration_id`, `name`, `reason`, at most 50 per integration). The listing becomes the integration's tool snapshot only when the run is executed by the platform: a remote-origin run's sidecar is on the caller's machine and is no authority on organization state, so its listing is dropped.",
+        "security": [
+          {
+            "bearerExecToken": []
+          }
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/PackageScope"
+          },
+          {
+            "$ref": "#/components/parameters/PackageName"
+          },
+          {
+            "name": "connection_id",
+            "in": "query",
+            "required": false,
+            "description": "The connection this run bound to the integration (a member of `runs.resolved_connections[<integration id>]`). Required unless the run bound none. An id the run did not bind is a `400 connection_not_in_run`.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["tools", "truncated", "unavailable"],
+                "properties": {
+                  "tools": {
+                    "type": "array",
+                    "maxItems": 500,
+                    "items": {
+                      "type": "object",
+                      "required": ["name", "inputSchema"],
+                      "properties": {
+                        "name": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 256
+                        },
+                        "inputSchema": {
+                          "type": "object",
+                          "required": ["type"],
+                          "properties": {
+                            "type": {
+                              "type": "string",
+                              "enum": ["object"]
+                            }
+                          }
+                        }
+                      }
+                    }
+                  },
+                  "truncated": {
+                    "type": "boolean"
+                  },
+                  "unavailable": {
+                    "type": "array",
+                    "maxItems": 500,
+                    "items": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": ["name", "reason"],
+                      "properties": {
+                        "name": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 256
+                        },
+                        "reason": {
+                          "type": "string",
+                          "enum": [
+                            "not_listed",
+                            "hidden_tools",
+                            "allowlist",
+                            "definition_not_approved",
+                            "name_collision"
+                          ]
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "204": {
+            "description": "Report recorded."
+          },
+          "400": {
+            "description": "The `connection_id` selector is missing, malformed, or names a connection this run did not bind. `invalid_request` — absent or not a uuid; the platform never picks a connection on the caller's behalf. `connection_not_in_run` — a well-formed id that is not in `runs.resolved_connections` for this integration; the run token authorises this run's bound set only. A malformed body is an `invalid_request` too.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "description": "The definition this run executes is no longer readable (`run_definition_gone` / `run_agent_deleted`, as on the GET endpoint), so the run token's authorization set cannot be decided; or `connect_run_no_refresh` — the caller is an ephemeral connect run.",
             "content": {
               "application/problem+json": {
                 "schema": {

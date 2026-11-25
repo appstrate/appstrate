@@ -340,8 +340,15 @@ describe("GET /api/integrations/:packageId", () => {
     expect(res.status).toBe(200);
     const body = (await res.json()) as { tool_catalog: unknown[] };
     expect(body.tool_catalog).toEqual([
-      { name: "search", description: "Search threads" },
-      { name: "send" },
+      {
+        name: "search",
+        description: "Search threads",
+        status: "available",
+        origin: "declared",
+        modified: false,
+        fingerprint: null,
+      },
+      { name: "send", status: "available", origin: "declared", modified: false, fingerprint: null },
     ]);
   });
 

@@ -213,11 +213,13 @@ function manifestErrorsToFieldErrors(result: {
 async function assertAgentIntegrationScopesValid(
   manifest: Record<string, unknown>,
   orgId: string,
+  spaceId: string,
   requireCallableTools = false,
 ): Promise<void> {
   const scopeErrors = await validateAgentIntegrationSelections({
     manifest,
     orgId,
+    toolPolicySpaceId: spaceId,
     requireCallableTools,
   });
   if (scopeErrors.length > 0) {
@@ -286,7 +288,12 @@ async function validateManifestForRoute(
     assertManifestConforms(expectedType, validated);
     await assertPackageDependenciesAccessible(c, validated, opts.previous);
   }
-  await assertAgentIntegrationScopesValid(validated, c.get("orgId"), opts.requireCallableTools);
+  await assertAgentIntegrationScopesValid(
+    validated,
+    c.get("orgId"),
+    c.get("spaceId"),
+    opts.requireCallableTools,
+  );
   return validated;
 }
 
@@ -450,6 +457,7 @@ export const shareTargetSchema = z
 async function createVersionSafe(params: {
   packageId: string;
   orgId: string;
+  spaceId: string;
   userId: string;
   manifest: Record<string, unknown>;
   normalizedFiles: Record<string, Uint8Array>;
@@ -465,6 +473,7 @@ async function createVersionSafe(params: {
   const gateErrors = await validateAgentIntegrationSelections({
     manifest: params.manifest,
     orgId: params.orgId,
+    toolPolicySpaceId: params.spaceId,
     requireCallableTools: true,
   });
   if (gateErrors.length > 0) {
@@ -699,6 +708,7 @@ function makeCreateHandler(rcfg: PackageRouteConfig) {
       ? await createVersionSafe({
           packageId,
           orgId,
+          spaceId: c.get("spaceId"),
           userId: user.id,
           manifest,
           normalizedFiles: draft.files,
@@ -2427,7 +2437,12 @@ export function createPackagesRouter() {
       asRecord(manifest),
       asRecord(existing?.draftManifest),
     );
-    await assertAgentIntegrationScopesValid(manifest as Record<string, unknown>, orgId, true);
+    await assertAgentIntegrationScopesValid(
+      manifest as Record<string, unknown>,
+      orgId,
+      c.get("spaceId"),
+      true,
+    );
     if (existing) {
       if (existing.orgId !== orgId) {
         throw conflict("name_collision", `A package with identifier '${packageId}' already exists`);

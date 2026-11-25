@@ -38,11 +38,13 @@ import {
   normaliseMcpToolBody,
   normaliseMcpToolNamespace,
 } from "@appstrate/core/naming";
-import type { IntegrationSpawnSpec } from "@appstrate/core/sidecar-types";
+import type { IntegrationSpawnSpec, UnavailableToolReason } from "@appstrate/core/sidecar-types";
 import {
+  definitionApproved,
   exposeTool,
   notifyDetached,
   sanitiseTextField,
+  toolDefinitionFingerprint,
   toolExclusion,
   withToolIntegration,
   type AppstrateMcpClient,
@@ -163,6 +165,12 @@ interface McpHostUpstream {
    */
   hiddenTools?: readonly string[];
   /**
+   * Approved definitions of the undeclared tools of a closed catalog (name → fingerprints, `[]` =
+   * none approved). A listed tool in the map is exposed only when the fingerprint of its RAW
+   * definition is among them; a tool absent from the map (every declared tool) is never gated.
+   */
+  approvedToolFingerprints?: Readonly<Record<string, readonly string[]>>;
+  /**
    * Trusted first-party upstream (e.g. the sidecar's own in-process
    * `api_call` server). Skips the tool-poisoning sanitiser
    * (`sanitiseToolDescriptor`) — which is designed for UNTRUSTED
@@ -192,6 +200,21 @@ interface McpHostOptions {
    * upstreams (the in-process `api_call` server) budget their own output.
    */
   outputBudget?: ToolOutputBudgetDeps;
+}
+
+/** A tool the agent selected (or the platform gates) that this upstream does not expose. */
+export interface UnavailableTool {
+  name: string;
+  reason: UnavailableToolReason;
+}
+
+/** What {@link McpHost.register} did with one upstream. */
+export interface McpHostRegistration {
+  /** The ALLOCATED namespace — the `{namespace}__` prefix of every tool the upstream exposes. */
+  namespace: string;
+  unavailable: UnavailableTool[];
+  /** The tools the upstream listed, as the server returned them (before any filtering). */
+  listed: readonly Tool[];
 }
 
 /** Reserved: a tool that declares it cannot sit in a namespace served by several connections. */
@@ -315,11 +338,11 @@ export class McpHost {
    * tracked yet (third-party MCP servers rarely emit them in practice).
    */
   /**
-   * Ingest an upstream MCP server. Returns the ALLOCATED namespace — the
-   * normalised slug, possibly disambiguated with a `_2`/`_3`/… suffix on
-   * collision — the `{namespace}__` prefix of every tool it advertises.
+   * Ingest an upstream MCP server. The registration carries the ALLOCATED namespace — the
+   * normalised slug, possibly disambiguated with a `_2`/`_3`/… suffix on collision — and the tools
+   * the agent selected that the upstream does not expose, with the reason.
    */
-  async register(upstream: McpHostUpstream): Promise<string> {
+  async register(upstream: McpHostUpstream): Promise<McpHostRegistration> {
     if (this.disposed) throw new Error("McpHost: cannot register after dispose()");
     const baseNamespace = normaliseNamespace(upstream.namespace);
     if (!baseNamespace) {
@@ -390,7 +413,14 @@ export class McpHost {
 
     if (capabilities && !capabilities.tools) {
       // Server explicitly does NOT support tools — no point asking.
-      return normalisedNs;
+      return {
+        namespace: normalisedNs,
+        unavailable: (upstream.allowedTools ?? []).map((name) => ({
+          name,
+          reason: "not_listed" as const,
+        })),
+        listed: [],
+      };
     }
 
     upstream.listSignal?.throwIfAborted();
@@ -410,14 +440,39 @@ export class McpHost {
     const hiddenSet = upstream.hiddenTools ? new Set<string>(upstream.hiddenTools) : null;
     // A slot served by several connections puts the selector on every tool it
     // holds, so none of them may declare `connection` itself.
+    const listedNames = new Set(tools.map((tool) => tool.name));
+    const unavailable: UnavailableTool[] = (upstream.allowedTools ?? [])
+      .filter((name) => !listedNames.has(name))
+      .map((name) => ({ name, reason: "not_listed" as const }));
     const admitted = tools.filter((tool) => {
       const exclusion = toolExclusion(tool.name, allowlist, hiddenSet);
-      if (exclusion === null) return true;
+      if (exclusion === null) {
+        if (
+          definitionApproved(
+            tool.name,
+            toolDefinitionFingerprint(tool),
+            upstream.approvedToolFingerprints,
+          )
+        ) {
+          return true;
+        }
+        this.options.onLog?.({
+          source: `host:${normalisedNs}`,
+          level: "warn",
+          data: { event: "tool_excluded_by_definition_not_approved", originalName: tool.name },
+        });
+        unavailable.push({ name: tool.name, reason: "definition_not_approved" });
+        return false;
+      }
       this.options.onLog?.({
         source: `host:${normalisedNs}`,
         level: "info",
         data: { event: `tool_excluded_by_${exclusion}`, originalName: tool.name },
       });
+      // A hidden tool nobody selected is not a loss; only a selected one is reported.
+      if (exclusion === "hidden_tools" && allowlist?.has(tool.name)) {
+        unavailable.push({ name: tool.name, reason: "hidden_tools" });
+      }
       return false;
     });
     const slotLabels = this.labelsBySlot().get(normalisedNs) ?? new Set<string>();
@@ -531,6 +586,7 @@ export class McpHost {
               originalName: tool.name,
             },
           });
+          unavailable.push({ name: tool.name, reason: "name_collision" });
           continue;
         }
         descriptor = exposure.descriptor;
@@ -569,7 +625,7 @@ export class McpHost {
       if (!siblings.has(key)) siblings.set(key, finalName);
     }
 
-    return normalisedNs;
+    return { namespace: normalisedNs, unavailable, listed: tools };
   }
 
   private routeFor(upstream: McpHostUpstream, originalName: string): ToolRoute {

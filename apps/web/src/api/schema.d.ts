@@ -5642,6 +5642,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/internal/integration-credentials/{scope}/{name}/tools-observed": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Report the tools a run's boot listed from a remote integration
+         * @description Sidecar-only. Same Bearer run token and agent-dependency and activation checks as the GET endpoint. `connection_id` names a connection this run bound to the integration, as for `upstream-success`; it is omitted only for an integration that binds none (an unauthenticated one). Called once per connection, fire-and-forget, after the sidecar registered the integration's tools. `tools` are the MCP descriptors as the server returned them (the platform computes their fingerprints itself); the sidecar cuts them at 1 MiB and sets `truncated`. `unavailable` lists the tools the agent selected that this run does not expose, each with its reason; the run's `metadata.unavailable_tools[]` is stamped with them (`integration_id`, `name`, `reason`, at most 50 per integration). The listing becomes the integration's tool snapshot only when the run is executed by the platform: a remote-origin run's sidecar is on the caller's machine and is no authority on organization state, so its listing is dropped.
+         */
+        post: operations["reportIntegrationToolsObserved"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/internal/integration-credentials/{scope}/{name}/upstream-success": {
         parameters: {
             query?: never;
@@ -14447,12 +14467,40 @@ export interface operations {
                         tool_catalog: {
                             name: string;
                             description?: string;
+                            /**
+                             * @description What this space can do with the tool. `available`: usable. `missing`: the manifest or an approval names it and the server no longer lists it. `pending`: the server lists an undeclared tool (or a new definition of an approved one) on a closed catalog and the space has not approved it. `blocked`: the space refuses it, whatever its definition.
+                             * @enum {string}
+                             */
+                            status: "available" | "missing" | "pending" | "blocked";
+                            /**
+                             * @description `declared`: in the manifest's catalog. `approved`: undeclared, approved in this space. `listed`: only the server lists it.
+                             * @enum {string}
+                             */
+                            origin: "declared" | "approved" | "listed";
+                            /** @description A listing carries a definition that changed since first seen, or that differs from every approval. A declared tool whose definition changed stays `available`. */
+                            modified: boolean;
+                            /** @description Fingerprint of the definition the first stored listing carries; `null` when none lists the tool. */
+                            fingerprint: string | null;
                             policy?: {
                                 required_scopes?: {
                                     [key: string]: string[];
                                 };
                             };
                         }[];
+                        /** @description The latest stored listing of the server behind `tool_catalog`, summarised; `null` when none was recorded yet. */
+                        tool_snapshot: {
+                            /** Format: uuid */
+                            connection_id: string | null;
+                            /** Format: date-time */
+                            listed_at: string;
+                            truncated: boolean;
+                            /** @description Tools the server lists that the manifest does not declare. */
+                            added: number;
+                            /** @description Tools the manifest or an approval names that no listing returns. */
+                            missing: number;
+                            /** @description Tools whose definition changed since first seen. */
+                            modified: number;
+                        } | null;
                         default_tools?: string[] | "*";
                         allow_undeclared_tools: boolean;
                         active: boolean;
@@ -16095,12 +16143,40 @@ export interface operations {
                         tool_catalog: {
                             name: string;
                             description?: string;
+                            /**
+                             * @description What this space can do with the tool. `available`: usable. `missing`: the manifest or an approval names it and the server no longer lists it. `pending`: the server lists an undeclared tool (or a new definition of an approved one) on a closed catalog and the space has not approved it. `blocked`: the space refuses it, whatever its definition.
+                             * @enum {string}
+                             */
+                            status: "available" | "missing" | "pending" | "blocked";
+                            /**
+                             * @description `declared`: in the manifest's catalog. `approved`: undeclared, approved in this space. `listed`: only the server lists it.
+                             * @enum {string}
+                             */
+                            origin: "declared" | "approved" | "listed";
+                            /** @description A listing carries a definition that changed since first seen, or that differs from every approval. A declared tool whose definition changed stays `available`. */
+                            modified: boolean;
+                            /** @description Fingerprint of the definition the first stored listing carries; `null` when none lists the tool. */
+                            fingerprint: string | null;
                             policy?: {
                                 required_scopes?: {
                                     [key: string]: string[];
                                 };
                             };
                         }[];
+                        /** @description The latest stored listing of the server behind `tool_catalog`, summarised; `null` when none was recorded yet. */
+                        tool_snapshot: {
+                            /** Format: uuid */
+                            connection_id: string | null;
+                            /** Format: date-time */
+                            listed_at: string;
+                            truncated: boolean;
+                            /** @description Tools the server lists that the manifest does not declare. */
+                            added: number;
+                            /** @description Tools the manifest or an approval names that no listing returns. */
+                            missing: number;
+                            /** @description Tools whose definition changed since first seen. */
+                            modified: number;
+                        } | null;
                         default_tools?: string[] | "*";
                         allow_undeclared_tools: boolean;
                         active: boolean;
@@ -30385,6 +30461,72 @@ export interface operations {
                 };
             };
             503: components["responses"]["EncryptionKeyUnavailable"];
+        };
+    };
+    reportIntegrationToolsObserved: {
+        parameters: {
+            query?: {
+                /** @description The connection this run bound to the integration (a member of `runs.resolved_connections[<integration id>]`). Required unless the run bound none. An id the run did not bind is a `400 connection_not_in_run`. */
+                connection_id?: string;
+            };
+            header?: never;
+            path: {
+                /** @description Package scope (e.g. @myorg) */
+                scope: components["parameters"]["PackageScope"];
+                /** @description Package name */
+                name: components["parameters"]["PackageName"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    tools: {
+                        name: string;
+                        inputSchema: {
+                            /** @enum {string} */
+                            type: "object";
+                        };
+                    }[];
+                    truncated: boolean;
+                    unavailable: {
+                        name: string;
+                        /** @enum {string} */
+                        reason: "not_listed" | "hidden_tools" | "allowlist" | "definition_not_approved" | "name_collision";
+                    }[];
+                };
+            };
+        };
+        responses: {
+            /** @description Report recorded. */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The `connection_id` selector is missing, malformed, or names a connection this run did not bind. `invalid_request` — absent or not a uuid; the platform never picks a connection on the caller's behalf. `connection_not_in_run` — a well-formed id that is not in `runs.resolved_connections` for this integration; the run token authorises this run's bound set only. A malformed body is an `invalid_request` too. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            /** @description The definition this run executes is no longer readable (`run_definition_gone` / `run_agent_deleted`, as on the GET endpoint), so the run token's authorization set cannot be decided; or `connect_run_no_refresh` — the caller is an ephemeral connect run. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            500: components["responses"]["InternalServerError"];
         };
     };
     reportIntegrationUpstreamSuccess: {

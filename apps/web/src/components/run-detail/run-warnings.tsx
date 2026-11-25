@@ -12,13 +12,48 @@ import { packageDetailPath } from "../../lib/package-paths";
 import { agentSettingsHref } from "../../lib/settings-section-href";
 import { HealthAction, HealthCard, HealthCardItem } from "../health-card";
 import { artifactFailureCodeKey, partialArtifactFailures } from "../run-artifacts";
+import { MetaBadge } from "../status-badge";
+import {
+  isRunDegraded,
+  parseDegradedIntegrations,
+  parseUnavailableTools,
+  type UnavailableTool,
+} from "../../lib/run-degradation";
 
-/** Safe-narrows `runs.metadata.degraded_integrations` (integration ids, stamped on a terminal 401 at refresh). */
-function parseDegradedIntegrations(metadata: unknown): string[] {
-  if (metadata == null || typeof metadata !== "object") return [];
-  const raw = (metadata as Record<string, unknown>).degraded_integrations;
-  if (!Array.isArray(raw)) return [];
-  return raw.filter((v): v is string => typeof v === "string");
+/** « dégradé » next to a run's status: the run finished, but without something it needed. */
+export function RunDegradedBadge({ metadata }: { metadata: unknown }) {
+  const { t } = useTranslation("agents");
+  if (!isRunDegraded(metadata)) return null;
+  return <MetaBadge label={t("run.degraded.badge")} title={t("run.degraded.hint")} />;
+}
+
+function unavailableReasonLabel(reason: string, t: (key: string) => string): string {
+  switch (reason) {
+    case "not_listed":
+      return t("run.unavailableTools.reason.not_listed");
+    case "hidden_tools":
+      return t("run.unavailableTools.reason.hidden_tools");
+    case "allowlist":
+      return t("run.unavailableTools.reason.allowlist");
+    case "definition_not_approved":
+      return t("run.unavailableTools.reason.definition_not_approved");
+    case "name_collision":
+      return t("run.unavailableTools.reason.name_collision");
+    default:
+      return t("run.unavailableTools.reason.unknown");
+  }
+}
+
+function UnavailableToolItem({ tool }: { tool: UnavailableTool }) {
+  const { t } = useTranslation("agents");
+  const displayName = useIntegrationName(tool.integrationId);
+  return (
+    <HealthCardItem
+      title={<span className="font-mono text-xs break-all">{tool.name}</span>}
+      description={`${displayName} · ${unavailableReasonLabel(tool.reason, t)}`}
+      actions={null}
+    />
+  );
 }
 
 function DegradedIntegrationItem({ integrationId }: { integrationId: string }) {
@@ -92,7 +127,7 @@ function ResolvedModelFallback({
 /**
  * What the run left behind without failing, as warning cards (never a banner: a finished run is
  * history): model fallback; an integration's terminal auth failure (401 surviving refresh);
- * a `partial` outputs sweep, where deliverables were LOST though the run may have SUCCEEDED.
+ * tools the agent asked for that the run could not serve; a `partial` outputs sweep, where deliverables were LOST though the run may have SUCCEEDED.
  */
 export function RunWarnings({
   run,
@@ -103,6 +138,7 @@ export function RunWarnings({
 }) {
   const { t } = useTranslation("agents");
   const degraded = parseDegradedIntegrations(run.metadata);
+  const unavailable = parseUnavailableTools(run.metadata);
   const lost = partialArtifactFailures(run.artifacts);
   return (
     <>
@@ -116,6 +152,20 @@ export function RunWarnings({
             <ul className="px-4">
               {degraded.map((id) => (
                 <DegradedIntegrationItem key={id} integrationId={id} />
+              ))}
+            </ul>
+          </HealthCard>
+        </div>
+      )}
+      {unavailable.length > 0 && (
+        <div className="mb-6">
+          <HealthCard title={t("run.unavailableTools.title")} tone="warning" badge={null}>
+            <p className="text-muted-foreground px-4 pt-3 text-xs">
+              {t("run.unavailableTools.message")}
+            </p>
+            <ul className="px-4">
+              {unavailable.map((tool) => (
+                <UnavailableToolItem key={`${tool.integrationId}:${tool.name}`} tool={tool} />
               ))}
             </ul>
           </HealthCard>
