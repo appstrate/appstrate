@@ -133,6 +133,11 @@ export const ROUTE_ACCESS = {
     anyOf: ["billing:read"],
     operations: ["getBillingAccount"],
   },
+  "/org-settings/enterprise-sso": {
+    feature: "enterpriseSso",
+    anyOf: ["org-sso:read"],
+    operations: ["getOrgSso"],
+  },
 
   "/workspace-settings": {
     open: "layout only: the index opens the rail's first entry, every tab gates itself",

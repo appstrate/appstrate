@@ -21,7 +21,7 @@ import {
 
 type Features = Record<string, boolean>;
 
-const ALL_FEATURES: Features = { oidc: true, billing: true, webhooks: true };
+const ALL_FEATURES: Features = { oidc: true, billing: true, webhooks: true, enterpriseSso: true };
 const NO_FEATURES: Features = {};
 
 function sectionsFor(features: Features, granted: string[], inPersonalSpace = false) {
@@ -66,6 +66,13 @@ describe("unified settings navigation", () => {
     ]);
   });
 
+  it("lists enterprise sign-in to whoever reads it, under its module", () => {
+    expect(destinations(ALL_FEATURES, ["org-sso:read"])).toContain("/org-settings/enterprise-sso");
+    expect(destinations(ALL_FEATURES, ["org-sso:write"])).not.toContain(
+      "/org-settings/enterprise-sso",
+    );
+  });
+
   it("never lists a screen its route refuses, whatever the write grant", () => {
     // `spaces:write` without the route's `spaces:read` reaches nothing.
     expect(destinations(ALL_FEATURES, ["spaces:write"])).not.toContain("/org-settings/spaces");
@@ -76,12 +83,14 @@ describe("unified settings navigation", () => {
       "oauth-clients:read",
       "access-grants:read",
       "billing:read",
+      "org-sso:read",
       "webhooks:read",
       "space-settings:write",
     ]);
     expect(withoutModules).not.toContain("/org-settings/oauth");
     expect(withoutModules).not.toContain("/org-settings/access-grants");
     expect(withoutModules).not.toContain("/org-settings/billing");
+    expect(withoutModules).not.toContain("/org-settings/enterprise-sso");
     expect(withoutModules).not.toContain("/workspace-settings/auth");
     expect(withoutModules).not.toContain("/workspace-settings/oauth");
     expect(withoutModules).not.toContain("/workspace-settings/webhooks");
