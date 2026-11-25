@@ -145,7 +145,7 @@ An agent manifest splits the version from the configuration. Excerpt of the agen
 
 - Leaving `tools` out uses the integration's `default_tools` (`["api_call"]` for the API integrations, a named list of the server's tools for the shipped MCP-backed ones). An explicit empty list selects nothing.
 - An agent whose integration exposes no callable tool is refused when a version is published or imported, and a run fails at boot if the tool set is empty, rather than letting the model improvise unauthenticated HTTP.
-- `tools: "*"` (every tool the upstream server advertises) is allowed only when the integration sets `allow_undeclared_tools: true`.
+- `tools: "*"` (every tool the upstream server advertises) is allowed only when the integration sets `allow_undeclared_tools: true`. Without it, a tool the server lists but the manifest does not declare is unavailable in a space until a person approves its definition there; see [Remote tool approvals](/integrations/remote-tool-approvals).
 - `scopes` adds scopes beyond the inferred ones, and `auth_key` picks one auth when the integration has several.
 
 An integration may ship an `INTEGRATION.md` of usage notes. It is not pasted into the prompt (Preview): the run's integrations are listed there with the file's location, under `.pi/integrations/` in the workspace, and the agent reads it before its first call to that integration's tools.

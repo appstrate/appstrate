@@ -1,0 +1,104 @@
+---
+title: Remote Tool Approvals
+description: How Appstrate tracks the tools a remote MCP server lists, which ones a space can use, how undeclared tools are approved or blocked, and what happens to a run when a tool is unavailable.
+---
+
+<Callout type="info" title="Preview">
+  Tool snapshots, approvals and blocks are not yet in the latest release.
+</Callout>
+
+A [remote MCP integration](/integrations/how-integrations-work#sources-how-the-agent-reaches-the-service) offers the tools its server lists, and that list can change without the integration changing. Appstrate keeps track of it and lets each space decide which tools its agents may use. This page covers that mechanism. Integrations with `source.kind: "none"` or `"local"` have no server to list and are not concerned, except that [blocking](#block-a-tool) applies to `api_call` too.
+
+## The tool snapshot
+
+For each connection, the platform stores what the server last listed: the **tool snapshot**. It is refreshed when:
+
+- tools are listed outside a run (the agent editor, a direct tool listing through the credential proxy) or the server is synchronized;
+- a platform run boots: the sidecar reports what the server listed to the run;
+- someone selects **Read the server again** on the integration's **Tools** tab. This needs the right to call the integration with that connection.
+
+The **Tools** tab shows the date of the last read, how many tools were added, gone or changed since the previous one, and the connection used. If the server returned more tools than the platform keeps, the list is marked **Truncated list**. A tool missing from a truncated list is never judged gone.
+
+## Tool statuses
+
+In a space, every tool has a status and an origin.
+
+| Status      | Meaning                                                                                                                                                          |
+| ----------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `available` | The agent can select and call it.                                                                                                                                |
+| `missing`   | Declared or approved, but the server no longer lists it ("Not on the server at the last read"). Only judged from a complete listing.                             |
+| `pending`   | Waiting for an approval in this space ("Awaiting approval in this space"): an undeclared tool on a closed catalog, or an approved tool whose definition changed. |
+| `blocked`   | A person blocked it in this space ("Blocked in this space").                                                                                                     |
+
+| Origin     | Meaning                                                           |
+| ---------- | ----------------------------------------------------------------- |
+| `declared` | Named in the integration's `tools_policy`.                        |
+| `approved` | Not declared, but a person approved its definition in this space. |
+| `listed`   | Not declared and not approved: the server lists it, nothing more. |
+
+A **declared** tool whose definition changes is only flagged "definition changed". It is never held back: the integration's author vouched for its name.
+
+## Closed and open catalogs
+
+What happens to an undeclared tool depends on `allow_undeclared_tools` in the integration manifest.
+
+| Catalog                                   | Undeclared tool                                                                                             |
+| ----------------------------------------- | ----------------------------------------------------------------------------------------------------------- |
+| **Closed** (default)                      | Unavailable in a space until a person holding `integrations:configure` approves its exact definition there. |
+| **Open** (`allow_undeclared_tools: true`) | Usable without approval. Blocking still applies.                                                            |
+
+Tools in `hidden_tools` (and the connect and login tools the platform keeps out of reach) are never offered and can never be approved, whatever the catalog.
+
+## Approve a tool
+
+Open the integration, then its **Tools** tab. Under **Tools to review** are the tools the server lists that the package does not declare, and the approved ones whose definition changed (**Definition changed since approval**). **View the definition** shows what the server lists, next to the approved one when there is one. **Approve** accepts that exact definition, identified by its fingerprint.
+
+- A tool that no snapshot contains cannot be reviewed: read the server again first.
+- If the definition changed between your review and your click, the approval is refused (`tool_snapshot_stale`): review the new one.
+- One tool can have several approved definitions, for instance when a templated server URL points each connection at its own instance. At most 32 per tool; **Withdraw approval** frees a slot.
+- A definition too large to be kept cannot be reviewed, so it cannot be approved.
+- **Withdraw approval** makes the tool unavailable again in this space until it is approved anew.
+
+Space admins holding `integrations:configure` receive a **Tools to review** notification when a listing brings a new or changed undeclared tool they could approve.
+
+Approvals are per space. Approving a tool in one space does not make it usable in another.
+
+## Block a tool
+
+**Block** (or **Block a tool…** to name one) makes a tool neither offered nor callable in the space, declared or not, on an open or a closed catalog. It also applies to `api_call` and `api_upload`; blocking `api_upload` alone applies to runs only. **Unblock** reverses it.
+
+## Who can change a policy
+
+Approving, withdrawing, blocking and unblocking are decisions about what agents may do. They are accepted only from a person signed in to the dashboard. API keys, tokens issued to the CLI, MCP or OIDC clients, the chat and the MCP `invoke_operation` tool are refused with `403 dashboard_session_required`. These routes are not in the MCP catalog. Reading the server again is not a policy decision: anyone who may call the integration with the connection can do it.
+
+## In the agent editor
+
+The agent editor greys out tools that are unavailable and says why, but never removes a selection. Selections are judged against the approvals of the agent's home space. A tool that is merely `missing` or `pending` stays selected, so the agent works again as soon as the server lists it or someone approves it.
+
+## When a run cannot have a tool
+
+A run whose selected tools are unavailable does not fail: it continues without them and is marked **degraded**. The run page shows **Tools unavailable during this run**, listing each tool with its reason, and the model is told in its system prompt which tools it does not have.
+
+| Reason shown                          | Meaning                                                                               |
+| ------------------------------------- | ------------------------------------------------------------------------------------- |
+| Not listed by the server at launch    | `not_listed`: the server did not list the tool.                                       |
+| Hidden by the integration             | `hidden_tools`: the integration withholds it.                                         |
+| Definition not approved in this space | `definition_not_approved`: undeclared on a closed catalog, or changed since approval. |
+| Name already taken by another tool    | `name_collision`: two tools would reach the agent under one name.                     |
+| Blocked in this space                 | `blocked_in_space`: the space blocks it.                                              |
+
+A run that selects no usable tool at all still fails at boot, as described in [How integrations work](/integrations/how-integrations-work#declaring-integrations-in-an-agent).
+
+## Reaching the server directly is refused
+
+An integration's own MCP endpoint cannot be called as plain HTTP through the credential proxy or an in-run `api_call`: the call is refused with `403 remote_mcp_endpoint_not_proxied`. Tools are the way in, because they are where the policy applies.
+
+When a server refuses a call with a Bearer challenge (`401`, or `403 insufficient_scope`), the resulting `upstream_credential_rejected` problem carries `required_scopes`, the scopes the server asked for, and an in-run `api_call` result names them.
+
+## Exporting an agent
+
+`GET /api/agents/{scope}/{name}/bundle` adds an `Appstrate-Space-Approved-Tools` response header, a comma-separated `<integrationId>:<tool>` list, when the agent uses tools only because this space approved them. The archive does not carry the approvals: the importing space must approve those tools again.
+
+## Error codes
+
+The codes of this mechanism are in the [error catalog](/api/errors): `tool_blocked_in_space`, `tool_definition_not_approved`, `tool_snapshot_stale`, `tool_already_declared`, `tool_definition_unavailable`, `tool_approvals_limit`, `dashboard_session_required` and `remote_mcp_endpoint_not_proxied`.
