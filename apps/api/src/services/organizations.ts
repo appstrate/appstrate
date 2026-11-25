@@ -24,11 +24,15 @@ import {
   modelProviderCredentials,
   modelProviderPairings,
   spaces,
+  spaceMembers,
+  spaceRoles,
   integrationConnections,
   type ScheduleDisabledReason,
 } from "@appstrate/db/schema";
 import { and, eq, ne, inArray, isNull, notInArray, count, sql, asc, type SQL } from "drizzle-orm";
 import type { OrgRole } from "../types/index.ts";
+import type { SpaceRolePreset } from "@appstrate/core/permissions";
+import type { PersonalSpaceRoleOverride } from "@appstrate/shared-types";
 import {
   isUuid,
   lockOrganizationRow,
@@ -58,7 +62,11 @@ import { batchLoadScheduleEndUserNames, batchLoadUserNames } from "../lib/user-h
 import { actorFromIds } from "../lib/actor.ts";
 import { orphanPersonalSpaces } from "./spaces.ts";
 import { ensurePersonalSpace, isPlatformAccount, provisionOrg } from "@appstrate/db/provision-org";
-import type { ConnectionShare, RevokedSpaceAssignment } from "./space-members.ts";
+import type {
+  ConnectionShare,
+  RevokedSpaceAssignment,
+  SpaceRoleAssignment,
+} from "./space-members.ts";
 import { assignableRolesForMember, canRemoveMember } from "@appstrate/shared-types";
 import { endOAuthAccessInOrg } from "./oauth-token-revocation.ts";
 import { emitEvent } from "../lib/modules/module-loader.ts";
@@ -200,6 +208,7 @@ export async function updateOrganization(
 import {
   orgSettingsReadSchema,
   orgSettingsSchema as orgSettingsBaseSchema,
+  SPACE_ROLE_PRESETS,
 } from "@appstrate/core/permissions";
 
 /**
@@ -276,24 +285,53 @@ export async function listOrgsWithUnsupportedApiVersion(
     .where(and(sql`${pin} IS NOT NULL`, notInArray(pin, [...supported])));
 }
 
+/**
+ * A `personal_space_role` naming a custom role is checked AND written under a share lock on
+ * that role's row (`FOR KEY SHARE`), in one transaction: the setting has no FK, and
+ * `deleteSpaceRole` locks the same row `FOR UPDATE` before counting the setting among the
+ * role's holders, so a delete and this write serialize. 404 when the id is no role of the org.
+ */
 export async function updateOrgSettings(
   orgId: string,
   updates: Partial<OrgSettings>,
 ): Promise<OrgSettings> {
-  // Merge server-side via JSONB concatenation so concurrent admins toggling
-  // different keys don't clobber each other (read-modify-write would race).
-  const [row] = await db
-    .update(organizations)
-    .set({
-      orgSettings: sql`COALESCE(${organizations.orgSettings}, '{}'::jsonb) || ${JSON.stringify(updates)}::jsonb`,
-      updatedAt: new Date(),
-    })
-    .where(eq(organizations.id, orgId))
-    .returning({ orgSettings: organizations.orgSettings });
+  const customRoleId =
+    updates.personal_space_role !== undefined &&
+    !(SPACE_ROLE_PRESETS as readonly string[]).includes(updates.personal_space_role)
+      ? updates.personal_space_role
+      : null;
+  const row = await db.transaction(async (tx) => {
+    if (customRoleId !== null) {
+      const [role] = await tx
+        .select({ id: spaceRoles.id })
+        .from(spaceRoles)
+        .where(and(eq(spaceRoles.id, customRoleId), eq(spaceRoles.orgId, orgId)))
+        .for("key share");
+      if (!role) {
+        throw new ApiError({
+          status: 404,
+          code: "not_found",
+          title: "Not Found",
+          detail: `Role '${customRoleId}' not found in this organization`,
+          param: "personal_space_role",
+        });
+      }
+    }
+    // Merge server-side via JSONB concatenation so concurrent admins toggling
+    // different keys don't clobber each other (read-modify-write would race).
+    const [updated] = await tx
+      .update(organizations)
+      .set({
+        orgSettings: sql`COALESCE(${organizations.orgSettings}, '{}'::jsonb) || ${JSON.stringify(updates)}::jsonb`,
+        updatedAt: new Date(),
+      })
+      .where(eq(organizations.id, orgId))
+      .returning({ orgSettings: organizations.orgSettings });
+    return updated;
+  });
 
-  // The statement above is auto-committed (no enclosing transaction), so the
-  // row is durable by the time the pin entry is dropped — the next cached
-  // read cannot re-cache the pre-update value.
+  // The transaction has committed, so the row is durable by the time the pin
+  // entry is dropped — the next cached read cannot re-cache the pre-update value.
   orgApiVersionCache.invalidate(orgId);
   // Resolved models carry the payer's personal credentials only while the policy allows them.
   if (updates.personal_model_credentials !== undefined) clearResolvedModelCache();
@@ -838,6 +876,129 @@ export async function updateMemberRole(
   });
   await removeScheduleJobs(disabledScheduleIds);
   return result;
+}
+
+/** The role columns of a `space_members` row, as the audit records them. */
+type PersonalSpaceRoleColumns = {
+  presetRole: SpaceRolePreset | null;
+  customRoleId: string | null;
+};
+
+/**
+ * Set (`assignment`) or clear (`null`) `targetUserId`'s own role in their personal space —
+ * the one `space_members` row a personal space holds, read by `resolveSpaceRole` ahead of the
+ * org's `personal_space_role` (RBAC spec §3.6). The only door writing that row: the generic
+ * space-member routes refuse a personal space.
+ *
+ * Under the target's `org_members` lock, the one org-role changes and exits take, so a
+ * promotion (which deletes the row) and this write serialize. A set provisions the personal
+ * space when it is missing; a clear of a space that does not exist is a no-op.
+ *
+ * @throws 404 when the target is not a member or guest of the org, or the custom role is not
+ *   one of its roles; 409 `redundant_space_role` when a set targets an owner or admin, who
+ *   always hold `admin` there.
+ * @returns the row's role before the write (`null`: there was none), for the audit.
+ */
+export async function setPersonalSpaceRoleOverride(
+  orgId: string,
+  targetUserId: string,
+  assignment: SpaceRoleAssignment | null,
+  addedBy: string,
+): Promise<{ previous: PersonalSpaceRoleColumns | null }> {
+  return db.transaction(async (tx) => {
+    const target = await lockOrgMember(tx, orgId, targetUserId);
+    if (!target) throw notFound("Member not found");
+    const administers = target.role === "owner" || target.role === "admin";
+
+    if (assignment === null) {
+      // Idempotent: an owner or admin holds no row (a promotion deletes it), so there is
+      // nothing to clear and nothing to refuse.
+      const deleted = await tx
+        .delete(spaceMembers)
+        .where(
+          and(
+            eq(spaceMembers.userId, targetUserId),
+            inArray(
+              spaceMembers.spaceId,
+              tx
+                .select({ id: spaces.id })
+                .from(spaces)
+                .where(and(eq(spaces.orgId, orgId), eq(spaces.ownerUserId, targetUserId))),
+            ),
+          ),
+        )
+        .returning({
+          presetRole: spaceMembers.presetRole,
+          customRoleId: spaceMembers.customRoleId,
+        });
+      return { previous: deleted[0] ?? null };
+    }
+
+    if (administers) {
+      throw conflict(
+        "redundant_space_role",
+        `${target.role}s always hold admin in their own personal space; an override would grant nothing`,
+      );
+    }
+    let values: PersonalSpaceRoleColumns;
+    if ("preset_role" in assignment) {
+      values = { presetRole: assignment.preset_role, customRoleId: null };
+    } else {
+      const [role] = await tx
+        .select({ id: spaceRoles.id })
+        .from(spaceRoles)
+        .where(and(eq(spaceRoles.id, assignment.custom_role_id), eq(spaceRoles.orgId, orgId)))
+        .limit(1);
+      if (!role) throw notFound("Space role not found");
+      values = { presetRole: null, customRoleId: role.id };
+    }
+    const space = await ensurePersonalSpace(tx, orgId, targetUserId);
+    if (!space) throw notFound("Member not found");
+    const [existing] = await tx
+      .select({ presetRole: spaceMembers.presetRole, customRoleId: spaceMembers.customRoleId })
+      .from(spaceMembers)
+      .where(and(eq(spaceMembers.spaceId, space.id), eq(spaceMembers.userId, targetUserId)))
+      .limit(1);
+    await tx
+      .insert(spaceMembers)
+      .values({ spaceId: space.id, userId: targetUserId, addedBy, ...values })
+      .onConflictDoUpdate({ target: [spaceMembers.spaceId, spaceMembers.userId], set: values });
+    return { previous: existing ?? null };
+  });
+}
+
+/** Each member's override of the org's `personal_space_role`, keyed by user id; absent = none. */
+export async function listPersonalSpaceRoleOverrides(
+  orgId: string,
+  userIds?: readonly string[],
+): Promise<Map<string, PersonalSpaceRoleOverride>> {
+  if (userIds?.length === 0) return new Map();
+  const rows = await db
+    .select({
+      userId: spaceMembers.userId,
+      presetRole: spaceMembers.presetRole,
+      customRoleId: spaceMembers.customRoleId,
+    })
+    .from(spaceMembers)
+    .innerJoin(
+      spaces,
+      and(eq(spaces.id, spaceMembers.spaceId), eq(spaces.ownerUserId, spaceMembers.userId)),
+    )
+    .where(
+      and(
+        eq(spaces.orgId, orgId),
+        isNull(spaces.orphanedAt),
+        userIds === undefined ? undefined : inArray(spaceMembers.userId, [...userIds]),
+      ),
+    );
+  return new Map(
+    rows.map((row) => [
+      row.userId,
+      row.presetRole !== null
+        ? { preset_role: row.presetRole }
+        : { custom_role_id: row.customRoleId! },
+    ]),
+  );
 }
 
 /** An expected refusal: no `cause`, so the error handler writes no error line. */

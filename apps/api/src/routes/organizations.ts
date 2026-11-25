@@ -5,7 +5,14 @@ import type { Context } from "hono";
 import { z } from "zod";
 import type { AppEnv } from "../types/index.ts";
 import { requirePermission } from "../middleware/require-permission.ts";
-import { auditSpaceAssignments, spaceAssignmentSchema } from "../lib/space-role-assignment.ts";
+import {
+  auditSpaceAssignments,
+  auditSpaceRole,
+  exactlyOneRole,
+  spaceAssignmentSchema,
+  spaceRoleAssignmentShape,
+  toAssignment,
+} from "../lib/space-role-assignment.ts";
 import { listCallerOrganizations } from "../lib/principal-permissions.ts";
 import { callerReachableSpaces } from "../lib/reachable-spaces.ts";
 import { isUserPrincipal } from "../lib/principal.ts";
@@ -22,6 +29,8 @@ import {
   memberDepartureImpact,
   removeMember,
   updateMemberRole,
+  setPersonalSpaceRoleOverride,
+  listPersonalSpaceRoleOverrides,
   getOrgSettings,
   updateOrgSettings,
   orgSettingsPatchSchema,
@@ -105,6 +114,11 @@ export const updateRoleSchema = z
     role: z.enum(ORG_ROLES),
   })
   .strict();
+
+/** Body of `PUT …/members/{userId}/personal-space-role`: one preset, or one custom role. */
+export const personalSpaceRoleOverrideSchema = exactlyOneRole(
+  z.object({ ...spaceRoleAssignmentShape }),
+);
 
 /**
  * Omitting `space_assignments` keeps the stored ones; the role rules are
@@ -238,11 +252,12 @@ async function memberSpacesForCaller(
 async function buildOrgDetail(c: Context<AppEnv>, orgId: string) {
   const permissions = c.get("permissions");
   const readsMembers = permissions?.has("members:read") ?? false;
-  const [org, members, invitations, memberSpaces] = await Promise.all([
+  const [org, members, invitations, memberSpaces, overrides] = await Promise.all([
     getOrgById(orgId),
     readsMembers ? getOrgMembers(orgId) : Promise.resolve([]),
     permissions?.has("members:invite") ? getOrgInvitations(orgId) : Promise.resolve([]),
     readsMembers ? memberSpacesForCaller(c, orgId) : Promise.resolve(new Map()),
+    readsMembers ? listPersonalSpaceRoleOverrides(orgId) : Promise.resolve(new Map()),
   ]);
   if (!org) {
     throw notFound("Organization not found");
@@ -278,6 +293,7 @@ async function buildOrgDetail(c: Context<AppEnv>, orgId: string) {
       displayName: m.displayName,
       email: m.email,
       spaces: memberSpaces.get(m.userId) ?? [],
+      personal_space_role: overrides.get(m.userId) ?? null,
     })),
     invitations: invitations.map((inv) => ({
       id: inv.id,
@@ -597,22 +613,82 @@ router.put("/:orgId/members/:userId", requirePermission("members", "change-role"
   });
   await recordSharesRemoved(c, orgId, unsharedShares, "access_lost");
 
-  // Bare updated resource — same serializer as the members list in
-  // GET /orgs/:orgId.
-  const updated = await getOrgMemberWithProfile(orgId, targetUserId);
-  if (!updated) {
-    throw notFound("Member not found");
-  }
-  const memberSpaces = await memberSpacesForCaller(c, orgId);
-  return c.json({
-    userId: updated.userId,
-    role: updated.role,
-    joinedAt: updated.joinedAt,
-    displayName: updated.displayName,
-    email: updated.email,
-    spaces: memberSpaces.get(targetUserId) ?? [],
-  });
+  return c.json(await memberDto(c, orgId, targetUserId));
 });
+
+/** One member as the members list in GET /orgs/:orgId serializes it — a write's bare response. */
+async function memberDto(c: Context<AppEnv>, orgId: string, userId: string) {
+  const [member, memberSpaces, overrides] = await Promise.all([
+    getOrgMemberWithProfile(orgId, userId),
+    memberSpacesForCaller(c, orgId),
+    listPersonalSpaceRoleOverrides(orgId, [userId]),
+  ]);
+  if (!member) throw notFound("Member not found");
+  return {
+    userId: member.userId,
+    role: member.role,
+    joinedAt: member.joinedAt,
+    displayName: member.displayName,
+    email: member.email,
+    spaces: memberSpaces.get(userId) ?? [],
+    personal_space_role: overrides.get(userId) ?? null,
+  };
+}
+
+// PUT /api/orgs/:orgId/members/:userId/personal-space-role — the member's own role in their
+// personal space, overriding the org's `personal_space_role` (RBAC spec §3.6). Same guard as
+// the org role change: it is the same kind of decision about the same member.
+router.put(
+  "/:orgId/members/:userId/personal-space-role",
+  requirePermission("members", "change-role"),
+  async (c) => {
+    const orgId = c.req.param("orgId")!;
+    const targetUserId = c.req.param("userId")!;
+    const data = await readJsonBody(c, personalSpaceRoleOverrideSchema);
+    const { previous } = await setPersonalSpaceRoleOverride(
+      orgId,
+      targetUserId,
+      toAssignment(data),
+      c.get("user").id,
+    );
+    await recordAuditFromContext(c, {
+      action: "org.member_personal_space_role_updated",
+      resourceType: "member",
+      resourceId: targetUserId,
+      before: previous,
+      after: auditSpaceRole(data),
+      orgIdOverride: orgId,
+    });
+    return c.json(await memberDto(c, orgId, targetUserId));
+  },
+);
+
+// DELETE /api/orgs/:orgId/members/:userId/personal-space-role — back to the org default.
+// Idempotent: 204 whether or not an override was set.
+router.delete(
+  "/:orgId/members/:userId/personal-space-role",
+  requirePermission("members", "change-role"),
+  async (c) => {
+    const orgId = c.req.param("orgId")!;
+    const targetUserId = c.req.param("userId")!;
+    const { previous } = await setPersonalSpaceRoleOverride(
+      orgId,
+      targetUserId,
+      null,
+      c.get("user").id,
+    );
+    if (previous) {
+      await recordAuditFromContext(c, {
+        action: "org.member_personal_space_role_cleared",
+        resourceType: "member",
+        resourceId: targetUserId,
+        before: previous,
+        orgIdOverride: orgId,
+      });
+    }
+    return c.body(null, 204);
+  },
+);
 
 // POST /api/orgs/:orgId/leave — the caller leaves the organization (any member)
 // No `requirePermission`: membership is the only precondition; the service

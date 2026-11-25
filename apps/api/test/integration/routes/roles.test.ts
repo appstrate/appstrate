@@ -430,6 +430,45 @@ describe("custom space roles", () => {
       const other = await createRole({ key: "unpromised" });
       expect((await del(other.id)).status).toBe(204);
     });
+
+    it("409s while the org's personal_space_role names it, and deletes once it does not", async () => {
+      const role = await createRole({ key: "personal-default" });
+      const patch = (value: string) =>
+        app.request(`/api/orgs/${owner.orgId}/settings`, {
+          method: "PATCH",
+          headers: { Cookie: owner.cookie, "Content-Type": "application/json" },
+          body: JSON.stringify({ personal_space_role: value }),
+        });
+      expect((await patch(role.id)).status).toBe(200);
+
+      const problem = await expectProblem(await del(role.id), 409, { code: "role_in_use" });
+      expect(problem.org_default).toBe(true);
+      expect(problem.member_count).toBe(0);
+      expect(problem.pending_invitation_count).toBe(0);
+      expect(problem.detail).toContain("default role in personal spaces");
+
+      expect((await patch("operator")).status).toBe(200);
+      expect((await del(role.id)).status).toBe(204);
+    });
+
+    it("409s while a member's personal-space override names it", async () => {
+      const role = await createRole({ key: "override-held" });
+      const user = await createTestUser();
+      await addOrgMember(owner.orgId, user.id, "member");
+      const res = await app.request(
+        `/api/orgs/${owner.orgId}/members/${user.id}/personal-space-role`,
+        {
+          method: "PUT",
+          headers: { Cookie: owner.cookie, "Content-Type": "application/json" },
+          body: JSON.stringify({ custom_role_id: role.id }),
+        },
+      );
+      expect(res.status, await res.clone().text()).toBe(200);
+
+      const problem = await expectProblem(await del(role.id), 409, { code: "role_in_use" });
+      expect(problem.member_count).toBe(1);
+      expect(problem.org_default).toBe(false);
+    });
   });
 
   describe("a custom role is assignable and grants exactly its permissions", () => {

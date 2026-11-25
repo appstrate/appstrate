@@ -28,7 +28,7 @@ describe("deferred space assignments — who can author one", () => {
   // alone and to no org role (RBAC spec §3.6), which is why the row here says
   // `ownerUserId: null` explicitly rather than by omission.
   it("gives every full-access org role the admin preset in any team space", async () => {
-    const { resolveSpaceRole } = await import("../../../src/lib/space-role.ts");
+    const { ADMIN_ROLE_REF, resolveSpaceRole } = await import("../../../src/lib/space-role.ts");
     for (const role of ORG_ROLES_WITH_FULL_ACCESS) {
       expect(
         resolveSpaceRole(
@@ -36,7 +36,7 @@ describe("deferred space assignments — who can author one", () => {
           { id: "spc_x", visibility: "private", defaultRole: "viewer", ownerUserId: null },
           null,
           "usr_x",
-          "admin",
+          ADMIN_ROLE_REF,
         ),
         `${role} must reach every space as preset admin, or the deferred path's guarantee fails`,
       ).toEqual({ kind: "preset", preset: "admin" });

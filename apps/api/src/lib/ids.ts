@@ -7,6 +7,7 @@
  */
 
 import { SPACE_ID_RE } from "@appstrate/db/ids";
+import { SPACE_ROLE_ID_REGEX } from "@appstrate/core/permissions";
 import { invalidRequest } from "./errors.ts";
 
 /** Whether `id` is a canonical space id — the Zod-side half of {@link assertSpaceId}. */
@@ -27,22 +28,16 @@ export function assertSpaceId(id: string, param = "space_id"): void {
 }
 
 /**
- * Strict custom-space-role id shape: `srl_` + a canonical lowercase dashed
- * UUID — exactly what `prefixedId("srl")` mints.
- *
- * Same reasoning as `SPACE_ID_RE` (`@appstrate/db/ids`): a role id arrives on a
- * path param (`/api/roles/:id`) and in a `space_members.custom_role_id` write,
- * and both would otherwise answer 404 for a malformed id, saying nothing about WHY.
- */
-const SPACE_ROLE_ID_RE = /^srl_[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
-
-/**
- * Whether `id` is a canonical space-role id. The predicate half of
+ * Whether `id` is a canonical space-role id (`SPACE_ROLE_ID_REGEX`: `srl_` + a canonical
+ * lowercase dashed UUID — exactly what `prefixedId("srl")` mints). Same reasoning as
+ * `SPACE_ID_RE` (`@appstrate/db/ids`): a role id arrives on a path param
+ * (`/api/roles/:id`) and in a `space_members.custom_role_id` write, and both would
+ * otherwise answer 404 for a malformed id, saying nothing about WHY. The predicate half of
  * {@link assertSpaceRoleId}, for the body field that is validated by Zod
  * (`spaceRoleAssignmentShape.custom_role_id`) rather than by a throw.
  */
 export function isSpaceRoleId(id: string): boolean {
-  return SPACE_ROLE_ID_RE.test(id);
+  return SPACE_ROLE_ID_REGEX.test(id);
 }
 
 /**

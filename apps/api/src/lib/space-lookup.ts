@@ -23,10 +23,10 @@ import {
   MEMBERSHIP_COLUMNS,
   memberFromJoin,
   membershipOn,
-  PERSONAL_SPACE_ROLE_COLUMN,
-  toPersonalSpaceRole,
-  type PersonalSpaceRole,
+  PERSONAL_SPACE_DEFAULT_COLUMNS,
+  personalSpaceDefaultRef,
   type SpaceMemberRow,
+  type SpaceRoleRef,
 } from "./space-role.ts";
 
 /** Space row exposed as `c.get("space")`. Keep the field set tight so services can destructure it. */
@@ -81,8 +81,8 @@ export interface SpaceAccessSnapshot {
   member: SpaceMemberRow | null;
   /** `null` when `userId` is not a member of the organization. */
   orgRole: OrgRole | null;
-  /** The org's `personal_space_role`, from the same statement (RBAC spec §4.4). */
-  personalSpaceRole: PersonalSpaceRole;
+  /** The org's `personal_space_role`, resolved from the same statement (RBAC spec §4.4). */
+  personalSpaceDefault: SpaceRoleRef;
 }
 
 /**
@@ -112,7 +112,7 @@ export async function loadSpaceAccessForIds(
       space: SPACE_CONTEXT_COLUMNS,
       ...MEMBERSHIP_COLUMNS,
       orgRole: organizationMembers.role,
-      storedPersonalSpaceRole: PERSONAL_SPACE_ROLE_COLUMN,
+      ...PERSONAL_SPACE_DEFAULT_COLUMNS,
     })
     .from(spaces)
     .innerJoin(organizations, eq(organizations.id, spaces.orgId))
@@ -130,6 +130,6 @@ export async function loadSpaceAccessForIds(
     space: row.space,
     member: memberFromJoin(row),
     orgRole: row.orgRole,
-    personalSpaceRole: toPersonalSpaceRole(row.storedPersonalSpaceRole),
+    personalSpaceDefault: personalSpaceDefaultRef(row),
   }));
 }

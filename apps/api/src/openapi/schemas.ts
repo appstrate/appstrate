@@ -208,9 +208,9 @@ export const ORG_SETTINGS_PROPERTIES = {
   },
   personal_space_role: {
     type: "string",
-    enum: ["admin", "operator"],
+    anyOf: [{ enum: [...SPACE_ROLE_PRESETS] }, { pattern: SPACE_ROLE_ID_PATTERN }],
     description:
-      "The role an organization MEMBER holds in their own personal space. Defaults to `admin`. `operator` caps it: the member runs published, active agents (a plain launch without a published version returns `404 no_published_version`). An explicit draft launch requires write access in the package’s home space (`403 draft_not_writable` otherwise). Existing schedules keep their previously authorized draft selectors. The member activates and deactivates packages, connects integrations, and can still delete the agents, skills, integrations and schedules they already have there (`agents:delete`, `skills:delete`, `integrations:delete`, `schedules:delete`), but can no longer create, edit, publish, share, configure or compose an inline run, nor rename the space. Owners and admins keep `admin` in their own personal space and a guest stays `operator`. Computed on every request: switching it back restores `admin` with no other write. Always present on read; optional on PATCH.",
+      "The role an organization MEMBER holds by default in their own personal space: a preset key (`admin`, `builder`, `operator`, `runner`, `viewer`) or the id of one of this organization's custom space roles (`srl_…`). Defaults to `admin`. On write, a custom id that is not a role of this organization answers `404 not_found`; while a custom role is named here it cannot be deleted (`409 role_in_use` with `org_default: true`). Any role short of `admin` also grants `agents:delete`, `skills:delete`, `integrations:delete` and `schedules:delete` there, so the member can still remove what they already have. Below `admin` the member loses what the role withholds — e.g. without `agents:write` no create, edit or inline run (`403 inline_run_not_allowed_in_space`); a plain launch runs the published version (`404 no_published_version` without one) and an explicit draft launch requires write access in the package's home space (`403 draft_not_writable`). Existing schedules keep their previously authorized draft selectors. Owners and admins always hold `admin` in their own personal space, a guest holds `operator`, and a member's own override (`PUT /api/orgs/{orgId}/members/{userId}/personal-space-role`) wins over this default. A custom role that no longer exists resolves to `operator` plus the deletes above, never to `admin`. Computed on every request: changing it takes effect with no other write. Always present on read; optional on PATCH.",
   },
 };
 
@@ -996,7 +996,7 @@ export const schemas = {
     type: "object",
     // `email`/`displayName` are best-effort joins (getOrgMembers emits
     // `?? undefined` when the user/profile row is missing) — NOT required.
-    required: ["userId", "role", "joinedAt", "spaces"],
+    required: ["userId", "role", "joinedAt", "spaces", "personal_space_role"],
     properties: {
       userId: { type: "string" },
       displayName: { type: "string" },
@@ -1008,6 +1008,25 @@ export const schemas = {
         description:
           "The spaces this member reaches, among those whose member list the caller may read (`GET /api/spaces/{id}/members`'s own rule, per space: `space-members:read` there for explicit members, plus `members:read` for implicit ones). A credential pinned to a space reads that space only. Ordered as `GET /api/spaces` lists them.",
         items: { $ref: "#/components/schemas/OrgMemberSpace" },
+      },
+      personal_space_role: {
+        description:
+          "The member's own role in their personal space, overriding the organization's `personal_space_role` (set with `PUT /api/orgs/{orgId}/members/{userId}/personal-space-role`). `null`: they follow the organization default. Always `null` for an owner or admin, who hold `admin` there.",
+        oneOf: [
+          { type: "null" },
+          {
+            type: "object",
+            required: ["preset_role"],
+            properties: { preset_role: { type: "string", enum: [...SPACE_ROLE_PRESETS] } },
+            additionalProperties: false,
+          },
+          {
+            type: "object",
+            required: ["custom_role_id"],
+            properties: { custom_role_id: { type: "string", pattern: SPACE_ROLE_ID_PATTERN } },
+            additionalProperties: false,
+          },
+        ],
       },
     },
   },

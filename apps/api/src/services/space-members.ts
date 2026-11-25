@@ -29,10 +29,11 @@ import {
   customRoleOn,
   loadSpaceMember,
   MEMBERSHIP_COLUMNS,
+  ADMIN_ROLE_REF,
   memberFromJoin,
-  PERSONAL_SPACE_ROLE_COLUMN,
+  PERSONAL_SPACE_DEFAULT_COLUMNS,
+  personalSpaceDefaultRef,
   resolveSpaceRole,
-  toPersonalSpaceRole,
   toSpaceRoleWire,
   type SpaceAccessRow,
   type SpaceRoleRef,
@@ -119,7 +120,7 @@ async function listMembersOfSpaces(
       },
       userId: organizationMembers.userId,
       orgRole: organizationMembers.role,
-      storedPersonalSpaceRole: PERSONAL_SPACE_ROLE_COLUMN,
+      ...PERSONAL_SPACE_DEFAULT_COLUMNS,
       name: userTable.name,
       email: userTable.email,
       displayName: profiles.displayName,
@@ -156,14 +157,14 @@ async function listMembersOfSpaces(
     const member = memberFromJoin(row);
     // The fourth argument is the user THIS row is about, not the request's
     // caller: the question asked of the resolver is "what would this person
-    // hold here". On a personal space that answers `admin` for its owner and
-    // `null` for everyone else, so the list is the owner alone (decision 10).
+    // hold here". On a personal space that answers the owner's own role for
+    // them and `null` for everyone else, so the list is the owner alone (decision 10).
     const effective = resolveSpaceRole(
       row.orgRole,
       row.space,
       member,
       row.userId,
-      toPersonalSpaceRole(row.storedPersonalSpaceRole),
+      personalSpaceDefaultRef(row),
     );
     if (!effective) continue;
     out.push({
@@ -259,10 +260,12 @@ export async function saveSpaceMember(params: {
 }
 
 /**
- * A personal space has exactly one member — its owner — and no row for them
- * (RBAC spec §3.6, decision 10). "Personal" has to mean one thing: collaboration
- * goes through a team space, distribution through sharing. Converting the space
- * (`POST /api/spaces/{id}/convert-to-team`) is what makes it grantable.
+ * A personal space has exactly one member — its owner (RBAC spec §3.6, decision
+ * 10). "Personal" has to mean one thing: collaboration goes through a team space,
+ * distribution through sharing. Converting the space
+ * (`POST /api/spaces/{id}/convert-to-team`) is what makes it grantable. The one row it
+ * may hold, the owner's override of the org default, has its own door on the org
+ * members API; these generic doors refuse it both ways.
  */
 async function assertSpaceTakesMembers(tx: DbOrTx, spaceId: string): Promise<void> {
   const [space] = await tx
@@ -270,13 +273,15 @@ async function assertSpaceTakesMembers(tx: DbOrTx, spaceId: string): Promise<voi
     .from(spaces)
     .where(eq(spaces.id, spaceId))
     .limit(1);
-  if (space?.ownerUserId) {
-    throw conflict(
-      "personal_space_has_no_members",
-      "A personal space belongs to one member and takes no others. " +
-        "Convert it to a team space first.",
-    );
-  }
+  if (space?.ownerUserId) throw personalSpaceHasNoMembers();
+}
+
+function personalSpaceHasNoMembers(): ApiError {
+  return conflict(
+    "personal_space_has_no_members",
+    "A personal space belongs to one member and takes no others. " +
+      "Convert it to a team space first.",
+  );
 }
 
 function existingSpaceMember() {
@@ -349,13 +354,17 @@ export async function removeSpaceMember(params: {
 }): Promise<SpaceMemberRemoval> {
   const { orgId, space, userId } = params;
   return db.transaction(async (tx) => {
+    // The owner's row on their personal space is the per-member override of the org
+    // default: only `/api/orgs/{orgId}/members/{userId}/personal-space-role` drops it.
+    if (space.ownerUserId !== null) throw personalSpaceHasNoMembers();
     const target = await lockOrgMember(tx, orgId, userId);
     await lockSpaceRow(tx, space.id);
-    // The standing is the TARGET's, so the caller id is theirs — a personal
-    // space resolves `admin` for its owner and nothing for anyone else. No
-    // member row: the removal is about to delete the only one there could be. The cap is
-    // `admin`: only an `admin` of a personal space (its uncapped owner) reaches this route.
-    const accessAfter = target ? resolveSpaceRole(target.role, space, null, userId, "admin") : null;
+    // The standing is the TARGET's, so the caller id is theirs. No member row: the
+    // removal is about to delete the only one there could be. A team space, so the
+    // personal-space default is never read.
+    const accessAfter = target
+      ? resolveSpaceRole(target.role, space, null, userId, ADMIN_ROLE_REF)
+      : null;
     assertCanGrantSpaceRole(params.actorPermissions, accessAfter);
     const existing = await loadSpaceMember(space.id, userId, tx);
     if (!existing) return removal(false, accessAfter, nothingUnshared());
@@ -405,10 +414,10 @@ export async function deleteSpaceMembershipsInOrg(
   orgId: string,
   userId: string,
 ): Promise<RevokedSpaceAssignment[]> {
-  // Every space of the org, personal ones included, and that is not a leak:
-  // a personal space holds no `space_members` row at all
-  // ({@link assertSpaceTakesMembers}), so a promotion has nothing to revoke
-  // there and cannot reach inside one.
+  // Every space of the org, personal ones included: the only row a personal space
+  // holds is its owner's override of the org default
+  // (`setPersonalSpaceRoleOverride`), which an owner or admin never reads and an
+  // exit must not leave to revive on a re-invite.
   const orgSpaces = await tx.select({ id: spaces.id }).from(spaces).where(eq(spaces.orgId, orgId));
   if (orgSpaces.length === 0) return [];
   return tx
@@ -677,8 +686,14 @@ async function sharesOfOwnersWithoutAccess(
       (row) =>
         row.orgRole === null ||
         row.userId === departedUserId ||
-        // Only null-ness is read, and the cap never turns a role into null or back.
-        resolveSpaceRole(row.orgRole, row.space, memberFromJoin(row), row.userId, "admin") === null,
+        // Only null-ness is read, and the personal-space default never turns a role into null or back.
+        resolveSpaceRole(
+          row.orgRole,
+          row.space,
+          memberFromJoin(row),
+          row.userId,
+          ADMIN_ROLE_REF,
+        ) === null,
     )
     .map((row) => ({ connectionId: row.id, spaceId: row.space.id }));
 }

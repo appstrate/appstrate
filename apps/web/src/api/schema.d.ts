@@ -3430,6 +3430,30 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/orgs/{orgId}/members/{userId}/personal-space-role": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Set a member's role in their personal space
+         * @description Give one member or guest their own role in their personal space, overriding the organization's `personal_space_role` default (and, for a guest, the `operator` they hold otherwise). Body: exactly one of `preset_role` / `custom_role_id`; a `custom_role_id` must name a role of this organization (404 otherwise). Any role short of `admin` also grants `agents:delete`, `skills:delete`, `integrations:delete` and `schedules:delete` there. The personal space is provisioned if the member has none yet. Owners and admins always hold `admin` in their own personal space: targeting one is `409 redundant_space_role`. The override is dropped when the member is promoted to owner or admin and when they leave or are removed; a later demotion or re-invite does not restore it. A custom role named by an override cannot be deleted (`409 role_in_use`). Same guard as `changeMemberRole` (`members:change-role`).
+         */
+        put: operations["setMemberPersonalSpaceRole"];
+        post?: never;
+        /**
+         * Return a member to the organization default in their personal space
+         * @description Drop the member's own role in their personal space, so they hold the organization's `personal_space_role` again (`operator` for a guest). Idempotent: 204 whether or not an override was set. 404 when the user is not a member of the organization. Same guard as `changeMemberRole` (`members:change-role`).
+         */
+        delete: operations["clearMemberPersonalSpaceRole"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/orgs/{orgId}/notifications": {
         parameters: {
             query?: never;
@@ -4602,7 +4626,7 @@ export interface paths {
         post?: never;
         /**
          * Delete a custom space role
-         * @description Remove a bundle. Requires `roles:delete` (owner/admin). Refused with 409 `role_in_use` while any space member holds the role or any PENDING invitation assigns it — the problem body carries `member_count` and `pending_invitation_count`. Reassign them first.
+         * @description Remove a bundle. Requires `roles:delete` (owner/admin). Refused with 409 `role_in_use` while any space member holds the role (a member's own override in their personal space included), any PENDING invitation assigns it, or the organization's `personal_space_role` setting names it — the problem body carries `member_count`, `pending_invitation_count` and `org_default`. Reassign them, or change that setting, first.
          */
         delete: operations["deleteRole"];
         options?: never;
@@ -5170,7 +5194,7 @@ export interface paths {
         post?: never;
         /**
          * Remove a space member
-         * @description Drop the explicit role. `access_after` says whether the member keeps implicit access (an `open` space) or loses the space entirely. Refused with 403 if the member's current role is one the caller could not have granted, or if removing the row would grant implicit permissions the caller does not hold.
+         * @description Drop the explicit role. `access_after` says whether the member keeps implicit access (an `open` space) or loses the space entirely. Refused with 403 if the member's current role is one the caller could not have granted, or if removing the row would grant implicit permissions the caller does not hold. A personal space is refused with 409 `personal_space_has_no_members`: its owner's own role there is cleared with `DELETE /api/orgs/{orgId}/members/{userId}/personal-space-role`.
          */
         delete: operations["removeSpaceMember"];
         options?: never;
@@ -6922,6 +6946,13 @@ export interface components {
             joinedAt: string;
             /** @description The spaces this member reaches, among those whose member list the caller may read (`GET /api/spaces/{id}/members`'s own rule, per space: `space-members:read` there for explicit members, plus `members:read` for implicit ones). A credential pinned to a space reads that space only. Ordered as `GET /api/spaces` lists them. */
             spaces: components["schemas"]["OrgMemberSpace"][];
+            /** @description The member's own role in their personal space, overriding the organization's `personal_space_role` (set with `PUT /api/orgs/{orgId}/members/{userId}/personal-space-role`). `null`: they follow the organization default. Always `null` for an owner or admin, who hold `admin` there. */
+            personal_space_role: null | {
+                /** @enum {string} */
+                preset_role: "admin" | "builder" | "operator" | "runner" | "viewer";
+            } | {
+                custom_role_id: string;
+            };
         };
         OrgMemberSpace: {
             id: string;
@@ -7113,11 +7144,8 @@ export interface components {
             dashboard_sso_enabled?: boolean;
             /** @description Whether members may bring personal model credentials. Defaults to true. When false, adding one (`owner_type: user` on `POST /api/model-provider-credentials` or on `POST /api/model-providers-oauth/pairing`) answers `403 personal_model_credentials_disabled`, and the personal credentials that already exist serve nothing: a model the organization leaves unbound is refused (`409 model_credential_required`), and a run on one is refused at its next call. Always present on read; optional on PATCH. */
             personal_model_credentials: boolean;
-            /**
-             * @description The role an organization MEMBER holds in their own personal space. Defaults to `admin`. `operator` caps it: the member runs published, active agents (a plain launch without a published version returns `404 no_published_version`). An explicit draft launch requires write access in the package’s home space (`403 draft_not_writable` otherwise). Existing schedules keep their previously authorized draft selectors. The member activates and deactivates packages, connects integrations, and can still delete the agents, skills, integrations and schedules they already have there (`agents:delete`, `skills:delete`, `integrations:delete`, `schedules:delete`), but can no longer create, edit, publish, share, configure or compose an inline run, nor rename the space. Owners and admins keep `admin` in their own personal space and a guest stays `operator`. Computed on every request: switching it back restores `admin` with no other write. Always present on read; optional on PATCH.
-             * @enum {string}
-             */
-            personal_space_role: "admin" | "operator";
+            /** @description The role an organization MEMBER holds by default in their own personal space: a preset key (`admin`, `builder`, `operator`, `runner`, `viewer`) or the id of one of this organization's custom space roles (`srl_…`). Defaults to `admin`. On write, a custom id that is not a role of this organization answers `404 not_found`; while a custom role is named here it cannot be deleted (`409 role_in_use` with `org_default: true`). Any role short of `admin` also grants `agents:delete`, `skills:delete`, `integrations:delete` and `schedules:delete` there, so the member can still remove what they already have. Below `admin` the member loses what the role withholds — e.g. without `agents:write` no create, edit or inline run (`403 inline_run_not_allowed_in_space`); a plain launch runs the published version (`404 no_published_version` without one) and an explicit draft launch requires write access in the package's home space (`403 draft_not_writable`). Existing schedules keep their previously authorized draft selectors. Owners and admins always hold `admin` in their own personal space, a guest holds `operator`, and a member's own override (`PUT /api/orgs/{orgId}/members/{userId}/personal-space-role`) wins over this default. A custom role that no longer exists resolves to `operator` plus the deletes above, never to `admin`. Computed on every request: changing it takes effect with no other write. Always present on read; optional on PATCH. */
+            personal_space_role: string | ("admin" | "builder" | "operator" | "runner" | "viewer") | unknown;
         };
         Organization: {
             id: string;
@@ -20765,7 +20793,8 @@ export interface operations {
                      *                 "name": "admin"
                      *               }
                      *             }
-                     *           ]
+                     *           ],
+                     *           "personal_space_role": null
                      *         },
                      *         {
                      *           "userId": "usr_def456",
@@ -20784,7 +20813,10 @@ export interface operations {
                      *                 "name": "operator"
                      *               }
                      *             }
-                     *           ]
+                     *           ],
+                     *           "personal_space_role": {
+                     *             "preset_role": "builder"
+                     *           }
                      *         }
                      *       ],
                      *       "invitations": []
@@ -21929,7 +21961,8 @@ export interface operations {
                      *             "name": "admin"
                      *           }
                      *         }
-                     *       ]
+                     *       ],
+                     *       "personal_space_role": null
                      *     }
                      */
                     "application/json": components["schemas"]["OrgMember"];
@@ -22044,6 +22077,78 @@ export interface operations {
                         hasMore: boolean;
                     };
                 };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    setMemberPersonalSpaceRole: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                orgId: string;
+                userId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** @enum {string} */
+                    preset_role?: "admin" | "builder" | "operator" | "runner" | "viewer";
+                    custom_role_id?: string;
+                } & (unknown | unknown);
+            };
+        };
+        responses: {
+            /** @description Updated member — same shape as the members list in GET /api/orgs/{orgId} */
+            200: {
+                headers: {
+                    "Request-Id": components["headers"]["RequestId"];
+                    "Appstrate-Version": components["headers"]["AppstrateVersion"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OrgMember"];
+                };
+            };
+            400: components["responses"]["ValidationError"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            /** @description The target is an owner or admin, who always hold `admin` in their personal space (`redundant_space_role`) */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+        };
+    };
+    clearMemberPersonalSpaceRole: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                orgId: string;
+                userId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Override cleared, or there was none */
+            204: {
+                headers: {
+                    "Request-Id": components["headers"]["RequestId"];
+                    "Appstrate-Version": components["headers"]["AppstrateVersion"];
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
@@ -22747,11 +22852,8 @@ export interface operations {
                     dashboard_sso_enabled?: boolean;
                     /** @description Whether members may bring personal model credentials. Defaults to true. When false, adding one (`owner_type: user` on `POST /api/model-provider-credentials` or on `POST /api/model-providers-oauth/pairing`) answers `403 personal_model_credentials_disabled`, and the personal credentials that already exist serve nothing: a model the organization leaves unbound is refused (`409 model_credential_required`), and a run on one is refused at its next call. Always present on read; optional on PATCH. */
                     personal_model_credentials?: boolean;
-                    /**
-                     * @description The role an organization MEMBER holds in their own personal space. Defaults to `admin`. `operator` caps it: the member runs published, active agents (a plain launch without a published version returns `404 no_published_version`). An explicit draft launch requires write access in the package’s home space (`403 draft_not_writable` otherwise). Existing schedules keep their previously authorized draft selectors. The member activates and deactivates packages, connects integrations, and can still delete the agents, skills, integrations and schedules they already have there (`agents:delete`, `skills:delete`, `integrations:delete`, `schedules:delete`), but can no longer create, edit, publish, share, configure or compose an inline run, nor rename the space. Owners and admins keep `admin` in their own personal space and a guest stays `operator`. Computed on every request: switching it back restores `admin` with no other write. Always present on read; optional on PATCH.
-                     * @enum {string}
-                     */
-                    personal_space_role?: "admin" | "operator";
+                    /** @description The role an organization MEMBER holds by default in their own personal space: a preset key (`admin`, `builder`, `operator`, `runner`, `viewer`) or the id of one of this organization's custom space roles (`srl_…`). Defaults to `admin`. On write, a custom id that is not a role of this organization answers `404 not_found`; while a custom role is named here it cannot be deleted (`409 role_in_use` with `org_default: true`). Any role short of `admin` also grants `agents:delete`, `skills:delete`, `integrations:delete` and `schedules:delete` there, so the member can still remove what they already have. Below `admin` the member loses what the role withholds — e.g. without `agents:write` no create, edit or inline run (`403 inline_run_not_allowed_in_space`); a plain launch runs the published version (`404 no_published_version` without one) and an explicit draft launch requires write access in the package's home space (`403 draft_not_writable`). Existing schedules keep their previously authorized draft selectors. Owners and admins always hold `admin` in their own personal space, a guest holds `operator`, and a member's own override (`PUT /api/orgs/{orgId}/members/{userId}/personal-space-role`) wins over this default. A custom role that no longer exists resolves to `operator` plus the deletes above, never to `admin`. Computed on every request: changing it takes effect with no other write. Always present on read; optional on PATCH. */
+                    personal_space_role?: string | ("admin" | "builder" | "operator" | "runner" | "viewer") | unknown;
                 };
             };
         };
@@ -22770,6 +22872,15 @@ export interface operations {
             400: components["responses"]["ValidationError"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
+            /** @description `personal_space_role` names a custom role id that is not a role of this organization */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
         };
     };
     listAgentPackages: {
@@ -25969,6 +26080,8 @@ export interface operations {
                         member_count: number;
                         /** @description Pending invitations whose `space_assignments` name this role. */
                         pending_invitation_count: number;
+                        /** @description Whether the organization's `personal_space_role` setting names this role. */
+                        org_default: boolean;
                     };
                 };
             };
@@ -28642,6 +28755,15 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
+            /** @description The space is a personal space (`personal_space_has_no_members`) */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
         };
     };
     updateSpaceMember: {

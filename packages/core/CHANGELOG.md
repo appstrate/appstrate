@@ -11,6 +11,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - `studio:read`, a space-level core permission (`CoreResources.studio`): it opens the Studio's
   screens in the dashboard and gates no API route.
+- `personalSpaceRoleSchema` and `SPACE_ROLE_ID_REGEX` in `@appstrate/core/permissions`.
+
+### Changed
+
+- `orgSettingsSchema.personal_space_role` (and `orgSettingsReadSchema`) accepts any space-role
+  preset key (`admin`, `builder`, `operator`, `runner`, `viewer`) or a custom space role id
+  (`srl_` + canonical UUID), no longer `admin` | `operator` only. The read default stays
+  `admin`; stored values `admin` and `operator` remain valid.
 
 ### Removed
 

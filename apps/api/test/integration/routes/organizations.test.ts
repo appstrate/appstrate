@@ -1168,10 +1168,12 @@ describe("Organizations API", () => {
         "displayName",
         "email",
         "joinedAt",
+        "personal_space_role",
         "role",
         "spaces",
         "userId",
       ]);
+      expect(body.personal_space_role).toBeNull();
 
       // Persisted
       await assertDbHas(

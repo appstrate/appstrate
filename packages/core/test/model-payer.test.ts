@@ -33,9 +33,27 @@ describe("orgSettingsSchema", () => {
     expect("personal_space_role" in parsed).toBe(false);
   });
 
-  it("refuses a personal_space_role other than admin or operator", () => {
-    expect(orgSettingsSchema.partial().safeParse({ personal_space_role: "builder" }).success).toBe(
-      false,
-    );
+  it("accepts a preset key or a custom role id as personal_space_role", () => {
+    const parse = (value: unknown) =>
+      orgSettingsSchema.partial().safeParse({ personal_space_role: value }).success;
+    for (const preset of ["admin", "builder", "operator", "runner", "viewer"]) {
+      expect(parse(preset), preset).toBe(true);
+    }
+    expect(parse("srl_11111111-1111-4111-8111-111111111111")).toBe(true);
+  });
+
+  it("refuses any other personal_space_role", () => {
+    const parse = (value: unknown) =>
+      orgSettingsSchema.partial().safeParse({ personal_space_role: value }).success;
+    for (const value of [
+      "owner",
+      "superuser",
+      "srl_nope",
+      "SRL_11111111-1111-4111-8111-111111111111",
+      1,
+      null,
+    ]) {
+      expect(parse(value), String(value)).toBe(false);
+    }
   });
 });

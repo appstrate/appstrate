@@ -5,10 +5,11 @@ import {
   APPEARANCE_PROPERTIES,
   EMOJI_ICON_WRITE_RULE,
   ORG_SETTINGS_PROPERTIES,
+  SPACE_ROLE_ID_PATTERN,
 } from "../schemas.ts";
 
 import { ASSIGNABLE_ORG_ROLES } from "@appstrate/shared-types";
-import { ORG_ROLES } from "@appstrate/core/permissions";
+import { ORG_ROLES, SPACE_ROLE_PRESETS } from "@appstrate/core/permissions";
 import {
   APPEARANCE_COLORS,
   ICON_IMAGE_MAX_BYTES,
@@ -185,6 +186,7 @@ export const organizationsPaths = {
                         role: { kind: "preset", key: "admin", name: "admin" },
                       },
                     ],
+                    personal_space_role: null,
                   },
                   {
                     userId: "usr_def456",
@@ -200,6 +202,7 @@ export const organizationsPaths = {
                         role: { kind: "preset", key: "operator", name: "operator" },
                       },
                     ],
+                    personal_space_role: { preset_role: "builder" },
                   },
                 ],
                 invitations: [],
@@ -411,6 +414,7 @@ export const organizationsPaths = {
                     role: { kind: "preset", key: "admin", name: "admin" },
                   },
                 ],
+                personal_space_role: null,
               },
             },
           },
@@ -435,6 +439,82 @@ export const organizationsPaths = {
       responses: {
         "204": {
           description: "Member removed",
+          headers: STD_RESPONSE_HEADERS,
+        },
+        "401": { $ref: "#/components/responses/Unauthorized" },
+        "403": { $ref: "#/components/responses/Forbidden" },
+        "404": { $ref: "#/components/responses/NotFound" },
+      },
+    },
+  },
+  "/api/orgs/{orgId}/members/{userId}/personal-space-role": {
+    put: {
+      operationId: "setMemberPersonalSpaceRole",
+      "x-appstrate-space": { kind: "organization" },
+      tags: ["Organizations"],
+      summary: "Set a member's role in their personal space",
+      description:
+        "Give one member or guest their own role in their personal space, overriding the organization's `personal_space_role` default (and, for a guest, the `operator` they hold otherwise). Body: exactly one of `preset_role` / `custom_role_id`; a `custom_role_id` must name a role of this organization (404 otherwise). Any role short of `admin` also grants `agents:delete`, `skills:delete`, `integrations:delete` and `schedules:delete` there. The personal space is provisioned if the member has none yet. Owners and admins always hold `admin` in their own personal space: targeting one is `409 redundant_space_role`. The override is dropped when the member is promoted to owner or admin and when they leave or are removed; a later demotion or re-invite does not restore it. A custom role named by an override cannot be deleted (`409 role_in_use`). Same guard as `changeMemberRole` (`members:change-role`).",
+      parameters: [
+        { name: "orgId", in: "path", required: true, schema: { type: "string" } },
+        { name: "userId", in: "path", required: true, schema: { type: "string" } },
+      ],
+      requestBody: {
+        required: true,
+        content: {
+          "application/json": {
+            schema: {
+              type: "object",
+              description: "Exactly one of `preset_role` / `custom_role_id`.",
+              allOf: [{ oneOf: [{ required: ["preset_role"] }, { required: ["custom_role_id"] }] }],
+              properties: {
+                preset_role: { type: "string", enum: [...SPACE_ROLE_PRESETS] },
+                custom_role_id: { type: "string", pattern: SPACE_ROLE_ID_PATTERN },
+              },
+              additionalProperties: false,
+            },
+          },
+        },
+      },
+      responses: {
+        "200": {
+          description: "Updated member — same shape as the members list in GET /api/orgs/{orgId}",
+          headers: STD_RESPONSE_HEADERS,
+          content: {
+            "application/json": {
+              schema: { $ref: "#/components/schemas/OrgMember" },
+            },
+          },
+        },
+        "400": { $ref: "#/components/responses/ValidationError" },
+        "401": { $ref: "#/components/responses/Unauthorized" },
+        "403": { $ref: "#/components/responses/Forbidden" },
+        "404": { $ref: "#/components/responses/NotFound" },
+        "409": {
+          description:
+            "The target is an owner or admin, who always hold `admin` in their personal space (`redundant_space_role`)",
+          content: {
+            "application/problem+json": {
+              schema: { $ref: "#/components/schemas/ProblemDetail" },
+            },
+          },
+        },
+      },
+    },
+    delete: {
+      operationId: "clearMemberPersonalSpaceRole",
+      "x-appstrate-space": { kind: "organization" },
+      tags: ["Organizations"],
+      summary: "Return a member to the organization default in their personal space",
+      description:
+        "Drop the member's own role in their personal space, so they hold the organization's `personal_space_role` again (`operator` for a guest). Idempotent: 204 whether or not an override was set. 404 when the user is not a member of the organization. Same guard as `changeMemberRole` (`members:change-role`).",
+      parameters: [
+        { name: "orgId", in: "path", required: true, schema: { type: "string" } },
+        { name: "userId", in: "path", required: true, schema: { type: "string" } },
+      ],
+      responses: {
+        "204": {
+          description: "Override cleared, or there was none",
           headers: STD_RESPONSE_HEADERS,
         },
         "401": { $ref: "#/components/responses/Unauthorized" },
@@ -712,6 +792,15 @@ export const organizationsPaths = {
         "400": { $ref: "#/components/responses/ValidationError" },
         "401": { $ref: "#/components/responses/Unauthorized" },
         "403": { $ref: "#/components/responses/Forbidden" },
+        "404": {
+          description:
+            "`personal_space_role` names a custom role id that is not a role of this organization",
+          content: {
+            "application/problem+json": {
+              schema: { $ref: "#/components/schemas/ProblemDetail" },
+            },
+          },
+        },
       },
     },
   },

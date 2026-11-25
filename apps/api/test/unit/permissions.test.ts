@@ -20,7 +20,7 @@ import {
   type Permission,
 } from "../../src/lib/permissions.ts";
 import { OIDC_ALLOWED_SCOPES } from "../../src/modules/oidc/auth/scopes.ts";
-import { resolveSpaceRole, spacePermissions } from "../../src/lib/space-role.ts";
+import { ADMIN_ROLE_REF, resolveSpaceRole, spacePermissions } from "../../src/lib/space-role.ts";
 import { canGrantSpaceRole } from "../../src/lib/space-role-policy.ts";
 
 /**
@@ -34,7 +34,7 @@ function inDefaultSpace(role: Parameters<typeof orgPermissions>[0]): ReadonlySet
     { id: "spc_test", visibility: "open", defaultRole: "operator", ownerUserId: null },
     null,
     "usr_test",
-    "admin",
+    ADMIN_ROLE_REF,
   );
   return effectivePermissions({
     orgPermissions: orgPermissions(role),
@@ -133,7 +133,7 @@ describe("effective permissions in an open space", () => {
       { id: "spc_test", visibility: "closed", defaultRole: "operator", ownerUserId: null },
       { ref: { kind: "preset", preset: "viewer" } },
       "usr_test",
-      "admin",
+      ADMIN_ROLE_REF,
     );
     const perms = effectivePermissions({
       orgPermissions: orgPermissions("guest"),
@@ -285,7 +285,7 @@ describe("the `runner` preset", () => {
       { id: "spc_test", visibility: "closed", defaultRole: "operator", ownerUserId: null },
       { ref: { kind: "preset", preset: "runner" } },
       "usr_test",
-      "admin",
+      ADMIN_ROLE_REF,
     );
     const effective = effectivePermissions({
       orgPermissions: orgPermissions("member"),

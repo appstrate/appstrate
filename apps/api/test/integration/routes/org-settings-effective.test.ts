@@ -12,6 +12,8 @@ import { getTestApp } from "../../helpers/app.ts";
 import { truncateAll, db } from "../../helpers/db.ts";
 import { createTestContext, type TestContext } from "../../helpers/auth.ts";
 import { organizations } from "@appstrate/db/schema";
+import { seedSpaceRole } from "../../helpers/seed.ts";
+import { expectProblem } from "../../helpers/assertions.ts";
 
 const app = getTestApp();
 
@@ -70,13 +72,41 @@ describe("organization settings — effective values", () => {
     );
   });
 
-  it("stores personal_space_role operator and refuses any other value", async () => {
-    expect((await patchSettings(ctx, { personal_space_role: "operator" })).status).toBe(200);
-    const res = await app.request(settingsUrl(ctx), { headers: { Cookie: ctx.cookie } });
+  it("stores any preset key as personal_space_role and refuses another string", async () => {
+    for (const preset of ["operator", "builder", "runner", "viewer", "admin"]) {
+      expect((await patchSettings(ctx, { personal_space_role: preset })).status, preset).toBe(200);
+      const res = await app.request(settingsUrl(ctx), { headers: { Cookie: ctx.cookie } });
+      expect(((await res.json()) as { personal_space_role: string }).personal_space_role).toBe(
+        preset,
+      );
+    }
+    for (const value of ["owner", "superuser", "srl_nope", 1]) {
+      const res = await patchSettings(ctx, { personal_space_role: value });
+      expect(res.status, String(value)).toBe(400);
+    }
+  });
+
+  it("stores a custom role of this org, and 404s an id that is not one", async () => {
+    const own = await seedSpaceRole({ orgId: ctx.orgId });
+    const res = await patchSettings(ctx, { personal_space_role: own.id });
+    expect(res.status, await res.clone().text()).toBe(200);
     expect(((await res.json()) as { personal_space_role: string }).personal_space_role).toBe(
-      "operator",
+      own.id,
     );
-    expect((await patchSettings(ctx, { personal_space_role: "builder" })).status).toBe(400);
+
+    const other = await createTestContext({ orgSlug: "neighbour" });
+    const foreign = await seedSpaceRole({ orgId: other.orgId });
+    for (const id of [foreign.id, "srl_11111111-1111-4111-8111-111111111111"]) {
+      await expectProblem(await patchSettings(ctx, { personal_space_role: id }), 404, {
+        code: "not_found",
+      });
+    }
+    // The refused write changed nothing.
+    const [row] = await db
+      .select({ orgSettings: organizations.orgSettings })
+      .from(organizations)
+      .where(eq(organizations.id, ctx.orgId));
+    expect(row!.orgSettings).toHaveProperty("personal_space_role", own.id);
   });
 
   it("a PATCH of another key does not write the personal_space_role default into storage", async () => {

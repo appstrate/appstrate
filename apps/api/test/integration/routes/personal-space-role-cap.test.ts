@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * `personal_space_role: "operator"` over HTTP (RBAC spec §3.6).
+ * `personal_space_role` over HTTP (RBAC spec §3.6): `operator` first, then the other
+ * presets and a custom role of the org as the default.
  *
  * The cap holds an org MEMBER in their own personal space to `operator` plus the
  * four delete permissions. The claims, in order: what it refuses (compose, author,
@@ -12,7 +13,7 @@
 
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "bun:test";
 import { eq } from "drizzle-orm";
-import { runs, schedules } from "@appstrate/db/schema";
+import { runs, schedules, spaceRoles } from "@appstrate/db/schema";
 import { getTestApp } from "../../helpers/app.ts";
 import { db, truncateAll } from "../../helpers/db.ts";
 import { expectProblem } from "../../helpers/assertions.ts";
@@ -31,6 +32,7 @@ import {
   seedSpace,
   seedSpaceMember,
   seedSpacePackage,
+  seedSpaceRole,
 } from "../../helpers/seed.ts";
 import {
   createFakeOrchestrator,
@@ -60,7 +62,7 @@ const headersFor = (ctx: TestContext, spaceId: string) => ({
 
 const json = { "Content-Type": "application/json" };
 
-async function setCap(owner: TestContext, value: "operator" | "admin" | null): Promise<void> {
+async function setCap(owner: TestContext, value: string | null): Promise<void> {
   const res = await app.request(`/api/orgs/${owner.orgId}/settings`, {
     method: "PATCH",
     headers: { Cookie: owner.cookie, ...json },
@@ -404,6 +406,70 @@ describe("personal_space_role: operator", () => {
       await expectProblem(await validateInline(guest, own.id), 403, {
         code: "inline_run_not_allowed_in_space",
       });
+    });
+  });
+
+  describe("another preset or a custom role as the default", () => {
+    it("gives a member builder or viewer plus the delete floor", async () => {
+      await setCap(owner, "builder");
+      const asBuilder = await personalOf(member);
+      expect(asBuilder.role).toMatchObject({ kind: "preset", key: "builder" });
+      expect(asBuilder.permissions).toContain("agents:write");
+      for (const permission of DELETES) expect(asBuilder.permissions).toContain(permission);
+
+      await setCap(owner, "viewer");
+      const asViewer = await personalOf(member);
+      expect(asViewer.role).toMatchObject({ kind: "preset", key: "viewer" });
+      for (const permission of DELETES) expect(asViewer.permissions).toContain(permission);
+      for (const permission of ["agents:write", "agents:run"]) {
+        expect(asViewer.permissions).not.toContain(permission);
+      }
+      const statuses = await authoringStatuses(member, personalId, agentId);
+      expect(statuses.createAgent).toBe(403);
+    });
+
+    it("gives a member a custom role's permissions plus the floor, named on GET /api/spaces", async () => {
+      // No `studio:read`: the Studio is what this role withholds.
+      const role = await seedSpaceRole({
+        orgId: owner.orgId,
+        key: "runner-lite",
+        name: "Runner lite",
+        permissions: ["agents:read", "agents:run", "runs:read"],
+      });
+      await setCap(owner, role.id);
+
+      const own = await personalOf(member);
+      expect(own.role).toMatchObject({ kind: "custom", key: "runner-lite" });
+      expect(own.permissions).not.toContain("studio:read");
+      expect(own.permissions).not.toContain("agents:write");
+      for (const permission of ["agents:read", "agents:run", "runs:read", ...DELETES]) {
+        expect(own.permissions).toContain(permission);
+      }
+      const detail = await app.request(`/api/spaces/${personalId}`, {
+        headers: orgOnlyHeaders(member),
+      });
+      expect(detail.status, await detail.clone().text()).toBe(200);
+      expect(await detail.json()).toMatchObject({
+        role: { kind: "custom", key: "runner-lite", name: "Runner lite" },
+      });
+
+      // Owners and admins keep admin; a guest keeps plain operator.
+      expect((await personalOf(admin)).role).toMatchObject({ key: "admin" });
+      const guestOwn = await personalOf(guest);
+      expect(guestOwn.role).toMatchObject({ key: "operator" });
+      for (const permission of DELETES) expect(guestOwn.permissions).not.toContain(permission);
+    });
+
+    it("fails closed to operator plus the floor when the named role is gone", async () => {
+      const role = await seedSpaceRole({ orgId: owner.orgId, permissions: ["agents:read"] });
+      await setCap(owner, role.id);
+      // Bypass the delete guard, as a race would: the setting still names the id.
+      await db.delete(spaceRoles).where(eq(spaceRoles.id, role.id));
+
+      const own = await personalOf(member);
+      expect(own.role).toMatchObject({ kind: "preset", key: "operator" });
+      for (const permission of DELETES) expect(own.permissions).toContain(permission);
+      expect(own.permissions).not.toContain("agents:write");
     });
   });
 });
