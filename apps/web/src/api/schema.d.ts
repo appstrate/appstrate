@@ -1926,6 +1926,26 @@ export interface paths {
         patch: operations["updateIntegrationSettings"];
         trace?: never;
     };
+    "/api/integrations/{packageId}/tool-snapshot/refresh": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * List the remote server's tools again into the integration's snapshot
+         * @description Lists the tools of the integration's published remote MCP server now, bypassing the cached listing, through the credential proxy with the connection the caller's selection picks (or `connection_id`): the same selection, `authorized_uris` allowlist and egress guard as a credential-proxy call outside a run, journaled as one call of the connection. The listing is recorded as the snapshot of that connection (of the integration alone when it declares no auths). Requires `integrations:read` and `credential-proxy:call-own`. Rate limited to 10 requests per minute.
+         */
+        post: operations["refreshIntegrationToolSnapshot"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/library": {
         parameters: {
             query?: never;
@@ -15512,7 +15532,7 @@ export interface operations {
                 "application/json": {
                     /**
                      * Format: uuid
-                     * @description The connection to call the server with; omitted, the proxy's selection (`X-Connection-Id` semantics). Ignored for an integration declaring no auths, whose server is reached without a connection.
+                     * @description The connection to call the server with, whose variables render a templated server URL; omitted, the proxy's selection (`X-Connection-Id` semantics). Refused for an integration declaring no auths, whose server is reached without a connection.
                      */
                     connection_id?: string;
                 };
@@ -15600,7 +15620,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetail"];
                 };
             };
-            /** @description `integration_not_remote` — the integration is not backed by a remote MCP server; `sync_transport_unsupported` — its server uses the SSE transport; `sync_url_templated` — its server URL is chosen per connection (`{$variable.…}`). */
+            /** @description `integration_not_remote` — the integration is not backed by a remote MCP server; `sync_transport_unsupported` — its server uses the SSE transport; `remote_url_unrenderable` — the server URL is built from connection variables (`{$variable.…}`) and the selected connection's do not render it. */
             422: {
                 headers: {
                     "Request-Id": components["headers"]["RequestId"];
@@ -16105,6 +16125,118 @@ export interface operations {
             400: components["responses"]["ValidationError"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
+        };
+    };
+    refreshIntegrationToolSnapshot: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
+                "X-Org-Id"?: components["parameters"]["XOrgId"];
+                /** @description Space ID. Required for space-scoped routes (agents, runs, schedules, and space-scoped module routes). Not needed for API key auth (space resolved from key). */
+                "X-Space-Id"?: components["parameters"]["XSpaceId"];
+            };
+            path: {
+                /** @description Integration package id (e.g. `@official/gmail`). */
+                packageId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": {
+                    /**
+                     * Format: uuid
+                     * @description The connection to list with; omitted, the proxy's selection. Refused for an integration declaring no auths.
+                     */
+                    connection_id?: string;
+                };
+            };
+        };
+        responses: {
+            /** @description The snapshot as it now stands. */
+            200: {
+                headers: {
+                    "Request-Id": components["headers"]["RequestId"];
+                    "Appstrate-Version": components["headers"]["AppstrateVersion"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        tool_snapshot: {
+                            /**
+                             * Format: uuid
+                             * @description The connection listed with; null for an integration declaring no auths.
+                             */
+                            connection_id: string | null;
+                            /** Format: date-time */
+                            listed_at: string;
+                            /** @description The server lists more tools than are read. */
+                            truncated: boolean;
+                            tool_count: number;
+                        };
+                    };
+                };
+            };
+            /** @description `validation_failed` — the request body is invalid. */
+            400: {
+                headers: {
+                    "Request-Id": components["headers"]["RequestId"];
+                    "Appstrate-Version": components["headers"]["AppstrateVersion"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description `credential-proxy:call-own` missing, `credential_proxy_closed` — the space's `credential_proxy_open` is `false`, whatever the caller's role —, or the proxy refused the call (`unauthorized_target`, `blocked_target`). */
+            403: {
+                headers: {
+                    "Request-Id": components["headers"]["RequestId"];
+                    "Appstrate-Version": components["headers"]["AppstrateVersion"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            404: components["responses"]["NotFound"];
+            /** @description The proxy's connection-selection conflicts: `must_choose_connection` when the caller holds several usable connections and the body names none, `needs_reconnection`. */
+            409: {
+                headers: {
+                    "Request-Id": components["headers"]["RequestId"];
+                    "Appstrate-Version": components["headers"]["AppstrateVersion"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description `integration_not_remote` — the integration is not backed by a Streamable HTTP MCP server; `remote_url_unrenderable` — the connection's variables do not render the server URL. */
+            422: {
+                headers: {
+                    "Request-Id": components["headers"]["RequestId"];
+                    "Appstrate-Version": components["headers"]["AppstrateVersion"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            429: components["responses"]["RateLimited"];
+            /** @description `bad_gateway` — the server could not be listed; `upstream_credential_rejected` — it refused the connection's credential. */
+            502: {
+                headers: {
+                    "Request-Id": components["headers"]["RequestId"];
+                    "Appstrate-Version": components["headers"]["AppstrateVersion"];
+                    /** @description RFC 9209. `appstrate; received-status=<n>`: the upstream's response, relayed. `appstrate; error=<type>` (RFC 9209 §2.3 error type): the proxy's own response. Bare `appstrate`: served by the proxy without contacting the upstream (a cache hit). */
+                    "Proxy-Status"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
         };
     };
     getLibrary: {

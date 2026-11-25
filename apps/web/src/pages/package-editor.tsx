@@ -40,7 +40,12 @@ import {
   fieldsToSchema,
 } from "../components/agent-editor/utils";
 import type { ResourceEntry, SchemaField } from "../components/agent-editor/types";
-import { INTEGRATION_DOC, mergeServerSync, serverSyncBody } from "../lib/integration-server-sync";
+import {
+  INTEGRATION_DOC,
+  mergeServerSync,
+  serverSyncBody,
+  type serverSyncAvailability,
+} from "../lib/integration-server-sync";
 import { fileTextOperation } from "../lib/package-file-drafts";
 import { encodeIconDataUri } from "../lib/icon-image";
 
@@ -302,15 +307,15 @@ function IntegrationEditorInner({
   packageId,
   tab,
   toolCatalog,
-  canSync,
+  sync: syncAvailability,
 }: {
   initialState: EditorState;
   packageId: string;
   tab: PackageEditorTab;
   /** The saved package's tool catalog, shown with the draft's policy. */
   toolCatalog: IntegrationToolCatalogEntry[];
-  /** The draft's server can be asked for its tools. */
-  canSync: boolean;
+  /** Whether the draft's server can be asked for its tools; `null`: nothing to sync. */
+  sync: ReturnType<typeof serverSyncAvailability>;
 }) {
   const { t } = useTranslation(["agents", "common"]);
   // Set by `validate` when it refuses the local server: the Source tab flags its empty fields.
@@ -425,8 +430,9 @@ function IntegrationEditorInner({
           tools={toolCatalog}
           edit={{ manifest: state.manifest, onChange: onManifestChange }}
           sync={
-            canSync
+            syncAvailability
               ? {
+                  blockedBy: syncAvailability === "available" ? null : syncAvailability,
                   run: (connectionId) =>
                     sync.mutate({
                       params: { path: { packageId } },
@@ -451,13 +457,13 @@ export function IntegrationDefinitionEditor({
   detail,
   section,
   toolCatalog,
-  canSync,
+  sync,
 }: {
   detail: Versioned<OrgPackageItemDetail>;
   section: IntegrationDefinitionSection;
   toolCatalog: IntegrationToolCatalogEntry[];
-  /** The draft is served by a Streamable HTTP server at a fixed URL the caller may read. */
-  canSync: boolean;
+  /** Whether the draft's remote server can be asked for its tools; `null`: nothing to sync. */
+  sync: ReturnType<typeof serverSyncAvailability>;
 }) {
   return (
     <DraftEditorMount id={detail.id} etag={detail.etag}>
@@ -466,7 +472,7 @@ export function IntegrationDefinitionEditor({
         packageId={detail.id}
         tab={section}
         toolCatalog={toolCatalog}
-        canSync={canSync}
+        sync={sync}
       />
     </DraftEditorMount>
   );

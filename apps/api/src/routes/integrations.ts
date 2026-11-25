@@ -15,6 +15,7 @@
  * `DELETE /api/spaces/{id}/packages/{scope}/{name}` (RBAC spec §6.10).
  *   - `GET    /:packageId`                           — manifest + per-auth status for caller
  *   - `POST   /:packageId/discover`                  — a manifest proposal from the connected server
+ *   - `POST   /:packageId/tool-snapshot/refresh`     — list the server's tools again, now, into the snapshot
  *   - `GET    /:packageId/auths/:authKey/clients`    — admin: list available OAuth clients
  *   - `PUT    /:packageId/auths/:authKey/default-client` — admin: choose the default client
  *   - `POST   /:packageId/auths/:authKey/oauth-clients`  — admin: register a custom OAuth client
@@ -101,9 +102,21 @@ import { withRunToolDescriptions } from "../services/run-tools-mcp.ts";
 import { getSpaceScope, type OrgScope, type SpaceScope } from "../lib/scope.ts";
 import type { AuditPayload } from "@appstrate/core/module";
 import { auditDiff, recordAuditAs, recordAuditFromContext } from "./../services/audit.ts";
-import { listIntegrations, listIntegrationsAtRemoteUrl } from "../services/integration-service.ts";
+import {
+  listIntegrations,
+  listIntegrationsAtRemoteUrl,
+  readIntegrationManifestForProxy,
+} from "../services/integration-service.ts";
 import { discoverRemoteIntegration } from "../services/integration-discovery.ts";
 import { syncIntegrationFromServer } from "../services/integration-server-sync.ts";
+import { readToolSnapshots } from "../services/integration-tool-snapshots.ts";
+import {
+  listRemoteTools,
+  resolveRemoteConnection,
+  streamableRemote,
+} from "../services/credential-proxy/remote-tools.ts";
+import { assertActiveOutsideRun } from "../services/credential-proxy/integration-resolver.ts";
+import { connectOfferPolicyFromRequest } from "../lib/connect-offer-policy.ts";
 import {
   reachOutsideRun,
   reachOutsideRunIfPermitted,
@@ -1107,6 +1120,70 @@ export function createIntegrationsRouter() {
       warnings: proposal.warnings,
     });
   });
+
+  // The server's tools, listed again now, into the snapshot: what the editor and a space's policy
+  // read. It is a credential call outside a run, under the access rule of `/discover`.
+  router.post(
+    "/:packageId{@[^/]+/[^/]+}/tool-snapshot/refresh",
+    rateLimit(10),
+    requirePermission("integrations", "read"),
+    async (c) => {
+      const packageId = c.req.param("packageId")!;
+      const scope = getSpaceScope(c);
+      await assertIsIntegration(scope, packageId);
+      const body = await readJsonBody(c, syncFromServerSchema, { allowEmpty: true });
+      assertPermission(c, "credential-proxy", "call-own");
+      const reach = reachOutsideRun(callerPermissions(c), c.get("space")!);
+      await assertActiveOutsideRun(scope, packageId);
+      const loaded = await readIntegrationManifestForProxy(packageId, scope.orgId, null);
+      if (!loaded.ok) throw notFound(`Integration '${packageId}' has no published version`);
+      const manifest = streamableRemote(packageId, loaded.manifest);
+      const caller = {
+        scope,
+        actor: getActor(c),
+        reach,
+        caller: {
+          apiKeyId: c.get("apiKeyId") || null,
+          authMethod: c.get("authMethod"),
+          requestId: c.get("requestId"),
+        },
+        signal: c.req.raw.signal,
+        connectOffers: connectOfferPolicyFromRequest(c),
+      };
+      const { connectionId } = await resolveRemoteConnection(
+        { ...caller, integrationId: packageId, connectionId: body.connection_id },
+        manifest,
+      );
+      const catalog = await listRemoteTools({
+        ...caller,
+        integrationId: packageId,
+        manifest,
+        ...(connectionId ? { connectionId } : {}),
+        fresh: true,
+      });
+      const [snapshot] = await readToolSnapshots({
+        orgId: scope.orgId,
+        packageId,
+        connectionIds: [connectionId],
+      });
+      if (!catalog.listed || !snapshot) {
+        throw new ApiError({
+          status: 502,
+          code: "bad_gateway",
+          title: "Bad Gateway",
+          detail: `The server of integration '${packageId}' could not be listed${catalog.listingFailure ? ` (${catalog.listingFailure})` : ""}.`,
+        });
+      }
+      return c.json({
+        tool_snapshot: {
+          connection_id: snapshot.connectionId,
+          listed_at: snapshot.listedAt.toISOString(),
+          truncated: snapshot.truncated,
+          tool_count: snapshot.tools.length,
+        },
+      });
+    },
+  );
 
   router.get("/:packageId{@[^/]+/[^/]+}", requirePermission("integrations", "read"), async (c) => {
     const packageId = c.req.param("packageId")!;

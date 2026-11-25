@@ -4,6 +4,7 @@ import { describe, expect, it } from "bun:test";
 import { ApiError } from "../../api/errors.ts";
 import {
   mergeServerSync,
+  serverSyncAvailability,
   serverSyncBody,
   syncConnectionCandidates,
   type ServerSyncProposal,
@@ -153,5 +154,34 @@ describe("sync connection choice", () => {
     expect(syncConnectionCandidates(refusal("must_choose_connection"))).toEqual([candidate]);
     expect(syncConnectionCandidates(refusal("needs_reconnection"))).toBeNull();
     expect(syncConnectionCandidates(new Error("x"))).toBeNull();
+  });
+});
+
+describe("serverSyncAvailability", () => {
+  const remote = { kind: "remote", transport: "streamable-http" };
+  const access = { unauthenticated: false, mayProxy: true, hasConnection: true };
+
+  it("has nothing to sync for a source that is not remote", () => {
+    expect(serverSyncAvailability({ kind: "local" }, access)).toBeNull();
+    expect(serverSyncAvailability(null, access)).toBeNull();
+  });
+
+  it("names why a remote source cannot be synced yet", () => {
+    expect(serverSyncAvailability({ ...remote, transport: "sse" }, access)).toBe("sse");
+    expect(serverSyncAvailability(remote, { ...access, mayProxy: false })).toBe("no_permission");
+    expect(serverSyncAvailability(remote, { ...access, hasConnection: false })).toBe(
+      "no_connection",
+    );
+  });
+
+  it("is available with a connection, or without auths", () => {
+    expect(serverSyncAvailability(remote, access)).toBe("available");
+    expect(
+      serverSyncAvailability(remote, {
+        unauthenticated: true,
+        mayProxy: false,
+        hasConnection: false,
+      }),
+    ).toBe("available");
   });
 });

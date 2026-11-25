@@ -192,6 +192,13 @@ column integration_pins.package_id text not null
 column integration_pins.space_id text not null
 column integration_pins.updated_at timestamp with time zone not null default now()
 column integration_pins.user_id text
+column integration_tool_snapshots.connection_id uuid
+column integration_tool_snapshots.id uuid not null default gen_random_uuid()
+column integration_tool_snapshots.listed_at timestamp with time zone not null default now()
+column integration_tool_snapshots.org_id uuid not null
+column integration_tool_snapshots.package_id text not null
+column integration_tool_snapshots.tools jsonb not null default '[]'::jsonb
+column integration_tool_snapshots.truncated boolean not null default false
 column jwks.alg text
 column jwks.created_at timestamp with time zone not null default now()
 column jwks.crv text
@@ -594,6 +601,22 @@ column session.token text not null
 column session.updated_at timestamp with time zone not null default now()
 column session.user_agent text
 column session.user_id text not null
+column space_integration_tool_approvals.approved_at timestamp with time zone not null default now()
+column space_integration_tool_approvals.approved_by text
+column space_integration_tool_approvals.definition jsonb not null
+column space_integration_tool_approvals.fingerprint text not null
+column space_integration_tool_approvals.id uuid not null default gen_random_uuid()
+column space_integration_tool_approvals.org_id uuid not null
+column space_integration_tool_approvals.package_id text not null
+column space_integration_tool_approvals.space_id text not null
+column space_integration_tool_approvals.tool_name text not null
+column space_integration_tool_blocks.blocked_at timestamp with time zone not null default now()
+column space_integration_tool_blocks.blocked_by text
+column space_integration_tool_blocks.id uuid not null default gen_random_uuid()
+column space_integration_tool_blocks.org_id uuid not null
+column space_integration_tool_blocks.package_id text not null
+column space_integration_tool_blocks.space_id text not null
+column space_integration_tool_blocks.tool_name text not null
 column space_members.added_by text
 column space_members.created_at timestamp with time zone not null default now()
 column space_members.custom_role_id text
@@ -800,6 +823,10 @@ constraint integration_pins integration_pins_package_id_packages_id_fk FOREIGN K
 constraint integration_pins integration_pins_pkey PRIMARY KEY (id)
 constraint integration_pins integration_pins_space_id_spaces_id_fk FOREIGN KEY (space_id) REFERENCES spaces(id) ON DELETE CASCADE
 constraint integration_pins integration_pins_user_id_user_id_fk FOREIGN KEY (user_id) REFERENCES "user"(id) ON DELETE CASCADE
+constraint integration_tool_snapshots integration_tool_snapshots_connection_id_integration_connection FOREIGN KEY (connection_id) REFERENCES integration_connections(id) ON DELETE CASCADE
+constraint integration_tool_snapshots integration_tool_snapshots_org_id_organizations_id_fk FOREIGN KEY (org_id) REFERENCES organizations(id) ON DELETE CASCADE
+constraint integration_tool_snapshots integration_tool_snapshots_package_id_packages_id_fk FOREIGN KEY (package_id) REFERENCES packages(id) ON DELETE CASCADE
+constraint integration_tool_snapshots integration_tool_snapshots_pkey PRIMARY KEY (id)
 constraint jwks jwks_pkey PRIMARY KEY (id)
 constraint llm_usage llm_usage_api_key_id_api_keys_id_fk FOREIGN KEY (api_key_id) REFERENCES api_keys(id) ON DELETE SET NULL
 constraint llm_usage llm_usage_chat_session_id_chat_sessions_id_fk FOREIGN KEY (chat_session_id) REFERENCES chat_sessions(id) ON DELETE SET NULL
@@ -833,7 +860,7 @@ constraint notifications notifications_pkey PRIMARY KEY (id)
 constraint notifications notifications_recipient_type_valid CHECK ((recipient_type = ANY (ARRAY['user'::text, 'end_user'::text])))
 constraint notifications notifications_run_id_runs_id_fk FOREIGN KEY (run_id) REFERENCES runs(id) ON DELETE CASCADE
 constraint notifications notifications_space_id_spaces_id_fk FOREIGN KEY (space_id) REFERENCES spaces(id) ON DELETE CASCADE
-constraint notifications notifications_type_valid CHECK ((type = ANY (ARRAY['run_failed'::text, 'package_shared'::text, 'agent_message'::text])))
+constraint notifications notifications_type_valid CHECK ((type = ANY (ARRAY['run_failed'::text, 'package_shared'::text, 'agent_message'::text, 'integration_tools_review'::text])))
 constraint oauth_access_tokens oauth_access_tokens_client_id_oauth_clients_client_id_fk FOREIGN KEY (client_id) REFERENCES oauth_clients(client_id) ON DELETE CASCADE
 constraint oauth_access_tokens oauth_access_tokens_pkey PRIMARY KEY (id)
 constraint oauth_access_tokens oauth_access_tokens_refresh_id_oauth_refresh_tokens_id_fk FOREIGN KEY (refresh_id) REFERENCES oauth_refresh_tokens(id) ON DELETE CASCADE
@@ -965,6 +992,14 @@ constraint runs runs_user_id_user_id_fk FOREIGN KEY (user_id) REFERENCES "user"(
 constraint session session_pkey PRIMARY KEY (id)
 constraint session session_token_unique UNIQUE (token)
 constraint session session_user_id_user_id_fk FOREIGN KEY (user_id) REFERENCES "user"(id) ON DELETE CASCADE
+constraint space_integration_tool_approvals space_integration_tool_approvals_approved_by_user_id_fk FOREIGN KEY (approved_by) REFERENCES "user"(id) ON DELETE SET NULL
+constraint space_integration_tool_approvals space_integration_tool_approvals_package_id_packages_id_fk FOREIGN KEY (package_id) REFERENCES packages(id) ON DELETE CASCADE
+constraint space_integration_tool_approvals space_integration_tool_approvals_pkey PRIMARY KEY (id)
+constraint space_integration_tool_approvals space_integration_tool_approvals_space_org_fk FOREIGN KEY (space_id, org_id) REFERENCES spaces(id, org_id) ON DELETE CASCADE
+constraint space_integration_tool_blocks space_integration_tool_blocks_blocked_by_user_id_fk FOREIGN KEY (blocked_by) REFERENCES "user"(id) ON DELETE SET NULL
+constraint space_integration_tool_blocks space_integration_tool_blocks_package_id_packages_id_fk FOREIGN KEY (package_id) REFERENCES packages(id) ON DELETE CASCADE
+constraint space_integration_tool_blocks space_integration_tool_blocks_pkey PRIMARY KEY (id)
+constraint space_integration_tool_blocks space_integration_tool_blocks_space_org_fk FOREIGN KEY (space_id, org_id) REFERENCES spaces(id, org_id) ON DELETE CASCADE
 constraint space_members space_members_added_by_user_id_fk FOREIGN KEY (added_by) REFERENCES "user"(id) ON DELETE SET NULL
 constraint space_members space_members_custom_role_id_space_roles_id_fk FOREIGN KEY (custom_role_id) REFERENCES space_roles(id) ON DELETE RESTRICT
 constraint space_members space_members_one_role CHECK ((num_nonnulls(preset_role, custom_role_id) = 1))
@@ -1064,6 +1099,7 @@ index CREATE INDEX idx_integration_oauth_clients_package ON public.integration_o
 index CREATE INDEX idx_integration_org_defaults_connection_ids ON public.integration_org_defaults USING gin (connection_ids)
 index CREATE INDEX idx_integration_pins_connection_ids ON public.integration_pins USING gin (connection_ids)
 index CREATE INDEX idx_integration_pins_user ON public.integration_pins USING btree (user_id) WHERE (user_id IS NOT NULL)
+index CREATE INDEX idx_integration_tool_snapshots_connection ON public.integration_tool_snapshots USING btree (connection_id) WHERE (connection_id IS NOT NULL)
 index CREATE INDEX idx_llm_usage_api_key_id ON public.llm_usage USING btree (api_key_id)
 index CREATE INDEX idx_llm_usage_chat_session_id ON public.llm_usage USING btree (chat_session_id)
 index CREATE INDEX idx_llm_usage_org_created ON public.llm_usage USING btree (org_id, created_at)
@@ -1197,6 +1233,7 @@ index CREATE UNIQUE INDEX integration_connections_pkey ON public.integration_con
 index CREATE UNIQUE INDEX integration_oauth_clients_pkey ON public.integration_oauth_clients USING btree (id)
 index CREATE UNIQUE INDEX integration_org_defaults_pkey ON public.integration_org_defaults USING btree (id)
 index CREATE UNIQUE INDEX integration_pins_pkey ON public.integration_pins USING btree (id)
+index CREATE UNIQUE INDEX integration_tool_snapshots_pkey ON public.integration_tool_snapshots USING btree (id)
 index CREATE UNIQUE INDEX jwks_pkey ON public.jwks USING btree (id)
 index CREATE UNIQUE INDEX llm_usage_pkey ON public.llm_usage USING btree (id)
 index CREATE UNIQUE INDEX model_provider_credentials_pkey ON public.model_provider_credentials USING btree (id)
@@ -1240,6 +1277,8 @@ index CREATE UNIQUE INDEX run_reads_run_id_recipient_type_recipient_id_pk ON pub
 index CREATE UNIQUE INDEX runs_pkey ON public.runs USING btree (id)
 index CREATE UNIQUE INDEX session_pkey ON public.session USING btree (id)
 index CREATE UNIQUE INDEX session_token_unique ON public.session USING btree (token)
+index CREATE UNIQUE INDEX space_integration_tool_approvals_pkey ON public.space_integration_tool_approvals USING btree (id)
+index CREATE UNIQUE INDEX space_integration_tool_blocks_pkey ON public.space_integration_tool_blocks USING btree (id)
 index CREATE UNIQUE INDEX space_members_space_id_user_id_pk ON public.space_members USING btree (space_id, user_id)
 index CREATE UNIQUE INDEX space_packages_space_id_package_id_pk ON public.space_packages USING btree (space_id, package_id)
 index CREATE UNIQUE INDEX space_roles_pkey ON public.space_roles USING btree (id)
@@ -1253,15 +1292,19 @@ index CREATE UNIQUE INDEX uq_chat_sessions_id_org_id ON public.chat_sessions USI
 index CREATE UNIQUE INDEX uq_files_id_org_id ON public.files USING btree (id, org_id)
 index CREATE UNIQUE INDEX uq_files_run_output_dedup ON public.files USING btree (run_id, sha256, name) WHERE (purpose = 'agent_output'::file_purpose)
 index CREATE UNIQUE INDEX uq_integration_conn_id_org_id ON public.integration_connections USING btree (id, org_id)
+index CREATE UNIQUE INDEX uq_integration_tool_snapshots_target ON public.integration_tool_snapshots USING btree (org_id, package_id, COALESCE((connection_id)::text, ''::text))
 index CREATE UNIQUE INDEX uq_llm_usage_proxy_request_id ON public.llm_usage USING btree (request_id) WHERE ((source = 'proxy'::llm_usage_source) AND (request_id IS NOT NULL))
 index CREATE UNIQUE INDEX uq_llm_usage_runner_run_id ON public.llm_usage USING btree (run_id) WHERE ((source = 'runner'::llm_usage_source) AND (run_id IS NOT NULL))
 index CREATE UNIQUE INDEX uq_model_provider_credentials_id_provider_id ON public.model_provider_credentials USING btree (id, provider_id)
 index CREATE UNIQUE INDEX uq_notifications_run_recipient_type ON public.notifications USING btree (run_id, recipient_type, recipient_id, type) WHERE (run_id IS NOT NULL)
+index CREATE UNIQUE INDEX uq_notifications_tools_review_unread ON public.notifications USING btree (space_id, recipient_type, recipient_id, ((payload ->> 'packageId'::text))) WHERE ((type = 'integration_tools_review'::text) AND (read_at IS NULL))
 index CREATE UNIQUE INDEX uq_oauth_client_resources_pair ON public.oauth_client_resources USING btree (client_id, resource_id)
 index CREATE UNIQUE INDEX uq_org_invitations_pending ON public.org_invitations USING btree (org_id, email) WHERE (status = 'pending'::invitation_status)
 index CREATE UNIQUE INDEX uq_org_models_unaliased_binding ON public.org_models USING btree (org_id, credential_id, model_id) WHERE (aliased = false)
 index CREATE UNIQUE INDEX uq_org_models_unbound ON public.org_models USING btree (org_id, provider_id, model_id) WHERE (credential_id IS NULL)
 index CREATE UNIQUE INDEX uq_runs_id_org_id ON public.runs USING btree (id, org_id)
+index CREATE UNIQUE INDEX uq_space_integration_tool_approvals ON public.space_integration_tool_approvals USING btree (space_id, package_id, tool_name, fingerprint)
+index CREATE UNIQUE INDEX uq_space_integration_tool_blocks ON public.space_integration_tool_blocks USING btree (space_id, package_id, tool_name)
 index CREATE UNIQUE INDEX uq_spaces_id_org_id ON public.spaces USING btree (id, org_id)
 index CREATE UNIQUE INDEX uq_spaces_org_owner ON public.spaces USING btree (org_id, owner_user_id) WHERE (owner_user_id IS NOT NULL)
 index CREATE UNIQUE INDEX uq_storage_deletion_jobs_pending ON public.storage_deletion_jobs USING btree (bucket, storage_key) WHERE (completed_at IS NULL)

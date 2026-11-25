@@ -31,6 +31,7 @@ import { PageActionsMenu } from "../page-actions-menu";
 import { PackageToolCatalog, type PackageTool } from "../package-detail/package-tool-catalog";
 import { TableRowActions } from "../table-row-actions";
 import { RequiredScopesField } from "./required-scopes-field";
+import type { ServerSyncBlock } from "../../lib/integration-server-sync";
 import { SyncFromServer, type ServerSyncResult } from "./sync-from-server";
 import {
   getAllowUndeclaredTools,
@@ -54,12 +55,13 @@ export function IntegrationToolsSection({
   allowUndeclaredTools?: boolean;
   /** The draft manifest, when the reader may change the package. */
   edit?: { manifest: Record<string, unknown>; onChange: (next: Record<string, unknown>) => void };
-  /** Offered only when the integration can be asked for its tools (remote, connected). */
+  /** Offered for a remote integration; `blockedBy` disables it with the reason. */
   sync?: {
     run: (connectionId?: string) => void;
     isPending: boolean;
     error: unknown;
     result: ServerSyncResult | null;
+    blockedBy: ServerSyncBlock | null;
   };
 }) {
   const { t } = useTranslation(["agents", "settings", "common"]);

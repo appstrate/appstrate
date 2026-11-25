@@ -42,6 +42,7 @@ describe("IntegrationToolsSection sync", () => {
     run: () => {},
     isPending: false,
     error: null,
+    blockedBy: null,
     result: {
       count: 3,
       warnings: [{ code: "tools_truncated" as const, message: "en" }],
@@ -80,6 +81,20 @@ describe("IntegrationToolsSection sync", () => {
       />,
     );
     expect(html).toContain('aria-label="Choisir la connexion à utiliser"');
+  });
+
+  it("keeps the button, disabled and explained, when the sync is blocked", () => {
+    const html = render(
+      <IntegrationToolsSection
+        tools={[]}
+        edit={{ manifest, onChange: () => {} }}
+        sync={{ ...sync, blockedBy: "no_connection" }}
+      />,
+    );
+    expect(html).toMatch(
+      /<button[^>]*disabled=""[^>]*data-testid="integration-editor-sync-button"/,
+    );
+    expect(html).toContain("Connectez d’abord un compte pour lister les outils du serveur");
   });
 
   it("offers nothing without it", () => {

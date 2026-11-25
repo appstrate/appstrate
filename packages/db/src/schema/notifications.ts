@@ -50,7 +50,12 @@ import { runs } from "./runs.ts";
  * carries the few fields the bell needs to render without a join.
  */
 /** The notification kinds — `notifications.type`, held by the CHECK below. */
-export const notificationTypeValues = ["run_failed", "package_shared", "agent_message"] as const;
+export const notificationTypeValues = [
+  "run_failed",
+  "package_shared",
+  "agent_message",
+  "integration_tools_review",
+] as const;
 export type NotificationType = (typeof notificationTypeValues)[number];
 
 /**
@@ -76,6 +81,8 @@ export interface NotificationPayloads {
     title: string;
     message: string;
   };
+  /** A remote integration's catalog changed in a way the space has not reviewed yet. */
+  integration_tools_review: { packageId: string; display_name: string };
 }
 
 export const notifications = pgTable(
@@ -184,6 +191,16 @@ export const notifications = pgTable(
     // fan-out path is already exactly-once, finalizeRun CAS winner). For
     // `agent_message` it is the rule itself: an agent's `notify` reaches each
     // recipient once per run, and a second call inserts nothing.
+    // One unread tools-review notice per (space, recipient, integration): a catalog that keeps
+    // changing does not stack rows.
+    uniqueIndex("uq_notifications_tools_review_unread")
+      .on(
+        table.spaceId,
+        table.recipientType,
+        table.recipientId,
+        sql`(${table.payload}->>'packageId')`,
+      )
+      .where(sql`${table.type} = 'integration_tools_review' AND ${table.readAt} IS NULL`),
     uniqueIndex("uq_notifications_run_recipient_type")
       .on(table.runId, table.recipientType, table.recipientId, table.type)
       .where(sql`${table.runId} IS NOT NULL`),

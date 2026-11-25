@@ -15,6 +15,7 @@ import {
   integrationConnections,
   integrationOauthClients,
   integrationOrgDefaults,
+  integrationToolSnapshots,
   spacePackages,
   spaces,
 } from "@appstrate/db/schema";
@@ -2027,6 +2028,108 @@ describe("the typed tools of a remote MCP integration", () => {
       expect(hidden.status).toBe(404);
       expect((await problemOf(hidden)).code).toBe("not_found");
       expect(server.requests.length).toBe(exchanges);
+    });
+  });
+
+  describe("the tool snapshot", () => {
+    const toolsListed = () => server.requests.filter((r) => r.body.includes('"tools/list"')).length;
+    const snapshots = () => db.select().from(integrationToolSnapshots);
+
+    /** `POST /api/integrations/{id}/tool-snapshot/refresh`, authenticated as `key`. */
+    const refresh = (body?: unknown, key = apiKey) =>
+      getTestApp().request(`/api/integrations/${ID}/tool-snapshot/refresh`, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${key}`,
+          "X-Org-Id": ctx.orgId,
+          "X-Space-Id": ctx.defaultSpaceId,
+          "Content-Type": "application/json",
+        },
+        ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
+      });
+
+    beforeEach(async () => {
+      apiKey = (
+        await seedApiKey({
+          orgId: ctx.orgId,
+          spaceId: ctx.defaultSpaceId,
+          createdBy: ctx.user.id,
+          scopes: ["credential-proxy:call-own", "integrations:read"],
+        })
+      ).rawKey;
+    });
+
+    it("is recorded by a listing that reaches the server, not by one served from the cache", async () => {
+      await seedProxyIntegration(ctx, remote());
+      const connectionId = await seedProxyConnection(ctx, ID, "api_key", { token: TOKEN });
+
+      await list({ connection_id: connectionId });
+      const [row] = await snapshots();
+      expect(row?.connectionId).toBe(connectionId);
+      expect(row?.tools.map((tool) => tool.name)).toEqual([
+        "search",
+        "create",
+        "delete",
+        "undeclared",
+        "forge",
+      ]);
+      // Every listed tool, hidden and undeclared ones included, with its raw fingerprint.
+      expect(row?.tools.every((tool) => /^[0-9a-f]{64}$/.test(tool.fingerprint))).toBe(true);
+
+      await db.delete(integrationToolSnapshots);
+      await list({ connection_id: connectionId });
+      expect(await snapshots()).toEqual([]);
+    });
+
+    it("refresh lists again whatever is cached and answers the snapshot", async () => {
+      await seedProxyIntegration(ctx, remote());
+      const connectionId = await seedProxyConnection(ctx, ID, "api_key", { token: TOKEN });
+
+      const first = await refresh({ connection_id: connectionId });
+      expect(first.status).toBe(200);
+      expect(await first.json()).toEqual({
+        tool_snapshot: {
+          connection_id: connectionId,
+          listed_at: expect.any(String),
+          truncated: false,
+          tool_count: 5,
+        },
+      });
+      const afterFirst = toolsListed();
+      expect(afterFirst).toBeGreaterThan(0);
+
+      expect((await refresh()).status).toBe(200);
+      expect(toolsListed()).toBe(afterFirst * 2);
+    });
+
+    it("refresh is refused in a space whose credential proxy is closed, before any exchange", async () => {
+      await seedProxyIntegration(ctx, remote());
+      await seedProxyConnection(ctx, ID, "api_key", { token: TOKEN });
+      await db
+        .update(spaces)
+        .set({ credentialProxyOpen: false })
+        .where(eq(spaces.id, ctx.defaultSpaceId));
+
+      const res = await refresh();
+      expect(res.status).toBe(403);
+      expect(((await res.json()) as { code: string }).code).toBe("credential_proxy_closed");
+      expect(server.requests).toEqual([]);
+    });
+
+    it("refresh is refused to a caller without the credential proxy permission", async () => {
+      await seedProxyIntegration(ctx, remote());
+      await seedProxyConnection(ctx, ID, "api_key", { token: TOKEN });
+      const key = (
+        await seedApiKey({
+          orgId: ctx.orgId,
+          spaceId: ctx.defaultSpaceId,
+          createdBy: ctx.user.id,
+          scopes: ["integrations:read"],
+        })
+      ).rawKey;
+
+      expect((await refresh(undefined, key)).status).toBe(403);
+      expect(server.requests).toEqual([]);
     });
   });
 });

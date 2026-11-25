@@ -39,6 +39,7 @@ import { authMethodLabel } from "../lib/integration-presentation";
 import { AvailabilityBadge } from "../components/package-detail/availability-card";
 import { Button } from "@appstrate/ui/components/button";
 import { Alert, AlertDescription, AlertTitle } from "@appstrate/ui/components/alert";
+import { serverSyncAvailability } from "../lib/integration-server-sync";
 import { needsWizardFinish, wizardResumePath } from "../lib/integration-wizard";
 import { Badge } from "@appstrate/ui/components/badge";
 import { Skeleton } from "@appstrate/ui/components/skeleton";
@@ -75,7 +76,6 @@ import {
   resolveIntegrationSettingsSection,
 } from "../lib/integration-settings-sections";
 import { isUnauthenticatedIntegration } from "@appstrate/core/integration";
-import { isVariableTemplate } from "@appstrate/afps-shared/connection-variables";
 import { usePackageDetail, usePackageDownload, type Versioned } from "../hooks/use-packages";
 import { useIntegrationDetail, useIntegrationDetailsIn } from "../hooks/use-integrations";
 import { useCanReach } from "../hooks/use-can-reach";
@@ -173,14 +173,11 @@ export function IntegrationSettings({
   const draftSource = definition
     ? readIntegrationSource((definition.manifest as Record<string, unknown>).source)
     : null;
-  const syncable =
-    draftSource?.kind === "remote" &&
-    draftSource.transport !== "sse" &&
-    !isVariableTemplate(draftSource.url) &&
-    // A draft declaring no auths (AFPS §7.2) is read without the credential proxy nor a connection.
-    (isUnauthenticatedIntegration(definition?.manifest ?? {}) ||
-      (can("credential-proxy:call-own") &&
-        detail.auths.some((auth) => auth.connections.length > 0)));
+  const syncAvailability = serverSyncAvailability(draftSource, {
+    unauthenticated: isUnauthenticatedIntegration(definition?.manifest ?? {}),
+    mayProxy: can("credential-proxy:call-own"),
+    hasConnection: detail.auths.some((auth) => auth.connections.length > 0),
+  });
   const resolve = (requested: string | null): IntegrationSettingsSection =>
     resolveIntegrationSettingsSection(requested, {
       canConfigure,
@@ -190,8 +187,8 @@ export function IntegrationSettings({
   const steps = detail.manifest.setup_guide?.steps ?? [];
   // Same order as an agent's: Explorer (see it: files, versions), then
   // what is set here, then the AFPS package, what the integration IS for every
-  // space, edited in place when the reader may. The tool catalogue belongs to
-  // the package: nothing about it is set per organization or per space.
+  // space, edited in place when the reader may. The tool catalogue is the package's; what a
+  // server exposes is read per connection and kept as a snapshot.
   const item = (
     id: IntegrationSettingsSection,
     icon: SectionRailItem["icon"],
@@ -256,7 +253,7 @@ export function IntegrationSettings({
               detail={definition}
               section={definitionSection}
               toolCatalog={detail.tool_catalog ?? []}
-              canSync={syncable}
+              sync={syncAvailability}
             />
           </Suspense>
         ) : isPackageCommonSection(active) ? (

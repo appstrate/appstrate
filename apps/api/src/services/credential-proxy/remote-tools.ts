@@ -40,6 +40,7 @@ import {
 } from "../integration-connections.ts";
 import { renderRemoteSource } from "../integration-manifest-helpers.ts";
 import { readIntegrationManifestForProxy } from "../integration-service.ts";
+import { recordToolSnapshot } from "../integration-tool-snapshots.ts";
 import { ProxyCallError } from "./core.ts";
 import { assertActiveOutsideRun, noConnectionMessage } from "./integration-resolver.ts";
 import {
@@ -130,7 +131,7 @@ export interface RemoteToolsCaller {
 
 type RemoteToolsInput = RemoteToolsCaller & { integrationId: string };
 
-function streamableRemote(integrationId: string, manifest: IntegrationManifest) {
+export function streamableRemote(integrationId: string, manifest: IntegrationManifest) {
   const source = manifest.source;
   if (source?.kind !== "remote" || source.remote.transport === "sse") {
     throw new ApiError({
@@ -148,8 +149,10 @@ function streamableRemote(integrationId: string, manifest: IntegrationManifest) 
  * server URL rendered from its variables (AFPS §7.12). An unauthenticated integration binds no
  * connection (`null`): one named is refused before any exchange.
  */
-async function remoteConnection(
-  input: RemoteToolsInput & { connectionId?: string },
+export async function resolveRemoteConnection(
+  input: Pick<RemoteToolsInput, "scope" | "actor" | "reach" | "integrationId" | "connectOffers"> & {
+    connectionId?: string;
+  },
   manifest: IntegrationManifest,
   tool?: string,
 ): Promise<{ connectionId: string | null; url: string }> {
@@ -200,7 +203,10 @@ export function connectionIdRefusedWithoutAuth(integrationId: string): ApiError 
   );
 }
 
-async function withConnectOffers(err: unknown, input: RemoteToolsInput): Promise<unknown> {
+async function withConnectOffers(
+  err: unknown,
+  input: Pick<RemoteToolsInput, "scope" | "actor" | "connectOffers">,
+): Promise<unknown> {
   const policy = input.connectOffers;
   if (!policy || !(err instanceof ApiError) || !err.fieldErrors?.length) return err;
   const errors = await attachConnectOffers({
@@ -329,11 +335,13 @@ export async function listRemoteTools(
     connectionId?: string;
     /** Read the cached `tools/list` only; nothing is sent. */
     cachedOnly?: boolean;
+    /** List again whatever is cached: the caller asked for the server's catalog as it is now. */
+    fresh?: boolean;
   },
 ): Promise<RemoteToolCatalog> {
   const manifest = streamableRemote(input.integrationId, input.manifest);
   const unauthenticated = isUnauthenticatedIntegration(manifest);
-  const { connectionId, url } = await remoteConnection(input, manifest);
+  const { connectionId, url } = await resolveRemoteConnection(input, manifest);
   const key = remoteCatalogKey({
     orgId: input.scope.orgId,
     connectionId,
@@ -341,6 +349,7 @@ export async function listRemoteTools(
     version: manifest.version,
     url,
   });
+  if (input.fresh) catalogCache.invalidate(key);
   let described = catalogCache.peek(key);
   let listingFailure: string | undefined =
     described === undefined ? (input.cachedOnly ? "not_cached" : "timeout") : undefined;
@@ -351,6 +360,19 @@ export async function listRemoteTools(
         url,
         async (client, signal) => {
           const { tools, truncated } = await listToolPages(client, signal);
+          // A snapshot that cannot be written must not fail the listing it records.
+          await recordToolSnapshot({
+            orgId: input.scope.orgId,
+            packageId: input.integrationId,
+            connectionId,
+            tools,
+            truncated,
+          }).catch((err: unknown) =>
+            logger.warn("credential-proxy: tool snapshot not recorded", {
+              integrationId: input.integrationId,
+              error: getErrorMessage(err),
+            }),
+          );
           return boundedCatalog(tools.map(sanitiseToolDescriptor), truncated);
         },
       );
@@ -444,7 +466,7 @@ export async function callRemoteTool(
   if (!offered.has(input.name)) {
     throw notFound(`Integration '${input.integrationId}' offers no tool named '${input.name}'`);
   }
-  const { connectionId, url } = await remoteConnection(input, manifest, input.name);
+  const { connectionId, url } = await resolveRemoteConnection(input, manifest, input.name);
   // Set once the session is open: a failure after it is the `tools/call` exchange's. No tool
   // definition was listed on this client, so the SDK validates no output and raises no -32602
   // of its own after the call: one caught here is the server's.

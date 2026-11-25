@@ -10,6 +10,7 @@ import { db } from "@appstrate/db/client";
 import {
   connectionCalls,
   integrationConnectionShares,
+  integrationConnections,
   integrationOrgDefaults,
   packages,
   spacePackages,
@@ -449,25 +450,50 @@ describe("POST /api/integrations/{packageId}/discover", () => {
     expect(((await res.json()) as { code: string }).code).toBe("sync_transport_unsupported");
   });
 
-  it("answers 422 for a server URL chosen per connection", async () => {
-    await seedProxyIntegration(ctx, {
-      ...remote(),
-      schema_version: "0.3",
-      source: {
-        kind: "remote",
-        remote: { url: "{$variable.base_url}/mcp", transport: "streamable-http" },
-      },
-      variables: {
-        schema: {
-          type: "object",
-          properties: { base_url: { type: "string", format: "uri" } },
-          required: ["base_url"],
+  describe("a server URL built from the connection's variables", () => {
+    const templated = () =>
+      ({
+        ...remote({
+          url: `{$variable.base_url}${server.url.slice(server.origin.length)}`,
+          authorizedUris: ["{$variable.base_url}/**"],
+        }),
+        schema_version: "0.3",
+        variables: {
+          schema: {
+            type: "object",
+            properties: { base_url: { type: "string" } },
+            required: ["base_url"],
+          },
         },
-      },
-    } as unknown as IntegrationManifest);
-    const res = await sync(ctx, {});
-    expect(res.status).toBe(422);
-    expect(((await res.json()) as { code: string }).code).toBe("sync_url_templated");
+      }) as unknown as IntegrationManifest;
+
+    // A variable heads the origin, which the egress guard refuses on loopback: no test server can
+    // be listed end to end, but the refusal names the host the connection's variable rendered.
+    it("renders the URL from the selected connection's variables and holds it to the egress guard", async () => {
+      await seedProxyIntegration(ctx, templated());
+      const connectionId = await seedProxyConnection(ctx, ID, "api_key", { token: TOKEN });
+      await db
+        .update(integrationConnections)
+        .set({ variables: { base_url: server.origin } })
+        .where(eq(integrationConnections.id, connectionId));
+
+      const res = await sync(ctx, { connection_id: connectionId });
+      expect(res.status).toBe(403);
+      const body = (await res.json()) as { code: string; detail: string };
+      expect(body.code).toBe("blocked_target");
+      expect(body.detail).toContain("127.0.0.1");
+      expect(server.methods).toEqual([]);
+    });
+
+    it("answers 422 remote_url_unrenderable when the connection's variables do not render it", async () => {
+      await seedProxyIntegration(ctx, templated());
+      const connectionId = await seedProxyConnection(ctx, ID, "api_key", { token: TOKEN });
+
+      const res = await sync(ctx, { connection_id: connectionId });
+      expect(res.status).toBe(422);
+      expect(((await res.json()) as { code: string }).code).toBe("remote_url_unrenderable");
+      expect(server.methods).toEqual([]);
+    });
   });
 
   it("answers 422 for an integration that is not remote", async () => {

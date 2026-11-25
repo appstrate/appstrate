@@ -1253,7 +1253,7 @@ export const integrationsPaths = {
                   type: "string",
                   format: "uuid",
                   description:
-                    "The connection to call the server with; omitted, the proxy's selection (`X-Connection-Id` semantics). Ignored for an integration declaring no auths, whose server is reached without a connection.",
+                    "The connection to call the server with, whose variables render a templated server URL; omitted, the proxy's selection (`X-Connection-Id` semantics). Refused for an integration declaring no auths, whose server is reached without a connection.",
                 },
               },
               additionalProperties: false,
@@ -1379,7 +1379,7 @@ export const integrationsPaths = {
         },
         "422": {
           description:
-            "`integration_not_remote` — the integration is not backed by a remote MCP server; `sync_transport_unsupported` — its server uses the SSE transport; `sync_url_templated` — its server URL is chosen per connection (`{$variable.…}`).",
+            "`integration_not_remote` — the integration is not backed by a remote MCP server; `sync_transport_unsupported` — its server uses the SSE transport; `remote_url_unrenderable` — the server URL is built from connection variables (`{$variable.…}`) and the selected connection's do not render it.",
           headers: STD_RESPONSE_HEADERS,
           content: problemJson,
         },
@@ -1393,6 +1393,106 @@ export const integrationsPaths = {
         "504": {
           description:
             "`upstream_timeout` — the server did not answer within the sync's 20 s (`Proxy-Status` error `http_response_timeout`).",
+          headers: { ...STD_RESPONSE_HEADERS, ...PROXY_STATUS_HEADER },
+          content: problemJson,
+        },
+      },
+    },
+  },
+  "/api/integrations/{packageId}/tool-snapshot/refresh": {
+    post: {
+      operationId: "refreshIntegrationToolSnapshot",
+      tags: ["Integrations"],
+      summary: "List the remote server's tools again into the integration's snapshot",
+      description:
+        "Lists the tools of the integration's published remote MCP server now, bypassing the cached listing, through the credential proxy with the connection the caller's selection picks (or `connection_id`): the same selection, `authorized_uris` allowlist and egress guard as a credential-proxy call outside a run, journaled as one call of the connection. The listing is recorded as the snapshot of that connection (of the integration alone when it declares no auths). Requires `integrations:read` and `credential-proxy:call-own`. Rate limited to 10 requests per minute.",
+      parameters: [
+        { $ref: "#/components/parameters/XOrgId" },
+        { $ref: "#/components/parameters/XSpaceId" },
+        packageIdParam,
+      ],
+      requestBody: {
+        required: false,
+        content: {
+          "application/json": {
+            schema: {
+              type: "object",
+              properties: {
+                connection_id: {
+                  type: "string",
+                  format: "uuid",
+                  description:
+                    "The connection to list with; omitted, the proxy's selection. Refused for an integration declaring no auths.",
+                },
+              },
+              additionalProperties: false,
+            },
+          },
+        },
+      },
+      responses: {
+        "200": {
+          description: "The snapshot as it now stands.",
+          headers: STD_RESPONSE_HEADERS,
+          content: {
+            "application/json": {
+              schema: {
+                type: "object",
+                required: ["tool_snapshot"],
+                properties: {
+                  tool_snapshot: {
+                    type: "object",
+                    required: ["connection_id", "listed_at", "truncated", "tool_count"],
+                    properties: {
+                      connection_id: {
+                        type: ["string", "null"],
+                        format: "uuid",
+                        description:
+                          "The connection listed with; null for an integration declaring no auths.",
+                      },
+                      listed_at: { type: "string", format: "date-time" },
+                      truncated: {
+                        type: "boolean",
+                        description: "The server lists more tools than are read.",
+                      },
+                      tool_count: { type: "integer", minimum: 0 },
+                    },
+                    additionalProperties: false,
+                  },
+                },
+                additionalProperties: false,
+              },
+            },
+          },
+        },
+        "400": {
+          description: "`validation_failed` — the request body is invalid.",
+          headers: STD_RESPONSE_HEADERS,
+          content: problemJson,
+        },
+        "403": {
+          description:
+            "`credential-proxy:call-own` missing, `credential_proxy_closed` — the space's `credential_proxy_open` is `false`, whatever the caller's role —, or the proxy refused the call (`unauthorized_target`, `blocked_target`).",
+          headers: STD_RESPONSE_HEADERS,
+          content: problemJson,
+        },
+        "404": { $ref: "#/components/responses/NotFound" },
+        "409": {
+          description:
+            "The proxy's connection-selection conflicts: `must_choose_connection` when the caller holds several usable connections and the body names none, `needs_reconnection`.",
+          headers: STD_RESPONSE_HEADERS,
+          content: problemJson,
+        },
+        "422": {
+          description:
+            "`integration_not_remote` — the integration is not backed by a Streamable HTTP MCP server; `remote_url_unrenderable` — the connection's variables do not render the server URL.",
+          headers: STD_RESPONSE_HEADERS,
+          content: problemJson,
+        },
+        "429": { $ref: "#/components/responses/RateLimited" },
+        "502": {
+          description:
+            "`bad_gateway` — the server could not be listed; `upstream_credential_rejected` — it refused the connection's credential.",
           headers: { ...STD_RESPONSE_HEADERS, ...PROXY_STATUS_HEADER },
           content: problemJson,
         },

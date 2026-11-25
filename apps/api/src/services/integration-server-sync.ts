@@ -6,22 +6,24 @@
  * operation of `mcp-over-proxy.ts`: through the credential proxy (`proxyCall`) once a connection
  * exists, so connection selection, `authorized_uris`, the egress guard and the 401 refresh are the
  * proxy's; for an unauthenticated integration (AFPS §7.2), which has nothing to inject, directly,
- * egress-guarded on every hop. Either is journaled like a call outside a run. Persists nothing
- * else.
+ * egress-guarded on every hop. Either is journaled like a call outside a run. Persists only the
+ * tools snapshot.
  */
 
 import type { Implementation, Tool } from "@modelcontextprotocol/sdk/types.js";
 import { createMcpHttpClient, type AppstrateMcpClient } from "@appstrate/mcp-transport";
-import { isVariableTemplate } from "@appstrate/afps-shared/connection-variables";
 import { isUnauthenticatedIntegration } from "@appstrate/core/integration";
 import { isIconImage } from "@appstrate/core/appearance";
 import { PACKAGE_CONTENT_ENTRY } from "@appstrate/core/package-files";
 import type { Actor } from "../lib/actor.ts";
+import { getErrorMessage } from "@appstrate/core/errors";
 import { ApiError } from "../lib/errors.ts";
 import { fetchWithin } from "../lib/egress-host-guard.ts";
 import { logger } from "../lib/logger.ts";
 import type { SpaceScope } from "../lib/scope.ts";
 import { ProxyCallError } from "./credential-proxy/core.ts";
+import { resolveRemoteConnection } from "./credential-proxy/remote-tools.ts";
+import { recordToolSnapshot } from "./integration-tool-snapshots.ts";
 import {
   directMcpOperation,
   listToolPages,
@@ -102,7 +104,7 @@ export async function syncIntegrationFromServer(input: {
       detail: `Integration '${packageId}' is not backed by a remote MCP server.`,
     });
   }
-  const { url, transport } = source.remote;
+  const { transport } = source.remote;
   if (transport === "sse") {
     throw new ApiError({
       status: 422,
@@ -111,17 +113,27 @@ export async function syncIntegrationFromServer(input: {
       detail: `Integration '${packageId}' uses the SSE transport; only Streamable HTTP servers can be synchronized.`,
     });
   }
-  if (isVariableTemplate(url)) {
-    throw new ApiError({
-      status: 422,
-      code: "sync_url_templated",
-      title: "Server URL Is Templated",
-      detail: `Integration '${packageId}' chooses its server URL per connection; it cannot be synchronized.`,
-    });
-  }
 
   const unauthenticated = isUnauthenticatedIntegration(loaded.manifest);
   const reach = unauthenticated ? null : input.proxyReach();
+  // The URL is the chosen connection's rendering (AFPS §7.12); the draft's manifest decides it.
+  const { connectionId, url } = await resolveRemoteConnection(
+    {
+      scope,
+      actor: input.actor,
+      integrationId: packageId,
+      // Read only for an authenticated integration, which has a reach.
+      reach: reach ?? "own",
+      connectOffers: null,
+      ...(input.connectionId ? { connectionId: input.connectionId } : {}),
+    },
+    loaded.manifest,
+  ).catch((err: unknown) => {
+    if (err instanceof ApiError && err.code === "credential_not_found") {
+      throw notConnected(err.message);
+    }
+    throw err;
+  });
 
   // One bound for the whole sync, the icon lookup included.
   const timeout = AbortSignal.timeout(SYNC_TIMEOUT_MS);
@@ -143,7 +155,7 @@ export async function syncIntegrationFromServer(input: {
       ? directMcpOperation(operationInput)
       : proxiedMcpOperation({
           ...operationInput,
-          ...(input.connectionId ? { connectionId: input.connectionId } : {}),
+          ...(connectionId ? { connectionId } : {}),
           reach,
           version: DRAFT,
         });
@@ -174,6 +186,19 @@ export async function syncIntegrationFromServer(input: {
     operation.settle();
     await client?.close().catch(() => {});
   }
+  // A snapshot that cannot be written must not fail the sync that read the tools.
+  await recordToolSnapshot({
+    orgId: scope.orgId,
+    packageId,
+    connectionId,
+    tools: exchanged.tools,
+    truncated: exchanged.truncated,
+  }).catch((err: unknown) =>
+    logger.warn("integration sync: tool snapshot not recorded", {
+      packageId,
+      error: getErrorMessage(err),
+    }),
+  );
   return proposalFromServer(
     {
       url,

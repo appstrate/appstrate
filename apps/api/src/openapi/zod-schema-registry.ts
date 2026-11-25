@@ -586,6 +586,12 @@ const coreSchemas: OpenApiSchemaEntry[] = [
   },
   {
     method: "POST",
+    path: "/api/integrations/{packageId}/tool-snapshot/refresh",
+    jsonSchema: toJsonSchema(syncFromServerSchema),
+    description: "List the remote server's tools again into the integration's snapshot",
+  },
+  {
+    method: "POST",
     path: "/api/integrations/{packageId}/auths/{authKey}/oauth-clients",
     jsonSchema: toJsonSchema(oauthClientCreateSchema),
     description: "Register a custom integration OAuth client",

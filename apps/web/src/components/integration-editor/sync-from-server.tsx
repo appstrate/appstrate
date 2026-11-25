@@ -5,7 +5,8 @@ import { RefreshCw } from "lucide-react";
 import { Button } from "@appstrate/ui/components/button";
 import { Spinner } from "@appstrate/ui/components/spinner";
 import { errorMessage } from "../../lib/mutation-error";
-import type { ServerSyncProposal } from "../../lib/integration-server-sync";
+import type { ServerSyncBlock, ServerSyncProposal } from "../../lib/integration-server-sync";
+import { DisabledReasonTooltip } from "../disabled-reason-tooltip";
 import { DiscoveryWarnings } from "./discovery-warnings";
 import { SyncConnectionChoice } from "./sync-connection-choice";
 
@@ -26,6 +27,7 @@ export function SyncFromServer({
   isPending,
   error,
   result,
+  blockedBy,
 }: {
   /** `connectionId`: the candidate chosen after a `must_choose_connection` refusal. */
   run: (connectionId?: string) => void;
@@ -33,21 +35,27 @@ export function SyncFromServer({
   error: unknown;
   /** The last applied sync, for the confirmation line and its warnings. */
   result: ServerSyncResult | null;
+  /** Why the sync cannot run: the button stays, disabled, with the reason as a tooltip. */
+  blockedBy: ServerSyncBlock | null;
 }) {
   const { t } = useTranslation("agents");
   return (
     <div className="flex flex-col gap-3" data-testid="integration-editor-sync">
       <div className="flex flex-col items-start gap-2">
-        <Button
-          type="button"
-          variant="outline"
-          disabled={isPending}
-          onClick={() => run()}
-          data-testid="integration-editor-sync-button"
+        <DisabledReasonTooltip
+          reason={blockedBy && t(`integrationEditor.sync.blocked.${blockedBy}`)}
         >
-          {isPending ? <Spinner /> : <RefreshCw />}
-          {t("integrationEditor.sync.button")}
-        </Button>
+          <Button
+            type="button"
+            variant="outline"
+            disabled={isPending || blockedBy !== null}
+            onClick={() => run()}
+            data-testid="integration-editor-sync-button"
+          >
+            {isPending ? <Spinner /> : <RefreshCw />}
+            {t("integrationEditor.sync.button")}
+          </Button>
+        </DisabledReasonTooltip>
         {result && error == null && (
           <p className="text-muted-foreground text-sm" role="status">
             {t("integrationEditor.sync.done", { count: result.count })}

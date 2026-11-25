@@ -98,6 +98,11 @@ const CORE_TABLES = [
   "package_shares",
   "space_packages",
   "org_package_offers",
+  // Tool snapshots, approvals and blocks cascade from packages / spaces (the snapshots also from
+  // connections), so they go before all three.
+  "integration_tool_snapshots",
+  "space_integration_tool_approvals",
+  "space_integration_tool_blocks",
   "integration_connections",
   "integration_oauth_clients",
   "package_schedules",

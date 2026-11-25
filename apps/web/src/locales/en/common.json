@@ -283,7 +283,6 @@
   "apiError.upstream_mcp_error": "The integration's MCP server refused the request with a JSON-RPC error.",
   "apiError.upstream_response_too_large": "The integration's MCP server answered with more data than the platform reads in one exchange.",
   "apiError.sync_transport_unsupported": "This MCP server uses the SSE transport: only Streamable HTTP servers can be synchronized.",
-  "apiError.sync_url_templated": "This integration's MCP server depends on each connection: it cannot be synchronized.",
   "apiError.missing_integration_connection": "An integration connection is missing or must be chosen before launching.",
   "apiError.model_not_configured": "No model is configured for this agent. Pick one or set the organization's default model.",
   "apiError.run_capacity_starting": "Run execution is still starting up, retry in a few seconds.",

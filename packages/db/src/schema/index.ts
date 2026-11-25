@@ -12,6 +12,7 @@ export * from "./run-reads.ts";
 export * from "./integrations.ts";
 export * from "./integration-pins.ts";
 export * from "./integration-org-defaults.ts";
+export * from "./integration-tool-policy.ts";
 export * from "./uploads.ts";
 export * from "./files.ts";
 export * from "./storage-deletion-jobs.ts";
