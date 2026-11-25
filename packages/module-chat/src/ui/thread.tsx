@@ -44,7 +44,6 @@ import { ReasoningStep, ThinkingStatus, ThoughtGroup } from "./reasoning.tsx";
 import { THOUGHT_GROUP, groupThought, isThoughtPart } from "./thought-group.ts";
 import { useTurnElapsedMs } from "./use-turn-elapsed.ts";
 import { formatDuration } from "@appstrate/core/format";
-import { TurnSpaceChoice } from "./space-choice.tsx";
 import { ToolFallback } from "./tool-fallback.tsx";
 import {
   InvokeOperationToolUI,
@@ -1020,7 +1019,6 @@ function AssistantMessage() {
         <MessagePrimitive.GroupedParts groupBy={groupThought}>
           {renderAssistantPart}
         </MessagePrimitive.GroupedParts>
-        <TurnSpaceChoice />
         <TurnLimitNotice />
         <MessageError />
       </div>

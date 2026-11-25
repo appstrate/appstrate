@@ -140,10 +140,12 @@ they start with `packages/` or `e2e/`.
   page that drew a `Dialog` of its own would be unmounted and mounted in turn,
   and the backdrop and the zoom would play twice (#2008). Rail pieces:
   `RailHeader`, `RailGroup`, `RailLink`, `ContextSelector`
-  (`components/settings/`). Settings are ONE shell (`pages/settings/layout.tsx`)
-  whose rail lists three sections — Organisation, Espace de travail, Compte
-  (`/preferences`) — built in `pages/settings/navigation.ts` from what each
-  route lets the caller reach.
+  (`components/settings/`). ONE shell (`pages/settings/layout.tsx`) draws two
+  dialogs, chosen by the URL (`lib/settings-surface.ts`): **Paramètres**, whose
+  rail lists Organisation and Espace de travail and ends on the link « Ouvrir les
+  préférences », and **Préférences** (`/preferences`), whose rail lists Compte.
+  The sections are built in `pages/settings/navigation.ts` from what each route
+  lets the caller reach.
 - A detail page that draws its title in the header (the agent, run, schedule and
   integration pages, and the skill and tool pages, through `DetailBar`,
   `components/detail-bar.tsx`) fills three slots the header

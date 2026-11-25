@@ -22,7 +22,7 @@ import type { MenuBack } from "@appstrate/ui/components/sheet-menu";
 import { useConversationSkillsContext } from "./use-conversation-skills.ts";
 
 /** Where the panel is: its rows, or one of the levels they open in their place. */
-export type ComposerPanelLevel = "tools" | "skills" | "models" | "configuration";
+export type ComposerPanelLevel = "tools" | "skills" | "models" | "configuration" | "limit";
 
 export interface ComposerPanelState {
   open: boolean;
@@ -108,6 +108,7 @@ export function useComposerPanelHeading(): { title: string; back?: MenuBack } {
   });
   if (level === "skills") return { title: t("skills.title"), back: up("tools") };
   if (level === "models") return { title: t("composer.model"), back: up("tools") };
+  if (level === "limit") return { title: t("composer.limit.generic"), back: up("tools") };
   if (level === "configuration") {
     const active = picker ? selectedModel(picker.models, picker.selectedId) : undefined;
     return {

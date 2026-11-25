@@ -365,11 +365,12 @@
 
 /* Without scroll-driven animations (Firefox stable), shadcn's `scroll-fade-*`
    falls back to a static fade on both edges, whatever the scroll position,
-   marking edges that hide nothing. No fade there instead: the row just
-   scrolls. Unlayered on purpose, to beat the utility. Matched on the class
+   marking edges that hide nothing. No fade there instead: the row or the
+   list just scrolls. Unlayered on purpose, to beat the utility. Matched on the class
    substring so a variant (`max-md:scroll-fade-x`) is covered too. */
 @supports not (animation-timeline: scroll()) {
-  [class*="scroll-fade-x"] {
+  [class*="scroll-fade-x"],
+  [class*="scroll-fade-y"] {
     --scroll-fade-mask: none;
   }
 }

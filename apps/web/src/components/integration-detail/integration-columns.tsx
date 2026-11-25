@@ -26,7 +26,9 @@ import { rowActionsColumn } from "../row-actions-column";
 import { CellDate, CellEmpty, CellText } from "../table-cells";
 import { isConnectionOwnedBy } from "../integration-connect/connection-ownership";
 import type { ConnectionAuthContext } from "../../lib/integration-presentation";
-import type { IntegrationConnection, IntegrationManifestView } from "../../hooks/use-integrations";
+import type { IntegrationManifestView } from "../../hooks/use-integrations";
+import type { ConnectionRow } from "../../lib/connection-rows";
+import { useRowSpacesColumn } from "../space-column";
 import { useWorkingSpaceWording } from "../../hooks/use-overview-mode";
 import { ScopeSummaryText } from "../integration-connect/scope-summary-text";
 import type { ClientRow } from "../../lib/integration-clients";
@@ -224,25 +226,30 @@ export function useIntegrationClientColumns({
  */
 export function useConnectionColumns({
   packageId,
-  manifest,
+  manifestOf,
   userId,
-  isAdmin,
+  isAdminOf,
   authForConnection,
   methodLabel,
+  spanning,
 }: {
   packageId: string;
-  /** Names the granted scopes by each auth's `scope_catalog`. */
-  manifest: IntegrationManifestView;
+  /** Names the granted scopes by each auth's `scope_catalog`, as the row's space reads it. */
+  manifestOf: (connection: ConnectionRow) => IntegrationManifestView;
   userId: string | undefined;
-  isAdmin: boolean;
+  /** Whether the reader configures the integration in the row's space. */
+  isAdminOf: (connection: ConnectionRow) => boolean;
   /** The row's own authentication: renew and the scope names resolve against it. */
-  authForConnection: (connection: IntegrationConnection) => ConnectionAuthContext;
+  authForConnection: (connection: ConnectionRow) => ConnectionAuthContext;
   /** Names each row's authentication: the table mixes every method of the integration. */
-  methodLabel: (connection: IntegrationConnection) => string;
-}): DataColumn<IntegrationConnection>[] {
+  methodLabel: (connection: ConnectionRow) => string;
+  /** The list spans the reader's spaces: each row names the spaces it is listed in. */
+  spanning: boolean;
+}): DataColumn<ConnectionRow>[] {
   const { t } = useTranslation("settings");
   // The row whose name is in edit: « Rename » is in one column, the name in another.
   const [renamingId, setRenamingId] = useState<string | null>(null);
+  const spaceColumn = useRowSpacesColumn<ConnectionRow>(spanning, (c) => c.rowSpaceIds);
   return [
     {
       id: "account",
@@ -253,7 +260,7 @@ export function useConnectionColumns({
         <AccountCell
           connection={c}
           packageId={packageId}
-          isAdmin={isAdmin}
+          isAdmin={isAdminOf(c)}
           renaming={renamingId === c.id}
           onRenamingChange={(renaming) => setRenamingId(renaming ? c.id : null)}
         />
@@ -266,6 +273,7 @@ export function useConnectionColumns({
       elastic: true,
       cell: (c) => <CellText title={methodLabel(c)}>{methodLabel(c)}</CellText>,
     },
+    ...spaceColumn,
     {
       id: "status",
       header: t("proxies.col.status"),
@@ -291,7 +299,7 @@ export function useConnectionColumns({
       cell: (c) =>
         c.scopes_granted.length > 0 ? (
           <ScopeSummaryText
-            manifest={manifest}
+            manifest={manifestOf(c)}
             authKey={authForConnection(c).authKey}
             scopes={c.scopes_granted}
             className="text-muted-foreground block truncate text-[0.65rem]"
@@ -313,7 +321,7 @@ export function useConnectionColumns({
       width: 168,
       // Share menus: the column scrolls into reach rather than waiting for room.
       control: true,
-      cell: (c) => <SharingCell connection={c} packageId={packageId} isAdmin={isAdmin} />,
+      cell: (c) => <SharingCell connection={c} packageId={packageId} isAdmin={isAdminOf(c)} />,
     },
     rowActionsColumn((c) => (
       <ConnectionActionsCell
@@ -321,7 +329,7 @@ export function useConnectionColumns({
         packageId={packageId}
         {...authForConnection(c)}
         isOwn={isConnectionOwnedBy(c, userId)}
-        isAdmin={isAdmin}
+        isAdmin={isAdminOf(c)}
         renaming={renamingId === c.id}
         onRename={() => setRenamingId(c.id)}
       />

@@ -205,6 +205,20 @@ export function requireSpaceContext() {
 }
 
 /**
+ * Middleware: {@link requireSpaceContext} when the request names a space (a credential pin or
+ * `X-Space-Id`), nothing otherwise — for a route whose answer has an organization-level form.
+ * It carries the same marker: a space the caller names is admitted by the same rule.
+ */
+export function optionalSpaceContext() {
+  const required = requireSpaceContext();
+  return markHandler(
+    (c: Context<AppEnv>, next: Next) =>
+      c.get("spaceId") || c.req.header("X-Space-Id") ? required(c, next) : next(),
+    REQUEST_SPACE_CONTEXT,
+  );
+}
+
+/**
  * Wire the core seam a module route uses to enter a space (`enterSpaceContext`).
  * Registered at MODULE EVALUATION so production wiring and the test harness,
  * which both import `requireSpaceContext` from here, cannot drift.
