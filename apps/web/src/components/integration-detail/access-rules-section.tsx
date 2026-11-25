@@ -4,22 +4,30 @@ import { useTranslation } from "react-i18next";
 import { OptionSelect } from "@/components/app-ui/option-select";
 import { SaveFeedback } from "../settings/save-feedback";
 import { useUpdateIntegrationSettings } from "../../hooks/use-integrations";
+import { OrgDefaultSection } from "./org-default-section";
+import { PinManagementSection } from "./pin-management-section";
 
 /**
- * Who may create connections: cross-cutting, not tied to one auth, and admin only. The account
- * runs use by default and the per-agent exceptions are their own section of Paramètres
- * (`DefaultConnectionSettings`).
+ * Paramètres › Gestion des connexions: who may create a connection, the space's default and the
+ * per-agent exceptions. Cross-cutting, not tied to one auth, and set by a configurer.
+ *
+ * `existingOnly` (no authentication method left): the default and the exceptions show only what
+ * is stored, so a configurer can still remove it.
  */
 export function AccessRulesSection({
   packageId,
   blockUserConnections,
+  existingOnly = false,
 }: {
   packageId: string;
   blockUserConnections: boolean;
+  existingOnly?: boolean;
 }) {
   return (
-    <div data-testid="access-rules-section">
+    <div className="flex flex-col gap-8" data-testid="access-rules-section">
       <BlockUserConnectionsToggle packageId={packageId} initialBlocked={blockUserConnections} />
+      <OrgDefaultSection packageId={packageId} existingOnly={existingOnly} />
+      <PinManagementSection packageId={packageId} existingOnly={existingOnly} />
     </div>
   );
 }

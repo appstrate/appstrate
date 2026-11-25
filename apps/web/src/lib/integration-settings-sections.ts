@@ -44,12 +44,10 @@ export function resolveIntegrationSettingsSection(
     return requested as IntegrationSettingsSection;
   }
   if (requested === "files" || !canConfigure) return "files";
-  return requested === "access" || requested === "default-connection"
-    ? requested
-    : "authentication";
+  return requested === "access" ? requested : "authentication";
 }
 
-const INTEGRATION_SPACE_SECTIONS = ["authentication", "access", "default-connection"] as const;
+const INTEGRATION_SPACE_SECTIONS = ["authentication", "access"] as const;
 type IntegrationSpaceSection = (typeof INTEGRATION_SPACE_SECTIONS)[number];
 
 /** Whether `section` is set in one space, read from the one the space line names. */
