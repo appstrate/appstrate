@@ -4,7 +4,7 @@
  * The composer's tools panel, the same on every format: its rows (the skills, the model, the space
  * limit, creation mode), and the levels they open in their place, each named, with a way back —
  * the skills, the models (with the inline-run model switch and the context's detail), then one
- * model's settings. The container is the caller's `Popover` (`composer-tools.tsx`), a bottom
+ * model's settings, and the spaces a conversation without an origin may be limited to. The container is the caller's `Popover` (`composer-tools.tsx`), a bottom
  * sheet below `md`. Below `md` the panel also holds attaching a file and, as its last line, the
  * disclaimer: a phone's composer line has room for neither.
  */
@@ -57,9 +57,9 @@ function Hint({ children }: { children: React.ReactNode }) {
   );
 }
 
-/** The space limit, as {@link limitAvailability} decides it: a switch, a choice among spaces, or why not. */
-function LimitRows() {
-  const { t, actingSpaceIds, renderSpaces } = useChatHost();
+/** The space limit, as {@link limitAvailability} decides it: a switch, the level choosing a space, or why not. */
+function LimitRows({ onChoose }: { onChoose: () => void }) {
+  const { t, actingSpaceIds } = useChatHost();
   const scope = useConversationScope();
   const limit = limitAvailability(scope, actingSpaceIds);
   const space = useSpaceName(limit.kind === "toggle" ? limit.spaceId : null);
@@ -78,21 +78,14 @@ function LimitRows() {
     );
   }
   if (limit.kind === "choose") {
-    // No origin and several acting spaces: the space picked becomes the origin.
+    // One space per acting space would crowd the rows: they get a level of their own.
     return (
-      <div
-        role="group"
-        aria-label={t("composer.limit.choose")}
-        data-testid="composer-limit-item"
-        className="flex flex-col"
-      >
-        <Hint>{t("composer.limit.choose")}</Hint>
-        {limit.spaceIds.map((id) => (
-          <SheetMenuRow key={id} onClick={() => scope.limitTo(id)}>
-            {renderSpaces([id])}
-          </SheetMenuRow>
-        ))}
-      </div>
+      <LevelRow
+        icon={<MapPinIcon />}
+        label={t("composer.limit.generic")}
+        onClick={onChoose}
+        testId="composer-limit-item"
+      />
     );
   }
   // A turn generating, no space to act in, an origin the chat no longer acts in, or the acting set
@@ -105,6 +98,34 @@ function LimitRows() {
       </SheetMenuRow>
       {limit.reason && <Hint>{t(LIMIT_REASON_KEY[limit.reason])}</Hint>}
     </>
+  );
+}
+
+/**
+ * The level choosing the space a conversation without an origin is limited to: the space picked
+ * becomes its origin, and the pick ends the errand. Should the choice stop being offered while the
+ * level is open (a turn starts generating), the limit's row says why in its place.
+ */
+export function LimitLevel({ onPicked }: { onPicked: () => void }) {
+  const { actingSpaceIds, renderSpaces } = useChatHost();
+  const scope = useConversationScope();
+  const limit = limitAvailability(scope, actingSpaceIds);
+  if (limit.kind !== "choose") return <LimitRows onChoose={() => {}} />;
+  return (
+    <div className="flex flex-col" data-testid="composer-limit-spaces">
+      {limit.spaceIds.map((id) => (
+        <SheetMenuRow
+          key={id}
+          disabled={scope.pending}
+          onClick={() => {
+            scope.limitTo(id);
+            onPicked();
+          }}
+        >
+          {renderSpaces([id])}
+        </SheetMenuRow>
+      ))}
+    </div>
   );
 }
 
@@ -196,6 +217,8 @@ export function ComposerToolsPanel({ authorsPackages }: { authorsPackages: boole
         <SkillsPickerPanel conversation={conversation} draft={draft} />
       </div>
     );
+  } else if (level === "limit") {
+    content = <LimitLevel onPicked={close} />;
   } else if ((level === "models" || level === "configuration") && picker) {
     content = (
       <>
@@ -260,7 +283,7 @@ export function ComposerToolsPanel({ authorsPackages }: { authorsPackages: boole
             testId="composer-panel-model"
           />
         )}
-        <LimitRows />
+        <LimitRows onChoose={() => setLevel("limit")} />
         {authorsPackages && (
           <SheetMenuSwitchRow
             id={creationId}

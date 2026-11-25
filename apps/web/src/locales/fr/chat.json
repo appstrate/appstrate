@@ -203,7 +203,6 @@
   "composer.inlineRunModelChip.undo": "Revenir au modèle par défaut pour les runs",
   "composer.limit": "Limiter à {{name}}",
   "composer.limit.generic": "Limiter à un espace",
-  "composer.limit.choose": "Limiter à…",
   "composer.limit.noActingSpace": "Vous ne pouvez agir dans aucun espace.",
   "composer.limit.generating": "Modifiable une fois la réponse terminée.",
   "composer.limit.outside": "Vous ne pouvez plus agir dans l’espace d’origine de cette conversation.",
