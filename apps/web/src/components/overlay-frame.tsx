@@ -16,9 +16,8 @@ import { useTranslation } from "react-i18next";
 import { Dialog, DialogContent, DialogTitle } from "@appstrate/ui/components/dialog";
 import { keepOpenWhileRenaming } from "../lib/keep-open-while-renaming";
 import { useCloseOverlay } from "../lib/modal-route";
-import { isUnder } from "../lib/route-access";
 import { INTEGRATED_TABLE_SURFACE } from "../lib/table-surface";
-import { SETTINGS_SURFACES, settingsSurfaceFromPath } from "../pages/settings/navigation";
+import { SETTINGS_SURFACES, settingsSurfaceFromPath } from "../lib/settings-surface";
 
 export function OverlayFrame() {
   const { t } = useTranslation("settings");
@@ -26,9 +25,9 @@ export function OverlayFrame() {
   const close = useCloseOverlay();
   const content = useRef<HTMLDivElement>(null);
   // Announced by assistive technology from the first frame, skeleton included.
-  const title = isUnder(pathname, "/catalogue")
-    ? t("common:nav.catalogue")
-    : t(SETTINGS_SURFACES[settingsSurfaceFromPath(pathname)].titleKey);
+  // The panel overlays are the settings dialogs and the catalogue.
+  const surface = settingsSurfaceFromPath(pathname);
+  const title = surface ? t(SETTINGS_SURFACES[surface].titleKey) : t("common:nav.catalogue");
 
   return (
     <Dialog open onOpenChange={(open) => !open && close()}>

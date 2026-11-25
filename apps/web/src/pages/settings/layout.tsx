@@ -35,34 +35,25 @@ import { useOrg } from "../../hooks/use-org";
 import { useViewer } from "../../hooks/use-viewer";
 import { useLandAfterOrgSwitch } from "../../lib/modal-route";
 import { overlayIntent } from "../../lib/overlay-chunks";
-import { SETTINGS_INDEX, type SettingsScope } from "../../lib/route-access";
+import { SETTINGS_INDEX, settingsScopeFromPath, type SettingsScope } from "../../lib/route-access";
+import { inSurface, SETTINGS_SURFACES, surfaceOfScope } from "../../lib/settings-surface";
 import { useOverlayBreadcrumb } from "../../hooks/use-overlay-breadcrumb";
 import { breadcrumbStore } from "../../stores/breadcrumb-store";
 import {
   activeSettingsItem,
   firstSettingsPath,
   settingsContentKey,
-  settingsScopeFromPath,
-  settingsSurfaceFromPath,
-  SETTINGS_SURFACES,
-  surfaceSections,
-  type SettingsSurface,
   type UnifiedSettingsNavItem,
   type UnifiedSettingsSection,
 } from "./navigation";
 import { useSettingsSections } from "./use-settings-sections";
 
-/** Each rail's groups, as they stand before the caller's permissions say which entries exist. */
-const RAIL_PLACEHOLDER: Record<
-  SettingsSurface,
-  { scope: SettingsScope; labelKey: string; rows: number }[]
-> = {
-  settings: [
-    { scope: "organization", labelKey: "source.org", rows: 6 },
-    { scope: "workspace", labelKey: "workspaceSettings.sectionGeneral", rows: 5 },
-  ],
-  preferences: [{ scope: "account", labelKey: "preferences.sectionAccount", rows: 5 }],
-};
+/** The rails' groups, as they stand before the caller's permissions say which entries exist. */
+const RAIL_PLACEHOLDER: { scope: SettingsScope; labelKey: string; rows: number }[] = [
+  { scope: "organization", labelKey: "source.org", rows: 6 },
+  { scope: "workspace", labelKey: "workspaceSettings.sectionGeneral", rows: 5 },
+  { scope: "account", labelKey: "preferences.sectionAccount", rows: 5 },
+];
 
 interface ScopeNavigationProps {
   section: UnifiedSettingsSection;
@@ -110,12 +101,12 @@ export function UnifiedSettingsLayout() {
   // A page under the item (a webhook) names itself through its own crumb, which the heading shows.
   const subPageTitle = useStore(breadcrumbStore, (s) => s.overlayPage.entries[0]?.label);
 
-  const surface = settingsSurfaceFromPath(location.pathname);
-  const sections = surfaceSections(useSettingsSections(), surface);
+  const activeScope = settingsScopeFromPath(location.pathname);
+  const surface = surfaceOfScope(activeScope);
+  const sections = inSurface(useSettingsSections(), surface);
   const { ready } = usePermissions();
 
   const activeItem = activeSettingsItem(sections, location.pathname);
-  const activeScope = settingsScopeFromPath(location.pathname);
   const activeSection = sections.find((section) => section.scope === activeScope);
   const contentKey = settingsContentKey(location.pathname, currentOrg?.id ?? null, spaceId);
   const label = (key: string) => t(key, { ns: "settings" });
@@ -128,7 +119,8 @@ export function UnifiedSettingsLayout() {
     activeSectionLabel && activeItem && activeSectionHref
       ? [
           { label: title, href: SETTINGS_INDEX[activeScope] },
-          { label: activeSectionLabel, href: activeSectionHref },
+          // A dialog of one section (Preferences) has no section to tell apart.
+          ...(sections.length > 1 ? [{ label: activeSectionLabel, href: activeSectionHref }] : []),
           // A link once a page under the item (a webhook) extends the trail.
           {
             label: label(activeItem.labelKey),
@@ -193,7 +185,7 @@ export function UnifiedSettingsLayout() {
             ))
           : // Entries are gated per space, so none exists until the permissions
             // land: hold each group's place rather than insert rows later.
-            RAIL_PLACEHOLDER[surface].map((group, index) => (
+            inSurface(RAIL_PLACEHOLDER, surface).map((group, index) => (
               <RailGroup key={group.scope} title={label(group.labelKey)} separated={index > 0}>
                 {selectors[group.scope]}
                 <div className="mt-1.5 flex flex-col gap-0.5" aria-hidden>

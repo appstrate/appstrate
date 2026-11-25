@@ -1,16 +1,22 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { describe, expect, it } from "bun:test";
-import { isUnder, routeVerdict, SETTINGS_INDEX } from "../../../lib/route-access";
+import {
+  isUnder,
+  routeVerdict,
+  SETTINGS_INDEX,
+  settingsScopeFromPath,
+} from "../../../lib/route-access";
+import {
+  inSurface,
+  settingsSurfaceFromPath,
+  type SettingsSurface,
+} from "../../../lib/settings-surface";
 import {
   activeSettingsItem,
   firstSettingsPath,
   settingsContentKey,
-  settingsScopeFromPath,
-  settingsSurfaceFromPath,
-  surfaceSections,
   visibleSettingsSections,
-  type SettingsSurface,
 } from "../navigation";
 
 type Features = Record<string, boolean>;
@@ -185,7 +191,7 @@ describe("account section (/preferences)", () => {
 describe("settings surfaces", () => {
   const sections = sectionsFor(ALL_FEATURES, [...GUEST, "space-settings:write"]);
   const scopes = (surface: SettingsSurface) =>
-    surfaceSections(sections, surface).map((section) => section.scope);
+    inSurface(sections, surface).map((section) => section.scope);
 
   it("lists what the caller administers in Settings and their own account in Preferences", () => {
     expect(scopes("settings")).toEqual(["organization", "workspace"]);
@@ -197,6 +203,8 @@ describe("settings surfaces", () => {
     expect(settingsSurfaceFromPath("/workspace-settings/webhooks/wh_1")).toBe("settings");
     expect(settingsSurfaceFromPath("/preferences")).toBe("preferences");
     expect(settingsSurfaceFromPath("/preferences/models")).toBe("preferences");
+    expect(settingsSurfaceFromPath("/catalogue/installed/agent")).toBeUndefined();
+    expect(settingsSurfaceFromPath("/preferencesx")).toBeUndefined();
   });
 });
 
