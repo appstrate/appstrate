@@ -1799,8 +1799,14 @@ describe("Packages API", () => {
       expect(res.status, await res.clone().text()).toBe(200);
     });
 
-    it("rejects a tool selection when a closed catalog declares nothing", async () => {
-      const bare = gmailIntegrationManifest();
+    it("rejects a tool selection when a closed remote catalog declares nothing", async () => {
+      // A local source declaring no tools is advisory (AFPS §7.1); a remote one is closed.
+      const bare = gmailIntegrationManifest({
+        source: {
+          kind: "remote",
+          remote: { url: "https://example.com/mcp/v1", transport: "streamable-http" },
+        },
+      });
       delete bare.tools_policy;
       await seedPackage({
         id: integrationId,

@@ -2054,7 +2054,9 @@ export async function bootIntegrations(
         const added = host.routeCount() - sizeBefore;
         const unavailableTools = selectedUnavailableTools(registration.unavailable);
         pushUnavailableToolBreadcrumb(spec, unavailableTools, breadcrumbs);
-        reportToolsObserved(spec, registration.listed, unavailableTools, bundleFetchOpts);
+        // The platform's own endpoint serves a catalog it already knows: nothing to snapshot.
+        if (!spec.manifest.server?.platformEndpoint)
+          reportToolsObserved(spec, registration.listed, unavailableTools, bundleFetchOpts);
         // Attach the in-process api_call tool alongside the remote MCP's tools.
         const apiCallAdded = await attachApiCall(spec, connection, source, allocatedNs);
         assertIntegrationExposesTools(spec, added + apiCallAdded);

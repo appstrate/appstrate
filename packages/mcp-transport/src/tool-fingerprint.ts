@@ -5,7 +5,8 @@
  * what the model reads or a caller acts on no longer matches the definition someone approved.
  */
 
-import { canonicalJsonStringify } from "@appstrate/afps-runtime/bundle";
+// The leaf, not the bundle barrel: this package is also loaded by plain Node (Playwright).
+import { canonicalJsonStringify } from "@appstrate/afps-runtime/canonical-json";
 import type { Tool } from "@modelcontextprotocol/sdk/types.js";
 
 /**
