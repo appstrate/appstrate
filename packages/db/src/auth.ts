@@ -1259,9 +1259,7 @@ function buildAuth(options: CreateAuthOptions) {
             // Forward the transaction-scoped view (path + query, on top of
             // headers) so module hooks can bind their decisions to the OAuth
             // transaction rather than an ambient cookie — see
-            // `RealmResolutionContext`. The extra fields ride alongside the
-            // `BeforeSignupContext` contract; modules that only read
-            // `headers` are unaffected.
+            // `RealmResolutionContext`.
             // No resolver (no OIDC module) means "platform". A bootstrap-token
             // redeem is "platform" whatever the request carries: an
             // instance-owner row in another realm is unrecoverable. Resolved
@@ -1276,10 +1274,7 @@ function buildAuth(options: CreateAuthOptions) {
                   : resolver({ headers, path: ctx?.path ?? null, query: ctx?.query ?? null });
               return realmOnce;
             };
-            const signupHookCtx: BeforeSignupContext & {
-              path: string | null;
-              query: Record<string, unknown> | null;
-            } = {
+            const signupHookCtx: BeforeSignupContext = {
               headers,
               path: ctx?.path ?? null,
               query: ctx?.query ?? null,
@@ -1331,10 +1326,11 @@ function buildAuth(options: CreateAuthOptions) {
               // Same transaction-scoped extension as the before-hook — lets
               // the OIDC after-signup handler resolve the in-flight OAuth
               // client from the transaction binding instead of the cookie.
-              const afterCtx: AfterSignupContext & {
-                path: string | null;
-                query: Record<string, unknown> | null;
-              } = { headers, path: ctx?.path ?? null, query: ctx?.query ?? null };
+              const afterCtx: AfterSignupContext = {
+                headers,
+                path: ctx?.path ?? null,
+                query: ctx?.query ?? null,
+              };
               await afterSignup({ id: user.id, email: user.email }, afterCtx);
             }
           },

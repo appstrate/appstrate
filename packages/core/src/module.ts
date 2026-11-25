@@ -451,13 +451,19 @@ export interface BeforeSignupContext {
    * The Better Auth endpoint creating the account (`"/sign-up/email"`,
    * `"/callback/:id"`, `"/magic-link/verify"`, …), or `null` outside HTTP.
    */
-  path?: string | null;
+  path: string | null;
+  /**
+   * The endpoint's parsed query (e.g. a magic-link token), or `null` outside
+   * HTTP: a hook can bind its decision to the in-flight OAuth transaction
+   * rather than an ambient cookie.
+   */
+  query: Record<string, unknown> | null;
   /**
    * The audience the account is about to be created in: `"platform"` for a
    * member of the platform, `"end_user:<spaceId>"` for an application's end
    * user. Resolved on demand, at most once per signup.
    */
-  realm?: () => Promise<string>;
+  realm: () => Promise<string>;
 }
 
 /**
@@ -467,6 +473,10 @@ export interface BeforeSignupContext {
  */
 export interface AfterSignupContext {
   headers: Headers | null;
+  /** As {@link BeforeSignupContext.path}. */
+  path: string | null;
+  /** As {@link BeforeSignupContext.query}. */
+  query: Record<string, unknown> | null;
 }
 
 /**
