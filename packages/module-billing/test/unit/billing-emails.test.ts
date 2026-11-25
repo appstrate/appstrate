@@ -8,6 +8,7 @@ import { renderCancellationConfirmedEmail } from "../../src/emails/templates/can
 import { renderSubscriptionExpiredEmail } from "../../src/emails/templates/subscription-expired.ts";
 import { renderPlanChangedEmail } from "../../src/emails/templates/plan-changed.ts";
 import { renderQuotaWarningEmail } from "../../src/emails/templates/quota-warning.ts";
+import { renderComputeWarningEmail } from "../../src/emails/templates/compute-warning.ts";
 import { renderCardExpiringEmail } from "../../src/emails/templates/card-expiring.ts";
 import { renderBillingEmail } from "../../src/emails/registry.ts";
 import { billingSettingsUrl } from "../../src/emails/layout.ts";
@@ -212,6 +213,43 @@ describe("billing email templates", () => {
       const result = renderQuotaWarningEmail({ ...baseProps, locale: "en" });
       expect(result.subject).toContain("85%");
       expect(result.html).toContain("Upgrade my plan");
+    });
+  });
+
+  // -----------------------------------------------------------------------
+  // compute-warning
+  // -----------------------------------------------------------------------
+  describe("compute-warning", () => {
+    const baseProps = {
+      planName: "Free",
+      usagePercent: 82,
+      minutesUsed: 820,
+      minutesIncluded: 1000,
+      resetDate: "2026-12-01T00:00:00.000Z",
+      upgradeUrl: "/settings/billing",
+      locale: "fr" as const,
+    };
+
+    it("renders the French warning with the minutes, the percentage and the renewal date", () => {
+      const result = renderComputeWarningEmail(baseProps);
+      expect(result.subject).toContain("82");
+      expect(result.subject).toContain("minutes de calcul");
+      expect(result.html).toContain("820");
+      expect(result.html).toContain("Free");
+      expect(result.html).toContain("décembre");
+      expect(result.html).toContain("Passer en Équipe");
+    });
+
+    it("renders the English version", () => {
+      const result = renderComputeWarningEmail({ ...baseProps, locale: "en" });
+      expect(result.subject).toContain("82%");
+      expect(result.html).toContain("December");
+      expect(result.html).toContain("Upgrade to Team");
+    });
+
+    it("is reachable through the registry, with the org name on the subject", () => {
+      const result = renderBillingEmail("compute-warning", baseProps, { orgName: "Acme" });
+      expect(result.subject).toContain("Acme");
     });
   });
 

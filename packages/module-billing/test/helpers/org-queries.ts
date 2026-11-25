@@ -24,6 +24,9 @@ export function seedOrgMembers(orgId: string, members: ModuleOrgMember[]): void 
 }
 
 export const orgQueries: BillingOrgQueries = {
+  // An org that was never seeded does not exist: `null`, as the platform answers for one it
+  // has deleted.
+  getOrgName: async (orgId) => (directory.has(orgId) ? `Org ${orgId}` : null),
   getOrgOwnerEmails: async (orgId) =>
     (directory.get(orgId) ?? []).filter((m) => m.role === "owner").map((m) => m.email),
   // Mirrors the contract's one load-bearing detail: an id that is not a member

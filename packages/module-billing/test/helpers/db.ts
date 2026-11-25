@@ -8,7 +8,7 @@
  */
 import { getBillingDb } from "../../src/db.ts";
 import { sql } from "drizzle-orm";
-import { resetMockLedger } from "./mock-platform.ts";
+import { resetMockLedger, resetMockRuns } from "./mock-platform.ts";
 import { resetOrgDirectory } from "./org-queries.ts";
 import { resetLlmUsageIdSeq } from "./seed.ts";
 import EE_TABLES from "../tables.ts";
@@ -26,6 +26,7 @@ export async function truncateBillingTables(): Promise<void> {
     await db.execute(sql.raw(`DELETE FROM ${table}`));
   }
   resetMockLedger();
+  resetMockRuns();
   resetOrgDirectory();
   resetLlmUsageIdSeq();
 }

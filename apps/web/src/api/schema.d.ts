@@ -6276,6 +6276,7 @@ export interface components {
                 name: string;
             };
             plans: components["schemas"]["BillingPlan"][];
+            compute: components["schemas"]["BillingCompute"];
             usage_percent: number;
             credits_used: number;
             credit_quota: number;
@@ -6299,6 +6300,22 @@ export interface components {
          * @enum {string}
          */
         BillingCheckoutPlanId: "starter" | "pro";
+        /** @description The org's compute consumption for the current calendar month (UTC). Each finished platform run counts for its duration rounded up to the second; a remote run counts for nothing. A new run is refused once the included minutes are used up; runs already started finish. */
+        BillingCompute: {
+            used_seconds: number;
+            /** @description Minutes included this month. `null` when the plan has no compute quota. */
+            included_minutes: number | null;
+            /** @description Share of the included minutes used. 0 when the plan has no compute quota. */
+            usage_percent: number;
+            /** Format: date-time */
+            period_start: string;
+            /**
+             * Format: date-time
+             * @description When the allowance renews: the start of next month, UTC.
+             */
+            period_end: string;
+            max_concurrent_runs: number | null;
+        };
         BillingContact: {
             /**
              * Format: email
@@ -6334,6 +6351,10 @@ export interface components {
             credit_quota: number;
             /** @description Durable-file storage the plan grants, in bytes — the value projected onto the org's platform storage limit. */
             file_storage_bytes: number;
+            /** @description Compute minutes the plan includes per calendar month (UTC). `null` while the plan carries no compute quota. */
+            included_compute_minutes: number | null;
+            /** @description Runs the org may have in flight at once on this plan. `null` leaves the deployment-wide limit. */
+            max_concurrent_runs: number | null;
         };
         /** @description A catalog plan the org can upgrade into — an `BillingPlan` whose `id` is narrowed to a checkout target. */
         BillingUpgradePlan: components["schemas"]["BillingPlan"] & {

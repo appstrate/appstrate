@@ -24,6 +24,18 @@ import {
 import { ensureCursorSeeded } from "./billing/usage-recorder.ts";
 import { onOrgCreate, onOrgDelete, onOrgMemberRemove } from "./onboarding/post-signup.ts";
 import {
+  checkComputeAdmission,
+  maxConcurrentRunsOf,
+  ownsPlatformCompute,
+} from "./compute/admission.ts";
+import {
+  drainComputeSweeper,
+  ensureComputeCursorSeeded,
+  requestSettlement,
+  startComputeSweeper,
+  stopComputeSweeper,
+} from "./compute/settlement.ts";
+import {
   checkoutBodySchema,
   createBillingRoutes,
   managersBodySchema,
@@ -149,6 +161,11 @@ const billingModule: AppstrateModule = {
     // A failed pass advances nothing and the next tick retries. INTERVAL=0
     // pauses the sweep only — the maintenance half keeps running.
     startBillingSweeper();
+
+    // Compute minutes: finished runs settle into the org's monthly counter. The timer is the
+    // catch-up; a terminal `onRunStatusChange` pokes a pass so the gauge follows the run.
+    await ensureComputeCursorSeeded();
+    startComputeSweeper();
   },
 
   publicPaths: ["/api/billing/webhooks"],
@@ -238,6 +255,11 @@ const billingModule: AppstrateModule = {
   emailOverrides,
 
   hooks: {
+    // The plan's cap on runs in flight, enforced atomically by the platform when it inserts
+    // the run (see `compute/admission.ts`). Fails closed like `beforeUsage`: a throw here
+    // refuses the launch rather than admitting it uncapped.
+    runLimits: async (orgId: string) => ({ maxConcurrentRuns: await maxConcurrentRunsOf(orgId) }),
+
     // Unified admission gate (first-match-wins). Billing is NOT done here — the
     // cursor sweeper (billing-sweeper.ts) is the sole biller. This is a
     // read-only soft-cap check.
@@ -248,6 +270,28 @@ const billingModule: AppstrateModule = {
     // estimated AMOUNT, not on "is the model platform-provided?", which would hard-code
     // "BYOK ⇒ free" and stop being true the moment platform compute is billed.
     beforeUsage: async (params: BeforeUsageParams): Promise<UsageRejection | null> => {
+      // Plan limits on platform compute (concurrency, monthly minutes) come first and apply
+      // to a BYOK run as much as to one on a platform credential: the sandbox is occupied
+      // either way. Everything else (a chat turn, a remote run, the system-proxy seam
+      // admitting a run that is already running) owns no compute here and passes through.
+      if (ownsPlatformCompute(params)) {
+        try {
+          const refusal = await checkComputeAdmission(params);
+          if (refusal) return refusal;
+        } catch (err) {
+          // Fail CLOSED, for the same reason as the credit check below.
+          logger.error("beforeUsage compute admission failed, refusing usage", {
+            orgId: params.orgId,
+            err: err instanceof Error ? err.message : String(err),
+          });
+          return {
+            code: "unexpected",
+            message: "Billing is temporarily unavailable.",
+            status: 500,
+          };
+        }
+      }
+
       // Self-funded short-circuit: the org supplies both the credential and the
       // host (a remote BYOK run), so the platform funds nothing and there is
       // nothing to gate. Returning here BEFORE the quote keeps the billing DB
@@ -303,6 +347,11 @@ const billingModule: AppstrateModule = {
     onOrgCreate,
     onOrgDelete,
     onOrgMemberRemove,
+    // A run reached a terminal status: settle its compute minutes now rather than at the
+    // next tick. `started` carries no duration yet. Never throws (see `requestSettlement`).
+    onRunStatusChange: ({ status }) => {
+      if (status !== "started") requestSettlement();
+    },
   },
 
   async shutdown() {
@@ -310,7 +359,9 @@ const billingModule: AppstrateModule = {
     // DB pool closes so it is not torn out mid-transaction. The timer is
     // cleared FIRST so nothing new starts while we drain.
     stopBillingSweeper();
+    stopComputeSweeper();
     await drainBillingSweeper();
+    await drainComputeSweeper();
     const redis = getBillingRedis();
     if (redis) {
       await redis.quit();

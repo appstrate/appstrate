@@ -2,7 +2,8 @@
 
 import { describe, expect, it, beforeEach } from "bun:test";
 import { truncateBillingTables } from "../../helpers/db.ts";
-import { seedBillingAccount } from "../../helpers/seed.ts";
+import { seedBillingAccount, seedComputeUsage } from "../../helpers/seed.ts";
+import { periodStartOf } from "../../../src/compute/period.ts";
 import {
   resetStripeMock,
   generateWebhookEvent,
@@ -86,6 +87,92 @@ describe("billing routes", () => {
         ["starter", plans.starter.fileStorageBytes],
         ["pro", plans.pro.fileStorageBytes],
       ]);
+    });
+
+    describe("compute", () => {
+      const thisMonth = periodStartOf(new Date());
+
+      async function computeOf() {
+        const res = await app.request("/api/billing", { headers: headers() });
+        expect(res.status).toBe(200);
+        return ((await res.json()) as { compute: Record<string, unknown> }).compute;
+      }
+
+      it("reports the Free plan's 1 000 minutes, with nothing used yet", async () => {
+        await seedBillingAccount({ orgId, planId: "free" });
+        const compute = await computeOf();
+        expect(compute).toMatchObject({
+          used_seconds: 0,
+          included_minutes: 1000,
+          usage_percent: 0,
+          max_concurrent_runs: 3,
+          period_start: `${thisMonth}T00:00:00.000Z`,
+        });
+        const end = new Date(compute.period_end as string);
+        expect(end.getUTCDate()).toBe(1);
+        expect(end.getTime()).toBeGreaterThan(Date.now());
+      });
+
+      it("reports the seconds used this month and the share of the quota", async () => {
+        await seedBillingAccount({ orgId, planId: "free" });
+        // 24 700 s of 60 000 s: 41 %.
+        await seedComputeUsage({ orgId, periodStart: thisMonth, secondsUsed: 24_700 });
+        expect(await computeOf()).toMatchObject({ used_seconds: 24_700, usage_percent: 41 });
+      });
+
+      it("reads 100 % exactly when a new run is refused, never before", async () => {
+        await seedBillingAccount({ orgId, planId: "free" });
+        await seedComputeUsage({ orgId, periodStart: thisMonth, secondsUsed: 59_999 });
+        expect((await computeOf()).usage_percent).toBe(99);
+      });
+
+      it("reports 100 % at the quota and caps it above", async () => {
+        await seedBillingAccount({ orgId, planId: "free" });
+        await seedComputeUsage({ orgId, periodStart: thisMonth, secondsUsed: 70_000 });
+        expect((await computeOf()).usage_percent).toBe(100);
+      });
+
+      it("ignores the previous month's consumption", async () => {
+        await seedBillingAccount({ orgId, planId: "free" });
+        const last = new Date();
+        last.setUTCMonth(last.getUTCMonth() - 1, 1);
+        await seedComputeUsage({
+          orgId,
+          periodStart: periodStartOf(last),
+          secondsUsed: 60_000,
+        });
+        expect(await computeOf()).toMatchObject({ used_seconds: 0, usage_percent: 0 });
+      });
+
+      it("reports no quota for a plan that carries none, and still the seconds used", async () => {
+        await seedBillingAccount({ orgId, planId: "starter" });
+        await seedComputeUsage({ orgId, periodStart: thisMonth, secondsUsed: 90 });
+        expect(await computeOf()).toMatchObject({
+          used_seconds: 90,
+          included_minutes: null,
+          usage_percent: 0,
+          max_concurrent_runs: null,
+        });
+      });
+
+      it("states the compute entitlement on every plan of the catalog", async () => {
+        await seedBillingAccount({ orgId, planId: "free" });
+        const res = await app.request("/api/billing", { headers: headers() });
+        const body = (await res.json()) as {
+          plans: Array<{
+            id: string;
+            included_compute_minutes: number | null;
+            max_concurrent_runs: number | null;
+          }>;
+        };
+        expect(
+          body.plans.map((p) => [p.id, p.included_compute_minutes, p.max_concurrent_runs]),
+        ).toEqual([
+          ["free", 1000, 3],
+          ["starter", null, null],
+          ["pro", null, null],
+        ]);
+      });
     });
 
     it("returns 404 when no billing account exists", async () => {
