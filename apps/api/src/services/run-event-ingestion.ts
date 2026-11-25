@@ -150,6 +150,7 @@ export async function getRunSinkContext(runId: string): Promise<RunSinkContext |
       sinkClosedAt: runs.sinkClosedAt,
       lastEventSequence: runs.lastEventSequence,
       startedAt: runs.startedAt,
+      runningAt: runs.runningAt,
       versionRef: runs.versionRef,
       modelSource: runs.modelSource,
       payerUserId: runs.payerUserId,
@@ -559,12 +560,14 @@ async function finalizeRunImpl(input: FinalizeRunInput): Promise<void> {
   );
   const now = new Date();
   const packageEphemeral = isInlineShadowPackageId(run.packageId);
-  // Wall-clock duration as the authoritative value. Runners (PiRunner,
-  // MockRunner, …) only measure their internal loop and often omit
-  // `durationMs` from the finalize payload — without this fallback the
-  // `duration` column stays null on every successful run and the UI
-  // loses the value the moment `isRunning` flips to false.
-  const resolvedDurationMs = result.durationMs ?? now.getTime() - run.startedAt.getTime();
+  // The runner's own `durationMs` when it posted one (its loop, boot excluded). Otherwise
+  // (a run the PLATFORM terminates: orphan at boot, stall or boot-deadline watchdog, cancel)
+  // the wall-clock time since the run left `pending`. Never since `started_at`: that is the
+  // creation of the row, so it would charge a run for its provisioning, for the time the
+  // server was down, and, for a run that never ran, for its whole life. A run that never
+  // became `running` lasted 0.
+  const resolvedDurationMs =
+    result.durationMs ?? (run.runningAt ? now.getTime() - run.runningAt.getTime() : 0);
 
   // 5. Terminal params shared by the CAS below and the `onRunStatusChange`
   //    broadcast in step 7. Forwarding `runs.model_source` lets a subscriber

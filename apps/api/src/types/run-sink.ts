@@ -35,6 +35,8 @@ export interface RunSinkContext {
   sinkClosedAt: Date | null;
   lastEventSequence: number;
   startedAt: Date;
+  /** `runs.running_at`: when the run first became `running`; null = it never ran. */
+  runningAt: Date | null;
   /**
    * The agent definition the run executes — `"draft"` or a concrete semver
    * stamped at kickoff. Finalize reads the output schema from the

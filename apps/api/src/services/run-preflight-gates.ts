@@ -101,6 +101,11 @@ interface PreflightGatesOk {
   ok: true;
   /** Agent potentially cloned with a capped `timeout` — pass this to downstream code. */
   agent: LoadedPackage;
+  /**
+   * The org's own cap on runs in flight (`runLimits` hook), or null for the deployment-wide one
+   * only. The atomic reservation in `createRun` enforces it: pass it there.
+   */
+  maxConcurrentRuns: number | null;
   /** Sub-gate durations (ms) for the pipeline's per-stage timing log. */
   timings: PreflightGateTimings;
 }
@@ -247,9 +252,18 @@ export async function runPreflightGates(input: PreflightGatesInput): Promise<Pre
     }
   }
 
+  // 5. Per-org run limits a module imposes. Read here, enforced atomically by `createRun`
+  //    under the org admission lock: the count above is only a fast pre-check. A remote run
+  //    occupies no platform slot, so it carries none.
+  let maxConcurrentRuns: number | null = null;
+  if (input.executionPlane === "platform" && hasHook("runLimits")) {
+    maxConcurrentRuns = (await callHook("runLimits", orgId))?.maxConcurrentRuns ?? null;
+  }
+
   return {
     ok: true,
     agent,
+    maxConcurrentRuns,
     timings: { rateLimitMs, concurrencyMs, beforeUsageHookMs },
   };
 }

@@ -145,6 +145,12 @@ export const runs = pgTable(
     tokenUsage: jsonb("token_usage").$type<TokenUsage>(),
     startedAt: timestamp("started_at", { withTimezone: true }).defaultNow().notNull(),
     completedAt: timestamp("completed_at", { withTimezone: true }),
+    // The instant the run left `pending` (first `running` flip), stamped once and never moved.
+    // It is the start of the duration a run the PLATFORM terminates is measured from (an
+    // orphan found at boot, a stall, a boot-deadline, a cancel): `started_at` is the creation
+    // of the row and includes provisioning and, for a run that never ran, all of its life. NULL
+    // = the run never started running (and on a row that predates the column).
+    runningAt: timestamp("running_at", { withTimezone: true }),
     duration: integer("duration"),
     scheduleId: text("schedule_id").references(() => schedules.id, {
       onDelete: "set null",
@@ -398,6 +404,12 @@ export const runs = pgTable(
       .where(
         sql`${table.bootDeadlineAt} IS NOT NULL AND ${table.sinkClosedAt} IS NULL AND ${table.lastEventSequence} = 0`,
       ),
+    // Terminal-run cursor read (`PlatformServices.runs.listTerminal`): a metering
+    // module sweeps finished runs by `(completed_at, id)`. Partial — a run that
+    // has not finished carries no `completed_at` and is never read this way.
+    index("idx_runs_completed_at")
+      .on(table.completedAt, table.id)
+      .where(sql`${table.completedAt} IS NOT NULL`),
     // Tenant-integrity FK for the launching conversation. The live migration
     // uses PostgreSQL's column-list `SET NULL (chat_session_id)` so deleting a
     // session detaches the run without trying to null the NOT-NULL org_id.
