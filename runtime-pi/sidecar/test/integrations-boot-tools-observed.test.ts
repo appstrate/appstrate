@@ -1,25 +1,29 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * The tools-observed report is fire-and-forget: a platform that refuses it (400) or cannot be
+ * The tools-observed report is best-effort: a platform that refuses it (400) or cannot be
  * reached leaves the integration registered and the boot report intact. Driven through
- * `bootIntegrations` against a fake remote MCP server behind a stubbed global `fetch`.
+ * `bootIntegrations` against a fake remote MCP server behind a stubbed `fetchFn`; retry pauses
+ * are 0 ms and the pending reports are drained by `shutdown()`, so nothing sleeps or polls.
+ *
+ * Also pins that the space policy (`blockedTools`, `approvedToolFingerprints`) reaches
+ * `host.register`, on the remote and the local path: a gated tool is absent from the booted tools.
  */
 
-import { afterEach, describe, expect, it } from "bun:test";
+import { describe, expect, it } from "bun:test";
+import * as path from "node:path";
+import { readFileSync } from "node:fs";
+import { zipArtifact } from "@appstrate/core/zip";
 import type { IntegrationSpawnSpec } from "@appstrate/core/sidecar-types";
 import type { AppstrateToolDefinition } from "@appstrate/mcp-transport";
 import { handlerFetch, modernMcpHandler } from "@appstrate/mcp-transport/testing";
 import { bootIntegrations } from "../integrations-boot.ts";
 import { HERMETIC_PROCESS_ADAPTER_ID } from "./helpers/hermetic-process-adapter.ts";
+import { installPassthroughRunnerExec } from "./helpers/runner-exec.ts";
 
 const SERVER_URL = "https://mcp.example.com/mcp";
-const originalFetch = globalThis.fetch;
-afterEach(() => {
-  globalThis.fetch = originalFetch;
-});
 
-const spec = {
+const baseSpec = {
   integrationId: "@vendor/remote",
   namespace: "remote",
   sourceKind: "remote",
@@ -31,15 +35,22 @@ const spec = {
   toolAllowlist: ["echo", "gone"],
 } as unknown as IntegrationSpawnSpec;
 
-const echo: AppstrateToolDefinition = {
-  descriptor: { name: "echo", inputSchema: { type: "object" } },
+const tool = (name: string): AppstrateToolDefinition => ({
+  descriptor: { name, inputSchema: { type: "object" } },
   handler: async () => ({ content: [{ type: "text", text: "ok" }] }),
-};
+});
 
-async function bootWith(observed: () => Response | Promise<Response>, attempts: number) {
-  const serve = handlerFetch(modernMcpHandler({ tools: [echo] }));
+const noDelay = () => 0;
+
+/** Boots, snapshots what the agent would see, then shuts down: that drains the reports. */
+async function bootWith(
+  spec: IntegrationSpawnSpec,
+  upstreamTools: AppstrateToolDefinition[],
+  observed: () => Response | Promise<Response> = () => new Response(null, { status: 204 }),
+) {
+  const serve = handlerFetch(modernMcpHandler({ tools: upstreamTools }));
   const reports: unknown[] = [];
-  globalThis.fetch = (async (input: Parameters<typeof fetch>[0], init?: RequestInit) => {
+  const fetchFn = (async (input: Parameters<typeof fetch>[0], init?: RequestInit) => {
     const request = new Request(String(input), init);
     if (request.url.includes("/tools-observed")) {
       reports.push(await request.json());
@@ -48,20 +59,24 @@ async function bootWith(observed: () => Response | Promise<Response>, attempts: 
     return serve(request);
   }) as typeof fetch;
   const previous = process.env.INTEGRATION_RUNTIME_ADAPTER;
+  const originalFetch = globalThis.fetch;
   process.env.INTEGRATION_RUNTIME_ADAPTER = HERMETIC_PROCESS_ADAPTER_ID;
+  // The remote MCP server and the report both go through the global fetch.
+  globalThis.fetch = fetchFn;
   try {
     const result = await bootIntegrations([spec], {
       platformApiUrl: "http://platform.local",
       runToken: "run-token",
+      retryDelayMs: noDelay,
     });
-    // The report is not awaited by the boot: wait for its last attempt, retries included, so none
-    // outlives the stubbed fetch.
-    const deadline = Date.now() + 5_000;
-    while (reports.length < attempts && Date.now() < deadline) {
-      await new Promise((resolve) => setTimeout(resolve, 20));
-    }
-    return { result, reports };
+    const snapshot = {
+      toolNames: result.tools.map((t) => t.descriptor.name),
+      report: result.report,
+    };
+    await result.shutdown();
+    return { ...snapshot, reports };
   } finally {
+    globalThis.fetch = originalFetch;
     if (previous === undefined) delete process.env.INTEGRATION_RUNTIME_ADAPTER;
     else process.env.INTEGRATION_RUNTIME_ADAPTER = previous;
   }
@@ -74,23 +89,97 @@ describe("bootIntegrations — tools-observed report", () => {
     ["answers 400", () => new Response("{}", { status: 400 }), 1],
   ] as const) {
     it(`keeps the integration registered when the report ${label}`, async () => {
-      const { result, reports } = await bootWith(answer, attempts);
-      try {
-        expect(reports).toHaveLength(attempts);
-        expect(reports[0]).toMatchObject({
-          truncated: false,
-          unavailable: [{ name: "gone", reason: "not_listed" }],
-        });
-        expect(result.report.ok).toBe(true);
-        expect(result.report.spawned).toHaveLength(1);
-        expect(result.report.spawned[0]).toMatchObject({
-          integrationId: "@vendor/remote",
-          unavailableTools: [{ name: "gone", reason: "not_listed" }],
-        });
-        expect(result.tools.some((t) => t.descriptor.name.endsWith("echo"))).toBe(true);
-      } finally {
-        await result.shutdown();
-      }
+      const { reports, report, toolNames } = await bootWith(baseSpec, [tool("echo")], answer);
+      expect(reports).toHaveLength(attempts);
+      expect(reports[0]).toMatchObject({
+        truncated: false,
+        unavailable: [{ name: "gone", reason: "not_listed" }],
+      });
+      expect(report.ok).toBe(true);
+      expect(report.spawned).toHaveLength(1);
+      expect(report.spawned[0]).toMatchObject({
+        integrationId: "@vendor/remote",
+        unavailableTools: [{ name: "gone", reason: "not_listed" }],
+      });
+      expect(toolNames.some((name) => name.endsWith("echo"))).toBe(true);
     });
   }
+});
+
+describe("bootIntegrations — the space policy reaches the host", () => {
+  it("leaves a blocked tool and an unapproved undeclared tool out of a remote integration", async () => {
+    const spec = {
+      ...baseSpec,
+      toolAllowlist: ["echo", "blocked", "secret"],
+      blockedTools: ["blocked"],
+      approvedToolFingerprints: { secret: ["not-the-fingerprint"] },
+    } as unknown as IntegrationSpawnSpec;
+    const { toolNames, reports } = await bootWith(spec, [
+      tool("echo"),
+      tool("blocked"),
+      tool("secret"),
+    ]);
+    expect(toolNames.filter((name) => name.startsWith("remote__"))).toEqual(["remote__echo"]);
+    expect(reports[0]).toMatchObject({
+      unavailable: expect.arrayContaining([
+        { name: "blocked", reason: "blocked_in_space" },
+        { name: "secret", reason: "definition_not_approved" },
+      ]),
+    });
+  });
+
+  it("leaves a blocked tool out of a local integration and reports it without tools", async () => {
+    const fixtureDir = path.join(import.meta.dir, "fixtures/bun-toolkit");
+    const bundle = zipArtifact({
+      "manifest.json": new Uint8Array(readFileSync(path.join(fixtureDir, "manifest.json"))),
+      "server.ts": new Uint8Array(readFileSync(path.join(fixtureDir, "server.ts"))),
+    });
+    const reports: Record<string, unknown>[] = [];
+    const fetchFn = (async (input: Parameters<typeof fetch>[0], init?: RequestInit) => {
+      const request = new Request(String(input), init);
+      if (request.url.includes("/tools-observed")) {
+        reports.push((await request.json()) as Record<string, unknown>);
+        return new Response(null, { status: 204 });
+      }
+      if (request.url.includes("/internal/integration-bundle/")) {
+        return new Response(bundle, { status: 200 });
+      }
+      return new Response("{}", { status: 404 });
+    }) as typeof fetch;
+    const spec = {
+      integrationId: "@appstrate/bun-toolkit",
+      namespace: "buntoolkit",
+      connection: { id: "conn-a", label: "work", accountId: null },
+      sourceKind: "local",
+      manifest: {
+        name: "@appstrate/bun-toolkit",
+        version: "1.0.0",
+        server: { type: "bun", entry_point: "./server.ts" },
+      },
+      spawnEnv: {},
+      toolAllowlist: ["uuid", "hash"],
+      blockedTools: ["hash"],
+    } as unknown as IntegrationSpawnSpec;
+    const previous = process.env.INTEGRATION_RUNTIME_ADAPTER;
+    process.env.INTEGRATION_RUNTIME_ADAPTER = HERMETIC_PROCESS_ADAPTER_ID;
+    const runnerExec = await installPassthroughRunnerExec();
+    try {
+      const result = await bootIntegrations([spec], {
+        platformApiUrl: "http://platform.local",
+        runToken: "run-token",
+        fetchFn,
+        retryDelayMs: noDelay,
+      });
+      const names = result.tools.map((t) => t.descriptor.name);
+      await result.shutdown();
+      expect(names).toContain("buntoolkit__uuid");
+      expect(names).not.toContain("buntoolkit__hash");
+      expect(reports).toHaveLength(1);
+      expect(reports[0]).toEqual({ unavailable: [{ name: "hash", reason: "blocked_in_space" }] });
+    } finally {
+      await runnerExec.restore();
+      if (previous === undefined) delete process.env.INTEGRATION_RUNTIME_ADAPTER;
+      else process.env.INTEGRATION_RUNTIME_ADAPTER = previous;
+    }
+  });
 });

@@ -48,7 +48,7 @@ export function readUpstreamMeta(result: CallToolResult): UpstreamMeta {
   if (typeof raw !== "object" || raw === null) {
     throw new Error(`api_call: _meta['${UPSTREAM_META_KEY}'] must be an object, got ${typeof raw}`);
   }
-  const obj = raw as { status?: unknown; headers?: unknown };
+  const obj = raw as { status?: unknown; headers?: unknown; required_scopes?: unknown };
   if (typeof obj.status !== "number" || !Number.isInteger(obj.status)) {
     throw new Error(`api_call: _meta['${UPSTREAM_META_KEY}'].status must be an integer`);
   }
@@ -66,7 +66,7 @@ export function readUpstreamMeta(result: CallToolResult): UpstreamMeta {
   }
   // Optional and advisory: rendered into the model's status line, so re-validated here and
   // never a protocol violation.
-  const scopes = (raw as { required_scopes?: unknown }).required_scopes;
+  const scopes = obj.required_scopes;
   const requiredScopes = sanitiseRequiredScopes(Array.isArray(scopes) ? scopes : undefined);
   return {
     status: obj.status,

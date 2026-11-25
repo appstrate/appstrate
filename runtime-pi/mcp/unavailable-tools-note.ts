@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { allocateMcpToolName, isListedToolName, parseScopedName } from "@appstrate/core/naming";
+import { isListedToolName, parseScopedName } from "@appstrate/core/naming";
 import type { IntegrationBootReport, UnavailableToolReason } from "@appstrate/core/sidecar-types";
 
 /** A block is a decision of the space administrators, not a fault: say so, so the model does not retry. */
@@ -12,8 +12,8 @@ const reasonText = (reason: UnavailableToolReason): string =>
  * model does not plan around them. Empty when every selected tool is available.
  */
 export function unavailableToolsNote(spawned: IntegrationBootReport["spawned"]): string {
-  // Server-controlled names reach the system prompt: only plain tokens are quoted. Several
-  // connections of one integration share a slot, so identical lines collapse.
+  // Server-controlled names reach the system prompt: only plain tokens are quoted. Identical
+  // lines (several connections of one integration, one tool) collapse.
   const lines = new Set(
     spawned
       .filter((entry) => parseScopedName(entry.integrationId) !== null)
@@ -24,15 +24,10 @@ export function unavailableToolsNote(spawned: IntegrationBootReport["spawned"]):
             : "";
         return (entry.unavailableTools ?? [])
           .filter(({ name }) => isListedToolName(name))
-          .map(({ name, reason }) => {
-            // The plain `ns__body` of a name collision is a sibling tool that IS exposed: quote
-            // the upstream name instead.
-            const shown =
-              reason === "name_collision"
-                ? name
-                : allocateMcpToolName(entry.namespace, name, () => false);
-            return `${entry.integrationId}: ${shown}${label} (${reasonText(reason)})`;
-          });
+          .map(
+            // The upstream name, always: a namespaced `ns__name` could be a live sibling tool.
+            ({ name, reason }) => `${entry.integrationId}: ${name}${label} (${reasonText(reason)})`,
+          );
       }),
   );
   if (lines.size === 0) return "";

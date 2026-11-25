@@ -54,7 +54,7 @@ import {
 } from "@appstrate/afps-runtime/resolvers";
 import { buildInjectedCredentialHeader } from "@appstrate/connect/proxy-primitives";
 import { getErrorMessage } from "@appstrate/core/errors";
-import { targetsMcpEndpoint, type McpEndpoint } from "@appstrate/core/integration";
+import { targetsMcpEndpoint, type McpEndpoint } from "@appstrate/core/mcp-endpoint";
 import { logger } from "./logger.ts";
 import { filterSensitiveHeaders } from "./redact.ts";
 

@@ -110,6 +110,43 @@ describe("McpHost — approvedToolFingerprints", () => {
   });
 });
 
+describe("McpHost — approvedToolFingerprints keys are own properties only", () => {
+  // Names that resolve on Object.prototype: a plain lookup would return a function or the prototype
+  // itself and `.includes` would throw.
+  for (const name of ["constructor", "__proto__", "toString"]) {
+    it(`exposes a tool named ${name} that has no entry, without throwing`, async () => {
+      const { host, registration, close } = await register([tool(name, "x"), tool("safe", "ok")], {
+        approvedToolFingerprints: { other_tool: [] },
+      });
+      try {
+        expect(exposed(host)).toEqual([`gh__${name}`, "gh__safe"].sort());
+        expect(registration.unavailable).toEqual([]);
+      } finally {
+        await close();
+      }
+    });
+
+    it(`excludes a tool named ${name} whose own entry approves nothing`, async () => {
+      const approved: Record<string, string[]> = {};
+      Object.defineProperty(approved, name, {
+        value: [],
+        enumerable: true,
+        configurable: true,
+        writable: true,
+      });
+      const { host, registration, close } = await register([tool(name, "x"), tool("safe", "ok")], {
+        approvedToolFingerprints: approved,
+      });
+      try {
+        expect(exposed(host)).toEqual(["gh__safe"]);
+        expect(registration.unavailable).toEqual([{ name, reason: "definition_not_approved" }]);
+      } finally {
+        await close();
+      }
+    });
+  }
+});
+
 describe("McpHost — unavailable report", () => {
   it("reports an allowlisted tool the listing did not return as not_listed", async () => {
     const { host, registration, close } = await register([tool("a", "a")], {

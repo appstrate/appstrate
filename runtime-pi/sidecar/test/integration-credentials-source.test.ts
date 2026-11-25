@@ -830,7 +830,7 @@ describe("postIntegrationToolsObserved", () => {
 
 describe("postIntegrationToolsObserved — resilience", () => {
   const observed = { tools: [], truncated: false, unavailable: [] };
-  const opts = { platformApiUrl: "http://api", runToken: "tok", retryDelaysMs: [0, 0] };
+  const opts = { platformApiUrl: "http://api", runToken: "tok", retryDelayMs: () => 0 };
 
   it("retries a network error and a 5xx, then returns the answer", async () => {
     const answers = [new Error("down"), new Response(null, { status: 503 }), 204] as const;
@@ -904,22 +904,6 @@ describe("capObservedTools", () => {
     const capped = capObservedTools(tools);
     expect(capped.tools).toHaveLength(OBSERVED_TOOLS_MAX_COUNT);
     expect(capped.truncated).toBe(true);
-  });
-
-  it("drops the tools the platform would refuse, so the rest still gets through", () => {
-    const refused = [
-      { name: "x".repeat(OBSERVED_TOOL_NAME_MAX_LENGTH + 1), inputSchema: { type: "object" } },
-      { name: "", inputSchema: { type: "object" } },
-      { name: "no_schema" },
-      { name: "string_schema", inputSchema: "object" },
-      { name: "array_schema", inputSchema: { type: "array" } },
-      { inputSchema: { type: "object" } },
-      null,
-    ];
-    expect(capObservedTools([t("ok"), ...refused, t("also_ok")])).toEqual({
-      tools: [t("ok"), t("also_ok")],
-      truncated: true,
-    });
   });
 });
 

@@ -416,7 +416,7 @@ export class McpHost {
       // Server explicitly does NOT support tools — no point asking.
       return {
         namespace: normalisedNs,
-        unavailable: (upstream.allowedTools ?? []).map((name) => ({
+        unavailable: [...new Set(upstream.allowedTools ?? [])].map((name) => ({
           name,
           reason: "not_listed" as const,
         })),
@@ -455,7 +455,12 @@ export class McpHost {
         (blockedSet?.has(tool.name) ? "blocked_in_space" : null);
       if (exclusion === null) {
         // Only a tool with an approved entry is fingerprinted (declared and open catalogs have none).
-        const approved = upstream.approvedToolFingerprints?.[tool.name];
+        // Own-property lookup: a tool named `constructor` must not resolve to Object.prototype.
+        const fingerprints = upstream.approvedToolFingerprints;
+        const approved =
+          fingerprints && Object.hasOwn(fingerprints, tool.name)
+            ? fingerprints[tool.name]
+            : undefined;
         if (approved === undefined || approved.includes(toolDefinitionFingerprint(tool))) {
           return true;
         }

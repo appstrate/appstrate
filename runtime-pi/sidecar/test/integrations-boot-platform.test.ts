@@ -197,8 +197,10 @@ describe("bootIntegrations — platform endpoint tools-observed report", () => {
         platformApiUrl: PLATFORM_API_URL,
         runToken: "run-token",
         fetchFn,
+        retryDelayMs: () => 0,
       });
-      await new Promise((resolve) => setTimeout(resolve, 20));
+      // `shutdown()` drains the best-effort report: no sleeping.
+      await result.shutdown();
       expect(reports).toHaveLength(1);
       expect(reports[0]).toMatchObject({ unavailable: [{ name: "gone", reason: "not_listed" }] });
     } finally {

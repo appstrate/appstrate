@@ -28,7 +28,7 @@ describe("unavailableToolsNote", () => {
         { integrationId: "@scope/x", namespace: "x", toolCount: 1 },
       ]),
     ).toBe(
-      "\n\n<unavailable_tools>\n@scope/gh: gh__create_issue (definition_not_approved)\n@scope/gh: gh__gone (not_listed)\n</unavailable_tools>",
+      "\n\n<unavailable_tools>\n@scope/gh: create_issue (definition_not_approved)\n@scope/gh: gone (not_listed)\n</unavailable_tools>",
     );
   });
 
@@ -43,7 +43,7 @@ describe("unavailableToolsNote", () => {
         },
       ]),
     ).toBe(
-      "\n\n<unavailable_tools>\n@scope/gh: gh__delete_repo (blocked_in_space: blocked by the space administrators)\n</unavailable_tools>",
+      "\n\n<unavailable_tools>\n@scope/gh: delete_repo (blocked_in_space: blocked by the space administrators)\n</unavailable_tools>",
     );
   });
 
@@ -80,12 +80,10 @@ describe("unavailableToolsNote", () => {
           unavailableTools: [{ name: "fine", reason: "not_listed" }],
         },
       ]),
-    ).toBe(
-      "\n\n<unavailable_tools>\n@scope/gh: gh__ok_tool_v-1 (not_listed)\n</unavailable_tools>",
-    );
+    ).toBe("\n\n<unavailable_tools>\n@scope/gh: ok.tool/v-1 (not_listed)\n</unavailable_tools>");
   });
 
-  it("names the tool as the model sees it, adds the connection label and dedupes", () => {
+  it("quotes the upstream name, adds the connection label and dedupes", () => {
     const entry = (connectionLabel?: string) => ({
       integrationId: "@scope/gh",
       namespace: "gh",
@@ -94,7 +92,7 @@ describe("unavailableToolsNote", () => {
       unavailableTools: [{ name: "a.b", reason: "not_listed" as const }],
     });
     expect(unavailableToolsNote([entry("work"), entry("work"), entry("bad label\n")])).toBe(
-      "\n\n<unavailable_tools>\n@scope/gh: gh__a_b [work] (not_listed)\n@scope/gh: gh__a_b (not_listed)\n</unavailable_tools>",
+      "\n\n<unavailable_tools>\n@scope/gh: a.b [work] (not_listed)\n@scope/gh: a.b (not_listed)\n</unavailable_tools>",
     );
   });
 });

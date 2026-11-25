@@ -42,11 +42,11 @@ import type {
 } from "@appstrate/connect/integration-credentials";
 import type { ActiveConnectInputs, MitmCredentialSource } from "./integration-mitm-listener.ts";
 import { matchesAuthorizedUriSpec } from "@appstrate/afps-shared/authorized-uris";
+import { computeBackoffDelayMs, isRetryableHttpStatus } from "@appstrate/afps-shared/backoff";
 import {
   OBSERVED_TOOLS_MAX_BYTES,
   OBSERVED_TOOLS_MAX_COUNT,
   observedToolNameSchema,
-  observedToolSchema,
   type UnavailableToolReason,
 } from "@appstrate/core/sidecar-types";
 import { logger } from "./logger.ts";
@@ -697,9 +697,8 @@ function postIntegrationUpstreamSuccess(
 }
 
 /**
- * The tools the platform would accept, longest prefix first: tools it would refuse are dropped
- * (they would fail the whole body), then the list is cut at the platform's count and at
- * `maxBytes` of serialisation. `truncated` says any tool was left out.
+ * The longest prefix of `tools` within the platform's count and `maxBytes` of serialisation;
+ * the platform judges each entry. `truncated` says any tool was left out.
  */
 export function capObservedTools<T>(
   tools: readonly T[],
@@ -708,18 +707,13 @@ export function capObservedTools<T>(
   const encoder = new TextEncoder();
   let bytes = 2; // "[]"
   const kept: T[] = [];
-  let truncated = false;
   for (const tool of tools) {
-    if (!observedToolSchema.safeParse(tool).success) {
-      truncated = true;
-      continue;
-    }
     bytes += encoder.encode(JSON.stringify(tool)).byteLength + (kept.length > 0 ? 1 : 0);
     if (kept.length >= OBSERVED_TOOLS_MAX_COUNT || bytes > maxBytes)
       return { tools: kept, truncated: true };
     kept.push(tool);
   }
-  return { tools: kept, truncated };
+  return { tools: kept, truncated: false };
 }
 
 /** The unavailable tools the platform would accept: a bounded name, at most its count. */
@@ -731,8 +725,16 @@ export function capObservedUnavailable<T extends { name: string }>(unavailable: 
 
 /** Per-attempt budget of a tools-observed report. */
 const TOOLS_OBSERVED_TIMEOUT_MS = 10_000;
-/** Pauses before each retry: the route is idempotent, so a network error or 5xx is retried. */
-const TOOLS_OBSERVED_RETRY_DELAYS_MS = [500, 2_000] as const;
+/** Retries after the first attempt: the route is idempotent, so a network error or 5xx is retried. */
+const TOOLS_OBSERVED_RETRIES = 2;
+/** Backoff of a retry (`computeBackoffDelayMs`: 500 ms, then 1 s, capped). */
+const TOOLS_OBSERVED_BACKOFF = { baseMs: 500, capMs: 2_000 } as const;
+/** Worst-case time of one report: every attempt's timeout plus every pause. */
+export const TOOLS_OBSERVED_MAX_TOTAL_MS =
+  (TOOLS_OBSERVED_RETRIES + 1) * TOOLS_OBSERVED_TIMEOUT_MS +
+  Array.from({ length: TOOLS_OBSERVED_RETRIES }, (_, i) =>
+    computeBackoffDelayMs(i + 1, TOOLS_OBSERVED_BACKOFF),
+  ).reduce((a, b) => a + b, 0);
 
 /**
  * What a run's remote upstream listed, reported so the platform can snapshot it. Each attempt is
@@ -742,24 +744,27 @@ export async function postIntegrationToolsObserved(
   integrationId: string,
   connectionId: string | undefined,
   observed: {
-    tools: readonly unknown[];
-    truncated: boolean;
+    /** Omitted: the report only carries `unavailable` and records no snapshot. */
+    tools?: readonly unknown[];
+    truncated?: boolean;
     unavailable: readonly { name: string; reason: UnavailableToolReason }[];
   },
   opts: {
     platformApiUrl: string;
     runToken: string;
     fetchFn?: typeof fetch;
-    /** Pauses before each retry; tests shorten them. */
-    retryDelaysMs?: readonly number[];
+    /** Retry pauses; tests inject a zero delay. Defaults to `computeBackoffDelayMs`. */
+    retryDelayMs?: (attempt: number) => number;
   },
 ): Promise<Response> {
   const fetchFn = opts.fetchFn ?? fetch;
-  const delays = opts.retryDelaysMs ?? TOOLS_OBSERVED_RETRY_DELAYS_MS;
+  const delayMs =
+    opts.retryDelayMs ??
+    ((attempt: number) => computeBackoffDelayMs(attempt, TOOLS_OBSERVED_BACKOFF));
   const url = `${opts.platformApiUrl}/internal/integration-credentials/${integrationId}/tools-observed${credentialsQuery(connectionId)}`;
   const body = JSON.stringify(observed);
   for (let attempt = 0; ; attempt++) {
-    const last = attempt >= delays.length;
+    const last = attempt >= TOOLS_OBSERVED_RETRIES;
     try {
       const res = await fetchFn(url, {
         method: "POST",
@@ -767,11 +772,11 @@ export async function postIntegrationToolsObserved(
         body,
         signal: AbortSignal.timeout(TOOLS_OBSERVED_TIMEOUT_MS),
       });
-      if (res.status < 500 || last) return res;
+      if (!isRetryableHttpStatus(res.status) || last) return res;
     } catch (err) {
       if (last) throw err;
     }
-    await Bun.sleep(delays[attempt]!);
+    await Bun.sleep(delayMs(attempt + 1));
   }
 }
 
