@@ -113,6 +113,7 @@ describe("GET /api/credential-proxy/tools", () => {
       expect(status).toBe(200);
       expect(body).toEqual({
         tools: [],
+        integrations: [],
         connections: [],
         not_ready: [
           {

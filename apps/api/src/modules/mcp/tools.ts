@@ -137,6 +137,8 @@ import {
   type McpSkillReader,
 } from "./discovery.ts";
 import { buildPackageFileTools } from "./package-file-tools.ts";
+import { presentTools, withPresentation } from "./presentation.ts";
+import { MAX_PRESENTED_ITEMS, type PresentationSubject } from "@appstrate/core/mcp-presentation";
 import {
   ACTIVE_SPACES_META_KEY,
   OPERATION_SPACES_META_KEY,
@@ -456,10 +458,14 @@ interface SearchCall {
  * A kind's section (`denied`: operations withheld; `searched`: the spaces its shown entries name),
  * or the refusal that answers a call naming it.
  */
-type KindSearch = (
-  call: SearchCall,
-) => Promise<
-  | { section: Record<string, unknown>; denied?: number; searched?: string[] }
+type KindSearch = (call: SearchCall) => Promise<
+  | {
+      section: Record<string, unknown>;
+      denied?: number;
+      searched?: string[];
+      /** The entities its shown items name, for the call's presentation. */
+      subjects?: PresentationSubject[];
+    }
   | { refused: Refusal | RouteRefusal }
 >;
 
@@ -691,8 +697,10 @@ function buildSearchTool(
     );
     const sections: Record<string, unknown> = {};
     let shown = 0;
+    let found = 0;
     let denied: number | undefined;
     const searched = new Set<string>();
+    const subjects: PresentationSubject[] = [];
     for (const { kind, named, outcome } of outcomes) {
       if ("refused" in outcome) {
         if (named) return refusalResult(outcome.refused);
@@ -700,6 +708,8 @@ function buildSearchTool(
       }
       sections[KINDS[kind].section] = outcome.section;
       shown += Array.isArray(outcome.section.items) ? outcome.section.items.length : 0;
+      if (typeof outcome.section.total === "number") found += outcome.section.total;
+      subjects.push(...(outcome.subjects ?? []));
       denied = outcome.denied ?? denied;
       for (const id of outcome.searched ?? []) searched.add(id);
     }
@@ -712,10 +722,19 @@ function buildSearchTool(
     });
     // Without `space_id`, the spaces that contributed an entry to the result: what the chat records.
     const readSpaceIds = ctx.orgSpaces && args.space_id === undefined ? [...searched] : [];
-    return jsonResult({
-      ...sections,
-      ...(readSpaceIds.length > 0 ? { searched_spaces: readSpaceIds } : {}),
-    });
+    return withPresentation(
+      jsonResult({
+        ...sections,
+        ...(readSpaceIds.length > 0 ? { searched_spaces: readSpaceIds } : {}),
+      }),
+      {
+        title: typeof args.query === "string" && args.query ? args.query : "Search",
+        read_only: true,
+        destructive: false,
+        count: found,
+        items: subjects.slice(0, MAX_PRESENTED_ITEMS),
+      },
+    );
   };
 
   return { descriptor, handler };
@@ -816,6 +835,11 @@ async function searchAgentKind({ ctx, spaces, tokens, limit, signal }: SearchCal
   return {
     section: { total: matches.length, items, ...unsearched(refused) },
     searched: spacesShown(items),
+    subjects: items.map((hit) => ({
+      kind: "agent" as const,
+      id: hit.id,
+      ...(hit.display_name ? { display_name: hit.display_name } : {}),
+    })),
   };
 }
 
@@ -855,6 +879,11 @@ async function searchSkillKind({ ctx, spaces, tokens, limit }: SearchCall) {
   return {
     section: { total: matches.length, items, ...unsearched(refused) },
     searched: spacesShown(items),
+    subjects: items.map((skill) => ({
+      kind: "skill" as const,
+      id: skill.packageId,
+      ...(skill.name ? { display_name: skill.name } : {}),
+    })),
   };
 }
 
@@ -2640,8 +2669,10 @@ export function buildMcpTools(ctx: McpToolContext, surface: McpSurface): Appstra
   ];
   const { orgSpaces } = ctx;
   const pinned = orgSpaces === undefined;
-  return (orgSpaces ? tools.map((tool) => withSpaceArgument(tool, orgSpaces)) : tools).map((tool) =>
-    refuseUndeclaredArguments(tool, pinned),
+  return presentTools(
+    (orgSpaces ? tools.map((tool) => withSpaceArgument(tool, orgSpaces)) : tools).map((tool) =>
+      refuseUndeclaredArguments(tool, pinned),
+    ),
   );
 }
 

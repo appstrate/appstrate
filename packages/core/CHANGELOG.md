@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **`@appstrate/core/mcp-presentation`**: how a client shows one MCP tool call.
+  `TOOL_PRESENTATION_META_KEY` (`dev.appstrate/presentation`) names the `_meta` entry the platform
+  stamps on every tool result, `toolPresentationSchema` / `presentationSubjectSchema` describe it,
+  `readToolPresentation` reads it, and `isReadOnlyMethod` says whether an HTTP method only reads.
+
 ## [18.0.0] — 2026-11-24
 
 ### Added

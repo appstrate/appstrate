@@ -682,6 +682,26 @@ const integrationToolSchema = {
       description:
         "`remote` only: the name the server lists the tool by, which `tools/call` takes.",
     },
+    title: {
+      type: "string",
+      description:
+        "`remote` only, when the server gives one: the tool's display name (`title`, else " +
+        "`annotations.title`), sanitised. Server text, for display only.",
+    },
+    read_only_hint: {
+      type: "boolean",
+      enum: [true],
+      description:
+        "`remote` only: the server declares the tool reads only (`annotations.readOnlyHint`). " +
+        "An untrusted hint, for display only: nothing is gated on it.",
+    },
+    destructive_hint: {
+      type: "boolean",
+      enum: [true],
+      description:
+        "`remote` only: the server declares the tool may destroy (`annotations.destructiveHint`). " +
+        "An untrusted hint, for display only.",
+    },
     input_schema: {
       type: "object",
       additionalProperties: true,
@@ -896,6 +916,7 @@ export const credentialProxyPaths = {
                 type: "object",
                 required: [
                   "tools",
+                  "integrations",
                   "connections",
                   "not_ready",
                   "unlisted",
@@ -905,6 +926,24 @@ export const credentialProxyPaths = {
                 additionalProperties: false,
                 properties: {
                   tools: { type: "array", items: integrationToolSchema },
+                  integrations: {
+                    type: "array",
+                    description:
+                      "The integrations of `tools`, each once: how a client names and draws them.",
+                    items: {
+                      type: "object",
+                      required: ["integration_package_id", "display_name"],
+                      additionalProperties: false,
+                      properties: {
+                        integration_package_id: { type: "string" },
+                        display_name: { type: "string" },
+                        icon: {
+                          type: "string",
+                          description: "Its manifest icon: an Iconify id or an image URL.",
+                        },
+                      },
+                    },
+                  },
                   connections: {
                     type: "array",
                     description: "The connections the tools reach, each once.",

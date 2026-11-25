@@ -124,10 +124,20 @@ interface PiChatUiStreamMapperOptions {
 export class PiChatUiStreamMapper {
   private readonly onFirstModelEvent: (() => void) | undefined;
   private readonly turnSpaces: ReadonlySet<string>;
+  private readOnlyTools: ReadonlySet<string> = new Set();
 
   constructor(options: PiChatUiStreamMapperOptions = {}) {
     this.turnSpaces = options.turnSpaces ?? new Set();
     this.onFirstModelEvent = options.onFirstModelEvent;
+  }
+
+  /**
+   * The tools the platform declares read-only, known once its MCP surface is read (before the
+   * first model call). A call of one is stamped `providerMetadata.appstrate.readOnly` from its
+   * first chunk, so the card that folds reads together places it before any result arrives.
+   */
+  describeReadOnlyTools(tools: ReadonlySet<string>): void {
+    this.readOnlyTools = tools;
   }
 
   /**
@@ -280,7 +290,15 @@ export class PiChatUiStreamMapper {
         const toolName = stripMcpToolPrefix(call?.name ?? "");
         this.lastTool = toolName;
         this.open.set(ev.contentIndex, { kind: "tool", id: toolCallId, toolCallId, toolName });
-        return [{ type: "tool-input-start", toolCallId, toolName }];
+        const readOnly = this.readOnlyTools.has(toolName);
+        return [
+          {
+            type: "tool-input-start",
+            toolCallId,
+            toolName,
+            ...(readOnly && { providerMetadata: { appstrate: { readOnly } } }),
+          },
+        ];
       }
       case "toolcall_delta": {
         const block = this.open.get(ev.contentIndex);
@@ -298,13 +316,15 @@ export class PiChatUiStreamMapper {
         const input = ev.toolCall.arguments ?? {};
         const named = dispatchSpace(input);
         const spaceId = named !== undefined && this.turnSpaces.has(named) ? named : undefined;
+        const readOnly = this.readOnlyTools.has(toolName);
+        const appstrate = { ...(spaceId && { spaceId }), ...(readOnly && { readOnly }) };
         return [
           {
             type: "tool-input-available",
             toolCallId,
             toolName,
             input,
-            ...(spaceId && { providerMetadata: { appstrate: { spaceId } } }),
+            ...(Object.keys(appstrate).length > 0 && { providerMetadata: { appstrate } }),
           },
         ];
       }
