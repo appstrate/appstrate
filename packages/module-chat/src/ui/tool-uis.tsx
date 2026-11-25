@@ -24,11 +24,8 @@ import {
   ArrowUpRightIcon,
   BookOpenIcon,
   BracesIcon,
-  PencilIcon,
   PlayIcon,
-  PlusIcon,
   SearchIcon,
-  Trash2Icon,
   UploadIcon,
   ZapIcon,
   type LucideIcon,
@@ -66,6 +63,9 @@ import {
   type CreatedPackage,
 } from "./package-created.ts";
 import { unwrapMcpResult } from "@appstrate/core/mcp-result";
+import { presentationOf, presentCall } from "./tool-presentation.ts";
+import { SubjectGlyph, SubjectStack } from "./subject-glyph.tsx";
+import type { PresentationSubject } from "@appstrate/core/mcp-presentation";
 import {
   definedEntries,
   deriveToolPhase,
@@ -81,17 +81,6 @@ import {
  * card (button + auto-resume on completion — see oauth-connect-card).
  */
 const INITIATE_CONNECT_OP = "initiateIntegrationConnect";
-
-// Readable label + icon for an Appstrate API operation, by verb prefix — a
-// heuristic, not an exhaustive operationId map (which would rot). The first
-// match wins; unmatched ops fall back to the neutral `tool.op.other`.
-const OP_RULES: { re: RegExp; labelKey: string; Icon: LucideIcon }[] = [
-  { re: /^(run|trigger|execute|start)/i, labelKey: "tool.op.launch", Icon: PlayIcon },
-  { re: /^(create|post|add|import|upload)/i, labelKey: "tool.op.create", Icon: PlusIcon },
-  { re: /^(update|patch|put|set|rename|configure)/i, labelKey: "tool.op.update", Icon: PencilIcon },
-  { re: /^(delete|remove|cancel|archive)/i, labelKey: "tool.op.delete", Icon: Trash2Icon },
-  { re: /^(list|get|search|find|read)/i, labelKey: "tool.op.read", Icon: SearchIcon },
-];
 
 // assistant-stream ToolCallTiming = { startedAt, completedAt? } (epoch ms;
 // completedAt absent while running).
@@ -134,15 +123,25 @@ function Meta({
 }
 
 /**
- * Single leading icon per row: the operation's verb icon, tinted by phase
+ * Single leading icon per row: what the call acted on (`lead`: an integration's
+ * logo, an agent's tile) when the platform named it, else the verb icon, tinted by phase
  * (neutral / destructive). While running it is replaced by a spinner. Status is
  * otherwise carried by the HTTP badge, the red border, and the inline error —
  * no separate status icon, so the row shows one coherent glyph.
  */
-function LeadIcon({ phase, Icon }: { phase: ToolPhase; Icon: LucideIcon }) {
+function LeadIcon({
+  phase,
+  Icon,
+  lead,
+}: {
+  phase: ToolPhase;
+  Icon: LucideIcon;
+  lead?: React.ReactNode;
+}) {
   if (phase === "running") {
     return <Spinner className="text-muted-foreground size-4 shrink-0" />;
   }
+  if (lead) return lead;
   const tone = phase === "error" ? "text-destructive" : "text-muted-foreground";
   return <Icon className={`size-4 shrink-0 ${tone}`} />;
 }
@@ -176,9 +175,11 @@ function DetailSection({ titleKey, value }: { titleKey: string; value: unknown }
 export function ToolCallCard({
   phase,
   Icon,
+  subject,
   label,
   labelKey,
   idText,
+  aside,
   args,
   result,
   isError,
@@ -189,10 +190,14 @@ export function ToolCallCard({
 }: {
   phase: ToolPhase;
   Icon: LucideIcon;
+  /** What the call acted on (`tool-presentation.ts`): its glyph is drawn instead of `Icon`. */
+  subject?: PresentationSubject;
   /** Shown verbatim (a tool name); `labelKey` is translated instead. */
   label?: string;
   labelKey?: string;
   idText?: string;
+  /** Before the meta, e.g. a search's result count and the glyphs of what it found. */
+  aside?: React.ReactNode;
   args: unknown;
   result: unknown;
   isError?: boolean;
@@ -204,6 +209,7 @@ export function ToolCallCard({
   footer?: React.ReactNode;
 }) {
   const { t } = useChatHost();
+  const lead = subject ? <SubjectGlyph subject={subject} /> : undefined;
   const title = labelKey ? t(labelKey) : (label ?? "");
   const [open, setOpen] = React.useState(false);
   // `unwrapMcpResult` JSON-parses the tool payload. Unmemoized it re-parsed on
@@ -232,11 +238,12 @@ export function ToolCallCard({
         className="hover:bg-muted/50 flex h-9 w-full items-center gap-2 rounded-lg px-3 text-left text-sm"
         onClick={() => setOpen(true)}
       >
-        <LeadIcon phase={phase} Icon={Icon} />
+        <LeadIcon phase={phase} Icon={Icon} lead={lead} />
         <span className="flex min-w-0 flex-1 items-center gap-2 truncate">
           <span className="font-medium">{title}</span>
           {idText ? <code className="text-muted-foreground truncate text-xs">{idText}</code> : null}
         </span>
+        {aside}
         <CallSpace spaceId={spaceId} />
         <Meta phase={phase} status={status} durationMs={durationMs} />
       </button>
@@ -248,7 +255,7 @@ export function ToolCallCard({
         <Modal
           title={
             <span className="flex items-center gap-2">
-              <Icon className="size-4 shrink-0" />
+              {lead ?? <Icon className="size-4 shrink-0" />}
               {title}
               {idText ? <code className="text-muted-foreground text-xs">{idText}</code> : null}
             </span>
@@ -364,7 +371,8 @@ export const InvokeOperationToolUI = makeAssistantToolUI<
   unknown
 >({
   toolName: "invoke_operation",
-  render: (props) => {
+  render: function InvokeOperation(props) {
+    const { t } = useChatHost();
     const { args, result } = props;
     const opId = args?.operation_id ?? "";
     const phase = deriveToolPhase(props);
@@ -405,19 +413,18 @@ export const InvokeOperationToolUI = makeAssistantToolUI<
       return <RunLaunchCard {...props} />;
     }
 
-    const rule = OP_RULES.find((r) => r.re.test(opId)) ?? {
-      Icon: ZapIcon,
-      labelKey: "tool.op.other",
-    };
+    const presentation = presentationOf(result);
+    const presented = presentation ? presentCall(presentation, t, t("tool.op.other")) : undefined;
     const spaceId = callSpaceOf(props);
     const created =
       phase === "success" ? packageCreatedByOperation(opId, unwrapMcpResult(result)) : null;
     return (
       <ToolCallCard
         phase={phase}
-        Icon={rule.Icon}
-        labelKey={rule.labelKey}
-        idText={opId}
+        Icon={presented?.Icon ?? ZapIcon}
+        subject={presented?.subject}
+        label={presented?.label ?? t("tool.op.other")}
+        idText={presented?.idText ?? opId}
         args={args}
         result={result}
         isError={props.isError}
@@ -504,20 +511,32 @@ function stringArg(args: Record<string, unknown> | undefined, key: string): stri
 
 export const SearchToolUI = makeAssistantToolUI<Record<string, unknown>, unknown>({
   toolName: "search",
-  render: (props: AnyToolProps) => (
-    <ToolCallCard
-      phase={deriveToolPhase(props)}
-      Icon={SearchIcon}
-      labelKey="tool.search"
-      idText={stringArg(props.args, "query")}
-      args={props.args}
-      result={props.result}
-      isError={props.isError}
-      toolCallId={props.toolCallId}
-      timing={props.timing}
-      spaceId={callSpaceOf(props)}
-    />
-  ),
+  render: function Search(props: AnyToolProps) {
+    const { t } = useChatHost();
+    const presentation = presentationOf(props.result);
+    return (
+      <ToolCallCard
+        phase={deriveToolPhase(props)}
+        Icon={SearchIcon}
+        labelKey="tool.search"
+        idText={stringArg(props.args, "query")}
+        aside={
+          presentation?.count !== undefined ? (
+            <span className="text-muted-foreground flex shrink-0 items-center gap-1.5 text-xs">
+              <SubjectStack subjects={presentation.items ?? []} />
+              {t("tool.search.count", { count: presentation.count })}
+            </span>
+          ) : null
+        }
+        args={props.args}
+        result={props.result}
+        isError={props.isError}
+        toolCallId={props.toolCallId}
+        timing={props.timing}
+        spaceId={callSpaceOf(props)}
+      />
+    );
+  },
 });
 
 export const DescribeToolUI = makeAssistantToolUI<Record<string, unknown>, unknown>({

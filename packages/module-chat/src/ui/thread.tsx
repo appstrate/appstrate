@@ -42,6 +42,8 @@ import { MarkdownText, ReasoningText } from "./markdown-text.tsx";
 import { ReasoningGroup, ThinkingStatus } from "./reasoning.tsx";
 import { TurnSpaceChoice } from "./space-choice.tsx";
 import { ToolFallback } from "./tool-fallback.tsx";
+import { ActivityGroup } from "./reads-group.tsx";
+import { activityGroupOf } from "./activity-group.ts";
 import {
   InvokeOperationToolUI,
   SearchToolUI,
@@ -963,20 +965,50 @@ export function MessageError() {
   );
 }
 
-/** Module-level: assistant-ui memoizes each part on these members' identity. */
-const ASSISTANT_PART_COMPONENTS = {
-  Text: MarkdownText,
-  Reasoning: ReasoningText,
-  ReasoningGroup,
-  tools: { Fallback: ToolFallback },
-  Empty: ThinkingIndicator,
-} satisfies React.ComponentProps<typeof MessagePrimitive.Parts>["components"];
+/**
+ * Module-level: assistant-ui memoizes the group tree on its identity. Reasoning and
+ * reads fold into one activity group (`reads-group.tsx`); reasoning keeps its own
+ * disclosure inside it.
+ */
+const groupAssistantPart = (part: Parameters<typeof activityGroupOf>[0]) => activityGroupOf(part);
+
+function AssistantParts() {
+  return (
+    <MessagePrimitive.GroupedParts groupBy={groupAssistantPart}>
+      {({ part, children }) => {
+        switch (part.type) {
+          case "group-activity":
+            return <ActivityGroup indices={part.indices}>{children}</ActivityGroup>;
+          case "group-reasoning":
+            return (
+              <ReasoningGroup
+                startIndex={part.indices[0] ?? 0}
+                endIndex={part.indices[part.indices.length - 1] ?? 0}
+              >
+                {children}
+              </ReasoningGroup>
+            );
+          case "text":
+            return <MarkdownText />;
+          case "reasoning":
+            return <ReasoningText />;
+          case "tool-call":
+            return part.toolUI ?? <ToolFallback {...part} />;
+          case "indicator":
+            return <ThinkingIndicator />;
+          default:
+            return null;
+        }
+      }}
+    </MessagePrimitive.GroupedParts>
+  );
+}
 
 function AssistantMessage() {
   return (
     <MessagePrimitive.Root className="group flex w-full max-w-(--thread-max-width) flex-col py-2">
       <div className={ASSISTANT_MESSAGE_CLASS}>
-        <MessagePrimitive.Parts components={ASSISTANT_PART_COMPONENTS} />
+        <AssistantParts />
         <TurnSpaceChoice />
         <TurnLimitNotice />
         <MessageError />
