@@ -6,6 +6,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Upgrade and client changes
+
+- Remote MCP integrations are now a closed catalog by default. On a remote integration whose manifest neither declares a tool in `tools_policy` nor sets `allow_undeclared_tools: true`, an agent keeps only the tools a space has approved. A run that selects any other tool continues without it and is marked degraded (`definition_not_approved`). Saving or publishing such an agent is refused until the tool is approved. After the upgrade, for each such integration, open its **Tools** tab, select **Read the server again**, then approve the tools under **Tools to review** in every space that uses them. To keep every listed tool usable without approval, publish a version of the integration that declares them or sets `allow_undeclared_tools: true`. See [Remote Tool Approvals](docs/site/integrations/remote-tool-approvals.mdx).
+- The credential proxy and in-run `api_call` refuse an integration's own MCP endpoint with `403 remote_mcp_endpoint_not_proxied`, redirects included. Reach its tools through the tool calls.
+- A space can block a tool, including `api_call` and `api_upload`. A blocked tool is neither offered nor callable in that space.
+
 ## [1.0.0-beta.71] - 2026-11-24
 
 ### Module authors
