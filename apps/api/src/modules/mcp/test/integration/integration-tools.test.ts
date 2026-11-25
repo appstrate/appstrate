@@ -782,6 +782,21 @@ describe("mcp integration tools", () => {
       expect(await listFiles()).toEqual(original);
     });
 
+    it("names the tool it refuses the arguments of", async () => {
+      await connect(owner, "mine");
+      const { result } = await mcp(caller, "tools/call", {
+        name: "call_integration_tool",
+        arguments: { tool: TOOL, arguments: { requests: "not a list" } },
+      });
+      expect(result?.isError).toBe(true);
+      expect(upstreamCalls).toHaveLength(0);
+      // The card of a refused call shows which integration it was for, not a bare tool name.
+      expect(readToolPresentation(result?._meta)).toMatchObject({
+        title: "API call",
+        subject: { kind: "integration", id: INTEGRATION_ID },
+      });
+    });
+
     it("reports the refresh verdict of a 401 the platform could not recover as `credential`", async () => {
       await connect(owner, "mine");
       mockUpstream(() => json({ message: "Bad credentials" }, 401));

@@ -620,12 +620,15 @@ export function buildCallIntegrationToolTool(ctx: IntegrationToolContext): Appst
     }
     if ("refusal" in found) return refuse(found.refusal);
     const { tool } = found;
+    // Once the tool is known, a refusal of its arguments names it too.
+    const refuseCall = (refusal: Refusal): CallToolResult =>
+      withPresentation(refuse(refusal), toolCallPresentation(read, tool, call.data.arguments));
 
     let toolArguments: unknown = call.data.arguments;
     if (tool.schema) {
       const parsed = tool.schema.safeParse(call.data.arguments);
       if (!parsed.success) {
-        return refuse(argumentsRefusal(parsed.error, call.data.arguments, ["arguments"]));
+        return refuseCall(argumentsRefusal(parsed.error, call.data.arguments, ["arguments"]));
       }
       toolArguments = parsed.data;
     } else {
@@ -644,7 +647,7 @@ export function buildCallIntegrationToolTool(ctx: IntegrationToolContext): Appst
           (key) => !Object.hasOwn(properties, key),
         );
         if (unknown.length > 0) {
-          return refuse(unknownArgumentsRefusal(unknown.map((key) => `arguments.${key}`)));
+          return refuseCall(unknownArgumentsRefusal(unknown.map((key) => `arguments.${key}`)));
         }
       }
       const required = Array.isArray(tool.input_schema.required) ? tool.input_schema.required : [];
@@ -653,7 +656,7 @@ export function buildCallIntegrationToolTool(ctx: IntegrationToolContext): Appst
           typeof name === "string" && call.data.arguments[name] === undefined,
       );
       if (missing.length > 0) {
-        return refuse({
+        return refuseCall({
           code: "missing_argument",
           error: missing.map((name) => `arguments.${name} is required.`).join(" "),
           arguments: missing.map((name) => `arguments.${name}`),
