@@ -1,5 +1,5 @@
 {
-  "id": "1611bfe4-3c8b-4ccd-b9fd-63434b14de45",
+  "id": "5eaa28ac-2a56-4f51-b97a-7849bc99d6be",
   "prevId": "00000000-0000-0000-0000-000000000000",
   "version": "7",
   "dialect": "postgresql",
@@ -20,12 +20,6 @@
           "primaryKey": false,
           "notNull": false
         },
-        "tenant_linked_by": {
-          "name": "tenant_linked_by",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
         "tenant_linked_at": {
           "name": "tenant_linked_at",
           "type": "timestamp with time zone",
@@ -42,12 +36,6 @@
         "enforced_at": {
           "name": "enforced_at",
           "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "enforced_by": {
-          "name": "enforced_by",
-          "type": "text",
           "primaryKey": false,
           "notNull": false
         },

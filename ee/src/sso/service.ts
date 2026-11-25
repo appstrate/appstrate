@@ -12,7 +12,7 @@
 
 import { ApiError, conflict, forbidden, notFound } from "@appstrate/core/api-errors";
 import type { AuditPayload } from "@appstrate/core/module";
-import { hasVerificationRecord, type TxtResolver } from "./dns.ts";
+import { hasVerificationRecord } from "./dns.ts";
 import { newVerificationToken, normalizeDomain, verificationRecordName } from "./domain.ts";
 import {
   deleteDomain,
@@ -21,13 +21,13 @@ import {
   insertDomain,
   listDomains,
   markDomainVerified,
+  microsoftSessionOf,
   saveConnection,
   verifiedOwnerOf,
   type JoinRole,
   type SsoConnection,
   type SsoDomain,
 } from "./store.ts";
-import { microsoftTenantOfSession } from "./auth-plugin.ts";
 import { getPlatform } from "../platform.ts";
 
 /** Binding a tenant reads the owner's own Microsoft sign-in, made for that purpose: a recent one. */
@@ -77,7 +77,7 @@ export async function readSettings(
   const [connection, domains, callerSession] = await Promise.all([
     getConnection(orgId),
     listDomains(orgId),
-    microsoftTenantOfSession(caller.sessionId, caller.userId),
+    microsoftSessionOf(caller.sessionId, caller.userId),
   ]);
   return { connection, domains, callerTenantId: callerSession?.tenantId ?? null };
 }
@@ -100,9 +100,9 @@ function microsoftSessionRequired(detail: string): ApiError {
  * crafted link that sends an owner through a Microsoft sign-in of another
  * tenant cannot rebind the organization on its own.
  */
-export async function linkTenant(actor: Actor, opts: { replace?: boolean } = {}): Promise<void> {
+export async function linkTenant(actor: Actor, opts: { replace?: boolean }): Promise<void> {
   assertOwnerSession(actor);
-  const origin = await microsoftTenantOfSession(actor.sessionId, actor.userId);
+  const origin = await microsoftSessionOf(actor.sessionId, actor.userId);
   if (!origin || Date.now() - origin.createdAt.getTime() > LINK_SIGN_IN_MAX_AGE_MS) {
     throw microsoftSessionRequired(
       "Sign in with Microsoft with your work account, then connect the tenant within 15 minutes.",
@@ -119,15 +119,14 @@ export async function linkTenant(actor: Actor, opts: { replace?: boolean } = {})
       "Another tenant is bound to the organization. Confirm to replace it.",
     );
   }
-  await saveConnection(actor.orgId, {
+  const after = await saveConnection(actor.orgId, {
     tenantId: origin.tenantId,
-    tenantLinkedBy: actor.userId,
     tenantLinkedAt: new Date(),
   });
   await actor.audit({
     action: "org_sso.tenant_linked",
     before: auditView(before),
-    after: auditView(await getConnection(actor.orgId)),
+    after: auditView(after),
   });
 }
 
@@ -138,11 +137,11 @@ export async function unlinkTenant(actor: Actor): Promise<void> {
   if (before.enforcedAt) {
     throw conflict("sso_enforced", "Lift the enforcement before unlinking the tenant.");
   }
-  await saveConnection(actor.orgId, { tenantId: null, tenantLinkedBy: null, tenantLinkedAt: null });
+  const after = await saveConnection(actor.orgId, { tenantId: null, tenantLinkedAt: null });
   await actor.audit({
     action: "org_sso.tenant_unlinked",
     before: auditView(before),
-    after: auditView(await getConnection(actor.orgId)),
+    after: auditView(after),
   });
 }
 
@@ -150,15 +149,15 @@ export async function setJoinRole(actor: Actor, joinRole: JoinRole): Promise<voi
   assertOwnerSession(actor);
   const before = await getConnection(actor.orgId);
   if ((before?.joinRole ?? "member") === joinRole) return;
-  await saveConnection(actor.orgId, { joinRole });
+  const after = await saveConnection(actor.orgId, { joinRole });
   await actor.audit({
     action: "org_sso.join_role_updated",
     before: auditView(before),
-    after: auditView(await getConnection(actor.orgId)),
+    after: auditView(after),
   });
 }
 
-export async function addDomain(actor: Actor, input: string): Promise<SsoDomain> {
+export async function addDomain(actor: Actor, input: string): Promise<void> {
   assertOwnerSession(actor);
   const domain = normalizeDomain(input);
   if (!domain) {
@@ -174,25 +173,21 @@ export async function addDomain(actor: Actor, input: string): Promise<SsoDomain>
   if (owner && owner !== actor.orgId) {
     throw conflict("domain_taken", "Another organization has already verified this domain.");
   }
-  const created = await insertDomain(actor.orgId, domain, newVerificationToken());
-  if (!created) throw conflict("domain_exists", "This domain is already listed.");
+  if (!(await insertDomain(actor.orgId, domain, newVerificationToken()))) {
+    throw conflict("domain_exists", "This domain is already listed.");
+  }
   await actor.audit({ action: "org_sso.domain_added", after: { domain } });
-  return created;
 }
 
 /** Look up the TXT record; mark the domain verified when it carries the token. */
-export async function verifyDomain(
-  actor: Actor,
-  domainId: string,
-  resolveTxt?: TxtResolver,
-): Promise<SsoDomain> {
+export async function verifyDomain(actor: Actor, domainId: string): Promise<void> {
   assertOwnerSession(actor);
   const domain = await getDomain(actor.orgId, domainId);
   if (!domain) throw notFound("Domain not found");
-  if (domain.verifiedAt) return domain;
+  if (domain.verifiedAt) return;
   let found: boolean;
   try {
-    found = await hasVerificationRecord(domain.domain, domain.verificationToken, resolveTxt);
+    found = await hasVerificationRecord(domain.domain, domain.verificationToken);
   } catch (cause) {
     throw new ApiError({
       status: 502,
@@ -221,7 +216,6 @@ export async function verifyDomain(
     action: "org_sso.domain_verified",
     after: { domain: domain.domain, ...(enforced ? { endedAccounts } : {}) },
   });
-  return (await getDomain(actor.orgId, domainId))!;
 }
 
 /**
@@ -264,7 +258,7 @@ export async function removeDomain(actor: Actor, domainId: string): Promise<void
  * two. Calling it again on an enforced organization re-runs the revocation,
  * which is how a run cut short is finished.
  */
-export async function enforce(actor: Actor): Promise<{ endedAccounts: number }> {
+export async function enforce(actor: Actor): Promise<void> {
   assertOwnerSession(actor);
   const before = await getConnection(actor.orgId);
   if (!before?.tenantId) {
@@ -274,23 +268,22 @@ export async function enforce(actor: Actor): Promise<{ endedAccounts: number }> 
   if (verified.length === 0) {
     throw conflict("sso_not_ready", "Verify at least one domain first.");
   }
-  const origin = await microsoftTenantOfSession(actor.sessionId, actor.userId);
+  const origin = await microsoftSessionOf(actor.sessionId, actor.userId);
   if (origin?.tenantId !== before.tenantId) {
     throw microsoftSessionRequired(
       "Sign in with Microsoft from the organization's tenant before enforcing it, so that you cannot lock yourself out.",
     );
   }
-  if (!before.enforcedAt) {
-    await saveConnection(actor.orgId, { enforcedAt: new Date(), enforcedBy: actor.userId });
-  }
+  const after = before.enforcedAt
+    ? before
+    : await saveConnection(actor.orgId, { enforcedAt: new Date() });
   const domains = verified.map((d) => d.domain);
   const endedAccounts = await endDomainAccess(domains, actor);
   await actor.audit({
     action: before.enforcedAt ? "org_sso.enforcement_reapplied" : "org_sso.enforced",
     before: auditView(before),
-    after: { ...auditView(await getConnection(actor.orgId)), domains, endedAccounts },
+    after: { ...auditView(after), domains, endedAccounts },
   });
-  return { endedAccounts };
 }
 
 /** Lift enforcement: passwords and other linked sign-ins work again (none was deleted). */
@@ -298,10 +291,10 @@ export async function liftEnforcement(actor: Actor): Promise<void> {
   assertOwnerSession(actor);
   const before = await getConnection(actor.orgId);
   if (!before?.enforcedAt) return;
-  await saveConnection(actor.orgId, { enforcedAt: null, enforcedBy: null });
+  const after = await saveConnection(actor.orgId, { enforcedAt: null });
   await actor.audit({
     action: "org_sso.enforcement_lifted",
     before: auditView(before),
-    after: auditView(await getConnection(actor.orgId)),
+    after: auditView(after),
   });
 }

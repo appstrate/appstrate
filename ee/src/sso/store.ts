@@ -13,7 +13,6 @@ export type JoinRole = "member" | "guest";
  */
 export interface DomainPolicy {
   orgId: string;
-  domain: string;
   tenantId: string;
   joinRole: JoinRole;
   enforced: boolean;
@@ -36,14 +35,17 @@ export interface SsoDomain {
   createdAt: Date;
 }
 
-/** How long a Microsoft session record is kept: no platform session lives longer. */
+/**
+ * How long a Microsoft session record is kept. A platform session slides, so it
+ * can outlive its record; it then reads as a session no Microsoft sign-in
+ * opened, which only ever refuses (binding a tenant, enforcing), never admits.
+ */
 const SESSION_RECORD_TTL_MS = 8 * 24 * 60 * 60 * 1000;
 
 export async function findDomainPolicy(domain: string): Promise<DomainPolicy | null> {
   const [row] = await getEeDb()
     .select({
       orgId: ssoDomains.orgId,
-      domain: ssoDomains.domain,
       tenantId: ssoConnections.tenantId,
       joinRole: ssoConnections.joinRole,
       enforcedAt: ssoConnections.enforcedAt,
@@ -61,56 +63,62 @@ export async function findDomainPolicy(domain: string): Promise<DomainPolicy | n
   if (!row?.tenantId) return null;
   return {
     orgId: row.orgId,
-    domain: row.domain,
     tenantId: row.tenantId,
     joinRole: row.joinRole as JoinRole,
     enforced: row.enforcedAt !== null,
   };
 }
 
+const CONNECTION_COLUMNS = {
+  orgId: ssoConnections.orgId,
+  tenantId: ssoConnections.tenantId,
+  tenantLinkedAt: ssoConnections.tenantLinkedAt,
+  joinRole: ssoConnections.joinRole,
+  enforcedAt: ssoConnections.enforcedAt,
+};
+
+function toConnection(row: Omit<SsoConnection, "joinRole"> & { joinRole: string }): SsoConnection {
+  return { ...row, joinRole: row.joinRole as JoinRole };
+}
+
 export async function getConnection(orgId: string): Promise<SsoConnection | null> {
   const [row] = await getEeDb()
-    .select({
-      orgId: ssoConnections.orgId,
-      tenantId: ssoConnections.tenantId,
-      tenantLinkedAt: ssoConnections.tenantLinkedAt,
-      joinRole: ssoConnections.joinRole,
-      enforcedAt: ssoConnections.enforcedAt,
-    })
+    .select(CONNECTION_COLUMNS)
     .from(ssoConnections)
     .where(eq(ssoConnections.orgId, orgId))
     .limit(1);
-  return row ? { ...row, joinRole: row.joinRole as JoinRole } : null;
+  return row ? toConnection(row) : null;
 }
 
 /**
  * Write the given fields of `orgId`'s connection, creating the row on first
- * write. An UPDATE first: an `INSERT … ON CONFLICT` would hold the CHECK
- * constraints against the insert's defaults (no tenant) before the conflict.
+ * write, and resolve to the connection as written. An UPDATE first: an
+ * `INSERT … ON CONFLICT` would hold the CHECK constraints against the insert's
+ * defaults (no tenant) before the conflict.
  */
 export async function saveConnection(
   orgId: string,
   fields: Partial<{
     tenantId: string | null;
-    tenantLinkedBy: string | null;
     tenantLinkedAt: Date | null;
     joinRole: JoinRole;
     enforcedAt: Date | null;
-    enforcedBy: string | null;
   }>,
-): Promise<void> {
+): Promise<SsoConnection> {
   const db = getEeDb();
   const values = { ...fields, updatedAt: new Date() };
-  const updated = await db
+  const [updated] = await db
     .update(ssoConnections)
     .set(values)
     .where(eq(ssoConnections.orgId, orgId))
-    .returning({ orgId: ssoConnections.orgId });
-  if (updated.length > 0) return;
-  await db
+    .returning(CONNECTION_COLUMNS);
+  if (updated) return toConnection(updated);
+  const [inserted] = await db
     .insert(ssoConnections)
     .values({ orgId, ...values })
-    .onConflictDoUpdate({ target: ssoConnections.orgId, set: values });
+    .onConflictDoUpdate({ target: ssoConnections.orgId, set: values })
+    .returning(CONNECTION_COLUMNS);
+  return toConnection(inserted!);
 }
 
 export async function listDomains(orgId: string): Promise<SsoDomain[]> {
@@ -195,18 +203,19 @@ export async function recordMicrosoftSession(
     .where(lt(ssoSessions.createdAt, new Date(Date.now() - SESSION_RECORD_TTL_MS)));
 }
 
-/** The Microsoft origin of a session, or `null` when another method opened it. */
+/**
+ * The tenant `sessionId` was opened from by a Microsoft sign-in of `userId`,
+ * or `null` when no session is given or another method (or account) opened it.
+ */
 export async function microsoftSessionOf(
-  sessionId: string,
-): Promise<{ userId: string; tenantId: string; createdAt: Date } | null> {
+  sessionId: string | undefined,
+  userId: string,
+): Promise<{ tenantId: string; createdAt: Date } | null> {
+  if (!sessionId) return null;
   const [row] = await getEeDb()
-    .select({
-      userId: ssoSessions.userId,
-      tenantId: ssoSessions.tenantId,
-      createdAt: ssoSessions.createdAt,
-    })
+    .select({ tenantId: ssoSessions.tenantId, createdAt: ssoSessions.createdAt })
     .from(ssoSessions)
-    .where(eq(ssoSessions.sessionId, sessionId))
+    .where(and(eq(ssoSessions.sessionId, sessionId), eq(ssoSessions.userId, userId)))
     .limit(1);
   return row ?? null;
 }

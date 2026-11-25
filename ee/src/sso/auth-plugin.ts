@@ -29,6 +29,7 @@
 import { BASE_ERROR_CODES, getCurrentAdapter } from "better-auth";
 import { APIError, createAuthMiddleware, getSessionFromCtx } from "better-auth/api";
 import { defineRequestState } from "@better-auth/core/context";
+import type { BeforeSignupContext } from "@appstrate/core/module";
 import { emailDomainOf } from "./domain.ts";
 import {
   cappedRefresh,
@@ -37,12 +38,7 @@ import {
   type SessionOrigin,
   type SsoRefusal,
 } from "./policy.ts";
-import {
-  findDomainPolicy,
-  microsoftSessionOf,
-  recordMicrosoftSession,
-  type DomainPolicy,
-} from "./store.ts";
+import { findDomainPolicy, recordMicrosoftSession, type DomainPolicy } from "./store.ts";
 import { getPlatform, orgRoleOf } from "../platform.ts";
 
 const MICROSOFT = "microsoft";
@@ -63,9 +59,11 @@ interface HookContext {
   params?: Record<string, string | undefined>;
   query?: Record<string, unknown>;
   context: {
-    adapter: unknown;
     baseURL: string;
-    session?: { session: { userId: string; createdAt: Date | string } } | null;
+    session?: {
+      session: { userId: string; createdAt: Date | string };
+      user: { email: string; realm?: string };
+    } | null;
   };
   redirect(url: string): unknown;
 }
@@ -95,34 +93,31 @@ async function currentState(): Promise<SignInState | null> {
   }
 }
 
+/** Captured at plugin init: the fallback outside a Better Auth request (scripts, seeds). */
 let authAdapter: UserReader | null = null;
 
-/** Better Auth's adapter, inside the hook's own transaction when there is one. */
-async function adapterFor(context: HookContext | null): Promise<UserReader | null> {
-  return context
-    ? ((await getCurrentAdapter(context.context.adapter as never)) as unknown as UserReader)
-    : authAdapter;
+/** Better Auth's adapter: the transaction's when a hook runs inside one. */
+async function currentAdapter(): Promise<UserReader | null> {
+  return (await getCurrentAdapter(authAdapter as never)) as unknown as UserReader | null;
 }
 
-async function readUser(
-  userId: string,
-  context: HookContext | null,
-): Promise<{ email: string; realm: string } | null> {
-  const adapter = await adapterFor(context);
+/** Hooks apply to accounts of the `platform` realm only (an absent realm is the column's default). */
+function isPlatformRealm(realm?: string): boolean {
+  return (realm ?? "platform") === "platform";
+}
+
+async function readUser(userId: string): Promise<{ email: string; realm?: string } | null> {
+  const adapter = await currentAdapter();
   if (!adapter) return null;
-  const row = await adapter.findOne<{ email: string; realm?: string }>({
+  return adapter.findOne<{ email: string; realm?: string }>({
     model: "user",
     where: [{ field: "id", value: userId }],
     select: ["email", "realm"],
   });
-  return row ? { email: row.email, realm: row.realm ?? "platform" } : null;
 }
 
-async function ownerOfMicrosoftAccount(
-  accountId: string,
-  context: HookContext | null,
-): Promise<string | null> {
-  const adapter = await adapterFor(context);
+async function ownerOfMicrosoftAccount(accountId: string): Promise<string | null> {
+  const adapter = await currentAdapter();
   const row = await adapter?.findOne<{ userId: string }>({
     model: "account",
     where: [
@@ -152,6 +147,11 @@ const REDIRECTED_PATHS: ReadonlySet<string> = new Set(["/magic-link/verify", "/v
  * Where a refusal redirects: the caller-supplied callback when it stays on the
  * platform's own origin, the platform's root otherwise. The query value is
  * taken as Better Auth parsed it, never decoded a second time.
+ *
+ * The same redirect as core's `refusalRedirect` (`@appstrate/db/auth.ts`, private
+ * to that package), except that the target is confined to the platform's own
+ * origin here, so a refusal never relies on Better Auth's origin check having
+ * vetted the callback of the endpoint it interrupts.
  */
 function sameOriginTarget(raw: unknown, baseURL: string): URL {
   const home = new URL("/", baseURL);
@@ -164,6 +164,11 @@ function sameOriginTarget(raw: unknown, baseURL: string): URL {
   }
 }
 
+function forbidden(code: SsoRefusal): APIError {
+  return new APIError("FORBIDDEN", { code, message: REFUSAL_MESSAGES[code] });
+}
+
+/** A refusal in a hook that knows its endpoint: a redirect on a browser GET, a 403 otherwise. */
 function refusal(context: HookContext | null, code: SsoRefusal): unknown {
   if (context?.path && REDIRECTED_PATHS.has(context.path)) {
     const raw = context.query?.errorCallbackURL ?? context.query?.callbackURL;
@@ -171,34 +176,44 @@ function refusal(context: HookContext | null, code: SsoRefusal): unknown {
     target.searchParams.set("error", code);
     return context.redirect(target.toString());
   }
-  return new APIError("FORBIDDEN", { code, message: REFUSAL_MESSAGES[code] });
+  return forbidden(code);
 }
+
+/**
+ * The payload of a JWT, its signature unchecked (`{}` when it is not one): each
+ * caller says why reading it unverified is safe.
+ */
+function jwtPayload(token: unknown): Record<string, unknown> {
+  if (typeof token !== "string") return {};
+  try {
+    const payload: unknown = JSON.parse(
+      Buffer.from(token.split(".")[1] ?? "", "base64url").toString("utf8"),
+    );
+    return payload && typeof payload === "object" ? (payload as Record<string, unknown>) : {};
+  } catch {
+    return {};
+  }
+}
+
+const stringOrNull = (value: unknown): string | null => (typeof value === "string" ? value : null);
 
 /**
  * The `tid` and `email` claims of an ID token Better Auth just received from
  * Microsoft's token endpoint over TLS (the same token its provider decodes for
  * the profile), so the signature is not re-checked here.
  */
-export function idTokenClaims(idToken: unknown): {
+function idTokenClaims(idToken: unknown): {
   tenantId: string | null;
   email: string | null;
   /** `oid`: the account id Better Auth keys a Microsoft account on. */
   objectId: string | null;
 } {
-  const none = { tenantId: null, email: null, objectId: null };
-  if (typeof idToken !== "string") return none;
-  try {
-    const claims = JSON.parse(
-      Buffer.from(idToken.split(".")[1] ?? "", "base64url").toString("utf8"),
-    ) as { tid?: unknown; email?: unknown; oid?: unknown };
-    return {
-      tenantId: typeof claims.tid === "string" ? claims.tid : null,
-      email: typeof claims.email === "string" ? claims.email : null,
-      objectId: typeof claims.oid === "string" ? claims.oid : null,
-    };
-  } catch {
-    return none;
-  }
+  const claims = jwtPayload(idToken);
+  return {
+    tenantId: stringOrNull(claims.tid),
+    email: stringOrNull(claims.email),
+    objectId: stringOrNull(claims.oid),
+  };
 }
 
 /**
@@ -224,10 +239,10 @@ async function onMicrosoftAccount(
     typeof account.userId === "string"
       ? account.userId
       : objectId
-        ? await ownerOfMicrosoftAccount(objectId, context)
+        ? await ownerOfMicrosoftAccount(objectId)
         : null;
-  const owner = ownerId ? await readUser(ownerId, context) : null;
-  if (owner && owner.realm !== "platform") return;
+  const owner = ownerId ? await readUser(ownerId) : null;
+  if (owner && !isPlatformRealm(owner.realm)) return;
   for (const address of [email, owner?.email]) {
     const policy = await policyForEmail(address);
     if (policy && policy.tenantId !== tenantId) throw refusal(context, "sso_tenant_mismatch");
@@ -261,8 +276,8 @@ async function beforeSessionCreate(
   session: { userId: string; expiresAt: Date },
   context: HookContext | null,
 ): Promise<{ data: { expiresAt: Date; createdAt?: Date } } | void> {
-  const user = await readUser(session.userId, context);
-  if (!user || user.realm !== "platform") return;
+  const user = await readUser(session.userId);
+  if (!user || !isPlatformRealm(user.realm)) return;
   const policy = await policyForEmail(user.email);
   if (!policy) return;
   const decision = decideSession(
@@ -305,15 +320,15 @@ async function afterSessionCreate(
     const tenantId = state?.microsoftTenant;
     if (!state || !tenantId) return;
     await recordMicrosoftSession(session.id, session.userId, tenantId);
-    const user = await readUser(session.userId, context);
-    if (!user || user.realm !== "platform") return;
+    const user = await readUser(session.userId);
+    if (!user || !isPlatformRealm(user.realm)) return;
     const policy = await policyForEmail(user.email);
     if (
       !policy ||
       !microsoftVouchesFor(policy, { tenantId, email: state.microsoftEmail }, user.email)
     )
       return;
-    if (await orgRoleOf(policy.orgId, session.userId)) return;
+    // Idempotent: an existing member keeps their role and `created` is false.
     const { created } = await members.provision(policy.orgId, session.userId, policy.joinRole);
     if (created) {
       logger.info("ee: joined the organization of the address's domain", {
@@ -337,12 +352,8 @@ async function beforeSessionUpdate(
   context: HookContext | null,
 ): Promise<{ data: { expiresAt: Date } } | void> {
   if (!(data.expiresAt instanceof Date)) return;
-  const current = (context?.context as { session?: unknown } | undefined)?.session as
-    | { session: { createdAt: Date | string }; user: { email: string; realm?: string } }
-    | null
-    | undefined;
-  if (!current?.session || !current.user) return;
-  if ((current.user.realm ?? "platform") !== "platform") return;
+  const current = context?.context.session;
+  if (!current?.session || !current.user || !isPlatformRealm(current.user.realm)) return;
   const policy = await policyForEmail(current.user.email);
   if (!policy?.enforced) return;
   return {
@@ -366,17 +377,7 @@ async function beforeUserUpdate(
 ): Promise<void> {
   if (typeof data.email !== "string") return;
   const addresses: unknown[] = [data.email];
-  const token = context?.query?.token;
-  if (context?.path === "/verify-email" && typeof token === "string") {
-    try {
-      const payload = JSON.parse(
-        Buffer.from(token.split(".")[1] ?? "", "base64url").toString("utf8"),
-      ) as { email?: unknown };
-      addresses.push(payload.email);
-    } catch {
-      // Not a JWT: Better Auth refused it before any write.
-    }
-  }
+  if (context?.path === "/verify-email") addresses.push(jwtPayload(context.query?.token).email);
   for (const address of addresses) {
     if (typeof address === "string" && (await policyForEmail(address))?.enforced) {
       throw refusal(context, "sso_required");
@@ -398,8 +399,8 @@ const passwordSignInGate = createAuthMiddleware(async (ctx) => {
   const found = (await ctx.context.internalAdapter.findUserByEmail(email)) as {
     user: { id: string; realm?: string };
   } | null;
-  if (found && (found.user.realm ?? "platform") !== "platform") return;
-  if (ctx.query?.emergency !== "1") throw refusal(null, "sso_required");
+  if (found && !isPlatformRealm(found.user.realm)) return;
+  if (ctx.query?.emergency !== "1") throw forbidden("sso_required");
   // Emergency path: owners of the enforcing organization only. Anyone else
   // gets what a wrong password gets, after the same hashing work, and their
   // password is never checked.
@@ -428,10 +429,9 @@ const passwordSignInGate = createAuthMiddleware(async (ctx) => {
  */
 const changeEmailGate = createAuthMiddleware(async (ctx) => {
   const session = await getSessionFromCtx(ctx);
-  const realm = (session?.user as { realm?: string } | undefined)?.realm ?? "platform";
-  if (!session || realm !== "platform") return;
+  if (!session || !isPlatformRealm((session.user as { realm?: string }).realm)) return;
   for (const email of [session.user.email, readBodyEmail(ctx.body, "newEmail")]) {
-    if ((await policyForEmail(email))?.enforced) throw refusal(null, "sso_required");
+    if ((await policyForEmail(email))?.enforced) throw forbidden("sso_required");
   }
 });
 
@@ -440,26 +440,12 @@ const changeEmailGate = createAuthMiddleware(async (ctx) => {
  * address unless the OAuth callback creates it — there the session decision
  * (Microsoft of the bound tenant, or nothing) still applies.
  */
-export async function refuseEnforcedSignup(
-  email: string,
-  ctx: { path?: string | null; realm?: () => Promise<string> },
-): Promise<void> {
+export async function refuseEnforcedSignup(email: string, ctx: BeforeSignupContext): Promise<void> {
   if (ctx.path === CALLBACK_PATH) return;
   const policy = await policyForEmail(email);
   if (!policy?.enforced) return;
-  const realm = ctx.realm ? await ctx.realm() : "platform";
-  if (realm !== "platform") return;
-  throw refusal(null, "sso_required");
-}
-
-/** Whether `sessionId` was opened by a Microsoft sign-in of `userId`, and from which tenant. */
-export async function microsoftTenantOfSession(
-  sessionId: string | undefined,
-  userId: string,
-): Promise<{ tenantId: string; createdAt: Date } | null> {
-  if (!sessionId) return null;
-  const origin = await microsoftSessionOf(sessionId);
-  return origin && origin.userId === userId ? origin : null;
+  if (!isPlatformRealm(await ctx.realm())) return;
+  throw forbidden("sso_required");
 }
 
 export function enterpriseSignInPlugin() {

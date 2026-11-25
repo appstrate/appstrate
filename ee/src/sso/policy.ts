@@ -61,13 +61,12 @@ export function microsoftVouchesFor(
  * someone decides otherwise.
  */
 export function decideSession(
-  policy: DomainPolicy | null,
+  policy: DomainPolicy,
   origin: SessionOrigin,
   address: string,
   requestedExpiresAt: Date,
   now: Date,
 ): SessionDecision {
-  if (!policy) return { allow: true, expiresAt: requestedExpiresAt };
   // Enforced or not, a Microsoft sign-in for an address of a proven domain is
   // that address's own identity in the tenant the organization bound.
   if (origin.kind === "microsoft" && !microsoftVouchesFor(policy, origin, address)) {

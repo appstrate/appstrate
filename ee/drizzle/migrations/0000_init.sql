@@ -1,11 +1,9 @@
 CREATE TABLE "sso_connections" (
 	"org_id" uuid PRIMARY KEY NOT NULL,
 	"tenant_id" text,
-	"tenant_linked_by" text,
 	"tenant_linked_at" timestamp with time zone,
 	"join_role" text DEFAULT 'member' NOT NULL,
 	"enforced_at" timestamp with time zone,
-	"enforced_by" text,
 	"updated_at" timestamp with time zone DEFAULT now() NOT NULL,
 	CONSTRAINT "sso_connections_join_role_check" CHECK ("sso_connections"."join_role" IN ('member', 'guest')),
 	CONSTRAINT "sso_connections_enforced_needs_tenant" CHECK ("sso_connections"."enforced_at" IS NULL OR "sso_connections"."tenant_id" IS NOT NULL)

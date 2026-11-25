@@ -15,7 +15,6 @@ const ADDRESS = "alice@corp.test";
 const weekLater = new Date(now.getTime() + 7 * 24 * 3600_000);
 const policy = (enforced: boolean): DomainPolicy => ({
   orgId: "org",
-  domain: "corp.test",
   tenantId: TENANT,
   joinRole: "member",
   enforced,
@@ -25,13 +24,6 @@ const capped = new Date(now.getTime() + ENFORCED_SESSION_MAX_AGE_MS);
 const OTHERS: SessionOrigin[] = [{ kind: "other" }];
 
 describe("decideSession", () => {
-  it("leaves an address of no bound domain alone", () => {
-    expect(decideSession(null, { kind: "other" }, ADDRESS, weekLater, now)).toEqual({
-      allow: true,
-      expiresAt: weekLater,
-    });
-  });
-
   it("refuses another tenant whether or not the domain is enforced", () => {
     for (const enforced of [false, true]) {
       for (const tenantId of ["99999999-8888-7777-6666-555555555555", null]) {

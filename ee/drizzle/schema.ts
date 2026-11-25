@@ -17,13 +17,11 @@ export const ssoConnections = pgTable(
     orgId: uuid("org_id").primaryKey(),
     /** The Entra tenant (`tid`) bound to the organization, read off a real Microsoft sign-in. */
     tenantId: text("tenant_id"),
-    tenantLinkedBy: text("tenant_linked_by"),
     tenantLinkedAt: timestamp("tenant_linked_at", { withTimezone: true }),
     /** The org role given to a person who joins by signing in with Microsoft. */
     joinRole: text("join_role").notNull().default("member"),
     /** Set while sign-in is enforced; `null` otherwise. */
     enforcedAt: timestamp("enforced_at", { withTimezone: true }),
-    enforcedBy: text("enforced_by"),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [
