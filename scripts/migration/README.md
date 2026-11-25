@@ -1529,6 +1529,17 @@ If the candidate's `before-schema` check finds notifications outside their run's
 
 The last query lists identifiers of unresolved notifications. Check their recipients against the run and the historical membership or delivery records. A system run can have multiple recipients. Determine the intended tenant and recipient before an individual correction. Keep traffic closed until the preflight returns zero, including independently checked read markers and grants on later installations. Record the affected counts in the deployment log.
 
+## 0058 — The Studio permission on existing custom roles
+
+The release adds the space permission `studio:read`, which opens the Studio's screens. The presets
+hold it; a custom role stored before the release does not, so its holders would lose the Studio at
+the deploy. Run `psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f scripts/migration/0058-grant-studio-read.sql`
+in the window, before the new release takes traffic (on PGlite, execute the SQL with the app
+stopped). It appends `studio:read` to every custom role lacking it and prints the roles it changed;
+the previous release reads the string as an unavailable permission and ignores it, so running it
+before the deploy is harmless too. A second execution updates zero rows. Record the count in the
+deployment log.
+
 ## Historical chat messages — `before-traffic`
 
 `verify-beta68-upgrade.ts before-traffic` lists, under `chat · messages incompatible with history replay`, each stored message that `historicalChatMessageSchema` refuses, as `session_id=… seq=…`. The next turn in such a conversation is refused with a 400, so the check keeps chat closed. It prints identifiers only, never message content.

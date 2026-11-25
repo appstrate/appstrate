@@ -6,6 +6,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Upgrade and client changes
+
+- A space role can withhold the Studio: the new space permission `studio:read` opens its screens (#2393). Every preset holds it. Run [script `0058`](scripts/migration/README.md#0058--the-studio-permission-on-existing-custom-roles) before reopening traffic, or the holders of a custom role stored before this release lose the Studio. A role without it keeps every other grant: its holders use the chat, and the REST API and MCP clients still answer them.
+
 ## [1.0.0-beta.71] - 2026-11-24
 
 ### Module authors

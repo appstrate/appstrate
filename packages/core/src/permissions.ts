@@ -135,6 +135,11 @@ export interface CoreResources {
   // Org-wide integration OAuth clients (+ the org-tier default), inherited by every
   // space; the org half of `integrations:configure`, session-only for the same reason.
   "org-integrations": "configure";
+  // The Studio's screens in the dashboard (agents, runs, schedules, skills, integrations, the
+  // catalogue). No API route reads it: it opens screens, never a capability. A role without it
+  // keeps every other grant, so the chat still does for it what those grants allow; the REST API
+  // and an MCP client stay reachable with them too, so it is not a boundary.
+  studio: "read";
 }
 
 /** Core resource names. */
@@ -325,6 +330,7 @@ export const CORE_RESOURCE_ACTIONS = {
     "share",
   ],
   "org-integrations": ["configure"],
+  studio: ["read"],
 } as const satisfies { readonly [R in CoreResource]: readonly CoreResources[R][] };
 
 /** Read by the module loader at boot to refuse a module re-declaring a core resource name. */
@@ -366,6 +372,7 @@ export const CORE_RESOURCE_LEVELS = {
   "api-keys": "space",
   "credential-proxy": "space",
   integrations: "space",
+  studio: "space",
 } as const satisfies Record<CoreResource, PermissionLevel>;
 
 /** Core permission strings granted by org roles. */

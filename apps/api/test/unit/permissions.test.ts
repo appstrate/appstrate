@@ -244,6 +244,7 @@ describe("the `runner` preset", () => {
     "persistence:read",
     "runs:cancel",
     "runs:read",
+    "studio:read",
   ];
 
   /** The half of a preset's set that core defines, module contributions removed. */
@@ -253,7 +254,7 @@ describe("the `runner` preset", () => {
       .sort();
   }
 
-  it("holds exactly the eight core space-level grants it is defined by", () => {
+  it("holds exactly the nine core space-level grants it is defined by", () => {
     expect(coreGrants("runner")).toEqual(RUNNER_GRANTS);
   });
 
