@@ -30,7 +30,48 @@ function hasOwn(record: Manifest, key: string): boolean {
   return Object.prototype.hasOwnProperty.call(record, key);
 }
 
-const SYNC_IDENTITY = ["display_name", "description", "homepage", "icon"] as const;
+/** The identity a server proposes: filled into a draft only where the author left it empty. */
+export const SERVER_IDENTITY_KEYS = ["display_name", "description", "homepage", "icon"] as const;
+export type ServerIdentityKey = (typeof SERVER_IDENTITY_KEYS)[number];
+
+/**
+ * Fills the identity fields of `current` that are empty and that the server proposes; a field the
+ * author wrote is never replaced. `filled` names what changed, in `SERVER_IDENTITY_KEYS` order.
+ */
+export function mergeServerIdentity(
+  current: Manifest,
+  proposed: Manifest,
+): { manifest: Manifest; filled: ServerIdentityKey[] } {
+  const manifest: Manifest = { ...current };
+  const filled: ServerIdentityKey[] = [];
+  for (const key of SERVER_IDENTITY_KEYS) {
+    if (proposed[key] !== undefined && isEmpty(current[key])) {
+      manifest[key] = proposed[key];
+      filled.push(key);
+    }
+  }
+  return { manifest, filled };
+}
+
+/** Why a draft's server cannot be read yet; the control is shown disabled with this reason. */
+export type ServerReadBlock = "sse" | "no_permission" | "no_connection";
+
+/**
+ * Whether a draft's server can be read: `null` when there is nothing to read (not a remote
+ * source), `"available"`, or the reason it cannot yet. A templated URL is not a reason: the
+ * server renders it with the chosen connection's variables.
+ */
+export function serverReadAvailability(
+  source: { kind: string; transport?: string } | null | undefined,
+  access: { unauthenticated: boolean; mayProxy: boolean; hasConnection: boolean },
+): "available" | ServerReadBlock | null {
+  if (source?.kind !== "remote") return null;
+  if (source.transport === "sse") return "sse";
+  // A draft declaring no auths (AFPS §7.2) is read without the credential proxy nor a connection.
+  if (access.unauthenticated) return "available";
+  if (!access.mayProxy) return "no_permission";
+  return access.hasConnection ? "available" : "no_connection";
+}
 
 /** Whether the server listed more tools than were read: what is not listed may still exist. */
 export function isToolsTruncated(proposal: Pick<ServerSyncProposal, "warnings">): boolean {
@@ -55,7 +96,7 @@ export function mergeServerSync(
   const kept = Object.keys(policy).filter((name) => truncated || listedSet.has(name));
   const names = [...kept, ...listed.filter((name) => !hasOwn(policy, name))];
   const manifest: Manifest = {
-    ...current,
+    ...mergeServerIdentity(current, proposed).manifest,
     tools_policy: Object.fromEntries(
       names.map((name) => [name, hasOwn(policy, name) ? policy[name] : {}]),
     ),
@@ -73,9 +114,6 @@ export function mergeServerSync(
     manifest.default_tools = proposal.manifest.default_tools.filter((name) => exposed.has(name));
   }
 
-  for (const key of SYNC_IDENTITY) {
-    if (proposed[key] !== undefined && isEmpty(current[key])) manifest[key] = proposed[key];
-  }
   return manifest;
 }
 

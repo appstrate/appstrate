@@ -30,6 +30,14 @@ import { getSource, isRemoteSourceUrl } from "../components/integration-editor/u
 import { IntegrationIconField } from "../components/integration-editor/integration-icon-field";
 import { AuthsSection } from "../components/integration-editor/auths-section";
 import { IntegrationToolsSection } from "../components/integration-editor/integration-tools-section";
+import { ServerIdentityFill } from "../components/integration-editor/server-identity-fill";
+import { encodeIconDataUri } from "../lib/icon-image";
+import {
+  mergeServerIdentity,
+  type ServerIdentityKey,
+  type ServerSyncProposal,
+  type serverReadAvailability,
+} from "../lib/integration-server-sync";
 import type { ToolDeclaration } from "../components/integration-editor/integration-tool-policy-section";
 
 import {
@@ -42,6 +50,8 @@ import {
 import type { ResourceEntry, SchemaField } from "../components/agent-editor/types";
 import { declareTools } from "../lib/integration-tool-policy";
 import type { ToolSnapshotInfo } from "../lib/integration-tool-snapshot";
+
+const isEmptyIcon = (icon: unknown) => typeof icon !== "string" || icon === "";
 
 const asNumber = (value: unknown) => (typeof value === "number" ? value : undefined);
 
@@ -307,6 +317,7 @@ function IntegrationEditorInner({
   tab,
   toolCatalog,
   snapshot,
+  serverRead,
   toolPolicy,
 }: {
   initialState: EditorState;
@@ -316,6 +327,8 @@ function IntegrationEditorInner({
   toolCatalog: IntegrationToolCatalogEntry[];
   /** The server's last listing, summarised above the table. */
   snapshot: ToolSnapshotInfo;
+  /** Whether the draft's server can be read for its identity; `null`: not a remote source. */
+  serverRead: ReturnType<typeof serverReadAvailability>;
   /** The space's review and blocks, under the Tools section, given the draft's declaration. */
   toolPolicy?: (declaration: ToolDeclaration) => ReactNode;
 }) {
@@ -346,6 +359,25 @@ function IntegrationEditorInner({
   const isLocal = getSource(state.manifest).kind === "local";
   const fileIndex = usePackageFileIndex(isLocal ? packageId : undefined);
   const serverFiles = fileIndex.data?.data.map((file) => file.path);
+  // Fills the identity the author left empty. A raster the manifest does not accept as is (ICO,
+  // large PNG) is re-encoded; one the browser cannot decode is skipped. The icon lands only if the
+  // draft still has none.
+  const fillIdentity = async (proposal: ServerSyncProposal): Promise<ServerIdentityKey[]> => {
+    const proposed = proposal.manifest as Record<string, unknown>;
+    const { filled } = mergeServerIdentity(state.manifest, proposed);
+    editor.setState((s) => ({
+      ...s,
+      manifest: mergeServerIdentity(s.manifest, proposed).manifest,
+    }));
+    if (!proposal.icon_source || proposed.icon || !isEmptyIcon(state.manifest.icon)) return filled;
+    try {
+      const icon = await encodeIconDataUri(proposal.icon_source);
+      editor.setState((s) => (s.manifest.icon ? s : { ...s, manifest: { ...s.manifest, icon } }));
+      return [...filled, "icon"];
+    } catch {
+      return filled;
+    }
+  };
   // Declaring a listed tool edits the draft; saving and publishing stay the author's.
   const declaration: ToolDeclaration = {
     declared: new Set(Object.keys(asRecord(state.manifest.tools_policy))),
@@ -377,10 +409,19 @@ function IntegrationEditorInner({
           value={editor.metadata}
           onChange={editor.onMetadataChange}
           identityChildren={
-            <IntegrationIconField
-              icon={typeof state.manifest.icon === "string" ? state.manifest.icon : undefined}
-              onChange={(icon) => editor.updateManifest({ icon })}
-            />
+            <>
+              <IntegrationIconField
+                icon={typeof state.manifest.icon === "string" ? state.manifest.icon : undefined}
+                onChange={(icon) => editor.updateManifest({ icon })}
+              />
+              {serverRead && (
+                <ServerIdentityFill
+                  packageId={packageId}
+                  blockedBy={serverRead === "available" ? null : serverRead}
+                  apply={fillIdentity}
+                />
+              )}
+            </>
           }
         />
       )}
@@ -418,12 +459,15 @@ export function IntegrationDefinitionEditor({
   section,
   toolCatalog,
   snapshot,
+  serverRead,
   toolPolicy,
 }: {
   detail: Versioned<OrgPackageItemDetail>;
   section: IntegrationDefinitionSection;
   toolCatalog: IntegrationToolCatalogEntry[];
   snapshot: ToolSnapshotInfo;
+  /** Whether the draft's remote server can be read for its identity; `null`: not remote. */
+  serverRead: ReturnType<typeof serverReadAvailability>;
   /** The space's review and blocks, drawn under the Tools section. */
   toolPolicy?: (declaration: ToolDeclaration) => ReactNode;
 }) {
@@ -435,6 +479,7 @@ export function IntegrationDefinitionEditor({
         tab={section}
         toolCatalog={toolCatalog}
         snapshot={snapshot}
+        serverRead={serverRead}
         toolPolicy={toolPolicy}
       />
     </DraftEditorMount>

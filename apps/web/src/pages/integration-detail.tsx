@@ -73,6 +73,9 @@ import { ConfigurationSpace } from "../components/configuration-space";
 import { RoleLimitNotice } from "../components/role-limit-notice";
 import { usePermissions, useHomeSpaceName } from "../hooks/use-permissions";
 import { toolSnapshotInfo } from "../lib/integration-tool-snapshot";
+import { readIntegrationSource } from "../lib/package-manifest";
+import { serverReadAvailability } from "../lib/integration-server-sync";
+import { isUnauthenticatedIntegration } from "@appstrate/core/integration";
 import {
   INTEGRATION_DEFINITION_SECTIONS,
   isIntegrationSpaceSection,
@@ -174,6 +177,15 @@ export function IntegrationSettings({
     if (clientTarget !== null && !hasClientTable) closeClient();
   }, [clientTarget, hasClientTable, closeClient]);
 
+  // The identity read calls the server of the DRAFT, published or not: the copy this editor writes.
+  const draftSource = definition
+    ? readIntegrationSource((definition.manifest as Record<string, unknown>).source)
+    : null;
+  const serverRead = serverReadAvailability(draftSource, {
+    unauthenticated: isUnauthenticatedIntegration(definition?.manifest ?? {}),
+    mayProxy: can("credential-proxy:call-own"),
+    hasConnection: detail.auths.some((auth) => auth.connections.length > 0),
+  });
   const toolSnapshot = toolSnapshotInfo(packageId, detail, published);
   // Only a remote integration lists tools a space can review. The review is one space's: it
   // follows the sections set in a space (`isIntegrationSpaceSection`) in « Tous les espaces ».
@@ -292,6 +304,7 @@ export function IntegrationSettings({
               section={definitionSection}
               toolCatalog={detail.tool_catalog ?? []}
               snapshot={toolSnapshot}
+              serverRead={serverRead}
               toolPolicy={toolPolicy}
             />
           </Suspense>

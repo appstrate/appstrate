@@ -77,7 +77,7 @@ On the **Tools** tab of the integration editor, **Declare in the integration** (
 - **After declaring**: a declared tool no longer needs approval. If the server later changes its definition, the tool is signalled as modified but never held back, as for any declared tool.
 - **Nothing is removed**: declaring only adds. A declared tool the server stops listing stays in the list as `missing`.
 
-The integration creation wizard keeps its own read of the server (`POST /api/integrations/{packageId}/discover`): it reads the draft, which is not what runs use, so it records no snapshot. It is also what offers to save the server's instructions as `INTEGRATION.md`; the editor does not propose them again.
+The integration creation wizard keeps its own read of the server (`POST /api/integrations/{packageId}/discover`): it reads the draft, which is not what runs use, so it records no snapshot. It is also what offers to save the server's instructions as `INTEGRATION.md`; the editor does not propose them again. In the editor, **Fill in from the server** on the **General** tab makes the same read and fills only the empty identity fields (name, description, homepage, logo) of the draft; save the draft to keep them.
 
 ## Block a tool
 
