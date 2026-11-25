@@ -203,7 +203,6 @@
   "composer.inlineRunModelChip.undo": "Go back to the default model for runs",
   "composer.limit": "Limit to {{name}}",
   "composer.limit.generic": "Limit to a space",
-  "composer.limit.choose": "Limit to…",
   "composer.limit.noActingSpace": "You cannot act in any space.",
   "composer.limit.generating": "Can be changed once the reply is done.",
   "composer.limit.outside": "You can no longer act in this conversation’s origin space.",
