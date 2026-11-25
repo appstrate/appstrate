@@ -9,7 +9,12 @@
 import { describe, it, expect } from "bun:test";
 import type { CallToolResult, Tool } from "@modelcontextprotocol/sdk/types.js";
 import type { AppstrateToolDefinition } from "@appstrate/mcp-transport";
-import { readToolPresentation, TOOL_PRESENTATION_META_KEY } from "@appstrate/core/mcp-presentation";
+import {
+  isLookupTool,
+  readToolPresentation,
+  TOOL_LOOKUP_META_KEY,
+  TOOL_PRESENTATION_META_KEY,
+} from "@appstrate/core/mcp-presentation";
 import { getCatalog } from "../../catalog.ts";
 import { descriptorPresentation, presentTools, withPresentation } from "../../presentation.ts";
 import { registerTestPlatformApp } from "../../../../../test/helpers/platform-app.ts";
@@ -115,7 +120,7 @@ describe("presentTools", () => {
     const { presentation } = await call(
       tool(
         { name: "get_me", annotations: { title: "Get caller context", readOnlyHint: true } },
-        { ...text({}), structuredContent: { user: { id: "usr_1", name: "Ada" } } },
+        text({ status: 200, body: { user: { id: "usr_1", name: "Ada" } } }),
       ),
     );
     expect(presentation?.subject).toEqual({ kind: "user", id: "usr_1", display_name: "Ada" });
@@ -148,5 +153,21 @@ describe("tool icons", () => {
     ]);
     expect(unknown!.descriptor.icons).toBeUndefined();
     expect(declared!.descriptor.icons).toEqual(own);
+  });
+});
+
+describe("lookup stamp", () => {
+  it("marks search and describe lookups, and nothing else", () => {
+    const [search, describeTool, invoke] = presentTools([
+      tool({ name: "search" }, text({})),
+      tool({ name: "describe" }, text({})),
+      tool({ name: "invoke_operation" }, text({})),
+    ]);
+    expect(search!.descriptor._meta?.[TOOL_LOOKUP_META_KEY]).toBe(true);
+    expect(describeTool!.descriptor._meta?.[TOOL_LOOKUP_META_KEY]).toBe(true);
+    expect(invoke!.descriptor._meta?.[TOOL_LOOKUP_META_KEY]).toBeUndefined();
+    expect(isLookupTool(search!.descriptor)).toBe(true);
+    expect(isLookupTool(invoke!.descriptor)).toBe(false);
+    expect(isLookupTool({ annotations: { readOnlyHint: true } })).toBe(true);
   });
 });

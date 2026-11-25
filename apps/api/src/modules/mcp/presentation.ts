@@ -13,11 +13,13 @@ import type { CallToolResult, Tool } from "@modelcontextprotocol/sdk/types.js";
 import type { AppstrateToolDefinition } from "@appstrate/mcp-transport";
 import {
   isReadOnlyMethod,
+  TOOL_LOOKUP_META_KEY,
   TOOL_PRESENTATION_META_KEY,
   type PresentationSubject,
   type ToolPresentation,
 } from "@appstrate/core/mcp-presentation";
 import { asRecord } from "@appstrate/core/safe-json";
+import { unwrapMcpResult } from "@appstrate/core/mcp-result";
 import { getCatalog } from "./catalog.ts";
 import { toolIcons } from "./tool-icons.ts";
 
@@ -82,9 +84,9 @@ function presentOperation(args: Record<string, unknown>): ToolPresentation | und
   };
 }
 
-/** `get_me`: the caller it answered for. */
+/** `get_me`: the caller it answered for (`/api/me/context`, relayed as `{ status, body }`). */
 function presentCaller(descriptor: Tool, result: CallToolResult): ToolPresentation | undefined {
-  const user = asRecord(asRecord(result.structuredContent)?.user);
+  const user = asRecord(asRecord(asRecord(unwrapMcpResult(result))?.body)?.user);
   if (!user || typeof user.id !== "string") return undefined;
   const name = typeof user.name === "string" && user.name ? user.name : undefined;
   return {
@@ -93,11 +95,23 @@ function presentCaller(descriptor: Tool, result: CallToolResult): ToolPresentati
   };
 }
 
-/** `descriptor` with the icons the platform draws it with, unless it declares its own. */
-function withIcons(descriptor: Tool): Tool {
-  if (descriptor.icons) return descriptor;
-  const icons = toolIcons(descriptor.name);
-  return icons ? { ...descriptor, icons } : descriptor;
+/**
+ * Tools that only look things up although MCP's `readOnlyHint` is withheld: with the kind of
+ * integration tools, `search` and `describe` may read a third-party catalog, which journals a
+ * call and can refresh a token, but they change nothing of the caller's.
+ */
+const LOOKUP_TOOLS: ReadonlySet<string> = new Set(["search", "describe"]);
+
+/** `descriptor` as a client draws it: its icons, unless it declares its own, and the lookup stamp. */
+function presentDescriptor(descriptor: Tool): Tool {
+  const icons = descriptor.icons ? undefined : toolIcons(descriptor.name);
+  const lookup = LOOKUP_TOOLS.has(descriptor.name);
+  if (!icons && !lookup) return descriptor;
+  return {
+    ...descriptor,
+    ...(icons ? { icons } : {}),
+    ...(lookup ? { _meta: { ...descriptor._meta, [TOOL_LOOKUP_META_KEY]: true } } : {}),
+  };
 }
 
 type Presenter = (
@@ -111,11 +125,11 @@ const PRESENTERS: Partial<Record<string, Presenter>> = {
   get_me: (descriptor, _args, result) => presentCaller(descriptor, result),
 };
 
-/** Every tool's results stamped with their presentation, and its descriptor with its icons. */
+/** Every tool's results stamped with their presentation, and its descriptor as a client draws it. */
 export function presentTools(tools: AppstrateToolDefinition[]): AppstrateToolDefinition[] {
   return tools.map((tool) => ({
     ...tool,
-    descriptor: withIcons(tool.descriptor),
+    descriptor: presentDescriptor(tool.descriptor),
     handler: async (args, extra) => {
       const result = await tool.handler(args, extra);
       if (result._meta?.[TOOL_PRESENTATION_META_KEY] !== undefined) return result;

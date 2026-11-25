@@ -492,7 +492,7 @@ describe("the space a tool call is stamped with", () => {
   });
 });
 
-describe("a call of a read-only tool", () => {
+describe("a call of a lookup tool", () => {
   const call = (name: string): AgentSessionEvent[] => [
     { type: "message_start", message: {} },
     {
@@ -517,7 +517,7 @@ describe("a call of a read-only tool", () => {
   ];
   const stamps = (name: string) => {
     const mapper = new PiChatUiStreamMapper({ turnSpaces: new Set(["spc_o"]) });
-    mapper.describeReadOnlyTools(new Set(["search"]));
+    mapper.describeLookupTools(new Set(["search"]));
     const chunks = call(name).flatMap((e) => mapper.map(e)) as Array<{
       type: string;
       providerMetadata?: unknown;
@@ -528,10 +528,10 @@ describe("a call of a read-only tool", () => {
     };
   };
 
-  it("is stamped read-only from its first chunk, beside the space it acted in", () => {
+  it("is stamped a lookup from its first chunk, beside the space it acted in", () => {
     expect(stamps("mcp__platform__search")).toEqual({
-      start: { appstrate: { readOnly: true } },
-      available: { appstrate: { spaceId: "spc_o", readOnly: true } },
+      start: { appstrate: { lookup: true } },
+      available: { appstrate: { spaceId: "spc_o", lookup: true } },
     });
   });
 

@@ -9,8 +9,8 @@
  * failed (errors stay inline).
  *
  * What counts as a read is decided before the call runs: the engine stamps the call
- * of a tool its descriptor declares `readOnlyHint` (`providerMetadata.appstrate.readOnly`,
- * `pi-chat/ui-stream-mapper.ts`), so a call never moves into or out of a group when its
+ * of a tool the platform declares a lookup (`isLookupTool`, `@appstrate/core/mcp-presentation`)
+ * with `providerMetadata.appstrate.lookup` (`pi-chat/ui-stream-mapper.ts`), so a call never moves into or out of a group when its
  * result lands. Reasoning between reads folds with them: the run of activity before an
  * answer is one group. A group holding fewer than two reads draws no header and folds
  * nothing, with the same tree, so the second read folds it without remounting the cards.

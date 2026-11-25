@@ -89,7 +89,7 @@ describe("methodIcon", () => {
 });
 
 describe("activityGroupOf", () => {
-  const read = { type: "tool-call", providerMetadata: { appstrate: { readOnly: true } } };
+  const read = { type: "tool-call", providerMetadata: { appstrate: { lookup: true } } };
 
   it("folds reasoning and stamped reads into the activity group", () => {
     expect(activityGroupOf({ type: "reasoning" })).toEqual(["group-activity", "group-reasoning"]);
@@ -99,7 +99,7 @@ describe("activityGroupOf", () => {
   it("never folds a write, an unstamped call or text", () => {
     expect(activityGroupOf({ type: "tool-call" })).toBeNull();
     expect(
-      activityGroupOf({ type: "tool-call", providerMetadata: { appstrate: { readOnly: false } } }),
+      activityGroupOf({ type: "tool-call", providerMetadata: { appstrate: { lookup: false } } }),
     ).toBeNull();
     expect(activityGroupOf({ type: "text" })).toBeNull();
   });

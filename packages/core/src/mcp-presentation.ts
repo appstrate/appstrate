@@ -57,6 +57,25 @@ export function readToolPresentation(meta: unknown): ToolPresentation | undefine
   return parsed.success ? parsed.data : undefined;
 }
 
+/**
+ * On a tool DESCRIPTOR: a call of this tool only looks things up, for the person reading the
+ * conversation, even where MCP's `readOnlyHint` is withheld because the call has side effects
+ * outside the user's data (a catalog read that reaches a third-party server and may refresh a
+ * connection's token). A client folds such calls together; known before the call runs.
+ */
+export const TOOL_LOOKUP_META_KEY = "dev.appstrate/lookup";
+
+/** A tool whose calls only look things up: declared `readOnlyHint`, or stamped a lookup. */
+export function isLookupTool(descriptor: {
+  annotations?: { readOnlyHint?: boolean } | undefined;
+  _meta?: Record<string, unknown> | undefined;
+}): boolean {
+  return (
+    descriptor.annotations?.readOnlyHint === true ||
+    descriptor._meta?.[TOOL_LOOKUP_META_KEY] === true
+  );
+}
+
 /** HTTP methods that only read. */
 export function isReadOnlyMethod(method: string): boolean {
   const upper = method.toUpperCase();

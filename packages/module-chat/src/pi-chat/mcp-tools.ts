@@ -30,7 +30,11 @@ import {
 } from "@appstrate/core/mcp-spaces";
 import { canComposeInline, canRunAgents } from "@appstrate/core/permissions";
 import { assistantVisibleMcpResult } from "@appstrate/core/mcp-result";
-import { readToolPresentation, type ToolPresentation } from "@appstrate/core/mcp-presentation";
+import {
+  isLookupTool,
+  readToolPresentation,
+  type ToolPresentation,
+} from "@appstrate/core/mcp-presentation";
 import { formatTurnBudgetNote } from "@appstrate/core/chat-turn-metadata";
 import { parseSkillUri, SKILL_URI_PREFIX } from "@appstrate/core/skill-address";
 import {
@@ -240,8 +244,8 @@ interface PlatformMcpTools {
   extensionFactories: ExtensionFactory[];
   /** Server usage guidance (MCP `instructions`), to append to the system prompt. */
   instructions?: string;
-  /** The tools declared read-only (MCP `readOnlyHint`), by the name the model calls. */
-  readOnlyTools: ReadonlySet<string>;
+  /** The tools whose calls only look things up (`isLookupTool`), by the name the model calls. */
+  lookupTools: ReadonlySet<string>;
   surfaceCached: boolean;
   /** Idempotent teardown of the MCP client. */
   close(): Promise<void>;
@@ -492,10 +496,10 @@ export async function buildPlatformMcpTools(
   return {
     extensionFactories,
     ...(surface.instructions ? { instructions: surface.instructions } : {}),
-    // The tools the server declares read-only (MCP `readOnlyHint`): their calls fold together.
-    readOnlyTools: new Set(
+    // The tools whose calls only look things up (`isLookupTool`): their calls fold together.
+    lookupTools: new Set(
       surface.tools
-        .filter((tool) => tool.annotations?.readOnlyHint === true)
+        .filter((tool) => isLookupTool(tool))
         .map((tool) => stripMcpToolPrefix(tool.name)),
     ),
     surfaceCached: cached !== undefined,

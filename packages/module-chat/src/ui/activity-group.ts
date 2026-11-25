@@ -2,8 +2,8 @@
 
 /**
  * Which assistant parts fold together (`reads-group.tsx` draws the group): reasoning,
- * and the calls the engine stamped read-only before they ran
- * (`providerMetadata.appstrate.readOnly`, `pi-chat/ui-stream-mapper.ts`), unless they
+ * and the calls the engine stamped a lookup before they ran
+ * (`providerMetadata.appstrate.lookup`, `pi-chat/ui-stream-mapper.ts`), unless they
  * failed — an error stays inline.
  */
 
@@ -18,11 +18,11 @@ interface GroupablePart {
   readonly isError?: boolean | undefined;
 }
 
-/** A tool call stamped read-only that has not failed. */
+/** A tool call stamped a lookup that has not failed. */
 export function isFoldableRead(part: GroupablePart): boolean {
   if (part.type !== "tool-call") return false;
-  const stamp = (part.providerMetadata as { appstrate?: { readOnly?: unknown } } | undefined)
-    ?.appstrate?.readOnly;
+  const stamp = (part.providerMetadata as { appstrate?: { lookup?: unknown } } | undefined)
+    ?.appstrate?.lookup;
   if (stamp !== true) return false;
   return deriveToolPhase(part) !== "error";
 }
