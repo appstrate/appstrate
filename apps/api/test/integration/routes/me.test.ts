@@ -769,6 +769,21 @@ describe("Me API (/api/me)", () => {
       expect(body.org).toMatchObject({ id: ctx.orgId, role: "owner" });
     });
 
+    it("names the organization for an API key, which resolves past org context", async () => {
+      const apiKey = await seedApiKey({
+        createdBy: ctx.user.id,
+        orgId: ctx.orgId,
+        spaceId: ctx.defaultSpaceId,
+        scopes: [],
+      });
+      const res = await app.request("/api/me/context", {
+        headers: { Authorization: `Bearer ${apiKey.rawKey}` },
+      });
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as { org: { name: string; slug: string } };
+      expect(body.org).toMatchObject({ name: ctx.org.name, slug: ctx.org.slug });
+    });
+
     it("returns 401 without authentication", async () => {
       const res = await app.request("/api/me/context");
       expect(res.status).toBe(401);

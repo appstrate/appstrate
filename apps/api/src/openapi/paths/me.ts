@@ -859,18 +859,15 @@ export const mePaths = {
                   },
                   org: {
                     type: "object",
-                    required: ["id", "role"],
+                    required: ["id", "role", "name", "slug"],
                     properties: {
                       id: { type: "string" },
                       role: {
                         type: "string",
                         enum: ["owner", "admin", "member", "guest", "end_user"],
                       },
-                      name: {
-                        type: ["string", "null"],
-                        description: "Human-readable organization name.",
-                      },
-                      slug: { type: ["string", "null"], description: "Organization slug." },
+                      name: { type: "string", description: "Human-readable organization name." },
+                      slug: { type: "string", description: "Organization slug." },
                     },
                   },
                   space: {

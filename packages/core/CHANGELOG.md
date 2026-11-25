@@ -13,6 +13,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   space and names none is refused with the eligible spaces in the refusal alone (`accepted`, and
   by name in `error`): the chat no longer renders a picker from result metadata, its model asks
   the user.
+- **`AuthResolution.orgSlug`** — BREAKING (`@appstrate/core/module`). No strategy supplied it, so a
+  bearer resolved inline reached routes without an organization slug or name; the platform now
+  reads both from the organization `orgId` names, for every inline resolution.
 
 ## [18.0.0] — 2026-11-24
 

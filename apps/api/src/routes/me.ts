@@ -493,12 +493,7 @@ router.get("/context", optionalSpaceContext(), async (c) => {
   // The persona's while previewing: this payload tells the model what the caller
   // may do, and every operation it names is checked against the persona.
   const role = (callerOrgRole(c) as string | undefined) ?? "end_user";
-  const org = {
-    id: orgId,
-    role,
-    name: (c.get("orgName") as string | undefined) ?? null,
-    slug: (c.get("orgSlug") as string | undefined) ?? null,
-  };
+  const org = { id: orgId, role, name: c.get("orgName"), slug: c.get("orgSlug") };
   if (!space) return c.json({ user: identity, org });
   const scope = getSpaceScope(c);
 

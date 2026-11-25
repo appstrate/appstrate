@@ -43,6 +43,7 @@ describe("mcp org-wide connection", () => {
   let foreign: { id: string };
   let callerId: string;
   let orgSlug: string;
+  let orgName: string;
 
   beforeEach(async () => {
     await truncateAll();
@@ -50,6 +51,7 @@ describe("mcp org-wide connection", () => {
     const caller = await memberContext(owner, "member", "operator");
     callerId = caller.user.id;
     orgSlug = owner.org.slug;
+    orgName = owner.org.name;
     defaultSpaceId = owner.defaultSpaceId;
     gestion = await seedSpace({ orgId: owner.orgId, name: "Gestion", visibility: "closed" });
     lecture = await seedSpace({ orgId: owner.orgId, name: "Lecture", visibility: "closed" });
@@ -114,7 +116,8 @@ describe("mcp org-wide connection", () => {
     const body = me.data.body as Record<string, unknown>;
     expect(Object.keys(body).sort()).toEqual(["org", "user"]);
     expect(body.user).toMatchObject({ id: callerId });
-    expect(body.org).toMatchObject({ role: "member" });
+    // An org-pinned bearer resolves inline, past org context: its org still has a name.
+    expect(body.org).toMatchObject({ role: "member", name: orgName, slug: orgSlug });
     const spaces = me.data.spaces as Array<{ id: string }>;
     expect(spaces.map((s) => s.id).sort()).toEqual([defaultSpaceId, gestion.id, lecture.id].sort());
 

@@ -17852,9 +17852,9 @@ export interface operations {
                             /** @enum {string} */
                             role: "owner" | "admin" | "member" | "guest" | "end_user";
                             /** @description Human-readable organization name. */
-                            name?: string | null;
+                            name: string;
                             /** @description Organization slug. */
-                            slug?: string | null;
+                            slug: string;
                         };
                         /** @description The space this request resolved to, absent when it named none (as is every list). Every list in this payload is scoped to it. An empty list means nothing of that kind is available to this caller in this space, this is not the space you meant, or the caller's permissions do not cover that list. */
                         space?: {
