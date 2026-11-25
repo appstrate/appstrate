@@ -2245,7 +2245,7 @@ export interface paths {
         };
         /**
          * The caller's working context for an AI agent
-         * @description Returns the caller's identity, their role in the pinned org, and the integrations they could attach when building an agent in the current space (their own, or shared into it). One payload powering the MCP `get_me` tool and direct API/MCP callers — so an agent can prefer already-connected integrations and respect the caller's role (operations beyond it 403 at invoke time). The space is the one the credential (API key, token) is bound to — an `X-Space-Id` naming another is refused — else the one `X-Space-Id` names; with neither the request is a 400.
+         * @description Returns the caller's identity, their role in the pinned org, and the integrations they could attach when building an agent in the current space (their own, or shared into it). One payload powering the MCP `get_me` tool and direct API/MCP callers — so an agent can prefer already-connected integrations and respect the caller's role (operations beyond it 403 at invoke time). The space is the one the credential (API key, token) is bound to — an `X-Space-Id` naming another is refused — else the one `X-Space-Id` names. With neither, the answer holds `user` and `org` alone: every other field belongs to one space.
          */
         get: operations["getMyContext"];
         put?: never;
@@ -3147,7 +3147,7 @@ export interface paths {
         put?: never;
         /**
          * Run a conversational turn (streaming)
-         * @description Receives the running thread (AI SDK UIMessages) and streams the assistant turn (UIMessage stream over SSE). Inference runs on the org's configured models: API-key models are routed through the llm-proxy (key injected server-side), OAuth-subscription models are called natively at the provider's own base URL with the access token held in memory. Either way usage is metered server-side; tool calls dispatch through the organization MCP endpoint, organization-level calls need no space, and space-acting calls resolve their destination under the caller's role there; every space a call acts in, and the space of a file `read_resource` reads or one attached from the file gallery when it is a space of the turn, is recorded on the conversation before the act (its own uploads, stored in the caller's personal space, record none; a call reads any other file by id in the space it names only), and every space disclosed by a search or a configuration refusal is recorded before its result is shown. The conversation stays openable only while the caller reaches all of them with `chat:read`; a call can name only a space of the acting set (the reachable spaces where the caller holds `chat:write`, `chat:read` and `mcp:read` together). A limited conversation (`restricted`) acts in its origin space alone, and is refused (403) once the caller can no longer act there. The space of a request that names none (a default, never a pin): the only space the turn can act in (a limited conversation); a space the user names; for an inline run, a new package or a direct integration tool call, the caller's personal space first, whatever their role there; for any other act, the conversation's origin space; otherwise a missing destination returns a choice of eligible spaces. Selecting one starts a new user turn with a `data-space-choice` part carrying `{ tool, operationId?, spaceId }`. For that turn, every call of the selected tool (and, for `invoke_operation`, the selected operation ID) uses this destination, including repeated calls with different arguments. Each call still checks its own permissions, and an explicit destination that conflicts with the selection is refused. The selection expires at the end of the turn. When the space so chosen cannot serve the request, the assistant stops and asks: it never activates, connects or switches space on its own. `spaceId` and `restricted` set the origin and the limit, and are read only when this turn creates the conversation — an existing one keeps its own. Ignores `X-Space-Id`; admitted when the acting set is not empty. A credential confined to spaces (pinned to one, or carrying a space allowlist, such as the bearer of a chat turn) is refused (403). A user message may carry one `data-agent-prompt` part, `{ name, title }` on the new message (a `text` there is a 400): a launch of an agent from the composer's menu (`listChatCommands`). The turn resolves `name` with `prompts/get` (the message text as its `request`) over the caller's own connection in the turn's spaces, before persisting the message (a name the server does not serve is a 400, nothing written), stores the launch instructions it returns in the part's `data.text`, and shows the model that text in place of the message's own on this turn and every later one. Message persistence is server-owned: the user turn is persisted before inference and the assistant turn when the stream finalizes (survives client disconnect). Rate limited (20/min per caller). Not invocable over MCP (streaming).
+         * @description Receives the running thread (AI SDK UIMessages) and streams the assistant turn (UIMessage stream over SSE). Inference runs on the org's configured models: API-key models are routed through the llm-proxy (key injected server-side), OAuth-subscription models are called natively at the provider's own base URL with the access token held in memory. Either way usage is metered server-side; tool calls dispatch through the organization MCP endpoint, organization-level calls need no space, and space-acting calls resolve their destination under the caller's role there; every space a call acts in, and the space of a file `read_resource` reads or one attached from the file gallery when it is a space of the turn, is recorded on the conversation before the act (its own uploads, stored in the caller's personal space, record none; a call reads any other file by id in the space it names only), and every space disclosed by a search or a configuration refusal is recorded before its result is shown. The conversation stays openable only while the caller reaches all of them with `chat:read`; a call can name only a space of the acting set (the reachable spaces where the caller holds `chat:write`, `chat:read` and `mcp:read` together). A limited conversation (`restricted`) acts in its origin space alone, and is refused (403) once the caller can no longer act there. The space of a request that names none (a default, never a pin): the only space the turn can act in (a limited conversation); a space the user names; for an inline run, a new package or a direct integration tool call, the caller's personal space first, whatever their role there; for any other act, the conversation's origin space; otherwise the call is refused with the eligible spaces, and the assistant asks the user which one before calling again with it. When the space so chosen cannot serve the request, the assistant stops and asks: it never activates, connects or switches space on its own. `spaceId` and `restricted` set the origin and the limit, and are read only when this turn creates the conversation — an existing one keeps its own. Ignores `X-Space-Id`; admitted when the acting set is not empty. A credential confined to spaces (pinned to one, or carrying a space allowlist, such as the bearer of a chat turn) is refused (403). A user message may carry one `data-agent-prompt` part, `{ name, title }` on the new message (a `text` there is a 400): a launch of an agent from the composer's menu (`listChatCommands`). The turn resolves `name` with `prompts/get` (the message text as its `request`) over the caller's own connection in the turn's spaces, before persisting the message (a name the server does not serve is a 400, nothing written), stores the launch instructions it returns in the part's `data.text`, and shows the model that text in place of the message's own on this turn and every later one. Message persistence is server-owned: the user turn is persisted before inference and the assistant turn when the stream finalizes (survives client disconnect). Rate limited (20/min per caller). Not invocable over MCP (streaming).
          */
         post: operations["streamChat"];
         delete?: never;
@@ -17852,12 +17852,12 @@ export interface operations {
                             /** @enum {string} */
                             role: "owner" | "admin" | "member" | "guest" | "end_user";
                             /** @description Human-readable organization name. */
-                            name?: string | null;
+                            name: string;
                             /** @description Organization slug. */
-                            slug?: string | null;
+                            slug: string;
                         };
-                        /** @description The space this request resolved to. Every list in this payload is scoped to it. An empty list means nothing of that kind is available to this caller in this space, this is not the space you meant, or the caller's permissions do not cover that list. */
-                        space: {
+                        /** @description The space this request resolved to, absent when it named none (as is every list). Every list in this payload is scoped to it. An empty list means nothing of that kind is available to this caller in this space, this is not the space you meant, or the caller's permissions do not cover that list. */
+                        space?: {
                             id: string;
                             /** @description Human-readable space name. */
                             name: string;
@@ -17865,7 +17865,7 @@ export interface operations {
                             personal: boolean;
                         };
                         /** @description The caller's own most recent runs (actor-scoped), newest first — lets an agent reference a recent or failed run without a discovery round-trip. */
-                        recent_runs: {
+                        recent_runs?: {
                             packageId: string;
                             status: string;
                             runNumber?: number | null;
@@ -17875,7 +17875,7 @@ export interface operations {
                             error?: string | null;
                         }[];
                         /** @description Integrations the caller holds a connection usable in this space for, active here or not (`active`). */
-                        connections: {
+                        connections?: {
                             integration_package_id: string;
                             name: string;
                             /** @enum {string} */
@@ -17908,7 +17908,7 @@ export interface operations {
                             default_tools?: string[] | "*";
                         }[];
                         /** @description Agents ACTIVE in the current space (capped), each with the required integrations that keep it from launching here. Only present when the caller holds the `agents:run` permission; empty otherwise. When `agents_truncated` is true, the full list is reachable via the `listAgents` operation. */
-                        agents: {
+                        agents?: {
                             /** @description Invokable identifier, e.g. "@appstrate/triage". */
                             packageId: string;
                             display_name: string;
@@ -17925,11 +17925,11 @@ export interface operations {
                             source: "local" | "system";
                         }[];
                         /** @description True when the agent list was capped (full list via `listAgents`). */
-                        agents_truncated: boolean;
+                        agents_truncated?: boolean;
                         /** @description Total active agents before the cap. */
-                        agents_total: number;
+                        agents_total?: number;
                         /** @description Skills the caller could attach to an agent in the current space (capped). A catalogue read, not a runnable hint: only present when the caller holds the `skills:read` permission; empty otherwise. Skills are not run directly — declare them under an agent manifest's `dependencies.skills`. When `skills_truncated` is true, the full list is reachable via the `listSkills` operation. */
-                        skills: {
+                        skills?: {
                             /** @description Attachable identifier, e.g. "@appstrate/web-research". Declare under dependencies.skills. */
                             packageId: string;
                             display_name: string;
@@ -17944,9 +17944,9 @@ export interface operations {
                             source: "local" | "system";
                         }[];
                         /** @description True when the skill list was capped (full list via `listSkills`). */
-                        skills_truncated: boolean;
+                        skills_truncated?: boolean;
                         /** @description Total active skills before the cap. */
-                        skills_total: number;
+                        skills_total?: number;
                     };
                 };
             };
@@ -21198,7 +21198,7 @@ export interface operations {
                     "text/event-stream": string;
                 };
             };
-            /** @description No enabled model configured, or invalid body — including a message that is not a valid AI SDK UIMessage, a last message whose JSON exceeds 256 KB, a malformed or repeated `data-agent-prompt` or `data-space-choice` part, an agent name the server does not serve, or launch instructions over 64 KB. */
+            /** @description No enabled model configured, or invalid body — including a message that is not a valid AI SDK UIMessage, a last message whose JSON exceeds 256 KB, a malformed or repeated `data-agent-prompt` part, an agent name the server does not serve, or launch instructions over 64 KB. */
             400: components["responses"]["ValidationError"];
             /** @description Usage refused by the `beforeUsage` admission hook; only emitted when a module provides it. RFC 9457 problem+json; `code` is `quota_exceeded` when the org is out of credits, or `subscription_blocked` when its subscription is suspended or cancelled. */
             402: {

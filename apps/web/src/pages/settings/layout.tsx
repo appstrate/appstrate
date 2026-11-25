@@ -3,18 +3,18 @@
 import { requestScopeChange } from "../../hooks/use-unsaved-changes";
 
 /**
- * One settings shell for three scopes: organization, workspace and the
- * caller's own account (`/preferences`).
+ * One shell for two dialogs: Settings (organization and workspace scopes) and
+ * Preferences (the caller's own account, `/preferences`).
  *
- * Each scope is its own menu section in the rail; organization and workspace
- * carry their context selector. The keyed content outlet prevents data from
- * the previous scope flashing after a context switch.
+ * Each scope is its own menu section in its dialog's rail; organization and
+ * workspace carry their context selector. Settings' rail ends on a link to
+ * Preferences. The keyed content outlet prevents data from the previous scope
+ * flashing after a context switch.
  */
 import { useState, type ReactNode } from "react";
 import { useStore } from "zustand";
-import { Navigate, Outlet, useLocation } from "react-router-dom";
+import { Link, Navigate, Outlet, useLocation } from "react-router-dom";
 import { useTranslation } from "react-i18next";
-import { Settings } from "lucide-react";
 import { spaceLabel } from "../../lib/space-label";
 import { orgTile, spaceTile } from "../../lib/identity-tile-props";
 import { AppVersion } from "../../components/app-version";
@@ -34,20 +34,21 @@ import { isSpaceEnterable } from "../../lib/space-lists";
 import { useOrg } from "../../hooks/use-org";
 import { useViewer } from "../../hooks/use-viewer";
 import { useLandAfterOrgSwitch } from "../../lib/modal-route";
-import { SETTINGS_INDEX, type SettingsScope } from "../../lib/route-access";
+import { overlayIntent } from "../../lib/overlay-chunks";
+import { SETTINGS_INDEX, settingsScopeFromPath, type SettingsScope } from "../../lib/route-access";
+import { inSurface, SETTINGS_SURFACES, surfaceOfScope } from "../../lib/settings-surface";
 import { useOverlayBreadcrumb } from "../../hooks/use-overlay-breadcrumb";
 import { breadcrumbStore } from "../../stores/breadcrumb-store";
 import {
   activeSettingsItem,
   firstSettingsPath,
   settingsContentKey,
-  settingsScopeFromPath,
   type UnifiedSettingsNavItem,
   type UnifiedSettingsSection,
 } from "./navigation";
 import { useSettingsSections } from "./use-settings-sections";
 
-/** The rail's groups, as they stand before the caller's permissions say which entries exist. */
+/** The rails' groups, as they stand before the caller's permissions say which entries exist. */
 const RAIL_PLACEHOLDER: { scope: SettingsScope; labelKey: string; rows: number }[] = [
   { scope: "organization", labelKey: "source.org", rows: 6 },
   { scope: "workspace", labelKey: "workspaceSettings.sectionGeneral", rows: 5 },
@@ -100,23 +101,26 @@ export function UnifiedSettingsLayout() {
   // A page under the item (a webhook) names itself through its own crumb, which the heading shows.
   const subPageTitle = useStore(breadcrumbStore, (s) => s.overlayPage.entries[0]?.label);
 
-  const sections = useSettingsSections();
+  const activeScope = settingsScopeFromPath(location.pathname);
+  const surface = surfaceOfScope(activeScope);
+  const sections = inSurface(useSettingsSections(), surface);
   const { ready } = usePermissions();
 
   const activeItem = activeSettingsItem(sections, location.pathname);
-  const activeScope = settingsScopeFromPath(location.pathname);
   const activeSection = sections.find((section) => section.scope === activeScope);
   const contentKey = settingsContentKey(location.pathname, currentOrg?.id ?? null, spaceId);
   const label = (key: string) => t(key, { ns: "settings" });
-  const settingsBreadcrumbLabel = label("common:nav.settings");
+  const { titleKey, icon: surfaceIcon } = SETTINGS_SURFACES[surface];
+  const title = label(titleKey);
   const activeSectionLabel = activeSection ? label(activeSection.labelKey) : null;
   const activeSectionHref = activeSection?.items[0]?.to ?? activeItem?.to;
 
   useOverlayBreadcrumb(
     activeSectionLabel && activeItem && activeSectionHref
       ? [
-          { label: settingsBreadcrumbLabel, href: SETTINGS_INDEX[activeScope] },
-          { label: activeSectionLabel, href: activeSectionHref },
+          { label: title, href: SETTINGS_INDEX[activeScope] },
+          // A dialog of one section (Preferences) has no section to tell apart.
+          ...(sections.length > 1 ? [{ label: activeSectionLabel, href: activeSectionHref }] : []),
           // A link once a page under the item (a webhook) extends the trail.
           {
             label: label(activeItem.labelKey),
@@ -166,7 +170,7 @@ export function UnifiedSettingsLayout() {
   };
   const rail = (
     <div className="flex h-full flex-col">
-      <RailHeader icon={Settings} title={label("common:nav.settings")} />
+      <RailHeader icon={surfaceIcon} title={title} />
       <div className="flex-1">
         {ready
           ? sections.map((section, index) => (
@@ -181,7 +185,7 @@ export function UnifiedSettingsLayout() {
             ))
           : // Entries are gated per space, so none exists until the permissions
             // land: hold each group's place rather than insert rows later.
-            RAIL_PLACEHOLDER.map((group, index) => (
+            inSurface(RAIL_PLACEHOLDER, surface).map((group, index) => (
               <RailGroup key={group.scope} title={label(group.labelKey)} separated={index > 0}>
                 {selectors[group.scope]}
                 <div className="mt-1.5 flex flex-col gap-0.5" aria-hidden>
@@ -195,7 +199,16 @@ export function UnifiedSettingsLayout() {
               </RailGroup>
             ))}
       </div>
-      <div className="px-4 py-3">
+      <div className="flex flex-col items-start gap-2 px-4 py-3">
+        {surface === "settings" && (
+          <Link
+            to={SETTINGS_INDEX.account}
+            {...overlayIntent(SETTINGS_INDEX.account)}
+            className="text-muted-foreground hover:text-foreground text-sm underline-offset-4 hover:underline"
+          >
+            {label("unifiedSettings.openPreferences")}
+          </Link>
+        )}
         <AppVersion />
       </div>
     </div>
@@ -203,7 +216,7 @@ export function UnifiedSettingsLayout() {
 
   return (
     <PanelLayout
-      title={settingsBreadcrumbLabel}
+      title={title}
       rail={rail}
       // The same band as the catalogue: invisible at rest, the section's name
       // once the page has scrolled past its own heading — and an opaque surface

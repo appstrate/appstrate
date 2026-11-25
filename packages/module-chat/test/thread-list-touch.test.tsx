@@ -80,7 +80,7 @@ describe("a conversation row's « … »", () => {
     const html = render(["chat:read", "chat:write"]);
     // One « … » per row, on every format.
     expect(html.match(/aria-label="threads\.actions\.openFor"/g)).toHaveLength(
-      html.match(/data-testid="chat-session-spaces"/g)!.length,
+      html.match(/data-testid="chat-session-space-tiles"/g)!.length,
     );
     expect(trigger()).toContain("w-11");
     expect(trigger()).toContain("h-12");
@@ -122,27 +122,28 @@ describe("the conversation search on a phone", () => {
   });
 });
 
-describe("a conversation's spaces on a phone", () => {
+describe("a conversation's spaces, on every format", () => {
   const html = render(["chat:read", "chat:write"]);
 
-  it("closes the title's line with their tiles, and keeps the names line for md and up", () => {
+  it("closes a writer's title line with their tiles, with no names line", () => {
     const tiles = html.match(/<span[^>]*data-testid="chat-session-space-tiles"[^>]*>[^<]*/)?.[0];
-    expect(tiles).toContain("max-md:flex");
     expect(tiles).toContain("tiles:spc_a");
-    const names = html.match(/<span[^>]*data-testid="chat-session-spaces"[^>]*>/)?.[0];
-    expect(names).toContain("max-md:hidden");
+    expect(tiles).not.toMatch(/max-md:|md:hidden/);
+    expect(html).not.toContain('data-testid="chat-session-spaces"');
   });
 
-  it("puts the title and the tiles on one line below md", () => {
-    expect(html).toMatch(/flex min-w-0 flex-1 flex-col[^"]*max-md:flex-row/);
+  it("puts a writer's title and tiles on one line, as tall as Studio's rows under a mouse", () => {
+    expect(html).toMatch(/flex min-w-0 flex-1 flex-row items-center gap-2/);
+    expect(html).toContain("desktop-pointer:h-8");
   });
 
   it("names them on a line of their own for a reader, whose row has no « … » to name them in", () => {
     const reader = render(["chat:read"]);
     const names = reader.match(/<span[^>]*data-testid="chat-session-spaces"[^>]*>/)?.[0];
     expect(names).toBeDefined();
-    expect(names).not.toContain("max-md:hidden");
+    expect(names).not.toContain("hidden");
     expect(reader).not.toContain("chat-session-space-tiles");
-    expect(reader).not.toMatch(/flex min-w-0 flex-1 flex-col[^"]*max-md:flex-row/);
+    expect(reader).toMatch(/flex min-w-0 flex-1 flex-col gap-0\.5/);
+    expect(reader).not.toContain("desktop-pointer:h-8");
   });
 });
