@@ -13,7 +13,7 @@ A [remote MCP integration](/integrations/how-integrations-work#sources-how-the-a
 
 For each connection, the platform stores what the server last listed: the **tool snapshot**. It is refreshed when:
 
-- tools are listed outside a run (the agent editor, a direct tool listing through the credential proxy) or the server is synchronized;
+- tools are listed outside a run (the agent editor, a direct tool listing through the credential proxy) or the integration creation wizard reads the server;
 - a platform run boots: the sidecar reports what the server listed to the run;
 - someone selects **Read the server again** on the integration's **Tools** tab. This needs the right to call the integration with that connection.
 
@@ -62,6 +62,20 @@ Open the integration, then its **Tools** tab. Under **Tools to review** are the 
 Space admins holding `integrations:configure` receive a **Tools to review** notification when a listing brings a new or changed undeclared tool they could approve.
 
 Approvals are per space. Approving a tool in one space does not make it usable in another.
+
+## Declare a tool in the integration
+
+Approving is the space's decision. Declaring is the author's: it adds the tool to the integration's `tools_policy`, so the integration itself vouches for it.
+
+On the **Tools** tab of the integration editor, **Declare in the integration** (on a tool under **Tools to review** or **Undeclared tools**) adds one listed tool to the draft, and **Declare all listed tools** adds every tool the last read lists and the package does not declare yet. Both work from the recorded snapshot: read the server again first if none exists.
+
+- **Who**: anyone with write access to the integration in its home space. This is not the `integrations:configure` right that approving needs.
+- **Effect**: the tool is added to the draft only. Save the draft, then publish a version. From that version on the tool is declared everywhere the integration is active, with no per-space approval.
+- **Approving instead**: approving makes the tool usable in this space only, and leaves the manifest untouched. Declaring, once published, covers the whole organization.
+- **After declaring**: a declared tool no longer needs approval. If the server later changes its definition, the tool is signalled as modified but never held back, as for any declared tool.
+- **Nothing is removed**: declaring only adds. A declared tool the server stops listing stays in the list as `missing`.
+
+The integration creation wizard keeps its own read of the server (`POST /api/integrations/{packageId}/discover`): at creation there is no published version and no snapshot yet. It is also what offers to save the server's instructions as `INTEGRATION.md`; the editor does not propose them again.
 
 ## Block a tool
 
