@@ -26,10 +26,9 @@ type SsoEnv = {
   Variables: {
     orgId: string;
     orgRole: string;
-    user: { id: string; email: string; name: string };
+    user: { id: string };
     authMethod: string;
     sessionId?: string;
-    permissions: ReadonlySet<string>;
   };
 };
 
@@ -90,48 +89,50 @@ export function createSsoRouter() {
   const router = new Hono<SsoEnv>();
   const read = requireModulePermission("org-sso", "read");
   const write = requireModulePermission("org-sso", "write");
+  // Every write is rate-limited per caller, keyed on the route pattern.
+  const { rateLimit } = getPlatform().services.http;
 
   router.get("/api/org-sso", read, (c) => respondWithSettings(c));
 
-  router.patch("/api/org-sso", write, async (c) => {
+  router.patch("/api/org-sso", rateLimit(10), write, async (c) => {
     const body = await readJsonBody(c, settingsPatchSchema);
     await setJoinRole(actorOf(c), body.join_role);
     return respondWithSettings(c);
   });
 
-  router.post("/api/org-sso/tenant", write, async (c) => {
+  router.post("/api/org-sso/tenant", rateLimit(10), write, async (c) => {
     const body = await readJsonBody(c, linkTenantBodySchema, { allowEmpty: true });
     await linkTenant(actorOf(c), { replace: body.replace === true });
     return respondWithSettings(c);
   });
 
-  router.delete("/api/org-sso/tenant", write, async (c) => {
+  router.delete("/api/org-sso/tenant", rateLimit(10), write, async (c) => {
     await unlinkTenant(actorOf(c));
     return respondWithSettings(c);
   });
 
-  router.post("/api/org-sso/domains", write, async (c) => {
+  router.post("/api/org-sso/domains", rateLimit(10), write, async (c) => {
     const body = await readJsonBody(c, domainBodySchema);
     await addDomain(actorOf(c), body.domain);
     return respondWithSettings(c, 201);
   });
 
-  router.post("/api/org-sso/domains/:domainId/verify", write, async (c) => {
+  router.post("/api/org-sso/domains/:domainId/verify", rateLimit(10), write, async (c) => {
     await verifyDomain(actorOf(c), c.req.param("domainId"));
     return respondWithSettings(c);
   });
 
-  router.delete("/api/org-sso/domains/:domainId", write, async (c) => {
+  router.delete("/api/org-sso/domains/:domainId", rateLimit(10), write, async (c) => {
     await removeDomain(actorOf(c), c.req.param("domainId"));
     return respondWithSettings(c);
   });
 
-  router.post("/api/org-sso/enforcement", write, async (c) => {
+  router.post("/api/org-sso/enforcement", rateLimit(10), write, async (c) => {
     await enforce(actorOf(c));
     return respondWithSettings(c);
   });
 
-  router.delete("/api/org-sso/enforcement", write, async (c) => {
+  router.delete("/api/org-sso/enforcement", rateLimit(10), write, async (c) => {
     await liftEnforcement(actorOf(c));
     return respondWithSettings(c);
   });

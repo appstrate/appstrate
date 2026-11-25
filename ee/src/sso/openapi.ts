@@ -26,6 +26,7 @@ function settings(description: string) {
 
 const writeErrors = {
   "403": problem("Not an owner, or not a dashboard session (`dashboard_session_required`)"),
+  "429": { $ref: "#/components/responses/RateLimited" },
 };
 
 export function openApiTags() {

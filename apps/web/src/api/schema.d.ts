@@ -20387,6 +20387,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetail"];
                 };
             };
+            429: components["responses"]["RateLimited"];
         };
     };
     addOrgSsoDomain: {
@@ -20443,6 +20444,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetail"];
                 };
             };
+            429: components["responses"]["RateLimited"];
         };
     };
     removeOrgSsoDomain: {
@@ -20495,6 +20497,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetail"];
                 };
             };
+            429: components["responses"]["RateLimited"];
         };
     };
     verifyOrgSsoDomain: {
@@ -20556,6 +20559,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetail"];
                 };
             };
+            429: components["responses"]["RateLimited"];
             /** @description `dns_lookup_failed` */
             502: {
                 headers: {
@@ -20606,6 +20610,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetail"];
                 };
             };
+            429: components["responses"]["RateLimited"];
         };
     };
     liftOrgSsoEnforcement: {
@@ -20638,6 +20643,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetail"];
                 };
             };
+            429: components["responses"]["RateLimited"];
         };
     };
     linkOrgSsoTenant: {
@@ -20686,6 +20692,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetail"];
                 };
             };
+            429: components["responses"]["RateLimited"];
         };
     };
     unlinkOrgSsoTenant: {
@@ -20727,6 +20734,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetail"];
                 };
             };
+            429: components["responses"]["RateLimited"];
         };
     };
     listOrganizations: {
