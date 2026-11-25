@@ -74,6 +74,8 @@ export const integrationToolSnapshots = pgTable(
     index("idx_integration_tool_snapshots_connection")
       .on(table.connectionId)
       .where(sql`${table.connectionId} IS NOT NULL`),
+    // FK cascade on package delete (the target index above leads with org_id).
+    index("idx_integration_tool_snapshots_package").on(table.packageId),
   ],
 );
 
@@ -108,6 +110,12 @@ export const spaceIntegrationToolApprovals = pgTable(
       table.toolName,
       table.fingerprint,
     ),
+    // FK cascade on package delete (the unique index above leads with space_id).
+    index("idx_space_integration_tool_approvals_package").on(table.packageId),
+    // FK SET NULL on user delete.
+    index("idx_space_integration_tool_approvals_approved_by")
+      .on(table.approvedBy)
+      .where(sql`${table.approvedBy} IS NOT NULL`),
   ],
 );
 
@@ -136,5 +144,11 @@ export const spaceIntegrationToolBlocks = pgTable(
       table.packageId,
       table.toolName,
     ),
+    // FK cascade on package delete (the unique index above leads with space_id).
+    index("idx_space_integration_tool_blocks_package").on(table.packageId),
+    // FK SET NULL on user delete.
+    index("idx_space_integration_tool_blocks_blocked_by")
+      .on(table.blockedBy)
+      .where(sql`${table.blockedBy} IS NOT NULL`),
   ],
 );

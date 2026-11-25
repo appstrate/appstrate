@@ -6795,6 +6795,21 @@
           "concurrently": false,
           "method": "btree",
           "with": {}
+        },
+        "idx_integration_tool_snapshots_package": {
+          "name": "idx_integration_tool_snapshots_package",
+          "columns": [
+            {
+              "expression": "package_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
         }
       },
       "foreignKeys": {
@@ -6926,6 +6941,37 @@
           "concurrently": false,
           "method": "btree",
           "with": {}
+        },
+        "idx_space_integration_tool_approvals_package": {
+          "name": "idx_space_integration_tool_approvals_package",
+          "columns": [
+            {
+              "expression": "package_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "idx_space_integration_tool_approvals_approved_by": {
+          "name": "idx_space_integration_tool_approvals_approved_by",
+          "columns": [
+            {
+              "expression": "approved_by",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "where": "\"space_integration_tool_approvals\".\"approved_by\" IS NOT NULL",
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
         }
       },
       "foreignKeys": {
@@ -7036,6 +7082,37 @@
             }
           ],
           "isUnique": true,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "idx_space_integration_tool_blocks_package": {
+          "name": "idx_space_integration_tool_blocks_package",
+          "columns": [
+            {
+              "expression": "package_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "idx_space_integration_tool_blocks_blocked_by": {
+          "name": "idx_space_integration_tool_blocks_blocked_by",
+          "columns": [
+            {
+              "expression": "blocked_by",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "where": "\"space_integration_tool_blocks\".\"blocked_by\" IS NOT NULL",
           "concurrently": false,
           "method": "btree",
           "with": {}

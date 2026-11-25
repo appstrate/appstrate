@@ -191,6 +191,9 @@ export const notifications = pgTable(
     // fan-out path is already exactly-once, finalizeRun CAS winner). For
     // `agent_message` it is the rule itself: an agent's `notify` reaches each
     // recipient once per run, and a second call inserts nothing.
+    uniqueIndex("uq_notifications_run_recipient_type")
+      .on(table.runId, table.recipientType, table.recipientId, table.type)
+      .where(sql`${table.runId} IS NOT NULL`),
     // One unread tools-review notice per (space, recipient, integration): a catalog that keeps
     // changing does not stack rows.
     uniqueIndex("uq_notifications_tools_review_unread")
@@ -201,9 +204,6 @@ export const notifications = pgTable(
         sql`(${table.payload}->>'packageId')`,
       )
       .where(sql`${table.type} = 'integration_tools_review' AND ${table.readAt} IS NULL`),
-    uniqueIndex("uq_notifications_run_recipient_type")
-      .on(table.runId, table.recipientType, table.recipientId, table.type)
-      .where(sql`${table.runId} IS NOT NULL`),
     // DB-level guard mirroring the `$type` union above and the
     // `pkp_actor_type_valid` CHECK on `package_persistence`. A raw insert with
     // an unknown recipient kind is rejected (the TS union only guards the ORM

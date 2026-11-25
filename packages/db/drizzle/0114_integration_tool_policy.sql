@@ -44,7 +44,12 @@ ALTER TABLE "space_integration_tool_blocks" ADD CONSTRAINT "space_integration_to
 ALTER TABLE "space_integration_tool_blocks" ADD CONSTRAINT "space_integration_tool_blocks_space_org_fk" FOREIGN KEY ("space_id","org_id") REFERENCES "public"."spaces"("id","org_id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 CREATE UNIQUE INDEX "uq_integration_tool_snapshots_target" ON "integration_tool_snapshots" USING btree ("org_id","package_id",coalesce("connection_id"::text, ''));--> statement-breakpoint
 CREATE INDEX "idx_integration_tool_snapshots_connection" ON "integration_tool_snapshots" USING btree ("connection_id") WHERE "integration_tool_snapshots"."connection_id" IS NOT NULL;--> statement-breakpoint
+CREATE INDEX "idx_integration_tool_snapshots_package" ON "integration_tool_snapshots" USING btree ("package_id");--> statement-breakpoint
 CREATE UNIQUE INDEX "uq_space_integration_tool_approvals" ON "space_integration_tool_approvals" USING btree ("space_id","package_id","tool_name","fingerprint");--> statement-breakpoint
+CREATE INDEX "idx_space_integration_tool_approvals_package" ON "space_integration_tool_approvals" USING btree ("package_id");--> statement-breakpoint
+CREATE INDEX "idx_space_integration_tool_approvals_approved_by" ON "space_integration_tool_approvals" USING btree ("approved_by") WHERE "space_integration_tool_approvals"."approved_by" IS NOT NULL;--> statement-breakpoint
 CREATE UNIQUE INDEX "uq_space_integration_tool_blocks" ON "space_integration_tool_blocks" USING btree ("space_id","package_id","tool_name");--> statement-breakpoint
+CREATE INDEX "idx_space_integration_tool_blocks_package" ON "space_integration_tool_blocks" USING btree ("package_id");--> statement-breakpoint
+CREATE INDEX "idx_space_integration_tool_blocks_blocked_by" ON "space_integration_tool_blocks" USING btree ("blocked_by") WHERE "space_integration_tool_blocks"."blocked_by" IS NOT NULL;--> statement-breakpoint
 CREATE UNIQUE INDEX "uq_notifications_tools_review_unread" ON "notifications" USING btree ("space_id","recipient_type","recipient_id",("payload"->>'packageId')) WHERE "notifications"."type" = 'integration_tools_review' AND "notifications"."read_at" IS NULL;--> statement-breakpoint
 ALTER TABLE "notifications" ADD CONSTRAINT "notifications_type_valid" CHECK (type IN ('run_failed', 'package_shared', 'agent_message', 'integration_tools_review'));
