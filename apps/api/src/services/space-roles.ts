@@ -11,7 +11,13 @@
 
 import { and, eq, sql } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
-import { orgInvitations, organizations, spaceMembers, spaceRoles } from "@appstrate/db/schema";
+import {
+  oauthClient,
+  orgInvitations,
+  organizations,
+  spaceMembers,
+  spaceRoles,
+} from "@appstrate/db/schema";
 import {
   isSpaceRolePreset,
   SPACE_ROLE_PRESETS,
@@ -248,18 +254,19 @@ export async function updateSpaceRole(params: {
 interface RoleHolders {
   memberCount: number;
   pendingInvitationCount: number;
+  /** The org's OIDC clients whose `signup_space_assignments` name this role. */
+  signupAssignmentCount: number;
   /** The org's `personal_space_role` names this role: every member's personal-space default. */
   orgDefault: boolean;
 }
 
 /**
- * Three things hold a bundle: a `space_members` row (a member's own override in their
+ * Four things hold a bundle: a `space_members` row (a member's own override in their
  * personal space included), a PENDING invitation whose JSONB `space_assignments` name it,
- * and the org's `personal_space_role` setting. The last two have no FK, so deleting under
- * them would strand the invitee with an assignment that never applies, or every member's
- * personal space on the fail-closed `operator` fallback.
- *
- * Not counted: an OIDC client's `signup_space_assignments` naming the role (a known gap).
+ * an org OIDC client whose JSONB `signup_space_assignments` name it, and the org's
+ * `personal_space_role` setting. The last three have no FK, so deleting under them would
+ * strand the invitee with an assignment that never applies, refuse every SSO signup of the
+ * client, or put every member's personal space on the fail-closed `viewer` fallback.
  */
 async function countRoleHolders(
   orgId: string,
@@ -282,6 +289,15 @@ async function countRoleHolders(
         sql`${orgInvitations.spaceAssignments} @> ${JSON.stringify([{ custom_role_id: id }])}::jsonb`,
       ),
     );
+  const signupPolicies = await executor
+    .select({ count: sql<number>`count(*)::int` })
+    .from(oauthClient)
+    .where(
+      and(
+        eq(oauthClient.referencedOrgId, orgId),
+        sql`${oauthClient.signupSpaceAssignments} @> ${JSON.stringify([{ custom_role_id: id }])}::jsonb`,
+      ),
+    );
   const [org] = await executor
     .select({ id: organizations.id })
     .from(organizations)
@@ -295,6 +311,7 @@ async function countRoleHolders(
   return {
     memberCount: assigned[0]?.count ?? 0,
     pendingInvitationCount: invited[0]?.count ?? 0,
+    signupAssignmentCount: signupPolicies[0]?.count ?? 0,
     orgDefault: org !== undefined,
   };
 }
@@ -302,8 +319,9 @@ async function countRoleHolders(
 function roleInUse(key: string, counts: RoleHolders): never {
   throw conflict(
     "role_in_use",
-    `Role '${key}' is still held by ${counts.memberCount} space member(s) and ` +
-      `${counts.pendingInvitationCount} pending invitation(s)` +
+    `Role '${key}' is still held by ${counts.memberCount} space member(s), ` +
+      `${counts.pendingInvitationCount} pending invitation(s) and ` +
+      `${counts.signupAssignmentCount} OIDC client signup assignment(s)` +
       (counts.orgDefault
         ? ", and it is the organization's default role in personal spaces. " +
           "Reassign them and change that setting before deleting it."
@@ -311,6 +329,7 @@ function roleInUse(key: string, counts: RoleHolders): never {
     {
       member_count: counts.memberCount,
       pending_invitation_count: counts.pendingInvitationCount,
+      signup_assignment_count: counts.signupAssignmentCount,
       org_default: counts.orgDefault,
     },
   );
@@ -319,14 +338,13 @@ function roleInUse(key: string, counts: RoleHolders): never {
 /**
  * Holders are counted rather than left to `ON DELETE RESTRICT`, whose error
  * names neither the role nor how many people would lose access. The role row is
- * locked `FOR UPDATE` before the count: the org-settings write that names a custom
- * role as the personal-space default share-locks the same row (`FOR KEY SHARE`,
- * `updateOrgSettings`, `setPersonalSpaceRoleOverride`), so the two serialize — the setting
- * has no FK to hold it. A `space_members` insert naming the role takes the same KEY SHARE lock
- * through its FK check, so it either commits before the count (and is counted) or fails its
- * own FK after the delete: the delete never meets an FK violation. A pending invitation names
- * the role in jsonb with no lock, so one saved concurrently can still slip past the count;
- * acceptance then skips the assignment as a role that no longer exists.
+ * locked `FOR UPDATE` before the count, and every writer that names a custom role reads
+ * that row `FOR KEY SHARE` in its own write transaction (`updateOrgSettings`,
+ * `setPersonalSpaceRoleOverride`, `saveSpaceMember`, the OIDC client writes through
+ * `assertSpaceAssignmentsValid`): it either commits first and is counted (409), or reads
+ * after the delete and answers 404. A pending invitation is validated outside its insert's
+ * transaction, so one saved concurrently can still slip past the count; acceptance then
+ * skips the assignment as a role that no longer exists.
  */
 export async function deleteSpaceRole(orgId: string, id: string): Promise<SpaceRoleWire> {
   return db.transaction(async (tx) => {
@@ -338,7 +356,12 @@ export async function deleteSpaceRole(orgId: string, id: string): Promise<SpaceR
     if (!row) throw notFound(`Role '${id}' not found in this organization`);
 
     const counts = await countRoleHolders(orgId, id, tx);
-    if (counts.memberCount > 0 || counts.pendingInvitationCount > 0 || counts.orgDefault) {
+    if (
+      counts.memberCount > 0 ||
+      counts.pendingInvitationCount > 0 ||
+      counts.signupAssignmentCount > 0 ||
+      counts.orgDefault
+    ) {
       roleInUse(row.key, counts);
     }
 

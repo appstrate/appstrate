@@ -221,7 +221,7 @@
   "apiError.redundant_space_role": "Owners and administrators already run every space: a space role would grant them nothing.",
   "apiError.organization_has_no_default_space": "The organization has no default space to home this package in.",
   "apiError.role_key_taken": "A role already has this key. Pick another one.",
-  "apiError.role_in_use": "This role is still in use (members, invitations or the default role of personal spaces): {{message}}",
+  "apiError.role_in_use": "This role is still in use (members, invitations, the default role of personal spaces or sign-up policies): {{message}}",
   "apiError.external_id_taken": "This external ID is already used in this space.",
   "apiError.webhook_limit_reached": "Maximum number of webhooks reached: {{message}}",
   "apiError.blocked_url": "Address refused, it points to a private or reserved network: {{message}}",

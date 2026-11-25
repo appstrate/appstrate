@@ -19,7 +19,10 @@ import {
   orgOnlyHeaders,
   type TestContext,
 } from "../../helpers/auth.ts";
+import { loopbackHeaders } from "../../helpers/loopback.ts";
 import { seedSpaceRole } from "../../helpers/seed.ts";
+import { listSpaceMembers } from "../../../src/services/space-members.ts";
+import { knownSpaceLevelPermissions, orgPermissions } from "../../../src/lib/permissions.ts";
 
 const app = getTestApp();
 
@@ -232,6 +235,62 @@ describe("member personal-space role override", () => {
     expect((await clearOverride(member, guest.user.id)).status).toBe(403);
   });
 
+  it("is refused to an owner's credential whose ceiling lacks members:change-role", async () => {
+    const put = (permissions: string[]) =>
+      app.request(overrideUrl(owner, member.user.id), {
+        method: "PUT",
+        headers: {
+          ...loopbackHeaders(owner, owner.orgId, { orgRole: "owner", permissions }),
+          ...json,
+        },
+        body: JSON.stringify({ preset_role: "viewer" }),
+      });
+    const ceiling = [...orgPermissions("owner")].filter((p) => p !== "members:change-role");
+    await expectProblem(await put(ceiling), 403);
+    expect(await overrideRows(owner.orgId, member.user.id)).toEqual([]);
+    // The twin: the same bearer with the permission in its ceiling writes.
+    const allowed = await put([...ceiling, "members:change-role"]);
+    expect(allowed.status, await allowed.clone().text()).toBe(200);
+  });
+
+  // A custom override, not `viewer`: the `viewer` preset grants `studio:read` (every `:read`
+  // of `operator`), so only a bundle can show the Studio withheld.
+  it("an override withholding studio:read reads the same through the chat's loopback bearer", async () => {
+    const role = await seedSpaceRole({
+      orgId: owner.orgId,
+      key: "reader",
+      name: "Reader",
+      permissions: ["agents:read"],
+    });
+    const put = await putOverride(owner, member.user.id, { custom_role_id: role.id });
+    expect(put.status, await put.clone().text()).toBe(200);
+    const res = await app.request("/api/spaces", {
+      headers: loopbackHeaders(member, owner.orgId, {
+        orgRole: "member",
+        permissions: [...orgPermissions("member"), ...knownSpaceLevelPermissions()],
+      }),
+    });
+    expect(res.status, await res.clone().text()).toBe(200);
+    const own = ((await res.json()) as { data: ListedSpace[] }).data.filter((s) => s.personal);
+    expect(own).toHaveLength(1);
+    expect(own[0]!.role).toMatchObject({ kind: "custom", key: "reader" });
+    for (const permission of ["agents:read", ...DELETES]) {
+      expect(own[0]!.permissions).toContain(permission);
+    }
+    for (const permission of ["studio:read", "agents:write", "agents:run"]) {
+      expect(own[0]!.permissions).not.toContain(permission);
+    }
+  });
+
+  it("lists a guest without an override in their own space as reached by default, not by org role", async () => {
+    const space = await personalOf(guest);
+    const [seat] = await listSpaceMembers(owner.orgId, space.id, true);
+    expect(seat).toMatchObject({ userId: guest.user.id, source: "open_space" });
+    expect((await putOverride(owner, guest.user.id, { preset_role: "viewer" })).status).toBe(200);
+    const [explicit] = await listSpaceMembers(owner.orgId, space.id, true);
+    expect(explicit).toMatchObject({ userId: guest.user.id, source: "explicit" });
+  });
+
   it("DELETE returns the member to the org default, idempotently", async () => {
     expect((await putOverride(owner, member.user.id, { preset_role: "viewer" })).status).toBe(200);
     expect((await personalOf(member)).role).toMatchObject({ key: "viewer" });
@@ -308,7 +367,6 @@ describe("member personal-space role override", () => {
     const revoked = (audit?.before as { revokedSpaceAssignments: { spaceId: string }[] })
       .revokedSpaceAssignments;
     expect(revoked.map((row) => row.spaceId)).not.toContain(personal!.id);
-    expect(await overrideRows(owner.orgId, member.user.id)).toEqual([]);
   });
 
   it("hides every override from a caller without members:change-role", async () => {

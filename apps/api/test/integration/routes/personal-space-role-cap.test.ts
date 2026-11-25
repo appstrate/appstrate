@@ -456,37 +456,48 @@ describe("personal_space_role: operator", () => {
       for (const permission of DELETES) expect(asViewer.permissions).toContain(permission);
     });
 
-    it("gives a member a custom role's permissions plus the floor, named on GET /api/spaces", async () => {
-      // No `studio:read`: the Studio is what this role withholds.
-      const role = await seedSpaceRole({
-        orgId: owner.orgId,
-        key: "runner-lite",
-        name: "Runner lite",
-        permissions: ["agents:read", "agents:run", "runs:read"],
-      });
-      await setCap(owner, role.id);
-
-      const own = await personalOf(member);
-      expect(own.role).toMatchObject({ kind: "custom", key: "runner-lite" });
-      expect(own.permissions).not.toContain("studio:read");
-      expect(own.permissions).not.toContain("agents:write");
-      for (const permission of ["agents:read", "agents:run", "runs:read", ...DELETES]) {
-        expect(own.permissions).toContain(permission);
-      }
-      const detail = await app.request(`/api/spaces/${personalId}`, {
-        headers: orgOnlyHeaders(member),
-      });
-      expect(detail.status, await detail.clone().text()).toBe(200);
-      expect(await detail.json()).toMatchObject({
-        role: { kind: "custom", key: "runner-lite", name: "Runner lite" },
+    describe("a custom role as the default", () => {
+      beforeEach(async () => {
+        // No `studio:read`: the Studio is what this role withholds.
+        const role = await seedSpaceRole({
+          orgId: owner.orgId,
+          key: "runner-lite",
+          name: "Runner lite",
+          permissions: ["agents:read", "agents:run", "runs:read"],
+        });
+        await setCap(owner, role.id);
       });
 
-      // Owners and admins keep admin; a guest takes the custom role too, never above a member.
-      expect((await personalOf(admin)).role).toMatchObject({ key: "admin" });
-      const guestOwn = await personalOf(guest);
-      expect(guestOwn.role).toMatchObject({ kind: "custom", key: "runner-lite" });
-      expect(guestOwn.permissions).not.toContain("agents:write");
-      for (const permission of DELETES) expect(guestOwn.permissions).toContain(permission);
+      it("gives a member its permissions plus the floor on GET /api/spaces", async () => {
+        const own = await personalOf(member);
+        expect(own.role).toMatchObject({ kind: "custom", key: "runner-lite" });
+        expect(own.permissions).not.toContain("studio:read");
+        expect(own.permissions).not.toContain("agents:write");
+        for (const permission of ["agents:read", "agents:run", "runs:read", ...DELETES]) {
+          expect(own.permissions).toContain(permission);
+        }
+      });
+
+      it("names it on the space detail", async () => {
+        const detail = await app.request(`/api/spaces/${personalId}`, {
+          headers: orgOnlyHeaders(member),
+        });
+        expect(detail.status, await detail.clone().text()).toBe(200);
+        expect(await detail.json()).toMatchObject({
+          role: { kind: "custom", key: "runner-lite", name: "Runner lite" },
+        });
+      });
+
+      it("leaves an org admin at admin", async () => {
+        expect((await personalOf(admin)).role).toMatchObject({ key: "admin" });
+      });
+
+      it("gives a guest the same role, never above a member", async () => {
+        const guestOwn = await personalOf(guest);
+        expect(guestOwn.role).toMatchObject({ kind: "custom", key: "runner-lite" });
+        expect(guestOwn.permissions).not.toContain("agents:write");
+        for (const permission of DELETES) expect(guestOwn.permissions).toContain(permission);
+      });
     });
 
     it("fails closed to viewer plus the floor when the named role is gone", async () => {

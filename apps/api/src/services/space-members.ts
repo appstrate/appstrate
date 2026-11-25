@@ -174,7 +174,13 @@ async function listMembersOfSpaces(
       name: row.displayName ?? row.name ?? null,
       email: row.email ?? null,
       org_role: row.orgRole,
-      source: member ? "explicit" : row.orgRole === "member" ? "open_space" : "org_role",
+      // Implicit and not by org role: an open space's default, or the org's default in the
+      // owner's own personal space (a guest's included).
+      source: member
+        ? "explicit"
+        : row.orgRole === "owner" || row.orgRole === "admin"
+          ? "org_role"
+          : "open_space",
       role: toSpaceRoleWire(effective),
       createdAt: row.createdAt?.toISOString() ?? null,
     });
@@ -727,7 +733,10 @@ async function assignmentColumns(
     })
     .from(spaceRoles)
     .where(and(eq(spaceRoles.id, assignment.custom_role_id), eq(spaceRoles.orgId, orgId)))
-    .limit(1);
+    .limit(1)
+    // Held to the caller's commit: a concurrent `deleteSpaceRole` either counts this row (409)
+    // or wins first and this read finds nothing (404), never an FK violation on the write.
+    .for("key share");
   if (!role) throw notFound("Space role not found");
   assertCanGrantSpaceRole(actorPermissions, { kind: "custom", role });
   return { presetRole: null, customRoleId: role.id };

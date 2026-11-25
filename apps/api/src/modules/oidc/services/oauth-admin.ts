@@ -398,42 +398,49 @@ export async function createClient(input: CreateClientInput): Promise<OAuthClien
   const signupRole: AssignableOrgRole =
     input.level === "org" ? (input.signupRole ?? "member") : "member";
   const signupSpaceAssignments = input.level === "org" ? (input.signupSpaceAssignments ?? []) : [];
-  if (input.level === "org") {
-    await assertSpaceAssignmentsValid({
-      orgId: input.referencedOrgId,
-      role: signupRole,
-      assignments: signupSpaceAssignments,
-      param: "signupSpaceAssignments",
-    });
-  }
 
-  const inserted = await db
-    .insert(oauthClient)
-    .values({
-      id,
-      clientId,
-      clientSecret: hashedSecret,
-      name: input.name,
-      redirectUris: input.redirectUris,
-      postLogoutRedirectUris: input.postLogoutRedirectUris ?? [],
-      scopes: input.scopes ?? ["openid", "profile", "email"],
-      level: input.level,
-      referencedOrgId: input.level === "org" ? input.referencedOrgId : null,
-      referencedSpaceId: input.level === "space" ? input.referencedSpaceId : null,
-      skipConsent: input.isFirstParty ?? false,
-      allowSignup,
-      signupRole,
-      signupSpaceAssignments,
-      disabled: false,
-      applicationType: applicationTypeFor(input.redirectUris),
-      tokenEndpointAuthMethod: "client_secret_basic",
-      grantTypes: ["authorization_code", "refresh_token"],
-      responseTypes: ["code"],
-      requirePKCE: true,
-      createdAt: now,
-      updatedAt: now,
-    })
-    .returning();
+  // Validation and insert share a transaction: the custom roles the grants name
+  // stay `FOR KEY SHARE`-locked against `deleteSpaceRole` until the row commits.
+  const inserted = await db.transaction(async (tx) => {
+    if (input.level === "org") {
+      await assertSpaceAssignmentsValid(
+        {
+          orgId: input.referencedOrgId,
+          role: signupRole,
+          assignments: signupSpaceAssignments,
+          param: "signupSpaceAssignments",
+        },
+        tx,
+      );
+    }
+    return tx
+      .insert(oauthClient)
+      .values({
+        id,
+        clientId,
+        clientSecret: hashedSecret,
+        name: input.name,
+        redirectUris: input.redirectUris,
+        postLogoutRedirectUris: input.postLogoutRedirectUris ?? [],
+        scopes: input.scopes ?? ["openid", "profile", "email"],
+        level: input.level,
+        referencedOrgId: input.level === "org" ? input.referencedOrgId : null,
+        referencedSpaceId: input.level === "space" ? input.referencedSpaceId : null,
+        skipConsent: input.isFirstParty ?? false,
+        allowSignup,
+        signupRole,
+        signupSpaceAssignments,
+        disabled: false,
+        applicationType: applicationTypeFor(input.redirectUris),
+        tokenEndpointAuthMethod: "client_secret_basic",
+        grantTypes: ["authorization_code", "refresh_token"],
+        responseTypes: ["code"],
+        requirePKCE: true,
+        createdAt: now,
+        updatedAt: now,
+      })
+      .returning();
+  });
   if (inserted.length === 0) {
     throw new Error("OIDC: failed to insert oauth_clients row");
   }
@@ -529,6 +536,7 @@ export async function updateClient(
   // `signupRole` is only meaningful on org-level clients — reject updates
   // targeting instance/space levels loudly so configuration mistakes
   // surface. `allowSignup` is valid on every level.
+  let signupOrgId: string | null = null;
   if (input.signupRole !== undefined || input.signupSpaceAssignments !== undefined) {
     if (!existing) return null;
     if (existing.level !== "org" || !existing.referencedOrgId) {
@@ -537,12 +545,7 @@ export async function updateClient(
         "OIDC: signupRole and signupSpaceAssignments are only valid for org-level clients",
       );
     }
-    await assertSpaceAssignmentsValid({
-      orgId: existing.referencedOrgId,
-      role: input.signupRole ?? existing.signupRole,
-      assignments: input.signupSpaceAssignments ?? existing.signupSpaceAssignments,
-      param: "signupSpaceAssignments",
-    });
+    signupOrgId = existing.referencedOrgId;
   }
 
   // Build a single SET clause — atomic, no partial-update risk.
@@ -558,11 +561,22 @@ export async function updateClient(
   if (input.signupSpaceAssignments !== undefined)
     set.signupSpaceAssignments = input.signupSpaceAssignments;
 
-  const [row] = await db
-    .update(oauthClient)
-    .set(set)
-    .where(eq(oauthClient.clientId, clientId))
-    .returning();
+  // Same transaction as the validation, so a custom role the grants name stays
+  // `FOR KEY SHARE`-locked against `deleteSpaceRole` until the row commits.
+  const [row] = await db.transaction(async (tx) => {
+    if (signupOrgId !== null && existing) {
+      await assertSpaceAssignmentsValid(
+        {
+          orgId: signupOrgId,
+          role: input.signupRole ?? existing.signupRole,
+          assignments: input.signupSpaceAssignments ?? existing.signupSpaceAssignments,
+          param: "signupSpaceAssignments",
+        },
+        tx,
+      );
+    }
+    return tx.update(oauthClient).set(set).where(eq(oauthClient.clientId, clientId)).returning();
+  });
   if (!row) return null;
   cacheInvalidate(clientId);
   return mapRow(row);

@@ -250,7 +250,7 @@ export const rolesPaths = {
       tags: ["Roles"],
       summary: "Delete a custom space role",
       description:
-        "Remove a bundle. Requires `roles:delete` (owner/admin). Refused with 409 `role_in_use` while any space member holds the role (a member's own override in their personal space included), any PENDING invitation assigns it, or the organization's `personal_space_role` setting names it — the problem body carries `member_count`, `pending_invitation_count` and `org_default`. Reassign them, or change that setting, first.",
+        "Remove a bundle. Requires `roles:delete` (owner/admin). Refused with 409 `role_in_use` while any space member holds the role (a member's own override in their personal space included), any PENDING invitation assigns it, an OIDC client's sign-up policy (`signup_space_assignments`) assigns it, or the organization's `personal_space_role` setting names it — the problem body carries `member_count`, `pending_invitation_count`, `signup_assignment_count` and `org_default`. Reassign them, edit the sign-up policies, or change that setting, first.",
       parameters: [{ $ref: "#/components/parameters/XOrgId" }, ROLE_ID_PARAM],
       responses: {
         "204": { description: "Role deleted", headers: REQUEST_ID_ONLY_HEADERS },
@@ -267,7 +267,12 @@ export const rolesPaths = {
                   { $ref: "#/components/schemas/ProblemDetail" },
                   {
                     type: "object",
-                    required: ["member_count", "pending_invitation_count", "org_default"],
+                    required: [
+                      "member_count",
+                      "pending_invitation_count",
+                      "signup_assignment_count",
+                      "org_default",
+                    ],
                     properties: {
                       member_count: {
                         type: "integer",
@@ -277,6 +282,11 @@ export const rolesPaths = {
                         type: "integer",
                         description:
                           "Pending invitations whose `space_assignments` name this role.",
+                      },
+                      signup_assignment_count: {
+                        type: "integer",
+                        description:
+                          "The organization's OIDC clients whose `signup_space_assignments` assign this role.",
                       },
                       org_default: {
                         type: "boolean",

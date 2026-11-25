@@ -10,8 +10,10 @@
  */
 
 import { describe, it, expect, beforeEach } from "bun:test";
+import { eq } from "drizzle-orm";
+import { organizations, spaceMembers, spaceRoles } from "@appstrate/db/schema";
 import { getTestApp } from "../../helpers/app.ts";
-import { truncateAll } from "../../helpers/db.ts";
+import { db, truncateAll } from "../../helpers/db.ts";
 import { expectProblem } from "../../helpers/assertions.ts";
 import { SPACE_ROLE_PRESETS } from "@appstrate/core/permissions";
 import {
@@ -468,6 +470,77 @@ describe("custom space roles", () => {
       const problem = await expectProblem(await del(role.id), 409, { code: "role_in_use" });
       expect(problem.member_count).toBe(1);
       expect(problem.org_default).toBe(false);
+    });
+  });
+
+  // One of two orders, never a third: the writer commits first and the delete 409s, or the
+  // delete commits first and the writer 404s. Afterwards nothing names a role that is gone.
+  describe("DELETE racing a writer that names the role", () => {
+    const roleExists = async (id: string) =>
+      (await db.select({ id: spaceRoles.id }).from(spaceRoles).where(eq(spaceRoles.id, id)))
+        .length === 1;
+
+    async function race(write: () => Response | Promise<Response>, id: string) {
+      const [written, deleted] = await Promise.all([write(), del(id)]);
+      const statuses = [written.status, deleted.status];
+      const body = `${await written.clone().text()} | ${await deleted.clone().text()}`;
+      for (const status of statuses) expect(status, body).toBeLessThan(500);
+      const writerFirst = statuses[0] === 200 || statuses[0] === 201;
+      expect(statuses, body).toEqual(writerFirst ? [statuses[0]!, 409] : [404, 204]);
+      expect(await roleExists(id)).toBe(writerFirst);
+      return writerFirst;
+    }
+
+    it("PATCH settings personal_space_role", async () => {
+      const role = await createRole({ key: "race-setting" });
+      const writerFirst = await race(
+        () => req("PATCH", `/api/orgs/${owner.orgId}/settings`, { personal_space_role: role.id }),
+        role.id,
+      );
+      const [org] = await db
+        .select({ settings: organizations.orgSettings })
+        .from(organizations)
+        .where(eq(organizations.id, owner.orgId));
+      const stored = (org?.settings as { personal_space_role?: string } | null)
+        ?.personal_space_role;
+      expect(stored === role.id).toBe(writerFirst);
+    });
+
+    it("PUT a member's personal-space override", async () => {
+      const role = await createRole({ key: "race-override" });
+      const user = await createTestUser();
+      await addOrgMember(owner.orgId, user.id, "member");
+      const writerFirst = await race(
+        () =>
+          req("PUT", `/api/orgs/${owner.orgId}/members/${user.id}/personal-space-role`, {
+            custom_role_id: role.id,
+          }),
+        role.id,
+      );
+      const rows = await db
+        .select({ customRoleId: spaceMembers.customRoleId })
+        .from(spaceMembers)
+        .where(eq(spaceMembers.userId, user.id));
+      expect(rows.some((row) => row.customRoleId === role.id)).toBe(writerFirst);
+    });
+
+    it("POST a space member", async () => {
+      const role = await createRole({ key: "race-member" });
+      const user = await createTestUser();
+      await addOrgMember(owner.orgId, user.id, "member");
+      const writerFirst = await race(
+        () =>
+          req("POST", `/api/spaces/${owner.defaultSpaceId}/members`, {
+            userId: user.id,
+            custom_role_id: role.id,
+          }),
+        role.id,
+      );
+      const rows = await db
+        .select({ customRoleId: spaceMembers.customRoleId })
+        .from(spaceMembers)
+        .where(eq(spaceMembers.userId, user.id));
+      expect(rows.some((row) => row.customRoleId === role.id)).toBe(writerFirst);
     });
   });
 
