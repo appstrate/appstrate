@@ -244,8 +244,8 @@ async function validatePersonaSpace(
   // the role to someone else. Owners and admins carry no `space_members` row, so `null` IS it.
   const real = effectivePermissions({
     orgPermissions: orgPermissions(realOrgRole),
-    // `null` caller and an `admin` cap: the space is not personal (refused above), so
-    // neither parameter can change the answer.
+    // `null` caller and `ADMIN_ROLE_REF` as `personalSpaceDefault`: the space is not personal
+    // (refused above), so neither parameter can change the answer.
     spacePermissions: spacePermissions(
       resolveSpaceRole(realOrgRole, space, null, null, ADMIN_ROLE_REF),
     ),

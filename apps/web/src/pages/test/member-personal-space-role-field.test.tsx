@@ -121,6 +121,11 @@ describe("the personal space role field of the user sheet", () => {
     expect(followLabel(guest, options, CUSTOM_ID, "?", catalog(["agents:read"]))).toBe("Triage");
     expect(followLabel(guest, options, "admin", "?", catalog([]))).toBe("Opérateur");
     expect(followLabel(guest, options, "viewer", "?", catalog([]))).toBe("Lecteur");
+    // A custom role gone from the loaded catalogue resolves to viewer, as the server does;
+    // before the catalogue answers, the fallback.
+    expect(followLabel(member("member", null), options, "srl_gone", "?", catalog([]))).toBe(
+      "Lecteur",
+    );
     expect(followLabel(member("member", null), options, "srl_gone", "Rôle personnalisé")).toBe(
       "Rôle personnalisé",
     );
@@ -136,7 +141,7 @@ describe("the personal space role field of the user sheet", () => {
     for (const role of ["admin", "owner"] as const) {
       const html = renderField(member(role, null), ["members:change-role"]);
       expect(selectOf(html)).toBeUndefined();
-      expect(html).toContain(settingsFr["userDetail.personalSpaceRoleAdminFixed"]);
+      expect(html).toContain(settingsFr["roles.preset.admin"]);
       expect(html).toContain(settingsFr["userDetail.personalSpaceRoleAdminHint"]);
     }
   });

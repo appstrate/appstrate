@@ -101,7 +101,7 @@ export function UserDetailModal({
                 onValueChange={onChangeOrgRole}
                 disabled={isChangingOrgRole}
                 aria-labelledby={labelId}
-                className="w-56"
+                className="w-full sm:w-56"
               />
             ) : (
               <span className="text-sm">{t(roleI18nKey(member.role))}</span>

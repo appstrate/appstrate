@@ -6,7 +6,7 @@ import { useTranslation } from "react-i18next";
 import { Lock, SearchX } from "lucide-react";
 import { Button } from "@appstrate/ui/components/button";
 import { usePermissions } from "../hooks/use-permissions";
-import { useRouteVerdict } from "../hooks/use-can-reach";
+import { useHome, useRouteVerdict } from "../hooks/use-can-reach";
 import { useEnterLinkedSpace } from "../hooks/use-current-space";
 import type { RoutePath } from "../lib/route-access";
 import { routeOf } from "../lib/route-match";
@@ -76,13 +76,17 @@ export function UnavailableState({ children }: { children?: ReactNode }) {
   );
 }
 
-/** The address matches no route: said, with the way back, instead of landing on the dashboard unexplained. */
+/**
+ * The address matches no route: said, with the way back to what `/` shows the reader (the chat for
+ * a role without the Studio), instead of landing there unexplained.
+ */
 export function NotFoundPage() {
   const { t } = useTranslation("common");
+  const chat = useHome() === "chat";
   return (
     <UnavailableState>
       <Button asChild variant="outline" size="sm">
-        <Link to="/">{t("nav.dashboard")}</Link>
+        <Link to={chat ? "/chat" : "/"}>{t(chat ? "products.chat" : "nav.dashboard")}</Link>
       </Button>
     </UnavailableState>
   );

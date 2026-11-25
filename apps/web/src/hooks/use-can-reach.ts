@@ -7,6 +7,7 @@ import { useOverviewMode } from "./use-overview-mode";
 import { useSpaces } from "./use-spaces";
 import { routeVerdict, STUDIO_PERMISSION, type RoutePath } from "../lib/route-access";
 import { routeOf } from "../lib/route-match";
+import { homeOf } from "../lib/home-route";
 import { spacesWhere, spanningRouteVerdict } from "../lib/space-lists";
 
 /**
@@ -83,4 +84,12 @@ export function useStudioReach(): boolean {
 /** Whether the reach verdicts are answers yet: until the permission set loads every one reads as refused. */
 export function useReachReady(): boolean {
   return usePermissions().ready;
+}
+
+/** What `/` shows the reader (`homeOf`): the dashboard, the chat, a refusal, or pending. */
+export function useHome() {
+  const { ready } = usePermissions();
+  const studio = useStudioReach();
+  const chat = useCanReach()("/chat");
+  return homeOf({ ready, studio, chat });
 }

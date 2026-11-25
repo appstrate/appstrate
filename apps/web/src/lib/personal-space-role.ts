@@ -29,7 +29,8 @@ export function storedRoleToSelectValue(stored: unknown): string {
 /**
  * What « selon l'organisation » resolves to: the org setting — for a guest too, unless it lets
  * them author agents (`agents:write`), in which case a guest holds `operator`. Judged on the
- * catalogue entry's permissions; before the catalogue answers, on the authoring presets.
+ * catalogue entry's permissions; before the catalogue answers, on the authoring presets. A stored
+ * custom role the loaded catalogue lacks resolves to `viewer`, as the server resolves it.
  */
 export function followLabel(
   member: OrgMember,
@@ -38,14 +39,18 @@ export function followLabel(
   unknown: string,
   roles?: readonly Pick<RoleObject, "kind" | "key" | "id" | "permissions">[],
 ): string {
-  const value = storedRoleToSelectValue(stored);
-  const entry = roles?.find(
-    (role) =>
-      spaceRoleValue({
-        preset_role: role.kind === "preset" ? role.key : null,
-        custom_role_id: role.id,
-      }) === value,
-  );
+  const valueOf = (role: Pick<RoleObject, "kind" | "key" | "id">) =>
+    spaceRoleValue({
+      preset_role: role.kind === "preset" ? role.key : null,
+      custom_role_id: role.id,
+    });
+  const storedValue = storedRoleToSelectValue(stored);
+  const gone =
+    !!roles &&
+    spaceRoleAssignment(storedValue).custom_role_id !== undefined &&
+    !roles.some((role) => valueOf(role) === storedValue);
+  const value = gone ? spaceRoleValue({ preset_role: "viewer" }) : storedValue;
+  const entry = roles?.find((role) => valueOf(role) === value);
   const authors = entry
     ? entry.permissions.includes("agents:write")
     : value === spaceRoleValue({ preset_role: "admin" }) ||

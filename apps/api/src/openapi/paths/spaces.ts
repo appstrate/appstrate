@@ -736,7 +736,7 @@ export const spacesPaths = {
       tags: ["Spaces"],
       summary: "List space members",
       description:
-        'Everyone who actually reaches the space, not just everyone who was added: explicit rows, org owners/admins (`source: "org_role"`) and — in an `open` space — every org member (`source: "open_space"`).',
+        'Everyone who actually reaches the space, not just everyone who was added: explicit rows, org owners/admins (`source: "org_role"`) and — in an `open` space — every org member, as in a personal space its owner without an override (`source: "open_space"`).',
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XViewAs" },

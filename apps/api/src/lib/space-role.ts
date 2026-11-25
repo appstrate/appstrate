@@ -81,10 +81,10 @@ interface PersonalSpaceDefaultColumns {
   personalSpaceCustomRole: unknown;
 }
 
+/** Both drivers decode `json` (PGlite, postgres.js), so the subquery arrives as an object or `null`. */
 function toCustomSpaceRole(value: unknown): CustomSpaceRole | null {
-  const parsed = typeof value === "string" ? (JSON.parse(value) as unknown) : value;
-  if (parsed === null || typeof parsed !== "object") return null;
-  const { id, key, name, permissions } = parsed as Record<string, unknown>;
+  if (value === null || typeof value !== "object") return null;
+  const { id, key, name, permissions } = value as Record<string, unknown>;
   if (typeof id !== "string" || typeof key !== "string" || typeof name !== "string") return null;
   if (!Array.isArray(permissions) || !permissions.every((p) => typeof p === "string")) return null;
   return { id, key, name, permissions };
@@ -100,7 +100,7 @@ export function personalSpaceDefaultRef(row: PersonalSpaceDefaultColumns): Space
   if (stored === null) return ADMIN_ROLE_REF;
   if (isSpaceRolePreset(stored)) return { kind: "preset", preset: stored };
   const custom = toCustomSpaceRole(row.personalSpaceCustomRole);
-  if (custom && custom.id === stored) return { kind: "custom", role: custom };
+  if (custom) return { kind: "custom", role: custom };
   return { kind: "preset", preset: "viewer" };
 }
 

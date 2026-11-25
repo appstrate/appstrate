@@ -271,18 +271,14 @@ describe("personalSpaceDefaultRef", () => {
     }
   });
 
-  it("reads a custom id as the role the same statement resolved, object or JSON text", () => {
+  it("reads a custom id as the role the same statement resolved", () => {
     if (CUSTOM.kind !== "custom") throw new Error("unreachable");
     expect(stored(CUSTOM.role.id, CUSTOM.role)).toEqual(CUSTOM);
-    expect(stored(CUSTOM.role.id, JSON.stringify(CUSTOM.role))).toEqual(CUSTOM);
   });
 
   it("fails closed to viewer on a dangling id or a stray value, never admin", () => {
     if (CUSTOM.kind !== "custom") throw new Error("unreachable");
     expect(stored(CUSTOM.role.id, null)).toEqual(preset("viewer"));
-    expect(stored("srl_44444444-4444-4444-8444-444444444444", CUSTOM.role)).toEqual(
-      preset("viewer"),
-    );
     expect(stored("superuser")).toEqual(preset("viewer"));
     // …and the resolver adds the floor on top, as for any non-admin default.
     expect(resolveSpaceRole("member", personal, null, OWNER, stored(CUSTOM.role.id))).toEqual({

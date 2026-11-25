@@ -1534,11 +1534,12 @@ The last query lists identifiers of unresolved notifications. Check their recipi
 The release adds the space permission `studio:read`, which opens the Studio's screens. The presets
 hold it; a custom role stored before the release does not, so its holders would lose the Studio at
 the deploy. Run `psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f scripts/migration/0058-grant-studio-read.sql`
-in the window, before the new release takes traffic (on PGlite, execute the SQL with the app
-stopped). It appends `studio:read` to every custom role lacking it and prints the roles it changed;
-the previous release reads the string as an unavailable permission and ignores it, so running it
-before the deploy is harmless too. A second execution updates zero rows. Record the count in the
-deployment log.
+in the window, with the previous release stopped and before the new release takes traffic (on PGlite,
+execute the SQL with the app stopped). The previous release refuses an unknown permission when a
+custom role is saved, so do not run it while that release serves traffic. It appends `studio:read`
+to every custom role lacking it and prints the roles it changed. Run it once and never again: a
+re-run would grant the Studio back to roles an admin narrowed on purpose. Record the printed count
+in the deployment log.
 
 ## Historical chat messages — `before-traffic`
 

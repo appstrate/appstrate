@@ -3,18 +3,14 @@
 import { Navigate, useLocation } from "react-router-dom";
 import { DashboardSkeleton } from "../components/loading-skeletons";
 import { NoAccessState } from "../components/route-gate";
-import { useCanReach, useStudioReach } from "../hooks/use-can-reach";
-import { usePermissions } from "../hooks/use-permissions";
-import { homeOf } from "../lib/home-route";
+import { useHome } from "../hooks/use-can-reach";
 import { DashboardPage } from "./dashboard";
 
 /** `/`: the Studio's dashboard, or the chat for a role without the Studio. */
 export function HomePage() {
-  const { ready } = usePermissions();
-  const studio = useStudioReach();
-  const chat = useCanReach()("/chat");
+  const home = useHome();
   const { search } = useLocation();
-  switch (homeOf({ ready, studio, chat })) {
+  switch (home) {
     case "dashboard":
       return <DashboardPage />;
     case "pending":

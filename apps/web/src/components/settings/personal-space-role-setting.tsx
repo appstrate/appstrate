@@ -31,6 +31,7 @@ export function PersonalSpaceRoleSetting() {
     <SettingRow
       label={t("orgSettings.personalSpaceRoleTitle")}
       description={t("orgSettings.personalSpaceRoleDesc")}
+      details={t("orgSettings.personalSpaceRoleDetails")}
       status={<SaveFeedback {...fieldWriteState(update, "personal_space_role")} />}
     >
       {(labelId) => (

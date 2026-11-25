@@ -208,7 +208,10 @@ export const ORG_SETTINGS_PROPERTIES = {
   },
   personal_space_role: {
     type: "string",
-    anyOf: [{ enum: [...SPACE_ROLE_PRESETS] }, { pattern: SPACE_ROLE_ID_PATTERN }],
+    oneOf: [
+      { type: "string", enum: [...SPACE_ROLE_PRESETS] },
+      { type: "string", pattern: SPACE_ROLE_ID_PATTERN },
+    ],
     description:
       "The role an organization member or guest holds by default in their own personal space: a preset key (`admin`, `builder`, `operator`, `runner`, `viewer`) or the id of one of this organization's custom space roles (`srl_…`). Defaults to `admin`. On write, a custom id that is not a role of this organization answers `404 not_found`; while a custom role is named here it cannot be deleted (`409 role_in_use` with `org_default: true`). Any role short of `admin` also grants `agents:delete`, `skills:delete`, `integrations:delete` and `schedules:delete` there, so the member can still remove what they already have. Below `admin` the member loses what the role withholds — e.g. without `agents:write` no create, edit or inline run (`403 inline_run_not_allowed_in_space`); a plain launch runs the published version (`404 no_published_version` without one) and an explicit draft launch requires write access in the package's home space (`403 draft_not_writable`). Existing schedules keep their previously authorized draft selectors. Owners and admins always hold `admin` in their own personal space. A guest takes this default too, with the deletes above, unless the default lets them author agents (it grants `agents:write`: `admin`, `builder`, or such a custom role), in which case a guest holds plain `operator` (so with the default absent a guest holds `operator`). A member's or guest's own override (`PUT /api/orgs/{orgId}/members/{userId}/personal-space-role`) wins over this default. A custom role that no longer exists resolves to `viewer` plus the deletes above, never to `admin`. Computed on every request: changing it takes effect with no other write. Always present on read; optional on PATCH.",
   },
@@ -1040,7 +1043,7 @@ export const schemas = {
         type: "string",
         enum: ["explicit", "org_role", "open_space"],
         description:
-          "How the member reaches the space: an explicit row, their org role (owner/admin), or the open space's default.",
+          "How the member reaches the space: an explicit row, their org role (owner/admin), or a default (`open_space`): an open space's default role, or the organization's `personal_space_role` in their own personal space.",
       },
       role: {
         type: ["object", "null"],
@@ -3056,7 +3059,7 @@ export const schemas = {
         type: "string",
         enum: ["explicit", "org_role", "open_space"],
         description:
-          "How the principal reaches the space: an explicit row, their org role (owner/admin), or the open space's default.",
+          "How the principal reaches the space: an explicit row, their org role (owner/admin), or a default (`open_space`): an open space's default role, or the organization's `personal_space_role` in their own personal space.",
       },
       role: {
         type: ["object", "null"],

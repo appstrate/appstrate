@@ -35,7 +35,7 @@ export function PersonalSpaceRoleField({ member }: { member: OrgMember }) {
         description={t("userDetail.personalSpaceRoleAdminHint")}
         className="pb-0"
       >
-        <span className="text-sm">{t("userDetail.personalSpaceRoleAdminFixed")}</span>
+        <span className="text-sm">{t("roles.preset.admin")}</span>
       </SettingRow>
     );
   }
@@ -72,7 +72,7 @@ function EditableField({ member, label }: { member: OrgMember; label: string }) 
         <SpaceRoleSelect
           id="member-personal-space-role"
           ariaLabelledBy={labelId}
-          className="w-64"
+          className="w-full sm:w-56"
           value={memberOverrideToSelectValue(member.personal_space_role)}
           options={selectOptions}
           fallbackLabel={t("orgSettings.personalSpaceRoleUnknown")}

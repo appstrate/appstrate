@@ -15,10 +15,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- `orgSettingsSchema.personal_space_role` (and `orgSettingsReadSchema`) accepts any space-role
-  preset key (`admin`, `builder`, `operator`, `runner`, `viewer`) or a custom space role id
-  (`srl_` + canonical UUID), no longer `admin` | `operator` only. The read default stays
-  `admin`; stored values `admin` and `operator` remain valid.
+- **`orgSettingsReadSchema.personal_space_role`** — BREAKING. The output type widens from
+  `"admin" | "operator"` to a space-role preset key (`admin`, `builder`, `operator`, `runner`,
+  `viewer`) or a custom space role id (`srl_` + canonical UUID). `orgSettingsSchema` accepts the
+  same values on input. The read default stays `admin`; stored `admin` and `operator` remain valid.
+- **New core resource `studio`** (`CoreResource`) — BREAKING. A module that declares a `studio`
+  permission resource is refused at load (`cannot redefine core resource`).
 
 ### Removed
 
