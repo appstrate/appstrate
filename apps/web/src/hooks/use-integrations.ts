@@ -221,12 +221,12 @@ export interface IntegrationDetailIn {
 /**
  * The integration's detail in each of `spaceIds` the reader may read it in, on the same keys as
  * {@link useIntegrationDetail} there. `sources` keeps `spaceIds`' order and holds only the answered
- * spaces; `isLoading` until every one answered.
+ * spaces; `isLoading` until every one answered; `error` the first refusal, never dropped silently.
  */
 export function useIntegrationDetailsIn(
   packageId: string | undefined,
   spaceIds: readonly string[],
-): { sources: IntegrationDetailIn[]; isLoading: boolean } {
+): { sources: IntegrationDetailIn[]; isLoading: boolean; error: unknown } {
   const orgId = useCurrentOrgId();
   const grants = useRowSpaceGrants();
   const readable = spaceIds.filter((spaceId) => grants(spaceId, "integrations:read"));
@@ -247,6 +247,7 @@ export function useIntegrationDetailsIn(
           : [],
       ),
       isLoading: results.some((result) => result.isLoading),
+      error: results.find((result) => result.error)?.error ?? null,
     }),
   });
 }
@@ -642,9 +643,8 @@ export function useRenameIntegrationConnection() {
 /**
  * Share a connection into a space (idempotent) or withdraw it, through a space's door
  * (`packageId` set: `doorSpaceId`, the working space when omitted) or the account's. The mutation
- * stays pending until the refetched sharing
- * lands, so the share editor never re-enables on stale state. Withdrawing disables other
- * actors' schedules naming the connection.
+ * stays pending until the refetched sharing lands, so the share editor never re-enables on stale
+ * state. Withdrawing disables other actors' schedules naming the connection.
  */
 export function useConnectionShare(
   op: "share" | "unshare",

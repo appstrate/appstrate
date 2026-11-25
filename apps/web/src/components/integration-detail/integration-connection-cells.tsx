@@ -30,7 +30,6 @@ import {
   useAgentsConsumingIntegration,
   useIntegrationPins,
 } from "../../hooks/use-integrations";
-import { useRowSpaceGrants } from "../../hooks/use-permissions";
 import { useCurrentOrgId } from "../../hooks/use-org";
 import type { ConnectionRow } from "../../lib/connection-rows";
 import { spaceHeader } from "../../lib/scoping-headers";
@@ -87,11 +86,9 @@ function useLockText(
 
 /** What the caller may do to this row in its space: the API's verdict on it (`allowed_actions`). */
 function useRowGrants(connection: ConnectionRow, isAdmin: boolean) {
-  const grants = useRowSpaceGrants();
   const spaceId = connection.rowSpaceId;
   const actions = connection.allowed_actions ?? [];
   return {
-    canConnect: grants(spaceId, "integrations:connect"),
     spaceId,
     canRename: actions.includes("rename"),
     canShare: actions.includes("share"),

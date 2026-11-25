@@ -53,6 +53,7 @@ import {
   type SettingsRailGroup,
 } from "../components/settings/settings-rail-view";
 import { PackageDetailBar } from "../components/package-detail/package-detail-bar";
+import { ErrorState } from "../components/page-states";
 import { ListTabSkeleton, PackageDetailSkeleton } from "../components/loading-skeletons";
 import { PackageActionsDropdown } from "../components/package-detail/package-actions-dropdown";
 import { SetupGuideSteps } from "../components/package-detail/setup-guide-steps";
@@ -474,6 +475,11 @@ export function IntegrationDetailPage() {
   }
 
   const active = detail.active;
+  const connectionSources = overview
+    ? across.sources
+    : active && workingSpaceId
+      ? [{ spaceId: workingSpaceId, detail }]
+      : [];
   const m = detail.manifest;
   // Only the package detail knows the source.
   const source = pkg?.source;
@@ -565,38 +571,24 @@ export function IntegrationDetailPage() {
 
       {/* One connected-accounts table, with each row retaining its auth context. */}
       <DetailTabPanel value="connections">
-        {/* In « Tous les espaces » the list spans every space the integration is active in where
-            the reader reads it; active nowhere they reach, the hint. */}
-        {overview ? (
-          pkgLoading || across.isLoading ? (
-            <ListTabSkeleton />
-          ) : across.sources.length === 0 ? (
-            <ActivationHint />
-          ) : across.sources.every((source) => source.detail.auths.length === 0) ? (
-            <p className="text-muted-foreground text-sm">{t("integration.auth.none")}</p>
-          ) : (
-            <ConnectionsTable
-              packageId={packageId}
-              sources={across.sources}
-              spanning
-              addIn={connectionsFromWorkingSpace && active ? { detail, canConfigure } : undefined}
-              onConfigure={openAuthentication}
-            />
-          )
-        ) : !active ? (
+        {/* The working space's list, or in « Tous les espaces » one list spanning every space the
+            integration is active in where the reader reads it; active nowhere, the hint. */}
+        {overview && (pkgLoading || across.isLoading) ? (
+          <ListTabSkeleton />
+        ) : across.error ? (
+          <ErrorState error={across.error} />
+        ) : connectionSources.length === 0 ? (
           <ActivationHint />
-        ) : detail.auths.length === 0 ? (
+        ) : connectionSources.every((source) => source.detail.auths.length === 0) ? (
           <p className="text-muted-foreground text-sm">{t("integration.auth.none")}</p>
         ) : (
-          workingSpaceId && (
-            <ConnectionsTable
-              packageId={packageId}
-              sources={[{ spaceId: workingSpaceId, detail }]}
-              spanning={false}
-              addIn={{ detail, canConfigure }}
-              onConfigure={openAuthentication}
-            />
-          )
+          <ConnectionsTable
+            packageId={packageId}
+            sources={connectionSources}
+            spanning={overview}
+            addIn={connectionsFromWorkingSpace && active ? { detail, canConfigure } : undefined}
+            onConfigure={openAuthentication}
+          />
         )}
       </DetailTabPanel>
 

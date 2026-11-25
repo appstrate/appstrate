@@ -63,7 +63,8 @@ export function ConnectionsTable({
   // `connection_blocked_by_admin`, and `integrations:configure` is exempt.
   const blockedByAdmin = !!addIn && addIn.detail.block_user_connections && !addIn.canConfigure;
   const detailOf = new Map(sources.map((source) => [source.spaceId, source.detail]));
-  // Every method of the integration, once: the spaces read the same manifest's auths.
+  // Every method any listed space reads, once: the home space reads the draft, the others the
+  // latest published version, so their auths may differ. A row resolves its own (`authOf`).
   const auths = [
     ...new Map(
       sources.flatMap(({ detail }) => detail.auths).map((auth) => [auth.auth_key, auth]),
