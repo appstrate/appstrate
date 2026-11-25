@@ -23,6 +23,7 @@ import { useOverviewMode } from "@/hooks/use-overview-mode";
 import { catalogueHref } from "@/lib/catalogue-link";
 import { overlayIntent, preloadOverlaysWhenIdle } from "@/lib/overlay-chunks";
 import { isSettingsPath, isUnder, SETTINGS_INDEX } from "@/lib/route-access";
+import { keepsDrawerOpen } from "@/lib/drawer-navigation";
 import { KEYBOARD_VIEWPORT_CLASS } from "@appstrate/ui/use-keyboard-viewport";
 import { cn } from "@appstrate/ui/cn";
 import {
@@ -86,10 +87,13 @@ function OverlayEntry({
 export function AppSidebar({ product }: { product: "studio" | "chat" }) {
   const { t } = useTranslation();
   // On a phone the navigation is a sheet over the page: once a link has taken the user somewhere,
-  // the sheet would only hide where they went. Desktop keeps its own, remembered, open state.
+  // the sheet would only hide where they went, unless it was a product tab, which only swaps the
+  // sheet's content (`lib/drawer-navigation.ts`). Desktop keeps its own, remembered, open state.
   const { setOpenMobile } = useSidebar();
-  const { key } = useLocation();
-  useEffect(() => setOpenMobile(false), [key, setOpenMobile]);
+  const { key, state } = useLocation();
+  useEffect(() => {
+    if (!keepsDrawerOpen(state)) setOpenMobile(false);
+  }, [key, state, setOpenMobile]);
   // The catalogue is drawn only when its route admits the caller (`ROUTE_ACCESS`). It names no
   // space, so « Tous les espaces » opens it as it is: its add menu picks the space per package.
   const canReach = useCanReach();

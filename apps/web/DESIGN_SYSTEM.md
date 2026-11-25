@@ -111,7 +111,10 @@ they start with `packages/` or `e2e/`.
 - **The sidebar is the whole screen on a phone**: its first row is the organization switcher, as
   wide as its names with its chevrons right after them (the sidebar's width from `md` up), then at
   the row's end the notification bell (its list rises from the bottom, as every phone menu does)
-  and the close button, both 44 px. Then the Studio/Chat switch and the product's navigation. In the chat: "Nouvelle
+  and the close button, both 44 px. Then the Studio/Chat switch and the product's navigation.
+  Following a link folds the sheet, except the Studio/Chat switch: it swaps the sheet's content and
+  leaves it open (`lib/drawer-navigation.ts`), while the page behind moves to the product's landing
+  (Studio's home, a new conversation), so closing it without a choice still lands somewhere. In the chat: "Nouvelle
   conversation" (a left-aligned row with its icon in a round tile, like the conversations below)
   with the search as a magnifier at the end of that row, which unfolds a filled field (no border)
   under it, closed by its X or by a tap elsewhere while empty, then the recent conversations (one
