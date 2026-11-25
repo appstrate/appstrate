@@ -45,7 +45,7 @@ export type CallSpace =
 
 type SpacePolicy = Pick<
   OrgWideSpaces,
-  "reachable" | "bounded" | "originSpaceId" | "orgPermissions" | "spaceChoice"
+  "reachable" | "bounded" | "originSpaceId" | "orgPermissions"
 >;
 
 /** The resource a body or query addresses, before applying the caller's space policy. */
@@ -88,22 +88,12 @@ export function isInlineRunSource(rule: CatalogOperation["spaceScope"] | undefin
   );
 }
 
-export function chosenCallSpace(name: unknown, args: Record<string, unknown>, policy: SpacePolicy) {
-  const choice = policy.spaceChoice;
-  return choice &&
-    choice.tool === name &&
-    (name !== "invoke_operation" || choice.operationId === args.operation_id)
-    ? choice.spaceId
-    : undefined;
-}
-
 export function resolveCallSpace(
   name: unknown,
   args: Record<string, unknown>,
   policy: SpacePolicy,
 ): CallSpace {
-  const chosen = chosenCallSpace(name, args, policy);
-  const explicit = args.space_id === undefined ? chosen : args.space_id;
+  const explicit = args.space_id;
   const destination = (personal = false) =>
     explicit !== undefined
       ? explicit

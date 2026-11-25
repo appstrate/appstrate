@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Removed
+
+- **`SPACE_CHOICE_META_KEY`** — BREAKING (`@appstrate/core/mcp-spaces`). An MCP call that needs a
+  space and names none is refused with the eligible spaces in the refusal alone (`accepted`, and
+  by name in `error`): the chat no longer renders a picker from result metadata, its model asks
+  the user.
+
 ## [18.0.0] — 2026-11-24
 
 ### Added

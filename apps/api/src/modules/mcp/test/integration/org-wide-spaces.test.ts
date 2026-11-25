@@ -20,7 +20,7 @@ import { seedApiKey, seedSpace, seedSpaceMember } from "../../../../../test/help
 import { MCP_ACCEPT, mcpRpc, type JsonRpcEnvelope } from "../../../../../test/helpers/mcp.ts";
 import { registerTestPlatformApp } from "../../../../../test/helpers/platform-app.ts";
 import { drainAudits } from "../../../../services/audit.ts";
-import { OPERATION_SPACES_META_KEY, SPACE_CHOICE_META_KEY } from "@appstrate/core/mcp-spaces";
+import { OPERATION_SPACES_META_KEY } from "@appstrate/core/mcp-spaces";
 
 const app = getTestApp();
 await registerTestPlatformApp();
@@ -243,7 +243,7 @@ describe("mcp org-wide connection", () => {
       prompt: "Summarize the request.",
     };
     const missing = await call("invoke_operation", { operation_id, body: { source } });
-    expect(missing.result?._meta).toMatchObject({ [SPACE_CHOICE_META_KEY]: [gestion.id] });
+    expect(payload(missing).data.accepted).toEqual([gestion.id]);
 
     const personal = await seedSpace({
       orgId: headers["X-Org-Id"]!,
@@ -360,9 +360,7 @@ describe("mcp org-wide connection", () => {
         code: "missing_argument",
         arguments: ["space_id"],
       });
-      expect(missing.result?._meta).toMatchObject({
-        [SPACE_CHOICE_META_KEY]: expect.arrayContaining([gestion.id]),
-      });
+      expect(payload(missing).data.accepted).toEqual(expect.arrayContaining([gestion.id]));
       const resolved = await call("invoke_operation", { operation_id: id, space_id: gestion.id });
       expect(payload(resolved).data).toMatchObject({
         status: 200,

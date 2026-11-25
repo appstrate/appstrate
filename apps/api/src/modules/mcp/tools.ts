@@ -140,7 +140,6 @@ import { buildPackageFileTools } from "./package-file-tools.ts";
 import {
   ACTIVE_SPACES_META_KEY,
   OPERATION_SPACES_META_KEY,
-  SPACE_CHOICE_META_KEY,
   describeSpace,
   projectActiveInSpaces,
 } from "@appstrate/core/mcp-spaces";
@@ -150,7 +149,6 @@ import {
   withOperationTarget,
   isInlineRunSource,
   effectiveOperationScope,
-  chosenCallSpace,
   TOOL_SPACE_RULES,
 } from "./call-space.ts";
 import { forbidden, notFound } from "../../lib/errors.ts";
@@ -2749,20 +2747,6 @@ function withSpaceArgument(
     descriptor,
     handler: async (args, extra) => {
       const resolved = resolveCallSpace(name, args, spaces);
-      const chosen = chosenCallSpace(name, args, spaces);
-      if (
-        chosen !== undefined &&
-        ((args.space_id !== undefined && args.space_id !== chosen) ||
-          (resolved.kind === "space" &&
-            resolved.target !== undefined &&
-            resolved.target !== chosen))
-      ) {
-        return refusalResult({
-          code: "space_mismatch",
-          error: "The call must use the space the user chose.",
-          arguments: ["space_id"],
-        });
-      }
       const entered =
         resolved.kind !== "none" && (resolved.kind === "space" || resolved.id !== undefined);
       const need = act === "runs" && args.kind === "inline" ? "composes" : act;
@@ -2796,11 +2780,10 @@ function withSpaceArgument(
               error: "No reachable space grants this operation.",
               granted_in: [],
             });
-          const missing = spaceArgumentRefusal({ ...spaces, reachable: candidates }, resolved.id)!;
-          return {
-            ...refusalResult(missing),
-            _meta: { [SPACE_CHOICE_META_KEY]: candidates.map((s) => s.id) },
-          };
+          // The model asks the user which of these spaces, then calls again with it.
+          return refusalResult(
+            spaceArgumentRefusal({ ...spaces, reachable: candidates }, resolved.id)!,
+          );
         }
       }
       if (entered || (name === "invoke_operation" && need === "invokes")) {
@@ -2846,9 +2829,7 @@ function withSpaceArgument(
         result._meta?.[OPERATION_SPACES_META_KEY] !== undefined
       )
         return result;
-      const meta: Record<string, unknown> = { ...result._meta, [OPERATION_SPACES_META_KEY]: ids };
-      if (name === "call_integration_tool") delete meta[SPACE_CHOICE_META_KEY];
-      return { ...result, _meta: meta };
+      return { ...result, _meta: { ...result._meta, [OPERATION_SPACES_META_KEY]: ids } };
     },
   };
 }
