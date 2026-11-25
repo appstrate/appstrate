@@ -9,6 +9,7 @@
 import { describe, expect, it, spyOn } from "bun:test";
 import { QueryClient } from "@tanstack/react-query";
 import { installFakeStorage } from "../../test/fake-storage.ts";
+import { STUDIO_PERMISSION } from "../../lib/route-access.ts";
 
 installFakeStorage({
   __APP_CONFIG__: { features: {}, trustedOrigins: [] },
@@ -85,11 +86,12 @@ describe("the products toggle", () => {
       const queryClient = new QueryClient();
       queryClient.setQueryData(["orgs"], [ORG]);
       // Two spaces reading runs offer the mode; the other one is where the chat acts.
+      // Every preset opens the Studio.
       const space = (id: string, permissions: string[]) => ({
         id,
         object: "space",
         access: "member",
-        permissions,
+        permissions: [STUDIO_PERMISSION, ...permissions],
         personal: false,
         isDefault: id === "spc_a",
         name: id,
@@ -146,5 +148,59 @@ describe("the products toggle", () => {
     const outOfMode = tabs(false, chatter, true);
     expect(outOfMode).toContain('aria-label="1 conversation non lue"');
     expect(outOfMode).not.toContain("3 conversations non lues");
+  });
+
+  it("is not drawn for a role without the Studio: the chat is its one product", () => {
+    // Same harness, every space withholding the Studio: the Studio tab goes, and a toggle of one is not drawn.
+    const tabs = (overview: boolean) => {
+      const stubs = [
+        spyOn(orgStore, "getInitialState").mockReturnValue({
+          ...orgStore.getInitialState(),
+          id: "org_1",
+        }),
+        spyOn(spaceStore, "getInitialState").mockReturnValue({
+          ...spaceStore.getInitialState(),
+          id: "spc_a",
+        }),
+        spyOn(authStore, "getInitialState").mockReturnValue({
+          ...authStore.getInitialState(),
+          user: { id: "u_1", email: "u@example.test", emailVerified: true },
+        }),
+        spyOn(overviewStore, "getInitialState").mockReturnValue({
+          ...overviewStore.getInitialState(),
+          chosen: overview ? { "u_1:org_1": true } : {},
+        }),
+      ];
+      const config = window.__APP_CONFIG__;
+      window.__APP_CONFIG__ = { ...config, features: { ...config.features, chat: true } };
+      const queryClient = new QueryClient();
+      queryClient.setQueryData(["orgs"], [ORG]);
+      const chatOnly = ["runs:read", "chat:read", "chat:write", "mcp:read", "agents:run"];
+      queryClient.setQueryData(
+        ["get", "/api/spaces", { params: { header: { "X-Org-Id": "org_1" } } }],
+        {
+          object: "list",
+          hasMore: false,
+          data: ["spc_a", "spc_b"].map((id) => ({
+            id,
+            object: "space",
+            access: "member",
+            permissions: chatOnly,
+            personal: false,
+            isDefault: id === "spc_a",
+            name: id,
+            role: null,
+          })),
+        },
+      );
+      try {
+        return render(<ProductTabs />, { queryClient });
+      } finally {
+        window.__APP_CONFIG__ = config;
+        for (const stub of stubs) stub.mockRestore();
+      }
+    };
+    expect(tabs(false)).toBe("");
+    expect(tabs(true)).toBe("");
   });
 });

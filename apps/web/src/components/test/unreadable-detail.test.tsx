@@ -111,8 +111,11 @@ describe("UnreadableDetail", () => {
           }).queryKey,
           {
             data: [
-              { ...SPACES[0], permissions: ["agents:run"] },
-              { ...SPACES[1], permissions: [readable ? "agents:read" : "agents:run"] },
+              { ...SPACES[0], permissions: ["studio:read", "agents:run"] },
+              {
+                ...SPACES[1],
+                permissions: ["studio:read", readable ? "agents:read" : "agents:run"],
+              },
             ],
           },
         );

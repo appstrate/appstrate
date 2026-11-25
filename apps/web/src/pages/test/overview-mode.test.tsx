@@ -15,6 +15,7 @@ import { SidebarProvider } from "@appstrate/ui/components/sidebar";
 import { reporter } from "../../test/agent-detail.ts";
 import { installFakeStorage } from "../../test/fake-storage.ts";
 import { paginatedRunsKeys } from "../../lib/query-keys.ts";
+import { STUDIO_PERMISSION } from "../../lib/route-access.ts";
 
 installFakeStorage({
   __APP_CONFIG__: { features: {}, trustedOrigins: [] },
@@ -45,7 +46,7 @@ const space = (id: string, permissions: string[]) => ({
   id,
   object: "space",
   access: "member",
-  permissions,
+  permissions: [STUDIO_PERMISSION, ...permissions],
   personal: false,
   isDefault: id === "spc_a",
   name: id === "spc_a" ? "Studio" : id,

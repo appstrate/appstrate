@@ -6,6 +6,7 @@ import { SidebarProvider } from "@appstrate/ui/components/sidebar";
 import type { components } from "../../api/client.ts";
 import { NavOrg } from "../nav-org.tsx";
 import { memberSpaceClient, renderInSpace, testSpace } from "../../test/space-context.ts";
+import { STUDIO_PERMISSION } from "../../lib/route-access.ts";
 import i18n, { i18nReady } from "../../i18n.ts";
 import { installFakeStorage } from "../../test/fake-storage.ts";
 
@@ -35,7 +36,8 @@ function navFor(
     color: null,
     role: "owner",
     deleting_at: null,
-    permissions,
+    // Synthetic: the set stands for a space's, which every preset opens the Studio in.
+    permissions: [STUDIO_PERMISSION, ...permissions],
     createdAt: "2026-09-05T00:00:00Z",
   };
   queryClient.setQueryData(["orgs"], [org]);

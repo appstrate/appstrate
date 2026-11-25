@@ -5,9 +5,9 @@ import { usePermissions, useRowSpaceGrants } from "./use-permissions";
 import { useAppConfig } from "./use-app-config";
 import { useOverviewMode } from "./use-overview-mode";
 import { useSpaces } from "./use-spaces";
-import { routeVerdict, type RoutePath } from "../lib/route-access";
+import { routeVerdict, STUDIO_PERMISSION, type RoutePath } from "../lib/route-access";
 import { routeOf } from "../lib/route-match";
-import { spanningRouteVerdict } from "../lib/space-lists";
+import { spacesWhere, spanningRouteVerdict } from "../lib/space-lists";
 
 /**
  * The verdict on a declared route, read by `RouteGate` and every link: the working space's
@@ -63,6 +63,20 @@ export function useCanReachInSpace(): (target: string, spaceId: string | undefin
       return routeVerdict(route, gate, features, space.personal) === "granted";
     },
     [canReach, grants, features, spaces],
+  );
+}
+
+/**
+ * Whether the reader reaches the Studio: the working space grants it, or in « Tous les espaces »
+ * some space does, as the mode's lists open where one admits them.
+ */
+export function useStudioReach(): boolean {
+  const { can } = usePermissions();
+  const { on } = useOverviewMode();
+  const { data: spaces } = useSpaces();
+  return (
+    can(STUDIO_PERMISSION) ||
+    (on && spacesWhere(spaces, (gate) => gate(STUDIO_PERMISSION)).length > 0)
   );
 }
 

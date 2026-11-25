@@ -220,8 +220,9 @@ export interface ChatHost {
   /**
    * Where an in-app `path` opens for a row of `spaceId`: the host names the space in the link when
    * it is not the working one (its `?enterSpace=` convention), else returns `path` unchanged.
+   * `undefined` when the host would not open it for this reader: the chat then shows no link.
    */
-  linkInSpace: (path: string, spaceId: string | undefined) => string;
+  linkInSpace: (path: string, spaceId: string | undefined) => string | undefined;
   /**
    * A hook returning a space's plain name by id (`undefined` for one the caller does not reach),
    * for the accessible names that carry a space's name where `renderSpaces`' node would not.
