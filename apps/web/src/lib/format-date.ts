@@ -1,9 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import {
-  formatAge as formatAgeIn,
-  formatRelativeTime as formatRelativeTimeIn,
-} from "@appstrate/core/format";
+import { formatRelativeTime as formatRelativeTimeIn } from "@appstrate/core/format";
 import i18n from "../i18n";
 
 type DateGranularity = "date" | "datetime";
@@ -48,11 +45,6 @@ export function formatRelativeTime(
   style?: Intl.RelativeTimeFormatStyle,
 ): string {
   return formatRelativeTimeIn(Date.parse(at), now, i18n.language, style);
-}
-
-/** `formatAge` of `@appstrate/core/format` on an ISO date, in the interface's language. */
-export function formatAge(at: string, now: number): string {
-  return formatAgeIn(Date.parse(at), now, i18n.language);
 }
 
 /**

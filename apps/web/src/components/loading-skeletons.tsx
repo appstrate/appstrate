@@ -12,7 +12,7 @@
 
 import {
   ComposerSkeleton,
-  ConversationRowSkeleton,
+  ConversationListSkeleton,
   ConversationSkeleton,
 } from "@appstrate/module-chat/conversation-skeleton";
 import { Card } from "@appstrate/ui/components/card";
@@ -31,15 +31,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import type { PackageType } from "@appstrate/core/validation";
 import { PACKAGE_TYPE_ROUTE_SEGMENT } from "@appstrate/core/package-files";
 import { canReadRuns } from "@appstrate/core/permissions";
-import { Plus } from "lucide-react";
 import { Skeleton } from "@appstrate/ui/components/skeleton";
-import {
-  SidebarGroup,
-  SidebarGroupLabel,
-  SidebarMenu,
-  SidebarMenuButton,
-  SidebarMenuItem,
-} from "@appstrate/ui/components/sidebar";
 import { cn } from "@appstrate/ui/cn";
 import { usePageBreadcrumb } from "../hooks/use-overlay-breadcrumb";
 import type { BreadcrumbEntry } from "../stores/breadcrumb-store";
@@ -1034,37 +1026,8 @@ export function ChatConversationSkeleton() {
   );
 }
 
-/**
- * The conversation list's shape, drawn while its permissions and chunk load:
- * the "new conversation" row (the chat's primary action, so it is real, not
- * grey) above a group of row skeletons — what `ChatConversationList` draws for a writer, the one
- * it draws « new conversation » for: the title and the space tiles on one line, drawn by the
- * module's own `ConversationRowSkeleton`.
- */
+/** The conversation list's shape while its permissions and chunk load: the module's own. */
 export function ChatSidebarSkeleton() {
   const { t } = useTranslation("chat");
-  return (
-    <>
-      <SidebarGroup className="pb-0">
-        <SidebarMenu>
-          <SidebarMenuItem>
-            <SidebarMenuButton disabled tooltip={t("threads.new")}>
-              <Plus />
-              <span>{t("threads.new")}</span>
-            </SidebarMenuButton>
-          </SidebarMenuItem>
-        </SidebarMenu>
-      </SidebarGroup>
-      <SidebarGroup className="min-h-0 flex-1 group-data-[collapsible=icon]:hidden">
-        <SidebarGroupLabel className="text-sm md:text-xs">{t("threads.title")}</SidebarGroupLabel>
-        <SidebarMenu>
-          {Array.from({ length: 5 }, (_, i) => (
-            <SidebarMenuItem key={i}>
-              <ConversationRowSkeleton oneLine />
-            </SidebarMenuItem>
-          ))}
-        </SidebarMenu>
-      </SidebarGroup>
-    </>
-  );
+  return <ConversationListSkeleton newConversation={t("threads.new")} />;
 }

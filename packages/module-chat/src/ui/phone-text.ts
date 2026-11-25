@@ -43,6 +43,14 @@ export const COMPOSER_TOOLS_CLASS = "min-w-0 flex-1 max-md:flex-none md-short:ba
 /** "New conversation" in the sidebar: a row aligned left like the conversations below it on a phone. */
 export const NEW_CONVERSATION_CLASS = "max-md:justify-start max-md:gap-3 max-md:font-medium";
 
+/** The phone's « new conversation » icon, in a round tile as the rows below it have theirs. */
+export const NEW_CONVERSATION_ICON_CLASS =
+  "max-md:bg-sidebar-accent max-md:flex max-md:size-8 max-md:items-center max-md:justify-center max-md:rounded-full md:contents";
+
+/** The phone's search toggle, beside « new conversation »: a thumb's 44px. */
+export const SEARCH_TOGGLE_CLASS =
+  "text-sidebar-foreground/70 flex size-11 items-center justify-center rounded-md md:hidden";
+
 /** The conversation search field of the sidebar (a filled field below `md`, 44 px tall there). */
 export const SEARCH_INPUT_CLASS =
   "pr-9 pl-7 text-base max-md:h-11 max-md:rounded-xl max-md:border-0 max-md:bg-muted max-md:focus-visible:ring-0 max-md:focus-visible:ring-offset-0 max-md:pl-10 max-md:shadow-none md:h-8 md:pr-7 md:py-0 md:text-base [&::-webkit-search-cancel-button]:hidden";
@@ -58,9 +66,17 @@ export const ASSISTANT_MESSAGE_CLASS = "text-foreground text-base leading-relaxe
 export const MARKDOWN_PROSE_CLASS =
   "prose prose-base md:prose-sm dark:prose-invert max-w-none break-words [&_code]:text-[0.85em] [&_pre>code]:text-[1em] [&_pre]:rounded-md [&_pre]:p-3 [&_pre]:text-sm md:[&_pre]:text-xs";
 
+/**
+ * The conversation's side padding. The host's context panel floats over the thread's right side and
+ * publishes the width it takes as `--chat-context-inset` (unset while it is closed): the thread keeps
+ * its full width, so its scrollbar stays at the window's right edge, and reserves that width on its
+ * right, so the column stays centered in what the panel leaves.
+ */
+export const THREAD_SIDE_PADDING_CLASS =
+  "pl-4 pr-[calc(1rem+var(--chat-context-inset,0px))] duration-base ease-surface transition-[padding]";
+
 /** The transcript scroller: it keeps its scroll to itself (no rubber-band or pull-to-refresh of the page). */
-export const THREAD_VIEWPORT_CLASS =
-  "relative flex min-h-0 flex-1 flex-col items-center overflow-y-auto overscroll-contain px-4 pt-6";
+export const THREAD_VIEWPORT_CLASS = `relative flex min-h-0 flex-1 flex-col items-center overflow-y-auto overscroll-contain pt-6 ${THREAD_SIDE_PADDING_CLASS}`;
 
 /** The sticky footer holding the composer; `group/footer` lets the disclaimer react to the focus. */
 export const THREAD_FOOTER_CLASS =
