@@ -3,7 +3,8 @@
 /**
  * Which parts of an assistant turn fold into the thought block
  * (`thought-group.ts`): reasoning and the agent's tool calls do, errors
- * included; the cards the user acts on or reads stay out.
+ * included, and so does a created package (its link closes the block); the
+ * cards the user acts on stay out.
  */
 
 import { describe, expect, it } from "bun:test";
@@ -12,6 +13,7 @@ import {
   THOUGHT_GROUP,
   groupThought,
   isStandaloneToolCall,
+  stepLabel,
 } from "../src/ui/thought-group.ts";
 
 const complete = { type: "complete" } as const;
@@ -62,27 +64,28 @@ describe("thought block grouping", () => {
     expect(isStandaloneToolCall(call("run_and_wait", {}, running))).toBe(true);
   });
 
-  it("keeps a created package out of the block once the call succeeds", () => {
+  it("folds a created package into the block: its link is the block's last row", () => {
     const created = call(
       "invoke_operation",
       { operation_id: "createAgent" },
       { result: mcp({ status: 201, body: { id: "@acme/report" } }) },
     );
-    expect(isStandaloneToolCall(created)).toBe(true);
+    expect(isStandaloneToolCall(created)).toBe(false);
+    expect(groupThought(created)).toEqual([THOUGHT_GROUP]);
     const imported = call(
       "import_package_file",
       {},
-      {
-        result: mcp({ root_package_id: "@acme/report", root_type: "agent" }),
-      },
+      { result: mcp({ root_package_id: "@acme/report", root_type: "agent" }) },
     );
-    expect(isStandaloneToolCall(imported)).toBe(true);
-    // Still running: nothing created yet, it is a step.
-    expect(
-      isStandaloneToolCall(
-        call("invoke_operation", { operation_id: "createAgent" }, { status: { type: "running" } }),
-      ),
-    ).toBe(false);
+    expect(isStandaloneToolCall(imported)).toBe(false);
+  });
+
+  it("labels a step by its verb and target, and leaves reasoning unlabelled", () => {
+    expect(stepLabel({ type: "reasoning" })).toEqual({});
+    const read = stepLabel(call("invoke_operation", { operation_id: "listAgents" }));
+    expect(read.labelKey).toBeDefined();
+    expect(read.target).toBe("listAgents");
+    expect(stepLabel(call("some_tool")).label).toBe("some_tool");
   });
 
   it("keeps a call waiting for the user out of the block", () => {

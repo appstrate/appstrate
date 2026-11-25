@@ -79,6 +79,7 @@
   "tool.search": "Search",
   "tool.describe": "Description",
   "tool.stepFailed": "failed",
+  "tool.stepDone": "succeeded",
   "tool.detail.input": "Input",
   "tool.detail.output": "Output",
   "tool.detail.metadata": "Metadata",

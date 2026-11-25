@@ -79,6 +79,7 @@
   "tool.search": "Recherche",
   "tool.describe": "Description",
   "tool.stepFailed": "échec",
+  "tool.stepDone": "réussi",
   "tool.detail.input": "Entrée",
   "tool.detail.output": "Sortie",
   "tool.detail.metadata": "Métadonnées",

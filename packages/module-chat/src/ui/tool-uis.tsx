@@ -2,18 +2,17 @@
 
 /**
  * Appstrate-specific rich tool cards. Each MCP tool the chat agent calls gets
- * a compact, error-aware row: phase icon + verb icon + label + id, with the
- * HTTP status and duration on the right. The glanceable summary stays inline;
+ * a compact, error-aware row: verb icon + label + id, with the duration and a
+ * status glyph on the right. The glanceable summary stays inline;
  * the full (technical) input/output is shown as raw JSON in a modal opened by
  * clicking the row — parsing arbitrary API payloads into a field table reads
  * worse than monospace JSON, and JSON keeps every field intact.
  *
  * Inside the turn's thought block (`ThoughtGroup`, `reasoning.tsx`) the card is
- * a quiet step row: a failed call there is one the agent works past, so it
- * reads as a muted step (no red, no banner) and its error stays one click away
- * in the raw JSON. Outside the block, a card the user reads (e.g. the package a
- * call created) keeps its border and its inline error. Tone is driven by the
- * actual result (`deriveToolPhase`), not the verb.
+ * a quiet step row whose detail unfolds in place. Everywhere, a failure stays
+ * small: the row ends with a status glyph (a muted check, or a red cross), never
+ * a red border or banner, and the error message reads as muted text. Outcome is
+ * driven by the actual result (`deriveToolPhase`), not the verb.
  *
  * One shared `<ToolCallCard>` does the work; the four `makeAssistantToolUI`
  * registrations are thin wrappers that only pick the icon, label, and id.
@@ -27,6 +26,7 @@ import {
   ArrowUpRightIcon,
   BookOpenIcon,
   BracesIcon,
+  CheckIcon,
   CircleXIcon,
   PencilIcon,
   PlayIcon,
@@ -36,6 +36,7 @@ import {
   UploadIcon,
   ZapIcon,
   type LucideIcon,
+  ChevronRightIcon,
 } from "lucide-react";
 import { formatDuration } from "@appstrate/core/format";
 import { Button } from "@appstrate/ui/components/button";
@@ -45,7 +46,7 @@ import { Modal } from "./modal.tsx";
 import { callSpaceOf } from "./conversation-scope.ts";
 import { useChatHost } from "./runtime-context.ts";
 import { useInThoughtGroup } from "./use-in-thought-group.ts";
-import { INITIATE_CONNECT_OP } from "./thought-group.ts";
+import { INITIATE_CONNECT_OP, OP_LABEL_RULES } from "./thought-group.ts";
 import { JsonView } from "./json-view.tsx";
 import { OAuthConnectCard } from "./oauth-connect-card.tsx";
 import { ChatRunProgressCard } from "./chat-run-progress-card.tsx";
@@ -80,16 +81,11 @@ import {
   type ToolPhase,
 } from "./tool-result.ts";
 
-// Readable label + icon for an Appstrate API operation, by verb prefix — a
-// heuristic, not an exhaustive operationId map (which would rot). The first
+// Readable label + icon for an Appstrate API operation, by verb prefix (the
+// labels in `OP_LABEL_RULES`, the icons here, in the same order). The first
 // match wins; unmatched ops fall back to the neutral `tool.op.other`.
-const OP_RULES: { re: RegExp; labelKey: string; Icon: LucideIcon }[] = [
-  { re: /^(run|trigger|execute|start)/i, labelKey: "tool.op.launch", Icon: PlayIcon },
-  { re: /^(create|post|add|import|upload)/i, labelKey: "tool.op.create", Icon: PlusIcon },
-  { re: /^(update|patch|put|set|rename|configure)/i, labelKey: "tool.op.update", Icon: PencilIcon },
-  { re: /^(delete|remove|cancel|archive)/i, labelKey: "tool.op.delete", Icon: Trash2Icon },
-  { re: /^(list|get|search|find|read)/i, labelKey: "tool.op.read", Icon: SearchIcon },
-];
+const OP_ICONS: LucideIcon[] = [PlayIcon, PlusIcon, PencilIcon, Trash2Icon, SearchIcon];
+const OP_RULES = OP_LABEL_RULES.map((rule, i) => ({ ...rule, Icon: OP_ICONS[i] ?? ZapIcon }));
 
 // assistant-stream ToolCallTiming = { startedAt, completedAt? } (epoch ms;
 // completedAt absent while running).
@@ -101,60 +97,53 @@ function readDurationMs(timing: unknown): number | undefined {
   return undefined;
 }
 
-const BADGE_TONE: Record<ToolPhase, string> = {
-  success: "bg-primary/10 text-primary",
-  error: "bg-destructive/10 text-destructive",
-  running: "bg-muted text-muted-foreground",
-  pending: "bg-muted text-muted-foreground",
-};
-
+/**
+ * The row's right edge: the duration, then one small status glyph once the
+ * call settles (a muted check, or a red cross on failure). The HTTP code is
+ * not shown inline (it is noise once the outcome reads at a glance); it stays
+ * in the glyph's tooltip and in the call's detail.
+ */
 function Meta({
   phase,
   status,
   durationMs,
-  quiet,
 }: {
   phase: ToolPhase;
   status?: number;
   durationMs?: number;
-  quiet: boolean;
 }) {
-  const { lang } = useChatHost();
-  if (status === undefined && durationMs === undefined) return null;
+  const { t, lang } = useChatHost();
+  const settled = phase === "success" || phase === "error";
+  if (!settled && durationMs === undefined) return null;
+  const failed = phase === "error";
+  const Glyph = failed ? CircleXIcon : CheckIcon;
+  const outcome = t(failed ? "tool.stepFailed" : "tool.stepDone");
   return (
-    <span className="flex items-center gap-1.5 text-xs">
-      {status !== undefined ? (
-        <code
-          className={`rounded px-1.5 py-0.5 font-medium ${quiet ? BADGE_TONE.pending : BADGE_TONE[phase]}`}
+    <span className="text-muted-foreground flex shrink-0 items-center gap-1.5 text-xs tabular-nums">
+      {durationMs !== undefined ? <span>{formatDuration(durationMs, lang)}</span> : null}
+      {settled ? (
+        <Glyph
+          role="img"
+          aria-label={outcome}
+          className={`size-3.5 shrink-0 ${failed ? "text-destructive/80" : ""}`}
         >
-          {status}
-        </code>
-      ) : null}
-      {durationMs !== undefined ? (
-        <span className="text-muted-foreground">{formatDuration(durationMs, lang)}</span>
+          <title>{status !== undefined ? `${outcome} (HTTP ${status})` : outcome}</title>
+        </Glyph>
       ) : null}
     </span>
   );
 }
 
 /**
- * Single leading icon per row: the operation's verb icon, tinted by phase
- * (neutral / destructive). While running it is replaced by a spinner. Status is
- * otherwise carried by the HTTP badge, the red border, and the inline error —
- * no separate status icon, so the row shows one coherent glyph. A quiet step
- * row marks a failure with a muted cross instead of red.
+ * Single leading icon per row: the operation's verb icon, always muted (the
+ * outcome is the status glyph on the right). While running it is replaced by
+ * a spinner.
  */
-function LeadIcon({ phase, Icon, quiet }: { phase: ToolPhase; Icon: LucideIcon; quiet: boolean }) {
-  const size = quiet ? "size-3.5" : "size-4";
+function LeadIcon({ phase, Icon }: { phase: ToolPhase; Icon: LucideIcon }) {
   if (phase === "running") {
-    return <Spinner className={`text-muted-foreground shrink-0 ${size}`} />;
+    return <Spinner className="text-muted-foreground size-4 shrink-0" />;
   }
-  if (quiet) {
-    const Glyph = phase === "error" ? CircleXIcon : Icon;
-    return <Glyph className={`text-muted-foreground shrink-0 ${size}`} />;
-  }
-  const tone = phase === "error" ? "text-destructive" : "text-muted-foreground";
-  return <Icon className={`shrink-0 ${size} ${tone}`} />;
+  return <Icon className="text-muted-foreground size-4 shrink-0" />;
 }
 
 function hasContent(value: unknown): boolean {
@@ -179,9 +168,35 @@ function DetailSection({ titleKey, value }: { titleKey: string; value: unknown }
 }
 
 /**
+ * A step's detail, unfolded in place under its row in the thought block: what
+ * the agent sent, what came back, and the error it recovered from, read as
+ * plain text rather than as an alert.
+ */
+function StepDetail({
+  args,
+  unwrapped,
+  errorMsg,
+}: {
+  args: unknown;
+  unwrapped: unknown;
+  errorMsg: string | undefined;
+}) {
+  return (
+    <div className="bg-muted/30 flex flex-col gap-3 border-t px-3 py-2">
+      {errorMsg ? (
+        <div className="text-muted-foreground text-xs break-words">{errorMsg}</div>
+      ) : null}
+      <DetailSection titleKey="tool.detail.input" value={args} />
+      <DetailSection titleKey="tool.detail.output" value={unwrapped} />
+    </div>
+  );
+}
+
+/**
  * Compact clickable tool row. Inline: phase icon, verb icon, label, id, and
  * HTTP/duration meta (+ an inline error banner on failure, outside the thought
- * block). Click opens a modal with the raw input / output / metadata JSON.
+ * block). Click opens a modal with the raw input / output / metadata JSON; in
+ * the thought block it unfolds the step's input and output in place instead.
  */
 export function ToolCallCard({
   phase,
@@ -223,7 +238,7 @@ export function ToolCallCard({
   const unwrapped = React.useMemo(() => unwrapMcpResult(result), [result]);
   const status = httpStatusOf(unwrapped);
   const durationMs = readDurationMs(timing);
-  const errorMsg = phase === "error" && !quiet ? extractErrorMessage(unwrapped) : undefined;
+  const errorMsg = phase === "error" ? extractErrorMessage(unwrapped) : undefined;
   const meta = definedEntries({
     tool_call_id: toolCallId,
     is_error: isError,
@@ -231,14 +246,11 @@ export function ToolCallCard({
     duration_ms: durationMs,
   });
 
-  const border = phase === "error" && !quiet ? "border-destructive/40" : "";
   return (
     <div
       data-testid="tool-call"
       data-phase={phase}
-      className={
-        quiet ? "w-full" : `bg-card text-card-foreground my-3 w-full rounded-lg border ${border}`
-      }
+      className={quiet ? "w-full" : "bg-card text-card-foreground my-3 w-full rounded-lg border"}
     >
       {/* Fixed-height header row (h-9 card, h-7 step): the HTTP badge (taller
           than the text line) and the duration appear when the result lands — a
@@ -248,27 +260,33 @@ export function ToolCallCard({
         type="button"
         className={
           quiet
-            ? "hover:bg-muted/50 text-muted-foreground hover:text-foreground flex h-7 w-full items-center gap-2 rounded-md px-2 text-left text-xs"
+            ? "hover:bg-muted/40 text-muted-foreground hover:text-foreground group/step flex h-9 w-full items-center justify-start gap-2 px-3 text-left text-sm font-normal"
             : "hover:bg-muted/50 flex h-9 w-full items-center gap-2 rounded-lg px-3 text-left text-sm"
         }
-        onClick={() => setOpen(true)}
+        aria-expanded={quiet ? open : undefined}
+        onClick={() => setOpen((current) => (quiet ? !current : true))}
       >
-        <LeadIcon phase={phase} Icon={Icon} quiet={quiet} />
+        <LeadIcon phase={phase} Icon={Icon} />
         <span className="flex min-w-0 flex-1 items-center gap-2 truncate">
-          <span className={quiet ? "" : "font-medium"}>{title}</span>
+          <span className={quiet ? "shrink-0" : "font-medium"}>{title}</span>
           {idText ? <code className="text-muted-foreground truncate text-xs">{idText}</code> : null}
-          {quiet && phase === "error" ? (
-            <span className="sr-only">{t("tool.stepFailed")}</span>
+          {quiet ? (
+            <ChevronRightIcon
+              className={`size-3.5 shrink-0 transition-transform ${open ? "rotate-90" : ""}`}
+            />
           ) : null}
         </span>
         <CallSpace spaceId={spaceId} />
-        <Meta phase={phase} status={status} durationMs={durationMs} quiet={quiet} />
+        <Meta phase={phase} status={status} durationMs={durationMs} />
       </button>
-      {errorMsg ? (
-        <div className="text-destructive border-t px-3 py-2 text-xs break-words">{errorMsg}</div>
+      {errorMsg && !quiet ? (
+        <div className="text-muted-foreground border-t px-3 py-2 text-xs break-words">
+          {errorMsg}
+        </div>
       ) : null}
       {footer}
-      {open ? (
+      {quiet && open ? <StepDetail args={args} unwrapped={unwrapped} errorMsg={errorMsg} /> : null}
+      {!quiet && open ? (
         <Modal
           title={
             <span className="flex items-center gap-2">
@@ -475,6 +493,7 @@ function CreatedPackageLink({
   spaceId: string | undefined;
 }) {
   const { t, onPackagesChanged, linkInSpace } = useChatHost();
+  const quiet = useInThoughtGroup();
   React.useEffect(() => {
     if (announcedPackageWrites.has(toolCallId)) return;
     announcedPackageWrites.add(toolCallId);
@@ -483,11 +502,17 @@ function CreatedPackageLink({
   return (
     <a
       href={linkInSpace(packagePageHref(created), spaceId)}
-      className="text-primary hover:bg-muted/50 flex items-center gap-1.5 border-t px-3 py-2 text-xs font-medium"
+      className={
+        quiet
+          ? "text-primary hover:bg-muted/40 flex h-9 items-center gap-2 border-t px-3 text-sm"
+          : "text-primary hover:bg-muted/50 flex items-center gap-1.5 border-t px-3 py-2 text-xs font-medium"
+      }
     >
-      <ArrowUpRightIcon className="size-3.5 shrink-0" />
+      <ArrowUpRightIcon className={`shrink-0 ${quiet ? "size-4" : "size-3.5"}`} />
       {t("tool.packageCreated.open")}
-      <code className="text-muted-foreground truncate font-normal">{created.packageId}</code>
+      <code className="text-muted-foreground truncate text-xs font-normal">
+        {created.packageId}
+      </code>
     </a>
   );
 }

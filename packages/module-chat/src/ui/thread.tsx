@@ -39,9 +39,11 @@ import { turnLimitReached } from "@appstrate/core/chat-turn-metadata";
 import { Alert, AlertDescription } from "@appstrate/ui/components/alert";
 import { Button } from "@appstrate/ui/components/button";
 import { cn } from "@appstrate/ui/cn";
-import { MarkdownText, ReasoningText } from "./markdown-text.tsx";
-import { ThinkingStatus, ThoughtGroup } from "./reasoning.tsx";
+import { MarkdownText } from "./markdown-text.tsx";
+import { ReasoningStep, ThinkingStatus, ThoughtGroup } from "./reasoning.tsx";
 import { THOUGHT_GROUP, groupThought, isThoughtPart } from "./thought-group.ts";
+import { useTurnElapsedMs } from "./use-turn-elapsed.ts";
+import { formatDuration } from "@appstrate/core/format";
 import { TurnSpaceChoice } from "./space-choice.tsx";
 import { ToolFallback } from "./tool-fallback.tsx";
 import {
@@ -861,15 +863,27 @@ export function UserMessage() {
 /**
  * The trailing dots while the turn runs with nothing else moving: no part yet,
  * or a standalone card at the tail. A thought block at the tail carries its own
- * dots, so the turn keeps one status region. `GroupedParts` only emits the
- * indicator while the message runs.
+ * dots in its header, so the turn keeps one status region. `GroupedParts` only
+ * emits the indicator while the message runs.
  */
 function ThinkingIndicator() {
   const tailIsThought = useAuiState((s) => {
     const last = s.message.parts[s.message.parts.length - 1];
     return last !== undefined && isThoughtPart(last);
   });
-  return tailIsThought ? null : <ThinkingStatus />;
+  const { t, lang } = useChatHost();
+  const elapsedMs = useTurnElapsedMs(!tailIsThought);
+  if (tailIsThought) return null;
+  // The line a thought block's header takes over once its first step lands.
+  return (
+    <div className="text-muted-foreground flex h-7 items-center gap-2 text-sm tabular-nums">
+      <ThinkingStatus />
+      <span>{t("reasoning.running")}</span>
+      {elapsedMs !== undefined && elapsedMs >= 1000 ? (
+        <span>{formatDuration(elapsedMs, lang)}</span>
+      ) : null}
+    </div>
+  );
 }
 
 /** Always shown, not on hover, so a mid-conversation model switch is visible. */
@@ -987,7 +1001,7 @@ const renderAssistantPart: AssistantPartRender = ({ part, children }) => {
     case "text":
       return <MarkdownText />;
     case "reasoning":
-      return <ReasoningText />;
+      return <ReasoningStep text={"text" in part ? part.text : ""} />;
     case "image":
       return <MessagePartPrimitive.Image />;
     case "tool-call":

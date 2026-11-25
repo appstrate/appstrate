@@ -888,11 +888,17 @@ is shared by the route fallback and the history wait. The chat sits inside the
 shared shell (its list: `modules/chat/chat-sidebar.tsx`). It
 uses `@appstrate/ui` primitives and the host's `t` (`chat.json`), it cannot
 import from `apps/web`. The agent's reasoning and tool calls fold into one
-collapsible thought block per run of steps (`reasoning.tsx`, rule in
-`thought-group.ts`), each call a quiet `ToolCallCard` row (`tool-uis.tsx`) whose
-failure is muted, not red: red is for the error that ends the turn. What the
-user acts on or reads stays out of the block: the connect card, a run started
-from the chat (a `ChatRunProgressCard`), the package a call created. The model picker is `model-select.tsx`, whose list is the shared `ModelPickerList` (section 5). The thread sits on the
+thought block per run of steps (`reasoning.tsx`, rule in `thought-group.ts`): a
+plain header line (the spark loader, the step in progress, the step count, the
+time last), folded until the reader opens it, over one card with a row per step
+that unfolds in place. Each call is a quiet `ToolCallCard` row (`tool-uis.tsx`)
+ending in a status glyph, a muted check or a small red cross, never an HTTP code
+(it is in the glyph's tooltip), a red border or a red banner: a step's error
+reads as muted text in its detail. The package a call created is the block's
+last row (its link). What the user acts on stays out of the block: the connect
+card, a run started from the chat (a `ChatRunProgressCard`). The spark (`.spark`
+in `styles.css`) is the one working indicator: four coral balls whose diagonals
+swap in turn, pure CSS, still under reduced motion. The model picker is `model-select.tsx`, whose list is the shared `ModelPickerList` (section 5). The thread sits on the
 canvas, surfaces on it are white cards, and heights hold across states (no jump).
 The context panel (`modules/chat/conversation-sidebar.tsx`) is transparent on that
 canvas and floats beside the thread: its cards and its previewed file are `Card` /
