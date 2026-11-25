@@ -17,6 +17,7 @@ import {
 } from "lucide-react";
 import { Button } from "@appstrate/ui/components/button";
 import { cn } from "@appstrate/ui/cn";
+import { IDENTITY_COLOR_CLASSES } from "@appstrate/ui/identity-colors";
 import { $api } from "../api/client";
 import { useAuth } from "../hooks/use-auth";
 import { useCanReach } from "../hooks/use-can-reach";
@@ -41,6 +42,16 @@ import { PackageIcon } from "./package-icon";
 
 /** How long a card stays on top before the next one takes its place. */
 const TIP_ROTATION_MS = 6000;
+
+/** How long a card takes to leave the top: `duration-base`, the transition it runs. */
+const TIP_LEAVE_MS = 250;
+
+/** The tile colour of each package type on the catalogue card. */
+const CATALOGUE_TILES = [
+  { type: "agent", color: "violet" },
+  { type: "skill", color: "amber" },
+  { type: "integration", color: "emerald" },
+] as const;
 
 /** Literal keys, so the locale check sees every one of them. */
 const TIP_COPY: Record<
@@ -156,16 +167,28 @@ function TipStack({
   const [hovered, setHovered] = useState(false);
   const [focused, setFocused] = useState(false);
   const [turnedByHand, setTurnedByHand] = useState(false);
+  // The card sliding off the top, drawn above the stack until it has faded out.
+  const [leaving, setLeaving] = useState<SidebarTipId | null>(null);
   const count = tips.length;
   const top = Math.max(0, topId === null ? 0 : tips.indexOf(topId));
+  const current = tips[top]!;
   const next = tips[(top + 1) % count]!;
   const rotating = count > 1 && !hovered && !focused && !turnedByHand;
 
   useEffect(() => {
     if (!rotating) return;
-    const timer = setTimeout(() => setTopId(next), TIP_ROTATION_MS);
+    const timer = setTimeout(() => {
+      setLeaving(current);
+      setTopId(next);
+    }, TIP_ROTATION_MS);
     return () => clearTimeout(timer);
-  }, [rotating, next]);
+  }, [rotating, current, next]);
+
+  useEffect(() => {
+    if (!leaving) return;
+    const timer = setTimeout(() => setLeaving(null), TIP_LEAVE_MS);
+    return () => clearTimeout(timer);
+  }, [leaving]);
 
   const onBlur = (event: FocusEvent<HTMLElement>) => {
     if (!event.currentTarget.contains(event.relatedTarget)) setFocused(false);
@@ -191,6 +214,7 @@ function TipStack({
           className="focus-visible:ring-ring absolute inset-x-2 top-0 z-40 h-2 cursor-pointer rounded-t-lg outline-none group-hover/tips:h-7 focus-visible:ring-2"
           onClick={() => {
             setTurnedByHand(true);
+            setLeaving(current);
             setTopId(next);
           }}
         />
@@ -198,6 +222,7 @@ function TipStack({
       <div className="grid grid-cols-[minmax(0,1fr)]">
         {tips.map((id, index) => {
           const depth = (index - top + count) % count;
+          const isLeaving = id === leaving && depth !== 0;
           return (
             <div
               key={id}
@@ -205,10 +230,15 @@ function TipStack({
               data-tip={id}
               data-depth={depth}
               className={cn(
-                "duration-base ease-surface min-w-0 origin-top transition-[opacity,transform] [grid-area:1/1]",
-                depth === 0 && "z-30",
-                depth === 1 && "z-20 -translate-y-2 scale-[0.94] group-hover/tips:-translate-y-7",
-                depth > 1 && "z-10 scale-[0.88] opacity-0",
+                "duration-base ease-surface min-w-0 origin-top transition-[opacity,translate,scale] [grid-area:1/1]",
+                // The card leaving the top slides down a little as it fades, over the one taking
+                // its place, which comes forward from behind.
+                isLeaving && "pointer-events-none z-[35] translate-y-2.5 scale-[0.94] opacity-0",
+                !isLeaving && depth === 0 && "z-30",
+                !isLeaving &&
+                  depth === 1 &&
+                  "z-20 -translate-y-2 scale-[0.94] group-hover/tips:-translate-y-7",
+                !isLeaving && depth > 1 && "z-10 scale-[0.88] opacity-0",
               )}
             >
               <TipCard
@@ -268,7 +298,12 @@ function TipCard({
       <div aria-hidden="true" className="flex h-7 min-w-0 items-center">
         <TipVisual id={id} />
       </div>
-      <Button asChild variant="outline" size="sm" className="mt-auto h-8 w-full">
+      <Button
+        asChild
+        variant="outline"
+        size="sm"
+        className="bg-muted/40 mt-auto h-8 w-full shadow-xs"
+      >
         <Link to={target} {...overlayIntent(target)}>
           {t(copy.action)}
         </Link>
@@ -308,11 +343,11 @@ function TipVisual({ id }: { id: SidebarTipId }) {
     case "invite":
       return (
         <span className="flex gap-1.5">
-          <Disc className="bg-muted text-muted-foreground">
+          <Disc className={IDENTITY_COLOR_CLASSES.blue}>
             <UserRound className="size-4" />
           </Disc>
-          {[0, 1].map((seat) => (
-            <Disc key={seat} className="text-muted-foreground border-border border border-dashed">
+          {(["emerald", "pink"] as const).map((color) => (
+            <Disc key={color} className={IDENTITY_COLOR_CLASSES[color]}>
               <Plus className="size-3.5" />
             </Disc>
           ))}
@@ -321,8 +356,10 @@ function TipVisual({ id }: { id: SidebarTipId }) {
     case "schedule":
       return (
         <span className="flex gap-1.5 text-xs">
-          <span className="bg-muted rounded-md px-2 py-1">{t("tips.schedule.days")}</span>
-          <span className="bg-muted rounded-md px-2 py-1 tabular-nums">
+          <span className={cn(IDENTITY_COLOR_CLASSES.blue, "rounded-md px-2 py-1")}>
+            {t("tips.schedule.days")}
+          </span>
+          <span className={cn(IDENTITY_COLOR_CLASSES.amber, "rounded-md px-2 py-1 tabular-nums")}>
             {t("tips.schedule.time")}
           </span>
         </span>
@@ -330,10 +367,10 @@ function TipVisual({ id }: { id: SidebarTipId }) {
     case "catalogue":
       return (
         <span className="flex gap-1.5">
-          {(["agent", "skill", "integration"] as const).map((type) => {
+          {CATALOGUE_TILES.map(({ type, color }) => {
             const Glyph = PACKAGE_TYPE_ICON[type];
             return (
-              <Disc key={type} className="bg-muted text-muted-foreground rounded-md">
+              <Disc key={type} className={cn(IDENTITY_COLOR_CLASSES[color], "rounded-md")}>
                 <Glyph className="size-4" />
               </Disc>
             );
