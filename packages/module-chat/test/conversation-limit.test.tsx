@@ -21,7 +21,7 @@ import {
   type ConversationScope,
 } from "../src/ui/conversation-scope.ts";
 import { ComposerTools } from "../src/ui/composer-tools.tsx";
-import { ComposerToolsPanel } from "../src/ui/composer-tools-panel.tsx";
+import { ComposerToolsPanel, LimitLevel } from "../src/ui/composer-tools-panel.tsx";
 import {
   ChatHostProvider,
   ChatTransportProvider,
@@ -482,7 +482,11 @@ describe("the composer's limit chip", () => {
 describe("the tools panel's limit rows", () => {
   const names: Record<string, string> = { spc_a: "Studio", spc_b: "Atelier" };
 
-  function entry(scope: ConversationScope, actingSpaceIds: string[]) {
+  function entry(
+    scope: ConversationScope,
+    actingSpaceIds: string[],
+    body: ReactNode = <ComposerToolsPanel authorsPackages={false} />,
+  ) {
     const host = testHost({
       t: (key, options) => (options ? `${key}|${String(options.name)}` : key),
       actingSpaceIds,
@@ -493,9 +497,7 @@ describe("the tools panel's limit rows", () => {
       <QueryClientProvider client={new QueryClient()}>
         <ChatHostProvider value={host}>
           <ConversationScopeProvider value={scope}>
-            <Runtime>
-              <ComposerToolsPanel authorsPackages={false} />
-            </Runtime>
+            <Runtime>{body}</Runtime>
           </ConversationScopeProvider>
         </ChatHostProvider>
       </QueryClientProvider>,
@@ -510,13 +512,41 @@ describe("the tools panel's limit rows", () => {
     expect(out).not.toContain('role="group"');
   });
 
-  it("choose: lists the acting spaces, each a row the host names", () => {
+  it("choose: a row opening a level, the spaces kept off the panel's rows", () => {
     const out = entry(conversationScope(), ["spc_a", "spc_b"]);
     expect(out).toContain('data-testid="composer-limit-item"');
-    expect(out).toContain('aria-label="composer.limit.choose"');
+    expect(out).toContain("composer.limit.generic");
+    expect(out).toContain("lucide-chevron-right");
+    expect(out).not.toContain("data-spaces=");
+    expect(out).not.toContain('role="switch"');
+  });
+
+  it("choose level: lists the acting spaces, each a row the host names", () => {
+    const out = entry(conversationScope(), ["spc_a", "spc_b"], <LimitLevel onPicked={() => {}} />);
+    expect(out).toContain('data-testid="composer-limit-spaces"');
     expect(out).toContain('data-spaces="spc_a"');
     expect(out).toContain('data-spaces="spc_b"');
-    expect(out).not.toContain('role="switch"');
+    expect(out).not.toMatch(/disabled=""[^>]*>\s*<i data-spaces/);
+  });
+
+  it("choose level: inert while a change is in flight", () => {
+    const out = entry(
+      conversationScope({ pending: true }),
+      ["spc_a", "spc_b"],
+      <LimitLevel onPicked={() => {}} />,
+    );
+    expect(out.match(/disabled=""/g)?.length).toBe(2);
+  });
+
+  it("choose level: says why once the choice is no longer offered", () => {
+    const out = entry(
+      conversationScope({ generating: true }),
+      ["spc_a", "spc_b"],
+      <LimitLevel onPicked={() => {}} />,
+    );
+    expect(out).not.toContain("composer-limit-spaces");
+    expect(out).toMatch(/disabled=""[^>]*data-testid="composer-limit-item"/);
+    expect(out).toContain("composer.limit.generating");
   });
 
   it("unavailable: inert, with its reason", () => {
