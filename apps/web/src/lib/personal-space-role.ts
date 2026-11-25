@@ -2,7 +2,13 @@
 
 import { isSpaceRolePreset } from "@appstrate/core/permissions";
 import type { components } from "../api/client";
-import { spaceRoleAssignment, spaceRoleValue, type SpaceRolePreset } from "../hooks/use-roles";
+import {
+  spaceRoleAssignment,
+  spaceRoleValue,
+  type RoleObject,
+  type SpaceRoleOption,
+  type SpaceRolePreset,
+} from "../hooks/use-roles";
 
 type OrgMember = components["schemas"]["OrgMember"];
 
@@ -18,6 +24,35 @@ export function storedRoleToSelectValue(stored: unknown): string {
   return isSpaceRolePreset(key)
     ? spaceRoleValue({ preset_role: key })
     : spaceRoleValue({ custom_role_id: key });
+}
+
+/**
+ * What « selon l'organisation » resolves to: the org setting — for a guest too, unless it lets
+ * them author agents (`agents:write`), in which case a guest holds `operator`. Judged on the
+ * catalogue entry's permissions; before the catalogue answers, on the authoring presets.
+ */
+export function followLabel(
+  member: OrgMember,
+  options: SpaceRoleOption[],
+  stored: unknown,
+  unknown: string,
+  roles?: readonly Pick<RoleObject, "kind" | "key" | "id" | "permissions">[],
+): string {
+  const value = storedRoleToSelectValue(stored);
+  const entry = roles?.find(
+    (role) =>
+      spaceRoleValue({
+        preset_role: role.kind === "preset" ? role.key : null,
+        custom_role_id: role.id,
+      }) === value,
+  );
+  const authors = entry
+    ? entry.permissions.includes("agents:write")
+    : value === spaceRoleValue({ preset_role: "admin" }) ||
+      value === spaceRoleValue({ preset_role: "builder" });
+  const shown =
+    member.role === "guest" && authors ? spaceRoleValue({ preset_role: "operator" }) : value;
+  return options.find((option) => option.value === shown)?.label ?? unknown;
 }
 
 /** The org setting's PATCH body for a picked select value. */

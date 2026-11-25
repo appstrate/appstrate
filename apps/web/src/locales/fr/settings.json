@@ -1337,7 +1337,7 @@
   "orgSettings.personalModelCredentialsDesc": "Désactivé, les clés perso et les abonnements perso ne servent plus aucun modèle : les modèles qui en dépendent deviennent inutilisables, les autres restent payés par l'organisation.",
   "orgSettings.personalSpacesTitle": "Espaces personnels",
   "orgSettings.personalSpaceRoleTitle": "Rôle dans l’espace personnel",
-  "orgSettings.personalSpaceRoleDesc": "Le rôle que chaque membre détient dans son espace personnel (« Mon espace »). Les propriétaires et administrateurs y sont toujours administrateurs, les invités le reçoivent aussi, sauf s’il leur permet de créer des agents : ils y sont alors opérateurs, et le rôle propre à un membre, réglé depuis sa fiche, l’emporte sur celui-ci. Tout rôle en dessous d’administrateur conserve le droit de supprimer ce que le membre possède déjà.",
+  "orgSettings.personalSpaceRoleDesc": "Le rôle de chaque membre dans son espace personnel (« Mon espace »). Les propriétaires et administrateurs y restent administrateurs. Un invité reçoit ce rôle, sauf s’il permet de créer des agents : il y est alors opérateur. Le rôle réglé sur la fiche d’un membre l’emporte. En dessous d’administrateur, chacun garde le droit de supprimer ce qu’il possède déjà.",
   "orgSettings.personalSpaceRoleUnknown": "Rôle personnalisé",
   "userDetail.personalSpaceRole": "Rôle dans son espace personnel",
   "userDetail.personalSpaceRoleHint": "Remplace le rôle par défaut de l’organisation pour cette personne, dans son espace personnel seulement.",

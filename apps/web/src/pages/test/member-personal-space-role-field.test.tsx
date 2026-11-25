@@ -10,9 +10,9 @@ import type { components } from "../../api/client.ts";
 
 installFakeStorage({ __APP_CONFIG__: { features: {}, trustedOrigins: [] } });
 
-const { PersonalSpaceRoleField, followLabel } =
+const { PersonalSpaceRoleField } =
   await import("../org-settings/member-personal-space-role-field.tsx");
-const { FOLLOW_ORG_DEFAULT, memberOverrideToSelectValue } =
+const { FOLLOW_ORG_DEFAULT, followLabel, memberOverrideToSelectValue } =
   await import("../../lib/personal-space-role.ts");
 const { orgStore } = await import("../../stores/org-store.ts");
 const { render } = await import("../../test/render.tsx");
@@ -105,9 +105,14 @@ describe("the personal space role field of the user sheet", () => {
     }
     // With it: the stored role's permissions decide, custom roles included.
     const catalog = (customPermissions: string[]) => [
-      { kind: "preset", key: "admin", id: null, permissions: ["agents:read", "agents:write"] },
-      { kind: "preset", key: "viewer", id: null, permissions: ["agents:read"] },
-      { kind: "custom", key: "triage", id: CUSTOM_ID, permissions: customPermissions },
+      {
+        kind: "preset" as const,
+        key: "admin",
+        id: null,
+        permissions: ["agents:read", "agents:write"],
+      },
+      { kind: "preset" as const, key: "viewer", id: null, permissions: ["agents:read"] },
+      { kind: "custom" as const, key: "triage", id: CUSTOM_ID, permissions: customPermissions },
     ];
     const guest = member("guest", null);
     expect(followLabel(guest, options, CUSTOM_ID, "?", catalog(["agents:write"]))).toBe(

@@ -1336,7 +1336,7 @@
   "orgSettings.personalModelCredentialsDesc": "When off, personal keys and personal subscriptions serve no model: the models that depend on them become unusable, the others stay paid by the organization.",
   "orgSettings.personalSpacesTitle": "Personal spaces",
   "orgSettings.personalSpaceRoleTitle": "Role in personal spaces",
-  "orgSettings.personalSpaceRoleDesc": "The role each member holds in their own personal space (“My space”). Owners and admins always administer theirs, guests take it too, unless it lets them author agents, in which case they are operators, and a member’s own role, set from their sheet, wins over this one. Any role short of admin still lets the member delete what they already own.",
+  "orgSettings.personalSpaceRoleDesc": "The role each member holds in their personal space (“My space”). Owners and admins stay admins there. A guest gets this role too, unless it lets them create agents: they are then an operator. A role set on a member’s sheet takes precedence. Below admin, everyone keeps the right to delete what they already own.",
   "orgSettings.personalSpaceRoleUnknown": "Custom role",
   "userDetail.personalSpaceRole": "Role in their personal space",
   "userDetail.personalSpaceRoleHint": "Replaces the organization’s default role for this person, in their personal space only.",

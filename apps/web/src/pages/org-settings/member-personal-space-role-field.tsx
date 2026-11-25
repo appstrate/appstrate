@@ -7,11 +7,11 @@ import { SpaceRoleSelect } from "../../components/space-role-select";
 import { useOrg, useSetMemberPersonalSpaceRole } from "../../hooks/use-org";
 import { useOrgSettings } from "../../hooks/use-org-settings";
 import { usePermissions } from "../../hooks/use-permissions";
-import { spaceRoleValue, useSpaceRoleOptions, type SpaceRoleOption } from "../../hooks/use-roles";
+import { useSpaceRoleOptions, type SpaceRoleOption } from "../../hooks/use-roles";
 import {
   FOLLOW_ORG_DEFAULT,
+  followLabel,
   memberOverrideToSelectValue,
-  storedRoleToSelectValue,
 } from "../../lib/personal-space-role";
 
 type OrgMember = components["schemas"]["OrgMember"];
@@ -40,38 +40,6 @@ export function PersonalSpaceRoleField({ member }: { member: OrgMember }) {
     );
   }
   return <EditableField member={member} label={label} />;
-}
-
-/** The role catalogue entries `followLabel` reads (`GET /api/roles`), permissions included. */
-type RoleCatalogEntry = { kind: string; key: string; id: string | null; permissions: string[] };
-
-/**
- * What « selon l'organisation » resolves to: the org setting — for a guest too, unless it lets
- * them author agents (`agents:write`), in which case a guest holds `operator`. Judged on the
- * catalogue entry's permissions; before the catalogue answers, on the authoring presets.
- */
-export function followLabel(
-  member: OrgMember,
-  options: SpaceRoleOption[],
-  stored: unknown,
-  unknown: string,
-  roles?: readonly RoleCatalogEntry[],
-): string {
-  const value = storedRoleToSelectValue(stored);
-  const entry = roles?.find(
-    (role) =>
-      spaceRoleValue({
-        preset_role: role.kind === "preset" ? role.key : null,
-        custom_role_id: role.id,
-      }) === value,
-  );
-  const authors = entry
-    ? entry.permissions.includes("agents:write")
-    : value === spaceRoleValue({ preset_role: "admin" }) ||
-      value === spaceRoleValue({ preset_role: "builder" });
-  const shown =
-    member.role === "guest" && authors ? spaceRoleValue({ preset_role: "operator" }) : value;
-  return options.find((option) => option.value === shown)?.label ?? unknown;
 }
 
 function EditableField({ member, label }: { member: OrgMember; label: string }) {
