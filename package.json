@@ -20,10 +20,10 @@
   "devDependencies": {
     "@commitlint/cli": "^21.2.4",
     "@commitlint/config-conventional": "^21.2.4",
-    "@earendil-works/pi-ai": "1.5.2",
+    "@earendil-works/pi-ai": "1.6.0",
     "@eslint/js": "^10.0.1",
     "@readme/openapi-parser": "^10.0.0",
-    "@redocly/openapi-core": "^2.79.0",
+    "@redocly/openapi-core": "^2.82.0",
     "@types/bun": "latest",
     "drizzle-orm": "^0.45.4",
     "eslint": "^10.15.0",
@@ -33,15 +33,15 @@
     "eslint-plugin-react-refresh": "^0.5.8",
     "globals": "^17.14.0",
     "husky": "^9.1.7",
-    "knip": "^6.45.1",
-    "lint-staged": "^17.6.1",
+    "knip": "^6.47.0",
+    "lint-staged": "^17.6.2",
     "openapi-typescript": "^7.13.0",
     "prettier": "^3.10.1",
     "prettier-plugin-tailwindcss": "^0.8.1",
-    "turbo": "^2.11.11",
+    "turbo": "^2.11.13",
     "type-coverage": "^2.31.2",
     "typescript": "6.0.3",
-    "typescript-eslint": "^8.71.2"
+    "typescript-eslint": "^8.73.0"
   },
   "engines": {
     "bun": ">=1.4.2"

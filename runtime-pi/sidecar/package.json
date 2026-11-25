@@ -13,10 +13,10 @@
     "@appstrate/core": "workspace:*",
     "@appstrate/mcp-transport": "workspace:*",
     "@appstrate/runner-pi": "workspace:*",
-    "@earendil-works/pi-ai": "1.5.2",
+    "@earendil-works/pi-ai": "1.6.0",
     "@modelcontextprotocol/sdk": "^1.32.2",
     "fflate": "^0.8.3",
-    "hono": "^4.13.18",
+    "hono": "^4.13.20",
     "p-limit": "^7.3.3"
   }
 }
