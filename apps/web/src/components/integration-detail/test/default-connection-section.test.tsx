@@ -6,7 +6,7 @@ import { installFakeStorage } from "../../../test/fake-storage.ts";
 
 installFakeStorage({ __APP_CONFIG__: { features: {}, trustedOrigins: [] } });
 
-const { DefaultConnectionSection } = await import("../default-connection-section.tsx");
+const { DefaultConnectionSettings } = await import("../default-connection-section.tsx");
 const { render } = await import("../../../test/render.tsx");
 const i18nModule = await import("../../../i18n.ts");
 
@@ -22,32 +22,25 @@ const auths = [
     ],
   },
 ] as IntegrationDetailWire["auths"];
-function section(
-  proxy: IntegrationDetailWire["proxy_connection"],
-  canConfigure = false,
-  active = true,
-) {
+function section(proxy: IntegrationDetailWire["proxy_connection"], active = true) {
   return render(
-    <DefaultConnectionSection
+    <DefaultConnectionSettings
       packageId="@acme/gmail"
       detail={{ active, auths, proxy_connection: proxy }}
-      canConfigure={canConfigure}
     />,
   );
 }
 
-describe("DefaultConnectionSection", () => {
-  it("names the imposed account to the member with a personal account and keeps editing controls hidden", () => {
+describe("DefaultConnectionSettings", () => {
+  it("names the imposed account, not the reader's own", () => {
     const html = section({ status: "ready", imposed: true, connection_id: "team" });
     expect(html).toContain(
       t("integration.defaultConnection.direct.imposedAccount", { account: "CRM équipe" }),
     );
     expect(html).not.toContain("Mon compte");
-    expect(html).not.toContain('data-testid="org-default-section"');
-    expect(html).not.toContain('data-testid="pin-management-section"');
   });
 
-  it("tells the member when a call needs an explicit choice", () => {
+  it("tells when a call needs an explicit choice", () => {
     expect(section({ status: "must_choose", imposed: false })).toContain(
       t("integration.defaultConnection.direct.must_choose"),
     );
@@ -61,14 +54,13 @@ describe("DefaultConnectionSection", () => {
 
   it("shows the inactive state even with a usable connection", () => {
     expect(
-      section({ status: "ready", imposed: false, connection_id: "personal" }, false, false),
+      section({ status: "ready", imposed: false, connection_id: "personal" }, false),
     ).toContain(t("integration.defaultConnection.direct.inactive"));
   });
 
-  it("is the tab's h2, anchored, with the configurer's exceptions as h3", () => {
-    const html = section({ status: "none", imposed: false }, true);
-    expect(html).toContain('id="default-connection"');
-    expect(html).toMatch(new RegExp(`<h2[^>]*>${t("integration.defaultConnection.title")}</h2>`));
+  it("holds the space default and the agent exceptions under the verdict", () => {
+    const html = section({ status: "none", imposed: false });
+    expect(html).toContain(t("integration.defaultConnection.direct.none"));
     expect(html).toMatch(new RegExp(`<h3[^>]*>${t("integration.admin.exceptions.title")}</h3>`));
   });
 });
