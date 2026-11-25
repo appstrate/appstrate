@@ -86,7 +86,8 @@ function ToolNameCell({
           </span>
         )}
         <div className="flex flex-wrap gap-1.5 empty:hidden">
-          {tool.origin === "approved" && (
+          {/* An approval whose definition moved, or a blocked tool, is no longer what it approved. */}
+          {tool.origin === "approved" && reason === null && (
             <Badge variant="secondary">{t("packageTools.approved")}</Badge>
           )}
           {tool.scopesUnknown && <Badge variant="outline">{t("packageTools.scopesUnknown")}</Badge>}

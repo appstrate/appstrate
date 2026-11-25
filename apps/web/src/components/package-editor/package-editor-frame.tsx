@@ -27,6 +27,7 @@ export function PackageEditorFrame({
   tabs,
   descriptions,
   children,
+  after,
 }: {
   editor: PackageEditor;
   /** The sections, labelled as the settings rail labels them. */
@@ -34,6 +35,8 @@ export function PackageEditorFrame({
   /** The line under the open section's heading. */
   descriptions?: Partial<Record<PackageEditorTab, string>>;
   children: ReactNode;
+  /** Drawn under the section, outside the draft: what the open section governs in a space, not in the package. */
+  after?: ReactNode;
 }) {
   const { t } = useTranslation(["agents", "settings", "common"]);
   const { type, state, activeTab, isPending } = editor;
@@ -86,6 +89,7 @@ export function PackageEditorFrame({
           />
           <UnsavedChangesModal blocker={editor.blocker} onSaveDraft={editor.saveDraft} />
         </div>
+        {after && <div className="mt-4">{after}</div>}
       </div>
       {footer}
     </div>

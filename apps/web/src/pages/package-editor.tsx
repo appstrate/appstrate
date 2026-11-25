@@ -315,6 +315,7 @@ function IntegrationEditorInner({
   toolCatalog,
   snapshot,
   sync: syncAvailability,
+  toolPolicy,
 }: {
   initialState: EditorState;
   packageId: string;
@@ -325,6 +326,8 @@ function IntegrationEditorInner({
   snapshot: ToolSnapshotInfo;
   /** Whether the draft's server can be asked for its tools; `null`: nothing to sync. */
   sync: ReturnType<typeof serverSyncAvailability>;
+  /** The space's review and blocks, under the Tools section. */
+  toolPolicy?: ReactNode;
 }) {
   const { t } = useTranslation(["agents", "common"]);
   // Set by `validate` when it refuses the local server: the Source tab flags its empty fields.
@@ -406,6 +409,7 @@ function IntegrationEditorInner({
         auths: t("integrationEditor.description.auths"),
         tools: t("integrationEditor.description.tools"),
       }}
+      after={activeTab === "tools" ? toolPolicy : undefined}
     >
       {activeTab === "general" && (
         <MetadataSection
@@ -469,6 +473,7 @@ export function IntegrationDefinitionEditor({
   toolCatalog,
   snapshot,
   sync,
+  toolPolicy,
 }: {
   detail: Versioned<OrgPackageItemDetail>;
   section: IntegrationDefinitionSection;
@@ -476,6 +481,8 @@ export function IntegrationDefinitionEditor({
   snapshot: ToolSnapshotInfo;
   /** Whether the draft's remote server can be asked for its tools; `null`: nothing to sync. */
   sync: ReturnType<typeof serverSyncAvailability>;
+  /** The space's review and blocks, drawn under the Tools section. */
+  toolPolicy?: ReactNode;
 }) {
   return (
     <DraftEditorMount id={detail.id} etag={detail.etag}>
@@ -486,6 +493,7 @@ export function IntegrationDefinitionEditor({
         toolCatalog={toolCatalog}
         snapshot={snapshot}
         sync={sync}
+        toolPolicy={toolPolicy}
       />
     </DraftEditorMount>
   );

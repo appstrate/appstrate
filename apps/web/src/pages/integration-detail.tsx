@@ -277,18 +277,16 @@ export function IntegrationSettings({
           ? DEFINITION_RAIL.find(([id]) => id === active)?.[1]
           : undefined;
         return definition && definitionSection ? (
-          <>
-            <Suspense fallback={<SettingsSkeleton />}>
-              <IntegrationDefinitionEditor
-                detail={definition}
-                section={definitionSection}
-                toolCatalog={detail.tool_catalog ?? []}
-                snapshot={toolSnapshot}
-                sync={syncAvailability}
-              />
-            </Suspense>
-            {active === "tools" && toolPolicy && <div className="px-6 pb-6">{toolPolicy}</div>}
-          </>
+          <Suspense fallback={<SettingsSkeleton />}>
+            <IntegrationDefinitionEditor
+              detail={definition}
+              section={definitionSection}
+              toolCatalog={detail.tool_catalog ?? []}
+              snapshot={toolSnapshot}
+              sync={syncAvailability}
+              toolPolicy={toolPolicy}
+            />
+          </Suspense>
         ) : isPackageCommonSection(active) ? (
           <PackageCommonSection
             section={active}
