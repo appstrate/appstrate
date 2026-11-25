@@ -34,6 +34,17 @@ import {
   uploadPackageZip,
   downloadVersionZip,
 } from "../../../src/services/package-storage.ts";
+import {
+  buildBundleFromAfps,
+  canonicalBundleDigest,
+  computeRecordEntries,
+  emptyPackageCatalog,
+  generateKeyPair,
+  serializeRecord,
+  signBundle,
+  verifyBundleSignature,
+} from "@appstrate/afps-runtime/bundle";
+import { uploadPackageFiles } from "../../../src/services/package-items/storage.ts";
 import { unzipPackageArchive } from "../../../src/services/package-archive.ts";
 import {
   AGENT_PACKAGES_BUCKET,
@@ -3759,6 +3770,94 @@ describe("Packages API", () => {
       const entries = unzipPackageArchive(zip!);
       return new TextDecoder().decode(entries["manifest.json"]!);
     }
+
+    it("removes inert dependencies only from new fork and publication artifacts", async () => {
+      const source = await createTestContext({ orgSlug: "forkretired" });
+      await addOrgMember(source.orgId, ctx.user.id, "admin");
+      const id = "@forkretired/old-agent";
+      const dest = "@pkgorg/old-agent";
+      const retired = { tools: { "@old/tool": "^1.0.0" }, providers: { "@old/provider": "1" } };
+      const kept = { _meta: { example: "extension" }, skills: {} };
+      const version = "1.0.0";
+      await seedPublishedSource(id, source.orgId, {
+        name: id,
+        type: "agent",
+        version,
+        schema_version: "0.2",
+        display_name: "Agent",
+        description: "Published fixture",
+        dependencies: { ...kept, ...retired },
+      });
+      const encoder = new TextEncoder();
+      const sourceFiles = unzipPackageArchive((await downloadVersionZip(id, version))!);
+      const bundleOf = (bytes: Uint8Array) =>
+        buildBundleFromAfps(bytes, emptyPackageCatalog, { depTypes: [] });
+      const key = generateKeyPair();
+      const digest = canonicalBundleDigest(await bundleOf(zipArtifact(sourceFiles, 6)));
+      const signature = signBundle(digest, { keyId: key.keyId, privateKey: key.privateKey });
+      sourceFiles["signature.sig"] = encoder.encode(JSON.stringify(signature));
+      sourceFiles.RECORD = encoder.encode(
+        serializeRecord(computeRecordEntries(new Map(Object.entries(sourceFiles)))),
+      );
+      const original = zipArtifact(sourceFiles, 6);
+      await uploadPackageZip(id, version, Buffer.from(original));
+      await db
+        .update(packageVersions)
+        .set({ integrity: computeIntegrity(original), artifactSize: original.byteLength })
+        .where(and(eq(packageVersions.packageId, id), eq(packageVersions.version, version)));
+      await uploadPackageFiles("agents", source.orgId, id, sourceFiles);
+      const fork = await app.request(`/api/packages/${id}/fork`, {
+        method: "POST",
+        headers: authHeaders(ctx, { "Content-Type": "application/json" }),
+        body: "{}",
+      });
+      expect(fork.status, await fork.clone().text()).toBe(201);
+      // Publish from the SOURCE's old draft independently of the fork's repair.
+      const headers = authHeaders(source, { "Content-Type": "application/json" });
+      const previous = await app.request(`/api/packages/agents/${id}`, { headers });
+      const edit = await app.request(`/api/packages/agents/${id}`, {
+        method: "PATCH",
+        headers: { ...headers, "If-Match": previous.headers.get("ETag")! },
+        body: JSON.stringify({ content: "Edited prompt" }),
+      });
+      expect(edit.status, await edit.clone().text()).toBe(200);
+      const publish = await app.request(`/api/packages/agents/${id}/versions`, {
+        method: "POST",
+        headers: { ...headers, "If-Match": edit.headers.get("ETag")! },
+        body: JSON.stringify({ version: "1.1.0" }),
+      });
+      expect(publish.status, await publish.clone().text()).toBe(201);
+      const retained = (await downloadVersionZip(id, version))!;
+      expect(new Uint8Array(retained)).toEqual(new Uint8Array(original));
+      expect(
+        verifyBundleSignature(canonicalBundleDigest(await bundleOf(retained)), signature, {
+          keys: [{ keyId: key.keyId, publicKey: key.publicKey }],
+        }).ok,
+      ).toBe(true);
+      expect(JSON.parse(await artifactManifestText(id, version)).dependencies).toEqual({
+        ...kept,
+        ...retired,
+      });
+      expect((await draftManifest(dest)).dependencies).toEqual(kept);
+      for (const [target, ver] of [
+        [dest, version],
+        [id, "1.1.0"],
+      ] as const) {
+        const bytes = (await downloadVersionZip(target, ver))!;
+        const entries = unzipPackageArchive(bytes);
+        expect(entries["signature.sig"]).toBeUndefined();
+        expect(new TextDecoder().decode(entries.RECORD)).toBe(
+          serializeRecord(computeRecordEntries(new Map(Object.entries(entries)))),
+        );
+        const [row] = await db
+          .select()
+          .from(packageVersions)
+          .where(and(eq(packageVersions.packageId, target), eq(packageVersions.version, ver)));
+        expect(row?.integrity).toBe(computeIntegrity(bytes));
+        expect(row?.manifest).toMatchObject({ name: target, version: ver, dependencies: kept });
+        expect(JSON.parse(await artifactManifestText(target, ver)).dependencies).toEqual(kept);
+      }
+    });
 
     it("forks a clean manifest unchanged — nothing reordered, nothing defaulted", async () => {
       const srcCtx = await createTestContext({ orgSlug: "forkclean" });

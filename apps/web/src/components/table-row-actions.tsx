@@ -11,6 +11,8 @@ import {
   DropdownMenuTrigger,
 } from "@appstrate/ui/components/dropdown-menu";
 import { Spinner } from "@appstrate/ui/components/spinner";
+import { DisabledReasonTooltip } from "./disabled-reason-tooltip";
+import { inlineEditingSelector } from "../lib/keep-open-while-renaming";
 import { MenuActionItem } from "./menu-action";
 import { splitMenuActions, type MenuAction } from "../lib/menu-action";
 
@@ -31,10 +33,16 @@ export function TableRowActions({
   menuLabel,
   isPending = false,
   renaming = false,
+  disabledReason,
   actions,
   children,
 }: {
   menuLabel?: string;
+  /**
+   * Why the row's actions are out of this caller's reach: the « … » stays,
+   * disabled, and explains itself (DESIGN_SYSTEM §11).
+   */
+  disabledReason?: string;
   actions?: MenuAction[];
   isPending?: boolean;
   /**
@@ -55,7 +63,21 @@ export function TableRowActions({
   return (
     <div className="relative z-10 flex items-center justify-end gap-1">
       {isPending && <Spinner aria-label={t("loading")} />}
-      {hasItems && menuLabel && (
+      {disabledReason && menuLabel && (
+        <DisabledReasonTooltip reason={disabledReason}>
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            className="size-7 p-0"
+            aria-label={menuLabel}
+            disabled
+          >
+            <MoreHorizontal />
+          </Button>
+        </DisabledReasonTooltip>
+      )}
+      {!disabledReason && hasItems && menuLabel && (
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
             <Button
@@ -76,7 +98,9 @@ export function TableRowActions({
             onCloseAutoFocus={(event) => {
               if (!renaming) return;
               event.preventDefault();
-              const field = triggerRef.current?.closest("tr, [data-row]")?.querySelector("input");
+              const field = triggerRef.current
+                ?.closest("tr, [data-row]")
+                ?.querySelector<HTMLInputElement>(inlineEditingSelector);
               field?.focus();
               field?.select();
             }}

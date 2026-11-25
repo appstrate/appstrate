@@ -10,3 +10,4 @@ next-env.d.ts
 # (scripts/sync-content.ts, ../../scripts/export-openapi.ts).
 /content/
 /openapi.json
+/openapi.reference.json

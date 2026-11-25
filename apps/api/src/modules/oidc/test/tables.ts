@@ -10,6 +10,7 @@ export default [
   // `oauth_clients` (children reference clients) but there is no cross-table
   // dep on this row outside that one.
   "cli_refresh_tokens",
+  "oauth_grant_states",
   "oauth_access_tokens",
   "oauth_refresh_tokens",
   "oauth_consents",

@@ -23,6 +23,9 @@ import {
 } from "../../services/bundle-import.ts";
 import { recordAudit } from "../../services/audit.ts";
 import { asString, jsonResult, refusalResult, ToolRefusal } from "./tool-results.ts";
+import { OPERATION_SPACES_META_KEY } from "@appstrate/core/mcp-spaces";
+import { recordOperationSpaces, type OrgWideSpaces } from "./spaces.ts";
+import type { McpSurface } from "./tools.ts";
 
 interface PackageFileToolContext {
   permissions: ReadonlySet<string>;
@@ -40,7 +43,11 @@ interface PackageFileToolContext {
    * Who places a root re-imported from ANOTHER home space here, as
    * `POST /api/packages/import-bundle` decides; `null` → `root_active: false`.
    */
-  placeRootAs: Parameters<typeof handleImportBundle>[4];
+  placeRootAs: (
+    packageId: string,
+    record?: (ids: readonly string[]) => Promise<boolean>,
+  ) => ReturnType<Parameters<typeof handleImportBundle>[4]>;
+  orgSpaces?: OrgWideSpaces;
 }
 
 interface PackageFileBytes {
@@ -235,6 +242,7 @@ function buildImportPackageFileTool(ctx: PackageFileToolContext): AppstrateToolD
         arguments: ["file_uri"],
       });
     }
+    const operation = recordOperationSpaces(ctx.orgSpaces, [ctx.scope.spaceId]);
     try {
       const file = await readPackageFileBytes(ctx, uri);
       const result = await handleImportBundle(
@@ -242,7 +250,7 @@ function buildImportPackageFileTool(ctx: PackageFileToolContext): AppstrateToolD
         ctx.scope,
         ctx.actor.id,
         ctx.authorizeBundle,
-        ctx.placeRootAs,
+        (packageId) => ctx.placeRootAs(packageId, operation.record),
       );
       for (const audit of bundleImportAuditRecords(result, {
         via: "import:file",
@@ -259,7 +267,9 @@ function buildImportPackageFileTool(ctx: PackageFileToolContext): AppstrateToolD
           after: audit.after,
         });
       }
-      return jsonResult({ ...result, file_uri: fileUri(file.fileId) });
+      const response = jsonResult({ ...result, file_uri: fileUri(file.fileId) });
+      if (operation.record) response._meta = { [OPERATION_SPACES_META_KEY]: [...operation.ids] };
+      return response;
     } catch (err) {
       if (err instanceof ToolRefusal) return refusalResult(err.refusal);
       return jsonResult({ error: getErrorMessage(err) }, true);
@@ -333,15 +343,18 @@ function buildRuntimeCapabilitiesTool(): AppstrateToolDefinition {
   return { descriptor, handler };
 }
 
-/** `imports` is `McpSurface.importsPackages` — the only check on `mcp:invoke` and on
- *  the actor being a user; the import service re-checks each package's `write`. */
+/**
+ * Each tool on its `McpSurface` act. `importsPackages` is the only check on `mcp:invoke` and on
+ * the actor being a user; the import service re-checks each package's `write`. Authoring starts
+ * from `get_runtime_capabilities`, inside an inline run (`composes`).
+ */
 export function buildPackageFileTools(
   ctx: PackageFileToolContext,
-  imports: boolean,
+  surface: Pick<McpSurface, "validatesPackages" | "importsPackages" | "composes">,
 ): AppstrateToolDefinition[] {
   return [
-    buildValidatePackageFileTool(ctx),
-    ...(imports ? [buildImportPackageFileTool(ctx)] : []),
-    buildRuntimeCapabilitiesTool(),
+    ...(surface.validatesPackages ? [buildValidatePackageFileTool(ctx)] : []),
+    ...(surface.importsPackages ? [buildImportPackageFileTool(ctx)] : []),
+    ...(surface.composes ? [buildRuntimeCapabilitiesTool()] : []),
   ];
 }

@@ -103,7 +103,8 @@ describe("RunSnapshotInspector — the run's facts", () => {
     const html = overview(published({ status: "success" }), [turn]);
     expect(html).toContain(agentsFr["run.usageContext"]);
     expect(html).toContain('role="progressbar"');
-    expect(html).toContain("187k / 200k");
+    // French compact notation puts a no-break space before the unit.
+    expect(html).toContain("187\u00a0k / 200\u00a0k");
   });
 
   it("tells a runtime-version refusal from the journal instead of the provider's advice", () => {

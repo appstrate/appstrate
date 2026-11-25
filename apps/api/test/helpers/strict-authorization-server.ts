@@ -64,6 +64,8 @@ export interface RecordedAuthorizeRequest {
 }
 
 export interface StrictAuthorizationServerOptions {
+  /** A stable account claim in the provider token response, when it supplies one. */
+  subject?: string;
   /** Client id registered at this provider. */
   clientId?: string;
   /**
@@ -369,6 +371,7 @@ export function createStrictAuthorizationServer(
         token_type: "Bearer",
         expires_in: expiresIn,
         scope: grant.scope,
+        ...(options.subject ? { sub: options.subject } : {}),
       };
       // The modelled half of the second defect: no offline flag on the
       // authorize request → a short-lived token and NO refresh token.

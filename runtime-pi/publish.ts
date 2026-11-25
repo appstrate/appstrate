@@ -23,7 +23,6 @@
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
 import { signFresh } from "@appstrate/afps-runtime/events";
-import { sinkSiblingUrl } from "@appstrate/afps-runtime/sinks";
 import { resolveWorkspaceFile } from "@appstrate/afps-runtime/resolvers";
 import { getErrorMessage } from "@appstrate/core/errors";
 import { encodeFilenameHeader, sanitizeFilename } from "@appstrate/core/naming";
@@ -152,8 +151,8 @@ function parseRetryAfterMs(header: string | null): number | undefined {
 }
 
 export interface RunFileUploaderDeps {
-  /** The run-scoped event sink URL (`…/api/runs/:id/events`). `/events` is swapped for `/files`. */
-  sinkUrl: string;
+  /** Verified run-scoped upload endpoint. */
+  filesUrl: string;
   /** Run secret used to HMAC-sign each POST (Standard Webhooks, empty body). */
   sinkSecret: string;
   /** Absolute workspace root; upload paths are resolved relative to it. */
@@ -201,13 +200,6 @@ export interface RunFileUploaderDeps {
 export function createRunFileUploader(deps: RunFileUploaderDeps): FileUploader {
   const fetchFn = deps.fetchFn ?? fetch;
   const sleep = deps.sleepFn ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)));
-  // `/files` is the only upload path — never add a `/documents` fallback. The
-  // platform validates at boot that its runtime images carry its own version
-  // (`findRuntimeImageTagMismatch`), so a stale counterpart cannot be on the
-  // other end of this request; and if one somehow were, a hard upload failure
-  // naming the status is the RIGHT outcome. A fallback would convert it into a
-  // published file silently landing on a path the platform no longer serves.
-  const url = sinkSiblingUrl(deps.sinkUrl, "files");
 
   return async (relPath, name) => {
     // `publish_file` promises a workspace-relative path. Keep that
@@ -252,7 +244,8 @@ export function createRunFileUploader(deps: RunFileUploaderDeps): FileUploader {
 
       let res: Response;
       try {
-        res = await fetchFn(url, {
+        res = await fetchFn(deps.filesUrl, {
+          redirect: "manual",
           method: "POST",
           headers,
           body: Bun.file(absPath).stream(),
@@ -272,8 +265,7 @@ export function createRunFileUploader(deps: RunFileUploaderDeps): FileUploader {
       }
 
       if (res.ok) {
-        // A platform newer or older than this image may return extra fields
-        // (e.g. the retired `presentation`); they are simply not read.
+        // The uploader reads only the response fields it uses, across platform versions.
         const doc = (await res.json()) as PublishedFile;
         // Record the server-authoritative identity (its sanitized name +
         // sha256), matching the server dedup index exactly. Also remember the

@@ -29,8 +29,10 @@ CLI shebang assumes `bun`.
 
 ## CLI
 
+Run from the Appstrate monorepo root after installing dependencies with `bun install`.
+
 ```
-afps <command> [options]
+bun packages/afps-runtime/bin/afps.ts <command> [options]
 
   keygen              Generate an Ed25519 key pair
   sign <bundle>       Add signature.sig to a bundle (re-packs the ZIP)
@@ -52,24 +54,24 @@ Each command exposes `--help` with per-option documentation.
 
 ```sh
 # 1. Generate a signing key pair
-afps keygen --out key.json
+bun packages/afps-runtime/bin/afps.ts keygen --out key.json
 
 # 2. Produce a trust root mapping keyId → public key
 jq '{ keys: [{keyId: .keyId, publicKey: .publicKey}] }' key.json > trust.json
 
 # 3. Sign an existing bundle
-afps sign my-agent.afps --key key.json
+bun packages/afps-runtime/bin/afps.ts sign my-agent.afps-bundle --key key.json
 
 # 4. Verify
-afps verify my-agent.afps --trust-root trust.json
+bun packages/afps-runtime/bin/afps.ts verify my-agent.afps-bundle --trust-root trust.json
 # → ✓ manifest + template valid (3 files)
 # → ✓ signature valid (keyId: …)
 
 # 5. Inspect
-afps inspect my-agent.afps --json | jq
+bun packages/afps-runtime/bin/afps.ts inspect my-agent.afps-bundle --json | jq
 
 # 6. Contract-test your implementation
-afps conformance --json | jq '.summary'
+bun packages/afps-runtime/bin/afps.ts conformance --json | jq '.summary'
 ```
 
 ### Replay a recorded run (library API)
@@ -79,15 +81,10 @@ wrapper around two library calls — use them directly from a `.ts`
 file when you need fixture-based regression:
 
 ```ts
-import { readFile } from "node:fs/promises";
-import { reduceEvents, createReducerSink, type RunEvent } from "@appstrate/afps-runtime";
+import { reduceEvents, type RunEvent } from "@appstrate/afps-runtime";
 
-const events: RunEvent[] = JSON.parse(await readFile("events.json", "utf-8"));
-const { sink, snapshot } = createReducerSink();
-for (const ev of events) await sink.handle(ev);
-const result = reduceEvents(events);
-await sink.finalize(result);
-console.log(snapshot());
+const events: RunEvent[] = await Bun.file("events.json").json();
+console.log(reduceEvents(events));
 ```
 
 ## Library
@@ -101,7 +98,6 @@ import {
   verifyBundleSignature,
   renderPrompt,
   reduceEvents,
-  createReducerSink,
   type RunEvent,
 } from "@appstrate/afps-runtime";
 
@@ -134,14 +130,11 @@ const prompt = await renderPrompt({
 // Consume an event stream through a sink (produced by a runner you wire
 // up externally — one that takes the `RunOptions` shape from
 // `@appstrate/afps-runtime/runner`) and fold it into a RunResult.
-const { sink, snapshot } = createReducerSink();
 const events: RunEvent[] = [
   { type: "output.emitted", timestamp: Date.now(), runId: "run_1", data: { done: true } },
 ];
-for (const ev of events) await sink.handle(ev);
 const result = reduceEvents(events);
-await sink.finalize(result);
-console.log(snapshot().output); // { done: true }
+console.log(result.output); // { done: true }
 ```
 
 ### Package subpath exports
@@ -152,7 +145,7 @@ console.log(snapshot().output); // { done: true }
 | `@appstrate/afps-runtime/bundle`      | Loader, validator, hash, signing, prompt rendering                                                                |
 | `@appstrate/afps-runtime/runner`      | `RunOptions`, `reduceEvents`, `RunResult`                                                                         |
 | `@appstrate/afps-runtime/interfaces`  | `EventSink` contract                                                                                              |
-| `@appstrate/afps-runtime/sinks`       | `HttpSink`, `CompositeSink`, `createReducerSink`                                                                  |
+| `@appstrate/afps-runtime/sinks`       | `HttpSink`, `CompositeSink`                                                                                       |
 | `@appstrate/afps-runtime/resolvers`   | `LocalIntegrationResolver`, `RemoteAppstrateIntegrationResolver`, `IntegrationApiCallResolver`, `makeApiCallTool` |
 | `@appstrate/afps-runtime/events`      | CloudEvents envelope + Standard Webhooks signing                                                                  |
 | `@appstrate/afps-runtime/template`    | Logic-less Mustache with JSON sanitisation                                                                        |

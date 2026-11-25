@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * THE frame every shown file wears: the run's featured deliverable, the preview
- * modal and the chat's side panel, so the same file reads the same wherever it
+ * THE frame every shown file wears: the run's featured deliverable, the reader
+ * page and the chat's side panel, so the same file reads the same wherever it
  * is opened.
  *
  * Header: type icon and kind, name, size, retention. Actions: copy (text kinds
@@ -11,7 +11,7 @@
  * strict HTML sandbox included.
  *
  * Full screen is the browser's own (`requestFullscreen` on the frame), not a
- * second modal: it works the same inside a page, a modal or a panel, and Escape
+ * modal: it works the same inside a page or a panel, and Escape
  * leaves it natively.
  */
 
@@ -73,7 +73,7 @@ export function FileArtifact({
   error: unknown;
   /** The name to show before (or without) the fetched DTO. */
   fallbackName?: string;
-  /** Off where the container already titles the file (the preview modal). */
+  /** Off where the container already titles the file (the reader page). */
   showName?: boolean;
   /** Off on the reader page, which that action opens. */
   openInNewTab?: boolean;

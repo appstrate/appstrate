@@ -1412,6 +1412,47 @@ describe("POST /api/runs/:id/events/finalize — complete result persistence", (
     });
   });
 
+  it("serves the terminal provider reason without reading advisory logs", async () => {
+    const runId = await seedRunWithSink(ctx, "@test/final-agent");
+    const res = await postFinalize(runId, {
+      status: "failed",
+      durationMs: 10,
+      error: {
+        code: "adapter_error",
+        message:
+          '400 {"error":{"message":"Version refusée","details":{"error_code":"claude_code_version_too_old"}}}',
+        context: { error_category: "invalid_request" },
+      },
+      usage: { input_tokens: 1, output_tokens: 0 },
+    });
+    expect(res.status).toBe(200);
+    const read = await app.request(`/api/runs/${runId}`, { headers: authHeaders(ctx) });
+    expect(await read.json()).toMatchObject({
+      model_error: { category: "invalid_request", reason: "runtime_version_too_old" },
+    });
+  });
+
+  it("persists the runner's category independently of provider prose and ignores future category values", async () => {
+    for (const [reported, expected] of [
+      ["credential_unavailable", "credential_unavailable"],
+      ["future_category", "unknown"],
+    ]) {
+      const runId = await seedRunWithSink(ctx, "@test/final-agent");
+      const res = await postFinalize(runId, {
+        status: "failed",
+        error: {
+          code: "adapter_error",
+          message: "Service momentanément inaccessible",
+          context: { error_category: reported, external_extension: 7 },
+        },
+        usage: { input_tokens: 5, output_tokens: 1 },
+      });
+      expect(res.status).toBe(200);
+      const read = await app.request(`/api/runs/${runId}`, { headers: authHeaders(ctx) });
+      expect(await read.json()).toMatchObject({ model_error: { category: expected } });
+    }
+  });
+
   it("classifies nothing on a failure that is not a model call", async () => {
     const runId = await seedRunWithSink(ctx, "@test/final-agent");
 

@@ -15,7 +15,9 @@
  * The groups are that, plus the caller's own credentials to NAME the group (« Ma clé perso »).
  */
 
-export type PickerPayer = "system" | "org" | "user" | null;
+import type { ModelBinding, ModelPayer } from "@appstrate/core/model-payer";
+
+export type PickerPayer = ModelPayer | null;
 
 /** The fields of an `OrgModel` the picker reads (structural: web and chat rows both fit). */
 export interface PickerModel {
@@ -25,7 +27,7 @@ export interface PickerModel {
   modelId: string | null;
   providerId?: string | null;
   provider_name?: string | null;
-  binding?: "system" | "org" | "user" | "managed";
+  binding?: ModelBinding;
   credentialId?: string | null;
   billed_to?: PickerPayer;
   enabled?: boolean;

@@ -32,7 +32,7 @@ import { useViewAs } from "../../stores/view-as-store";
 import {
   accessStanding,
   resolveChatCapabilities,
-  type ActingSpaceGrant,
+  limitedGrants,
   type ResolvedChatCapability,
 } from "./chat-access";
 
@@ -74,11 +74,11 @@ export function ChatAccessSummary({
     workingRole: roleIn(spaceId),
     origin: originSpace ? { name: originSpace.name, role: roleIn(originSpace.id) } : null,
   });
-  const acting = actingSpaces(spaces, orgPermissions);
+  const acting = actingSpaces(spaces);
   const capabilities = resolveChatCapabilities({
-    ...(conversation?.restricted
-      ? limitedGrants(acting, conversation.spaceId)
-      : { spaces: acting, orgPermissions: orgPermissions ?? [] }),
+    spaces: conversation?.restricted
+      ? limitedGrants(acting, conversation.spaceId, orgPermissions ?? [])
+      : acting,
     authoring,
   });
   const RoleIcon = persona ? EyeIcon : ShieldIcon;
@@ -100,16 +100,6 @@ export function ChatAccessSummary({
       ) : null}
     </section>
   );
-}
-
-/**
- * A limited conversation acts in its origin space alone, and in none once the caller cannot act
- * there. Of the org-level half the turn keeps only a few reads (`limitedConversationPermissions`,
- * module-chat), none of which a row reads: the origin space's own grants decide every row.
- */
-function limitedGrants(acting: readonly ActingSpaceGrant[], originId: string | null) {
-  const origin = acting.find((space) => space.id === originId);
-  return { spaces: origin ? [origin] : [], orgPermissions: [] };
 }
 
 /** The tiles of the spaces granting a row, stacked, their names in a tooltip. */

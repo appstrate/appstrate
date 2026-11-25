@@ -9,6 +9,7 @@
  * so the OIDC module is always loaded here.
  */
 
+import { EDIT_OAUTH_CLIENT_PARAM } from "../../../lib/integration-clients";
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Plus, KeyRound } from "lucide-react";
@@ -33,7 +34,7 @@ export function OAuthClientsTab({ level }: OAuthClientsTabProps) {
   const { can } = usePermissions();
   const canWrite = can("oauth-clients:write");
   const [creating, setCreating] = useState(false);
-  const editClient = useUrlModalTarget("editOauthClient", data, (client) => client.clientId);
+  const editClient = useUrlModalTarget(EDIT_OAUTH_CLIENT_PARAM, data, (client) => client.clientId);
   const selectedClient = editClient.target ?? null;
   // Shown once, and with no address.
   const [createdSecret, setCreatedSecret] = useState<CreatedSecret | null>(null);

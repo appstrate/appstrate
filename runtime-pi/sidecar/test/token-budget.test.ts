@@ -355,6 +355,19 @@ describe("TokenBudget — context-window guard (#464)", () => {
     expect(b.reserveTokens).toBe(64_000);
   });
 
+  it("caps the reserve at 64k on a 1M window, as the runner's summary threshold does", () => {
+    // DeepSeek V4.1 Flash: 384k max output → spill threshold 936k.
+    for (const reserveTokens of [384_000, undefined]) {
+      const b = new TokenBudget({
+        inlineCapTokens: 10_000,
+        runBudgetTokens: 500_000,
+        contextWindowTokens: 1_000_000,
+        ...(reserveTokens !== undefined ? { reserveTokens } : {}),
+      });
+      expect(b.reserveTokens).toBe(64_000);
+    }
+  });
+
   it("spills with exceeds_context_window when cumulative + estimated would breach window − reserve", () => {
     // 200 K window, 64 K reserve → threshold = 136 K. Run-budget set
     // high enough (500 K) that only the context-window guard fires.

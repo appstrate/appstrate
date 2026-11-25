@@ -12,8 +12,21 @@
 import { describe, it, expect, beforeEach, afterEach } from "bun:test";
 import { getTestApp } from "../../helpers/app.ts";
 import { truncateAll } from "../../helpers/db.ts";
-import { createTestContext, authHeaders, type TestContext } from "../../helpers/auth.ts";
-import { seedPackage, seedPackageVersion } from "../../helpers/seed.ts";
+import {
+  addOrgMember,
+  authHeaders,
+  createTestContext,
+  createTestUser,
+  type TestContext,
+} from "../../helpers/auth.ts";
+import {
+  seedPackage,
+  seedPackageVersion,
+  seedSpace,
+  seedSpaceGrant,
+  seedSpaceMember,
+  seedSpacePackage,
+} from "../../helpers/seed.ts";
 import { db } from "../../helpers/db.ts";
 import { packages } from "@appstrate/db/schema";
 import { eq } from "drizzle-orm";
@@ -474,7 +487,7 @@ describe("POST /api/runs/inline/validate", () => {
           field: `integrations.${INTEGRATION}`,
           code: "integration_not_active",
           title: "Integration Not Active",
-          message: `Integration '${INTEGRATION}' is not active in this space; the run proceeds without it.`,
+          message: `Integration '${INTEGRATION}' is not active in this space — activate it with POST /api/spaces/${ctx.defaultSpaceId}/packages {"packageId":"${INTEGRATION}"}; the run proceeds without it.`,
         },
       ]);
 
@@ -485,6 +498,48 @@ describe("POST /api/runs/inline/validate", () => {
       expect(refused.errors.map((e) => [e.field, e.code])).toEqual([
         [`integrations.${INTEGRATION}`, "integration_not_active"],
       ]);
+    });
+
+    it("names, on the launch 409, only the spaces where the caller may compose an inline run", async () => {
+      await seedIntegration();
+      await deactivatePackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, INTEGRATION);
+      const member = await createTestUser();
+      await addOrgMember(ctx.orgId, member.id, "member");
+      await seedSpaceMember({
+        spaceId: ctx.defaultSpaceId,
+        userId: member.id,
+        presetRole: "admin",
+      });
+      // The integration is active in both; only `composes` grants `agents:write` beside `agents:run`.
+      const composes = await seedSpace({ orgId: ctx.orgId, name: "Composes" });
+      const runsOnly = await seedSpace({ orgId: ctx.orgId, name: "Runs only" });
+      for (const [space, permissions] of [
+        [composes, ["agents:write", "agents:run"]],
+        [runsOnly, ["agents:run"]],
+      ] as const) {
+        await seedSpaceGrant({
+          orgId: ctx.orgId,
+          spaceId: space.id,
+          userId: member.id,
+          permissions: [...permissions],
+        });
+        await seedSpacePackage(space.id, INTEGRATION);
+      }
+
+      const res = await app.request("/api/runs/inline", {
+        method: "POST",
+        headers: {
+          ...authHeaders({ ...ctx, cookie: member.cookie }),
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          manifest: manifestSelecting({ tools: ["search"], required: true }),
+          prompt: "do something",
+        }),
+      });
+      expect(res.status).toBe(409);
+      const body = (await res.json()) as { active_in_spaces?: unknown };
+      expect(body.active_in_spaces).toEqual([{ id: composes.id, name: "Composes" }]);
     });
 
     it("does NOT insert a shadow row when the selection is refused", async () => {

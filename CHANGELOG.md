@@ -6,6 +6,63 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [1.0.0-beta.71] - 2026-11-24
+
+### Module authors
+
+Before upgrading, declare `x-appstrate-space` on documented operations whose scope cannot be
+inferred from their mounted guards. The platform checks these contracts at startup. Modules
+that resolve a resource's space from a database row use `withAuthorizedRow` from
+`@appstrate/core/permissions`. See the [module authoring guide](apps/api/src/modules/README.md#openapi-contributions).
+
+### Upgrade and client changes
+
+- Follow the [upgrade procedure through migration 0113](docs/deployment/UPGRADE_0113.md) before migrating the schema and reopening traffic.
+- Reconnecting an integration in place requires a matching account identity and instance. A connection without a comparable identity needs a new connection and explicit reassignment of its shares, pins and schedules. Personal connection policies still apply.
+- MCP clients can validate both successful `run_and_wait` responses and structured refusals against the tool’s declared output schema. Each run processes remote resource reads one at a time, limited to 48 MiB on the wire and 32 MiB of decoded contents. A concurrent read waits for the previous one to complete.
+- Space and organization run lists require timestamps with a time and timezone. Send an RFC 3339 instant for date filters.
+- A reporting CLI must use the public origin configured in `APP_URL`. Run events, provisioning and finalization require direct endpoints without redirects. An unavailable resource-metadata service can temporarily interrupt automatic MCP OAuth setup even with a configured issuer; retry after it recovers.
+
+### MCP clients
+
+The platform MCP server replaces `search_operations`, `search_integration_tools` and `describe_operation` with `search` and `describe`, and `read_file` with `read` (#2315). An MCP client re-lists its tools on its next connection; a call to a retired name answers `-32602 Unknown tool`.
+
+| beta.70                                                  | Now                                                                                                   |
+| -------------------------------------------------------- | ----------------------------------------------------------------------------------------------------- |
+| `search_operations { query, tag, limit }`                | `search { query, kinds: ["operation"], tag, limit }`, result under `operations`                       |
+| `search_integration_tools { query, integration, limit }` | `search { query, kinds: ["integration_tool"], integration, limit }`, result under `integration_tools` |
+| `describe_operation { operation_id }`                    | `describe { kind: "operation", id }`                                                                  |
+| `read_file { uri }`                                      | `read { uri }`, which also reads `skill://` URIs                                                      |
+
+- `search` also finds the agents the caller can read (`agents`; on the organization endpoint `granted_in` names the spaces where each is listed) and the skills it can read (`skills`). Every item carries the `id` that `describe` takes; an item's `operation_id` and an integration tool's `tool` are now `id`.
+- `describe` also details an integration tool (its schemas, `usage` and connections), an agent (its launch contract at the definition a launch with `version` omitted runs, the `space` it was read in and a ready `run_and_wait` call) and a skill (its frontmatter and files, in the space the call enters; `read` of a `skill://` URI of another space answers `space_mismatch`).
+- A kind a `search` names and the caller may not read in the space (integration tools in a closed or unauthorised space, the agents route refusing) is refused with an error result; a search that names no kind leaves it out. `tag` and `integration` narrow an omitted `kinds` to operations and integration tools, and are `invalid_argument` beside `kinds` that exclude their kind.
+- On the organization endpoint `search` takes `space_id` as optional: without it, it searches every space the connection reaches, and each item carries `granted_in`, the spaces where it is usable (a skill keeps one item per `skill://` URI). The other tools resolve their destination from the operation, its arguments and the connection. Organization-wide operations require no space. A call that needs a destination asks when those inputs leave it undetermined. A connection, `not_ready` or `unlisted` entry of an integration tool listed identically in several spaces is one entry whose `granted_in` names them (entries that differ stay apart, each with its own), a space whose read was refused (a skill archive unavailable included) is named in the section's `unsearched`, and a search without `space_id` that read some space's agents, skills or integration tools lists those spaces in a top-level `searched_spaces`. The chat records, before the result reaches the model, the spaces a call that names none says it read; a result naming a space outside the turn, or one that cannot be recorded, is withheld.
+- Where `search` and `describe` declare the `integration_tool` kind they are annotated open-world, not read-only (a listing reaches third-party servers with the connection's credential); otherwise they stay read-only.
+- A search whose `kinds` does not list `integration_tool` (an `integration` filter alone included) reads remote MCP catalogs from the cache only, so it contacts no server and sends no credential. A cold catalog's tools are listed by name, and the integration is named in `uncached`. `GET /api/credential-proxy/tools` takes the same choice as `catalogs=live|cached` (default `live`) and answers an `uncached` array.
+- `invoke_operation`, `call_integration_tool`, `run_and_wait`, `list_files`, `validate_package_file`, `import_package_file`, `get_runtime_capabilities` and `get_me` keep their names and arguments.
+
+### Chat skills and commands
+
+The three skill modes of a chat conversation (`auto`, `manual`, `strict`) become two settings: the pinned skills, injected in full, and `skill_discovery`, whether the assistant may find other skills. Only the user pins; the server owns the pinned set and reports what each pin does (#2356). The composer's `/` menu lists the skills a message can name and the agents the caller can launch.
+
+- **BREAKING (chat API):** `skill_mode` is replaced by `skill_discovery` (boolean, default `true`), and `pinned_skills` by `pins: [{ id, status, chars }]` (sorted by `id`) on the session objects. `status` is `injected`, `over_budget`, `unavailable` (in no skill listing the turn read) or `unreadable` (its read failed, or the text was not the one listed), written by the turn that claims the conversation and `null` until a turn has evaluated the pin; `chars` is the length of the `SKILL.md` that turn read, `null` when it read none.
+- New `PATCH /api/orgs/{orgId}/chat/sessions/{id}/skills`, body `{ pins?, skill_discovery? }` (strict, at least one field; `pins` any number of scoped names, held to the 64 000-character budget each turn): `pins` replaces the whole set (deduped, sorted) and drops the verdicts of the pins it removes. Answers the session object (200) and leaves `updatedAt` alone. Allowed while a turn runs; it applies from the next turn.
+- **BREAKING (chat API):** `POST /api/orgs/{orgId}/chat` takes `pins` and `skill_discovery` only on the turn that creates the conversation (or an ephemeral turn); an existing conversation ignores them and changes its pins through the PATCH. The old fields are refused (400). A live turn holding the conversation is a 409 `chat_turn_in_flight`; a limit change between the turn's start and its claim is a 409 `chat_turn_scope_changed`.
+- A skill a user message names with a `:skill[…]{name=@scope/name}` directive (the `/` menu's chip) is injected in full on every turn whose history holds that message, discovery on or off: after the pins, within the same budget, most recent message first, a pinned one once. It is read like a pin but gets no `skill_status` entry; one that is not injected gets a notice line. Sending a message pins nothing.
+- The assistant pins nothing: a `SKILL.md` it reads serves its turn and its text stays in the history. The thread shows that read as a « Lue pour ce message » chip with a pin action.
+- A turn works on the caller's drafts only with package authoring on and `skills:write`: then the catalogue and the injected pins take a skill's draft when the caller has one; otherwise its published version.
+- `skill_discovery: false` is the former `strict`: the turn holds no `skills:*`. With it on, the context lists the other skills of the turn's spaces, never a pinned one (a pin left out says why in a notice). A conversation that was `manual` now sees that catalogue.
+- The `list_skills` tool is removed: the catalogue is in the context and `read_resource` loads a skill by its `skill://` URI.
+- The skills panel shows each pin as loaded or not loaded with the reason, a footer line for changes pending until the next message, one hint on unchecking, and a gauge of the 64 000-character budget, the only limit on pins: a skill whose listed size would exceed it cannot be pinned (from the panel, the `/` menu or a read chip). The gauge also counts the skills named in the draft. Any pin can be unchecked.
+- New `GET /api/orgs/{orgId}/chat/commands` (optional `spaceId`, a space the caller can act in, to read one space alone; `package_authoring`, boolean, absent = on as in the `POST /chat` body: skill drafts are listed only with it on and `skills:write`, as a turn injects them): `{ skills: [{ id, name, description, version, bytes }], agents: [{ name, title, description, packageId, icon, color }] }` (`bytes`: the size of its `SKILL.md` in UTF-8 bytes as listed, `null` when the listing gives none; `icon`/`color`: the agent's chosen appearance, `null` when none, carried by the launch prompts' `_meta["dev.appstrate/agent"]`; an agent prompt without it is left out), read with the caller's own permissions over `skills/list` and `prompts/list` on one connection closed before the answer. A half that cannot be read is empty; an unreachable MCP server is a 502.
+- A user message of `POST /api/orgs/{orgId}/chat` may carry one `data-agent-prompt` part, `{ name, title }`, to launch an agent. The turn resolves `name` with `prompts/get` (the message text as `request`) before persisting the message and stores the launch instructions in the part's `data.text`; the model reads that text in place of the typed text. An unknown name, launch instructions over 64 KB, a second part, a malformed one or one carrying its own `text` is a 400 and nothing is written; a platform MCP server that fails to answer is a 502. Later turns replay the stored texts, most recent first, within 64 000 characters; older ones become a short stub.
+- Data and schema (migration 0112): `strict` becomes `skill_discovery = false`; `auto` conversations lose their pinned skills, which were kept but unused and would otherwise be injected after the upgrade; `chat_sessions` gains `skill_status`.
+
+### MCP integrations
+
+- An MCP tool whose input and output schemas exceed the shared 8192-byte budget is degraded instead of silently dropped (#2361): its `output_schema` goes first, then the documentation keywords of its input schema, then the input schema itself (`{ "type": "object" }`, the description noting that the server validates the arguments). Tools of servers with large schemas (Google Calendar, Drive, Gmail) reappear. The steps taken are exposed as an optional `schema_reduced` array on `GET /api/credential-proxy/tools` and in MCP `describe` of an `integration_tool` (omitted when empty); in a run the sidecar logs a `tool_descriptor_reduced` warning. A name collision is the only remaining exclusion.
+
 ## [1.0.0-beta.70] - 2026-11-19
 
 The Apple Silicon CLI builds on the supported macOS 15 runner. Production upgrades directly from beta.68 using the [maintenance procedure](docs/deployment/BETA_69.md). The beta.69 tag stopped before CLI signing. Its client and operator changes are described below.

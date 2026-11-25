@@ -50,7 +50,7 @@ function spaceFixture(personal: boolean, domains: string[] = []): Space {
     personal,
     access: "member",
     role: null,
-    permissions: [],
+    permissions: ORG.permissions,
     created_by: null,
     createdAt: ORG.createdAt,
     updatedAt: ORG.createdAt,
@@ -156,7 +156,7 @@ function switchTag(html: string): string {
 type PatchCall = [string, { params: { path: { id: string } }; body: unknown }];
 
 describe("a workspace's general settings", () => {
-  it("keeps only the name and one sentence for a personal workspace", () => {
+  it("keeps only the name, one sentence and the direct access state for a personal workspace", () => {
     const html = generalPage(true);
     expect(html).toContain("Nom");
     expect(html).toContain("toujours privé");
@@ -240,9 +240,14 @@ describe("the direct access switch of a workspace", () => {
     }
   });
 
-  it("is absent from a personal workspace", () => {
-    expect(generalPage(true)).not.toContain(`id="${SWITCH_ID}"`);
-    expect(generalPage(false)).toContain(`id="${SWITCH_ID}"`);
+  it("is drawn on and read-only in a personal workspace, which the server never closes", () => {
+    const html = generalPage(true);
+    const tag = switchTag(html);
+    expect(tag).toContain('data-state="checked"');
+    expect(tag).toContain(' disabled=""');
+    expect(html).toContain("Toujours activé dans un espace personnel");
+    // The team workspace's hint and its note on inline runs describe a switch that can close.
+    expect(html).not.toContain("Le désactiver ferme seulement");
   });
 
   it("is gated by the route, not by the page: the page draws it enabled for any caller", () => {

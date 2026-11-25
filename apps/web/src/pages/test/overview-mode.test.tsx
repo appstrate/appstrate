@@ -14,6 +14,7 @@ import type { QueryClient } from "@tanstack/react-query";
 import { SidebarProvider } from "@appstrate/ui/components/sidebar";
 import { reporter } from "../../test/agent-detail.ts";
 import { installFakeStorage } from "../../test/fake-storage.ts";
+import { paginatedRunsKeys } from "../../lib/query-keys.ts";
 
 installFakeStorage({
   __APP_CONFIG__: { features: {}, trustedOrigins: [] },
@@ -83,6 +84,7 @@ const agent = (space_ids: string[]) => ({
   display_name: "Rapporteur",
   keywords: [],
   dependencies: { integrations: {} },
+  integrations: [],
   running_runs: 0,
   unread_count: 0,
   published: true,
@@ -141,21 +143,17 @@ function renderIn(
 
 describe("the switcher", () => {
   it("names the organization and the space, or the mode, in its accessible name", () => {
-    expect(renderIn(true, <OrgSwitcher variant="brand" />).html).toContain(
+    expect(renderIn(true, <OrgSwitcher />).html).toContain(
       "aria-label=\"Changer d'organisation ou d'espace (actuel : Acme, Tous les espaces)\"",
     );
-    expect(renderIn(false, <OrgSwitcher variant="brand" />).html).toContain(
+    expect(renderIn(false, <OrgSwitcher />).html).toContain(
       "aria-label=\"Changer d'organisation ou d'espace (actuel : Acme, Studio)\"",
     );
   });
 
-  it("names the mode where it names the working space, in the sidebar and the phone header alike", () => {
-    for (const variant of ["brand", "mobile"] as const) {
-      expect(renderIn(true, <OrgSwitcher variant={variant} />).html).toContain(
-        'title="Tous les espaces"',
-      );
-      expect(renderIn(false, <OrgSwitcher variant={variant} />).html).toContain('title="Studio"');
-    }
+  it("names the mode where it names the working space", () => {
+    expect(renderIn(true, <OrgSwitcher />).html).toContain('title="Tous les espaces"');
+    expect(renderIn(false, <OrgSwitcher />).html).toContain('title="Studio"');
   });
 });
 
@@ -243,7 +241,7 @@ describe("the agent index in the mode", () => {
     expect(html).not.toContain("enterSpace=");
     // The « Espace » column names the home and counts the other, named in the badge's label.
     expect(html).toContain(">Espace<");
-    expect(html).toMatch(/title="Studio">Studio<\/span>.*aria-label="Partagé avec spc_b"/);
+    expect(html).toMatch(/title="Studio">Studio<\/span>.*aria-label="Actif aussi dans spc_b"/);
     expect(html).toContain("1 élément");
   });
 
@@ -370,7 +368,7 @@ describe("the integration index in the mode", () => {
     expect(html).not.toContain("enterSpace=");
     // The org-scoped connection reaches both spaces and counts once.
     expect(html).toMatch(
-      /title="Studio">Studio<\/span>.*aria-label="Partagé avec spc_b".*?<span aria-hidden="true">·<\/span>.*?2 connexions/,
+      /title="Studio">Studio<\/span>.*aria-label="Actif aussi dans spc_b".*?<span aria-hidden="true">·<\/span>.*?2 connexions/,
     );
     expect(html).toContain("data-page-actions-trigger");
   });
@@ -492,8 +490,7 @@ describe("the dashboard in the mode", () => {
   const seed = (queryClient: QueryClient) => {
     queryClient.setQueryData(["agents", "org_1", "across-spaces"], AGENTS);
     queryClient.setQueryData(
-      [
-        "paginated-runs",
+      paginatedRunsKeys.list(
         "org_1",
         "across-spaces",
         "/runs",
@@ -502,8 +499,10 @@ describe("the dashboard in the mode", () => {
         undefined,
         undefined,
         undefined,
+        undefined,
+        undefined,
         15,
-      ],
+      ),
       {
         pages: [
           {
@@ -526,18 +525,19 @@ describe("the dashboard in the mode", () => {
     const { asked } = renderIn(true, <DashboardPage />, "/", seed);
     expect(asked("agents")).toEqual([["agents", "org_1", "across-spaces"]]);
     expect(asked("schedules")).toEqual([["schedules", "org_1", "across-spaces"]]);
-    const runRequests = asked("paginated-runs").map(
-      ([, orgId, scope, endpoint, , , status, , , limit]) => ({
-        orgId,
-        scope,
-        endpoint,
-        status,
-        limit,
-      }),
-    );
-    expect(runRequests).toEqual([
-      { orgId: "org_1", scope: "across-spaces", endpoint: "/runs", status: undefined, limit: 15 },
-      { orgId: "org_1", scope: "across-spaces", endpoint: "/runs", status: "running", limit: 1 },
+    expect(asked("paginated-runs")).toMatchObject([
+      [
+        "paginated-runs",
+        "org_1",
+        "across-spaces",
+        { endpoint: "/runs", status: undefined, limit: 15 },
+      ],
+      [
+        "paginated-runs",
+        "org_1",
+        "across-spaces",
+        { endpoint: "/runs", status: "running", limit: 1 },
+      ],
     ]);
   });
 
@@ -564,8 +564,7 @@ describe("the dashboard in the mode", () => {
         queryClient.setQueryData(["agents", "org_1", "spc_a"], [agent(["spc_a"])]);
         queryClient.setQueryData(["schedules", "org_1", "spc_a"], []);
         queryClient.setQueryData(
-          [
-            "paginated-runs",
+          paginatedRunsKeys.list(
             "org_1",
             "spc_a",
             "/runs",
@@ -574,8 +573,10 @@ describe("the dashboard in the mode", () => {
             undefined,
             undefined,
             undefined,
+            undefined,
+            undefined,
             15,
-          ],
+          ),
           {
             pages: [{ object: "list", hasMore: false, data: [], total: 0 }],
             pageParams: [undefined],
@@ -680,9 +681,9 @@ describe("an agent's page", () => {
       runner("spc_a"),
       runner("spc_b"),
     ]);
-    expect(asked("paginated-runs").map((key) => key.slice(1, 4))).toEqual([
-      ["org_1", "across-spaces", "/agents/@acme/reporter/runs"],
-      ["org_1", "spc_a", "/agents/@acme/reporter/runs"],
+    expect(asked("paginated-runs")).toMatchObject([
+      ["paginated-runs", "org_1", "across-spaces", { endpoint: "/agents/@acme/reporter/runs" }],
+      ["paginated-runs", "org_1", "spc_a", { endpoint: "/agents/@acme/reporter/runs" }],
     ]);
   });
 });

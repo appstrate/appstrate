@@ -31,7 +31,7 @@ import { RUNS_READ_PERMISSIONS } from "@appstrate/core/permissions";
 import { runs } from "@appstrate/db/schema";
 import { actorFilter, getActor } from "./actor.ts";
 import { notFound } from "./errors.ts";
-import { callerPermissions, type SpaceGrant } from "./permissions.ts";
+import { callerPermissions, callerSpaceGrant, type SpaceGrant } from "./permissions.ts";
 import { requireAnyPermission } from "../middleware/require-permission.ts";
 import type { AppEnv } from "../types/index.ts";
 
@@ -64,22 +64,15 @@ export function readsRun(
 }
 
 /**
- * WHERE fragment for the runs this principal launched — the narrow half of
- * {@link runVisibilityFilter}, and on its own what `GET /api/runs?user=me`
- * means. "Mine" is one predicate whether it comes from the permission or from
- * the query parameter, so a caller holding `read-all` who asks for `user=me`
- * reads exactly the rows a plain `runs:read` caller reads.
- */
-function ownRunsFilter(actor: Actor): SQL {
-  return actorFilter(actor, { userId: runs.userId, endUserId: runs.endUserId });
-}
-
-/**
  * WHERE fragment for the runs `grants` open: every run of a space whose grant
  * reads them all ({@link canReadEveryRun}), the actor's own elsewhere — or
  * everywhere when `ownOnly` (`?user=me`). No grant (or no actor where one is
- * needed), no row. The many-space twin of {@link runVisibilityFilter}: every
- * query spanning spaces narrows through it.
+ * needed), no row. The one statement of the rule as SQL: a single-space query
+ * passes the one grant of its space ({@link runVisibilityFilter}).
+ *
+ * "Mine" is one predicate whether it comes from the permission or from
+ * `ownOnly`, so a caller holding `read-all` who asks for `user=me` reads
+ * exactly the rows a plain `runs:read` caller reads.
  */
 export function runReadCondition(
   grants: readonly SpaceGrant[],
@@ -92,15 +85,19 @@ export function runReadCondition(
   const reach: SQL[] = [];
   if (everyRun.length) reach.push(inArray(runs.spaceId, everyRun));
   if (ownRuns.length && actor) {
-    reach.push(and(inArray(runs.spaceId, ownRuns), ownRunsFilter(actor))!);
+    reach.push(
+      and(
+        inArray(runs.spaceId, ownRuns),
+        actorFilter(actor, { userId: runs.userId, endUserId: runs.endUserId }),
+      )!,
+    );
   }
   return or(...reach) ?? sql`false`;
 }
 
-/** WHERE fragment narrowing `runs` to what the caller may read; `undefined` = no narrowing. */
-export function runVisibilityFilter(c: Context<AppEnv>): SQL | undefined {
-  if (canReadEveryRun(callerPermissions(c))) return undefined;
-  return ownRunsFilter(getActor(c));
+/** WHERE fragment narrowing `runs` to what the caller may read in the request's space. */
+export function runVisibilityFilter(c: Context<AppEnv>): SQL {
+  return runReadCondition([callerSpaceGrant(c)], getActor(c));
 }
 
 /**

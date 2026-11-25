@@ -14,6 +14,7 @@ export const spacesPaths = {
   "/api/spaces": {
     post: {
       operationId: "createSpace",
+      "x-appstrate-space": { kind: "organization" },
       tags: ["Spaces"],
       summary: "Create a space",
       description:
@@ -93,6 +94,7 @@ export const spacesPaths = {
     },
     get: {
       operationId: "listSpaces",
+      "x-appstrate-space": { kind: "organization" },
       tags: ["Spaces"],
       summary: "List spaces",
       description:
@@ -181,6 +183,7 @@ export const spacesPaths = {
   "/api/spaces/{id}": {
     get: {
       operationId: "getSpace",
+      "x-appstrate-space": { kind: "organization" },
       tags: ["Spaces"],
       summary: "Get a space",
       description: "Get a single space by ID.",
@@ -301,6 +304,7 @@ export const spacesPaths = {
     },
     delete: {
       operationId: "deleteSpace",
+      "x-appstrate-space": { kind: "organization" },
       tags: ["Spaces"],
       summary: "Delete a space",
       description:
@@ -332,6 +336,7 @@ export const spacesPaths = {
   "/api/spaces/{id}/convert-to-team": {
     post: {
       operationId: "convertSpaceToTeam",
+      "x-appstrate-space": { kind: "organization" },
       tags: ["Spaces"],
       summary: "Convert a personal space to a team space",
       description:
@@ -368,6 +373,7 @@ export const spacesPaths = {
   "/api/spaces/{id}/sweep-now": {
     post: {
       operationId: "sweepPersonalSpace",
+      "x-appstrate-space": { kind: "organization" },
       tags: ["Spaces"],
       summary: "Sweep an orphaned personal space now",
       description:
@@ -459,7 +465,8 @@ export const spacesPaths = {
         "Where it is not, this call places it, but only for a caller holding the package type's `share` permission in the package's HOME space and only when the package has a published version (`409 package_has_no_version`) — `403` without the permission, `404` when the package id is not reachable at all. " +
         "Without that permission the call only switches on a row that exists, so a placement withdrawn while the call is in flight is refused with `404` rather than recreated. An API key never carries `share`, so it activates only what is already placed. " +
         "In the caller's OWN personal space the type's activation grant is not required: ownership is the authorization, which is how a guest switches on a package placed there for them. " +
-        "The placement carries no version: the package runs its latest published version, and its draft runs for whoever can write it.",
+        "The placement carries no version: the package runs its latest published version, and its draft runs for whoever can write it. " +
+        "Activating an AGENT activates nothing else: each integration it declares that is not active here is a `warnings[]` item of the response (`code: integration_not_active`, `required` saying whether a launch here is refused until it is activated, or starts without it) — activate it with this same call and its `packageId`, or leave the agent on without it.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { name: "id", in: "path", required: true, schema: { type: "string" } },
@@ -490,7 +497,12 @@ export const spacesPaths = {
           headers: REQUEST_ID_ONLY_HEADERS,
           content: {
             "application/json": {
-              schema: { $ref: "#/components/schemas/SpacePackage" },
+              schema: {
+                allOf: [
+                  { $ref: "#/components/schemas/SpacePackage" },
+                  { $ref: "#/components/schemas/ActivationWarnings" },
+                ],
+              },
             },
           },
         },
@@ -500,7 +512,12 @@ export const spacesPaths = {
           headers: REQUEST_ID_ONLY_HEADERS,
           content: {
             "application/json": {
-              schema: { $ref: "#/components/schemas/SpacePackage" },
+              schema: {
+                allOf: [
+                  { $ref: "#/components/schemas/SpacePackage" },
+                  { $ref: "#/components/schemas/ActivationWarnings" },
+                ],
+              },
             },
           },
         },
@@ -603,7 +620,7 @@ export const spacesPaths = {
       tags: ["Space Packages"],
       summary: "Deactivate a package in this space",
       description:
-        "Switch the package off here — every package type, system packages included: the placement row always outranks the deployment's default, so a switch that changes nothing is never rendered. The row and every setting on it — model, proxy, generation settings, stored input values — are KEPT, so activating it again restores them; only withdrawing the placement (`DELETE /api/packages/{scope}/{name}/shares/{target}`) removes the row. A SYSTEM package with no row yet gets one saying `false`, which is what makes the opt-out survive the next run. `404` when the package has no row here and the deployment does not switch it on by default: there is nothing to switch off.",
+        "Switch the package off here — every package type, system packages included: the placement row always outranks the deployment's default, so a switch that changes nothing is never rendered. The row and every setting on it — model, proxy, generation settings, stored input values — are KEPT, so activating it again restores them; only withdrawing the placement (`DELETE /api/packages/{scope}/{name}/shares/{target}`) removes the row. A SYSTEM package with no row yet gets one saying `false`, which is what makes the opt-out survive the next run. `404` when the package has no row here and the deployment does not switch it on by default: there is nothing to switch off. `400` for a system integration bound to the runtime (it serves the run's own tools and stays active in every space).",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { name: "id", in: "path", required: true, schema: { type: "string" } },
@@ -614,6 +631,7 @@ export const spacesPaths = {
         "204": {
           description: "Switched off here, or already off. No audit entry when nothing changed.",
         },
+        "400": { $ref: "#/components/responses/ValidationError" },
         "401": { $ref: "#/components/responses/Unauthorized" },
         "403": { $ref: "#/components/responses/Forbidden" },
         "404": { $ref: "#/components/responses/NotFound" },

@@ -10,12 +10,15 @@
 import { describe, expect, it } from "bun:test";
 import { readUIMessageStream, type UIMessage, type UIMessageChunk } from "ai";
 import { turnMetadataFromMessage } from "@appstrate/core/chat-turn-metadata";
+import { contextReading } from "../src/ui/turn-context.ts";
+import type { PiUsage } from "../src/pi-chat/pi-events.ts";
 import {
   ChatTurnDeadlineError,
   closePiTurn,
   isChatTurnDeadline,
   resolveTurnClosure,
   turnDeadlineNoticeText,
+  turnContextOf,
   turnNoticeChunks,
 } from "../src/pi-chat/pi-turn-closure.ts";
 
@@ -114,7 +117,7 @@ describe("closePiTurn", () => {
       stepCount: 0,
       stepCapReached: false,
       ...MODEL,
-      lastToolName: "read_file",
+      lastToolName: "read",
       newId: () => "assistant-before-start",
     }).chunks;
 
@@ -131,7 +134,7 @@ describe("closePiTurn", () => {
       toolStepBudget: 15,
       toolStepBudgetReached: false,
       maxStepsReached: false,
-      lastToolName: "read_file",
+      lastToolName: "read",
     });
     expect(JSON.stringify(message)).not.toContain("leaked detail");
   });
@@ -386,5 +389,121 @@ describe("the model a turn bound to", () => {
       modelLabel: "Claude Opus 5",
       errorCategory: "upstream_unavailable",
     });
+  });
+});
+
+describe("turnContextOf", () => {
+  const MEASURE = {
+    sizing: { contextWindow: 200_000, compaction: { reserveTokens: 16_384 } },
+    contextTokens: (u: PiUsage) => u.input + u.output + u.cacheRead + u.cacheWrite,
+  };
+  const used = (input: number): PiUsage => ({
+    input,
+    output: 200,
+    cacheRead: 0,
+    cacheWrite: 0,
+    totalTokens: 0,
+    cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+  });
+
+  it("states the call's tokens by Pi's measure, over the window and its threshold", () => {
+    expect(turnContextOf({ lastSettledUsage: used(48_000) }, MEASURE)).toEqual({
+      context: { tokens: 48_200, window: 200_000, compactAt: 183_616 },
+    });
+  });
+
+  it("marks a window the model did not declare as assumed", () => {
+    const assumed = { ...MEASURE, windowAssumed: true as const };
+    expect(turnContextOf({ lastSettledUsage: used(48_000) }, assumed).context).toEqual({
+      tokens: 48_200,
+      window: 200_000,
+      compactAt: 183_616,
+      windowAssumed: true,
+    });
+  });
+
+  it("states nothing when no call settled, it reported no tokens, or no model was bound", () => {
+    expect(turnContextOf({}, MEASURE)).toEqual({});
+    const empty = { ...used(0), output: 0 };
+    expect(turnContextOf({ lastSettledUsage: empty }, MEASURE)).toEqual({});
+    expect(turnContextOf({ lastSettledUsage: used(5) }, undefined)).toEqual({});
+  });
+
+  const ANCHORS = {
+    origins: new Map([["entry_a2", { messageId: "a2", offset: 1 }]]),
+    branchHeadId: "u3",
+    estimateRestart: (summary: string) => 1_000 + summary.length,
+  };
+  const compaction = (firstKeptEntryId: string) => ({
+    summary: "Résumé",
+    firstKeptEntryId,
+    tokensBefore: 190_000,
+  });
+
+  it("states where the kept history starts, in branch message ids", () => {
+    expect(turnContextOf({ compaction: compaction("entry_a2") }, MEASURE, ANCHORS)).toEqual({
+      summary: { text: "Résumé", keptFrom: { messageId: "a2", offset: 1 }, tokensBefore: 190_000 },
+    });
+  });
+
+  it("starts the kept history at the turn's user message when Pi kept one of the turn's own entries", () => {
+    expect(
+      turnContextOf({ compaction: compaction("entry_live") }, MEASURE, ANCHORS).summary?.keptFrom,
+    ).toEqual({ messageId: "u3", offset: 0 });
+  });
+
+  it("states the post-summary estimate over the pre-summary measure, and grades it below full", () => {
+    const state = turnContextOf(
+      {
+        lastSettledUsage: used(190_000),
+        compaction: compaction("entry_a2"),
+        contextAfterCompaction: 40_000,
+      },
+      MEASURE,
+      ANCHORS,
+    );
+    expect(state.context).toEqual({ tokens: 40_000, window: 200_000, compactAt: 183_616 });
+    expect(contextReading(state.context!).level).toBe("ok");
+  });
+
+  it("estimates the whole turn after a summary Pi cut inside it, which the next turn resends", () => {
+    const state = turnContextOf(
+      {
+        lastSettledUsage: used(190_000),
+        compaction: compaction("entry_live"),
+        contextAfterCompaction: 40_000,
+      },
+      MEASURE,
+      ANCHORS,
+    );
+    expect(state.context?.tokens).toBe(1_000 + "Résumé".length);
+    expect(state.summary?.keptFrom).toEqual({ messageId: "u3", offset: 0 });
+  });
+
+  it("keeps the summary of a turn whose calls all failed", () => {
+    const state = turnContextOf({ compaction: compaction("entry_a2") }, undefined, ANCHORS);
+    expect(state).not.toHaveProperty("context");
+    expect(state.summary?.text).toBe("Résumé");
+  });
+
+  it("persists the context and the summary with the turn's closing metadata", async () => {
+    const chunks = closePiTurn({
+      finishReason: "stop",
+      streamStarted: false,
+      aborted: false,
+      abortReason: undefined,
+      stepCount: 1,
+      stepCapReached: false,
+      ...MODEL,
+      ...turnContextOf(
+        { lastSettledUsage: used(48_000), compaction: compaction("entry_a2") },
+        MEASURE,
+        ANCHORS,
+      ),
+      newId: () => "assistant-ctx",
+    }).chunks;
+    const turn = turnMetadataFromMessage(await assemble(chunks));
+    expect(turn?.context).toEqual({ tokens: 48_200, window: 200_000, compactAt: 183_616 });
+    expect(turn?.summary?.keptFrom).toEqual({ messageId: "a2", offset: 1 });
   });
 });

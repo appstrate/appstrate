@@ -14,19 +14,17 @@ import { Button } from "./button.tsx";
 import { Tooltip, TooltipContent, TooltipTrigger } from "./tooltip.tsx";
 
 /** A produced thing (a file, a result) shown with its header and actions. */
-const Artifact = React.forwardRef<HTMLDivElement, React.HTMLAttributes<HTMLDivElement>>(
-  ({ className, ...props }, ref) => (
+function Artifact({ className, ...props }: React.ComponentProps<"div">) {
+  return (
     <div
-      ref={ref}
       className={cn(
         "bg-background flex min-h-0 flex-col overflow-hidden rounded-lg border",
         className,
       )}
       {...props}
     />
-  ),
-);
-Artifact.displayName = "Artifact";
+  );
+}
 
 function ArtifactHeader({ className, ...props }: React.HTMLAttributes<HTMLDivElement>) {
   return (
@@ -71,8 +69,8 @@ function ArtifactAction({
         <Button
           type="button"
           variant="ghost"
-          size="icon"
-          className={cn("text-muted-foreground hover:text-foreground size-8", className)}
+          size="icon-sm"
+          className={cn("text-muted-foreground hover:text-foreground", className)}
           aria-label={label}
           onFocus={(event) => {
             if (!event.currentTarget.matches(":focus-visible")) event.preventDefault();

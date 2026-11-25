@@ -4,16 +4,19 @@ import { useTranslation } from "react-i18next";
 import { CheckCheck } from "lucide-react";
 import { useUnreadRunCount, useMarkAllRunsRead } from "../hooks/use-run-reads";
 import { PageHeader } from "../components/page-header";
-import { NoMatchState } from "../components/page-states";
+import { NoMatchState, SpaceFilterEmpty } from "../components/page-states";
 import { ListToolbar, type FilterSpec } from "../components/list-toolbar";
+import { readerFiltered } from "../lib/list-filters";
 import { useSearchPlaceholder } from "../lib/search-placeholder";
 import { useListParams } from "../lib/list-params";
 import { RunList } from "../components/run-list";
 import { PageActionsMenu } from "../components/page-actions-menu";
-import type { RunKindFilter } from "../hooks/use-paginated-runs";
+import { useFirstRunsPage, type RunKindFilter } from "../hooks/use-paginated-runs";
 import { usePermissions } from "../hooks/use-permissions";
 import { useRunStatusFilter } from "../hooks/use-run-status-filter";
 import { useAdmittingSpaces, useOverviewMode } from "../hooks/use-overview-mode";
+import { useSpaceFilter } from "../hooks/use-space-filter";
+import { showsTeamEmpty } from "../lib/space-filter";
 
 /**
  * Filters live in the URL (a filtered list is a link) and each takes SEVERAL
@@ -24,16 +27,29 @@ const KINDS = ["package", "inline"] as const;
 const SCOPES = ["me"] as const;
 
 /** The query parameters this screen filters on, and nothing else. */
-const FILTER_PARAMS = ["user", "kind", "status", "q"] as const;
+const FILTER_PARAMS = ["user", "kind", "status", "q", "space"] as const;
 
 /** `?status=failed,timeout` — the wire shape the endpoint takes. */
 export function RunsPage() {
   const { t } = useTranslation(["agents", "common"]);
   const { on: spanning } = useOverviewMode();
   const runSpaces = useAdmittingSpaces("runs");
-  // « Tout marquer comme lu » marks what the list spans: the working space, or each space
-  // admitting the list.
-  const unreadCount = useUnreadRunCount({ spanning });
+  const spaceFilter = useSpaceFilter("runs", spanning);
+  // « Tout marquer comme lu » marks what the list shows: the working space, or each space
+  // admitting the list that the space filter keeps.
+  const { spaceIds } = spaceFilter;
+  const teamPreset = spaceFilter.mode === "team";
+  const shownSpaces = spaceIds ? runSpaces.filter((s) => spaceIds.includes(s.id)) : runSpaces;
+  // Runs of personal spaces, which the team default hides. A disabled query keeps serving its
+  // cached `data`: gate the figure on `teamPreset`, not just the fetch.
+  const hiddenPage = useFirstRunsPage({
+    spanning: true,
+    spaces: { spaceKind: "personal" },
+    limit: 1,
+    enabled: teamPreset,
+  });
+  const hiddenCount = teamPreset ? (hiddenPage.data?.total ?? 0) : 0;
+  const unreadCount = useUnreadRunCount({ spanning, spaces: spaceFilter.runs });
   const markAllRead = useMarkAllRunsRead();
   const list = useListParams(FILTER_PARAMS);
   const searchPlaceholder = useSearchPlaceholder(t("common:nav.runs"));
@@ -41,7 +57,7 @@ export function RunsPage() {
   // Without `runs:read-all` the list is already "mine": no scope filter. Across spaces, each
   // row follows its own space: "mine" narrows as soon as one of them shows others' runs.
   const canSeeEveryRun = spanning
-    ? runSpaces.some((space) => space.permissions.includes("runs:read-all"))
+    ? shownSpaces.some((space) => space.permissions.includes("runs:read-all"))
     : can("runs:read-all");
 
   const scopes = list.values("user", SCOPES);
@@ -50,6 +66,7 @@ export function RunsPage() {
   const search = list.search;
 
   const filters: FilterSpec[] = [
+    ...(spaceFilter.filter ? [spaceFilter.filter] : []),
     ...(canSeeEveryRun
       ? [
           {
@@ -77,6 +94,11 @@ export function RunsPage() {
   // The endpoint takes ONE kind, so "both ticked" is "no kind parameter" (same
   // for scope); the ticks themselves stay as ticked.
   const kind: RunKindFilter | undefined = kinds.length === 1 ? kinds[0] : undefined;
+  const filtered = Boolean(search) || readerFiltered(filters);
+  const teamEmpty = showsTeamEmpty({
+    readerFiltered: filtered,
+    hiddenCount,
+  });
   const user = canSeeEveryRun && scopes.includes("me") ? "me" : undefined;
 
   return (
@@ -92,8 +114,7 @@ export function RunsPage() {
                 id: "mark-all-read",
                 label: t("common:notifications.markAllRead"),
                 icon: CheckCheck,
-                onSelect: () =>
-                  markAllRead.mutate(spanning ? runSpaces.map((space) => space.id) : null),
+                onSelect: () => markAllRead.mutate(spanning ? shownSpaces.map((s) => s.id) : null),
                 disabled: markAllRead.isPending || !unreadCount,
               },
             ]}
@@ -106,6 +127,7 @@ export function RunsPage() {
         kind={kind}
         status={statuses}
         spanning={spanning}
+        spaces={spaceFilter.runs}
         search={search}
         toolbar={({ columns }) => (
           <ListToolbar
@@ -119,9 +141,15 @@ export function RunsPage() {
             columns={columns}
           />
         )}
-        // A filtered list that finds nothing ran out of matches: the way out is the filter.
+        // A filtered list that finds nothing ran out of matches: the way out is the filter. When
+        // only the space filter narrows, the way out is every space.
         emptyState={
-          search || filters.some((f) => f.values.length > 0) ? (
+          teamEmpty ? (
+            <SpaceFilterEmpty
+              message={t("common:spaceFilter.empty.runs")}
+              showAll={spaceFilter.showAll}
+            />
+          ) : filtered ? (
             <NoMatchState message={t("runs.emptyFiltered")} onReset={list.reset} />
           ) : undefined
         }

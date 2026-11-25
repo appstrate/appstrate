@@ -116,7 +116,7 @@ const TRACKING_TABLE_QUERY = "SELECT to_regclass('drizzle.__drizzle_migrations')
 /**
  * How far the database has been migrated.
  *
- * `apps/api/src/lib/boot.ts` calls `migrate(db, { migrationsFolder })` with no
+ * The core migrator in `packages/db/src/core-migrations.ts` sets no
  * `migrationsSchema` / `migrationsTable`, so the tracking table is the drizzle
  * default `drizzle.__drizzle_migrations`, and drizzle stores each applied
  * migration's `folderMillis` — the journal entry's `when`, verbatim — in

@@ -24,15 +24,16 @@ import {
   type IntegrationManifest,
 } from "@appstrate/core/integration";
 import { mapWithConcurrency } from "@appstrate/core/map-with-concurrency";
-import { normaliseMcpToolNamespace } from "@appstrate/core/naming";
 import { API_CALL_TOOL_NAME, API_UPLOAD_TOOL_NAME } from "@appstrate/afps-shared/api-tool-naming";
 import {
   fnv1a64Hex,
+  integrationNamespaces,
   isValidMcpToolName,
   MCP_TOOL_NAME_MAX_LENGTH,
   normaliseMcpToolBody,
 } from "@appstrate/afps-shared/mcp-naming";
 import type { ProblemDetail } from "@appstrate/core/api-errors";
+import type { ToolDescriptorReduction } from "@appstrate/mcp-transport";
 import { ApiError, notFound } from "../../lib/errors.ts";
 import { logger } from "../../lib/logger.ts";
 import type { ProxyConnectionStatus } from "../integration-connections.ts";
@@ -74,6 +75,8 @@ interface RemoteTool extends ToolBase {
   remote_name: string;
   input_schema: Record<string, unknown>;
   output_schema?: Record<string, unknown>;
+  /** The schema shown is partial: the budget steps applied to the server's descriptor, in order. */
+  schema_reduced?: ToolDescriptorReduction[];
   /** The server could not be listed: the tool is declared, without description or schema. */
   catalog_unreadable?: true;
   /** Per connection lacking some, the scopes its `tools_policy` entry requires. */
@@ -99,6 +102,8 @@ export interface IntegrationToolListing {
   not_ready: IntegrationOutsideRun[];
   unlisted: UnlistedIntegration[];
   truncated_catalogs: TruncatedCatalog[];
+  /** The remote integrations whose catalog a cache-only listing did not find in the cache. */
+  uncached: string[];
 }
 
 interface IntegrationToolQuery {
@@ -110,12 +115,15 @@ interface IntegrationToolQuery {
    */
   name?: string;
   connectionId?: string;
+  /** Read remote catalogs from the cache only; a cold one's tools are listed `catalog_unreadable`. */
+  cachedOnly?: boolean;
 }
 
 /**
  * The `proxy_connection` statuses of an integration without a usable connection: a call naming
  * none is refused, and no connection a call could name instead clears it. `proxy_closed` is none
- * of a listing's: `reachOutsideRun` refuses a closed space before it.
+ * of a listing's: `reachOutsideRun` refuses a closed space before it. Nor is `not_published`:
+ * the listing judges the published manifests alone.
  */
 const NOT_READY_STATUSES: ReadonlySet<ProxyConnectionStatus> = new Set([
   "none",
@@ -126,51 +134,6 @@ const NOT_READY_STATUSES: ReadonlySet<ProxyConnectionStatus> = new Set([
 ]);
 
 const LIST_CONCURRENCY = 3;
-/** Hex digits of the package id's hash a clashing namespace takes first; 16 at most. */
-const NAMESPACE_HASH_LENGTH = 6;
-const MAX_NAMESPACE_HASH_LENGTH = 16;
-
-/**
- * The namespace of each integration active in a space: its normalised id, without the trailing
- * `_` the length cut may leave, followed by `_` and a hash of its id while it equals another's.
- * No namespace holds `__` or ends with `_`, so distinct namespaces never yield the same
- * `{ns}__{body}` name, and the result depends on the set of ids alone.
- */
-export function integrationNamespaces(ids: readonly string[]): Map<string, string> {
-  const bases = new Map(
-    ids.map((id) => {
-      let base = normaliseMcpToolNamespace(id);
-      while (base.endsWith("_")) base = base.slice(0, -1);
-      return [id, base];
-    }),
-  );
-  const hashLength = new Map<string, number>(
-    ids.map((id) => [id, bases.get(id) ? 0 : NAMESPACE_HASH_LENGTH]),
-  );
-  const namespaceOf = (id: string) => {
-    const base = bases.get(id)!;
-    const length = hashLength.get(id)!;
-    if (length === 0) return base;
-    const hash = fnv1a64Hex(id).slice(0, length);
-    return base ? `${base}_${hash}` : hash;
-  };
-  for (;;) {
-    const holders = new Map<string, string[]>();
-    for (const id of ids) {
-      const namespace = namespaceOf(id);
-      holders.set(namespace, [...(holders.get(namespace) ?? []), id]);
-    }
-    const clashing = [...holders.values()].filter((group) => group.length > 1).flat();
-    const growable = clashing.filter((id) => hashLength.get(id)! < MAX_NAMESPACE_HASH_LENGTH);
-    if (growable.length === 0) break;
-    for (const id of growable) {
-      const length = hashLength.get(id)!;
-      hashLength.set(id, length === 0 ? NAMESPACE_HASH_LENGTH : length + 2);
-    }
-  }
-  return new Map(ids.map((id) => [id, namespaceOf(id)]));
-}
-
 /** Hex digits of the upstream name's hash a transformed tool name ends with. */
 const TOOL_NAME_HASH_LENGTH = 8;
 
@@ -345,6 +308,7 @@ async function readRemoteCatalog(
   caller: RemoteToolsCaller,
   entry: ListedIntegration,
   connectionId: string | undefined,
+  cachedOnly: boolean,
 ): Promise<RemoteToolCatalog> {
   const named = entry.connections.find(
     (c) => c.connection_id.toLowerCase() === connectionId?.toLowerCase(),
@@ -355,6 +319,7 @@ async function readRemoteCatalog(
       integrationId: entry.id,
       manifest: entry.manifest,
       ...(id ? { connectionId: id } : {}),
+      cachedOnly,
     });
   try {
     return await list(named?.connection_id);
@@ -372,7 +337,8 @@ async function readRemoteCatalog(
 }
 
 type RemoteListing =
-  { tools: RemoteTool[]; truncatedAt: number | null } | { unlisted: UnlistedIntegration };
+  | { tools: RemoteTool[]; truncatedAt: number | null; listingFailure?: string }
+  | { unlisted: UnlistedIntegration };
 
 /**
  * Whether `name` may be one of a remote integration's tools, its server unread: any name of its
@@ -417,7 +383,7 @@ function catalogUnavailable(
 async function remoteTools(
   caller: RemoteToolsCaller,
   entry: ListedIntegration,
-  query: Pick<IntegrationToolQuery, "name" | "connectionId">,
+  query: Pick<IntegrationToolQuery, "name" | "connectionId" | "cachedOnly">,
 ): Promise<RemoteListing> {
   const { id: integrationId, namespace, manifest, connections } = entry;
   if (
@@ -438,7 +404,7 @@ async function remoteTools(
   }
   let catalog: RemoteToolCatalog;
   try {
-    catalog = await readRemoteCatalog(caller, entry, query.connectionId);
+    catalog = await readRemoteCatalog(caller, entry, query.connectionId, query.cachedOnly === true);
   } catch (err) {
     if (!(err instanceof ApiError)) throw err;
     if (query.name !== undefined && !mayNameRemoteTool(entry, query.name)) {
@@ -477,6 +443,7 @@ async function remoteTools(
       remote_name: upstream.name,
       input_schema: upstream.input_schema,
       ...(upstream.output_schema ? { output_schema: upstream.output_schema } : {}),
+      ...(upstream.schema_reduced ? { schema_reduced: upstream.schema_reduced } : {}),
       ...(unreadable ? { catalog_unreadable: true as const } : {}),
       connection_ids: connections.map((c) => c.connection_id),
       ...(Object.keys(missing).length > 0 ? { missing_scopes: missing } : {}),
@@ -517,7 +484,11 @@ async function remoteTools(
     }
     tools.push(remoteTool(named, { name: upstream, input_schema: { type: "object" } }, true));
   }
-  return { tools, truncatedAt: catalog.truncatedAt };
+  return {
+    tools,
+    truncatedAt: catalog.truncatedAt,
+    ...(catalog.listingFailure ? { listingFailure: catalog.listingFailure } : {}),
+  };
 }
 
 /** Connecting it gives a tool to call outside a run: an `api_call` tool, or a remote server's. */
@@ -593,6 +564,7 @@ export async function listIntegrationTools(
       not_ready: [],
       unlisted: [],
       truncated_catalogs: [],
+      uncached: [],
     };
   }
 
@@ -633,6 +605,7 @@ export async function listIntegrationTools(
   const tools: IntegrationTool[] = [];
   const unlisted: UnlistedIntegration[] = [];
   const truncatedCatalogs: TruncatedCatalog[] = [];
+  const uncached: string[] = [];
   for (const { id } of integrations) {
     tools.push(...httpTools.get(id)!);
     const result = listed.get(id);
@@ -643,6 +616,7 @@ export async function listIntegrationTools(
       continue;
     }
     tools.push(...result.tools);
+    if (result.listingFailure === "not_cached") uncached.push(id);
     if (result.truncatedAt !== null) {
       truncatedCatalogs.push({ integration_package_id: id, listed_tools: result.truncatedAt });
     }
@@ -654,5 +628,6 @@ export async function listIntegrationTools(
     not_ready: notReady,
     unlisted,
     truncated_catalogs: query.name === undefined ? truncatedCatalogs : [],
+    uncached,
   };
 }

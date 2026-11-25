@@ -111,8 +111,13 @@ describe("serves_model_ids", () => {
       headers: authHeaders(owner),
     });
     expect(res.status).toBe(200);
-    const rows = ((await res.json()) as { data: { id: string; serves_model_ids: string[] }[] })
-      .data;
+    const rows = (
+      (await res.json()) as {
+        data: { id: string; serves_model_ids: string[]; referencing_model_count: number }[];
+      }
+    ).data;
+    expect(rows.find((row) => row.id === personal)?.referencing_model_count).toBe(0);
+    expect(rows.find((row) => row.id === orgKey)?.referencing_model_count).toBe(1);
     const served = (id: string) => rows.find((row) => row.id === id)?.serves_model_ids;
     // The server's own rule decides, model by model.
     expect(servesModel(FIXED_ANTHROPIC, unbound)).toBe(true);

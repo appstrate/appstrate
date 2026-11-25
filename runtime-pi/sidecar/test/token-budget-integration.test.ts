@@ -470,6 +470,20 @@ describe("token-aware spill — env-var configuration via buildSidecarRuntimeDep
     const runtimeDeps = buildSidecarRuntimeDeps(appDeps);
     expect(runtimeDeps.tokenBudget.reserveTokens).toBe(64_000);
   });
+
+  it("caps the reserve at 64k on a 1M window with a 384k max output", () => {
+    const appDeps = makeDeps({
+      config: {
+        platformApiUrl: "http://mock:3000",
+        runToken: "tok",
+        proxyUrl: "",
+        modelContextWindow: 1_000_000,
+        modelMaxTokens: 384_000,
+      },
+    });
+    const runtimeDeps = buildSidecarRuntimeDeps(appDeps);
+    expect(runtimeDeps.tokenBudget.reserveTokens).toBe(64_000);
+  });
 });
 
 describe("token-aware spill — fallback when blob store is full", () => {

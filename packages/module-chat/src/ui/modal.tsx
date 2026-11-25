@@ -1,17 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * In-chat modal — a thin composition over the design-system `Dialog`, which
- * already provides the portal, focus trap, Escape handling and body-scroll
- * lock this file used to hand-roll.
- *
- * The hand-rolled overlay was justified by "the package doesn't depend on
- * react-dom". That expired: the module imports Radix-backed `@appstrate/ui`
- * primitives (Popover, Tabs) whose peer set already includes react-dom, and
- * they resolve it from `packages/ui`, not from here.
- *
- * Only the sizing survives the move: chat details are wide and tall, hence the
- * `max-w-2xl` / `max-h-[85dvh]` override on the design system's `max-w-lg`.
+ * Chat details use a wide, viewport-bounded design-system Dialog.
  */
 
 import * as React from "react";

@@ -16,7 +16,6 @@ import { useCanReach } from "./use-can-reach";
 import { useCurrentSpaceId, useSpaceSwitcher } from "./use-current-space";
 import { requestScopeChange } from "./use-unsaved-changes";
 import { spaceStore } from "../stores/space-store";
-import { useOrg } from "./use-org";
 import { useOverviewMode } from "./use-overview-mode";
 import { usePermissions } from "./use-permissions";
 import { useSpaces } from "./use-spaces";
@@ -55,7 +54,6 @@ export function useSpacesFor(need: SpaceNeed, among?: readonly string[]) {
   const { can } = usePermissions();
   const canReach = useCanReach();
   const { features } = useAppConfig();
-  const orgPermissions = useOrg().currentOrg?.permissions;
   const { data: spaces } = useSpaces();
   const workingSpaceId = useCurrentSpaceId();
 
@@ -64,7 +62,7 @@ export function useSpacesFor(need: SpaceNeed, among?: readonly string[]) {
     ("permission" in need
       ? gate(need.permission)
       : routeVerdict(need.route, gate, features, space.personal) === "granted");
-  const eligible = on ? spacesWhere(spaces, orgPermissions, admits) : [];
+  const eligible = on ? spacesWhere(spaces, admits) : [];
   const offered = on
     ? eligible.length > 0
     : "permission" in need

@@ -52,8 +52,7 @@ export function CreationHandoffChoices({
 }: CreationHandoffChoicesProps) {
   const { t } = useTranslation("settings");
   const canReach = useCanReach();
-  const translatePrompt = (key: string, values?: Record<string, string>) => t(key, values);
-  const chatPrompt = buildChatCreationDraft(resource, translatePrompt, integration);
+  const chatPrompt = buildChatCreationDraft(resource, t, integration);
   // The chat route gate covers both the feature flag and the `chat:read` permission.
   const chatAvailable = canReach("/chat");
 

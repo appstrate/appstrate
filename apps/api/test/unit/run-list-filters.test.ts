@@ -1,8 +1,19 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { describe, expect, it } from "bun:test";
+import type { Context } from "hono";
 import { PgDialect } from "drizzle-orm/pg-core";
-import { parseRunListFilters, runSearchCondition } from "../../src/lib/run-list-filters.ts";
+import type { AppEnv } from "../../src/types/index.ts";
+import {
+  parseGlobalRunListQuery,
+  parseRunListFilters,
+  runSearchCondition,
+} from "../../src/lib/run-list-filters.ts";
+
+const parse = (query: Record<string, string>) =>
+  parseGlobalRunListQuery({
+    req: { query: (name?: string) => (name ? query[name] : query) },
+  } as unknown as Context<AppEnv>);
 
 describe("run list filters", () => {
   it("leaves an unfiltered request unfiltered", () => {
@@ -51,5 +62,46 @@ describe("run list filters", () => {
     }
     const largest = new PgDialect().sqlToQuery(runSearchCondition("2147483647"));
     expect(largest.params.at(-1)).toBe(2147483647);
+  });
+});
+
+describe("space_kind filter", () => {
+  it("reads absent and empty as no narrowing", () => {
+    expect(parse({}).spaceKind).toBeUndefined();
+    expect(parse({ space_kind: "" }).spaceKind).toBeUndefined();
+  });
+  it("accepts the two kinds", () => {
+    expect(parse({ space_kind: "team" }).spaceKind).toBe("team");
+    expect(parse({ space_kind: "personal" }).spaceKind).toBe("personal");
+  });
+  it("rejects any other value instead of widening the list", () => {
+    expect(() => parse({ space_kind: "all" })).toThrow();
+    expect(() => parse({ space_kind: "Team" })).toThrow();
+  });
+});
+
+describe("spaceId filter", () => {
+  const A = "spc_00000000-0000-4000-8000-000000000001";
+  const B = "spc_00000000-0000-4000-8000-000000000002";
+  const ids = (n: number) =>
+    Array.from(
+      { length: n },
+      (_, i) => `spc_00000000-0000-4000-8000-${String(i).padStart(12, "0")}`,
+    );
+  it("reads absent and empty as no narrowing", () => {
+    expect(parse({}).spaceIds).toBeUndefined();
+    expect(parse({ spaceId: "" }).spaceIds).toBeUndefined();
+  });
+  it("accepts one or several ids and collapses a repeated one", () => {
+    expect(parse({ spaceId: A }).spaceIds).toEqual([A]);
+    expect(parse({ spaceId: `${A}, ${B},${A}` }).spaceIds).toEqual([A, B]);
+  });
+  it("rejects a malformed member instead of dropping it", () => {
+    expect(() => parse({ spaceId: `${A},nope` })).toThrow();
+    expect(() => parse({ spaceId: `${A},` })).toThrow();
+  });
+  it("caps the list at 100 ids", () => {
+    expect(parse({ spaceId: ids(100).join(",") }).spaceIds).toHaveLength(100);
+    expect(() => parse({ spaceId: ids(101).join(",") })).toThrow();
   });
 });

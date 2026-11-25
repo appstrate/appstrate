@@ -11,7 +11,7 @@
  */
 
 import { describe, it, expect } from "bun:test";
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -351,6 +351,58 @@ describe("buildMcpDirectFactories — integration tools", () => {
       await pair.close();
     }
   });
+
+  for (const toFile of [undefined, "download.bin"]) {
+    it(`propagates cancellation during a linked api_call body read (${toFile ?? "automatic spill"})`, async () => {
+      const uri = "appstrate://tool-output/run/synthetic-body";
+      const pair = await createInProcessPair([
+        {
+          descriptor: {
+            name: "test__api_call",
+            inputSchema: { type: "object" },
+            _meta: { [API_CALL_TOOL_META_KEY]: { tool_key: "api_call" } },
+          },
+          handler: async () => ({ content: [{ type: "resource_link", name: "response", uri }] }),
+        },
+      ]);
+      const workspace = mkdtempSync(join(tmpdir(), "mcp-cancelled-body-"));
+      const controller = new AbortController();
+      const reason = new Error("cancelled during resource read");
+      let readSignal: AbortSignal | undefined;
+      const events: string[] = [];
+      try {
+        const factories = await buildMcpDirectFactories({
+          mcp: {
+            ...wrapClient(pair.client, { close: () => Promise.resolve() }),
+            readResource: async (request, options) => {
+              readSignal = options?.signal;
+              controller.abort(reason);
+              // The transport may still deliver bytes after it has received cancellation.
+              return { contents: [{ uri: request.uri, text: "x".repeat(64 * 1024) }] };
+            },
+          },
+          runId: "run",
+          emit: (event) => events.push(event.type),
+          workspace,
+        });
+        const captured: CapturedTool[] = [];
+        for (const f of factories) f(makeMockExtensionApi(captured));
+        const args = {
+          target: "https://service.test/file",
+          ...(toFile && { responseMode: { toFile } }),
+        };
+        await expect(captured[0]!.execute("read-body", args, controller.signal)).rejects.toBe(
+          reason,
+        );
+        expect(readSignal).toBe(controller.signal);
+        expect(readdirSync(workspace)).toEqual([]);
+        expect(events).not.toContain("resource.spilled");
+      } finally {
+        await pair.close();
+        rmSync(workspace, { recursive: true, force: true });
+      }
+    });
+  }
 
   it("throws an upstream api_call error with its own text, not as a response-write failure", async () => {
     const host = new McpHost();

@@ -90,6 +90,8 @@ export interface RunTurnRow {
    * (it alone knows the container-side default). Absent when unknown, never zero.
    */
   contextWindow?: number;
+  /** {@link contextWindow} is the runner's fallback: the model declared none. */
+  contextWindowAssumed?: true;
 }
 
 /** `data.event` discriminator carried by per-turn breadcrumb rows. */
@@ -121,6 +123,7 @@ export function buildTurnRows(rawLogs: RawLog[]): RunTurnRow[] {
     // Deliberately NOT `readNumber` (as for `latencyMs`): a missing window is "unknown",
     // so the key stays ABSENT rather than defaulted.
     const contextWindow = d["contextWindow"];
+    const hasWindow = typeof contextWindow === "number" && Number.isFinite(contextWindow);
 
     rows.push({
       index: d["index"],
@@ -132,8 +135,9 @@ export function buildTurnRows(rawLogs: RawLog[]): RunTurnRow[] {
       cacheReadTokens,
       cacheWriteTokens,
       ...(typeof latencyMs === "number" && Number.isFinite(latencyMs) ? { latencyMs } : {}),
-      ...(typeof contextWindow === "number" && Number.isFinite(contextWindow)
-        ? { contextWindow }
+      ...(hasWindow ? { contextWindow } : {}),
+      ...(hasWindow && d["contextWindowAssumed"] === true
+        ? { contextWindowAssumed: true as const }
         : {}),
     });
   }

@@ -155,9 +155,15 @@ describe("integration activation precedence", () => {
       [SYSTEM_INTEGRATION, DCR_INTEGRATION, PLAIN_INTEGRATION],
       ctx.defaultSpaceId,
     );
-    expect(map.get(SYSTEM_INTEGRATION)).toEqual({ active: true, blockUserConnections: false });
-    expect(map.get(DCR_INTEGRATION)).toEqual({ active: true, blockUserConnections: false });
-    expect(map.get(PLAIN_INTEGRATION)).toEqual({ active: false, blockUserConnections: false });
+    expect(map.get(SYSTEM_INTEGRATION)).toMatchObject({
+      active: true,
+      blockUserConnections: false,
+    });
+    expect(map.get(DCR_INTEGRATION)).toMatchObject({ active: true, blockUserConnections: false });
+    expect(map.get(PLAIN_INTEGRATION)).toMatchObject({
+      active: false,
+      blockUserConnections: false,
+    });
 
     // Every requested id is present even with no row.
     expect(map.size).toBe(3);
@@ -194,9 +200,12 @@ describe("integration activation precedence", () => {
       blockUserConnections: true,
     });
 
-    expect((await resolveIntegrationActivations([PLACED], ctx.defaultSpaceId)).get(PLACED)).toEqual(
-      { active: true, blockUserConnections: true },
-    );
+    const activations = await resolveIntegrationActivations([PLACED], ctx.defaultSpaceId);
+    expect(activations.get(PLACED)).toMatchObject({
+      active: true,
+      via: "shared",
+      blockUserConnections: true,
+    });
     expect(await isUserConnectionCreationBlocked(ctx.defaultSpaceId, PLACED)).toBe(true);
   });
 });

@@ -1,11 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { Puzzle } from "lucide-react";
-import { parseIcon } from "@appstrate/core/appearance";
 import type { PackageType } from "@appstrate/shared-types";
 import { cn } from "@appstrate/ui/cn";
 import { IdentityTile } from "@appstrate/ui/components/identity-tile";
-import { ManifestGlyph } from "@appstrate/ui/components/manifest-glyph";
+import { IntegrationIcon } from "@appstrate/ui/components/integration-icon";
 import { PACKAGE_TYPE_ICON } from "../lib/package-type-icon";
 
 /** `xs` sits inline beside a line of text, `sm` in a compact row, `md` on a card. */
@@ -40,8 +38,8 @@ type PackageIconProps = {
  * `icon` follows one grammar for every type (`@appstrate/core/appearance`):
  * an agent is an `IdentityTile` (its colour, derived from its package `id` when
  * it chose none; `lucide:bot` when it has no icon), an integration shows its
- * logo (a neutral placeholder when it has none), the other types show their
- * type's glyph on a muted ground.
+ * logo on a white ground of its own (a neutral placeholder when it has none),
+ * the other types show their type's glyph on a muted ground.
  */
 export function PackageIcon(props: PackageIconProps) {
   const { type, name, icon, color, size = "md", className } = props;
@@ -63,18 +61,12 @@ export function PackageIcon(props: PackageIconProps) {
   }
 
   if (type === "integration") {
-    const placeholder = (
-      <span className={muted} aria-hidden>
-        <Puzzle className={mutedGlyph} />
-      </span>
-    );
-    const parsed = parseIcon(icon);
-    if (!parsed) return placeholder;
     return (
-      <ManifestGlyph
-        icon={parsed}
-        className={cn("shrink-0", box, GLYPH_PADDING[size])}
-        fallback={placeholder}
+      <IntegrationIcon
+        src={icon}
+        className={box}
+        padding={GLYPH_PADDING[size]}
+        fallbackClassName={mutedGlyph}
       />
     );
   }

@@ -72,6 +72,7 @@ type ReadResource = (uri: string) => Promise<{
 }>;
 
 interface ShapeApiCallResponseOptions {
+  signal?: AbortSignal;
   workspace: string;
   /** `responseMode.toFile` — workspace-relative path to write the body to. */
   toFile?: string;
@@ -102,6 +103,7 @@ function decodeBase64(b64: string): Uint8Array {
 async function extractBodyBytes(
   result: ToolResult,
   readResource: ReadResource,
+  signal?: AbortSignal,
 ): Promise<Uint8Array> {
   const chunks: Uint8Array[] = [];
   const enc = new TextEncoder();
@@ -109,7 +111,9 @@ async function extractBodyBytes(
     if (block.type === "text" && typeof block.text === "string") {
       chunks.push(enc.encode(block.text));
     } else if (block.type === "resource_link" && typeof block.uri === "string") {
+      signal?.throwIfAborted();
       const c = (await readResource(block.uri)).contents?.[0];
+      signal?.throwIfAborted();
       // Prefer the base64 `blob` (byte-exact) over `text`: a non-UTF-8 /
       // binary body round-tripped through `TextEncoder` would corrupt bytes
       // (invalid sequences replaced with U+FFFD). Only fall back to `text`
@@ -150,7 +154,12 @@ async function extractBodyBytes(
  * swapped for a symlink between the check and the open stays out of reach
  * without `openat2(RESOLVE_BENEATH)`, which Bun does not expose.
  */
-async function writeBodyConfined(workspace: string, abs: string, bytes: Uint8Array): Promise<void> {
+async function writeBodyConfined(
+  workspace: string,
+  abs: string,
+  bytes: Uint8Array,
+  signal?: AbortSignal,
+): Promise<void> {
   const parent = dirname(abs);
   // Realpath both sides: a workspace under a symlink (macOS `/var`) is no escape.
   const root = await realpath(workspace);
@@ -177,6 +186,7 @@ async function writeBodyConfined(workspace: string, abs: string, bytes: Uint8Arr
       existing = dirname(existing);
     }
   }
+  signal?.throwIfAborted();
   await mkdir(parent, { recursive: true });
   // Re-check: a directory swapped for a symlink during `mkdir` would otherwise pass.
   assertInside(await realpath(parent));
@@ -194,12 +204,14 @@ async function writeBodyConfined(workspace: string, abs: string, bytes: Uint8Arr
 
   // Floor 2b — `O_NOFOLLOW` fails with ELOOP if the final path component is a
   // symlink, closing the TOCTOU gap between the lstat above and the write.
+  signal?.throwIfAborted();
   const handle = await open(
     abs,
     fsConstants.O_WRONLY | fsConstants.O_CREAT | fsConstants.O_TRUNC | fsConstants.O_NOFOLLOW,
     0o644,
   );
   try {
+    // Opening with O_TRUNC commits the replacement; complete it even if the signal now aborts.
     await handle.writeFile(bytes);
   } finally {
     await handle.close();
@@ -219,6 +231,7 @@ export async function shapeApiCallResponse(
   result: ToolResult,
   opts: ShapeApiCallResponseOptions,
 ): Promise<ToolResult> {
+  opts.signal?.throwIfAborted();
   const status = safeStatus(result);
   // The shared code describes an exchange the sidecar answered itself, so it is rendered only
   // at status 0: next to a real upstream status it would contradict it.
@@ -228,9 +241,9 @@ export async function shapeApiCallResponse(
       : null;
 
   if (opts.toFile) {
-    const bytes = await extractBodyBytes(result, opts.readResource);
+    const bytes = await extractBodyBytes(result, opts.readResource, opts.signal);
     const abs = await resolveSafePath(opts.workspace, opts.toFile);
-    await writeBodyConfined(opts.workspace, abs, bytes);
+    await writeBodyConfined(opts.workspace, abs, bytes, opts.signal);
     const descriptor = {
       kind: "file" as const,
       path: opts.toFile,
@@ -254,6 +267,7 @@ export async function shapeApiCallResponse(
     result as Parameters<typeof spillResourcesToWorkspace>[0],
     {
       workspace: opts.workspace,
+      signal: opts.signal,
       toolCallId: opts.toolCallId,
       emit: opts.emit,
       runId: opts.runId,

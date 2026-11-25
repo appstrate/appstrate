@@ -26,7 +26,7 @@ import { RunOverviewSkeleton } from "./run-detail/run-snapshot-inspector";
 import { SkeletonBadge, SkeletonLine } from "./skeleton-line";
 import type { ReactNode } from "react";
 import { useTranslation } from "react-i18next";
-import { useLocation, useParams } from "react-router-dom";
+import { useLocation, useParams, useSearchParams } from "react-router-dom";
 import { useQueryClient } from "@tanstack/react-query";
 import type { PackageType } from "@appstrate/core/validation";
 import { PACKAGE_TYPE_ROUTE_SEGMENT } from "@appstrate/core/package-files";
@@ -47,7 +47,7 @@ import { useCurrentOrgId } from "../hooks/use-org";
 import { usePermissions } from "../hooks/use-permissions";
 import { useChatFilter } from "../modules/chat/use-chat-runtime";
 import { useListView } from "../stores/list-view-store";
-import { useAdmittingSpaces, useOverviewMode } from "../hooks/use-overview-mode";
+import { useAdmittingSpaces, useHereSpaceId, useOverviewMode } from "../hooks/use-overview-mode";
 import {
   agentSectionVisible,
   isSpaceSetting,
@@ -158,10 +158,13 @@ export function DetailPageSkeleton({
   panel,
   meta,
   spaces,
+  actions,
 }: {
   title?: string;
   trail?: readonly BreadcrumbEntry[];
   tabCount: number;
+  /** Whether the page draws an action at the bar's end (`DetailBarSkeleton`). */
+  actions?: boolean;
   /** Whether the page draws a line under its title (`DetailBarSkeleton`). */
   meta?: boolean;
   /** Whether that line opens with the resource's spaces (`DetailBarSkeleton`). */
@@ -177,6 +180,7 @@ export function DetailPageSkeleton({
         tabCount={tabCount}
         meta={meta}
         spaces={spaces}
+        actions={actions}
       />
       {/* The first tab lays its blocks on the page, like `DetailTabPanel`: no frame around them. */}
       {panel ?? <CardBlocks count={3} />}
@@ -196,6 +200,15 @@ function SpaceLineBlocks() {
       <SkeletonLine className="w-36 text-sm" />
       <Skeleton className="h-8 w-32" />
     </div>
+  );
+}
+
+/** {@link ListTabBlocks} on its own, while a tab's rows load inside the page. */
+export function ListTabSkeleton() {
+  return (
+    <Waiting>
+      <ListTabBlocks />
+    </Waiting>
   );
 }
 
@@ -249,7 +262,6 @@ function useOpensWithSpaceLine(type: PackageType, tab: string): boolean {
     );
   }
   if (type !== "integration") return false;
-  if (tab === "connections") return true;
   if (tab !== "settings") return false;
   // A section named in the address exists: the rail offers it.
   const section = resolveIntegrationSettingsSection(search.get("integrationSettings"), {
@@ -264,7 +276,14 @@ function useOpensWithSpaceLine(type: PackageType, tab: string): boolean {
  * A framed two-pane tab (settings, a run's results): `AgentDetailSplit`'s rail beside its section,
  * in the tab panel's card.
  */
-function RailPanelBlocks({ spaceLine = false }: { spaceLine?: boolean }) {
+function RailPanelBlocks({
+  spaceLine = false,
+  rows,
+}: {
+  spaceLine?: boolean;
+  /** The open section's rows, when it has fewer than `SettingsSkeleton`'s default. */
+  rows?: number;
+}) {
   return (
     <Card className="@container/split overflow-hidden">
       <div className="grid min-h-[610px] grid-cols-1 @xl/split:grid-cols-[14rem_minmax(0,1fr)]">
@@ -288,7 +307,7 @@ function RailPanelBlocks({ spaceLine = false }: { spaceLine?: boolean }) {
                 <SkeletonLine className="w-1/3 text-sm leading-relaxed" />
               </div>
             </header>
-            <SettingsSkeleton />
+            <SettingsSkeleton rows={rows} />
           </div>
         </div>
       </div>
@@ -371,6 +390,16 @@ export function PackageDetailSkeleton({ type }: { type: PackageType }) {
   const title = useCachedPackageName(type, packageId);
   const tab = useOpenTab();
   const spaceLine = useOpensWithSpaceLine(type, tab);
+  const search = new URLSearchParams(useLocation().search);
+  const configuresIntegration = useSpacesFor({ permission: "integrations:configure" }).offered;
+  // « Création de connexions » is one setting; the other sections hold several.
+  const opensAccess =
+    type === "integration" &&
+    resolveIntegrationSettingsSection(search.get("integrationSettings"), {
+      canConfigure: configuresIntegration,
+      isOwned: true,
+      hasDefinition: true,
+    }) === "access";
   return (
     <DetailPageSkeleton
       title={title}
@@ -382,7 +411,7 @@ export function PackageDetailSkeleton({ type }: { type: PackageType }) {
       spaces
       panel={
         tab === "settings" ? (
-          <RailPanelBlocks spaceLine={spaceLine} />
+          <RailPanelBlocks spaceLine={spaceLine} rows={opensAccess ? 1 : undefined} />
         ) : tab === "memory" ? (
           <MemoryTabBlocks />
         ) : tab === "runs" || tab === "connections" || tab === "usedBy" ? (
@@ -447,6 +476,39 @@ export function NotificationDetailSkeleton() {
           <div className="bg-card rounded-t-lg border-t p-4">
             <Lines lines={3} />
           </div>
+        </div>
+      }
+    />
+  );
+}
+
+/** The height of a file's frame on its page (the reader), shared with its skeleton. */
+export const FILE_READER_FRAME = "h-[max(28rem,calc(100svh-16rem))]";
+
+/**
+ * A file's page (the reader), under the files list: the bar, then the file's frame. The address
+ * names the file's space, so the space and « Ouvrir dans l'espace » are drawn exactly when the
+ * page will draw them: while the switcher does not name that space.
+ */
+export function FileReaderSkeleton() {
+  const { t } = useTranslation("common");
+  const elsewhere = useSearchParams()[0].get("space") !== useHereSpaceId();
+  return (
+    <DetailPageSkeleton
+      trail={[{ label: t("nav.files"), href: "/files" }]}
+      tabCount={0}
+      meta={false}
+      spaces={elsewhere}
+      actions={elsewhere}
+      panel={
+        <div
+          className={`${FILE_READER_FRAME} flex min-w-0 flex-col overflow-hidden rounded-lg border`}
+        >
+          <div className="flex min-h-12 items-center gap-2.5 border-b px-4 py-2">
+            <Skeleton className="size-4 shrink-0" />
+            <SkeletonLine className="w-32 text-xs leading-5" />
+          </div>
+          <Skeleton className="min-h-0 flex-1 rounded-none" />
         </div>
       }
     />
@@ -590,7 +652,7 @@ function CollectionBlocks({
   /** Inside a surface that is already framed (an overlay), the table draws no card of its own. */
   frameless?: boolean;
   cards?: boolean;
-  /** The cards carry a run button (agents). */
+  /** The cards are agents': a run button and the stack of their integrations. */
   runnable?: boolean;
   /** The cards name their space (a list spanning spaces). */
   spaceName?: boolean;
@@ -611,7 +673,12 @@ function CollectionBlocks({
         ) : (
           <CardGridSkeleton
             placeholder={
-              <PackageCardSkeleton runnable={runnable} meta={cardMeta} spaceName={spaceName} />
+              <PackageCardSkeleton
+                runnable={runnable}
+                integrations={runnable}
+                meta={cardMeta}
+                spaceName={spaceName}
+              />
             }
           />
         )
@@ -663,33 +730,38 @@ export function EditorPanelSkeleton() {
 
 /**
  * A settings page that is a table (`DataTable` on the panel's integrated surface: no frame, the
- * head ruled above and below), with what leads it: an intro (a heading line over its hint, or a
- * lone hint paragraph) and the list's toolbar.
+ * head ruled above and below), with what leads it: a hint paragraph and the list's toolbar. With
+ * `groups`, the page is that many titled tables (`SettingsGroup`) under the hint.
  */
 export function SettingsTableSkeleton({
   toolbar = false,
   columns = false,
   intro,
+  groups,
 }: {
   /** The list's search bar. */
   toolbar?: boolean;
   /** The bar also holds the column menu. */
   columns?: boolean;
-  intro?: "heading" | "hint";
+  intro?: "hint";
+  groups?: number;
 }) {
   return (
     <Waiting>
-      {intro === "heading" && (
-        <div className="mb-4">
-          <SkeletonLine className="w-40 text-sm font-medium" />
-          <SkeletonLine className="mt-1 w-80 max-w-full text-xs" />
-        </div>
-      )}
       {intro === "hint" && (
         <SkeletonLine className="mb-6 w-full max-w-2xl text-sm leading-relaxed" />
       )}
       {toolbar && <ToolbarBlocks filters={false} columns={columns} />}
-      <TableBlocks framed={false} />
+      {groups ? (
+        Array.from({ length: groups }, (_, i) => (
+          <div key={i} className="mb-8">
+            <SkeletonLine className="mb-4 w-32 text-base font-semibold" />
+            <TableBlocks framed={false} />
+          </div>
+        ))
+      ) : (
+        <TableBlocks framed={false} />
+      )}
     </Waiting>
   );
 }
@@ -807,7 +879,7 @@ export function DashboardBodySkeleton() {
         <div className="flex gap-3 overflow-hidden pb-1">
           {Array.from({ length: 4 }, (_, i) => (
             <div key={i} className="w-[19rem] shrink-0">
-              <PackageCardSkeleton runnable spaceName={on} />
+              <PackageCardSkeleton runnable integrations spaceName={on} />
             </div>
           ))}
         </div>
@@ -965,8 +1037,9 @@ export function ChatConversationSkeleton() {
 /**
  * The conversation list's shape, drawn while its permissions and chunk load:
  * the "new conversation" row (the chat's primary action, so it is real, not
- * grey) above a group of row skeletons — what `ChatConversationList` draws: a title line and the
- * space line under it, drawn by the module's own `ConversationRowSkeleton`.
+ * grey) above a group of row skeletons — what `ChatConversationList` draws for a writer, the one
+ * it draws « new conversation » for: the title and the space tiles on one line, drawn by the
+ * module's own `ConversationRowSkeleton`.
  */
 export function ChatSidebarSkeleton() {
   const { t } = useTranslation("chat");
@@ -987,7 +1060,7 @@ export function ChatSidebarSkeleton() {
         <SidebarMenu>
           {Array.from({ length: 5 }, (_, i) => (
             <SidebarMenuItem key={i}>
-              <ConversationRowSkeleton />
+              <ConversationRowSkeleton oneLine />
             </SidebarMenuItem>
           ))}
         </SidebarMenu>

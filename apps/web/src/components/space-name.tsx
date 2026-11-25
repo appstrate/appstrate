@@ -10,19 +10,20 @@ import { useCurrentSpaceId } from "../hooks/use-current-space";
 import { useOverviewMode } from "../hooks/use-overview-mode";
 import { spaceTile } from "../lib/identity-tile-props";
 import { spaceLabel, spaceLabels } from "../lib/space-label";
+import { STACK_TILE, TileStack } from "./tile-stack";
 
 /** What naming a space reads of it. */
 export type SpaceListed = Parameters<typeof spaceTile>[0];
 
 /** The tile and text of each size: `sm` in a list's cell or a card's line, `md` in a picker row, `lg` heading a table row. */
 const SIZES = {
-  sm: { box: "gap-1.5 text-xs", tile: "size-4 rounded-[4px]" },
+  sm: { box: "gap-1.5 text-xs", tile: STACK_TILE },
   md: { box: "gap-2.5 text-sm", tile: "size-6" },
   lg: { box: "gap-3 text-sm", tile: "size-7 rounded-md" },
 } as const;
 
 /** A space's tile at one of the {@link SIZES}: the one tile every space listing draws. */
-function SpaceTile({
+export function SpaceTile({
   space,
   size = "sm",
   className,
@@ -40,14 +41,9 @@ function SpaceTile({
   );
 }
 
-/** The ring of a stacked tile: the container's `--space-tile-ring`, else the page background. */
-const RING = "ring-(--space-tile-ring,var(--background))";
-
 /**
- * Several spaces' tiles stacked, the first in front and each next one behind it, ringed in `--space-tile-ring`
- * (the colour of the surface they sit on, which the container sets for each of its states: a
- * conversation row or the chat's top-bar trigger; `--background` when none does) so the edges
- * stay readable. Past `max`, the rest is counted.
+ * Several spaces' tiles stacked ({@link TileStack}): the first in front and each next one behind
+ * it. Past `max`, the rest is counted.
  */
 export function SpaceTileStack({
   spaces,
@@ -58,33 +54,15 @@ export function SpaceTileStack({
   size?: keyof typeof SIZES;
   max?: number;
 }) {
-  const shown = max === undefined ? spaces : spaces.slice(0, max);
-  const hidden = spaces.length - shown.length;
-  // Reversed in the DOM, read in order on screen: the first space is painted last, in front.
   return (
-    <span className="flex shrink-0 flex-row-reverse items-center" data-testid="space-tile-stack">
-      {hidden > 0 && (
-        <span
-          className={cn(
-            "bg-muted text-muted-foreground -ml-1 flex shrink-0 items-center justify-center text-[10px] leading-none font-medium tabular-nums ring-2",
-            SIZES[size].tile,
-            RING,
-          )}
-        >
-          +{hidden}
-        </span>
-      )}
-      {shown
-        .map((space, index) => (
-          <SpaceTile
-            key={space.id}
-            space={space}
-            size={size}
-            className={cn("ring-2", RING, index > 0 && "-ml-1")}
-          />
-        ))
-        .reverse()}
-    </span>
+    <TileStack
+      items={spaces}
+      keyOf={(space) => space.id}
+      render={(space, className) => <SpaceTile space={space} size={size} className={className} />}
+      tileClass={SIZES[size].tile}
+      max={max}
+      testId="space-tile-stack"
+    />
   );
 }
 
@@ -142,25 +120,36 @@ export function SpaceNameOf({
 }
 
 /**
- * Every space a row touched, none counted away: all the tiles in a row, then the names joined
- * (« Studio, Coffre »), truncated with the full names in `title`. One space reads as
- * {@link SpaceName}. The line of a conversation's spaces.
+ * Every space a row touched: the tiles, then the names joined (« Studio, Coffre »), truncated with
+ * the full names in `title`; one space reads as {@link SpaceName}. With `tilesOnly`, for a line with
+ * no room for the names, two tiles at most then « +N », the names in `title` and for a screen
+ * reader. The line of a conversation's spaces.
  */
 export function SpaceTilesOf({
   spaceIds,
   size = "sm",
   className,
+  tilesOnly = false,
 }: {
   spaceIds: readonly string[];
   size?: keyof typeof SIZES;
   className?: string;
+  /** The tiles alone, two at most then « +N »: for a line with no room for the names. */
+  tilesOnly?: boolean;
 }) {
   const { t } = useTranslation();
   const spaces = useSpacesOf(spaceIds);
   if (spaces.length === 0) return null;
+  const names = spaceLabels(spaces, t);
+  if (tilesOnly)
+    return (
+      <span className={cn("flex shrink-0 items-center", className)} title={names}>
+        <SpaceTileStack spaces={spaces} size={size} max={2} />
+        <span className="sr-only">{names}</span>
+      </span>
+    );
   if (spaces.length === 1)
     return <SpaceName space={spaces[0]!} size={size} className={className} />;
-  const names = spaceLabels(spaces, t);
   return (
     <span
       className={cn("flex min-w-0 items-center", SIZES[size].box, className)}

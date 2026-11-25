@@ -318,8 +318,11 @@ describe("runner preset", () => {
   const INLINE_PATHS = ["/api/runs/inline", "/api/runs/inline/validate"] as const;
   const WRITE_DENIED = "Insufficient permissions: agents:write required";
   const RUN_DENIED = "Insufficient permissions: agents:run required";
+  // The inline doors answer one actionable refusal for either missing half.
+  const COMPOSE_DENIED = '"code":"inline_run_not_allowed_in_space"';
   /** Neither half of the composing guard refused this response. */
-  const passedGuard = (text: string) => !text.includes(WRITE_DENIED) && !text.includes(RUN_DENIED);
+  const passedGuard = (text: string) =>
+    !text.includes(COMPOSE_DENIED) && !text.includes(WRITE_DENIED) && !text.includes(RUN_DENIED);
   const postInline = (path: string, ctx: TestContext) =>
     app.request(path, {
       method: "POST",
@@ -346,7 +349,7 @@ describe("runner preset", () => {
       ] as const) {
         const res = await postInline(path, ctx);
         expect(`${label} ${path}: ${res.status}`).toBe(`${label} ${path}: 403`);
-        expect(await res.text()).toContain(WRITE_DENIED);
+        expect(await res.text()).toContain(COMPOSE_DENIED);
       }
     }
   });
@@ -361,10 +364,11 @@ describe("runner preset", () => {
     }
   });
 
-  it("refuses the inline route to a key missing either half", async () => {
+  it("refuses the inline route to a key missing either half, or both", async () => {
     for (const [scopes, denial] of [
-      [["agents:run"], WRITE_DENIED],
-      [["agents:write"], RUN_DENIED],
+      [["agents:run"], COMPOSE_DENIED],
+      [["agents:write"], COMPOSE_DENIED],
+      [["agents:read"], COMPOSE_DENIED],
     ] as const) {
       const key = await keyFor([...scopes]);
       const res = await app.request("/api/runs/inline", {
@@ -399,7 +403,7 @@ describe("runner preset", () => {
       ] as const) {
         const res = await postRemote(ctx, inlineSource());
         expect(`${label}: ${res.status}`).toBe(`${label}: 403`);
-        expect(await res.text()).toContain(WRITE_DENIED);
+        expect(await res.text()).toContain(COMPOSE_DENIED);
       }
     });
 
@@ -408,6 +412,50 @@ describe("runner preset", () => {
       const res = await postRemote(builder, inlineSource());
       expect(res.status).not.toBe(403);
       expect(passedGuard(await res.text())).toBe(true);
+    });
+
+    it("answers the inline refusal to a key holding neither permission, on all three doors", async () => {
+      const key = await keyFor(["agents:read"]);
+      const doors: Array<[string, string]> = [
+        ["/api/runs/inline", inlineBody()],
+        ["/api/runs/inline/validate", inlineBody()],
+        ["/api/runs/remote", remote(inlineSource())],
+      ];
+      for (const [path, body] of doors) {
+        const res = await app.request(path, {
+          method: "POST",
+          headers: keyHeaders(key.rawKey),
+          body,
+        });
+        expect(`${path}: ${res.status}`).toBe(`${path}: 403`);
+        const text = await res.text();
+        expect(text).toContain(COMPOSE_DENIED);
+        expect(text).toContain("active_in_spaces");
+      }
+    });
+
+    it("keeps the `agents:run` refusal for a registry source of a caller holding neither", async () => {
+      const key = await keyFor(["agents:read"]);
+      const res = await app.request("/api/runs/remote", {
+        method: "POST",
+        headers: keyHeaders(key.rawKey),
+        body: remote(registrySource()),
+      });
+      expect(res.status).toBe(403);
+      const text = await res.text();
+      expect(text).toContain(RUN_DENIED);
+      expect(text).not.toContain(COMPOSE_DENIED);
+    });
+
+    it("lets a malformed body fall through to the validation", async () => {
+      const key = await keyFor(["agents:read"]);
+      const res = await app.request("/api/runs/remote", {
+        method: "POST",
+        headers: keyHeaders(key.rawKey),
+        body: "{not json",
+      });
+      expect(res.status).toBe(403);
+      expect(await res.text()).not.toContain(COMPOSE_DENIED);
     });
 
     it("asks only `agents:run` of the registry source", async () => {

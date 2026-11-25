@@ -44,6 +44,7 @@ import {
   type ManifestIntegrationEntry,
 } from "@appstrate/core/dependencies";
 import {
+  displayAccountId,
   resolveEffectiveToolSelection,
   resolveScopeToolSelection,
   expandScopesGranted,
@@ -76,7 +77,12 @@ import { actorFromIds, actorOwns, type Actor } from "../lib/actor.ts";
 import { CONNECTION_LABEL_MAX } from "../lib/connection-label.ts";
 import { userConnectionsBlocked } from "./connection-reach.ts";
 import type { SpaceScope } from "../lib/scope.ts";
-import { fetchIntegrationManifest, type IntegrationManifestCache } from "./integration-service.ts";
+import {
+  fetchIntegrationManifest,
+  seedIntegrationManifests,
+  activationManifestCaches,
+  type IntegrationManifestCache,
+} from "./integration-service.ts";
 import {
   authKeyOnUnauthenticatedIntegration,
   authKeysServingSelection,
@@ -160,8 +166,8 @@ interface ResolveConnectionsInput {
   actorEndUserId?: string | null;
   /** Also resolve INERT integrations (never spawned): the agent-page picker still manages them. */
   includeInert?: boolean;
-  /** Declared integrations switched off in the space: never walked through the cascade. */
-  inactiveIntegrationIds?: ReadonlySet<string>;
+  /** Declared integrations switched off in `spaceId`: never walked through the cascade. */
+  inactive?: { spaceId: string; integrationIds: ReadonlySet<string> };
   /** The fallback binds nothing: the actor's own serving connections are a choice, one included. */
   noFallback?: boolean;
 }
@@ -207,12 +213,12 @@ export function resolveConnections(input: ResolveConnectionsInput): ConnectionRe
       continue;
     }
     if (isInert(req) && !input.includeInert) continue;
-    if (input.inactiveIntegrationIds?.has(req.integrationId)) {
+    if (input.inactive?.integrationIds.has(req.integrationId)) {
       record(
         req.integrationId,
         gapOf(req, {
           code: "integration_not_active",
-          message: `Integration '${req.integrationId}' is not active in this space`,
+          message: integrationNotActiveMessage(req.integrationId, input.inactive.spaceId),
         }),
       );
       continue;
@@ -661,14 +667,14 @@ function missingScopesOf(
   });
 }
 
-/** How an under-scoped member of the set `source` bound clears. */
-function scopeRemedy(
+/** Who can change the binding, and whether the existing grant can be upgraded in place. */
+function connectionRemedy(
   source: ConnectionResolutionSource,
-  ownedByActor: boolean,
+  canUpgrade: boolean,
 ): InsufficientScopesRemedy {
   if (source === "admin_pin" || source === "org_default_enforced") return "rebind_by_admin";
   if (source === "schedule_override") return "rebind_by_schedule_owner";
-  return ownedByActor ? "upgrade_or_new" : "new_connection";
+  return canUpgrade ? "upgrade_or_new" : "new_connection";
 }
 
 const LAYER_PHRASE: Record<ExplicitSource, string> = {
@@ -679,6 +685,17 @@ const LAYER_PHRASE: Record<ExplicitSource, string> = {
   member_pin: "your pin",
   org_default: "an org default",
 };
+
+/**
+ * `integration_not_active`, with its remedy: the activation door, which asks its own permission.
+ * One wording for the gate, readiness and the activation `warnings[]`; each adds its consequence.
+ */
+export function integrationNotActiveMessage(integrationId: string, spaceId: string): string {
+  return (
+    `Integration '${integrationId}' is not active in this space — activate it with ` +
+    `POST /api/spaces/${spaceId}/packages {"packageId":"${integrationId}"}`
+  );
+}
 
 /** A degraded state's twin code: a `required` integration in it is refused, any other is not. */
 type GapCode = Exclude<ConnectionResolutionWarningCode, "integration_unbound">;
@@ -879,16 +896,20 @@ function checkHealth(
 
   if (conn.needsReconnection) {
     const authKey = declaredAuthKey(args.manifest, conn.authKey);
+    const identified = displayAccountId(conn.accountId) !== null;
     return errorOf(args, {
       code: "needs_reconnection",
-      // The reconnect UPDATEs this row in place; without the id it would INSERT a duplicate.
+      ...(!identified && { remedy: connectionRemedy(source, false) }),
+      // Identifies the failing binding. Forward the id to reconnect only for a verifiable account.
       connectionId: conn.id,
       // No `requiredScopes`: the reconnect re-consents what the row holds plus `default_scopes`,
       // adding no agent's scopes; a row still short afterwards answers `insufficient_scopes`.
       ...(authKey !== null ? { authKey } : {}),
       ownedByActor,
       source,
-      message: `Connection for ${args.integrationId} needs to be reconnected.`,
+      message: identified
+        ? `Connection for ${args.integrationId} needs to be reconnected.`
+        : `Connection for ${args.integrationId} has no verifiable account. Choose another connection or ask an administrator to replace the binding. Existing shares, pins and schedules still use the original connection.`,
     });
   }
 
@@ -896,6 +917,7 @@ function checkHealth(
   if (missing.length > 0) {
     return errorOf(args, {
       code: "insufficient_scopes",
+      remedy: connectionRemedy(source, ownedByActor && displayAccountId(conn.accountId) !== null),
       connectionId: conn.id,
       authKey: conn.authKey,
       missingScopes: missing,
@@ -942,12 +964,87 @@ interface ResolveConnectionsForRunInput {
 /** The requirement of each integration `agentManifest` declares whose manifest loads. */
 async function requirementsOf(
   agentManifest: Record<string, unknown>,
-  manifestCache?: IntegrationManifestCache,
+  manifestCache: IntegrationManifestCache = new Map(),
 ): Promise<IntegrationRequirement[]> {
+  const entries = parseManifestIntegrations(agentManifest);
+  seedIntegrationManifests(
+    entries.map((entry) => entry.id),
+    manifestCache,
+  );
   const requirements = await Promise.all(
-    parseManifestIntegrations(agentManifest).map((entry) => buildRequirement(entry, manifestCache)),
+    entries.map((entry) => buildRequirement(entry, manifestCache)),
   );
   return requirements.filter((r): r is IntegrationRequirement => r !== null);
+}
+
+/** The integrations `agentManifest` requires: the run gate refuses it where one is not active. */
+export async function requiredIntegrationIds(
+  agentManifest: Record<string, unknown>,
+  manifestCache?: IntegrationManifestCache,
+): Promise<string[]> {
+  const requirements = await requirementsOf(agentManifest, manifestCache);
+  return requirements.filter((req) => req.required).map((req) => req.integrationId);
+}
+
+/** A declared integration not active in the space, with the agent's `required` flag. */
+export interface InactiveDeclaredIntegration {
+  integrationId: string;
+  required: boolean;
+}
+
+/**
+ * Per manifest (input order), the declared integrations not active in `spaceId` — the input of
+ * the run gate's `integration_not_active` (an error when `required`), inert ones skipped as the
+ * gate skips them. Published dependency pins and activation states are read in batches across the list.
+ */
+export async function inactiveDeclaredIntegrations(
+  agentManifests: readonly Record<string, unknown>[],
+  scope: SpaceScope,
+): Promise<InactiveDeclaredIntegration[][]> {
+  return inactiveAmong(await usedIntegrations(agentManifests, scope.orgId), scope.spaceId);
+}
+
+/**
+ * Per manifest (input order), the requirements of the integrations a run of it uses: those it
+ * declares whose manifest loads at the version it pins, inert ones skipped as the run gate skips
+ * them. Published dependency pins are read in one batch across the list.
+ */
+export async function usedIntegrations(
+  agentManifests: readonly Record<string, unknown>[],
+  orgId: string,
+): Promise<IntegrationRequirement[][]> {
+  const caches = await activationManifestCaches(agentManifests, orgId);
+  const perAgent = await Promise.all(
+    agentManifests.map((manifest, i) => requirementsOf(manifest, caches[i]!)),
+  );
+  return perAgent.map((reqs) => reqs.filter((req) => !isInert(req)));
+}
+
+/** Per agent, the {@link usedIntegrations} not active in `spaceId`, with the agent's `required` flag. */
+export async function inactiveAmong(
+  used: readonly (readonly IntegrationRequirement[])[],
+  spaceId: string,
+): Promise<InactiveDeclaredIntegration[][]> {
+  const ids = [...new Set(used.flat().map((req) => req.integrationId))];
+  const activeIds = await listActiveIntegrationIds(ids, spaceId);
+  return used.map((reqs) =>
+    reqs
+      .filter((req) => !activeIds.has(req.integrationId))
+      .map(({ integrationId, required }) => ({ integrationId, required })),
+  );
+}
+
+/** Per manifest, the ids of {@link inactiveDeclaredIntegrations} the agent declares `required`. */
+export async function inactiveRequiredIntegrationIds(
+  agentManifests: readonly Record<string, unknown>[],
+  scope: SpaceScope,
+): Promise<string[][]> {
+  return (await inactiveDeclaredIntegrations(agentManifests, scope)).map(requiredIds);
+}
+
+/** The ids of the `required` ones among an agent's inactive integrations: they refuse its launch. */
+export function requiredIds(inactive: readonly InactiveDeclaredIntegration[]): string[] {
+  return inactive.filter((entry) => entry.required).map((entry) => entry.integrationId);
 }
 
 /**
@@ -992,7 +1089,10 @@ export async function resolveConnectionsForRun(
     actorEndUserId,
     includeInert: input.includeInert ?? false,
     noFallback: input.noFallback,
-    inactiveIntegrationIds: new Set(integrationIds.filter((id) => !activeIds.has(id))),
+    inactive: {
+      spaceId: input.scope.spaceId,
+      integrationIds: new Set(integrationIds.filter((id) => !activeIds.has(id))),
+    },
   });
 }
 
@@ -1085,7 +1185,7 @@ export function translateResolutionError(e: ResolutionItem): ResolutionFieldErro
       : {}),
     ...(e.code === "insufficient_scopes"
       ? {
-          ...(e.source ? { remedy: scopeRemedy(e.source, e.ownedByActor === true) } : {}),
+          ...(e.remedy ? { remedy: e.remedy } : {}),
           ...(e.connectionId ? { connection_id: e.connectionId } : {}),
           ...(e.missingScopes && e.missingScopes.length > 0
             ? { missing_scopes: e.missingScopes }
@@ -1098,6 +1198,7 @@ export function translateResolutionError(e: ResolutionItem): ResolutionFieldErro
       : {}),
     ...(e.code === "needs_reconnection"
       ? {
+          ...(e.remedy ? { remedy: e.remedy } : {}),
           ...(e.connectionId ? { connection_id: e.connectionId } : {}),
           ...(e.ownedByActor !== undefined ? { owned_by_actor: e.ownedByActor } : {}),
         }

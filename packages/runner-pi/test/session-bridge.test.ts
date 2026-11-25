@@ -18,7 +18,8 @@ import {
   truncateToolResult,
   type InternalSink,
 } from "../src/pi-runner.ts";
-import { DEFAULT_CONTEXT_WINDOW, piTokenCostUsd, usageCostUsd } from "../src/pi-model.ts";
+import { piTokenCostUsd, usageCostUsd } from "../src/pi-model.ts";
+import { DEFAULT_CONTEXT_WINDOW } from "@appstrate/core/token-budget";
 import { loadPiCodingAgentSdk } from "../src/pi-sdk.ts";
 import { createFakeSession, createInternalCapture } from "./helpers.ts";
 import type { RunEvent } from "@appstrate/afps-runtime/types";
@@ -1415,6 +1416,7 @@ describe("installSessionBridge — early stop on `output`", () => {
 
     expect(sink.events.find((e) => e.type === "appstrate.error")).toBeDefined();
     expect(bridge.getTerminalError()).toEqual({
+      context: { error_category: "unknown" },
       code: "adapter_error",
       message: "provider exploded",
     });
@@ -1438,6 +1440,7 @@ describe("installSessionBridge — early stop on `output`", () => {
 
     expect(sink.events.find((e) => e.type === "appstrate.error")).toBeDefined();
     expect(bridge.getTerminalError()).toEqual({
+      context: { error_category: "unknown" },
       code: "adapter_error",
       message: "Request was aborted",
     });
@@ -1709,5 +1712,18 @@ describe("installSessionBridge — per-turn context breadcrumb", () => {
     settleTurn(session, { input: 1, output: 1 });
 
     expect(turns(sink)[0]?.contextWindow).toBe(DEFAULT_CONTEXT_WINDOW);
+  });
+
+  it("marks that default as assumed when the runner is told so, and only then", () => {
+    for (const assumed of [true, false]) {
+      const sink = createInternalCapture();
+      const session = createFakeSession();
+      installSessionBridge(session, sink, RUN_ID, {
+        contextWindow: DEFAULT_CONTEXT_WINDOW,
+        ...(assumed ? { contextWindowAssumed: true as const } : {}),
+      });
+      settleTurn(session, { input: 1, output: 1 });
+      expect(turns(sink)[0]?.contextWindowAssumed).toBe(assumed ? true : undefined);
+    }
   });
 });

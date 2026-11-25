@@ -22,8 +22,13 @@ import { packages, spacePackages } from "@appstrate/db/schema";
 import { getTestApp } from "../../helpers/app.ts";
 import { db, truncateAll } from "../../helpers/db.ts";
 import { createTestContext, type TestContext } from "../../helpers/auth.ts";
-import { seedPackage, seedSpace, seedSpacePackage } from "../../helpers/seed.ts";
-import { activeHereSql, isActiveHere } from "../../../src/services/package-activation.ts";
+import { seedOrgOffer, seedPackage, seedSpace, seedSpacePackage } from "../../helpers/seed.ts";
+import {
+  activeHereSql,
+  isActiveHere,
+  placementVia,
+} from "../../../src/services/package-activation.ts";
+import { placementReadFilter, placementRowJoin } from "../../../src/services/package-placement.ts";
 import {
   initSystemIntegrations,
   __resetSystemIntegrationsForTest,
@@ -44,13 +49,18 @@ const ROWS = [
   { label: "a row saying true", row: { enabled: true } },
 ] as const;
 
+const OFFERS = [
+  { label: "not offered", offered: false },
+  { label: "offered to the organization", offered: true },
+] as const;
+
 /**
  * The SQL half, asked about ONE package in ONE space — with the join
  * `activeHereSql` documents.
  */
 async function sqlSaysActive(spaceId: string, packageId: string): Promise<boolean> {
   const [hit] = await db
-    .select({ active: sql<boolean>`${activeHereSql()}` })
+    .select({ active: sql<boolean>`${activeHereSql(spaceId)}` })
     .from(packages)
     .leftJoin(
       spacePackages,
@@ -59,6 +69,17 @@ async function sqlSaysActive(spaceId: string, packageId: string): Promise<boolea
     .where(eq(packages.id, packageId))
     .limit(1);
   return hit!.active;
+}
+
+/** `placementReadFilter`, asked about ONE package in ONE space — the SQL twin of `placementVia`. */
+async function sqlSaysPlaced(spaceId: string, packageId: string): Promise<boolean> {
+  const [hit] = await db
+    .select({ id: packages.id })
+    .from(packages)
+    .leftJoin(spacePackages, placementRowJoin(packages.id, spaceId))
+    .where(and(eq(packages.id, packageId), placementReadFilter(spaceId)))
+    .limit(1);
+  return hit !== undefined;
 }
 
 beforeEach(async () => {
@@ -71,36 +92,61 @@ beforeEach(async () => {
 describe("the SQL mirror and the in-memory twin answer the same, cell for cell", () => {
   for (const type of TYPES) {
     for (const source of ["local", "system"] as const) {
-      for (const { label, row } of ROWS) {
-        it(`${type} / ${source} / ${label}`, async () => {
-          const id = `@parity/${type}-${source}`;
-          await seedPackage({
-            id,
-            orgId: source === "system" ? null : ctx.orgId,
-            type,
-            source,
-            homeSpaceId: source === "system" ? null : elsewhere,
-            draftManifest: { name: id, version: "0.1.0", type },
+      for (const { label: offerLabel, offered } of OFFERS) {
+        for (const { label, row } of ROWS) {
+          it(`${type} / ${source} / ${offerLabel} / ${label}`, async () => {
+            const id = `@parity/${type}-${source}`;
+            await seedPackage({
+              id,
+              orgId: source === "system" ? null : ctx.orgId,
+              type,
+              source,
+              homeSpaceId: source === "system" ? null : elsewhere,
+              draftManifest: { name: id, version: "0.1.0", type },
+            });
+            // A system-provenance INTEGRATION is only ON by default where the
+            // deployment offers it: the platform ships ~65 integration packages
+            // and `SYSTEM_INTEGRATIONS` names the subset that is auto-active.
+            if (type === "integration" && source === "system") {
+              initSystemIntegrations([{ id, clients: [] }]);
+            }
+            if (offered) await seedOrgOffer(ctx.orgId, id);
+            if (row) await seedSpacePackage(ctx.defaultSpaceId, id, { enabled: row.enabled });
+
+            const fromSql = await sqlSaysActive(ctx.defaultSpaceId, id);
+            const fromTs = isActiveHere({ id, type, source, offeredToOrg: offered }, row);
+            expect(fromTs).toBe(fromSql);
+
+            // Placement agrees too: `placementVia` names a provenance exactly where
+            // `placementReadFilter` places the package.
+            const homeSpaceId = source === "system" ? null : elsewhere;
+            const pkg = { id, type, source, homeSpaceId, offeredToOrg: offered };
+            const via = placementVia(pkg, ctx.defaultSpaceId, row && { placedByOffer: false });
+            expect(via !== null).toBe(await sqlSaysPlaced(ctx.defaultSpaceId, id));
+
+            // And the rule itself: the row wins, and the default or the offer
+            // only decide where the space has said nothing.
+            expect(fromSql).toBe(row ? row.enabled : source === "system" || offered);
           });
-          // A system-provenance INTEGRATION is only ON by default where the
-          // deployment offers it: the platform ships ~65 integration packages
-          // and `SYSTEM_INTEGRATIONS` names the subset that is auto-active.
-          if (type === "integration" && source === "system") {
-            initSystemIntegrations([{ id, clients: [] }]);
-          }
-          if (row) await seedSpacePackage(ctx.defaultSpaceId, id, { enabled: row.enabled });
-
-          const fromSql = await sqlSaysActive(ctx.defaultSpaceId, id);
-          const fromTs = isActiveHere({ id, type, source }, row);
-          expect(fromTs).toBe(fromSql);
-
-          // And the rule itself: the row wins, and the default only decides
-          // where the space has said nothing.
-          expect(fromSql).toBe(row ? row.enabled : source === "system");
-        });
+        }
       }
     }
   }
+
+  it("an offer reaches only the organization it is made to", async () => {
+    const other = await createTestContext({ orgSlug: "otherorg" });
+    const id = "@parity/offered-elsewhere";
+    await seedPackage({
+      id,
+      orgId: ctx.orgId,
+      type: "skill",
+      homeSpaceId: elsewhere,
+      draftManifest: { name: id, version: "0.1.0", type: "skill" },
+    });
+    await seedOrgOffer(ctx.orgId, id);
+    expect(await sqlSaysActive(ctx.defaultSpaceId, id)).toBe(true);
+    expect(await sqlSaysActive(other.defaultSpaceId, id)).toBe(false);
+  });
 
   it("leaves a system-provenance integration the deployment does NOT offer inactive without a row", async () => {
     // The one narrowing in the rule, and the reason the default is not simply
@@ -115,14 +161,19 @@ describe("the SQL mirror and the in-memory twin answer the same, cell for cell",
       draftManifest: { name: id, version: "0.1.0", type: "integration" },
     });
     expect(await sqlSaysActive(ctx.defaultSpaceId, id)).toBe(false);
-    expect(isActiveHere({ id, type: "integration", source: "system" }, null)).toBe(false);
+    expect(
+      isActiveHere({ id, type: "integration", source: "system", offeredToOrg: false }, null),
+    ).toBe(false);
 
     // …and an explicit row still wins, in both directions.
     await seedSpacePackage(ctx.defaultSpaceId, id, { enabled: true });
     expect(await sqlSaysActive(ctx.defaultSpaceId, id)).toBe(true);
-    expect(isActiveHere({ id, type: "integration", source: "system" }, { enabled: true })).toBe(
-      true,
-    );
+    expect(
+      isActiveHere(
+        { id, type: "integration", source: "system", offeredToOrg: false },
+        { enabled: true },
+      ),
+    ).toBe(true);
   });
 
   it("switches a runtime-bound system integration on without a row, and keeps a row saying false", async () => {
@@ -132,13 +183,18 @@ describe("the SQL mirror and the in-memory twin answer the same, cell for cell",
     const restore = await installRuntimeBoundSystemPackages();
     try {
       expect(await sqlSaysActive(ctx.defaultSpaceId, id)).toBe(true);
-      expect(isActiveHere({ id, type: "integration", source: "system" }, null)).toBe(true);
+      expect(
+        isActiveHere({ id, type: "integration", source: "system", offeredToOrg: false }, null),
+      ).toBe(true);
 
       await seedSpacePackage(ctx.defaultSpaceId, id, { enabled: false });
       expect(await sqlSaysActive(ctx.defaultSpaceId, id)).toBe(false);
-      expect(isActiveHere({ id, type: "integration", source: "system" }, { enabled: false })).toBe(
-        false,
-      );
+      expect(
+        isActiveHere(
+          { id, type: "integration", source: "system", offeredToOrg: false },
+          { enabled: false },
+        ),
+      ).toBe(false);
     } finally {
       restore();
     }
@@ -170,6 +226,8 @@ describe("the SQL mirror and the in-memory twin answer the same, cell for cell",
     // Discriminant: the other space has no row, so the deployment default
     // decides there — `true`. A leaking join would answer `false`.
     expect(await sqlSaysActive(elsewhere, id)).toBe(true);
-    expect(isActiveHere({ id, type: "skill", source: "system" }, undefined)).toBe(true);
+    expect(
+      isActiveHere({ id, type: "skill", source: "system", offeredToOrg: false }, undefined),
+    ).toBe(true);
   });
 });

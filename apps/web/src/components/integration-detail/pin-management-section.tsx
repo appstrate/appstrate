@@ -17,7 +17,13 @@ import { usePinEditor } from "./use-pin-editor";
  * added and edited in one form modal, and deleted only through its confirmation, the same two the
  * agent's Connexions rows open (`usePinEditor`).
  */
-export function PinManagementSection({ packageId }: { packageId: string }) {
+export function PinManagementSection({
+  packageId,
+  existingOnly = false,
+}: {
+  packageId: string;
+  existingOnly?: boolean;
+}) {
   const { t } = useTranslation(["settings", "common"]);
   const editor = usePinEditor(packageId);
 
@@ -30,6 +36,8 @@ export function PinManagementSection({ packageId }: { packageId: string }) {
     onEdit: editor.edit,
     onDelete: editor.remove,
   });
+
+  if (existingOnly && editor.pins?.length === 0) return null;
 
   return (
     <div className="pb-0" data-testid="pin-management-section">
@@ -62,7 +70,7 @@ export function PinManagementSection({ packageId }: { packageId: string }) {
       ) : editor.agentsError || editor.connectionsError ? (
         // Neither « no agent » nor a dead « Ajouter »: the reads this action needs failed.
         <ErrorState error={editor.agentsError ?? editor.connectionsError} compact />
-      ) : editor.pinsError ? null : editor.unpinnedAgents.length === 0 ? (
+      ) : editor.pinsError || existingOnly ? null : editor.unpinnedAgents.length === 0 ? (
         <p className="text-muted-foreground text-xs italic">
           {t("integration.admin.pinManagement.noConsumingAgents")}
         </p>

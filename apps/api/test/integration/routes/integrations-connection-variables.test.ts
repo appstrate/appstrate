@@ -43,6 +43,7 @@ interface Forge {
   pkce: boolean;
   /** The status the RFC 8414 / OIDC metadata probes answer instead of the document. */
   metadataStatus?: number;
+  resourceMetadataStatus?: number;
   stop: () => void;
 }
 
@@ -85,6 +86,8 @@ function startForge(): Forge {
         });
       }
       if (req.method === "GET" && url.pathname.startsWith(`${prm}/`)) {
+        if (handle.resourceMetadataStatus)
+          return new Response("busy", { status: handle.resourceMetadataStatus });
         const path = url.pathname.slice(prm.length);
         const prefix = path.replace(/\/api\/v4\/mcp$/, "");
         return json({
@@ -210,7 +213,7 @@ function tokenManifest(name: string): IntegrationManifest {
         credentials: {
           schema: {
             type: "object",
-            properties: { api_key: { type: "string" } },
+            properties: { api_key: { type: "string" }, email: { type: "string" } },
             required: ["api_key"],
           },
         },
@@ -319,7 +322,7 @@ describe("connection variables — credential connections", () => {
 
   it("persists the variables with the credential and returns them", async () => {
     const res = await importConnection({
-      credentials: { api_key: "k1" },
+      credentials: { api_key: "k1", email: "member@example.test" },
       variables: { base_url: base },
     });
     expect(res.status).toBe(200);
@@ -340,11 +343,14 @@ describe("connection variables — credential connections", () => {
 
   it("refuses a reconnect to another instance, like one to another account", async () => {
     const first = (await (
-      await importConnection({ credentials: { api_key: "k1" }, variables: { base_url: base } })
+      await importConnection({
+        credentials: { api_key: "k1", email: "member@example.test" },
+        variables: { base_url: base },
+      })
     ).json()) as { id: string };
     const other = `http://127.0.0.1:${forge.port}`;
     const res = await importConnection({
-      credentials: { api_key: "k2" },
+      credentials: { api_key: "k2", email: "member@example.test" },
       variables: { base_url: other },
       connection_id: first.id,
     });
@@ -357,7 +363,7 @@ describe("connection variables — credential connections", () => {
     expect(row!.variables).toEqual({ base_url: base });
 
     const same = await importConnection({
-      credentials: { api_key: "k2" },
+      credentials: { api_key: "k2", email: "member@example.test" },
       variables: { base_url: base },
       connection_id: first.id,
     });
@@ -412,12 +418,15 @@ describe("connection variables — credential connections", () => {
 
   it("hosted form: returns the reconnected connection's values in the context", async () => {
     const conn = (await (
-      await importConnection({ credentials: { api_key: "k1" }, variables: { base_url: base } })
+      await importConnection({
+        credentials: { api_key: "k1", email: "member@example.test" },
+        variables: { base_url: base },
+      })
     ).json()) as { id: string };
     const session = await openHosted(ctx, "@myorg/panel", "token", { connection_id: conn.id });
     expect(session.context.variables!.values).toEqual({ base_url: base });
     const res = await submitHosted(session, {
-      credentials: { api_key: "k2" },
+      credentials: { api_key: "k2", email: "member@example.test" },
       variables: { base_url: base },
     });
     expect(res.status).toBe(200);
@@ -449,6 +458,7 @@ describe("authorization server chosen per connection (AFPS §7.3)", () => {
     forge.iss = true;
     forge.pkce = true;
     forge.metadataStatus = undefined;
+    forge.resourceMetadataStatus = undefined;
     ctx = await createTestContext({ orgSlug: "myorg" });
     await seedIntegration(ctx.orgId, forgeManifest("@myorg/forge"));
   });
@@ -617,17 +627,22 @@ describe("authorization server chosen per connection (AFPS §7.3)", () => {
     expect(JSON.stringify(await res.json())).toContain("per connection");
   });
 
-  it("answers 503 when the chosen server's metadata does not answer, registering nothing", async () => {
-    forge.metadataStatus = 503;
-    const res = await app.request("/api/integrations/@myorg/forge/auths/oauth/connect/oauth2", {
-      method: "POST",
-      headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
-      body: JSON.stringify({ variables: { base_url: base } }),
-    });
-    expect(res.status).toBe(503);
-    expect(((await res.json()) as { code: string }).code).toBe("authorization_server_unreachable");
-    expect(forge.registrations).toHaveLength(0);
-  });
+  it.each(["metadataStatus", "resourceMetadataStatus"] as const)(
+    "answers 503 when the chosen server's %s document is unavailable, registering nothing",
+    async (failure) => {
+      forge[failure] = 503;
+      const res = await app.request("/api/integrations/@myorg/forge/auths/oauth/connect/oauth2", {
+        method: "POST",
+        headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
+        body: JSON.stringify({ variables: { base_url: base } }),
+      });
+      expect(res.status).toBe(503);
+      expect(((await res.json()) as { code: string }).code).toBe(
+        "authorization_server_unreachable",
+      );
+      expect(forge.registrations).toHaveLength(0);
+    },
+  );
 
   it("vouches for no server a system integration chooses per connection: no iss, refused", async () => {
     const restore = _setSystemPackagesForTesting(

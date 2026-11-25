@@ -13,7 +13,7 @@
  * not the same wire act as sending `published`.
  */
 
-import { test, expect } from "../../fixtures/browser.fixture.ts";
+import { test, expect, seedRolePreview } from "../../fixtures/browser.fixture.ts";
 import { createAgentWithInputSchema } from "../../helpers/seed.ts";
 
 for (const scenario of [
@@ -39,21 +39,16 @@ for (const scenario of [
     const packageId = scenario.inline ? "@inline/incident" : `${scope}/${name}`;
     const runId = "run_incident_42";
     if (scenario.role === "runner") {
-      await page.addInitScript(
-        (persona) => {
-          localStorage.setItem("appstrate_view_as", JSON.stringify(persona));
+      await seedRolePreview(page, {
+        orgId: browserCtx.org.orgId,
+        orgRole: "member",
+        space: {
+          spaceId: browserCtx.org.defaultSpaceId,
+          role: "preset:runner",
+          roleLabel: "Runner",
+          spaceName: "Default",
         },
-        {
-          orgId: browserCtx.org.orgId,
-          orgRole: "member",
-          space: {
-            spaceId: browserCtx.org.defaultSpaceId,
-            role: "preset:runner",
-            roleLabel: "Runner",
-            spaceName: "Default",
-          },
-        },
-      );
+      });
     }
     // Only the historical run and execution response are fixtures; auth, permissions,
     // agent schema, typed client and modal interactions use the application.

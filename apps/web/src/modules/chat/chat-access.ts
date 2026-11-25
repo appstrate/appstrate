@@ -13,6 +13,7 @@
 
 import {
   canAuthorPackages,
+  limitedConversationPermissions,
   reaches,
   turnCapabilities,
   type TurnCapabilities,
@@ -25,11 +26,30 @@ export interface ActingSpaceGrant extends SpaceGrant {
   id: string;
 }
 
+/**
+ * A limited conversation acts in its origin space alone, and in none once the caller cannot act
+ * there. Of the org-level half the turn keeps only a few reads (`limitedConversationPermissions`,
+ * module-chat), none of which a row reads: the origin space's own grants decide every row.
+ */
+export function limitedGrants(
+  acting: readonly ActingSpaceGrant[],
+  originId: string | null,
+  orgPermissions: readonly string[],
+) {
+  const origin = acting.find((space) => space.id === originId);
+  return origin
+    ? [
+        {
+          ...origin,
+          permissions: limitedConversationPermissions(origin.permissions, new Set(orgPermissions)),
+        },
+      ]
+    : [];
+}
+
 export interface ChatAccessContext {
   /** The spaces the turn acts in; empty while they load, or when it acts nowhere. */
   spaces: readonly ActingSpaceGrant[];
-  /** Org-level grants every space's gate adds (none for a limited conversation). */
-  orgPermissions: readonly string[];
   /** The composer's package-authoring switch. */
   authoring: boolean;
 }
@@ -74,7 +94,7 @@ const CHAT_CAPABILITIES: readonly ChatCapability[] = [
     held: (_ctx, turn) => reaches(turn.runLevel, "read"),
   },
   {
-    // Browsing (`list_files`), not reading: `read_file` applies the file ACL, not
+    // Browsing (`list_files`), not reading: `read` applies the file ACL, not
     // `files:read`. A tool of its own, so no `mcp:invoke`.
     id: "browseFiles",
     labelKey: "access.capability.browseFiles",
@@ -114,8 +134,7 @@ export interface ResolvedChatCapability extends ChatCapability {
  */
 export function resolveChatCapabilities(ctx: ChatAccessContext): ResolvedChatCapability[] {
   const judged = ctx.spaces.map((space) => {
-    const can = (permission: string) =>
-      ctx.orgPermissions.includes(permission) || space.permissions.includes(permission);
+    const can = (permission: string) => space.permissions.includes(permission);
     return { id: space.id, inSpace: { can, space }, turn: turnCapabilities(can, []) };
   });
   return CHAT_CAPABILITIES.map((capability) => {

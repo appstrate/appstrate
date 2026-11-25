@@ -21,6 +21,7 @@ import type {
 } from "@appstrate/shared-types";
 import { $api, client, type paths } from "../api/client";
 import { invalidatePaths } from "../lib/query-keys";
+import { spaceHeader } from "../lib/scoping-headers";
 import { splitPackageRef } from "../lib/package-paths";
 
 // Spec-pinned: the generated response shape verbatim (a rename/removal of any non-`manifest`
@@ -44,14 +45,14 @@ export type IntegrationClient = NonNullable<
   paths["/api/integrations/{packageId}/auths/{authKey}/clients"]["get"]["responses"]["200"]["content"]["application/json"]["data"]
 >[number];
 import { useOrgOnlyScope, useOrgScope, useSpaceReadScope } from "./use-org-scope";
-import { usePermissions } from "./use-permissions";
+import { usePermissions, useRowSpaceGrants } from "./use-permissions";
+import { useCurrentOrgId } from "./use-org";
 import { invalidateSchedules, warnSchedulesDisabled } from "./use-schedules";
 
 // The detail READ shape is NOT re-exported from shared-types: consumers use IntegrationDetailWire.
 export type {
   AgentIntegrationEntry,
   IntegrationAuthStatus,
-  IntegrationAuthType,
   IntegrationCandidate,
   IntegrationConnection,
   IntegrationManifestAuth,
@@ -90,23 +91,31 @@ export function invalidateIntegrationQueries(qc: QueryClient): Promise<void> {
 
 type IntegrationNameOf = (integrationId: string) => string;
 
-/** Display names of `integrationIds` from the detail query cache (fetched when uncached and readable); the id stands in for an unreadable name. */
+/** Resolve warned integration names in bulk, reusing scoped details that are already loaded. */
 export async function loadIntegrationNames(
   qc: QueryClient,
   scope: { header: ReturnType<typeof useOrgScope>["header"]; enabled: boolean },
   integrationIds: readonly string[],
 ): Promise<IntegrationNameOf> {
   const names = new Map<string, string>();
+  const missing: string[] = [];
+  for (const packageId of new Set(integrationIds)) {
+    const options = $api.queryOptions("get", "/api/integrations/{packageId}", {
+      params: { path: { packageId }, header: scope.header },
+    });
+    const cached = qc.getQueryData<IntegrationDetailWire>(options.queryKey);
+    if (cached?.manifest.display_name) names.set(packageId, cached.manifest.display_name);
+    else missing.push(packageId);
+  }
   await Promise.all(
-    integrationIds.map(async (packageId) => {
-      const options = $api.queryOptions("get", "/api/integrations/{packageId}", {
-        params: { path: { packageId }, header: scope.header },
-      });
-      const detail = scope.enabled
+    integrationIdChunks(missing).map(async (chunk) => {
+      const options = integrationRowsOptions(scope.header, chunk);
+      const rows = scope.enabled
         ? await qc.ensureQueryData(options).catch(() => undefined)
-        : qc.getQueryData<RawIntegrationDetail>(options.queryKey);
-      const name = (detail as IntegrationDetailWire | undefined)?.manifest.display_name;
-      if (name) names.set(packageId, name);
+        : qc.getQueryData<IntegrationSummaryWire[]>(options.queryKey);
+      for (const row of rows ?? []) {
+        if (row.manifest.display_name) names.set(row.id, row.manifest.display_name);
+      }
     }),
   );
   return (integrationId) => names.get(integrationId) ?? integrationId;
@@ -126,6 +135,32 @@ const IDS_PER_REQUEST = 100;
 /** The answer for no id, one array so it is the same value from render to render. */
 const NO_ROWS: IntegrationSummaryWire[] = [];
 
+function integrationIdChunks(ids: readonly string[]): string[][] {
+  const unique = [...new Set(ids)].sort();
+  const chunks: string[][] = [];
+  for (let i = 0; i < unique.length; i += IDS_PER_REQUEST) {
+    chunks.push(unique.slice(i, i + IDS_PER_REQUEST));
+  }
+  return chunks;
+}
+
+function integrationRowsOptions(header: ReturnType<typeof useOrgScope>["header"], ids: string[]) {
+  return {
+    queryKey: ["get", "/api/integrations", "by-id", header["X-Org-Id"], header["X-Space-Id"], ids],
+    queryFn: async ({ signal }: { signal: AbortSignal }) => {
+      const responses = await Promise.all(
+        integrationIdChunks(ids).map((chunk) =>
+          client.GET("/api/integrations", {
+            params: { query: { id: chunk, limit: IDS_PER_REQUEST }, header },
+            signal,
+          }),
+        ),
+      );
+      return responses.flatMap((response) => response.data!.data as IntegrationSummaryWire[]);
+    },
+  };
+}
+
 /**
  * The list rows of `ids` for the current space, chunked by {@link IDS_PER_REQUEST}. An id not placed
  * here has no row; `undefined` until every request answered. When `ids` changes, the previous set's
@@ -141,27 +176,11 @@ export function useIntegrationsById(
   error: unknown;
 } {
   const scope = useSpaceReadScope("integrations:read");
-  // Sorted and unique, so the same set is the same keys whatever order it came in.
   const unique = [...new Set(ids)].sort();
-  const chunks: string[][] = [];
-  for (let i = 0; i < unique.length; i += IDS_PER_REQUEST) {
-    chunks.push(unique.slice(i, i + IDS_PER_REQUEST));
-  }
   const orgId = scope.header["X-Org-Id"];
   const spaceId = scope.header["X-Space-Id"];
   const query = useQuery({
-    queryKey: ["get", "/api/integrations", "by-id", orgId, spaceId, unique],
-    queryFn: async ({ signal }) => {
-      const responses = await Promise.all(
-        chunks.map((chunk) =>
-          client.GET("/api/integrations", {
-            params: { query: { id: chunk, limit: IDS_PER_REQUEST }, header: scope.header },
-            signal,
-          }),
-        ),
-      );
-      return responses.flatMap((response) => response.data!.data as IntegrationSummaryWire[]);
-    },
+    ...integrationRowsOptions(scope.header, unique),
     enabled: scope.enabled && (options?.enabled ?? true),
     // One observer retains the combined result; useQueries cannot retain changed keys.
     placeholderData: (previous, previousQuery) =>
@@ -193,18 +212,43 @@ export function useIntegrationDetail(packageId: string | undefined, spaceId?: st
   );
 }
 
-/** The detail of each of `packageIds`, in order. `active` and `block_user_connections` are read here: the list is paginated and would misreport them past 100 integrations. */
-export function useIntegrationDetails(packageIds: readonly string[]) {
-  const scope = useSpaceReadScope("integrations:read");
+/** One space's read of an integration: what a list spanning spaces merges. */
+export interface IntegrationDetailIn {
+  spaceId: string;
+  detail: IntegrationDetailWire;
+}
+
+/**
+ * The integration's detail in each of `spaceIds` the reader may read it in, on the same keys as
+ * {@link useIntegrationDetail} there. `sources` keeps `spaceIds`' order and holds only the answered
+ * spaces; `isLoading` until every one answered; `error` the first refusal, never dropped silently.
+ */
+export function useIntegrationDetailsIn(
+  packageId: string | undefined,
+  spaceIds: readonly string[],
+): { sources: IntegrationDetailIn[]; isLoading: boolean; error: unknown } {
+  const orgId = useCurrentOrgId();
+  const grants = useRowSpaceGrants();
+  const readable = spaceIds.filter((spaceId) => grants(spaceId, "integrations:read"));
   return useQueries({
-    queries: packageIds.map((packageId) => ({
+    queries: readable.map((spaceId) => ({
       ...$api.queryOptions("get", "/api/integrations/{packageId}", {
-        params: { path: { packageId }, header: scope.header },
+        params: {
+          path: { packageId: packageId ?? "" },
+          header: { "X-Org-Id": orgId ?? undefined, "X-Space-Id": spaceId },
+        },
       }),
-      enabled: scope.enabled,
-      // Spec-pinned (see IntegrationDetailWire): only `manifest` is narrowed.
-      select: (data: RawIntegrationDetail) => data as IntegrationDetailWire,
+      enabled: !!orgId && !!packageId,
     })),
+    combine: (results) => ({
+      sources: results.flatMap((result, i) =>
+        result.data
+          ? [{ spaceId: readable[i]!, detail: result.data as IntegrationDetailWire }]
+          : [],
+      ),
+      isLoading: results.some((result) => result.isLoading),
+      error: results.find((result) => result.error)?.error ?? null,
+    }),
   });
 }
 
@@ -224,7 +268,11 @@ export function useIntegrationConnections(packageId: string | undefined) {
 }
 
 /** Query options of an agent's connection readiness: readers of the same version share one key, so they cannot disagree. */
-function useAgentConnectionReadinessOptions(agentPackageId: string | undefined, version?: string) {
+export function useAgentConnectionReadinessOptions(
+  agentPackageId: string | undefined,
+  version?: string,
+  scheduleId?: string,
+) {
   const orgScope = useOrgScope();
   const { can } = usePermissions();
   const { scope, name } = agentPackageId
@@ -237,7 +285,7 @@ function useAgentConnectionReadinessOptions(agentPackageId: string | undefined, 
     {
       params: {
         path: { scope, name },
-        ...(version ? { query: { version } } : {}),
+        ...(version || scheduleId ? { query: { version, scheduleId } } : {}),
         header: orgScope.header,
       },
     },
@@ -250,8 +298,12 @@ function useAgentConnectionReadinessOptions(agentPackageId: string | undefined, 
  * `blocks_run`/`errors` mirror the run-kickoff 409; `integrations[]` carries every declared
  * integration's management verdict plus a `run_blocking` flag.
  */
-export function useAgentConnectionReadiness(agentPackageId: string | undefined, version?: string) {
-  return useQuery(useAgentConnectionReadinessOptions(agentPackageId, version));
+export function useAgentConnectionReadiness(
+  agentPackageId: string | undefined,
+  version?: string,
+  scheduleId?: string,
+) {
+  return useQuery(useAgentConnectionReadinessOptions(agentPackageId, version, scheduleId));
 }
 
 type AgentConnectionReadiness =
@@ -270,9 +322,10 @@ export function useReadIntegrationResolution(
   integrationId: string,
   agentPackageId: string,
   version?: string,
+  scheduleId?: string,
 ) {
   const qc = useQueryClient();
-  const { queryKey } = useAgentConnectionReadinessOptions(agentPackageId, version);
+  const { queryKey } = useAgentConnectionReadinessOptions(agentPackageId, version, scheduleId);
   return () => {
     const state = qc.getQueryState<AgentConnectionReadiness>(queryKey);
     if (state?.status === "error") throw state.error;
@@ -288,8 +341,9 @@ export function useIntegrationReadinessEntry(
   integrationId: string | undefined,
   agentPackageId: string | undefined,
   version?: string,
+  scheduleId?: string,
 ) {
-  const options = useAgentConnectionReadinessOptions(agentPackageId, version);
+  const options = useAgentConnectionReadinessOptions(agentPackageId, version, scheduleId);
   return useQuery({
     ...options,
     enabled: options.enabled && !!integrationId,
@@ -473,8 +527,8 @@ export function useDeleteIntegrationOAuthClient(tier: IntegrationClientTier) {
 // Admin: block_user_connections + pins + connection metadata
 // ─────────────────────────────────────────────
 
-export function useIntegrationPins(packageId: string | undefined) {
-  const scope = useSpaceReadScope("integrations:read");
+export function useIntegrationPins(packageId: string | undefined, spaceId?: string) {
+  const scope = useSpaceReadScope("integrations:read", spaceId);
   return $api.useQuery(
     "get",
     "/api/integrations/{packageId}/pins",
@@ -489,8 +543,8 @@ export function useIntegrationPins(packageId: string | undefined) {
 }
 
 /** The space's agents that declare this integration as a dependency (feeds the "pin a new agent" picker). */
-export function useAgentsConsumingIntegration(packageId: string | undefined) {
-  const scope = useSpaceReadScope("integrations:read");
+export function useAgentsConsumingIntegration(packageId: string | undefined, spaceId?: string) {
+  const scope = useSpaceReadScope("integrations:read", spaceId);
   return $api.useQuery(
     "get",
     "/api/integrations/{packageId}/consuming-agents",
@@ -587,18 +641,25 @@ export function useRenameIntegrationConnection() {
 }
 
 /**
- * Share a connection into a space (idempotent) or withdraw it, through the space's door
- * (`packageId` set) or the account's. The mutation stays pending until the refetched sharing
- * lands, so the share editor never re-enables on stale state. Withdrawing disables other
- * actors' schedules naming the connection.
+ * Share a connection into a space (idempotent) or withdraw it, through a space's door
+ * (`packageId` set: `doorSpaceId`, the working space when omitted) or the account's. The mutation
+ * stays pending until the refetched sharing lands, so the share editor never re-enables on stale
+ * state. Withdrawing disables other actors' schedules naming the connection.
  */
-export function useConnectionShare(op: "share" | "unshare", packageId?: string) {
+export function useConnectionShare(
+  op: "share" | "unshare",
+  packageId?: string,
+  doorSpaceId?: string,
+) {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async ({ connectionId, spaceId }: { connectionId: string; spaceId: string }) => {
       if (packageId) {
         const path = "/api/integrations/{packageId}/connections/{connectionId}/shares/{spaceId}";
-        const init = { params: { path: { packageId, connectionId, spaceId } } };
+        const init = {
+          params: { path: { packageId, connectionId, spaceId } },
+          ...spaceHeader(doorSpaceId),
+        };
         await (op === "share" ? client.PUT(path, init) : client.DELETE(path, init));
       } else {
         const path = "/api/me/connections/{connectionId}/shares/{spaceId}";
@@ -614,7 +675,7 @@ export function useConnectionShare(op: "share" | "unshare", packageId?: string) 
 }
 
 /** Explicit policy, atomically saved with current team-space shares by the server. */
-export function useConnectionShareAllSpaces(packageId?: string) {
+export function useConnectionShareAllSpaces(packageId?: string, doorSpaceId?: string) {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async ({ connectionId, enabled }: { connectionId: string; enabled: boolean }) => {
@@ -623,6 +684,7 @@ export function useConnectionShareAllSpaces(packageId?: string) {
         await client.PUT("/api/integrations/{packageId}/connections/{connectionId}/shares", {
           params: { path: { packageId, connectionId } },
           body,
+          ...spaceHeader(doorSpaceId),
         });
       } else {
         await client.PUT("/api/me/connections/{connectionId}/shares", {

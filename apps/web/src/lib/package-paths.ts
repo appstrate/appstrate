@@ -17,7 +17,7 @@ export function packageListPath(type: PackageType | string): string {
 }
 
 export function runDetailPath(packageId: string, runId: string): string {
-  return `${packageDetailPath("agent", packageId)}/runs/${runId}`;
+  return `${packageDetailPath("agent", packageId)}/runs/${encodeURIComponent(runId)}`;
 }
 
 export function scheduleDetailPath(scheduleId: string): string {

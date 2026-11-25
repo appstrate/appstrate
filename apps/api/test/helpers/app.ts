@@ -35,7 +35,8 @@ import { initSystemIntegrations } from "../../src/services/integration-client-re
 import { initRunLimits } from "../../src/services/run-limits.ts";
 import { initProxyLimits } from "../../src/services/proxy-limits.ts";
 import { seedTestModelProviders } from "./model-providers.ts";
-import { applyAuthPipeline, skipAuth } from "../../src/lib/auth-pipeline.ts";
+import { skipAuth } from "../../src/lib/auth-paths.ts";
+import { applyAuthPipeline } from "../../src/lib/auth-pipeline.ts";
 import { createAuthBootstrapRouter } from "../../src/routes/auth-bootstrap.ts";
 import {
   collectModulePermissions,
@@ -270,7 +271,7 @@ export function getTestApp(options?: GetTestAppOptions): Hono<AppEnv> {
   // Org context for the `/api/orgs/:orgId*` family, where the org comes from the
   // PATH. Mounted here — before the orgs router AND before every module router
   // below — so a module mounting under `/api/orgs/:orgId/…` (oidc's
-  // `cli-sessions`) inherits it instead of deriving its own, ceiling-free, set.
+  // `access-grants`) inherits it instead of deriving its own, ceiling-free, set.
   app.use("/api/orgs/:orgId/*", ...ORG_PATH_MIDDLEWARE);
 
   app.route("/api/orgs", orgsRouter);

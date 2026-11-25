@@ -18,7 +18,7 @@ import { useUiLabels } from "./ui-labels.ts";
 const SIDEBAR_COOKIE_NAME = "sidebar_state";
 const SIDEBAR_COOKIE_MAX_AGE = 60 * 60 * 24 * 7;
 const SIDEBAR_WIDTH = "16rem";
-const SIDEBAR_WIDTH_MOBILE = "18rem";
+
 const SIDEBAR_WIDTH_ICON = "3rem";
 const SIDEBAR_KEYBOARD_SHORTCUT = "b";
 
@@ -190,11 +190,15 @@ const Sidebar = React.forwardRef<
           <SheetContent
             data-sidebar="sidebar"
             data-mobile="true"
-            className={cn("bg-sidebar text-sidebar-foreground w-(--sidebar-width) p-0", className)}
+            className={cn(
+              "bg-sidebar text-sidebar-foreground w-(--sidebar-width) max-w-none p-0",
+              className,
+            )}
             showCloseButton={false}
             style={
               {
-                "--sidebar-width": SIDEBAR_WIDTH_MOBILE,
+                // On a phone the navigation takes the whole screen, as a chat app's menu does.
+                "--sidebar-width": "100vw",
               } as React.CSSProperties
             }
             side={side}

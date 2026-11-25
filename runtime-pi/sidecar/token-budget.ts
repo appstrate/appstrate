@@ -6,7 +6,7 @@
  * tools and third-party MCP tools all draw on one budget per run.
  *
  * Background. The byte-based caps in `helpers.ts`
- * (`MAX_RESPONSE_SIZE`, `ABSOLUTE_MAX_RESPONSE_SIZE`) protect against
+ * (`ABSOLUTE_MAX_RESPONSE_SIZE`) protect against
  * OOM and "agent downloads a 10 MB PDF" scenarios but do not reflect
  * the true cost of a tool output in the agent's context window:
  *
@@ -201,12 +201,11 @@ interface TokenBudgetOptions {
    */
   contextWindowTokens?: number;
   /**
-   * Reserve (tokens) the upstream model keeps for its response. Only
-   * meaningful in combination with {@link contextWindowTokens}.
-   * Defaults to `max(16384, floor(contextWindowTokens × 0.2))` — the
-   * same heuristic the runner uses for Pi SDK compaction sizing, kept
-   * in sync deliberately so a missing `maxTokens` cascades to the same
-   * conservative fallback in both places.
+   * Room (tokens) kept for the model's reply. Only meaningful in
+   * combination with {@link contextWindowTokens}. Normalized by
+   * `deriveResponseReserveTokens`, the rule the runner sizes Pi SDK
+   * compaction with: capped at 64k and at 80 % of the window; a missing
+   * value derives from the window (`max(16384, 20 %)`, under the same caps).
    */
   reserveTokens?: number;
   /**
@@ -283,7 +282,8 @@ export class TokenBudget {
           `TokenBudget: contextWindowTokens must be a positive integer when set, got ${ctx}`,
         );
       }
-      // `deriveResponseReserveTokens` guarantees `reserve < ctx`: it treats
+      // `deriveResponseReserveTokens` guarantees `reserve < ctx` for any
+      // `ctx >= 2` (a 1-token window has no positive reserve below it): it treats
       // an impossible `maxTokens >= ctx` (corrupt catalog/override data) as
       // unusable and falls back to a derived default rather than throwing —
       // a bad datum must degrade gracefully, never crash the sidecar at boot.

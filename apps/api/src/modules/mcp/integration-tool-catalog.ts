@@ -8,9 +8,14 @@
  * typed tool through `/api/credential-proxy/tools/call`.
  */
 
-import type { z } from "zod";
+import { z } from "zod";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
-import { markRelayedResult, type AppstrateRequestExtra } from "@appstrate/mcp-transport";
+import { proxyConnectionVerdictProperties } from "../../openapi/paths/integrations.ts";
+import {
+  TOOL_DESCRIPTOR_REDUCTIONS,
+  markRelayedResult,
+  type AppstrateRequestExtra,
+} from "@appstrate/mcp-transport";
 import { RUN_CONNECT_OFFERS_HEADER } from "@appstrate/core/run-and-wait-client";
 import type {
   IntegrationTool,
@@ -29,11 +34,17 @@ import {
   type ToolCallOutcome,
 } from "./api-call-batch.ts";
 import { INTEGRATION_TOOLS_PATH, REMOTE_TOOLS_CALL_PATH } from "./catalog.ts";
-import { asRecord, dispatchHeaders, jsonResult, type Refusal } from "./tool-results.ts";
+import {
+  asRecord,
+  dispatchHeaders,
+  jsonResult,
+  type Refusal,
+  type RouteRefusal,
+} from "./tool-results.ts";
 
 /** A tool of the listing, as the route returns it, with how `call_integration_tool` calls it. */
 export type CallableTool = IntegrationTool & {
-  /** How to call it and read its result, carried with its `input_schema` by `best_match`. */
+  /** How to call it and read its result, carried with its `input_schema` by `describe`. */
   usage: string;
   /** Its arguments as JSON Schema. */
   input_schema: Record<string, unknown>;
@@ -51,12 +62,6 @@ export type CallableTool = IntegrationTool & {
 };
 
 export type CallableListing = Omit<IntegrationToolListing, "tools"> & { tools: CallableTool[] };
-
-/** The listing route's refusal, as `invoke_operation` would relay it. */
-export interface ListingRefusal {
-  status: number;
-  body: unknown;
-}
 
 /** Scopes of a connection a search lists; past it `scopes_granted_count` gives the total. */
 export const MAX_LISTED_SCOPES = 20;
@@ -95,7 +100,10 @@ const REMOTE_TOOL_USAGE =
   "validates the rest. A server may refuse the call with a protocol error (the platform's " +
   "`upstream_invalid_params` for its arguments or tool name, else `upstream_mcp_error`, " +
   "either with its `mcp_error.code` and `message`) or with its own `isError` tool result. When " +
-  "it has an `output_schema`, its `structuredContent` follows it. The `connection_id` of " +
+  "it has an `output_schema`, its `structuredContent` follows it. A `schema_reduced` lists " +
+  "what was cut from the server's schemas to fit the size bound: `output_schema` (none " +
+  "shown), `schema_documentation` (descriptions, titles, examples and annotations dropped), " +
+  "`input_schema` (arguments not shown; the server validates them). The `connection_id` of " +
   "call_integration_tool names the connection; without it the proxy chooses as for an " +
   "`api_call`, and `must_choose_connection` lists the candidates in " +
   "`errors[0].candidate_connections` (retry with one `id` as `connection_id`); a tool whose " +
@@ -283,6 +291,85 @@ function callable(ctx: DispatchContext, tool: IntegrationTool): CallableTool {
   };
 }
 
+const stringList = z.array(z.string());
+const toolFields = {
+  name: z.string(),
+  integration_package_id: z.string(),
+  description: z.string(),
+  connection_ids: stringList,
+};
+const schemaObject = z.record(z.string(), z.unknown());
+const integrationListingSchema = z.looseObject({
+  tools: z.array(
+    z.discriminatedUnion("kind", [
+      z.looseObject({
+        ...toolFields,
+        kind: z.literal("api_call"),
+        auth_key: z.string(),
+        connection_required: z.boolean(),
+      }),
+      z.looseObject({
+        ...toolFields,
+        kind: z.literal("remote"),
+        remote_name: z.string(),
+        input_schema: schemaObject,
+        output_schema: schemaObject.optional(),
+        schema_reduced: z.array(z.enum(TOOL_DESCRIPTOR_REDUCTIONS)).optional(),
+        catalog_unreadable: z.literal(true).optional(),
+        missing_scopes: z.record(z.string(), stringList).optional(),
+      }),
+    ]),
+  ),
+  connections: z.array(
+    z.looseObject({
+      integration_package_id: z.string(),
+      connection_id: z.string(),
+      label: z.string(),
+      owned_by_actor: z.boolean(),
+      auth_key: z.string(),
+      scopes_granted: stringList,
+      authorized_uris: stringList,
+      allow_all_uris: z.boolean(),
+      needs_reconnection: z.boolean(),
+      call_permission_required: z.boolean(),
+    }),
+  ),
+  not_ready: z.array(
+    z.looseObject({
+      integration_package_id: z.string(),
+      display_name: z.string(),
+      proxy_connection: z.looseObject({
+        status: z.enum(proxyConnectionVerdictProperties.status.enum),
+        imposed: z.boolean(),
+      }),
+      refusal: z
+        .looseObject({ field: z.string(), code: z.string(), message: z.string() })
+        .optional(),
+    }),
+  ),
+  unlisted: z.array(
+    z.looseObject({
+      integration_package_id: z.string(),
+      refusal: z.looseObject({
+        type: z.string(),
+        title: z.string(),
+        status: z.number(),
+        detail: z.string(),
+        instance: z.string(),
+        code: z.string(),
+        request_id: z.string(),
+      }),
+    }),
+  ),
+  truncated_catalogs: z.array(
+    z.looseObject({
+      integration_package_id: z.string(),
+      listed_tools: z.number().int().nonnegative(),
+    }),
+  ),
+  uncached: stringList,
+}) satisfies z.ZodType<IntegrationToolListing>;
+
 /**
  * The caller's integration tools, from the listing route, filtered by its query parameters
  * (`integration_package_id`, `name`, `connection_id`); the MCP request's `signal` cancels it. The
@@ -290,15 +377,16 @@ function callable(ctx: DispatchContext, tool: IntegrationTool): CallableTool {
  */
 export async function readIntegrationTools(
   ctx: DispatchContext,
-  query: { integration?: string; name?: string; connectionId?: string },
+  query: { integration?: string; name?: string; connectionId?: string; cachedOnly?: boolean },
   signal: AbortSignal | undefined,
-): Promise<CallableListing | { refused: ListingRefusal }> {
+): Promise<CallableListing | { refused: RouteRefusal }> {
   const url = new URL(INTEGRATION_TOOLS_PATH, ctx.origin);
   if (query.integration !== undefined) {
     url.searchParams.set("integration_package_id", query.integration);
   }
   if (query.name !== undefined) url.searchParams.set("name", query.name);
   if (query.connectionId !== undefined) url.searchParams.set("connection_id", query.connectionId);
+  if (query.cachedOnly) url.searchParams.set("catalogs", "cached");
   const response = await ctx.dispatch(
     new Request(url.toString(), {
       method: "GET",
@@ -307,9 +395,20 @@ export async function readIntegrationTools(
     }),
   );
   const body = asRecord(await response.json().catch(() => undefined));
-  if (!response.ok || !Array.isArray(body?.tools)) {
+  if (!response.ok) {
     return { refused: { status: response.status, body: body ?? null } };
   }
-  const listing = body as unknown as IntegrationToolListing;
+  const parsed = integrationListingSchema.safeParse(body);
+  if (!parsed.success)
+    return {
+      refused: {
+        status: 502,
+        body: {
+          code: "invalid_integration_catalog",
+          detail: "Invalid response from the integration tools catalogue",
+        },
+      },
+    };
+  const listing = parsed.data;
   return { ...listing, tools: listing.tools.map((tool) => callable(ctx, tool)) };
 }

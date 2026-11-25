@@ -323,7 +323,7 @@ async function fetchDiscoveryDocument(
       headers: { Accept: "application/json" },
       signal: AbortSignal.timeout(10_000),
     });
-    if (res.status >= 500) return UNREACHABLE;
+    if (res.status === 429 || res.status >= 500) return UNREACHABLE;
     if (!res.ok) return null;
     const json = await readJsonUnder(res);
     if (!json || typeof json !== "object") return null;

@@ -1,11 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import type { UIMessage } from "ai";
-import { PDF_INPUT_UNSUPPORTED, type TurnPdfInput } from "./native-pdf.ts";
+import { INLINE_RUN_HINT, type TurnPdfInput } from "./native-pdf.ts";
 import type { ChatAttachmentRead, ChatAttachmentContent } from "@appstrate/core/chat-contract";
 import { isRasterImageMime } from "@appstrate/core/mime";
 import { RESOURCE_BLOB_MAX_BYTES } from "@appstrate/mcp-transport";
 import { INLINE_IMAGE_BUDGET_BYTES, type Message } from "@appstrate/runner-pi";
+import { FILES_PER_KIND_PER_MESSAGE, TURN_PDF_MAX_BYTES } from "../attachment-limits.ts";
 import { logger } from "../logger.ts";
 
 type UserContent = Extract<Message, { role: "user" }>["content"];
@@ -17,7 +18,7 @@ export type AttachmentImages = ReadonlyMap<string, ReadonlyMap<string, PiImageCo
  * request cap (`LLM_PROXY_LIMITS.max_request_bytes`, 10 MiB) with room left for the text of the
  * conversation. The three kinds of binary share it, each bounded on its own path:
  * - tool-result images: {@link INLINE_IMAGE_BUDGET_BYTES}, by the runner's `inlineImageBudgetExtension`;
- * - PDFs: {@link RESOURCE_BLOB_MAX_BYTES} raw per turn, by `createTurnPdfInput`;
+ * - PDFs: {@link TURN_PDF_MAX_BYTES} raw per turn, by `createTurnPdfInput`;
  * - attachment images: what is left, {@link ATTACHMENT_IMAGE_BUDGET_BYTES}.
  */
 export const REQUEST_BINARY_BUDGET_BYTES = 7 * 1024 * 1024;
@@ -27,11 +28,10 @@ const base64Size = (bytes: number) => Math.ceil(bytes / 3) * 4;
 
 /** The attachment images' share of {@link REQUEST_BINARY_BUDGET_BYTES}. */
 export const ATTACHMENT_IMAGE_BUDGET_BYTES =
-  REQUEST_BINARY_BUDGET_BYTES - INLINE_IMAGE_BUDGET_BYTES - base64Size(RESOURCE_BLOB_MAX_BYTES);
+  REQUEST_BINARY_BUDGET_BYTES - INLINE_IMAGE_BUDGET_BYTES - base64Size(TURN_PDF_MAX_BYTES);
 
 /** Images are eligible in the newest three user messages, including the current prompt. */
 const RECENT_USER_MESSAGES = 3;
-const FILES_PER_KIND_PER_MESSAGE = 4;
 
 /** Rebuild recent image inputs from their ACL-checked files, newest turn first. */
 export async function loadAttachmentImages(
@@ -84,7 +84,7 @@ export type ReadAttachment = (
 ) => Promise<ChatAttachmentContent | null>;
 
 /**
- * Only a PDF explicitly attached to this prompt is sent. Later turns may use read_file
+ * Only a PDF explicitly attached to this prompt is sent. Later turns may use read
  * with the durable pointer, which checks the caller's current permissions again.
  */
 export async function readPromptPdfs(
@@ -99,13 +99,12 @@ export async function readPromptPdfs(
     if (part.type !== "file" || part.mediaType !== "application/pdf" || receipts.has(part.url))
       continue;
     signal.throwIfAborted();
-    let note =
-      "PDF content unavailable (unreadable or over the inline limit). Use an inline run to inspect larger files.";
+    let note = `PDF content unavailable (unreadable or over the inline limit). ${INLINE_RUN_HINT}`;
     // A model that reads no PDF says so for every one; the per-message cap applies only when it does.
-    if (!pdfInput.supported) {
-      note = PDF_INPUT_UNSUPPORTED;
+    if (pdfInput.unsupported) {
+      note = pdfInput.unsupported;
     } else if (receipts.size >= FILES_PER_KIND_PER_MESSAGE) {
-      note = `PDF omitted: at most ${FILES_PER_KIND_PER_MESSAGE} PDFs are read per message. Use an inline run to inspect it.`;
+      note = `PDF omitted: at most ${FILES_PER_KIND_PER_MESSAGE} per message. ${INLINE_RUN_HINT}`;
     } else if (read) {
       try {
         const file = await read(part.url, {
@@ -118,7 +117,7 @@ export async function readPromptPdfs(
             name: part.filename ?? "attachment.pdf",
             data: Buffer.from(file.bytes).toString("base64"),
           });
-          note = pdf.reference ?? pdf.note;
+          note = "reference" in pdf ? pdf.reference : pdf.note;
         }
       } catch (error) {
         signal.throwIfAborted();

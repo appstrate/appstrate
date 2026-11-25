@@ -7,10 +7,10 @@
  * Mounts `/api/mcp/o/:org` and the space-pinned `/api/mcp/o/:org/s/:space`
  * (Streamable HTTP), each with its own RFC 9728 discovery.
  * The ~250 platform operations are surfaced through three progressive-disclosure
- * tools (`search_operations`, `describe_operation`, `invoke_operation`) rather
+ * tools (`search`, `describe`, `invoke_operation`) rather
  * than one tool per endpoint, keeping the client tool budget tiny. Run launch
  * and waiting use the dedicated `run_and_wait` shortcut, and the credential
- * proxy the `search_integration_tools` / `call_integration_tool` discovery pair. Tool calls dispatch
+ * proxy `call_integration_tool`, its tools found by `search`. Tool calls dispatch
  * in-process through the platform app, reusing the auth pipeline and RBAC — an
  * MCP caller can do exactly what the same credential could do over REST.
  *
@@ -24,8 +24,8 @@
  * the AS is first asked for it — alongside the in-process verifier set in
  * `lib/audiences.ts`.
  *
- * Consumers: external MCP clients (Claude Code, Cursor) via OAuth, the
- * first-party chat app (BFF reuses its OIDC token), and Appstrate agents.
+ * External MCP clients connect over OAuth. The first-party chat uses a scoped
+ * loopback bearer for platform tool calls.
  */
 
 import type { AppstrateModule } from "@appstrate/core/module";

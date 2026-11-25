@@ -190,6 +190,7 @@ export const uploadsPaths = {
   "/api/uploads/_content": {
     put: {
       operationId: "writeUploadContent",
+      "x-appstrate-space": { kind: "organization" },
       tags: ["Uploads"],
       summary: "Write upload bytes (proxy sink)",
       description:

@@ -66,6 +66,9 @@ export interface AccessTokenClaims {
    *  alongside. The OIDC strategy gates the token on the family's
    *  revocation state — absent for non-CLI instance tokens. */
   cliFamilyId?: string;
+  /** JWT `iat`, in seconds. An MCP grant's revocation watermark is compared
+   *  against it (`services/mcp-grants.ts`). */
+  issuedAt?: number;
 }
 
 /** Supplies the key set access tokens are verified against. */
@@ -171,6 +174,7 @@ export async function verifyEndUserAccessToken(
     spaceId: typeof extra.space_id === "string" ? extra.space_id : undefined,
     endUserId: typeof extra.end_user_id === "string" ? extra.end_user_id : undefined,
     cliFamilyId: typeof extra.cli_family_id === "string" ? extra.cli_family_id : undefined,
+    issuedAt: typeof payload.iat === "number" ? payload.iat : undefined,
   };
 }
 

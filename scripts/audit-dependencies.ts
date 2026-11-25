@@ -101,9 +101,7 @@ export interface Advisory {
  * A fatal advisory this repo accepts for now, with the date the acceptance
  * stops being true.
  *
- * Checked in BOTH directions by `reviewAdvisories`, the rule
- * `ACCEPTED_CROSS_MODULE_IMPORTS` in `verify-module-isolation.ts` carries for
- * the same reason: an entry that no longer matches a live FATAL advisory fails
+ * Checked in both directions by `reviewAdvisories`: an entry that no longer matches a live FATAL advisory fails
  * the gate, so this cannot quietly become a list of vulnerabilities that were
  * patched two releases ago while reading like a list of live risks.
  *

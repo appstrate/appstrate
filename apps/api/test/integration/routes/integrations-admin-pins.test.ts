@@ -39,7 +39,16 @@ import {
   memberContext,
   type TestContext,
 } from "../../helpers/auth.ts";
-import { seedAgent, seedPackage, seedSpaceMember, seedSpaceRole } from "../../helpers/seed.ts";
+import {
+  seedAgent,
+  seedApiKey,
+  seedPackage,
+  seedPublishedVersion,
+  seedSchedule,
+  seedSpace,
+  seedSpaceMember,
+  seedSpaceRole,
+} from "../../helpers/seed.ts";
 import { activatePackage, deactivatePackage } from "../../../src/services/space-packages.ts";
 import { asc, eq } from "drizzle-orm";
 import {
@@ -250,6 +259,112 @@ describe("/api/integrations/:packageId admin surface", () => {
   }
 
   describe("GET /api/agents/:scope/:name/connection-readiness — per-integration resolution", () => {
+    it("reads a schedule's version pins only for its agent and space with schedules:read", async () => {
+      const otherSpace = await seedSpace({ orgId: ctx.orgId, name: "Other team" });
+      const seed = (packageId: string, spaceId: string) =>
+        seedSchedule({
+          packageId,
+          spaceId,
+          orgId: ctx.orgId,
+          userId: ctx.user.id,
+        });
+      const matching = await seed(AGENT, ctx.defaultSpaceId);
+      const otherAgent = await seed(REQUIRED_AGENT, ctx.defaultSpaceId);
+      const elsewhere = await seed(AGENT, otherSpace.id);
+      const read = (id: string, headers: Record<string, string> = authHeaders(ctx)) =>
+        app.request(`/api/agents/${AGENT}/connection-readiness?scheduleId=${id}`, { headers });
+      expect((await read(matching.id)).status).toBe(200);
+      expect((await read(otherAgent.id)).status).toBe(404);
+      expect((await read(elsewhere.id)).status).toBe(404);
+      const key = await seedApiKey({
+        orgId: ctx.orgId,
+        spaceId: ctx.defaultSpaceId,
+        createdBy: ctx.user.id,
+        scopes: ["agents:read", "integrations:read"],
+      });
+      expect((await read(matching.id, { Authorization: `Bearer ${key.rawKey}` })).status).toBe(403);
+    });
+
+    it("judges a schedule's pinned integration version, not the latest one", async () => {
+      const VERSIONED = "@adminorg/versioned";
+      const VERSIONED_AGENT = "@adminorg/agent-versioned";
+      const withAuths = localIntegrationManifest({
+        name: VERSIONED,
+        version: "0.1.0",
+        auths: {
+          primary: {
+            type: "api_key",
+            authorizedUris: ["https://api.example.com/**"],
+            credentialFields: ["api_key"],
+            delivery: httpHeaderDelivery({ name: "Authorization", field: "api_key" }),
+          },
+        },
+        tools_policy: { search: {} },
+      });
+      // The latest version declares no auths (AFPS §7.2): it binds no connection.
+      const noAuths = {
+        type: "integration",
+        schema_version: "0.3",
+        name: VERSIONED,
+        version: "1.0.0",
+        display_name: "Versioned",
+        source: {
+          kind: "remote",
+          remote: { url: "https://mcp.example.com/v/mcp", transport: "streamable-http" },
+        },
+        tools_policy: { search: {} },
+      };
+      await seedPackage({
+        id: VERSIONED,
+        homeSpaceId: ctx.defaultSpaceId,
+        orgId: ctx.orgId,
+        type: "integration",
+        source: "local",
+        draftManifest: noAuths,
+      });
+      await activatePackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, VERSIONED);
+      await seedPublishedVersion(VERSIONED, "0.1.0", { manifest: withAuths });
+      await seedPublishedVersion(VERSIONED, "1.0.0", { manifest: noAuths });
+      await seedAgent({
+        id: VERSIONED_AGENT,
+        homeSpaceId: ctx.defaultSpaceId,
+        orgId: ctx.orgId,
+        createdBy: ctx.user.id,
+        draftManifest: {
+          name: VERSIONED_AGENT,
+          version: "1.0.0",
+          type: "agent",
+          schema_version: "0.2",
+          display_name: "Versioned agent",
+          dependencies: { integrations: { [VERSIONED]: "*" } },
+          integrations_configuration: { [VERSIONED]: { tools: ["search"] } },
+        },
+      });
+      await activatePackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, VERSIONED_AGENT);
+      const schedule = await seedSchedule({
+        packageId: VERSIONED_AGENT,
+        spaceId: ctx.defaultSpaceId,
+        orgId: ctx.orgId,
+        userId: ctx.user.id,
+        dependencyOverrides: { [VERSIONED]: "0.1.0" },
+      });
+
+      const required = async (query: string) => {
+        const res = await app.request(
+          `/api/agents/${VERSIONED_AGENT}/connection-readiness${query}`,
+          { headers: authHeaders(ctx) },
+        );
+        expect(res.status).toBe(200);
+        const body = (await res.json()) as {
+          integrations: Array<{ integration_package_id: string; connection_required: boolean }>;
+        };
+        return body.integrations.find((i) => i.integration_package_id === VERSIONED)
+          ?.connection_required;
+      };
+      expect(await required("")).toBe(false);
+      expect(await required(`?scheduleId=${schedule.id}`)).toBe(true);
+    });
+
     it("returns the full resolution verdict shape for a declared integration", async () => {
       const connId = await seedPrivateConnectionFor(ctx.user.id);
 

@@ -395,7 +395,7 @@ describe("mcp resources/read (appfile://)", () => {
       jsonrpc: "2.0",
       id: 1,
       method: "tools/call",
-      params: { name: "read_file", arguments: { uri } },
+      params: { name: "read", arguments: { uri } },
     });
     // Without `files:read` in the file's space the file is as absent as a missing one.
     expect(viaTool.envelope.result?.isError).toBe(true);
@@ -410,7 +410,7 @@ describe("mcp resources/read (appfile://)", () => {
     expect(JSON.stringify([direct.envelope, viaTool.envelope])).not.toContain("private-report");
   });
 
-  it("exposes the same file through the chat-callable read_file tool", async () => {
+  it("exposes the same file through the chat-callable read tool", async () => {
     const runId = await seedRun(scope);
     const docId = await publishDoc(scope, runId, "report.txt", "text/plain", "hello tool reader");
 
@@ -418,7 +418,7 @@ describe("mcp resources/read (appfile://)", () => {
       jsonrpc: "2.0",
       id: 1,
       method: "tools/call",
-      params: { name: "read_file", arguments: { uri: `appfile://${docId}` } },
+      params: { name: "read", arguments: { uri: `appfile://${docId}` } },
     });
     const content = (envelope.result?.content as Array<Record<string, unknown>>) ?? [];
     expect(content).toHaveLength(1);
@@ -772,7 +772,8 @@ describe("mcp file-backed package workflow", () => {
       orgId: ctx.orgId,
       spaceId: ctx.defaultSpaceId,
       createdBy: ctx.user.id,
-      scopes: ["mcp:read", "mcp:invoke"],
+      // An inline run's grants declare validate_package_file; `files:read` is withheld.
+      scopes: ["mcp:read", "mcp:invoke", "agents:run", "agents:write", "runs:read"],
     });
     const { envelope } = await rpc(
       { Authorization: `Bearer ${key.rawKey}`, "X-Org-Id": ctx.orgId },
@@ -1006,7 +1007,7 @@ describe("mcp file reads of a chat conversation's own attachments", () => {
         jsonrpc: "2.0",
         id: 1,
         method: "tools/call",
-        params: { name: "read_file", arguments: { uri, space_id: ctx.defaultSpaceId } },
+        params: { name: "read", arguments: { uri, space_id: ctx.defaultSpaceId } },
       });
       return envelope;
     };
@@ -1045,13 +1046,13 @@ describe("the content_url of an oversized MCP file read", () => {
     runOwner = ctx.user.id;
   });
 
-  /** `read_file` from the default space, answered as metadata; returns its `content_url`. */
+  /** `read` from the default space, answered as metadata; returns its `content_url`. */
   async function contentUrlOf(headers: Record<string, string>, uri: string): Promise<string> {
     const { envelope } = await rpc(headers, {
       jsonrpc: "2.0",
       id: 1,
       method: "tools/call",
-      params: { name: "read_file", arguments: { uri, space_id: ctx.defaultSpaceId } },
+      params: { name: "read", arguments: { uri, space_id: ctx.defaultSpaceId } },
     });
     const content = envelope.result?.content as Array<{ resource: { text: string } }>;
     const meta = JSON.parse(content[0]!.resource.text) as { content_url: string };

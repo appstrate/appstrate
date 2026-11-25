@@ -26,12 +26,8 @@ import type { ModelSwap } from "../helpers.ts";
 import { _setLogSinkForTesting } from "../logger.ts";
 import { PI_SDK_VERSION, PI_SDK_VERSION_HEADER } from "@appstrate/runner-pi/provider-map";
 import { PLATFORM_MODEL_COMPAT } from "@appstrate/runner-pi/model-compat";
-import {
-  DEFAULT_CONTEXT_WINDOW,
-  DEFAULT_MAX_TOKENS,
-  getPiModel,
-  piModelDialect,
-} from "@appstrate/runner-pi/pi-model";
+import { getPiModel, piModelDialect } from "@appstrate/runner-pi/pi-model";
+import { DEFAULT_CONTEXT_WINDOW, DEFAULT_MAX_TOKENS } from "@appstrate/core/token-budget";
 import {
   _resetSdkDriftWarningForTesting,
   buildBackingModel,

@@ -58,11 +58,8 @@ function isToolShaped(entry: unknown): entry is Tool {
 const X_MCP_HEADER_KEY = "x-mcp-header";
 /** RFC 9110 §5.1 `token` (`1*tchar`). */
 const RFC9110_TOKEN = /^[!#$%&'*+\-.^_`|~0-9A-Za-z]+$/;
-/**
- * The spec names `string`, `integer`, `boolean`; the SDK also admits `number` (the conformance
- * referee mirrors it), and the client is the SDK, so the list follows it.
- */
-const PRIMITIVE_TYPES = new Set(["string", "integer", "boolean", "number"]);
+/** Parameter types permitted by SEP-2243. */
+const PRIMITIVE_TYPES = new Set(["string", "integer", "boolean"]);
 /** Subschema positions the `properties`-only chain must not pass through. */
 const NON_REACHABLE_KEYWORDS = [
   "items",

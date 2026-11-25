@@ -18,7 +18,10 @@ installSpaStorage({
 await import("sonner");
 Object.defineProperty(globalThis, "document", {
   configurable: true,
-  value: { documentElement: { classList: { add: () => {}, remove: () => {} } } },
+  value: {
+    documentElement: { classList: { add: () => {}, remove: () => {} } },
+    querySelector: () => null,
+  },
 });
 afterAll(() => {
   Reflect.deleteProperty(globalThis, "document");

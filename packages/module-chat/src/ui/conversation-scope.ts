@@ -6,7 +6,7 @@
  */
 
 import { createContext, useContext, type ReactNode } from "react";
-import { actsIn, useChatHost } from "./runtime-context.ts";
+import { actsIn, useChatHost, type ChatHost } from "./runtime-context.ts";
 
 export interface ConversationScope {
   /**
@@ -44,6 +44,21 @@ export const ConversationScopeProvider = ConversationScopeContext.Provider;
 
 export function useConversationScope(): ConversationScope {
   return useContext(ConversationScopeContext);
+}
+
+/** The composer's space-level permissions follow the same acting space as the turn. */
+export function conversationTurnCan(
+  scope: Pick<ConversationScope, "restricted" | "originSpaceId">,
+  host: Pick<ChatHost, "actingSpaceIds" | "can" | "canIn">,
+) {
+  if (!scope.restricted) return host.can;
+  const origin = scope.originSpaceId;
+  return (permission: string) =>
+    !!origin && actsIn(host.actingSpaceIds, origin) && host.canIn(origin, permission);
+}
+
+export function useConversationTurnCan() {
+  return conversationTurnCan(useConversationScope(), useChatHost());
 }
 
 /** Why the limit cannot change: a turn generates, the chat acts nowhere, or not in the origin. */
@@ -104,7 +119,17 @@ export function limitedSpaceOf(
  * (`providerMetadata.appstrate.spaceId`): read from the call, never from the conversation's present
  * limit, which can change afterwards. `undefined` for a call that acts in no space.
  */
-export function callSpaceOf(part: { providerMetadata?: unknown }): string | undefined {
+export function callSpaceOf(part: {
+  providerMetadata?: unknown;
+  result?: unknown;
+}): string | undefined {
+  // A settled tool knows the execution scope, including a target named by path or a
+  // genuinely organization-wide call with an empty list. Without a resolved scope, use the input stamp.
+  const resolved = (part.result as { actedSpaceIds?: unknown } | undefined)?.actedSpaceIds;
+  if (Array.isArray(resolved)) {
+    const target = resolved[resolved.length - 1];
+    return typeof target === "string" ? target : undefined;
+  }
   const stamp = (part.providerMetadata as { appstrate?: { spaceId?: unknown } } | undefined)
     ?.appstrate?.spaceId;
   return typeof stamp === "string" && stamp ? stamp : undefined;

@@ -11,8 +11,10 @@ import {
   cp,
   lstat,
   mkdir,
+  mkdtemp,
   readdir,
   readFile,
+  readlink,
   rename,
   rm,
   rmdir,
@@ -184,6 +186,74 @@ export function targetRoot(target: SyncTarget): string {
 export function skillDir(target: SyncTarget, slug: string): string {
   const root = targetRoot(target);
   return target === "claude-plugin" ? join(root, "skills", slug) : join(root, slug);
+}
+
+/** Fingerprint the saved tree, including empty directories, file modes and link targets. */
+async function backupDigest(root: string): Promise<string> {
+  const hash = new Bun.CryptoHasher("sha256");
+  async function visit(path: string, relative: string) {
+    const stat = await lstat(path);
+    // Explicit framing separates the file's bytes from the next entry.
+    hash.update(JSON.stringify([relative, stat.mode, stat.isFile() ? stat.size : null]) + "\n");
+    if (stat.isDirectory()) {
+      for (const name of (await readdir(path)).sort())
+        await visit(join(path, name), join(relative, name));
+    } else if (stat.isSymbolicLink()) {
+      hash.update(JSON.stringify(await readlink(path)) + "\n");
+    } else if (stat.isFile()) {
+      for await (const chunk of Bun.file(path).stream()) hash.update(chunk);
+    } else {
+      throw new Error(`Unsupported file type in skill backup: ${relative}`);
+    }
+  }
+  await visit(root, "");
+  return hash.digest("hex");
+}
+
+/** Older ledgers identify a ZIP or ETag alone. Keep the existing tree outside
+ * all discovery roots before replacing files whose local edits cannot be identified. */
+export async function backupPreviousSkillTrees(
+  target: SyncTarget,
+  slugs: string[],
+): Promise<string | undefined> {
+  const parent = join(getDataDir(), "skills-sync", "backups");
+  let staging: string | undefined;
+  try {
+    for (const slug of slugs) {
+      const source = skillDir(target, slug);
+      try {
+        await lstat(source);
+      } catch (err) {
+        if ((err as NodeJS.ErrnoException).code === "ENOENT") continue;
+        throw err;
+      }
+      if (!staging) {
+        await mkdir(parent, { recursive: true, mode: 0o700 });
+        staging = await mkdtemp(join(parent, `${target}-`));
+      }
+      await cp(source, join(staging, slug), {
+        recursive: true,
+        dereference: false,
+        verbatimSymlinks: true,
+      });
+    }
+    if (!staging) return;
+    const digest = await backupDigest(staging);
+    // A placement can fail after the copy. Reuse a matching snapshot on retry only if the
+    // backup itself still holds those bytes; the user may have edited it since the failure.
+    for (const name of await readdir(parent)) {
+      if (name.startsWith(`${target}-`) && name.endsWith(`-${digest}`)) {
+        const previous = join(parent, name);
+        if ((await backupDigest(previous).catch(() => undefined)) === digest) return previous;
+      }
+    }
+    const saved = `${staging}-${digest}`;
+    await rename(staging, saved);
+    staging = undefined;
+    return saved;
+  } finally {
+    if (staging) await rm(staging, { recursive: true, force: true });
+  }
 }
 
 export interface SkillWriteFailure {

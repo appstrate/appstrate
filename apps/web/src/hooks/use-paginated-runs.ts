@@ -1,11 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { useInfiniteQuery } from "@tanstack/react-query";
+import { partialMatchKey, useInfiniteQuery } from "@tanstack/react-query";
 import { canReadRuns } from "@appstrate/core/permissions";
 import { client } from "../api/client";
 import { useListScope } from "./use-org-scope";
 import { usePermissions } from "./use-permissions";
 import { paginatedRunsKeys } from "../lib/query-keys";
+import type { RunSpaceScope } from "../lib/space-filter";
 import { keysetPaging } from "@appstrate/ui/keyset-paging";
 import type { EnrichedRun, ListEnvelope } from "@appstrate/shared-types";
 import type { RunStatus } from "@appstrate/core/run-status";
@@ -25,6 +26,11 @@ interface UseRunsOptions {
   unread?: boolean;
   /** Every space the reader reaches (`GET /api/orgs/{orgId}/runs`); ignored for a schedule's list. */
   spanning?: boolean;
+  /**
+   * Narrows an org-wide list to team or personal spaces (`space_kind`) or to these spaces
+   * (`spaceId`); ignored off the org-wide route.
+   */
+  spaces?: RunSpaceScope;
   enabled?: boolean;
   limit?: number;
 }
@@ -34,17 +40,13 @@ const RUNS_PAGE_SIZE = 25;
 /** One page of runs, newest first. */
 export type RunsPage = ListEnvelope<EnrichedRun> & { total: number };
 
-/**
- * Whether the previous rows stay on screen while `currentKey` loads: when only the search
- * (the key's second-to-last segment, `paginatedRunsKeys.list`) changed.
- */
-export function keepsRunRows(previousKey: readonly unknown[], currentKey: readonly unknown[]) {
-  const filters = (key: readonly unknown[]) => [...key.slice(0, -2), key[key.length - 1]];
-  const current = filters(currentKey);
-  const previous = filters(previousKey);
-  return (
-    previous.length === current.length && previous.every((segment, i) => segment === current[i])
-  );
+/** Keep previous rows only when every criterion except the search is unchanged. */
+export function keepsRunRows(
+  previousKey: readonly unknown[],
+  currentKey: ReturnType<typeof paginatedRunsKeys.list>,
+) {
+  const [family, org, space, { search: _search, ...filters }] = currentKey;
+  return partialMatchKey(previousKey, [family, org, space, filters]);
 }
 
 /** The runs list, paged with `fetchNextPage`. */
@@ -57,6 +59,7 @@ export function useRuns({
   search,
   unread,
   spanning,
+  spaces,
   enabled = true,
   limit = RUNS_PAGE_SIZE,
 }: UseRunsOptions) {
@@ -68,6 +71,8 @@ export function useRuns({
 
   const statusKey = status && status.length > 0 ? status.join(",") : undefined;
   const statusQuery = status && status.length > 0 ? status : undefined;
+  const spaceIdsQuery =
+    spaces?.spaceIds && spaces.spaceIds.length > 0 ? spaces.spaceIds : undefined;
 
   const endpoint = scheduleId
     ? `/schedules/${scheduleId}/runs`
@@ -83,6 +88,9 @@ export function useRuns({
     kind,
     statusKey,
     unread,
+    // The key carries it only where the request does.
+    acrossSpaces ? spaces?.spaceKind : undefined,
+    acrossSpaces ? spaceIdsQuery?.join(",") : undefined,
     search,
     limit,
   );
@@ -100,6 +108,7 @@ export function useRuns({
           search,
           unread,
           acrossOrgId: scope.acrossOrgId,
+          spaces: { spaceKind: spaces?.spaceKind, spaceIds: spaceIdsQuery },
           limit,
           startingAfter: pageParam,
         },
@@ -166,6 +175,7 @@ export async function fetchRunPage(
     search,
     unread,
     acrossOrgId,
+    spaces,
     limit,
     startingAfter,
   }: RunPageRequest,
@@ -191,7 +201,10 @@ export async function fetchRunPage(
   };
   if (acrossOrgId) {
     const { data } = await client.GET("/api/orgs/{orgId}/runs", {
-      params: { path: { orgId: acrossOrgId }, query },
+      params: {
+        path: { orgId: acrossOrgId },
+        query: { ...query, space_kind: spaces?.spaceKind, spaceId: spaces?.spaceIds },
+      },
       signal,
     });
     return data!;

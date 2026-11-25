@@ -119,6 +119,7 @@ function Meta({
   status?: number;
   durationMs?: number;
 }) {
+  const { lang } = useChatHost();
   if (status === undefined && durationMs === undefined) return null;
   return (
     <span className="flex items-center gap-1.5 text-xs">
@@ -126,7 +127,7 @@ function Meta({
         <code className={`rounded px-1.5 py-0.5 font-medium ${BADGE_TONE[phase]}`}>{status}</code>
       ) : null}
       {durationMs !== undefined ? (
-        <span className="text-muted-foreground">{formatDuration(durationMs)}</span>
+        <span className="text-muted-foreground">{formatDuration(durationMs, lang)}</span>
       ) : null}
     </span>
   );
@@ -501,13 +502,13 @@ function stringArg(args: Record<string, unknown> | undefined, key: string): stri
   return typeof v === "string" && v ? v : undefined;
 }
 
-export const SearchOperationsToolUI = makeAssistantToolUI<Record<string, unknown>, unknown>({
-  toolName: "search_operations",
+export const SearchToolUI = makeAssistantToolUI<Record<string, unknown>, unknown>({
+  toolName: "search",
   render: (props: AnyToolProps) => (
     <ToolCallCard
       phase={deriveToolPhase(props)}
       Icon={SearchIcon}
-      labelKey="tool.searchOperations"
+      labelKey="tool.search"
       idText={stringArg(props.args, "query")}
       args={props.args}
       result={props.result}
@@ -519,14 +520,14 @@ export const SearchOperationsToolUI = makeAssistantToolUI<Record<string, unknown
   ),
 });
 
-export const DescribeOperationToolUI = makeAssistantToolUI<Record<string, unknown>, unknown>({
-  toolName: "describe_operation",
+export const DescribeToolUI = makeAssistantToolUI<Record<string, unknown>, unknown>({
+  toolName: "describe",
   render: (props: AnyToolProps) => (
     <ToolCallCard
       phase={deriveToolPhase(props)}
       Icon={BookOpenIcon}
-      labelKey="tool.describeOperation"
-      idText={stringArg(props.args, "operation_id")}
+      labelKey="tool.describe"
+      idText={stringArg(props.args, "id")}
       args={props.args}
       result={props.result}
       isError={props.isError}

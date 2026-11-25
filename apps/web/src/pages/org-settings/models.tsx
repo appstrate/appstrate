@@ -78,7 +78,13 @@ export function OrgSettingsModelsPage() {
   const canConnect = can("model-provider-credentials:connect");
 
   const { data: models, isLoading: modelsLoading, error: modelsError } = useModels();
-  const { data: credentials, isLoading: pkLoading, error: pkError } = useModelProviderCredentials();
+  const [deleteKeyId, setDeleteKeyId] = useState<string | null>(null);
+  const {
+    data: credentials,
+    isLoading: pkLoading,
+    error: pkError,
+    isPaused: pkPaused,
+  } = useModelProviderCredentials(deleteKeyId ? "always" : false);
   // A row is a key and its models: either read failing leaves the table wrong, so both surface.
   const tableError = modelsError ?? pkError;
   const { data: registry } = useProvidersRegistry();
@@ -97,7 +103,7 @@ export function OrgSettingsModelsPage() {
 
   const [tab, setTab] = useQueryTab("tab", MODELS_TABS);
 
-  const [confirmDelete, setConfirmDelete] = useState<ModelProviderCredentialInfo | null>(null);
+  const confirmDelete = credentials?.find((key) => key.id === deleteKeyId);
   const [deletingModel, setDeletingModel] = useState<OrgModelInfo | null>(null);
   const updateCredential = useUpdateModelProviderCredential();
   // The key form shows its refusal inline; a rename goes through the cache's toast.
@@ -133,7 +139,7 @@ export function OrgSettingsModelsPage() {
     },
     onChangeKey: (pk: ModelProviderCredentialInfo) => editKey.open(pk.id),
     onReconnect: (pk: ModelProviderCredentialInfo) => editKey.open(pk.id),
-    onDelete: setConfirmDelete,
+    onDelete: (key: ModelProviderCredentialInfo) => setDeleteKeyId(key.id),
   };
 
   const addCredential: MenuAction = {
@@ -326,8 +332,8 @@ export function OrgSettingsModelsPage() {
       {confirmDelete && (
         <DeleteKeyConfirm
           credential={confirmDelete}
-          models={models ?? []}
-          onClose={() => setConfirmDelete(null)}
+          referenceCountVerified={!pkError && !pkPaused}
+          onClose={() => setDeleteKeyId(null)}
         />
       )}
     </>

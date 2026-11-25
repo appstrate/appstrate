@@ -4,11 +4,8 @@
  * The « Clés org » tab of org settings → Modèles: what a saved key shows, and
  * what happens when one is deleted while a model still runs on it.
  *
- * `org_models.credential_id` is ON DELETE RESTRICT, so the server refuses such
- * a delete. The page knows the models already and says so in the confirmation
- * before the server has to: it names them, and the confirm button stays out of
- * reach until they are gone. Both halves are pinned here: the refusal with the
- * models named, and the delete that goes through once nothing binds to the key.
+ * The key reports the count of all referencing models. The server rechecks on
+ * deletion if another actor binds a model while the dialog is open.
  *
  * Nothing here talks to a model provider: the keys are rows, never used.
  */
@@ -87,14 +84,23 @@ test.describe("Provider keys — UI", () => {
     const otherKey = await seedKey(apiClient, { providerId: "anthropic", api_key: "sk-ant-e2e" });
     const otherModel = await seedModel(apiClient, otherKey.id, MODEL_ID);
 
+    // This reader's list does not contain the model bound to the first key.
+    await page.route(/\/api\/models(?:\?.*)?$/, async (route) => {
+      const response = await route.fetch();
+      const body = await response.json();
+      await route.fulfill({
+        response,
+        json: { ...body, data: body.data.filter((item: { id: string }) => item.id !== model.id) },
+      });
+    });
+
     await openKeysTab(page);
     await openRowMenuItem(page, key.label, DELETE);
     const dialog = page.getByRole("alertdialog", { name: "Supprimer la clé ?" });
     await expect(dialog).toBeVisible();
-    // The page names the models on the key itself, so the operator learns
-    // what to do first instead of a refusal after the click.
+    // The key carries the reference count even when the reader cannot list those models.
     await expect(
-      dialog.getByText(`La clé « ${key.label} » est utilisée par 1 modèle : ${model.label}.`),
+      dialog.getByText(`La clé « ${key.label} » est utilisée par 1 modèle.`),
     ).toBeVisible();
     await expect(dialog.getByRole("button", { name: DELETE, exact: true })).toBeDisabled();
     await dialog.getByRole("button", { name: "Annuler" }).click();
@@ -112,5 +118,59 @@ test.describe("Provider keys — UI", () => {
     const models = (await (await apiClient.get("/models")).json()).data as Array<{ id: string }>;
     expect(models.find((m) => m.id === otherModel.id)).toBeDefined();
     await expect(keyRow(page, otherKey.label)).toBeVisible();
+  });
+
+  test("rechecks the same open dialog when another actor binds and removes the last model", async ({
+    authedPage: page,
+    apiClient,
+  }) => {
+    const key = await seedKey(apiClient, {
+      providerId: "openai-compatible",
+      api_key: "e2e-key",
+      base_url_override: "https://vllm.internal.test/v1",
+    });
+    await openKeysTab(page);
+    await openRowMenuItem(page, key.label, DELETE);
+    const dialog = page.getByRole("alertdialog", { name: "Supprimer la clé ?" });
+    const confirm = dialog.getByRole("button", { name: DELETE, exact: true });
+    await expect(confirm).toBeEnabled();
+    const model = await seedModel(apiClient, key.id, "vllm-model");
+    const readStarted = Promise.withResolvers<void>();
+    const releaseRead = Promise.withResolvers<void>();
+    await page.route(
+      /\/api\/model-provider-credentials(?:\?.*)?$/,
+      async (route) => {
+        readStarted.resolve();
+        await releaseRead.promise;
+        await route.continue();
+      },
+      { times: 1 },
+    );
+    const refused = page.waitForResponse(
+      (response) =>
+        response.request().method() === "DELETE" &&
+        response.url().endsWith(`/model-provider-credentials/${key.id}`),
+    );
+    await confirm.click();
+    try {
+      expect((await refused).status()).toBe(409);
+      await readStarted.promise;
+      // The cached zero predates the refusal. A second DELETE must wait for the key read.
+      await expect(confirm).toBeDisabled();
+    } finally {
+      releaseRead.resolve();
+    }
+    await expect(
+      dialog.getByText(`La clé « ${key.label} » est utilisée par 1 modèle.`),
+    ).toBeVisible();
+    await expect(confirm).toBeDisabled();
+    expect((await apiClient.delete(`/models/${model.id}`)).status()).toBe(204);
+    // Returning from the other tab re-reads the key while the same dialog is open.
+    await page.evaluate(() => window.dispatchEvent(new Event("visibilitychange")));
+    await expect(dialog.getByText(`Supprimer la clé « ${key.label} » ?`)).toBeVisible();
+    await expect(confirm).toBeEnabled();
+    await confirm.click();
+    await expect(dialog).toBeHidden();
+    await expect(keyRow(page, key.label)).toHaveCount(0);
   });
 });

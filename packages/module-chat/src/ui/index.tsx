@@ -49,7 +49,6 @@ import type {
   ChatHost,
   ChatTranslate,
   ChatTransport,
-  DownloadFile,
   OpenFile,
   SelectConversation,
   UploadFile,
@@ -66,11 +65,11 @@ export type {
   OpenFileTarget,
   RenderSpaces,
   SelectConversation,
-  SpaceChoiceMenu,
 } from "./runtime-context.ts";
-export { ChatConversationList, ChatConversationSettingsButton } from "./thread-list.tsx";
+export { ChatConversationList, ChatConversationRenameButton } from "./thread-list.tsx";
 export { ChatTransportProvider, SelectConversationProvider } from "./runtime-context.ts";
-import { ModelSelect } from "./model-select.tsx";
+import { ModelPickerProvider, type ModelPickerProps } from "./model-picker.ts";
+import { modelSizing } from "./model-fit.ts";
 import { fetchModelsEnvelope, selectChatModels, type OrgModelOption } from "./models-data.ts";
 import {
   markSessionRead,
@@ -94,7 +93,11 @@ import {
   type ConversationCreation,
 } from "./chat-route.ts";
 import { useConversationLimit } from "./conversation-limit.ts";
-import { ConversationScopeProvider, useConversationScope } from "./conversation-scope.ts";
+import {
+  ConversationScopeProvider,
+  useConversationScope,
+  conversationTurnCan,
+} from "./conversation-scope.ts";
 import {
   subscribeGeneration,
   subscribeModel,
@@ -109,10 +112,15 @@ import { getPackageAuthoringEnabled } from "./package-authoring-store.ts";
 import { getInlineRunModelEnabled } from "./inline-run-model-store.ts";
 import { latestTurnModelId } from "./turn-model.ts";
 import { ComposerTools } from "./composer-tools.tsx";
-import { DEFAULT_SKILL_SELECTION, type ChatSkillSelection } from "../skills.ts";
 import { canAuthorPackages, canPinSkills } from "../capabilities.ts";
 import { createChatAttachmentAdapter } from "./attachment-adapter.ts";
 import { shouldReconcileHistory } from "./history-reconcile.ts";
+import { sendWithDirectives } from "./directive-send.ts";
+import {
+  ConversationSkillsProvider,
+  useConversationSkills,
+  type ConversationSkillsState,
+} from "./use-conversation-skills.ts";
 
 // Tab visibility as an external store — the mark-read effect must not fire
 // while the tab is hidden: SSE-driven invalidations refetch the list even in
@@ -173,17 +181,15 @@ export interface ChatPageProps {
   onConversationChange?: SelectConversation;
   /**
    * Presents a clicked chat file — or the single file a live run produced —
-   * through the host's in-app viewer. Optional: without it direct clicks fall
-   * back to `downloadFile` and automatic presentation is skipped. Delivered
+   * through the host's in-app viewer. Delivered
    * to deep tool UIs via context, not props.
    */
-  onOpenFile?: OpenFile;
+  onOpenFile: OpenFile;
   /**
    * REQUIRED host services — the chat implements none of them itself (see
-   * `runtime-context.ts`): the authenticated download, the authenticated image
+   * `runtime-context.ts`): the authenticated image
    * preview hook, the staged uploader, and the translator for user-facing text.
    */
-  downloadFile: DownloadFile;
   useFileImageSrc: UseFileImageSrc;
   uploadFile: UploadFile;
   t: ChatTranslate;
@@ -201,6 +207,8 @@ export interface ChatPageProps {
   modelCredentials: ChatHost["modelCredentials"];
   /** Renders a byte count in the host's language. Pass a stable function. */
   formatBytes: ChatHost["formatBytes"];
+  /** The host's UI language (see `ChatHost`). */
+  lang: ChatHost["lang"];
   /** Refreshes the host's package lists (see `ChatHost`). Pass a stable function. */
   onPackagesChanged: ChatHost["onPackagesChanged"];
   /** The user's first name, greeted on a new conversation (see `ChatHost`). */
@@ -211,8 +219,6 @@ export interface ChatPageProps {
   linkInSpace: ChatHost["linkInSpace"];
   /** Names a space in plain text (see `ChatHost`). Pass a stable hook. */
   useSpaceLabelOf: ChatHost["useSpaceLabelOf"];
-  /** The host's menu of spaces (see `ChatHost`). Pass a stable component. */
-  SpaceChoiceMenu: ChatHost["SpaceChoiceMenu"];
 }
 
 export function ChatPage({
@@ -222,7 +228,6 @@ export function ChatPage({
   initialComposerDraft,
   onConversationChange,
   onOpenFile,
-  downloadFile,
   useFileImageSrc,
   uploadFile,
   t,
@@ -233,12 +238,12 @@ export function ChatPage({
   personalModelCredentials,
   modelCredentials,
   formatBytes,
+  lang,
   onPackagesChanged,
   firstName,
   renderSpaces,
   linkInSpace,
   useSpaceLabelOf,
-  SpaceChoiceMenu,
 }: ChatPageProps) {
   // The conversation the runtime is bound to. A persisted conversation's id
   // comes from the URL and wins; for a brand-new one (bare `/chat`) we mint an
@@ -331,10 +336,13 @@ export function ChatPage({
   // between renders and consumers re-render no more than with a context each.
   const selectedPreset = models.find((model) => model.id === selectedModel);
   const modelLabel = selectedPreset?.label ?? selectedPreset?.modelId ?? null;
+  const selectedSizing = useMemo(
+    () => (selectedPreset ? modelSizing(selectedPreset) : null),
+    [selectedPreset],
+  );
   const host = useMemo<ChatHost>(
     () => ({
-      openFile: onOpenFile ?? null,
-      downloadFile,
+      openFile: onOpenFile,
       useFileImageSrc,
       t,
       can,
@@ -344,17 +352,18 @@ export function ChatPage({
       personalModelCredentials,
       modelCredentials,
       formatBytes,
+      lang,
       onPackagesChanged,
       firstName,
+      modelId: selectedModel,
       modelLabel,
+      modelSizing: selectedSizing,
       renderSpaces,
       linkInSpace,
       useSpaceLabelOf,
-      SpaceChoiceMenu,
     }),
     [
       onOpenFile,
-      downloadFile,
       useFileImageSrc,
       t,
       can,
@@ -364,37 +373,36 @@ export function ChatPage({
       personalModelCredentials,
       modelCredentials,
       formatBytes,
+      lang,
       onPackagesChanged,
       firstName,
+      selectedModel,
       modelLabel,
+      selectedSizing,
       renderSpaces,
       linkInSpace,
       useSpaceLabelOf,
-      SpaceChoiceMenu,
     ],
   );
 
   // Built once per catalog/selection change, NOT per `ChatPage` render: this
   // page re-renders on every session-list refetch (SSE frame, safety-net poll,
-  // the local-first row patch on send), and an inline element here would hand
-  // `Conversation` a new prop each time and defeat its `memo` below. The
+  // the local-first row patch on send), and an inline object here would hand
+  // `ModelPickerProvider` a new value each time and re-render every reader. The
   // setters are stable module functions, so the deps are exactly the values
   // the picker displays.
-  const composerSlot = useMemo(
-    () => (
-      <ModelSelect
-        models={models}
-        selectedId={selectedModel}
-        onSelect={setSelectedModel}
-        generation={generation}
-        onGenerationChange={editGenerationSettings}
-        pending={modelsPending}
-        failed={modelsFailed}
-      />
-    ),
+  const modelPicker = useMemo<ModelPickerProps>(
+    () => ({
+      models,
+      selectedId: selectedModel,
+      onSelect: setSelectedModel,
+      generation,
+      onGenerationChange: editGenerationSettings,
+      pending: modelsPending,
+      failed: modelsFailed,
+    }),
     [models, selectedModel, generation, modelsPending, modelsFailed],
   );
-  const authorsPackages = canAuthorPackages(can);
 
   // The active row reduced to primitives so the memoised `Conversation` re-renders only when
   // they change (a few times per turn), not on every list refetch. `generating` and `updatedAt`
@@ -409,31 +417,30 @@ export function ChatPage({
     <ChatTransportProvider value={transport ?? null}>
       <SelectConversationProvider value={onConversationChange ?? null}>
         <ChatHostProvider value={host}>
-          {/* The conversation list and the conversation settings are NOT here:
+          <ModelPickerProvider value={modelPicker}>
+            {/* The conversation list and the conversation settings are NOT here:
               they are the shell's navigation and header actions, mounted by
               the host from `ChatConversationList` /
-              `ChatConversationSettingsButton`. What is left is the thread itself. */}
-          {/* A plain div, not a `main`: the host shell's inset already IS the
+              `ChatConversationRenameButton`. What is left is the thread itself. */}
+            {/* A plain div, not a `main`: the host shell's inset already IS the
               page's `main` landmark, and two nested ones name two pages. */}
-          <div className="bg-canvas flex size-full min-h-0 min-w-0 flex-col overflow-hidden">
-            <Conversation
-              key={activeId}
-              id={activeId}
-              transport={transport}
-              isPersisted={isPersisted}
-              initialComposerDraft={isPersisted ? undefined : initialComposerDraft}
-              onConversationChange={onConversationChange}
-              uploadFile={uploadFile}
-              composerSlot={composerSlot}
-              authorsPackages={authorsPackages}
-              canPinSkills={canPinSkills(can)}
-              canWrite={canWrite}
-              serverGenerating={serverGenerating}
-              serverUpdatedAt={serverUpdatedAt}
-              storedSpaceId={storedSpaceId}
-              storedRestricted={storedRestricted}
-            />
-          </div>
+            <div className="bg-canvas flex size-full min-h-0 min-w-0 flex-col overflow-hidden">
+              <Conversation
+                key={activeId}
+                id={activeId}
+                transport={transport}
+                isPersisted={isPersisted}
+                initialComposerDraft={isPersisted ? undefined : initialComposerDraft}
+                onConversationChange={onConversationChange}
+                uploadFile={uploadFile}
+                canWrite={canWrite}
+                serverGenerating={serverGenerating}
+                serverUpdatedAt={serverUpdatedAt}
+                storedSpaceId={storedSpaceId}
+                storedRestricted={storedRestricted}
+              />
+            </div>
+          </ModelPickerProvider>
         </ChatHostProvider>
       </SelectConversationProvider>
     </ChatTransportProvider>
@@ -448,9 +455,6 @@ interface ConversationProps {
   onConversationChange?: SelectConversation;
   /** The host's uploader, which the conversation's attachment adapter stages files through. */
   uploadFile: UploadFile;
-  composerSlot?: React.ReactNode;
-  authorsPackages: boolean;
-  canPinSkills: boolean;
   /** `chat:write`: the composer placeholder and the not-found screen's new-conversation action. */
   canWrite: boolean;
   /** Server session row `generating`, from the list or the conversation; `undefined` = no row. */
@@ -474,17 +478,13 @@ interface ConversationProps {
  * hosts the streaming runtime. Every prop is either a primitive (`id`,
  * `isPersisted`, the `server*` / `stored*` fields of the active row), a host
  * value the host memoises (`onConversationChange`, `uploadFile`, and `transport`,
- * rebuilt when the list filter changes), or a `useMemo` product of `ChatPage`
- * (`composerSlot`), so a list refetch that leaves the active row
+ * rebuilt when the list filter changes), so a list refetch that leaves the active row
  * untouched is a no-op here.
  */
 const Conversation = memo(function Conversation({
   id,
   transport,
   isPersisted,
-  composerSlot,
-  authorsPackages,
-  canPinSkills,
   canWrite,
   storedSpaceId,
   storedRestricted,
@@ -498,7 +498,8 @@ const Conversation = memo(function Conversation({
   // streaming turn. A conversation that started new stays "load-free" for its
   // whole life; only a deep-linked (persisted-at-mount) one loads history.
   const [persistedAtMount] = useState(isPersisted);
-  const { t, actingSpaceIds } = useChatHost();
+  const host = useChatHost();
+  const { t, actingSpaceIds } = host;
   const queryClient = useQueryClient();
   const history = useQuery({
     ...sessionSeedQuery(queryClient, transport, id),
@@ -524,36 +525,24 @@ const Conversation = memo(function Conversation({
 
   // No picker on a failed read: it would show the defaults, and a change would
   // send them over the stored choice.
-  const showPicker = canPinSkills && !history.isError;
-  // What the user changed, sent with every turn (which writes it); nothing
-  // changed = nothing sent, and the stored selection stands. The ref is the
-  // transport's request-time read of the same value.
-  const [chosenSkills, setChosenSkills] = useState<ChatSkillSelection>();
-  const chosenSkillsRef = useRef<ChatSkillSelection>(undefined);
-  const chooseSkills = useCallback((selection: ChatSkillSelection) => {
-    chosenSkillsRef.current = selection;
-    setChosenSkills(selection);
-  }, []);
-  const getChosenSkills = useCallback(() => chosenSkillsRef.current, []);
-  const skills = chosenSkills ?? history.data?.skills ?? DEFAULT_SKILL_SELECTION;
-  const tools = useMemo(
-    () => (
-      <ComposerTools
-        transport={transport}
-        selection={skills}
-        onSelectionChange={chooseSkills}
-        showPicker={showPicker}
-        authorsPackages={authorsPackages}
-      />
-    ),
-    [transport, skills, chooseSkills, showPicker, authorsPackages],
-  );
+  const turnCan = conversationTurnCan(scope, host);
+  const authorsPackages = canAuthorPackages(turnCan);
+  const showPicker = canPinSkills(turnCan) && !history.isError;
+  // The session detail's skills once the server holds the row, a local selection before. Gated
+  // here for the turn (`turnSkills` bypasses the provider) and below for what the thread shows.
+  const conversationSkills = useConversationSkills({
+    transport,
+    id,
+    persisted: persistedAtMount,
+    enabled: showPicker,
+  });
+  const tools = <ComposerTools authorsPackages={authorsPackages} />;
 
   if (persistedAtMount && history.isPending) {
     return (
       <ConversationSkeleton
         label={t("conversation.loading")}
-        placeholder={canWrite ? t("composer.placeholder") : null}
+        placeholder={turnCan("chat:write") ? t("composer.placeholder") : null}
         disclaimer={t("thread.disclaimer")}
       />
     );
@@ -566,17 +555,19 @@ const Conversation = memo(function Conversation({
   }
   return (
     <ConversationScopeProvider value={scope}>
-      <ConversationInner
-        id={id}
-        transport={transport}
-        isPersisted={persistedAtMount}
-        initialMessages={initialMessages}
-        composerTools={tools}
-        composerSlot={composerSlot}
-        getChosenSkills={getChosenSkills}
-        getCreation={getCreation}
-        {...rest}
-      />
+      {/* The panel, the `/` menu's skills and the thread's pin action, where the selection can change. */}
+      <ConversationSkillsProvider value={showPicker ? conversationSkills : null}>
+        <ConversationInner
+          id={id}
+          transport={transport}
+          isPersisted={persistedAtMount}
+          initialMessages={initialMessages}
+          composerTools={tools}
+          turnSkills={conversationSkills}
+          getCreation={getCreation}
+          {...rest}
+        />
+      </ConversationSkillsProvider>
     </ConversationScopeProvider>
   );
 });
@@ -615,24 +606,22 @@ function ConversationInner({
   onConversationChange,
   uploadFile,
   composerTools,
-  composerSlot,
   serverGenerating,
   serverUpdatedAt,
-  getChosenSkills,
+  turnSkills,
   getCreation,
-}: Omit<
-  ConversationProps,
-  "canPinSkills" | "canWrite" | "authorsPackages" | "storedSpaceId" | "storedRestricted"
-> & {
+}: Omit<ConversationProps, "canWrite" | "storedSpaceId" | "storedRestricted"> & {
   composerTools: React.ReactNode;
   initialMessages: UIMessage[];
-  getChosenSkills: () => ChatSkillSelection | undefined;
+  /** The skills a first turn creates the conversation with. */
+  turnSkills: Pick<ConversationSkillsState, "takeForTurn">;
   /** The origin space and limit the turn being sent creates the conversation with. */
   getCreation: () => ConversationCreation | undefined;
 }) {
   const queryClient = useQueryClient();
   const { t, attachTarget } = useChatHost();
   const scope = useConversationScope();
+  const { takeForTurn } = turnSkills;
   // File attachments: the composer stages picked files through the HOST uploader, into the
   // caller's personal space, as `upload://` file parts the server materializes into durable
   // files of the conversation.
@@ -691,12 +680,12 @@ function ConversationInner({
             generation: getCompatibleGenerationSettings(),
             packageAuthoring: getPackageAuthoringEnabled(),
             inlineRunsUseChatModel: getInlineRunModelEnabled(),
-            skills: getChosenSkills(),
+            skills: takeForTurn(),
             creation: getCreation(),
           });
         },
       }),
-    [buildHeaders, getChosenSkills, getCreation, getTransport],
+    [buildHeaders, takeForTurn, getCreation, getTransport],
   );
 
   const chat = useChat({
@@ -848,7 +837,17 @@ function ConversationInner({
     if (transport) void stopSession(transport, id).catch(() => {});
     return chat.stop();
   }, [chat, transport, id, messageQueue]);
-  const chatWithServerStop = useMemo(() => ({ ...chat, stop }), [chat, stop]);
+  // The agent a message names joins it as it is sent; its skills stay in the text, which the
+  // turn reads them from.
+  const { sendMessage } = chat;
+  const send = useCallback<typeof sendMessage>(
+    (message, options) => sendMessage(sendWithDirectives(message), options),
+    [sendMessage],
+  );
+  const chatWithServerStop = useMemo(
+    () => ({ ...chat, stop, sendMessage: send }),
+    [chat, stop, send],
+  );
 
   const runtime = useAISDKRuntime(chatWithServerStop, { adapters: { attachments } });
 
@@ -856,7 +855,6 @@ function ConversationInner({
     <AssistantRuntimeProvider runtime={runtime}>
       <Thread
         composerTools={composerTools}
-        composerSlot={composerSlot}
         initialComposerDraft={initialComposerDraft}
         messageQueue={messageQueue}
       />

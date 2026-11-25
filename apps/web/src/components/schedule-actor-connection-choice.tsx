@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
+import { MAX_CONNECTIONS_PER_INTEGRATION } from "@appstrate/core/integration";
+import type { ActorValue } from "../lib/schedule-payload";
 import { Card } from "@appstrate/ui/components/card";
 import type { ReactNode } from "react";
 import { useTranslation } from "react-i18next";
@@ -10,24 +12,15 @@ import { useIntegrationName } from "../hooks/use-integration-name";
 import { candidateDescription, type ConnectionChoice } from "../lib/connection-choice";
 import { toggleCapped, type ConnectionSet } from "../lib/connection-set";
 import { ClearChoiceButton } from "./integration-connect/clear-choice-button";
+import { sharedChoices, type CandidateGroup, type Readiness } from "./schedule-shared-choices";
 
-/**
- * The connection section of a schedule running as someone other than the viewer, whose own
- * pickers would judge the VIEWER's connections. A refused save's candidates are the pick
- * control instead — only connections the viewer reaches too, so the list can be empty: the
- * actor's private connections are theirs (or an admin's) to pin. Why each was refused is said
- * once, by the form-level `ScheduleConnectionRefusals`. Stored picks nothing refused are shown
- * read-only, each integration's clearable. "No connection" (`[]`) is a box of its own for each
- * integration the agent does not require; nothing ticked is no choice (`null`).
- *
- * Where nothing was refused, no choice is the actor's own resolution, which is said. A refusal is
- * the server saying that resolution cannot decide, so there no choice is no answer.
- */
+/** Another actor's stored picks, the choices shared in the space, or a refused save's candidates. */
 export function ScheduleActorConnectionChoice({
   choices,
   integrations,
   value,
   onChange,
+  shared,
   showContext = true,
 }: {
   /** What the last save was refused over — kept on screen while it is answered. */
@@ -36,13 +29,17 @@ export function ScheduleActorConnectionChoice({
   integrations: readonly { id: string; required?: boolean }[];
   value: Readonly<Record<string, string[]>>;
   onChange: (integrationId: string, connectionIds: ConnectionSet) => void;
+  shared?: { entries: readonly Readiness[]; actor: ActorValue };
   /** Says the connections are resolved for the actor; a form that just named it leaves it out. */
   showContext?: boolean;
 }) {
   const { t } = useTranslation(["agents"]);
   const optional = new Set(integrations.filter((i) => i.required !== true).map((i) => i.id));
-  const refused = (integrationId: string) => choices.some((c) => c.integrationId === integrationId);
-  const others = [...new Set([...Object.keys(value), ...optional])].filter((id) => !refused(id));
+  const groups: readonly CandidateGroup[] = shared
+    ? sharedChoices(shared.entries, shared.actor, value)
+    : choices;
+  const hasGroup = (integrationId: string) => groups.some((c) => c.integrationId === integrationId);
+  const others = [...new Set([...Object.keys(value), ...optional])].filter((id) => !hasGroup(id));
   return (
     <div className="flex flex-col gap-2" data-testid="schedule-actor-connections">
       <Label className="mb-0">{t("connectionOverrides.label")}</Label>
@@ -51,7 +48,7 @@ export function ScheduleActorConnectionChoice({
           {t("schedule.connectionOverrides.otherActor")}
         </p>
       )}
-      {choices.map((choice) => (
+      {groups.map((choice) => (
         <IntegrationChoiceBox
           key={choice.integrationId}
           integrationId={choice.integrationId}
@@ -60,9 +57,14 @@ export function ScheduleActorConnectionChoice({
           <ScheduleCandidatePicker
             choice={choice}
             value={value[choice.integrationId] ?? null}
-            allowNone={optional.has(choice.integrationId)}
+            allowNone={choice.allowNone ?? optional.has(choice.integrationId)}
             onChange={(next) => onChange(choice.integrationId, next)}
           />
+          {shared && value[choice.integrationId] === undefined && (
+            <p className="text-muted-foreground text-xs">
+              {t("schedule.connectionOverrides.inheritActor")}
+            </p>
+          )}
           {/* No candidates travel with an unreachable pick: clearing it lets
               the next save resolve again, and ask again if it must. */}
           {choice.candidates.length === 0 && value[choice.integrationId] !== undefined && (
@@ -129,7 +131,7 @@ function ScheduleCandidatePicker({
   allowNone,
   onChange,
 }: {
-  choice: ConnectionChoice;
+  choice: CandidateGroup;
   value: ConnectionSet;
   allowNone: boolean;
   onChange: (next: ConnectionSet) => void;
@@ -153,10 +155,14 @@ function ScheduleCandidatePicker({
             description={candidateDescription(c, labels)}
             checked={checked}
             // A dead connection fails the fire it is picked for; unticking stays open.
-            disabled={!checked && c.needs_reconnection}
+            disabled={
+              !checked &&
+              (c.needs_reconnection ||
+                picked.length >= (choice.max ?? MAX_CONNECTIONS_PER_INTEGRATION))
+            }
             onCheckedChange={() => {
               // Unticking the last box is no choice at this layer, never « no connection ».
-              const next = toggleCapped(picked, c.id);
+              const next = toggleCapped(picked, c.id, choice.max);
               onChange(next.length > 0 ? next : null);
             }}
           />

@@ -2,11 +2,10 @@
 
 import type { ReactNode } from "react";
 import { useTranslation } from "react-i18next";
-import type { RunStatus } from "@appstrate/core/run-status";
 import { RunList } from "./run-list";
 import { ListToolbar } from "./list-toolbar";
 import { NoMatchState } from "./page-states";
-import { useLocalListParams } from "../lib/list-params";
+import { useLocalListParams, type ListState } from "../lib/list-params";
 import { useRunStatusFilter } from "../hooks/use-run-status-filter";
 import { useSearchPlaceholder } from "../lib/search-placeholder";
 import { useOverviewMode } from "../hooks/use-overview-mode";
@@ -24,19 +23,20 @@ type RunScope = { packageId: string } | { scheduleId: string; agentName: string 
  */
 export function ScopedRunList({
   scope,
-  initialStatus,
+  list: panelList,
   banner,
   emptyState,
 }: {
   scope: RunScope;
-  initialStatus?: RunStatus[];
+  list?: ListState;
   /** Row above the first page, and above `emptyState`; shown only while nothing is filtered. */
   banner?: ReactNode;
   /** The panel's empty state when nothing is filtered. */
   emptyState: ReactNode;
 }) {
   const { t } = useTranslation(["agents", "common"]);
-  const list = useLocalListParams(initialStatus ? { status: initialStatus } : undefined);
+  const local = useLocalListParams();
+  const list = panelList ?? local;
   const { statuses, filter: statusFilter } = useRunStatusFilter(list);
   const filtered = !!list.search || statuses.length > 0;
   const searchPlaceholder = useSearchPlaceholder(t("common:nav.runs"));

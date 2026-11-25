@@ -4,61 +4,16 @@ Operational scripts that rewrite row **contents** once, against the deployments
 that need it, and are then finished. They are **not** replayed, **not** part of
 boot, and **never** live in `packages/db/drizzle/`.
 
-See `docs/NO_TRANSITIONAL_CODE.md` for why the split exists — both halves of the
-`documents` → `files` rename were botched by ignoring it, each costing a
-production incident.
+See [the migration policy](../../docs/NO_TRANSITIONAL_CODE.md) for the boundary between schema changes and operator-run data changes.
 
-## Release beta.58 — shipped
-
-**Filed as done, 2026-09-18.** This page carried that release's runbook in the
-present imperative for as long as it was the next thing to happen. It has
-happened: `ghcr.io/appstrate/appstrate:1.0.0-beta.58` is what production runs,
-and a runbook kept past its window reads as live instruction to whoever opens
-this file for the NEXT release. The runbook itself is in git history; what
-survives here is the state it left, read back off production on 2026-09-18.
-
-| Read back                            | Value                                                   |
-| ------------------------------------ | ------------------------------------------------------- |
-| `drizzle.__drizzle_migrations`       | **68** rows — `0000` … `0067`, the whole pending batch  |
-| `drizzle.ee_migrations`              | 8 — the billing module's own journal, self-applied      |
-| `ee_billing_accounts`                | 31, with 717 claimed ledger rows                        |
-| `org_members` by role                | 31 owner / 16 admin / 1 member / **2 guest** / 0 viewer |
-| `oauth_clients.self_service IS NULL` | 0                                                       |
-| `packages_org_package_has_home`      | `convalidated = true`                                   |
-| personal spaces                      | 6, against 50 memberships                               |
-
-What that establishes, per script, without re-deriving it from a plan:
-
-- **`0010` ran.** The billing module's seven `ee_*` tables are in the
-  platform database under their own journal, and 31 billing accounts came
-  across. This was the one irreversible step of the release: `0010` is
-  idempotent BY REFUSAL, so a target already holding billing rows is refused
-  for good.
-- **`0008` + `0012` + `0017` ran.** No row reads `viewer` and two read `guest`.
-- **`0011` ran**, or had nothing to fold: no `oauth_clients` row is left NULL.
-- **`0014` ran**, and validated `0067`'s `NOT VALID` check as it ends by doing.
-  Every org package that is not `ephemeral` has a home.
-- **`0013` ran, first in the window; `0009` was not needed.** Their
-  preconditions are the unique indexes `uq_org_models_unaliased_binding` and
-  `uq_org_invitations_pending`, both of which exist — and the batch that
-  creates them applies in ONE transaction, so it could not have committed with
-  a duplicate left: `0013` removed the duplicate bindings, and there was no
-  duplicate pending invitation for `0009` to cancel.
-- **`0015` has not run, by design.** It is the one step that belongs outside
-  the window: `provisionMember` creates a personal space at every membership
-  door and `GET /api/spaces` repairs the caller's own, so what `0015` buys is
-  the members who do not log in soon. 6 of 50 exist because 6 members have been
-  through a door since. Pre-flight the space count before running it.
-
-**What it owed, and no longer does: `0068`.** Production never waited on it —
-`0014` validated `0067`'s check there. A FRESH install did, since the drizzle
-tree alone never validates it. `0068_packages_org_home_validate.sql` shipped in
-`v1.0.0-beta.59` (#1467) and closes it; the reasoning, and why it could not ride
-in beta.58's own batch, is under **Shipped in the follow-up release** below.
-
-The per-subject sections below are not runbooks and never were. They explain
-what each script does and what it checks, which is what the next release reads
-them for.
+For a deployment crossing beta.58, rehearse from its own database and use the
+per-script preflights below. Check the OAuth client authentication methods before
+installing the new image. Resolve duplicate model bindings and pending invitations
+before the unique indexes are created. Schedule the billing transfer with the
+platform stopped. Script `0010` refuses a target that already contains billing rows.
+Preserve the target backup for recovery. Run the RBAC and package-home backfills at their documented
+schema boundaries, and run `0014` before `0016`. The optional `0015` provisions
+personal spaces for existing members who have not returned since the upgrade.
 
 ## Release beta.67 — order of operations
 
@@ -181,9 +136,8 @@ Exceptions: `0020` is a dry run unless given `-v apply=on` (see its header);
 
 ## Detail — RBAC rollout (drizzle `0056` + `0059`, scripts `0008` + `0009` + `0012` + `0017`)
 
-**Not a runbook.** The order lives in "Release beta.58" above: these files are its
-before the drizzle batch (`0009`) and after it (`0008`, `0012`, `0017`). What follows is what
-each one is for and which query decides whether it has work.
+Run the duplicate-invitation preflight before the migration batch and follow the
+schema boundaries below for `0008`, `0012` and `0017`.
 
 One thing to confirm on the rehearsal copy before anything else: every
 organization that has chat sessions has a default space, because `0056` promotes
@@ -289,8 +243,7 @@ organization that has chat sessions has a default space, because `0056` promotes
 
 ## Detail — OAuth-provider 1.7.3 rollout (drizzle `0057`, script `0011`)
 
-**Not a runbook.** `0011` is step 4 of "Release beta.58"; the pre-flight below is
-its pre-flight, and it is the one that cannot wait for the window.
+Record the affected clients before deploying the new image, then run `0011` after `0057`.
 
 1. **Pre-flight, before the 1.7.3 image is deployed.** 1.7.3 reads a stored
    NULL `token_endpoint_auth_method` as `client_secret_basic` and then refuses
@@ -350,14 +303,7 @@ its pre-flight, and it is the one that cannot wait for the window.
 
 ## Detail — Personal spaces & sharing rollout (drizzle `0063` … `0067`, scripts `0014` + `0016` + `0015`)
 
-**Not a runbook.** `0014` and `0016` are step 4 of "Release beta.58", in that
-order; `0015` is its step 7. What is below is the reasoning, the pre-flights and
-the validation lists the runbook points at.
-
-These five migrations are NOT a batch of their own: production's watermark is
-`0055`, so they arrive inside the same twelve-migration transaction as `0056` …
-`0062`. Nothing here needs a new environment variable — `TRUST_PROXY` and
-`MODULES` are owed by the release's own configuration steps, not by these files.
+Run `0014` after `0067`, then `0016`. Schedule the optional `0015` outside the maintenance window.
 
 `0016` is second because it reads what `0014` writes. It gives every
 `space_packages` row that sits outside its package's home the `package_shares`
@@ -686,40 +632,13 @@ buys is the members who will not log in soon — their space exists before someo
 shares a package to them. Idempotent; a second run inserts zero rows and
 `missing_personal_space_after` must print 0.
 
-### Shipped in the follow-up release — `0068 … VALIDATE CONSTRAINT`
+### Validate package homes before schema migration `0068`
 
-`0067` adds `packages_org_package_has_home` `NOT VALID`, and `0014` — an
-operator script — is what validates it, so the drizzle tree by itself never did:
-a fresh install, where `0014` never runs, kept
-`pg_constraint.convalidated = false` for ever, and
-`docs/NO_TRANSITIONAL_CODE.md` §2's pattern (`ADD … NOT VALID` in one migration,
-`VALIDATE` in a later one) was left half-written. It could not be closed in THIS
-release: the batch applies every pending migration, `0067` included, BEFORE
-the operator scripts run — so a `VALIDATE` inside that batch would have scanned
-`packages` while every `home_space_id` was still NULL, raised `23514` and rolled
-the whole transaction back, the deploy failing on the very migration meant to
-confirm it. **The shape recurs**: when a constraint's precondition is an
-operator script that runs after the batch, its `VALIDATE` belongs in the NEXT
-release, never in the one that adds the constraint.
-
-**It shipped** as `packages/db/drizzle/0068_packages_org_home_validate.sql` in
-`v1.0.0-beta.59`, one statement —
-`ALTER TABLE "packages" VALIDATE CONSTRAINT "packages_org_package_has_home";`.
-Where `0014` has committed it is a no-op: production, read read-only on
-2026-09-18, already carries `pg_constraint.convalidated = true`, and the
-statement itself was rehearsed there inside a transaction that was then rolled
-back, which succeeded. Its real job is the fresh-install path, where `0014`
-never runs and the constraint would otherwise stay `NOT VALID` for ever; on a
-deployment that somehow skipped `0014` it fails loudly with `23514` — the
-intended failure, not an accident.
-
-**Where this is recorded.** In `0067`'s own header, under "THE REMAINING HALF",
-the way `0056` records its `viewer` window, and in `0068`'s header, which
-carries the closing half. Neither is to be edited now that the debt is paid: a
-shipped migration is never rewritten, and the reasoning those two headers carry
-is what the next reader of this shape needs. Issue #1450 is closed by
-`v1.0.0-beta.59`; this page is not the record — it is a release runbook, and a
-runbook gets filed as done.
+On an existing installation upgrading across `0067`, run `0014` and check
+its counts before applying `0068_packages_org_home_validate.sql`. The latter
+validates `packages_org_package_has_home` and fails with SQLSTATE `23514` if
+an organization package covered by the constraint still lacks a home. On a fresh
+database the schema migrations can run together.
 
 ### Rollback — what is actually reversible
 
@@ -824,6 +743,10 @@ a check on the end state, not on its own capture. Idempotent without a marker:
 the predicate is the condition the write removes. Not harmless to skip: those
 credentials authenticate again on a re-invite, and a refresh through an
 `allowSignup` org client re-provisions the membership on its own.
+
+Since #2325 the platform ends OAuth tokens by deleting them rather than setting `revoked` (a marked token
+presented again makes Better Auth delete the whole (client, user) grant), so the marks `0019` and the
+previous release wrote are cleaned up by `0056`.
 
 ## Detail — Custom space roles that act without reading (script `0020`)
 
@@ -1540,8 +1463,7 @@ server` line and above all every `UNFOLDED` line: a dry run with any `UNFOLDED` 
    For a signed version, or when `AFPS_SIGNATURE_POLICY=required`, run the dry run with
    `--signing-dir <private-directory>`. It writes the exact prospective unsigned bundles there,
    named by their canonical content digest. Give each request to the publisher for inspection.
-   The publisher signs it on their own machine with
-   `afps sign <digest>.afps-bundle --key <trusted-key.json> --out <digest>.signed.afps-bundle`.
+   The publisher signs it from the Appstrate monorepo root on their machine after `bun install`: `bun packages/afps-runtime/bin/afps.ts sign <digest>.afps-bundle --key <trusted-key.json> --out <digest>.signed.afps-bundle`.
    Place the returned bundle alongside its request and repeat the dry run and apply with the same
    directory. Only its signature is imported. The platform verifies it against the actual migrated
    content under the configured trust root before any write. Keep the directory for retries. A
@@ -1601,6 +1523,44 @@ overwritten in place, so restoring the database alone leaves rewritten archives 
 `integrity` no longer matches them (an integrity mismatch at run time), and the server archives
 queued for deletion are gone once the outbox has run.
 
+## 0057 — Run notification scope
+
+If the candidate's `before-schema` check finds notifications outside their run's scope, stop writers and rehearse on the restore. Run `psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f scripts/migration/0057-repair-run-notification-spaces.sql` (on PGlite, execute the SQL with the app stopped). The script corrects the space only when the original organization, the run's recorded actor and its current member or end-user record agree. It preserves recipient, read state and payload. A second execution updates zero corrected rows.
+
+The last query lists identifiers of unresolved notifications. Check their recipients against the run and the historical membership or delivery records. A system run can have multiple recipients. Determine the intended tenant and recipient before an individual correction. Keep traffic closed until the preflight returns zero, including independently checked read markers and grants on later installations. Record the affected counts in the deployment log.
+
+## Historical chat messages — `before-traffic`
+
+`verify-beta68-upgrade.ts before-traffic` lists, under `chat · messages incompatible with history replay`, each stored message that `historicalChatMessageSchema` refuses, as `session_id=… seq=…`. The next turn in such a conversation is refused with a 400, so the check keeps chat closed. It prints identifiers only, never message content.
+
+On the restore, read the shape of each listed row without its text. Every listed message keeps at least one line, whatever its JSON types:
+
+```sql
+SELECT m.seq, jsonb_typeof(m.content) AS content_type, m.content->>'role' AS role,
+       jsonb_typeof(m.content->'parts') AS parts_type, p.position,
+       jsonb_typeof(p.part) AS part_json_type, p.part->>'type' AS part_type,
+       array(SELECT jsonb_object_keys(
+         CASE WHEN jsonb_typeof(p.part) = 'object' THEN p.part ELSE '{}'::jsonb END)) AS part_keys
+FROM chat_messages m
+LEFT JOIN LATERAL jsonb_array_elements(
+  CASE WHEN jsonb_typeof(m.content->'parts') = 'array' THEN m.content->'parts' ELSE '[]'::jsonb END
+) WITH ORDINALITY AS p(part, position) ON true
+WHERE m.seq IN (/* listed seq values */)
+ORDER BY m.seq, p.position;
+```
+
+The refused shapes are: content that is not an object, a role other than `user` or `assistant`, a message whose `parts` is missing or not an array, a part that is not an object, a text part without `text`, a file part without `mediaType` or without an `upload://` / `appfile://` URL, and a `data-agent-prompt` part outside a user message, repeated in one message, or whose `data` is not `{ name, title, text? }`. Repair them with the next numbered script, written against the exact shape found and rehearsed on the restore. Never edit the rows by hand in production. Re-run `before-traffic` until the count is `0`, then reopen chat.
+
+## Detail — Marked OAuth refresh tokens deleted (script `0056`)
+
+**Run it once after deploying the release that ends OAuth tokens by deleting them (#2325), inside or after the deploy window; the app may keep running.** Better Auth reads a refresh token marked `revoked` and presented again outside the reuse window as stolen, and deletes every refresh token of that (client, user) pair on every resource, other orgs included. Until this release the platform marked tokens at member exit and at password change, and `0019` did the same; the code now deletes them, but the rows already marked are still in the database and each is a trigger a stale client can pull.
+
+`0056` deletes the refresh tokens with `revoked IS NOT NULL AND rotated_at IS NULL`: Better Auth's own rotation sets `rotated_at` with `revoked`, so a marked row without it was ended administratively (the platform, `0019`, `/oauth2/revoke`, or Better Auth's sign-out of a session's non-`offline_access` refresh tokens). Such a token grants nothing, so no access changes. Rotated-out rows (`rotated_at` set) are kept: they are Better Auth's reuse detection. `rotated_at` exists since drizzle `0057`; a row rotated before it is deleted too, losing only replay detection on an already dead token. The access-token rows of a deleted refresh token go through the `refresh_id` cascade; nothing else is touched.
+
+It prints `marked_to_delete` / `rotated_kept` / `live_kept` (read-only preview), `refresh_tokens_deleted`, and `marked_refresh_tokens_left`, which must be `0`. A second run prints `0` deleted. `psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f scripts/migration/0056-delete-marked-oauth-refresh-tokens.sql`; under PGlite, with the app stopped. Idempotent.
+
+Rollback: not possible without restoring the backup, and not needed: the deleted rows granted nothing.
+
 ## Log
 
 | #    | date                | what                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         | rows                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
@@ -1657,3 +1617,5 @@ queued for deletion are gone once the outbox has run.
 | 0053 | not yet             | every stored agent manifest carrying `runtime_tools`, or predating `--before` without `@appstrate/platform`, moved to `@appstrate/platform` in one transaction (dependency added and indexed in `package_version_dependencies`, tools = (`runtime_tools` ∩ {log, note, pin}) ∪ {recall_memory, run_history}, open `output.schema` for an agent selecting `output` without one, `runtime_tools` removed), malformed manifests listed and left, exit 1 — **rehearse on a production dump first; run in the release window, app stopped, after the schema migrations, before the app serves traffic**; `.ts`, `--before <RFC 3339 instant>` required, dry run by default, `--apply` to write    | prints the mode and the target database, then per store rewritten / of which `output.schema` added / malformed and left / after: carrying `runtime_tools` / after: before `--before` without `@appstrate/platform` — how many manifests still carry `runtime_tools` and how many written before `--before` still lack the dependency: each is one of those listed; a second run rewrites 0                                                                                                                                                                                                                                                                                                                   |
 | 0054 | not yet             | `mcp-server` packages folded into the local integrations that ran them (server block, tools, `_meta`, payload files, `user_config` bridge → `delivery.env`), `dependencies.mcp_servers` dropped, every `mcp-server` package deleted (#2220) — **run in the deploy window, app stopped, BEFORE the migrations** (drizzle `0106` drops the `mcp-server` enum label and fails while a row of that type remains); also removes stored `mcp-servers:*` grants                                                                                                                                                                                                                                     | dry run lists the `mcp-server` packages, the integrations folded, the `note` / `UNFOLDED` lines and the storage target; `--apply` refuses (exit 1, nothing written) on any `UNFOLDED` line, else commits in one transaction after verifying none is left; a second run finds nothing                                                                                                                                                                                                                                                                                                                                                                                                                         |
 | 0055 | not yet             | chat `read_file` / `read_resource` calls on an `appfile://` persisted before #2280 (the file's text, or its bytes as a base64 resource) rewritten as the receipt the chat now persists (`{ uri, mimeType?, size?, note }`, no content); receipts, platform metadata and `skill://` reads untouched — model replay keeps only the file reference — **run in the release window with the app stopped**: until it has run, loading an old thread can return its stored file contents to the browser                                                                                                                                                                                             | dry run prints the messages and file reads to rewrite; `--apply` rewrites them in one transaction, exits 1 unless none is left; a second run finds nothing                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
+| 0056 | not yet             | refresh tokens marked by an administrative revocation (`revoked IS NOT NULL AND rotated_at IS NULL`: member exit, password change, `0019`, `/oauth2/revoke`, sign-out of non-`offline_access` tokens) deleted, access tokens through the `refresh_id` cascade, rotated-out rows kept (#2325) — **run once after the release that deletes instead of marking; the app may keep running**                                                                                                                                                                                                                                                                                                      | prints marked_to_delete / rotated_kept / live_kept, deleted, and left (must be 0); a second run deletes 0                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
+| 0057 | not yet             | Repair a run notification’s space where its organization, run and recipient agree, before copying recipient read state.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      | On an isolated beta.68 restore with one deliberately incorrect space, the preflight went from 1 to 0 and the recipient read marker survived 0113 and 0052 on PostgreSQL 16.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |

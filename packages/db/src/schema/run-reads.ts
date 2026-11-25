@@ -1,6 +1,15 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { pgTable, text, uuid, timestamp, index, primaryKey, check } from "drizzle-orm/pg-core";
+import {
+  pgTable,
+  text,
+  uuid,
+  timestamp,
+  index,
+  primaryKey,
+  foreignKey,
+  check,
+} from "drizzle-orm/pg-core";
 import { sql } from "drizzle-orm";
 import { organizations } from "./organizations.ts";
 import { spaces } from "./spaces.ts";
@@ -30,9 +39,7 @@ export const runReads = pgTable(
     orgId: uuid("org_id")
       .notNull()
       .references(() => organizations.id, { onDelete: "cascade" }),
-    spaceId: text("space_id")
-      .notNull()
-      .references(() => spaces.id, { onDelete: "cascade" }),
+    spaceId: text("space_id").notNull(),
     recipientType: text("recipient_type").notNull().$type<"user" | "end_user">(),
     recipientId: text("recipient_id").notNull(),
     readAt: timestamp("read_at", { withTimezone: true }),
@@ -57,7 +64,11 @@ export const runReads = pgTable(
       table.recipientId,
       table.spaceId,
     ),
-    // The space FK cascade states `space_id` alone.
+    foreignKey({
+      name: "run_reads_space_org_fk",
+      columns: [table.spaceId, table.orgId],
+      foreignColumns: [spaces.id, spaces.orgId],
+    }).onDelete("cascade"),
     index("idx_run_reads_space").on(table.spaceId),
     check("run_reads_recipient_type_valid", sql`recipient_type IN ('user', 'end_user')`),
   ],

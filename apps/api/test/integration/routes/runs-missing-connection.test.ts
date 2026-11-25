@@ -51,8 +51,11 @@ import {
   seedPublishedVersion,
   seedPackageShare,
   seedPackageVersion,
+  seedSpace,
   seedSpaceMember,
+  seedSpacePackage,
   seedSpaceRole,
+  seedUnreachableSpace,
 } from "../../helpers/seed.ts";
 import { activatePackage } from "../../../src/services/space-packages.ts";
 import { integrationConnections, integrationPins, spacePackages } from "@appstrate/db/schema";
@@ -546,6 +549,103 @@ describe("POST /api/agents/:scope/:name/run — 409 missing_integration_connecti
     const err = body.errors!.find((e) => e.field === `integrations.${INTEGRATION}`);
     expect(err).toBeDefined();
     expect(err!.code).toBe("integration_not_active");
+  });
+
+  it("names the activation door and the caller's spaces where the launch could run instead", async () => {
+    await seedAgent({
+      id: AGENT,
+      homeSpaceId: ctx.defaultSpaceId,
+      orgId: ctx.orgId,
+      createdBy: ctx.user.id,
+      draftManifest: buildAgentManifest([INTEGRATION]),
+    });
+    await activatePackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, AGENT);
+    await seedPackage({
+      id: INTEGRATION,
+      homeSpaceId: ctx.defaultSpaceId,
+      orgId: ctx.orgId,
+      type: "integration",
+      source: "local",
+      draftManifest: buildIntegrationManifest(INTEGRATION),
+    });
+    // Ready: the agent and the integration are both active there.
+    const ready = await seedSpace({ orgId: ctx.orgId, name: "Ready" });
+    // The agent alone: the launch would be refused there too.
+    const agentOnly = await seedSpace({ orgId: ctx.orgId, name: "Agent only" });
+    // Both active, in a space the caller does not read.
+    const hidden = await seedUnreachableSpace(ctx.orgId);
+    for (const spaceId of [ready.id, agentOnly.id, hidden]) await seedSpacePackage(spaceId, AGENT);
+    for (const spaceId of [ready.id, hidden]) await seedSpacePackage(spaceId, INTEGRATION);
+
+    const res = await app.request(`/api/agents/${AGENT}/run?version=draft`, {
+      method: "POST",
+      headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
+      body: JSON.stringify({}),
+    });
+
+    expect(res.status).toBe(409);
+    const body = (await res.json()) as ProblemDetails & { active_in_spaces?: unknown };
+    const remedy = `POST /api/spaces/${ctx.defaultSpaceId}/packages {"packageId":"${INTEGRATION}"}`;
+    expect(body.errors!.find((e) => e.code === "integration_not_active")!.message).toContain(
+      remedy,
+    );
+    expect(body.active_in_spaces).toEqual([{ id: ready.id, name: "Ready" }]);
+
+    // Readiness carries the same remedy, and no launch alternative: it is a read.
+    const readiness = await app.request(`/api/agents/${AGENT}/connection-readiness`, {
+      headers: authHeaders(ctx),
+    });
+    expect(readiness.status).toBe(200);
+    const verdict = (await readiness.json()) as Record<string, unknown> & {
+      errors: ValidationFieldError[];
+    };
+    expect(verdict.errors.find((e) => e.code === "integration_not_active")!.message).toContain(
+      remedy,
+    );
+    expect(JSON.stringify(verdict)).not.toContain("active_in_spaces");
+  });
+
+  it("names no space where another required integration would refuse the launch", async () => {
+    // Required A and B; A active here, B off. S1 holds B but not A; S2 holds both.
+    await seedAgent({
+      id: AGENT,
+      homeSpaceId: ctx.defaultSpaceId,
+      orgId: ctx.orgId,
+      createdBy: ctx.user.id,
+      draftManifest: buildAgentManifest([INTEGRATION, SECOND_INTEGRATION]),
+    });
+    await activatePackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, AGENT);
+    for (const id of [INTEGRATION, SECOND_INTEGRATION]) {
+      await seedPackage({
+        id,
+        homeSpaceId: ctx.defaultSpaceId,
+        orgId: ctx.orgId,
+        type: "integration",
+        source: "local",
+        draftManifest: buildIntegrationManifest(id),
+      });
+    }
+    await activatePackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, INTEGRATION);
+    const s1 = await seedSpace({ orgId: ctx.orgId, name: "S1" });
+    const s2 = await seedSpace({ orgId: ctx.orgId, name: "S2" });
+    for (const spaceId of [s1.id, s2.id]) {
+      await seedSpacePackage(spaceId, AGENT);
+      await seedSpacePackage(spaceId, SECOND_INTEGRATION);
+    }
+    await seedSpacePackage(s2.id, INTEGRATION);
+
+    const res = await app.request(`/api/agents/${AGENT}/run?version=draft`, {
+      method: "POST",
+      headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
+      body: JSON.stringify({}),
+    });
+
+    expect(res.status).toBe(409);
+    const body = (await res.json()) as ProblemDetails & { active_in_spaces?: unknown };
+    expect(body.errors!.find((e) => e.code === "integration_not_active")!.field).toBe(
+      `integrations.${SECOND_INTEGRATION}`,
+    );
+    expect(body.active_in_spaces).toEqual([{ id: s2.id, name: "S2" }]);
   });
 
   it("reports an inactive integration ONCE — no downstream not_connected", async () => {
@@ -1100,6 +1200,18 @@ describe("POST /api/agents/:scope/:name/run — 409 missing_integration_connecti
       });
     });
 
+    async function blockUserConnections() {
+      await db
+        .update(spacePackages)
+        .set({ blockUserConnections: true })
+        .where(
+          and(
+            eq(spacePackages.spaceId, ctx.defaultSpaceId),
+            eq(spacePackages.packageId, OAUTH_INTEGRATION),
+          ),
+        );
+    }
+
     // `needs_reconnection` re-consents THAT row in place, so it is the owner's to run.
     describe("needs_reconnection", () => {
       /** A dead oauth2 connection, owned by `userId` and optionally shared. */
@@ -1151,6 +1263,23 @@ describe("POST /api/agents/:scope/:name/run — 409 missing_integration_connecti
           connection_id: connectionId,
         });
         expect(claims!.scopes ?? []).not.toContain("search.read");
+      });
+
+      it("offers the owner a renewal when the space blocks new connections", async () => {
+        await seedOauthIntegration();
+        const member = await memberHolding(["agents:run", "runs:read", "integrations:connect"]);
+        const connectionId = await seedDeadConnection(member.user.id);
+        await blockUserConnections();
+
+        const err = relayItem(await launchAs(member));
+        expect(err.code).toBe("needs_reconnection");
+        expect(err.connect_url).toStartWith("http");
+        const token = new URL(err.connect_url!).searchParams.get("token");
+        expect(readConnectToken(token!)).toMatchObject({
+          user_id: member.user.id,
+          connection_id: connectionId,
+          space_id: ctx.defaultSpaceId,
+        });
       });
 
       it("mints nothing when the dead connection is a colleague's shared row", async () => {
@@ -1221,24 +1350,8 @@ describe("POST /api/agents/:scope/:name/run — 409 missing_integration_connecti
       });
     });
 
-    // `block_user_connections` funnels a space onto one shared connection, and
-    // the relay must not hand out a link that walks around it. Its one
-    // carve-out is the same as `assertConnectionCreationAllowed`'s: an actor
-    // holding `integrations:configure` is precisely who is expected to create
-    // the shared connection the block exists to force everyone onto.
+    // The space can reserve the creation of new connections to its governors.
     describe("block_user_connections", () => {
-      async function blockUserConnections() {
-        await db
-          .update(spacePackages)
-          .set({ blockUserConnections: true })
-          .where(
-            and(
-              eq(spacePackages.spaceId, ctx.defaultSpaceId),
-              eq(spacePackages.packageId, OAUTH_INTEGRATION),
-            ),
-          );
-      }
-
       it("mints nothing for a member who may connect but may not configure", async () => {
         await seedOauthIntegration();
         await blockUserConnections();

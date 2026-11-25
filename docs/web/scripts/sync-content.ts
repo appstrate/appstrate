@@ -105,15 +105,12 @@ async function writeEnvPage() {
   await Bun.write(resolve(CONTENT, 'self-hosting/environment-variables.mdx'), page);
 }
 
-/**
- * Two things the renderer cannot take: an operation whose tag the document does
- * not declare, and the catch-all media type `*\/*` (the credential proxy).
- */
+/** Add undeclared tag groups and the example instance URL for the reference. */
 async function prepareSpec() {
   if (!existsSync(OPENAPI_FILE)) {
     throw new Error('openapi.json is missing: run `bun run content`, which writes it first.');
   }
-  const spec = JSON.parse((await readText(OPENAPI_FILE)).replaceAll('"*/*"', '"application/octet-stream"'));
+  const spec = JSON.parse(await readText(OPENAPI_FILE));
   // The API serves its spec with `servers: [{ url: "/" }]`, which the curl examples would
   // resolve against the docs host. Use the placeholder the hand-written pages use.
   spec.servers = [{ url: 'https://your-instance', description: 'Your Appstrate instance' }];
@@ -128,7 +125,7 @@ async function prepareSpec() {
       }
     }
   }
-  await Bun.write(OPENAPI_FILE, JSON.stringify(spec, null, 2));
+  await Bun.write(resolve(ROOT, 'openapi.reference.json'), JSON.stringify(spec, null, 2));
 }
 
 const CLOUD_OPENAPI = 'https://app.appstrate.com/api/openapi.json';
@@ -216,7 +213,7 @@ async function generateApiReference() {
   const handWritten = await readJson<{ pages: string[] }>(metaPath);
 
   await generateFiles({
-    input: createOpenAPI({ input: ['./openapi.json'] }),
+    input: createOpenAPI({ input: ['./openapi.reference.json'] }),
     output: apiDir,
     per: 'operation',
     groupBy: 'tag',

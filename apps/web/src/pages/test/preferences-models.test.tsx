@@ -10,6 +10,7 @@ import { describe, expect, it, spyOn } from "bun:test";
 import { QueryClient } from "@tanstack/react-query";
 import { installFakeStorage } from "../../test/fake-storage.ts";
 import settingsFr from "../../locales/fr/settings.json";
+import commonFr from "../../locales/fr/common.json";
 import type { ModelProviderCredentialInfo } from "../../hooks/use-model-provider-credentials.ts";
 
 installFakeStorage({
@@ -44,6 +45,7 @@ function credential(over: Partial<ModelProviderCredentialInfo>): ModelProviderCr
     created_by: "usr_admin",
     allowed_actions: [],
     bindable: false,
+    referencing_model_count: 0,
     serves_model_ids: [],
     needs_reconnection: false,
     createdAt: CREATED,
@@ -113,7 +115,7 @@ function renderFor(permissions: string[], settingsLoaded = true): string {
   if (settingsLoaded) {
     queryClient.setQueryData(
       ["get", "/api/orgs/{orgId}/settings", { params: { path: { orgId: ORG_ID } } }],
-      { personal_model_credentials: true },
+      { personal_model_credentials: true, personal_space_role: "admin" },
     );
   }
   const orgSnapshot = spyOn(orgStore, "getInitialState").mockReturnValue({
@@ -173,7 +175,7 @@ describe("the Preferences models page, for a member who holds connect", () => {
 
   it("keeps every deed in the menu: no pencil on the row", () => {
     expect(row(MY_KEY)).not.toContain(`aria-label="${settingsFr["credentials.edit"]}"`);
-    expect(row(MY_SUBSCRIPTION)).not.toContain(settingsFr["credentials.oauth.reconnect"]);
+    expect(row(MY_SUBSCRIPTION)).not.toContain(commonFr["btn.reconnect"]);
   });
 
   it("offers the add deed in the Actions menu, and repeats nothing while the list has rows", () => {

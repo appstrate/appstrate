@@ -16,6 +16,8 @@ import { ArrowRight, Lock, Pause, Play, Trash2, Unplug } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import type { ScheduleWireDto } from "@appstrate/shared-types";
 import { DropdownMenuItem, DropdownMenuSeparator } from "@appstrate/ui/components/dropdown-menu";
+import { ApiError } from "../api/errors";
+import { Button } from "@appstrate/ui/components/button";
 import { Input } from "@appstrate/ui/components/input";
 import { PageActionsMenu } from "./page-actions-menu";
 import { toastScheduleConnectionChoice } from "../lib/mutation-error";
@@ -31,6 +33,7 @@ import { AgentIntegrationsBlock } from "./package-detail/agent-integrations-bloc
 import { InputFieldRow } from "./settings/input-field-row";
 import { ScheduleActorConnectionChoice } from "./schedule-actor-connection-choice";
 import { ScheduleConnectionAnswer } from "./schedule-connection-answer";
+import { useAgentConnectionReadiness } from "../hooks/use-integrations";
 import { useActorName } from "../hooks/use-actor-name";
 import { ManualSave } from "./settings/manual-save";
 import { EmptyState, ErrorState } from "./page-states";
@@ -41,6 +44,7 @@ import { FrequencyComposer } from "./frequency-composer";
 import { NoAccessState } from "./route-gate";
 import { useAuth } from "../hooks/use-auth";
 import { usePermissions } from "../hooks/use-permissions";
+import { scheduleMenuActions } from "../lib/schedule-governance";
 import { useCanWriteSchedule } from "../hooks/use-can-write-schedule";
 import { useAgents, usePackageDetail } from "../hooks/use-packages";
 import { useScheduleFormDeps, useUpdateSchedule } from "../hooks/use-schedules";
@@ -73,7 +77,7 @@ import {
 
 const SECTION_IDS: readonly string[] = SECTIONS.map((section) => section.id);
 
-type Schedule = ScheduleWireDto;
+type Schedule = ScheduleWireDto & { etag?: string | null };
 type Deps = NonNullable<ReturnType<typeof useScheduleFormDeps>["deps"]>;
 
 /** Who the schedule runs as, as stored. */
@@ -113,30 +117,36 @@ export function ScheduleActionsMenu({
   const { t } = useTranslation(["agents"]);
   const { can } = usePermissions();
   const toggle = useUpdateSchedule();
+  const governs = useCanWriteSchedule(schedule);
+  const offered = scheduleMenuActions({
+    write: can("schedules:write"),
+    delete: can("schedules:delete"),
+    governs,
+  });
   // A write names no connection it does not mean to, but waits on what the fires run.
   const { ready } = useFiredFacts(schedule.packageId, firedVersion(schedule.version_override));
+  if (!offered.toggle && !offered.delete) return null;
   return (
     <PageActionsMenu>
-      <DropdownMenuItem
-        onSelect={() =>
-          toggle.mutate(
-            { id: schedule.id, enabled: !schedule.enabled },
-            { onError: (err) => toastScheduleConnectionChoice(err) },
-          )
-        }
-        disabled={toggle.isPending || !ready}
-      >
-        {schedule.enabled ? <Pause /> : <Play />}
-        {schedule.enabled ? t("schedule.disable") : t("schedule.enable")}
-      </DropdownMenuItem>
-      {can("schedules:delete") && (
+      {offered.toggle && (
+        <DropdownMenuItem
+          onSelect={() =>
+            schedule.etag &&
+            toggle.mutate(
+              { id: schedule.id, etag: schedule.etag, enabled: !schedule.enabled },
+              { onError: (err) => toastScheduleConnectionChoice(err) },
+            )
+          }
+          disabled={!schedule.etag || toggle.isPending || !ready}
+        >
+          {schedule.enabled ? <Pause /> : <Play />}
+          {schedule.enabled ? t("schedule.disable") : t("schedule.enable")}
+        </DropdownMenuItem>
+      )}
+      {offered.delete && (
         <>
-          <DropdownMenuSeparator />
-          <DropdownMenuItem
-            onSelect={onDelete}
-            disabled={deletePending}
-            className="text-destructive focus:text-destructive"
-          >
+          {offered.toggle && <DropdownMenuSeparator />}
+          <DropdownMenuItem onSelect={onDelete} disabled={deletePending} variant="destructive">
             <Trash2 />
             {t("common:btn.delete")}
           </DropdownMenuItem>
@@ -196,7 +206,7 @@ interface SectionProps {
 }
 
 function ScheduleSettingsPanel({
-  schedule,
+  schedule: latest,
   section,
   mayWrite,
 }: {
@@ -209,7 +219,13 @@ function ScheduleSettingsPanel({
   const navigate = useNavigate();
   const active = SECTIONS.find((s) => s.id === section) ?? SECTIONS[0];
   const update = useUpdateSchedule();
-  const [draft, setDraft] = useState<ScheduleDraft>({});
+  const [editor, setEditor] = useState<{ base: Schedule | null; draft: ScheduleDraft }>({
+    base: null,
+    draft: {},
+  });
+  const { draft } = editor;
+  const schedule = editor.base ?? latest;
+  const [conflict, setConflict] = useState(false);
   // What the last save was refused over, for the actor it was judged for.
   const [refusal, setRefusal] = useState<Refusal | null>(null);
   const stored = storedActor(schedule);
@@ -225,8 +241,8 @@ function ScheduleSettingsPanel({
 
   // An edit back to what is stored is no edit; a new actor drops the picks made for the old one.
   const edit = (next: ScheduleDraft) =>
-    setDraft((prev) => {
-      const merged = { ...prev, ...next };
+    setEditor((prev) => {
+      const merged = { ...prev.draft, ...next };
       if (next.name !== undefined && next.name === (schedule.name ?? "")) delete merged.name;
       if (next.cron !== undefined && next.cron === schedule.cron_expression) delete merged.cron;
       if (next.timezone !== undefined && next.timezone === schedule.timezone)
@@ -241,7 +257,7 @@ function ScheduleSettingsPanel({
         delete merged.picks;
         if (sameActor(next.actor, stored)) delete merged.actor;
       }
-      return merged;
+      return { draft: merged, base: Object.keys(merged).length > 0 ? (prev.base ?? latest) : null };
     });
 
   const inputWrapper = formDeps.deps?.inputWrapper;
@@ -262,14 +278,17 @@ function ScheduleSettingsPanel({
   });
   const dirty = Object.keys(body).length > 0;
   const discard = () => {
-    setDraft({});
+    setEditor({ base: null, draft: {} });
+    setConflict(false);
     setRefusal(null);
   };
   // A refusal rethrows so "save and leave" does not leave over an unsaved draft.
   const save = async () => {
     try {
-      await update.mutateAsync({ id: schedule.id, ...body });
+      if (!schedule.etag || conflict) return;
+      await update.mutateAsync({ id: schedule.id, etag: schedule.etag, ...body });
     } catch (err) {
+      if (err instanceof ApiError && err.status === 412) setConflict(true);
       const choices = scheduleConnectionChoices(err);
       if (choices.length > 0) {
         setRefusal({
@@ -310,7 +329,29 @@ function ScheduleSettingsPanel({
             facts={facts}
             refusal={refusal}
           />
-          <ManualSave dirty={dirty} onSave={save} onDiscard={discard} />
+          {conflict && (
+            <div role="alert" className="flex items-center gap-2 text-sm">
+              <span>{t("common:apiError.precondition_failed")}</span>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                disabled={!latest.etag || latest.etag === schedule.etag}
+                onClick={() => {
+                  setEditor((prev) => ({ ...prev, base: latest }));
+                  setConflict(false);
+                }}
+              >
+                {t("schedule.reviewChanges")}
+              </Button>
+            </div>
+          )}
+          <ManualSave
+            dirty={dirty}
+            saveDisabled={!schedule.etag || conflict}
+            onSave={save}
+            onDiscard={discard}
+          />
         </>
       ) : (
         <SettingsSkeleton />
@@ -559,10 +600,13 @@ function ConnectionsSection({ schedule, draft, edit, version, facts, refusal }: 
   const integrations = facts.integrations;
   // After an actor move the stored picks name the previous identity's connections.
   const picks = draft.picks ?? (draft.actor ? {} : (schedule.connection_overrides ?? {}));
-  // The pickers judge the VIEWER's connections: the agent's table speaks only
-  // for a schedule that runs as the viewer. Another actor's connections are
-  // named from the candidates the server offers when it refuses a save.
   const actorIsViewer = useIsViewer(actor);
+  const scheduleId = schedule.dependency_overrides ? schedule.id : undefined;
+  const readiness = useAgentConnectionReadiness(
+    actorIsViewer || integrations?.length === 0 ? undefined : schedule.packageId,
+    firedVersion(version),
+    scheduleId,
+  );
   const actorName = useActorName(actor);
 
   const pick = (
@@ -598,16 +642,24 @@ function ConnectionsSection({ schedule, draft, edit, version, facts, refusal }: 
     />
   );
   if (integrations.length === 0) return empty;
+  if (!actorIsViewer && isQueryInFlight(readiness)) return <SettingsSkeleton rows={2} />;
+  if (!actorIsViewer && readiness.isError) return <ErrorState error={readiness.error} compact />;
   return actorIsViewer ? (
     <AgentIntegrationsBlock
       entries={integrations}
       agentPackageId={schedule.packageId}
-      scheduleOverrides={{ value: picks, onChange: pick, version: firedVersion(version) }}
+      scheduleOverrides={{
+        value: picks,
+        onChange: pick,
+        version: firedVersion(version),
+        scheduleId,
+      }}
       empty={empty}
     />
   ) : (
     <ScheduleActorConnectionChoice
       choices={[]}
+      shared={readiness.data ? { entries: readiness.data.integrations, actor } : undefined}
       integrations={integrations}
       value={picks}
       onChange={pick}

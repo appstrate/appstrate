@@ -92,6 +92,11 @@ export const spacePackages = pgTable(
     blockUserConnections: boolean("block_user_connections").notNull().default(false),
     enabled: boolean("enabled").notNull(),
     sharedBy: text("shared_by").references(() => user.id, { onDelete: "set null" }),
+    // A row outside the package's home that exists only because the package is
+    // offered to the organization (`org_package_offers`): a DECISION about the
+    // offer (switch off, configure), not a placement. Withdrawing the offer
+    // deletes it; `placePackage` (a real share) sets it back to false.
+    placedByOffer: boolean("placed_by_offer").notNull().default(false),
     installedAt: timestamp("installed_at", { withTimezone: true }).defaultNow().notNull(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
   },
@@ -100,6 +105,35 @@ export const spacePackages = pgTable(
     index("idx_space_packages_package_id").on(table.packageId),
     // Referencing-side index for the `user` SET NULL action.
     index("idx_space_packages_shared_by").on(table.sharedBy),
+  ],
+);
+
+/**
+ * A package OFFERED to its organization: placed and active in every space of
+ * the org, personal spaces included, wherever a space holds no row of its own
+ * (a `space_packages` row always wins, `enabled = false` being the sticky
+ * opt-out). Presence of the row = offered; there is no state column.
+ * `offered_by` is the admin who offered it (`NULL` once they are gone).
+ * Written only by `services/package-org-offers.ts`; read through
+ * `offeredToSpaceOrgSql` (`services/package-placement.ts`).
+ */
+export const orgPackageOffers = pgTable(
+  "org_package_offers",
+  {
+    orgId: uuid("org_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    packageId: text("package_id")
+      .notNull()
+      .references(() => packages.id, { onDelete: "cascade" }),
+    offeredBy: text("offered_by").references(() => user.id, { onDelete: "set null" }),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.orgId, table.packageId] }),
+    index("idx_org_package_offers_package_id").on(table.packageId),
+    // Referencing-side index for the `user` SET NULL action.
+    index("idx_org_package_offers_offered_by").on(table.offeredBy),
   ],
 );
 

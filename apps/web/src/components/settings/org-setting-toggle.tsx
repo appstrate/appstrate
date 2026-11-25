@@ -12,14 +12,13 @@ import { useOrg } from "../../hooks/use-org";
 import { useOrgSettings, useUpdateOrgSettings } from "../../hooks/use-org-settings";
 import { usePermissions } from "../../hooks/use-permissions";
 import { fieldWriteState } from "../../lib/field-write-state";
-
-type OrgToggleField =
-  "personal_model_credentials" | "dashboard_sso_enabled" | "restrict_package_copy";
+import { toggleBody, type OrgToggleField } from "../../lib/org-setting-toggle-body";
 
 /**
- * A boolean organization setting as a self-saving switch row (`org:settings`). A skeleton stands
- * in until the settings load, so a click can never send a value read off a default; a refusal is
- * said once, by the global mutation toast.
+ * An organization setting as a self-saving switch row (`org:settings`): a boolean, or a two-valued
+ * setting that caps the personal space role. A skeleton stands in until the settings load,
+ * so a click can never send a value read off a default; a refusal is said once, by the global
+ * mutation toast.
  */
 export function OrgSettingToggle({
   id,
@@ -57,13 +56,13 @@ export function OrgSettingToggle({
         <DisabledReasonTooltip reason={mayWrite ? null : t("orgSettings.cannotChange")}>
           <Switch
             id={id}
-            checked={orgSettings?.[field] ?? false}
+            checked={orgSettings?.[field] === (field === "personal_space_role" ? "admin" : true)}
             disabled={!mayWrite || !orgSettings || update.isPending}
             onCheckedChange={(checked) =>
               update.mutate(
                 {
                   params: { path: { orgId: currentOrg.id } },
-                  body: { [field]: checked === true },
+                  body: toggleBody(field, checked === true),
                 },
                 { onSuccess },
               )

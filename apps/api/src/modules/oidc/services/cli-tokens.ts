@@ -68,14 +68,14 @@
 
 import { createCache } from "@appstrate/core/cache";
 import { randomBytes, createHash } from "node:crypto";
-import { and, eq, isNotNull, isNull, ne } from "drizzle-orm";
+import { and, eq, inArray, isNotNull, isNull, ne } from "drizzle-orm";
 import { getEnv } from "@appstrate/env";
 import { db } from "@appstrate/db/client";
 import { user as userTable, organizationMembers } from "@appstrate/db/schema";
 import { cliRefreshToken, deviceCode, oauthClient } from "@appstrate/db/schema";
 import { prefixedId } from "@appstrate/db/ids";
 import { logger } from "../../../lib/logger.ts";
-import type { DbOrTx } from "../../../lib/db-helpers.ts";
+import type { DbOrTx, Tx } from "../../../lib/db-helpers.ts";
 import { getOidcAuthApi } from "../auth/api.ts";
 import { getErrorMessage } from "@appstrate/core/errors";
 
@@ -653,11 +653,6 @@ export async function revokeRefreshToken(params: {
  * them would let an observer enumerate the rotation history of a session,
  * leaking activity-pattern information unrelated to "is this device
  * currently active and what was it called when it logged in?".
- *
- * `current` is omitted (always `false`) for callers that don't present a
- * refresh token — the dashboard SPA has no way to identify "this very
- * session" because BA cookie sessions are orthogonal to refresh-token
- * families. The CLI, when it ever reuses this endpoint, can populate it.
  */
 interface CliSessionListEntry {
   familyId: string;
@@ -668,18 +663,12 @@ interface CliSessionListEntry {
   lastUsedAt: Date | null;
   createdAt: Date;
   expiresAt: Date;
-  current: boolean;
 }
 
 /**
  * List a user's active CLI sessions. "Active" = head of family
  * (`parent_id IS NULL`) AND not revoked AND not expired. Yields one entry
  * per device the user is currently signed into.
- *
- * Sort order: most recent activity first, falling back to creation time
- * for sessions that have never rotated. This puts the device that was
- * "actually used last" at the top — what users typically want to see in
- * a session list.
  */
 export async function listSessionsForUser(userId: string): Promise<CliSessionListEntry[]> {
   const now = new Date();
@@ -713,13 +702,7 @@ export async function listSessionsForUser(userId: string): Promise<CliSessionLis
       lastUsedAt: r.lastUsedAt,
       createdAt: r.createdAt,
       expiresAt: r.expiresAt,
-      current: false,
-    }))
-    .sort((a, b) => {
-      const aTs = (a.lastUsedAt ?? a.createdAt).getTime();
-      const bTs = (b.lastUsedAt ?? b.createdAt).getTime();
-      return bTs - aTs;
-    });
+    }));
 }
 
 /**
@@ -760,48 +743,29 @@ export async function revokeFamilyForUser(params: {
 
 /**
  * Revoke every active CLI session family belonging to a user. Server
- * primitive backing `appstrate logout --all`, the dashboard
+ * primitive backing the dashboard
  * "Revoke all sessions" button (`user_revoked_all`) and a password change or
  * reset (`password_changed`, `credential-change.ts`). Idempotent —
  * already-revoked families are skipped at the SQL level.
  *
- * Returns the count of families newly revoked so the caller can render a
- * meaningful confirmation toast ("Signed out 3 devices.").
- *
- * Implementation: a single UPDATE scoped by `user_id` + active
- * (`revoked_at IS NULL`). We don't need to enumerate families first —
- * the rotation children carry the same `revoked_at` column and the same
- * UPDATE flips both heads and children. The audit reason tells it apart
- * from per-family revocation in the security log.
+ * Return the affected heads to count devices once and invalidate their cached
+ * names after the caller commits.
  */
 export async function revokeAllFamiliesForUser(
+  tx: Tx,
   userId: string,
   reason: "user_revoked_all" | "password_changed",
-): Promise<{ revokedCount: number }> {
-  // Count families that will be touched BEFORE the UPDATE, so the return
-  // value matches "number of devices signed out" rather than "number of
-  // rows touched" (rotation rows would inflate the latter into something
-  // that doesn't reflect user-visible state).
-  const heads = await db
-    .select({ familyId: cliRefreshToken.familyId })
-    .from(cliRefreshToken)
-    .where(
-      and(
-        eq(cliRefreshToken.userId, userId),
-        isNull(cliRefreshToken.parentId),
-        isNull(cliRefreshToken.revokedAt),
-      ),
-    );
-  if (heads.length === 0) return { revokedCount: 0 };
-  await db
+): Promise<string[]> {
+  const rows = await tx
     .update(cliRefreshToken)
     .set({ revokedAt: new Date(), revokedReason: reason })
-    .where(and(eq(cliRefreshToken.userId, userId), isNull(cliRefreshToken.revokedAt)));
-  // Drop device-name cache entries for the revoked families — same race
-  // window as `revokeFamily` (see comment there). Bulk path bypasses the
-  // single-family helper, so invalidate inline.
-  for (const { familyId } of heads) runnerDeviceNameCache.invalidate(familyId);
-  return { revokedCount: heads.length };
+    .where(and(eq(cliRefreshToken.userId, userId), isNull(cliRefreshToken.revokedAt)))
+    .returning({ familyId: cliRefreshToken.familyId, parentId: cliRefreshToken.parentId });
+  return rows.flatMap((row) => (row.parentId === null ? [row.familyId] : []));
+}
+
+export function invalidateRevokedDeviceNames(familyIds: string[]): void {
+  for (const familyId of familyIds) runnerDeviceNameCache.invalidate(familyId);
 }
 
 /**
@@ -978,16 +942,10 @@ export async function listSessionsForOrg(orgId: string): Promise<AdminCliSession
       lastUsedAt: r.lastUsedAt,
       createdAt: r.createdAt,
       expiresAt: r.expiresAt,
-      current: false,
       userId: r.userId,
       userEmail: r.userEmail,
       userName: r.userName,
-    }))
-    .sort((a, b) => {
-      const aTs = (a.lastUsedAt ?? a.createdAt).getTime();
-      const bTs = (b.lastUsedAt ?? b.createdAt).getTime();
-      return bTs - aTs;
-    });
+    }));
 }
 
 /**
@@ -1045,12 +1003,7 @@ export async function revokeFamilyForOrgAdmin(params: {
   if (head.revokedAt) return false;
   // Refuse if the user's user-global credential is shared with any OTHER org —
   // see the cross-org over-reach guard in the doc comment above.
-  const [otherOrgMembership] = await db
-    .select({ orgId: organizationMembers.orgId })
-    .from(organizationMembers)
-    .where(and(eq(organizationMembers.userId, head.userId), ne(organizationMembers.orgId, orgId)))
-    .limit(1);
-  if (otherOrgMembership) {
+  if ((await membersOfOtherOrgs(orgId, [head.userId])).size > 0) {
     logger.info(
       "oidc: org-admin CLI revoke refused — credential is shared across the member's other orgs",
       { module: "oidc", orgId, familyId },
@@ -1059,6 +1012,19 @@ export async function revokeFamilyForOrgAdmin(params: {
   }
   await revokeFamily(familyId, "org_admin_revoked");
   return true;
+}
+
+/**
+ * The users among `userIds` who also belong to an org other than `orgId`: their
+ * CLI sessions serve that other org too, so an admin of `orgId` may not end them.
+ */
+export async function membersOfOtherOrgs(orgId: string, userIds: string[]): Promise<Set<string>> {
+  if (userIds.length === 0) return new Set();
+  const rows = await db
+    .select({ userId: organizationMembers.userId })
+    .from(organizationMembers)
+    .where(and(inArray(organizationMembers.userId, userIds), ne(organizationMembers.orgId, orgId)));
+  return new Set(rows.map((r) => r.userId));
 }
 
 async function revokeFamily(familyId: string, reason: string): Promise<void> {

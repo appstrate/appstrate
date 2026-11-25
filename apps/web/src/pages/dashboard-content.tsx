@@ -2,9 +2,9 @@
 
 import { Card } from "@appstrate/ui/components/card";
 import { usePermissions } from "../hooks/use-permissions";
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { useTranslation } from "react-i18next";
+import { Trans, useTranslation } from "react-i18next";
 import type { TFunction } from "i18next";
 import i18n from "../i18n";
 import type { AgentListItem, EnrichedRun, EnrichedSchedule } from "@appstrate/shared-types";
@@ -23,14 +23,14 @@ import { RowSpaceName, RunRow } from "../components/run-row";
 import { scheduleLabel, scheduleNextRunAt } from "../lib/schedule-options";
 import { agentCardItem } from "../lib/package-card-item";
 import { spacesWhere } from "../lib/space-lists";
+import { withAllSpaces } from "../lib/space-filter";
 import { useSpaceLink } from "../hooks/use-current-space";
 import { useChatCan } from "../modules/chat/use-chat-runtime";
 import { useCanReach } from "../hooks/use-can-reach";
 import { useSpaces } from "../hooks/use-spaces";
-import { useOrg } from "../hooks/use-org";
 import { useCopyToClipboard } from "@appstrate/ui/use-copy-to-clipboard";
 import { chatDraftNavigationState } from "../lib/creation-handoff";
-import { formatDateField } from "../lib/format-date";
+import { ScheduledAt } from "../components/scheduled-at";
 import { dashboardSections } from "../lib/dashboard-sections";
 import { scheduleDetailPath } from "../lib/package-paths";
 import { toast } from "sonner";
@@ -53,12 +53,22 @@ export interface DashboardData {
   agentName: (run: EnrichedRun) => string;
 }
 
-function SectionHeading({ title, href, action }: { title: string; href: string; action: string }) {
+function SectionHeading({
+  title,
+  href,
+  action,
+  spanning,
+}: {
+  title: string;
+  href: string;
+  action: string;
+  spanning: boolean;
+}) {
   return (
     <div className="mb-3 flex items-center justify-between gap-4">
       <h2 className="text-base font-semibold tracking-tight">{title}</h2>
       <Link
-        to={href}
+        to={withAllSpaces(href, spanning)}
         className="text-muted-foreground hover:text-primary inline-flex items-center gap-1 text-xs font-medium transition-colors"
       >
         {action}
@@ -178,7 +188,7 @@ function MetricCard({
 }: {
   label: string;
   value: string | number;
-  detail: string;
+  detail: ReactNode;
   className?: string;
 }) {
   return (
@@ -275,7 +285,11 @@ function DashboardScheduleRow({
       <div className="shrink-0 text-right">
         <ScheduleStateBadges schedule={schedule} />
         <p className="text-muted-foreground mt-1 text-[11px] tabular-nums">
-          {nextRunAt ? formatDateField(nextRunAt, "datetime", schedule.timezone) : "—"}
+          {nextRunAt ? (
+            <ScheduledAt at={nextRunAt} timeZone={schedule.timezone} variant="relative" />
+          ) : (
+            "—"
+          )}
         </p>
       </div>
     </Link>
@@ -355,15 +369,23 @@ function dashboardMetrics(
       sections.schedules && {
         label: t("dashboard.metric.schedules"),
         value: activeSchedules.length,
-        detail: upcomingSchedules[0]?.next_run_at
-          ? t("dashboard.metric.schedulesNext", {
-              date: formatDateField(
-                upcomingSchedules[0].next_run_at,
-                "datetime",
-                upcomingSchedules[0].timezone,
+        detail: upcomingSchedules[0]?.next_run_at ? (
+          <Trans
+            ns="agents"
+            i18nKey="dashboard.metric.schedulesNext"
+            components={{
+              date: (
+                <ScheduledAt
+                  at={upcomingSchedules[0].next_run_at}
+                  timeZone={upcomingSchedules[0].timezone}
+                  variant="relative"
+                />
               ),
-            })
-          : t("dashboard.metric.schedulesNone"),
+            }}
+          />
+        ) : (
+          t("dashboard.metric.schedulesNone")
+        ),
       },
     ].filter((card) => card !== false),
   };
@@ -373,14 +395,11 @@ export function DashboardContent(data: DashboardData) {
   const { t } = useTranslation("agents");
   const { can } = usePermissions();
   const { data: spaces } = useSpaces();
-  const orgPermissions = useOrg().currentOrg?.permissions;
   // The dashboard is the fallback route and renders for ANY principal: each
   // section answers to the guard of the query that feeds it — in « Tous les
   // espaces », granted in some space (the org route lists those).
   const sections = dashboardSections(
-    data.spanning
-      ? (permission) => spacesWhere(spaces, orgPermissions, (can) => can(permission)).length > 0
-      : can,
+    data.spanning ? (permission) => spacesWhere(spaces, (can) => can(permission)).length > 0 : can,
   );
   const metrics = dashboardMetrics(data, sections, t);
   const agentById = new Map(data.agents.map((agent) => [agent.id, agent]));
@@ -423,6 +442,7 @@ export function DashboardContent(data: DashboardData) {
               title={t("dashboard.recentAgents")}
               href="/agents"
               action={t("dashboard.allAgents")}
+              spanning={data.spanning}
             />
             <RecentAgents agents={data.agents} spanning={data.spanning} />
           </section>
@@ -445,6 +465,7 @@ export function DashboardContent(data: DashboardData) {
                 title={t("dashboard.recentRuns")}
                 href="/runs"
                 action={t("dashboard.seeAll")}
+                spanning={data.spanning}
               />
               <RecentRuns
                 runs={data.runs}
@@ -460,6 +481,7 @@ export function DashboardContent(data: DashboardData) {
                 title={t("dashboard.upcomingSchedules")}
                 href="/schedules"
                 action={t("common:nav.schedules")}
+                spanning={data.spanning}
               />
               <UpcomingSchedules
                 schedules={metrics.upcomingSchedules}

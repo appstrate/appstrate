@@ -61,11 +61,8 @@ import {
   type AppstrateResourceProvider,
   type McpPost,
 } from "@appstrate/mcp-transport";
-import { OPERATION_INDEX_HEADING } from "@appstrate/core/chat-contract";
-import {
-  INLINE_MANIFEST_RULE,
-  RUN_AND_WAIT_RESUME_INSTRUCTION,
-} from "@appstrate/core/run-and-wait-client";
+import { CHAT_LOOPBACK_AUTH_METHOD, OPERATION_INDEX_HEADING } from "@appstrate/core/chat-contract";
+import { RUN_AND_WAIT_RESUME_INSTRUCTION } from "@appstrate/core/run-and-wait-client";
 import { requireModulePermission } from "@appstrate/core/permissions";
 import { forbidden, invalidRequest, methodNotAllowed, notFound } from "../../lib/errors.ts";
 import { getActor } from "../../lib/actor.ts";
@@ -99,7 +96,6 @@ import {
   buildFileResourceProvider,
   deriveMcpSurface,
   FORWARDED_AUTH_HEADERS,
-  INLINE_LOG_INSTRUCTION,
   RUN_AND_WAIT_LONG_POLL_RESUME,
   WARNING_CODES_PHRASE,
   type Dispatch,
@@ -109,11 +105,12 @@ import {
 import { buildOperationIndex, buildOrgWideOperationIndex, operationIdGranted } from "./catalog.ts";
 import { buildSkillServer } from "./skills.ts";
 import { servedSkillsContext } from "../../services/served-skills.ts";
-import { SKILL_URI_PREFIX } from "@appstrate/core/skill-uri";
+import { SKILL_URI_PREFIX } from "@appstrate/core/skill-address";
 import {
   listReachableSpaces,
   pinnedSpaceIds,
   requestedSpaceId,
+  spaceDispatcher,
   NO_FALLBACK_HINT,
   type McpSpace,
   type OrgWideSpaces,
@@ -172,11 +169,11 @@ const MCP_RATE_LIMIT_PER_MIN = 120;
  * per-operation OpenAPI schemas can't (purpose, entity model, the `@` scope
  * rule, async-run + SSE-not-callable behaviour), plus a GENERATED operation
  * index (`buildOperationIndex()`) so a client can pick an operationId directly
- * and skip a search_operations round-trip.
+ * and skip a search round-trip.
  *
  * Still maintenance-free: the index is derived from the live catalog, so the
- * surface grows without editing this text. describe_operation (or
- * search_operations' best_match) remains the source of truth for input schemas.
+ * surface grows without editing this text. describe remains the source of truth
+ * for input schemas.
  */
 export function buildServerInstructions(
   permissions: ReadonlySet<string>,
@@ -186,7 +183,7 @@ export function buildServerInstructions(
   orgSpaces?: OrgWideSpaces,
 ): string {
   // A missing act is taught by ABSENCE (see `McpSurface`).
-  const { invokes, runs, composes: inline, authors, importsPackages } = surface;
+  const { invokes, runs, composes: inline, authors, importsPackages, validatesPackages } = surface;
   // A sentence naming an operation renders only for a caller its route grants,
   // unless the gate it sits under already implies that grant (org-wide: in any space).
   const granted = (operationId: string): boolean =>
@@ -197,32 +194,41 @@ export function buildServerInstructions(
   const connects = runs && granted("initiateIntegrationConnect");
   const runningAgents = runs ? "configuring or running" : "configuring";
   const agentUse = authors ? "building or configuring" : runningAgents;
-  const grounding = `Start by calling get_me to learn who you are acting for, your role in this organization, and which integrations are already connected (prefer those when ${agentUse} an agent).`;
+  // The chat states who the caller is and their role in its own prompt, so it is not sent to
+  // get_me for that; an external client learns both from get_me.
+  const grounding = rendersCards
+    ? `Your context says who you act for and your role; get_me lists a space's connected integrations (prefer those when ${agentUse} an agent) and its agents.`
+    : `Start by calling get_me to learn who you are acting for, your role in this organization, and which integrations are already connected (prefer those when ${agentUse} an agent).`;
   // Both halves of the connect bullet below end the same way: the connect offer
   // is already in the tool result, and only its DELIVERY differs by client. The
   // chat renders the offer as a card itself, so the model must not restate it;
   // an external MCP client has no card, so the model hands the URL over. One
   // string, emitted once, so the two branches cannot drift apart.
   const connectDelivery = rendersCards
-    ? "The client renders the connect button from this result on its own; your text must NOT duplicate it — do NOT paste the link, do not describe the button or where to click. End your turn with ONE short sentence saying you'll continue once the integration is connected — do NOT poll, loop, wait, or run in the same turn."
-    : "Give the caller that `connect_url` to open, in one short sentence, and end your turn — do NOT poll, loop, wait, or run in the same turn.";
-  // Every inline-run span below follows `run_and_wait`'s own descriptor: a
-  // caller who cannot compose is not told about a kind the route refuses.
-  const runOps = inline ? "`runAgent`/`runInline`" : "`runAgent`";
+    ? "The client renders the connect button from this result on its own; your text must NOT duplicate it — do NOT paste the link, do not describe the button or where to click. Present the available options and wait for the user — do NOT poll, loop, wait on a run, or launch in the same turn."
+    : "Give the caller that `connect_url` to open alongside any team option, then end your turn — do NOT poll, loop, wait on a run, or launch in the same turn.";
+  // A direct inline launch needs no run-read permission. Each space must grant
+  // invocation and launch together before it can be offered as a destination.
+  const inlineSpaces = orgSpaces?.reachable.filter(
+    (space) => space.surface.invokes && operationIdGranted("runInline", space.permissions, ceiling),
+  );
+  const launchesInline = inlineSpaces ? inlineSpaces.length > 0 : invokes && granted("runInline");
+  const runOps = launchesInline ? "`runAgent`/`runInline`" : "`runAgent`";
   // Discovery-only (`mcp:read` alone): the operationId goes no further than describe.
   const verbs = invokes ? "discover and call" : "discover and inspect";
   const pickOperation = invokes
-    ? "then call describe_operation for its input schema and invoke_operation to run it"
-    : "then call describe_operation for what it does and the shape of its input";
+    ? "then call describe for its input schema and invoke_operation to run it"
+    : "then call describe for what it does and the shape of its input";
   const packageImportGuidance = importsPackages
     ? " Call `import_package_file` only when validation returns BOTH `valid: true` AND `importable: true`, and the user asked to add the package. If conflicts make it non-importable, report them instead of attempting a doomed mutation."
     : "";
-  const inlineShortcut = inline ? ` ${INLINE_MANIFEST_RULE} ${INLINE_LOG_INSTRUCTION}` : "";
-  // Authoring a package means an inline run writing it; without that grant
-  // only the validation half of the bullet is true.
+  // Authoring a package means an inline run writing it; without that grant only the
+  // validation half of the bullet is true, and without validation there is no bullet.
   const packageFiles = inline
     ? "Local MCP integration authoring — call `get_runtime_capabilities` first, have one inline run create the integration manifest + server files, package them from the package root with the available shell tools (for example `python3 -m zipfile -c package.afps manifest.json <entry-point> ...`), then publish that archive with `publish_file` and pass the returned `appfile://` URI to `validate_package_file`."
-    : "MCP package files — to check an existing archive, pass its `appfile://` URI to `validate_package_file`.";
+    : validatesPackages
+      ? "MCP package files — to check an existing archive, pass its `appfile://` URI to `validate_package_file`."
+      : null;
   // Both need `invoke_operation`; the integration preference order they sit
   // beside names no tool, so every caller gets it.
   const concurrencyBullet = invokes
@@ -230,17 +236,19 @@ export function buildServerInstructions(
 `
     : "";
   const heavyListBullet = invokes
-    ? `- Heavy list responses — list operations paginate with \`query: { limit, startingAfter }\` (pass the last row's \`id\`; \`hasMore\` says whether another page follows), except in-memory catalogues (the integration and model-provider lists), which take \`offset\`; some${listsIntegrations ? " (e.g. `listIntegrations`)" : ""} also take a \`fields\` selector (comma-separated projection; describe_operation shows it when available). On heavy lists request only the fields you need${listsIntegrations ? ' — e.g. `fields: "id,active,block_user_connections"` on `listIntegrations` —' : ""} and read a single row's detail operation when you need its full \`manifest\`.
+    ? `- Heavy list responses — list operations paginate with \`query: { limit, startingAfter }\` (pass the last row's \`id\`; \`hasMore\` says whether another page follows), except in-memory catalogues (the integration and model-provider lists), which take \`offset\`; some${listsIntegrations ? " (e.g. `listIntegrations`)" : ""} also take a \`fields\` selector (comma-separated projection; describe shows it when available). On heavy lists request only the fields you need${listsIntegrations ? ' — e.g. `fields: "id,active,block_user_connections"` on `listIntegrations` —' : ""} and read a single row's detail operation when you need its full \`manifest\`.
 `
     : "";
   const integrationListing = listsIntegrations
-    ? ` \`GET /api/integrations\` lists every integration with an \`active\` flag (activated for this space) and \`block_user_connections\`; use it to tell tiers 2 and 3 apart. Do not silently activate or connect an integration the caller did not ask for — surface that it would be needed and let them decide.`
+    ? ` \`GET /api/integrations\` lists every integration with an \`active\` flag (activated for this space) and \`block_user_connections\`; use it to tell tiers 2 and 3 apart.`
     : "";
   // Everything about launching a run — intro sentences, run bullets, readiness
   // and connect guidance — is absent together for a caller who cannot launch.
   const runIntro = runs
-    ? ` When you need a newly launched run's progress or result, prefer the run_and_wait tool directly; it already owns launch plus waiting and declares its own schema. For intentionally fire-and-forget runs, use ${runOps} through describe_operation and invoke_operation.`
-    : "";
+    ? ` When you need a newly launched run's progress or result, prefer the run_and_wait tool directly; it already owns launch plus waiting and declares its own schema. For intentionally fire-and-forget runs, use ${runOps} through describe and invoke_operation.`
+    : launchesInline
+      ? " To launch an inline run without waiting, describe runInline and call it with invoke_operation."
+      : "";
   // A `done:false` run is still going. An external client waits on it; the chat
   // gets `done:false` at the end of its turn budget, too late for a long-poll.
   const doneFalseFollowUp = rendersCards
@@ -248,14 +256,18 @@ export function buildServerInstructions(
     : RUN_AND_WAIT_LONG_POLL_RESUME;
   const runBullets = runs
     ? `- Runs are asynchronous: triggering one returns the created run resource (use its \`id\`), then it moves pending→running→success|failed|timeout|cancelled. When you need the result of a run you are launching now, prefer \`run_and_wait\` over manually composing ${runOps} plus \`getRun\`; it handles launch and waiting in one call. Use \`getRun\` with \`query: { wait: true }\` when you are inspecting or waiting on an existing run that \`run_and_wait\` did not launch in this turn; for a run \`run_and_wait\` returned with \`done:false\`, see the shortcut below.
-- Shortcut — \`run_and_wait\` launches a run, exposes the created run to chat for live progress, then waits internally and returns \`{ id, packageId, status, done:true, result?, error?, warnings }\` once the run is terminal (\`error\`: the run's own failure; \`warnings\`: see the connect bullet). Prefer it for launch-and-wait flows; use the fully discoverable ${runOps} when you deliberately want to launch without waiting. \`done:true\` means the run is over: do not call \`getRun\` to wait for it. \`done:false\` means its wait ended first. ${doneFalseFollowUp}${inlineShortcut}
+- Shortcut — \`run_and_wait\` launches a run, exposes the created run to chat for live progress, then waits internally and returns \`{ id, packageId, status, done:true, result?, error?, warnings, files?${orgSpaces ? ", space" : ""} }\` once the run is terminal (\`error\`: the run's own failure; \`warnings\`: see the connect bullet). Prefer it for launch-and-wait flows; use the fully discoverable ${runOps} when you deliberately want to launch without waiting. \`done:true\` means the run is over: do not call \`getRun\` to wait for it. \`done:false\` means its wait ended first. ${doneFalseFollowUp}
 `
     : "";
   const authKeySource = listsIntegrations
     ? "<the error's auth_key, or a key from manifest.auths of the integration row from GET /api/integrations when the error carries none>"
     : "<the error's auth_key>";
+  const teamLaunches = inlineSpaces?.filter((space) => !space.personal);
+  const missingConnectionChoice = teamLaunches?.length
+    ? ` For an inline run in the personal space, on \`not_connected\`, with or without a \`connect_url\`, first check \`get_me\` in these team spaces with launch permission: ${teamLaunches.map((space) => space.id).join(", ")}. If a connection is usable there, name that space alongside connecting one's own and wait for the user's choice.`
+    : "";
   const connectFlow = connects
-    ? ` When it does NOT (except \`insufficient_scopes\`, below), you MUST start the connect flow yourself (do not just describe it): CALL \`invoke_operation\` with \`operation_id: "initiateIntegrationConnect"\`, \`path_params: { packageId: "<id>", authKey: "${authKeySource}" }\` and \`body: { scopes: <the error's required_scopes, verbatim, when it carries them>, connection_id: <the error's connection_id, for a needs_reconnection item only — the existing connection is then reconnected in place instead of duplicated, with no scopes> }\`. Forwarding \`required_scopes\` is what makes the consent cover the scopes the run needs instead of re-granting the same insufficient set. This op is auth-type-agnostic — it works for every auth (oauth2, api_key, basic, mtls, custom), so you never inspect the auth type yourself — and its result is what carries the \`connect_url\`; without that call there is none, so never promise a connect link you did not just obtain this turn.`
+    ? ` For a \`not_connected\`, \`needs_reconnection\` or \`auth_key_mismatch\` item without a link, offer to connect or reconnect. For a \`needs_reconnection\` item with a \`remedy\`, the account cannot be identified: its connection_id is diagnostic. Follow \`rebind_by_admin\` or \`rebind_by_schedule_owner\` by naming who must change the binding. With \`new_connection\`, offer another available connection or creation if permitted; bind the selected ID explicitly. Existing shares, pins and schedules still use the original ID. Wait for the user to choose that remedy. Only after they choose it, CALL \`invoke_operation\` with \`operation_id: "initiateIntegrationConnect"\`, \`path_params: { packageId: "<id>", authKey: "${authKeySource}" }\` and \`body: { scopes: <the error's required_scopes, verbatim, when it carries them>, connection_id: <the error's connection_id, for an owned needs_reconnection item without a remedy only — the existing connection is then reconnected in place instead of duplicated, with no scopes> }\`. Forwarding \`required_scopes\` is what makes the consent cover the scopes the run needs instead of re-granting the same insufficient set. This op is auth-type-agnostic — it works for every auth (oauth2, api_key, basic, mtls, custom), so you never inspect the auth type yourself — and its result is what carries the \`connect_url\`; without that call there is none, so never promise a connect link you did not just obtain this turn.`
     : "";
   const pins = granted("upsertMyIntegrationPin");
   // No link for it: an upgrade in place widens every agent using the connection. A launch
@@ -265,7 +277,7 @@ export function buildServerInstructions(
     ? " Once the user finished the link, its id is the newest connection of that integration and account in `listIntegrationConnections`."
     : " Once the user finished the link, a retry without overrides answers `must_choose_connection` when `source` is `fallback_auto`: its `candidate_connections` list the new one. For a `member_pin` or `org_default`, it must be named in a pin or an override.";
   const insufficientScopes = connects
-    ? ` An \`insufficient_scopes\` item carries no \`connect_url\`: act on its \`remedy\`. \`rebind_by_admin\` or \`rebind_by_schedule_owner\`: create nothing, tell the user an admin (or the schedule's owner) must switch that binding. \`new_connection\` or \`upgrade_or_new\`: create a NEW connection (as above, WITHOUT \`connection_id\`, \`scopes\` = its \`required_scopes\`) and retry with \`connection_overrides\` naming it.${newId}${stick} Under \`upgrade_or_new\` only, you may pass \`connection_id\` instead, upgrading the connection in place, when the user explicitly chose it after you told them it widens every agent using that connection.`
+    ? ` An \`insufficient_scopes\` item carries no \`connect_url\`: act on its \`remedy\`. \`rebind_by_admin\` or \`rebind_by_schedule_owner\`: create nothing, tell the user an admin (or the schedule's owner) must switch that binding. \`new_connection\` or \`upgrade_or_new\`: offer to create a NEW connection. Only after the user chooses it, create it (as above, WITHOUT \`connection_id\`, \`scopes\` = its \`required_scopes\`) and retry with \`connection_overrides\` naming it.${newId}${stick} Under \`upgrade_or_new\` only, you may pass \`connection_id\` instead, upgrading the connection in place, when the user explicitly chose it after you told them it widens every agent using that connection.`
     : ` An \`insufficient_scopes\` item carries no \`connect_url\`: tell the user to create a connection with its \`required_scopes\` (or have the existing one upgraded) in Appstrate and bind it to this run.`;
   const pinChoice = pins
     ? ` For a stored agent, a member pin makes the choice stick for its later runs: \`upsertMyIntegrationPin\` (path: the agent id and the integration id; body \`{ connection_ids: [...] }\`).`
@@ -277,23 +289,27 @@ export function buildServerInstructions(
     : `; a warning here never carries a \`connect_url\`). Report the result as lacking that integration and offer to connect it when the warning carries a connect target — ${connects ? "when the caller asks, start it with `initiateIntegrationConnect` from the warning's `auth_key` and `required_scopes`, as for an error item below" : "connecting it is for the user to do"}`;
   const connectBullets = runs
     ? `
-- Connecting or reconnecting an integration before a run — an integration may be unconnected, expired, needs-reconnection, under-scoped, or otherwise unusable. Do NOT pre-validate just to launch a "do it now" ${inline ? "inline run" : "run"}: \`run_and_wait\` already runs the same readiness preflight and returns a 409 \`missing_integration_connection\` without consuming credits when the ${inline ? "manifest" : "agent"} cannot run. A declared integration blocks the launch only when the ${inline ? "manifest" : "agent"} marks it \`required\` or what is bound is broken or ambiguous: an optional one with no usable connection, bound to none on purpose (\`[]\`), or inactive in the space lets the run start without it, and the result's \`warnings\` names it with the code that state would raise as an error (${WARNING_CODES_PHRASE}; \`integration_unbound\` alone: a pin or override chose \`[]\`), same \`field\` and fields as an error item; \`auth_key\` and \`required_scopes\` only when connecting would help${warningConnect}; do not start a connect flow or re-run unless the caller asks. A schedule write answers \`warnings: null\` when it judged nothing (disabled, no resolution-affecting change, or written for another member, whose connections it never reveals) and \`[]\` only when it judged and found nothing to report. If \`run_and_wait\` fails with field errors whose \`field\` is \`integrations.<id>\`${inline ? " (or if you intentionally call `validateInlineRun` only to iterate/check readiness without launching)" : ""}, that integration is not ready — whatever the \`code\` (\`not_connected\`, \`needs_reconnection\`, \`insufficient_scopes\`, \`auth_key_mismatch\`, …), with ONE exception below. Handle each such error item by looking ${connects ? "FIRST " : ""}for a \`connect_url\` on the item. When it HAS one, the connect session is already minted and this tool result already carries it: do NOT call ${connects ? "`initiateIntegrationConnect`, do NOT call any other tool" : "any tool"}, do not restate the connection request.${connectFlow} ${connectDelivery}${insufficientScopes} On a later turn, call \`run_and_wait\` again${inline ? " (or `validateInlineRun` if you are only checking readiness)" : ""}; when readiness passes, proceed with the run.
-- The exception — code \`must_choose_connection\` on \`integrations.<id>\` is NOT a connect problem: the platform will not pick the connection itself — the user holds several, or only connections other members share, which are never used without an explicit choice — and needs you to say which one to use. Do NOT start a connect flow for it (another connection makes the ambiguity worse). Retry the SAME \`run_and_wait\` call with the top-level \`connection_overrides\` argument, mapping that integration id to the candidates' \`id\`s: \`connection_overrides: { "<id>": ["<candidate_connection_id>", ...] }\`. Always an ARRAY — a bare id is refused before the launch. The key is the integration id itself — not the error's \`field\` path. The error's \`candidate_connections\` carry a \`label\`, an \`account_id\`, \`owned_by_actor\`, \`needs_reconnection\`, \`scopes_granted\` and \`missing_scopes\`: read those to choose — if the user named an account, match it there rather than listing connections in a separate call. Never pick a candidate whose \`needs_reconnection\` is true (the run fails on it); if it is the one the task needs, tell the user to reconnect it. Prefer a candidate whose \`missing_scopes\` is empty, the one granting least among them: one with missing scopes answers \`insufficient_scopes\`. A candidate with \`owned_by_actor: false\` is another member's shared account, so that choice visibly matters: use it only when the user named it, otherwise ask. Name several only when the task genuinely needs them all (the run's tools then take a required \`connection\` argument); otherwise pick one candidate yourself when nothing distinguishes them, and ask the user only if the choice visibly matters. An enabled schedule write answers this code for the user's one connection too: name the candidate in the schedule's own \`connection_overrides\`.${pinChoice}
+- Connecting or reconnecting an integration before a run — an integration may be unconnected, expired, needs-reconnection, under-scoped, or otherwise unusable. Do NOT pre-validate just to launch a "do it now" ${inline ? "inline run" : "run"}: \`run_and_wait\` already runs the same readiness preflight and returns a 409 \`missing_integration_connection\` without consuming credits when the ${inline ? "manifest" : "agent"} cannot run. A declared integration blocks the launch only when the ${inline ? "manifest" : "agent"} marks it \`required\` or what is bound is broken or ambiguous: an optional one with no usable connection, bound to none on purpose (\`[]\`), or inactive in the space lets the run start without it, and the result's \`warnings\` names it with the code that state would raise as an error (${WARNING_CODES_PHRASE}; \`integration_unbound\` alone: a pin or override chose \`[]\`), same \`field\` and fields as an error item; \`auth_key\` and \`required_scopes\` only when connecting would help${warningConnect}; do not start a connect flow or re-run unless the caller asks. A \`must_choose_connection\` warning is answered by a re-run naming a candidate in \`connection_overrides\` (the exception below), an \`integration_not_active\` one by activating the integration, never by connecting. When the request names a connection (its label or account), resolve its id from \`get_me\` (each integration entry lists its \`connections\`; \`active: false\` on the entry means the integration is off in that space, a configuration refusal to repair) and pass \`connection_overrides\` BEFORE launching${inline ? "; declare every integration the request relies on `required: true` so that a missing or ambiguous binding is a 409 `must_choose_connection` listing the candidates, never a run that starts without it" : ""} — never launch without the integration the user asked for. A schedule write answers \`warnings: null\` when it judged nothing (disabled, no resolution-affecting change, or written for another member, whose connections it never reveals) and \`[]\` only when it judged and found nothing to report. If \`run_and_wait\` fails with field errors whose \`field\` is \`integrations.<id>\`, read each item’s \`code\` before choosing a remedy. On \`integration_not_active\`, offer activation and wait for the user’s choice. Never start a connection for this code, even without a \`connect_url\`. For a connection error, proceed by looking ${connects ? "FIRST " : ""}for a \`connect_url\` on the item.${missingConnectionChoice} When it HAS one, reuse that offer; do not start another connect flow. ${connectDelivery}${connectFlow}${insufficientScopes} On a later turn, call \`run_and_wait\` again; when readiness passes, proceed with the run.
+- The exception — code \`must_choose_connection\` on \`integrations.<id>\` is NOT a connect problem: the platform will not pick the connection itself — the user holds several, or only connections other members share, which are never used without an explicit choice — and needs you to say which one to use. Do NOT start a connect flow for it (another connection makes the ambiguity worse). Retry the SAME \`run_and_wait\` call with the top-level \`connection_overrides\` argument, mapping that integration id to the candidates' \`id\`s: \`connection_overrides: { "<id>": ["<candidate_connection_id>", ...] }\`. Always an ARRAY — a bare id is refused before the launch. The key is the integration id itself — not the error's \`field\` path. The error's \`candidate_connections\` carry a \`label\`, an \`account_id\`, \`owned_by_actor\`, \`needs_reconnection\`, \`scopes_granted\` and \`missing_scopes\`: read those to choose — if the user named an account, match it there rather than listing connections in a separate call. Never pick a candidate whose \`needs_reconnection\` is true (the run fails on it); if it is the one the task needs, its owner can renew an identified account. For an unidentified account, ask for another available connection or a replacement for that binding. Prefer a candidate whose \`missing_scopes\` is empty, the one granting least among them: one with missing scopes answers \`insufficient_scopes\`. A candidate with \`owned_by_actor: false\` is another member's shared account, so that choice visibly matters: use it only when the user named it, otherwise ask. Name several only when the task genuinely needs them all (the run's tools then take a required \`connection\` argument); otherwise pick one candidate yourself when nothing distinguishes them, and ask the user only if the choice visibly matters. An enabled schedule write answers this code for the user's one connection too: name the candidate in the schedule's own \`connection_overrides\`.${pinChoice}
 - Code \`auth_serves_no_selected_tool\` on \`integrations.<id>\` is not a connect problem either: the connection its \`connection_id\` names was explicitly bound (your \`connection_overrides\`, or a pin or default) and was made on an auth that exposes none of the agent's selected tools, so reconnecting it changes nothing. When you passed \`connection_overrides\`, retry without that id; when a pin or default binds it, tell the user which connection to take out of the set.
 - Codes \`auth_key_serves_no_selected_tool\` and \`auth_key_on_unauthenticated_integration\` on \`integrations.<id>\` are not connection problems at all: the agent's own \`auth_key\` (its \`required_auth_key\`) names an auth that exposes none of the agent's selected tools, or one of an integration that declares no auth method, so no connection, pick or override can clear it. Do not start a connect flow. ${inline ? "For an inline run you wrote that configuration: fix `auth_key` or `tools` for that integration in your manifest and retry; for a stored agent, do not retry — tell" : "Do not retry — tell"} the user the agent's configuration must change (its \`auth_key\` for that integration, or its tool selection).
 - Code \`required_integration_unbound\` on \`integrations.<id>\` is not a connect problem: the agent requires that integration and a pin, or a stored schedule's \`connection_overrides\`, binds it to none (\`[]\`). It clears by naming a connection in that layer, or in \`connection_overrides\` (a run override outranks a member pin, not an admin pin); tell the user which. In \`connection_overrides\`, \`[]\` runs without the integration, and for a required one answers \`required_integration_unbound\` unless an admin imposes a set; connections an admin imposes on the integration (an admin pin or an enforced org default) stay bound whatever you pass, so the override only adds to them (\`[]\` adds nothing) and a connection outside a set that allows no additions answers \`override_outranked\`.`
     : "";
-  return `Appstrate runs autonomous AI agents in sandboxed Docker containers. The tools here let you ${verbs} any operation of the Appstrate REST API — their own descriptions tell you how. ${grounding} The operation index at the end of these instructions lists the operations available to your role by tag; it is your primary way to find an operation. Default to picking an operationId straight from that index, ${pickOperation}. Reach for search_operations only when the index is genuinely ambiguous or a capability you expect isn't listed — not as a routine first step. Never guess an operationId or body shape: describe_operation (or search_operations' best_match) is the source of truth for the input schema.${runIntro}
+  return `Appstrate runs autonomous AI agents in sandboxed Docker containers. The tools here let you ${verbs} any operation of the Appstrate REST API — their own descriptions tell you how. ${grounding} The operation index at the end of these instructions lists the operations available to your role by tag; it is your primary way to find an operation. Default to picking an operationId straight from that index, ${pickOperation}. The index covers operations only: use search to find agents, skills and integration tools, which it alone lists completely, and for an operation only when the index is genuinely ambiguous or a capability you expect isn't listed (pass \`kinds: ["operation"]\` then). Never guess an operationId or body shape: describe is the source of truth for the input schema.${runIntro}
 
 ## Core model
-Organization → Spaces (id \`spc_…\`, one default) → Agents → Runs. End-users (\`eu_…\`) are external identities for embedded use. Packages (agents, integrations, skills…) are identified as \`@scope/name\` (e.g. \`@appstrate/my-agent\`). Depending on the operation this is passed either as a single \`packageId\` param or split into separate \`scope\` and \`name\` params — describe_operation shows which; always keep the \`@\`, and the \`/\` when it's a single param.
+Organization → Spaces (id \`spc_…\`, one default) → Agents → Runs. End-users (\`eu_…\`) are external identities for embedded use. Packages (agents, integrations, skills…) are identified as \`@scope/name\` (e.g. \`@appstrate/my-agent\`). Depending on the operation this is passed either as a single \`packageId\` param or split into separate \`scope\` and \`name\` params — describe shows which; always keep the \`@\`, and the \`/\` when it's a single param.
 
 ## Org & space context
-${orgSpaces ? orgWideSpaceContext : pinnedSpaceContext}
+${orgSpaces ? orgWideSpaceContext(orgSpaces, inlineSpaces ?? [], surface.creates || importsPackages) : pinnedSpaceContext}
 
 ## Beyond the per-operation schemas
-${runBullets}- ${packageFiles}${packageImportGuidance} Archive bytes stay server-side throughout.
-- Streaming/SSE operations (live logs, realtime) cannot be called through this server; fetch logs or poll instead.
+${runBullets}${
+    packageFiles
+      ? `- ${packageFiles}${packageImportGuidance} Archive bytes stay server-side throughout.
+`
+      : ""
+  }- Streaming/SSE operations (live logs, realtime) cannot be called through this server; fetch logs or poll instead.
 - Wire JSON is snake_case, except universal id/timestamp fields (id, createdAt…) which stay camelCase.
 - A refused call is a tool result with \`isError: true\` and \`{ code, error, … }\`. \`missing_argument\`, \`unknown_argument\`, \`invalid_argument\`, \`unknown_operation\`, \`unknown_space\` and \`space_mismatch\` mean fix the call (\`arguments\` names the faulty ones, \`accepted\` lists what is valid) and retry. \`not_granted\` (a permission, or a file you may see but not download) is final: report it. An operation the route answered with an HTTP error is not a refusal: it comes back as \`{ status, body }\` with \`isError: true\`; read \`body\` to decide — except a \`403\` your permissions explain, which is a \`not_granted\` refusal.
 ${heavyListBullet}${concurrencyBullet}${
@@ -305,19 +321,59 @@ ${heavyListBullet}${concurrencyBullet}${
         }
 `
       : ""
-  }- Integration preference — when a task needs an integration, prefer in order: (1) one the caller has already connected (listed by get_me — connecting it was an explicit choice), then (2) one that is activated for this space but not yet connected, then (3) one that is neither.${integrationListing}${connectBullets}
+  }- Integration preference — when a task needs an integration, prefer in order: (1) one the caller has already connected (listed by get_me — connecting it was an explicit choice), then (2) one that is activated for this space but not yet connected, then (3) one that is neither. Never activate or connect an integration the caller did not ask for: surface that it would be needed and let them decide.${integrationListing}${connectBullets}
 
 ${OPERATION_INDEX_HEADING}
 ${orgSpaces ? buildOrgWideOperationIndex(orgSpaces.reachable, ceiling) : buildOperationIndex(permissions, ceiling)}`;
 }
 
-const pinnedSpaceContext =
-  "This MCP server is scoped to ONE organization — the one this endpoint serves — and to the one space this connection is pinned to; every operation runs there and you never send those ids per call. To act in another organization, connect that organization's own MCP server (its URL carries its id).";
+const ORG_BOUNDARY =
+  "To act in another organization, connect that organization's own MCP server (its URL carries its id).";
 
-const orgWideSpaceContext = `This MCP server is scoped to ONE organization — the one this endpoint serves — and reaches every space of it where you hold a role. To act in another organization, connect that organization's own MCP server (its URL carries its id).
-- Every tool that acts in a space REQUIRES \`space_id\`, reads and writes alike: the server picks no default space. The argument's schema lists your spaces, their ids and your role in each. Pick the space from the user's request, or, when it names none, the space your context designates for such a request; with neither, when it is ambiguous, ask.
-- Your role differs per space, so an operation allowed in one may be refused in another. A refusal is final for that task: ${NO_FALLBACK_HINT}
+const pinnedSpaceContext = `This MCP server is scoped to ONE organization — the one this endpoint serves — and to the one space this connection is pinned to; every operation runs there and you never send those ids per call. ${ORG_BOUNDARY} A refusal for your role (\`403\`, \`not_granted\`) is final: report it. A configuration refusal (an agent or integration not active in the space, a connection missing or needing reconnection) is repairable: offer its remedy (connect, or \`activatePackage\` when your role allows).`;
+
+/**
+ * The space hierarchy, written once for every tool that takes `space_id`. Step 3 names the
+ * personal space whatever the caller's role there: a role that refuses the act answers with a
+ * refusal listing where it is allowed, which the model relays. Measured with a real model: told
+ * in advance that the personal space refuses, it picks the one space that allows and never asks.
+ */
+function orgWideSpaceContext(
+  spaces: OrgWideSpaces,
+  inlineSpaces: readonly McpSpace[],
+  creates: boolean,
+): string {
+  const personal = spaces.reachable.find((space) => space.personal);
+  const proxySpaces = spaces.reachable.filter((space) => space.surface.proxies);
+  const proxyTeams = proxySpaces.filter((space) => !space.personal);
+  const personalActs = personal
+    ? [
+        ...(inlineSpaces.length ? ["an inline run (including a launch without waiting)"] : []),
+        ...(creates ? ["a new package (agent, skill, integration)"] : []),
+        ...(proxySpaces.length ? ["a direct integration tool call (`call_integration_tool`)"] : []),
+      ]
+    : [];
+  const personalStep = !personal
+    ? "You have no personal space: steps 4 and 5 apply to every act."
+    : personalActs.length === 0
+      ? "Not applicable to this connection: steps 4 and 5 apply to every act."
+      : `For ${personalActs.join(", ")}: your personal space (the one marked \`your personal space\`); your reply names it. Send it there first, whatever your role there and even when another space looks better suited or is the only one where it would work: a refusal or a space that cannot serve is the next rule's case, never a reason to start in another space.`;
+  return `This MCP server is scoped to ONE organization — the one this endpoint serves — and reaches every space of it where you hold a role. ${ORG_BOUNDARY}
+- Use \`describe\` on an operation without choosing a space: it reports where its route acts. An organization-level operation acts in no space: omit \`space_id\` and never ask which space, whatever the steps below say. A route with a space in its path, query or body uses that destination. For other space operations send the space the user named. When no space is named, call the tool: the server uses the connection or conversation's designated destination, or returns a choice if one is needed. For a refusal asking for that choice, halt and wait for the user. These rules choose the destination:
+  1. Only one space is listed (a conversation limited to a space, a narrowed credential): that one.
+  2. The user's request names a space: that one.
+  3. ${personalStep}
+  4. For an act step 3 does not name (never for one it names, whatever space the conversation was opened in): the space your context designates (for the chat, the space the conversation was opened in); with none, omit the argument so the server can request a choice. A space is not designated because the request would work there.
+  5. A credential with no personal space (API key, end-user, delegated credential) uses its own space; when several are reachable and nothing designates one, call without the argument and present the choice the server returns.
+- When the space this order gives cannot serve the request, STOP: make no further call that changes anything or acts elsewhere (no activation, no offer, no connect flow, no run in another space). Reply with the reason and every option below that applies, and wait: only the user's answer in a later message chooses one. Naming an integration in the request is not that answer. Offer another space only when your role there allows the act (the \`space_id\` schema gives your role in each; \`granted_in\` and \`active_in_spaces\` list them).${inlineSpaces.length ? ` For every inline-run alternative below, the ONLY spaces with launch permission are: ${inlineSpaces.map((space) => space.id).join(", ")}. A reachable connection or active integration in any other space does not authorize a run there. Check the integration and connection only in eligible spaces; pass their space_id to search or get_me.` : ""}
+  (a) The integration is off there (\`active: false\`, \`integration_not_active\`). Options: activating it there (\`activatePackage\`: path \`id\` naming that space, when your role allows); using it in a named space where it is active and the requested action is allowed; for an organization owner or admin, offering it to the organization (from chat, the organization catalog; otherwise \`offerPackageToOrg\` with an unconfined credential), which activates it in every space without a row of its own: a space's own switched-off row still wins, and no connection becomes reachable by it.
+  (b) The connection needed is missing or not reachable there (a colleague's connection shared with team spaces only never reaches a personal space). Options, both to state: using it in a named team space that allows the requested action (verify the connection there with \`get_me\` or \`search\`); connecting one's own.${proxySpaces.length ? ` For a direct call, when the personal search returns the integration in \`not_ready\` with \`not_connected\`, even with a link, search for its tool before replying in these team spaces allowing \`call_integration_tool\`: ${proxyTeams.map((space) => space.id).join(", ") || "none"}. Name a team whose search returns the tool alongside connecting one's own; call the tool only after the user chooses.` : ""} Never suggest sharing a member's account for a need that is only the caller's own.
+  (c) Your role there does not allow the act (\`not_granted\`, 403 \`inline_run_not_allowed_in_space\`): ${NO_FALLBACK_HINT}
+  To launch an existing agent, use a space where it is active (\`agent_not_active_in_space\`, \`active_in_spaces\`). Activating an agent, or sharing it so that it lands ON, refuses nothing: the response's \`warnings[]\` names each declared integration inactive in that space, and a \`required: true\` one will refuse its launch there — offer to activate it, with the user's agreement.
+- When the request or its context designates a space, pass that \`space_id\` to \`search\` too. For “list available agents” in a conversation opened in a space, list only that space. An empty result is the answer: report it and wait for the user to request a wider search. Omit \`space_id\` to search every space only when the space is unknown or the user explicitly requests a cross-space search. \`searched_spaces\` lists only the spaces that supplied entries shown in the result; each item’s \`granted_in\` names the spaces where you reach it.
+- A personal space takes no API key, end-user or space-level OIDC client (409 \`personal_space_takes_no_keys\`, \`personal_space_takes_no_end_users\`, \`personal_space_takes_no_oauth_clients\`); an organization-level OIDC client (dashboard SSO) has no space to pick. For the other three, the team space the request names, else the one your context designates, where your role allows it; with none, offer the team spaces where your role allows it and let the user pick.
 - Space names are not unique: every machine field — \`space_id\`, \`granted_in\`, the index's \`[…]\` — names a space by id.`;
+}
 
 function forwardAuthHeaders(src: Headers): Headers {
   const out = new Headers();
@@ -332,15 +388,17 @@ function forwardAuthHeaders(src: Headers): Headers {
 type McpEnv = AppEnv & { Variables: { mcpPost?: McpPost | null; mcpOrgSpaces?: OrgWideSpaces } };
 
 /** A tool or act is offered when one reachable space grants it; the guard decides each call. */
-function unionSurface(spaces: readonly McpSpace[]): McpSurface {
+export function unionSurface(spaces: readonly McpSpace[]): McpSurface {
   const any = (key: keyof McpSurface) => spaces.some((s) => s.surface[key]);
   return {
     invokes: any("invokes"),
     runs: any("runs"),
     composes: any("composes"),
     authors: any("authors"),
+    creates: any("creates"),
     listsFiles: any("listsFiles"),
     importsPackages: any("importsPackages"),
+    validatesPackages: any("validatesPackages"),
     proxies: any("proxies"),
     proxiesClosed: any("proxiesClosed"),
   };
@@ -527,8 +585,28 @@ export function createMcpRouter(deps: McpRouterDeps = {}): Hono<AppEnv> {
     const reachable = await listReachableSpaces(c, orgId, (permissions, space) =>
       deriveMcpSurface(permissions, ceiling, actor, proxied, space),
     );
-    const requested = await requestedSpaceId(post?.payload, orgId);
-    const chosen = reachable.find((s) => s.id === requested) ?? reachable[0];
+    const chat = c.get("authMethod") === CHAT_LOOPBACK_AUTH_METHOD ? c.get("authExtra") : undefined;
+    const choice = chat?.spaceChoice as OrgWideSpaces["spaceChoice"];
+    const beforeAct = chat?.beforeMcpSpaceAct;
+    const policy = {
+      reachable,
+      bounded: c.get("credentialSpaceIds") !== undefined,
+      ceiling,
+      orgPermissions: c.get("permissions"),
+      originSpaceId: typeof chat?.originSpaceId === "string" ? chat.originSpaceId : undefined,
+      spaceChoice: choice,
+      beforeAct:
+        typeof beforeAct === "function"
+          ? (id: string) => Promise.resolve(beforeAct(id))
+          : undefined,
+    };
+    const requested = await requestedSpaceId(post?.payload, orgId, policy);
+    // Admission alone needs one live MCP role. Prefer one granting invoke so a truly
+    // organization-wide invocation can recheck its own grant there after admission.
+    const chosen =
+      reachable.find((s) => s.id === requested) ??
+      reachable.find((s) => s.surface.invokes) ??
+      reachable[0];
     if (!chosen) {
       throw forbidden(
         c.get("credentialSpaceIds") === undefined
@@ -547,6 +625,7 @@ export function createMcpRouter(deps: McpRouterDeps = {}): Hono<AppEnv> {
       surface: deriveMcpSurface(permissions, ceiling, actor, proxied, c.get("space")!),
     };
     c.set("mcpOrgSpaces", {
+      ...policy,
       reachable: reachable.map((s) => (s.id === current.id ? current : s)),
       current,
     });
@@ -598,7 +677,11 @@ export function createMcpRouter(deps: McpRouterDeps = {}): Hono<AppEnv> {
     const spansSpaces = orgSpaces !== undefined && c.get("credentialSpaceIds") === undefined;
     const dispatch: Dispatch = spansSpaces
       ? dispatchInProcess
-      : (request) => dispatchInProcess(request, scope.spaceId);
+      : (request) =>
+          dispatchInProcess(request, {
+            spaceId: scope.spaceId,
+            endpoint: orgSpaces === undefined,
+          });
     // The caller identity + space scope for tools that call a service directly (the
     // file resource provider). Resolved the same way the in-process
     // sub-dispatch would, so direct and dispatched paths stay consistent.
@@ -621,6 +704,7 @@ export function createMcpRouter(deps: McpRouterDeps = {}): Hono<AppEnv> {
     // the context synchronously before its first await, so nothing here
     // depends on the request outliving the response (over SSE it runs after the handler returned).
     const observe: McpObserver = (event) => {
+      const spaceId = event.operationSpaceId === undefined ? scope.spaceId : event.operationSpaceId;
       logger.info("mcp.tool_call", {
         requestId: c.get("requestId"),
         tool: event.tool,
@@ -633,7 +717,8 @@ export function createMcpRouter(deps: McpRouterDeps = {}): Hono<AppEnv> {
         outcome: event.outcome,
         shownCount: event.shownCount,
         deniedCount: event.deniedCount,
-        spaceId: scope.spaceId,
+        // A search across spaces acted in none of them in particular.
+        ...(event.spaceIds ? { spaceIds: event.spaceIds } : { spaceId }),
       });
       if (event.tool === "invoke_operation" && event.outcome === "invoked") {
         // `void`: deliberately off the response path — the rationale, and what
@@ -643,12 +728,13 @@ export function createMcpRouter(deps: McpRouterDeps = {}): Hono<AppEnv> {
             action: "mcp.operation.invoked",
             resourceType: "mcp_operation",
             resourceId: event.operationId ?? null,
+            spaceIdOverride: spaceId,
             after: {
               method: event.method ?? null,
               path: event.path ?? null,
               status: event.status ?? null,
               outcome: event.outcome,
-              spaceId: scope.spaceId,
+              spaceId,
             },
           }),
         );
@@ -661,9 +747,22 @@ export function createMcpRouter(deps: McpRouterDeps = {}): Hono<AppEnv> {
     // need no actor context. get_me likewise carries no actor context: it
     // dispatches in-process to /api/me/context, which resolves the caller from
     // the forwarded auth headers. The index is scoped to the caller's role.
+    // `skills/*` and `resources/read` for `skill://` (SEP-2640), in every space this
+    // connection reaches, each read with the caller's permissions in that space.
+    const skills = buildSkillServer(
+      servedSkillsContext(
+        c,
+        org,
+        (orgSpaces?.reachable ?? [{ id: scope.spaceId, permissions }]).map((space) => ({
+          spaceId: space.id,
+          permissions: space.permissions,
+        })),
+      ),
+    );
     const toolCtx = {
       authorizeBundle: (bundle: Bundle) => authorizeBundlePackages(c, bundle),
-      placeRootAs: (packageId: string) => heldPlacementAuthority(c, packageId),
+      placeRootAs: (packageId: string, record?: (ids: readonly string[]) => Promise<boolean>) =>
+        heldPlacementAuthority(c, packageId, scope.spaceId, record),
       requestId: c.get("requestId"),
       followRunLogs: (runId: string, onLog: (log: RunLogEvent) => void) =>
         followRunLogs(
@@ -685,7 +784,12 @@ export function createMcpRouter(deps: McpRouterDeps = {}): Hono<AppEnv> {
       actor,
       scope,
       fileAccess: () => requestFileAccess(c),
-      orgSpaces,
+      orgSpaces: orgSpaces && {
+        ...orgSpaces,
+        dispatchIn: spaceDispatcher(orgSpaces, dispatchInProcess, !spansSpaces),
+      },
+      // `search`, `describe` and `read` reach skills through the Skills extension's own reader.
+      skills,
     };
     const surface = orgSpaces
       ? unionSurface(orgSpaces.reachable)
@@ -695,18 +799,6 @@ export function createMcpRouter(deps: McpRouterDeps = {}): Hono<AppEnv> {
     // forwarded-auth in-process dispatch as the tools (files are NOT listed
     // under `resources/list`; they surface only via `resource_link`).
     const files = buildFileResourceProvider(toolCtx);
-    // `skills/*` and `resources/read` for `skill://` (SEP-2640), in every space this
-    // connection reaches, each read with the caller's permissions in that space.
-    const skills = buildSkillServer(
-      servedSkillsContext(
-        c,
-        org,
-        (orgSpaces?.reachable ?? [{ id: scope.spaceId, permissions }]).map((space) => ({
-          spaceId: space.id,
-          permissions: space.permissions,
-        })),
-      ),
-    );
     const resources: AppstrateResourceProvider = {
       read: (uri, extra) =>
         uri.startsWith(SKILL_URI_PREFIX) ? skills.read(uri) : files.read(uri, extra),
@@ -715,8 +807,9 @@ export function createMcpRouter(deps: McpRouterDeps = {}): Hono<AppEnv> {
     const prompts = buildAgentPromptProvider({
       origin,
       authHeaders,
-      dispatch,
+      dispatchIn: toolCtx.orgSpaces?.dispatchIn ?? (() => dispatch),
       spaces: orgSpaces?.reachable ?? [{ id: scope.spaceId, name: c.get("space")!.name, surface }],
+      namesSpace: orgSpaces !== undefined,
     });
     const server = createMcpServer(
       tools,

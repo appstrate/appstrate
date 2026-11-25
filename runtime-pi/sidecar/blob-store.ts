@@ -36,6 +36,8 @@
  *     the sidecar drops every URI.
  */
 
+import { MCP_RESOURCE_MAX_ITEMS, resourceReadWithinLimits } from "@appstrate/core/mcp-result";
+
 const ULID_BYTES = 16;
 const ENCODING_ALPHABET = "0123456789ABCDEFGHJKMNPQRSTVWXYZ"; // Crockford base32 — ULID standard.
 
@@ -84,6 +86,14 @@ export function generateUlid(now: number = Date.now()): string {
   return out.slice(0, 26);
 }
 
+type LinkedResourceClient = Pick<
+  import("@appstrate/mcp-transport").AppstrateMcpClient,
+  "readResource"
+>;
+// A maximal collection can have a distinct URI for every member as well as its own.
+const MAX_LINK_HANDLES = MCP_RESOURCE_MAX_ITEMS + 1;
+const MAX_LINK_URI_BYTES = 8192;
+
 const BLOB_URI_PREFIX_TEMPLATE = "appstrate://tool-output/";
 
 /**
@@ -124,19 +134,17 @@ export function parseBlobUri(uri: string): { runId: string; id: string } | null 
  * (the sidecar serves exactly one run for its lifetime).
  */
 export class BlobStore {
+  private readonly links = new Map<string, { upstreamUri: string; client: LinkedResourceClient }>();
+  private readonly linkIds = new WeakMap<LinkedResourceClient, Map<string, string>>();
   private readonly blobs = new Map<string, BlobRecord>();
   private readonly maxTotalBytes: number;
   private totalBytes = 0;
+  /** Settles once every upstream read queued so far has finished: one at a time per run. */
+  private upstreamTurn: Promise<void> = Promise.resolve();
 
   /**
-   * `maxTotalBytes` is REQUIRED, deliberately. It used to default to
-   * 256 MiB — exactly the sidecar container's cgroup limit
-   * (`SIDECAR_MEMORY_BYTES`) — so a store that filled to its own default
-   * tripped the kernel OOM-killer before the store's guard ever ran,
-   * killing every integration mid-run. Every caller already passed a lower
-   * cap precisely to avoid that; the default was reachable only by
-   * forgetting, and what it did on being reached was kill the process.
-   * A caller that must think about the number cannot forget it.
+   * Set the budget below the sidecar memory limit so the store can refuse a blob
+   * before the container runs out of memory.
    */
   constructor(
     readonly runId: string,
@@ -209,6 +217,89 @@ export class BlobStore {
     return record;
   }
 
+  /** Bind the emitted URI to this run and to the same upstream connection for future reads. */
+  link(upstreamUri: string, client: LinkedResourceClient): string | null {
+    if (Buffer.byteLength(upstreamUri) > MAX_LINK_URI_BYTES) return null;
+    const ids = this.linkIds.get(client) ?? new Map<string, string>();
+    const retained = ids.get(upstreamUri);
+    const id = retained ?? generateUlid();
+    if (retained) {
+      this.links.delete(retained);
+    } else {
+      if (this.links.size >= MAX_LINK_HANDLES) {
+        const [oldId, oldest] = this.links.entries().next().value!;
+        this.links.delete(oldId);
+        this.linkIds.get(oldest.client)?.delete(oldest.upstreamUri);
+      }
+      ids.set(upstreamUri, id);
+      this.linkIds.set(client, ids);
+    }
+    this.links.set(id, { upstreamUri, client });
+    return blobUri(this.runId, id);
+  }
+
+  async readLink(uri: string, signal: AbortSignal | undefined, maxBytes: number) {
+    const parsed = parseBlobUri(uri);
+    if (!parsed || parsed.runId !== this.runId) return null;
+    if (!this.links.has(parsed.id)) return null;
+    signal?.throwIfAborted();
+    // One large response can occupy the run's entire read budget, so upstream reads queue across
+    // all connections in the run; local blobs need no turn. The turn covers the response's checks
+    // too, so two large responses are never held at once. A later read waits for this one even
+    // when this one is cancelled while queued.
+    const previous = this.upstreamTurn;
+    const turn = Promise.withResolvers<void>();
+    this.upstreamTurn = previous.then(() => turn.promise);
+    try {
+      await waitUnlessAborted(previous, signal);
+      // Resolve the handle when its turn comes: eviction or `clear()` may have retired it while
+      // it waited, and then no upstream request may leave.
+      const link = this.links.get(parsed.id);
+      if (!link) return null;
+      return await this.readLinked(parsed.id, link, signal, maxBytes);
+    } finally {
+      turn.resolve();
+    }
+  }
+
+  private async readLinked(
+    id: string,
+    link: { upstreamUri: string; client: LinkedResourceClient },
+    signal: AbortSignal | undefined,
+    maxBytes: number,
+  ) {
+    const result = await link.client.readResource(
+      { uri: link.upstreamUri },
+      { ...(signal && { signal }) },
+    );
+    signal?.throwIfAborted();
+    if (!resourceReadWithinLimits(result.contents, maxBytes))
+      throw new Error("Upstream resource exceeds the run's resource count or size limit");
+    // A different request or shutdown can retire the parent while its upstream read is pending.
+    if (!this.links.has(id)) return null;
+    const members = new Set([link.upstreamUri]);
+    for (const item of result.contents) {
+      if (Buffer.byteLength(item.uri) > MAX_LINK_URI_BYTES)
+        throw new Error("Upstream resource URI exceeds the run's URI size limit");
+      members.add(item.uri);
+    }
+
+    // Validate the entire collection before changing any handle. Refresh its existing handles
+    // first, so allocating a new member can evict only a handle outside this response.
+    const ids = this.linkIds.get(link.client)!;
+    const missing: string[] = [];
+    for (const member of members) {
+      if (ids.has(member)) this.link(member, link.client);
+      else missing.push(member);
+    }
+    for (const member of missing) this.link(member, link.client);
+    const contents = result.contents.map((item) => ({
+      ...item,
+      uri: blobUri(this.runId, ids.get(item.uri)!),
+    }));
+    return { ...result, contents };
+  }
+
   /** List every URI currently stored (for `resources/list`). */
   list(): { uri: string; mimeType: string; name?: string }[] {
     return [...this.blobs.values()].map((r) => ({
@@ -220,7 +311,23 @@ export class BlobStore {
 
   /** Drop everything. Called at sidecar shutdown for orderly teardown. */
   clear(): void {
+    for (const { client } of this.links.values()) this.linkIds.delete(client);
+    this.links.clear();
     this.blobs.clear();
     this.totalBytes = 0;
   }
+}
+
+/** Resolve once `turn` settles, or reject with the signal's reason if it aborts first. */
+function waitUnlessAborted(turn: Promise<void>, signal: AbortSignal | undefined): Promise<void> {
+  if (!signal) return turn;
+  signal.throwIfAborted();
+  return new Promise((resolve, reject) => {
+    const onAbort = () => reject(signal.reason);
+    signal.addEventListener("abort", onAbort, { once: true });
+    void turn.then(() => {
+      signal.removeEventListener("abort", onAbort);
+      resolve();
+    });
+  });
 }

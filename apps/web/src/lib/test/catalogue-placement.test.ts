@@ -7,12 +7,7 @@
  */
 
 import { describe, it, expect } from "bun:test";
-import {
-  cataloguePlacement,
-  detailSpace,
-  inPlacedTab,
-  placementIn,
-} from "../catalogue-placement.ts";
+import { cataloguePlacement, detailSpace, placementIn } from "../catalogue-placement.ts";
 import type { LibraryPackageItem } from "../../hooks/use-library.ts";
 
 function pkg(
@@ -29,6 +24,9 @@ function pkg(
     home_writable: true,
     home_deletable: true,
     home_shareable: true,
+    offered_to_org: false,
+    org_offerable: false,
+    active_by_default: false,
     activation: [],
     placements: placements.map((p) => ({
       space_id: p.space_id,
@@ -95,7 +93,6 @@ describe("cataloguePlacement", () => {
   it("calls a package with no placement unplaced — the second tab's subject", () => {
     const placement = cataloguePlacement(pkg([], null), "spc_a");
     expect(placement.unplaced).toBe(true);
-    expect(inPlacedTab(placement)).toBe(false);
   });
 
   it("keeps a system package in the placed tab: the wire says it is active there", () => {
@@ -107,7 +104,6 @@ describe("cataloguePlacement", () => {
       "spc_a",
     );
     expect(placement.unplaced).toBe(false);
-    expect(inPlacedTab(placement)).toBe(true);
   });
 
   it("sends a system package switched off in every space to Découvrir", () => {
@@ -117,7 +113,7 @@ describe("cataloguePlacement", () => {
       pkg([{ space_id: "spc_a", via: "system", state: "inactive" }], null),
       "spc_a",
     );
-    expect(inPlacedTab(placement)).toBe(false);
+    expect(placement.unplaced).toBe(true);
   });
 });
 
@@ -151,7 +147,7 @@ describe("what is merely off", () => {
       ),
       "spc_a",
     );
-    expect(inPlacedTab(placement)).toBe(false);
+    expect(placement.unplaced).toBe(true);
   });
 
   it("keeps it in Espaces once one space runs it", () => {
@@ -165,7 +161,7 @@ describe("what is merely off", () => {
       ),
       "spc_b",
     );
-    expect(inPlacedTab(placement)).toBe(true);
+    expect(placement.unplaced).toBe(false);
   });
 });
 

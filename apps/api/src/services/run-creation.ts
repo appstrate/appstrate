@@ -110,7 +110,7 @@ export async function createRun(input: CreateRunInput): Promise<CreateRunResult>
   // Readiness (`validateAgentReadiness`) is NOT re-run here. The single
   // caller — `POST /api/runs/remote` — already validates the
   // (agent, input, spaceId, actor) tuple before it gets here: the
-  // `registry` branch calls `validateAgentReadiness` directly, the `inline`
+  // `registry` branch runs `resolveRunPreflight`, the `inline`
   // branch runs it inside `runInlinePreflight`. Running it again would repeat
   // that work; the connection cascade below still re-resolves, which catches a
   // change in between.

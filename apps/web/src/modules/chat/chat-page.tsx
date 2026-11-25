@@ -13,23 +13,21 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useReducer, useState } from "react";
 import { useLocation, useNavigate, useParams } from "react-router-dom";
 import { useQueryClient } from "@tanstack/react-query";
+import { useTranslation } from "react-i18next";
 import {
-  ChatConversationSettingsButton,
+  ChatConversationRenameButton,
   ChatPage,
   ChatTransportProvider,
   SelectConversationProvider,
   type AttachTarget,
   type OpenFile,
-  type SpaceChoiceMenu,
 } from "@appstrate/module-chat/ui";
 import { bindChatPreferencesUser } from "@appstrate/module-chat/preferences";
 import { useAuth } from "../../hooks/use-auth";
 import { useFirstName } from "../../hooks/use-first-name";
-import { useFileDownload, useFileImageSrc } from "../../hooks/use-files";
-import { useCurrentOrgId } from "../../hooks/use-org";
-import { useCurrentSpaceId, useSpaceLink } from "../../hooks/use-current-space";
+import { useFileImageSrc } from "../../hooks/use-files";
+import { useSpaceLink } from "../../hooks/use-current-space";
 import { useRowSpaceGrants } from "../../hooks/use-permissions";
-import { otherSpaceFileContext } from "../../lib/file-link";
 import { ChatConversationSkeleton, ChatPanelSkeleton } from "../../components/loading-skeletons";
 import { formatBytes } from "../../lib/format-bytes";
 import { useViewAs } from "../../stores/view-as-store";
@@ -43,7 +41,6 @@ import { ConversationContextToggle, ConversationSidebar } from "./conversation-s
 import { ShellHeaderActions } from "../../components/shell-header-slots";
 import { ConversationSpaces } from "./conversation-spaces";
 import { renderSpaces } from "./render-spaces";
-import { SpaceChoiceSubmenu } from "../../components/space-choice-menu";
 import {
   useChatActingSpaceIds,
   useChatCan,
@@ -51,7 +48,7 @@ import {
   useChatTransport,
   useChatTranslate,
 } from "./use-chat-runtime";
-import { useOwnPersonalSpaceId, useSpaceLabelOf, useSpacesOf } from "../../hooks/use-spaces";
+import { useOwnPersonalSpaceId, useSpaceLabelOf } from "../../hooks/use-spaces";
 import { readChatComposerDraft } from "../../lib/creation-handoff";
 import { useOrgSettings } from "../../hooks/use-org-settings";
 import {
@@ -105,6 +102,7 @@ export function ChatModulePage() {
   // the answers speaks the same language too — labels and aria-labels alike.
   const transport = useChatTransport();
   const translate = useChatTranslate();
+  const { i18n } = useTranslation();
   const { known } = useChatFilter();
   // What the chat may do is judged over the spaces it acts in, not the working one.
   const can = useChatCan();
@@ -157,19 +155,8 @@ export function ChatModulePage() {
     window.addEventListener("popstate", onHistoryNavigation);
     return () => window.removeEventListener("popstate", onHistoryNavigation);
   }, []);
-  // File services the module consumes instead of reimplementing: the typed
-  // download (reports failures with a toast) and the typed image preview.
-  const downloadFile = useFileDownload();
-  // A file of another space (a call of a conversation) is read in its own.
-  const orgId = useCurrentOrgId();
-  const currentSpaceId = useCurrentSpaceId();
   // A run a conversation launched opens in its space, entering it when it is not this one.
   const linkInSpace = useSpaceLink();
-  const onDownloadFile = useCallback(
-    (id: string, name: string, spaceId?: string) =>
-      void downloadFile(id, name, otherSpaceFileContext(spaceId, orgId, currentSpaceId)),
-    [downloadFile, orgId, currentSpaceId],
-  );
   // The very same uploader every SchemaForm file field uses — including its
   // refresh of the org storage gauge — into the space the chat names for each file.
   const uploadFile = useUploadInSpace();
@@ -193,11 +180,7 @@ export function ChatModulePage() {
       <SelectConversationProvider value={onConversationChange}>
         <ShellHeaderActions>
           <ConversationSpaces conversationId={conversationId ?? null} transport={transport} />
-          <ChatConversationSettingsButton
-            activeId={conversationId ?? null}
-            t={translate}
-            can={can}
-          />
+          <ChatConversationRenameButton activeId={conversationId ?? null} t={translate} can={can} />
           <ConversationContextToggle expanded={sidebarState.expanded} dispatch={dispatchSidebar} />
         </ShellHeaderActions>
         <div className="relative flex min-h-0 min-w-0 flex-1">
@@ -209,7 +192,6 @@ export function ChatModulePage() {
               initialComposerDraft={initialComposerDraft}
               onConversationChange={onConversationChange}
               onOpenFile={presentFile}
-              downloadFile={onDownloadFile}
               useFileImageSrc={useFileImageSrc}
               uploadFile={uploadFile}
               t={translate}
@@ -220,12 +202,12 @@ export function ChatModulePage() {
               personalModelCredentials={orgSettings?.personal_model_credentials}
               modelCredentials={modelCredentials}
               formatBytes={formatBytes}
+              lang={i18n.language}
               onPackagesChanged={onPackagesChanged}
               firstName={firstName || null}
               renderSpaces={renderSpaces}
               linkInSpace={linkInSpace}
               useSpaceLabelOf={useSpaceLabelOf}
-              SpaceChoiceMenu={ChatSpaceChoiceMenu}
             />
           </div>
           <ConversationSidebar
@@ -238,15 +220,3 @@ export function ChatModulePage() {
     </ChatTransportProvider>
   );
 }
-
-/** The chat's « in which space? » menu: the app's own, from a menu entry. */
-const ChatSpaceChoiceMenu: SpaceChoiceMenu = ({ label, spaceIds, onPick, trigger, testId }) => {
-  const spaces = useSpacesOf(spaceIds);
-  return (
-    <SpaceChoiceSubmenu
-      choice={{ label, spaces, onPick }}
-      trigger={trigger}
-      marks={testId ? { "data-testid": testId } : undefined}
-    />
-  );
-};

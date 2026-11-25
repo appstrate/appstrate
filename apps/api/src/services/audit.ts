@@ -144,14 +144,15 @@ export function drainAudits(timeoutMs: number): Promise<{ pending: number; drain
  * writes, so the space read here is already the resource's. A module route
  * enters through `enterSpaceContext`, which sets `space` but leaves `spaceId`
  * (the credential's) alone — hence `space` first. `spaceIdOverride` is for an
- * event about a space the request never entered (a connection shared into it).
+ * event about a space the request never entered (a connection shared into it),
+ * or null when the event belongs to the organization.
  *
  * Under a role preview the persona goes into `after.viewAs`; the actor stays
  * the administrator, which is who they were.
  */
 export async function recordAuditFromContext(
   c: Context<AppEnv>,
-  input: ContextAuditInput & { orgIdOverride?: string; spaceIdOverride?: string },
+  input: ContextAuditInput & { orgIdOverride?: string; spaceIdOverride?: string | null },
 ): Promise<void> {
   const { orgIdOverride, spaceIdOverride, ...auditInput } = input;
   await recordAuditsFromContext(c, [auditInput], { orgIdOverride, spaceIdOverride });
@@ -161,7 +162,7 @@ export async function recordAuditFromContext(
 export async function recordAuditsFromContext(
   c: Context<AppEnv>,
   inputs: ContextAuditInput[],
-  overrides: { orgIdOverride?: string; spaceIdOverride?: string } = {},
+  overrides: { orgIdOverride?: string; spaceIdOverride?: string | null } = {},
 ): Promise<void> {
   const orgId = overrides.orgIdOverride ?? c.get("orgId");
   if (!orgId || inputs.length === 0) return;
@@ -184,7 +185,10 @@ export async function recordAuditsFromContext(
   }
 
   const persona = c.get("viewAs");
-  const spaceId = overrides.spaceIdOverride ?? c.get("space")?.id ?? c.get("spaceId") ?? null;
+  const spaceId =
+    overrides.spaceIdOverride === undefined
+      ? (c.get("space")?.id ?? c.get("spaceId") ?? null)
+      : overrides.spaceIdOverride;
   const meta = requestAuditMeta(c);
   await recordAudit(
     inputs.map((input) => ({

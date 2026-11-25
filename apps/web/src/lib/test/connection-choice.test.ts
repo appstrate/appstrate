@@ -272,6 +272,11 @@ describe("retryDecision", () => {
     expect(retryDecision([structural], false, []).showRetry).toBe(false);
   });
 
+  it("offers the re-run once a structural row is activated, even with nothing else fixable", () => {
+    expect(retryDecision([structural], false, [], new Set(["@acme/gmail"])).showRetry).toBe(true);
+    expect(retryDecision([structural], false, [], new Set()).showRetry).toBe(false);
+  });
+
   it("holds the re-run beside a structural row still blocking, and frees it once it clears", () => {
     const mixed = [...fixable, structural];
     // The fixable row is answered; the structural one is not the modal's to fix.

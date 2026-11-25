@@ -4,7 +4,7 @@ import { describe, it, expect, beforeEach } from "bun:test";
 import { getTestApp } from "../../helpers/app.ts";
 import { db, truncateAll } from "../../helpers/db.ts";
 import { asc, eq } from "drizzle-orm";
-import { auditEvents } from "@appstrate/db/schema";
+import { auditEvents, schedules } from "@appstrate/db/schema";
 import {
   createTestContext,
   createTestUser,
@@ -529,6 +529,9 @@ describe("Schedules API", () => {
           body: JSON.stringify(body),
         });
 
+      // A row whose clock is ahead also models two writes within one ETag millisecond.
+      const ahead = new Date(Date.now() + 60_000);
+      await db.update(schedules).set({ updatedAt: ahead }).where(eq(schedules.id, schedule.id));
       const read = await app.request(`/api/schedules/${schedule.id}`, {
         headers: authHeaders(ctx),
       });
@@ -538,7 +541,7 @@ describe("Schedules API", () => {
       const first = await patch({ name: "First" }, etag);
       expect(first.status).toBe(200);
       const next = first.headers.get("ETag")!;
-      expect(next).not.toBe(etag);
+      expect(Number(JSON.parse(next))).toBeGreaterThan(Number(JSON.parse(etag)));
 
       // The tag the first write consumed is stale now.
       const stale = await patch({ name: "Second" }, etag);

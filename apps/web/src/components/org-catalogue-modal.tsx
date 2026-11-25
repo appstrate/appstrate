@@ -18,7 +18,7 @@
  */
 import { PendingButton } from "@/components/app-ui/pending-button";
 import { useEffect, useState } from "react";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQuery } from "@tanstack/react-query";
 import { useLocation, useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { ArrowLeft, ExternalLink, LibraryBig } from "lucide-react";
@@ -43,10 +43,9 @@ import {
 import { searchOf } from "../lib/url-search";
 import { useOrg } from "../hooks/use-org";
 import { useSpaces } from "../hooks/use-spaces";
-import { fetchPackageDetail, fetchPackageIndex, useAgents } from "../hooks/use-packages";
+import { fetchAgentActivationDetail, fetchPackageIndex, useAgents } from "../hooks/use-packages";
 import { packageKeys } from "../lib/query-keys";
 import { missingIntegrations, type MissingDependency } from "../lib/activation-closure";
-import { useCurrentOrgId } from "../hooks/use-org";
 import { useIntegrationsById } from "../hooks/use-integrations";
 import { PackageIcon } from "./package-icon";
 import { PACKAGE_TYPE_ICON } from "../lib/package-type-icon";
@@ -61,7 +60,6 @@ import { useCurrentSpaceId } from "../hooks/use-current-space";
 import {
   cataloguePlacement,
   detailSpace,
-  inPlacedTab,
   type CataloguePlacement,
   type PlacementState,
 } from "../lib/catalogue-placement";
@@ -129,7 +127,6 @@ export function OrgCatalogueModal({
   // space (no « ici », no bulk activation): the add menu and the « Par espace » matrix name the
   // space of every deed.
   const spaceId = useHereSpaceId();
-  const orgId = useCurrentOrgId();
   const { currentOrg } = useOrg();
   const { data: library, isLoading, error } = useCatalogueLibrary();
   const activate = useSetPackageActive();
@@ -143,7 +140,6 @@ export function OrgCatalogueModal({
     setSelectedIn(listKey);
     setSelected(new Set());
   }
-  const qc = useQueryClient();
 
   const discovering = view === "discover";
   const layout: "cards" | "table" = discovering ? "cards" : "table";
@@ -260,7 +256,7 @@ export function OrgCatalogueModal({
     // agents and skills (placed by their home) would empty it.
     if (discovering) return true;
     const placement = placementById.get(item.id);
-    return placement ? inPlacedTab(placement) : false;
+    return !!placement && !placement.unplaced;
   });
   const mayActivateIn = (pkg: LibraryPackageItem, targetSpaceId: string) =>
     activationGate(pkg, targetSpaceId, true).allowed;
@@ -457,10 +453,7 @@ export function OrgCatalogueModal({
     if (!from) return setActive(item, targetSpaceId, next);
     let declared: { id: string }[];
     try {
-      const detail = await qc.fetchQuery({
-        queryKey: packageKeys.detail("agents", orgId ?? "", from, item.id, null),
-        queryFn: () => fetchPackageDetail("agent", item.id, undefined, from),
-      });
+      const detail = await fetchAgentActivationDetail(item.id, from);
       declared = detail.dependencies.integrations;
     } catch {
       // The question is a courtesy; the run gate is the authority.
@@ -703,13 +696,19 @@ export function OrgCatalogueModal({
             setActive(closure.item, closure.spaceId, true);
             nextClosure();
           }}
-          onActivateAll={() => {
-            // Each is its own call: the API has no cascade, and one refusal must not take the others down.
-            setActive(closure.item, closure.spaceId, true);
-            for (const entry of closure.missing) {
-              activate.mutate({ spaceId: closure.spaceId, packageId: entry.id, active: true });
-            }
+          onActivateAll={async () => {
             nextClosure();
+            // Judge the agent after every requested integration has settled, including refusals.
+            await Promise.allSettled(
+              closure.missing.map((entry) =>
+                activate.mutateAsync({
+                  spaceId: closure.spaceId,
+                  packageId: entry.id,
+                  active: true,
+                }),
+              ),
+            );
+            setActive(closure.item, closure.spaceId, true);
           }}
         />
       )}

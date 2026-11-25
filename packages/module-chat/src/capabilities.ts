@@ -10,6 +10,7 @@ import {
 } from "@appstrate/core/permissions";
 import type { ReachableSpaceGrant } from "@appstrate/core/module";
 
+export { limitedConversationPermissions } from "./turn-permissions.ts";
 export { reaches, type RunLevel } from "@appstrate/core/permissions";
 
 export interface TurnCapabilities {
@@ -23,7 +24,7 @@ export interface TurnCapabilities {
   /**
    * `transport` ∧ `skills:read`: the context lists the space's skills by their `skill://` URI, and
    * `read_resource`, which loads one, is registered on every platform MCP connection — no
-   * dispatch needed. In the `manual` skill mode, `list_skills` lists them on the user's request.
+   * dispatch needed.
    */
   readonly readsSkills: boolean;
   /**
@@ -32,7 +33,7 @@ export interface TurnCapabilities {
    */
   readonly readsConnections: boolean;
   /**
-   * `search_integration_tools` / `call_integration_tool` are offered: in at least one of the
+   * The integration tools (`search`'s `integration_tool` kind, `call_integration_tool`) are offered: in at least one of the
    * turn's spaces, `mcp:invoke` and a credential-proxy permission hold and the space leaves the
    * proxy open (`credentialProxyOpen`) — the MCP server's per-space `proxies`, unioned org-wide.
    */

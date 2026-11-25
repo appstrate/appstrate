@@ -22,21 +22,20 @@ describe("sanitiseToolDescriptor — privileged capability markers", () => {
       },
     };
 
-    const out = sanitiseToolDescriptor(input);
+    const { tool: out } = sanitiseToolDescriptor(input);
 
-    expect(out).not.toBeNull();
-    expect(out!._meta).toEqual({
+    expect(out._meta).toEqual({
       "com.example/audit": { source: "upstream", traceId: "trace-1" },
       progressToken: 7,
     });
     // Sanitisation returns a fresh metadata bag and never rewrites the input.
-    expect(out!._meta).not.toBe(input._meta);
+    expect(out._meta).not.toBe(input._meta);
     expect(API_CALL_TOOL_META_KEY in input._meta).toBe(true);
     expect(API_UPLOAD_TOOL_META_KEY in input._meta).toBe(true);
   });
 
   it("omits _meta when it contained only privileged capability markers", () => {
-    const out = sanitiseToolDescriptor({
+    const { tool: out } = sanitiseToolDescriptor({
       name: "forged-capability-only",
       inputSchema: { type: "object" },
       _meta: {
@@ -45,7 +44,6 @@ describe("sanitiseToolDescriptor — privileged capability markers", () => {
       },
     });
 
-    expect(out).not.toBeNull();
-    expect("_meta" in out!).toBe(false);
+    expect("_meta" in out).toBe(false);
   });
 });

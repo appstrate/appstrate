@@ -36,6 +36,7 @@ export const orgIntegrationsPaths = {
   "/api/org-integrations/{scope}/{name}/auths/{authKey}/clients": {
     get: {
       operationId: "listOrgIntegrationClients",
+      "x-appstrate-space": { kind: "organization" },
       tags: ["Integrations"],
       summary: "List the org-level OAuth clients of an integration auth",
       description:
@@ -61,6 +62,7 @@ export const orgIntegrationsPaths = {
   "/api/org-integrations/{scope}/{name}/auths/{authKey}/default-client": {
     put: {
       operationId: "setOrgDefaultIntegrationClient",
+      "x-appstrate-space": { kind: "organization" },
       tags: ["Integrations"],
       summary: "Set the org-level default OAuth client of an integration auth",
       description:
@@ -85,6 +87,7 @@ export const orgIntegrationsPaths = {
   "/api/org-integrations/{scope}/{name}/auths/{authKey}/oauth-clients": {
     post: {
       operationId: "createOrgIntegrationOAuthClient",
+      "x-appstrate-space": { kind: "organization" },
       tags: ["Integrations"],
       summary: "Register an org-level OAuth client for an integration auth",
       description:
@@ -111,6 +114,7 @@ export const orgIntegrationsPaths = {
   "/api/org-integrations/{scope}/{name}/oauth-clients/{clientId}": {
     patch: {
       operationId: "updateOrgIntegrationOAuthClient",
+      "x-appstrate-space": { kind: "organization" },
       tags: ["Integrations"],
       summary:
         "Update an org-level OAuth client (rotate its secret, change its redirect URI or method)",
@@ -130,6 +134,7 @@ export const orgIntegrationsPaths = {
     },
     delete: {
       operationId: "deleteOrgIntegrationOAuthClient",
+      "x-appstrate-space": { kind: "organization" },
       tags: ["Integrations"],
       summary: "Delete an org-level OAuth client",
       description:

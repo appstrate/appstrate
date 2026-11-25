@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
+import type { Translate } from "./ui-labels.ts";
 import {
   mapModelReasoningLevels,
   type ModelGenerationCapabilities,
@@ -19,7 +20,7 @@ import type { ModelGenerationControlLabels } from "./model-generation-controls.t
  * it does on that model: no parameter, the server decides.
  */
 export function buildGenerationLabels(
-  t: (key: string, options?: { level: string }) => string,
+  t: Translate<{ level: string }>,
   capabilities?: ModelGenerationCapabilities | null,
 ): ModelGenerationControlLabels {
   const offUnsent = capabilities?.reasoning.off === "unsent";

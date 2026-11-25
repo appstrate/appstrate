@@ -430,7 +430,9 @@ describe("connection rows carry their variables", () => {
   });
 
   it("an acquisition without a resource clears the stored one", async () => {
-    const id = await seedConnection(ctx, "default", { base_url: "https://mcp.example.com/forge" });
+    const id = await seedConnection(ctx, "account-1", {
+      base_url: "https://mcp.example.com/forge",
+    });
     await db
       .update(integrationConnections)
       .set({ oauthResource: "https://mcp.example.com/forge/mcp" })
@@ -446,6 +448,7 @@ describe("connection rows carry their variables", () => {
         authKey: "primary",
       },
       {
+        accountId: "account-1",
         credentials: { api_key: "k-789" },
         variables: { base_url: "https://mcp.example.com/forge" },
       },

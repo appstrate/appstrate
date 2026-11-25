@@ -19,7 +19,7 @@ function run(events: AgentSessionEvent[]) {
 
 describe("stripMcpToolPrefix", () => {
   it("strips the mcp__<server>__ prefix but keeps inner __", () => {
-    expect(stripMcpToolPrefix("mcp__platform__search_operations")).toBe("search_operations");
+    expect(stripMcpToolPrefix("mcp__platform__search")).toBe("search");
     expect(stripMcpToolPrefix("mcp__platform__run__and__wait")).toBe("run__and__wait");
   });
   it("passes non-MCP names through", () => {
@@ -84,7 +84,7 @@ describe("PiChatUiStreamMapper", () => {
           type: "toolcall_start",
           contentIndex: 0,
           partial: {
-            content: [{ type: "toolCall", id: "call_1", name: "mcp__platform__search_operations" }],
+            content: [{ type: "toolCall", id: "call_1", name: "mcp__platform__search" }],
           },
         },
       },
@@ -96,7 +96,7 @@ describe("PiChatUiStreamMapper", () => {
           contentIndex: 0,
           toolCall: {
             id: "call_1",
-            name: "mcp__platform__search_operations",
+            name: "mcp__platform__search",
             arguments: { q: "x" },
           },
           partial: {},
@@ -105,7 +105,7 @@ describe("PiChatUiStreamMapper", () => {
       {
         type: "tool_execution_end",
         toolCallId: "call_1",
-        toolName: "mcp__platform__search_operations",
+        toolName: "mcp__platform__search",
         result: { content: [{ type: "text", text: "ok" }] },
         isError: false,
       },
@@ -114,12 +114,12 @@ describe("PiChatUiStreamMapper", () => {
     expect(chunks).toContainEqual({
       type: "tool-input-start",
       toolCallId: "call_1",
-      toolName: "search_operations",
+      toolName: "search",
     });
     expect(chunks).toContainEqual({
       type: "tool-input-available",
       toolCallId: "call_1",
-      toolName: "search_operations",
+      toolName: "search",
       input: { q: "x" },
     });
     expect(chunks).toContainEqual({
@@ -232,69 +232,11 @@ describe("PiChatUiStreamMapper", () => {
     ]);
   });
 
-  it("accumulates usage and reports the finish reason", () => {
+  it("reports a tool-use finish reason", () => {
     const { mapper } = run([
-      {
-        type: "message_end",
-        message: {
-          role: "assistant",
-          stopReason: "toolUse",
-          usage: {
-            input: 100,
-            output: 50,
-            cacheRead: 10,
-            cacheWrite: 5,
-            totalTokens: 165,
-            cost: { input: 0.1, output: 0.2, cacheRead: 0, cacheWrite: 0, total: 0.3 },
-          },
-        },
-      },
+      { type: "message_end", message: { role: "assistant", stopReason: "toolUse" } },
     ]);
-    const meta = mapper.result();
-    expect(meta.usage).toEqual({
-      input_tokens: 100,
-      output_tokens: 50,
-      cache_read_input_tokens: 10,
-      cache_creation_input_tokens: 5,
-    });
-    // The terminal meta exposes NO `costUsd`: billing is computed by the ledger
-    // writer from these token counts + the model's catalog rates.
-    expect(meta).not.toHaveProperty("costUsd");
-    expect(meta.finishReason).toBe("tool-calls");
-  });
-
-  it("bands each model call at the tier of the rate card it reaches", () => {
-    const cost = {
-      input: 1,
-      output: 2,
-      tiers: [{ inputTokensAbove: 1_000, input: 2, output: 4, cacheRead: 0, cacheWrite: 0 }],
-    };
-    const mapper = new PiChatUiStreamMapper({ cost });
-    const end = (input: number, cacheRead: number) => ({
-      type: "message_end" as const,
-      message: {
-        role: "assistant",
-        stopReason: "stop",
-        usage: { input, output: 7, cacheRead, cacheWrite: 0, totalTokens: 0, cost: ZERO_COST },
-      },
-    });
-    // 600 + 500 = 1100 crosses the tier; 900 does not.
-    for (const e of [end(900, 0), end(600, 500)]) mapper.map(e);
-    expect(mapper.result().usage).toEqual({
-      input_tokens: 1_500,
-      output_tokens: 14,
-      cache_read_input_tokens: 500,
-      cache_creation_input_tokens: 0,
-      tiers: [
-        {
-          input_tokens_above: 1_000,
-          input_tokens: 600,
-          output_tokens: 7,
-          cache_read_input_tokens: 500,
-          cache_creation_input_tokens: 0,
-        },
-      ],
-    });
+    expect(mapper.result().finishReason).toBe("tool-calls");
   });
 
   it("captures a terminal error turn's message + error finish reason", () => {
@@ -547,5 +489,98 @@ describe("the space a tool call is stamped with", () => {
 
   it("stamps nothing for a space outside the turn's, which the call is refused in", () => {
     expect("providerMetadata" in available({ space_id: "spc_x" }, new Set(["spc_o"]))).toBe(false);
+  });
+});
+
+describe("PiChatUiStreamMapper — the last settled call", () => {
+  const usage = (input: number, output: number, cacheRead = 0) => ({
+    input,
+    output,
+    cacheRead,
+    cacheWrite: 0,
+    totalTokens: 0,
+    cost: ZERO_COST,
+  });
+  const start: AgentSessionEvent = { type: "message_start", message: { role: "assistant" } };
+  const end = (stopReason: string, u: ReturnType<typeof usage>): AgentSessionEvent => ({
+    type: "message_end",
+    message: { role: "assistant", stopReason, usage: u },
+  });
+  const compaction = (summary: string): AgentSessionEvent => ({
+    type: "compaction_end",
+    result: { summary, firstKeptEntryId: `kept_${summary}`, tokensBefore: 9_000 },
+    aborted: false,
+  });
+
+  it("keeps the last call's usage, which the turn's summed usage cannot give back", () => {
+    const { mapper } = run([
+      end("toolUse", usage(1_000, 200, 9_000)),
+      end("stop", usage(1_500, 300)),
+    ]);
+    expect(mapper.result().lastSettledUsage).toEqual(usage(1_500, 300));
+  });
+
+  it("skips an aborted or failed call, which measured nothing", () => {
+    const { mapper } = run([
+      end("stop", usage(4_000, 100)),
+      end("aborted", usage(9, 0)),
+      end("error", usage(9, 0)),
+    ]);
+    expect(mapper.result().lastSettledUsage).toEqual(usage(4_000, 100));
+    expect("lastSettledUsage" in run([end("error", usage(9, 0))]).mapper.result()).toBe(false);
+  });
+
+  it("keeps the summary made at any point of the turn, the last one winning", () => {
+    expect(
+      run([compaction("s1"), start, end("stop", usage(10, 5))]).mapper.result().compaction,
+    ).toEqual({ summary: "s1", firstKeptEntryId: "kept_s1", tokensBefore: 9_000 });
+    expect(
+      run([compaction("s1"), start, end("stop", usage(10, 5)), compaction("s2")]).mapper.result()
+        .compaction?.summary,
+    ).toBe("s2");
+  });
+
+  it("keeps the settled context measure across summary events", () => {
+    const summarized: AgentSessionEvent = {
+      type: "compaction_end",
+      result: { summary: "s", firstKeptEntryId: "k", tokensBefore: 1, usage: usage(7_000, 400) },
+      aborted: false,
+    };
+    const aborted: AgentSessionEvent = {
+      type: "compaction_end",
+      result: { summary: "s", firstKeptEntryId: "k", tokensBefore: 1, usage: usage(9, 9) },
+      aborted: true,
+    };
+    const result = run([
+      start,
+      end("stop", usage(1_000, 100)),
+      summarized,
+      aborted,
+    ]).mapper.result();
+    expect(result.lastSettledUsage).toEqual(usage(1_000, 100));
+  });
+
+  it("keeps Pi's post-summary estimate only while no call settled after the summary", () => {
+    const summarized = (after: number): AgentSessionEvent => ({
+      type: "compaction_end",
+      result: { summary: "s", firstKeptEntryId: "k", tokensBefore: 1, estimatedTokensAfter: after },
+      aborted: false,
+    });
+    const last = run([start, end("stop", usage(190_000, 100)), summarized(40_000)]).mapper.result();
+    expect(last.contextAfterCompaction).toBe(40_000);
+    expect(last.lastSettledUsage).toEqual(usage(190_000, 100));
+    const followed = run([
+      summarized(40_000),
+      start,
+      end("stop", usage(50_000, 100)),
+    ]).mapper.result();
+    expect(followed).not.toHaveProperty("contextAfterCompaction");
+  });
+
+  it("ignores an aborted or failed summary", () => {
+    const aborted: AgentSessionEvent = { type: "compaction_end", result: undefined, aborted: true };
+    const failed: AgentSessionEvent = { type: "compaction_end", result: undefined, aborted: false };
+    expect(run([aborted, failed, start]).mapper.result()).not.toHaveProperty("compaction");
+    expect(run([compaction("s1"), aborted]).mapper.result().compaction?.summary).toBe("s1");
   });
 });

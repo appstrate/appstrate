@@ -195,6 +195,13 @@ export const oidcPaths = {
   "/api/oauth/clients": {
     post: {
       operationId: "createOAuthClient",
+      "x-appstrate-space": {
+        kind: "resource",
+        source: "body",
+        parameter: "referencedSpaceId",
+        level_parameter: "level",
+        space_level: "space",
+      },
       tags: ["OAuth Clients"],
       summary: "Register an OAuth client",
       description:
@@ -240,6 +247,7 @@ export const oidcPaths = {
     },
     get: {
       operationId: "listOAuthClients",
+      "x-appstrate-space": { kind: "organization" },
       tags: ["OAuth Clients"],
       summary: "List OAuth clients",
       description:
@@ -259,6 +267,7 @@ export const oidcPaths = {
   "/api/oauth/clients/{clientId}": {
     get: {
       operationId: "getOAuthClient",
+      "x-appstrate-space": { kind: "organization" },
       tags: ["OAuth Clients"],
       summary: "Get OAuth client",
       parameters: [
@@ -285,6 +294,7 @@ export const oidcPaths = {
     },
     patch: {
       operationId: "updateOAuthClient",
+      "x-appstrate-space": { kind: "organization" },
       tags: ["OAuth Clients"],
       summary: "Update OAuth client",
       description:
@@ -318,6 +328,7 @@ export const oidcPaths = {
     },
     delete: {
       operationId: "deleteOAuthClient",
+      "x-appstrate-space": { kind: "organization" },
       tags: ["OAuth Clients"],
       summary: "Delete OAuth client",
       parameters: [
@@ -338,6 +349,7 @@ export const oidcPaths = {
   "/api/oauth/scopes": {
     get: {
       operationId: "listOAuthScopes",
+      "x-appstrate-space": { kind: "organization" },
       tags: ["OAuth Clients"],
       summary: "List supported OAuth scopes",
       parameters: [{ $ref: "#/components/parameters/XOrgId" }],
@@ -367,6 +379,7 @@ export const oidcPaths = {
   "/api/oauth/clients/{clientId}/rotate": {
     post: {
       operationId: "rotateOAuthClientSecret",
+      "x-appstrate-space": { kind: "organization" },
       tags: ["OAuth Clients"],
       summary: "Rotate client secret",
       parameters: [
@@ -402,6 +415,7 @@ export const oidcPaths = {
   "/api/auth/oauth2/authorize": {
     get: {
       operationId: "oauth2Authorize",
+      "x-appstrate-space": { kind: "organization" },
       // Public OAuth 2.1 protocol endpoint — NOT protected by the platform's
       // global cookie/apikey scheme. `security: []` overrides the inherited
       // global requirement so tooling doesn't advertise a session/API-key
@@ -463,6 +477,7 @@ export const oidcPaths = {
   "/api/auth/oauth2/token": {
     post: {
       operationId: "oauth2Token",
+      "x-appstrate-space": { kind: "organization" },
       // Public OAuth 2.1 protocol endpoint — client auth rides the request
       // body / Basic header, not the platform session. Override the global scheme.
       security: [],
@@ -540,6 +555,7 @@ export const oidcPaths = {
   "/api/auth/oauth2/userinfo": {
     get: {
       operationId: "oauth2Userinfo",
+      "x-appstrate-space": { kind: "organization" },
       // Authenticated by the OIDC access token (`Authorization: Bearer ey…`),
       // NOT the platform cookie/apikey scheme — override the global requirement.
       security: [],
@@ -559,6 +575,7 @@ export const oidcPaths = {
   "/api/auth/oauth2/introspect": {
     post: {
       operationId: "oauth2Introspect",
+      "x-appstrate-space": { kind: "organization" },
       // Public OAuth 2.0 protocol endpoint (RFC 7662) — override the global scheme.
       security: [],
       tags: ["OAuth Clients"],
@@ -610,6 +627,7 @@ export const oidcPaths = {
   "/api/auth/oauth2/revoke": {
     post: {
       operationId: "oauth2Revoke",
+      "x-appstrate-space": { kind: "organization" },
       // Public OAuth 2.0 protocol endpoint (RFC 7009) — override the global scheme.
       security: [],
       tags: ["OAuth Clients"],
@@ -627,13 +645,26 @@ export const oidcPaths = {
         },
       },
       responses: {
-        "200": { description: "Revocation succeeded (even on unknown token, per RFC 7009)." },
+        "200": {
+          description:
+            "Revoked, or the token was invalid: unknown, expired or already revoked (RFC 7009 §2.2). The two answers are identical.",
+        },
+        "400": {
+          description:
+            "`invalid_request` — a missing token or malformed client authentication. `unsupported_token_type` — a JWT access token, which cannot be revoked server-side (RFC 7009 §2.2.1). `invalid_client` — an unknown `client_id`.",
+          content: oauthError,
+        },
+        "401": {
+          description: "`invalid_client` — missing or invalid client credentials.",
+          content: oauthError,
+        },
       },
     },
   },
   "/api/auth/jwks": {
     get: {
       operationId: "oauth2Jwks",
+      "x-appstrate-space": { kind: "organization" },
       // Fully public — signing keys are meant to be fetched by anyone. Override.
       security: [],
       tags: ["OAuth Clients"],
@@ -661,6 +692,7 @@ export const oidcPaths = {
   "/.well-known/openid-configuration": {
     get: {
       operationId: "oidcDiscovery",
+      "x-appstrate-space": { kind: "organization" },
       // Public discovery document — override the global scheme.
       security: [],
       tags: ["OAuth Clients"],
@@ -673,6 +705,7 @@ export const oidcPaths = {
   "/.well-known/oauth-authorization-server": {
     get: {
       operationId: "oauthServerMetadata",
+      "x-appstrate-space": { kind: "organization" },
       // Public metadata document — override the global scheme.
       security: [],
       tags: ["OAuth Clients"],
@@ -683,6 +716,7 @@ export const oidcPaths = {
   "/.well-known/openid-configuration/api/auth": {
     get: {
       operationId: "oidcDiscoveryPathInserted",
+      "x-appstrate-space": { kind: "organization" },
       // Public discovery document — override the global scheme.
       security: [],
       tags: ["OAuth Clients"],
@@ -695,6 +729,7 @@ export const oidcPaths = {
   "/.well-known/oauth-authorization-server/api/auth": {
     get: {
       operationId: "oauthServerMetadataPathInserted",
+      "x-appstrate-space": { kind: "organization" },
       // Public metadata document — override the global scheme.
       security: [],
       tags: ["OAuth Clients"],
@@ -710,6 +745,7 @@ export const oidcPaths = {
   "/api/oauth/logout": {
     get: {
       operationId: "oauthLogout",
+      "x-appstrate-space": { kind: "organization" },
       // Public RP-initiated logout — clears the session cookie if present, but
       // requires no prior platform auth. Override the global scheme.
       security: [],
@@ -754,8 +790,7 @@ export const oidcPaths = {
         },
         "400": {
           $ref: "#/components/responses/ValidationError",
-          description:
-            "Malformed space id — `spc_` + a UUID is the only accepted shape (a retired `app_` id names the un-run `app_` \u2192 `spc_` migration).",
+          description: "Malformed space id. Expected `spc_` followed by a canonical UUID.",
         },
         "403": { $ref: "#/components/responses/Forbidden" },
         "404": {
@@ -833,8 +868,7 @@ export const oidcPaths = {
         "204": { description: "Deleted" },
         "400": {
           $ref: "#/components/responses/ValidationError",
-          description:
-            "Malformed space id — `spc_` + a UUID is the only accepted shape (a retired `app_` id names the un-run `app_` \u2192 `spc_` migration).",
+          description: "Malformed space id. Expected `spc_` followed by a canonical UUID.",
         },
         "403": { $ref: "#/components/responses/Forbidden" },
         "404": {
@@ -924,8 +958,7 @@ export const oidcPaths = {
         },
         "400": {
           $ref: "#/components/responses/ValidationError",
-          description:
-            "Malformed space id — `spc_` + a UUID is the only accepted shape (a retired `app_` id names the un-run `app_` \u2192 `spc_` migration).",
+          description: "Malformed space id. Expected `spc_` followed by a canonical UUID.",
         },
         "403": { $ref: "#/components/responses/Forbidden" },
         "404": {
@@ -1015,8 +1048,7 @@ export const oidcPaths = {
         "204": { description: "Deleted" },
         "400": {
           $ref: "#/components/responses/ValidationError",
-          description:
-            "Malformed space id — `spc_` + a UUID is the only accepted shape (a retired `app_` id names the un-run `app_` \u2192 `spc_` migration).",
+          description: "Malformed space id. Expected `spc_` followed by a canonical UUID.",
         },
         "403": { $ref: "#/components/responses/Forbidden" },
         "404": {
@@ -1031,6 +1063,7 @@ export const oidcPaths = {
     post: {
       tags: ["Device Authorization"],
       operationId: "deviceAuthorizationCode",
+      "x-appstrate-space": { kind: "organization" },
       // Public device-authorization grant (RFC 8628) — the client is gated by
       // `validateClient`, not the platform session. Matches the sibling public
       // device-flow endpoints (`/cli/token`, `/cli/revoke`) which are also `[]`.
@@ -1123,6 +1156,7 @@ export const oidcPaths = {
     post: {
       tags: ["Device Authorization"],
       operationId: "cliToken",
+      "x-appstrate-space": { kind: "organization" },
       security: [],
       summary: "Exchange a device_code or refresh token for a CLI token pair",
       description:
@@ -1189,6 +1223,7 @@ export const oidcPaths = {
     post: {
       tags: ["Device Authorization"],
       operationId: "cliRevoke",
+      "x-appstrate-space": { kind: "organization" },
       security: [],
       summary: "Revoke a CLI refresh token family",
       description:
@@ -1228,17 +1263,18 @@ export const oidcPaths = {
       },
     },
   },
-  "/api/auth/cli/sessions": {
+  "/api/auth/access-grants": {
     get: {
-      tags: ["Device Authorization"],
-      operationId: "cliListSessions",
-      summary: "List the caller's active CLI sessions",
+      tags: ["Access Grants"],
+      operationId: "listMyAccessGrants",
+      "x-appstrate-space": { kind: "organization" },
+      summary: "List the caller's access grants",
       description:
-        'List the caller\'s active CLI sessions (one entry per device). Cookie auth required — the listing is scoped to `c.get("user").id` derived from the BA session. `current` is always `false` for cookie callers because the dashboard does not present a refresh token.',
+        "Everything the caller has let act for them outside the browser: CLI sessions (one per device) and MCP client grants (one per client and MCP endpoint). Browser session only — an API key or an OAuth bearer cannot reach it. Most recent activity first.",
       security: [{ cookieAuth: [] }],
       responses: {
         "200": {
-          description: "Session list.",
+          description: "Grant list.",
           content: {
             "application/json": {
               schema: {
@@ -1246,34 +1282,7 @@ export const oidcPaths = {
                 required: ["object", "data", "hasMore"],
                 properties: {
                   object: { type: "string", enum: ["list"] },
-                  data: {
-                    type: "array",
-                    items: {
-                      type: "object",
-                      required: [
-                        "familyId",
-                        "deviceName",
-                        "userAgent",
-                        "createdIp",
-                        "lastUsedIp",
-                        "lastUsedAt",
-                        "createdAt",
-                        "expiresAt",
-                        "current",
-                      ],
-                      properties: {
-                        familyId: { type: "string" },
-                        deviceName: { type: ["string", "null"] },
-                        userAgent: { type: ["string", "null"] },
-                        createdIp: { type: ["string", "null"] },
-                        lastUsedIp: { type: ["string", "null"] },
-                        lastUsedAt: { type: ["string", "null"], format: "date-time" },
-                        createdAt: { type: "string", format: "date-time" },
-                        expiresAt: { type: "string", format: "date-time" },
-                        current: { type: "boolean" },
-                      },
-                    },
-                  },
+                  data: { type: "array", items: { $ref: "#/components/schemas/AccessGrant" } },
                   hasMore: { type: "boolean" },
                 },
               },
@@ -1287,13 +1296,14 @@ export const oidcPaths = {
       },
     },
   },
-  "/api/auth/cli/sessions/revoke": {
+  "/api/auth/access-grants/revoke": {
     post: {
-      tags: ["Device Authorization"],
-      operationId: "cliRevokeSession",
-      summary: "Revoke a single CLI session owned by the caller",
+      tags: ["Access Grants"],
+      operationId: "revokeMyAccessGrant",
+      "x-appstrate-space": { kind: "organization" },
+      summary: "End one of the caller's access grants",
       description:
-        "Revoke a single CLI session owned by the caller. Cookie auth required. `revoked: false` is returned when the family does not exist, does not belong to the caller, or has already been revoked — the route layer does not distinguish these cases at the HTTP shape so an attacker who somehow guessed a `family_id` cannot probe ownership through the response.",
+        "End one grant. A CLI session's refresh-token family is revoked. An MCP grant's tokens are deleted, its endpoint is taken out of the caller's consent to the client (reconnecting shows the consent screen again), and an access token already issued is refused from its next request. `revoked: false` when the id names no live grant of the caller — unknown, someone else's and already ended look the same, so an id cannot be probed. Browser session only.",
       security: [{ cookieAuth: [] }],
       requestBody: {
         required: true,
@@ -1301,8 +1311,9 @@ export const oidcPaths = {
           "application/json": {
             schema: {
               type: "object",
-              required: ["familyId"],
-              properties: { familyId: { type: "string", minLength: 1 } },
+              additionalProperties: false,
+              required: ["id"],
+              properties: { id: { type: "string", minLength: 1 } },
             },
           },
         },
@@ -1314,6 +1325,7 @@ export const oidcPaths = {
             "application/json": {
               schema: {
                 type: "object",
+                required: ["revoked"],
                 properties: { revoked: { type: "boolean" } },
               },
             },
@@ -1326,13 +1338,14 @@ export const oidcPaths = {
       },
     },
   },
-  "/api/auth/cli/sessions/revoke-all": {
+  "/api/auth/access-grants/revoke-all": {
     post: {
-      tags: ["Device Authorization"],
-      operationId: "cliRevokeAllSessions",
-      summary: "Revoke every active CLI session belonging to the caller",
+      tags: ["Access Grants"],
+      operationId: "revokeAllMyAccessGrants",
+      "x-appstrate-space": { kind: "organization" },
+      summary: "End every access grant of the caller",
       description:
-        "Revoke every active CLI session belonging to the caller. Server primitive backing `appstrate logout --all`. Cookie auth required. Idempotent — calling on an account with no active sessions returns `{ revokedCount: 0 }`.",
+        "End every CLI session and MCP client grant of the caller, as `revoke` does for one. Idempotent: an account with none returns `{ revoked_count: 0 }`. Browser session only.",
       security: [{ cookieAuth: [] }],
       responses: {
         "200": {
@@ -1341,7 +1354,8 @@ export const oidcPaths = {
             "application/json": {
               schema: {
                 type: "object",
-                properties: { revokedCount: { type: "integer", minimum: 0 } },
+                required: ["revoked_count"],
+                properties: { revoked_count: { type: "integer", minimum: 0 } },
               },
             },
           },
@@ -1357,6 +1371,7 @@ export const oidcPaths = {
     get: {
       tags: ["Device Authorization"],
       operationId: "deviceActivateGet",
+      "x-appstrate-space": { kind: "organization" },
       summary: "User-facing verification page",
       description:
         "Server-rendered HTML page where the user types the short `user_code` shown by the CLI. When called with `?user_code=...` and a valid session, resolves to a consent panel; otherwise shows the entry form or redirects to `/auth/login` with a `returnTo` that preserves the code.",
@@ -1395,6 +1410,7 @@ export const oidcPaths = {
     post: {
       tags: ["Device Authorization"],
       operationId: "deviceActivateSubmit",
+      "x-appstrate-space": { kind: "organization" },
       summary: "Normalize a submitted user_code and redirect to the consent panel",
       responses: {
         "303": { description: "Redirect to `GET /activate?user_code=...`." },
@@ -1414,6 +1430,7 @@ export const oidcPaths = {
     post: {
       tags: ["Device Authorization"],
       operationId: "deviceActivateApprove",
+      "x-appstrate-space": { kind: "organization" },
       summary: "Approve a pending device authorization",
       description:
         "Delegates to Better Auth's `/api/auth/device/approve`. The realm/level guard registered by `oidcGuardsPlugin` enforces that the approving user's realm matches the target client's level — a cross-audience approval is rejected with 403.",
@@ -1435,6 +1452,7 @@ export const oidcPaths = {
     post: {
       tags: ["Device Authorization"],
       operationId: "deviceActivateDeny",
+      "x-appstrate-space": { kind: "organization" },
       summary: "Deny a pending device authorization",
       responses: {
         "200": { description: "Denied — renders the refusal page." },
@@ -1449,24 +1467,18 @@ export const oidcPaths = {
 
   // ── Admin oversight ────────────────────────────────────────────────────────
 
-  "/api/orgs/{orgId}/cli-sessions": {
+  "/api/orgs/{orgId}/access-grants": {
     get: {
-      tags: ["Device Authorization"],
-      operationId: "listOrgCliSessions",
-      summary: "List CLI sessions for org members (admin)",
+      tags: ["Access Grants"],
+      operationId: "listOrgAccessGrants",
+      "x-appstrate-space": { kind: "organization" },
+      summary: "List the access grants reaching an organization (admin)",
       description:
-        "Admin oversight of every active CLI session belonging to a member of `orgId`. Returns the same per-device shape as the personal `/api/auth/cli/sessions` endpoint, plus the owning member's id/email/name. Visibility scoped to the org's CURRENT roster — a member who left no longer surfaces here. Owner/admin only.\n\nCLI sessions are user-scoped, NOT space-scoped: a session is created by `appstrate login` against a user account, and is reusable across every space the user can reach. This endpoint therefore returns every active session held by a member of the org, regardless of which space(s) that member operates in — an admin auditing one space surface still sees CLI sessions that the same human is using to drive a different space in the same org.",
-      parameters: [
-        {
-          name: "orgId",
-          in: "path",
-          required: true,
-          schema: { type: "string" },
-        },
-      ],
+        "Every grant that reaches `orgId`: the CLI sessions of its current members, and the MCP client grants bound to its MCP endpoint or to one of its spaces' endpoints. Each row names its holder. A CLI session acts in every organization of its owner, so `revocable` is `false` for one whose owner also belongs to another organization. Requires `access-grants:read` (owner/admin).",
+      parameters: [{ name: "orgId", in: "path", required: true, schema: { type: "string" } }],
       responses: {
         "200": {
-          description: "Active org CLI sessions",
+          description: "Grants reaching the organization.",
           headers: commonHeaders,
           content: {
             "application/json": {
@@ -1475,43 +1487,7 @@ export const oidcPaths = {
                 required: ["object", "data", "hasMore"],
                 properties: {
                   object: { type: "string", enum: ["list"] },
-                  data: {
-                    type: "array",
-                    items: {
-                      type: "object",
-                      required: [
-                        "familyId",
-                        "userId",
-                        "userEmail",
-                        "userName",
-                        "deviceName",
-                        "userAgent",
-                        "createdIp",
-                        "lastUsedIp",
-                        "lastUsedAt",
-                        "createdAt",
-                        "expiresAt",
-                        "current",
-                      ],
-                      properties: {
-                        familyId: { type: "string" },
-                        userId: { type: "string" },
-                        userEmail: { type: ["string", "null"] },
-                        userName: { type: ["string", "null"] },
-                        deviceName: { type: ["string", "null"] },
-                        userAgent: { type: ["string", "null"] },
-                        createdIp: { type: ["string", "null"] },
-                        lastUsedIp: { type: ["string", "null"] },
-                        lastUsedAt: {
-                          type: ["string", "null"],
-                          format: "date-time",
-                        },
-                        createdAt: { type: "string", format: "date-time" },
-                        expiresAt: { type: "string", format: "date-time" },
-                        current: { type: "boolean" },
-                      },
-                    },
-                  },
+                  data: { type: "array", items: { $ref: "#/components/schemas/OrgAccessGrant" } },
                   hasMore: { type: "boolean" },
                 },
               },
@@ -1521,44 +1497,36 @@ export const oidcPaths = {
         "401": { $ref: "#/components/responses/Unauthorized" },
         "403": {
           $ref: "#/components/responses/Forbidden",
-          description: "Caller is not an admin/owner of the org.",
+          description: "Caller lacks `access-grants:read` in the organization.",
         },
         "429": { $ref: "#/components/responses/RateLimited" },
       },
     },
   },
 
-  "/api/orgs/{orgId}/cli-sessions/{familyId}": {
+  "/api/orgs/{orgId}/access-grants/{grantId}": {
     delete: {
-      tags: ["Device Authorization"],
-      operationId: "revokeOrgCliSession",
-      summary: "Revoke a member's CLI session (admin)",
+      tags: ["Access Grants"],
+      operationId: "revokeOrgAccessGrant",
+      "x-appstrate-space": { kind: "organization" },
+      summary: "End an access grant reaching an organization (admin)",
       description:
-        "Force a member's CLI session out from the dashboard. Logged with `revoked_reason='org_admin_revoked'` so the audit trail distinguishes admin force-outs from user-initiated logouts and reuse-detection revocations. Returns 404 when the family is unknown, doesn't belong to a current member of `orgId`, or has already been revoked — the route layer collapses these cases so an admin cannot probe membership outside the org through this endpoint.",
+        "End a member's CLI session (reason `org_admin_revoked`) or an MCP client grant bound to this organization, with the same effect as the holder ending it themselves. 404 when the id names no grant this organization can see, or a CLI session whose owner also belongs to another organization — the cases are not told apart, so membership outside the organization cannot be probed. Requires `access-grants:delete` (owner/admin).",
       parameters: [
-        {
-          name: "orgId",
-          in: "path",
-          required: true,
-          schema: { type: "string" },
-        },
-        {
-          name: "familyId",
-          in: "path",
-          required: true,
-          schema: { type: "string" },
-        },
+        { name: "orgId", in: "path", required: true, schema: { type: "string" } },
+        { name: "grantId", in: "path", required: true, schema: { type: "string" } },
       ],
       responses: {
-        "204": { description: "Revoked." },
+        "204": { description: "Ended." },
         "401": { $ref: "#/components/responses/Unauthorized" },
         "403": {
           $ref: "#/components/responses/Forbidden",
-          description: "Caller is not an admin/owner of the org.",
+          description: "Caller lacks `access-grants:delete` in the organization.",
         },
         "404": {
           $ref: "#/components/responses/NotFound",
-          description: "Session not found / not in this org / already revoked.",
+          description:
+            "No grant of this organization under that id, or one this admin may not end.",
         },
         "429": { $ref: "#/components/responses/RateLimited" },
       },

@@ -8,7 +8,6 @@ import {
   MAX_MCP_ENVELOPE_SIZE,
   MAX_REQUEST_BODY_SIZE,
   INTEGRATION_ID_RE,
-  MAX_RESPONSE_SIZE,
   ABSOLUTE_MAX_RESPONSE_SIZE,
   API_CALL_TIMEOUT_MS,
   readPositiveByteEnv,
@@ -19,10 +18,6 @@ import {
 // --- Constants ---
 
 describe("constants", () => {
-  it("MAX_RESPONSE_SIZE is 256 KB", () => {
-    expect(MAX_RESPONSE_SIZE).toBe(256 * 1024);
-  });
-
   it("ABSOLUTE_MAX_RESPONSE_SIZE is 32 MB", () => {
     expect(ABSOLUTE_MAX_RESPONSE_SIZE).toBe(32 * 1024 * 1024);
   });

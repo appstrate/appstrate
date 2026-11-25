@@ -18,7 +18,6 @@ import type { ResolutionFieldError } from "@appstrate/core/api-errors";
 
 export type IntegrationManifestView = IntegrationManifest;
 export type IntegrationManifestAuth = NonNullable<IntegrationManifest["auths"]>[string];
-export type IntegrationAuthType = IntegrationManifestAuth["type"];
 
 /**
  * An agent's integration declaration flattened by `parseManifestIntegrations`:
@@ -47,7 +46,13 @@ export const CONNECTION_SCOPES = ["org", "space"] as const;
 export type ConnectionScope = (typeof CONNECTION_SCOPES)[number];
 
 /** Actions a caller may take on a connection, listed per row on the list surfaces. */
-export const CONNECTION_ACTIONS = ["rename", "share", "share_all_spaces", "unshare_here"] as const;
+export const CONNECTION_ACTIONS = [
+  "rename",
+  "reconnect",
+  "share",
+  "share_all_spaces",
+  "unshare_here",
+] as const;
 export type ConnectionAction = (typeof CONNECTION_ACTIONS)[number];
 
 /** Where a connection reaches, as one reader sees it. */
@@ -119,7 +124,7 @@ export interface IntegrationConnection extends ConnectionReach {
 
 export interface IntegrationAuthStatus {
   auth_key: string;
-  type: IntegrationAuthType;
+  type: IntegrationManifestAuth["type"];
   required: boolean;
   /** Scopes declared in the manifest (the ones the connect button requests). */
   scopes: string[];

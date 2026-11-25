@@ -25,10 +25,13 @@ import { describe, it, expect, beforeAll, afterAll, beforeEach } from "bun:test"
 import * as jose from "jose";
 import { eq } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
-import { endUsers, spaces } from "@appstrate/db/schema";
+import type { MeConnectionSourceGroup } from "@appstrate/shared-types";
+import { endUsers, integrationConnections, spaces } from "@appstrate/db/schema";
 import { truncateAll } from "../../../../../../test/helpers/db.ts";
 import { createTestUser, createTestOrg } from "../../../../../../test/helpers/auth.ts";
 import { oidcEndUserProfiles } from "@appstrate/db/schema";
+import { localIntegrationManifest } from "../../../../../../test/helpers/integration-manifests.ts";
+import { seedPackage } from "../../../../../../test/helpers/seed.ts";
 import { prefixedId } from "@appstrate/db/ids";
 
 let privateKey: jose.CryptoKey;
@@ -139,6 +142,60 @@ describe("OIDC auth strategy — end-to-end via getTestApp", () => {
     });
     // Strategy claimed the request, endUser context set, route reached.
     expect(res.status).toBe(200);
+  });
+
+  it("starts a listed renewal in an end user's pinned space with the token's own grants", async () => {
+    const packageId = "@oidcstrat/reconnect";
+    await seedPackage({
+      id: packageId,
+      orgId,
+      homeSpaceId: spaceId,
+      type: "integration",
+      draftManifest: localIntegrationManifest({
+        name: packageId,
+        auths: { api: { type: "api_key" } },
+      }),
+    });
+    const [row] = await db
+      .insert(integrationConnections)
+      .values({
+        integrationId: packageId,
+        authKey: "api",
+        accountId: "acct-listed",
+        orgId,
+        spaceId,
+        endUserId,
+        label: "Renewal",
+        credentialsEncrypted: "fixture",
+        scopesGranted: [],
+      })
+      .returning({ id: integrationConnections.id });
+    const token = await mintToken({
+      sub: authUserId,
+      actor_type: "end_user",
+      end_user_id: endUserId,
+      space_id: spaceId,
+      scope: "openid integrations:read integrations:connect",
+    });
+    const headers = { Authorization: `Bearer ${token}` };
+    const list = await app.request("/api/me/connections", { headers });
+    expect(list.status).toBe(200);
+    const body = (await list.json()) as { data: MeConnectionSourceGroup[] };
+    const listed = body.data
+      .flatMap((g) => g.connections)
+      .find((r) => r.connection_id === row!.id)!;
+    expect(listed.reconnect_space_id).toBe(spaceId);
+    expect(listed.allowed_actions).toContain("reconnect");
+    const start = await app.request(`/api/integrations/${packageId}/auths/api/connect/session`, {
+      method: "POST",
+      headers: {
+        ...headers,
+        "X-Space-Id": listed.reconnect_space_id!,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ connection_id: listed.connection_id }),
+    });
+    expect(start.status).toBe(200);
   });
 
   for (const visibility of ["open", "closed", "private"] as const) {
@@ -471,7 +528,7 @@ describe("OIDC auth strategy — end-to-end via getTestApp", () => {
       email: "stage3@example.com",
       scope: "openid profile email",
     });
-    const denied = await app.request(`/api/orgs/${orgId}/cli-sessions`, {
+    const denied = await app.request(`/api/orgs/${orgId}/access-grants`, {
       headers: { Authorization: `Bearer ${identityOnly}` },
     });
     expect(denied.status).toBe(403);
@@ -800,8 +857,6 @@ describe("OIDC auth strategy — end-to-end via getTestApp", () => {
    * grant, so the token's scope claim is the only cap on it (RBAC spec §7.2).
    */
   async function seedOwnedConnection(): Promise<string> {
-    const { integrationConnections } = await import("@appstrate/db/schema");
-    const { seedPackage } = await import("../../../../../../test/helpers/seed.ts");
     await seedPackage({ id: "@oidcstrat/svc", orgId, type: "integration", source: "local" });
     const [row] = await db
       .insert(integrationConnections)
@@ -821,7 +876,6 @@ describe("OIDC auth strategy — end-to-end via getTestApp", () => {
   }
 
   async function connectionExists(connectionId: string): Promise<boolean> {
-    const { integrationConnections } = await import("@appstrate/db/schema");
     const rows = await db
       .select({ id: integrationConnections.id })
       .from(integrationConnections)

@@ -65,6 +65,7 @@ export interface ConnectionPickerOptions {
   persistence: ConnectionPickerPersistence;
   /** Version the readiness verdict is read for, so a launch form matches what it runs. Omitted: the server's default. */
   version?: string;
+  scheduleId?: string;
 }
 
 /** `openPopup` is injectable for tests (must resolve `true` once active integration queries refetched). */
@@ -106,6 +107,7 @@ export function useConnectionPicker(
     agentScopes,
     persistence,
     version,
+    scheduleId,
   }: ConnectionPickerOptions,
   deps: ConnectionPickerDeps = {},
 ) {
@@ -114,8 +116,14 @@ export function useConnectionPicker(
     integrationId,
     agentPackageId,
     version,
+    scheduleId,
   );
-  const readResolution = useReadIntegrationResolution(integrationId, agentPackageId, version);
+  const readResolution = useReadIntegrationResolution(
+    integrationId,
+    agentPackageId,
+    version,
+    scheduleId,
+  );
   const upsertPin = useUpsertMemberIntegrationPin();
   const deletePin = useDeleteMemberIntegrationPin();
   const hostedPopup = useHostedConnectPopup();
@@ -364,15 +372,10 @@ export function useConnectionPicker(
       scopes: conn.missing_scopes,
       connectionId: conn.id,
     });
-  // Only the owner renews or upgrades: a foreign shared connection's tokens are someone else's.
-  const canFixInPlace = (conn: IntegrationCandidate) =>
-    canConnect && conn.is_own && auths[conn.auth_key]?.type === "oauth2";
 
   return {
     gatesRun,
-    required,
     candidates,
-    candidateIds,
     canAddConnection,
     lockedConnectionIds,
     lockedBy,
@@ -389,7 +392,6 @@ export function useConnectionPicker(
     auths,
     authKeys,
     explicitIds,
-    pickedNone,
     summary,
     problems,
     problemsOf,
@@ -405,7 +407,6 @@ export function useConnectionPicker(
     manifest,
     missingScopeLabels,
     connectsWithAgentScopes,
-    canFixInPlace,
     oauthPending,
     persist,
     triggerConnect,

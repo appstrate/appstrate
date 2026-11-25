@@ -59,10 +59,6 @@ export function placementIn(placement: CataloguePlacement, spaceId: string): Pla
   return placement.inactiveIn.includes(spaceId) ? "inactive" : null;
 }
 
-export function inPlacedTab(placement: CataloguePlacement): boolean {
-  return !placement.unplaced;
-}
-
 /** The space to read a package's detail FROM: the server answers only where it is placed. Home first, then any holder. */
 export function detailSpace(
   placement: CataloguePlacement,

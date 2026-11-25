@@ -106,8 +106,8 @@ export function findRetiredDependencyKeys(manifest: unknown): RetiredDependencyK
  * An emptied `dependencies` is left as `{}` rather than deleted — `{}` is the
  * shape the editor itself mints for a fresh agent, so both writers agree.
  *
- * NOT wired into any stored/published path — there the key is tolerated and
- * surfaced as an install warning instead.
+ * Forking or publishing an existing draft also applies this to the newly written
+ * artifact. Published source versions keep their original manifest and digest.
  */
 export function dropRetiredDependencyKeys(
   manifest: Record<string, unknown>,

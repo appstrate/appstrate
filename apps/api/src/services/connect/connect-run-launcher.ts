@@ -37,6 +37,7 @@
  * the sentinel below — plaintext bundle bytes never touch stdout/stderr/logs.
  */
 
+import { getAppstrateConnectMeta } from "@appstrate/core/integration";
 import { createDecipheriv, randomBytes } from "node:crypto";
 
 import { toCredentialStringMap } from "@appstrate/connect/integration-credentials";
@@ -54,11 +55,7 @@ import {
   getLocalServerEnv,
 } from "@appstrate/core/integration";
 import { effectiveMcpServerType } from "@appstrate/core/mcp-server";
-import {
-  getAppstrateConnectMeta,
-  runnerEgressFor,
-  type AfpsManifestAuth,
-} from "../integration-manifest-helpers.ts";
+import { runnerEgressFor, type AfpsManifestAuth } from "../integration-manifest-helpers.ts";
 import {
   getOrchestrator,
   orchestratorSupportsSidecarOnly,
@@ -179,8 +176,7 @@ export async function buildConnectLoginSpec(
 
   return {
     integrationId: execution.integrationId,
-    // McpHost.normaliseNamespace slugs/caps this — the package id is the same
-    // namespace the spawn resolver uses for the agent-run path.
+    // Use the package ID as the namespace input, as the agent-run spawn resolver does.
     namespace: execution.integrationId,
     // connect-run only spawns local servers (the connect-login
     // tool can't run against a remote managed MCP — `runConnectOnce`

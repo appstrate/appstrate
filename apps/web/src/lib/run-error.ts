@@ -17,8 +17,7 @@ const RUN_ERROR_REASON_KEY: Record<ModelErrorReason, string> = {
 
 /**
  * The structured reason (`data.error_reason`) of a run's `adapter_error` row, or null.
- * The column `model_error` keeps no reason: the journal is its only durable home. The
- * value is unvalidated JSONB, so a reason with no sentence here reads as none.
+ * Older servers expose the reason only in the journal. Unknown JSONB values have no label.
  */
 export function findRunErrorReason(
   logs: ReadonlyArray<{ event?: string | null; data?: unknown }> | undefined,
@@ -48,8 +47,9 @@ export function runErrorText(
 ): string {
   // A `cancelled` run is only ever a member's cancellation (`POST /api/runs/{id}/cancel`).
   if (run.status === "cancelled") return t("run.cancelledByUser");
-  if (errorReason) return t(RUN_ERROR_REASON_KEY[errorReason]);
   const failure = run.model_error;
+  const reason = failure?.reason ?? errorReason;
+  if (reason) return t(RUN_ERROR_REASON_KEY[reason]);
   if (failure?.category === "credential_unavailable") return t("run.error.modelRefused");
   if (failure?.category === "rate_limited") return t("run.error.modelRateLimited");
   if (failure?.status != null && failure.message) {

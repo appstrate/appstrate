@@ -13,12 +13,10 @@ import { AgentRunButton } from "./agent-run-button";
 import { Ban, CalendarClock, Play } from "lucide-react";
 import { EmptyState, EmptyStateAction, NoMatchState } from "../page-states";
 import { ListToolbar, type FilterSpec } from "../list-toolbar";
-import { runStatusValues } from "@appstrate/core/run-status";
-import { readList, useLocalListParams } from "../../lib/list-params";
+import { usePanelListParams } from "../../lib/list-params";
 import { matchesSearch } from "../../lib/strings";
 import { deedEntry } from "../space-deed";
 import { useScheduleCreation } from "./use-schedule-creation";
-import { useConsumedSearchParam } from "../../hooks/use-consumed-search-param";
 
 export function AgentRunsTab({
   packageId,
@@ -29,12 +27,12 @@ export function AgentRunsTab({
 }) {
   const { t } = useTranslation(["agents", "common"]);
   // The overview's counters open this tab already filtered.
-  const requestedStatus = useConsumedSearchParam("agentRunStatus");
+  const list = usePanelListParams({ status: "agentRunStatus", q: "agentRunSearch" });
 
   return (
     <ScopedRunList
       scope={{ packageId }}
-      initialStatus={readList(requestedStatus, runStatusValues)}
+      list={list}
       emptyState={
         <EmptyState message={t("detail.emptyRuns")} icon={Play} compact>
           <AgentRunButton packageId={packageId} versionLabel={versionLabel} />
@@ -54,7 +52,7 @@ export function AgentSchedulesTab({ packageId }: { packageId: string }) {
   const { on: spanning } = useOverviewMode();
   const schedulesQuery = useSchedules(packageId, { spanning });
   const schedules = schedulesQuery.data;
-  const list = useLocalListParams();
+  const list = usePanelListParams({ state: "agentScheduleState", q: "agentScheduleSearch" });
   const states = list.values("state", ["active", "disabled"] as const);
   const columns = useScheduleColumns({ showAgentName: false, spanning });
   const create = useScheduleCreation(packageId, detail);
@@ -124,9 +122,11 @@ export function AgentSchedulesTab({ packageId }: { packageId: string }) {
 
 /** The agent's memory: the working space's, or, in « Tous les espaces », every space's the reader reaches. */
 export function AgentMemoryTab({ packageId }: { packageId: string }) {
-  const requestedType = useConsumedSearchParam("agentMemory");
+  const list = usePanelListParams({
+    type: "agentMemory",
+    scope: "agentMemoryScope",
+    q: "agentMemorySearch",
+  });
   const { on: spanning } = useOverviewMode();
-  const initialTypes: Array<"pinned" | "archive"> =
-    requestedType === "pinned" || requestedType === "archive" ? [requestedType] : [];
-  return <MemoryPanel packageId={packageId} initialTypes={initialTypes} spanning={spanning} />;
+  return <MemoryPanel packageId={packageId} list={list} spanning={spanning} />;
 }

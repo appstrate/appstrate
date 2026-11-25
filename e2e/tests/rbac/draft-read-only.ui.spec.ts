@@ -21,7 +21,7 @@
  * to reach the exact branch.
  */
 
-import { test, expect } from "../../fixtures/browser.fixture.ts";
+import { test, expect, seedRolePreview } from "../../fixtures/browser.fixture.ts";
 import { createAgent } from "../../helpers/seed.ts";
 
 test("a never-published agent opens read-only for an operator, and becomes launchable once published", async ({
@@ -54,21 +54,16 @@ test("a never-published agent opens read-only for an operator, and becomes launc
   });
   expect(model.status(), await model.text()).toBe(201);
 
-  await page.addInitScript(
-    (persona) => {
-      localStorage.setItem("appstrate_view_as", JSON.stringify(persona));
+  await seedRolePreview(page, {
+    orgId: browserCtx.org.orgId,
+    orgRole: "member",
+    space: {
+      spaceId: browserCtx.org.defaultSpaceId,
+      role: "preset:operator",
+      roleLabel: "Operator",
+      spaceName: "Default",
     },
-    {
-      orgId: browserCtx.org.orgId,
-      orgRole: "member",
-      space: {
-        spaceId: browserCtx.org.defaultSpaceId,
-        role: "preset:operator",
-        roleLabel: "Operator",
-        spaceName: "Default",
-      },
-    },
-  );
+  });
 
   // The list shows it — creating a package activates it at its home, and the
   // index is the active set — so the detail must answer, and answer 200. The

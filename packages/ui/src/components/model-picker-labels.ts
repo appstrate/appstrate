@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
+import type { Translate } from "./ui-labels.ts";
 import type { PickerReasonKind } from "./model-picker-groups.ts";
 import type { ModelPickerLabels } from "./model-picker.tsx";
 
@@ -8,9 +9,7 @@ import type { ModelPickerLabels } from "./model-picker.tsx";
  * the chat's cannot drift apart (same pattern as `buildGenerationLabels`). `t` is bound to a
  * namespace that resolves `modelPicker.*` (`settings`, a boot namespace).
  */
-export function buildModelPickerLabels(
-  t: (key: string, options?: Record<string, string>) => string,
-): ModelPickerLabels {
+export function buildModelPickerLabels(t: Translate<Record<string, string>>): ModelPickerLabels {
   const reasons: Record<PickerReasonKind, string> = {
     disabled: t("providers.state.disabled"),
     orgUnavailable: t("modelPicker.reason.orgUnavailable"),

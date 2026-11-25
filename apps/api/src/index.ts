@@ -72,7 +72,8 @@ import { apiVersion } from "./middleware/api-version.ts";
 import { idempotencyGuard } from "./middleware/idempotency-guard.ts";
 import { getCachedOrgApiVersion } from "./services/organizations.ts";
 import { getAppConfig, initAppConfig } from "./lib/app-config.ts";
-import { applyAuthPipeline, skipAuth } from "./lib/auth-pipeline.ts";
+import { skipAuth } from "./lib/auth-paths.ts";
+import { applyAuthPipeline } from "./lib/auth-pipeline.ts";
 import type { AppEnv } from "./types/index.ts";
 import { apiCors } from "./lib/cors.ts";
 
@@ -353,7 +354,7 @@ const schedulesRouter = createSchedulesRouter();
 // Org context for the `/api/orgs/:orgId*` family, where the org comes from the
 // PATH. Mounted here — before the orgs router AND before every module router
 // below — so a module mounting under `/api/orgs/:orgId/…` (oidc's
-// `cli-sessions`) inherits it instead of deriving its own, ceiling-free, set.
+// `access-grants`) inherits it instead of deriving its own, ceiling-free, set.
 app.use("/api/orgs/:orgId/*", ...ORG_PATH_MIDDLEWARE);
 
 // Organization routes (no org context needed — self-managed auth)

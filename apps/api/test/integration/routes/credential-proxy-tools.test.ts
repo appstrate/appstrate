@@ -128,6 +128,7 @@ describe("GET /api/credential-proxy/tools", () => {
         ],
         unlisted: [],
         truncated_catalogs: [],
+        uncached: [],
       });
       expect(body.not_ready[0]!.refusal).not.toHaveProperty("connect_url");
     });

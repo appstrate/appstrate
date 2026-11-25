@@ -183,6 +183,7 @@ export const llmProxyPaths = {
   [`${LLM_PROXY_MOUNT}${llmProxyUrlPath("openai-completions")}`]: {
     post: {
       operationId: "llmProxyOpenaiChatCompletions",
+      "x-appstrate-space": { kind: "organization" },
       tags: ["LLM Proxy"],
       summary: "OpenAI Chat Completions — with server-side model injection",
       description:
@@ -228,6 +229,7 @@ export const llmProxyPaths = {
   [`${LLM_PROXY_MOUNT}${llmProxyUrlPath("openai-responses")}`]: {
     post: {
       operationId: "llmProxyOpenaiResponses",
+      "x-appstrate-space": { kind: "organization" },
       tags: ["LLM Proxy"],
       summary: "OpenAI Responses — with server-side model injection",
       description:
@@ -277,6 +279,7 @@ export const llmProxyPaths = {
   [`${LLM_PROXY_MOUNT}${llmProxyUrlPath("anthropic-messages")}`]: {
     post: {
       operationId: "llmProxyAnthropicMessages",
+      "x-appstrate-space": { kind: "organization" },
       tags: ["LLM Proxy"],
       summary: "Anthropic Messages — with server-side model injection",
       description:
@@ -347,6 +350,7 @@ export const llmProxyPaths = {
   [`${LLM_PROXY_MOUNT}${llmProxyUrlPath("mistral-conversations")}`]: {
     post: {
       operationId: "llmProxyMistralChatCompletions",
+      "x-appstrate-space": { kind: "organization" },
       tags: ["LLM Proxy"],
       summary: "Mistral Chat Completions — with server-side model injection",
       description:
@@ -413,6 +417,7 @@ export const runLlmProxyPaths = Object.fromEntries(
     {
       post: {
         operationId: RUN_OPERATION_IDS[shape],
+        "x-appstrate-space": { kind: "organization" },
         tags: ["Internal"],
         summary: `Run inference (${shape}) — metered by the platform LLM proxy`,
         description:

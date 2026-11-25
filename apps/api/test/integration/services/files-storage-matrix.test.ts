@@ -228,12 +228,20 @@ describeRequiresS3("files storage parity — S3 presigned posture", () => {
     );
 
     const mcpCtx: McpToolContext = {
+      observe: () => {},
       origin: "https://instance.example",
       authHeaders: new Headers(),
       permissions: new Set(["files:read"]),
       ceiling: undefined,
       actor: { type: "user", id: ctx.user.id },
       scope,
+      skills: {
+        list: async () => [],
+        entry: async () => null,
+        read: async () => {
+          throw new Error("no skill reads here");
+        },
+      },
       fileAccess: async () => ({
         grants: [{ spaceId: scope.spaceId, permissions: new Set(["files:read"]) }],
       }),

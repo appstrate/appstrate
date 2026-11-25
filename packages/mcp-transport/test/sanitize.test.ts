@@ -46,19 +46,18 @@ describe("sanitiseTextField", () => {
 
 describe("sanitiseToolDescriptor", () => {
   it("sanitises tool description (zero-width + truncate)", () => {
-    const out = sanitiseToolDescriptor({
+    const { tool: out } = sanitiseToolDescriptor({
       name: "echo",
       description: "do​this tool" + "x".repeat(MAX_TOOL_DESCRIPTION_BYTES + 10),
       inputSchema: { type: "object" },
     });
-    expect(out).not.toBeNull();
-    expect(out!.description).not.toContain("​");
-    expect(out!.description!.length).toBeLessThanOrEqual(MAX_TOOL_DESCRIPTION_BYTES);
-    expect(out!.description).toContain("[truncated]");
+    expect(out.description).not.toContain("​");
+    expect(out.description!.length).toBeLessThanOrEqual(MAX_TOOL_DESCRIPTION_BYTES);
+    expect(out.description).toContain("[truncated]");
   });
 
   it("recursively sanitises nested property descriptions (Full-Schema Poisoning)", () => {
-    const out = sanitiseToolDescriptor({
+    const { tool: out } = sanitiseToolDescriptor({
       name: "bad",
       description: "ok",
       inputSchema: {
@@ -73,8 +72,7 @@ describe("sanitiseToolDescriptor", () => {
         },
       },
     });
-    expect(out).not.toBeNull();
-    const props = (out!.inputSchema as { properties?: Record<string, { description: string }> })
+    const props = (out.inputSchema as { properties?: Record<string, { description: string }> })
       .properties;
     expect(props).toBeDefined();
     const desc = props!.path!.description;
@@ -83,31 +81,8 @@ describe("sanitiseToolDescriptor", () => {
     expect(desc.length).toBeLessThanOrEqual(MAX_PARAMETER_DESCRIPTION_BYTES);
   });
 
-  it("returns null when sanitised schema exceeds the size cap", () => {
-    // Build a deeply nested, oversized schema.
-    const inflated = {
-      type: "object" as const,
-      properties: Object.fromEntries(
-        Array.from({ length: 200 }, (_, i) => [
-          `prop_${i}`,
-          { type: "string", description: "x".repeat(MAX_PARAMETER_DESCRIPTION_BYTES) },
-        ]),
-      ),
-    };
-    const out = sanitiseToolDescriptor({
-      name: "huge",
-      description: "ok",
-      inputSchema: inflated,
-    });
-    // The serialised schema after sanitisation will far exceed
-    // MAX_SCHEMA_SERIALISED_BYTES.
-    expect(out).toBeNull();
-    // Sanity: the input is genuinely above the cap.
-    expect(JSON.stringify(inflated).length).toBeGreaterThan(MAX_SCHEMA_SERIALISED_BYTES);
-  });
-
   it("preserves benign descriptors verbatim", () => {
-    const out = sanitiseToolDescriptor({
+    const { tool: out } = sanitiseToolDescriptor({
       name: "ok",
       description: "simple tool",
       inputSchema: {
@@ -116,9 +91,8 @@ describe("sanitiseToolDescriptor", () => {
         required: ["a"],
       },
     });
-    expect(out).not.toBeNull();
-    expect(out!.description).toBe("simple tool");
-    const props = (out!.inputSchema as { properties: Record<string, { description: string }> })
+    expect(out.description).toBe("simple tool");
+    const props = (out.inputSchema as { properties: Record<string, { description: string }> })
       .properties;
     expect(props.a!.description).toBe("an arg");
   });
@@ -136,7 +110,7 @@ describe("sanitiseToolDescriptor", () => {
   // An untrusted server's `outputSchema` used to ride through on the `...tool`
   // spread: unsanitised, and outside the serialised-size budget.
   it("strips hidden code points from outputSchema descriptions", () => {
-    const out = sanitiseToolDescriptor({
+    const { tool: out } = sanitiseToolDescriptor({
       name: "poisoned",
       inputSchema: { type: "object" },
       outputSchema: {
@@ -144,36 +118,17 @@ describe("sanitiseToolDescriptor", () => {
         properties: { result: { type: "string", description: "be​nign" } },
       },
     });
-    expect(out).not.toBeNull();
-    const props = (out!.outputSchema as { properties: Record<string, { description: string }> })
+    const props = (out.outputSchema as { properties: Record<string, { description: string }> })
       .properties;
     expect(props.result!.description).toBe("benign");
   });
 
-  it("counts outputSchema against the serialised-size cap", () => {
-    const inflated = {
-      type: "object" as const,
-      properties: Object.fromEntries(
-        Array.from({ length: 2000 }, (_, i) => [
-          `field_${i}`,
-          { type: "string", description: "x".repeat(64) },
-        ]),
-      ),
-    };
-    expect(JSON.stringify(inflated).length).toBeGreaterThan(MAX_SCHEMA_SERIALISED_BYTES);
-    // Small inputSchema — only the outputSchema breaches the budget.
-    const out = sanitiseToolDescriptor({
-      name: "oversized-output",
-      inputSchema: { type: "object" },
-      outputSchema: inflated,
-    });
-    expect(out).toBeNull();
-  });
-
   it("omits outputSchema when the upstream declared none", () => {
-    const out = sanitiseToolDescriptor({ name: "plain", inputSchema: { type: "object" } });
-    expect(out).not.toBeNull();
-    expect("outputSchema" in out!).toBe(false);
+    const { tool: out } = sanitiseToolDescriptor({
+      name: "plain",
+      inputSchema: { type: "object" },
+    });
+    expect("outputSchema" in out).toBe(false);
   });
 });
 
@@ -265,5 +220,248 @@ describe("stripReservedResultMeta", () => {
     expect(stripped.content[0]).toBe(clean);
     const untouched = { content: [clean] };
     expect(stripReservedResultMeta(untouched)).toBe(untouched);
+  });
+});
+
+describe("sanitiseToolDescriptor — schema budget", () => {
+  const bytes = (value: unknown) => new TextEncoder().encode(JSON.stringify(value)).byteLength;
+  const budgetOf = (tool: { inputSchema: unknown; outputSchema?: unknown }) =>
+    bytes(tool.inputSchema) + (tool.outputSchema === undefined ? 0 : bytes(tool.outputSchema));
+  /** An object schema of `count` string properties, each documented by `doc`. */
+  const objectSchema = (count: number, doc: Record<string, unknown> = {}) => ({
+    type: "object" as const,
+    properties: Object.fromEntries(
+      Array.from({ length: count }, (_, i) => [`field_${i}`, { type: "string", ...doc }]),
+    ),
+  });
+
+  it("leaves a descriptor within budget as it is", () => {
+    const tool = {
+      name: "small",
+      description: "ok",
+      inputSchema: objectSchema(3, { description: "a field" }),
+      outputSchema: objectSchema(3),
+    };
+    const { tool: out, reduced } = sanitiseToolDescriptor(tool);
+    expect(reduced).toEqual([]);
+    expect(out.inputSchema).toEqual(tool.inputSchema);
+    expect(out.outputSchema).toEqual(tool.outputSchema);
+  });
+
+  it("removes only the outputSchema when it alone breaks the budget", () => {
+    const inputSchema = objectSchema(5, { description: "kept", "x-note": "kept too" });
+    const outputSchema = objectSchema(400, { description: "x".repeat(32) });
+    expect(bytes(outputSchema)).toBeGreaterThan(MAX_SCHEMA_SERIALISED_BYTES);
+    const { tool: out, reduced } = sanitiseToolDescriptor({
+      name: "big-output",
+      inputSchema,
+      outputSchema,
+    });
+    expect(reduced).toEqual(["output_schema"]);
+    expect("outputSchema" in out).toBe(false);
+    expect(out.inputSchema).toEqual(inputSchema);
+  });
+
+  it("strips the input schema's documentation keywords, keeping names and validation", () => {
+    const doc = {
+      description: "y".repeat(200),
+      title: "A title",
+      examples: ["e"],
+      $comment: "c",
+      deprecated: false,
+      readOnly: false,
+      writeOnly: false,
+      "x-google-annotation": { a: 1 },
+    };
+    const inputSchema = {
+      type: "object" as const,
+      description: "the tool's arguments",
+      required: ["description", "title"],
+      properties: {
+        ...objectSchema(40, doc).properties,
+        description: { type: "string", description: "a property named description" },
+        title: { type: "string", enum: ["a", "b"], default: "a", title: "Title" },
+        "x-custom": { type: "string", "x-hint": "h" },
+        list: {
+          type: "array",
+          description: "d",
+          items: { $ref: "#/$defs/item", description: "d" },
+        },
+        choice: {
+          anyOf: [
+            { type: "string", description: "d" },
+            { const: 1, title: "one" },
+          ],
+        },
+      },
+      $defs: {
+        item: {
+          type: "object",
+          description: "d",
+          properties: { id: { type: "string", description: "d", pattern: "^[a-z]+$" } },
+          additionalProperties: false,
+        },
+      },
+    };
+    expect(bytes(inputSchema)).toBeGreaterThan(MAX_SCHEMA_SERIALISED_BYTES);
+    const { tool: out, reduced } = sanitiseToolDescriptor({
+      name: "documented",
+      description: "the tool's own description",
+      inputSchema,
+      outputSchema: objectSchema(2),
+    });
+    // The stripped input leaves room for the small output schema: it comes back.
+    expect(reduced).toEqual(["schema_documentation"]);
+    expect(out.outputSchema).toEqual(objectSchema(2));
+    expect(out.description).toBe("the tool's own description");
+    const schema = out.inputSchema as Record<string, unknown> & {
+      properties: Record<string, unknown>;
+    };
+    expect(schema.description).toBeUndefined();
+    expect(schema.required).toEqual(["description", "title"]);
+    expect(schema.properties.field_0).toEqual({ type: "string" });
+    expect(schema.properties.description).toEqual({ type: "string" });
+    expect(schema.properties.title).toEqual({ type: "string", enum: ["a", "b"], default: "a" });
+    expect(schema.properties["x-custom"]).toEqual({ type: "string" });
+    expect(schema.properties.list).toEqual({ type: "array", items: { $ref: "#/$defs/item" } });
+    expect(schema.properties.choice).toEqual({ anyOf: [{ type: "string" }, { const: 1 }] });
+    expect(schema.$defs).toEqual({
+      item: {
+        type: "object",
+        properties: { id: { type: "string", pattern: "^[a-z]+$" } },
+        additionalProperties: false,
+      },
+    });
+  });
+
+  it("withholds an input schema still too large once stripped, and says so", () => {
+    const { tool: out, reduced } = sanitiseToolDescriptor({
+      name: "huge",
+      description: "z".repeat(MAX_TOOL_DESCRIPTION_BYTES * 2),
+      inputSchema: objectSchema(600),
+    });
+    expect(reduced).toEqual(["schema_documentation", "input_schema"]);
+    expect(out.inputSchema).toEqual({ type: "object" });
+    expect(out.description!.startsWith("Input schema withheld, too large to show")).toBe(true);
+    expect(out.description).toContain("zzz");
+    expect(new TextEncoder().encode(out.description).byteLength).toBeLessThanOrEqual(
+      MAX_TOOL_DESCRIPTION_BYTES,
+    );
+    const bare = sanitiseToolDescriptor({ name: "bare", inputSchema: objectSchema(600) }).tool;
+    expect(bare.description).toContain("Input schema withheld");
+  });
+
+  it("keeps a small outputSchema beside an input schema it had to withhold", () => {
+    const inputSchema = {
+      type: "object" as const,
+      properties: {
+        pick: { enum: Array.from({ length: 1000 }, (_, i) => `value_${i}`) },
+      },
+    };
+    expect(bytes(inputSchema)).toBeGreaterThan(MAX_SCHEMA_SERIALISED_BYTES);
+    const { tool: out, reduced } = sanitiseToolDescriptor({
+      name: "enum",
+      inputSchema,
+      outputSchema: objectSchema(1),
+    });
+    expect(reduced).toEqual(["schema_documentation", "input_schema"]);
+    expect(out.inputSchema).toEqual({ type: "object" });
+    expect(out.outputSchema).toEqual(objectSchema(1));
+  });
+
+  it("strips documentation alone when no outputSchema is declared, x-* at the root included", () => {
+    const inputSchema = { ...objectSchema(2), "x-doc": "x".repeat(MAX_SCHEMA_SERIALISED_BYTES) };
+    const { tool: out, reduced } = sanitiseToolDescriptor({ name: "root-x", inputSchema });
+    expect(reduced).toEqual(["schema_documentation"]);
+    expect(out.inputSchema).toEqual(objectSchema(2));
+    expect("outputSchema" in out).toBe(false);
+  });
+
+  it("budgets UTF-8 bytes, not UTF-16 code units", () => {
+    // "€" is one code unit and three bytes.
+    const inputSchema = objectSchema(20, { description: "€".repeat(170) });
+    expect(JSON.stringify(inputSchema).length).toBeLessThanOrEqual(MAX_SCHEMA_SERIALISED_BYTES);
+    expect(bytes(inputSchema)).toBeGreaterThan(MAX_SCHEMA_SERIALISED_BYTES);
+    const { tool: out, reduced } = sanitiseToolDescriptor({ name: "euro", inputSchema });
+    expect(reduced).toEqual(["schema_documentation"]);
+    expect(out.inputSchema).toEqual(objectSchema(20));
+    expect(budgetOf(out)).toBeLessThanOrEqual(MAX_SCHEMA_SERIALISED_BYTES);
+  });
+
+  it("strips draft-07 dependencies' schemas, keeps their property lists, and walks additionalItems", () => {
+    const inputSchema = {
+      type: "object" as const,
+      "x-pad": "x".repeat(MAX_SCHEMA_SERIALISED_BYTES),
+      dependencies: {
+        a: ["b", "c"],
+        c: { type: "object", description: "d", properties: { x: { type: "string", title: "t" } } },
+      },
+      properties: {
+        list: {
+          type: "array",
+          items: [{ type: "string" }],
+          additionalItems: { type: "number", description: "d" },
+        },
+        blob: { type: "string", contentSchema: { type: "object", title: "t" } },
+      },
+    };
+    const { tool: out, reduced } = sanitiseToolDescriptor({ name: "deps", inputSchema });
+    expect(reduced).toEqual(["schema_documentation"]);
+    expect(out.inputSchema).toEqual({
+      type: "object",
+      dependencies: {
+        a: ["b", "c"],
+        c: { type: "object", properties: { x: { type: "string" } } },
+      },
+      properties: {
+        list: { type: "array", items: [{ type: "string" }], additionalItems: { type: "number" } },
+        blob: { type: "string", contentSchema: { type: "object" } },
+      },
+    });
+  });
+
+  it("strips a malformed schema's documentation without throwing, leaving the rest as is", () => {
+    const inputSchema = {
+      type: "object" as const,
+      "x-pad": "x".repeat(MAX_SCHEMA_SERIALISED_BYTES),
+      properties: [{ type: "string" }, "odd"],
+      items: true,
+      not: false,
+      allOf: { type: "object", title: "t" },
+    } as unknown as { type: "object" };
+    const { tool: out, reduced } = sanitiseToolDescriptor({ name: "malformed", inputSchema });
+    expect(reduced).toEqual(["schema_documentation"]);
+    expect(out.inputSchema).toEqual({
+      type: "object",
+      properties: [{ type: "string" }, "odd"],
+      items: true,
+      not: false,
+      allOf: { type: "object" },
+    } as unknown as { type: "object" });
+  });
+
+  it("bounds a schema nested past the depth limit and still fits the budget", () => {
+    let inputSchema: Record<string, unknown> = { type: "string", description: "leaf" };
+    for (let i = 0; i < 500; i++) {
+      inputSchema = { type: "object", description: "level", properties: { a: inputSchema } };
+    }
+    const { tool: out } = sanitiseToolDescriptor({
+      name: "deep",
+      inputSchema: inputSchema as { type: "object" },
+    });
+    expect(budgetOf(out)).toBeLessThanOrEqual(MAX_SCHEMA_SERIALISED_BYTES);
+  });
+
+  it("always returns a descriptor within the schema budget", () => {
+    const multibyte = { description: "é".repeat(MAX_PARAMETER_DESCRIPTION_BYTES) };
+    const cases = [
+      { inputSchema: objectSchema(1), outputSchema: objectSchema(2000) },
+      { inputSchema: objectSchema(200, multibyte) },
+      { inputSchema: objectSchema(1000), outputSchema: objectSchema(1000) },
+    ];
+    for (const schemas of cases) {
+      const { tool: out } = sanitiseToolDescriptor({ name: "t", ...schemas });
+      expect(budgetOf(out)).toBeLessThanOrEqual(MAX_SCHEMA_SERIALISED_BYTES);
+    }
   });
 });

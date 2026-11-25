@@ -24,7 +24,7 @@ describe("chat turn metadata", () => {
         stepCount: 16,
         maxSteps: 16,
         maxStepsReached: true,
-        lastToolName: "describe_operation",
+        lastToolName: "describe",
       },
     );
 
@@ -37,7 +37,7 @@ describe("chat turn metadata", () => {
           stepCount: 16,
           maxSteps: 16,
           maxStepsReached: true,
-          lastToolName: "describe_operation",
+          lastToolName: "describe",
         },
       },
     });

@@ -13,7 +13,7 @@ import { OPERATION_INDEX_HEADING } from "@appstrate/core/chat-contract";
  * without a prompt cache, where the multi-KB index would be re-sent uncached on
  * every step: Mistral, and codex (the chatgpt.com backend is not prompt-cached
  * the way Anthropic/OpenAI are). Everyone else keeps it. Tools are unaffected —
- * the agent always has search_operations for discovery when the index is absent.
+ * the agent always has search for discovery when the index is absent.
  */
 export function applyOperationIndexPolicy(system: string, apiShape: string): string {
   const drop = apiShape === "mistral-conversations" || apiShape === "openai-codex-responses";

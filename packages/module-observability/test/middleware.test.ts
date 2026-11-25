@@ -27,7 +27,7 @@ import { describe, it, expect, beforeEach, afterEach } from "bun:test";
 import { Hono } from "hono";
 import type { Context } from "hono";
 import { SpanStatusCode } from "@opentelemetry/api";
-import { InMemorySpanExporter, type ReadableSpan } from "@opentelemetry/sdk-trace-base";
+import { InMemorySpanExporter, type ReadableSpan } from "@opentelemetry/sdk-trace";
 import {
   InMemoryMetricExporter,
   PeriodicExportingMetricReader,

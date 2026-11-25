@@ -1,7 +1,7 @@
 {
   "name": "@appstrate/ui",
   "version": "1.0.1",
-  "description": "Shared React UI components for Appstrate surfaces — schema-driven forms, upload widget, RJSF templates",
+  "description": "Shared React UI components for Appstrate surfaces \u2014 schema-driven forms, upload widget, RJSF templates",
   "license": "Apache-2.0",
   "private": true,
   "type": "module",
@@ -9,29 +9,6 @@
     "bun": ">=1.3.9"
   },
   "sideEffects": false,
-  "author": "Appstrate <hello@appstrate.dev>",
-  "repository": {
-    "type": "git",
-    "url": "https://github.com/appstrate/appstrate.git",
-    "directory": "packages/ui"
-  },
-  "homepage": "https://github.com/appstrate/appstrate/tree/main/packages/ui",
-  "bugs": {
-    "url": "https://github.com/appstrate/appstrate/issues"
-  },
-  "keywords": [
-    "appstrate",
-    "ui",
-    "react",
-    "rjsf",
-    "schema-form",
-    "afps"
-  ],
-  "files": [
-    "src",
-    "LICENSE",
-    "NOTICE"
-  ],
   "exports": {
     "./schema-form": "./src/schema-form/index.tsx",
     "./components/ui-labels": "./src/components/ui-labels.ts",
@@ -40,13 +17,14 @@
     "./components/model-picker-labels": "./src/components/model-picker-labels.ts",
     "./components/*": "./src/components/*.tsx",
     "./cn": "./src/cn.ts",
+    "./context-window": "./src/context-window.ts",
     "./identity-colors": "./src/identity-colors.ts",
     "./keyset-paging": "./src/keyset-paging.ts",
     "./lucide-names": "./src/lucide-names.ts",
     "./use-copy-to-clipboard": "./src/use-copy-to-clipboard.ts",
     "./use-live-elapsed-ms": "./src/use-live-elapsed-ms.ts",
-    "./use-keyboard-viewport": "./src/use-keyboard-viewport.ts",
-    "./use-mobile": "./src/use-mobile.ts"
+    "./use-now-tick": "./src/use-now-tick.ts",
+    "./use-keyboard-viewport": "./src/use-keyboard-viewport.ts"
   },
   "dependencies": {
     "@iconify/react": "^6.0.4",

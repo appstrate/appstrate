@@ -3,6 +3,7 @@
 import type { TFunction } from "i18next";
 import { formatDateField } from "./format-date";
 import { catalogueHref } from "./catalogue-link";
+import { runDetailPath } from "./package-paths";
 import { linkedSpacePath } from "./across-spaces";
 import type { paths } from "../api/client";
 
@@ -49,7 +50,7 @@ export function notificationRow(
   }
   const packageId = notification.payload?.packageId ?? null;
   const href =
-    packageId && notification.runId ? `/agents/${packageId}/runs/${notification.runId}` : null;
+    packageId && notification.runId ? runDetailPath(packageId, notification.runId) : null;
   const target = href && canReach(href) ? href : null;
   const liveName = packageId ? agentName(packageId) : undefined;
   if (notification.type === "agent_message") {

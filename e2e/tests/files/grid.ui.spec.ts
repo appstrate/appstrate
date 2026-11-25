@@ -3,6 +3,7 @@
 import { test, expect } from "../../fixtures/browser.fixture.ts";
 import { createOverviewContext } from "../../helpers/overview.ts";
 import { createSpace } from "../../helpers/seed.ts";
+import { menuItem } from "../../helpers/menu.ts";
 import { Sidebar } from "../../pages/sidebar.ts";
 import type { FileDto } from "../../../apps/web/src/hooks/use-files.ts";
 
@@ -99,14 +100,14 @@ for (const appearance of [
       return route.fulfill({ json: { ...image, preview_url: "/api/files/file_grid/content" } });
     });
     await page.goto("/files");
-    const cards = page.getByRole("tab", { name: "Vue cartes", exact: true });
-    const table = page.getByRole("tab", { name: "Vue tableau", exact: true });
-    await expect(cards).toHaveAttribute("data-state", "active");
-    const preview = page.getByRole("button", { name: "Aperçu: capture.png", exact: true });
-    await expect(preview).toBeVisible();
+    const cards = page.getByRole("radio", { name: "Vue cartes", exact: true });
+    const table = page.getByRole("radio", { name: "Vue tableau", exact: true });
+    await expect(cards).toBeChecked();
+    const tile = page.getByRole("link", { name: "Ouvrir: capture.png", exact: true });
+    await expect(tile).toBeVisible();
     await expect
       .poll(() =>
-        preview
+        tile
           .locator("img")
           .evaluate((img: HTMLImageElement) => img.complete && img.naturalWidth > 0),
       )
@@ -121,45 +122,46 @@ for (const appearance of [
     );
     await page.screenshot({ path: testInfo.outputPath("files-grid.png"), fullPage: true });
 
-    await preview.click();
-    await expect(page.getByRole("dialog", { name: "capture.png", exact: true })).toBeVisible();
-    await expect(page).toHaveURL(/preview=file_grid/);
-    await page.keyboard.press("Escape");
-    await expect(preview).toBeFocused();
+    // A file opens on its page, never in a modal over the list.
+    await tile.click();
+    await expect(page).toHaveURL(/\/files\/file_grid\?/);
+    await expect(page.getByRole("dialog")).toHaveCount(0);
+    await page.goBack();
+    await expect(tile).toBeVisible();
 
     const menu = page.getByRole("button", { name: "Plus d'actions pour capture.png", exact: true });
     await menu.click();
-    await page.getByRole("menuitem", { name: "Conserver", exact: true }).click();
+    await menuItem(page, "Conserver", { exact: true }).click();
     await expect.poll(() => kept).toBe(true);
     await menu.click();
-    await expect(page.getByRole("menuitem", { name: "Conserver", exact: true })).toHaveCount(0);
+    await expect(menuItem(page, "Conserver", { exact: true })).toHaveCount(0);
     const download = page.waitForEvent("download");
-    await page.getByRole("menuitem", { name: "Télécharger", exact: true }).click();
+    await menuItem(page, "Télécharger", { exact: true }).click();
     expect((await download).suggestedFilename()).toBe("capture.png");
 
     await table.click();
     await expect(page.getByRole("table", { name: "Documents", exact: true })).toBeVisible();
     await page.reload();
-    await expect(table).toHaveAttribute("data-state", "active");
+    await expect(table).toBeChecked();
     await cards.click();
     await page.reload();
-    await expect(cards).toHaveAttribute("data-state", "active");
+    await expect(cards).toBeChecked();
     const search = page.getByRole("textbox", { name: /Rechercher des fichiers/ });
     await search.fill("absent");
     await expect(
       page.getByText("Aucun document ne correspond à ce filtre.", { exact: true }),
     ).toBeVisible();
     await search.fill("");
-    await expect(preview).toBeVisible();
+    await expect(tile).toBeVisible();
     await menu.click();
-    await page.getByRole("menuitem", { name: "Supprimer", exact: true }).click();
+    await menuItem(page, "Supprimer", { exact: true }).click();
     const confirm = page.getByRole("alertdialog");
     await confirm.getByRole("button", { name: "Annuler", exact: true }).click();
     await expect(menu).toBeFocused();
     await menu.click();
-    await page.getByRole("menuitem", { name: "Supprimer", exact: true }).click();
+    await menuItem(page, "Supprimer", { exact: true }).click();
     await confirm.getByRole("button", { name: "Supprimer", exact: true }).click();
-    await expect(preview).toHaveCount(0);
+    await expect(tile).toHaveCount(0);
     expect(deleted).toBe(true);
   });
 }
@@ -196,7 +198,7 @@ for (const view of ["Vue cartes", "Vue tableau"]) {
         await route.fulfill({ json: { object: "list", data: [], hasMore: false } });
       });
       await page.goto("/files");
-      await page.getByRole("tab", { name: view, exact: true }).click();
+      await page.getByRole("radio", { name: view, exact: true }).click();
       await expect(page.getByText(name, { exact: true }).first()).toBeVisible();
       const pending = page.waitForRequest(
         (request) => new URL(request.url()).pathname === "/api/files",

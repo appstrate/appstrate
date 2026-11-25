@@ -23,7 +23,7 @@ import { eq } from "drizzle-orm";
 import { db, truncateAll } from "../../helpers/db.ts";
 import { createTestContext, type TestContext } from "../../helpers/auth.ts";
 import { seedAgent } from "../../helpers/seed.ts";
-import { packages } from "@appstrate/db/schema";
+import { packages, packageVersions } from "@appstrate/db/schema";
 import * as storage from "@appstrate/db/storage";
 import {
   resolveAgentRunManifest,
@@ -90,6 +90,33 @@ describe("resolveAgentRunVersion", () => {
 
     expect(resolved.overrideVersionLabel).toBe("1.0.0");
     expect(resolved.agent.prompt).toBe(PUBLISHED_PROMPT);
+  });
+
+  it("reads older snapshots and extension fields, and rejects malformed execution fields in both selectors", async () => {
+    const agent = await seedPublishedDirtyAgent();
+    const version = {
+      name: AGENT,
+      version: "1.0.0",
+      type: "agent",
+      dependencies: { tools: {} },
+      "x-extra": "reader",
+    };
+    await db
+      .update(packageVersions)
+      .set({ manifest: version })
+      .where(eq(packageVersions.packageId, AGENT));
+    for (const read of [resolveAgentRunManifest, resolveAgentRunVersion]) {
+      expect((await read(agent, "published")).agent.manifest).toMatchObject(version);
+    }
+    await db
+      .update(packageVersions)
+      .set({ manifest: { ...version, dependencies: 27 } })
+      .where(eq(packageVersions.packageId, AGENT));
+    for (const read of [resolveAgentRunManifest, resolveAgentRunVersion]) {
+      await expect(read(agent, "published")).rejects.toMatchObject({
+        code: "version_artifact_unavailable",
+      });
+    }
   });
 
   it("treats an empty selector like an omitted one", async () => {

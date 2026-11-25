@@ -16,6 +16,7 @@ import type { IntegrationConnection } from "../../../hooks/use-integrations.ts";
 installFakeStorage({ __APP_CONFIG__: { features: {}, trustedOrigins: [] } });
 
 const { OrgDefaultSection } = await import("../org-default-section.tsx");
+const { DefaultConnectionSettings } = await import("../default-connection-section.tsx");
 const { orgStore } = await import("../../../stores/org-store.ts");
 const { spaceStore } = await import("../../../stores/space-store.ts");
 const { render } = await import("../../../test/render.tsx");
@@ -60,7 +61,11 @@ function section(
     allow_additional_connections: boolean;
     agent_active?: boolean;
   }[] = [],
-  { agentsLoaded = true, enforce = false }: { agentsLoaded?: boolean; enforce?: boolean } = {},
+  {
+    agentsLoaded = true,
+    enforce = false,
+    retiredAuth = false,
+  }: { agentsLoaded?: boolean; enforce?: boolean; retiredAuth?: boolean } = {},
 ): string {
   const qc = new QueryClient({ defaultOptions: { queries: { retryOnMount: false } } });
   qc.setQueryData(
@@ -143,7 +148,21 @@ function section(
     id: SPACE_ID,
   });
   try {
-    return render(<OrgDefaultSection packageId={INTEGRATION} />, { queryClient: qc });
+    return render(
+      retiredAuth ? (
+        <DefaultConnectionSettings
+          packageId={INTEGRATION}
+          detail={{
+            active: true,
+            auths: [],
+            proxy_connection: { status: "not_required", imposed: enforce },
+          }}
+        />
+      ) : (
+        <OrgDefaultSection packageId={INTEGRATION} />
+      ),
+      { queryClient: qc },
+    );
   } finally {
     org.mockRestore();
     space.mockRestore();
@@ -151,6 +170,18 @@ function section(
 }
 
 describe("the space default's usage mode", () => {
+  it("keeps an existing default and agent exception editable after the last auth is retired", () => {
+    const html = section(
+      [SHARED],
+      [{ agent_package_id: "@acme/ops", allow_additional_connections: false }],
+      { enforce: true, retiredAuth: true },
+    );
+    expect(html).toContain('data-testid="org-default-section"');
+    expect(html).toContain('data-testid="pin-management-section"');
+    expect(html).toContain("Ops");
+    expect(html).not.toContain('data-testid="pin-add"');
+  });
+
   it("asks for shared connections before a mode change when every stored one is unshared", () => {
     const html = section([GONE]);
     expect(html).toContain('data-testid="org-default-mode-locked"');

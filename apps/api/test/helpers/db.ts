@@ -97,6 +97,7 @@ const CORE_TABLES = [
   // `package_shares` is read only by script 0048 and its boot guard.
   "package_shares",
   "space_packages",
+  "org_package_offers",
   "integration_connections",
   "integration_oauth_clients",
   "package_schedules",
