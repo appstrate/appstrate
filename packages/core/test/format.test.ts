@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { describe, it, expect } from "bun:test";
-import { formatAge, formatBytes, formatDuration, formatRelativeTime } from "../src/format.ts";
+import { formatBytes, formatDuration, formatRelativeTime } from "../src/format.ts";
 
 describe("formatDuration", () => {
   it("renders sub-second values as rounded milliseconds", () => {
@@ -62,7 +62,7 @@ describe("formatBytes", () => {
   });
 });
 
-describe("formatRelativeTime / formatAge", () => {
+describe("formatRelativeTime", () => {
   const NOW = Date.parse("2026-10-15T12:00:00Z");
   const MIN = 60_000;
   const HOUR = 60 * MIN;
@@ -71,12 +71,10 @@ describe("formatRelativeTime / formatAge", () => {
   const plain = (text: string) => text.replace(/\s/g, " ");
   const rel = (offset: number, locale = "fr") =>
     plain(formatRelativeTime(NOW + offset, NOW, locale));
-  const age = (offset: number) => plain(formatAge(NOW + offset, NOW, "fr"));
 
   it("reads under a minute as now, in both directions", () => {
     expect(rel(59_000)).toBe("maintenant");
     expect(rel(-59_000)).toBe("maintenant");
-    expect(age(-59_000)).toBe("maintenant");
   });
 
   it("truncates toward zero, so nothing is announced later than it is", () => {
@@ -92,15 +90,9 @@ describe("formatRelativeTime / formatAge", () => {
     expect(rel(400 * DAY)).toBe("dans 1 a");
   });
 
-  it("renders an age as a bare quantity, the same units without « il y a »", () => {
-    expect(age(-5 * MIN)).toBe("5 min");
-    expect(age(-3 * DAY)).toBe("3 j");
-    expect(age(-800 * DAY)).toBe("2 ans");
-  });
-
   it("renders nothing for an unparseable date, never « maintenant » or a throw", () => {
     expect(formatRelativeTime(Number.NaN, NOW, "fr")).toBe("");
-    expect(formatAge(Date.parse("not a date"), NOW, "fr")).toBe("");
+    expect(formatRelativeTime(Date.parse("not a date"), NOW, "fr")).toBe("");
   });
 
   it("speaks the locale it is given, English when it is absent or malformed", () => {
