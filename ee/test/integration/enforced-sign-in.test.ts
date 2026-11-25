@@ -9,7 +9,7 @@
 import { describe, it, expect, beforeEach, beforeAll, afterAll } from "bun:test";
 import { eq } from "drizzle-orm";
 import { createEmailVerificationToken } from "better-auth/api";
-import { deviceCode, session, user } from "@appstrate/db/schema";
+import { session, user } from "@appstrate/db/schema";
 import { getAuth, setBeforeSignupHook, _authHookSlotsForTesting } from "@appstrate/db/auth";
 import { getTestApp } from "../../../apps/api/test/helpers/app.ts";
 import { db, truncateAll } from "../../../apps/api/test/helpers/db.ts";
@@ -27,6 +27,7 @@ import { ENFORCED_SESSION_MAX_AGE_MS } from "../../src/sso/policy.ts";
 import {
   DOMAIN,
   TENANT,
+  approveDeviceCode,
   githubSignIn,
   interceptProviderFetches,
   microsoftSignIn,
@@ -259,31 +260,12 @@ describe("an enforced domain", () => {
   });
 
   it("refuses the device flow's own session (`/device/token`)", async () => {
-    const { ensureCliClient } =
-      await import("../../../apps/api/src/modules/oidc/services/ensure-cli-client.ts");
-    await ensureCliClient();
     const cookie = sessionCookieFrom(
       await microsoftSignIn(app, { email: alice.email, tenantId: TENANT }),
     )!;
-    const codeRes = await client.post("/device/code", {
-      client_id: "appstrate-cli",
-      scope: "openid profile email",
-    });
-    expect(codeRes.status).toBe(200);
-    const code = (await codeRes.json()) as { device_code: string; user_code: string };
-    await app.request(`/api/auth/device?user_code=${encodeURIComponent(code.user_code)}`, {
-      headers: { Cookie: cookie },
-    });
-    expect(
-      (await client.post("/device/approve", { userCode: code.user_code }, cookie)).status,
-    ).toBe(200);
-    await db
-      .update(deviceCode)
-      .set({ lastPolledAt: new Date(Date.now() - 10_000) })
-      .where(eq(deviceCode.deviceCode, code.device_code));
     const res = await client.post("/device/token", {
       grant_type: "urn:ietf:params:oauth:grant-type:device_code",
-      device_code: code.device_code,
+      device_code: await approveDeviceCode(app, cookie, "openid profile email"),
       client_id: "appstrate-cli",
     });
     expect(res.status).toBe(403);

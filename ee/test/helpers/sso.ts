@@ -8,9 +8,13 @@
  */
 
 import { afterAll, beforeAll } from "bun:test";
+import { eq } from "drizzle-orm";
+import { deviceCode } from "@appstrate/db/schema";
 import { getEeDb } from "../../src/db.ts";
 import { ssoConnections, ssoDomains, ssoSessions } from "../../drizzle/schema.ts";
 import { useAuthEnv } from "../../../apps/api/test/helpers/auth-env.ts";
+import { authClientFor } from "../../../apps/api/test/helpers/auth.ts";
+import { db } from "../../../apps/api/test/helpers/db.ts";
 
 export const TENANT = "11111111-2222-3333-4444-555555555555";
 export const OTHER_TENANT = "99999999-8888-7777-6666-555555555555";
@@ -209,4 +213,33 @@ export function sessionCookieFrom(res: Response): string | null {
 export function redirectError(res: Response): string | null {
   const location = res.headers.get("location");
   return location ? new URL(location, "http://localhost").searchParams.get("error") : null;
+}
+
+/**
+ * A CLI device code (`appstrate-cli`, `scope`) approved by the session in
+ * `cookie`, ready to be exchanged at once; resolves its `device_code`.
+ */
+export async function approveDeviceCode(
+  app: TestApp,
+  cookie: string,
+  scope: string,
+): Promise<string> {
+  const { ensureCliClient } =
+    await import("../../../apps/api/src/modules/oidc/services/ensure-cli-client.ts");
+  await ensureCliClient();
+  const client = authClientFor(app);
+  const codeRes = await client.post("/device/code", { client_id: "appstrate-cli", scope });
+  if (!codeRes.ok) throw new Error(`device/code answered ${codeRes.status}`);
+  const code = (await codeRes.json()) as { device_code: string; user_code: string };
+  await app.request(`/api/auth/device?user_code=${encodeURIComponent(code.user_code)}`, {
+    headers: { Cookie: cookie },
+  });
+  const approved = await client.post("/device/approve", { userCode: code.user_code }, cookie);
+  if (approved.status !== 200) throw new Error(`device/approve answered ${approved.status}`);
+  // Past the polling interval, so the first exchange is not told to slow down.
+  await db
+    .update(deviceCode)
+    .set({ lastPolledAt: new Date(Date.now() - 10_000) })
+    .where(eq(deviceCode.deviceCode, code.device_code));
+  return code.device_code;
 }

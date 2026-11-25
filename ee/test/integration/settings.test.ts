@@ -8,7 +8,7 @@
 
 import { describe, it, expect, beforeEach, afterAll, beforeAll } from "bun:test";
 import { and, eq } from "drizzle-orm";
-import { auditEvents, deviceCode, session } from "@appstrate/db/schema";
+import { auditEvents, session } from "@appstrate/db/schema";
 import { getTestApp } from "../../../apps/api/test/helpers/app.ts";
 import { db, truncateAll } from "../../../apps/api/test/helpers/db.ts";
 import {
@@ -20,8 +20,17 @@ import {
   type TestContext,
 } from "../../../apps/api/test/helpers/auth.ts";
 import { seedApiKey } from "../../../apps/api/test/helpers/seed.ts";
+import { loopbackHeaders } from "../../../apps/api/test/helpers/loopback.ts";
 import { swapTxtResolverForTesting, type TxtResolver } from "../../src/sso/dns.ts";
-import { DOMAIN, OTHER_TENANT, TENANT, seedMicrosoftSession, seedSso } from "../helpers/sso.ts";
+import { getConnection } from "../../src/sso/store.ts";
+import {
+  DOMAIN,
+  OTHER_TENANT,
+  TENANT,
+  approveDeviceCode,
+  seedMicrosoftSession,
+  seedSso,
+} from "../helpers/sso.ts";
 
 const app = getTestApp();
 const client = authClientFor(app);
@@ -63,28 +72,9 @@ function call(ctx: TestContext, method: string, path: string, body?: unknown) {
 
 /** A CLI login (device flow approved by the session in `cookie`): its refresh token. */
 async function cliRefreshTokenFor(cookie: string): Promise<string> {
-  const { ensureCliClient } =
-    await import("../../../apps/api/src/modules/oidc/services/ensure-cli-client.ts");
-  await ensureCliClient();
-  const code = (await (
-    await client.post("/device/code", {
-      client_id: "appstrate-cli",
-      scope: "openid profile email offline_access",
-    })
-  ).json()) as { device_code: string; user_code: string };
-  await app.request(`/api/auth/device?user_code=${encodeURIComponent(code.user_code)}`, {
-    headers: { Cookie: cookie },
-  });
-  expect((await client.post("/device/approve", { userCode: code.user_code }, cookie)).status).toBe(
-    200,
-  );
-  await db
-    .update(deviceCode)
-    .set({ lastPolledAt: new Date(Date.now() - 10_000) })
-    .where(eq(deviceCode.deviceCode, code.device_code));
   const res = await client.post("/cli/token", {
     grant_type: "urn:ietf:params:oauth:grant-type:device_code",
-    device_code: code.device_code,
+    device_code: await approveDeviceCode(app, cookie, "openid profile email offline_access"),
     client_id: "appstrate-cli",
   });
   expect(res.status).toBe(200);
@@ -143,6 +133,20 @@ describe("/api/org-sso", () => {
       expect(res.status).toBe(403);
     });
 
+    it("refuses the chat's loopback bearer, even an owner's carrying org-sso:write", async () => {
+      await seedSso({ orgId: owner.orgId, enforced: true });
+      const res = await app.request("/api/org-sso/enforcement", {
+        method: "DELETE",
+        headers: loopbackHeaders(owner, owner.orgId, {
+          orgRole: "owner",
+          permissions: ["org-sso:read", "org-sso:write"],
+        }),
+      });
+      expect(res.status).toBe(403);
+      expect(((await res.json()) as { code: string }).code).toBe("dashboard_session_required");
+      expect((await getConnection(owner.orgId))?.enforcedAt).not.toBeNull();
+    });
+
     it("never gives the join role a privileged value", async () => {
       const res = await call(owner, "PATCH", "/api/org-sso", { join_role: "admin" });
       expect(res.status).toBe(400);
@@ -152,7 +156,7 @@ describe("/api/org-sso", () => {
   });
 
   describe("domains", () => {
-    it("verifies a domain by its TXT record, and only by the right value", async () => {
+    it("verifies a domain once its TXT record carries the token", async () => {
       const added = (await (
         await call(owner, "POST", "/api/org-sso/domains", { domain: "Corp.Test." })
       ).json()) as Settings;
@@ -164,16 +168,10 @@ describe("/api/org-sso", () => {
       });
       expect(domain.txt_record_value).toStartWith("appstrate-domain-verification=");
 
+      // Which records match is `hasVerificationRecord`'s (dns.test.ts); the route answers 422 or 200.
       const missing = await call(owner, "POST", `/api/org-sso/domains/${domain.id}/verify`);
       expect(missing.status).toBe(422);
-      txtRecords[domain.txt_record_name] = [["appstrate-domain-verification=wrong"]];
-      expect((await call(owner, "POST", `/api/org-sso/domains/${domain.id}/verify`)).status).toBe(
-        422,
-      );
-
-      // A long value split across character-strings is joined.
-      const value = domain.txt_record_value;
-      txtRecords[domain.txt_record_name] = [["v=spf1 -all"], [value.slice(0, 20), value.slice(20)]];
+      txtRecords[domain.txt_record_name] = [[domain.txt_record_value]];
       const verified = await call(owner, "POST", `/api/org-sso/domains/${domain.id}/verify`);
       expect(verified.status).toBe(200);
       expect(((await verified.json()) as Settings).domains[0]!.verified).toBe(true);
