@@ -93,8 +93,8 @@ function PickRow({
         <Button
           type="button"
           variant="ghost"
-          size="icon"
-          className="size-7 shrink-0"
+          size="icon-sm"
+          className="desktop-pointer:size-7 shrink-0"
           aria-pressed={isDefault}
           aria-label={
             isDefault

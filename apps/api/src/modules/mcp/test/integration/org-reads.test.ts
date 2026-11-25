@@ -37,6 +37,7 @@ import { overrideJwks } from "../../../oidc/services/enduser-token.ts";
 import { resetOidcGuardsLimiters } from "../../../oidc/auth/guards.ts";
 import { authorizationCodeFlow } from "../../../oidc/test/helpers/authorization-code-flow.ts";
 import mcpModule from "../../index.ts";
+import { mintMcpLoopbackToken } from "../../../../../../../packages/module-chat/src/loopback-auth.ts";
 
 const app = getTestApp();
 await registerTestPlatformApp();
@@ -79,7 +80,7 @@ describe("lists spanning spaces through invoke_operation", () => {
         orgId: owner.orgId,
         spaceId,
         userId,
-        status: "success",
+        status: who === "owner" ? "failed" : "success",
         startedAt: new Date(),
       });
       runs[who] = run.id;
@@ -142,6 +143,7 @@ describe("lists spanning spaces through invoke_operation", () => {
     endpoint: string,
     token: string,
     spaceId?: string,
+    query?: Record<string, unknown>,
   ): Promise<Array<{ id: string; space_ids?: string[] } & Partial<HomeWire>>> {
     const res = await app.request(endpoint, {
       method: "POST",
@@ -158,6 +160,7 @@ describe("lists spanning spaces through invoke_operation", () => {
           name: "invoke_operation",
           arguments: {
             operation_id: operation,
+            query,
             path_params: { orgId: owner.orgId },
             ...(spaceId ? { space_id: spaceId } : {}),
           },
@@ -177,8 +180,8 @@ describe("lists spanning spaces through invoke_operation", () => {
     return body.data;
   }
 
-  async function restRuns(): Promise<string[]> {
-    const res = await app.request(`/api/orgs/${owner.orgId}/runs`, {
+  async function restRuns(query = ""): Promise<string[]> {
+    const res = await app.request(`/api/orgs/${owner.orgId}/runs${query}`, {
       headers: { Cookie: member.cookie },
     });
     expect(res.status).toBe(200);
@@ -215,8 +218,37 @@ describe("lists spanning spaces through invoke_operation", () => {
     const endpoint = `/api/mcp/o/${owner.orgId}`;
     // The entered space decides nothing here: each row's space decides it.
     // The default space (implicit `operator`) is reached too and holds no row.
+    expect(await invoke("listOrgRuns", endpoint, token)).toEqual(restIds);
     expect(await invoke("listOrgRuns", endpoint, token, un)).toEqual(restIds);
     expect(await invoke("listOrgRuns", endpoint, token, deux)).toEqual(restIds);
+  });
+
+  it("reads the conversation's origin when its signed bearer can reach two spaces", async () => {
+    const token = mintMcpLoopbackToken({
+      userId: member.user.id,
+      name: member.user.name,
+      email: member.user.email,
+      orgId: owner.orgId,
+      orgRole: "member",
+      permissions: ["mcp:read", "mcp:invoke", "runs:read", "runs:read-all"],
+      spaceIds: [un, deux],
+      originSpaceId: deux,
+      restricted: false,
+    });
+    const endpoint = `/api/mcp/o/${owner.orgId}`;
+    expect(await invoke("listOrgRuns", endpoint, token)).toEqual(runIds.deux);
+    expect(await invoke("listOrgRuns", endpoint, token, un)).toEqual([...runIds.un].sort());
+  });
+
+  it("returns the same failed and successful runs through CSV REST and MCP arrays", async () => {
+    const token = await mintToken(member, getMcpOrgResourceUri(owner.orgId));
+    const statuses = ["failed", "success"];
+    const rest = await restRuns("?status=failed,success");
+    const mcp = await invokeRows("listOrgRuns", `/api/mcp/o/${owner.orgId}`, token, un, {
+      status: statuses,
+    });
+    expect(rest).toEqual([...runIds.un, ...runIds.deux].sort());
+    expect(mcp.map((row) => row.id).sort()).toEqual(rest);
   });
 
   it("bounds a space-bound token to its space", async () => {

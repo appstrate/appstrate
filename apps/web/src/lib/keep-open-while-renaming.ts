@@ -1,5 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
+const attribute = "data-inline-editing";
+export const inlineEditingAttributes = { [attribute]: "" } as const;
+export const inlineEditingSelector = `[${attribute}]`;
+
 /**
  * Escape inside an inline rename (`InlineEditableLabel`, which marks its input
  * `data-inline-editing`) cancels the rename only: the dialog around it stays
@@ -7,5 +11,5 @@
  * the dialog has to ask.
  */
 export function keepOpenWhileRenaming(event: KeyboardEvent): void {
-  if (document.activeElement?.closest("[data-inline-editing]")) event.preventDefault();
+  if (document.activeElement?.closest(inlineEditingSelector)) event.preventDefault();
 }

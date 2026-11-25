@@ -10,11 +10,12 @@
  * space, end user) locks in the order it walks; a deadlock with one is detected by Postgres.
  */
 
+import { nextScheduleVersion } from "../lib/schedule-version.ts";
 import { and, asc, eq, inArray, or, sql, type SQL } from "drizzle-orm";
 import { schedules, type ScheduleDisabledReason } from "@appstrate/db/schema";
 import type { ConnectionOverrides } from "@appstrate/core/integration";
 import type { Actor } from "../lib/actor.ts";
-import type { Tx } from "../lib/db-helpers.ts";
+import type { DbOrTx, Tx } from "../lib/db-helpers.ts";
 
 /** `connection_overrides` names `connectionId` (a jsonpath variable, never spliced). */
 export function scheduleOverridesName(connectionId: string): SQL {
@@ -26,6 +27,17 @@ export function scheduleOverridesName(connectionId: string): SQL {
 /** `connection_overrides` names one of `connectionIds`; `undefined` for none. */
 export function schedulesNamingAny(connectionIds: readonly string[]): SQL | undefined {
   return or(...connectionIds.map((id) => scheduleOverridesName(id)));
+}
+
+/** The keys of `overrides` naming one of `ownedIds`, in key order. */
+export function integrationsNamingAny(
+  overrides: ConnectionOverrides | null,
+  ownedIds: ReadonlySet<string>,
+): string[] {
+  return Object.entries(overrides ?? {})
+    .filter(([, ids]) => ids.some((id) => ownedIds.has(id)))
+    .map(([integrationId]) => integrationId)
+    .sort();
 }
 
 /** A connection and the actor owning it. */
@@ -73,8 +85,68 @@ export async function disableSchedules(
   if (ids.length === 0) return;
   await tx
     .update(schedules)
-    .set({ enabled: false, disabledReason: reason, nextRunAt: null, updatedAt: new Date() })
+    .set({
+      enabled: false,
+      disabledReason: reason,
+      nextRunAt: null,
+      updatedAt: nextScheduleVersion,
+    })
     .where(inArray(schedules.id, [...ids]));
+}
+
+/** Schedules naming one of `connections` (in its `inSpaceId` when set); `undefined` for none. */
+function foreignNamingWhere(connections: readonly LostConnection[]): SQL | undefined {
+  return or(
+    ...connections.map((c) =>
+      and(
+        scheduleOverridesName(c.id),
+        c.inSpaceId === undefined ? undefined : eq(schedules.spaceId, c.inSpaceId),
+      ),
+    ),
+  );
+}
+
+/** The columns {@link pickForeign} reads, in id order. */
+const FOREIGN_NAMING_COLUMNS = {
+  id: schedules.id,
+  spaceId: schedules.spaceId,
+  userId: schedules.userId,
+  endUserId: schedules.endUserId,
+  enabled: schedules.enabled,
+  connectionOverrides: schedules.connectionOverrides,
+};
+
+/** The ids of `rows` {@link isForeignNaming} one of `connections` (of its `inSpaceId` when set). */
+function pickForeign(
+  rows: readonly (NamingSchedule & { id: string; spaceId: string })[],
+  connections: readonly LostConnection[],
+): string[] {
+  return rows
+    .filter((row) =>
+      connections.some(
+        (c) =>
+          (c.inSpaceId === undefined || row.spaceId === c.inSpaceId) && isForeignNaming(row, c),
+      ),
+    )
+    .map((row) => row.id);
+}
+
+/**
+ * The schedules {@link disableForeignSchedules} would disable for losing `connections`, read
+ * without a lock: a preview, stale as soon as it is returned.
+ */
+export async function selectForeignNamingScheduleIds(
+  executor: DbOrTx,
+  connections: readonly LostConnection[],
+): Promise<string[]> {
+  const naming = foreignNamingWhere(connections);
+  if (!naming) return [];
+  const rows = await executor
+    .select(FOREIGN_NAMING_COLUMNS)
+    .from(schedules)
+    .where(naming)
+    .orderBy(asc(schedules.id));
+  return pickForeign(rows, connections);
 }
 
 /**
@@ -88,36 +160,15 @@ export async function disableForeignSchedules(
   reason: ScheduleDisabledReason,
   alsoLock?: SQL,
 ): Promise<string[]> {
-  const naming = or(
-    ...connections.map((c) =>
-      and(
-        scheduleOverridesName(c.id),
-        c.inSpaceId === undefined ? undefined : eq(schedules.spaceId, c.inSpaceId),
-      ),
-    ),
-  );
+  const naming = foreignNamingWhere(connections);
   if (!naming && !alsoLock) return [];
   const rows = await tx
-    .select({
-      id: schedules.id,
-      spaceId: schedules.spaceId,
-      userId: schedules.userId,
-      endUserId: schedules.endUserId,
-      enabled: schedules.enabled,
-      connectionOverrides: schedules.connectionOverrides,
-    })
+    .select(FOREIGN_NAMING_COLUMNS)
     .from(schedules)
     .where(or(naming, alsoLock))
     .orderBy(asc(schedules.id))
     .for("update");
-  const ids = rows
-    .filter((row) =>
-      connections.some(
-        (c) =>
-          (c.inSpaceId === undefined || row.spaceId === c.inSpaceId) && isForeignNaming(row, c),
-      ),
-    )
-    .map((row) => row.id);
+  const ids = pickForeign(rows, connections);
   await disableSchedules(tx, ids, reason);
   return ids;
 }

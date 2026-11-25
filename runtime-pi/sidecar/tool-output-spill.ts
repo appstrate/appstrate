@@ -11,16 +11,16 @@
  */
 
 import { getErrorMessage } from "@appstrate/core/errors";
-import type { CallToolResult } from "@appstrate/mcp-transport";
+import { isMcpProtocolError, McpError, type CallToolResult } from "@appstrate/mcp-transport";
 import type { BlobStore } from "./blob-store.ts";
+import { scrubSecretMaterial } from "./redact.ts";
 import { logger } from "./logger.ts";
 import type { TokenBudget } from "./token-budget.ts";
 
 /** Run-scoped deps of the spill decision. */
 export interface ToolOutputBudgetDeps {
   tokenBudget: TokenBudget;
-  /** Absent: text that should spill is cut to the inline cap instead. */
-  blobStore?: BlobStore;
+  blobStore: BlobStore;
 }
 
 // ≈ 900 chars: well above the agent-side workspace pointer (~200 chars) that would replace it.
@@ -42,7 +42,7 @@ interface TextContent {
  * Reserve `text` inline, or stash it in the blob store and return the
  * `resource_link` that replaces it. `null` means "deliver `text` as is"
  * (its tokens are recorded). When the budget says spill but the blob
- * store is absent or refuses the bytes, the text is cut to the inline cap
+ * store refuses the bytes, the text is cut to the inline cap
  * and returned as a replacement `text` block: delivering it whole is how
  * an oversized output overflows the model request.
  */
@@ -68,15 +68,6 @@ export function spillTextIfOverBudget(
     return null;
   }
 
-  if (!blobStore) {
-    const cut = fitToInlineCap(text, tokenBudget, "spill unavailable: no blob store");
-    logger.warn("token-budget: no blob store configured, cut to inline cap", {
-      source: meta.source,
-      estimatedTokens,
-      consumedTokens: tokenBudget.consumedTokens(),
-    });
-    return { type: "text", text: cut };
-  }
   let record;
   try {
     record = blobStore.put(new TextEncoder().encode(text), {
@@ -167,31 +158,32 @@ export function boundUpstreamError(
   signal: AbortSignal | undefined,
 ): unknown {
   if (signal?.aborted || !(err instanceof Error) || err.name === "AbortError") return err;
-  const message = fitToInlineCap(err.message, tokenBudget, "upstream error over the inline cap");
-  if (message !== err.message) {
-    try {
-      err.message = message;
-    } catch {
-      // `message` is a getter on some host errors (DOMException): rebuild instead.
-      return Object.assign(new Error(message), { name: err.name });
+  const message = fitToInlineCap(
+    scrubSecretMaterial(err.message),
+    tokenBudget,
+    "upstream error over the inline cap",
+  );
+  if (isMcpProtocolError(err)) {
+    let data = err.data;
+    if (data !== undefined) {
+      try {
+        const json = JSON.stringify(data);
+        if (
+          !json ||
+          tokenBudget.estimate(json) > tokenBudget.inlineCapTokens ||
+          scrubSecretMaterial(json) !== json
+        )
+          data = undefined;
+      } catch {
+        data = undefined;
+      }
     }
+    const copy = new McpError(err.code, message, data);
+    // Both SDK generations prefix messages in their constructor; the source already includes it.
+    copy.message = message;
+    return copy;
   }
-  const holder = err as Error & { data?: unknown };
-  if (holder.data !== undefined) {
-    let serialised: string | undefined;
-    try {
-      serialised = JSON.stringify(holder.data);
-    } catch {
-      serialised = undefined;
-    }
-    if (
-      serialised === undefined ||
-      tokenBudget.estimate(serialised) > tokenBudget.inlineCapTokens
-    ) {
-      holder.data = undefined;
-    }
-  }
-  return err;
+  return Object.assign(new Error(message), { name: err.name });
 }
 
 type ContentBlock = CallToolResult["content"][number];

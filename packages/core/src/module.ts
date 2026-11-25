@@ -45,7 +45,7 @@ import type { TerminalRunStatus } from "./run-status.ts";
  * attributes, bundler support). `packages/core/test/core-version.test.ts`
  * asserts it equals the published `version` field, so it cannot drift.
  */
-export const CORE_VERSION = "17.0.0";
+export const CORE_VERSION = "18.0.0";
 
 /** Metadata describing a module. */
 export interface ModuleManifest {
@@ -983,6 +983,13 @@ interface AuthResolutionBase {
    * `c.get("credentialSpaceIds")`.
    */
   spaceIds?: readonly string[];
+  /**
+   * Whether {@link spaceIds} is a restriction the person chose. Default `true` (fail closed).
+   * `false`: the set is merely every space the person acts in this turn; the credential stays
+   * confined for every other rule, but acts on connections as the person does. Meaningful with
+   * `spaceIds` only. Propagated to `c.get("credentialSpaceIdsRestricted")` when `false`.
+   */
+  spaceIdsRestricted?: boolean;
   /** Optional end-user impersonation context (mirrors `c.get("endUser")`). */
   endUser?: EndUserContext;
   /** Strategy-specific metadata to attach via `c.set` under `extra` namespace. */

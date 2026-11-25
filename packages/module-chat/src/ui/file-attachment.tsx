@@ -5,10 +5,10 @@
  * sent user-message attachments (`thread.tsx`, input) and the run-card output
  * files (`chat-run-progress-card.tsx`, output) — and by the composer's staged
  * uploads: every chat file is the one attachment chip, an image's thumbnail or
- * the file type's icon in its media square. The click action (in-app preview vs. authenticated download) and its label come from
+ * the file type's icon in its media square. The preview action and its label come from
  * `fileActivation`, so both surfaces behave identically.
  *
- * Every service this needs — the preview opener, the authenticated download, the
+ * Every service this needs — the preview opener, the
  * authenticated image hook, the translator — is read from the host injection
  * seam, so callers pass a file and nothing else.
  */
@@ -170,9 +170,7 @@ function StoredImageMedia({ id, mime, spaceId }: { id: string; mime: string; spa
 
 /**
  * The unified file attachment: the chip, an image's thumbnail (read in the
- * file's space) or the type's icon leading. It opens the file's activation
- * (in-app preview when a host opener is present, else the host's
- * authenticated download).
+ * file's space) or the type's icon leading. Clicking opens the host's file viewer.
  */
 export function FileAttachment({
   file,
@@ -180,15 +178,15 @@ export function FileAttachment({
   /** `spaceId`: the file's space when known (the space of the call that produced it). */
   file: { id: string; name: string; mime?: string | null; spaceId?: string };
 }) {
-  const { openFile: opener, downloadFile, t, useSpaceLabelOf } = useChatHost();
+  const { openFile, t, useSpaceLabelOf } = useChatHost();
   const canIn = useCanIn();
   const spaceName = useSpaceLabelOf()(file.spaceId);
-  // Preview, download and thumbnail all read the file's content (`files:read`), in its space.
+  // Preview and thumbnail read the file's content (`files:read`), in its space.
   if (!canIn(file.spaceId, "files:read")) {
     const title = spaceName ? t("file.noAccessIn", { name: spaceName }) : t("file.noAccess");
     return <AttachmentChip name={file.name} mime={file.mime} title={title} />;
   }
-  const { onActivate, label } = fileActivation(file, opener, downloadFile, t);
+  const { onActivate, label } = fileActivation(file, openFile, t);
   return (
     <AttachmentChip
       name={file.name}

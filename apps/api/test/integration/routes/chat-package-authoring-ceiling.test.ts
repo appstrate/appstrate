@@ -20,7 +20,6 @@ import { registerTestPlatformApp } from "../../helpers/platform-app.ts";
 // auth strategy from.
 import { mintMcpLoopbackToken } from "../../../../../packages/module-chat/src/loopback-auth.ts";
 import { turnPermissions } from "../../../../../packages/module-chat/src/turn-permissions.ts";
-import type { ChatSkillMode } from "@appstrate/db/schema";
 
 const app = getTestApp();
 await registerTestPlatformApp();
@@ -31,7 +30,7 @@ interface ListedSpace {
   permissions: string[];
 }
 
-let bearer: (authoring: boolean, skillMode?: ChatSkillMode) => Record<string, string>;
+let bearer: (authoring: boolean, skillDiscovery?: boolean) => Record<string, string>;
 
 beforeEach(async () => {
   await truncateAll();
@@ -58,14 +57,14 @@ beforeEach(async () => {
     expect(resolved).toContain(permission);
   }
 
-  bearer = (authoring, skillMode = "auto") => {
+  bearer = (authoring, skillDiscovery = true) => {
     const token = mintMcpLoopbackToken({
       userId: builder.user.id,
       email: builder.user.email,
       name: builder.user.name,
       orgId: builder.orgId,
       orgRole: "member",
-      permissions: turnPermissions(resolved, { authoring, skillMode }),
+      permissions: turnPermissions(resolved, { authoring, skillDiscovery }),
     });
     return {
       Authorization: `Bearer ${token}`,
@@ -151,24 +150,24 @@ describe("a chat turn with package authoring switched off", () => {
   });
 });
 
-describe("a chat turn in the strict skill mode", () => {
+describe("a chat turn with skill discovery off", () => {
   it("is refused the skill listing although the builder's role grants it", async () => {
-    const list = (skillMode: ChatSkillMode) =>
-      app.request("/api/packages/skills", { headers: bearer(true, skillMode) });
-    expect((await list("strict")).status).toBe(403);
-    // Control: the same bearer outside strict lists them.
-    expect((await list("manual")).status).toBe(200);
+    const list = (skillDiscovery: boolean) =>
+      app.request("/api/packages/skills", { headers: bearer(true, skillDiscovery) });
+    expect((await list(false)).status).toBe(403);
+    // Control: the same bearer with discovery on lists them.
+    expect((await list(true)).status).toBe(200);
   });
 
   it("is refused writing a skill, whose response would echo its SKILL.md", async () => {
-    const create = (skillMode: ChatSkillMode) =>
+    const create = (skillDiscovery: boolean) =>
       app.request("/api/packages/skills", {
         method: "POST",
-        headers: { ...bearer(true, skillMode), "Content-Type": "application/json" },
+        headers: { ...bearer(true, skillDiscovery), "Content-Type": "application/json" },
         body: JSON.stringify({}),
       });
-    expect((await create("strict")).status).toBe(403);
-    // Control: outside strict the guard passes and the empty body is judged.
-    expect((await create("manual")).status).toBe(400);
+    expect((await create(false)).status).toBe(403);
+    // Control: with discovery on the guard passes and the empty body is judged.
+    expect((await create(true)).status).toBe(400);
   });
 });

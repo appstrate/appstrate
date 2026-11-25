@@ -89,11 +89,9 @@ test("single choices apply at once, and a failed save from the leave dialog keep
   });
   await page.goto("/workspace-settings/general");
   await page.getByRole("textbox", { name: "Nom", exact: true }).fill("Saved on leave");
+  // Settings' rail ends on the way to Preferences, the other dialog.
   const leave = () =>
-    page
-      .getByRole("navigation", { name: "Compte", exact: true })
-      .getByRole("link", { name: "Général", exact: true })
-      .click();
+    page.getByRole("link", { name: "Ouvrir les préférences", exact: true }).click();
   const dialog = page.getByRole("alertdialog", { name: "Modifications non enregistrées" });
   await leave();
   await dialog.getByRole("button", { name: "Enregistrer", exact: true }).click();
@@ -134,21 +132,22 @@ test("a form that outlives a space switch drops its draft and stays guarded", as
   orgOnlyClient,
 }) => {
   const target = await createSpace(orgOnlyClient, `Manual survivor ${Date.now()}`);
-  await page.goto("/preferences/general");
-  const name = page.getByRole("textbox", { name: "Nom d'affichage", exact: true });
+  // The organization's page does not depend on the space, so it stays mounted across the switch.
+  await page.goto("/org-settings/general");
+  const name = page.getByRole("textbox", { name: "Nom", exact: true });
   const original = await name.inputValue();
   const save = page.getByRole("button", { name: "Enregistrer", exact: true });
   const dialog = page.getByRole("alertdialog", { name: "Modifications non enregistrées" });
   await name.fill("Draft before the switch");
   await new Sidebar(page).switchSpaceInSettings(target.name);
   await dialog.getByRole("button", { name: "Quitter sans enregistrer" }).click();
-  // The account preference stays mounted: the draft is gone, not left unguarded.
+  // The organization's form stays mounted: the draft is gone, not left unguarded.
   await expect(name).toHaveValue(original);
   await expect(save).toHaveCount(0);
   await name.fill("Draft after the switch");
   await page
-    .getByRole("navigation", { name: "Compte", exact: true })
-    .getByRole("link", { name: "Apparence", exact: true })
+    .getByRole("navigation", { name: "Organisation", exact: true })
+    .getByRole("link", { name: "Utilisateurs", exact: true })
     .click();
   await expect(dialog).toBeVisible();
   await dialog.getByRole("button", { name: "Annuler", exact: true }).click();
@@ -211,7 +210,7 @@ test("browser Back can be cancelled without unmounting the edited form", async (
   await expect(page).toHaveURL(/preferences\/appearance/);
 });
 
-test("the trail shows a conversation's name, and its settings dialog renames it: Annuler writes nothing, Enregistrer writes to its own target", async ({
+test("the trail shows a conversation's name, and « Renommer » renames it: Annuler writes nothing, Renommer writes to its own target", async ({
   authedPage: page,
   apiClient,
   browserCtx,
@@ -240,10 +239,9 @@ test("the trail shows a conversation's name, and its settings dialog renames it:
   await expect(trail).toContainText("Rename A");
   await expect(trail.getByRole("textbox")).toHaveCount(0);
 
-  const openSettings = () =>
-    page.getByRole("button", { name: "Paramètres de la conversation", exact: true }).click();
-  const dialog = page.getByRole("dialog", { name: "Paramètres de la conversation" });
-  await openSettings();
+  const openRename = () => page.getByRole("button", { name: "Renommer", exact: true }).click();
+  const dialog = page.getByRole("dialog", { name: "Renommer la conversation" });
+  await openRename();
   const name = dialog.getByRole("textbox", { name: "Nom" });
   await expect(name).toHaveValue("Rename A");
   await name.fill("Pending A");
@@ -254,12 +252,12 @@ test("the trail shows a conversation's name, and its settings dialog renames it:
   // A row reads its title, then the spaces it touched.
   await page.getByRole("button", { name: /^Rename B\b/ }).click();
   await expect(page).toHaveURL(new RegExp(`/chat/${b}$`));
-  await openSettings();
+  await openRename();
   await expect(name).toHaveValue("Rename B");
   // Unchanged, nothing to save.
-  await expect(dialog.getByRole("button", { name: "Enregistrer", exact: true })).toBeDisabled();
+  await expect(dialog.getByRole("button", { name: "Renommer", exact: true })).toBeDisabled();
   await name.fill("Saved B");
-  await dialog.getByRole("button", { name: "Enregistrer", exact: true }).click();
+  await dialog.getByRole("button", { name: "Renommer", exact: true }).click();
   await expect(dialog).toHaveCount(0);
   await expect(trail).toContainText("Saved B");
   expect(writes).toEqual([{ id: b, title: "Saved B" }]);

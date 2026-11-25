@@ -292,6 +292,7 @@ describe("auto-provisioned client: CIMD first, DCR as fallback", () => {
   ): Promise<void> {
     meta = startMetadataServer(advertise);
     meta.provider = createStrictAuthorizationServer({
+      subject: "account-1",
       clientId: opts.clientId ?? documentUrl(meta.base),
       ...(opts.clientSecret ? { clientSecret: opts.clientSecret } : {}),
       ...(opts.clientSecret ? {} : { acceptedAuthMethods: ["none"] as const }),
@@ -469,7 +470,7 @@ describe("auto-provisioned client: CIMD first, DCR as fallback", () => {
       {
         packageId: INTEGRATION,
         authKey: AUTH_KEY,
-        accountId: "default",
+        accountId: "account-1",
         credentials: { access_token: "old-at", refresh_token: rt },
         expiresAt: new Date(Date.now() + 60_000),
         actor: { type: "user", id: ctx.user.id },
@@ -1012,6 +1013,10 @@ describe("auto-provisioned client: CIMD first, DCR as fallback", () => {
     const { resolved, picked } = await connectClient();
     expect(resolved.metadataDocumentClient).toBeUndefined();
     expect(picked!.clientId).toBe("dcr-1");
+    // The switch governs new registrations. An issuer may still fetch an earlier client's document.
+    const existing = await app.request(`/oauth/client-metadata/${documentName(meta.base)}`);
+    expect(existing.status).toBe(200);
+    expect(await existing.json()).toMatchObject({ client_id: documentUrl(meta.base) });
     expect(meta.registrations).toBe(1);
   });
 

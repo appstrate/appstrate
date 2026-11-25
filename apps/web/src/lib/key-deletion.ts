@@ -2,39 +2,37 @@
 
 import type { TFunction } from "i18next";
 import type { ModelProviderCredentialInfo } from "../hooks/use-model-provider-credentials";
-import type { OrgModelInfo } from "../hooks/use-models";
+import { ApiError } from "../api/errors";
+import { errorMessage } from "./mutation-error";
 
-/**
- * The server refuses an org key while any model references it, enabled or not (`credential_in_use`,
- * `ON DELETE RESTRICT`), so the prompt names those models and offers only Annuler. A member's
- * personal key serves no model of its own.
- */
+/** All referencing models count, including those hidden from the current model list. */
 export function keyDeletionPrompt(
-  credential: Pick<ModelProviderCredentialInfo, "id" | "label" | "owner_type">,
-  models: readonly OrgModelInfo[],
+  credential: Pick<ModelProviderCredentialInfo, "label" | "owner_type" | "referencing_model_count">,
   t: TFunction,
+  refusal: unknown = null,
+  referenceCountVerified = true,
 ): { description: string; blocked: boolean } {
-  const { label } = credential;
-  if (credential.owner_type === "user") {
+  const { label, referencing_model_count: count } = credential;
+  if (count > 0) {
     return {
-      description: t("credentials.deleteMemberConfirm", { ns: "settings", label }),
-      blocked: false,
+      description: t("credentials.deleteInUse", { ns: "settings", label, count }),
+      blocked: true,
     };
   }
-  const using = models.filter((m) => m.credentialId === credential.id);
-  if (using.length === 0) {
+  const refusedInUse = refusal instanceof ApiError && refusal.code === "credential_in_use";
+  if (refusal && (!refusedInUse || !referenceCountVerified)) {
     return {
-      description: t("credentials.deleteConfirm", { ns: "settings", label }),
-      blocked: false,
+      description: errorMessage(refusal),
+      blocked: refusedInUse,
     };
   }
   return {
-    description: t("credentials.deleteInUse", {
-      ns: "settings",
-      label,
-      count: using.length,
-      models: using.map((m) => m.label).join(", "),
-    }),
-    blocked: true,
+    description: t(
+      credential.owner_type === "user"
+        ? "credentials.deleteMemberConfirm"
+        : "credentials.deleteConfirm",
+      { ns: "settings", label },
+    ),
+    blocked: false,
   };
 }

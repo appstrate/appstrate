@@ -6,6 +6,7 @@
  * End-users belong to a space and represent external users of the platform.
  */
 
+import { likeContains } from "../lib/like-pattern.ts";
 import { eq, and, or, ilike, desc } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
 import { endUsers, notifications, runReads, uploads, organizations } from "@appstrate/db/schema";
@@ -138,7 +139,7 @@ export async function listEndUsers(
   if (params.search) {
     // Case-insensitive substring match across the human-facing fields so a
     // picker can find an end-user by name, email, or external id.
-    const pattern = `%${params.search}%`;
+    const pattern = likeContains(params.search);
     const term = or(
       ilike(endUsers.name, pattern),
       ilike(endUsers.email, pattern),

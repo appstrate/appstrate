@@ -2,7 +2,7 @@
 
 import type { ReactNode } from "react";
 import { useTranslation } from "react-i18next";
-import { SpaceNameOf } from "./space-name";
+import { SpaceNameOf, SpaceTilesOf } from "./space-name";
 import { PackageSpaces, type PackageSpacesOf } from "./package-spaces";
 import type { DataColumn } from "./data-table";
 
@@ -17,6 +17,16 @@ function useSpaceColumnOf<T>(spanning: boolean, cell: (row: T) => ReactNode): Da
 export function useSpaceColumn<T extends { spaceId?: string }>(spanning: boolean): DataColumn<T>[] {
   return useSpaceColumnOf<T>(spanning, (row) => (
     <SpaceNameOf spaceId={row.spaceId} className="text-muted-foreground" />
+  ));
+}
+
+/** The column of rows listed in SEVERAL spaces with none of them their home (connections). */
+export function useRowSpacesColumn<T>(
+  spanning: boolean,
+  spaceIdsOf: (row: T) => readonly string[],
+): DataColumn<T>[] {
+  return useSpaceColumnOf<T>(spanning, (row) => (
+    <SpaceTilesOf spaceIds={spaceIdsOf(row)} className="text-muted-foreground" />
   ));
 }
 

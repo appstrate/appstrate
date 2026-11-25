@@ -35,6 +35,23 @@ export interface PiUsage {
   };
 }
 
+/** Mirror of Pi's `CompactionResult`: the summary it appended, and what it cost. */
+export interface PiCompactionResult {
+  summary: string;
+  /** Session entry id of the first message kept beside the summary. */
+  firstKeptEntryId: string;
+  tokensBefore: number;
+  /** Pi's estimate of the session after the summary, system prompt included. */
+  estimatedTokensAfter?: number;
+}
+
+/** Pi's `compaction_end`; `result` is absent when the summary failed. */
+export interface PiCompactionEndEvent {
+  type: "compaction_end";
+  result: PiCompactionResult | undefined;
+  aborted: boolean;
+}
+
 /** UI-message-stream finish reasons this engine emits. */
 export type PiFinishReason = "stop" | "length" | "tool-calls" | "error" | "other";
 
@@ -45,6 +62,7 @@ export type AgentSessionEvent =
   | { type: "message_end"; message: unknown }
   | { type: "turn_end"; message: unknown; toolResults: unknown[] }
   | { type: "agent_end"; messages: unknown[] }
+  | PiCompactionEndEvent
   | {
       type: "tool_execution_end";
       toolCallId: string;
@@ -108,6 +126,7 @@ type _MessageEnd = Assert<Conforms<VendorEvent<"message_end">, OurEvent<"message
 type _TurnEnd = Assert<Conforms<VendorEvent<"turn_end">, OurEvent<"turn_end">>>;
 type _AgentEnd = Assert<Conforms<VendorEvent<"agent_end">, OurEvent<"agent_end">>>;
 type _ToolEnd = Assert<Conforms<VendorEvent<"tool_execution_end">, OurEvent<"tool_execution_end">>>;
+type _CompactionEnd = Assert<Conforms<VendorEvent<"compaction_end">, OurEvent<"compaction_end">>>;
 
 // Assistant-stream events the mapper branches on. Asserted per variant, not on
 // the whole union: a NEW streaming variant Pi adds and the mapper ignores is
@@ -153,6 +172,7 @@ type VendorConformance = _MessageStart &
   _TurnEnd &
   _AgentEnd &
   _ToolEnd &
+  _CompactionEnd &
   _StreamTextStart &
   _StreamTextDelta &
   _StreamTextEnd &

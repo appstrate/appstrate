@@ -7,7 +7,7 @@
  * creating and importing choose their space in their own menu (`useSpaceAction`).
  */
 
-import { useMemo, useState } from "react";
+import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Boxes } from "lucide-react";
 import { PageHeader } from "../components/page-header";
@@ -18,8 +18,13 @@ import { packageCardItem } from "../lib/package-card-item";
 import { packageDetailPath } from "../lib/package-paths";
 import { useListView } from "../stores/list-view-store";
 import { DataTable } from "../components/data-table";
-import { ListFooter, ListToolbar } from "../components/list-toolbar";
-import { EmptyState, EmptyStateAction, NoMatchState } from "../components/page-states";
+import { ListFooter, ListToolbar, type FilterSpec } from "../components/list-toolbar";
+import {
+  EmptyState,
+  EmptyStateAction,
+  NoMatchState,
+  SpaceFilterEmpty,
+} from "../components/page-states";
 import { CreationHandoffModal } from "../components/creation-handoff-modal";
 import { ImportModal } from "../components/import-modal";
 import { SpaceLibraryHint } from "../components/space-library-hint";
@@ -36,6 +41,9 @@ import { usePackageList } from "../hooks/use-packages";
 import { useOrg } from "../hooks/use-org";
 import { useColumnVisibility } from "../stores/column-visibility-store";
 import { useOverviewMode } from "../hooks/use-overview-mode";
+import { useSpaceFilter } from "../hooks/use-space-filter";
+import { showsTeamEmpty } from "../lib/space-filter";
+import { readerFiltered } from "../lib/list-filters";
 import { usePackageIndexActions } from "../hooks/use-package-index-actions";
 import { useSpaceLink } from "../hooks/use-current-space";
 import { IntegrationSourceLabel } from "../components/integration-source-label";
@@ -51,7 +59,7 @@ export function IntegrationsPage() {
   const connectionCount = useConnectionCounts();
   const linkInSpace = useSpaceLink();
   const [view, setView] = useListView("integrations");
-  const list = useListParams(["origin", "source"]);
+  const list = useListParams(["origin", "source", "space"]);
   const searchPlaceholder = useSearchPlaceholder(t("integrations.title"));
   const { canCreate, creation, importing, setImporting, createAction, actionsMenu } =
     usePackageIndexActions("integration", t("integrations.create"));
@@ -61,15 +69,49 @@ export function IntegrationsPage() {
   const sources = list.values("source", INTEGRATION_SOURCES);
   const query = list.search;
 
-  const shown = useMemo(
-    () => filterIntegrations(active, { query, origins, sources }),
-    [active, query, origins, sources],
+  const space = useSpaceFilter("integrations", spanning);
+  // The rows the space filter keeps, before the other filters.
+  const { rows: inFilteredSpaces, hiddenCount } = space.narrow(
+    active,
+    (integration) => integration.space_ids,
   );
-  const filtering = query.trim() !== "" || origins.length > 0 || sources.length > 0;
+  const shown = filterIntegrations(inFilteredSpaces, { query, origins, sources });
 
   const allColumns = useIntegrationListColumns(connectionCount, spanning);
   const { columns, menu } = useColumnVisibility("integrations", allColumns);
-  const empty = filtering ? (
+  const filters: FilterSpec[] = [
+    ...(space.filter ? [space.filter] : []),
+    {
+      id: "origin",
+      label: t("integrations.filter.origin"),
+      values: origins,
+      onChange: list.setValues("origin"),
+      options: [
+        { value: "custom", label: t("catalogue.sourceOrg", { name: orgName }) },
+        { value: "system", label: t("catalogue.sourceSystem") },
+      ],
+    },
+    {
+      id: "source",
+      label: t("integrations.col.source"),
+      values: sources,
+      onChange: list.setValues("source"),
+      options: INTEGRATION_SOURCES.map((source) => ({
+        value: source,
+        label: t(`integrations.source.${source}`),
+      })),
+    },
+  ];
+  const filtering = query.trim() !== "" || readerFiltered(filters);
+  const empty = showsTeamEmpty({
+    readerFiltered: filtering,
+    hiddenCount,
+  }) ? (
+    <SpaceFilterEmpty
+      message={t("common:spaceFilter.empty.integrations")}
+      showAll={space.showAll}
+    />
+  ) : filtering ? (
     <NoMatchState message={t("integrations.empty.filtered")} onReset={list.reset} />
   ) : (
     <EmptyState
@@ -94,28 +136,7 @@ export function IntegrationsPage() {
 
       <ListToolbar
         search={{ value: query, onChange: list.setSearch, placeholder: searchPlaceholder }}
-        filters={[
-          {
-            id: "origin",
-            label: t("integrations.filter.origin"),
-            values: origins,
-            onChange: list.setValues("origin"),
-            options: [
-              { value: "custom", label: t("catalogue.sourceOrg", { name: orgName }) },
-              { value: "system", label: t("catalogue.sourceSystem") },
-            ],
-          },
-          {
-            id: "source",
-            label: t("integrations.col.source"),
-            values: sources,
-            onChange: list.setValues("source"),
-            options: INTEGRATION_SOURCES.map((source) => ({
-              value: source,
-              label: t(`integrations.source.${source}`),
-            })),
-          },
-        ]}
+        filters={filters}
         onReset={list.reset}
         columns={view === "table" ? menu : undefined}
         actions={<ListViewTabs view={view} onChange={setView} />}

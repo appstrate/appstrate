@@ -81,6 +81,8 @@ interface ListProps {
   /** A first row that clears the choice: names what it falls back to. */
   inherit?: { label: string; modelId: string | null };
   renderIcon?: (model: PickerModel) => ReactNode;
+  /** A secondary line under a model's name, as its reason (the chat flags a model its conversation outgrows). */
+  renderNote?: (model: PickerModel) => ReactNode;
   /** The host's link to where the person adds or reconnects a key of their own. */
   fixLink?: (label: string) => ReactNode;
   /**
@@ -88,6 +90,11 @@ interface ListProps {
    * keeps its reason.
    */
   selectable?: (model: PickerModel) => boolean;
+  /**
+   * A control at the end of a model's row (its settings). Its click and its Enter reach it alone:
+   * neither selects the row.
+   */
+  rowAction?: (model: PickerModel) => ReactNode;
   className?: string;
   listClassName?: string;
 }
@@ -99,8 +106,10 @@ export function ModelPickerList({
   labels,
   inherit,
   renderIcon,
+  renderNote,
   fixLink,
   selectable,
+  rowAction,
   className,
   listClassName,
 }: ListProps) {
@@ -169,10 +178,23 @@ export function ModelPickerList({
                           {labels.reasons[blocked]}
                         </div>
                       )}
+                      {renderNote?.(model)}
                     </div>
                     <Check
                       className={cn("mt-0.5", model.id === value ? "opacity-100" : "opacity-0")}
                     />
+                    {rowAction && (
+                      // cmdk selects the highlighted row on Enter anywhere inside the list.
+                      <span
+                        className="contents"
+                        onClick={(event) => event.stopPropagation()}
+                        onKeyDown={(event) => {
+                          if (event.key === "Enter") event.stopPropagation();
+                        }}
+                      >
+                        {rowAction(model)}
+                      </span>
+                    )}
                   </CommandItem>
                 );
               })}

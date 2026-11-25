@@ -381,11 +381,8 @@ const AUTO_CONSUMED_BASENAMES = [
  *
  * Adapters extend the floor via `extraForbidden*`. Only the docker adapter
  * uses that now, for `/.docker/` (prefix) and `/.dockerenv` (file), which are
- * Docker-private and meaningless on a host filesystem. `/usr/` and
- * `/workspace/` used to be extras that BOTH adapters passed and are shared
- * floor now: PATH is not one adapter's business, and `/workspace/` is the
- * per-run tree shared with the agent container, where a credential mount
- * collides with run artifacts on every backend.
+ * Docker-private. The shared floor protects PATH directories on every backend and the
+ * workspace where credential files would collide with run artifacts.
  *
  * Matching semantics: a prefix matches when the path equals the prefix without
  * its trailing slash OR starts with the prefix; a file matches on exact

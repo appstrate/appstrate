@@ -2,21 +2,21 @@
 
 import type { ReactNode } from "react";
 import { useTranslation } from "react-i18next";
-import { isUnauthenticatedIntegration } from "@appstrate/core/integration";
 import { Puzzle } from "lucide-react";
 import { Badge } from "@appstrate/ui/components/badge";
 import { cn } from "@appstrate/ui/cn";
 import {
-  useIntegrationDetails,
+  useAgentConnectionReadiness,
+  useIntegrationsById,
   useIntegrationReadinessEntry,
   useAgentsConsumingIntegration,
   type AgentIntegrationEntry,
   type IntegrationCandidate,
-  type IntegrationDetailWire,
+  type IntegrationSummaryWire,
 } from "../../hooks/use-integrations";
 import { usePermissions } from "../../hooks/use-permissions";
+import { bindsConnection } from "./binds-connection";
 import { ActivateIntegrationButton } from "../activate-integration-button";
-import { ApiError } from "../../api/errors";
 import { errorMessage } from "../../lib/mutation-error";
 import type { ConnectionSet } from "../../lib/connection-set";
 import { ItemList } from "../item-list";
@@ -49,13 +49,15 @@ interface ScheduleOverrides {
   value: Readonly<Record<string, string[]>>;
   onChange: (integrationId: string, connectionIds: ConnectionSet) => void;
   version?: string;
+  scheduleId?: string;
 }
 
 /** An integration's own detail read, as one row needs it. */
 interface DetailState {
-  detail: IntegrationDetailWire | undefined;
+  detail: IntegrationSummaryWire | undefined;
   isLoading: boolean;
   error: unknown;
+  notPlaced: boolean;
 }
 
 /** One declared integration and its own detail read. */
@@ -64,9 +66,6 @@ interface IntegrationRow {
   state: DetailState;
 }
 
-/** 404: the integration is not placed in this space, which is what activating it fixes. */
-const isNotPlaced = (error: unknown) => error instanceof ApiError && error.status === 404;
-
 const displayNameOf = ({ entry, state }: IntegrationRow) =>
   state.detail?.manifest.display_name ?? entry.id;
 
@@ -74,8 +73,7 @@ const displayNameOf = ({ entry, state }: IntegrationRow) =>
  * Connection status for every declared integration, driven by the server's
  * `IntegrationAgentResolution` from the bulk `connection-readiness` query (the same verdict as the
  * launch badge and the run-kickoff 409). The picker shows for every integration, even inert ones;
- * whether one BLOCKS the run is the server's `run_blocking` flag. Activity comes from the
- * integration's own detail, never the paginated list.
+ * whether one BLOCKS the run is the server's `run_blocking` flag. The filtered catalogue returns activity and manifests for the exact dependency IDs.
  *
  * One self-contained block per integration, stacked, so a phone keeps every part without
  * scrolling: name, id and access on the left, status and the admin's « … » on the right (the pin
@@ -91,21 +89,38 @@ export function AgentIntegrationsBlock({
 }: AgentIntegrationsBlockProps) {
   const { t } = useTranslation(["agents", "settings"]);
   const { can } = usePermissions();
-  const details = useIntegrationDetails(entries.map((entry) => entry.id));
+  const details = useIntegrationsById(entries.map((entry) => entry.id));
+  const { data: readiness } = useAgentConnectionReadiness(
+    scheduleOverrides ? agentPackageId : undefined,
+    scheduleOverrides?.version,
+    scheduleOverrides?.scheduleId,
+  );
   // A pin binds the agent, whatever a schedule overrides: its rows offer none.
   const canPin = !scheduleOverrides && can("integrations:configure");
 
+  const byId = new Map(details.data?.map((row) => [row.id, row]));
   const rows: IntegrationRow[] = entries
-    .map((entry, index) => {
-      const query = details[index]!;
+    .map((entry) => {
+      const detail = byId.get(entry.id);
       return {
         entry,
-        state: { detail: query.data, isLoading: query.isLoading, error: query.error },
+        state: {
+          detail,
+          isLoading: details.isLoading || (!detail && details.isPlaceholderData),
+          error: details.error,
+          notPlaced: !detail && !!details.data && !details.isPlaceholderData && !details.error,
+        },
       };
     })
     // AFPS §7.2: an integration declaring no auths binds no connection, so it has no row here.
-    // Kept while its detail is unread: only the manifest says it takes none.
-    .filter(({ state }) => !(state.detail && isUnauthenticatedIntegration(state.detail.manifest)));
+    // On a schedule, judge the integration version it fires. The live manifest may have different auths.
+    .filter(({ entry, state }) =>
+      bindsConnection(
+        state.detail,
+        scheduleOverrides &&
+          readiness?.integrations.find((item) => item.integration_package_id === entry.id),
+      ),
+    );
   if (rows.length === 0) return empty;
 
   return (
@@ -130,9 +145,7 @@ export function AgentIntegrationsBlock({
                   <IntegrationStatusCell
                     packageId={row.entry.id}
                     // Optimistic while the detail loads so the status does not flash inactive.
-                    spaceActive={
-                      row.state.detail ? row.state.detail.active : !isNotPlaced(row.state.error)
-                    }
+                    spaceActive={row.state.detail ? row.state.detail.active : !row.state.notPlaced}
                     agentPackageId={agentPackageId}
                   />
                 )}
@@ -221,8 +234,7 @@ function IntegrationConnectionCell({
     // A placeholder only while a fetch is in flight: a disabled read (no `integrations:read`) never settles.
     // The picker's own wait (`LoadingPicker`), so the cell keeps one shape.
     if (isLoading) return <Skeleton className="h-7 w-32 rounded-md" />;
-    if (isNotPlaced(error))
-      return <InactiveIntegration packageId={packageId} required={required} />;
+    if (state.notPlaced) return <InactiveIntegration packageId={packageId} required={required} />;
     // Any other failure is named; a disabled read has none to name.
     return error ? (
       <span className={cn(AMBER_TEXT, "text-xs break-words")}>{errorMessage(error)}</span>
@@ -245,6 +257,7 @@ function IntegrationConnectionCell({
           onChange: (ids) => scheduleOverrides.onChange(packageId, ids),
         }}
         version={scheduleOverrides.version}
+        scheduleId={scheduleOverrides.scheduleId}
       />
     );
   }
@@ -329,7 +342,7 @@ function InactiveIntegration({ packageId, required }: { packageId: string; requi
 function buildReuseInfo(
   connections: IntegrationCandidate[],
   agentCount: number,
-  t: (k: string, opts?: Record<string, unknown>) => string,
+  t: (key: string, values: { account: string; count: number }) => string,
 ): string {
   const account = connections.map((c) => c.label).join(" · ");
   if (agentCount <= 1) {

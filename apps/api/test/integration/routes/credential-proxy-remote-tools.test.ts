@@ -18,14 +18,17 @@ import {
   spacePackages,
   spaces,
 } from "@appstrate/db/schema";
-import { fnv1a64Hex, isValidMcpToolName } from "@appstrate/afps-shared/mcp-naming";
+import {
+  fnv1a64Hex,
+  integrationNamespaces,
+  isValidMcpToolName,
+} from "@appstrate/afps-shared/mcp-naming";
 import { clearAllCachesLocally } from "@appstrate/core/cache";
 import { forgetProtocolEras } from "@appstrate/mcp-transport/testing";
 import type { IntegrationManifest } from "@appstrate/core/integration";
 import { getEnv } from "@appstrate/env";
 import { drainAudits, pendingAuditCount } from "../../../src/services/audit.ts";
 import {
-  integrationNamespaces,
   listIntegrationTools,
   type IntegrationTool,
   type IntegrationToolListing,
@@ -238,6 +241,38 @@ describe("the typed tools of a remote MCP integration", () => {
         catalog_unreadable: true,
       });
     }
+  });
+
+  it("with catalogs=cached, contacts no server for a cold catalog and serves a warm one", async () => {
+    await seedProxyIntegration(ctx, remote());
+    await seedProxyConnection(ctx, ID, "api_key", { token: TOKEN });
+    const journaled = async () => (await db.select().from(connectionCalls)).length;
+
+    // Cold: nothing sent, nothing journaled; the declared names, flagged, and the integration named.
+    const cold = await list({ catalogs: "cached" });
+    expect(cold.status).toBe(200);
+    expect(server.requests).toEqual([]);
+    expect(await journaled()).toBe(0);
+    expect(cold.body.uncached).toEqual([ID]);
+    expect(cold.remote.map((tool) => tool.remote_name).sort()).toEqual([
+      "create",
+      "forge",
+      "search",
+    ]);
+    expect(cold.remote.every((tool) => tool.catalog_unreadable === true)).toBe(true);
+
+    // A live listing reads the server and fills the cache…
+    const live = await list();
+    expect(live.body.uncached).toEqual([]);
+    expect(server.requests.length).toBeGreaterThan(0);
+
+    // …which a cached listing then serves whole, without another exchange.
+    const exchanges = server.requests.length;
+    const warm = await list({ catalogs: "cached" });
+    expect(server.requests.length).toBe(exchanges);
+    expect(warm.body.uncached).toEqual([]);
+    expect(warm.remote.map((tool) => tool.name)).toEqual(live.remote.map((tool) => tool.name));
+    expect(warm.remote[0]).toMatchObject({ description: `${ID}. Full-text search.` });
   });
 
   it("lists with the connection the proxy selects when none is named", async () => {
@@ -1643,6 +1678,30 @@ describe("the typed tools of a remote MCP integration", () => {
         ["search", outputSchema],
         ["create", undefined],
       ]);
+    });
+  });
+
+  it("lists a tool whose output schema exceeds the schema budget without it, saying so", async () => {
+    const outputSchema = {
+      type: "object" as const,
+      properties: Object.fromEntries(
+        Array.from({ length: 200 }, (_, i) => [
+          `field${i}`,
+          { type: "string", enum: ["x".repeat(40)] },
+        ]),
+      ),
+    };
+    await withServer({ tools: [{ name: "search", outputSchema }, "create"] }, async (other) => {
+      await seedProxyIntegration(ctx, on(other, { tools_policy: { search: {}, create: {} } }));
+      await seedProxyConnection(ctx, ID, "api_key", { token: TOKEN });
+
+      const { remote: tools } = await list();
+      const [search, create] = tools;
+      expect(search?.remote_name).toBe("search");
+      expect(search?.schema_reduced).toEqual(["output_schema"]);
+      expect(search && "output_schema" in search).toBe(false);
+      expect(create?.remote_name).toBe("create");
+      expect(create && "schema_reduced" in create).toBe(false);
     });
   });
 

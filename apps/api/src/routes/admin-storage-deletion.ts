@@ -23,7 +23,8 @@ import { Hono } from "hono";
 import type { Context } from "hono";
 import { z } from "zod";
 import type { AppEnv } from "../types/index.ts";
-import { forbidden, invalidRequest, notFound } from "../lib/errors.ts";
+import { parseStrictQuery } from "../lib/list-query.ts";
+import { forbidden, notFound } from "../lib/errors.ts";
 import { isPlatformAdmin } from "@appstrate/db/auth-policy";
 import { rateLimit } from "../middleware/rate-limit.ts";
 import { parseListLimit } from "@appstrate/core/list-query";
@@ -61,7 +62,8 @@ function requirePlatformAdmin(c: Context<AppEnv>): void {
   }
 }
 
-const listQuerySchema = z.object({
+const listQuerySchema = z.strictObject({
+  limit: z.string().optional(),
   status: z.enum(["pending", "dead", "completed"]).default("pending"),
   // Stripe-style cursor: the id of the last row of the previous page, exactly
   // as `/api/end-users` and the file gallery take it.
@@ -76,13 +78,9 @@ export function createAdminStorageDeletionRouter(): Hono<AppEnv> {
   // an unbounded cross-org read for whoever holds a valid operator session.
   router.get("/", rateLimit(60), async (c) => {
     requirePlatformAdmin(c);
-    const parsed = listQuerySchema.safeParse({
-      status: c.req.query("status"),
-      startingAfter: c.req.query("startingAfter"),
-    });
-    if (!parsed.success) throw invalidRequest("Invalid query parameters");
+    const query = parseStrictQuery(c, listQuerySchema);
     const limit = parseListLimit(c, { defaultLimit: 50, maxLimit: 200 });
-    const result = await listStorageDeletionJobs({ ...parsed.data, limit });
+    const result = await listStorageDeletionJobs({ ...query, limit });
     setCursorLinkHeader({
       c,
       hasMore: result.hasMore,

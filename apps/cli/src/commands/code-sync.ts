@@ -58,6 +58,7 @@ import {
   writeNotice,
 } from "../lib/skills-sync/state.ts";
 import {
+  backupPreviousSkillTrees,
   pluginFixedFiles,
   pluginTreeMatches,
   removeManagedDir,
@@ -422,6 +423,13 @@ async function executePlans(
         // over" would DELETE the version that still works.
         else if (plan.present.has(slug)) carry(slug);
       }
+
+      const unverifiable = [...fresh, ...plan.removed].filter((slug) => {
+        const previous = plan.ledger.managed[slug];
+        return previous && !previous.integrity.startsWith("sha256:");
+      });
+      const backup = await backupPreviousSkillTrees(plan.target, unverifiable);
+      if (backup) report.note(`Previous ${plan.target} skill files were backed up to ${backup}.`);
 
       const outcome =
         plan.target === "claude-plugin"

@@ -274,8 +274,18 @@ export const EXEMPT_SCHEMAS: Record<string, string> = {
     "ProblemDetail with the `model_scheduled` extension; RFC 9457 envelope, never read through a shared-type",
   MissingIntegrationConnectionProblem:
     "ProblemDetail narrowed to `missing_integration_connection`; RFC 9457 envelope, never read through a shared-type",
+  AgentNotActiveInSpaceProblem:
+    "ProblemDetail narrowed to `agent_not_active_in_space`; RFC 9457 envelope, never read through a shared-type",
+  InlineRunNotAllowedProblem:
+    "ProblemDetail narrowed to `inline_run_not_allowed_in_space`; RFC 9457 envelope, never read through a shared-type",
+  ActiveInSpaces:
+    "`active_in_spaces` extension of the launch and inline-run refusals, built by lib/launch-spaces.ts; never read through a shared-type",
   LaunchWarnings:
     "`warnings` envelope merged by allOf into the launch success bodies; its items are ConnectionResolutionWarning, no shared-type",
+  ActivationWarnings:
+    "`warnings` envelope merged by allOf into the activation and share success bodies; its items are ActivationWarning, no shared-type",
+  ActivationWarning:
+    "ResolutionFieldError narrowed to `integration_not_active` plus the agent's `required` flag; built by activationWarnings in services/space-packages.ts, no shared-type",
   RunAndWaitResult:
     "MCP `run_and_wait` structuredContent and outputSchema; projected by @appstrate/core/run-and-wait-client, no shared-type",
   RunAndWaitPending: "RunAndWaitResult branch for `done: false`; no shared-type",
@@ -297,6 +307,8 @@ export const EXEMPT_SCHEMAS: Record<string, string> = {
   AgentConnectionReadiness:
     "bulk agent connection-readiness envelope; SPA uses the generated spec type (integrations[].resolution is the registered IntegrationAgentResolution)",
   OAuthClientObject: "OIDC oauth-admin wire; no shared-type (SPA uses the generated spec type)",
+  AccessGrant: "OIDC access-grants wire; no shared-type (SPA uses the generated spec type)",
+  OrgAccessGrant: "OIDC access-grants wire; no shared-type (SPA uses the generated spec type)",
   OAuthClientWithSecret: "OIDC client-create wire; no shared-type",
   OAuthTokenResponse: "internal credential-proxy wire; mirrors @appstrate/core/sidecar-types",
   IntegrationCredentialsResponse: "sidecar↔platform credential-proxy wire; no SPA consumer",
@@ -305,8 +317,12 @@ export const EXEMPT_SCHEMAS: Record<string, string> = {
   LibraryPackageList: "SPA consumes components['schemas']['LibraryPackageList'] directly",
   PackagePlacement:
     "LibraryPackageList item sub-object; read through LibraryPackageList's generated spec type",
+  PackageAvailability:
+    "package detail sub-object (integration, agent, skill); mirrored by the optional `availability` of the AgentDetail / OrgPackageItemDetail shared-types",
   PackageShare:
     "share-audience wire projected by `listPackageShares` (a space rendered as its owner when personal); no persisted row shape and no shared-type — the SPA consumes the generated spec type",
+  PackageOrgOffer:
+    "offer acknowledgement of `PUT …/org-offer`; no persisted row shape and no shared-type — the SPA consumes the generated spec type",
   ShareTarget:
     "request-body value object of POST /packages/{scope}/{name}/shares; never a response",
   ShareTargetView:
@@ -326,6 +342,7 @@ export const EXEMPT_SCHEMAS: Record<string, string> = {
   ChatSession:
     "module-chat wire DTO; ISO timestamps, no shared-type (UI uses the generated spec type)",
   ChatMessage: "module-chat opaque history-node wire DTO; no shared-type",
+  ChatCommands: "module-chat wire DTO; the composer's `/` menu, no shared-type",
   // @appstrate/module-billing billing wire DTOs. The module keeps a Drizzle schema
   // of its own (packages/module-billing/drizzle/schema.ts), so none of these has a
   // shared-type in this repo at all; the dashboard consumes the generated spec

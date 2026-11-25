@@ -60,7 +60,7 @@ export function PackageSpaces({ item }: { item: PackageSpacesOf }) {
   const stacked = others
     .flatMap((id) => spaces?.find((space) => space.id === id) ?? [])
     .slice(0, STACKED_TILES);
-  const text = t(homeActive ? "packageSpaces.sharedWith" : "packageSpaces.availableIn", {
+  const text = t(homeActive ? "packageSpaces.alsoActiveIn" : "packageSpaces.availableIn", {
     names: names.join(", "),
   });
   if (system && spaceIds.length === 0) return null;

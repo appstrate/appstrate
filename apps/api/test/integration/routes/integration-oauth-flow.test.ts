@@ -233,7 +233,7 @@ describe("integration OAuth2 flow (conformant provider)", () => {
   let provider: StrictAuthorizationServer;
 
   const startProvider = (options: StrictAuthorizationServerOptions): StrictAuthorizationServer => {
-    provider = createStrictAuthorizationServer(options);
+    provider = createStrictAuthorizationServer({ subject: "account-1", ...options });
     return provider;
   };
 

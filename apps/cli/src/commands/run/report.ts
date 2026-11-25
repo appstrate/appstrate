@@ -25,7 +25,7 @@
  *                           when telemetry is down.
  */
 
-import { HttpSink } from "@appstrate/afps-runtime/sinks";
+import { HttpSink, runServiceUrl, sameOriginRunUrl } from "@appstrate/afps-runtime/sinks";
 import { UNAVAILABLE_INTEGRATION_REASONS, type Bundle } from "@appstrate/afps-runtime/bundle";
 import { parseScopedName } from "@appstrate/core/naming";
 import type { ConnectionOverrides } from "@appstrate/core/integration";
@@ -65,12 +65,8 @@ export interface ReportSession {
    * the connections the run bound.
    */
   proxyHeaders: Record<string, string>;
-  /**
-   * Base events URL (same one HttpSink POSTs to). Exposed so the
-   * caller can derive the heartbeat endpoint and start a liveness
-   * keep-alive — same mechanism the runtime-pi container uses.
-   */
-  sinkUrl: string;
+  mcpUrl: string;
+  heartbeatUrl: string;
   /**
    * Raw run secret. Required to sign heartbeat requests via the shared
    * `startSinkHeartbeat` helper. Also held inside `httpSink`, but not
@@ -206,22 +202,36 @@ export async function startReportSession(
     id: string;
     url: string;
     finalize_url: string;
+    mcp_url?: string;
+    heartbeat_url?: string;
     secret: string;
     expiresAt: string;
     warnings?: unknown;
   };
 
-  const httpSink = new HttpSink({
-    url: payload.url,
-    finalizeUrl: payload.finalize_url,
-    runSecret: payload.secret,
-  });
+  let eventsUrl: string;
+  let finalizeUrl: string;
+  let mcpUrl: string;
+  let heartbeatUrl: string;
+  try {
+    eventsUrl = sameOriginRunUrl(ctx.instance, payload.url, "events");
+    finalizeUrl = sameOriginRunUrl(ctx.instance, payload.finalize_url, "finalize");
+    mcpUrl = runServiceUrl(eventsUrl, "mcp", payload.mcp_url);
+    heartbeatUrl = runServiceUrl(eventsUrl, "heartbeat", payload.heartbeat_url);
+  } catch (err) {
+    throw new ReportStartError(
+      err instanceof Error ? err.message : "Invalid run service URL in registration response",
+      `Check that the server's APP_URL and your CLI instance use the same scheme, hostname and port (${new URL(ctx.instance).origin}).`,
+    );
+  }
+  const httpSink = new HttpSink({ url: eventsUrl, finalizeUrl, runSecret: payload.secret });
 
   return {
     runId: payload.id,
     httpSink,
     proxyHeaders: { "X-Run-Id": payload.id },
-    sinkUrl: payload.url,
+    mcpUrl,
+    heartbeatUrl,
     runSecret: payload.secret,
     warnings: parseLaunchItems(payload.warnings),
   };

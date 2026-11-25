@@ -60,6 +60,9 @@ const HOSTS = [
   "mcp.offline.test",
   "mcp.nopkce.test",
   "mcp.manualnopkce.test",
+  "mcp.busymetadata.test",
+  "mcp.prm-outage.test",
+  "mcp.prm-missing.test",
   "mcp.noscope.test",
   "mcp.guessoffline.test",
   "mcp.guessempty.test",
@@ -353,6 +356,119 @@ describe("discoverRemoteIntegration", () => {
     const auth = (manifest.auths as Record<string, Record<string, unknown>>).oauth!;
     expect(auth.default_scopes).toEqual(["ok"]);
     expect(auth.scope_catalog).toEqual([{ value: "ok", label: "ok" }]);
+  });
+
+  const outageHost = "mcp.prm-outage.test";
+  const outageOrigin = `https://${outageHost}`;
+  const outageResource = `${outageOrigin}/mcp`;
+  const advertisedUrl = `${outageOrigin}/.well-known/oauth-protected-resource/mcp`;
+
+  it.each([
+    ['Bearer scope="tools:read"'],
+    [`Bearer scope="tools:read", resource_metadata="${outageOrigin}/unavailable"`],
+  ])("follows the GET document when POST sends %s and keeps its scopes", async (postChallenge) => {
+    const metadataUrl = `${outageOrigin}/metadata/resource`;
+    const { fetchImpl, seen } = fakeFetch({
+      ...protectedServer(outageHost),
+      [`POST ${outageResource}`]: () => unauthorized(postChallenge),
+      [`GET ${outageOrigin}/unavailable`]: () => json({}, 503),
+      [`GET ${outageResource}`]: () => unauthorized(`Bearer resource_metadata="${metadataUrl}"`),
+      [`GET ${metadataUrl}`]: () =>
+        json({
+          resource: outageResource,
+          authorization_servers: [outageOrigin],
+          resource_name: "GET-discovered resource",
+        }),
+      [`GET ${advertisedUrl}`]: () => json({}, 404),
+    });
+    const { manifest, provenance } = await discoverRemoteIntegration(
+      { url: outageResource, orgSlug: "acme" },
+      { fetchImpl },
+    );
+    expect(manifest.display_name).toBe("GET-discovered resource");
+    expect(manifest.auths).toMatchObject({ oauth: { default_scopes: ["tools:read"] } });
+    expect(provenance["/auths/oauth"]).toBe("detected");
+    expect(seen.filter((request) => request === `GET ${metadataUrl}`)).toHaveLength(1);
+  });
+
+  it.each([
+    ["HTTP 429", () => json({}, 429)],
+    ["HTTP 503", () => json({}, 503)],
+    [
+      "transport failure",
+      () => {
+        throw new TypeError("connection reset");
+      },
+    ],
+  ] as const)(
+    "asks to retry an explicitly advertised resource document after %s",
+    async (_, fail) => {
+      const { fetchImpl, seen } = fakeFetch({
+        [`POST ${outageResource}`]: () =>
+          unauthorized(`Bearer resource_metadata="${advertisedUrl}"`),
+        [`GET ${advertisedUrl}`]: fail,
+      });
+      const err = await refusal(
+        discoverRemoteIntegration({ url: outageResource, orgSlug: "acme" }, { fetchImpl }),
+      );
+      expect(err.status).toBe(502);
+      expect(err.message).toContain("protected-resource metadata");
+      expect(seen.filter((request) => request === `GET ${advertisedUrl}`)).toHaveLength(1);
+    },
+  );
+
+  it("uses valid root resource metadata after an advertised document returns 503", async () => {
+    const { fetchImpl } = fakeFetch({
+      ...protectedServer(outageHost, { challengeScope: "read:tools" }),
+      [`GET ${advertisedUrl}`]: () => json({}, 503),
+      [`GET ${outageOrigin}/.well-known/oauth-protected-resource`]: () =>
+        json({ resource: outageOrigin, authorization_servers: [outageOrigin] }),
+    });
+    const { manifest } = await discoverRemoteIntegration(
+      { url: outageResource, orgSlug: "acme" },
+      { fetchImpl },
+    );
+    expect(manifest.auths).toMatchObject({
+      oauth: { type: "oauth2", default_scopes: ["read:tools"] },
+    });
+  });
+
+  it.each([429, 503])(
+    "answers 502 when a well-known candidate alone returns %i",
+    async (status) => {
+      const { fetchImpl } = fakeFetch({
+        [`POST ${outageResource}`]: () => unauthorized("Bearer"),
+        [`GET ${advertisedUrl}`]: () => json({}, status),
+      });
+      const err = await refusal(
+        discoverRemoteIntegration({ url: outageResource, orgSlug: "acme" }, { fetchImpl }),
+      );
+      expect(err.status).toBe(502);
+      expect(err.message).toContain("protected-resource metadata");
+    },
+  );
+
+  it("keeps the API-key fallback when the advertised resource document is absent", async () => {
+    const url = "https://mcp.prm-missing.test/mcp";
+    const { fetchImpl } = fakeFetch({
+      [`POST ${url}`]: () =>
+        unauthorized('Bearer resource_metadata="https://mcp.prm-missing.test/meta"'),
+    });
+    const { manifest } = await discoverRemoteIntegration({ url, orgSlug: "acme" }, { fetchImpl });
+    expect(manifest.auths).toMatchObject({ primary: { type: "api_key" } });
+  });
+
+  it("asks to retry a throttled issuer instead of proposing a manual client", async () => {
+    const host = "mcp.busymetadata.test";
+    const { fetchImpl } = fakeFetch({
+      ...protectedServer(host),
+      [`GET https://${host}/.well-known/oauth-authorization-server`]: () => json({}, 429),
+    });
+    const err = await refusal(
+      discoverRemoteIntegration({ url: `https://${host}/mcp`, orgSlug: "acme" }, { fetchImpl }),
+    );
+    expect(err.status).toBe(502);
+    expect(err.message).toContain("Retry");
   });
 
   it("names the issuer and warns when the server offers no dynamic registration", async () => {
@@ -738,9 +854,9 @@ describe("discoverRemoteIntegration", () => {
     expect(err.code).toBe("not_an_mcp_server");
   });
 
-  it("reads the tools ask like the probe: a 5xx is a server that could not answer", async () => {
+  it.each([429, 503])("answers 502 when tools/list returns %i", async (status) => {
     const url = "https://mcp.tools5xx.test/mcp";
-    const fetchImpl = openThenTools(url, () => new Response("down", { status: 503 }));
+    const fetchImpl = openThenTools(url, () => new Response("down", { status }));
     const err = await refusal(discoverRemoteIntegration({ url, orgSlug: "acme" }, { fetchImpl }));
     expect({ status: err.status, code: err.code }).toEqual({ status: 502, code: "bad_gateway" });
   });
@@ -767,21 +883,34 @@ describe("discoverRemoteIntegration", () => {
     expect(proposal.manifest.auths).toBeUndefined();
   });
 
-  it("answers 502 when the probe and initialize both answer 5xx", async () => {
-    const { fetchImpl, seen } = fakeFetch({
-      "POST https://mcp.both5xx.test/mcp": () => new Response("down", { status: 503 }),
+  it.each([429, 503])(
+    "answers 502 when the probe and initialize both answer %i",
+    async (status) => {
+      const { fetchImpl, seen } = fakeFetch({
+        "POST https://mcp.both5xx.test/mcp": () => new Response("down", { status }),
+      });
+      const err = await refusal(
+        discoverRemoteIntegration(
+          { url: "https://mcp.both5xx.test/mcp", orgSlug: "acme" },
+          { fetchImpl },
+        ),
+      );
+      expect({ status: err.status, code: err.code }).toEqual({ status: 502, code: "bad_gateway" });
+      expect(seen).toEqual([
+        "POST https://mcp.both5xx.test/mcp",
+        "POST https://mcp.both5xx.test/mcp",
+      ]);
+    },
+  );
+
+  it.each([429, 503])("answers 502 when the SSE probe returns %i", async (status) => {
+    const url = "https://mcp.legacyauth.test/events";
+    const { fetchImpl } = fakeFetch({
+      [`POST ${url}`]: () => new Response(null, { status: 405 }),
+      [`GET ${url}`]: () => new Response(null, { status }),
     });
-    const err = await refusal(
-      discoverRemoteIntegration(
-        { url: "https://mcp.both5xx.test/mcp", orgSlug: "acme" },
-        { fetchImpl },
-      ),
-    );
+    const err = await refusal(discoverRemoteIntegration({ url, orgSlug: "acme" }, { fetchImpl }));
     expect({ status: err.status, code: err.code }).toEqual({ status: 502, code: "bad_gateway" });
-    expect(seen).toEqual([
-      "POST https://mcp.both5xx.test/mcp",
-      "POST https://mcp.both5xx.test/mcp",
-    ]);
   });
 
   it("falls back to the SSE GET past a generic JSON-RPC error on a 405", async () => {

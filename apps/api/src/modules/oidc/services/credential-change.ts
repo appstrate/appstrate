@@ -6,21 +6,28 @@
  * provider spares `offline_access` refresh tokens, and CLI families and
  * approved device codes are bound to no session.
  */
-import { and, eq, isNull } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
-import { deviceCode, oauthAccessToken, oauthRefreshToken } from "@appstrate/db/schema";
-import { revokeAllFamiliesForUser } from "./cli-tokens.ts";
+import { deviceCode, oauthGrantState } from "@appstrate/db/schema";
+import {
+  deleteOAuthTokens,
+  lockOAuthGrantsOfUser,
+} from "../../../services/oauth-token-revocation.ts";
+import { invalidateRevokedDeviceNames, revokeAllFamiliesForUser } from "./cli-tokens.ts";
 
 export async function revokeOidcAccessAfterCredentialChange(userId: string): Promise<void> {
-  await db.delete(deviceCode).where(eq(deviceCode.userId, userId));
-  const revokedAt = new Date();
-  await db
-    .update(oauthRefreshToken)
-    .set({ revoked: revokedAt })
-    .where(and(eq(oauthRefreshToken.userId, userId), isNull(oauthRefreshToken.revoked)));
-  await db
-    .update(oauthAccessToken)
-    .set({ revoked: revokedAt })
-    .where(and(eq(oauthAccessToken.userId, userId), isNull(oauthAccessToken.revoked)));
-  await revokeAllFamiliesForUser(userId, "password_changed");
+  const families = await db.transaction(async (tx) => {
+    await lockOAuthGrantsOfUser(tx, userId);
+    await tx.delete(deviceCode).where(eq(deviceCode.userId, userId));
+    // Deleted, not marked: see `oauth-token-revocation.ts`.
+    await deleteOAuthTokens(tx, (table) => eq(table.userId, userId));
+    // After the deletes, so a refresh that read a token before them is refused.
+    // Consents stay: the user did not revoke the client.
+    await tx
+      .update(oauthGrantState)
+      .set({ tokensValidAfter: new Date() })
+      .where(eq(oauthGrantState.userId, userId));
+    return revokeAllFamiliesForUser(tx, userId, "password_changed");
+  });
+  invalidateRevokedDeviceNames(families);
 }

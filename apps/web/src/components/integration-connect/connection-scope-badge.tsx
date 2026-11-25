@@ -5,13 +5,7 @@ import type { ConnectionScope } from "@appstrate/shared-types";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@appstrate/ui/components/tooltip";
 
 /** Where a connection is usable — fixed by the OAuth client that minted it — with the why on hover. */
-export function ConnectionScopeBadge({
-  scope,
-  testId,
-}: {
-  scope: ConnectionScope;
-  testId?: string;
-}) {
+export function ConnectionScopeBadge({ scope }: { scope: ConnectionScope }) {
   const { t } = useTranslation("settings");
   const label =
     scope === "org"
@@ -27,7 +21,6 @@ export function ConnectionScopeBadge({
         <span
           tabIndex={0}
           className="text-muted-foreground border-border inline-flex shrink-0 cursor-default rounded-full border px-2 py-px text-[0.65rem] whitespace-nowrap"
-          data-testid={testId}
         >
           {label}
           <span className="sr-only">{help}</span>

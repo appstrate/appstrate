@@ -7,6 +7,7 @@ export const profilePaths = {
   "/api/profile": {
     get: {
       operationId: "getProfile",
+      "x-appstrate-space": { kind: "organization" },
       tags: ["Profile"],
       summary: "Get user profile",
       description: "Get the current user's profile (email, name, display_name, language).",
@@ -35,6 +36,7 @@ export const profilePaths = {
     },
     patch: {
       operationId: "updateProfile",
+      "x-appstrate-space": { kind: "organization" },
       tags: ["Profile"],
       summary: "Update user profile",
       description: "Update the current user's profile (displayName, language).",
@@ -82,6 +84,7 @@ export const profilePaths = {
   "/api/profile/password": {
     post: {
       operationId: "setProfilePassword",
+      "x-appstrate-space": { kind: "organization" },
       tags: ["Profile"],
       summary: "Set an initial password",
       description:
@@ -152,6 +155,7 @@ export const profilePaths = {
   "/api/profiles/batch": {
     post: {
       operationId: "batchGetProfiles",
+      "x-appstrate-space": { kind: "organization" },
       tags: ["Profile"],
       summary: "Batch lookup profiles",
       description:

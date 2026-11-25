@@ -12,11 +12,8 @@ import { createHash } from "node:crypto";
 import { eq } from "drizzle-orm";
 import { packageDistTags, packages } from "@appstrate/db/schema";
 import { unzipArtifact, zipArtifact } from "@appstrate/core/zip";
-import {
-  parseSkillUri,
-  SKILL_DEFINITION_META_KEY,
-  SKILL_LOCK_VERSION_META_KEY,
-} from "@appstrate/core/skill-uri";
+import { SKILL_DEFINITION_META_KEY, SKILL_LOCK_VERSION_META_KEY } from "@appstrate/core/skill-uri";
+import { parseSkillUri } from "@appstrate/core/skill-address";
 import { computeIntegrity } from "@appstrate/core/integrity";
 import * as storage from "@appstrate/db/storage";
 import { getTestApp } from "../../helpers/app.ts";
@@ -30,6 +27,7 @@ import {
 import {
   seedPackage,
   seedPackageVersion,
+  seedPublishedVersion,
   seedSpace,
   seedSpaceMember,
   seedSpacePackage,
@@ -51,6 +49,7 @@ import {
 // to the module instance whose auth strategy the app registered.
 import { mintMcpLoopbackToken } from "../../../../../packages/module-chat/src/loopback-auth.ts";
 import type { InjectedSkills } from "@appstrate/core/chat-contract";
+import { orgPermissions, presetPermissions } from "../../../src/lib/permissions.ts";
 
 const app = getTestApp();
 await registerTestPlatformApp();
@@ -208,6 +207,129 @@ describe("skills/list and resources/read", () => {
     const headers = await guest({ [owner.defaultSpaceId]: ["mcp:read"] });
     expect(await listUris(headers)).toEqual([]);
     expect((await call(headers, "resources/read", { uri: toneUri() })).error?.code).toBe(-32002);
+  });
+});
+
+describe("the read tool on skill://", () => {
+  type ToolResult = {
+    isError: boolean;
+    content: Array<{ type: string; text?: string; resource?: Record<string, unknown> }>;
+  };
+  const read = async (headers: Record<string, string>, args: Record<string, unknown>) =>
+    (await call(headers, "tools/call", { name: "read", arguments: args })).result as ToolResult;
+  const refusalCode = (result: ToolResult) =>
+    (JSON.parse(result.content[0]!.text!) as { code: string }).code;
+
+  it("returns the resource resources/read serves, for a client without the Skills extension", async () => {
+    const tool = await read(ownerHeaders(), { uri: teamUri(), space_id: teamB.id });
+    const served = await call(ownerHeaders(), "resources/read", { uri: teamUri() });
+    expect(tool.isError).toBe(false);
+    expect(tool.content).toEqual([
+      { type: "resource", resource: (served.result?.contents as unknown[])[0] as never },
+    ]);
+  });
+
+  it("refuses a skill of another space than the one the call enters", async () => {
+    const pinned = inSpace(ownerHeaders(), owner.defaultSpaceId);
+    expect(refusalCode(await read(pinned, { uri: teamUri() }))).toBe("space_mismatch");
+    const named = await read(ownerHeaders(), { uri: teamUri(), space_id: owner.defaultSpaceId });
+    expect(named.isError).toBe(true);
+    expect(refusalCode(named)).toBe("space_mismatch");
+  });
+
+  it("refuses as not_found what resources/read cannot serve", async () => {
+    const pinned = inSpace(ownerHeaders(), owner.defaultSpaceId);
+    const headers = await guest({ [owner.defaultSpaceId]: ["mcp:read"] });
+    const unreadable = await read(headers, { uri: toneUri(), space_id: owner.defaultSpaceId });
+    expect(unreadable.isError).toBe(true);
+    expect(refusalCode(unreadable)).toBe("not_found");
+    expect(refusalCode(await read(pinned, { uri: "skill://nope" }))).toBe("not_found");
+  });
+});
+
+describe("search and describe on skills", () => {
+  const tool = async (
+    headers: Record<string, string>,
+    name: string,
+    args: Record<string, unknown>,
+  ) =>
+    (
+      (await call(headers, "tools/call", { name, arguments: args })).result as {
+        structuredContent: Record<string, unknown>;
+      }
+    ).structuredContent;
+
+  it("lists the skills of the space the call names, and describes one as skills/get does", async () => {
+    const searched = (await tool(ownerHeaders(), "search", {
+      kinds: ["skill"],
+      space_id: teamB.id,
+    })) as { skills: { items: Array<Record<string, string | string[]>> } };
+    expect(searched.skills.items).toEqual([
+      {
+        id: teamUri(),
+        packageId: TEAM,
+        name: "team",
+        description: "Sets the team.",
+        granted_in: [teamB.id],
+      },
+    ]);
+    const described = await tool(ownerHeaders(), "describe", {
+      kind: "skill",
+      id: teamUri(),
+      space_id: teamB.id,
+    });
+    const listed = (await call(ownerHeaders(), "skills/list", {})).result?.skills as Entry[];
+    const entry = listed.find((e) => e.uri === teamUri())!;
+    expect(described).toMatchObject({
+      kind: "skill",
+      id: teamUri(),
+      frontmatter: entry.frontmatter,
+      resources: entry.resources,
+    });
+  });
+
+  it("refuses a space where the caller cannot read skills when the kind is named, and leaves the kind out when it is defaulted", async () => {
+    const headers = await guest({
+      [owner.defaultSpaceId]: ["mcp:read", "skills:read"],
+      [teamB.id]: ["mcp:read"],
+    });
+    const named = (
+      await call(headers, "tools/call", {
+        name: "search",
+        arguments: { kinds: ["skill"], space_id: teamB.id },
+      })
+    ).result as { isError: boolean; content: Array<{ text: string }> };
+    expect(named.isError).toBe(true);
+    expect(JSON.parse(named.content[0]!.text)).toMatchObject({
+      status: 403,
+      body: { code: "not_granted" },
+    });
+    const defaulted = await tool(headers, "search", { space_id: teamB.id });
+    expect(defaulted.skills).toBeUndefined();
+  });
+
+  it("lists the skills of the other spaces and names the refused one under unsearched, across spaces", async () => {
+    const headers = await guest({
+      [owner.defaultSpaceId]: ["mcp:read", "skills:read"],
+      [teamB.id]: ["mcp:read"],
+    });
+    const searched = (await tool(headers, "search", { kinds: ["skill"] })) as {
+      skills: { items: Array<{ id: string }>; unsearched: Array<{ space_id: string }> };
+    };
+    expect(searched.skills.items.map((i) => i.id)).toEqual([toneUri()]);
+    expect(searched.skills.unsearched.map((u) => u.space_id)).toEqual([teamB.id]);
+  });
+
+  it("searches the skills of one space without reading the archives of the others", async () => {
+    // A skill never served before: a cached archive would not be read again.
+    const broken = "@skillsext/broken";
+    await seedPublishedSkill(broken, "broken", teamB.id);
+    await storage.deleteFile(AGENT_PACKAGES_BUCKET, versionZipKey(broken, "1.0.0"));
+    const searched = (await tool(ownerHeaders(), "search", {
+      kinds: ["skill"],
+      space_id: owner.defaultSpaceId,
+    })) as { skills: { total: number; items: Array<{ id: string }> } };
+    expect(searched.skills.items.map((i) => i.id)).toEqual([toneUri()]);
   });
 });
 
@@ -543,5 +665,177 @@ describe("skills/get and resources/read in a chat turn", () => {
       withSkillsRead({ [system]: { definition: "published", version: null } }),
       `${dir}@draft/system-tone/SKILL.md`,
     );
+  });
+});
+
+describe("search across spaces", () => {
+  const AGENT_A = "@skillsext/agent-a";
+  const AGENT_B = "@skillsext/agent-b";
+  let third: { id: string };
+
+  async function seedAgent(id: string, spaceId: string): Promise<void> {
+    await seedPackage({ id, orgId: owner.orgId, homeSpaceId: spaceId });
+    await seedSpacePackage(spaceId, id);
+  }
+
+  beforeEach(async () => {
+    third = await seedSpace({ orgId: owner.orgId, name: "Third" });
+    await seedPublishedSkill("@skillsext/third", "third", third.id);
+    await seedAgent(AGENT_A, owner.defaultSpaceId);
+    await seedAgent(AGENT_B, teamB.id);
+    await seedAgent("@skillsext/agent-c", third.id);
+  });
+
+  const search = async (headers: Record<string, string>, args: Record<string, unknown>) =>
+    parseSearch(await call(headers, "tools/call", { name: "search", arguments: args }));
+  const parseSearch = (envelope: JsonRpcEnvelope) => {
+    const result = envelope.result as { isError: boolean; content: Array<{ text: string }> };
+    return {
+      isError: Boolean(result.isError),
+      data: JSON.parse(result.content[0]!.text) as Record<string, unknown>,
+    };
+  };
+  const section = (data: Record<string, unknown>, name: string) =>
+    data[name] as { items: Array<{ id: string; granted_in: string[] }> };
+  const grantedIn = (data: Record<string, unknown>, name: string) =>
+    Object.fromEntries(section(data, name).items.map((item) => [item.id, item.granted_in]));
+
+  it("lists every space reached, each item naming where it is usable; space_id narrows to one", async () => {
+    const all = await search(ownerHeaders(), { kinds: ["agent", "skill"] });
+    expect(grantedIn(all.data, "agents")).toMatchObject({
+      [AGENT_A]: [owner.defaultSpaceId],
+      [AGENT_B]: [teamB.id],
+    });
+    expect(Object.values(grantedIn(all.data, "skills")).flat().sort()).toEqual(
+      [owner.defaultSpaceId, teamB.id, third.id].sort(),
+    );
+
+    const one = await search(ownerHeaders(), {
+      kinds: ["agent", "skill"],
+      space_id: teamB.id,
+    });
+    expect(grantedIn(one.data, "agents")).toEqual({ [AGENT_B]: [teamB.id] });
+    expect(Object.values(grantedIn(one.data, "skills"))).toEqual([[teamB.id]]);
+  });
+
+  it("answers a search across spaces whose skill archive is unavailable in one: that space is unsearched", async () => {
+    // A skill never served before: a cached archive would not be read again.
+    const broken = "@skillsext/broken";
+    await seedPublishedSkill(broken, "broken", teamB.id);
+    await storage.deleteFile(AGENT_PACKAGES_BUCKET, versionZipKey(broken, "1.0.0"));
+    const all = await search(ownerHeaders(), {});
+    expect(all.isError).toBe(false);
+    expect(section(all.data, "operations")).toBeDefined();
+    expect(Object.keys(grantedIn(all.data, "agents"))).toContain(AGENT_A);
+    expect(Object.keys(grantedIn(all.data, "skills"))).toContain(toneUri());
+    expect(
+      (all.data.skills as { unsearched: Array<{ space_id: string; code?: string }> }).unsearched,
+    ).toEqual([
+      expect.objectContaining({ space_id: teamB.id, code: "version_artifact_unavailable" }),
+    ]);
+
+    // Named, the failure answers the call when the kind is named, and drops the kind otherwise.
+    const named = await search(ownerHeaders(), { kinds: ["skill"], space_id: teamB.id });
+    expect(named.isError).toBe(true);
+    expect((await search(ownerHeaders(), { space_id: teamB.id })).data.skills).toBeUndefined();
+  });
+
+  it("reports the spaces a search without space_id read, and nothing otherwise", async () => {
+    const all = await search(ownerHeaders(), { kinds: ["agent", "skill"] });
+    expect((all.data.searched_spaces as string[]).sort()).toEqual(
+      [owner.defaultSpaceId, teamB.id, third.id].sort(),
+    );
+    // Operations read no space data.
+    expect((await search(ownerHeaders(), { kinds: ["operation"] })).data.searched_spaces).toBe(
+      undefined,
+    );
+    // A named space, or a pinned connection, adds no field.
+    const named = await search(ownerHeaders(), { kinds: ["agent"], space_id: teamB.id });
+    expect(named.data.searched_spaces).toBeUndefined();
+    const pinned = await search(inSpace(ownerHeaders(), owner.defaultSpaceId), {
+      kinds: ["agent"],
+    });
+    expect(pinned.data.searched_spaces).toBeUndefined();
+  });
+
+  it("reports only the spaces an entry shown names: not one that answered nothing shown", async () => {
+    const one = await search(ownerHeaders(), { kinds: ["agent", "skill"], query: "third" });
+    expect(Object.keys(grantedIn(one.data, "skills"))).toEqual([
+      `skill://${third.id}/skillsext/third/third/SKILL.md`,
+    ]);
+    expect(one.data.searched_spaces).toEqual([third.id]);
+
+    const none = await search(ownerHeaders(), { kinds: ["agent", "skill"], query: "zzzunmatched" });
+    expect(none.data.searched_spaces).toBeUndefined();
+
+    // An agent cut by `limit` is not shown: its space is not reported.
+    const cut = await search(ownerHeaders(), { kinds: ["agent"], limit: 1 });
+    const agents = cut.data.agents as { total: number; items: Array<{ granted_in: string[] }> };
+    expect(agents.total).toBeGreaterThan(1);
+    expect(cut.data.searched_spaces).toEqual(agents.items[0]!.granted_in);
+  });
+
+  it("describes an agent and a skill in the space it names, the agent's run_with naming it", async () => {
+    const describe = async (args: Record<string, unknown>) =>
+      parseSearch(await call(ownerHeaders(), "tools/call", { name: "describe", arguments: args }));
+    const agent = { kind: "agent", id: AGENT_B, space_id: teamB.id };
+    // Unpublished: its detail answers 404.
+    expect((await describe(agent)).data).toMatchObject({ status: 404 });
+
+    await seedPublishedVersion(AGENT_B, "1.0.0");
+    expect((await describe(agent)).data).toMatchObject({
+      kind: "agent",
+      id: AGENT_B,
+      space: { id: teamB.id },
+      run_with: {
+        arguments: { kind: "agent", scope: "@skillsext", name: "agent-b", space_id: teamB.id },
+      },
+    });
+    expect(
+      (await describe({ kind: "skill", id: teamUri(), space_id: teamB.id })).data,
+    ).toMatchObject({ kind: "skill", id: teamUri() });
+  });
+
+  it("leaves out the agents of a space where the role cannot read them", async () => {
+    const headers = await guest({
+      [owner.defaultSpaceId]: ["mcp:read", "agents:read", "skills:read"],
+      [teamB.id]: ["mcp:read", "skills:read"],
+    });
+    const all = await search(headers, { kinds: ["agent", "skill"] });
+    expect(Object.keys(grantedIn(all.data, "agents"))).toContain(AGENT_A);
+    expect(Object.keys(grantedIn(all.data, "agents"))).not.toContain(AGENT_B);
+    expect(Object.keys(grantedIn(all.data, "skills"))).toContain(teamUri());
+  });
+
+  it("still refuses a skill of another space than space_id, whatever the search found", async () => {
+    const refused = parseSearch(
+      await call(ownerHeaders(), "tools/call", {
+        name: "describe",
+        arguments: { kind: "skill", id: teamUri(), space_id: owner.defaultSpaceId },
+      }),
+    );
+    expect(refused.data).toMatchObject({ code: "space_mismatch" });
+  });
+
+  it("covers only the spaces a credential bound to a set reaches", async () => {
+    const token = mintMcpLoopbackToken({
+      userId: owner.user.id,
+      email: owner.user.email,
+      name: owner.user.name,
+      orgId: owner.orgId,
+      orgRole: "owner",
+      permissions: [...new Set([...orgPermissions("owner"), ...presetPermissions("admin")])],
+      spaceIds: [owner.defaultSpaceId, teamB.id],
+    });
+    const bound = { Authorization: `Bearer ${token}`, "X-Org-Id": owner.orgId };
+    const all = await search(bound, { kinds: ["agent", "skill"] });
+    expect(Object.keys(grantedIn(all.data, "agents")).sort()).toEqual([AGENT_A, AGENT_B]);
+    expect(Object.values(grantedIn(all.data, "skills")).flat().sort()).toEqual(
+      [owner.defaultSpaceId, teamB.id].sort(),
+    );
+    // A space outside the set is refused when named, never read.
+    const outside = await search(bound, { kinds: ["agent"], space_id: third.id });
+    expect(outside.isError).toBe(true);
+    expect(outside.data.code).toBe("unknown_space");
   });
 });

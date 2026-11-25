@@ -40,11 +40,11 @@ describe("ConversationSkeleton", () => {
     expect(html).not.toContain("Vérifiez");
   });
 
-  it("starts the mobile composer at rest with its disclaimer visible", () => {
+  it("draws the phone composer as one line, the disclaimer under it from md up only", () => {
     const html = renderToString(
       <ConversationSkeleton label="Chargement" placeholder="Écrire" disclaimer="Vérifiez" />,
     );
-    expect(html).toContain('data-rest=""');
-    expect(html).not.toMatch(/max-md:hidden[^>]*>Vérifiez/);
+    // The live phone composer has the disclaimer in its "+" panel, not under it.
+    expect(html).toMatch(/class="[^"]*max-md:hidden[^"]*">Vérifiez/);
   });
 });

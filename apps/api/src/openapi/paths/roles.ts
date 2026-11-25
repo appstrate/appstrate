@@ -16,10 +16,11 @@ export const rolesPaths = {
   "/api/org-roles": {
     get: {
       operationId: "listOrgRoles",
+      "x-appstrate-space": { kind: "organization" },
       tags: ["Roles"],
       summary: "List organization roles",
       description:
-        'The four organization roles (`owner`, `admin`, `member`, `guest`) and the org-level permissions each grants — the platform\'s own matrix with what the loaded modules contribute at `level: "org"`. The same in every organization and for every caller (no preview, no credential ceiling): it describes the roles, not the caller. Any member may read it.',
+        'The four organization roles (`owner`, `admin`, `member`, `guest`) and the org-level permissions each grants — the platform\'s own matrix with what the loaded modules contribute at `level: "org"`. The same in every organization and for every caller (no preview, no credential ceiling): it describes the roles, not the caller. Membership is checked in the organization selected by X-Org-Id. Any member may read it.',
       parameters: [{ $ref: "#/components/parameters/XOrgId" }],
       responses: {
         "200": {
@@ -62,6 +63,7 @@ export const rolesPaths = {
   "/api/roles": {
     get: {
       operationId: "listRoles",
+      "x-appstrate-space": { kind: "organization" },
       tags: ["Roles"],
       summary: "List space roles",
       description:
@@ -94,6 +96,7 @@ export const rolesPaths = {
     },
     post: {
       operationId: "createRole",
+      "x-appstrate-space": { kind: "organization" },
       tags: ["Roles"],
       summary: "Create a custom space role",
       description:
@@ -155,6 +158,7 @@ export const rolesPaths = {
   "/api/roles/vocabulary": {
     get: {
       operationId: "listRoleVocabulary",
+      "x-appstrate-space": { kind: "organization" },
       tags: ["Roles"],
       summary: "List the permissions a custom role may hold",
       description:
@@ -193,6 +197,7 @@ export const rolesPaths = {
   "/api/roles/{id}": {
     patch: {
       operationId: "updateRole",
+      "x-appstrate-space": { kind: "organization" },
       tags: ["Roles"],
       summary: "Update a custom space role",
       description:
@@ -241,6 +246,7 @@ export const rolesPaths = {
     },
     delete: {
       operationId: "deleteRole",
+      "x-appstrate-space": { kind: "organization" },
       tags: ["Roles"],
       summary: "Delete a custom space role",
       description:

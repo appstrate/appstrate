@@ -133,7 +133,11 @@ describe("a conversation's seed", () => {
   const history: SessionHistory = {
     ...row("chs_1"),
     messages: [],
-    skills: { skillMode: "manual", pinnedSkills: ["@acme/tone"] },
+    skills: {
+      skillDiscovery: true,
+      pins: [{ id: "@acme/tone", status: "injected", chars: 120 }],
+    },
+    usage: { input_tokens: 0, output_tokens: 0 },
     createdAt: "",
   };
 
@@ -150,7 +154,7 @@ describe("a conversation's seed", () => {
     const seed = await queryClient.fetchQuery(
       sessionSeedQuery(queryClient, transportOver(request), "chs_1"),
     );
-    expect(seed).toEqual({ messages: [], skills: history.skills });
+    expect(seed).toEqual({ messages: [] });
     expect(request.calls).toHaveLength(0);
   });
 

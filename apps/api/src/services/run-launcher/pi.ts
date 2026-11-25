@@ -375,6 +375,9 @@ async function runPlatformContainerImpl(
       sink: {
         url: sinkCredentials.url,
         finalizeUrl: sinkCredentials.finalize_url,
+        heartbeatUrl: sinkCredentials.heartbeat_url,
+        workspaceUrl: sinkCredentials.workspace_url,
+        filesUrl: sinkCredentials.files_url,
         secret: sinkCredentials.secret,
       },
       // Forward the W3C trace from the spawning request — when set, the

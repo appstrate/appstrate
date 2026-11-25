@@ -9,6 +9,7 @@
  * a positive context, and the window is read off the turns, not the run row.
  */
 
+import { fractionOfWindow } from "@appstrate/ui/context-window";
 import type { RunTurnRow } from "./log-utils";
 
 /** Returned only when there is BOTH a numerator and a denominator, never a zeroed reading. */
@@ -18,19 +19,11 @@ interface RunContextReading {
   peak: number;
   /** The window last stated by a turn. */
   window: number;
+  /** That turn's window is the runner's fallback, not one the model declared. */
+  windowAssumed: boolean;
   /** 0..1 shares of {@link window}. */
   currentFraction: number;
   peakFraction: number;
-}
-
-/**
- * A token count as a 0..1 share of the window — the ONE percentage computation
- * in the SPA. Clamped to `[0, 1]`: a bar cannot overflow its track, and the raw
- * counts are rendered unclamped beside every percentage.
- */
-export function fractionOfWindow(tokens: number, window: number): number {
-  if (!Number.isFinite(tokens) || !Number.isFinite(window) || window <= 0) return 0;
-  return Math.min(1, Math.max(0, tokens / window));
 }
 
 /**
@@ -50,12 +43,14 @@ export function readRunContext(turns: readonly RunTurnRow[] | undefined): RunCon
   // Walk in emitted order rather than sorting by `index`: a malformed index cannot reorder the series.
   // Named `contextWindow`: a local `window` would shadow the global in this browser bundle.
   let contextWindow: number | null = null;
+  let windowAssumed = false;
   let current = 0;
   let peak = 0;
   for (const turn of turns) {
     const stated = turn.contextWindow;
     if (typeof stated === "number" && Number.isFinite(stated) && stated > 0) {
       contextWindow = stated;
+      windowAssumed = turn.contextWindowAssumed === true;
     }
     const tokens = turn.contextTokens;
     if (!Number.isFinite(tokens) || tokens <= 0) continue;
@@ -69,28 +64,8 @@ export function readRunContext(turns: readonly RunTurnRow[] | undefined): RunCon
     current,
     peak,
     window: contextWindow,
+    windowAssumed,
     currentFraction: fractionOfWindow(current, contextWindow),
     peakFraction: fractionOfWindow(peak, contextWindow),
   };
-}
-
-/**
- * A token count as the compact figure the gauge shows (`128k`, `1.0M`).
- * Decimal thousands (not `formatBytes` tiers). The tier is chosen AFTER rounding,
- * so `999_600` becomes `1.0M` rather than `1000k`.
- */
-export function formatCompactTokens(tokens: number): string {
-  if (!Number.isFinite(tokens) || tokens < 0) return "0";
-  if (tokens < 1000) return String(Math.round(tokens));
-  const thousands = Math.round(tokens / 1000);
-  if (thousands < 1000) return `${thousands}k`;
-  return `${(tokens / 1_000_000).toFixed(1)}M`;
-}
-
-/** A 0..1 share as a localized percentage (`Intl`: French puts a narrow no-break space before the sign). */
-export function formatWindowPercent(fraction: number, lang: string): string {
-  return new Intl.NumberFormat(lang, {
-    style: "percent",
-    maximumFractionDigits: 0,
-  }).format(fraction);
 }

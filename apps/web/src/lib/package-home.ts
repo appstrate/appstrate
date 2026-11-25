@@ -43,3 +43,16 @@ export function homeNameBesideTiles({
   if (!spaceIds || (homeSpaceId && spaceIds.includes(homeSpaceId))) return null;
   return homeSpaceName;
 }
+
+/**
+ * The enabled schedules of `homeSpaceId` that withdrawing the package from it would disable.
+ * Until a count is available the dialog still explains the consequence of the move.
+ */
+export function previousHomeSchedules(
+  schedules: readonly { spaceId: string; enabled: boolean }[] | undefined,
+  homeSpaceId: string,
+  opts: { readable: boolean; isError: boolean },
+): number | "unknown" {
+  if (!opts.readable || opts.isError || !schedules) return "unknown";
+  return schedules.filter((s) => s.spaceId === homeSpaceId && s.enabled).length;
+}

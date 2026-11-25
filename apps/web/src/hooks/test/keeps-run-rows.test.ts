@@ -6,7 +6,15 @@ import { describe, it, expect } from "bun:test";
 import { ACROSS_SPACES, paginatedRunsKeys } from "../../lib/query-keys.ts";
 import { keepsRunRows } from "../use-paginated-runs.ts";
 
-const key = (overrides: { status?: string; search?: string; limit?: number } = {}) =>
+const key = (
+  overrides: {
+    status?: string;
+    search?: string;
+    limit?: number;
+    spaceKind?: "team" | "personal";
+    spaceIds?: string;
+  } = {},
+) =>
   paginatedRunsKeys.list(
     "org_1",
     "spc_1",
@@ -15,6 +23,8 @@ const key = (overrides: { status?: string; search?: string; limit?: number } = {
     undefined,
     overrides.status,
     undefined,
+    overrides.spaceKind,
+    overrides.spaceIds,
     overrides.search ?? "",
     overrides.limit ?? 25,
   );
@@ -28,6 +38,21 @@ describe("keepsRunRows", () => {
     expect(keepsRunRows(key({ search: "rap" }), key({ search: "rapport" }))).toBe(true);
   });
 
+  it("drops the rows when the space kind changes, and keeps them while searching within it", () => {
+    expect(keepsRunRows(key({ spaceKind: "team" }), key())).toBe(false);
+    expect(
+      keepsRunRows(
+        key({ spaceKind: "team", search: "r" }),
+        key({ spaceKind: "team", search: "ra" }),
+      ),
+    ).toBe(true);
+  });
+
+  it("drops the rows when the picked spaces change", () => {
+    expect(keepsRunRows(key({ spaceIds: "spc_a" }), key({ spaceIds: "spc_a,spc_b" }))).toBe(false);
+    expect(keepsRunRows(key({ spaceIds: "spc_a" }), key())).toBe(false);
+  });
+
   it("drops the rows when a filter changes", () => {
     expect(keepsRunRows(key(), key({ status: "failed" }))).toBe(false);
   });
@@ -38,6 +63,8 @@ describe("keepsRunRows", () => {
         "org_1",
         ACROSS_SPACES,
         "/runs",
+        undefined,
+        undefined,
         undefined,
         undefined,
         undefined,

@@ -15,6 +15,7 @@ afterEach(() => {
   globalThis.fetch = realFetch;
 });
 
+/** Records every request's URL and answers it. */
 function capture(): string[] {
   const urls: string[] = [];
   globalThis.fetch = Object.assign(

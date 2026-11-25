@@ -26,8 +26,19 @@ await i18nModule.default.changeLanguage("fr");
 const ORG_ID = "org_1";
 const SPACE_ID = "spc_a";
 
+const AVAILABILITY = {
+  via: "shared",
+  state: "active",
+  shared_by: { user_id: "u_2", name: "Ada" },
+  offered_to_org: false,
+  org_offerable: false,
+  active_by_default: false,
+};
+
 const DETAIL = {
   active: true,
+  availability: AVAILABILITY,
+  manifest: { display_name: "Gmail" },
   auths: [{ auth_key: "api", type: "api_key", connections: [] }],
   tool_catalog: [{ name: "send" }, { name: "read" }],
 } as unknown as IntegrationDetailWire;
@@ -153,5 +164,36 @@ describe("the integration overview", () => {
       expect(html).not.toContain(t("integration.summary.connections"));
       expect(html).not.toContain(t("integration.summary.reauthorize"));
     }
+  });
+
+  describe("the availability card", () => {
+    const t = i18nModule.default.getFixedT("fr", "settings");
+    const withAvailability = (patch: Record<string, unknown>) =>
+      ({
+        ...DETAIL,
+        availability: { ...AVAILABILITY, ...patch },
+      }) as unknown as IntegrationDetailWire;
+
+    it("says how the working space got the integration", () => {
+      const html = renderOverview([]);
+      expect(html).toContain(t("packages.availability.title"));
+      expect(statValue(html, t("packages.availability.here"))).toBe(
+        t("packages.availability.sharedBy_integration", { name: "Ada" }),
+      );
+    });
+
+    it("is hidden in « Tous les espaces », which has no working-space answer", () => {
+      const html = renderOverview([], { overview: true, spaceIds: ["spc_a"] });
+      expect(html).not.toContain(t("packages.availability.title"));
+    });
+
+    it("draws the offer row only when the offer stands or the reader may change it", () => {
+      const none = renderOverview([]);
+      expect(none).not.toContain(t("catalogue.orgOffer.label"));
+      for (const patch of [{ org_offerable: true }, { offered_to_org: true }]) {
+        const html = renderOverview([], { detail: withAvailability(patch) });
+        expect(html).toContain(t("catalogue.orgOffer.label"));
+      }
+    });
   });
 });

@@ -5,8 +5,8 @@ import { searchOf } from "../url-search.ts";
 
 describe("searchOf", () => {
   it("writes the query behind its `?`", () => {
-    expect(searchOf(new URLSearchParams({ preview: "file_1", q: "a b" }))).toBe(
-      "?preview=file_1&q=a+b",
+    expect(searchOf(new URLSearchParams({ endUser: "eu_1", q: "a b" }))).toBe(
+      "?endUser=eu_1&q=a+b",
     );
   });
 

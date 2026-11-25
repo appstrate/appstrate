@@ -22,7 +22,7 @@
 
 import { describe, it, expect } from "bun:test";
 import type { IntegrationSpawnSpec } from "@appstrate/core/sidecar-types";
-import { runConnectOnce } from "../integrations-boot.ts";
+import { readConnectSpec, runConnectOnce } from "../integrations-boot.ts";
 import { HERMETIC_PROCESS_ADAPTER_ID } from "./helpers/hermetic-process-adapter.ts";
 
 const INTEGRATION_ID = "@scope/connect-it";
@@ -34,7 +34,9 @@ const SERVER_VERSION = "1.4.2";
  * past its own preconditions (`connectLogin`, `manifest.server`, a non-remote
  * `sourceKind`).
  */
-function connectSpec(server: Record<string, unknown>): IntegrationSpawnSpec {
+function connectSpec(
+  server: NonNullable<IntegrationSpawnSpec["manifest"]["server"]>,
+): IntegrationSpawnSpec {
   return {
     integrationId: INTEGRATION_ID,
     namespace: INTEGRATION_ID,
@@ -65,9 +67,10 @@ function connectSpec(server: Record<string, unknown>): IntegrationSpawnSpec {
         prefix: "Bearer ",
         value: "{$credential.session_token}",
       },
+      variables: {},
       inputs: { email: "a@b.c", password: "pw" },
     },
-  } as unknown as IntegrationSpawnSpec;
+  };
 }
 
 /** One platform call the sidecar made, in the order it made it. */
@@ -127,7 +130,7 @@ async function connectRun(
   const previous = process.env.INTEGRATION_RUNTIME_ADAPTER;
   process.env.INTEGRATION_RUNTIME_ADAPTER = HERMETIC_PROCESS_ADAPTER_ID;
   try {
-    await runConnectOnce(spec, {
+    await runConnectOnce(readConnectSpec(JSON.stringify(spec)), {
       platformApiUrl: "http://platform.local",
       runToken: "connect-token",
       fetchFn,

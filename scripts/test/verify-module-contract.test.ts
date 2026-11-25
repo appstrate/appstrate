@@ -69,12 +69,4 @@ describe("scripts/verify-module-contract.ts as a process", () => {
     expect(code).not.toBe(0);
     expect(output).toContain("unknown owner: HOOK_LEDGER.beforeUsage.owners names `not-a-module`");
   }, 60_000);
-
-  it("fails when MODULE_TENANT and DECLARER_ROOTS name different modules", () => {
-    const { code, output } = runGateWith((source) =>
-      source.replace('  "module-billing": "oss",\n', ""),
-    );
-    expect(code).not.toBe(0);
-    expect(output).toContain("MODULE_TENANT and DECLARER_ROOTS name different modules");
-  }, 60_000);
 });

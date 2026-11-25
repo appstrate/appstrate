@@ -3,7 +3,11 @@
 import { REQUEST_ID_ONLY_HEADERS, STD_RESPONSE_HEADERS } from "../headers.ts";
 import { MAX_CONNECTIONS_PER_INTEGRATION } from "@appstrate/core/integration";
 import { connectionIdSetJsonSchema } from "./integrations.ts";
-import { connectionConflictContent } from "../responses.ts";
+import {
+  connectionConflictContent,
+  runListPage,
+  scopedRunListValidationError,
+} from "../responses.ts";
 import { ORG_READ_REACH, packageIdFilterParameter } from "../parameters.ts";
 
 /**
@@ -87,6 +91,7 @@ export const schedulesPaths = {
   "/api/orgs/{orgId}/schedules": {
     get: {
       operationId: "listOrgSchedules",
+      "x-appstrate-space": { kind: "aggregate" },
       tags: ["Schedules"],
       summary: "List schedules across the organization's spaces",
       description:
@@ -290,7 +295,7 @@ export const schedulesPaths = {
         "404": {
           $ref: "#/components/responses/NoPublishedVersion",
           description:
-            "`no_published_version` when the agent has never been published, `agent_not_found` when this space holds no placement for it, `agent_not_active_in_space` when it holds one that is switched OFF (switch it back on with `POST /api/spaces/{id}/packages`).",
+            "`no_published_version` when the agent has never been published, `agent_not_found` when this space holds no placement for it, `agent_not_active_in_space` when it holds one that is switched OFF (switch it back on with `POST /api/spaces/{id}/packages`; its `active_in_spaces` names where this version and its required integrations are active, the caller holds `schedules:write` and the schedule’s actor can run agents).",
         },
         "409": scheduleConnectionNotChosen,
         "422": { $ref: "#/components/responses/VersionArtifactUnavailable" },
@@ -546,31 +551,8 @@ export const schedulesPaths = {
         { $ref: "#/components/parameters/RunSearch" },
       ],
       responses: {
-        "200": {
-          description: "Paginated run list",
-          headers: { ...STD_RESPONSE_HEADERS, Link: { $ref: "#/components/headers/Link" } },
-          content: {
-            "application/json": {
-              schema: {
-                type: "object",
-                properties: {
-                  object: { type: "string", enum: ["list"] },
-                  data: {
-                    type: "array",
-                    items: { $ref: "#/components/schemas/Run" },
-                  },
-                  total: { type: "integer" },
-                  hasMore: { type: "boolean" },
-                },
-                required: ["object", "data", "total", "hasMore"],
-              },
-            },
-          },
-        },
-        "400": {
-          $ref: "#/components/responses/ValidationError",
-          description: "`limit` outside its declared range (`param` names it).",
-        },
+        "200": runListPage,
+        "400": scopedRunListValidationError,
         "401": { $ref: "#/components/responses/Unauthorized" },
         "403": { $ref: "#/components/responses/Forbidden" },
       },

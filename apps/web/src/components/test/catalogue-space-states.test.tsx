@@ -41,6 +41,9 @@ const PACKAGE: LibraryPackageItem = {
   home_writable: true,
   home_deletable: true,
   home_shareable: true,
+  offered_to_org: false,
+  org_offerable: false,
+  active_by_default: false,
   activation: [],
   placements: [
     { space_id: "spc_on", via: "home", state: "active", shared_by: null },

@@ -36,6 +36,8 @@ import { describeRequiresRedis } from "../../helpers/tier.ts";
 import { closeRedis, flushRedis } from "../../helpers/redis.ts";
 import { createJudgedSchedule } from "../../helpers/schedule-fixtures.ts";
 import { getRedisQueueConnection } from "../../../src/lib/redis.ts";
+import { onDispatchSpaces } from "../../../src/lib/internal-dispatch.ts";
+import { forbidden } from "../../../src/lib/errors.ts";
 
 const app = getTestApp();
 const AGENT = "@withdraw/worker";
@@ -146,6 +148,87 @@ beforeEach(async () => {
   teamBuilder = await principal({ id: teamId, preset: "builder" });
   teamOperator = await principal({ id: teamId, preset: "operator" });
   teamViewer = await principal({ id: teamId, preset: "viewer" });
+});
+
+describe("conversation receipts for package placement", () => {
+  const shares = `/api/packages/${AGENT}/shares`;
+  async function dispatch(
+    path: string,
+    method: "POST" | "DELETE",
+    headers: Headers,
+    body?: object,
+    beforeWrite?: () => Promise<void>,
+  ) {
+    const ids: string[] = [];
+    const request = new Request(new URL(path, "http://localhost").href, {
+      method,
+      headers: { ...headers, "Content-Type": "application/json" },
+      ...(body && { body: JSON.stringify(body) }),
+    });
+    onDispatchSpaces(request, async (spaceIds) => {
+      ids.push(...spaceIds);
+      await beforeWrite?.();
+    });
+    return { response: await app.fetch(request), ids };
+  }
+
+  it("records the authorized home and target before sharing and stops if recording fails", async () => {
+    const body = { target: { kind: "space", spaceId: teamId } };
+    const rejected = await dispatch(shares, "POST", owner(), body, async () => {
+      throw forbidden("Conversation could not record the placement");
+    });
+    expect(rejected.response.status).toBe(403);
+    expect(rejected.ids).toEqual([homeId, teamId]);
+    expect(await placedIn(teamId)).toBe(false);
+    const sent = await dispatch(shares, "POST", owner(), body);
+    expect(sent.response.status).toBe(201);
+    expect(sent.ids).toEqual([homeId, teamId]);
+    const withdrawn = await dispatch(`${shares}/${teamId}`, "DELETE", owner());
+    expect(withdrawn.response.status).toBe(204);
+    expect(withdrawn.ids).toEqual([homeId, teamId]);
+  });
+
+  it("refuses a tracked placement if the authorization moved to another home before the write", async () => {
+    const nextHome = await seedSpace({ orgId: ctx.orgId, name: "New home" });
+    const result = await dispatch(
+      shares,
+      "POST",
+      owner(),
+      { target: { kind: "space", spaceId: teamId } },
+      async () => {
+        await db.update(packages).set({ homeSpaceId: nextHome.id }).where(eq(packages.id, AGENT));
+      },
+    );
+    expect(result.response.status).toBe(403);
+    expect(result.ids).toEqual([homeId, teamId]);
+    expect(await placedIn(teamId)).toBe(false);
+  });
+
+  it("records implicit placement on activation and only the recipient's space on their withdrawal", async () => {
+    const activated = await dispatch(`/api/spaces/${teamId}/packages`, "POST", owner(teamId), {
+      packageId: AGENT,
+    });
+    expect(activated.response.status).toBe(201);
+    expect(activated.ids).toEqual([homeId, teamId]);
+    const withdrawn = await dispatch(`${shares}/${teamId}`, "DELETE", teamBuilder.headers(teamId));
+    expect(withdrawn.response.status).toBe(204);
+    expect(withdrawn.ids).toEqual([teamId]);
+  });
+
+  it("keeps another member's private space out of a user-addressed share and withdrawal", async () => {
+    const sent = await dispatch(shares, "POST", author.headers(homeId), {
+      target: { kind: "user", userId: recipient.userId },
+    });
+    expect(sent.response.status).toBe(201);
+    expect(sent.ids).toEqual([homeId]);
+    const withdrawn = await dispatch(
+      `${shares}/${recipient.userId}`,
+      "DELETE",
+      author.headers(homeId),
+    );
+    expect(withdrawn.response.status).toBe(204);
+    expect(withdrawn.ids).toEqual([homeId]);
+  });
 });
 
 describe("the recipient side may withdraw", () => {

@@ -109,6 +109,21 @@ describe("listSyncableSkills", () => {
 });
 
 describe("resolveSkill", () => {
+  it("matches the SHA-256 vector for ordered UTF-8 paths in either catalogue order", () => {
+    const root = "skill://spc_1/acme/pdf@draft/pdf";
+    const uri = `${root}/SKILL.md`;
+    const resources = [
+      { uri, digest: `sha256:${"0".repeat(64)}`, size: 10 },
+      { uri: `${root}/caf%C3%A9.md`, digest: `sha256:${"1".repeat(64)}`, size: 5 },
+    ];
+    for (const order of [resources, resources.toReversed()]) {
+      expect(
+        resolveSkill({ uri, frontmatter: { name: "pdf", description: "PDF" }, resources: order })
+          .integrity,
+      ).toBe("sha256:b5b5446f6e61cf73e640e72ffbf864b53262389d03aad73e3b9cfcb5d803ffc9");
+    }
+  });
+
   it("labels a published skill with its served metadata.version and pins its digests", async () => {
     createSkillServer([
       { id: "@acme/pdf", skillMd: skillMd("pdf-tools", "Work with PDFs."), version: "2.3.1" },

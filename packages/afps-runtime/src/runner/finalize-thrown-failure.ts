@@ -33,10 +33,11 @@
  */
 
 import type { RunEvent } from "@afps-spec/types";
-import { reduceEvents } from "./reducer.ts";
+
 import type {
   RunError,
   RunTerminalStatus,
+  RunResult,
   TerminalRunResult,
   TokenUsage,
 } from "../types/run-result.ts";
@@ -47,8 +48,8 @@ interface FinalizeSink {
 }
 
 export interface FinalizeThrownFailureOptions {
-  /** Events captured so far (also the reducer input). */
-  events: RunEvent[];
+  /** Online result accumulated before the session failed. */
+  output: RunResult;
   /** The error thrown out of the session loop. */
   err: unknown;
   /** Abort signal — when already aborted, `err` is rethrown and nothing is finalized. */
@@ -92,7 +93,7 @@ function errorMessage(err: unknown): string {
 }
 
 export async function finalizeThrownFailure(opts: FinalizeThrownFailureOptions): Promise<void> {
-  const { events, err, signal, runId, now, emit, settlePending, eventSink, usage } = opts;
+  const { output, err, signal, runId, now, emit, settlePending, eventSink, usage } = opts;
 
   // 1. Cancellation: propagate without finalizing — the caller's finally
   //    block decides. MUST stay first so an aborted run never produces a
@@ -135,10 +136,10 @@ export async function finalizeThrownFailure(opts: FinalizeThrownFailureOptions):
     /* best-effort — the run outcome is decided below regardless */
   }
 
-  // 4. Reduce → stamp → finalize. `reduceEvents` (not emptyRunResult) so any
-  //    partial canonical output the agent emitted before the throw survives.
+  // Partial output already emitted by the run survives every terminal failure.
   const result: TerminalRunResult = {
-    ...reduceEvents(events, { error: resultError }),
+    ...output,
+    error: resultError,
     status: opts.terminalStatus ?? "failed",
     usage,
   };

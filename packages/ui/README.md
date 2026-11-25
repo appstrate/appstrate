@@ -33,12 +33,15 @@ import { SchemaForm } from "@appstrate/ui/schema-form";
 
 The widget is i18n-agnostic — pass translated strings via `labels`. See `apps/web/src/hooks/use-schema-form-labels.ts` for the i18next bridge used by the Appstrate platform.
 
+## Host theme
+
+The web host defines the Tailwind theme in `apps/web/src/styles.css`. Include its light and dark tokens for the sidebar, background, foreground, popovers, borders, focus rings and destructive actions. The sidebar provider sets its widths and the keyboard viewport helpers supply fallbacks. Radix supplies its own popover, menu and select geometry at render time.
+
 ## Exports
 
 - `./components/*` — shadcn/Radix primitives, one per file (e.g. `@appstrate/ui/components/button`, `dialog`, `select`, `sidebar`, `sonner`, …). CVA variants + `cn()` styling. `ls packages/ui/src/components/` is the authoritative list.
-- `./components/sidebar-context` — the `.ts`-only escape hatch for the sidebar context (the wildcard above resolves `.tsx`).
+- `./components/sidebar` exports the sidebar primitives, `SidebarProvider` and `useSidebar()`.
 - `./cn` — the canonical `cn(...)` class-merge helper (`clsx` + `tailwind-merge`). The single implementation used by every component and the web app.
-- `./use-mobile` — `useIsMobile()` hook (breakpoint-based).
 - `./schema-form` — `SchemaForm` component, `SchemaFormLabels` type, RJSF widgets/templates.
 
 > The `./components/*` wildcard is unguarded: a subpath naming a file that does

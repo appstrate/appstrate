@@ -73,6 +73,17 @@ const reachOf = (
   }),
 ];
 
+/** The kinds `search` declares in a handshake's tool list. */
+function searchKinds(tools: string): string[] {
+  const search = (JSON.parse(tools) as [string, string, unknown][]).find(
+    ([name]) => name === "search",
+  );
+  const parameters = search?.[2] as {
+    properties?: { kinds?: { items?: { enum?: string[] } } };
+  };
+  return parameters?.properties?.kinds?.items?.enum ?? [];
+}
+
 /** One chat turn's handshake against the real server, uncached: key + what it learned. */
 async function handshake(caller: Caller, permissions: readonly string[]) {
   const url = platformMcpUrl(ORIGIN, caller.ctx.orgId);
@@ -95,6 +106,7 @@ async function handshake(caller: Caller, permissions: readonly string[]) {
     },
     organization: inertTurnSpaces(caller.spaces),
     writeChunk: () => {},
+    fileDelivery: { image: false, pdf: false },
     signal: new AbortController().signal,
     turnBudget: { deadlineAt: Date.now() + 60_000, stepCount: () => 0 },
     fetch: platformFetch,
@@ -195,7 +207,7 @@ describe("platform MCP surface key purity", () => {
     const withAuthoring = await handshake(caller, grant);
     const withoutAuthoring = await handshake(
       caller,
-      turnPermissions(grant, { authoring: false, skillMode: "auto" }),
+      turnPermissions(grant, { authoring: false, skillDiscovery: true }),
     );
     expect(withoutAuthoring.key).not.toBe(withAuthoring.key);
     expect(withoutAuthoring.instructions).not.toBe(withAuthoring.instructions);
@@ -235,9 +247,10 @@ describe("platform MCP surface key purity", () => {
       ],
     };
     const [opened, shut] = await Promise.all([handshake(open, grant), handshake(closed, grant)]);
-    expect(opened.tools).toContain("search_integration_tools");
     expect(opened.tools).toContain("call_integration_tool");
     expect(shut.tools).not.toContain("call_integration_tool");
+    expect(searchKinds(opened.tools)).toContain("integration_tool");
+    expect(searchKinds(shut.tools)).not.toContain("integration_tool");
     expect(shut.key).not.toBe(opened.key);
   });
 });

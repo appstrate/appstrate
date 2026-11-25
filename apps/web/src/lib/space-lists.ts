@@ -53,34 +53,16 @@ interface ListedSpace {
   permissions: readonly string[];
 }
 
-function gateIn(
-  space: { permissions: readonly string[] },
-  orgPermissions: readonly string[] = [],
-): SpaceGate {
-  return (permission) =>
-    orgPermissions.includes(permission) || space.permissions.includes(permission);
-}
-
-/**
- * The spaces held with a role that `admits`, each judged as `usePermissions().can` judges the
- * working space. A list's permissions are of space level, so its verdicts need no `orgPermissions`.
- */
+/** The API projects each space's effective grants, including the caller's organization grants. */
 export function spacesWhere<S extends ListedSpace>(
   spaces: readonly S[] | undefined,
-  orgPermissions: readonly string[] | undefined,
   admits: (can: SpaceGate, space: S) => boolean,
 ): S[] {
   return (spaces ?? []).filter(
-    (space) => isSpaceEnterable(space) && admits(gateIn(space, orgPermissions), space),
+    (space) =>
+      isSpaceEnterable(space) &&
+      admits((permission) => space.permissions.includes(permission), space),
   );
-}
-
-/**
- * The spaces held with a role: what a list asking no role grant spans (the notification feed's
- * org route), and so what its « Tout marquer comme lu » marks.
- */
-export function spacesHeld<S extends ListedSpace>(spaces: readonly S[] | undefined): S[] {
-  return spacesWhere(spaces, undefined, () => true);
 }
 
 /** Whether `permission` holds in a row's space: the working space's gate, or the row's own. */
@@ -89,12 +71,11 @@ export function grantsInRowSpace(
   workingSpaceId: string | null,
   can: SpaceGate,
   spaces: readonly ListedSpace[] | undefined,
-  orgPermissions: readonly string[] | undefined,
   permission: string,
 ): boolean {
   if (!rowSpaceId || rowSpaceId === workingSpaceId) return can(permission);
   const space = spaces?.find((s) => s.id === rowSpaceId);
-  return !!space && isSpaceEnterable(space) && gateIn(space, orgPermissions)(permission);
+  return !!space && isSpaceEnterable(space) && space.permissions.includes(permission);
 }
 
 /**
@@ -104,16 +85,12 @@ export function grantsInRowSpace(
  */
 export function grantedForRow(
   spaces: readonly ListedSpace[] | undefined,
-  orgPermissions: readonly string[] | undefined,
   spaceId: string | null,
   permission: string,
 ): boolean {
   return (
-    spacesWhere(
-      spaces,
-      orgPermissions,
-      (can, space) => (!spaceId || space.id === spaceId) && can(permission),
-    ).length > 0
+    spacesWhere(spaces, (can, space) => (!spaceId || space.id === spaceId) && can(permission))
+      .length > 0
   );
 }
 
@@ -136,7 +113,7 @@ export function spaceChoice(
 /** The « Tous les espaces » is offered from two spaces admitting at least one of the lists. */
 export function overviewOffered(spaces: readonly ListedSpace[] | undefined): boolean {
   const admits = (can: SpaceGate) => SPACE_LISTS.some((list) => listAdmits(list)(can));
-  return spacesWhere(spaces, undefined, admits).length >= 2;
+  return spacesWhere(spaces, admits).length >= 2;
 }
 
 const listOf = (path: RoutePath) => SPACE_LISTS.find((list) => LIST_ROUTE[list] === path);
@@ -194,20 +171,15 @@ export function spanningRouteVerdict(
   // An `open` route (a file) is granted by its own declaration.
   if (!spanning || !spaces || !accessOf(path).anyOf) return undefined;
   const admits = routeAdmits(path);
-  return spacesWhere(spaces, undefined, admits).length > 0 ? "granted" : "denied";
+  return spacesWhere(spaces, admits).length > 0 ? "granted" : "denied";
 }
 
 /**
  * The spaces the chat acts in, as the backend's acting set judges them: held with
  * a role, the caller's gate granting the chat's acting permissions there.
  */
-export function actingSpaces<S extends ListedSpace>(
-  spaces: readonly S[] | undefined,
-  orgPermissions: readonly string[] | undefined,
-): S[] {
-  return spacesWhere(spaces, orgPermissions, (_can, space) =>
-    chatActsIn([...(orgPermissions ?? []), ...space.permissions]),
-  );
+export function actingSpaces<S extends ListedSpace>(spaces: readonly S[] | undefined): S[] {
+  return (spaces ?? []).filter((space) => isSpaceEnterable(space) && chatActsIn(space.permissions));
 }
 
 /**
@@ -217,12 +189,9 @@ export function actingSpaces<S extends ListedSpace>(
  */
 export function grantedInSomeActingSpace(
   spaces: readonly ListedSpace[] | undefined,
-  orgPermissions: readonly string[] | undefined,
   permission: string,
 ): boolean {
-  return actingSpaces(spaces, orgPermissions).some((space) =>
-    gateIn(space, orgPermissions)(permission),
-  );
+  return actingSpaces(spaces).some((space) => space.permissions.includes(permission));
 }
 
 /**
@@ -234,10 +203,8 @@ export function connectionRowConfigures(
   conn: { org: { id: string }; space: { id: string } | null },
   orgId: string | null | undefined,
   spaces: readonly ListedSpace[] | undefined,
-  orgPermissions: readonly string[] | undefined,
 ): boolean {
   return (
-    conn.org.id === orgId &&
-    grantedForRow(spaces, orgPermissions, conn.space?.id ?? null, "integrations:configure")
+    conn.org.id === orgId && grantedForRow(spaces, conn.space?.id ?? null, "integrations:configure")
   );
 }

@@ -12,13 +12,17 @@
  * scopes, not a role, so a caller acting on a session is never refused by them.
  */
 
-import { PERMISSION_REQUIREMENT_MARKER } from "@appstrate/core/permissions";
+import { AUTHORIZED_ROW_MARKER, PERMISSION_REQUIREMENT_MARKER } from "@appstrate/core/permissions";
 import { findTargetHandler, isMiddleware } from "hono/utils/handler";
 import { getPattern, splitPath, splitRoutingPath } from "hono/utils/url";
 import { hasHandlerMarker, markHandler, readHandlerMarker } from "../middleware/handler-marker.ts";
-import { ceilingRequirementOf, isSpaceRescope } from "../middleware/require-permission.ts";
+import { ceilingRequirementOf, rescopedSpaceParameter } from "../middleware/require-permission.ts";
+
+import { REQUEST_SPACE_CONTEXT } from "../middleware/space-context.ts";
+import type { MountedSpaceScope } from "./operation-space.ts";
 
 export interface RouteRequirement {
+  readonly spaceContext?: MountedSpaceScope;
   /** One per guard evaluated in the caller's own space, mount order, all required; `"a|b"` is a disjunction. Filters. */
   readonly requirements: readonly string[];
   /** Guards mounted after a space re-scope: enforced in the space the path names. Shown, never filtered. */
@@ -50,7 +54,7 @@ type Token =
 type TemplateSegment = string | null;
 
 /** `partial`: the entry runs for some values of a `{param}` and not others. */
-type Match = "none" | "partial" | "full";
+type Match = "none" | "literal-shadow" | "partial" | "full";
 
 const WILDCARD: Token = Object.freeze({ kind: "wildcard" });
 
@@ -60,9 +64,10 @@ interface TableEntry {
   readonly tokens: readonly Token[];
   readonly prefix: boolean;
   readonly serves: boolean;
+  readonly handlesRow: boolean;
   readonly requirement: string | null;
   readonly ceiling: string | null;
-  readonly rescope: boolean;
+  readonly spaceContext: MountedSpaceScope | undefined;
 }
 
 const FALLBACK = Symbol.for("appstrate.fallback");
@@ -107,14 +112,20 @@ export function deriveRouteRequirements(
     const tokens = tokenize(route.path);
     const prefix = tokens.at(-1)?.kind === "wildcard";
     const required = readHandlerMarker(route.handler, PERMISSION_REQUIREMENT_MARKER);
+    const target = rescopedSpaceParameter(route.handler);
     entries.push({
       method,
       tokens: prefix ? tokens.slice(0, -1) : tokens,
       prefix,
       serves: servesOperation(route.handler),
+      handlesRow: hasHandlerMarker(route.handler, AUTHORIZED_ROW_MARKER),
       requirement: typeof required === "string" && required.length > 0 ? required : null,
       ceiling: ceilingRequirementOf(route.handler),
-      rescope: isSpaceRescope(route.handler),
+      spaceContext: target
+        ? { kind: "target", parameter: target }
+        : hasHandlerMarker(route.handler, REQUEST_SPACE_CONTEXT)
+          ? { kind: "request" }
+          : undefined,
     });
   }
   return (method, pathTemplate) =>
@@ -127,7 +138,8 @@ function lookup(
   template: readonly TemplateSegment[],
 ): RouteRequirement | undefined {
   let served = false;
-  let rescoped = false;
+  let rowChecked: boolean | undefined;
+  let spaceContext: MountedSpaceScope | undefined;
   const requirements: string[] = [];
   const targetSpaceRequirements: string[] = [];
   // The ceiling is set at authentication, so no space re-scope moves it.
@@ -137,10 +149,30 @@ function lookup(
     if (entry.method !== "ALL" && entry.method !== method) continue;
     const match = matches(entry, template);
     if (match === "none") continue;
-    if (entry.rescope) rescoped = true;
+    // A literal sibling (or a constrained route) can shadow a parameter for some values.
+    // A row contract must hold on every terminal that could receive a concrete request.
+    if (entry.serves) {
+      if (rowChecked !== undefined && rowChecked !== entry.handlesRow) {
+        throw new Error(`Inconsistent row authorization for ${method} /${template.join("/")}`);
+      }
+      rowChecked = entry.handlesRow;
+    }
+    if (match === "literal-shadow") continue;
+    if (entry.spaceContext) {
+      if (
+        spaceContext &&
+        (spaceContext.kind !== entry.spaceContext.kind ||
+          (spaceContext.kind === "target" &&
+            entry.spaceContext.kind === "target" &&
+            spaceContext.parameter !== entry.spaceContext.parameter))
+      ) {
+        throw new Error(`Conflicting space middleware for ${method} /${template.join("/")}`);
+      }
+      spaceContext = entry.spaceContext;
+    }
     if (entry.requirement !== null) {
       // A guard reached twice is one requirement to the model.
-      const into = rescoped ? targetSpaceRequirements : requirements;
+      const into = spaceContext?.kind === "target" ? targetSpaceRequirements : requirements;
       if (!into.includes(entry.requirement)) into.push(entry.requirement);
     }
     if (entry.ceiling !== null && !ceilingRequirements.includes(entry.ceiling)) {
@@ -154,7 +186,13 @@ function lookup(
     }
   }
   if (!served) return undefined;
+  if (rowChecked) {
+    if (spaceContext)
+      throw new Error(`Conflicting space middleware for ${method} /${template.join("/")}`);
+    spaceContext = { kind: "resource", source: "row" };
+  }
   if (
+    spaceContext === undefined &&
     requirements.length === 0 &&
     targetSpaceRequirements.length === 0 &&
     ceilingRequirements.length === 0
@@ -162,6 +200,7 @@ function lookup(
     return UNGUARDED;
   }
   return Object.freeze({
+    ...(spaceContext ? { spaceContext } : {}),
     requirements: Object.freeze(requirements) as readonly string[],
     targetSpaceRequirements: Object.freeze(targetSpaceRequirements) as readonly string[],
     ceilingRequirements: Object.freeze(ceilingRequirements) as readonly string[],
@@ -180,7 +219,8 @@ function matches(entry: TableEntry, template: readonly TemplateSegment[]): Match
   for (const [i, segment] of template.slice(0, tokens.length).entries()) {
     const covered = tokenCovers(tokens[i]!, segment);
     if (covered === "none") return "none";
-    if (covered === "partial") match = "partial";
+    if (covered === "literal-shadow" || (covered === "partial" && match === "full"))
+      match = covered;
   }
   return match;
 }
@@ -190,6 +230,7 @@ function tokenCovers(token: Token, segment: TemplateSegment): Match {
     case "wildcard":
       return "full";
     case "literal":
+      if (segment === null) return "literal-shadow";
       return segment === token.value ? "full" : "none";
     case "param":
       if (token.accepts === null) return "full";
@@ -222,6 +263,6 @@ export function ceilingHolds(
   return holdsEach(ceilingRequirements, ceiling);
 }
 
-function holdsEach(entries: readonly string[], held: ReadonlySet<string>): boolean {
+export function holdsEach(entries: readonly string[], held: ReadonlySet<string>): boolean {
   return entries.every((entry) => entry.split("|").some((alternative) => held.has(alternative)));
 }

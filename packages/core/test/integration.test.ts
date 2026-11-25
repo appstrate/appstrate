@@ -179,6 +179,31 @@ describe("integrationManifestSchema — source kinds", () => {
 // ─────────────────────────────────────────────
 
 describe("integrationManifestSchema — oauth2 discovery + manual", () => {
+  it("validates known Appstrate extension fields and preserves foreign metadata", () => {
+    const manifest = baseManifest();
+    const auth = (manifest.auths as Record<string, Record<string, unknown>>).oauth!;
+    auth._meta = {
+      "dev.appstrate/auth": { required: "yes" },
+      "dev.appstrate/oauth": { scope_separator: 12 },
+    };
+    const invalid = integrationManifestSchema.safeParse(manifest);
+    expect(invalid.success).toBe(false);
+    expect(invalid.error?.issues.map((issue) => issue.path)).toContainEqual([
+      "auths",
+      "oauth",
+      "_meta",
+      "dev.appstrate/auth",
+      "required",
+    ]);
+    auth._meta = {
+      "dev.appstrate/auth": { required: false, future_hint: 5 },
+      "example.net/metadata": { enabled: true },
+    };
+    const valid = integrationManifestSchema.safeParse(manifest);
+    expect(valid.success).toBe(true);
+    expect(valid.data?.auths?.oauth?._meta).toEqual(auth._meta);
+  });
+
   it("accepts oauth2 with issuer only (discovery-first)", () => {
     const m = baseManifest();
     const auths = m.auths as Record<string, Record<string, unknown>>;

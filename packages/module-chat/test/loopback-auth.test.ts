@@ -249,4 +249,53 @@ describe("the spaces a bearer is bound to", () => {
       (await resolve(mintMcpLoopbackToken({ ...claims, permissions: ["mcp:read"] })))!.spaceIds,
     ).toBeUndefined();
   });
+
+  it("refuses a signed origin or user selection outside the bearer's reach", async () => {
+    const bearer = { ...claims, permissions: ["mcp:read"], spaceIds: ["spc_a"] };
+    expect(
+      await resolve(mintMcpLoopbackToken({ ...bearer, originSpaceId: "spc_outside" })),
+    ).toBeNull();
+    expect(
+      await resolve(
+        mintMcpLoopbackToken({
+          ...bearer,
+          spaceChoice: { tool: "run_and_wait", spaceId: "spc_outside" },
+        }),
+      ),
+    ).toBeNull();
+    expect(
+      await resolve(
+        mintMcpLoopbackToken({
+          ...bearer,
+          spaceChoice: { tool: "invoke_operation", spaceId: "spc_a" },
+        }),
+      ),
+    ).toBeNull();
+    const ephemeral = await resolve(mintMcpLoopbackToken({ ...bearer, originSpaceId: "spc_a" }));
+    expect(ephemeral?.extra?.originSpaceId).toBe("spc_a");
+    expect(ephemeral?.extra?.beforeMcpSpaceAct).toBeUndefined();
+  });
+
+  it("lifts the restriction only for an explicit `false`; absent or `true` stays restricted", async () => {
+    const mint = (restricted?: boolean) =>
+      resolve(
+        mintMcpLoopbackToken({
+          ...claims,
+          permissions: ["mcp:read"],
+          spaceIds: ["spc_a"],
+          restricted,
+        }),
+      );
+    expect((await mint(false))!.spaceIdsRestricted).toBe(false);
+    expect((await mint(true))!.spaceIdsRestricted).toBeUndefined();
+    expect((await mint(undefined))!.spaceIdsRestricted).toBeUndefined();
+  });
+
+  it("carries no restriction signal without an allowlist", async () => {
+    const res = await resolve(
+      mintMcpLoopbackToken({ ...claims, permissions: ["mcp:read"], restricted: false }),
+    );
+    expect(res!.spaceIds).toBeUndefined();
+    expect(res!.spaceIdsRestricted).toBeUndefined();
+  });
 });

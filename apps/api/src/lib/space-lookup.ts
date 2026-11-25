@@ -7,9 +7,15 @@
  * import each other.
  */
 
-import { and, eq, sql } from "drizzle-orm";
+import { and, eq, inArray, sql } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
-import { organizationMembers, spaceMembers, spaceRoles, spaces } from "@appstrate/db/schema";
+import {
+  organizationMembers,
+  organizations,
+  spaceMembers,
+  spaceRoles,
+  spaces,
+} from "@appstrate/db/schema";
 import type { OrgRole } from "@appstrate/core/permissions";
 import { assertSpaceId } from "./ids.ts";
 import {
@@ -17,6 +23,9 @@ import {
   MEMBERSHIP_COLUMNS,
   memberFromJoin,
   membershipOn,
+  PERSONAL_SPACE_ROLE_COLUMN,
+  toPersonalSpaceRole,
+  type PersonalSpaceRole,
   type SpaceMemberRow,
 } from "./space-role.ts";
 
@@ -50,11 +59,8 @@ export const SPACE_CONTEXT_COLUMNS = {
 } as const;
 
 /**
- * The space row, or null if it is not in `orgId`. Where a CLIENT-SUPPLIED
- * space id enters (middleware, MCP router — SSE auth enters through
- * {@link loadSpaceAccess}, which carries the same guard), hence the id-shape guard,
- * run BEFORE the SELECT: a retired `app_` id is un-migrated data, not a missing
- * row, and must throw rather than 404 (header, key and row would still agree).
+ * Returns the space in this organization, or null when it is absent. Validate the ID
+ * before querying so malformed input receives a 400 and a missing space receives a 404.
  */
 export async function validateSpaceInOrg(
   spaceId: string,
@@ -75,6 +81,8 @@ export interface SpaceAccessSnapshot {
   member: SpaceMemberRow | null;
   /** `null` when `userId` is not a member of the organization. */
   orgRole: OrgRole | null;
+  /** The org's `personal_space_role`, from the same statement (RBAC spec §4.4). */
+  personalSpaceRole: PersonalSpaceRole;
 }
 
 /**
@@ -87,14 +95,27 @@ export async function loadSpaceAccess(
   orgId: string,
   userId: string | null,
 ): Promise<SpaceAccessSnapshot | null> {
-  assertSpaceId(spaceId);
-  const [row] = await db
+  const [row] = await loadSpaceAccessForIds([spaceId], orgId, userId);
+  return row ?? null;
+}
+
+/** The same role snapshot for several spaces, in one statement. */
+export async function loadSpaceAccessForIds(
+  spaceIds: readonly string[],
+  orgId: string,
+  userId: string | null,
+): Promise<SpaceAccessSnapshot[]> {
+  if (spaceIds.length === 0) return [];
+  for (const id of spaceIds) assertSpaceId(id);
+  const rows = await db
     .select({
       space: SPACE_CONTEXT_COLUMNS,
       ...MEMBERSHIP_COLUMNS,
       orgRole: organizationMembers.role,
+      storedPersonalSpaceRole: PERSONAL_SPACE_ROLE_COLUMN,
     })
     .from(spaces)
+    .innerJoin(organizations, eq(organizations.id, spaces.orgId))
     .leftJoin(spaceMembers, membershipOn(userId))
     .leftJoin(spaceRoles, customRoleOn)
     .leftJoin(
@@ -104,7 +125,11 @@ export async function loadSpaceAccess(
         userId === null ? sql`false` : eq(organizationMembers.userId, userId),
       ),
     )
-    .where(and(eq(spaces.id, spaceId), eq(spaces.orgId, orgId)))
-    .limit(1);
-  return row ? { space: row.space, member: memberFromJoin(row), orgRole: row.orgRole } : null;
+    .where(and(inArray(spaces.id, [...spaceIds]), eq(spaces.orgId, orgId)));
+  return rows.map((row) => ({
+    space: row.space,
+    member: memberFromJoin(row),
+    orgRole: row.orgRole,
+    personalSpaceRole: toPersonalSpaceRole(row.storedPersonalSpaceRole),
+  }));
 }

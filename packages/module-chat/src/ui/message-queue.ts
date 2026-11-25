@@ -7,6 +7,8 @@
  * it with `useSyncExternalStore` (no setState in effects) and tests need no DOM.
  */
 
+import { namesAgent } from "./directive-send.ts";
+
 export interface QueueSnapshot {
   readonly items: readonly string[];
   /** The user pressed Stop during the current turn: its queue is held, not auto-sent. */
@@ -16,6 +18,17 @@ export interface QueueSnapshot {
 /** Queued texts become one message, one paragraph each. */
 export function joinQueued(items: readonly string[]): string {
   return items.join("\n\n");
+}
+
+/** Whether the draft can join the queue: a turn runs, text alone, no agent launch (none waits in a queue). */
+export function canQueueDraft(input: {
+  running: boolean;
+  text: string;
+  hasAttachments: boolean;
+}): boolean {
+  return (
+    input.running && !input.hasAttachments && input.text.trim() !== "" && !namesAgent(input.text)
+  );
 }
 
 export type FlushDecision = "send" | "hold" | "none";

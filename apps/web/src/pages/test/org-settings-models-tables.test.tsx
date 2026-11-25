@@ -85,6 +85,7 @@ function credential(over: Partial<ModelProviderCredentialInfo>): ModelProviderCr
     created_by: "usr_admin",
     allowed_actions: ["edit", "delete", "test"],
     bindable: true,
+    referencing_model_count: 0,
     serves_model_ids: [],
     needs_reconnection: false,
     createdAt: CREATED,
@@ -304,12 +305,13 @@ describe("an organization subscription", () => {
     expect(row).toContain(settingsFr["models.credentialUnavailable"]);
   });
 
-  it("offers no reconnect while it is healthy", () => {
+  it("offers the reconnect while it is healthy too, without the unavailable state", () => {
     const row = rowOf(
       providersTable([], [{ ...ORG_SUBSCRIPTION, needs_reconnection: false }]),
       ORG_SUBSCRIPTION.label,
     );
-    expect(row).not.toContain(menu);
+    expect(row).toContain(menu);
+    expect(row).not.toContain(settingsFr["models.credentialUnavailable"]);
   });
 });
 

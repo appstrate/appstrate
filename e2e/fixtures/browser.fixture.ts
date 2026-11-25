@@ -11,6 +11,24 @@ import { test as base, expect, type Page } from "@playwright/test";
 import { registerUser, createOrg, type AuthResult, type OrgResult } from "../helpers/seed.ts";
 import { createApiClient, createOrgOnlyClient, type ApiClient } from "../helpers/api-client.ts";
 
+import type { ViewAsOrgRole } from "@appstrate/core/permissions";
+
+export const PREVIEW_STORAGE_KEY = "appstrate_view_as";
+
+export async function seedRolePreview(
+  target: Page | import("@playwright/test").BrowserContext,
+  persona: {
+    orgId: string;
+    orgRole: ViewAsOrgRole;
+    space: { spaceId: string; role: string; roleLabel: string; spaceName: string } | null;
+  },
+) {
+  await target.addInitScript(([key, value]) => localStorage.setItem(key, value), [
+    PREVIEW_STORAGE_KEY,
+    JSON.stringify({ ...persona, returnSpaceId: null }),
+  ] as const);
+}
+
 interface BrowserContext {
   auth: AuthResult;
   org: OrgResult;

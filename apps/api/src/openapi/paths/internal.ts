@@ -114,6 +114,7 @@ export const internalPaths = {
   "/internal/mcp": {
     post: {
       operationId: "internalRunToolsMcpPost",
+      "x-appstrate-space": { kind: "organization" },
       tags: ["Internal"],
       summary: "Run MCP server of a platform run",
       description:
@@ -130,6 +131,7 @@ export const internalPaths = {
     },
     get: {
       operationId: "internalRunToolsMcpGet",
+      "x-appstrate-space": { kind: "organization" },
       tags: ["Internal"],
       summary: "Run MCP server of a platform run (GET)",
       description:
@@ -141,6 +143,7 @@ export const internalPaths = {
   "/internal/oauth-token/{credentialId}": {
     get: {
       operationId: "getOAuthModelProviderToken",
+      "x-appstrate-space": { kind: "organization" },
       tags: ["Internal"],
       summary: "Fetch a fresh access token for an OAuth model provider connection",
       description:
@@ -176,6 +179,7 @@ export const internalPaths = {
   "/internal/oauth-token/{credentialId}/refresh": {
     post: {
       operationId: "refreshOAuthModelProviderToken",
+      "x-appstrate-space": { kind: "organization" },
       tags: ["Internal"],
       summary: "Force a refresh of the access token for an OAuth model provider connection",
       description:
@@ -210,6 +214,7 @@ export const internalPaths = {
   "/internal/integration-credentials/{scope}/{name}": {
     get: {
       operationId: "getIntegrationCredentials",
+      "x-appstrate-space": { kind: "organization" },
       tags: ["Internal"],
       summary: "Fetch live credentials + HTTP delivery plans for an active integration",
       description:
@@ -248,6 +253,7 @@ export const internalPaths = {
   "/internal/integration-credentials/{scope}/{name}/refresh": {
     post: {
       operationId: "refreshIntegrationCredentials",
+      "x-appstrate-space": { kind: "organization" },
       tags: ["Internal"],
       summary: "Force-refresh OAuth2 credentials for an active integration",
       description:
@@ -306,6 +312,7 @@ export const internalPaths = {
   "/internal/integration-credentials/{scope}/{name}/upstream-success": {
     post: {
       operationId: "reportIntegrationUpstreamSuccess",
+      "x-appstrate-space": { kind: "organization" },
       tags: ["Internal"],
       summary: "End a connection's upstream-rejection streak",
       description:
@@ -342,6 +349,7 @@ export const internalPaths = {
   "/internal/integration-bundle/{scope}/{name}": {
     get: {
       operationId: "getIntegrationBundle",
+      "x-appstrate-space": { kind: "organization" },
       tags: ["Internal"],
       summary: "Fetch the archive of a local integration (manifest and server payload)",
       description:

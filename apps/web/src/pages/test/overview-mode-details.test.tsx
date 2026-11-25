@@ -53,8 +53,18 @@ describe("the sidebar's Runs entry", () => {
     expect(keys.length).toBe(2);
     expect(keys.every((key) => key[1] === "org_1" && key[2] === "across-spaces")).toBe(true);
     // The unread count (`unread: true`) and the runs in flight (`status: pending,running`).
-    expect(keys.some((key) => key[7] === true)).toBe(true);
-    expect(keys.some((key) => key[6] === "pending,running")).toBe(true);
+    expect(keys).toContainEqual([
+      "paginated-runs",
+      "org_1",
+      "across-spaces",
+      expect.objectContaining({ unread: true }),
+    ]);
+    expect(keys).toContainEqual([
+      "paginated-runs",
+      "org_1",
+      "across-spaces",
+      expect.objectContaining({ status: "pending,running" }),
+    ]);
   });
 
   it("counts the working space's out of the mode", () => {

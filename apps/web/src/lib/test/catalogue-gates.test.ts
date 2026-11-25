@@ -39,6 +39,9 @@ function packageRow(
     home_space_id: null,
     home_writable: false,
     home_shareable: false,
+    offered_to_org: false,
+    org_offerable: false,
+    active_by_default: false,
     home_deletable: false,
     placements,
     activation: [],
@@ -73,6 +76,16 @@ describe("activationGate", () => {
     expect(activationGate(off, "spc_c", false)).toEqual(ALLOWED);
   });
 
+  it("names a runtime-bound integration's refusal, not a missing grant", () => {
+    const bound = packageRow("integration", [], {
+      activation: [{ spaceId: "spc_a", activate: "allowed", deactivate: "runtime_bound" }],
+    });
+    expect(activationGate(bound, "spc_a", false)).toEqual({
+      allowed: false,
+      refusal: "runtimeBound",
+    });
+  });
+
   it("refuses a space the row has no verdict for, blaming nobody", () => {
     expect(activationGate(pkg, "spc_unknown", true)).toEqual({ allowed: false, refusal: null });
   });
@@ -91,6 +104,9 @@ describe("catalogueDeeds", () => {
           home_space_id: "spc_home",
           home_writable: true,
           home_shareable: true,
+          offered_to_org: false,
+          org_offerable: false,
+          active_by_default: false,
         }),
         "spc_home",
       ),
@@ -120,6 +136,9 @@ describe("catalogueDeeds", () => {
   it("does not list the current space twice for a sharer who is also its recipient", () => {
     const row = packageRow("agent", placements, {
       home_shareable: true,
+      offered_to_org: false,
+      org_offerable: false,
+      active_by_default: false,
       activation: [{ spaceId: "spc_guest", activate: "allowed", deactivate: "allowed" }],
     });
     expect(catalogueDeeds(row, "spc_guest").revokeFrom).toEqual(["spc_guest"]);

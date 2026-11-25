@@ -41,6 +41,7 @@ import { verifyEndUserAccessToken, type AccessTokenClaims } from "../services/en
 import { lookupEndUser } from "../services/enduser-mapping.ts";
 import { getClientCached } from "../services/oauth-admin.ts";
 import { checkFamilyAndTouch } from "../services/cli-tokens.ts";
+import { checkMcpGrantAndTouch } from "../services/mcp-grants.ts";
 import { scopesToPermissions } from "./claims.ts";
 import { getClientIpFromRequest } from "../../../lib/client-ip.ts";
 import { mcpBindingFromAudiences } from "../../../lib/audiences.ts";
@@ -148,7 +149,28 @@ export const oidcAuthStrategy: AuthStrategy = {
     // that of a space API key carrying every grantable scope, so org-only
     // authority (members, org settings, …) stays out of reach. A principal
     // already pinned to a different space contradicts its own audience.
-    const boundSpaceId = mcpBindingFromAudiences(claims.audiences)?.spaceId;
+    const mcpBinding = mcpBindingFromAudiences(claims.audiences);
+    // A token bound to an MCP resource belongs to an MCP access grant. Its JWT
+    // is verified without a database read, so the grant's revocation watermark
+    // is checked here, on every request (`services/mcp-grants.ts`).
+    if (resolution && mcpBinding && claims.clientId) {
+      const stillActive = await checkMcpGrantAndTouch({
+        userId: claims.authUserId,
+        clientId: claims.clientId,
+        binding: mcpBinding,
+        issuedAt: claims.issuedAt,
+        ip: getClientIpFromRequest(request),
+      });
+      if (!stillActive) {
+        logger.info("OIDC strategy: MCP access grant revoked — rejecting token", {
+          module: "oidc",
+          userId: claims.authUserId,
+          clientId: claims.clientId,
+        });
+        return null;
+      }
+    }
+    const boundSpaceId = mcpBinding?.spaceId;
     if (resolution && boundSpaceId !== undefined) {
       if (resolution.spaceId !== undefined && resolution.spaceId !== boundSpaceId) {
         logger.warn("OIDC strategy: token space differs from its audience space — rejecting", {

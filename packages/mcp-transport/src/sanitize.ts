@@ -22,7 +22,14 @@
  * Limits:
  *   - Tool description ≤ 2048 bytes.
  *   - Parameter description ≤ 512 bytes.
- *   - Total schema serialised size ≤ 8192 bytes.
+ *   - Input + output schema serialised size ≤ 8192 bytes, shared.
+ *
+ * A descriptor over the schema budget is degraded, never dropped: its
+ * `outputSchema` goes first, then the input schema's documentation keywords,
+ * then the input schema itself, which leaves `{ type: "object" }` and a note in
+ * the description; the `outputSchema` stays when it fits beside the reduced
+ * input ({@link sanitiseToolDescriptor}). Every step taken is reported to the
+ * caller.
  *
  * What this module deliberately does NOT do:
  *   - Block specific phrases ("IGNORE PREVIOUS"). The LLM's own
@@ -124,7 +131,7 @@ export function sanitiseTextField(value: unknown, maxBytes: number): string | un
  * otherwise send a pathologically deep object (`{a:{a:{a:…}}}`) to overflow
  * the stack before any size accounting runs. Legitimate JSON Schemas are
  * shallow; anything past this cap is treated as opaque and left un-recursed —
- * the serialised-size cap in {@link sanitiseToolDescriptor} still bounds the
+ * the serialised-size budget in {@link sanitiseToolDescriptor} still bounds the
  * total bytes that reach the agent, so an un-walked deep subtree cannot smuggle
  * an oversized payload through.
  */
@@ -181,42 +188,162 @@ function sanitiseToolMeta(meta: Tool["_meta"]): Tool["_meta"] | undefined {
   return Object.keys(out).length > 0 ? out : undefined;
 }
 
+/** The steps {@link sanitiseToolDescriptor} may take to bring a descriptor within the schema budget, in order. */
+export const TOOL_DESCRIPTOR_REDUCTIONS = [
+  "output_schema",
+  "schema_documentation",
+  "input_schema",
+] as const;
+export type ToolDescriptorReduction = (typeof TOOL_DESCRIPTOR_REDUCTIONS)[number];
+
+/** Keywords that only document a schema: validation never reads them. */
+const DOCUMENTATION_KEYWORDS: ReadonlySet<string> = new Set([
+  "description",
+  "title",
+  "examples",
+  "$comment",
+  "deprecated",
+  "readOnly",
+  "writeOnly",
+]);
+
+/**
+ * Keywords whose value maps a name (a property's, a definition's, …) to a schema. Draft-07
+ * `dependencies` also maps a name to a property-name array, kept as is like any non-schema value.
+ */
+const SCHEMA_MAP_KEYWORDS: ReadonlySet<string> = new Set([
+  "properties",
+  "patternProperties",
+  "$defs",
+  "definitions",
+  "dependentSchemas",
+  "dependencies",
+]);
+
+/** Keywords whose value is a schema or an array of schemas. */
+const SUBSCHEMA_KEYWORDS: ReadonlySet<string> = new Set([
+  "items",
+  "additionalItems",
+  "additionalProperties",
+  "not",
+  "if",
+  "then",
+  "else",
+  "contains",
+  "propertyNames",
+  "unevaluatedItems",
+  "unevaluatedProperties",
+  "allOf",
+  "anyOf",
+  "oneOf",
+  "prefixItems",
+  "contentSchema",
+]);
+
+function isSchemaObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+/**
+ * `schema` without its documentation keywords ({@link DOCUMENTATION_KEYWORDS} and every `x-*`
+ * annotation), at every schema position. Names under a {@link SCHEMA_MAP_KEYWORDS} keyword are
+ * not keywords — a property named `description` stays — and every other value (`enum`, `const`,
+ * `default`, `required`, …) is kept verbatim. Past {@link MAX_SCHEMA_DEPTH} a subtree is left as is.
+ */
+function stripSchemaDocumentation(schema: unknown, depth = 0): unknown {
+  if (!isSchemaObject(schema) || depth >= MAX_SCHEMA_DEPTH) return schema;
+  const strip = (sub: unknown) => stripSchemaDocumentation(sub, depth + 1);
+  const out: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(schema)) {
+    if (DOCUMENTATION_KEYWORDS.has(key) || key.startsWith("x-")) continue;
+    if (SCHEMA_MAP_KEYWORDS.has(key) && isSchemaObject(value)) {
+      out[key] = Object.fromEntries(Object.entries(value).map(([name, sub]) => [name, strip(sub)]));
+    } else if (SUBSCHEMA_KEYWORDS.has(key)) {
+      out[key] = Array.isArray(value) ? value.map(strip) : strip(value);
+    } else {
+      out[key] = value;
+    }
+  }
+  return out;
+}
+
+const encoder = new TextEncoder();
+
+/**
+ * Whether the serialised schemas fit {@link MAX_SCHEMA_SERIALISED_BYTES}, counted in UTF-8
+ * bytes — `String.length` counts UTF-16 code units, so a schema
+ * of multibyte characters could carry up to ~4× the intended budget. Both schemas share one
+ * budget: they reach the agent together.
+ */
+function fitsSchemaBudget(inputSchema: unknown, outputSchema?: unknown): boolean {
+  let bytes = encoder.encode(JSON.stringify(inputSchema)).byteLength;
+  if (outputSchema !== undefined) bytes += encoder.encode(JSON.stringify(outputSchema)).byteLength;
+  return bytes <= MAX_SCHEMA_SERIALISED_BYTES;
+}
+
+/** Leads the description of a tool whose input schema is withheld. */
+const INPUT_SCHEMA_WITHHELD_NOTE =
+  "Input schema withheld, too large to show: the server validates the arguments.";
+
 /**
  * Sanitise a single MCP {@link Tool} descriptor. Returns a fresh copy —
  * never mutates the input — with all known injection vectors stripped
  * and length caps enforced.
  *
- * Drops the tool entirely (returns `null`) when the resulting schemas
- * are too large after sanitisation. The host should log this and refuse
- * to advertise the tool to the agent rather than ship a half-sanitised
- * descriptor.
+ * The sanitised `inputSchema` and `outputSchema` share a budget of
+ * {@link MAX_SCHEMA_SERIALISED_BYTES}. A descriptor over it is degraded, never
+ * dropped; `reduced` lists, in this order, the steps taken (empty when none
+ * was needed):
+ *   1. `output_schema`: `outputSchema` is removed (optional in MCP).
+ *   2. `schema_documentation`: the input schema loses its documentation
+ *      keywords. The tool's own description stays.
+ *   3. `input_schema`: the input schema becomes `{ type: "object" }` and the
+ *      description says it was withheld and that the server validates the
+ *      arguments.
+ * The input schema is reduced only as far as it must fit on its own (step 1
+ * goes first), and the output schema is kept whenever it fits beside it.
  *
- * `outputSchema` is sanitised and budgeted alongside `inputSchema`. It
- * used to ride through untouched on the `...tool` spread: an untrusted
- * server could hide poisoned `description` fields in it and blow past the
- * size cap, which only weighed `inputSchema`. It is also load-bearing —
- * the MCP SDK client validates every result of a tool that declares one —
- * so a hostile or oversized `outputSchema` is not inert.
+ * `outputSchema` is sanitised and budgeted alongside `inputSchema`: an
+ * untrusted server could hide poisoned `description` fields in it, and it is
+ * load-bearing — the MCP SDK client validates every result of a tool that
+ * declares one — so a hostile or oversized `outputSchema` is not inert.
  */
-export function sanitiseToolDescriptor(tool: Tool): Tool | null {
-  const description = sanitiseTextField(tool.description, MAX_TOOL_DESCRIPTION_BYTES);
-  const inputSchema = sanitiseSchemaDescriptions(tool.inputSchema) as Tool["inputSchema"];
-  const outputSchema =
+export function sanitiseToolDescriptor(tool: Tool): {
+  tool: Tool;
+  reduced: ToolDescriptorReduction[];
+} {
+  let description = sanitiseTextField(tool.description, MAX_TOOL_DESCRIPTION_BYTES);
+  let inputSchema = sanitiseSchemaDescriptions(tool.inputSchema) as Tool["inputSchema"];
+  let outputSchema =
     tool.outputSchema === undefined
       ? undefined
       : (sanitiseSchemaDescriptions(tool.outputSchema) as Tool["outputSchema"]);
-  const sanitisedMeta = sanitiseToolMeta(tool._meta);
-  // Measure the UTF-8 byte length — `String.length` counts UTF-16 code units,
-  // so a schema of multibyte characters could carry up to ~4× the intended
-  // byte budget past this cap. Both schemas share one budget: they reach the
-  // agent together.
-  const encoder = new TextEncoder();
-  let serialisedBytes = encoder.encode(JSON.stringify(inputSchema)).byteLength;
-  if (outputSchema !== undefined) {
-    serialisedBytes += encoder.encode(JSON.stringify(outputSchema)).byteLength;
+  const reduced: ToolDescriptorReduction[] = [];
+  if (!fitsSchemaBudget(inputSchema, outputSchema)) {
+    // The output schema is the first to go: the input schema is reduced only as far as it must
+    // fit on its own, and the output schema stays if it still fits beside the result.
+    if (!fitsSchemaBudget(inputSchema)) {
+      inputSchema = stripSchemaDocumentation(inputSchema) as Tool["inputSchema"];
+      reduced.push("schema_documentation");
+    }
+    if (!fitsSchemaBudget(inputSchema)) {
+      inputSchema = { type: "object" };
+      // Leading, so the length cap (here, or a renamed tool's) cuts the upstream text, never the note.
+      description = sanitiseTextField(
+        description
+          ? `${INPUT_SCHEMA_WITHHELD_NOTE}\n\n${description}`
+          : INPUT_SCHEMA_WITHHELD_NOTE,
+        MAX_TOOL_DESCRIPTION_BYTES,
+      );
+      reduced.push("input_schema");
+    }
+    if (!fitsSchemaBudget(inputSchema, outputSchema)) {
+      outputSchema = undefined;
+      reduced.unshift("output_schema");
+    }
   }
-  if (serialisedBytes > MAX_SCHEMA_SERIALISED_BYTES) return null;
-  const { _meta: _untrustedMeta, ...toolWithoutMeta } = tool;
+  const sanitisedMeta = sanitiseToolMeta(tool._meta);
+  const { _meta: _untrustedMeta, outputSchema: _upstreamOutput, ...toolWithoutMeta } = tool;
   const out: Tool = {
     ...toolWithoutMeta,
     inputSchema,
@@ -227,7 +354,7 @@ export function sanitiseToolDescriptor(tool: Tool): Tool | null {
   if (typeof tool.title === "string") {
     out.title = sanitiseTextField(tool.title, MAX_PARAMETER_DESCRIPTION_BYTES);
   }
-  return out;
+  return { tool: out, reduced };
 }
 
 /** The labels whose place in a `_meta` prefix reserves it for MCP. */

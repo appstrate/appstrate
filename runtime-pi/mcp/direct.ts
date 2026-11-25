@@ -170,18 +170,20 @@ async function planApiCall(
     // workspace path and returning a file descriptor. With no `toFile`, large
     // bodies still auto-spill to `resources/<file>` and the status line is
     // prepended.
-    finish: async (result, toolCallId) => {
+    finish: async (result, toolCallId, signal) => {
       let shaped: Awaited<ReturnType<typeof shapeApiCallResponse>>;
       try {
         shaped = await shapeApiCallResponse(result, {
+          signal,
           workspace: opts.workspace,
           ...(responseToFile !== undefined ? { toFile: responseToFile } : {}),
           toolCallId,
           runId: opts.runId,
           emit: opts.emit,
-          readResource: (uri) => opts.mcp.readResource({ uri }),
+          readResource: (uri) => opts.mcp.readResource({ uri }, { ...(signal && { signal }) }),
         });
       } catch (err) {
+        signal?.throwIfAborted();
         // A bad responseMode.toFile path (escape/symlink) or a resource
         // read failure is a tool-level error, not a run abort.
         return callToolResultToPi({

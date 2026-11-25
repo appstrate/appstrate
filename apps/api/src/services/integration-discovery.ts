@@ -13,15 +13,16 @@
 import type { Implementation } from "@modelcontextprotocol/sdk/types.js";
 import { parse as parseHost } from "tldts";
 import { createMcpHttpClient, httpStatusOf } from "@appstrate/mcp-transport";
+import { isRetryableHttpStatus } from "@appstrate/afps-shared/backoff";
 import {
   discoverProtectedResourceMetadata,
-  parseResourceMetadataChallenge,
-  parseScopeChallenge,
+  parseBearerChallenge,
+  type BearerChallenge,
   resolveOAuthEndpoints,
 } from "@appstrate/connect";
 import { isIconImage } from "@appstrate/core/appearance";
 import { getErrorMessage } from "@appstrate/core/errors";
-import { scopeTokenSchema } from "@appstrate/core/integration";
+import { OAUTH_META_KEY, scopeTokenSchema } from "@appstrate/core/integration";
 import { toSlug } from "@appstrate/core/naming";
 import { parseSseFrames } from "@appstrate/core/sse";
 import { ApiError, badGateway, invalidRequest } from "../lib/errors.ts";
@@ -65,7 +66,7 @@ interface ProbedServer {
   transport: Transport;
   /** Whether the transport was seen answering, rather than guessed from the URL. */
   transportDetected: boolean;
-  challenge: string | undefined;
+  challenge: BearerChallenge | undefined;
   /** What the server says it is, when it answered `server/discover` or `initialize` openly. */
   identity: Implementation | undefined;
 }
@@ -181,7 +182,7 @@ async function probeServer(url: string, fetchImpl: typeof fetch): Promise<Probed
     const status = httpStatusOf(err) ?? seen.status;
     if (status === 404 || status === 405) return probeSse(url, fetchImpl);
     // A server that could not answer (the probe, then `initialize`): not a verdict on it.
-    if (status !== undefined && status >= 500) throw unreachable(url, err);
+    if (status !== undefined && isRetryableHttpStatus(status)) throw unreachable(url, err);
     throw notAnMcpServer(url);
   }
   try {
@@ -199,14 +200,11 @@ async function probeServer(url: string, fetchImpl: typeof fetch): Promise<Probed
         identity,
       };
     }
-    if (refusal !== undefined && !seen.oversized) {
-      // The same reading as the connect's: a fault on the way is the server unreachable, a
-      // 401/403 without a Bearer challenge not an MCP server asking for a credential, a 5xx
-      // a server that could not answer.
+    if (refusal !== undefined) {
       if (seen.failure !== undefined) throw unreachable(url, seen.failure);
       const status = seen.status;
       if (status === 401 || status === 403) throw notAnMcpServer(url);
-      if (status !== undefined && status >= 500) throw unreachable(url, refusal);
+      if (status !== undefined && isRetryableHttpStatus(status)) throw unreachable(url, refusal);
     }
     // It listed its tools — or answered the ask, if past the probe's bound or with a JSON-RPC
     // error — without a credential: an open server.
@@ -223,7 +221,7 @@ async function probeServer(url: string, fetchImpl: typeof fetch): Promise<Probed
 
 interface ProbeObservation {
   /** The Bearer challenge of the last 401/403 offering one. */
-  challenge?: string;
+  challenge?: BearerChallenge;
   /** The status of the last answer. */
   status?: number;
   /** The fault of the last exchange that failed (a request, or its body cut short). */
@@ -303,6 +301,7 @@ async function probeSse(url: string, fetchImpl: typeof fetch): Promise<ProbedSer
     }
   } else {
     await sse.body?.cancel().catch(() => {});
+    if (isRetryableHttpStatus(sse.status)) throw unreachable(url, `HTTP ${sse.status}`);
   }
   throw notAnMcpServer(url);
 }
@@ -331,10 +330,10 @@ export function serverIdentityFields(info: Implementation | undefined): {
  * The `WWW-Authenticate` of a 401/403 offering the Bearer scheme (MCP authorization), else
  * undefined: any other refusal is not an MCP server asking for a credential.
  */
-function bearerChallenge(res: Response): string | undefined {
+function bearerChallenge(res: Response): BearerChallenge | undefined {
   if (res.status !== 401 && res.status !== 403) return undefined;
   const challenge = res.headers.get("www-authenticate");
-  return challenge && /(?:^|,)\s*Bearer(?:\s|,|$)/i.test(challenge) ? challenge : undefined;
+  return challenge ? parseBearerChallenge(challenge) : undefined;
 }
 
 async function reach(url: string, fetchImpl: typeof fetch, init: RequestInit): Promise<Response> {
@@ -388,22 +387,25 @@ interface DiscoveredAuth {
  */
 async function discoverAuth(
   url: string,
-  challenge: string,
+  challenge: BearerChallenge,
   fetchImpl: typeof fetch,
 ): Promise<DiscoveredAuth> {
   const origin = new URL(url).origin;
-  const resourceMetadataUrl = parseResourceMetadataChallenge(challenge);
-  const challengeScopes = parseScopeChallenge(challenge);
-  const md = await discoverProtectedResourceMetadata({
+  const challengeScopes = challenge.scopes;
+  const { metadata: md, metadataUnreachable } = await discoverProtectedResourceMetadata({
     resourceServerUrl: url,
-    ...(resourceMetadataUrl ? { resourceMetadataUrl } : {}),
+    challenge,
     fetchImpl,
   });
+  if (metadataUnreachable)
+    throw badGateway("The protected-resource metadata could not be read. Retry shortly.");
 
   if (md) {
     const advertised = md.authorizationServers[0]!;
     const issuer = isBlockedEgressUrl(advertised) ? undefined : advertised;
     const endpoints = issuer ? await resolveOAuthEndpoints({ issuer, fetchImpl }) : {};
+    if (endpoints.metadataUnreachable)
+      throw badGateway("The authorization server metadata could not be read. Retry shortly.");
     const scopes = scopeTokens(challengeScopes ?? md.scopesSupported ?? []);
     const autoClient = provisionsClientItself(endpoints);
     const warning = !issuer
@@ -441,6 +443,8 @@ async function discoverAuth(
   }
 
   const atOrigin = await resolveOAuthEndpoints({ issuer: origin, fetchImpl });
+  if (atOrigin.metadataUnreachable)
+    throw badGateway("The authorization server metadata could not be read. Retry shortly.");
   if (provisionsClientItself(atOrigin)) {
     const scopes = scopeTokens(challengeScopes ?? []);
     return {
@@ -514,7 +518,7 @@ function oauth2Auth(
     authorized_uris: [`${origin}/**`],
     delivery: bearerDelivery("{$credential.access_token}"),
     _meta: {
-      "dev.appstrate/oauth": { scope_separator: " " },
+      [OAUTH_META_KEY]: { scope_separator: " " },
       "dev.appstrate/auth": { required: true },
     },
   };

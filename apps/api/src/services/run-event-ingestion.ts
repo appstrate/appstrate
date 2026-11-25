@@ -487,7 +487,7 @@ async function finalizeRunImpl(input: FinalizeRunInput): Promise<void> {
   // verbatim) is read here once into what a reader branches on — never by a client.
   const modelFailure =
     status !== "success" && result.error?.code === "adapter_error" && errorMessage
-      ? describeModelFailure(errorMessage)
+      ? describeModelFailure(errorMessage, result.error.context?.error_category)
       : null;
 
   // 4. Build the persisted result payload — structured output only. Anything

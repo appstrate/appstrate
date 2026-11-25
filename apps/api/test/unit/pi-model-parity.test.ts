@@ -22,7 +22,8 @@ import claudeCodeModule from "@appstrate/module-claude-code";
 import codexModule from "@appstrate/module-codex";
 import { buildRuntimePiEnv, llmProxyBaseUrl, type Api, type Model } from "@appstrate/runner-pi";
 import { PLATFORM_MODEL_COMPAT } from "@appstrate/runner-pi/model-compat";
-import { buildPiModel, DEFAULT_MAX_TOKENS, type PiModelSpec } from "@appstrate/runner-pi/pi-model";
+import { buildPiModel, type PiModelSpec } from "@appstrate/runner-pi/pi-model";
+import { DEFAULT_MAX_TOKENS } from "@appstrate/core/token-budget";
 import coreProvidersModule from "../../src/modules/core-providers/index.ts";
 import {
   listCatalogModels,

@@ -11,7 +11,7 @@ import {
   createTestUser,
   type TestContext,
 } from "../../helpers/auth.ts";
-import { seedPackage, seedSpace } from "../../helpers/seed.ts";
+import { seedPackage, seedSpace, seedSpacePackage } from "../../helpers/seed.ts";
 import { triggerScheduledRun } from "../../../src/services/scheduler.ts";
 import { createJudgedSchedule } from "../../helpers/schedule-fixtures.ts";
 
@@ -37,6 +37,7 @@ describe("scheduled runs respect current space access", () => {
           .values({ spaceId: space.id, userId: member.id, presetRole: "builder" });
       }
       const pkg = await seedPackage({ orgId: ctx.orgId, id: `@${ctx.org.slug}/scheduled-access` });
+      await seedSpacePackage(space.id, pkg.id);
       const actor = { type: "user", id: member.id } as const;
       const schedule = await createJudgedSchedule(
         { orgId: ctx.orgId, spaceId: space.id },

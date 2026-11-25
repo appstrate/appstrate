@@ -13,7 +13,9 @@
 
 import { describe, it, expect } from "bun:test";
 import { validateToolArguments } from "@earendil-works/pi-ai";
+import pLimit from "p-limit";
 import {
+  type AppstrateRequestExtra,
   API_CALL_TOOL_META_KEY,
   API_UPLOAD_TOOL_META_KEY,
   readApiCallToolKey,
@@ -187,4 +189,29 @@ describe("createApiCallToolDefs — api_upload target", () => {
   });
 
   it("Pi still refuses a non-URL target", () => expect(accepts("not a url")).toBe(false));
+});
+
+it("a cancelled queued api_call never reads credentials or starts the HTTP request", async () => {
+  const apiCallLimit = pLimit(1);
+  const gate = Promise.withResolvers<void>();
+  const occupied = apiCallLimit(() => gate.promise);
+  let reads = 0;
+  const [tool] = createApiCallToolDefs(
+    integ({
+      fetchCredentials: async () => {
+        reads++;
+        throw new Error("unexpected credential read");
+      },
+    }),
+    { ...deps, apiCallLimit },
+  );
+  const controller = new AbortController();
+  const call = tool!.handler({ target: "https://example.test", method: "POST" }, {
+    signal: controller.signal,
+  } as AppstrateRequestExtra);
+  controller.abort(new Error("request cancelled"));
+  gate.resolve();
+  await occupied;
+  await expect(call).rejects.toThrow("request cancelled");
+  expect(reads).toBe(0);
 });

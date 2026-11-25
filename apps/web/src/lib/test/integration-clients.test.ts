@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
+import { integrationClientModalRef, integrationClientModalValue } from "../integration-clients";
 import { describe, expect, it } from "bun:test";
 import type { IntegrationClient } from "../../hooks/use-integrations";
 import { mergeClientTiers } from "../integration-clients";
@@ -41,4 +42,11 @@ describe("mergeClientTiers", () => {
     expect(rows).toHaveLength(1);
     expect(rows[0]).toMatchObject({ level: "org", usedHere: true, orgDefault: false });
   });
+});
+
+it("addresses only the exact auth key when restoring a client editor URL", () => {
+  const value = integrationClientModalValue("key:extended", "icl_1");
+  expect(integrationClientModalRef("key:extended", value)).toBe("icl_1");
+  expect(integrationClientModalRef("key", value)).toBeNull();
+  expect(integrationClientModalRef("key", "key:icl_2")).toBe("icl_2");
 });

@@ -7,7 +7,7 @@ import { listSpacesForPrincipal } from "../services/spaces.ts";
 import type { Permission, SpaceGrant } from "./permissions.ts";
 import { toSpaceRoleWire, type SpaceRoleRef } from "./space-role.ts";
 import { forbidden, notFound, type ApiError } from "./errors.ts";
-import { dispatchSpacePin } from "./internal-dispatch.ts";
+import { dispatchPin } from "./internal-dispatch.ts";
 import {
   callerOrgRole,
   callerPersonalOwnerId,
@@ -25,6 +25,11 @@ export interface ReachableSpace {
   visibility: SpaceVisibility;
   defaultRole: SpaceRolePreset;
   ownerUserId: string | null;
+  /**
+   * Whether it is the caller's own personal space. None is under a role preview (it acts as
+   * nobody) or for a principal that is not a user (a delegated key, an end-user).
+   */
+  personal: boolean;
   /** Whether the space lets an MCP caller reach the credential proxy outside a run. */
   credentialProxyOpen: boolean;
   role: SpaceRoleRef;
@@ -65,9 +70,29 @@ export function enterableSpaces(c: Context<AppEnv>, orgId: string): Promise<Reac
   return reachPinnedTo(c, orgId, callerOrgRole(c, orgId), requestPin(c));
 }
 
+/**
+ * The credential's own reach. A credential bound to a set reaches all of it, whichever space the
+ * call entered: only the endpoint's pin holds (its dispatches' included). Any other credential
+ * keeps every pin, as {@link callerReachableSpaces} does. Read by launch refusals
+ * (`lib/launch-spaces.ts`) and by placement outside the home (`placementAccessSpaces`).
+ */
+export function credentialReachableSpaces(
+  c: Context<AppEnv>,
+  orgId: string,
+): Promise<ReachableSpace[]> {
+  const pin = c.get("credentialSpaceIds") === undefined ? requestPin(c) : endpointPin(c);
+  return reachPinnedTo(c, orgId, callerOrgRole(c, orgId), pin);
+}
+
 /** The space the endpoint or the dispatch confines this request to. */
 function requestPin(c: Context<AppEnv>): string | undefined {
-  return c.get("endpointSpaceId") ?? dispatchSpacePin(c);
+  return c.get("endpointSpaceId") ?? dispatchPin(c)?.spaceId;
+}
+
+/** The space the endpoint confines this request to, the request itself or its dispatch. */
+function endpointPin(c: Context<AppEnv>): string | undefined {
+  const dispatch = dispatchPin(c);
+  return c.get("endpointSpaceId") ?? (dispatch?.endpoint ? dispatch.spaceId : undefined);
 }
 
 function reachPinnedTo(
@@ -97,11 +122,12 @@ async function resolveReachableSpaces(
   pin: string | undefined,
 ): Promise<ReachableSpace[]> {
   if (!orgRole) return [];
+  const personalOwner = callerPersonalOwnerId(c, orgId);
   const entries = await listSpacesForPrincipal(
     orgId,
     orgRole,
     c.get("user").id,
-    callerPersonalOwnerId(c, orgId),
+    personalOwner,
     personaMemberships(personaFor(c, orgId)),
   );
   return entries.flatMap(({ space, role }) =>
@@ -114,6 +140,7 @@ async function resolveReachableSpaces(
             visibility: space.visibility,
             defaultRole: space.defaultRole,
             ownerUserId: space.ownerUserId,
+            personal: personalOwner !== null && space.ownerUserId === personalOwner,
             credentialProxyOpen: space.credentialProxyOpen,
             role,
             permissions: effectiveInSpace(c, role),

@@ -14,7 +14,7 @@
 
 import { describe, it, expect } from "bun:test";
 import { Hono, type Context, type Next } from "hono";
-import { PERMISSION_REQUIREMENT_MARKER } from "@appstrate/core/permissions";
+import { PERMISSION_REQUIREMENT_MARKER, withAuthorizedRow } from "@appstrate/core/permissions";
 import {
   deriveRouteRequirements,
   isGranted,
@@ -22,6 +22,8 @@ import {
   type RouteRequirement,
   type RouteRequirementLookup,
 } from "../../src/lib/route-requirements.ts";
+import { onDispatchTarget } from "../../src/lib/internal-dispatch.ts";
+import { forbidden } from "../../src/lib/errors.ts";
 import { readHandlerMarker } from "../../src/middleware/handler-marker.ts";
 import { requirePackageInOrg } from "../../src/middleware/guards.ts";
 import {
@@ -40,7 +42,7 @@ const ok = () => new Response("ok");
 const fallback = () => markFallback(() => new Response("fallback"));
 
 /** A space re-scope, mounted the way `routes/spaces.ts` mounts one. */
-const rescope = () => markSpaceRescope(async (_c: Context<AppEnv>, next: Next) => next());
+const rescope = () => markSpaceRescope("id", async (_c: Context<AppEnv>, next: Next) => next());
 
 /**
  * A root app with `sub` mounted under `/api`, the way every router in
@@ -458,6 +460,48 @@ describe("lookup — space re-scope", () => {
     );
     expect(early.requirements).toEqual(["spaces:read"]);
     expect(early.targetSpaceRequirements).toEqual(["members:read"]);
+  });
+});
+
+describe("authorized row handler", () => {
+  it("loads once, authorizes, and awaits the target check before handing the row to an action", async () => {
+    const events: string[] = [];
+    const row = { spaceId: "spc_a" };
+    const app = mounted((sub) =>
+      sub.post(
+        "/items/:id",
+        withAuthorizedRow(
+          async (c: Context<AppEnv>) => {
+            events.push("load");
+            if (c.req.param("id") === "denied") throw forbidden("row denied");
+            c.set("permissions", new Set(["webhooks:write"]));
+            return row;
+          },
+          (c, authorized) => {
+            expect(authorized).toBe(row);
+            events.push("write");
+            return c.json({ ok: true });
+          },
+        ),
+      ),
+    );
+    const request = async (id: string, accept: boolean) => {
+      const req = new Request(`http://localhost/api/items/${id}`, { method: "POST" });
+      onDispatchTarget(req, async (spaceId, permissions) => {
+        expect(spaceId).toBe(row.spaceId);
+        expect(permissions?.has("webhooks:write")).toBe(true);
+        await Promise.resolve();
+        events.push("check");
+        if (!accept) throw forbidden("target refused");
+      });
+      return app.fetch(req);
+    };
+    expect((await request("denied", true)).status).toBe(403);
+    expect(events.splice(0)).toEqual(["load"]);
+    expect((await request("item", false)).status).toBe(403);
+    expect(events.splice(0)).toEqual(["load", "check"]);
+    expect((await request("item", true)).status).toBe(200);
+    expect(events).toEqual(["load", "check", "write"]);
   });
 });
 

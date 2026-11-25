@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
+import { nextScheduleVersion } from "../lib/schedule-version.ts";
 import { createQueue } from "../infra/queue/index.ts";
 import type { JobQueue, QueueJob } from "../infra/queue/index.ts";
 import { getCache } from "../infra/index.ts";
@@ -15,8 +16,8 @@ import {
 } from "@appstrate/db/schema";
 import { activeRunStatusValues } from "@appstrate/core/run-status";
 import { resolveSpaceRole, spacePermissions } from "../lib/space-role.ts";
-import { loadSpaceAccess } from "../lib/space-lookup.ts";
-import { batchLoadUserNames } from "../lib/user-helpers.ts";
+import { loadSpaceAccessForIds } from "../lib/space-lookup.ts";
+import { batchLoadScheduleEndUserNames, batchLoadUserNames } from "../lib/user-helpers.ts";
 import { logger } from "../lib/logger.ts";
 import type { ScheduleWireDto, EnrichedSchedule } from "@appstrate/shared-types";
 import { createFailedRun } from "./state/runs.ts";
@@ -28,7 +29,7 @@ import {
   extractRunAgentDenorm,
 } from "./run-pipeline.ts";
 import { getPackageDisplayName, orgOrSystemFilter } from "../lib/package-helpers.ts";
-import { getSpacePackageSettings } from "./space-packages.ts";
+import { assertScheduleAgentActive, getSpacePackageSettings } from "./space-packages.ts";
 import { agentExecutionBlock } from "../lib/package-access.ts";
 import { resolveAndValidateScheduleInput } from "./input-resolution.ts";
 import { withoutLockedFields } from "@appstrate/core/input-resolution";
@@ -156,29 +157,43 @@ export async function removeScheduleJobs(scheduleIds: readonly string[]): Promis
  * schedule's org and hold agents:run in its space; an end-user must still
  * exist in the schedule's space.
  */
+export async function scheduleActorRunSpaces(
+  actor: Actor,
+  orgId: string,
+  spaceIds: readonly string[],
+): Promise<Set<string>> {
+  if (spaceIds.length === 0) return new Set();
+  if (actor.type === "user") {
+    // A fire has no admission to pin the org role at (RBAC spec §4.4). The
+    // frozen actor is the caller in personal spaces too (RBAC spec §3.6).
+    const snapshots = await loadSpaceAccessForIds(spaceIds, orgId, actor.id);
+    return new Set(
+      snapshots.flatMap(({ orgRole, space, member, personalSpaceRole }) => {
+        if (!orgRole) return [];
+        const role = resolveSpaceRole(orgRole, space, member, actor.id, personalSpaceRole);
+        return spacePermissions(role).has("agents:run") ? [space.id] : [];
+      }),
+    );
+  }
+  const rows = await db
+    .select({ spaceId: endUsers.spaceId })
+    .from(endUsers)
+    .where(
+      and(
+        eq(endUsers.orgId, orgId),
+        eq(endUsers.id, actor.id),
+        inArray(endUsers.spaceId, [...spaceIds]),
+      ),
+    );
+  return new Set(rows.map(({ spaceId }) => spaceId));
+}
+
 async function isScheduleActorValid(
   actor: Actor,
   orgId: string,
   spaceId: string,
 ): Promise<boolean> {
-  if (actor.type === "user") {
-    // All three inputs in one statement: a fire has no admission to pin the org
-    // role at (RBAC spec §4.4).
-    const access = await loadSpaceAccess(spaceId, orgId, actor.id);
-    if (!access?.orgRole) return false;
-    // The frozen actor IS the caller here: a schedule in a personal space runs
-    // as its owner, and stops the moment they are no longer the owner
-    // (RBAC spec §3.6).
-    return spacePermissions(
-      resolveSpaceRole(access.orgRole, access.space, access.member, actor.id),
-    ).has("agents:run");
-  }
-  const [row] = await db
-    .select({ id: endUsers.id })
-    .from(endUsers)
-    .where(and(eq(endUsers.id, actor.id), eq(endUsers.spaceId, spaceId)))
-    .limit(1);
-  return row !== undefined;
+  return (await scheduleActorRunSpaces(actor, orgId, [spaceId])).has(spaceId);
 }
 
 function invalidScheduleActorReason(actor: Actor): string {
@@ -231,7 +246,7 @@ async function disableScheduleAtFire(
       enabled: false,
       disabledReason: reason,
       nextRunAt: null,
-      updatedAt: new Date(),
+      updatedAt: nextScheduleVersion,
     })
     .where(
       and(
@@ -778,7 +793,7 @@ export async function listPackageSchedules(
 }
 
 /** The bare schedule row, before any enrichment — what a write path reads to diff against. */
-async function loadSchedule(id: string, scope: SpaceScope): Promise<ScheduleWireDto | null> {
+export async function loadSchedule(id: string, scope: SpaceScope): Promise<ScheduleWireDto | null> {
   const rows = await db
     .select()
     .from(schedules)
@@ -801,8 +816,7 @@ export async function getSchedule(
 ): Promise<EnrichedSchedule | null> {
   const schedule = await loadSchedule(id, scope);
   if (!schedule) return null;
-  const [enriched] = await enrichSchedules([schedule], schedule.orgId, viewer, visibility);
-  return enriched ?? null;
+  return enrichSchedule(schedule, viewer, visibility);
 }
 
 /** Per-schedule run counters served with the schedule itself (see {@link loadScheduleRunStats}). */
@@ -813,24 +827,6 @@ interface ScheduleRunStats {
 }
 
 const EMPTY_RUN_STATS: ScheduleRunStats = { runningRuns: 0, unreadCount: 0, lastRunNumber: 0 };
-
-/**
- * The schedule as served in the (unreachable in practice) branch where the
- * enrichment query returns no row for a schedule we just wrote. One function
- * rather than a re-listing at each call site, so a new `EnrichedSchedule` field
- * cannot be added to the happy path alone.
- */
-function unenrichedSchedule(schedule: ScheduleWireDto): EnrichedSchedule {
-  return {
-    ...schedule,
-    agent_name: schedule.packageId,
-    actor_name: null,
-    actor_type: null,
-    running_runs: 0,
-    unread_count: 0,
-    last_run_number: 0,
-  };
-}
 
 /**
  * The three run counters every schedule card shows — active runs, unread runs
@@ -918,23 +914,12 @@ async function enrichSchedules(
   if (schedules.length === 0) return [];
 
   const userIds = [...new Set(schedules.map((s) => s.userId).filter((id): id is string => !!id))];
-  const endUserIds = [
-    ...new Set(schedules.map((s) => s.endUserId).filter((id): id is string => !!id)),
-  ];
 
   const packageIds = [...new Set(schedules.map((s) => s.packageId))];
 
-  const [userNameMap, endUserRows, runStats, packageRows] = await Promise.all([
+  const [userNameMap, endUserNameMap, runStats, packageRows] = await Promise.all([
     batchLoadUserNames(userIds),
-    endUserIds.length > 0
-      ? db
-          .select({
-            id: endUsers.id,
-            name: sql<string | null>`coalesce(${endUsers.name}, ${endUsers.externalId})`,
-          })
-          .from(endUsers)
-          .where(inArray(endUsers.id, endUserIds))
-      : Promise.resolve([] as { id: string; name: string | null }[]),
+    batchLoadScheduleEndUserNames(orgId, schedules),
     loadScheduleRunStats(
       schedules.map((s) => s.id),
       orgId,
@@ -949,7 +934,6 @@ async function enrichSchedules(
       .from(packages)
       .where(and(inArray(packages.id, packageIds), orgOrSystemFilter(orgId))),
   ]);
-  const endUserNameMap = new Map(endUserRows.map((r) => [r.id, r.name]));
   const agentNameMap = new Map(packageRows.map((r) => [r.id, getPackageDisplayName(r)]));
 
   return schedules.map((schedule) => {
@@ -960,7 +944,7 @@ async function enrichSchedules(
       actorName = userNameMap.get(schedule.userId) ?? null;
     } else if (schedule.endUserId) {
       actorType = "end_user";
-      actorName = endUserNameMap.get(schedule.endUserId) ?? null;
+      actorName = endUserNameMap.get(schedule.id) ?? null;
     }
     // A schedule that never fired has no `runs` rows, hence no group — zeroes.
     const stats = runStats.get(schedule.id) ?? EMPTY_RUN_STATS;
@@ -974,6 +958,16 @@ async function enrichSchedules(
       last_run_number: stats.lastRunNumber,
     };
   });
+}
+
+async function enrichSchedule(
+  schedule: ScheduleWireDto,
+  viewer: Actor | null,
+  visibility: SQL | undefined,
+): Promise<EnrichedSchedule> {
+  const [enriched] = await enrichSchedules([schedule], schedule.orgId, viewer, visibility);
+  // enrichSchedules maps each input row, including a schedule without runs.
+  return enriched!;
 }
 
 export async function createSchedule(
@@ -1026,6 +1020,7 @@ export async function createSchedule(
       })
       .returning();
   const [row] = await db.transaction(async (tx) => {
+    await assertScheduleAgentActive(tx, scope, packageId);
     await assertScheduleGovernanceUnchanged(
       tx,
       scope.spaceId,
@@ -1048,8 +1043,7 @@ export async function createSchedule(
   // create response matches the GET detail shape (actor_name/actor_type).
   // Neither a viewer nor a visibility predicate is needed here: the schedule
   // was just created, so it has no runs and every counter is zero for anyone.
-  const [enriched] = await enrichSchedules([schedule], scope.orgId, null, undefined);
-  return enriched ?? unenrichedSchedule(schedule);
+  return enrichSchedule(schedule, null, undefined);
 }
 
 /** The caller's read of the row a write is judged against: the `updatedAt` token + fallbacks. */
@@ -1113,7 +1107,7 @@ export async function updateSchedule(
     timezone: tz,
     enabled,
     nextRunAt: nextRun ?? null,
-    updatedAt: new Date(),
+    updatedAt: nextScheduleVersion,
   };
   if (enabled) payload.disabledReason = null;
   if (data.name !== undefined) payload.name = data.name;
@@ -1148,6 +1142,7 @@ export async function updateSchedule(
   const [row] = !enabled
     ? await update(db)
     : await db.transaction(async (tx) => {
+        if (!expected.enabled) await assertScheduleAgentActive(tx, scope, expected.packageId);
         await assertScheduleGovernanceUnchanged(
           tx,
           scope.spaceId,
@@ -1175,8 +1170,7 @@ export async function updateSchedule(
 
   // Same EnrichedSchedule serializer as getSchedule/listSchedules, so the
   // update response matches the GET detail shape (actor/run counters).
-  const [enriched] = await enrichSchedules([schedule], scope.orgId, viewer, visibility);
-  return enriched ?? unenrichedSchedule(schedule);
+  return enrichSchedule(schedule, viewer, visibility);
 }
 
 /**
@@ -1215,7 +1209,7 @@ export async function dropLockedFieldsFromSchedules(
     if (Object.keys(stripped).length === Object.keys(input).length) continue;
     await tx
       .update(schedules)
-      .set({ input: stripped, updatedAt: new Date() })
+      .set({ input: stripped, updatedAt: nextScheduleVersion })
       .where(eq(schedules.id, row.id));
   }
 }

@@ -4,6 +4,7 @@ import { packageSourceValues } from "@appstrate/db/schema";
 import { SPACE_ID_RE } from "@appstrate/db/ids";
 import { PROXY_STATUS_HEADER, STD_RESPONSE_HEADERS } from "../headers.ts";
 import { MAX_CONNECTIONS_PER_INTEGRATION, SCOPE_TOKEN_RE } from "@appstrate/core/integration";
+import { INTEGRATION_CALLBACK_TEMPLATES } from "../../lib/integration-callback-url.ts";
 import { CONNECTION_LABEL_MAX } from "../../lib/connection-label.ts";
 import { CONNECTION_ACTIONS, CONNECTION_SCOPES } from "@appstrate/shared-types";
 
@@ -266,7 +267,7 @@ export const connectionActionsSchema = {
   type: "array",
   items: { type: "string", enum: [...CONNECTION_ACTIONS] },
   description:
-    "What the caller may do with this connection: `rename`, `share` (into a space it reaches) or `unshare_here` (withdraw it from the current space).",
+    "What the caller may do with this connection: `rename`, `reconnect` (its owner renews it in place, whether or not it is flagged `needs_reconnection`; absent when the stored upstream account is not identified, since a renewal could not be verified against it), `share` (into a space it reaches) or `unshare_here` (withdraw it from the current space).",
 } as const;
 
 export const spaceIdSchema = {
@@ -646,9 +647,10 @@ export const proxyConnectionVerdictProperties = {
       "unusable",
       "proxy_closed",
       "not_required",
+      "not_published",
     ],
     description:
-      "`not_required` — the integration declares no auths (AFPS §7.2): it binds no connection, the proxy has nothing to inject, the server sync reaches its server directly, and outside a run its tools are listed and called without a connection (`/api/credential-proxy/tools`, `/tools/call`). `ready` — one connection is bound and passes its health checks. `must_choose` — several connections apply, or only connections other members shared (`must_choose_connection`): a call names one. `needs_reconnection` — the bound connection must be reconnected. `none` — no connection in reach (`not_connected`). `not_permitted` — the caller holds neither `credential-proxy:call` nor `credential-proxy:call-own`, which the proxy route requires, or an enforced org default governs the integration and the caller holds only `credential-proxy:call-own` (`call_permission_required`). `default_unavailable` — the org default cannot bind: a member is gone or on another auth (`pinned_connection_unavailable`), the set is empty (`required_integration_unbound`) or past the cap (`connection_set_too_large`). `unusable` — the bound connection cannot serve the call (`insufficient_scopes`, `auth_serves_no_selected_tool`, or another selection refusal). `proxy_closed` — the space closes the credential proxy outside a run (`credential_proxy_open: false`): whatever the caller's role and connections, a call outside a run answers `403 credential_proxy_closed`, and only a run reaches the integration's connections.",
+      "`not_required` — the integration declares no auths (AFPS §7.2): it binds no connection, the proxy has nothing to inject, the server sync reaches its server directly, and outside a run its tools are listed and called without a connection (`/api/credential-proxy/tools`, `/tools/call`). `ready` — one connection is bound and passes its health checks. `must_choose` — several connections apply, or only connections other members shared (`must_choose_connection`): a call names one. `needs_reconnection` — the bound connection must be reconnected. `none` — no connection in reach (`not_connected`). `not_permitted` — the caller holds neither `credential-proxy:call` nor `credential-proxy:call-own`, which the proxy route requires, or an enforced org default governs the integration and the caller holds only `credential-proxy:call-own` (`call_permission_required`). `default_unavailable` — the org default cannot bind: a member is gone or on another auth (`pinned_connection_unavailable`), the set is empty (`required_integration_unbound`) or past the cap (`connection_set_too_large`). `unusable` — the bound connection cannot serve the call (`insufficient_scopes`, `auth_serves_no_selected_tool`, or another selection refusal). `proxy_closed` — the space closes the credential proxy outside a run (`credential_proxy_open: false`): whatever the caller's role and connections, a call outside a run answers `403 credential_proxy_closed`, and only a run reaches the integration's connections. `not_published` — the integration has no published version, so the proxy answers `404` to any call outside a run whatever the connections (publish one); it outranks every other status.",
   },
   imposed: {
     type: "boolean",
@@ -668,9 +670,12 @@ const integrationDetailSchema = {
     "block_user_connections",
     "platform_redirect_uri",
     "proxy_connection",
+    "availability",
   ],
   properties: {
     manifest: { type: "object", additionalProperties: true },
+    // The library's projection for the current space (`packageAvailabilityIn`).
+    availability: { $ref: "#/components/schemas/PackageAvailability" },
     auths: { type: "array", items: authStatusSchema },
     // Effective agent-facing tool catalog. Resolved server-side from the
     // `source.server.tools` (local source) minus `hidden_tools` and
@@ -711,8 +716,15 @@ const integrationDetailSchema = {
       required: ["status", "imposed"],
       additionalProperties: false,
       description:
-        "The connection an unnamed credential-proxy call outside a run (`/api/credential-proxy/proxy` with no `X-Run-Id` and no `X-Connection-Id`) gets for THIS caller in the current space: the same selection, under the caller's reach (`credential-proxy:call` reaches the connections usable in the space, `credential-proxy:call-own` alone the caller's own), with the space's org default applied. It is judged against this response's `manifest` — the latest published version, else the draft while nothing is published — which is what the proxy authorizes a call against once a version exists, and what the server sync of a never-published draft (`POST /api/integrations/{packageId}/discover`) authorizes against. A published integration whose draft changed its auths is judged on the published auths, so a sync of that draft may still answer otherwise. Unlike `auths[].ready`, it is the governed answer. It names no connection. The proxy also requires the integration to be active here (`active`), which this verdict does not repeat.",
-      properties: proxyConnectionVerdictProperties,
+        "The connection an unnamed credential-proxy call outside a run (`/api/credential-proxy/proxy` with no `X-Run-Id` and no `X-Connection-Id`) gets for THIS caller in the current space: the same selection, under the caller's reach (`credential-proxy:call` reaches the connections usable in the space, `credential-proxy:call-own` alone the caller's own), with the space's org default applied. It is judged against this response's `manifest` — the latest published version, else the draft while nothing is published — which is what the proxy authorizes a call against once a version exists, and what the server sync of a never-published draft (`POST /api/integrations/{packageId}/discover`) authorizes against. A published integration whose draft changed its auths is judged on the published auths, so a sync of that draft may still answer otherwise. Unlike `auths[].ready`, it is the governed answer. A ready verdict identifies the selected account when it is listed in this response. The proxy also requires the integration to be active here (`active`), which this verdict does not repeat.",
+      properties: {
+        ...proxyConnectionVerdictProperties,
+        connection_id: {
+          type: "string",
+          description:
+            "Selected connection from auths[].connections when the unnamed call is ready.",
+        },
+      },
     },
   },
 } as const;
@@ -746,7 +758,7 @@ const connectKickoffRelayProperties = {
     type: "string",
     format: "uuid",
     description:
-      "Reconnect this existing connection in place instead of creating a new one. Added scopes then apply to every agent that uses it: to give one agent more rights without widening the others, omit it and pass the required `scopes`. Do not duplicate an integration to change its scopes; create another connection.",
+      "Reconnect this existing connection in place only when both credentials identify the same upstream account and instance. An unidentified account (account_id default) requires another connection. Its shares, pins and schedules keep the original ID until explicitly changed. A space's gate on new member connections (`block_user_connections`) never refuses a renewal. Added scopes then apply to every agent that uses it: to give one agent more rights without widening the others, omit it and pass the required `scopes`. Do not duplicate an integration to change its scopes; create another connection.",
   },
 } as const;
 
@@ -791,7 +803,7 @@ const connectRunResponses = {
 
 /** How a declarative `connect.login` (AFPS §7.7) refuses, on both connect surfaces. */
 const CONNECT_LOGIN_400 =
-  "A login the service refused is `login_rejected` on `credentials`; on an oauth2 auth, that is a token endpoint answering `invalid_grant`, or HTTP 400 or 401 other than a refused OAuth client. A `login_rejected` says what was refused in the extension member `login_refusal`: `grant` for an oauth2 token request, `integration` for an integration's login tool (a connect-run), whose own untranslated text, if any, is `integration_diagnostic`; it is absent when the service refused the submitted credentials. A credential value the declarative login request cannot carry where it is placed, a `null` included, is `login_input_unencodable` on `credentials.<field>`, and a submitted base URL it may not reach `login_url_refused`, with one `errors[]` entry per `credentials.<field>` the address comes from. None echoes a credential value nor the service's answer. oauth2 declaring `connect.login` and an `issuer`: a `token_endpoint` the issuer's metadata contradicts is `invalid_request`, before anything is sent.";
+  "A login the service refused is `login_rejected` on `credentials`; on an oauth2 auth, that is a token endpoint answering `invalid_grant`. A malformed OAuth request, unsupported grant type or invalid scope is a configuration refusal (`connection_not_ready`); a transient provider failure asks for a retry. A `login_rejected` says what was refused in the extension member `login_refusal`: `grant` for an oauth2 token request, `integration` for an integration's login tool (a connect-run), whose own untranslated text, if any, is `integration_diagnostic`; it is absent when the service refused the submitted credentials. A credential value the declarative login request cannot carry where it is placed, a `null` included, is `login_input_unencodable` on `credentials.<field>`, and a submitted base URL it may not reach `login_url_refused`, with one `errors[]` entry per `credentials.<field>` the address comes from. None echoes a credential value nor the service's answer. oauth2 declaring `connect.login` and an `issuer`: a `token_endpoint` the issuer's metadata contradicts is `invalid_request`, before anything is sent.";
 const CONNECT_LOGIN_502 =
   "A declarative login (`connect.login`) could not complete: the service could not be reached, or answered 429 or 5xx (`login_upstream_unavailable`). A `Retry-After` the service sent is relayed, as the header and as `retry_after`, except on an oauth2 auth, whose token request relays none. On an oauth2 auth, `login_upstream_unavailable` also covers any other 4xx (a 403 is often a firewall refusing the client), an unusable 2xx (no `access_token`, or a `token_type` absent or other than `Bearer`, compared case-insensitively), and an `issuer` whose metadata cannot be read, refused before anything is sent. On an oauth2 auth, an OAuth client its token endpoint refuses is `oauth_client_rejected`. Once an oauth2 token request may have redeemed the grant — a timeout, a 5xx, an unusable 2xx, or any refusal after a successful token request, whatever its status (400, 404, 500 or 502) — the problem carries the extension member `grant_may_be_redeemed: true` and its detail says so; it is absent when the answer was a 4xx or the request was never sent.";
 const CONNECT_LOGIN_403 =
@@ -799,7 +811,7 @@ const CONNECT_LOGIN_403 =
 /** An oauth2 `connect.login` whose chosen OAuth client is gone by the token request, on both connect surfaces. */
 const CONNECT_LOGIN_409 = {
   description:
-    "oauth2 declaring `connect.login` (`connection_not_ready`), nothing sent: the OAuth client chosen for the auth no longer resolves when the token request is built, removed in between; or the client authenticates with a `token_endpoint_auth_method` the platform does not implement (only `client_secret_basic`, `client_secret_post` and `none` are). An auth with no usable OAuth client is the 403.",
+    "`identity_mismatch`: the original and submitted credentials do not identify the same upstream account and instance and the stored connection is preserved. With oauth2 declaring `connect.login` (`connection_not_ready`), nothing sent: the OAuth client chosen for the auth no longer resolves when the token request is built, removed in between; or the client authenticates with a `token_endpoint_auth_method` the platform does not implement (only `client_secret_basic`, `client_secret_post` and `none` are). An auth with no usable OAuth client is the 403.",
   content: {
     "application/problem+json": { schema: { $ref: "#/components/schemas/ProblemDetail" } },
   },
@@ -1020,6 +1032,7 @@ export const integrationsPaths = {
   "/api/integrations/callback": {
     get: {
       operationId: "integrationsOAuthCallback",
+      "x-appstrate-space": { kind: "organization" },
       tags: ["Integrations"],
       summary: "Integration OAuth2 callback (popup)",
       description:
@@ -1028,9 +1041,10 @@ export const integrationsPaths = {
       responses: oauthCallbackResponses,
     },
   },
-  "/api/integrations/callback/{tag}": {
+  [INTEGRATION_CALLBACK_TEMPLATES.dcr]: {
     get: {
       operationId: "integrationsOAuthCallbackForServer",
+      "x-appstrate-space": { kind: "organization" },
       tags: ["Integrations"],
       summary:
         "Integration OAuth2 callback of an auto-provisioned (DCR) client's authorization server (popup)",
@@ -1050,9 +1064,10 @@ export const integrationsPaths = {
       responses: oauthCallbackResponses,
     },
   },
-  "/api/integrations/callback/cimd/{tag}": {
+  [INTEGRATION_CALLBACK_TEMPLATES.metadata]: {
     get: {
       operationId: "integrationsOAuthCallbackForMetadataDocument",
+      "x-appstrate-space": { kind: "organization" },
       tags: ["Integrations"],
       summary: "Integration OAuth2 callback of a client metadata document (popup)",
       description:
@@ -1390,7 +1405,7 @@ export const integrationsPaths = {
       tags: ["Integrations"],
       summary: "Get integration detail + per-auth status",
       description:
-        "Detail of one integration, read FROM the current space: the integration must be PLACED there — homed there, holding a row there, or shipped with the deployment. An integration homed elsewhere and placed nowhere else answers 404, whatever the caller's organization role (RBAC spec §3.6), exactly as `GET /api/packages/integrations/{packageId}` does for the same row. Being placed is not being active: the response carries `active` for the current space.",
+        "Detail of one integration, read FROM the current space: the integration must be PLACED there — homed there, holding a row there, or shipped with the deployment. An integration homed elsewhere and placed nowhere else answers 404, whatever the caller's organization role (RBAC spec §3.6), exactly as `GET /api/packages/integrations/{packageId}` does for the same row. Being placed is not being active: the response carries `active` for the current space, and `availability`, the library's projection for it (why it is placed here, whether the space runs it, and whether this caller may offer it).",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XSpaceId" },
@@ -1670,7 +1685,7 @@ export const integrationsPaths = {
                   type: "string",
                   format: "uuid",
                   description:
-                    "Existing connection to renew in place (api_key/PAT/custom); the new credential then serves every agent that uses it. Omit on a fresh connect — the write then INSERTs a new row; to give one agent a different credential, create a new connection rather than duplicating the integration.",
+                    "Existing connection to renew in place only if the credentials identify the same upstream account and instance (409 identity_mismatch otherwise). A key or password without an account identity requires another connection. Shares, pins and schedules keep the original ID until explicitly changed. When an administrator restricts creation (`block_user_connections`), a renewal is still accepted; for another connection, choose a shared one or ask the administrator to provide one. Omit on a fresh connect — the write then INSERTs a new row; to give one agent a different credential, create a new connection rather than duplicating the integration.",
                 },
                 variables: connectionVariablesSchema,
               },
@@ -1826,6 +1841,7 @@ export const integrationsPaths = {
   "/api/integrations/connect/start": {
     get: {
       operationId: "startIntegrationConnect",
+      "x-appstrate-space": { kind: "organization" },
       tags: ["Integrations"],
       summary: "Hosted connect dispatch (token)",
       description:
@@ -1882,6 +1898,7 @@ export const integrationsPaths = {
   "/api/integrations/connect/context": {
     get: {
       operationId: "getIntegrationConnectContext",
+      "x-appstrate-space": { kind: "organization" },
       tags: ["Integrations"],
       summary: "Hosted form render context (page cookie)",
       description:
@@ -1907,6 +1924,20 @@ export const integrationsPaths = {
                       "The auth declaration the form renders. Credentials the platform mints (the `private_key` of `@appstrate/ssh`) are removed from `credentials.schema` — display only; submissions are validated against the full schema.",
                   },
                   connection_id: { type: ["string", "null"] },
+                  reconnecting: {
+                    type: ["object", "null"],
+                    required: ["label", "account_id"],
+                    properties: {
+                      label: { type: "string" },
+                      account_id: {
+                        type: ["string", "null"],
+                        description:
+                          "The upstream account the connection identifies; null when it identifies none.",
+                      },
+                    },
+                    description:
+                      "The connection this session renews in place, so the form can name the account the new credentials must belong to; null on a fresh connect.",
+                  },
                   csrf: { type: ["string", "null"] },
                   variables: {
                     type: ["object", "null"],
@@ -1939,6 +1970,7 @@ export const integrationsPaths = {
   "/api/integrations/connect/submit": {
     post: {
       operationId: "submitIntegrationConnect",
+      "x-appstrate-space": { kind: "organization" },
       tags: ["Integrations"],
       summary: "Hosted form credential submit (page cookie + CSRF)",
       description:

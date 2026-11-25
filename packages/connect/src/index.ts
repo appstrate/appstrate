@@ -123,7 +123,7 @@ export type {
 // neither module's input/output types are re-exported here.
 export {
   discoverProtectedResourceMetadata,
-  parseResourceMetadataChallenge,
-  parseScopeChallenge,
+  parseBearerChallenge,
+  type BearerChallenge,
 } from "./mcp-oauth-discovery.ts";
 export { registerDynamicClient, DynamicClientRegistrationError } from "./dcr.ts";

@@ -40,19 +40,21 @@ import { Button } from "@appstrate/ui/components/button";
 import { cn } from "@appstrate/ui/cn";
 import { MarkdownText, ReasoningText } from "./markdown-text.tsx";
 import { ReasoningGroup, ThinkingStatus } from "./reasoning.tsx";
+import { TurnSpaceChoice } from "./space-choice.tsx";
 import { ToolFallback } from "./tool-fallback.tsx";
 import {
   InvokeOperationToolUI,
-  SearchOperationsToolUI,
-  DescribeOperationToolUI,
+  SearchToolUI,
+  DescribeToolUI,
   ImportPackageFileToolUI,
   RunAndWaitToolUI,
 } from "./tool-uis.tsx";
+import { ReadResourceToolUI, ReadToolUI } from "./skill-load.tsx";
 import { parseResume, INTEGRATION_RESUME_MARKER } from "./auth-offer.ts";
-import { IntegrationIcon } from "./integration-icon.tsx";
+import { IntegrationIcon } from "@appstrate/ui/components/integration-icon";
 import {
-  getSelectedModelAcceptsImages,
-  getSelectedModelReadsPdf,
+  getSelectedModelSendsImages,
+  getSelectedModelSendsPdf,
   subscribeModel,
 } from "./model-store.ts";
 import { resolveAttachmentContent } from "./run-events.ts";
@@ -62,9 +64,13 @@ import {
   subscribeResolvedUploads,
 } from "./upload.ts";
 import { actsIn, useChatHost, useChatTransport } from "./runtime-context.ts";
-import { useConversationScope } from "./conversation-scope.ts";
+import { useConversationScope, useConversationTurnCan } from "./conversation-scope.ts";
 import { sentenceWithName } from "./sentence-with-name.tsx";
 import { sourceMessage, turnErrorState } from "./turn-error-state.ts";
+import { ContextIndicator } from "./context-gauge.tsx";
+import { ComposerPanelProvider } from "./composer-panel.ts";
+import { draftCrossesThreshold, estimateDraftTokens } from "./model-fit.ts";
+import { ConversationContextProvider, useConversationContext } from "./use-conversation-context.ts";
 import { turnModelLabel, turnModelSentenceKey } from "./turn-model.ts";
 import {
   AttachmentChip,
@@ -79,12 +85,16 @@ import {
   ACTION_ROW_CLASS,
   COMPOSER_BUTTON_CLASS,
   ICON_BUTTON_CLASS,
-  QUEUE_ICON_BUTTON_CLASS,
   CHIP_REMOVE_CLASS,
+  USER_ACTION_BAR_CLASS,
 } from "./touch-targets.ts";
 import {
   ASSISTANT_MESSAGE_CLASS,
-  COMPOSER_INPUT_CLASS,
+  COMPOSER_FIELD_CLASS,
+  COMPOSER_PLACEHOLDER_CLASS,
+  COMPOSER_ROW_CLASS,
+  COMPOSER_SEND_CLASS,
+  COMPOSER_TOOLS_CLASS,
   DISCLAIMER_CLASS,
   NOTE_TEXT_CLASS,
   READING_TEXT_CLASS,
@@ -93,107 +103,118 @@ import {
   USER_MESSAGE_CLASS,
 } from "./phone-text.ts";
 import {
+  canQueueDraft,
   flushDecision,
   joinQueued,
   type MessageQueue,
   type QueueSnapshot,
 } from "./message-queue.ts";
+import {
+  agentPromptOf,
+  precedingUserMessage,
+  retryContent,
+  hasBubbleContent,
+} from "./agent-prompt-part.ts";
+import { DirectiveText } from "./directive-chip.tsx";
+import { namesSeveralAgents } from "./directive-send.ts";
+import { readableDirectives } from "../directives.ts";
+import { ComposerEditor } from "./composer-input.tsx";
+import { CommandPopover, CommandTriggers } from "./composer-popover.tsx";
+import {
+  DraftSkillsProvider,
+  useConversationSkillsContext,
+  useDraftSkillsOf,
+} from "./use-conversation-skills.ts";
 
 export function Thread({
   composerTools,
-  composerSlot,
   initialComposerDraft,
   messageQueue,
 }: {
-  /** Left of the composer's bottom row: the attach button, the settings menu and the active-setting chips. */
+  /** Left of the composer's bottom row: the attach button, the tools panel's opener and the chips. */
   composerTools?: React.ReactNode;
-  /** Right of it, before send: the model picker. */
-  composerSlot?: React.ReactNode;
   initialComposerDraft?: string;
   /** Messages typed while the agent answers; created by the conversation, which also marks Stop on it. */
   messageQueue: MessageQueue;
 }) {
   useQueueFlush(messageQueue);
-  // Held above the welcome and footer composers: the draft seeds the conversation once.
-  const draftSeededRef = React.useRef(false);
-  const { can, t } = useChatHost();
+  const seededDraft = React.useRef(false);
+  const { t } = useChatHost();
+  const can = useConversationTurnCan();
   const canWrite = can("chat:write");
   // The whole thread is the drop target, welcome screen and transcript alike; a reader gets none.
   // Where attaching is unavailable a drop still reaches the adapter, whose refusal says why
   // (a disabled dropzone would cancel the drop silently).
   return (
-    <ComposerPrimitive.AttachmentDropzone
-      disabled={!canWrite}
-      data-testid="chat-dropzone"
-      className="group/drop relative h-full min-h-0"
-    >
-      <ThreadPrimitive.Root
-        // `canvas`, not `background`: a full-page thread is a PAGE, and pages in
-        // this shell are grey with white cards on top (the composer, the tool
-        // cards). `background` is shadcn's component surface, which would make
-        // the chat the one flat white screen in the product.
-        className="bg-canvas flex h-full flex-col"
-        style={{ ["--thread-max-width" as string]: "42rem" }}
+    <ConversationContextProvider>
+      <ComposerPrimitive.AttachmentDropzone
+        disabled={!canWrite}
+        data-testid="chat-dropzone"
+        className="group/drop relative h-full min-h-0"
       >
-        {/* Register the rich tool cards (these render nothing themselves). */}
-        <InvokeOperationToolUI />
-        <RunAndWaitToolUI />
-        <SearchOperationsToolUI />
-        <DescribeOperationToolUI />
-        <ImportPackageFileToolUI />
+        <ThreadPrimitive.Root
+          // `canvas`, not `background`: a full-page thread is a PAGE, and pages in
+          // this shell are grey with white cards on top (the composer, the tool
+          // cards). `background` is shadcn's component surface, which would make
+          // the chat the one flat white screen in the product.
+          className="bg-canvas flex h-full flex-col"
+          style={{ ["--thread-max-width" as string]: "42rem" }}
+          // Lets a control inside find this thread's own composer (`ScrollToBottom`).
+          data-chat-thread=""
+        >
+          {/* Register the rich tool cards (these render nothing themselves). */}
+          {initialComposerDraft && canWrite && (
+            <InitialComposerDraft draft={initialComposerDraft} seededRef={seededDraft} />
+          )}
+          <InvokeOperationToolUI />
+          <RunAndWaitToolUI />
+          <SearchToolUI />
+          <DescribeToolUI />
+          <ImportPackageFileToolUI />
+          <ReadResourceToolUI />
+          <ReadToolUI />
 
-        {/* Empty: composer centered mid-screen for a strong first impression.
+          {/* Empty: composer centered mid-screen for a strong first impression.
           Non-empty: classic scrollable transcript with a sticky footer. */}
-        <AuiIf condition={(s) => s.thread.isEmpty}>
-          <ThreadWelcome
-            composerTools={composerTools}
-            composerSlot={composerSlot}
-            initialComposerDraft={initialComposerDraft}
-            draftSeededRef={draftSeededRef}
-            queue={messageQueue}
-          />
-        </AuiIf>
+          <AuiIf condition={(s) => s.thread.isEmpty}>
+            <ThreadWelcome composerTools={composerTools} queue={messageQueue} />
+          </AuiIf>
 
-        <AuiIf condition={(s) => !s.thread.isEmpty}>
-          {/* No `scroll-smooth`: the auto-follow scroll during streaming must be
+          <AuiIf condition={(s) => !s.thread.isEmpty}>
+            {/* No `scroll-smooth`: the auto-follow scroll during streaming must be
             instant — smoothing turns every content append into a visible glide
             and amplifies any residual layout shift. `relative` makes the
             viewport the containing block of its absolutely positioned
             descendants (the `sr-only` labels): placed against an ancestor
             outside this scroller, they overflow the page into a second
             scrollbar. */}
-          <ThreadPrimitive.Viewport className={THREAD_VIEWPORT_CLASS}>
-            <ThreadPrimitive.Messages components={{ UserMessage, AssistantMessage }} />
+            <ThreadPrimitive.Viewport className={THREAD_VIEWPORT_CLASS}>
+              <ThreadPrimitive.Messages components={{ UserMessage, AssistantMessage }} />
 
-            <div className="min-h-6 flex-grow" />
+              <div className="min-h-6 flex-grow" />
 
-            <ThreadPrimitive.ViewportFooter className={THREAD_FOOTER_CLASS}>
-              <ScrollToBottom />
-              <Composer
-                tools={composerTools}
-                slot={composerSlot}
-                initialDraft={initialComposerDraft}
-                draftSeededRef={draftSeededRef}
-                queue={messageQueue}
-              />
-              <Disclaimer />
-            </ThreadPrimitive.ViewportFooter>
-          </ThreadPrimitive.Viewport>
-        </AuiIf>
-      </ThreadPrimitive.Root>
-      {/* The app's dropzone in its drag-over state (the form file field, the
+              <ThreadPrimitive.ViewportFooter className={THREAD_FOOTER_CLASS}>
+                <ScrollToBottom />
+                <Composer tools={composerTools} queue={messageQueue} />
+                <Disclaimer />
+              </ThreadPrimitive.ViewportFooter>
+            </ThreadPrimitive.Viewport>
+          </AuiIf>
+        </ThreadPrimitive.Root>
+        {/* The app's dropzone in its drag-over state (the form file field, the
           import dialog): dashed border, primary tint. Over the thread it needs
           a veil so the transcript does not show through. */}
-      <div
-        aria-hidden="true"
-        className="bg-canvas/90 duration-base ease-surface pointer-events-none absolute inset-0 z-20 p-3 opacity-0 transition-opacity group-data-[dragging=true]/drop:opacity-100"
-      >
-        <div className="border-primary bg-primary/5 flex h-full flex-col items-center justify-center gap-2 rounded-lg border-2 border-dashed text-center">
-          <UploadIcon className="text-primary motion-safe:group-data-[dragging=true]/drop:animate-in motion-safe:group-data-[dragging=true]/drop:slide-in-from-bottom-1 size-6" />
-          <p className="text-sm font-medium">{t("composer.dropzone")}</p>
+        <div
+          aria-hidden="true"
+          className="bg-canvas/90 duration-base ease-surface pointer-events-none absolute inset-0 z-20 p-3 opacity-0 transition-opacity group-data-[dragging=true]/drop:opacity-100"
+        >
+          <div className="border-primary bg-primary/5 flex h-full flex-col items-center justify-center gap-2 rounded-lg border-2 border-dashed text-center">
+            <UploadIcon className="text-primary motion-safe:group-data-[dragging=true]/drop:animate-in motion-safe:group-data-[dragging=true]/drop:slide-in-from-bottom-1 size-6" />
+            <p className="text-sm font-medium">{t("composer.dropzone")}</p>
+          </div>
         </div>
-      </div>
-    </ComposerPrimitive.AttachmentDropzone>
+      </ComposerPrimitive.AttachmentDropzone>
+    </ConversationContextProvider>
   );
 }
 
@@ -205,20 +226,37 @@ function shouldAutofocusComposer(): boolean {
   );
 }
 
+/** The welcome and footer render alternate inputs into this same conversation composer. */
+function InitialComposerDraft({
+  draft,
+  seededRef,
+}: {
+  draft: string;
+  seededRef: React.RefObject<boolean>;
+}) {
+  const aui = useAui();
+  const empty = useAuiState((s) => s.composer.isEditing && !s.composer.text);
+  React.useEffect(() => {
+    if (
+      !empty ||
+      !takesDraft(draft, { seeded: seededRef.current, typed: aui.composer.getState().text })
+    )
+      return;
+    seededRef.current = true;
+    aui.composer.setText(draft, { origin: "user" });
+  }, [aui, draft, empty, seededRef]);
+  return null;
+}
+
 function ThreadWelcome({
   composerTools,
-  composerSlot,
-  initialComposerDraft,
-  draftSeededRef,
   queue,
 }: {
   composerTools?: React.ReactNode;
-  composerSlot?: React.ReactNode;
-  initialComposerDraft?: string;
-  draftSeededRef: React.RefObject<boolean>;
   queue: MessageQueue;
 }) {
-  const { can, t, firstName: name, actingSpaceIds } = useChatHost();
+  const { t, firstName: name, actingSpaceIds } = useChatHost();
+  const can = useConversationTurnCan();
   const canWrite = can("chat:write");
   // The host is looking at a space where the chat does not act (a viewer there): the conversation
   // still runs, in the caller's other spaces, and touches none of this one. Unsaid until known.
@@ -244,13 +282,7 @@ function ThreadWelcome({
             </p>
           )}
         </div>
-        <Composer
-          tools={composerTools}
-          slot={composerSlot}
-          initialDraft={initialComposerDraft}
-          draftSeededRef={draftSeededRef}
-          queue={queue}
-        />
+        <Composer tools={composerTools} queue={queue} />
       </div>
     </div>
   );
@@ -261,7 +293,8 @@ function ThreadWelcome({
  * triggers none, so it is not said to them.
  */
 function Disclaimer() {
-  const { can, t } = useChatHost();
+  const { t } = useChatHost();
+  const can = useConversationTurnCan();
   if (!can("chat:write")) return null;
   return <p className={DISCLAIMER_CLASS}>{t("thread.disclaimer")}</p>;
 }
@@ -271,10 +304,19 @@ function ScrollToBottom() {
   return (
     <ThreadPrimitive.ScrollToBottom asChild>
       <Button
+        // Where the composer auto-focuses, it takes the focus back when the thread scrolls down:
+        // this thread's composer, found from the button, not the first one in the document.
+        onClick={(event) => {
+          if (shouldAutofocusComposer())
+            event.currentTarget
+              .closest("[data-chat-thread]")
+              ?.querySelector<HTMLElement>("[data-aui-composer-type=thread] [contenteditable]")
+              ?.focus({ preventScroll: true });
+        }}
         type="button"
         variant="outline"
         size="icon"
-        className="absolute -top-10 rounded-full disabled:invisible"
+        className="absolute -top-13 rounded-full disabled:invisible"
         aria-label={t("thread.scrollToBottom")}
       >
         <ArrowDownIcon />
@@ -294,26 +336,25 @@ function ComposerAttachmentChip() {
   const status = useAuiState((s) => s.attachment.status);
   const size = file?.size ?? 0;
   const { formatBytes, openFile, t } = useChatHost();
-  // A model known not to read images only gets the file's pointer: say so under the chip.
-  const acceptsImages = React.useSyncExternalStore(
+  // A file the selected model is declared unable to take only gets its pointer: say so under the chip.
+  const sendsImages = React.useSyncExternalStore(
     subscribeModel,
-    getSelectedModelAcceptsImages,
-    getSelectedModelAcceptsImages,
+    getSelectedModelSendsImages,
+    getSelectedModelSendsImages,
   );
-  // Likewise for a PDF on a model that does not read one natively (`readsPdfNatively`).
-  const readsPdf = React.useSyncExternalStore(
+  const sendsPdf = React.useSyncExternalStore(
     subscribeModel,
-    getSelectedModelReadsPdf,
-    getSelectedModelReadsPdf,
+    getSelectedModelSendsPdf,
+    getSelectedModelSendsPdf,
   );
   const notice =
-    file && isImageMime(file.type) && acceptsImages === false
-      ? t("composer.imageNotSeen")
-      : file?.type === "application/pdf" && readsPdf === false
-        ? t("composer.pdfNotRead")
+    file && isImageMime(file.type) && !sendsImages
+      ? t("composer.imageNotSent")
+      : file?.type === "application/pdf" && !sendsPdf
+        ? t("composer.pdfNotSent")
         : undefined;
   const preview =
-    openFile && file && localPreviewKind(file.type)
+    file && localPreviewKind(file.type)
       ? {
           label: t("file.previewOf", { name: name || t("file.unnamed") }),
           onActivate: () => openFile({ local: file }),
@@ -360,29 +401,8 @@ function ComposerAttachmentChip() {
 }
 
 /**
- * A sent file attachment, rendered from a message `file` part. The wire part
- * (ai-SDK `FileUIPart`) carries no byte size, so the chip shows the name + the
- * type's icon only (the composer chip shows the size, read from the picked File).
- */
-function FileAttachmentPart({ filename, mimeType }: { filename?: string; mimeType?: string }) {
-  return (
-    <div className="mt-1">
-      <AttachmentChip name={filename ?? ""} mime={mimeType} />
-    </div>
-  );
-}
-
-// ─── Sent user-message attachments ───────────────────────────────────────────
-// The `@assistant-ui/react-ai-sdk` converter filters user `file` parts OUT of a
-// message's content and re-exposes them as `message.attachments` — so the
-// `File: FileAttachmentPart` Parts mapping above NEVER fires for user messages
-// (it stays correct for assistant file parts). We render sent attachments from
-// the attachments channel instead (`MessagePrimitive.Attachments`).
-
-/**
  * One sent attachment on a user message, as the composer's chip. An `appfile://`
- * (server-persisted, or a reloaded conversation) is interactive (preview or
- * download). So is a just-sent optimistic `upload://` once the turn's stream
+ * (server-persisted, or a reloaded conversation) can be previewed. So can a just-sent optimistic `upload://` once the turn's stream
  * named the file it became. Before that instant, or for an unparseable URI, the
  * chip is inert, its media the staged local copy when it was an image — the
  * content route serves files only.
@@ -417,7 +437,7 @@ function SentAttachmentChip() {
   }
 
   // A resolved `appfile://` is interactive: the unified renderer's chip, resolving
-  // the opener-vs-download action.
+  // the preview action.
   return (
     <FileAttachment
       file={{ id: resolved.id, name, mime: contentType, spaceId: resolved.spaceId }}
@@ -436,6 +456,57 @@ function ComposerAttachmentError() {
     <p role="alert" className={cn("text-destructive", NOTE_TEXT_CLASS)}>
       {message}
     </p>
+  );
+}
+
+/** The draft would take the conversation past the summarizing threshold (`draftCrossesThreshold`). */
+function useDraftCrossesThreshold(): boolean {
+  const reading = useConversationContext();
+  const textLength = useAuiState((s) => s.composer.text.length);
+  const attachments = useAuiState((s) => s.composer.attachments);
+  const readsImages = React.useSyncExternalStore(
+    subscribeModel,
+    getSelectedModelSendsImages,
+    getSelectedModelSendsImages,
+  );
+  const readsPdf = React.useSyncExternalStore(
+    subscribeModel,
+    getSelectedModelSendsPdf,
+    getSelectedModelSendsPdf,
+  );
+  const draftTokens = React.useMemo(
+    () =>
+      estimateDraftTokens(
+        {
+          textLength,
+          files: attachments.map((a) => ({
+            name: a.name,
+            mime: a.file?.type || a.contentType || "",
+            size: a.file?.size ?? 0,
+          })),
+        },
+        { readsImages, readsPdf },
+      ),
+    [textLength, attachments, readsImages, readsPdf],
+  );
+  return reading !== null && draftCrossesThreshold(reading.context, draftTokens);
+}
+
+/**
+ * Warns when the draft (its text and files) would take the conversation past the summarizing
+ * threshold, by an approximation (`estimateDraftTokens`) against the last measure. Nothing before
+ * one. The live region stays mounted: one inserted already filled is often not announced.
+ */
+function DraftContextNotice({ crosses }: { crosses: boolean }) {
+  const { t } = useChatHost();
+  return (
+    <div role="status" className="empty:hidden">
+      {crosses ? (
+        <Alert role={undefined} variant="warning" size="sm">
+          <AlertDescription>{t("composer.draftPastThreshold")}</AlertDescription>
+        </Alert>
+      ) : null}
+    </div>
   );
 }
 
@@ -511,12 +582,12 @@ function QueuedMessages({
         {items.map((text, index) => (
           // Texts may repeat and the list only ever shrinks or appends: the index is the identity.
           <li key={index} className="text-muted-foreground flex items-center gap-1 text-xs">
-            <span className="min-w-0 flex-1 truncate" title={text}>
-              {text}
+            <span className="min-w-0 flex-1 truncate" title={readableDirectives(text)}>
+              <DirectiveText text={text} />
             </span>
             <IconButton
               label={t("composer.queue.edit")}
-              className={QUEUE_ICON_BUTTON_CLASS}
+              className="desktop-pointer:size-6"
               disabled={!composerEmpty}
               onClick={() => {
                 queue.remove(index);
@@ -527,7 +598,7 @@ function QueuedMessages({
             </IconButton>
             <IconButton
               label={t("composer.queue.remove")}
-              className={QUEUE_ICON_BUTTON_CLASS}
+              className="desktop-pointer:size-6"
               onClick={() => queue.remove(index)}
             >
               <XIcon />
@@ -539,41 +610,62 @@ function QueuedMessages({
   );
 }
 
-function Composer({
-  tools,
-  slot,
-  initialDraft,
-  draftSeededRef,
-  queue,
-}: {
-  tools?: React.ReactNode;
-  slot?: React.ReactNode;
-  initialDraft?: string;
-  draftSeededRef: React.RefObject<boolean>;
-  queue: MessageQueue;
-}) {
-  const { can, t, modelLabel } = useChatHost();
+/**
+ * The field's placeholder while it is empty, naming the model: a phone's line is narrow, so the
+ * model's name alone, never a sentence cut before it; from `md` up, the sentence. CSS picks the
+ * span, so the first render is already the right one.
+ */
+function ComposerPlaceholder({ modelLabel }: { modelLabel: string | null | undefined }) {
+  const { t } = useChatHost();
+  const empty = useAuiState((s) => s.composer.text === "");
+  if (!empty) return null;
+  return (
+    <div aria-hidden className={COMPOSER_PLACEHOLDER_CLASS}>
+      {modelLabel ? (
+        <>
+          <span className="md:hidden">{modelLabel}</span>
+          <span className="max-md:hidden">
+            {t("composer.placeholderModel", { model: modelLabel })}
+          </span>
+        </>
+      ) : (
+        t("composer.placeholder")
+      )}
+    </div>
+  );
+}
+
+function Composer({ tools, queue }: { tools?: React.ReactNode; queue: MessageQueue }) {
+  const { t, modelLabel } = useChatHost();
+  const can = useConversationTurnCan();
   const composer = unstable_useComposerInput();
   const running = useAuiState((s) => s.thread.isRunning);
   const hasAttachments = useAuiState((s) => s.composer.attachments.length > 0);
-  // On a phone the composer rests as one line (attach, field, send) until it is touched; from then
-  // on, or with a draft, a file or a turn running, it shows its tools. From `md` up it never rests.
   const autofocus = shouldAutofocusComposer();
-  const [touched, setTouched] = React.useState(false);
-  const rest = !touched && composer.value === "" && !hasAttachments && !running;
+  const draftCrosses = useDraftCrossesThreshold();
+  // The runtime's text, not the input's value: a draft restored on reload holds it before any input.
+  const draft = useAuiState((s) => s.composer.text);
   // The turn carries the limit and its files go to its spaces: none leaves before the change lands.
   const limitPending = useConversationScope().pending;
   // Only text is queued: attachments stay in the composer until the next real send.
-  const canQueue = running && !hasAttachments && composer.value.trim() !== "";
+  const queued = React.useSyncExternalStore(queue.subscribe, queue.getSnapshot, queue.getSnapshot);
+  // While a turn runs the draft joins the queue, which is sent as one message: it is counted whole.
+  const message = running ? joinQueued([...queued.items, draft]) : draft;
+  const conversationSkills = useConversationSkillsContext()?.skills ?? null;
+  const draftSkills = useDraftSkillsOf(conversationSkills, message);
+  // What the message names must be sendable: one agent.
+  const issue = namesSeveralAgents(message);
+  const issueId = React.useId();
+  const canQueue = canQueueDraft({ running, text: composer.value, hasAttachments });
   const enqueue = () => {
     if (canQueue && queue.add(composer.value)) composer.setText("");
   };
-  React.useEffect(() => {
-    if (!takesDraft(initialDraft, { seeded: draftSeededRef.current, typed: composer.value }))
-      return;
-    draftSeededRef.current = true;
-    composer.setText(initialDraft);
-  }, [composer, initialDraft, draftSeededRef]);
+  const blocked = limitPending || issue;
+  // Enter queues while a turn runs and sends otherwise, as the Send button does.
+  const enter = () => {
+    if (running) enqueue();
+    else if (!blocked) composer.send();
+  };
   // Sending, stopping and attaching all guard on `chat:write`.
   if (!can("chat:write")) {
     return (
@@ -582,107 +674,113 @@ function Composer({
       </p>
     );
   }
-  // No focus ring on the box: the app's global `textarea:focus` ring is too
-  // intense here. min-h-9 + px-0 override the global `textarea { min-h-80px }`
-  // base rule (utilities beat the base layer) for a compact, Codex-like field.
   return (
     <ComposerPrimitive.Root
-      className="group/composer bg-card flex w-full flex-col gap-1 rounded-xl border px-3 py-2 shadow-sm"
-      data-rest={rest ? "" : undefined}
-      onClick={() => setTouched(true)}
+      className="group/composer bg-card relative flex w-full flex-col gap-1 rounded-xl border px-3 py-2 shadow-sm"
       onSubmit={(e) => {
-        if (limitPending) e.preventDefault();
+        if (blocked) e.preventDefault();
       }}
     >
-      {/* Pending attachments, above the input. `empty:hidden` collapses the row
+      <DraftSkillsProvider value={draftSkills}>
+        <ComposerPanelProvider>
+          <CommandTriggers>
+            {/* Pending attachments, above the input. `empty:hidden` collapses the row
           (and its gap) when nothing is attached. */}
-      <QueuedMessages
-        queue={queue}
-        running={running}
-        composerEmpty={composer.value.trim() === ""}
-        onEdit={composer.setText}
-      />
-      <div className="flex flex-wrap gap-1.5 empty:hidden">
-        <ComposerPrimitive.Attachments components={{ Attachment: ComposerAttachmentChip }} />
-      </div>
-      <ComposerAttachmentError />
-      <div className="chat-composer-grid" data-rest={rest ? "" : undefined}>
-        <div className="min-w-0 [grid-area:tools]">{tools}</div>
-        <ComposerPrimitive.Input
-          rows={1}
-          // A phone would open its keyboard on arrival and never show the resting composer.
-          autoFocus={autofocus}
-          unstable_focusOnRunStart={autofocus}
-          unstable_focusOnScrollToBottom={autofocus}
-          unstable_focusOnThreadSwitched={autofocus}
-          onFocus={() => setTouched(true)}
-          aria-label={t("composer.placeholder")}
-          enterKeyHint="send"
-          addAttachmentOnPaste
-          placeholder={
-            modelLabel
-              ? t("composer.placeholderModel", { model: modelLabel })
-              : t("composer.placeholder")
-          }
-          onKeyDown={(e) => {
-            // While the agent answers the primitive ignores Enter; it queues instead.
-            if (!running || e.key !== "Enter" || e.shiftKey || e.ctrlKey || e.metaKey) return;
-            if (e.nativeEvent.isComposing) return;
-            e.preventDefault();
-            enqueue();
-          }}
-          className={COMPOSER_INPUT_CLASS}
-        />
-        <div className="max-w-full min-w-0 justify-self-end [grid-area:model] max-md:group-data-[rest]/composer:hidden">
-          {slot}
-        </div>
-        <div className="flex items-center gap-2 [grid-area:send]">
-          <ThreadPrimitive.If running={false}>
-            <ComposerPrimitive.Send asChild disabled={limitPending}>
-              <Button
-                type="button"
-                size="icon"
-                className={COMPOSER_BUTTON_CLASS}
-                aria-label={t("composer.send")}
-              >
-                <SendHorizontalIcon />
-              </Button>
-            </ComposerPrimitive.Send>
-          </ThreadPrimitive.If>
-          <ThreadPrimitive.If running>
-            <Button
-              type="button"
-              size="icon"
-              variant="outline"
-              className={COMPOSER_BUTTON_CLASS}
-              aria-label={t("composer.queue.add")}
-              title={t("composer.queue.add")}
-              disabled={!canQueue}
-              onClick={enqueue}
+            <QueuedMessages
+              queue={queue}
+              running={running}
+              composerEmpty={composer.value.trim() === ""}
+              onEdit={composer.setText}
+            />
+            <CommandPopover />
+            <div className="flex flex-wrap gap-1.5 empty:hidden">
+              <ComposerPrimitive.Attachments components={{ Attachment: ComposerAttachmentChip }} />
+            </div>
+            <ComposerAttachmentError />
+            <DraftContextNotice crosses={draftCrosses} />
+            <div className={COMPOSER_ROW_CLASS}>
+              <div className={COMPOSER_TOOLS_CLASS}>{tools}</div>
+              <div className={cn("relative", COMPOSER_FIELD_CLASS)}>
+                <ComposerPlaceholder modelLabel={modelLabel} />
+                <ComposerEditor
+                  label={t("composer.placeholder")}
+                  placeholder={
+                    modelLabel
+                      ? t("composer.placeholderModel", { model: modelLabel })
+                      : t("composer.placeholder")
+                  }
+                  // A phone would open its keyboard on arrival, before anything was asked for.
+                  autofocus={autofocus}
+                  onEnter={enter}
+                />
+              </div>
+              <div className={COMPOSER_SEND_CLASS}>
+                <ContextIndicator draftCrosses={draftCrosses} />
+                <ThreadPrimitive.If running={false}>
+                  <ComposerPrimitive.Send asChild disabled={blocked}>
+                    <Button
+                      type="button"
+                      size="icon-sm"
+                      className={COMPOSER_BUTTON_CLASS}
+                      aria-label={t("composer.send")}
+                      aria-describedby={issue ? issueId : undefined}
+                    >
+                      <SendHorizontalIcon />
+                    </Button>
+                  </ComposerPrimitive.Send>
+                </ThreadPrimitive.If>
+                <ThreadPrimitive.If running>
+                  <Button
+                    type="button"
+                    size="icon-sm"
+                    variant="outline"
+                    className={COMPOSER_BUTTON_CLASS}
+                    aria-label={t("composer.queue.add")}
+                    title={t("composer.queue.add")}
+                    disabled={!canQueue}
+                    aria-describedby={issue ? issueId : undefined}
+                    onClick={enqueue}
+                  >
+                    <ListPlusIcon />
+                  </Button>
+                  <ComposerPrimitive.Cancel asChild>
+                    <Button
+                      type="button"
+                      size="icon-sm"
+                      variant="secondary"
+                      className={COMPOSER_BUTTON_CLASS}
+                      aria-label={t("composer.stop")}
+                    >
+                      <SquareIcon className="fill-current" />
+                    </Button>
+                  </ComposerPrimitive.Cancel>
+                </ThreadPrimitive.If>
+              </div>
+            </div>
+            {/* Always mounted, so a screen reader hears the issue appear. */}
+            <p
+              id={issueId}
+              role="status"
+              className={issue ? cn(NOTE_TEXT_CLASS, "text-destructive") : "sr-only"}
             >
-              <ListPlusIcon />
-            </Button>
-            <ComposerPrimitive.Cancel asChild>
-              <Button
-                type="button"
-                size="icon"
-                variant="secondary"
-                className={COMPOSER_BUTTON_CLASS}
-                aria-label={t("composer.stop")}
-              >
-                <SquareIcon className="fill-current" />
-              </Button>
-            </ComposerPrimitive.Cancel>
-          </ThreadPrimitive.If>
-        </div>
-      </div>
+              {issue ? t("composer.oneAgentOnly") : ""}
+            </p>
+          </CommandTriggers>
+        </ComposerPanelProvider>
+      </DraftSkillsProvider>
     </ComposerPrimitive.Root>
   );
 }
 
 // ─── User message (bubble only — no edit/branch on a single-path thread) ─────
 
-function UserMessage() {
+/** Module-level: assistant-ui memoizes each part on these members' identity. */
+const USER_PART_COMPONENTS = {
+  // The user's text, with the skills and agents it names as chips.
+  Text: DirectiveText,
+} satisfies React.ComponentProps<typeof MessagePrimitive.Parts>["components"];
+
+export function UserMessage() {
   // The OAuth auto-resume turn (oauth-connect-card) is a real user message — it
   // drives the model to continue — but showing its raw text as a bubble is
   // noise. Detect the marker prefix and render a discreet "connected" notice
@@ -702,6 +800,8 @@ function UserMessage() {
     return null;
   });
   const resume = resumeText ? parseResume(resumeText) : null;
+  // Plain values from the selectors, never a derived object. See `turn-error-state.ts`.
+  const hasBubble = useAuiState(({ message }) => hasBubbleContent(message));
 
   if (resume) {
     return (
@@ -732,16 +832,20 @@ function UserMessage() {
           <MessagePrimitive.Attachments components={{ Attachment: SentAttachmentChip }} />
         </div>
       </MessagePrimitive.If>
-      {/* The text bubble. Guarded on content so an attachment-only message (no
-          text part) doesn't paint an empty grey pill. */}
-      <MessagePrimitive.If hasContent>
-        {/* A white card on the canvas, like every other surface in the thread
-            (the composer, the tool cards). `bg-muted` was a hollow on white and
-            reads as a smudge on grey — 3 points of luminance from the page. */}
-        <div className={USER_MESSAGE_CLASS}>
-          <MessagePrimitive.Parts components={{ File: FileAttachmentPart }} />
-        </div>
-      </MessagePrimitive.If>
+      {/* The text bubble. Guarded on content so an attachment-only or agent-only message (no
+          text part) doesn't paint an empty grey pill. A white card, like the thread's other surfaces. */}
+      {hasBubble && (
+        <>
+          <div className={USER_MESSAGE_CLASS}>
+            <MessagePrimitive.Parts components={USER_PART_COMPONENTS} />
+          </div>
+          {/* Under the bubble: copy, always there on touch, on hover under a mouse. No edit or
+              retry: the server writes the turns linearly, with no branch to rewrite one into. */}
+          <ActionBarPrimitive.Root className={USER_ACTION_BAR_CLASS}>
+            <CopyMessageButton />
+          </ActionBarPrimitive.Root>
+        </>
+      )}
     </MessagePrimitive.Root>
   );
 }
@@ -803,11 +907,13 @@ export function MessageError() {
     () => turnErrorState(message, t, can, personalModelCredentials),
     [message, t, can, personalModelCredentials],
   );
+  const aui = useAui();
   if (!errorState) return null;
   return (
     <Alert
       variant="destructive"
-      className="mt-2 break-words"
+      // A phone puts the buttons under the text, aligned on it: beside it they squeeze it to a column.
+      className="mt-2 break-words max-md:flex-wrap max-md:[&>[data-slot=alert-action]]:my-0 max-md:[&>[data-slot=alert-action]]:basis-full max-md:[&>[data-slot=alert-action]]:pl-7"
       action={
         errorState.action || errorState.retryable ? (
           <div className="flex gap-2">
@@ -818,17 +924,27 @@ export function MessageError() {
             ) : null}
             {errorState.retryable ? (
               <ThreadPrimitive.If running={false}>
-                <ThreadPrimitive.Suggestion
-                  prompt={t("turn.retryPrompt")}
-                  method="replace"
-                  autoSend
-                  asChild
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => {
+                    // The retry names the agent the failed turn launched, or the launch is lost.
+                    // Read at the click: a selector on the thread would run on every chunk.
+                    const asked = precedingUserMessage(
+                      aui.thread().getState().messages,
+                      message.id,
+                    );
+                    const agent = asked ? agentPromptOf(asked) : null;
+                    aui.thread().append({
+                      role: "user",
+                      content: retryContent(t("turn.retryPrompt"), agent),
+                    });
+                  }}
                 >
-                  <Button type="button" variant="outline" size="sm">
-                    <RotateCcwIcon />
-                    {t("common:btn.retry")}
-                  </Button>
-                </ThreadPrimitive.Suggestion>
+                  <RotateCcwIcon />
+                  {t("common:btn.retry")}
+                </Button>
               </ThreadPrimitive.If>
             ) : null}
           </div>
@@ -857,11 +973,11 @@ const ASSISTANT_PART_COMPONENTS = {
 } satisfies React.ComponentProps<typeof MessagePrimitive.Parts>["components"];
 
 function AssistantMessage() {
-  const { t } = useChatHost();
   return (
     <MessagePrimitive.Root className="group flex w-full max-w-(--thread-max-width) flex-col py-2">
       <div className={ASSISTANT_MESSAGE_CLASS}>
         <MessagePrimitive.Parts components={ASSISTANT_PART_COMPONENTS} />
+        <TurnSpaceChoice />
         <TurnLimitNotice />
         <MessageError />
       </div>
@@ -874,16 +990,7 @@ function AssistantMessage() {
             visibly jump. Copy stays usable mid-stream (copies the current
             snapshot), which is the seamless behavior we want. */}
         <ActionBarPrimitive.Root className={ACTION_BAR_CLASS}>
-          <ActionBarPrimitive.Copy asChild>
-            <IconButton label={t("common:btn.copy")}>
-              <MessagePrimitive.If copied>
-                <CheckIcon />
-              </MessagePrimitive.If>
-              <MessagePrimitive.If copied={false}>
-                <CopyIcon />
-              </MessagePrimitive.If>
-            </IconButton>
-          </ActionBarPrimitive.Copy>
+          <CopyMessageButton />
         </ActionBarPrimitive.Root>
       </div>
     </MessagePrimitive.Root>
@@ -891,6 +998,23 @@ function AssistantMessage() {
 }
 
 // ─── Shared bits ─────────────────────────────────────────────────────────────
+
+/** The message's copy button, a check once copied. Inside an `ActionBarPrimitive.Root`. */
+function CopyMessageButton() {
+  const { t } = useChatHost();
+  return (
+    <ActionBarPrimitive.Copy asChild>
+      <IconButton label={t("common:btn.copy")}>
+        <MessagePrimitive.If copied>
+          <CheckIcon />
+        </MessagePrimitive.If>
+        <MessagePrimitive.If copied={false}>
+          <CopyIcon />
+        </MessagePrimitive.If>
+      </IconButton>
+    </ActionBarPrimitive.Copy>
+  );
+}
 
 // forwardRef + prop spread so `asChild`/Slot-injected handlers (onClick from
 // the action-bar/branch-picker primitives) actually reach the button.
@@ -902,7 +1026,7 @@ const IconButton = React.forwardRef<
     ref={ref}
     type="button"
     variant="ghost"
-    size="icon"
+    size="icon-sm"
     aria-label={label}
     title={label}
     {...props}

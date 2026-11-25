@@ -20,7 +20,7 @@
 
 import type { Context } from "hono";
 import { z } from "zod";
-import { and, eq, gt, isNull, sql } from "drizzle-orm";
+import { and, count, eq, gt, isNull, sql } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
 import { modelProviderCredentials, orgModels, user } from "@appstrate/db/schema";
 import { encryptCredentials, decryptCredentials } from "@appstrate/connect";
@@ -1195,9 +1195,20 @@ export async function listOrgModelProviderCredentials(
   const servedBy = (providerId: string) =>
     memberModels.filter((m) => servesModel(providerId, m)).map((m) => m.id);
   const rows = await db
-    .select({ credential: modelProviderCredentials, ownerName: user.name })
+    .select({
+      credential: modelProviderCredentials,
+      ownerName: user.name,
+      referencingModelCount: count(orgModels.id),
+    })
     .from(modelProviderCredentials)
     .leftJoin(user, eq(user.id, modelProviderCredentials.ownerUserId))
+    .leftJoin(
+      orgModels,
+      and(
+        eq(orgModels.orgId, caller.orgId),
+        eq(orgModels.credentialId, modelProviderCredentials.id),
+      ),
+    )
     .where(
       scopedWhere(modelProviderCredentials, {
         orgId: caller.orgId,
@@ -1207,7 +1218,8 @@ export async function listOrgModelProviderCredentials(
             : eq(modelProviderCredentials.ownerUserId, caller.userId ?? sql`NULL`),
         ],
       }),
-    );
+    )
+    .groupBy(modelProviderCredentials.id, user.name);
 
   // Built-in credentials whose EVERY backing model is an alias:
   // hide the binding (apiShape + baseUrl) so the endpoint host doesn't reveal
@@ -1232,7 +1244,11 @@ export async function listOrgModelProviderCredentials(
 
   return mergeSystemAndDb({
     system,
-    rows: rows.map(({ credential, ownerName }) => ({ ...credential, ownerName })),
+    rows: rows.map(({ credential, ownerName, referencingModelCount }) => ({
+      ...credential,
+      ownerName,
+      referencingModelCount,
+    })),
     mapSystem: (id, def): ModelProviderCredentialInfo => {
       const provider = getModelProvider(def.providerId);
       const aliasOnly = aliasOnlySystemCredentials.has(id);
@@ -1257,6 +1273,7 @@ export async function listOrgModelProviderCredentials(
           personalAllowed,
         ),
         bindable: false,
+        referencing_model_count: 0,
         serves_model_ids: [],
         created_by: null,
         createdAt: now,
@@ -1303,6 +1320,7 @@ export async function listOrgModelProviderCredentials(
           personalAllowed,
         ),
         bindable: isBindableCredential(r),
+        referencing_model_count: r.referencingModelCount,
         serves_model_ids: r.ownerUserId === null ? [] : servedBy(r.providerId),
         created_by: r.createdBy,
         createdAt: toISORequired(r.createdAt),

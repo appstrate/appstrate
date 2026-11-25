@@ -22,7 +22,10 @@ const buttonVariants = cva(
         default: "h-10 px-4 py-2",
         sm: "h-9 rounded-md px-3",
         lg: "h-11 rounded-md px-8",
-        icon: "h-10 w-10",
+        // Icon buttons are a thumb's size on touch (44 px) and their own under a mouse
+        // (`desktop-pointer:`, a wide screen with a fine pointer): 40 px, or 32 px for `icon-sm`.
+        icon: "size-11 desktop-pointer:size-10",
+        "icon-sm": "size-11 desktop-pointer:size-8",
       },
     },
     defaultVariants: {

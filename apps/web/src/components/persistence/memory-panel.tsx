@@ -9,7 +9,7 @@ import { ActorBadge } from "./actor-badge";
 import { useMemoryColumns, type MemoryCollectionItem } from "./memory-columns";
 import { DataTable } from "../data-table";
 import { ListToolbar, type FilterSpec } from "../list-toolbar";
-import { useLocalListParams } from "../../lib/list-params";
+import { useLocalListParams, type ListState } from "../../lib/list-params";
 import { Modal } from "../modal";
 import { ConfirmModal } from "../confirm-modal";
 import { formatDateField } from "../../lib/format-date";
@@ -34,12 +34,11 @@ interface MemoryPanelProps {
   /** Run-scoped view: filter all rows by `runId`, hide scope filter, hide delete buttons. */
   runId?: string;
   /** Optional entry filter used by overview deep links. */
-  initialTypes?: Array<"pinned" | "archive">;
+  list?: ListState;
   /** The agent's memory in every space the reader reaches, each row naming its space (agent view only). */
   spanning?: boolean;
 }
 
-const EMPTY_MEMORY_TYPES: Array<"pinned" | "archive"> = [];
 const MEMORY_TYPES = ["pinned", "archive"] as const;
 const MEMORY_SCOPES = ["shared", "mine", "others"] as const;
 
@@ -47,7 +46,7 @@ const MEMORY_SCOPES = ["shared", "mine", "others"] as const;
 export function MemoryPanel({
   packageId,
   runId,
-  initialTypes = EMPTY_MEMORY_TYPES,
+  list: panelList,
   spanning = false,
 }: MemoryPanelProps) {
   const { t } = useTranslation(["agents", "common"]);
@@ -76,7 +75,8 @@ export function MemoryPanel({
 
   const isLoading = pinnedQ.isLoading || memoriesQ.isLoading;
 
-  const list = useLocalListParams({ type: initialTypes });
+  const local = useLocalListParams();
+  const list = panelList ?? local;
   const types = list.values("type", MEMORY_TYPES);
   const scopes = list.values("scope", MEMORY_SCOPES);
   const { copy } = useCopyToClipboard(1_500);

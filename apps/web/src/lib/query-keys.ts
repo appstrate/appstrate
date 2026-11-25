@@ -10,6 +10,7 @@
 
 import type { InvalidateQueryFilters, QueryClient } from "@tanstack/react-query";
 import type { paths } from "../api/schema";
+import type { SpaceKind } from "./space-filter";
 
 type Id = string | null | undefined;
 
@@ -83,6 +84,8 @@ export const paginatedRunsKeys = {
     kind: string | null | undefined,
     status: string | null | undefined,
     unread: boolean | undefined,
+    spaceKind: SpaceKind | undefined,
+    spaceIds: string | undefined,
     search: string | null | undefined,
     limit: number,
   ) =>
@@ -90,14 +93,7 @@ export const paginatedRunsKeys = {
       "paginated-runs",
       orgId,
       spaceId,
-      endpoint,
-      user,
-      kind,
-      status,
-      unread,
-      search,
-      // `search, limit` stay last: `placeholderData` keeps rows across a search change only (`keepsRunRows`).
-      limit,
+      { endpoint, user, kind, status, unread, spaceKind, spaceIds, search, limit },
     ] as const,
 };
 

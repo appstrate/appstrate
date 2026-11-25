@@ -30,9 +30,9 @@
 
 import { buildConnectUrl, connectClaimsFor } from "./connect-session.ts";
 import { fetchIntegrationManifest, type IntegrationManifestCache } from "../integration-service.ts";
-import { isUserConnectionCreationBlocked } from "../integration-connection-resolver.ts";
+import { connectTarget } from "../integration-connections.ts";
 import { acquiresByConnectLogin, partitionScopesByAuthCatalog } from "@appstrate/core/integration";
-import type { ResolutionFieldError } from "../../lib/errors.ts";
+import { ApiError, type ResolutionFieldError } from "../../lib/errors.ts";
 import type { ConnectOfferPolicy } from "../../lib/connect-offer-policy.ts";
 import type { SpaceScope } from "../../lib/scope.ts";
 import type { Actor } from "../../lib/actor.ts";
@@ -57,7 +57,7 @@ const FIELD_PREFIX = "integrations.";
  *
  * `not_connected`, or `auth_key_mismatch` on the dep's own auth, qualifies as a fresh
  * connect (no `connection_id`). `needs_reconnection` qualifies only on a connection the actor
- * OWNS and only with an id to re-consent in place, with no scopes of this agent: a
+ * owns and can identify, with the id to re-consent in place and no scopes of this agent: a
  * foreign-owned row is somebody else's account, and minting against it would let the caller
  * re-consent a colleague's credential.
  *
@@ -74,7 +74,7 @@ export function connectOfferTarget(e: ResolutionFieldError): ConnectOfferTarget 
     case "auth_key_mismatch":
       return { integrationId, authKey: e.auth_key, scopes: e.required_scopes ?? [] };
     case "needs_reconnection":
-      return e.owned_by_actor === true && e.connection_id
+      return !e.remedy && e.owned_by_actor === true && e.connection_id
         ? { integrationId, authKey: e.auth_key, scopes: [], connectionId: e.connection_id }
         : null;
     default:
@@ -138,15 +138,7 @@ export async function attachConnectOffers(params: {
           return e;
         }
 
-        // Same carve-out as `assertConnectionCreationAllowed`: an admin may
-        // create the shared connection the block exists to force everyone onto.
-        if (
-          !policy.canConfigure &&
-          (await isUserConnectionCreationBlocked(scope.spaceId, target.integrationId))
-        ) {
-          return e;
-        }
-
+        await connectTarget({ ...target, spaceId: scope.spaceId }, { ...policy, actor });
         const { connectUrl, expiresAt } = buildConnectUrl(
           connectClaimsFor({
             scope,
@@ -165,6 +157,7 @@ export async function attachConnectOffers(params: {
           packageId: target.integrationId,
         };
       } catch (err) {
+        if (err instanceof ApiError && (err.status === 403 || err.status === 404)) return e;
         logger.warn("Connect offer mint failed for readiness error", {
           integrationId: target.integrationId,
           authKey: target.authKey,

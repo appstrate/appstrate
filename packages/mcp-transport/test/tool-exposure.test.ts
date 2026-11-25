@@ -30,10 +30,11 @@ describe("exposeTool", () => {
         inputSchema: { type: "object" },
         _meta: { [TOOL_INTEGRATION_META_KEY]: { id: "@acme/docs", tool: "search" } },
       },
+      reduced: [],
     });
   });
 
-  it("sanitises the descriptor and drops one too large once sanitised", () => {
+  it("sanitises the descriptor and reduces one over the schema budget instead of dropping it", () => {
     const properties = Object.fromEntries(
       Array.from({ length: MAX_SCHEMA_SERIALISED_BYTES / 16 }, (_, i) => [
         `property_${i}`,
@@ -43,9 +44,11 @@ describe("exposeTool", () => {
     const big = { type: "object", properties };
     const exposed = exposeTool(tool("a", { description: "hi\u200Bthere" }), free);
     expect("descriptor" in exposed && exposed.descriptor.description).toBe("hithere");
-    expect(exposeTool(tool("a", { inputSchema: big as Tool["inputSchema"] }), free)).toEqual({
-      exclusion: "schema_too_large_after_sanitisation",
-    });
+    const reduced = exposeTool(tool("a", { inputSchema: big as Tool["inputSchema"] }), free);
+    if (!("descriptor" in reduced)) throw new Error("not exposed");
+    expect(reduced.reduced).toEqual(["schema_documentation", "input_schema"]);
+    expect(reduced.descriptor.name).toBe("docs__a");
+    expect(reduced.descriptor.inputSchema).toEqual({ type: "object" });
   });
 
   it("renames a taken name and leads the description with the upstream name", () => {

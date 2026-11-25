@@ -91,21 +91,6 @@ export interface AppstrateToolDefinition {
   handler: AppstrateToolHandler;
 }
 
-// There is no `hidden` flag on a tool definition.
-//
-// One existed, for exactly one use: a RETIRED tool name kept callable but
-// unlisted after a rename, because this server advertises
-// `tools: { listChanged: false }` and a client may cache the list for its whole
-// session. That use was then removed — `apps/api/src/modules/mcp/tools.ts`
-// registers no retired name, listed or hidden, on the grounds that the cost was
-// "a permanent second dispatch path whose only proof of life was its own test".
-// The flag outlived its only consumer by three commits, leaving a filter that
-// filtered nothing and a test asserting a capability nothing used.
-//
-// If a future rename wants it back it is three lines. Do not re-add it
-// speculatively: an unlisted-but-callable name is a second dispatch path, and
-// this codebase has now twice decided it does not want one.
-
 const DEFAULT_SERVER_INFO: Implementation = {
   name: "appstrate-mcp-server",
   version: "0.0.0",
@@ -434,6 +419,7 @@ export type {
 export {
   createMcpHttpClient,
   httpStatusOf,
+  isMcpProtocolError,
   isRequestTimeout,
   jsonRpcErrorOf,
   wrapClient,
@@ -474,6 +460,8 @@ export {
   MAX_TOOL_DESCRIPTION_BYTES,
   MAX_PARAMETER_DESCRIPTION_BYTES,
   MAX_SCHEMA_SERIALISED_BYTES,
+  TOOL_DESCRIPTOR_REDUCTIONS,
+  type ToolDescriptorReduction,
 } from "./sanitize.ts";
 
 // Tool exposure — which upstream tools an integration exposes to the agent, and the descriptor
@@ -482,6 +470,7 @@ export {
 export { exposeTool, toolExclusion, withToolIntegration } from "./tool-exposure.ts";
 
 // The `fetch` an MCP client transport is given, built from a `(url, init)` sender.
+export { boundResourceResponse } from "./resource-response.ts";
 export { mcpFetch } from "./mcp-fetch.ts";
 
 // Upstream-response metadata wire format — `_meta` key, header
@@ -515,3 +504,10 @@ export {
   type ApiCallToolMeta,
   type ApiUploadToolMeta,
 } from "./tool-meta.ts";
+
+// Agent launch prompt `_meta` — the agent's package id, icon and colour on `prompts/list`.
+export {
+  AGENT_PROMPT_META_KEY,
+  readAgentPromptMeta,
+  type AgentPromptMeta,
+} from "./agent-prompt-meta.ts";

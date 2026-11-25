@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
+import { isUniqueViolation } from "../lib/db-helpers.ts";
+import { nextScheduleVersion } from "../lib/schedule-version.ts";
 import { db } from "@appstrate/db/client";
 import { ApiError, conflict, forbidden, notFound } from "../lib/errors.ts";
 import { CURRENT_API_VERSION } from "../lib/api-versions.ts";
@@ -19,26 +21,13 @@ import {
   files,
   uploads,
   apiKeys,
-  oauthClient,
-  oauthAccessToken,
-  oauthRefreshToken,
   modelProviderCredentials,
   modelProviderPairings,
   spaces,
+  integrationConnections,
+  type ScheduleDisabledReason,
 } from "@appstrate/db/schema";
-import {
-  and,
-  arrayOverlaps,
-  eq,
-  ne,
-  inArray,
-  isNull,
-  notInArray,
-  or,
-  count,
-  sql,
-  asc,
-} from "drizzle-orm";
+import { and, eq, ne, inArray, isNull, notInArray, count, sql, asc, type SQL } from "drizzle-orm";
 import type { OrgRole } from "../types/index.ts";
 import {
   isUuid,
@@ -58,13 +47,20 @@ import {
   deleteSpaceMembershipsInOrg,
   lockOrgMember,
   lockSpacesOfSharedConnections,
+  sharesLostIn,
   unshareConnectionsOfOwnersWithoutAccess,
 } from "./space-members.ts";
+import {
+  integrationsNamingAny,
+  selectForeignNamingScheduleIds,
+} from "./schedules-naming-connection.ts";
+import { batchLoadScheduleEndUserNames, batchLoadUserNames } from "../lib/user-helpers.ts";
+import { actorFromIds } from "../lib/actor.ts";
 import { orphanPersonalSpaces } from "./spaces.ts";
 import { ensurePersonalSpace, isPlatformAccount, provisionOrg } from "@appstrate/db/provision-org";
 import type { ConnectionShare, RevokedSpaceAssignment } from "./space-members.ts";
 import { assignableRolesForMember, canRemoveMember } from "@appstrate/shared-types";
-import { getMcpOrgResourceUri, getMcpSpaceResourceUri } from "../lib/audiences.ts";
+import { endOAuthAccessInOrg } from "./oauth-token-revocation.ts";
 import { emitEvent } from "../lib/modules/module-loader.ts";
 
 interface OrgResult {
@@ -110,6 +106,19 @@ function toOrgResult(row: typeof organizations.$inferSelect): OrgResult {
   };
 }
 
+function rethrowOrgWriteError(err: unknown, slug: string | undefined): never {
+  if (slug !== undefined && isUniqueViolation(err, "organizations_slug_unique")) {
+    throw new ApiError({
+      status: 400,
+      code: "slug_taken",
+      title: "Bad Request",
+      detail: `Slug '${slug}' is already in use`,
+      cause: err,
+    });
+  }
+  throw err;
+}
+
 export async function createOrganization(
   name: string,
   slug: string,
@@ -120,14 +129,16 @@ export async function createOrganization(
   // bootstrap path so neither can provision half an organization. A default
   // space created after this commit, outside the transaction, is an
   // organization that can commit without one.
-  const { org } = await db.transaction(async (tx) =>
-    provisionOrg(tx, {
-      name,
-      slug,
-      ownerUserId: userId,
-      orgSettings: { api_version: CURRENT_API_VERSION },
-    }),
-  );
+  const { org } = await db
+    .transaction(async (tx) =>
+      provisionOrg(tx, {
+        name,
+        slug,
+        ownerUserId: userId,
+        orgSettings: { api_version: CURRENT_API_VERSION },
+      }),
+    )
+    .catch((err: unknown) => rethrowOrgWriteError(err, slug));
 
   // The initial `orgSettings` write above is a settings writer like any other:
   // a pin read for this id that raced the insert (and cached "no pin" for a
@@ -176,7 +187,8 @@ export async function updateOrganization(
     .update(organizations)
     .set({ ...updates, updatedAt: new Date() })
     .where(eq(organizations.id, orgId))
-    .returning();
+    .returning()
+    .catch((err: unknown) => rethrowOrgWriteError(err, updates.slug));
 
   if (!row) throw new Error("Failed to update organization");
   return toOrgResult(row);
@@ -436,8 +448,12 @@ interface MemberExitResult {
 }
 
 /** Under {@link lockOrganizationRow}, which all role writers take — not the request's role. */
-async function lockedActorRole(tx: Tx, orgId: string, actor: MemberActor): Promise<OrgRole> {
-  const row = await getOrgMember(orgId, actor.userId, tx);
+async function lockedActorRole(
+  executor: DbOrTx,
+  orgId: string,
+  actor: MemberActor,
+): Promise<OrgRole> {
+  const row = await getOrgMember(orgId, actor.userId, executor);
   if (!row) throw forbidden("Not a member of this organization");
   return row.role;
 }
@@ -467,6 +483,48 @@ async function assertAnotherOwnerRemains(tx: Tx, orgId: string, userId: string):
       "An organization must keep at least one owner. Promote another member to owner first, or delete the organization.",
     );
   }
+}
+
+/** The member's armed schedules in `orgId`: the ones an exit disables `actor_left_org`. */
+function armedSchedulesOf(orgId: string, userId: string): SQL {
+  return and(
+    eq(schedules.orgId, orgId),
+    eq(schedules.userId, userId),
+    eq(schedules.enabled, true),
+  )!;
+}
+
+type ExitDisableCause = Extract<ScheduleDisabledReason, "actor_left_org" | "connection_unshared">;
+
+/**
+ * The schedules {@link removeMemberInTx} would disable for `userId`'s exit, and why, read from the
+ * same selectors without writing: `connection_unshared` for another actor's schedule naming a
+ * share the exit withdraws, `actor_left_org` for the member's own. A snapshot, stale once returned.
+ */
+async function exitScheduleDisables(
+  executor: DbOrTx,
+  orgId: string,
+  userId: string,
+): Promise<Map<string, ExitDisableCause>> {
+  // Every share of the member's connections, as the exit sees them with the membership gone.
+  const lost = await sharesLostIn(executor, { orgId, userId }, userId);
+  const foreign = await selectForeignNamingScheduleIds(
+    executor,
+    // The scope filters on the connection's `user_id`: its owner is the member.
+    lost.map((share) => ({
+      id: share.connectionId,
+      owner: { type: "user", id: userId },
+      inSpaceId: share.spaceId,
+    })),
+  );
+  const own = await executor
+    .select({ id: schedules.id })
+    .from(schedules)
+    .where(armedSchedulesOf(orgId, userId));
+  const causes = new Map<string, ExitDisableCause>();
+  for (const id of foreign) causes.set(id, "connection_unshared");
+  for (const { id } of own) causes.set(id, "actor_left_org");
+  return causes;
 }
 
 /** The one exit door: leave and removal clean up the membership in one place. */
@@ -528,55 +586,18 @@ async function removeMemberInTx(
     .returning({ id: apiKeys.id });
 
   // Tokens that grant only this org: its own clients' (a refresh through an
-  // `allowSignup` one re-provisions the member) and those bound to one of its
-  // MCP resources (the org's or a space's). Only opaque tokens are rows; a JWT
-  // lives until its TTL, stopped by the per-request membership check.
-  const orgClientIds = tx
-    .select({ clientId: oauthClient.clientId })
-    .from(oauthClient)
-    .where(and(eq(oauthClient.level, "org"), eq(oauthClient.referencedOrgId, orgId)));
-  const orgSpaces = await tx.select({ id: spaces.id }).from(spaces).where(eq(spaces.orgId, orgId));
-  const mcpResources = [
-    getMcpOrgResourceUri(orgId),
-    ...orgSpaces.map((s) => getMcpSpaceResourceUri(orgId, s.id)),
-  ];
-  const revokedAt = new Date();
-  await tx
-    .update(oauthRefreshToken)
-    .set({ revoked: revokedAt })
-    .where(
-      and(
-        eq(oauthRefreshToken.userId, userId),
-        isNull(oauthRefreshToken.revoked),
-        or(
-          inArray(oauthRefreshToken.clientId, orgClientIds),
-          arrayOverlaps(oauthRefreshToken.resources, mcpResources),
-        ),
-      ),
-    );
-  await tx
-    .update(oauthAccessToken)
-    .set({ revoked: revokedAt })
-    .where(
-      and(
-        eq(oauthAccessToken.userId, userId),
-        isNull(oauthAccessToken.revoked),
-        or(
-          inArray(oauthAccessToken.clientId, orgClientIds),
-          arrayOverlaps(oauthAccessToken.resources, mcpResources),
-        ),
-      ),
-    );
+  // `allowSignup` one re-provisions the member), deleted outright, and its MCP
+  // endpoints' (the org's or a space's), withdrawn from tokens that may also
+  // cover another org's. Deleted, never marked revoked: see
+  // `oauth-token-revocation.ts`. A JWT lives until its TTL, stopped by the
+  // per-request membership check and the grant's watermark.
+  await endOAuthAccessInOrg(tx, orgId, userId);
 
   // Not deleted: 30 days to convert it, or to hand it back on re-invite (spec §3.6).
   const orphanedSpaceIds = await orphanPersonalSpaces(tx, orgId, userId);
   // The member's own armed schedules are disabled, not deleted (org history): they would keep
   // firing under the departed identity, whose user row survives (CRIT-13).
-  const departedSchedules = and(
-    eq(schedules.orgId, orgId),
-    eq(schedules.userId, userId),
-    eq(schedules.enabled, true),
-  );
+  const departedSchedules = armedSchedulesOf(orgId, userId);
   // No space lock needed, unlike a role change: with the membership gone the owner reaches no
   // space whatever a concurrent close leaves, so this unshares every shared connection. A close
   // unsharing the same rows is ordered against this by the row locks the unshare takes, which
@@ -592,7 +613,7 @@ async function removeMemberInTx(
       enabled: false,
       disabledReason: "actor_left_org",
       nextRunAt: null,
-      updatedAt: new Date(),
+      updatedAt: nextScheduleVersion,
     })
     .where(departedSchedules)
     .returning({ id: schedules.id });
@@ -642,13 +663,108 @@ export async function removeMember(
   targetUserId: string,
   actor: MemberActor,
 ): Promise<MemberExitResult> {
-  return exitOrg(orgId, targetUserId, async (tx, targetRole) => {
-    const actorRole = await lockedActorRole(tx, orgId, actor);
-    const isSelf = targetUserId === actor.userId;
-    if (!canRemoveMember({ actorRole, targetRole, isSelf })) {
-      throw forbidden("You cannot remove this member");
-    }
-    if (targetRole === "owner") assertOwnerChangeInSession(actor);
+  return exitOrg(orgId, targetUserId, (tx, targetRole) =>
+    assertMayRemove(tx, orgId, targetUserId, targetRole, actor),
+  );
+}
+
+/** 403 unless `actor` may remove `targetUserId` (of `targetRole`): the removal's own rule. */
+async function assertMayRemove(
+  executor: DbOrTx,
+  orgId: string,
+  targetUserId: string,
+  targetRole: OrgRole,
+  actor: MemberActor,
+): Promise<void> {
+  const actorRole = await lockedActorRole(executor, orgId, actor);
+  const isSelf = targetUserId === actor.userId;
+  if (!canRemoveMember({ actorRole, targetRole, isSelf })) {
+    throw forbidden("You cannot remove this member");
+  }
+  if (targetRole === "owner") assertOwnerChangeInSession(actor);
+}
+
+/** One schedule a member's removal would stop in a team space, as `getMemberDepartureImpact` lists it. */
+export interface DepartureImpactItem {
+  id: string;
+  name: string | null;
+  space: { id: string; name: string };
+  packageId: string;
+  actor: { type: "user" | "end_user"; id: string; name: string | null };
+  cause: ExitDisableCause;
+  /** Integrations whose named connection is the departing member's: reassigning is not enough. */
+  lost_integrations: string[];
+}
+
+/**
+ * What removing `targetUserId` would stop in the org's TEAM spaces, on `actor`'s authority: the
+ * schedules {@link removeMember} disables there, read without writing (a snapshot). 404 when not a
+ * member, 403 on the removal's own rule. Personal-space schedules are left out: the space enters
+ * its 30-day window, and an admin cannot read a live one.
+ */
+export async function memberDepartureImpact(
+  orgId: string,
+  targetUserId: string,
+  actor: MemberActor,
+): Promise<DepartureImpactItem[]> {
+  const target = await getOrgMember(orgId, targetUserId);
+  if (!target) throw notFound("Member not found");
+  await assertMayRemove(db, orgId, targetUserId, target.role, actor);
+
+  const causes = await exitScheduleDisables(db, orgId, targetUserId);
+  if (causes.size === 0) return [];
+  const rows = await db
+    .select({
+      id: schedules.id,
+      name: schedules.name,
+      packageId: schedules.packageId,
+      userId: schedules.userId,
+      endUserId: schedules.endUserId,
+      connectionOverrides: schedules.connectionOverrides,
+      spaceId: spaces.id,
+      spaceName: spaces.name,
+    })
+    .from(schedules)
+    .innerJoin(spaces, eq(spaces.id, schedules.spaceId))
+    .where(
+      and(
+        eq(schedules.orgId, orgId),
+        inArray(schedules.id, [...causes.keys()]),
+        isNull(spaces.ownerUserId),
+      ),
+    )
+    .orderBy(asc(spaces.name), asc(schedules.name), asc(schedules.id));
+  if (rows.length === 0) return [];
+
+  const owned = await db
+    .select({ id: integrationConnections.id })
+    .from(integrationConnections)
+    .where(
+      and(eq(integrationConnections.orgId, orgId), eq(integrationConnections.userId, targetUserId)),
+    );
+  const ownedIds = new Set(owned.map((row) => row.id));
+  const userIds = [...new Set(rows.flatMap((row) => (row.userId ? [row.userId] : [])))];
+  const [userNames, endUserNames] = await Promise.all([
+    batchLoadUserNames(userIds),
+    batchLoadScheduleEndUserNames(orgId, rows),
+  ]);
+
+  return rows.map((row) => {
+    const actorRef = actorFromIds(row.userId, row.endUserId)!;
+    return {
+      id: row.id,
+      name: row.name,
+      space: { id: row.spaceId, name: row.spaceName },
+      packageId: row.packageId,
+      actor: {
+        ...actorRef,
+        name:
+          (actorRef.type === "user" ? userNames.get(actorRef.id) : endUserNames.get(row.id)) ??
+          null,
+      },
+      cause: causes.get(row.id)!,
+      lost_integrations: integrationsNamingAny(row.connectionOverrides, ownedIds),
+    };
   });
 }
 
@@ -867,13 +983,4 @@ export async function deleteOrganization(orgId: string): Promise<void> {
   // Hygiene, not a confinement boundary: a cached pin for a deleted org is
   // inert (membership is gone, org-context 403s), but it need not linger.
   orgApiVersionCache.invalidate(orgId);
-}
-
-export async function isSlugAvailable(slug: string): Promise<boolean> {
-  const result = await db
-    .select({ slugCount: count() })
-    .from(organizations)
-    .where(eq(organizations.slug, slug));
-
-  return (result[0]?.slugCount ?? 0) === 0;
 }

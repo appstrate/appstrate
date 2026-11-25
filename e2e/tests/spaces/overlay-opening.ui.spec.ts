@@ -88,7 +88,7 @@ test("a catalogue address naming another space enters it and opens the catalogue
   await expect(dialog.locator("aside nav").first()).toBeVisible();
   await expect(dialog.getByRole("status")).toHaveCount(0);
   // The space it named is the one now worked in.
-  await expect(page.getByTestId("org-switcher-button").first()).toHaveAttribute(
+  await expect(page.getByTestId("org-switcher-button")).toHaveAttribute(
     "aria-label",
     new RegExp(`${other.name}\\)$`),
   );

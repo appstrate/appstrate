@@ -31,7 +31,7 @@ import {
 } from "../../services/files.ts";
 import { recordAuditFromContext } from "../../services/audit.ts";
 import { enterableAcrossSpaces, toReachableSpaceWire } from "../reachable-spaces.ts";
-import { callerPersonalOwnerId, credentialConfinedToSpaces } from "../view-as.ts";
+import { credentialConfinedToSpaces } from "../view-as.ts";
 import { provisionMember } from "../../services/organizations.ts";
 import { endAccessForEmailDomain } from "../../services/email-domain-access.ts";
 import type { AppEnv } from "../../types/index.ts";
@@ -101,13 +101,11 @@ function buildPlatformServices(): PlatformServices {
     // write. Billing-neutral: the core stores a byte limit, never a plan/price.
     setFileStorageLimit: setOrgFileStorageLimit,
     reachableSpaces: async (c, orgId) => {
-      // The caller's own personal space; none under a role preview, which acts as nobody's.
-      const personalOwner = callerPersonalOwnerId(c as Context<AppEnv>, orgId);
       return {
         spaces: (await enterableAcrossSpaces(c as Context<AppEnv>, orgId)).map((space) => ({
           ...toReachableSpaceWire(space),
           isDefault: space.isDefault,
-          personal: personalOwner !== null && space.ownerUserId === personalOwner,
+          personal: space.personal,
         })),
         confined: credentialConfinedToSpaces(c as Context<AppEnv>),
         // The half every space's set above was computed from (`effectiveInSpace`).

@@ -2,36 +2,48 @@
 
 import { useCallback, useEffect, useState, type RefObject } from "react";
 
+/**
+ * What the panel shows decides its width: a list stays narrow beside the
+ * thread, the details take a little more, a previewed file the most.
+ */
+export type PanelView = "list" | "info" | "file";
+
 const STORAGE_KEY = "appstrate:chat-context-width";
-const PANEL_MIN_WIDTH = 320;
-const PANEL_DEFAULT_WIDTH = 480;
+const PANEL_MIN_WIDTH = 300;
+const PANEL_DEFAULT_WIDTH: Record<PanelView, number> = { list: 360, info: 400, file: 560 };
 const PANEL_MAX_RATIO = 0.6;
 
-function readStoredWidth(): number | null {
+const storageKey = (view: PanelView) => `${STORAGE_KEY}:${view}`;
+
+function readStoredWidth(view: PanelView): number | null {
   try {
-    const value = Number(localStorage.getItem(STORAGE_KEY));
+    const value = Number(localStorage.getItem(storageKey(view)));
     return Number.isFinite(value) && value > 0 ? value : null;
   } catch {
     return null;
   }
 }
 
-function storeWidth(width: number | null) {
+function storeWidth(view: PanelView, width: number | null) {
   try {
-    if (width === null) localStorage.removeItem(STORAGE_KEY);
-    else localStorage.setItem(STORAGE_KEY, String(Math.round(width)));
+    if (width === null) localStorage.removeItem(storageKey(view));
+    else localStorage.setItem(storageKey(view), String(Math.round(width)));
   } catch {
     // Private mode or blocked storage: the width just does not outlive the page.
   }
 }
 
 /**
- * The context panel's width on desktop: remembered per browser, clamped between
- * a floor and a share of the chat area (the parent of `panelRef`'s element, so
- * the panel can never squeeze the thread out).
+ * The context panel's width on desktop, one per view: remembered per browser,
+ * clamped between a floor and a share of the chat area (the parent of
+ * `panelRef`'s element, so the panel can never squeeze the thread out).
  */
-export function usePanelWidth(panelRef: RefObject<HTMLElement | null>) {
-  const [stored, setStored] = useState(() => readStoredWidth() ?? PANEL_DEFAULT_WIDTH);
+export function usePanelWidth(panelRef: RefObject<HTMLElement | null>, view: PanelView) {
+  const [stored, setStored] = useState<Record<PanelView, number>>(() => ({
+    list: readStoredWidth("list") ?? PANEL_DEFAULT_WIDTH.list,
+    info: readStoredWidth("info") ?? PANEL_DEFAULT_WIDTH.info,
+    file: readStoredWidth("file") ?? PANEL_DEFAULT_WIDTH.file,
+  }));
   const [areaWidth, setAreaWidth] = useState(0);
 
   useEffect(() => {
@@ -48,10 +60,17 @@ export function usePanelWidth(panelRef: RefObject<HTMLElement | null>) {
     (width: number) => Math.min(Math.max(width, PANEL_MIN_WIDTH), max),
     [max],
   );
-  const commit = useCallback((width: number | null) => {
-    setStored(width ?? PANEL_DEFAULT_WIDTH);
-    storeWidth(width);
-  }, []);
+  const setLive = useCallback(
+    (width: number) => setStored((current) => ({ ...current, [view]: width })),
+    [view],
+  );
+  const commit = useCallback(
+    (width: number | null) => {
+      setStored((current) => ({ ...current, [view]: width ?? PANEL_DEFAULT_WIDTH[view] }));
+      storeWidth(view, width);
+    },
+    [view],
+  );
 
-  return { width: clamp(stored), min: PANEL_MIN_WIDTH, max, clamp, setLive: setStored, commit };
+  return { width: clamp(stored[view]), min: PANEL_MIN_WIDTH, max, clamp, setLive, commit };
 }

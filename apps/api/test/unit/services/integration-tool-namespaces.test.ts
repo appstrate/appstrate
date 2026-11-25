@@ -5,11 +5,12 @@
  * tool's body on its upstream name alone.
  */
 import { describe, it, expect } from "bun:test";
-import { fnv1a64Hex, isValidMcpToolName } from "@appstrate/afps-shared/mcp-naming";
 import {
+  fnv1a64Hex,
   integrationNamespaces,
-  remoteToolName,
-} from "../../../src/services/credential-proxy/integration-tools.ts";
+  isValidMcpToolName,
+} from "@appstrate/afps-shared/mcp-naming";
+import { remoteToolName } from "../../../src/services/credential-proxy/integration-tools.ts";
 
 const hash = (id: string, length = 6) => fnv1a64Hex(id).slice(0, length);
 

@@ -36,7 +36,7 @@ import {
   assertConnectionOverridesAllowed,
   connectionOverridesSchema,
 } from "../lib/launch-schemas.ts";
-import { requireActiveAgent, requireAgent } from "../middleware/guards.ts";
+import { requireActiveAgent, requireAgent, requireInlineCompose } from "../middleware/guards.ts";
 import { requirePermission } from "../middleware/require-permission.ts";
 import { stopWorkloadAndWait } from "../services/stop-workload.ts";
 import { logger } from "../lib/logger.ts";
@@ -60,10 +60,11 @@ import {
   agentReadIsSummary,
   assertDraftSelectorAllowed,
   assertDependencyDraftOverridesAllowed,
-  assertPackageDependenciesAccessible,
+  assertLaunchDependenciesAccessible,
 } from "../lib/package-access.ts";
 import { runInlinePreflight } from "../services/inline-run-preflight.ts";
 import { connectOfferPolicyFromRequest } from "../lib/connect-offer-policy.ts";
+import { activeSpacesForAgentVersion, launchSpacesLookup } from "../lib/launch-spaces.ts";
 import { withoutConnectOffers } from "../services/connect/preflight-connect-offer.ts";
 import { synthesiseFinalize } from "../services/run-event-ingestion.ts";
 import { recordAuditFromContext, recordAuditsFromContext } from "../services/audit.ts";
@@ -223,16 +224,24 @@ async function replayRun(c: Context<AppEnv>, response: Response): Promise<Respon
   return c.json({ ...cached, ...run }, 201, { "Idempotent-Replayed": "true" });
 }
 
+const scopedRunListQuery = z.strictObject({
+  limit: z.string().optional(),
+  startingAfter: z.string().optional(),
+  status: z.string().optional(),
+  q: z.string().optional(),
+});
+
 /** Agent and schedule histories read the same visible runs and expose the same pagination. */
 export async function respondScopedRunList(
   c: Context<AppEnv>,
   id: string,
   list: typeof listPackageRuns,
 ) {
+  const query = parseStrictQuery(c, scopedRunListQuery);
   const result = await list(getSpaceScope(c), id, {
     limit: parseListLimit(c, { defaultLimit: 20 }),
-    ...parseRunListFilters({ status: c.req.query("status"), q: c.req.query("q") }),
-    startingAfter: c.req.query("startingAfter") || undefined,
+    ...parseRunListFilters(query),
+    startingAfter: query.startingAfter || undefined,
     actor: getActor(c),
     visibility: runVisibilityFilter(c),
     canReadAgentInput: !agentReadIsSummary(c),
@@ -311,7 +320,15 @@ export function createRunsRouter() {
     // The execution gate, and only here: an agent placed in this space but
     // switched off does not run, a rerun of one of its past runs included —
     // `rerun_from` is a body field of THIS route, so it passes the same door.
-    requireActiveAgent(),
+    requireActiveAgent(async (c) => {
+      const body = await readJsonBody(c, runAgentBodySchema, { allowEmpty: true });
+      return activeSpacesForAgentVersion(
+        c,
+        ["agents:run"],
+        c.req.query("version"),
+        body.dependency_overrides,
+      );
+    }),
     runLaunchIdempotency(),
     async (c) => {
       const agent = c.get("package");
@@ -427,6 +444,10 @@ export function createRunsRouter() {
           actor,
           // Opt-in only: absent header ⇒ null ⇒ a 409 with no connect link.
           connectOffers: connectOfferPolicyFromRequest(c),
+          launchSpaces: launchSpacesLookup(c, ["agents:run"], {
+            version: versionOverride,
+            dependencyOverrides,
+          }),
           launchOverrides,
           // Same overrides handed to `prepareAndExecuteRun` below, so the
           // preflight seeds the manifests the kickoff will freeze.
@@ -694,11 +715,12 @@ export function createRunsRouter() {
     rateLimit(getInlineRunLimits().rate_per_min),
     // Composing: mirror of `canComposeInline` (@appstrate/core/permissions),
     // one guard per grant so a refusal names the one missing.
+    requireInlineCompose(),
     requirePermission("agents", "write"),
     requirePermission("agents", "run"),
     // The two guards say the caller may compose; every package the posted
     // manifest DEPENDS on is then judged one by one in the handler
-    // (`assertPackageDependenciesAccessible`).
+    // (`assertLaunchDependenciesAccessible`).
     runLaunchIdempotency(),
     async (c) => {
       const orgId = c.get("orgId");
@@ -717,7 +739,8 @@ export function createRunsRouter() {
         actor,
         body,
         connectOffers: connectOfferPolicyFromRequest(c),
-        authorizeDependencies: (manifest) => assertPackageDependenciesAccessible(c, manifest),
+        launchSpaces: launchSpacesLookup(c, ["agents:write", "agents:run"]),
+        authorizeDependencies: (manifest) => assertLaunchDependenciesAccessible(c, manifest),
       });
 
       // ----- Context files (fan-in by reference) -----
@@ -828,6 +851,7 @@ export function createRunsRouter() {
     rateLimit(getInlineRunLimits().rate_per_min),
     // Same guard as the run surface it validates for (`canComposeInline`), and
     // the same per-dependency authority behind it.
+    requireInlineCompose(),
     requirePermission("agents", "write"),
     requirePermission("agents", "run"),
     async (c) => {
@@ -842,7 +866,7 @@ export function createRunsRouter() {
         actor,
         body,
         mode: "accumulate",
-        authorizeDependencies: (manifest) => assertPackageDependenciesAccessible(c, manifest),
+        authorizeDependencies: (manifest) => assertLaunchDependenciesAccessible(c, manifest),
       });
       // Same reserved-name rule as the run endpoint — a manifest that validates
       // here must be runnable there.

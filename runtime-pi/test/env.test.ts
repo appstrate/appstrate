@@ -2,7 +2,7 @@
 
 import { describe, it, expect } from "bun:test";
 import { MODEL_INPUT_MODALITIES } from "@appstrate/core/module";
-import { DEFAULT_CONTEXT_WINDOW, DEFAULT_MAX_TOKENS } from "@appstrate/runner-pi/pi-model";
+import { DEFAULT_CONTEXT_WINDOW, DEFAULT_MAX_TOKENS } from "@appstrate/core/token-budget";
 import { buildPiModelFromEnv, parseRuntimeEnv, RuntimeEnvError } from "../env.ts";
 
 const VALID = {
@@ -20,6 +20,33 @@ const VALID = {
 };
 
 describe("parseRuntimeEnv — happy path", () => {
+  it("consumes explicit service links and rejects off-origin finalization before issuing a request", () => {
+    const origin = "https://api.example.com";
+    const explicit = {
+      ...VALID,
+      APPSTRATE_SINK_URL: origin + "/gateway/stream",
+      APPSTRATE_HEARTBEAT_URL: origin + "/live",
+      APPSTRATE_FILES_URL: origin + "/objects/?revision=3",
+      APPSTRATE_WORKSPACE_URL: origin + "/archive",
+    };
+    expect(parseRuntimeEnv(explicit).sink).toMatchObject({
+      heartbeatUrl: explicit.APPSTRATE_HEARTBEAT_URL,
+      filesUrl: explicit.APPSTRATE_FILES_URL,
+      workspaceUrl: explicit.APPSTRATE_WORKSPACE_URL,
+    });
+    expect(() =>
+      parseRuntimeEnv({ ...explicit, APPSTRATE_SINK_FINALIZE_URL: "https://other.test/done" }),
+    ).toThrow("Invalid finalize service URL");
+    expect(() =>
+      parseRuntimeEnv({ ...explicit, APPSTRATE_WORKSPACE_URL: "https://other.test/file" }),
+    ).toThrow("Invalid workspace service URL");
+    expect(parseRuntimeEnv(VALID).sink).toMatchObject({
+      heartbeatUrl: VALID.APPSTRATE_SINK_URL + "/heartbeat",
+      workspaceUrl: origin + "/api/runs/run_test123/workspace",
+      filesUrl: origin + "/api/runs/run_test123/files",
+    });
+  });
+
   it("parses the required minimal env", () => {
     const env = parseRuntimeEnv(VALID);
     expect(env.runId).toBe("run_test123");

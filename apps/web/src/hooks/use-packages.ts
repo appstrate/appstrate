@@ -144,6 +144,16 @@ async function fetchPackageDetail(
   return { ...normalizePackageItemDetail(data!), etag: response.headers.get("ETag") };
 }
 
+/** The catalogue previews what the agent will run when switched on. An unpublished agent exposes its draft. */
+export async function fetchAgentActivationDetail(packageId: string, spaceId: string) {
+  try {
+    return await fetchPackageDetail("agent", packageId, "published", spaceId);
+  } catch (error) {
+    if (!(error instanceof ApiError) || error.code !== "no_published_version") throw error;
+    return fetchPackageDetail("agent", packageId, undefined, spaceId);
+  }
+}
+
 /** The integration index adds the `source` facts its page splits by. */
 type PackageIndexItem<T extends PackageType> = T extends "integration"
   ? IntegrationIndexItem
@@ -339,8 +349,7 @@ export async function fetchAgents(acrossOrgId: string | null): Promise<AgentList
   const { data } = acrossOrgId
     ? await client.GET("/api/orgs/{orgId}/agents", { params: { path: { orgId: acrossOrgId } } })
     : await client.GET("/api/agents");
-  // The spec marks most item fields optional — normalize to the asserted
-  // list shape. `forked_from` is not returned by the list endpoint.
+  // Manifest-derived text can be absent. Fork provenance is detail-only.
   return data!.data.map((a) => ({
     ...a,
     // Fall back to the package id when display_name is empty.
@@ -348,12 +357,7 @@ export async function fetchAgents(acrossOrgId: string | null): Promise<AgentList
     description: a.description ?? "",
     schema_version: a.schema_version ?? "",
     author: a.author ?? "",
-    keywords: a.keywords ?? [],
-    scope: a.scope ?? null,
-    version: a.version ?? null,
     forked_from: null,
-    running_runs: a.running_runs ?? 0,
-    dependencies: a.dependencies,
   }));
 }
 

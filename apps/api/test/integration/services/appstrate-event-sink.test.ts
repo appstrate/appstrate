@@ -6,7 +6,7 @@
  * event type, the `runs.tokenUsage` snapshot, and the `llm_usage` ledger
  * row (including the fail-closed `writeLedger` default).
  *
- * Reducer / `snapshot()` semantics belong to `createReducerSink()` and
+ * Incremental reduction belongs to the runtime’s `foldEvent` and
  * are covered by `packages/afps-runtime/test/sinks/reducer-sink.test.ts`;
  * the reducer-plus-persist composition a read-back consumer writes is
  * covered end-to-end by `parity-e2e.test.ts`.
@@ -77,6 +77,19 @@ describe("persistRunEvent", () => {
       .where(and(eq(runLogs.runId, runId), eq(runLogs.orgId, ctx.orgId)))
       .orderBy(asc(runLogs.id));
   }
+
+  it("ignores malformed diagnostic fields and retains the event at its default level", async () => {
+    await persist(
+      event("appstrate.progress", {
+        message: { text: "wrong" },
+        data: ["not a record"],
+        level: "future",
+      }),
+    );
+    expect(await loadLogs()).toMatchObject([
+      { event: "progress", message: null, data: null, level: "debug" },
+    ]);
+  });
 
   it("output.emitted → one result/output run_log row per emission", async () => {
     await persist(event("output.emitted", { data: { a: 1, b: 2 } }));

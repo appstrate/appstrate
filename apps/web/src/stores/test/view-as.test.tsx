@@ -29,7 +29,7 @@ const {
   enterViewAs,
   exitViewAs,
   getViewAsHeader,
-  readPersistedPersona,
+  readStoredPreview,
   takeViewAsStopped,
   toViewAsPersona,
   STORAGE_KEY,
@@ -82,7 +82,7 @@ const ORGS_AS_PERSONA: Organization[] = [
 
 beforeEach(() => {
   fakeStorage.clear();
-  viewAsStore.setState({ persona: null, stoppedReason: null });
+  viewAsStore.setState({ persona: null, stoppedReason: null, returnSpaceId: null });
   orgStore.setState({ id: "org_a" });
   queryClient.removeQueries({ queryKey: orgKeys.all });
 });
@@ -115,7 +115,10 @@ describe("view-as store", () => {
 
   it("persists the persona and drops it on exit", () => {
     enterViewAs(PERSONA, ORGS_AS_PERSONA);
-    expect(JSON.parse(fakeStorage.getItem(STORAGE_KEY)!)).toEqual(PERSONA);
+    expect(JSON.parse(fakeStorage.getItem(STORAGE_KEY)!)).toEqual({
+      ...PERSONA,
+      returnSpaceId: null,
+    });
     exitViewAs();
     expect(fakeStorage.getItem(STORAGE_KEY)).toBeNull();
     expect(getViewAsHeader()).toBeNull();
@@ -123,6 +126,23 @@ describe("view-as store", () => {
 });
 
 describe("way back", () => {
+  it("restores the paired persona and return space after reload", () => {
+    enterViewAs(PERSONA, ORGS_AS_PERSONA, "spc_home");
+    viewAsStore.setState(readStoredPreview());
+    expect(viewAsStore.getState().persona).toEqual(PERSONA);
+    expect(exitViewAs()).toBe("spc_home");
+    expect(readStoredPreview().persona).toBeNull();
+  });
+
+  it("ends an incomplete saved preview and reports it once on reload", () => {
+    fakeStorage.setItem(STORAGE_KEY, JSON.stringify(PERSONA));
+    viewAsStore.setState(readStoredPreview());
+    expect(getViewAsHeader()).toBeNull();
+    expect(takeViewAsStopped()).toBe("invalid_view_as");
+    expect(fakeStorage.getItem(STORAGE_KEY)).toBeNull();
+    expect(readStoredPreview().stoppedReason).toBeNull();
+  });
+
   it("hands the space the preview moved the admin out of to the exit", () => {
     enterViewAs(PERSONA, ORGS_AS_PERSONA, "spc_home");
     expect(exitViewAs()).toBe("spc_home");
@@ -144,17 +164,18 @@ describe("way back", () => {
 
 describe("hydration", () => {
   it("reads a persisted persona back — this is what a reload resumes from", () => {
-    fakeStorage.setItem(STORAGE_KEY, JSON.stringify(PERSONA));
-    expect(readPersistedPersona()).toEqual(PERSONA);
+    fakeStorage.setItem(STORAGE_KEY, JSON.stringify({ ...PERSONA, returnSpaceId: null }));
+    expect(readStoredPreview().persona).toEqual(PERSONA);
   });
 
   it("drops a stored value that no longer parses rather than sending it", () => {
     // A hand-edited or stale entry would otherwise become a malformed
     // `X-View-As` on every single request.
     fakeStorage.setItem(STORAGE_KEY, JSON.stringify({ orgId: "org_a", orgRole: "owner" }));
-    expect(readPersistedPersona()).toBeNull();
+    expect(readStoredPreview().persona).toBeNull();
     fakeStorage.setItem(STORAGE_KEY, "{not json");
-    expect(readPersistedPersona()).toBeNull();
+    expect(readStoredPreview().stoppedReason).toBe("invalid_view_as");
+    expect(fakeStorage.getItem(STORAGE_KEY)).toBeNull();
   });
 });
 

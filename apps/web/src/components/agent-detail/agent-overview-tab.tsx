@@ -15,6 +15,7 @@ import { useCurrentSpaceId } from "../../hooks/use-current-space";
 import { useAgentMemories, useAgentPinned } from "../../hooks/use-persistence";
 import { RunStatusBadge } from "../status-badge";
 import { formatDateField } from "../../lib/format-date";
+import { ScheduledAt } from "../scheduled-at";
 import { latestMemoryDate } from "../../lib/agent-overview";
 import { runDetailPath } from "../../lib/package-paths";
 import { linkedSpacePath } from "../../lib/across-spaces";
@@ -23,6 +24,7 @@ import { searchOf } from "../../lib/url-search";
 import { OperationalStat } from "../operational-stat";
 import { DetailSectionCard } from "../detail-section-card";
 import { SkeletonBadge, SkeletonLine } from "../skeleton-line";
+import { AvailabilityCard, AvailabilityCardSkeleton } from "../package-detail/availability-card";
 
 /** A figure read from a query: a placeholder while it loads, « unknown » when the read failed. */
 function QueryValue({
@@ -122,6 +124,15 @@ function OperationalSummary({ packageId, detail }: { packageId: string; detail: 
 
   return (
     <div className="flex flex-col gap-8" data-agent-operational-overview>
+      {/* The working space's: « Tous les espaces » has none to say. */}
+      {!spanning && detail.availability && (
+        <AvailabilityCard
+          type="agent"
+          packageId={packageId}
+          name={detail.display_name ?? packageId}
+          availability={detail.availability}
+        />
+      )}
       <div className="grid gap-6 xl:grid-cols-3">
         <DetailSectionCard title={t("detail.overview.runs")} icon={PlayCircle} bodyClassName="p-0">
           {/* A container for the compact status below: it follows the card's width. */}
@@ -169,7 +180,7 @@ function OperationalSummary({ packageId, detail }: { packageId: string; detail: 
                 schedulesLoading ? (
                   <SkeletonLine className="w-32" />
                 ) : nextSchedule?.next_run_at ? (
-                  formatDateField(nextSchedule.next_run_at, "datetime", nextSchedule.timezone)
+                  <ScheduledAt at={nextSchedule.next_run_at} timeZone={nextSchedule.timezone} />
                 ) : (
                   <span className="text-muted-foreground">
                     {t(schedulesError ? "detail.overview.unknown" : "detail.overview.noSchedule")}
@@ -288,9 +299,12 @@ function StatValueSkeleton({ size = "md" }: { size?: "md" | "sm" }) {
  */
 export function AgentOverviewSkeleton() {
   const { t } = useTranslation("agents");
+  const { on: spanning } = useOverviewMode();
   return (
     <div className="flex flex-col gap-8">
       <div className="flex flex-col gap-8">
+        {/* Drawn out of « Tous les espaces », where the card exists. */}
+        {!spanning && <AvailabilityCardSkeleton />}
         <div className="grid gap-6 xl:grid-cols-3">
           <DetailSectionCard
             title={t("detail.overview.runs")}

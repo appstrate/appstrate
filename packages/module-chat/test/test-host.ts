@@ -9,7 +9,6 @@ import type { ChatHost } from "../src/ui/runtime-context.ts";
 export function testHost(overrides: Partial<ChatHost> = {}): ChatHost {
   return {
     openFile: () => {},
-    downloadFile: () => {},
     useFileImageSrc: () => null,
     t: (key) => key,
     can: () => true,
@@ -19,11 +18,11 @@ export function testHost(overrides: Partial<ChatHost> = {}): ChatHost {
     personalModelCredentials: true,
     modelCredentials: [],
     formatBytes: String,
+    lang: "en",
     onPackagesChanged: () => {},
     renderSpaces: (spaceIds) => spaceIds.join(", "),
     linkInSpace: (path) => path,
     useSpaceLabelOf: () => () => undefined,
-    SpaceChoiceMenu: () => null,
     ...overrides,
   };
 }

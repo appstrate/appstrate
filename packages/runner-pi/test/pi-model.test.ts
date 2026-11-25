@@ -5,8 +5,6 @@ import {
   addRequestUsage,
   buildPiModel,
   clampPiReasoningLevel,
-  DEFAULT_CONTEXT_WINDOW,
-  DEFAULT_MAX_TOKENS,
   findPiModelsById,
   getPiModel,
   isPiProvider,
@@ -14,10 +12,12 @@ import {
   piModelDialect,
   piReasoningLevels,
   piTokenCostUsd,
+  resolvePiContextWindow,
   usableRecordMaxTokens,
   usageCostUsd,
   type PiTokenCounts,
 } from "../src/pi-model.ts";
+import { DEFAULT_CONTEXT_WINDOW, DEFAULT_MAX_TOKENS } from "@appstrate/core/token-budget";
 import { deriveProviderFromApi } from "../src/provider-map.ts";
 import { PLATFORM_MODEL_COMPAT, ZERO_MODEL_COST } from "../src/model-compat.ts";
 import { capturePayload } from "../src/pi-payload.ts";
@@ -171,6 +171,31 @@ describe("buildPiModel", () => {
       contextWindow: 32_000,
     });
     expect(model).toMatchObject({ contextWindow: 32_000, maxTokens: DEFAULT_MAX_TOKENS });
+  });
+});
+
+describe("resolvePiContextWindow", () => {
+  it("keeps a declared window and assumes the default for an undeclared one", () => {
+    expect(resolvePiContextWindow(500_000)).toEqual({ contextWindow: 500_000 });
+    for (const declared of [null, undefined]) {
+      expect(resolvePiContextWindow(declared)).toEqual({
+        contextWindow: DEFAULT_CONTEXT_WINDOW,
+        assumed: true,
+      });
+    }
+  });
+
+  it("is the window buildPiModel builds with", () => {
+    for (const contextWindow of [500_000, null]) {
+      const model = buildPiModel({
+        id: "gw-model",
+        dialect: null,
+        apiShape: "openai-completions",
+        baseUrl: "https://gateway.example",
+        contextWindow,
+      });
+      expect(model.contextWindow).toBe(resolvePiContextWindow(contextWindow).contextWindow);
+    }
   });
 });
 

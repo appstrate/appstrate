@@ -42,6 +42,12 @@ const AUTHORIZATION_SERVER_TAG_LENGTH = 22;
 // The segment the connect package reads its tags by (`CLIENT_METADATA_REDIRECT_TAG_PREFIX`).
 const CLIENT_METADATA_CALLBACK_SEGMENT = CLIENT_METADATA_REDIRECT_TAG_PREFIX.slice(0, -1);
 
+/** OpenAPI templates for the two public, tag-constrained callback routes. */
+export const INTEGRATION_CALLBACK_TEMPLATES = {
+  dcr: `${INTEGRATION_CALLBACK_PATH}/{tag}`,
+  metadata: `${INTEGRATION_CALLBACK_PATH}/${CLIENT_METADATA_CALLBACK_SEGMENT}/{tag}`,
+};
+
 export const INTEGRATION_TAGGED_CALLBACK_PATH = new RegExp(
   `^${INTEGRATION_CALLBACK_PATH}/(?:${CLIENT_METADATA_CALLBACK_SEGMENT}/)?[A-Za-z0-9_-]{${AUTHORIZATION_SERVER_TAG_LENGTH}}$`,
 );
@@ -73,10 +79,15 @@ export function clientMetadataRedirectTag(tag: string): string {
  * document client's `…/callback/cimd/<tag>` —, `undefined` for the shared callback or any other URI. The connect flow records it in the OAuth state whenever the redirect URI it sends
  * carries one, so the callback refuses a response that comes back through another path.
  */
-export function redirectTagOf(redirectUri: string): string | undefined {
+export function taggedCallbackOf(
+  redirectUri: string,
+): { kind: "registered" | "metadata_document"; tag: string } | undefined {
   if (!URL.canParse(redirectUri)) return undefined;
   const { pathname } = new URL(redirectUri);
-  return INTEGRATION_TAGGED_CALLBACK_PATH.test(pathname)
-    ? pathname.slice(INTEGRATION_CALLBACK_PATH.length + 1)
-    : undefined;
+  if (!INTEGRATION_TAGGED_CALLBACK_PATH.test(pathname)) return undefined;
+  const tag = pathname.slice(INTEGRATION_CALLBACK_PATH.length + 1);
+  return {
+    kind: tag.startsWith(CLIENT_METADATA_REDIRECT_TAG_PREFIX) ? "metadata_document" : "registered",
+    tag,
+  };
 }

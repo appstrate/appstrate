@@ -2,6 +2,7 @@
 
 import {
   INTEGRATION_MANIFEST_FAILURE_CODES,
+  displayAccountId,
   type MissingIntegrationConnectionCode,
 } from "@appstrate/core/integration";
 import { ApiError } from "../api/errors";
@@ -30,8 +31,7 @@ export function candidateDescription(
   labels: { sharedByOther: string; needsReconnection: string },
 ): string {
   return [
-    // "default" is the placeholder of a connection with no account identity.
-    c.account_id !== "default" ? c.account_id : null,
+    displayAccountId(c.account_id),
     !c.owned_by_actor ? labels.sharedByOther : null,
     c.needs_reconnection ? labels.needsReconnection : null,
   ]
@@ -190,16 +190,53 @@ export function isStructuralCode(code: MissingIntegrationConnectionCode): boolea
   return STRUCTURAL_CODES.has(code);
 }
 
-/** Held while in flight or `stillBlocking` names a refused integration (undefined = not loaded, nothing gated). */
+/** Which inactive rows a fresh readiness read now clears. Without that read, trust local activations. */
+export function stillActivated(
+  errors: MissingIntegrationFieldError[],
+  activated: ReadonlySet<string>,
+  liveErrors?: readonly { field: string; code: string }[],
+): ReadonlySet<string> {
+  const inactiveFields =
+    liveErrors &&
+    new Set(liveErrors.filter((e) => e.code === "integration_not_active").map((e) => e.field));
+  return new Set(
+    errors
+      .filter(
+        (e) =>
+          e.code === "integration_not_active" &&
+          (inactiveFields
+            ? !inactiveFields.has(e.field)
+            : activated.has(integrationIdOfField(e.field))),
+      )
+      .map((e) => integrationIdOfField(e.field)),
+  );
+}
+
+/** The inactive-only intro holds while every refusal is `integration_not_active` and one is not yet activated. */
+export function onlyAwaitingActivation(
+  errors: MissingIntegrationFieldError[],
+  activated: ReadonlySet<string>,
+): boolean {
+  return (
+    errors.every((e) => e.code === "integration_not_active") &&
+    errors.some((e) => !activated.has(integrationIdOfField(e.field)))
+  );
+}
+
+/**
+ * Held while in flight or `stillBlocking` names a refused integration (undefined = not loaded,
+ * nothing gated). Offered once a row is fixable or an `activated` one awaits its re-run.
+ */
 export function retryDecision(
   errors: MissingIntegrationFieldError[],
   retrying: boolean,
   stillBlocking: readonly string[] | undefined,
+  activated: ReadonlySet<string> = new Set(),
 ): { showRetry: boolean; canRetry: boolean } {
   const blocked = (e: MissingIntegrationFieldError) =>
     stillBlocking?.includes(integrationIdOfField(e.field)) === true;
   return {
-    showRetry: errors.some((e) => !isStructuralCode(e.code)),
+    showRetry: activated.size > 0 || errors.some((e) => !isStructuralCode(e.code)),
     canRetry: !retrying && !errors.some(blocked),
   };
 }

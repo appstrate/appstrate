@@ -27,6 +27,7 @@ import { useTranslation } from "react-i18next";
 import { Check, Filter, PlusCircle, SlidersHorizontal, X } from "lucide-react";
 import { cn } from "@appstrate/ui/cn";
 import { toggleValue } from "../lib/toggle-value";
+import { filterRowOpen, readerFiltered } from "../lib/list-filters";
 import { TOOLBAR_UTILITY } from "../lib/toolbar-button";
 import { Badge } from "@appstrate/ui/components/badge";
 import { Button } from "@appstrate/ui/components/button";
@@ -55,6 +56,8 @@ import {
 export interface FilterOption {
   value: string;
   label: string;
+  /** Drawn before the label, in the menu and on the button's badges (a space's tile). */
+  icon?: ReactNode;
 }
 
 /** What the "Colonnes" menu needs: what there is, what is hidden, how to flip one. */
@@ -78,6 +81,12 @@ export interface FilterSpec {
   values: string[];
   options: FilterOption[];
   onChange: (values: string[]) => void;
+  /**
+   * The values the screen starts on; its presence means the dimension carries a default (ticked
+   * or not). While it is offered the row stays open, so the list's narrowing is explained and can
+   * be undone, and the values it holds (or none) never count as a filter the reader set.
+   */
+  defaultValues?: readonly string[];
 }
 
 /** Beyond this many, the button counts instead of naming. */
@@ -117,8 +126,9 @@ function FacetedFilter({ filter }: { filter: FilterSpec }) {
                   <Badge
                     key={option.value}
                     variant="secondary"
-                    className="rounded-sm px-1 font-normal"
+                    className="gap-1 rounded-sm px-1 font-normal"
                   >
+                    {option.icon}
                     {option.label}
                   </Badge>
                 ))
@@ -150,7 +160,8 @@ function FacetedFilter({ filter }: { filter: FilterSpec }) {
                     >
                       <Check className="text-primary-foreground size-3.5" />
                     </div>
-                    <span>{option.label}</span>
+                    {option.icon}
+                    <span className="truncate">{option.label}</span>
                   </CommandItem>
                 );
               })}
@@ -251,11 +262,13 @@ export function ListToolbar({
   actions?: ReactNode;
 }) {
   const { t } = useTranslation("common");
+  // Defaults count too: the badge and the open row are what explain a short list.
   const activeCount = filters.reduce((total, filter) => total + filter.values.length, 0);
 
-  // Only the FIRST render decides: closing the row afterwards is the reader's call and is not
-  // undone by the next keystroke.
-  const [open, setOpen] = useState(() => activeCount > 0);
+  // Once the reader toggles the row their choice stands: the next keystroke does not undo it.
+  const [startedActive] = useState(activeCount > 0);
+  const [choice, setChoice] = useState<boolean | null>(null);
+  const open = filterRowOpen(choice, startedActive, filters);
 
   return (
     <div className="@container/bar mb-3 flex flex-col gap-2">
@@ -276,7 +289,7 @@ export function ListToolbar({
             aria-label={t("toolbar.filters")}
             title={t("toolbar.filters")}
             className={cn(TOOLBAR_UTILITY, "aria-expanded:bg-accent")}
-            onClick={() => setOpen((wasOpen) => !wasOpen)}
+            onClick={() => setChoice(!open)}
           >
             <Filter />
             <span className="hidden @xl/bar:inline">{t("toolbar.filters")}</span>
@@ -296,7 +309,7 @@ export function ListToolbar({
           {filters.map((filter) => (
             <FacetedFilter key={filter.id} filter={filter} />
           ))}
-          {activeCount > 0 && onReset && (
+          {readerFiltered(filters) && onReset && (
             <Button variant="ghost" size="sm" className="h-8 gap-1.5 px-2.5" onClick={onReset}>
               <X />
               {t("toolbar.reset")}

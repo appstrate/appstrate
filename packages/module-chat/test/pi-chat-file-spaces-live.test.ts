@@ -25,7 +25,7 @@ import { parseFileUri } from "@appstrate/core/file-uri";
 import { db } from "@appstrate/db/client";
 import { chatSessions, files } from "@appstrate/db/schema";
 import { mintMcpLoopbackToken } from "../src/loopback-auth.ts";
-import { fileSpaceId } from "../src/persistence.ts";
+import { fileSpaceId, touchedSpaceIds, touchSessionSpace } from "../src/persistence.ts";
 import { platformMcpUrl } from "../src/platform-mcp.ts";
 import { buildPlatformMcpTools, type TurnSpaces } from "../src/pi-chat/mcp-tools.ts";
 
@@ -67,17 +67,25 @@ async function runOutput(owner: TestContext): Promise<string> {
   return `appfile://${row.id}`;
 }
 
-/** `read_file` and `read_resource` of a turn over the caller's personal space and the shared space. */
-async function fileTools(touched: string[]) {
+/** `read` and `read_resource` of a turn over the caller's personal space and the shared space. */
+async function fileTools() {
+  const sessionId = `chs_${crypto.randomUUID()}`;
+  const session = {
+    id: sessionId,
+    orgId: caller.orgId,
+    userId: caller.user.id,
+    originSpaceId: null,
+  };
+  await db
+    .insert(chatSessions)
+    .values({ id: sessionId, orgId: caller.orgId, userId: caller.user.id });
   const personal = (await ensurePersonalSpaceFor(caller.orgId, caller.user.id)).id;
   const organization: TurnSpaces = {
     spaces: [
       { id: personal, name: "Mon espace", role: "admin", permissions },
       { id: colleague.defaultSpaceId, name: "Default", role: "operator", permissions },
     ],
-    touch: async (space) => {
-      touched.push(space);
-    },
+    touch: (spaceId) => touchSessionSpace(session, spaceId),
     fileSpace: async (uri) => {
       const fileId = parseFileUri(uri);
       return fileId
@@ -91,6 +99,7 @@ async function fileTools(touched: string[]) {
     name: caller.user.name,
     orgId: caller.orgId,
     orgRole: "member",
+    chatSessionId: sessionId,
     permissions,
     spaceIds: organization.spaces.map((space) => space.id),
   });
@@ -99,6 +108,7 @@ async function fileTools(touched: string[]) {
     headers: { Authorization: `Bearer ${token}`, "x-org-id": caller.orgId },
     organization,
     writeChunk: () => {},
+    fileDelivery: { image: false, pdf: false },
     signal: new AbortController().signal,
     turnBudget: { deadlineAt: Date.now() + 60_000, stepCount: () => 0 },
     fetch: platformFetch,
@@ -110,8 +120,9 @@ async function fileTools(touched: string[]) {
   for (const factory of built.extensionFactories) factory(pi);
   return {
     built,
+    touched: async () => (await touchedSpaceIds([sessionId])).get(sessionId) ?? [],
     readFile: (uri: string, spaceId: string) =>
-      registered.get("read_file")!.execute("c1", { uri, space_id: spaceId }),
+      registered.get("read")!.execute("c1", { uri, space_id: spaceId }),
     readResource: (uri: string) => registered.get("read_resource")!.execute("c2", { uri }),
     personal,
   };
@@ -119,18 +130,17 @@ async function fileTools(touched: string[]) {
 
 describe("a chat call reads a file in the one space it entered", () => {
   it("records that space, and refuses a file of another turn space as missing", async () => {
-    const touched: string[] = [];
-    const { built, readFile, personal } = await fileTools(touched);
+    const { built, readFile, personal, touched } = await fileTools();
     try {
       const own = await runOutput(caller);
       // Entered from the personal space, a file of the shared space is not reached.
       expect((await readFile(own, personal)).content[0]!.text).toContain("not_found");
-      expect(touched).toEqual([personal]);
+      expect(await touched()).toEqual([personal]);
       // Entered in its own space it is read, and that space is the one recorded.
       expect((await readFile(own, colleague.defaultSpaceId)).content[0]!.text).not.toContain(
         "not_found",
       );
-      expect(touched).toEqual([personal, colleague.defaultSpaceId]);
+      expect(await touched()).toEqual([personal, colleague.defaultSpaceId]);
       // There, a colleague's private output stays behind its container ACL.
       const theirs = await runOutput(colleague);
       expect((await readFile(theirs, colleague.defaultSpaceId)).content[0]!.text).toContain(
@@ -142,8 +152,7 @@ describe("a chat call reads a file in the one space it entered", () => {
   });
 
   it("records the space of a file resource it read, and nothing for one it is refused", async () => {
-    const touched: string[] = [];
-    const { built, readResource } = await fileTools(touched);
+    const { built, readResource, touched } = await fileTools();
     try {
       // A colleague's private output in a turn space: refused, and its space is not recorded.
       const refused = await readResource(await runOutput(colleague)).then(
@@ -151,10 +160,10 @@ describe("a chat call reads a file in the one space it entered", () => {
         (error: unknown) => error,
       );
       expect(refused).toBeInstanceOf(Error);
-      expect(touched).toEqual([]);
+      expect(await touched()).toEqual([]);
       const read = await readResource(await runOutput(caller));
       expect(read.content.map((block) => block.text).join("")).toContain("x");
-      expect(touched).toEqual([colleague.defaultSpaceId]);
+      expect(await touched()).toEqual([colleague.defaultSpaceId]);
     } finally {
       await built.close();
     }

@@ -4,7 +4,7 @@
  * OpenAPI paths for the MCP module's own endpoints. These document the
  * transport + discovery surface for human/API consumers; the platform's
  * ~250 operations are NOT re-listed here — they are discovered at runtime
- * through the `search_operations` / `describe_operation` MCP tools, with
+ * through the `search` / `describe` MCP tools, with
  * `run_and_wait` as the run-launch shortcut.
  */
 
@@ -34,13 +34,15 @@ const spacePathParameter = {
 /** The tool surface, shared by the organization and space endpoints. */
 const MCP_TOOLS_DESCRIPTION =
   "Accepts JSON-RPC 2.0 messages (`initialize`, `tools/list`, `tools/call`). The tools it " +
-  "declares follow the caller's permissions: the read-only set (`search_operations`, " +
-  "`describe_operation`, `read_file`, `validate_package_file`, " +
-  "`get_runtime_capabilities` and `get_me`) is always present, " +
+  "declares follow the caller's permissions: the read-only set (`search`, " +
+  "`describe`, `read` and `get_me`) is always present, " +
   "while the acting tools — `invoke_operation` (`mcp:invoke`), " +
   "`run_and_wait` (`mcp:invoke` plus `agents:run` and a run-read permission), `list_files` " +
-  "(whatever guards the `listFiles` operation's own route), `import_package_file`, and " +
-  "`search_integration_tools` with `call_integration_tool` (`mcp:invoke` plus `credential-proxy:call-own` or " +
+  "(whatever guards the `listFiles` operation's own route), `import_package_file`, " +
+  "`get_runtime_capabilities` (the grants of an inline run), `validate_package_file` (those " +
+  "of `import_package_file` or of an inline run), and " +
+  "`call_integration_tool`, with the `integration_tool` kind of `search` and `describe` " +
+  "(`mcp:invoke` plus `credential-proxy:call-own` or " +
   "`credential-proxy:call`, on a " +
   "bearer credential the credential proxy accepts) — are " +
   "declared only to a caller whose grants make them usable, so `tools/list` differs by " +
@@ -63,6 +65,7 @@ const MCP_REFUSALS_DESCRIPTION =
 const orgEndpoint = {
   post: {
     operationId: "mcpStreamableHttpPost",
+    "x-appstrate-space": { kind: "organization" },
     tags: ["MCP"],
     summary: "Per-organization MCP Streamable HTTP endpoint",
     description:
@@ -73,8 +76,9 @@ const orgEndpoint = {
       "cannot drive any other organization. To use several organizations, configure one MCP " +
       "server entry per organization. Without a pinned space (no space-bound credential, no " +
       "`/s/{space}` in the URL) the connection reaches every space where the caller holds a " +
-      "role, and every tool that acts in a space requires a `space_id` argument whose schema " +
-      "lists them. " +
+      "role. Describe an operation before choosing its destination. Organization-level operations " +
+      "need no space. A space-dependent call can name its destination in its operation arguments. " +
+      "When the destination is still open, pass one of the reachable ids as `space_id`. " +
       MCP_REFUSALS_DESCRIPTION,
     security: [{ bearerJwt: [] }, { bearerApiKey: [] }, { cookieAuth: [] }],
     parameters: [orgPathParameter],
@@ -99,7 +103,7 @@ const orgEndpoint = {
                       type: "object",
                       description:
                         "A `tools/call` result's structured payload, matching the tool's " +
-                        "`outputSchema` when it declares one (`run_and_wait`: RunAndWaitResult).",
+                        "`outputSchema` when it declares one. For `run_and_wait` this includes RunAndWaitResult on success and structured route or tool refusals on error.",
                     },
                   },
                 },
@@ -128,6 +132,7 @@ const orgEndpoint = {
   },
   get: {
     operationId: "mcpStreamableHttpGet",
+    "x-appstrate-space": { kind: "organization" },
     tags: ["MCP"],
     summary: "Per-organization MCP Streamable HTTP (GET)",
     description:
@@ -162,6 +167,7 @@ const orgEndpoint = {
 const orgMetadata = {
   get: {
     operationId: "mcpProtectedResourceMetadata",
+    "x-appstrate-space": { kind: "organization" },
     tags: ["MCP"],
     summary: "OAuth 2.0 Protected Resource Metadata (RFC 9728)",
     description:
@@ -204,6 +210,7 @@ function pinnedToSpace(
   return {
     ...op,
     operationId: `${op.operationId}InSpace`,
+    "x-appstrate-space": { kind: "target", parameter: "space" },
     description,
     parameters: [...op.parameters, spacePathParameter],
   };

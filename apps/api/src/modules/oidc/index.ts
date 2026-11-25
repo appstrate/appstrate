@@ -43,7 +43,7 @@ import { getEnv } from "@appstrate/env";
 declare module "@appstrate/core/permissions" {
   interface ModuleResources {
     "oauth-clients": "read" | "write" | "delete";
-    "cli-sessions": "read" | "delete";
+    "access-grants": "read" | "delete";
   }
 }
 import { logger } from "../../lib/logger.ts";
@@ -210,6 +210,11 @@ const oidcModule: AppstrateModule = {
         name: "Device Authorization",
         description: "RFC 8628 device-authorization grant for CLI and other browserless clients",
       },
+      {
+        name: "Access Grants",
+        description:
+          "What a person has let act for them outside the browser — CLI sessions and MCP client grants — listed and ended in one place",
+      },
     ];
   },
 
@@ -283,16 +288,16 @@ const oidcModule: AppstrateModule = {
       grantTo: ["owner", "admin"],
       apiKeyGrantable: true,
     },
-    // Admin oversight of org members' CLI sessions.
+    // Admin oversight of the access grants reaching the org: members' CLI
+    // sessions and the MCP client grants bound to the org's endpoints.
     // Owner + admin only; explicitly NOT API-key-grantable (a compromised
     // key with this scope could sign every member of the org out, which
     // would be a much wider blast radius than the key holder's intent).
-    // The user-facing personal endpoints under
-    // `/api/auth/cli/sessions/*` are independently reachable by any
-    // member regardless of this scope — those use cookie auth and an
-    // ownership check, not RBAC.
+    // The personal endpoints under `/api/auth/access-grants*` are reachable
+    // by any signed-in member regardless of this scope — they take a browser
+    // session and act on the caller's own grants only.
     {
-      resource: "cli-sessions",
+      resource: "access-grants",
       actions: ["read", "delete"],
       level: "org",
       grantTo: ["owner", "admin"],

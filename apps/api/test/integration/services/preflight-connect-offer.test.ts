@@ -2,8 +2,7 @@
 
 /**
  * `attachConnectOffers` against real rows (#1207) — the `block_user_connections`
- * gate, the one input to the mint that cannot be faked through the manifest
- * memo: `isUserConnectionCreationBlocked` reads `space_packages`.
+ * gate and the connection scope of an in-place renewal.
  *
  * The pure decision matrix lives in `test/unit/services/preflight-connect-offer.test.ts`.
  */
@@ -12,8 +11,9 @@ import { describe, it, expect, beforeEach } from "bun:test";
 import { db, truncateAll } from "../../helpers/db.ts";
 import { createTestContext, type TestContext } from "../../helpers/auth.ts";
 import { seedPackage, seedSpace, seedSpacePackage } from "../../helpers/seed.ts";
+import { seedIntegrationConnection } from "../../helpers/run-connection-fixtures.ts";
 import { activatePackage } from "../../../src/services/space-packages.ts";
-import { spacePackages } from "@appstrate/db/schema";
+import { integrationConnections, spacePackages } from "@appstrate/db/schema";
 import { and, eq } from "drizzle-orm";
 import { attachConnectOffers } from "../../../src/services/connect/preflight-connect-offer.ts";
 import { isUserConnectionCreationBlocked } from "../../../src/services/integration-connection-resolver.ts";
@@ -96,8 +96,41 @@ describe("attachConnectOffers — block_user_connections", () => {
     ).toEqual(errors);
   });
 
+  it("a delegated renewal is offered only for a connection scoped to this space", async () => {
+    const connectionId = await seedIntegrationConnection(ctx, INTEGRATION);
+    const error = {
+      ...notConnected(),
+      code: "needs_reconnection",
+      connection_id: connectionId,
+      owned_by_actor: true,
+    };
+    const offer = async () =>
+      (
+        await attachConnectOffers({
+          errors: [error],
+          scope: { orgId: ctx.orgId, spaceId: ctx.defaultSpaceId },
+          actor: { type: "user", id: ctx.user.id },
+          policy: { canConnect: true, canConfigure: false, delegated: true },
+          manifestCache: manifestCache(),
+        })
+      )[0]!;
+
+    const local = await offer();
+    expect(local.connect_url).toStartWith("http");
+    const token = new URL(local.connect_url!).searchParams.get("token");
+    const claims = readConnectToken(token!);
+    expect(claims).toMatchObject({ connection_id: connectionId, delegated: true });
+    expect(claims!.scopes).toBeUndefined();
+
+    await db
+      .update(integrationConnections)
+      .set({ spaceId: null })
+      .where(eq(integrationConnections.id, connectionId));
+    expect(await offer()).toEqual(error);
+  });
+
   it("mints for an actor holding integrations:configure — the admin carve-out", async () => {
-    // Same carve-out as `assertConnectionCreationAllowed`: an admin may create
+    // Same carve-out as `connectTarget`: an admin may create
     // the shared connection the block exists to force everyone onto.
     const [item] = await attachConnectOffers({
       errors: [notConnected()],

@@ -19,10 +19,9 @@ import {
   SKILL_MAX_FILES,
   SKILL_MAX_TOTAL_BYTES,
   skillFileDigest,
-  skillFileUri,
-  type SkillAddress,
   type SkillEntry,
 } from "@appstrate/core/skill-uri";
+import { skillFileUri, type SkillAddress } from "@appstrate/core/skill-address";
 import { isSafeArchivePath } from "@appstrate/core/zip";
 import { PACKAGE_CONTENT_ENTRY, PACKAGE_MANIFEST_FILE } from "@appstrate/core/package-files";
 

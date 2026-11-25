@@ -33,6 +33,8 @@ import {
 } from "@appstrate/connect";
 import type { AfpsHttpDelivery as ConnectAfpsHttpDelivery } from "@appstrate/connect";
 import {
+  displayAccountId,
+  getAppstrateConnectMeta,
   getIntegrationSourceKind,
   getLocalServer,
   getRemoteSource,
@@ -61,7 +63,6 @@ import {
 } from "../lib/stored-credential.ts";
 import type { Actor } from "../lib/actor.ts";
 import { isIntegrationActive, loadAccessibleConnectionById } from "./integration-connections.ts";
-import { displayAccountId } from "../lib/connection-identity.ts";
 import type { ConnectionVariables } from "./connect/connection-variables.ts";
 import {
   fetchIntegrationManifest,
@@ -70,7 +71,6 @@ import {
 } from "./integration-service.ts";
 import {
   renderRemoteSource,
-  getAppstrateConnectMeta,
   renderCredentialTemplate,
   renderAuthAuthorizedUris,
   runnerEgressFor,

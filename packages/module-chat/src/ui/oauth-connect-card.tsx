@@ -62,7 +62,7 @@ import {
   type ResumeMeta,
 } from "./auth-offer.ts";
 import { createConnectWaiter, routeCompletion } from "./connect-waiter.ts";
-import { IntegrationIcon } from "./integration-icon.tsx";
+import { IntegrationIcon } from "@appstrate/ui/components/integration-icon";
 
 /** What the card reads of `GET /api/integrations/{packageId}`. */
 interface IntegrationRead {

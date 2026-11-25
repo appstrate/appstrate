@@ -215,6 +215,20 @@ interface StoreCounts {
   withoutPlatformAfter: number;
 }
 
+/** Read-only release check, using the same selection and historical cutoff as the rewrite. */
+export async function pendingRuntimeTools(before: Date) {
+  const { db, toRows } = await import("@appstrate/db/client");
+  const counts = [];
+  for (const store of STORES) {
+    const [row] = toRows<{ pending: number }>(
+      await db.execute(`SELECT count(*)::int AS pending FROM ${store.table}
+        WHERE ${toMigrate(store, before)}`),
+    );
+    counts.push({ store: store.table, pending: row!.pending });
+  }
+  return counts;
+}
+
 export async function runMigrateRuntimeTools(options: {
   apply: boolean;
   before: Date;

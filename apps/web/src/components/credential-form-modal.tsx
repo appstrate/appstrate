@@ -237,11 +237,9 @@ export function CredentialFormModal({
   );
 
   // OAuth-selected: the pairing body owns the connection (the helper POSTs creds back). An
-  // existing row is re-paired only when flagged and the server allows the caller to reconnect it.
+  // existing row is re-paired in place, whether or not it is flagged: the menu opens this only
+  // for a caller holding its `reconnect` action.
   if (isOAuthSelected && selectedProvider) {
-    const showPairing = credential
-      ? !!credential.needs_reconnection && credential.allowed_actions.includes("reconnect")
-      : true;
     return (
       <PairingModal
         title={title}
@@ -251,7 +249,6 @@ export function CredentialFormModal({
           credential ? { credentialId: credential.id } : { ownerType: personal ? "user" : "org" }
         }
         onConnected={() => onClose()}
-        showPairing={showPairing}
       >
         {!isEditing && providerField()}
       </PairingModal>

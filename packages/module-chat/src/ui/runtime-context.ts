@@ -8,7 +8,7 @@
  * This is the ONLY direction the dependency runs: the module never imports the
  * web shell (nor the shell's API client, router, or i18n), and the shell never
  * imports module internals. A service the shell already owns (authenticated
- * download, authenticated image preview, staged upload) is injected rather than
+ * authenticated image preview, staged upload) is injected rather than
  * reimplemented here — one implementation, one set of error semantics.
  *
  * THREE contexts, no more:
@@ -29,8 +29,9 @@
  * context hop for a value that never leaves the file would be pure ceremony.
  */
 
-import { createContext, useContext, type ComponentType, type ReactNode } from "react";
+import { createContext, useContext, type ReactNode } from "react";
 import type { PickerCredential } from "@appstrate/ui/components/model-picker-groups";
+import type { ModelSizing } from "./model-fit.ts";
 
 export type GetHeaders = () => Record<string, string>;
 
@@ -59,16 +60,11 @@ export interface ChatTransport {
  * The host's rendering of spaces by id (its tile and name, every space shown). The module
  * names the spaces a conversation touched, and the space of a tool call, through it.
  */
-export type RenderSpaces = (spaceIds: readonly string[]) => ReactNode;
-
-/** The host's space picker, opened from an entry in a menu. */
-export type SpaceChoiceMenu = ComponentType<{
-  label: string;
-  spaceIds: readonly string[];
-  onPick: (spaceId: string) => void;
-  trigger: ReactNode;
-  testId?: string;
-}>;
+export type RenderSpaces = (
+  spaceIds: readonly string[],
+  /** `tilesOnly`: the tiles alone, no name (two at most, then « +N »), for a line with no room for it. */
+  options?: { tilesOnly?: boolean },
+) => ReactNode;
 
 const ChatTransportContext = createContext<ChatTransport | null>(null);
 
@@ -115,12 +111,10 @@ export function useSelectConversation(): SelectConversation | null {
  *
  * The module owns no preview component — dependency direction is web →
  * module-chat, so the host injects an opener and the chat delegates to it.
- * `null` means no opener was provided (embedded mounts): direct clicks then fall
- * back to the authenticated download, while automatic presentation is a no-op.
  *
  * `spaceId` names the file's space when known (the space of the call of the conversation that
  * produced it): the host reads it there, and reads in the working space when it is the same one.
- * The download and the image hook below take it the same way.
+ * The image hook below takes it the same way.
  *
  * `{ local }` is a file picked in the composer and not yet sent: the host shows the browser's own
  * copy in the same panel. The composer offers it only for a `localPreviewKind`
@@ -130,13 +124,6 @@ export type OpenFile = (file: OpenFileTarget) => void;
 
 /** What {@link OpenFile} presents: a stored file, or a picked one not yet sent. */
 export type OpenFileTarget = { id: string; name: string; spaceId?: string } | { local: File };
-
-/**
- * The host's authenticated file download (typed API client + user-facing
- * error toast). Injected, never reimplemented: a second raw-`fetch` copy here
- * would swallow failures the shell's implementation reports.
- */
-export type DownloadFile = (id: string, name: string, spaceId?: string) => void;
 
 /**
  * The host's authenticated image-preview hook: a stored file id → an object
@@ -178,9 +165,7 @@ export type ChatTranslate = (key: string, params?: Record<string, string | numbe
  * one provider, one guard — see the file header for why this is not split.
  */
 export interface ChatHost {
-  /** `null` when the host provides no in-app preview (fall back to download). */
-  openFile: OpenFile | null;
-  downloadFile: DownloadFile;
+  openFile: OpenFile;
   useFileImageSrc: UseFileImageSrc;
   t: ChatTranslate;
   can: ChatCan;
@@ -216,14 +201,19 @@ export interface ChatHost {
   modelCredentials: readonly PickerCredential[];
   /** A byte count in the language the host renders (`2,0 Ko` in French). */
   formatBytes: (bytes: number) => string;
+  /** The host's UI language (BCP 47), for the numbers the module formats itself (`Intl`). */
+  lang: string;
   /**
    * The assistant created or imported a package: the host refreshes what lists
    * packages, as its own editor and import dialog do after a write.
    */
   onPackagesChanged: () => void;
-  /** The signed-in user's first name, greeted on a new conversation; the host derives it as its dashboard does. */
-  /** Display name from the current organization’s catalog. */
+  /** The selected model's id, and its display name from the current organization’s catalog. */
+  modelId?: string | null;
   modelLabel?: string | null;
+  /** The selected model's window and threshold, `null` when the browser cannot know them (an alias). */
+  modelSizing?: ModelSizing | null;
+  /** The signed-in user's first name, greeted on a new conversation; the host derives it as its dashboard does. */
   firstName?: string | null;
   /** Names spaces. */
   renderSpaces: RenderSpaces;
@@ -237,8 +227,6 @@ export interface ChatHost {
    * for the accessible names that carry a space's name where `renderSpaces`' node would not.
    */
   useSpaceLabelOf: () => (spaceId: string | null | undefined) => string | undefined;
-  /** The host's menu of spaces, the one every « … in which space? » entry of the app opens. */
-  SpaceChoiceMenu: SpaceChoiceMenu;
 }
 
 /** Why nothing can be attached: still loading, the listing failed, or a role preview (no personal space for good). */
