@@ -68,12 +68,15 @@ export function ResourceSection({
   emptyLabel,
   selectedEntries,
   onChange,
+  toolPolicySpaceId,
 }: {
   type: PackageType;
   title: string;
   emptyLabel: string;
   selectedEntries: ResourceEntry[];
   onChange: (update: (prev: ResourceEntry[]) => ResourceEntry[]) => void;
+  /** The agent's home space: its approvals and blocks are the ones a save judges against. */
+  toolPolicySpaceId: string | null;
 }) {
   const { t } = useTranslation(["agents", "settings", "common"]);
   // The picker offers the index, what the working space runs (in « Tous les espaces », any space
@@ -349,7 +352,7 @@ export function ResourceSection({
         <ToolsModal
           name={byId.get(toolsEntry.id)?.name || toolsEntry.id}
           entry={toolsEntry}
-          spaceId={readSpace(byId.get(toolsEntry.id))}
+          spaceId={toolPolicySpaceId ?? undefined}
           onClose={() => setToolsId(null)}
           onApply={(next) => {
             replaceEntry(toolsEntry.id, next);

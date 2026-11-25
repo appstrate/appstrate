@@ -1683,7 +1683,7 @@ export const integrationsPaths = {
         "404": { $ref: "#/components/responses/NotFound" },
         "409": {
           description:
-            "`tool_snapshot_stale` — the server no longer lists the named tools (`tools`) at that fingerprint: refresh the snapshot and review again; `tool_definition_unavailable` — the listed definition of the named tools (`tools`) was too large to keep, so it cannot be reviewed nor approved.",
+            "`tool_snapshot_stale` — the server no longer lists the named tools (`tools`) at that fingerprint: refresh the snapshot and review again; `tool_definition_unavailable` — the listed definition of the named tools (`tools`) was too large to keep, so it cannot be reviewed nor approved; `tool_approvals_limit` — the named tools (`tools`) would exceed 32 approved definitions: withdraw one first.",
           headers: STD_RESPONSE_HEADERS,
           content: problemJson,
         },
@@ -1722,7 +1722,7 @@ export const integrationsPaths = {
       tags: ["Integrations"],
       summary: "Block tools of the integration in the space",
       description:
-        "Blocks the named tools, declared or not: a blocked tool is neither offered nor callable in this space. Already blocked names are ignored. Requires `integrations:configure` and a dashboard session. Audited as `integration.tool.blocked`, one event per tool newly blocked.",
+        "Blocks the named tools, declared or not: a blocked tool is neither offered nor callable in this space. Already blocked names are ignored. Blocking an `api_call` tool also removes its `api_upload` companion; blocking an `api_upload` tool alone takes effect in runs only (the credential proxy has no upload tool to refuse). Requires `integrations:configure` and a dashboard session. Audited as `integration.tool.blocked`, one event per tool newly blocked.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XSpaceId" },

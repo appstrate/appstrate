@@ -2436,8 +2436,12 @@ export function createPackagesRouter() {
 
     // Check for existing user package
     const existing = await getPackageById(packageId);
+    // Another org's package never informs a judgment below: refused before any of them.
+    if (existing && existing.orgId !== orgId) {
+      throw conflict("name_collision", `A package with identifier '${packageId}' already exists`);
+    }
 
-    if (existing?.orgId === orgId) {
+    if (existing) {
       await assertPackageMutationAccess(c, packageId, "write");
       await assertExistingPackageActivationAccess(c, packageId, existing.type);
     }
@@ -2453,9 +2457,6 @@ export function createPackagesRouter() {
       true,
     );
     if (existing) {
-      if (existing.orgId !== orgId) {
-        throw conflict("name_collision", `A package with identifier '${packageId}' already exists`);
-      }
       if (existing.type !== packageType) {
         throw new ApiError({
           status: 400,

@@ -325,7 +325,10 @@ const proxyResponses = {
       "(`http_request_denied`); `credential_proxy_closed` — no `X-Run-Id`, and the space's " +
       "`credential_proxy_open` is `false`, whatever the caller's role " +
       "(`proxy_internal_response`); `tool_blocked_in_space` — the connection's auth backs an " +
-      "`api_call` tool the space blocked; `forbidden` — the principal lacks the permission of the path " +
+      "`api_call` tool the space blocked; `remote_mcp_endpoint_not_proxied` — `X-Target` is the " +
+      "connection's remote MCP endpoint (same origin and path, query and trailing slash ignored; " +
+      "the whole origin of an SSE endpoint): that server is reached through its tools, which apply " +
+      "the space's tool policy; `forbidden` — the principal lacks the permission of the path " +
       "the call takes (`credential-proxy:call` with `X-Run-Id`, `credential-proxy:call-own` " +
       "or `credential-proxy:call` without), session " +
       "bound to a different principal, cookie session used, or `X-Run-Id` names another " +

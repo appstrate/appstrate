@@ -291,6 +291,7 @@
   "run.unavailableTools.message": "L'agent avait demandé ces outils, mais le run n'a pas pu les lui fournir.",
   "run.unavailableTools.reason.not_listed": "Absent du serveur au lancement",
   "run.unavailableTools.reason.hidden_tools": "Masqué par l'intégration",
+  "run.unavailableTools.reason.blocked_in_space": "Bloqué dans cet espace",
   "run.unavailableTools.reason.definition_not_approved": "Définition non approuvée dans cet espace",
   "run.unavailableTools.reason.name_collision": "Nom déjà pris par un autre outil",
   "run.unavailableTools.reason.unknown": "Indisponible",

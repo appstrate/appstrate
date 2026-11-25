@@ -14,6 +14,7 @@ import {
   resolveIntegrationToolCatalog,
   type IntegrationManifest,
 } from "@appstrate/core/integration";
+import { MAX_APPROVED_FINGERPRINTS_PER_TOOL } from "@appstrate/core/sidecar-types";
 import type { OrgRole } from "@appstrate/core/permissions";
 import { db } from "@appstrate/db/client";
 import {
@@ -30,7 +31,7 @@ import {
   toolSnapshotConnectionIds,
 } from "./integration-connections.ts";
 import { readIntegrationManifestForConnect } from "./integration-service.ts";
-import { loadToolSpacePolicy } from "./integration-tool-catalog.ts";
+import { loadToolSpacePolicy, readToolSpaceRows } from "./integration-tool-catalog.ts";
 import { readToolSnapshots } from "./integration-tool-snapshots.ts";
 
 export interface ToolPolicyTarget {
@@ -82,37 +83,9 @@ async function loadListedTools(target: ToolPolicyTarget) {
 
 /** What the space can review: the tools listed, its approvals and its blocks. */
 export async function getToolPolicy(target: ToolPolicyTarget) {
-  const { scope, packageId } = target;
-  const [{ listed }, approvals, blocks] = await Promise.all([
+  const [{ listed }, { approvals, blocks }] = await Promise.all([
     loadListedTools(target),
-    db
-      .select({
-        tool_name: spaceIntegrationToolApprovals.toolName,
-        fingerprint: spaceIntegrationToolApprovals.fingerprint,
-        definition: spaceIntegrationToolApprovals.definition,
-        approved_by: spaceIntegrationToolApprovals.approvedBy,
-        approved_at: spaceIntegrationToolApprovals.approvedAt,
-      })
-      .from(spaceIntegrationToolApprovals)
-      .where(
-        and(
-          eq(spaceIntegrationToolApprovals.spaceId, scope.spaceId),
-          eq(spaceIntegrationToolApprovals.packageId, packageId),
-        ),
-      ),
-    db
-      .select({
-        tool_name: spaceIntegrationToolBlocks.toolName,
-        blocked_by: spaceIntegrationToolBlocks.blockedBy,
-        blocked_at: spaceIntegrationToolBlocks.blockedAt,
-      })
-      .from(spaceIntegrationToolBlocks)
-      .where(
-        and(
-          eq(spaceIntegrationToolBlocks.spaceId, scope.spaceId),
-          eq(spaceIntegrationToolBlocks.packageId, packageId),
-        ),
-      ),
+    readToolSpaceRows(target.scope.spaceId, target.packageId),
   ]);
   return {
     listed: [...listed.values()],
@@ -172,6 +145,25 @@ export async function approveTools(
       "tool_definition_unavailable",
       `The definition of ${unreadable.join(", ")} was too large to keep: it cannot be reviewed, so it cannot be approved.`,
       { tools: unreadable },
+    );
+  }
+  // What a run's spec carries per tool: past it an approval would be silently left out.
+  const { approvals: held } = await readToolSpaceRows(target.scope.spaceId, target.packageId);
+  const fingerprints = new Map<string, Set<string>>();
+  for (const { tool_name, fingerprint } of [
+    ...held,
+    ...distinct.map((t) => ({ tool_name: t.name, fingerprint: t.fingerprint })),
+  ]) {
+    fingerprints.set(tool_name, (fingerprints.get(tool_name) ?? new Set()).add(fingerprint));
+  }
+  const overLimit = namesOf(
+    distinct.filter((t) => fingerprints.get(t.name)!.size > MAX_APPROVED_FINGERPRINTS_PER_TOOL),
+  );
+  if (overLimit.length > 0) {
+    throw conflict(
+      "tool_approvals_limit",
+      `At most ${MAX_APPROVED_FINGERPRINTS_PER_TOOL} definitions of one tool can be approved: withdraw the approval of ${overLimit.join(", ")} before approving another.`,
+      { tools: overLimit },
     );
   }
   return db
@@ -274,7 +266,7 @@ export async function selectedApprovedTools(
       // An open catalog needs no approval; a declared or hidden tool never stands on one.
       if (!read.ok || allowsUndeclaredTools(read.manifest)) return [];
       const { declared, hidden } = declaredAndHidden(read.manifest);
-      const policy = await loadToolSpacePolicy(scope.spaceId, entry.id);
+      const policy = await loadToolSpacePolicy(scope.spaceId, entry.id, read.manifest);
       const approved = new Set(policy.approvals.map((a) => a.tool_name));
       return (entry.tools as string[])
         .filter((tool) => approved.has(tool) && !declared.has(tool) && !hidden.has(tool))

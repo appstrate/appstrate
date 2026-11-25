@@ -57,11 +57,14 @@ const asNumber = (value: unknown) => (typeof value === "number" ? value : undefi
 function AgentEditorInner({
   initialState,
   packageId,
+  homeSpaceId,
   effectiveTimeoutSeconds,
   tab,
 }: {
   initialState: EditorState;
   packageId: string;
+  /** The space whose tool approvals judge the agent's selections at save (`null`: no home). */
+  homeSpaceId: string | null;
   /**
    * Timeout this deployment will actually enforce (server-computed: declared
    * value clamped to `PLATFORM_RUN_LIMITS.timeout_ceiling_seconds`). Read off
@@ -215,6 +218,7 @@ function AgentEditorInner({
           {...resourceTabs[resourceKey]}
           selectedEntries={getResourceEntries(state.manifest, resourceKey)}
           onChange={setResources(resourceKey)}
+          toolPolicySpaceId={homeSpaceId}
         />
       )}
     </PackageEditorFrame>
@@ -275,6 +279,7 @@ export function AgentDefinitionEditor({
           etag: detail.etag,
         }}
         packageId={detail.id}
+        homeSpaceId={detail.home_space_id}
         effectiveTimeoutSeconds={detail.effective_timeout_seconds}
         tab={section}
       />

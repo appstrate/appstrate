@@ -32,6 +32,21 @@ describe("unavailableToolsNote", () => {
     );
   });
 
+  it("tells the model a blocked tool is the space administrators' decision", () => {
+    expect(
+      unavailableToolsNote([
+        {
+          integrationId: "@scope/gh",
+          namespace: "gh",
+          toolCount: 1,
+          unavailableTools: [{ name: "delete_repo", reason: "blocked_in_space" }],
+        },
+      ]),
+    ).toBe(
+      "\n\n<unavailable_tools>\n@scope/gh: gh__delete_repo (blocked_in_space: blocked by the space administrators)\n</unavailable_tools>",
+    );
+  });
+
   it("drops names and integration ids that are not plain tokens", () => {
     expect(
       unavailableToolsNote([

@@ -56,6 +56,18 @@ describe("pushUnavailableToolBreadcrumb", () => {
     });
   });
 
+  it("names a tool the space blocks with its reason", () => {
+    const breadcrumbs: IntegrationBootBreadcrumb[] = [];
+    pushUnavailableToolBreadcrumb(
+      specWith(["delete_repo"]),
+      [{ name: "delete_repo", reason: "blocked_in_space" }],
+      breadcrumbs,
+    );
+    expect(breadcrumbs[0]!.message).toBe(
+      "@scope/gh [work]: 1/1 selected tool(s) unavailable: delete_repo (blocked_in_space)",
+    );
+  });
+
   it("does not quote a server-controlled name that is not a plain token", () => {
     const breadcrumbs: IntegrationBootBreadcrumb[] = [];
     pushUnavailableToolBreadcrumb(

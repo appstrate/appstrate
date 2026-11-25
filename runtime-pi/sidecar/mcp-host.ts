@@ -165,6 +165,11 @@ interface McpHostUpstream {
    */
   hiddenTools?: readonly string[];
   /**
+   * Names the space blocks: dropped like `hiddenTools`, reported as `blocked_in_space` when the
+   * agent selected them. A name that is also hidden stays reported as hidden.
+   */
+  blockedTools?: readonly string[];
+  /**
    * Approved definitions of the undeclared tools of a closed catalog (name → fingerprints, `[]` =
    * none approved). A listed tool in the map is exposed only when the fingerprint of its RAW
    * definition is among them; a tool absent from the map (every declared tool) is never gated.
@@ -438,12 +443,15 @@ export class McpHost {
     // the allowlist, so authors declare names exactly as the upstream
     // advertises them.
     const hiddenSet = upstream.hiddenTools ? new Set<string>(upstream.hiddenTools) : null;
+    const blockedSet = upstream.blockedTools ? new Set<string>(upstream.blockedTools) : null;
     const listedNames = new Set(tools.map((tool) => tool.name));
     const unavailable: UnavailableTool[] = (upstream.allowedTools ?? [])
       .filter((name) => !listedNames.has(name))
       .map((name) => ({ name, reason: "not_listed" as const }));
     const admitted = tools.filter((tool) => {
-      const exclusion = toolExclusion(tool.name, allowlist, hiddenSet);
+      const exclusion =
+        toolExclusion(tool.name, allowlist, hiddenSet) ??
+        (blockedSet?.has(tool.name) ? "blocked_in_space" : null);
       if (exclusion === null) {
         if (
           definitionApproved(
@@ -468,8 +476,11 @@ export class McpHost {
         data: { event: `tool_excluded_by_${exclusion}`, originalName: tool.name },
       });
       // A hidden tool nobody selected is not a loss; only a selected one is reported.
-      if (exclusion === "hidden_tools" && allowlist?.has(tool.name)) {
-        unavailable.push({ name: tool.name, reason: "hidden_tools" });
+      if (
+        (exclusion === "hidden_tools" || exclusion === "blocked_in_space") &&
+        allowlist?.has(tool.name)
+      ) {
+        unavailable.push({ name: tool.name, reason: exclusion });
       }
       return false;
     });

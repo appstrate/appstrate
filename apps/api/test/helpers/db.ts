@@ -13,6 +13,7 @@ import { readdirSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { withDeadlockRetry } from "./deadlock-retry.ts";
 import { clearAllCachesLocally } from "@appstrate/core/cache";
+import { drainAudits } from "../../src/services/audit.ts";
 
 export { db, closeDb };
 
@@ -189,6 +190,9 @@ function buildTruncateSql(): string {
  * Call this in beforeEach() for full test isolation.
  */
 export async function truncateAll(): Promise<void> {
+  // Work tracked off the response path (audits, notification fan-out) lands in the next test's
+  // database, or fails on rows already deleted, if it is not flushed first.
+  await drainAudits(5_000);
   const truncateSql = (cachedTruncateSql ??= buildTruncateSql());
   await withDeadlockRetry(() => db.execute(sql.raw(truncateSql)), {
     onRetry: (err, attempt) => {

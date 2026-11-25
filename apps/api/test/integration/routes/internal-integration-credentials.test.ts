@@ -631,6 +631,18 @@ describe("GET /internal/integration-credentials/:scope/:name", () => {
     expect(snapshot!.truncated).toBe(true);
   });
 
+  it("DENY: tools-observed for an integration inactive in the space is a 404 and writes nothing", async () => {
+    await seedIntegration(INTEGRATION, false);
+    const connectionId = await seedConnectionRow(INTEGRATION);
+    await bindConnectionsToRun(runId, { [INTEGRATION]: [connectionId] });
+
+    expect((await observed(connectionId, report)).status).toBe(404);
+
+    expect(await db.select().from(integrationToolSnapshots)).toHaveLength(0);
+    const [run] = await db.select({ metadata: runs.metadata }).from(runs).where(eq(runs.id, runId));
+    expect(run!.metadata).not.toHaveProperty("unavailable_tools");
+  });
+
   it("DENY: tools-observed for a connection the run did not bind is a 400, and a malformed body too", async () => {
     await seedIntegration(INTEGRATION, true);
     const connectionId = await seedConnectionRow(INTEGRATION);

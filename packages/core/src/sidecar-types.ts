@@ -411,6 +411,12 @@ export interface IntegrationSpawnSpec {
    */
   hiddenTools?: readonly string[];
   /**
+   * Names the space blocks. Excluded like {@link hiddenTools}, but reported as `blocked_in_space`
+   * so the run says who withheld them. api_call / api_upload blocks never travel here: the
+   * platform removes those capabilities from the spec.
+   */
+  blockedTools?: readonly string[];
+  /**
    * Agent-declared MCP tool allowlist. When
    * non-undefined, restricts the set of tools the namespace advertises
    * via `tools/list`. Tools not in the allowlist are silently omitted
@@ -515,6 +521,8 @@ const strings = z.record(z.string(), z.string());
 const uris = z.array(z.string());
 
 /** SHA-256 hex, as `toolDefinitionFingerprint` (`@appstrate/mcp-transport`) produces. */
+/** Approved definitions the space may hold for one tool: the spawn spec's bound, enforced on write. */
+export const MAX_APPROVED_FINGERPRINTS_PER_TOOL = 32;
 const toolFingerprint = z.string().regex(/^[0-9a-f]{64}$/);
 
 /** The platform's per-connection launch contract, decoded before any integration is started. */
@@ -572,10 +580,13 @@ export const integrationSpawnSpecSchema = z.object({
     .object({ authorizedUris: uris, declaredUris: uris, allowAllUris: z.boolean() })
     .optional(),
   hiddenTools: uris.optional(),
+  blockedTools: uris.optional(),
   toolAllowlist: uris.optional(),
   approvedToolFingerprints: z
-    .record(z.string(), z.array(toolFingerprint).max(32))
-    .refine((byTool) => Object.keys(byTool).length <= 500)
+    .record(z.string(), z.array(toolFingerprint).max(MAX_APPROVED_FINGERPRINTS_PER_TOOL))
+    .refine((byTool) => Object.keys(byTool).length <= 500, {
+      message: "approvedToolFingerprints names more than 500 tools",
+    })
     .optional(),
   connectLogin: z
     .object({
@@ -842,7 +853,7 @@ export interface IntegrationBootBreadcrumb {
 
 /** Why a tool the agent selected is not callable in this run. */
 export type UnavailableToolReason =
-  "not_listed" | "hidden_tools" | "definition_not_approved" | "name_collision";
+  "not_listed" | "hidden_tools" | "blocked_in_space" | "definition_not_approved" | "name_collision";
 
 /** Bounds of the tools-observed report body: the sidecar caps to them, the platform refuses past them. */
 export const OBSERVED_TOOLS_MAX_COUNT = 500;

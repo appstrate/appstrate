@@ -36,6 +36,8 @@ function unavailableReasonLabel(
       return t("run.unavailableTools.reason.not_listed");
     case "hidden_tools":
       return t("run.unavailableTools.reason.hidden_tools");
+    case "blocked_in_space":
+      return t("run.unavailableTools.reason.blocked_in_space");
     case "definition_not_approved":
       return t("run.unavailableTools.reason.definition_not_approved");
     case "name_collision":

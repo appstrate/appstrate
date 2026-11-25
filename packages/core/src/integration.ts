@@ -994,6 +994,48 @@ export function getRemoteSource(
   return { url, transport };
 }
 
+/** Lower-cased, percent-decoded path with repeated and trailing slashes collapsed. */
+function normalisedPath(url: URL): string {
+  let path = url.pathname;
+  try {
+    path = decodeURIComponent(path);
+  } catch {
+    // A malformed escape stays as written: the comparison is then on the raw path.
+  }
+  return path
+    .toLowerCase()
+    .replace(/\/{2,}/g, "/")
+    .replace(/\/+$/, "");
+}
+
+/** A remote MCP server as its integration declares it: `server.url` and `server.transport`. */
+export interface McpEndpoint {
+  url: string;
+  transport?: string;
+}
+
+/**
+ * Whether `target` falls on the MCP endpoint: same origin (scheme, host without a trailing dot,
+ * port), and
+ *   - over SSE, any path: the server announces the endpoint its messages are POSTed to, at a path
+ *     of its choosing on that origin (often outside `server.url`'s), so the whole origin is it;
+ *   - otherwise, a path equal to the endpoint's or under it (`<path>/…`), compared
+ *     case-insensitively after percent-decoding, with repeated and trailing slashes collapsed;
+ *     query and fragment ignored. An endpoint at the origin root matches the root path only, so
+ *     the other paths of that host stay reachable.
+ */
+export function targetsMcpEndpoint(target: string | URL, endpoint: McpEndpoint): boolean {
+  if (!URL.canParse(String(target)) || !URL.canParse(endpoint.url)) return false;
+  const t = new URL(target);
+  const e = new URL(endpoint.url);
+  const host = (u: URL) => u.hostname.replace(/\.$/, "");
+  if (t.protocol !== e.protocol || host(t) !== host(e) || t.port !== e.port) return false;
+  if (endpoint.transport === "sse") return true;
+  const base = normalisedPath(e);
+  const path = normalisedPath(t);
+  return path === base || (base !== "" && path.startsWith(`${base}/`));
+}
+
 /**
  * Narrowed view of a single auth method's `delivery` (AFPS §7.6). The
  * canonical schema is `looseObject` so the fields are optional/unknown at the
@@ -1945,14 +1987,11 @@ export function validateAgentIntegrationScopes(
     }
   } else if (selection.tools && selection.tools.length > 0) {
     // AFPS §7.1: a local source declaring no tools has no catalog to check against.
+    const catalog = resolveIntegrationToolCatalog({ integration: integrationManifest });
     const catalogIsEmptyAdvisory =
-      getIntegrationSourceKind(integrationManifest) !== "remote" &&
-      resolveIntegrationToolCatalog({ integration: integrationManifest }).length === 0;
+      getIntegrationSourceKind(integrationManifest) !== "remote" && catalog.length === 0;
     if (!allowsUndeclaredTools(integrationManifest) && !catalogIsEmptyAdvisory) {
-      const allowed = new Set([
-        ...resolveIntegrationToolCatalog({ integration: integrationManifest }).map((e) => e.name),
-        ...(options?.approvedTools ?? []),
-      ]);
+      const allowed = new Set([...catalog.map((e) => e.name), ...(options?.approvedTools ?? [])]);
       for (const tool of selection.tools) {
         if (allowed.has(tool)) continue;
         errors.push({

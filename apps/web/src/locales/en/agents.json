@@ -291,6 +291,7 @@
   "run.unavailableTools.message": "The agent asked for these tools, but the run could not provide them.",
   "run.unavailableTools.reason.not_listed": "Not listed by the server at launch",
   "run.unavailableTools.reason.hidden_tools": "Hidden by the integration",
+  "run.unavailableTools.reason.blocked_in_space": "Blocked in this space",
   "run.unavailableTools.reason.definition_not_approved": "Definition not approved in this space",
   "run.unavailableTools.reason.name_collision": "Name already taken by another tool",
   "run.unavailableTools.reason.unknown": "Unavailable",

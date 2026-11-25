@@ -238,10 +238,12 @@ function selectsNoCallableTool(
   entry: ManifestIntegrationEntry,
   integrationManifest: IntegrationManifest,
   catalog: ReadonlyArray<{ name: string }>,
+  approvedTools: readonly string[],
   surfaceIsKnown: boolean,
 ): boolean {
   const effective = resolveEffectiveToolSelection(entry.tools, integrationManifest);
-  if (isToolsWildcard(effective)) return surfaceIsKnown && catalog.length === 0;
+  if (isToolsWildcard(effective))
+    return surfaceIsKnown && catalog.length + approvedTools.length === 0;
   if (effective === undefined || effective.length === 0) return true;
   // Intersect only when the catalog is KNOWABLE here. A remote integration that
   // enumerates nothing in its manifest discovers its tools at connect time, so
@@ -253,7 +255,7 @@ function selectsNoCallableTool(
   // refuse: the integration told us its tools and then hid all of them, so the
   // selection provably registers nothing.
   if (!surfaceIsKnown) return false;
-  const callable = new Set(catalog.map((e) => e.name));
+  const callable = new Set([...catalog.map((e) => e.name), ...approvedTools]);
   return !effective.some((t) => callable.has(t));
 }
 
@@ -436,19 +438,17 @@ export async function validateAgentIntegrationSelections(
     // ONE catalog, both checks. `resolveIntegrationToolCatalog` already
     // subtracts `hidden_tools` and appends the synthetic api_call/api_upload
     // entries, so this is the set the sidecar will actually register.
+    // Undeclared tools the space approved: callable and nameable like declared ones.
     const approvedTools = toolPolicySpaceId
       ? [
           ...new Set(
-            (await loadToolSpacePolicy(toolPolicySpaceId, entry.id)).approvals.map(
+            (await loadToolSpacePolicy(toolPolicySpaceId, entry.id, judgedManifest)).approvals.map(
               (a) => a.tool_name,
             ),
           ),
         ]
       : [];
-    const catalog = [
-      ...resolveIntegrationToolCatalog({ integration: judgedManifest }),
-      ...approvedTools.map((name) => ({ name })),
-    ];
+    const catalog = resolveIntegrationToolCatalog({ integration: judgedManifest });
 
     // The integration told us its tool surface when it declares `tools_policy`,
     // or when its local server enumerates `tools`. Absent both, the surface is
@@ -458,7 +458,10 @@ export async function validateAgentIntegrationSelections(
       Object.keys((judgedManifest as { tools_policy?: Record<string, unknown> }).tools_policy ?? {})
         .length > 0;
 
-    if (pinnedManifest && selectsNoCallableTool(entry, pinnedManifest, catalog, surfaceIsKnown)) {
+    if (
+      pinnedManifest &&
+      selectsNoCallableTool(entry, pinnedManifest, catalog, approvedTools, surfaceIsKnown)
+    ) {
       errors.push({
         field: `integrations_configuration.${entry.id}.tools`,
         code: "no_tools_selected",

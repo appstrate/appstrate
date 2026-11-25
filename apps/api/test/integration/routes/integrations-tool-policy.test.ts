@@ -8,6 +8,7 @@ import { describe, it, expect, beforeEach } from "bun:test";
 import { eq } from "drizzle-orm";
 import type { Tool } from "@modelcontextprotocol/sdk/types.js";
 import { toolDefinitionFingerprint } from "@appstrate/mcp-transport";
+import { MAX_APPROVED_FINGERPRINTS_PER_TOOL } from "@appstrate/core/sidecar-types";
 import { db } from "@appstrate/db/client";
 import { auditEvents, spaceIntegrationToolApprovals } from "@appstrate/db/schema";
 import { getTestApp } from "../../helpers/app.ts";
@@ -177,6 +178,29 @@ describe("integration tool policy routes", () => {
     expect((await send("DELETE", "/approvals/write_file")).status).toBe(204);
     expect((await view()).approvals).toEqual([]);
     expect((await send("DELETE", "/approvals/write_file")).status).toBe(204);
+  });
+
+  it("refuses a 33rd approved definition of one tool, and still accepts one already approved", async () => {
+    await listed(tool("write_file", "live"));
+    const held = Array.from({ length: MAX_APPROVED_FINGERPRINTS_PER_TOOL }, (_, i) => ({
+      spaceId: ctx.defaultSpaceId,
+      orgId: ctx.orgId,
+      packageId: ID,
+      toolName: "write_file",
+      fingerprint: i.toString(16).padStart(64, "0"),
+      definition: {},
+    }));
+    await db.insert(spaceIntegrationToolApprovals).values(held);
+
+    const refused = await approve({ name: "write_file", fingerprint: fp("write_file", "live") });
+    expect(refused.status).toBe(409);
+    expect(((await refused.json()) as { code: string }).code).toBe("tool_approvals_limit");
+    expect((await view()).approvals).toHaveLength(MAX_APPROVED_FINGERPRINTS_PER_TOOL);
+
+    await send("DELETE", "/approvals/write_file");
+    expect(
+      (await approve({ name: "write_file", fingerprint: fp("write_file", "live") })).status,
+    ).toBe(204);
   });
 
   it("blocks a tool, declared or not, and lifts the block", async () => {

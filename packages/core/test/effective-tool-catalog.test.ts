@@ -4,10 +4,14 @@ import { describe, it, expect } from "bun:test";
 import {
   resolveEffectiveToolCatalog,
   validateAgentIntegrationScopes,
+  targetsMcpEndpoint,
   type IntegrationManifest,
   type ToolSnapshotView,
 } from "../src/integration.ts";
-import { integrationSpawnSpecSchema } from "../src/sidecar-types.ts";
+import {
+  integrationSpawnSpecSchema,
+  MAX_APPROVED_FINGERPRINTS_PER_TOOL,
+} from "../src/sidecar-types.ts";
 
 const FP_A = "a".repeat(64);
 const FP_B = "b".repeat(64);
@@ -245,5 +249,56 @@ describe("integrationSpawnSpecSchema — approvedToolFingerprints", () => {
     ).toBe(false);
     const many = Object.fromEntries(Array.from({ length: 501 }, (_, i) => [`t${i}`, [FP_A]]));
     expect(parse({ approvedToolFingerprints: many }).success).toBe(false);
+  });
+});
+
+describe("integrationSpawnSpecSchema — blockedTools and bounds", () => {
+  const base = {
+    integrationId: "@me/remote",
+    namespace: "remote",
+    sourceKind: "remote",
+    manifest: { name: "@me/remote", version: "1.0.0" },
+    spawnEnv: {},
+  };
+  const parse = (extra: object) => integrationSpawnSpecSchema.safeParse({ ...base, ...extra });
+  it("accepts blockedTools names and refuses a non-array", () => {
+    expect(parse({ blockedTools: ["a", "b"] }).success).toBe(true);
+    expect(parse({ blockedTools: "a" }).success).toBe(false);
+  });
+  it("bounds fingerprints per tool at the exported constant, with a named oversize message", () => {
+    expect(MAX_APPROVED_FINGERPRINTS_PER_TOOL).toBe(32);
+    const many = Object.fromEntries(Array.from({ length: 501 }, (_, i) => [`t${i}`, [FP_A]]));
+    const result = parse({ approvedToolFingerprints: many });
+    expect(result.success).toBe(false);
+    if (!result.success) expect(result.error.message).toContain("approvedToolFingerprints");
+  });
+});
+
+describe("targetsMcpEndpoint", () => {
+  it("matches the endpoint path and below it, on the same origin only", () => {
+    const endpoint = { url: "https://mcp.example.com/v1/mcp", transport: "streamable-http" };
+    expect(targetsMcpEndpoint("https://mcp.example.com/v1/mcp", endpoint)).toBe(true);
+    expect(targetsMcpEndpoint("https://mcp.example.com/v1/mcp/?x=1#f", endpoint)).toBe(true);
+    expect(targetsMcpEndpoint("https://mcp.example.com/v1/mcp/sse", endpoint)).toBe(true);
+    expect(targetsMcpEndpoint("https://mcp.example.com/v1/mcpx", endpoint)).toBe(false);
+    expect(targetsMcpEndpoint("https://mcp.example.com/v1", endpoint)).toBe(false);
+    expect(targetsMcpEndpoint("http://mcp.example.com/v1/mcp", endpoint)).toBe(false);
+    expect(targetsMcpEndpoint("https://mcp.example.com:8443/v1/mcp", endpoint)).toBe(false);
+    expect(targetsMcpEndpoint("https://other.example.com/v1/mcp", endpoint)).toBe(false);
+  });
+
+  it("matches only the root path for an endpoint at the origin root", () => {
+    const endpoint = { url: "https://mcp.example.com/" };
+    expect(targetsMcpEndpoint("https://mcp.example.com", endpoint)).toBe(true);
+    expect(targetsMcpEndpoint("https://mcp.example.com/?a=b", endpoint)).toBe(true);
+    expect(targetsMcpEndpoint("https://mcp.example.com/v1/items", endpoint)).toBe(false);
+  });
+
+  it("matches every path of the origin for an SSE endpoint, and that origin only", () => {
+    const endpoint = { url: "https://mcp.example.com/v1/sse", transport: "sse" };
+    expect(targetsMcpEndpoint("https://mcp.example.com/messages?sessionId=1", endpoint)).toBe(true);
+    expect(targetsMcpEndpoint("https://mcp.example.com/", endpoint)).toBe(true);
+    expect(targetsMcpEndpoint("https://other.example.com/messages", endpoint)).toBe(false);
+    expect(targetsMcpEndpoint("http://mcp.example.com/messages", endpoint)).toBe(false);
   });
 });

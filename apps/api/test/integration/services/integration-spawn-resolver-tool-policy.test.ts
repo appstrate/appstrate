@@ -1,8 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Spawn resolver — the space's tool policy reaches the sidecar: blocked tools through
- * `hiddenTools`, and on a closed remote catalog the fingerprints approved for each undeclared
+ * Spawn resolver — the space's tool policy reaches the sidecar: X * `blockedTools`, and on a closed remote catalog the fingerprints approved for each undeclared
  * tool the agent names through `approvedToolFingerprints` (never for a declared tool, never on an
  * open catalog).
  */
@@ -86,7 +85,7 @@ describe("resolveIntegrationSpawns — space tool policy", () => {
     ctx = await createTestContext({ orgSlug: "orga" });
   });
 
-  it("hides the tools the space blocked", async () => {
+  it("names the tools the space blocked apart from the ones the manifest hides", async () => {
     await seed();
     await db.insert(spaceIntegrationToolBlocks).values({
       spaceId: ctx.defaultSpaceId,
@@ -95,7 +94,8 @@ describe("resolveIntegrationSpawns — space tool policy", () => {
       toolName: "search",
     });
     const spec = await spawn(["search"]);
-    expect(spec.hiddenTools).toEqual(["search"]);
+    expect(spec.blockedTools).toEqual(["search"]);
+    expect(spec.hiddenTools).toBeUndefined();
   });
 
   it("names the approved fingerprints of each undeclared tool, and none for a declared one", async () => {
@@ -117,25 +117,19 @@ describe("resolveIntegrationSpawns — space tool policy", () => {
     expect(spec.approvedToolFingerprints).toBeUndefined();
   });
 
-  it("sends at most the 32 most recent approved fingerprints of a tool", async () => {
+  it("sends every approved fingerprint of a tool, whatever their number: the approval door bounds it", async () => {
     await seed();
-    const fingerprint = (i: number) => i.toString(16).padStart(64, "0");
-    const start = Date.now();
     await db.insert(spaceIntegrationToolApprovals).values(
-      Array.from({ length: 33 }, (_, i) => ({
+      Array.from({ length: 5 }, (_, i) => ({
         spaceId: ctx.defaultSpaceId,
         orgId: ctx.orgId,
         packageId: INTEG,
         toolName: "write",
-        fingerprint: fingerprint(i),
+        fingerprint: i.toString(16).padStart(64, "0"),
         definition: {},
-        approvedAt: new Date(start + i * 1000),
       })),
     );
-    const sent = (await spawn(["write"])).approvedToolFingerprints!.write!;
-    expect(sent).toHaveLength(32);
-    expect(sent).not.toContain(fingerprint(0));
-    expect(sent).toContain(fingerprint(32));
+    expect((await spawn(["write"])).approvedToolFingerprints!.write).toHaveLength(5);
   });
 });
 
@@ -214,6 +208,8 @@ describe("resolveIntegrationSpawns — a blocked api_call", () => {
   it("is not granted to the run, upload companion included", async () => {
     const spec = await spawnApi(["api_call"]);
     expect(spec.apiCalls).toBeUndefined();
+    // Removed here: the sidecar is told of no `api_call` block.
+    expect(spec.blockedTools).toBeUndefined();
   });
 
   it("keeps the call when only its upload companion is blocked", async () => {

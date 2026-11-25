@@ -46,7 +46,7 @@ import {
 } from "@appstrate/afps-runtime/resolvers";
 import { InvalidHeaderValueError } from "@appstrate/afps-shared/delivery-http";
 import type { HostResolver } from "@appstrate/core/ssrf";
-import type { ToolSpacePolicy } from "@appstrate/core/integration";
+import { targetsMcpEndpoint, type McpEndpoint } from "@appstrate/core/integration";
 import { isAllowedInternalIdpHost } from "@appstrate/connect";
 import type { Actor } from "../../lib/actor.ts";
 import { logger } from "../../lib/logger.ts";
@@ -61,6 +61,7 @@ import {
   type ProxyCallPath,
 } from "./integration-resolver.ts";
 import type { CredentialStatus } from "../../lib/credential-status-header.ts";
+import { remoteMcpEndpointNotProxied } from "../integration-tool-catalog.ts";
 import { clearUpstreamRejections, type ConnectionNaming } from "../integration-connections.ts";
 
 /**
@@ -92,8 +93,8 @@ type ProxyCallInput = {
   connectionId?: string;
   /** How the caller names `connectionId`; the header when omitted. */
   connectionNaming?: ConnectionNaming;
-  /** The space's tool policy, for the `api_call` door: a blocked `api_call` is refused. */
-  toolPolicy?: ToolSpacePolicy;
+  /** The `api_call` door: the space's tool policy applies (a blocked `api_call`, the MCP endpoint). */
+  applySpacePolicy?: true;
 
   /** Scoped integration package name (e.g. `@afps/gmail`). */
   integrationId: string;
@@ -239,7 +240,7 @@ export async function proxyCall(input: ProxyCallInput): Promise<ProxyCallResult>
     actor: input.actor,
     ...(input.connectionId ? { connectionId: input.connectionId } : {}),
     ...(input.connectionNaming ? { connectionNaming: input.connectionNaming } : {}),
-    ...(input.toolPolicy ? { toolPolicy: input.toolPolicy } : {}),
+    ...(input.applySpacePolicy ? { applySpacePolicy: true as const } : {}),
     ...(input.run
       ? { run: input.run }
       : { reach: input.reach, ...(input.version ? { version: input.version } : {}) }),
@@ -251,6 +252,7 @@ export async function proxyCall(input: ProxyCallInput): Promise<ProxyCallResult>
   let connectionId: string;
   let credentialRevision: string;
   let rejectionStreak: number;
+  let remoteMcp: McpEndpoint | null;
   try {
     const result = await resolveIntegrationProxyCredentials(selection);
     resolved = result.payload;
@@ -258,6 +260,7 @@ export async function proxyCall(input: ProxyCallInput): Promise<ProxyCallResult>
     connectionId = result.connectionId;
     credentialRevision = result.credentialRevision;
     rejectionStreak = result.rejectionStreak;
+    remoteMcp = result.remoteMcp;
     refreshSelection = { ...selection, connectionId };
   } catch (err) {
     if (err instanceof IntegrationCredentialNotFoundError) {
@@ -283,6 +286,9 @@ export async function proxyCall(input: ProxyCallInput): Promise<ProxyCallResult>
     throw new ProxyCallError(kind === "unresolved_placeholder" ? kind : "invalid_request", message);
   }
   const { url: target, templates } = prepared.request;
+  if (remoteMcp !== null && targetsMcpEndpoint(target, remoteMcp)) {
+    throw remoteMcpEndpointNotProxied(input.integrationId);
+  }
 
   const authorizedUris = resolved.authorizedUris ?? [];
   const policy = credentialUrlPolicy({

@@ -1273,6 +1273,8 @@ async function registerLocalIntegration(
      * no extra filtering.
      */
     hiddenTools?: readonly string[];
+    /** `IntegrationSpawnSpec.blockedTools`: names the space blocks. */
+    blockedTools?: readonly string[];
   },
 ): Promise<{ allocatedNs: string; toolCount: number; unavailable: UnavailableTool[] }> {
   const sizeBefore = host.routeCount();
@@ -1283,6 +1285,7 @@ async function registerLocalIntegration(
     connection: spec.connection,
     ...(filters.allowedTools !== undefined ? { allowedTools: filters.allowedTools } : {}),
     ...((filters.hiddenTools?.length ?? 0) > 0 ? { hiddenTools: filters.hiddenTools } : {}),
+    ...((filters.blockedTools?.length ?? 0) > 0 ? { blockedTools: filters.blockedTools } : {}),
   });
   return { allocatedNs, toolCount: host.routeCount() - sizeBefore, unavailable };
 }
@@ -2042,6 +2045,7 @@ export async function bootIntegrations(
           // runtime as well as at install-time, so a manifest-hidden
           // tool can never reach the agent via the remote MCP path.
           ...(nativeHiddenTools ? { hiddenTools: nativeHiddenTools } : {}),
+          ...(spec.blockedTools?.length ? { blockedTools: spec.blockedTools } : {}),
           ...(spec.approvedToolFingerprints
             ? { approvedToolFingerprints: spec.approvedToolFingerprints }
             : {}),
@@ -2111,6 +2115,7 @@ export async function bootIntegrations(
           // R8a — propagate `hidden_tools` so the host filters them out at
           // runtime, regardless of whether install-time validation removed them.
           ...(nativeHiddenTools ? { hiddenTools: nativeHiddenTools } : {}),
+          blockedTools: spec.blockedTools,
         },
       );
       // Local integrations' unavailable tools are reported in the boot report only, never POSTed:

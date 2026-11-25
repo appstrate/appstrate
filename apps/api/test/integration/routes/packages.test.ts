@@ -2775,6 +2775,38 @@ describe("Packages API", () => {
       });
     });
 
+    it("answers name_collision for another organization's package before judging anything else", async () => {
+      const other = await createTestContext({ orgSlug: "otherorg" });
+      await seedAgent({ id: "@pkgorg/taken", orgId: other.orgId, createdBy: other.user.id });
+      const enc = (str: string) => new TextEncoder().encode(str);
+      const afps = zipSync({
+        "manifest.json": enc(
+          JSON.stringify({
+            name: "@pkgorg/taken",
+            version: "1.0.0",
+            type: "agent",
+            schema_version: "0.2",
+            display_name: "Taken",
+            description: "Names another org's package",
+            dependencies: { integrations: { "@nobody/ghost": "^1.0.0" } },
+            integrations_configuration: { "@nobody/ghost": { tools: ["anything"] } },
+          }),
+        ),
+        "prompt.md": enc("prompt"),
+      });
+      const form = new FormData();
+      form.append("file", new File([new Uint8Array(afps)], "agent.afps"));
+
+      const res = await app.request("/api/packages/import", {
+        method: "POST",
+        headers: authHeaders(ctx),
+        body: form,
+      });
+
+      expect(res.status).toBe(409);
+      expect(((await res.json()) as any).code).toBe("name_collision");
+    });
+
     it("moves the draft version when it overwrites an existing package, so a stale editor save is refused", async () => {
       const enc = (str: string) => new TextEncoder().encode(str);
       const id = "@pkgorg/reimported-skill";

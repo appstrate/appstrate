@@ -29,6 +29,7 @@ async function register(
   extra: {
     allowedTools?: string[];
     hiddenTools?: string[];
+    blockedTools?: string[];
     approvedToolFingerprints?: Record<string, string[]>;
   },
 ) {
@@ -133,6 +134,22 @@ describe("McpHost — unavailable report", () => {
     );
     try {
       expect(registration.unavailable).toEqual([{ name: "b", reason: "hidden_tools" }]);
+    } finally {
+      await close();
+    }
+  });
+
+  it("excludes blocked tools and reports blocked_in_space only for a selected one", async () => {
+    const { host, registration, close } = await register(
+      [tool("a", "a"), tool("b", "b"), tool("c", "c"), tool("d", "d")],
+      { allowedTools: ["a", "b", "d"], hiddenTools: ["d"], blockedTools: ["b", "c", "d"] },
+    );
+    try {
+      expect(exposed(host)).toEqual(["gh__a"]);
+      expect(registration.unavailable).toEqual([
+        { name: "b", reason: "blocked_in_space" },
+        { name: "d", reason: "hidden_tools" },
+      ]);
     } finally {
       await close();
     }

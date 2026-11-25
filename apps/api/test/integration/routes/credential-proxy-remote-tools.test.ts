@@ -2142,6 +2142,56 @@ describe("the typed tools of a remote MCP integration", () => {
       expect(server.requests).toEqual([]);
     });
 
+    it("refresh answers 502 when the server cannot be listed, and records nothing", async () => {
+      const dead = "http://127.0.0.1:9/mcp";
+      await seedProxyIntegration(
+        ctx,
+        remote({ url: dead, authorizedUris: ["http://127.0.0.1:9/**"] }),
+      );
+      await seedProxyConnection(ctx, ID, "api_key", { token: TOKEN });
+
+      const res = await refresh();
+      expect(res.status).toBe(502);
+      expect(((await res.json()) as { code: string }).code).toBe("bad_gateway");
+      expect(await snapshots()).toEqual([]);
+    });
+
+    it("refresh refuses a connection of a colleague that is not shared with the caller", async () => {
+      await seedProxyIntegration(ctx, remote());
+      const colleague = await memberContext(ctx, "member");
+      const theirs = await seedProxyConnection(colleague, ID, "api_key", { token: TOKEN });
+
+      const res = await refresh({ connection_id: theirs });
+      expect(res.status).toBeGreaterThanOrEqual(400);
+      expect(res.status).toBeLessThan(500);
+      expect(server.requests).toEqual([]);
+      expect(await snapshots()).toEqual([]);
+    });
+
+    it("refresh of an unauthenticated integration asks the same credential proxy right", async () => {
+      const open = startFakeMcpServer({ tools: ["search"] });
+      try {
+        await seedProxyIntegration(
+          ctx,
+          remoteIntegrationManifest({ name: ID, url: open.url, tools_policy: { search: {} } }),
+        );
+        const readOnly = (
+          await seedApiKey({
+            orgId: ctx.orgId,
+            spaceId: ctx.defaultSpaceId,
+            createdBy: ctx.user.id,
+            scopes: ["integrations:read"],
+          })
+        ).rawKey;
+
+        expect((await refresh(undefined, readOnly)).status).toBe(403);
+        expect(open.requests).toEqual([]);
+        expect((await refresh()).status).toBe(200);
+      } finally {
+        open.stop();
+      }
+    });
+
     it("refresh is refused to a caller without the credential proxy permission", async () => {
       await seedProxyIntegration(ctx, remote());
       await seedProxyConnection(ctx, ID, "api_key", { token: TOKEN });

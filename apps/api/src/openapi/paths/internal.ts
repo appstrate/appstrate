@@ -378,17 +378,8 @@ export const internalPaths = {
                   type: "array",
                   maxItems: 500,
                   items: {
-                    type: "object",
-                    description: "A valid descriptor; any other entry is dropped.",
-                    required: ["name", "inputSchema"],
-                    properties: {
-                      name: { type: "string", minLength: 1, maxLength: 256 },
-                      inputSchema: {
-                        type: "object",
-                        required: ["type"],
-                        properties: { type: { type: "string", enum: ["object"] } },
-                      },
-                    },
+                    description:
+                      "An MCP tool descriptor as the server returned it. Entries are judged one by one, not by this schema: a valid one has a non-empty `name` (at most 256 characters) and an object `inputSchema`; any other entry is dropped.",
                   },
                 },
                 truncated: { type: "boolean" },

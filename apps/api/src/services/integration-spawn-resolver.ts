@@ -35,6 +35,7 @@ import type { AfpsHttpDelivery as ConnectAfpsHttpDelivery } from "@appstrate/con
 import {
   allowsUndeclaredTools,
   displayAccountId,
+  getApiCallConfigs,
   getAppstrateConnectMeta,
   getIntegrationSourceKind,
   getLocalServer,
@@ -120,9 +121,6 @@ interface ResolveIntegrationsInput {
  * keys of the agent-facing table, so a reason cannot lack its text, nor a text its reason.
  */
 export type IntegrationDropReason = keyof typeof UNAVAILABLE_INTEGRATION_REASONS;
-
-/** The sidecar spec's cap on the fingerprints approved per tool; the most recent ones are kept. */
-const MAX_APPROVED_FINGERPRINTS = 32;
 
 /** One declared integration the run will start WITHOUT, plus why. */
 export interface DroppedIntegration {
@@ -373,7 +371,7 @@ async function resolveOne(
   // What the space decided about this integration's tools: blocked ones are hidden, and on a
   // closed remote catalog an undeclared tool the agent names is offered only at a definition the
   // space approved (declared tools are never held back by a changed definition).
-  const policy = await loadToolSpacePolicy(spaceId, integrationId);
+  const policy = await loadToolSpacePolicy(spaceId, integrationId, manifest);
   const blocked = new Set(policy.blocks);
   const selectedApiCalls: ApiCallSpec[] = selectedApiCallConfigs(manifest, effectiveSelection)
     // An `api_upload` dispatches through its `api_call`: blocking the call removes both.
@@ -521,18 +519,25 @@ async function resolveOne(
       ? Object.fromEntries(
           ((effectiveSelection ?? []) as readonly string[])
             .filter((name) => !declaredNames.has(name))
-            .map((name) => [
-              name,
-              (approvedByTool.get(name) ?? []).slice(0, MAX_APPROVED_FINGERPRINTS),
-            ]),
+            .map((name) => [name, approvedByTool.get(name) ?? []]),
         )
       : {};
   // The tools a spec exposes. A connection's login primitive is its auth's, never the agent's.
+  // Blocked by the space, not hidden by the manifest: the sidecar reports them as such.
+  // The `api_call` tools are removed above, never sent.
+  const platformTools = new Set(
+    getApiCallConfigs(manifest).flatMap((cfg) => [
+      cfg.toolName,
+      cfg.uploadToolName ?? cfg.toolName,
+    ]),
+  );
+  const blockedTools = policy.blocks.filter((name) => !platformTools.has(name));
+  const blockedSurface = blockedTools.length > 0 ? { blockedTools } : {};
   const toolSurface = (loginToolName: string | undefined) => {
-    const hiddenTools = [...new Set([...(manifest.hidden_tools ?? []), ...policy.blocks])];
+    const hiddenTools = [...new Set(manifest.hidden_tools ?? [])];
     if (wildcardSelection) {
       if (loginToolName && !hiddenTools.includes(loginToolName)) hiddenTools.push(loginToolName);
-      return hiddenTools.length > 0 ? { hiddenTools } : {};
+      return { ...(hiddenTools.length > 0 ? { hiddenTools } : {}), ...blockedSurface };
     }
     const toolAllowlist = ((effectiveSelection ?? []) as readonly string[]).filter(
       (t) => t !== loginToolName,
@@ -540,6 +545,7 @@ async function resolveOne(
     return {
       toolAllowlist,
       ...(hiddenTools.length > 0 ? { hiddenTools } : {}),
+      ...blockedSurface,
       ...(Object.keys(approvedToolFingerprints).length > 0 ? { approvedToolFingerprints } : {}),
     };
   };

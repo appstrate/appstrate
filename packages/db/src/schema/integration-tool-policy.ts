@@ -57,7 +57,7 @@ export const integrationToolSnapshots = pgTable(
     tools: jsonb("tools").$type<ToolSnapshotEntry[]>().notNull().default([]),
   },
   (table) => [
-    // `coalesce` stands in for NULLS NOT DISTINCT (drizzle cannot express it).
+    // `coalesce` stands in for NULLS NOT DISTINCT, which drizzle offers on `unique()` only, not `uniqueIndex()`.
     uniqueIndex("uq_integration_tool_snapshots_target").on(
       table.orgId,
       table.packageId,

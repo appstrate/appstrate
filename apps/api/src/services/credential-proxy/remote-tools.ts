@@ -44,6 +44,7 @@ import { renderRemoteSource } from "../integration-manifest-helpers.ts";
 import { readIntegrationManifestForProxy } from "../integration-service.ts";
 import {
   approvedFingerprintsByTool,
+  approvedToolNames,
   loadToolSpacePolicy,
   toolBlockedInSpace,
 } from "../integration-tool-catalog.ts";
@@ -463,7 +464,7 @@ export async function listRemoteTools(
   const offered = offeredRemoteToolNames(
     manifest,
     described?.tools.map(({ tool, fingerprint }) => ({ ...tool, fingerprint })),
-    await loadToolSpacePolicy(input.scope.spaceId, input.integrationId),
+    await loadToolSpacePolicy(input.scope.spaceId, input.integrationId, manifest),
   );
   if (described === undefined) {
     return {
@@ -520,7 +521,7 @@ export async function callRemoteTool(
   );
   if (!loaded.ok) throw notFound(`Integration '${input.integrationId}' has no published version`);
   const manifest = streamableRemote(input.integrationId, loaded.manifest);
-  const policy = await loadToolSpacePolicy(input.scope.spaceId, input.integrationId);
+  const policy = await loadToolSpacePolicy(input.scope.spaceId, input.integrationId, manifest);
   if (policy.blocks.includes(input.name)) {
     throw toolBlockedInSpace(input.integrationId, input.name);
   }
@@ -532,7 +533,7 @@ export async function callRemoteTool(
   );
   // On a closed catalog, an undeclared tool the space approved is judged on the listing below.
   const approvedUndeclared =
-    !offered.has(input.name) && !open && approvedFingerprintsByTool(policy).has(input.name);
+    !offered.has(input.name) && !open && approvedToolNames(policy).has(input.name);
   if (!offered.has(input.name) && !approvedUndeclared) {
     throw notFound(`Integration '${input.integrationId}' offers no tool named '${input.name}'`);
   }

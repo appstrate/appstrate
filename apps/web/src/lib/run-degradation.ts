@@ -14,6 +14,7 @@ export function parseDegradedIntegrations(metadata: unknown): string[] {
 const UNAVAILABLE_REASONS: Record<UnavailableToolReason, true> = {
   not_listed: true,
   hidden_tools: true,
+  blocked_in_space: true,
   definition_not_approved: true,
   name_collision: true,
 };

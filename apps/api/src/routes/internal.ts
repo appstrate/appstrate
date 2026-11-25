@@ -229,11 +229,11 @@ const UNAVAILABLE_TOOL_REASONS = [
   "name_collision",
 ] as const satisfies readonly UnavailableToolReason[];
 
-const toolNameSchema = z.string().min(1).max(OBSERVED_TOOL_NAME_MAX_LENGTH);
+const observedToolNameSchema = z.string().min(1).max(OBSERVED_TOOL_NAME_MAX_LENGTH);
 
 /** One raw MCP descriptor as the platform can fingerprint it. */
 const observedToolSchema = z.looseObject({
-  name: toolNameSchema,
+  name: observedToolNameSchema,
   inputSchema: z.looseObject({ type: z.literal("object") }),
 });
 
@@ -246,7 +246,9 @@ export const toolsObservedSchema = z.strictObject({
   tools: z.array(z.unknown()).max(OBSERVED_TOOLS_MAX_COUNT),
   truncated: z.boolean(),
   unavailable: z
-    .array(z.strictObject({ name: toolNameSchema, reason: z.enum(UNAVAILABLE_TOOL_REASONS) }))
+    .array(
+      z.strictObject({ name: observedToolNameSchema, reason: z.enum(UNAVAILABLE_TOOL_REASONS) }),
+    )
     .max(OBSERVED_TOOLS_MAX_COUNT),
 });
 

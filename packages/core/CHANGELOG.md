@@ -17,6 +17,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `@appstrate/core/sidecar-types` exports `OBSERVED_TOOLS_MAX_COUNT` and `OBSERVED_TOOL_NAME_MAX_LENGTH` (bounds of the tools-observed report); `@appstrate/core/www-authenticate` exports `MAX_REQUIRED_SCOPE_LENGTH`.
 - `isListedToolName` in `@appstrate/core/naming` tells whether a server-listed tool name is safe to quote to a model or a log.
 
+- `IntegrationSpawnSpec.blockedTools` carries the names a space blocks; the sidecar excludes them and reports `blocked_in_space` (new `UnavailableToolReason`). `MAX_APPROVED_FINGERPRINTS_PER_TOOL` (32) is exported from `@appstrate/core/sidecar-types`, and an oversize `approvedToolFingerprints` now fails with a message.
+- `@appstrate/core/integration` exports `targetsMcpEndpoint` and `McpEndpoint` (moved from the sidecar): whether a URL falls on an integration's remote MCP endpoint.
+
 ### Fixed
 
 - `validateAgentIntegrationScopes` refuses an unknown tool name on a closed `remote` catalog that declares no tools; it used to accept any name there. A catalog with `allow_undeclared_tools` is not name-checked, and a local source declaring no tools keeps the no-check rule of AFPS §7.1.

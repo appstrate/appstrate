@@ -38,7 +38,7 @@ import type { ToolDescriptorReduction } from "@appstrate/mcp-transport";
 import { ApiError, notFound } from "../../lib/errors.ts";
 import { logger } from "../../lib/logger.ts";
 import type { ProxyConnectionStatus } from "../integration-connections.ts";
-import { loadToolSpacePolicy } from "../integration-tool-catalog.ts";
+import { approvedToolNames, loadToolSpacePolicy } from "../integration-tool-catalog.ts";
 import {
   activeIntegrationIds,
   connectionsOutsideRun,
@@ -357,12 +357,12 @@ function mayNameRemoteTool(
 ): boolean {
   if (!name.startsWith(`${entry.namespace}__`)) return false;
   if (allowsUndeclaredTools(entry.manifest)) return true;
-  const offered = offeredRemoteToolNames(entry.manifest, undefined, policy);
   // An approved tool is named like a declared one; its listing says whether it is offered.
-  for (const { tool_name } of policy.approvals) {
-    if (!policy.blocks.includes(tool_name)) offered.add(tool_name);
-  }
-  return exposeRemoteTools(entry.id, entry.namespace, offered).has(name);
+  const nameable = new Set([
+    ...offeredRemoteToolNames(entry.manifest, undefined, policy),
+    ...approvedToolNames(policy),
+  ]);
+  return exposeRemoteTools(entry.id, entry.namespace, nameable).has(name);
 }
 
 /**
@@ -539,7 +539,7 @@ export async function listIntegrationTools(
           manifest,
           connections,
           apiCallNames: apiCallToolNames(id, namespace, manifest),
-          policy: await loadToolSpacePolicy(scope.spaceId, id),
+          policy: await loadToolSpacePolicy(scope.spaceId, id, manifest),
         };
       }),
   );

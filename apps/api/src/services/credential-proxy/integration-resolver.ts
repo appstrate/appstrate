@@ -28,7 +28,7 @@ import {
   type AfpsHttpDelivery as ConnectAfpsHttpDelivery,
   type ProxyCredentialsPayload,
 } from "@appstrate/connect";
-import { getApiCallConfigs, type ToolSpacePolicy } from "@appstrate/core/integration";
+import { getApiCallConfigs, type McpEndpoint } from "@appstrate/core/integration";
 import { credentialTemplateRefs } from "@appstrate/afps-shared/credential-template";
 import {
   renderAuthAuthorizedUris,
@@ -56,7 +56,8 @@ import {
   type ResolvedConnectionRow,
   type RunBoundSelection,
 } from "../integration-connections.ts";
-import { toolBlockedInSpace } from "../integration-tool-catalog.ts";
+import { renderRemoteSource } from "../integration-manifest-helpers.ts";
+import { loadToolSpacePolicy, toolBlockedInSpace } from "../integration-tool-catalog.ts";
 import { listOrgDefaultsForResolver } from "../integration-org-defaults-service.ts";
 import { listActivePackages } from "../space-packages.ts";
 import type { ConnectionVariables } from "../connect/connection-variables.ts";
@@ -144,8 +145,12 @@ type ResolveIntegrationProxyInput = {
   connectionId?: string;
   /** How the caller names `connectionId`; the header when omitted. */
   connectionNaming?: ConnectionNaming;
-  /** Set by the `api_call` door: refuses a connection whose auth's `api_call` the space blocked. */
-  toolPolicy?: ToolSpacePolicy;
+  /**
+   * Set by the `api_call` door: the space's tool policy applies. A connection whose auth's
+   * `api_call` the space blocked is refused, and the result names the remote MCP endpoint the
+   * call must not reach (it is open to the MCP tool doors only).
+   */
+  applySpacePolicy?: true;
 } & ProxyCallPath;
 
 interface ResolvedIntegrationProxyCredentials {
@@ -160,6 +165,8 @@ interface ResolvedIntegrationProxyCredentials {
   authKey: string;
   /** Consecutive upstream rejections counted before this call (`upstreamRejectionStreak`). */
   rejectionStreak: number;
+  /** With `applySpacePolicy`: the connection's rendered remote MCP endpoint, `null` when it has none. */
+  remoteMcp: McpEndpoint | null;
 }
 
 /**
@@ -181,13 +188,15 @@ export async function resolveIntegrationProxyCredentials(
   const connection = await resolveConnection(input, manifest);
   if (!connection) throw new IntegrationCredentialNotFoundError(noConnectionMessage(input));
 
-  for (const config of getApiCallConfigs(manifest)) {
-    if (
-      config.authKey === connection.authKey &&
-      input.toolPolicy?.blocks.includes(config.toolName)
-    ) {
-      throw toolBlockedInSpace(input.integrationId, config.toolName);
+  let remoteMcp: McpEndpoint | null = null;
+  if (input.applySpacePolicy) {
+    const policy = await loadToolSpacePolicy(input.spaceId, input.integrationId, manifest);
+    for (const config of getApiCallConfigs(manifest)) {
+      if (config.authKey === connection.authKey && policy.blocks.includes(config.toolName)) {
+        throw toolBlockedInSpace(input.integrationId, config.toolName);
+      }
     }
+    remoteMcp = renderRemoteSource(manifest, connection.variables);
   }
   const payload = buildPayload(input.integrationId, manifest, connection);
   return {
@@ -197,6 +206,7 @@ export async function resolveIntegrationProxyCredentials(
     credentialRevision: connection.credentialRevision,
     authKey: connection.authKey,
     rejectionStreak: upstreamRejectionStreak(connection),
+    remoteMcp,
   };
 }
 
