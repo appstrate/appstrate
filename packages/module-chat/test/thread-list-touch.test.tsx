@@ -114,6 +114,12 @@ describe("a conversation row's « … »", () => {
     expect(ages[0]).toMatch(/(?:^|\s)desktop-pointer:opacity-0(?:\s|")/);
     expect(ages[1]).not.toMatch(/(?:^|\s)desktop-pointer:opacity-0(?:\s|")/);
   });
+
+  it("keeps the age out of the way while the row's menu is open, the mouse gone to the menu", () => {
+    const html = render(["chat:read", "chat:write"]);
+    const age = html.match(/<span class="[^"]*desktop-pointer:inline[^"]*">age/)?.[0];
+    expect(age).toContain("desktop-pointer:group-has-[[aria-expanded=true]]/menu-item:opacity-0");
+  });
 });
 
 describe("the sidebar's head, the phone's on every format", () => {
@@ -188,10 +194,11 @@ describe("the list's date groups", () => {
     expect(html).toContain(`class="${GROUP_ROWS_CLASS}"`);
   });
 
-  it("head each group with a semibold label, darker than its rows, in small capitals under a mouse", () => {
+  it("head each group with a semibold label, darker than its rows, written as said, lit on hover", () => {
     expect(GROUP_LABEL_CLASS).toContain("font-semibold");
     expect(GROUP_LABEL_CLASS.split(" ")).toContain("text-sidebar-foreground");
-    expect(GROUP_LABEL_CLASS).toContain("md:uppercase");
+    expect(GROUP_LABEL_CLASS).not.toContain("uppercase");
+    expect(GROUP_LABEL_CLASS).toContain("desktop-pointer:hover:bg-sidebar-accent");
     expect(html).toContain("threads.group.older");
   });
 

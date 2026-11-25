@@ -120,9 +120,10 @@ they start with `packages/` or `e2e/`.
   same folded search, and the conversations as the same one-line rows. The list is as dense as a
   desktop app's: rows of 32 px under a mouse and 36 on touch (below the 44 px the rest of the
   chat gives a thumb, by choice), in regular weight a shade lighter than the date groups' headings,
-  which are semibold, set apart from « Nouvelle conversation » and from each other, and fold and
-  unfold (remembered per browser). Under a mouse a row's "…" shows on hover and on the open
-  conversation, in place of its age, its square as small as it is; on touch a row has none, the
+  which are semibold, written as said (« Hier », not in capitals), set apart from « Nouvelle
+  conversation » and from each other, lit on hover under a mouse, and fold and unfold
+  (remembered per browser). Under a mouse a row's "…" shows on hover and on the open
+  conversation, in place of its age (hidden too while its menu is open), its square as small as it is; on touch a row has none, the
   header's « … » acts on the open conversation. It
   opens at the phone drawer's 18rem and is resizable by its right edge (`PanelResizeHandle`,
   remembered per browser, double-click resets).

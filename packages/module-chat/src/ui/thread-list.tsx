@@ -118,17 +118,22 @@ const GROUP_LABEL_KEY: Record<SessionGroupKey, string> = {
  */
 export const GROUP_CLASS = "mt-4 flex flex-col gap-0.5";
 /**
- * Its heading, set apart from the rows: semibold and muted, in small capitals under a mouse. It
- * folds and unfolds its group, its chevron turned while folded.
+ * Its heading, set apart from the rows: semibold, written as said (« Hier », « 7 derniers jours »),
+ * lit on hover under a mouse like a row, since it folds and unfolds its group, its chevron turned
+ * while folded.
  */
 export const GROUP_LABEL_CLASS =
-  "group/label text-sidebar-foreground hover:text-sidebar-foreground/80 h-6 w-fit gap-1 px-2 text-[13px] font-semibold md:text-[11px] md:tracking-wider md:uppercase";
+  "group/label text-sidebar-foreground desktop-pointer:hover:bg-sidebar-accent desktop-pointer:hover:text-sidebar-accent-foreground h-6 w-fit gap-1 px-2 text-[13px] font-semibold md:text-xs";
 /** Its rows, one line each, close together (`ConversationRow`). */
 export const GROUP_ROWS_CLASS = "flex flex-col";
 
-/** The row's unread dot or age, stepping aside under a mouse for the « … » that takes its place. */
+/**
+ * The row's unread dot or age, stepping aside under a mouse for the « … » that takes its place,
+ * and while its menu is open: the mouse is then on the menu and the focus inside it, so neither
+ * hover nor focus-within keeps the slot clear any more.
+ */
 const SLOT_HIDDEN_FOR_MENU =
-  "desktop-pointer:group-hover/menu-item:opacity-0 desktop-pointer:group-focus-within/menu-item:opacity-0";
+  "desktop-pointer:group-hover/menu-item:opacity-0 desktop-pointer:group-focus-within/menu-item:opacity-0 desktop-pointer:group-has-[[aria-expanded=true]]/menu-item:opacity-0";
 
 /** The date groups the person folded, kept per browser (a blocked storage keeps them in memory). */
 const COLLAPSED_GROUPS_KEY = "appstrate-chat-collapsed-groups";
