@@ -144,6 +144,7 @@ export function ThoughtGroup({
           <button
             type="button"
             disabled={!expandable}
+            data-testid="chat-thought-toggle"
             className="enabled:hover:text-foreground group flex h-full min-w-0 items-center justify-start gap-2 text-left font-normal"
           >
             <span className="min-w-0 truncate">{sentence}</span>

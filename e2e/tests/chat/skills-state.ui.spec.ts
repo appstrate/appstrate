@@ -98,7 +98,8 @@ test("a skill the assistant read is pinned from its chip, and unpinned from the 
 
   await page.goto(`/chat/${id}`);
 
-  // The assistant's read is a skill chip.
+  // The assistant's read is a step of its thought block, folded until opened: a skill chip.
+  await page.getByTestId("chat-thought-toggle").click();
   const load = page.getByTestId("skill-load");
   await expect(load.getByTestId("directive-chip")).toHaveText("read");
 
