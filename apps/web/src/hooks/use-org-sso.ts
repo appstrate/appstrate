@@ -12,16 +12,11 @@ export function useOrgSso() {
   return $api.useQuery("get", "/api/org-sso", { params: { header } }, { enabled });
 }
 
-function useStoreSettings() {
+export function useOrgSsoMutations() {
   const queryClient = useQueryClient();
   const { header } = useOrgOnlyScope();
   const key = $api.queryOptions("get", "/api/org-sso", { params: { header } }).queryKey;
-  return (settings: SsoSettings) => queryClient.setQueryData(key, settings);
-}
-
-export function useOrgSsoMutations() {
-  const store = useStoreSettings();
-  const onSuccess = (settings: SsoSettings) => store(settings);
+  const onSuccess = (settings: SsoSettings) => queryClient.setQueryData(key, settings);
   return {
     update: $api.useMutation("patch", "/api/org-sso", { onSuccess }),
     // Its two callers word the refusal themselves: the button turns `microsoft_session_required`

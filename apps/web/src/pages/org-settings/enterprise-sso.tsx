@@ -31,10 +31,10 @@ import { usePermissions } from "../../hooks/use-permissions";
 import { fieldWriteState } from "../../lib/field-write-state";
 import { formatDateField } from "../../lib/format-date";
 import { refusalMessage, toastError } from "../../lib/mutation-error";
+import { socialCallbackError } from "../../lib/auth-flow";
 import {
   enforcementBlocker,
   ORG_SSO_PATH,
-  socialCallbackError,
   SSO_CONNECT_PARAM,
   ssoDomainBody,
   ssoJoinRoleBody,

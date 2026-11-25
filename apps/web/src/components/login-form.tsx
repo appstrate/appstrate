@@ -19,7 +19,8 @@ import { LegalFooter } from "./legal-footer";
 import { EmailNotVerifiedError } from "../lib/auth-errors";
 import { errorMessage, refusalMessage } from "../lib/mutation-error";
 import { ApiError } from "../api/errors";
-import { errorCallbackURL, isSsoRefusal, socialCallbackError } from "../lib/org-sso";
+import { isSsoRefusal } from "../lib/org-sso";
+import { errorCallbackURL, socialCallbackError } from "../lib/auth-flow";
 
 type LoginFormData = {
   email: string;

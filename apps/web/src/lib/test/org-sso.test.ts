@@ -4,9 +4,7 @@ import { describe, expect, it } from "bun:test";
 import {
   EMERGENCY_SIGN_IN_QUERY,
   enforcementBlocker,
-  errorCallbackURL,
   isSsoRefusal,
-  socialCallbackError,
   ssoDomainBody,
   ssoJoinRoleBody,
   ssoLinkTenantBody,
@@ -69,27 +67,11 @@ describe("enforcementBlocker", () => {
   });
 });
 
-describe("social callback errors", () => {
-  it("reads the code a refused callback came back with", () => {
-    expect(socialCallbackError("?error=sso_required")).toBe("sso_required");
-    expect(socialCallbackError("?redirect=%2Fruns")).toBeNull();
-  });
-
-  it("leaves a verification link's errors to the page that asked for it", () => {
-    expect(socialCallbackError("?error=INVALID_TOKEN")).toBeNull();
-  });
-
+describe("isSsoRefusal", () => {
   it("knows the organization's sign-in refusals", () => {
     expect(isSsoRefusal("sso_required")).toBe(true);
     expect(isSsoRefusal("sso_tenant_mismatch")).toBe(true);
     expect(isSsoRefusal("access_denied")).toBe(false);
     expect(isSsoRefusal(null)).toBe(false);
-  });
-
-  it("returns to the same page without the previous error", () => {
-    expect(errorCallbackURL("/login", "?redirect=%2Fruns&error=sso_required")).toBe(
-      "/login?redirect=%2Fruns",
-    );
-    expect(errorCallbackURL("/login", "?error=x&error_description=y")).toBe("/login");
   });
 });

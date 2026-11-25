@@ -7,7 +7,6 @@
  */
 
 import type { components } from "../api/client";
-import { hasVerificationLinkError } from "./auth-errors";
 import type { RoutePath } from "./route-access";
 
 export type SsoSettings = components["schemas"]["SsoSettings"];
@@ -59,24 +58,4 @@ type SsoRefusalCode = (typeof SSO_REFUSAL_CODES)[number];
 
 export function isSsoRefusal(code: string | null | undefined): code is SsoRefusalCode {
   return (SSO_REFUSAL_CODES as readonly string[]).includes(code ?? "");
-}
-
-/** Better Auth's callback error parameters, added to the error callback URL of a social sign-in. */
-const CALLBACK_ERROR_PARAMS = ["error", "error_description"];
-
-/** `path` + `search` without a previous callback error, so the next one is the only `?error=`. */
-export function errorCallbackURL(pathname: string, search: string): string {
-  const params = new URLSearchParams(search);
-  for (const name of CALLBACK_ERROR_PARAMS) params.delete(name);
-  const query = params.toString();
-  return query ? `${pathname}?${query}` : pathname;
-}
-
-/**
- * The code a social sign-in's callback came back with (`?error=`), or `null`. A verification
- * link's own errors are left to the page that asked for the link (`hasVerificationLinkError`).
- */
-export function socialCallbackError(search: string): string | null {
-  if (hasVerificationLinkError(search)) return null;
-  return new URLSearchParams(search).get("error") || null;
 }

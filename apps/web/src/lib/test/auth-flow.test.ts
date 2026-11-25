@@ -6,6 +6,8 @@ import {
   emailWasChanged,
   EMAIL_CHANGE_CALLBACK_URL,
   emailChangeLanding,
+  errorCallbackURL,
+  socialCallbackError,
 } from "../auth-flow";
 
 describe("signedOutDestination", () => {
@@ -54,5 +56,23 @@ describe("emailChangeLanding", () => {
 
   it("reports a refused address apart from a bad link", () => {
     expect(emailChangeLanding(`${search}&error=email_change_refused`)).toBe("refused");
+  });
+});
+
+describe("social callback errors", () => {
+  it("reads the code a refused callback came back with", () => {
+    expect(socialCallbackError("?error=sso_required")).toBe("sso_required");
+    expect(socialCallbackError("?redirect=%2Fruns")).toBeNull();
+  });
+
+  it("leaves a verification link's errors to the page that asked for it", () => {
+    expect(socialCallbackError("?error=INVALID_TOKEN")).toBeNull();
+  });
+
+  it("returns to the same page without the previous error", () => {
+    expect(errorCallbackURL("/login", "?redirect=%2Fruns&error=sso_required")).toBe(
+      "/login?redirect=%2Fruns",
+    );
+    expect(errorCallbackURL("/login", "?error=x&error_description=y")).toBe("/login");
   });
 });
