@@ -16,6 +16,7 @@ import {
   Shield,
   ShieldCheck,
   User,
+  UserCog,
   Users,
   Webhook,
 } from "lucide-react";
@@ -128,6 +129,37 @@ export function settingsScopeFromPath(pathname: string): SettingsScope {
   const scopes = Object.keys(SETTINGS_INDEX) as SettingsScope[];
   return scopes.find((scope) => isUnder(pathname, SETTINGS_INDEX[scope])) ?? "organization";
 }
+
+/**
+ * The two dialogs the shell draws: Settings holds what the caller administers
+ * (organization, workspace), Preferences what is their own (account). Each
+ * lists only its own scopes.
+ */
+export type SettingsSurface = "settings" | "preferences";
+
+const SURFACE_OF_SCOPE: Record<SettingsScope, SettingsSurface> = {
+  organization: "settings",
+  workspace: "settings",
+  account: "preferences",
+};
+
+export function settingsSurfaceFromPath(pathname: string): SettingsSurface {
+  return SURFACE_OF_SCOPE[settingsScopeFromPath(pathname)];
+}
+
+/** The sections a surface's rail lists. */
+export function surfaceSections(
+  sections: UnifiedSettingsSection[],
+  surface: SettingsSurface,
+): UnifiedSettingsSection[] {
+  return sections.filter((section) => SURFACE_OF_SCOPE[section.scope] === surface);
+}
+
+/** Each surface's name (the dialog's title, the rail's header, the breadcrumb's root) and icon. */
+export const SETTINGS_SURFACES: Record<SettingsSurface, { titleKey: string; icon: LucideIcon }> = {
+  settings: { titleKey: "common:nav.settings", icon: Settings },
+  preferences: { titleKey: "common:userMenu.preferences", icon: UserCog },
+};
 
 /** Keys the content outlet: a context switch remounts the page instead of flashing the previous scope's data. */
 export function settingsContentKey(

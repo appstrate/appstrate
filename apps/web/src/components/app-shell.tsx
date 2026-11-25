@@ -22,6 +22,7 @@ import { useOverviewMode } from "@/hooks/use-overview-mode";
 import { catalogueHref } from "@/lib/catalogue-link";
 import { overlayIntent, preloadOverlaysWhenIdle } from "@/lib/overlay-chunks";
 import { isSettingsPath, isUnder, SETTINGS_INDEX } from "@/lib/route-access";
+import { settingsSurfaceFromPath } from "@/pages/settings/navigation";
 import { KEYBOARD_VIEWPORT_CLASS } from "@appstrate/ui/use-keyboard-viewport";
 import { cn } from "@appstrate/ui/cn";
 import {
@@ -94,7 +95,9 @@ export function AppSidebar({ product }: { product: "studio" | "chat" }) {
   const canReach = useCanReach();
   const ready = useReachReady();
   const overlayPath = useOverlayPath() ?? "";
-  const settingsActive = isSettingsPath(overlayPath);
+  // Preferences is its own dialog: the Settings entry is not the one open there.
+  const settingsActive =
+    isSettingsPath(overlayPath) && settingsSurfaceFromPath(overlayPath) === "settings";
   const catalogueActive = isUnder(overlayPath, "/catalogue");
   const catalogueReachable = canReach("/catalogue");
   // Always on screen, so their overlays' code is fetched ahead of any click (`lib/overlay-chunks.ts`).

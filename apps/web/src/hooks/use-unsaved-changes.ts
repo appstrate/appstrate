@@ -111,7 +111,7 @@ export function requestScopeChange(action: () => void): void {
       setAsk(null);
       // "Leave without saving" drops every draft. `skip` covers the navigation the change
       // may start before the forms re-render clean; a clean form clears it and is guarded
-      // again (a form that stays mounted, such as an account preference, included).
+      // again (a form that stays mounted, such as the organization's page, included).
       for (const guard of dirtyGuards()) {
         guard.skip = true;
         guard.discard();

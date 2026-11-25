@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * The one dialog of every panel overlay (settings, catalogue).
+ * The one dialog of every panel overlay (settings, preferences, catalogue).
  *
  * A layout route of the overlay tree: it opens once, and whatever its panes go
  * through under it — the skeleton while a chunk or the permissions load, then
@@ -18,6 +18,7 @@ import { keepOpenWhileRenaming } from "../lib/keep-open-while-renaming";
 import { useCloseOverlay } from "../lib/modal-route";
 import { isUnder } from "../lib/route-access";
 import { INTEGRATED_TABLE_SURFACE } from "../lib/table-surface";
+import { SETTINGS_SURFACES, settingsSurfaceFromPath } from "../pages/settings/navigation";
 
 export function OverlayFrame() {
   const { t } = useTranslation("settings");
@@ -27,7 +28,7 @@ export function OverlayFrame() {
   // Announced by assistive technology from the first frame, skeleton included.
   const title = isUnder(pathname, "/catalogue")
     ? t("common:nav.catalogue")
-    : t("common:nav.settings");
+    : t(SETTINGS_SURFACES[settingsSurfaceFromPath(pathname)].titleKey);
 
   return (
     <Dialog open onOpenChange={(open) => !open && close()}>
