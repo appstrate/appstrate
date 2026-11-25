@@ -282,6 +282,8 @@ export function useIntegrationToolPolicy(packageId: string | undefined, enabled:
  * The tool policy's four writes. Each refreshes every integrations read: the detail's
  * `tool_catalog` statuses move with the policy. A refusal is toasted by the mutation cache.
  */
+export type ToolPolicyAction = "approve" | "revoke" | "block" | "unblock";
+
 export function useIntegrationToolPolicyActions(packageId: string) {
   const qc = useQueryClient();
   const onSuccess = () => invalidateIntegrationQueries(qc);
@@ -311,7 +313,19 @@ export function useIntegrationToolPolicyActions(packageId: string) {
     block: (body: Parameters<typeof block.mutate>[0]["body"], onDone?: () => void) =>
       block.mutate({ params: { path }, body }, { onSuccess: onDone }),
     unblock: (toolName: string) => unblock.mutate({ params: { path: { ...path, toolName } } }),
-    isPending: approve.isPending || revoke.isPending || block.isPending || unblock.isPending,
+    /** Whether `action` is in flight for the tool `name`: a row waits on its own write only. */
+    isPending: (action: ToolPolicyAction, name: string): boolean => {
+      switch (action) {
+        case "approve":
+          return approve.isPending && !!approve.variables?.body.tools.some((t) => t.name === name);
+        case "block":
+          return block.isPending && !!block.variables?.body.tools.includes(name);
+        case "revoke":
+          return revoke.isPending && revoke.variables?.params.path.toolName === name;
+        case "unblock":
+          return unblock.isPending && unblock.variables?.params.path.toolName === name;
+      }
+    },
   };
 }
 

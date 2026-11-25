@@ -2,19 +2,14 @@
 
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
-import { RefreshCw } from "lucide-react";
-import { Button } from "@appstrate/ui/components/button";
-import { Spinner } from "@appstrate/ui/components/spinner";
 import { $api } from "../../api/client";
-import { errorMessage } from "../../lib/mutation-error";
 import {
   connectionChoiceBody,
   type ServerIdentityKey,
   type ServerReadBlock,
   type ServerSyncProposal,
 } from "../../lib/integration-server-sync";
-import { DisabledReasonTooltip } from "../disabled-reason-tooltip";
-import { SyncConnectionChoice } from "./sync-connection-choice";
+import { ServerReadControl } from "./server-read-control";
 
 /**
  * Reads the draft's remote server and fills the identity fields the author left empty. The merge is
@@ -52,42 +47,28 @@ export function ServerIdentityFill({
   };
 
   return (
-    <div className="flex flex-col gap-2" data-testid="integration-editor-identity-from-server">
-      <div className="flex flex-col items-start gap-2">
-        <DisabledReasonTooltip
-          reason={blockedBy && t(`integrationEditor.identityFromServer.blocked.${blockedBy}`)}
-        >
-          <Button
-            type="button"
-            variant="outline"
-            disabled={read.isPending || blockedBy !== null}
-            onClick={() => run()}
-            data-testid="integration-editor-identity-from-server-button"
-          >
-            {read.isPending ? <Spinner /> : <RefreshCw />}
-            {t("integrationEditor.identityFromServer.button")}
-          </Button>
-        </DisabledReasonTooltip>
-        <p className="text-muted-foreground text-sm">
-          {t("integrationEditor.identityFromServer.help")}
-        </p>
-        {filled && read.error == null && (
-          <p className="text-muted-foreground text-sm" role="status">
-            {filled.length > 0
-              ? t("integrationEditor.identityFromServer.done", {
-                  count: filled.length,
-                  fields: filled.map((key) => labels[key]).join(", "),
-                })
-              : t("integrationEditor.identityFromServer.nothing")}
-          </p>
-        )}
-      </div>
-      {read.error != null && (
-        <p role="alert" className="text-destructive text-sm">
-          {errorMessage(read.error)}
+    <ServerReadControl
+      label={t("integrationEditor.identityFromServer.button")}
+      blockedBy={blockedBy}
+      isPending={read.isPending}
+      error={read.error}
+      onRun={run}
+      testId="integration-editor-identity-from-server"
+      buttonTestId="integration-editor-identity-from-server-button"
+    >
+      <p className="text-muted-foreground text-sm">
+        {t("integrationEditor.identityFromServer.help")}
+      </p>
+      {filled && read.error == null && (
+        <p className="text-muted-foreground text-sm" role="status">
+          {filled.length > 0
+            ? t("integrationEditor.identityFromServer.done", {
+                count: filled.length,
+                fields: filled.map((key) => labels[key]).join(", "),
+              })
+            : t("integrationEditor.identityFromServer.nothing")}
         </p>
       )}
-      <SyncConnectionChoice error={read.error} onChoose={run} disabled={read.isPending} />
-    </div>
+    </ServerReadControl>
   );
 }

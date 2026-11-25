@@ -28,6 +28,7 @@ import {
 import {
   isApiCallToolSelectionEnabled,
   replaceNativeToolSelection,
+  selectableNativeToolNames,
   toggleApiCallToolSelection,
 } from "./tool-selection.ts";
 import { cn } from "@appstrate/ui/cn";
@@ -54,6 +55,8 @@ import { TextSkeleton } from "../loading-skeletons";
 interface IntegrationToolPickerProps {
   packageId: string;
   spaceId?: string;
+  /** The space the statuses are read in, when it is not the one the reader is in. */
+  spaceName?: string;
   entry: ResourceEntry;
   onChange: (next: ResourceEntry) => void;
 }
@@ -100,7 +103,13 @@ function RequiredIntegrationToggle({ packageId, entry, onChange }: IntegrationTo
   );
 }
 
-function IntegrationToolPanel({ packageId, spaceId, entry, onChange }: IntegrationToolPickerProps) {
+function IntegrationToolPanel({
+  packageId,
+  spaceId,
+  spaceName,
+  entry,
+  onChange,
+}: IntegrationToolPickerProps) {
   const { t } = useTranslation("settings");
   const { data: detail, isLoading } = useIntegrationDetail(packageId, spaceId);
 
@@ -182,8 +191,10 @@ function IntegrationToolPanel({ packageId, spaceId, entry, onChange }: Integrati
   const arrayTools = Array.isArray(effectiveTools) ? [...new Set(effectiveTools)] : [];
   const selectedTools = new Set(arrayTools);
   const selectedScopes = new Set(entry.scopes ?? []);
+  // "Select all" adds what a checkbox could add: a tool the space cannot call stays out.
+  const selectableToolNames = selectableNativeToolNames(nativeCatalog, selectedTools);
   const allSelected =
-    declaredToolNames.length > 0 && declaredToolNames.every((name) => selectedTools.has(name));
+    selectableToolNames.length > 0 && selectableToolNames.every((name) => selectedTools.has(name));
   // "Select none" clears the NATIVE slice only (api_call selections are preserved).
   const noneSelected = declaredToolNames.every((name) => !selectedTools.has(name));
   // Mirrors `selectsNoCallableTool` on the API side: the whole selection, api_call rows included.
@@ -251,7 +262,7 @@ function IntegrationToolPanel({ packageId, spaceId, entry, onChange }: Integrati
       ...entry,
       tools: replaceNativeToolSelection(
         arrayTools,
-        declaredToolNames,
+        selectableToolNames,
         visibleSyntheticToolNames,
         all,
       ),
@@ -413,6 +424,7 @@ function IntegrationToolPanel({ packageId, spaceId, entry, onChange }: Integrati
           </p>
           <PackageToolCatalog
             listedAt={detail.tool_snapshot?.listed_at}
+            spaceName={spaceName}
             tools={nativeCatalog.map((tool) => ({
               name: tool.name,
               description: tool.description,

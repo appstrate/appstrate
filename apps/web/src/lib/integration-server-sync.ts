@@ -31,7 +31,7 @@ function hasOwn(record: Manifest, key: string): boolean {
 }
 
 /** The identity a server proposes: filled into a draft only where the author left it empty. */
-export const SERVER_IDENTITY_KEYS = ["display_name", "description", "homepage", "icon"] as const;
+const SERVER_IDENTITY_KEYS = ["display_name", "description", "homepage", "icon"] as const;
 export type ServerIdentityKey = (typeof SERVER_IDENTITY_KEYS)[number];
 
 /**

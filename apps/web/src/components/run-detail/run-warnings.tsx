@@ -9,7 +9,7 @@ import { useModels } from "../../hooks/use-models";
 import { usePermissions } from "../../hooks/use-permissions";
 import type { RunModelFallback } from "../../lib/run-model-fallback";
 import { packageDetailPath } from "../../lib/package-paths";
-import { agentSettingsHref } from "../../lib/settings-section-href";
+import { agentSettingsHref, integrationSettingsHref } from "../../lib/settings-section-href";
 import { HealthAction, HealthCard, HealthCardItem } from "../health-card";
 import { artifactFailureCodeKey, partialArtifactFailures } from "../run-artifacts";
 import { MetaBadge } from "../status-badge";
@@ -28,14 +28,28 @@ export function RunDegradedBadge({ metadata }: { metadata: unknown }) {
   return <MetaBadge label={t("run.degraded.badge")} title={t("run.degraded.hint")} />;
 }
 
+/** The reasons a space's decision settles: its integration's Outils section is where it is taken. */
+const SETTLED_IN_TOOLS_SECTION: ReadonlySet<UnavailableTool["reason"]> = new Set([
+  "blocked_in_space",
+  "definition_not_approved",
+]);
+
 function UnavailableToolItem({ tool }: { tool: UnavailableTool }) {
   const { t } = useTranslation("agents");
   const displayName = useIntegrationName(tool.integrationId);
+  const canReach = useCanReach();
+  const toolsPath = SETTLED_IN_TOOLS_SECTION.has(tool.reason)
+    ? integrationSettingsHref(packageDetailPath("integration", tool.integrationId), "tools")
+    : null;
   return (
     <HealthCardItem
       title={<span className="font-mono text-xs break-all">{tool.name}</span>}
       description={`${displayName} · ${t(unavailableReasonKey(tool.reason))}`}
-      actions={null}
+      actions={
+        toolsPath && canReach(toolsPath) ? (
+          <HealthAction to={toolsPath}>{t("run.unavailableTools.manage")}</HealthAction>
+        ) : null
+      }
     />
   );
 }

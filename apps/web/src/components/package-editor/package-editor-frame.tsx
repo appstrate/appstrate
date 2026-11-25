@@ -35,7 +35,7 @@ export function PackageEditorFrame({
   /** The line under the open section's heading. */
   descriptions?: Partial<Record<PackageEditorTab, string>>;
   children: ReactNode;
-  /** Drawn under the section, outside the draft: what the open section governs in a space, not in the package. */
+  /** Drawn under the section: what the open section governs in a space (decided at once, not part of the draft) and the declaration list, which edits the draft. */
   after?: ReactNode;
 }) {
   const { t } = useTranslation(["agents", "settings", "common"]);

@@ -158,7 +158,7 @@ describe("IntegrationToolPicker — tool status", () => {
     },
   }).queryKey;
 
-  function renderOver(tools: string[]): string {
+  function renderOver(tools: string[], spaceName?: string): string {
     const qc = new QueryClient();
     const base = { modified: false, fingerprint: null, origin: "declared" };
     qc.setQueryData(DETAIL_KEY, {
@@ -177,12 +177,20 @@ describe("IntegrationToolPicker — tool status", () => {
     return render(
       <IntegrationToolPicker
         packageId={ID}
+        spaceName={spaceName}
         entry={{ id: ID, version: "*", tools }}
         onChange={() => {}}
       />,
       { queryClient: qc },
     );
   }
+
+  it("names the space the statuses are read in when it is not the current one", () => {
+    const html = renderOver([], "Équipe Léa");
+    expect(html).toContain("En attente d’approbation dans Équipe Léa");
+    expect(html).toContain("Bloqué dans Équipe Léa");
+    expect(renderOver([])).toContain("En attente d’approbation dans cet espace");
+  });
 
   it("shows the reason of each unusable tool and disables adding it", () => {
     const html = renderOver([]);
@@ -208,7 +216,8 @@ describe("IntegrationToolPicker — tool status", () => {
   });
 });
 
-// The scopes of an approved undeclared tool are unknown only where a connection is made for scopes.
+// A tool with no declared permission is flagged only on an OAuth integration, the one that asks
+// for scopes, whatever the tool's origin.
 describe("IntegrationToolPicker — unknown permissions", () => {
   const DETAIL_KEY = $api.queryOptions("get", "/api/integrations/{packageId}", {
     params: {

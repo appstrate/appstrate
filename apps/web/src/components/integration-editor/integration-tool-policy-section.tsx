@@ -17,9 +17,11 @@ import {
   CollapsibleContent,
   CollapsibleTrigger,
 } from "@appstrate/ui/components/collapsible";
+import { Spinner } from "@appstrate/ui/components/spinner";
 import {
   useIntegrationToolPolicy,
   useIntegrationToolPolicyActions,
+  type ToolPolicyAction,
 } from "../../hooks/use-integrations";
 import {
   approvalBody,
@@ -82,7 +84,7 @@ export function IntegrationToolPolicySection({
       tools={tools}
       review={review}
       declaration={declaration}
-      busy={actions.isPending}
+      pending={actions.isPending}
       onApprove={(item) => actions.approve(approvalBody(item))}
       onBlock={(name, onDone) => actions.block(blockBody(name), onDone)}
       onRevoke={actions.revoke}
@@ -97,7 +99,7 @@ export function ToolPolicyView({
   tools,
   review,
   declaration,
-  busy,
+  pending,
   onApprove,
   onBlock,
   onRevoke,
@@ -108,7 +110,8 @@ export function ToolPolicyView({
   /** Approve, block and their lists: the space's decisions. */
   review: boolean;
   declaration?: ToolDeclaration;
-  busy: boolean;
+  /** Whether a write of that kind is in flight for that tool: only its own row waits on it. */
+  pending: (action: ToolPolicyAction, name: string) => boolean;
   onApprove: (item: { name: string; fingerprint: string }) => void;
   /** `onDone` runs on success: the confirmation closes then, not on the click. */
   onBlock: (name: string, onDone: () => void) => void;
@@ -125,6 +128,9 @@ export function ToolPolicyView({
     setConfirm({ kind, name });
     setConfirmOpen(true);
   };
+  // A tool's row is locked while any write on it is in flight; the others stay usable.
+  const rowBusy = (name: string) =>
+    (["approve", "revoke", "block", "unblock"] as const).some((action) => pending(action, name));
   const items = review ? reviewItems(tools, policy) : [];
   const declarable = declaration ? declarableTools(tools) : [];
   const toDeclare = declarable.filter((name) => !declaration?.declared.has(name));
@@ -171,12 +177,13 @@ export function ToolPolicyView({
                           <Button
                             type="button"
                             size="sm"
-                            disabled={busy}
+                            disabled={rowBusy(item.name)}
                             aria-label={t("integrationTools.policy.aria.approve", {
                               name: item.name,
                             })}
                             onClick={() => onApprove({ name: item.name, fingerprint })}
                           >
+                            {pending("approve", item.name) && <Spinner />}
                             {t("integrationTools.policy.approve")}
                           </Button>
                         )}
@@ -184,10 +191,11 @@ export function ToolPolicyView({
                           type="button"
                           size="sm"
                           variant="outline"
-                          disabled={busy}
+                          disabled={rowBusy(item.name)}
                           aria-label={t("integrationTools.policy.aria.block", { name: item.name })}
                           onClick={() => ask("block", item.name)}
                         >
+                          {pending("block", item.name) && <Spinner />}
                           {t("integrationTools.policy.block")}
                         </Button>
                       </div>
@@ -212,7 +220,8 @@ export function ToolPolicyView({
                   date: formatDateField(approval.approved_at),
                 })}
                 action={t("integrationTools.policy.revoke")}
-                busy={busy}
+                disabled={rowBusy(approval.tool_name)}
+                pending={pending("revoke", approval.tool_name)}
                 ariaLabel={t("integrationTools.policy.aria.revoke", { name: approval.tool_name })}
                 onAction={() => ask("revoke", approval.tool_name)}
               />
@@ -236,7 +245,8 @@ export function ToolPolicyView({
                     date: formatDateField(block.blocked_at),
                   })}
                   action={t("integrationTools.policy.unblock")}
-                  busy={busy}
+                  disabled={rowBusy(block.tool_name)}
+                  pending={pending("unblock", block.tool_name)}
                   ariaLabel={t("integrationTools.policy.aria.unblock", { name: block.tool_name })}
                   onAction={() => onUnblock(block.tool_name)}
                 />
@@ -247,7 +257,6 @@ export function ToolPolicyView({
             <OptionSelect
               value={undefined}
               onValueChange={(name) => ask("block", name)}
-              disabled={busy}
               className="max-w-sm"
               placeholder={t("integrationTools.policy.blocked.add")}
               aria-label={t("integrationTools.policy.blocked.add")}
@@ -311,7 +320,7 @@ export function ToolPolicyView({
             ? "integrationTools.policy.revoke"
             : "integrationTools.policy.block",
         )}
-        isPending={busy}
+        isPending={confirm ? pending(confirm.kind, confirm.name) : false}
         onConfirm={() => {
           if (!confirm) return;
           const close = () => setConfirmOpen(false);
@@ -356,14 +365,17 @@ function ToolRow({
   meta,
   action,
   ariaLabel,
-  busy,
+  disabled,
+  pending,
   onAction,
 }: {
   name: string;
   meta: string;
   action: string;
   ariaLabel: string;
-  busy: boolean;
+  disabled: boolean;
+  /** This row's own write is in flight. */
+  pending: boolean;
   onAction: () => void;
 }) {
   return (
@@ -379,10 +391,11 @@ function ToolRow({
         type="button"
         size="sm"
         variant="outline"
-        disabled={busy}
+        disabled={disabled}
         aria-label={ariaLabel}
         onClick={onAction}
       >
+        {pending && <Spinner />}
         {action}
       </Button>
     </li>
@@ -390,14 +403,7 @@ function ToolRow({
 }
 
 /** The listed definition: as a diff against the approved one when this replaces it, as is otherwise. */
-export function DefinitionCompare({
-  item,
-  defaultOpen = item.approved !== null || item.definition === null,
-}: {
-  item: ReviewItem;
-  /** Open for a changed definition (the diff is what the reviewer came for) or one too large to show. */
-  defaultOpen?: boolean;
-}) {
+export function DefinitionCompare({ item }: { item: ReviewItem }) {
   const { t } = useTranslation("agents");
   if (item.fingerprint === null) {
     return (
@@ -406,10 +412,11 @@ export function DefinitionCompare({
       </p>
     );
   }
+  // Open: approving makes the tool callable by every agent of the space, so what it grants sits next to Approve.
   const current = item.definition;
   const previous = item.approved?.definition ?? null;
   return (
-    <Collapsible defaultOpen={defaultOpen}>
+    <Collapsible defaultOpen>
       <CollapsibleTrigger className="group text-muted-foreground hover:text-foreground flex items-center gap-1 text-sm">
         <ChevronRight className="size-4 transition-transform group-data-[state=open]:rotate-90" />
         {t("integrationTools.policy.review.definition")}

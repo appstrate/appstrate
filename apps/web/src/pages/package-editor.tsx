@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { Fragment, useCallback, useContext, useState, type ReactNode } from "react";
+import { flushSync } from "react-dom";
 import { useTranslation } from "react-i18next";
 import type { Versioned } from "../hooks/use-packages";
 import type {
@@ -364,16 +365,28 @@ function IntegrationEditorInner({
   // draft still has none.
   const fillIdentity = async (proposal: ServerSyncProposal): Promise<ServerIdentityKey[]> => {
     const proposed = proposal.manifest as Record<string, unknown>;
-    const { filled } = mergeServerIdentity(state.manifest, proposed);
-    editor.setState((s) => ({
-      ...s,
-      manifest: mergeServerIdentity(s.manifest, proposed).manifest,
-    }));
-    if (!proposal.icon_source || proposed.icon || !isEmptyIcon(state.manifest.icon)) return filled;
+    // Recorded inside the updater: it sees the draft as it is when applied, not the render's.
+    // `flushSync` runs the updater now, so the local is set when it is read.
+    let filled: ServerIdentityKey[] = [];
+    flushSync(() =>
+      editor.setState((s) => {
+        const merged = mergeServerIdentity(s.manifest, proposed);
+        filled = merged.filled;
+        return { ...s, manifest: merged.manifest };
+      }),
+    );
+    if (!proposal.icon_source || proposed.icon) return filled;
     try {
       const icon = await encodeIconDataUri(proposal.icon_source);
-      editor.setState((s) => (s.manifest.icon ? s : { ...s, manifest: { ...s.manifest, icon } }));
-      return [...filled, "icon"];
+      let iconSet = false;
+      flushSync(() =>
+        editor.setState((s) => {
+          if (!isEmptyIcon(s.manifest.icon)) return s;
+          iconSet = true;
+          return { ...s, manifest: { ...s.manifest, icon } };
+        }),
+      );
+      return iconSet ? [...filled, "icon"] : filled;
     } catch {
       return filled;
     }

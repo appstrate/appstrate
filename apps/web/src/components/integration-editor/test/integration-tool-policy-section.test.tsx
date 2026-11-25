@@ -38,7 +38,7 @@ const view = (
       tools={tools}
       review={options.review ?? true}
       declaration={options.declaration}
-      busy={false}
+      pending={() => false}
       onApprove={noop}
       onBlock={noop}
       onRevoke={noop}
@@ -65,12 +65,11 @@ describe("ToolPolicyView", () => {
       [{ name: "search", status: "pending" }],
     );
     expect(html).toContain('data-testid="tool-review-search"');
-    expect(html).toContain("Approuver");
-    expect(html).toContain("Bloquer");
+    expect(html).toContain('aria-label="Approuver search"');
+    expect(html).toContain('aria-label="Bloquer search"');
     // The diff's header names both sides; its Monaco body renders client-side only.
     expect(html).toContain("Définition approuvée");
     expect(html).toContain("Définition actuelle");
-    expect(html).not.toContain("Search v1");
     expect(html).toContain("Retirer l’approbation");
   });
 
@@ -89,12 +88,11 @@ describe("ToolPolicyView", () => {
       },
       [{ name: "search", status: "pending" }],
     );
-    // Closed until asked for: a first definition has nothing to compare.
+    // Open for every review item: approving grants it to every agent of the space.
     expect(html).toContain("Voir la définition");
-    expect(html).not.toContain("UniqueField");
+    expect(html).toContain("UniqueField");
     const open = render(
       <DefinitionCompare
-        defaultOpen
         item={{
           name: "search",
           fingerprint: "a",
@@ -137,8 +135,8 @@ describe("ToolPolicyView", () => {
     ]);
     expect(html).toContain('data-testid="tool-review-ghost"');
     expect(html).toContain("Relire le serveur");
-    expect(html).not.toContain("Approuver");
-    expect(html).toContain("Bloquer");
+    expect(html).not.toContain('aria-label="Approuver ghost"');
+    expect(html).toContain('aria-label="Bloquer ghost"');
   });
 
   it("explains a definition too large to keep", () => {
@@ -161,6 +159,50 @@ describe("ToolPolicyView", () => {
     expect(html).toContain("Aucun outil à examiner");
     expect(html).toContain('data-testid="tool-policy-export"');
     expect(html).toContain("Débloquer");
+  });
+});
+
+describe("ToolPolicyView pending writes", () => {
+  const policy: ToolPolicy = {
+    listed: [
+      { name: "search", fingerprint: "a", definition: {} },
+      { name: "export", fingerprint: "b", definition: {} },
+    ],
+    approvals: [],
+    blocks: [],
+  };
+  const tools = [
+    { name: "search", status: "pending" },
+    { name: "export", status: "pending" },
+  ];
+  const button = (html: string, label: string) =>
+    new RegExp(`<button[^>]*aria-label="${label}"[^>]*>(?:(?!</button>).)*</button>`, "s").exec(
+      html,
+    )?.[0] ?? "";
+
+  it("spins and locks only the clicked row's button, and the tool's other action", () => {
+    const html = render(
+      <ToolPolicyView
+        policy={policy}
+        tools={tools}
+        review
+        pending={(action, name) => action === "approve" && name === "search"}
+        onApprove={noop}
+        onBlock={noop}
+        onRevoke={noop}
+        onUnblock={noop}
+      />,
+    );
+    const approve = button(html, "Approuver search");
+    expect(approve).toContain("animate-spin");
+    expect(approve).toContain('disabled=""');
+    const block = button(html, "Bloquer search");
+    expect(block).not.toContain("animate-spin");
+    expect(block).toContain('disabled=""');
+    for (const label of ["Approuver export", "Bloquer export"]) {
+      expect(button(html, label)).not.toContain("animate-spin");
+      expect(button(html, label)).not.toContain('disabled=""');
+    }
   });
 });
 
@@ -218,7 +260,7 @@ describe("ToolPolicyView declaration", () => {
       declaration: { ...declaration(["search"]), saved: true },
     });
     expect(saved).toContain("Déclaré : publiez une version pour l’appliquer.");
-    expect(saved).not.toContain("brouillon");
+    expect(saved).not.toContain("Déclaré dans le brouillon");
   });
 
   it("says a tool is declared in the draft, and drops the bulk action when none remains", () => {
@@ -234,8 +276,8 @@ describe("ToolPolicyView declaration", () => {
     expect(html).toContain('data-testid="tool-undeclared-search"');
     expect(html).toContain('data-testid="tool-declare-all"');
     expect(html).not.toContain('data-testid="tool-review-search"');
-    expect(html).not.toContain("Approuver");
-    expect(html).not.toContain("Bloquer");
+    expect(html).not.toContain('aria-label="Approuver ');
+    expect(html).not.toContain('aria-label="Bloquer ');
   });
 });
 
@@ -258,6 +300,6 @@ describe("IntegrationToolPolicySection", () => {
       />,
     );
     expect(html).toContain('data-testid="tool-declare-export_notes"');
-    expect(html).not.toContain("Approuver");
+    expect(html).not.toContain('aria-label="Approuver ');
   });
 });

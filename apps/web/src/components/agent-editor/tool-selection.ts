@@ -4,6 +4,21 @@
 
 import { apiUploadToolNameFor } from "@appstrate/core/integration";
 
+/**
+ * What « Tout sélectionner » may add: the tools whose checkbox is enabled (a missing, pending or
+ * blocked tool is not callable), plus the ones already selected, which stay toggleable.
+ */
+export function selectableNativeToolNames(
+  catalog: readonly { name: string; status?: "available" | "missing" | "pending" | "blocked" }[],
+  selected: ReadonlySet<string>,
+): string[] {
+  return catalog
+    .filter(
+      (tool) => tool.status === undefined || tool.status === "available" || selected.has(tool.name),
+    )
+    .map((tool) => tool.name);
+}
+
 /** Stale names are dropped on purpose: a bulk action must not keep capabilities the catalog can no longer show. */
 export function replaceNativeToolSelection(
   selection: readonly string[],

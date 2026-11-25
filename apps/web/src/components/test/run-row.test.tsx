@@ -46,7 +46,18 @@ describe("RunRow — degraded badge", () => {
     expect(rowWith({ degraded_integrations: ["@acme/gmail"] })).toContain(label);
     expect(
       rowWith({
-        unavailable_tools: [{ integration_id: "@acme/gmail", name: "x", reason: "allowlist" }],
+        unavailable_tools: [{ integration_id: "@acme/gmail", name: "x", reason: "hidden_tools" }],
+      }),
+    ).toContain(label);
+  });
+
+  it("flags a tool lost for a reason this build does not know", () => {
+    const label = i18n.t("agents:run.degraded.badge");
+    expect(
+      rowWith({
+        unavailable_tools: [
+          { integration_id: "@acme/gmail", name: "x", reason: "from_the_future" },
+        ],
       }),
     ).toContain(label);
   });

@@ -18,21 +18,19 @@
  */
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Pencil, Plus, RefreshCw, Trash2 } from "lucide-react";
+import { Pencil, Plus, Trash2 } from "lucide-react";
 import type { IntegrationToolCatalogEntry } from "@appstrate/shared-types";
 import { useQueryClient } from "@tanstack/react-query";
 import { $api } from "../../api/client";
 import { invalidateIntegrationQueries } from "../../hooks/use-integrations";
 import { usePermissions } from "../../hooks/use-permissions";
 import { formatDateField } from "../../lib/format-date";
-import { errorMessage } from "../../lib/mutation-error";
 import { countToolsWithoutScopes } from "../../lib/integration-tool-scopes";
-import type { ToolSnapshotInfo } from "../../lib/integration-tool-snapshot";
+import { snapshotRefreshBlock, type ToolSnapshotInfo } from "../../lib/integration-tool-snapshot";
 import { connectionChoiceBody } from "../../lib/integration-server-sync";
-import { SyncConnectionChoice } from "./sync-connection-choice";
+import { ServerReadControl } from "./server-read-control";
 import { Alert, AlertDescription, AlertTitle } from "@appstrate/ui/components/alert";
 import { Button } from "@appstrate/ui/components/button";
-import { Spinner } from "@appstrate/ui/components/spinner";
 import { Switch } from "@appstrate/ui/components/switch";
 import { FormItem } from "@/components/app-ui/form-item";
 import { Input } from "@appstrate/ui/components/input";
@@ -100,7 +98,7 @@ export function IntegrationToolsSection({
 
   return (
     <div className="flex flex-col gap-4">
-      {snapshot && <ToolSnapshotSummary snapshot={snapshot} tools={entries} />}
+      {snapshot?.remote && <ToolSnapshotSummary snapshot={snapshot} tools={entries} />}
       {edit ? (
         <AllowUndeclaredToggle manifest={edit.manifest} onChange={edit.onChange} />
       ) : (
@@ -194,7 +192,8 @@ export function IntegrationToolsSection({
 
 /**
  * The last listing of the server (when, with which connection, what moved), the tools without a
- * declared permission, and the button that lists again. `tools` is what the table shows: in the
+ * declared permission, and the button that lists again (a remote server only: no other has a
+ * listing). `tools` is what the table shows: in the
  * editor, the draft's policy.
  */
 function ToolSnapshotSummary({
@@ -225,6 +224,7 @@ function ToolSnapshotSummary({
         })),
       )
     : 0;
+  const blockedBy = snapshotRefreshBlock(snapshot, can("credential-proxy:call-own"));
   const { summary } = snapshot;
   return (
     <div className="flex flex-col gap-2" data-testid="integration-tool-snapshot">
@@ -253,33 +253,20 @@ function ToolSnapshotSummary({
           {t("integrationTools.withoutScopes", { count: withoutScopes })}
         </p>
       )}
-      {snapshot.remote && can("credential-proxy:call-own") && (
-        <div className="flex flex-col items-start gap-2">
-          <Button
-            type="button"
-            variant="outline"
-            disabled={refresh.isPending || !snapshot.published}
-            onClick={() => run()}
-            data-testid="integration-tool-snapshot-refresh"
-          >
-            {refresh.isPending ? <Spinner /> : <RefreshCw />}
-            {t("integrationTools.snapshot.refresh")}
-          </Button>
+      <ServerReadControl
+        label={t("integrationTools.snapshot.refresh")}
+        blockedBy={blockedBy}
+        isPending={refresh.isPending}
+        error={refresh.error}
+        onRun={run}
+        buttonTestId="integration-tool-snapshot-refresh"
+      >
+        {blockedBy === null && (
           <p className="text-muted-foreground text-xs" data-testid="integration-tool-snapshot-hint">
-            {t(
-              snapshot.published
-                ? "integrationTools.snapshot.refreshHint"
-                : "integrationTools.snapshot.refreshUnpublished",
-            )}
+            {t("integrationTools.snapshot.refreshHint")}
           </p>
-          {refresh.error != null && (
-            <p role="alert" className="text-destructive text-sm">
-              {errorMessage(refresh.error)}
-            </p>
-          )}
-          <SyncConnectionChoice error={refresh.error} onChoose={run} disabled={refresh.isPending} />
-        </div>
-      )}
+        )}
+      </ServerReadControl>
     </div>
   );
 }

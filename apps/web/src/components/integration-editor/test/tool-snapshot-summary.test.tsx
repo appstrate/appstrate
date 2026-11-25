@@ -37,6 +37,9 @@ const snapshot = (overrides: Partial<ToolSnapshotInfo> = {}): ToolSnapshotInfo =
   remote: true,
   published: true,
   oauth: true,
+  active: true,
+  unauthenticated: false,
+  hasConnection: true,
   ...overrides,
 });
 const tools = [
@@ -87,21 +90,32 @@ describe("the tool snapshot summary", () => {
     expect(view(snapshot())).not.toContain(TRUNCATED);
   });
 
-  it("offers « Relire le serveur » to a remote integration's caller who may use a connection", () => {
-    expect(view(snapshot())).toContain(REFRESH);
-    expect(view(snapshot({ remote: false }))).not.toContain(REFRESH);
-    expect(view(snapshot(), { permissions: [] })).not.toContain(REFRESH);
+  it("renders no summary for an integration whose source has no listing", () => {
+    const html = view(snapshot({ remote: false }));
+    expect(html).not.toContain("integration-tool-snapshot");
+    expect(html).not.toContain(REFRESH);
+    expect(html).not.toContain("Dernière lecture du serveur");
   });
 
-  it("disables the read until a version is published, and says the read uses the published one", () => {
-    const button = (html: string) =>
-      /<button[^>]*integration-tool-snapshot-refresh[^>]*>/.exec(html)?.[0] ?? "";
-    const unpublished = view(snapshot({ published: false }));
-    expect(button(unpublished)).toContain('disabled=""');
-    expect(unpublished).toContain("Publiez une version de l’intégration");
-    const published = view(snapshot());
-    expect(button(published)).not.toContain('disabled=""');
-    expect(published).toContain("dernière version publiée");
+  const button = (html: string) =>
+    /<button[^>]*integration-tool-snapshot-refresh[^>]*>/.exec(html)?.[0] ?? "";
+
+  it("offers « Relire le serveur » enabled, and says the read uses the published version", () => {
+    const html = view(snapshot());
+    expect(button(html)).not.toContain('disabled=""');
+    expect(html).toContain("dernière version publiée");
+  });
+
+  it.each([
+    ["no permission", { permissions: [] }, snapshot(), "Vous n’avez pas le droit"],
+    ["unpublished", {}, snapshot({ published: false }), "Publiez une version de l’intégration"],
+    ["inactive here", {}, snapshot({ active: false }), "Activez l’intégration dans cet espace"],
+    ["no connection", {}, snapshot({ hasConnection: false }), "Connectez d’abord un compte"],
+  ])("shows the read disabled with its reason: %s", (_label, options, info, reason) => {
+    const html = view(info, options);
+    expect(button(html)).toContain('disabled=""');
+    expect(html).toContain(reason);
+    expect(html).not.toContain("integration-tool-snapshot-hint");
   });
 
   it("says the server was never read when no listing is stored", () => {

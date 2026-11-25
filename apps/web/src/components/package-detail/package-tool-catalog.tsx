@@ -31,15 +31,27 @@ export interface PackageTool {
 }
 
 /** Why a tool is not usable here, as the line under its name; `null` for a usable tool. */
-function useUnavailableReason(tool: PackageTool, listedAt: string | null | undefined) {
+function useUnavailableReason(
+  tool: PackageTool,
+  listedAt: string | null | undefined,
+  spaceName: string | undefined,
+) {
   const { t } = useTranslation("agents");
   if (tool.status === "missing") {
     return listedAt
       ? t("packageTools.reason.missingAt", { date: formatDateField(listedAt) })
       : t("packageTools.reason.missing");
   }
-  if (tool.status === "pending") return t("packageTools.reason.pending");
-  if (tool.status === "blocked") return t("packageTools.reason.blocked");
+  if (tool.status === "pending") {
+    return spaceName
+      ? t("packageTools.reason.pendingIn", { space: spaceName })
+      : t("packageTools.reason.pending");
+  }
+  if (tool.status === "blocked") {
+    return spaceName
+      ? t("packageTools.reason.blockedIn", { space: spaceName })
+      : t("packageTools.reason.blocked");
+  }
   return null;
 }
 
@@ -48,15 +60,18 @@ function ToolNameCell({
   listedAt,
   selection,
   saved,
+  spaceName,
 }: {
   tool: PackageTool;
   listedAt: string | null | undefined;
+  /** The space the statuses are read in, when it is not the one the reader is in. */
+  spaceName: string | undefined;
   selection: { values: ReadonlySet<string>; onToggle: (name: string) => void } | undefined;
   /** The selection the catalog opened with. */
   saved: ReadonlySet<string>;
 }) {
   const { t } = useTranslation("agents");
-  const reason = useUnavailableReason(tool, listedAt);
+  const reason = useUnavailableReason(tool, listedAt, spaceName);
   const selected = selection?.values.has(tool.name) ?? false;
   return (
     <div className="flex items-start gap-2">
@@ -88,7 +103,11 @@ function ToolNameCell({
         <div className="flex flex-wrap gap-1.5 empty:hidden">
           {/* An approval whose definition moved, or a blocked tool, is no longer what it approved. */}
           {tool.origin === "approved" && reason === null && (
-            <Badge variant="secondary">{t("packageTools.approved")}</Badge>
+            <Badge variant="secondary">
+              {spaceName
+                ? t("packageTools.approvedIn", { space: spaceName })
+                : t("packageTools.approved")}
+            </Badge>
           )}
           {tool.scopesUnknown && <Badge variant="outline">{t("packageTools.scopesUnknown")}</Badge>}
           {tool.modified && (
@@ -109,7 +128,10 @@ export function PackageToolCatalog({
   actions,
   rowActions,
   listedAt,
+  spaceName,
 }: {
+  /** The space the tools' statuses are read in, named when it is not the reader's current one. */
+  spaceName?: string;
   /** The list's one "Actions" menu, when the catalog is edited where it is read. */
   actions?: ReactNode;
   /** A row's "…" menu, likewise. */
@@ -148,7 +170,13 @@ export function PackageToolCatalog({
       width: 160,
       elastic: true,
       cell: (tool) => (
-        <ToolNameCell tool={tool} listedAt={listedAt} selection={selection} saved={saved} />
+        <ToolNameCell
+          tool={tool}
+          listedAt={listedAt}
+          selection={selection}
+          saved={saved}
+          spaceName={spaceName}
+        />
       ),
     },
     {

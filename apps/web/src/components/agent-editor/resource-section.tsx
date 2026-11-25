@@ -45,6 +45,7 @@ import {
 } from "@appstrate/ui/components/table";
 import { rowSpace, spaceCarrying } from "../../lib/across-spaces";
 import { useCurrentSpaceId, useSpaceLink } from "../../hooks/use-current-space";
+import { useSpaceLabelOf } from "../../hooks/use-spaces";
 import { deedEntry, deedInSpaces, spaceDeedLabels } from "../space-deed";
 import { useOverviewMode } from "../../hooks/use-overview-mode";
 import { useSpacesFor } from "../../hooks/use-space-action";
@@ -108,6 +109,7 @@ export function ResourceSection({
   const [picking, setPicking] = useState(false);
   const [toolsId, setToolsId] = useState<string | null>(null);
   const toolsEntry = selectedEntries.find((entry) => entry.id === toolsId);
+  const spaceLabelOf = useSpaceLabelOf();
   const isIntegration = type === "integration";
 
   // A declared dependency the catalog does not return: an integration that is no
@@ -122,6 +124,13 @@ export function ResourceSection({
     return new Set(selectedEntries.map((e) => e.id).filter((id) => !present.has(id)));
   }, [canReadCatalog, items, selectedEntries]);
   const byId = new Map((items ?? []).map((item) => [item.id, item] as const));
+  const toolsSpaceId = toolsEntry
+    ? spaceCarrying(
+        toolPolicySpaceId,
+        byId.get(toolsEntry.id)?.space_ids,
+        readSpace(byId.get(toolsEntry.id)),
+      )
+    : undefined;
 
   const updateVersion = (id: string, version: string) =>
     onChange((prev) => prev.map((e) => (e.id === id ? { ...e, version } : e)));
@@ -355,11 +364,11 @@ export function ResourceSection({
         <ToolsModal
           name={byId.get(toolsEntry.id)?.name || toolsEntry.id}
           entry={toolsEntry}
-          spaceId={spaceCarrying(
-            toolPolicySpaceId,
-            byId.get(toolsEntry.id)?.space_ids,
-            readSpace(byId.get(toolsEntry.id)),
-          )}
+          spaceId={toolsSpaceId}
+          // The statuses are that space's: name it when it is not the one the reader is in.
+          spaceName={
+            toolsSpaceId && toolsSpaceId !== workingSpaceId ? spaceLabelOf(toolsSpaceId) : undefined
+          }
           onClose={() => setToolsId(null)}
           onApply={(next) => {
             replaceEntry(toolsEntry.id, next);
@@ -375,12 +384,14 @@ export function ResourceSection({
 function ToolsModal({
   name,
   spaceId,
+  spaceName,
   entry,
   onClose,
   onApply,
 }: {
   name: string;
   spaceId?: string;
+  spaceName?: string;
   entry: ResourceEntry;
   onClose: () => void;
   onApply: (entry: ResourceEntry) => void;
@@ -401,6 +412,7 @@ function ToolsModal({
       <div className="max-h-[60dvh] overflow-y-auto">
         <IntegrationToolPicker
           spaceId={spaceId}
+          spaceName={spaceName}
           packageId={entry.id}
           entry={draft}
           onChange={setDraft}
