@@ -3,7 +3,8 @@
 import type { TFunction } from "i18next";
 import { formatDateField } from "./format-date";
 import { catalogueHref } from "./catalogue-link";
-import { runDetailPath } from "./package-paths";
+import { packageDetailPath, runDetailPath } from "./package-paths";
+import { integrationSettingsHref } from "./settings-section-href";
 import { linkedSpacePath } from "./across-spaces";
 import type { paths } from "../api/client";
 
@@ -41,6 +42,22 @@ export function notificationRow(
       title: t("notifications.packageShared", {
         name: share?.shared_by_name ?? "",
         package: share?.packageId ?? "",
+      }),
+      status: null,
+      message: null,
+      meta: date,
+      target: href && canReach(href) ? href : null,
+    };
+  }
+  if (notification.type === "integration_tools_review") {
+    // The tools wait in the integration's Outils section, where they are settled.
+    const review = notification.payload;
+    const href = review
+      ? integrationSettingsHref(packageDetailPath("integration", review.packageId), "tools")
+      : null;
+    return {
+      title: t("notifications.integrationToolsReview", {
+        name: review?.display_name ?? review?.packageId ?? "",
       }),
       status: null,
       message: null,

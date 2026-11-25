@@ -17,7 +17,7 @@ CREATE TABLE "space_integration_tool_approvals" (
 	"package_id" text NOT NULL,
 	"tool_name" text NOT NULL,
 	"fingerprint" text NOT NULL,
-	"definition" jsonb NOT NULL,
+	"definition" jsonb,
 	"approved_by" text,
 	"approved_at" timestamp with time zone DEFAULT now() NOT NULL
 );

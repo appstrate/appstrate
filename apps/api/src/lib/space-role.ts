@@ -11,9 +11,21 @@
 
 import { and, eq, sql } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
-import { organizations, spaceMembers, spaceRoles, spaces } from "@appstrate/db/schema";
+import {
+  organizationMembers,
+  organizations,
+  spaceMembers,
+  spaceRoles,
+  spaces,
+} from "@appstrate/db/schema";
 import type { OrgRole, SpaceRolePreset, SpaceVisibility } from "@appstrate/core/permissions";
-import { partitionSpacePermissions, presetPermissions, type Permission } from "./permissions.ts";
+import {
+  partitionSpacePermissions,
+  presetPermissions,
+  type Action,
+  type Permission,
+  type Resource,
+} from "./permissions.ts";
 
 export interface SpaceAccessRow {
   id: string;
@@ -175,6 +187,55 @@ export async function loadSpaceMember(
     .limit(1);
 
   return row ? { ref: toRef(row) } : null;
+}
+
+/**
+ * The org members who hold `resource:action` in the space, each resolved exactly as their own
+ * request would be ({@link resolveSpaceRole}): a personal space yields its owner alone, a
+ * private or closed one only its members.
+ */
+export async function listSpacePermissionHolders<R extends Resource>(
+  spaceId: string,
+  resource: R,
+  action: Action<R>,
+): Promise<string[]> {
+  const wanted = `${resource}:${action}` as Permission;
+  const rows = await db
+    .select({
+      space: {
+        id: spaces.id,
+        visibility: spaces.visibility,
+        defaultRole: spaces.defaultRole,
+        ownerUserId: spaces.ownerUserId,
+      },
+      userId: organizationMembers.userId,
+      orgRole: organizationMembers.role,
+      storedPersonalSpaceRole: PERSONAL_SPACE_ROLE_COLUMN,
+      ...MEMBERSHIP_COLUMNS,
+    })
+    .from(spaces)
+    .innerJoin(organizations, eq(organizations.id, spaces.orgId))
+    .innerJoin(organizationMembers, eq(organizationMembers.orgId, spaces.orgId))
+    .leftJoin(
+      spaceMembers,
+      and(eq(spaceMembers.spaceId, spaces.id), eq(spaceMembers.userId, organizationMembers.userId)),
+    )
+    .leftJoin(spaceRoles, customRoleOn)
+    .where(eq(spaces.id, spaceId));
+
+  return rows
+    .filter((row) =>
+      spacePermissions(
+        resolveSpaceRole(
+          row.orgRole,
+          row.space,
+          memberFromJoin(row),
+          row.userId,
+          toPersonalSpaceRole(row.storedPersonalSpaceRole),
+        ),
+      ).has(wanted),
+    )
+    .map((row) => row.userId);
 }
 
 /** Shape every explicit-membership query shares. */

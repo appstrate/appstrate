@@ -70,6 +70,13 @@ const notificationObject = {
         shared_by_name: { type: "string" },
       },
     }),
+    notificationOf("integration_tools_review", {
+      required: ["packageId", "display_name"],
+      properties: {
+        packageId: { type: "string", description: "The remote integration whose tools to review." },
+        display_name: { type: "string" },
+      },
+    }),
     notificationOf("agent_message", {
       required: ["packageId", "agent_name", "title", "message"],
       properties: {

@@ -24,6 +24,7 @@ export const CORS_EXPOSED_HEADERS: readonly string[] = [
   VIEW_AS_ACTIVE_HEADER,
   "X-Bundle-Integrity",
   "X-Bundle-Version",
+  "Appstrate-Space-Approved-Tools",
   "X-Integrity",
   "X-Yanked",
 ];

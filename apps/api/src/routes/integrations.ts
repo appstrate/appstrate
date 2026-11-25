@@ -16,6 +16,11 @@
  *   - `GET    /:packageId`                           — manifest + per-auth status for caller
  *   - `POST   /:packageId/discover`                  — a manifest proposal from the connected server
  *   - `POST   /:packageId/tool-snapshot/refresh`     — list the server's tools again, now, into the snapshot
+ *   - `GET    /:packageId/tool-policy`               — the tools listed, and what the space approved and blocked
+ *   - `POST   /:packageId/tool-policy/approvals`     — admin, dashboard session: approve undeclared tool definitions
+ *   - `DELETE /:packageId/tool-policy/approvals/:toolName` — admin, dashboard session: withdraw a tool's approvals
+ *   - `POST   /:packageId/tool-policy/blocks`        — admin, dashboard session: block tools in the space
+ *   - `DELETE /:packageId/tool-policy/blocks/:toolName`    — admin, dashboard session: lift a block
  *   - `GET    /:packageId/auths/:authKey/clients`    — admin: list available OAuth clients
  *   - `PUT    /:packageId/auths/:authKey/default-client` — admin: choose the default client
  *   - `POST   /:packageId/auths/:authKey/oauth-clients`  — admin: register a custom OAuth client
@@ -80,6 +85,7 @@ import { popupHtmlClose, popupHtmlError } from "../lib/oauth-popup-html.ts";
 import { serveSpaceConnectionCalls } from "./connection-calls-handler.ts";
 import { normalizeOAuthErrorCode, oauthDiagnosticSuffix } from "../lib/oauth-error-diagnostic.ts";
 import { assertPermission, requirePermission } from "../middleware/require-permission.ts";
+import { requireDashboardSession } from "../middleware/require-dashboard-session.ts";
 import { rateLimit, rateLimitByIp } from "../middleware/rate-limit.ts";
 import { db } from "@appstrate/db/client";
 import { connectionPrincipal, writesDelegated } from "../lib/connection-principal.ts";
@@ -101,7 +107,12 @@ import { listSpacesForPrincipal } from "../services/spaces.ts";
 import { withRunToolDescriptions } from "../services/run-tools-mcp.ts";
 import { getSpaceScope, type OrgScope, type SpaceScope } from "../lib/scope.ts";
 import type { AuditPayload } from "@appstrate/core/module";
-import { auditDiff, recordAuditAs, recordAuditFromContext } from "./../services/audit.ts";
+import {
+  auditDiff,
+  recordAuditAs,
+  recordAuditFromContext,
+  recordAuditsFromContext,
+} from "./../services/audit.ts";
 import {
   listIntegrations,
   listIntegrationsAtRemoteUrl,
@@ -110,6 +121,15 @@ import {
 import { discoverRemoteIntegration } from "../services/integration-discovery.ts";
 import { syncIntegrationFromServer } from "../services/integration-server-sync.ts";
 import { readToolSnapshots } from "../services/integration-tool-snapshots.ts";
+import {
+  approveTools,
+  blockTools,
+  getToolPolicy,
+  revokeToolApproval,
+  unblockTool,
+  type ToolPolicyTarget,
+} from "../services/integration-tool-policy.ts";
+import { isListedToolName } from "@appstrate/core/naming";
 import {
   listRemoteTools,
   resolveRemoteConnection,
@@ -330,6 +350,21 @@ export const discoverIntegrationSchema = z
       return !parsed || (parsed.username === "" && parsed.password === "");
     }, "The URL must not carry a username or password."),
   })
+  .strict();
+
+const toolNameSchema = z.string().refine(isListedToolName, "not a tool name");
+
+export const approveToolsSchema = z
+  .object({
+    tools: z
+      .array(z.object({ name: toolNameSchema, fingerprint: z.string().min(1).max(128) }).strict())
+      .min(1)
+      .max(100),
+  })
+  .strict();
+
+export const blockToolsSchema = z
+  .object({ tools: z.array(toolNameSchema).min(1).max(100) })
   .strict();
 
 export const syncFromServerSchema = z.object({ connection_id: z.uuid().optional() }).strict();
@@ -1182,6 +1217,108 @@ export function createIntegrationsRouter() {
           tool_count: snapshot.tools.length,
         },
       });
+    },
+  );
+
+  // ─── Space tool policy ─────────────────────
+
+  const toolPolicyTarget = (c: Context<AppEnv>): ToolPolicyTarget => {
+    const [caller, orgRole] = spaceListCaller(c);
+    return { scope: getSpaceScope(c), packageId: c.req.param("packageId")!, caller, orgRole };
+  };
+  // A decision on what the space lets agents run is a person's, made on the dashboard.
+  const configureToolPolicy = requirePermission("integrations", "configure");
+  const toolPolicyAudit = (
+    c: Context<AppEnv>,
+    action: string,
+    entries: readonly { toolName: string; fingerprint?: string }[],
+  ) =>
+    recordAuditsFromContext(
+      c,
+      entries.map((after) => ({
+        action,
+        resourceType: "integration",
+        resourceId: c.req.param("packageId")!,
+        after,
+      })),
+    );
+  const toolNameParam = (c: Context<AppEnv>) => {
+    const name = c.req.param("toolName")!;
+    if (!isListedToolName(name)) throw invalidRequest("toolName is not a tool name", "toolName");
+    return name;
+  };
+
+  router.get(
+    "/:packageId{@[^/]+/[^/]+}/tool-policy",
+    requirePermission("integrations", "read"),
+    async (c) => {
+      await assertIsIntegration(getSpaceScope(c), c.req.param("packageId")!);
+      return c.json(await getToolPolicy(toolPolicyTarget(c)));
+    },
+  );
+
+  router.post(
+    "/:packageId{@[^/]+/[^/]+}/tool-policy/approvals",
+    configureToolPolicy,
+    requireDashboardSession,
+    async (c) => {
+      const target = toolPolicyTarget(c);
+      await assertIsIntegration(target.scope, target.packageId);
+      const body = await readJsonBody(c, approveToolsSchema);
+      const approved = await approveTools(target, body.tools, c.get("user")?.id ?? null);
+      await toolPolicyAudit(c, "integration.tool.approved", approved);
+      return c.body(null, 204);
+    },
+  );
+
+  router.delete(
+    "/:packageId{@[^/]+/[^/]+}/tool-policy/approvals/:toolName",
+    configureToolPolicy,
+    requireDashboardSession,
+    async (c) => {
+      const scope = getSpaceScope(c);
+      const packageId = c.req.param("packageId")!;
+      await assertIsIntegration(scope, packageId);
+      const toolName = toolNameParam(c);
+      if (await revokeToolApproval(scope, packageId, toolName)) {
+        await toolPolicyAudit(c, "integration.tool.approval_revoked", [{ toolName }]);
+      }
+      return c.body(null, 204);
+    },
+  );
+
+  router.post(
+    "/:packageId{@[^/]+/[^/]+}/tool-policy/blocks",
+    configureToolPolicy,
+    requireDashboardSession,
+    async (c) => {
+      const scope = getSpaceScope(c);
+      const packageId = c.req.param("packageId")!;
+      await assertIsIntegration(scope, packageId);
+      const body = await readJsonBody(c, blockToolsSchema);
+      const blocked = await blockTools(scope, packageId, body.tools, c.get("user")?.id ?? null);
+      await toolPolicyAudit(
+        c,
+        "integration.tool.blocked",
+        blocked.map((toolName) => ({ toolName })),
+      );
+      return c.body(null, 204);
+    },
+  );
+
+  router.delete(
+    "/:packageId{@[^/]+/[^/]+}/tool-policy/blocks/:toolName",
+    configureToolPolicy,
+    requireDashboardSession,
+    async (c) => {
+      const scope = getSpaceScope(c);
+      const packageId = c.req.param("packageId")!;
+      await assertIsIntegration(scope, packageId);
+      const toolName = toolNameParam(c);
+      if (await unblockTool(scope, packageId, toolName)) {
+        await toolPolicyAudit(c, "integration.tool.unblocked", [{ toolName }]);
+      }
+      return c.body(null, 204);
     },
   );
 

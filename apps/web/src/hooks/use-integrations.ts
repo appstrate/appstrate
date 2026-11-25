@@ -267,6 +267,52 @@ export function useIntegrationConnections(packageId: string | undefined) {
   );
 }
 
+/** What the working space decided about the integration's tools (`integrations:configure` reads it to review). */
+export function useIntegrationToolPolicy(packageId: string | undefined, enabled: boolean) {
+  const scope = useOrgScope();
+  return $api.useQuery(
+    "get",
+    "/api/integrations/{packageId}/tool-policy",
+    { params: { path: { packageId: packageId ?? "" }, header: scope.header } },
+    { enabled: enabled && scope.enabled && !!packageId },
+  );
+}
+
+/**
+ * The tool policy's four writes. Each refreshes every integrations read: the detail's
+ * `tool_catalog` statuses move with the policy. A refusal is toasted by the mutation cache.
+ */
+export function useIntegrationToolPolicyActions(packageId: string) {
+  const qc = useQueryClient();
+  const onSuccess = () => invalidateIntegrationQueries(qc);
+  const path = { packageId };
+  const approve = $api.useMutation("post", "/api/integrations/{packageId}/tool-policy/approvals", {
+    onSuccess,
+  });
+  const revoke = $api.useMutation(
+    "delete",
+    "/api/integrations/{packageId}/tool-policy/approvals/{toolName}",
+    { onSuccess },
+  );
+  const block = $api.useMutation("post", "/api/integrations/{packageId}/tool-policy/blocks", {
+    onSuccess,
+  });
+  const unblock = $api.useMutation(
+    "delete",
+    "/api/integrations/{packageId}/tool-policy/blocks/{toolName}",
+    { onSuccess },
+  );
+  return {
+    approve: (body: Parameters<typeof approve.mutate>[0]["body"]) =>
+      approve.mutate({ params: { path }, body }),
+    revoke: (toolName: string) => revoke.mutate({ params: { path: { ...path, toolName } } }),
+    block: (body: Parameters<typeof block.mutate>[0]["body"]) =>
+      block.mutate({ params: { path }, body }),
+    unblock: (toolName: string) => unblock.mutate({ params: { path: { ...path, toolName } } }),
+    isPending: approve.isPending || revoke.isPending || block.isPending || unblock.isPending,
+  };
+}
+
 /** Query options of an agent's connection readiness: readers of the same version share one key, so they cannot disagree. */
 export function useAgentConnectionReadinessOptions(
   agentPackageId: string | undefined,

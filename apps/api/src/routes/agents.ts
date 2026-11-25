@@ -35,6 +35,8 @@ import { ApiError, forbidden, invalidRequest, notFound, validationFailed } from 
 import { readJsonBody } from "@appstrate/core/request-body";
 import { asJSONSchemaObject } from "@appstrate/core/form";
 import { getSpaceScope } from "../lib/scope.ts";
+import { connectionCaller } from "./integrations.ts";
+import { selectedApprovedTools } from "../services/integration-tool-policy.ts";
 import { callerSpaceGrant, type SpaceGrant } from "../lib/permissions.ts";
 import { loadSchedule } from "../services/scheduler.ts";
 import { resolveAgentConnectionReadiness } from "../services/integration-pins-service.ts";
@@ -754,6 +756,7 @@ export function createAgentsRouter() {
       // between bundle download and run creation).
       let versionLabel: string;
       let bytes: Uint8Array;
+      let approvedTools: string[];
       try {
         let bundle;
         if (useDraft) {
@@ -793,6 +796,14 @@ export function createAgentsRouter() {
         // serialised, so this route is not a looser door to the same content
         // the package file explorer and `download` guard.
         await requireBundleDependencyReadPermissions(c, bundle, { orgId, accessible });
+        approvedTools = await selectedApprovedTools(
+          {
+            scope,
+            caller: connectionCaller(c, scope.spaceId),
+            orgRole: c.get("orgRole") ?? null,
+          },
+          bundle.packages.get(bundle.root)!.manifest,
+        );
         // Serialization stays inside the try: `writeBundleToBuffer` re-validates
         // the assembled map and raises the same `BundleError` family, so leaving
         // it outside would keep that throw on the untyped path.
@@ -843,6 +854,11 @@ export function createAgentsRouter() {
           "Content-Disposition": `attachment; filename="${safeName}.afps-bundle.zip"`,
           "X-Bundle-Integrity": wireIntegrity,
           "X-Bundle-Version": versionLabel,
+          // Tools that run here only because this space approved them: the archive does not carry
+          // that approval, so the importer is told which ones to review.
+          ...(approvedTools.length > 0
+            ? { "Appstrate-Space-Approved-Tools": approvedTools.join(",") }
+            : {}),
         },
       });
     },

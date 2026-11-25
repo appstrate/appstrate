@@ -128,6 +128,8 @@ import {
   importConnectionSchema,
   connectOAuthSchema,
   updateSettingsSchema,
+  approveToolsSchema,
+  blockToolsSchema,
   setPinSchema,
   setOrgDefaultSchema,
   oauthClientCreateSchema,
@@ -622,6 +624,18 @@ const coreSchemas: OpenApiSchemaEntry[] = [
     path: "/api/integrations/{packageId}/auths/{authKey}/connect/oauth2",
     jsonSchema: toJsonSchema(connectOAuthSchema),
     description: "Headless OAuth2 start for an integration auth",
+  },
+  {
+    method: "POST",
+    path: "/api/integrations/{packageId}/tool-policy/approvals",
+    jsonSchema: toJsonSchema(approveToolsSchema),
+    description: "Approve undeclared tool definitions in the space",
+  },
+  {
+    method: "POST",
+    path: "/api/integrations/{packageId}/tool-policy/blocks",
+    jsonSchema: toJsonSchema(blockToolsSchema),
+    description: "Block tools of the integration in the space",
   },
   {
     method: "PATCH",

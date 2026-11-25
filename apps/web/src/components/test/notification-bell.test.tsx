@@ -72,6 +72,24 @@ describe("NotificationContent", () => {
     expect(html).not.toContain('href="/runs/');
   });
 
+  it("renders an `integration_tools_review` row as the integration to review, on its own page", () => {
+    const html = renderList([
+      {
+        id: "n20",
+        spaceId: SPACE,
+        type: "integration_tools_review",
+        runId: null,
+        payload: { packageId: "@acme/notion", display_name: "Notion" },
+        read_at: null,
+        createdAt: "2026-09-10T10:00:00.000Z",
+      },
+    ]);
+
+    expect(html).toContain("Outils à examiner : Notion");
+    expect(html).toContain('href="/notifications/n20"');
+    expect(html).not.toContain("Agent supprimé");
+  });
+
   it("renders a failed run as its agent and status, linking to the run", () => {
     const html = renderList([
       {

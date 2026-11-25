@@ -235,7 +235,7 @@ async function loadConnectManifestOrThrow(
 }
 
 /** The manifest connecting reads ({@link readIntegrationManifestForConnect}), or a 404. */
-async function loadManifestOrThrow(
+export async function loadManifestOrThrow(
   scope: SpaceScope | OrgScope,
   packageId: string,
 ): Promise<IntegrationManifest> {
@@ -3392,6 +3392,17 @@ function summariseToolSnapshot(
   };
 }
 
+/**
+ * The snapshot targets that judge a space's tool catalog: the one shared target of an
+ * unauthenticated integration, otherwise the caller's listed connections.
+ */
+export function toolSnapshotConnectionIds(
+  manifest: IntegrationManifest,
+  connections: readonly { id: string }[],
+): (string | null)[] {
+  return isUnauthenticatedIntegration(manifest) ? [null] : connections.map((c) => c.id);
+}
+
 /** Marketplace detail view: the manifest and the per-auth status for the calling actor. */
 export async function getIntegrationAuthStatuses(
   scope: SpaceScope,
@@ -3447,9 +3458,7 @@ export async function getIntegrationAuthStatuses(
     spaceId: scope.spaceId,
     packageId,
     manifest,
-    connectionIds: isUnauthenticatedIntegration(manifest)
-      ? [null]
-      : allConnections.map((c) => c.id),
+    connectionIds: toolSnapshotConnectionIds(manifest, allConnections),
   });
   // The clients a connect of the auth can use: a classic auth chooses among the manual rows only
   // (`loadClientTiers`), so a leftover auto-provisioned row does not make it connectable.

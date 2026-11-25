@@ -91,6 +91,14 @@ const packageIdParam = {
   schema: { type: "string", pattern: "^@[a-z0-9][a-z0-9-]*/[a-z0-9][a-z0-9-]*$" },
 } as const;
 
+const toolNameParam = {
+  name: "toolName",
+  in: "path",
+  required: true,
+  description: "The tool's name as the server lists it (percent-encode a `/`).",
+  schema: { type: "string", pattern: "^[A-Za-z0-9_\\-./]{1,128}$" },
+} as const;
+
 export const authKeyParam = {
   name: "authKey",
   in: "path",
@@ -1547,6 +1555,235 @@ export const integrationsPaths = {
           headers: { ...STD_RESPONSE_HEADERS, ...PROXY_STATUS_HEADER },
           content: problemJson,
         },
+      },
+    },
+  },
+  "/api/integrations/{packageId}/tool-policy": {
+    get: {
+      operationId: "getIntegrationToolPolicy",
+      tags: ["Integrations"],
+      summary: "Read what the space decided about the integration's tools",
+      description:
+        "What a space can review about a remote integration's tools: `listed`, every distinct (name, fingerprint) the caller's connections last listed (`definition` is null for a tool past the snapshot's size cap), the space's `approvals` of undeclared tools' definitions (several fingerprints per tool may coexist) and its `blocks`. Requires `integrations:read`.",
+      parameters: [
+        { $ref: "#/components/parameters/XOrgId" },
+        { $ref: "#/components/parameters/XSpaceId" },
+        packageIdParam,
+      ],
+      responses: {
+        "200": {
+          description: "The tool policy view.",
+          headers: STD_RESPONSE_HEADERS,
+          content: {
+            "application/json": {
+              schema: {
+                type: "object",
+                required: ["listed", "approvals", "blocks"],
+                properties: {
+                  listed: {
+                    type: "array",
+                    items: {
+                      type: "object",
+                      required: ["name", "fingerprint", "definition"],
+                      properties: {
+                        name: { type: "string" },
+                        fingerprint: { type: "string" },
+                        definition: { type: ["object", "null"], additionalProperties: true },
+                      },
+                    },
+                  },
+                  approvals: {
+                    type: "array",
+                    items: {
+                      type: "object",
+                      required: [
+                        "tool_name",
+                        "fingerprint",
+                        "definition",
+                        "approved_by",
+                        "approved_at",
+                      ],
+                      properties: {
+                        tool_name: { type: "string" },
+                        fingerprint: { type: "string" },
+                        definition: { type: ["object", "null"], additionalProperties: true },
+                        approved_by: { type: ["string", "null"] },
+                        approved_at: { type: "string", format: "date-time" },
+                      },
+                    },
+                  },
+                  blocks: {
+                    type: "array",
+                    items: {
+                      type: "object",
+                      required: ["tool_name", "blocked_by", "blocked_at"],
+                      properties: {
+                        tool_name: { type: "string" },
+                        blocked_by: { type: ["string", "null"] },
+                        blocked_at: { type: "string", format: "date-time" },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+        "403": { $ref: "#/components/responses/Forbidden" },
+        "404": { $ref: "#/components/responses/NotFound" },
+      },
+    },
+  },
+  "/api/integrations/{packageId}/tool-policy/approvals": {
+    post: {
+      operationId: "approveIntegrationTools",
+      tags: ["Integrations"],
+      summary: "Approve the current definition of undeclared tools in the space",
+      description:
+        "Approves each `{ name, fingerprint }` as the server last listed it, for an undeclared tool of the integration. Another fingerprint already approved for the same tool stays approved. Requires `integrations:configure` AND a dashboard session: an API key, an OIDC/MCP/CLI token or the chat loopback is refused with `403 dashboard_session_required`. Audited as `integration.tool.approved`, one event per tool newly approved.",
+      parameters: [
+        { $ref: "#/components/parameters/XOrgId" },
+        { $ref: "#/components/parameters/XSpaceId" },
+        packageIdParam,
+      ],
+      requestBody: {
+        required: true,
+        content: {
+          "application/json": {
+            schema: {
+              type: "object",
+              required: ["tools"],
+              properties: {
+                tools: {
+                  type: "array",
+                  minItems: 1,
+                  maxItems: 100,
+                  items: {
+                    type: "object",
+                    required: ["name", "fingerprint"],
+                    properties: { name: { type: "string" }, fingerprint: { type: "string" } },
+                    additionalProperties: false,
+                  },
+                },
+              },
+              additionalProperties: false,
+            },
+          },
+        },
+      },
+      responses: {
+        "204": { description: "Approved", headers: STD_RESPONSE_HEADERS },
+        "400": {
+          description:
+            "`validation_failed` — the body is invalid; `tool_already_declared` — the manifest declares the named tools (`tools`): a declared tool needs no approval.",
+          headers: STD_RESPONSE_HEADERS,
+          content: problemJson,
+        },
+        "403": {
+          description:
+            "`dashboard_session_required` — the credential is not a dashboard session; otherwise `integrations:configure` is missing.",
+          headers: STD_RESPONSE_HEADERS,
+          content: problemJson,
+        },
+        "404": { $ref: "#/components/responses/NotFound" },
+        "409": {
+          description:
+            "`tool_snapshot_stale` — the server no longer lists the named tools (`tools`) at that fingerprint: refresh the snapshot and review again.",
+          headers: STD_RESPONSE_HEADERS,
+          content: problemJson,
+        },
+      },
+    },
+  },
+  "/api/integrations/{packageId}/tool-policy/approvals/{toolName}": {
+    delete: {
+      operationId: "revokeIntegrationToolApproval",
+      tags: ["Integrations"],
+      summary: "Withdraw every approval of a tool in the space",
+      description:
+        "Removes all approved fingerprints of the tool in this space. Answers 204 whether or not there was one (the audit event `integration.tool.approval_revoked` is recorded only when one was removed). Requires `integrations:configure` and a dashboard session.",
+      parameters: [
+        { $ref: "#/components/parameters/XOrgId" },
+        { $ref: "#/components/parameters/XSpaceId" },
+        packageIdParam,
+        toolNameParam,
+      ],
+      responses: {
+        "204": { description: "No approval of the tool remains", headers: STD_RESPONSE_HEADERS },
+        "400": { $ref: "#/components/responses/ValidationError" },
+        "403": {
+          description:
+            "`dashboard_session_required` — the credential is not a dashboard session; otherwise `integrations:configure` is missing.",
+          headers: STD_RESPONSE_HEADERS,
+          content: problemJson,
+        },
+        "404": { $ref: "#/components/responses/NotFound" },
+      },
+    },
+  },
+  "/api/integrations/{packageId}/tool-policy/blocks": {
+    post: {
+      operationId: "blockIntegrationTools",
+      tags: ["Integrations"],
+      summary: "Block tools of the integration in the space",
+      description:
+        "Blocks the named tools, declared or not: a blocked tool is neither offered nor callable in this space. Already blocked names are ignored. Requires `integrations:configure` and a dashboard session. Audited as `integration.tool.blocked`, one event per tool newly blocked.",
+      parameters: [
+        { $ref: "#/components/parameters/XOrgId" },
+        { $ref: "#/components/parameters/XSpaceId" },
+        packageIdParam,
+      ],
+      requestBody: {
+        required: true,
+        content: {
+          "application/json": {
+            schema: {
+              type: "object",
+              required: ["tools"],
+              properties: {
+                tools: { type: "array", minItems: 1, maxItems: 100, items: { type: "string" } },
+              },
+              additionalProperties: false,
+            },
+          },
+        },
+      },
+      responses: {
+        "204": { description: "Blocked", headers: STD_RESPONSE_HEADERS },
+        "400": { $ref: "#/components/responses/ValidationError" },
+        "403": {
+          description:
+            "`dashboard_session_required` — the credential is not a dashboard session; otherwise `integrations:configure` is missing.",
+          headers: STD_RESPONSE_HEADERS,
+          content: problemJson,
+        },
+        "404": { $ref: "#/components/responses/NotFound" },
+      },
+    },
+  },
+  "/api/integrations/{packageId}/tool-policy/blocks/{toolName}": {
+    delete: {
+      operationId: "unblockIntegrationTool",
+      tags: ["Integrations"],
+      summary: "Lift the block on a tool in the space",
+      description:
+        "Answers 204 whether or not the tool was blocked (the audit event `integration.tool.unblocked` is recorded only when a block was lifted). Requires `integrations:configure` and a dashboard session.",
+      parameters: [
+        { $ref: "#/components/parameters/XOrgId" },
+        { $ref: "#/components/parameters/XSpaceId" },
+        packageIdParam,
+        toolNameParam,
+      ],
+      responses: {
+        "204": { description: "The tool is not blocked", headers: STD_RESPONSE_HEADERS },
+        "400": { $ref: "#/components/responses/ValidationError" },
+        "403": {
+          description:
+            "`dashboard_session_required` — the credential is not a dashboard session; otherwise `integrations:configure` is missing.",
+          headers: STD_RESPONSE_HEADERS,
+          content: problemJson,
+        },
+        "404": { $ref: "#/components/responses/NotFound" },
       },
     },
   },

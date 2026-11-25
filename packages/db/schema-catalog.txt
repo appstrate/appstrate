@@ -603,7 +603,7 @@ column session.user_agent text
 column session.user_id text not null
 column space_integration_tool_approvals.approved_at timestamp with time zone not null default now()
 column space_integration_tool_approvals.approved_by text
-column space_integration_tool_approvals.definition jsonb not null
+column space_integration_tool_approvals.definition jsonb
 column space_integration_tool_approvals.fingerprint text not null
 column space_integration_tool_approvals.id uuid not null default gen_random_uuid()
 column space_integration_tool_approvals.org_id uuid not null

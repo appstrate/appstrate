@@ -16,6 +16,7 @@ import { useTabWithHash } from "../hooks/use-tab-with-hash";
 import { IntegrationOverview } from "../components/package-detail/integration-overview";
 import { IntegrationFunctioning } from "../components/package-detail/integration-structure";
 import { IntegrationToolsSection } from "../components/integration-editor/integration-tools-section";
+import { IntegrationToolPolicySection } from "../components/integration-editor/integration-tool-policy-section";
 
 const INTEGRATION_TABS = ["overview", "connections", "settings"] as const;
 import { useTranslation } from "react-i18next";
@@ -173,6 +174,11 @@ export function IntegrationSettings({
   const draftSource = definition
     ? readIntegrationSource((definition.manifest as Record<string, unknown>).source)
     : null;
+  // Only a remote integration lists tools a space can review.
+  const toolPolicy =
+    detail.manifest.source?.kind === "remote" ? (
+      <IntegrationToolPolicySection packageId={packageId} tools={detail.tool_catalog ?? []} />
+    ) : null;
   const syncAvailability = serverSyncAvailability(draftSource, {
     unauthenticated: isUnauthenticatedIntegration(definition?.manifest ?? {}),
     mayProxy: can("credential-proxy:call-own"),
@@ -248,14 +254,17 @@ export function IntegrationSettings({
           ? DEFINITION_RAIL.find(([id]) => id === active)?.[1]
           : undefined;
         return definition && definitionSection ? (
-          <Suspense fallback={<SettingsSkeleton />}>
-            <IntegrationDefinitionEditor
-              detail={definition}
-              section={definitionSection}
-              toolCatalog={detail.tool_catalog ?? []}
-              sync={syncAvailability}
-            />
-          </Suspense>
+          <>
+            <Suspense fallback={<SettingsSkeleton />}>
+              <IntegrationDefinitionEditor
+                detail={definition}
+                section={definitionSection}
+                toolCatalog={detail.tool_catalog ?? []}
+                sync={syncAvailability}
+              />
+            </Suspense>
+            {active === "tools" && toolPolicy && <div className="px-6 pb-6">{toolPolicy}</div>}
+          </>
         ) : isPackageCommonSection(active) ? (
           <PackageCommonSection
             section={active}
@@ -287,6 +296,7 @@ export function IntegrationSettings({
                 oauth: detail.auths.some((auth) => auth.type === "oauth2"),
               }}
             />
+            {toolPolicy && <div className="mt-8">{toolPolicy}</div>}
           </div>
         ) : isIntegrationSpaceSection(active) ? (
           // In « Tous les espaces » the space it is set in comes first.

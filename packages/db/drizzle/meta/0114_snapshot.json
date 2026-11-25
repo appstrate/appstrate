@@ -6877,7 +6877,7 @@
           "name": "definition",
           "type": "jsonb",
           "primaryKey": false,
-          "notNull": true
+          "notNull": false
         },
         "approved_by": {
           "name": "approved_by",

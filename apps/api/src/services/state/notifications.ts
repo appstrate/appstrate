@@ -1,12 +1,15 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { and, eq, inArray, isNull, count, desc, sql, type SQL } from "drizzle-orm";
+import { allowsUndeclaredTools, getDeclaredToolNames } from "@appstrate/core/integration";
 import { db } from "@appstrate/db/client";
 import { toPgSafe } from "@appstrate/db/pg-safe";
 import type { RunStatus } from "@appstrate/core/run-status";
 import {
+  integrationConnections,
   notifications,
   runAlertStatusValues,
+  spaces,
   type RunAlertStatus,
   type NotificationPayloads,
   type NotificationType,
@@ -16,6 +19,12 @@ import { isUuid, scopedWhere, type DbOrTx } from "../../lib/db-helpers.ts";
 import { actorMatch, type Actor } from "../../lib/actor.ts";
 import type { SpaceScope, SpacesScope } from "../../lib/scope.ts";
 import { listResponse } from "@appstrate/core/list-query";
+import { getErrorMessage } from "@appstrate/core/errors";
+import { logger } from "../../lib/logger.ts";
+import { listSpacePermissionHolders } from "../../lib/space-role.ts";
+import { connectionInSpace } from "../connection-reach.ts";
+import { readIntegrationManifestForConnect } from "../integration-service.ts";
+import { spacesActiveForAll } from "../space-packages.ts";
 import type { ListEnvelope } from "@appstrate/shared-types";
 
 // --- Notifications ---
@@ -164,6 +173,80 @@ export async function createPackageShareNotification(params: {
       shared_by_name: params.sharedByName,
     },
   });
+}
+
+/**
+ * Ask the people who govern an integration to review the tools its server just offered or
+ * changed (`integration_tools_review`), after a snapshot recorded `names` as new or changed.
+ *
+ * Silent when the catalog is open (undeclared tools are usable there) or every name is declared
+ * (a declared tool's change is only signalled on the page). Recipients: the `integrations:configure`
+ * holders of each space where the integration is active AND the snapshot's connection reaches
+ * (no connection: every active space). One unread notice per (space, recipient, integration):
+ * the partial unique index absorbs the rest. Never throws: a snapshot caller must not fail on it.
+ */
+export async function scheduleToolReviewNotifications(params: {
+  orgId: string;
+  packageId: string;
+  connectionId: string | null;
+  names: readonly string[];
+}): Promise<void> {
+  try {
+    const read = await readIntegrationManifestForConnect({ orgId: params.orgId }, params.packageId);
+    if (!read.ok || allowsUndeclaredTools(read.manifest)) return;
+    const declared = new Set(getDeclaredToolNames(read.manifest));
+    if (params.names.every((name) => declared.has(name))) return;
+
+    const orgSpaces = await db
+      .select({ id: spaces.id })
+      .from(spaces)
+      .where(eq(spaces.orgId, params.orgId));
+    const active = await spacesActiveForAll(
+      params.orgId,
+      [params.packageId],
+      orgSpaces.map((s) => s.id),
+    );
+    const { connectionId } = params;
+    const reached = await Promise.all(
+      [...active].map(async (spaceId) => {
+        if (connectionId === null) return spaceId;
+        const [row] = await db
+          .select({ id: integrationConnections.id })
+          .from(integrationConnections)
+          .where(and(eq(integrationConnections.id, connectionId), connectionInSpace(spaceId)))
+          .limit(1);
+        return row ? spaceId : null;
+      }),
+    );
+
+    const payload: NotificationPayloads["integration_tools_review"] = {
+      packageId: params.packageId,
+      display_name: read.manifest.display_name ?? params.packageId,
+    };
+    for (const spaceId of reached) {
+      if (spaceId === null) continue;
+      const holders = await listSpacePermissionHolders(spaceId, "integrations", "configure");
+      if (holders.length === 0) continue;
+      await db
+        .insert(notifications)
+        .values(
+          holders.map((userId) => ({
+            orgId: params.orgId,
+            spaceId,
+            recipientType: "user" as const,
+            recipientId: userId,
+            type: "integration_tools_review" as const,
+            payload,
+          })),
+        )
+        .onConflictDoNothing();
+    }
+  } catch (err) {
+    logger.warn("tool review notifications not scheduled", {
+      packageId: params.packageId,
+      error: getErrorMessage(err),
+    });
+  }
 }
 
 // --- The feed ---

@@ -87,7 +87,7 @@ export const spaceIntegrationToolApprovals = pgTable(
       .references(() => packages.id, { onDelete: "cascade" }),
     toolName: text("tool_name").notNull(),
     fingerprint: text("fingerprint").notNull(),
-    definition: jsonb("definition").$type<ToolDefinition>().notNull(),
+    definition: jsonb("definition").$type<ToolDefinition>(),
     approvedBy: text("approved_by").references(() => user.id, { onDelete: "set null" }),
     approvedAt: timestamp("approved_at", { withTimezone: true }).defaultNow().notNull(),
   },

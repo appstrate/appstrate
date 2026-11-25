@@ -1926,6 +1926,106 @@ export interface paths {
         patch: operations["updateIntegrationSettings"];
         trace?: never;
     };
+    "/api/integrations/{packageId}/tool-policy": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Read what the space decided about the integration's tools
+         * @description What a space can review about a remote integration's tools: `listed`, every distinct (name, fingerprint) the caller's connections last listed (`definition` is null for a tool past the snapshot's size cap), the space's `approvals` of undeclared tools' definitions (several fingerprints per tool may coexist) and its `blocks`. Requires `integrations:read`.
+         */
+        get: operations["getIntegrationToolPolicy"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/integrations/{packageId}/tool-policy/approvals": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Approve the current definition of undeclared tools in the space
+         * @description Approves each `{ name, fingerprint }` as the server last listed it, for an undeclared tool of the integration. Another fingerprint already approved for the same tool stays approved. Requires `integrations:configure` AND a dashboard session: an API key, an OIDC/MCP/CLI token or the chat loopback is refused with `403 dashboard_session_required`. Audited as `integration.tool.approved`, one event per tool newly approved.
+         */
+        post: operations["approveIntegrationTools"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/integrations/{packageId}/tool-policy/approvals/{toolName}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Withdraw every approval of a tool in the space
+         * @description Removes all approved fingerprints of the tool in this space. Answers 204 whether or not there was one (the audit event `integration.tool.approval_revoked` is recorded only when one was removed). Requires `integrations:configure` and a dashboard session.
+         */
+        delete: operations["revokeIntegrationToolApproval"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/integrations/{packageId}/tool-policy/blocks": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Block tools of the integration in the space
+         * @description Blocks the named tools, declared or not: a blocked tool is neither offered nor callable in this space. Already blocked names are ignored. Requires `integrations:configure` and a dashboard session. Audited as `integration.tool.blocked`, one event per tool newly blocked.
+         */
+        post: operations["blockIntegrationTools"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/integrations/{packageId}/tool-policy/blocks/{toolName}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Lift the block on a tool in the space
+         * @description Answers 204 whether or not the tool was blocked (the audit event `integration.tool.unblocked` is recorded only when a block was lifted). Requires `integrations:configure` and a dashboard session.
+         */
+        delete: operations["unblockIntegrationTool"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/integrations/{packageId}/tool-snapshot/refresh": {
         parameters: {
             query?: never;
@@ -8978,6 +9078,8 @@ export interface operations {
                     "X-Bundle-Integrity"?: string;
                     /** @description Resolved version label of the served bundle: a concrete semver for `source=published`, or `"draft"` for `source=draft`. Lets a CLI/runner attribute its run via `POST /api/runs/remote` `kind: "registry"` without parsing the manifest. */
                     "X-Bundle-Version"?: string;
+                    /** @description Comma-separated `<integrationId>:<tool>` list, present only when the exported agent selects tools that run in the current space because the space approved their definition (undeclared tools of a closed catalog). The archive does not carry that approval: whoever imports it elsewhere must review those tools there. */
+                    "Appstrate-Space-Approved-Tools"?: string;
                     [name: string]: unknown;
                 };
                 content: {
@@ -12709,6 +12811,8 @@ export interface operations {
                                  * @enum {integer}
                                  */
                                 upstream_status?: 401 | 403;
+                                /** @description `upstream_credential_rejected`, when the server's `WWW-Authenticate` challenge (401, or 403 `insufficient_scope`) names the OAuth scopes it asks for: the scopes to reconnect with. */
+                                required_scopes?: string[];
                                 /** @description `upstream_credential_rejected`, when the proxy's forced refresh judged the rejection (`X-Appstrate-Credential-Status` on `/proxy`): `needs_reconnection` — the connection is now flagged and its owner must reconnect it; `in_use` — it stays in use, `failures` counting this rejection toward the flag when it was counted. */
                                 credential?: {
                                     /** @enum {string} */
@@ -12872,6 +12976,8 @@ export interface operations {
                          * @enum {integer}
                          */
                         upstream_status?: 401 | 403;
+                        /** @description `upstream_credential_rejected`, when the server's `WWW-Authenticate` challenge (401, or 403 `insufficient_scope`) names the OAuth scopes it asks for: the scopes to reconnect with. */
+                        required_scopes?: string[];
                         /** @description `upstream_credential_rejected`, when the proxy's forced refresh judged the rejection (`X-Appstrate-Credential-Status` on `/proxy`): `needs_reconnection` — the connection is now flagged and its owner must reconnect it; `in_use` — it stays in use, `failures` counting this rejection toward the flag when it was counted. */
                         credential?: {
                             /** @enum {string} */
@@ -12906,6 +13012,8 @@ export interface operations {
                          * @enum {integer}
                          */
                         upstream_status?: 401 | 403;
+                        /** @description `upstream_credential_rejected`, when the server's `WWW-Authenticate` challenge (401, or 403 `insufficient_scope`) names the OAuth scopes it asks for: the scopes to reconnect with. */
+                        required_scopes?: string[];
                         /** @description `upstream_credential_rejected`, when the proxy's forced refresh judged the rejection (`X-Appstrate-Credential-Status` on `/proxy`): `needs_reconnection` — the connection is now flagged and its owner must reconnect it; `in_use` — it stays in use, `failures` counting this rejection toward the flag when it was counted. */
                         credential?: {
                             /** @enum {string} */
@@ -16200,6 +16308,266 @@ export interface operations {
             };
             400: components["responses"]["ValidationError"];
             403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    getIntegrationToolPolicy: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
+                "X-Org-Id"?: components["parameters"]["XOrgId"];
+                /** @description Space ID. Required for space-scoped routes (agents, runs, schedules, and space-scoped module routes). Not needed for API key auth (space resolved from key). */
+                "X-Space-Id"?: components["parameters"]["XSpaceId"];
+            };
+            path: {
+                /** @description Integration package id (e.g. `@official/gmail`). */
+                packageId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The tool policy view. */
+            200: {
+                headers: {
+                    "Request-Id": components["headers"]["RequestId"];
+                    "Appstrate-Version": components["headers"]["AppstrateVersion"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        listed: {
+                            name: string;
+                            fingerprint: string;
+                            definition: {
+                                [key: string]: unknown;
+                            } | null;
+                        }[];
+                        approvals: {
+                            tool_name: string;
+                            fingerprint: string;
+                            definition: {
+                                [key: string]: unknown;
+                            } | null;
+                            approved_by: string | null;
+                            /** Format: date-time */
+                            approved_at: string;
+                        }[];
+                        blocks: {
+                            tool_name: string;
+                            blocked_by: string | null;
+                            /** Format: date-time */
+                            blocked_at: string;
+                        }[];
+                    };
+                };
+            };
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    approveIntegrationTools: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
+                "X-Org-Id"?: components["parameters"]["XOrgId"];
+                /** @description Space ID. Required for space-scoped routes (agents, runs, schedules, and space-scoped module routes). Not needed for API key auth (space resolved from key). */
+                "X-Space-Id"?: components["parameters"]["XSpaceId"];
+            };
+            path: {
+                /** @description Integration package id (e.g. `@official/gmail`). */
+                packageId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    tools: {
+                        name: string;
+                        fingerprint: string;
+                    }[];
+                };
+            };
+        };
+        responses: {
+            /** @description Approved */
+            204: {
+                headers: {
+                    "Request-Id": components["headers"]["RequestId"];
+                    "Appstrate-Version": components["headers"]["AppstrateVersion"];
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description `validation_failed` — the body is invalid; `tool_already_declared` — the manifest declares the named tools (`tools`): a declared tool needs no approval. */
+            400: {
+                headers: {
+                    "Request-Id": components["headers"]["RequestId"];
+                    "Appstrate-Version": components["headers"]["AppstrateVersion"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description `dashboard_session_required` — the credential is not a dashboard session; otherwise `integrations:configure` is missing. */
+            403: {
+                headers: {
+                    "Request-Id": components["headers"]["RequestId"];
+                    "Appstrate-Version": components["headers"]["AppstrateVersion"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            404: components["responses"]["NotFound"];
+            /** @description `tool_snapshot_stale` — the server no longer lists the named tools (`tools`) at that fingerprint: refresh the snapshot and review again. */
+            409: {
+                headers: {
+                    "Request-Id": components["headers"]["RequestId"];
+                    "Appstrate-Version": components["headers"]["AppstrateVersion"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+        };
+    };
+    revokeIntegrationToolApproval: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
+                "X-Org-Id"?: components["parameters"]["XOrgId"];
+                /** @description Space ID. Required for space-scoped routes (agents, runs, schedules, and space-scoped module routes). Not needed for API key auth (space resolved from key). */
+                "X-Space-Id"?: components["parameters"]["XSpaceId"];
+            };
+            path: {
+                /** @description Integration package id (e.g. `@official/gmail`). */
+                packageId: string;
+                /** @description The tool's name as the server lists it (percent-encode a `/`). */
+                toolName: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description No approval of the tool remains */
+            204: {
+                headers: {
+                    "Request-Id": components["headers"]["RequestId"];
+                    "Appstrate-Version": components["headers"]["AppstrateVersion"];
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            400: components["responses"]["ValidationError"];
+            /** @description `dashboard_session_required` — the credential is not a dashboard session; otherwise `integrations:configure` is missing. */
+            403: {
+                headers: {
+                    "Request-Id": components["headers"]["RequestId"];
+                    "Appstrate-Version": components["headers"]["AppstrateVersion"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            404: components["responses"]["NotFound"];
+        };
+    };
+    blockIntegrationTools: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
+                "X-Org-Id"?: components["parameters"]["XOrgId"];
+                /** @description Space ID. Required for space-scoped routes (agents, runs, schedules, and space-scoped module routes). Not needed for API key auth (space resolved from key). */
+                "X-Space-Id"?: components["parameters"]["XSpaceId"];
+            };
+            path: {
+                /** @description Integration package id (e.g. `@official/gmail`). */
+                packageId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    tools: string[];
+                };
+            };
+        };
+        responses: {
+            /** @description Blocked */
+            204: {
+                headers: {
+                    "Request-Id": components["headers"]["RequestId"];
+                    "Appstrate-Version": components["headers"]["AppstrateVersion"];
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            400: components["responses"]["ValidationError"];
+            /** @description `dashboard_session_required` — the credential is not a dashboard session; otherwise `integrations:configure` is missing. */
+            403: {
+                headers: {
+                    "Request-Id": components["headers"]["RequestId"];
+                    "Appstrate-Version": components["headers"]["AppstrateVersion"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            404: components["responses"]["NotFound"];
+        };
+    };
+    unblockIntegrationTool: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
+                "X-Org-Id"?: components["parameters"]["XOrgId"];
+                /** @description Space ID. Required for space-scoped routes (agents, runs, schedules, and space-scoped module routes). Not needed for API key auth (space resolved from key). */
+                "X-Space-Id"?: components["parameters"]["XSpaceId"];
+            };
+            path: {
+                /** @description Integration package id (e.g. `@official/gmail`). */
+                packageId: string;
+                /** @description The tool's name as the server lists it (percent-encode a `/`). */
+                toolName: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The tool is not blocked */
+            204: {
+                headers: {
+                    "Request-Id": components["headers"]["RequestId"];
+                    "Appstrate-Version": components["headers"]["AppstrateVersion"];
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            400: components["responses"]["ValidationError"];
+            /** @description `dashboard_session_required` — the credential is not a dashboard session; otherwise `integrations:configure` is missing. */
+            403: {
+                headers: {
+                    "Request-Id": components["headers"]["RequestId"];
+                    "Appstrate-Version": components["headers"]["AppstrateVersion"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
             404: components["responses"]["NotFound"];
         };
     };
@@ -19805,6 +20173,31 @@ export interface operations {
                             /** @description The space it was written in: its run, and its own read (`GET /api/notifications/{id}`), are that space's. */
                             spaceId: string;
                             /** @constant */
+                            type: "integration_tools_review";
+                            /** @description Originating run id, when the notification references one */
+                            runId: string | null;
+                            /** @description Render-without-join data. */
+                            payload: {
+                                /** @description The remote integration whose tools to review. */
+                                packageId: string;
+                                display_name: string;
+                            } | null;
+                            /**
+                             * Format: date-time
+                             * @description When the recipient marked it read; null if unread
+                             */
+                            read_at: string | null;
+                            /** Format: date-time */
+                            createdAt: string;
+                        } | {
+                            /**
+                             * Format: uuid
+                             * @description Notification id
+                             */
+                            id: string;
+                            /** @description The space it was written in: its run, and its own read (`GET /api/notifications/{id}`), are that space's. */
+                            spaceId: string;
+                            /** @constant */
                             type: "agent_message";
                             /** @description Originating run id, when the notification references one */
                             runId: string | null;
@@ -19997,6 +20390,31 @@ export interface operations {
                             /** @enum {string} */
                             package_type: "agent" | "skill" | "integration";
                             shared_by_name: string;
+                        } | null;
+                        /**
+                         * Format: date-time
+                         * @description When the recipient marked it read; null if unread
+                         */
+                        read_at: string | null;
+                        /** Format: date-time */
+                        createdAt: string;
+                    } | {
+                        /**
+                         * Format: uuid
+                         * @description Notification id
+                         */
+                        id: string;
+                        /** @description The space it was written in: its run, and its own read (`GET /api/notifications/{id}`), are that space's. */
+                        spaceId: string;
+                        /** @constant */
+                        type: "integration_tools_review";
+                        /** @description Originating run id, when the notification references one */
+                        runId: string | null;
+                        /** @description Render-without-join data. */
+                        payload: {
+                            /** @description The remote integration whose tools to review. */
+                            packageId: string;
+                            display_name: string;
                         } | null;
                         /**
                          * Format: date-time
@@ -22372,6 +22790,31 @@ export interface operations {
                             /** @description The space it was written in: its run, and its own read (`GET /api/notifications/{id}`), are that space's. */
                             spaceId: string;
                             /** @constant */
+                            type: "integration_tools_review";
+                            /** @description Originating run id, when the notification references one */
+                            runId: string | null;
+                            /** @description Render-without-join data. */
+                            payload: {
+                                /** @description The remote integration whose tools to review. */
+                                packageId: string;
+                                display_name: string;
+                            } | null;
+                            /**
+                             * Format: date-time
+                             * @description When the recipient marked it read; null if unread
+                             */
+                            read_at: string | null;
+                            /** Format: date-time */
+                            createdAt: string;
+                        } | {
+                            /**
+                             * Format: uuid
+                             * @description Notification id
+                             */
+                            id: string;
+                            /** @description The space it was written in: its run, and its own read (`GET /api/notifications/{id}`), are that space's. */
+                            spaceId: string;
+                            /** @constant */
                             type: "agent_message";
                             /** @description Originating run id, when the notification references one */
                             runId: string | null;
@@ -22524,6 +22967,31 @@ export interface operations {
                             /** @enum {string} */
                             package_type: "agent" | "skill" | "integration";
                             shared_by_name: string;
+                        } | null;
+                        /**
+                         * Format: date-time
+                         * @description When the recipient marked it read; null if unread
+                         */
+                        read_at: string | null;
+                        /** Format: date-time */
+                        createdAt: string;
+                    } | {
+                        /**
+                         * Format: uuid
+                         * @description Notification id
+                         */
+                        id: string;
+                        /** @description The space it was written in: its run, and its own read (`GET /api/notifications/{id}`), are that space's. */
+                        spaceId: string;
+                        /** @constant */
+                        type: "integration_tools_review";
+                        /** @description Originating run id, when the notification references one */
+                        runId: string | null;
+                        /** @description Render-without-join data. */
+                        payload: {
+                            /** @description The remote integration whose tools to review. */
+                            packageId: string;
+                            display_name: string;
                         } | null;
                         /**
                          * Format: date-time

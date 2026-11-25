@@ -34,7 +34,7 @@ function orgOf(spaceId: string): SQL {
 }
 
 /** The rows that may serve space `spaceId`, whoever owns them. */
-function connectionInSpace(spaceId: string): SQL {
+export function connectionInSpace(spaceId: string): SQL {
   return and(eq(c.orgId, orgOf(spaceId)), or(eq(c.spaceId, spaceId), isNull(c.spaceId)))!;
 }
 

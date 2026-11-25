@@ -10,6 +10,7 @@ import { PACKAGE_TYPE_ROUTE_SEGMENT } from "@appstrate/core/package-files";
 import { asJSONSchemaObject } from "@appstrate/core/form";
 import { $api, client, type components } from "../api/client";
 import { downloadOrToast } from "../lib/blob-download";
+import { APPROVED_TOOLS_HEADER, warnApprovedTools } from "../lib/export-approved-tools";
 import { splitPackageRef } from "../lib/package-paths";
 import { spaceHeader } from "../lib/scoping-headers";
 import { generatedKeyPackage, keepPreviousWithin } from "../lib/query-state";
@@ -391,15 +392,20 @@ export function useAgentBundleExport(scope: string | undefined, name: string | u
   return useCallback(
     async (version?: string, spaceId?: string) => {
       if (!scope || !name) return;
+      let approvedTools: string | null = null;
       await downloadOrToast(
-        () =>
-          client.GET("/api/agents/{scope}/{name}/bundle", {
+        async () => {
+          const result = await client.GET("/api/agents/{scope}/{name}/bundle", {
             params: { path: { scope, name }, query: { version } },
             ...spaceHeader(spaceId),
             parseAs: "blob",
-          }),
+          });
+          approvedTools = result.response.headers.get(APPROVED_TOOLS_HEADER);
+          return result;
+        },
         `${stripScope(scope)}-${name}.afps-bundle`,
       );
+      warnApprovedTools(approvedTools);
     },
     [scope, name],
   );
