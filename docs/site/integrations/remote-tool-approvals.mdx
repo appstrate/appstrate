@@ -17,7 +17,15 @@ For each connection, the platform stores what the server last listed: the **tool
 - a platform run boots: the sidecar reports what the server listed to the run;
 - someone selects **Read the server again** on the integration's **Tools** tab. It reads the latest published version of the integration and needs the right to call it with that connection.
 
-**Read the server again** is refused before any version is published, for a server on the SSE transport, with `credential_proxy_closed` when the space closed the credential proxy, and with `remote_url_unrenderable` when the connection's variables do not render the server URL.
+**Read the server again** needs `credential-proxy:call-own` and is refused:
+
+- before any version is published (`404`);
+- for an integration that is not remote, with `integration_not_remote`;
+- for a server on the SSE transport, with `sync_transport_unsupported` (only Streamable HTTP is read);
+- with `credential_proxy_closed` when the space closed the credential proxy;
+- with `remote_url_unrenderable` when the connection's variables do not render the server URL.
+
+On the **Tools** tab the button is shown disabled, with the reason, when no version is published, the integration is not active in the space, you may not use a connection to query the server, no account is connected, or the server uses SSE.
 
 The **Tools** tab shows the date of the last read, how many tools were added, gone or changed since the previous one, and the connection used. If the server returned more tools than the platform keeps, the list is marked **Truncated list**. A tool missing from a truncated list is never judged gone.
 
@@ -57,8 +65,10 @@ Open the integration, then its **Tools** tab. Under **Tools to review** are the 
 
 - A tool that no snapshot contains cannot be reviewed: read the server again first.
 - If the definition changed between your review and your click, the approval is refused (`tool_snapshot_stale`): review the new one.
-- One tool can have several approved definitions, for instance when a templated server URL points each connection at its own instance. At most 32 per tool; **Withdraw approval** frees a slot.
-- A definition too large to be kept cannot be reviewed, so it cannot be approved.
+- One tool can have several approved definitions, for instance when a templated server URL points each connection at its own instance. At most 32 per tool (`409 tool_approvals_limit`). **Withdraw approval** removes every approved definition of the tool, so to stay under the limit withdraw the tool, then approve the definition to keep.
+- A definition too large to be kept cannot be reviewed, so it cannot be approved (`tool_definition_unavailable`).
+- On an open catalog nothing needs an approval: approving is refused with `409 tool_catalog_open`.
+- A hidden tool cannot be approved (`409 tool_hidden`), and neither can a declared one (`409 tool_already_declared`).
 - **Withdraw approval** makes the tool unavailable again in this space until it is approved anew.
 
 A **Tools to review** notification goes to the holders of `integrations:configure` when a snapshot brings a new or changed undeclared tool that is still awaiting approval. It is sent only for a closed catalog and only in the spaces where the integration is active and the tool is pending (not declared, blocked, or already approved at its current definition). For a snapshot of a connection, only the holders who can use that connection are notified. Each person has at most one unread notice per space and integration: a new listing does not stack another.
@@ -81,7 +91,7 @@ The integration creation wizard keeps its own read of the server (`POST /api/int
 
 ## Block a tool
 
-**Block** (or **Block a tool…** to name one) makes a tool neither offered nor callable in the space, declared or not, on an open or a closed catalog. It applies to the tools of every integration source (remote, local or none) and to `api_call` and `api_upload`; blocking `api_upload` alone applies to runs only. A policy route accepts any name the server listed (1 to 256 characters). **Unblock** reverses it.
+**Block** (or **Block a tool…** to name one) makes a tool neither offered nor callable in the space, declared or not, on an open or a closed catalog. It applies to the tools of every integration source (remote, local or none) and to `api_call` and `api_upload`; blocking `api_upload` alone applies to runs only. A policy route accepts any name the server listed (1 to 256 characters). A space holds at most 500 blocks per integration; past that, blocking is refused with `409 tool_blocks_limit` until one is lifted. **Unblock** reverses it.
 
 ## Who can change a policy
 
@@ -93,7 +103,7 @@ The agent editor greys out tools that are unavailable and says why, but never re
 
 ## When a run cannot have a tool
 
-A run whose selected tools are unavailable does not fail: it continues without them and is marked **degraded**. This includes a blocked `api_call` or `api_upload`: it is removed from the run and reported with `blocked_in_space`, like any selected tool the space blocks. A selection of all tools (`"*"`) resolved at run time against a closed catalog version exposes only the declared and approved tools. The run page shows **Tools unavailable during this run**, listing each tool with its reason, and the model is told in its system prompt which tools it does not have.
+A run whose selected tools are unavailable does not fail: it continues without them and is marked **degraded**. This holds for a local integration too: when it loses a selected tool, the sidecar reports it and the run is marked degraded. This includes a blocked `api_call` or `api_upload`: it is removed from the run and reported with `blocked_in_space`, like any selected tool the space blocks. A selection of all tools (`"*"`) resolved at run time against a closed catalog version exposes only the declared and approved tools. The run page shows **Tools unavailable during this run**, listing each tool with its reason, and the model is told in its system prompt which tools it does not have.
 
 | Reason shown                          | Meaning                                                                               |
 | ------------------------------------- | ------------------------------------------------------------------------------------- |
@@ -118,8 +128,8 @@ When a server refuses a call with a Bearer challenge (`401`, or `403 insufficien
 
 ## Exporting an agent
 
-`GET /api/agents/{scope}/{name}/bundle` adds an `Appstrate-Space-Approved-Tools` response header, a comma-separated `<integrationId>:<tool>` list, when the agent uses tools only because this space approved them. The archive does not carry the approvals: the importing space must approve those tools again.
+`GET /api/agents/{scope}/{name}/bundle` adds an `Appstrate-Space-Approved-Tools` response header when the agent uses tools only because this space approved them. Each element is `encodeURIComponent("<integrationId>:<tool>")`, percent-encoded because a tool name may contain a comma, and the elements are joined by commas. The archive does not carry the approvals: the importing space must approve those tools again.
 
 ## Error codes
 
-The codes of this mechanism are in the [error catalog](/api/errors): `tool_blocked_in_space`, `tool_definition_not_approved`, `tool_snapshot_stale`, `tool_already_declared`, `tool_definition_unavailable`, `tool_approvals_limit`, `dashboard_session_required` and `remote_mcp_endpoint_not_proxied`.
+The codes of this mechanism are in the [error catalog](/api/errors): `tool_blocked_in_space`, `tool_definition_not_approved`, `tool_snapshot_stale`, `tool_already_declared`, `tool_catalog_open`, `tool_hidden`, `tool_definition_unavailable`, `tool_approvals_limit`, `tool_blocks_limit`, `dashboard_session_required`, `integration_not_remote`, `sync_transport_unsupported` and `remote_mcp_endpoint_not_proxied`.
