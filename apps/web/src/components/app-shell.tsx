@@ -15,6 +15,7 @@ import { Button } from "@appstrate/ui/components/button";
 import { ShellBreadcrumb } from "@/components/shell-breadcrumb";
 import { ChatSidebarSkeleton } from "@/components/loading-skeletons";
 import { SidebarCredits } from "@/components/sidebar-credits";
+import { SidebarTips } from "@/components/sidebar-tips";
 import { useUnreadRunCount } from "@/hooks/use-run-reads";
 import { useOverlayPath } from "@/lib/modal-route";
 import { useCanReach, useReachReady } from "@/hooks/use-can-reach";
@@ -87,7 +88,7 @@ export function AppSidebar({ product }: { product: "studio" | "chat" }) {
   const { t } = useTranslation();
   // On a phone the navigation is a sheet over the page: once a link has taken the user somewhere,
   // the sheet would only hide where they went. Desktop keeps its own, remembered, open state.
-  const { setOpenMobile } = useSidebar();
+  const { setOpenMobile, isMobile } = useSidebar();
   const { key } = useLocation();
   useEffect(() => setOpenMobile(false), [key, setOpenMobile]);
   // The catalogue is drawn only when its route admits the caller (`ROUTE_ACCESS`). It names no
@@ -155,6 +156,10 @@ export function AppSidebar({ product }: { product: "studio" | "chat" }) {
         )}
       </SidebarContent>
       <SidebarFooter className="gap-0 p-0">
+        {/* Getting-started cards, a desktop's: the phone's drawer keeps its whole height for the
+            navigation. Here, in the foot, they stand at the same place in Studio and in the chat,
+            whose list fills the content above. */}
+        {!isMobile && <SidebarTips />}
         <SidebarMenu className="px-2 pb-2" hidden={!catalogueReachable}>
           <OverlayEntry
             to={catalogueHref("agent")}

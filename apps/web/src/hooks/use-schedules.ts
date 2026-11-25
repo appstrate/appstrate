@@ -29,13 +29,13 @@ function useCanReadSchedules(): boolean {
 }
 
 /** The current space's schedules, or, `spanning`, every space's the reader reaches (`GET /api/orgs/{orgId}/schedules`). */
-export function useAllSchedules(spanning = false) {
+export function useAllSchedules(spanning = false, enabled = true) {
   const scope = useListScope(spanning, useCanReadSchedules());
   return useQuery({
     // Key pinned: use-global-run-sync invalidates by this prefix on SSE events.
     queryKey: scheduleKeys.list(scope.orgId, scope.keySpace),
     queryFn: () => fetchSchedules(scope.acrossOrgId),
-    enabled: scope.enabled,
+    enabled: enabled && scope.enabled,
     refetchInterval: scope.refetchInterval,
   });
 }
