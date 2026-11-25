@@ -625,10 +625,55 @@ export function ConversationSidebar({
   const view: PanelView = shownFile(state) ? "file" : activeTab.id === "info" ? "info" : "list";
   const size = usePanelWidth(panelRef, view);
 
-  if (!desktop) {
-    return (
-      <div className="flex min-h-0 min-w-0 flex-1">
-        <div className="min-w-0 flex-1">{children}</div>
+  // Desktop: the panel floats over the thread's right side, inside the conversation. The thread
+  // keeps the whole width, so its scrollbar stays at the right edge, outside the panel (`right-4`,
+  // the scrollbar's gutter), and reserves the room the panel and that gutter take
+  // (`--chat-context-inset`, read by the module's side padding): nothing reads under it and the
+  // column stays centered in what is left. Closed, the panel is `inert` (out of the tab order and
+  // the accessibility tree) and lets the pointer through; its content keeps the full width so
+  // nothing reflows mid-transition. Below `lg` it opens in a sheet.
+  const inset =
+    desktop && state.expanded ? `calc(${size.width}px + ${SCROLLBAR_GUTTER})` : undefined;
+  return (
+    <div
+      className="relative flex min-h-0 min-w-0 flex-1"
+      style={{ ["--chat-context-inset" as string]: inset }}
+    >
+      {/* While the panel is resized, the thread's padding follows the pointer, not its transition. */}
+      <div className={cn("min-w-0 flex-1", dragging && "[&_*]:transition-none")}>{children}</div>
+      {desktop ? (
+        <aside
+          ref={panelRef}
+          id={CONVERSATION_CONTEXT_PANEL_ID}
+          aria-label={t("context.label")}
+          inert={!state.expanded}
+          className={cn(
+            "ease-surface absolute inset-y-0 right-4 transition-[opacity,translate]",
+            state.expanded
+              ? "duration-base translate-x-0 opacity-100"
+              : "duration-fast pointer-events-none translate-x-6 opacity-0",
+          )}
+          style={{ width: size.width }}
+        >
+          <PanelResizeHandle
+            controls={CONVERSATION_CONTEXT_PANEL_ID}
+            label={t("context.resize")}
+            width={size.width}
+            min={size.min}
+            max={size.max}
+            clamp={size.clamp}
+            onLive={size.setLive}
+            onCommit={size.commit}
+            onDraggingChange={setDragging}
+          />
+          <ConversationContext
+            conversationId={conversationId}
+            state={state}
+            dispatch={dispatch}
+            closable={false}
+          />
+        </aside>
+      ) : (
         <Sheet
           open={state.expanded}
           onOpenChange={(open) => open !== state.expanded && dispatch({ type: "toggle" })}
@@ -650,55 +695,7 @@ export function ConversationSidebar({
             />
           </SheetContent>
         </Sheet>
-      </div>
-    );
-  }
-
-  // The panel floats over the thread's right side, inside the conversation: the thread keeps the
-  // whole width, so its scrollbar stays at the right edge, outside the panel (`right-4`, the
-  // scrollbar's gutter). The thread reserves the room the panel and that gutter take
-  // (`--chat-context-inset`, read by the module's side padding), so nothing reads under it and
-  // the column stays centered in what is left. Closed, the panel is `inert` (out of the tab order
-  // and the accessibility tree) and lets the pointer through. Its content keeps the full width so
-  // nothing reflows mid-transition.
-  const inset = state.expanded ? `calc(${size.width}px + ${SCROLLBAR_GUTTER})` : undefined;
-  return (
-    <div
-      className="relative flex min-h-0 min-w-0 flex-1"
-      style={{ ["--chat-context-inset" as string]: inset }}
-    >
-      <div className={cn("min-w-0 flex-1", dragging && "[&_*]:transition-none")}>{children}</div>
-      <aside
-        ref={panelRef}
-        id={CONVERSATION_CONTEXT_PANEL_ID}
-        aria-label={t("context.label")}
-        inert={!state.expanded}
-        className={cn(
-          "ease-surface absolute inset-y-0 right-4 transition-[opacity,translate]",
-          state.expanded
-            ? "duration-base translate-x-0 opacity-100"
-            : "duration-fast pointer-events-none translate-x-6 opacity-0",
-        )}
-        style={{ width: size.width }}
-      >
-        <PanelResizeHandle
-          controls={CONVERSATION_CONTEXT_PANEL_ID}
-          label={t("context.resize")}
-          width={size.width}
-          min={size.min}
-          max={size.max}
-          clamp={size.clamp}
-          onLive={size.setLive}
-          onCommit={size.commit}
-          onDraggingChange={setDragging}
-        />
-        <ConversationContext
-          conversationId={conversationId}
-          state={state}
-          dispatch={dispatch}
-          closable={false}
-        />
-      </aside>
+      )}
     </div>
   );
 }

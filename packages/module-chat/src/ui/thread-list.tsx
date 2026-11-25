@@ -41,6 +41,7 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuLabel,
   DropdownMenuTrigger,
 } from "@appstrate/ui/components/dropdown-menu";
 import { Label } from "@appstrate/ui/components/label";
@@ -88,6 +89,8 @@ import { ConversationGroupSkeleton } from "./conversation-skeleton.tsx";
 import { groupSessionsByDate, type SessionGroupKey } from "./session-groups.ts";
 import {
   NEW_CONVERSATION_CLASS,
+  NEW_CONVERSATION_ICON_CLASS,
+  SEARCH_TOGGLE_CLASS,
   NOTE_TEXT_CLASS,
   READING_TEXT_DENSE_CLASS,
   SEARCH_INPUT_CLASS,
@@ -126,8 +129,11 @@ function useDebouncedTerm(input: string, delay: number): string {
  *
  * Every row is one line, for a writer as for a reader: the title, then one block
  * on the right — the tiles of the spaces the conversation touched (their names in
- * `title`), then its status when it has one (generating, unread); a writer's « … »
- * takes the whole block's place on hover. The date is the group's (« Aujourd'hui », …), not the row's. A conversation whose reply arrived while the user was elsewhere reads as
+ * `title`, and in a writer's « … » menu), then its status when it has one
+ * (generating, unread); a writer's « … » takes the whole block's place on hover.
+ * The date is the group's (« Aujourd'hui », …), not the row's.
+ *
+ * A conversation whose reply arrived while the user was elsewhere reads as
  * unread until it is opened; `activeId` is never counted, since looking at it
  * IS reading it.
  *
@@ -204,7 +210,7 @@ export function ChatConversationList({
                   className={cn(NEW_CONVERSATION_CLASS, showSearch && "max-md:pr-12")}
                 >
                   {/* A phone's row has its icon in a round tile, as the rows below it have theirs. */}
-                  <span className="max-md:bg-sidebar-accent max-md:flex max-md:size-8 max-md:items-center max-md:justify-center max-md:rounded-full md:contents">
+                  <span className={NEW_CONVERSATION_ICON_CLASS}>
                     <PlusIcon />
                   </span>
                   <span>{t("threads.new")}</span>
@@ -222,7 +228,8 @@ export function ChatConversationList({
                     searchField.current?.focus();
                   }}
                   className={cn(
-                    "text-sidebar-foreground/70 active:bg-sidebar-accent flex size-11 items-center justify-center rounded-md md:hidden",
+                    SEARCH_TOGGLE_CLASS,
+                    "active:bg-sidebar-accent",
                     canWrite ? "absolute top-0 right-0" : "ml-auto",
                   )}
                 >
@@ -506,6 +513,19 @@ function ConversationRow({
             className="min-w-40"
             sheetTitle={session.title ?? t("threads.new")}
           >
+            {/* The spaces it reaches, by name: the row shows their tiles alone, and a touch has
+                no hover to read their `title`. */}
+            <DropdownMenuLabel
+              data-testid="chat-menu-spaces"
+              className={cn(
+                "text-muted-foreground flex min-w-0 items-center font-normal [--tile-ring:var(--popover)] max-md:[--tile-ring:var(--background)]",
+                NOTE_TEXT_CLASS,
+              )}
+            >
+              {session.space_ids.length > 0
+                ? renderSpaces(session.space_ids)
+                : t("common:overview.title")}
+            </DropdownMenuLabel>
             <DropdownMenuItem onSelect={openRename}>
               <PencilIcon />
               {t("threads.rename")}

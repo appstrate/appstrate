@@ -19,6 +19,8 @@ import {
   COMPOSER_TOOLS_CLASS,
   DISCLAIMER_CLASS,
   NEW_CONVERSATION_CLASS,
+  NEW_CONVERSATION_ICON_CLASS,
+  SEARCH_TOGGLE_CLASS,
   THREAD_SIDE_PADDING_CLASS,
 } from "./phone-text.ts";
 
@@ -177,15 +179,12 @@ export function ConversationListSkeleton({ newConversation }: { newConversation:
               tooltip={newConversation}
               className={cn(NEW_CONVERSATION_CLASS, "max-md:pr-12")}
             >
-              <span className="max-md:bg-sidebar-accent max-md:flex max-md:size-8 max-md:items-center max-md:justify-center max-md:rounded-full md:contents">
+              <span className={NEW_CONVERSATION_ICON_CLASS}>
                 <PlusIcon />
               </span>
               <span>{newConversation}</span>
             </SidebarMenuButton>
-            <span
-              aria-hidden
-              className="text-sidebar-foreground/70 absolute top-0 right-0 flex size-11 items-center justify-center md:hidden"
-            >
+            <span aria-hidden className={cn(SEARCH_TOGGLE_CLASS, "absolute top-0 right-0")}>
               <SearchIcon className="size-5" />
             </span>
           </SidebarMenuItem>

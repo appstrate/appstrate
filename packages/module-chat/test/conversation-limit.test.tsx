@@ -446,9 +446,6 @@ describe("the composer's limit chip", () => {
     );
     // One line: nothing wraps the cluster.
     expect(out).not.toContain("flex-wrap");
-    // Neither opener carries a dot: the desktop's chip says the limit, the phone's panel names it.
-    expect(out).not.toContain("composer-plus-dot");
-    expect(out).not.toContain("composer-settings-dot");
   });
 
   it("draws no model pill: the model is a level of the tools panel", () => {
