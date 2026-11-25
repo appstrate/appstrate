@@ -9,6 +9,7 @@
 
 import { existsSync, readdirSync, statSync } from "node:fs";
 import { join, resolve } from "node:path";
+import { workspaceModuleRoots } from "../../scripts/lib/workspace-modules.ts";
 
 /** A module root and the absolute path to its entry file. */
 export interface DiscoveredModule {
@@ -28,11 +29,19 @@ function scanRoot(
     .filter(({ dir, entry }) => statSync(dir).isDirectory() && existsSync(entry));
 }
 
-/** Every module: `apps/api/src/modules/<n>/index.ts`, `packages/module-<n>/src/index.ts`. */
+/**
+ * Every module: `apps/api/src/modules/<n>/index.ts`, then the `src/index.ts` of each workspace
+ * module package (`packages/module-<n>/` and the commercial `ee/`, `workspaceModuleRoots`).
+ */
 export function discoverModules(repoRoot: string): DiscoveredModule[] {
   return [
     ...scanRoot(resolve(repoRoot, "apps/api/src/modules"), "index.ts", () => true),
-    ...scanRoot(resolve(repoRoot, "packages"), "src/index.ts", (n) => n.startsWith("module-")),
+    ...workspaceModuleRoots(repoRoot)
+      .map(({ dir }) => ({
+        dir: resolve(repoRoot, dir),
+        entry: resolve(repoRoot, dir, "src/index.ts"),
+      }))
+      .filter(({ entry }) => existsSync(entry)),
   ];
 }
 

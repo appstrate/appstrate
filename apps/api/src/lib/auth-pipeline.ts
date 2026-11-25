@@ -333,6 +333,7 @@ export function applyAuthPipeline(app: Hono<AppEnv>, opts: AuthPipelineOptions):
     });
     c.set("authMethod", "session");
     c.set("principalKind", "user");
+    c.set("sessionId", session.session.id);
     // Resolve the user's realm so the realm guard middleware below can
     // reject cookie sessions minted for a non-platform audience (OIDC
     // end-users) from hitting platform routes. The realm is denormalized

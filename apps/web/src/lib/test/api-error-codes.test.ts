@@ -49,6 +49,8 @@ const SOURCES = [
   "packages/db/src/**/*.ts",
   "packages/connect/src/**/*.ts",
   "packages/module-*/src/**/*.ts",
+  // The commercial package (`@appstrate/ee`): enterprise sign-in's refusals.
+  "ee/src/**/*.ts",
 ];
 // The MCP module's `code` literals, and `core`'s MCP tool-result helpers (`mcp-result.ts`,
 // `mcp-spaces.ts`: `missing_argument`, `unknown_space`), are tool-result refusals read by the model, never a problem body.

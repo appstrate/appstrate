@@ -30,11 +30,7 @@
  */
 
 import { z } from "zod";
-import type {
-  AppstrateModule,
-  BeforeSignupContext,
-  AfterSignupContext,
-} from "@appstrate/core/module";
+import type { AppstrateModule } from "@appstrate/core/module";
 import { getEnv } from "@appstrate/env";
 
 // Register module-owned RBAC resources. OAuth client registration /
@@ -315,20 +311,15 @@ const oidcModule: AppstrateModule = {
     // The guard resolves the in-flight client from the OAuth TRANSACTION
     // BINDING (state-keyed for social, token-keyed for magic-link,
     // server-authored cookie for the register path) — see
-    // `services/oauth-transaction-binding.ts`. The core wiring forwards the
-    // BA endpoint's `path` + `query` alongside the typed
-    // `BeforeSignupContext.headers`; narrow to read them.
+    // `services/oauth-transaction-binding.ts`, read off the BA endpoint's
+    // `path` + `query` the core wiring forwards.
     // Pass-through on every signup that is not gated by an org-level client.
     beforeSignup: async (email, ctx) => {
-      const tx = ctx as BeforeSignupContext & {
-        path?: string | null;
-        query?: Record<string, unknown> | null;
-      };
       await oidcBeforeSignupGuard({
         user: { email },
         headers: ctx.headers,
-        path: tx.path ?? null,
-        query: tx.query ?? null,
+        path: ctx.path,
+        query: ctx.query,
       });
     },
     // Symmetric post-signup: on a BA user freshly created through an
@@ -337,15 +328,11 @@ const oidcModule: AppstrateModule = {
     // `oidcAfterSignupHandler` docstring for why `buildOrgLevelClaims` alone
     // isn't enough for the social code path.
     afterSignup: async (user, ctx) => {
-      const tx = ctx as AfterSignupContext & {
-        path?: string | null;
-        query?: Record<string, unknown> | null;
-      };
       await oidcAfterSignupHandler({
         user,
         headers: ctx.headers,
-        path: tx.path ?? null,
-        query: tx.query ?? null,
+        path: ctx.path,
+        query: ctx.query,
       });
     },
   },

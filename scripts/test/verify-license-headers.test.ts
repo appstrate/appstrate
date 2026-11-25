@@ -10,7 +10,12 @@
 import { describe, it, expect } from "bun:test";
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import { LICENSED_GLOBS, checkLicenseHeader, generatorOf } from "../verify-license-headers.ts";
+import {
+  LICENSED_GLOBS,
+  checkLicenseHeader,
+  expectedLicenseFor,
+  generatorOf,
+} from "../verify-license-headers.ts";
 import { SOURCE_GLOBS } from "../lib/tracked-files.ts";
 
 /** The single entry in the gate's `GENERATED_ALLOWLIST`. */
@@ -18,6 +23,28 @@ const GENERATED_FILE = "apps/web/src/api/schema.d.ts";
 
 const APACHE = "// SPDX-License-Identifier: Apache-2.0";
 const OTHER_LICENCE = "// SPDX-License-Identifier: LicenseRef-Appstrate-Commercial";
+
+describe("expectedLicenseFor", () => {
+  it("puts the root ee/ package under the commercial licence", () => {
+    expect(expectedLicenseFor("ee/src/index.ts")).toBe("LicenseRef-Appstrate-Commercial");
+  });
+
+  it("puts everything else under Apache-2.0", () => {
+    expect(expectedLicenseFor("packages/module-billing/src/index.ts")).toBe("Apache-2.0");
+    // Prefix matching, not substring: a path that merely contains `ee/` is Apache-2.0.
+    expect(expectedLicenseFor("apps/web/src/ee/x.ts")).toBe("Apache-2.0");
+    expect(expectedLicenseFor("eee/src/index.ts")).toBe("Apache-2.0");
+  });
+});
+
+describe("checkLicenseHeader under ee/", () => {
+  it("accepts the commercial header and refuses Apache-2.0", () => {
+    expect(checkLicenseHeader("ee/src/index.ts", [OTHER_LICENCE])).toBeNull();
+    expect(checkLicenseHeader("ee/src/index.ts", [APACHE])).toContain(
+      "expected `// SPDX-License-Identifier: LicenseRef-Appstrate-Commercial`",
+    );
+  });
+});
 
 describe("checkLicenseHeader", () => {
   it("accepts the Apache-2.0 header", () => {

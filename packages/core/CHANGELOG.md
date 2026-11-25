@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **`PlatformServices.members.provision(orgId, userId, role)`** (`@appstrate/core/module`): a
+  module admits a person into an organization as `member` or `guest` through the platform's one
+  membership door, personal space included; idempotent, an existing member keeps their role.
+- **`PlatformServices.access.endForEmailDomain(domain, keepSessionId)`**: ends, for the platform
+  accounts at exactly that email domain, everything a password change ends (sessions but one,
+  pending sign-in links, the tokens modules revoke on a credential change), through the auth
+  layer so its hooks run.
+- **`BeforeSignupContext.path`, `.query` and `.realm()`**: the Better Auth endpoint creating the
+  account, its parsed query, and the audience the account is about to be created in (`platform`
+  or `end_user:<spaceId>`), resolved on demand. All three are always set by the platform.
+  **`AfterSignupContext.path` and `.query`**: the same endpoint and query.
+
 ## [18.0.0] — 2026-11-24
 
 ### Added
@@ -332,6 +346,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the `_meta` keys **`SKILL_DEFINITION_META_KEY`** (`dev.appstrate/definition`, a `skills/list`
   of drafts) and **`SKILL_LOCK_VERSION_META_KEY`** (`dev.appstrate/lock_version`, the draft an
   entry was read from), and the **`SkillAddress`**, **`SkillEntry`** and **`SkillResource`** types, shared by the API, `@appstrate/mcp-transport` and the CLI. (#2175)
+
 - **Image MIME types in `extensionForMime`** (`@appstrate/core/naming`): `image/png`, `image/jpeg` and `image/jpg` (`jpg`), `image/gif`, `image/webp`, `image/bmp` and `image/svg+xml` (`svg`) now resolve to an extension, so spilled images are no longer extensionless. (#2120)
 - **`AJV_FORMATS_OPTIONS`** (`@appstrate/core/ajv`): the ajv-formats options `createAjv` uses, so
   the RJSF validator registers the same formats and client and server agree.

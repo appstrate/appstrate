@@ -135,6 +135,7 @@ const DECLARER_ROOTS: Record<string, string> = {
   "module-chat": "packages/module-chat/src",
   "module-observability": "packages/module-observability/src",
   "module-billing": "packages/module-billing/src",
+  enterprise: "ee/src",
 };
 
 const LEDGER: Record<ContractMember, LedgerEntry> = {
@@ -144,23 +145,26 @@ const LEDGER: Record<ContractMember, LedgerEntry> = {
   // ── extension — generic, must have >= 2 owners ──────────────────────────
   createRouter: {
     kind: "extension",
-    owners: ["oidc", "webhooks", "mcp", "module-billing", "module-chat"],
+    owners: ["oidc", "webhooks", "mcp", "module-billing", "module-chat", "enterprise"],
   },
   publicPaths: { kind: "extension", owners: ["oidc", "mcp", "module-billing"] },
   permissionsContribution: {
     kind: "extension",
-    owners: ["oidc", "webhooks", "mcp", "module-billing", "module-chat"],
+    owners: ["oidc", "webhooks", "mcp", "module-billing", "module-chat", "enterprise"],
     justification:
       "RBAC — the core/module boundary; module-billing cannot migrate it into core (#488).",
   },
   hooks: {
     kind: "extension",
-    owners: ["oidc", "module-billing", "module-codex", "module-claude-code"],
+    owners: ["oidc", "module-billing", "module-codex", "module-claude-code", "enterprise"],
   },
-  events: { kind: "extension", owners: ["webhooks", "mcp", "module-billing", "module-chat"] },
+  events: {
+    kind: "extension",
+    owners: ["webhooks", "mcp", "module-billing", "module-chat", "enterprise"],
+  },
   features: {
     kind: "extension",
-    owners: ["oidc", "webhooks", "mcp", "module-billing", "module-chat"],
+    owners: ["oidc", "webhooks", "mcp", "module-billing", "module-chat", "enterprise"],
   },
   modelProviders: {
     kind: "extension",
@@ -170,19 +174,19 @@ const LEDGER: Record<ContractMember, LedgerEntry> = {
   },
   openApiPaths: {
     kind: "extension",
-    owners: ["oidc", "webhooks", "mcp", "module-billing", "module-chat"],
+    owners: ["oidc", "webhooks", "mcp", "module-billing", "module-chat", "enterprise"],
   },
   openApiComponentSchemas: {
     kind: "extension",
-    owners: ["oidc", "webhooks", "module-billing", "module-chat"],
+    owners: ["oidc", "webhooks", "module-billing", "module-chat", "enterprise"],
   },
   openApiTags: {
     kind: "extension",
-    owners: ["oidc", "webhooks", "mcp", "module-billing", "module-chat"],
+    owners: ["oidc", "webhooks", "mcp", "module-billing", "module-chat", "enterprise"],
   },
   openApiSchemas: {
     kind: "extension",
-    owners: ["oidc", "webhooks", "module-chat", "module-billing"],
+    owners: ["oidc", "webhooks", "module-chat", "module-billing", "enterprise"],
     justification:
       "Zod/OpenAPI parity is tied to each module's routes; centralizing these schemas would make the platform import module-private request shapes.",
   },
@@ -197,10 +201,11 @@ const LEDGER: Record<ContractMember, LedgerEntry> = {
       "module-chat adds its process-local loopback bearer strategy through the same seam.",
   },
   betterAuthPlugins: {
-    kind: "seam",
-    owners: ["oidc"],
+    kind: "extension",
+    owners: ["oidc", "enterprise"],
     justification:
-      "@appstrate/db/auth.ts builds the auth instance below the module layer; cannot import oidc.",
+      "@appstrate/db/auth.ts builds the auth instance below the module layer; cannot import a module. " +
+      "oidc contributes its OAuth server, enterprise (`ee/`) the sign-in policy of an organization's email domains.",
   },
   appConfigContribution: {
     kind: "seam",
@@ -241,7 +246,7 @@ const LEDGER: Record<ContractMember, LedgerEntry> = {
  */
 const HOOK_LEDGER: Record<HookMember, NamedLedgerEntry> = {
   beforeUsage: { owners: ["module-billing"] },
-  beforeSignup: { owners: ["oidc"] },
+  beforeSignup: { owners: ["oidc", "enterprise"] },
   afterSignup: { owners: ["oidc"] },
 };
 
@@ -254,7 +259,7 @@ const EVENT_LEDGER: Record<EventMember, NamedLedgerEntry> = {
   onRunStatusChange: { owners: ["webhooks", "module-chat"] },
   onRunConnectionMissing: { owners: ["webhooks"] },
   onOrgCreate: { owners: ["mcp", "module-billing"] },
-  onOrgDelete: { owners: ["mcp", "module-billing"] },
+  onOrgDelete: { owners: ["mcp", "module-billing", "enterprise"] },
   onOrgMemberRemove: { owners: ["module-billing"] },
 };
 
@@ -278,7 +283,9 @@ const SERVICE_LEDGER: Record<ServiceMember, NamedLedgerEntry> = {
   checkUsageAllowed: { owners: ["module-chat"] },
   reachableSpaces: { owners: ["module-chat"] },
   setFileStorageLimit: { owners: ["module-billing"] },
-  audit: { owners: ["module-billing"] },
+  audit: { owners: ["module-billing", "enterprise"] },
+  members: { owners: ["enterprise"] },
+  access: { owners: ["enterprise"] },
 };
 
 /**
