@@ -9,20 +9,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- `@appstrate/core/www-authenticate` exports `parseBearerChallenge` and `BearerChallenge` (moved from `@appstrate/connect`, now with `error`), and `requiredScopesFromChallenge`, which reads the scopes a server asks for on a 401 or a 403 `insufficient_scope` (valid scope tokens of at most `MAX_REQUIRED_SCOPE_LENGTH` = 128 characters, 20 at most).
-- `@appstrate/core/sidecar-types` exports `OBSERVED_TOOLS_MAX_COUNT` and `OBSERVED_TOOL_NAME_MAX_LENGTH`, the bounds of the tools-observed report body that the sidecar caps to and the platform enforces.
+- `@appstrate/core/www-authenticate` exports `parseBearerChallenge` and `BearerChallenge` (moved from `@appstrate/connect`, now with `error`), `requiredScopesFromChallenge`, which reads the scopes a server asks for on a 401 or a 403 `insufficient_scope`, `sanitiseRequiredScopes`, the filter it applies (valid scope tokens of at most `MAX_REQUIRED_SCOPE_LENGTH` = 128 characters, 20 at most), and `MAX_REQUIRED_SCOPE_LENGTH`.
+- `@appstrate/core/sidecar-types` exports the bounds and schemas of the tools-observed report that the sidecar caps to and the platform enforces: `OBSERVED_TOOLS_MAX_COUNT`, `OBSERVED_TOOL_NAME_MAX_LENGTH`, `OBSERVED_TOOLS_MAX_BYTES`, `observedToolNameSchema` and `observedToolSchema`.
 - `resolveEffectiveToolCatalog` and its types (`EffectiveToolEntry`, `EffectiveToolStatus`, `EffectiveToolOrigin`, `ToolSpacePolicy`, `ToolSnapshotView`, `ResolveEffectiveToolCatalogInput`) judge each tool of an integration against a space's approvals, blocks and the server's stored listings; a hidden tool never appears in it. `hiddenToolNames` is exported.
 - `validateAgentIntegrationScopes` takes `options.approvedTools`: names approved in the space count as known tools of a closed catalog.
-- `IntegrationSpawnSpec.approvedToolFingerprints` carries the approved definition fingerprints of the undeclared tools an agent selected; `IntegrationBootReport.spawned[].unavailableTools` (with `UnavailableToolReason`) names the selected tools a connection does not expose.
-- `@appstrate/core/sidecar-types` exports `OBSERVED_TOOLS_MAX_COUNT` and `OBSERVED_TOOL_NAME_MAX_LENGTH` (bounds of the tools-observed report); `@appstrate/core/www-authenticate` exports `MAX_REQUIRED_SCOPE_LENGTH`.
+- `IntegrationSpawnSpec.approvedToolFingerprints` carries the approved definition fingerprints of the undeclared tools an agent selected; `IntegrationBootReport.spawned[].unavailableTools` names the selected tools a connection does not expose, with `UnavailableToolReason` derived from the new `UNAVAILABLE_TOOL_REASONS`.
 - `isListedToolName` in `@appstrate/core/naming` tells whether a server-listed tool name is safe to quote to a model or a log.
-
-- `IntegrationSpawnSpec.blockedTools` carries the names a space blocks; the sidecar excludes them and reports `blocked_in_space` (new `UnavailableToolReason`). `MAX_APPROVED_FINGERPRINTS_PER_TOOL` (32) is exported from `@appstrate/core/sidecar-types`, and an oversize `approvedToolFingerprints` now fails with a message.
+- `IntegrationSpawnSpec.blockedTools` carries the names a space blocks; the sidecar excludes them and reports `blocked_in_space`. `MAX_APPROVED_FINGERPRINTS_PER_TOOL` (32) is exported from `@appstrate/core/sidecar-types`, and an oversize `approvedToolFingerprints` now fails with a message.
 - `@appstrate/core/integration` exports `targetsMcpEndpoint` and `McpEndpoint` (moved from the sidecar): whether a URL falls on an integration's remote MCP endpoint.
 
-### Fixed
+### Changed
 
-- `validateAgentIntegrationScopes` refuses an unknown tool name on a closed `remote` catalog that declares no tools; it used to accept any name there. A catalog with `allow_undeclared_tools` is not name-checked, and a local source declaring no tools keeps the no-check rule of AFPS §7.1.
+- `validateAgentIntegrationScopes` on a catalog with `allow_undeclared_tools` now accepts an explicit tool name the source does not declare; it used to refuse it as `unknown_tool`.
+- **BREAKING** — `validateAgentIntegrationScopes` treats a `remote` source that declares no tools as a closed catalog: every explicit tool selection is refused unless the tool is approved in the space (`options.approvedTools`); it used to accept any name. A local source declaring no tools keeps the no-check rule of AFPS §7.1.
 
 ## [18.0.0] — 2026-11-24
 

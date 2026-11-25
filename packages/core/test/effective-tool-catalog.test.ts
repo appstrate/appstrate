@@ -287,6 +287,31 @@ describe("targetsMcpEndpoint", () => {
     expect(targetsMcpEndpoint("https://other.example.com/v1/mcp", endpoint)).toBe(false);
   });
 
+  it("normalises the host, the default port, slashes, case, escapes and the query", () => {
+    const endpoint = { url: "https://mcp.example.com/v1/mcp" };
+    for (const target of [
+      "https://MCP.Example.COM/v1/mcp",
+      "https://mcp.example.com./v1/mcp",
+      "https://mcp.example.com:443/v1/mcp",
+      "https://mcp.example.com/v1/mcp/",
+      "https://mcp.example.com/v1/mcp?token=x",
+      "https://mcp.example.com/V1/MCP",
+      "https://mcp.example.com//v1///mcp",
+      "https://mcp.example.com/v1/%6Dcp",
+    ]) {
+      expect({ target, hit: targetsMcpEndpoint(target, endpoint) }).toEqual({ target, hit: true });
+    }
+    // The same normalisation applies to the declared endpoint.
+    expect(
+      targetsMcpEndpoint("https://mcp.example.com/v1/mcp", {
+        url: "https://MCP.example.com:443/v1/mcp/?a=1",
+      }),
+    ).toBe(true);
+    // A different explicit port or a sibling path is still another endpoint.
+    expect(targetsMcpEndpoint("https://mcp.example.com:444/v1/mcp", endpoint)).toBe(false);
+    expect(targetsMcpEndpoint("https://mcp.example.com/v1/mcp-other", endpoint)).toBe(false);
+  });
+
   it("matches only the root path for an endpoint at the origin root", () => {
     const endpoint = { url: "https://mcp.example.com/" };
     expect(targetsMcpEndpoint("https://mcp.example.com", endpoint)).toBe(true);

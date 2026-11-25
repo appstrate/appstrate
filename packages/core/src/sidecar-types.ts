@@ -517,12 +517,29 @@ export interface IntegrationSpawnSpec {
   };
 }
 
+/** Bounds of the tools-observed report body: the sidecar caps to them, the platform refuses past them. */
+export const OBSERVED_TOOLS_MAX_COUNT = 500;
+export const OBSERVED_TOOL_NAME_MAX_LENGTH = 256;
+/** Largest tools-observed report body, in bytes. */
+export const OBSERVED_TOOLS_MAX_BYTES = 1024 * 1024;
+
+/** The name of an observed tool: bounded, non-empty. */
+export const observedToolNameSchema = z.string().min(1).max(OBSERVED_TOOL_NAME_MAX_LENGTH);
+
+/** One raw MCP descriptor as the platform can fingerprint it. */
+export const observedToolSchema = z.looseObject({
+  name: observedToolNameSchema,
+  inputSchema: z.looseObject({ type: z.literal("object") }),
+});
+
 const strings = z.record(z.string(), z.string());
 const uris = z.array(z.string());
 
-/** SHA-256 hex, as `toolDefinitionFingerprint` (`@appstrate/mcp-transport`) produces. */
+const toolNames = z.array(observedToolNameSchema).max(OBSERVED_TOOLS_MAX_COUNT);
+
 /** Approved definitions the space may hold for one tool: the spawn spec's bound, enforced on write. */
 export const MAX_APPROVED_FINGERPRINTS_PER_TOOL = 32;
+/** SHA-256 hex, as `toolDefinitionFingerprint` (`@appstrate/mcp-transport`) produces. */
 const toolFingerprint = z.string().regex(/^[0-9a-f]{64}$/);
 
 /** The platform's per-connection launch contract, decoded before any integration is started. */
@@ -580,12 +597,12 @@ export const integrationSpawnSpecSchema = z.object({
     .object({ authorizedUris: uris, declaredUris: uris, allowAllUris: z.boolean() })
     .optional(),
   hiddenTools: uris.optional(),
-  blockedTools: uris.optional(),
+  blockedTools: toolNames.optional(),
   toolAllowlist: uris.optional(),
   approvedToolFingerprints: z
     .record(z.string(), z.array(toolFingerprint).max(MAX_APPROVED_FINGERPRINTS_PER_TOOL))
-    .refine((byTool) => Object.keys(byTool).length <= 500, {
-      message: "approvedToolFingerprints names more than 500 tools",
+    .refine((byTool) => Object.keys(byTool).length <= OBSERVED_TOOLS_MAX_COUNT, {
+      message: `approvedToolFingerprints names more than ${OBSERVED_TOOLS_MAX_COUNT} tools`,
     })
     .optional(),
   connectLogin: z
@@ -852,12 +869,14 @@ export interface IntegrationBootBreadcrumb {
 }
 
 /** Why a tool the agent selected is not callable in this run. */
-export type UnavailableToolReason =
-  "not_listed" | "hidden_tools" | "blocked_in_space" | "definition_not_approved" | "name_collision";
-
-/** Bounds of the tools-observed report body: the sidecar caps to them, the platform refuses past them. */
-export const OBSERVED_TOOLS_MAX_COUNT = 500;
-export const OBSERVED_TOOL_NAME_MAX_LENGTH = 256;
+export const UNAVAILABLE_TOOL_REASONS = [
+  "not_listed",
+  "hidden_tools",
+  "blocked_in_space",
+  "definition_not_approved",
+  "name_collision",
+] as const;
+export type UnavailableToolReason = (typeof UNAVAILABLE_TOOL_REASONS)[number];
 
 /**
  * Result of the sidecar's integration boot pass, fetched by the agent from

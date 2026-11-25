@@ -2,7 +2,12 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { describe, it, expect } from "bun:test";
-import { parseBearerChallenge, requiredScopesFromChallenge } from "../src/www-authenticate.ts";
+import {
+  parseBearerChallenge,
+  requiredScopesFromChallenge,
+  sanitiseRequiredScopes,
+  MAX_REQUIRED_SCOPE_LENGTH,
+} from "../src/www-authenticate.ts";
 
 describe("Bearer resource metadata (RFC 9728 §5.1)", () => {
   it("extracts resource_metadata from a WWW-Authenticate challenge", () => {
@@ -77,5 +82,29 @@ describe("requiredScopesFromChallenge", () => {
   it("drops scope tokens over 128 characters", () => {
     const header = `Bearer scope="${"x".repeat(129)} ${"y".repeat(128)}"`;
     expect(requiredScopesFromChallenge(401, header)).toEqual(["y".repeat(128)]);
+  });
+});
+
+describe("sanitiseRequiredScopes", () => {
+  it("keeps valid tokens and drops non-strings and invalid tokens", () => {
+    expect(sanitiseRequiredScopes(["read", 3, null, "has space", "write"])).toEqual([
+      "read",
+      "write",
+    ]);
+  });
+
+  it("drops tokens over the length bound", () => {
+    expect(sanitiseRequiredScopes(["a".repeat(MAX_REQUIRED_SCOPE_LENGTH + 1), "ok"])).toEqual([
+      "ok",
+    ]);
+  });
+
+  it("caps the list at 20", () => {
+    const many = Array.from({ length: 30 }, (_, i) => `s${i}`);
+    expect(sanitiseRequiredScopes(many)).toHaveLength(20);
+  });
+
+  it("returns an empty list for undefined", () => {
+    expect(sanitiseRequiredScopes(undefined)).toEqual([]);
   });
 });

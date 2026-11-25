@@ -65,6 +65,18 @@ export function parseBearerChallenge(header: string): BearerChallenge | undefine
   };
 }
 
+/** Keep the valid scope tokens of a server-controlled list: non-strings, invalid and over-long tokens dropped, capped. */
+export function sanitiseRequiredScopes(list: readonly unknown[] | undefined): string[] {
+  return (list ?? [])
+    .filter(
+      (s): s is string =>
+        typeof s === "string" &&
+        s.length <= MAX_REQUIRED_SCOPE_LENGTH &&
+        scopeTokenSchema.safeParse(s).success,
+    )
+    .slice(0, MAX_REQUIRED_SCOPES);
+}
+
 /**
  * The scopes a server asks for when it refuses a call: only on a 401, or a 403
  * `insufficient_scope` (RFC 6750 §3.1). Tokens that are not valid scope tokens
@@ -77,8 +89,6 @@ export function requiredScopesFromChallenge(
   if (!header || (status !== 401 && status !== 403)) return undefined;
   const challenge = parseBearerChallenge(header);
   if (status === 403 && challenge?.error !== "insufficient_scope") return undefined;
-  const scopes = (challenge?.scopes ?? [])
-    .filter((s) => s.length <= MAX_REQUIRED_SCOPE_LENGTH && scopeTokenSchema.safeParse(s).success)
-    .slice(0, MAX_REQUIRED_SCOPES);
+  const scopes = sanitiseRequiredScopes(challenge?.scopes);
   return scopes.length ? scopes : undefined;
 }
