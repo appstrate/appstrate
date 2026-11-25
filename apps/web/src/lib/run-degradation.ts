@@ -10,14 +10,21 @@ export function parseDegradedIntegrations(metadata: unknown): string[] {
   return raw.filter((v): v is string => typeof v === "string");
 }
 
-/** Every reason the platform stamps: a new one in core is a type error here until it is listed. */
-const UNAVAILABLE_REASONS: Record<UnavailableToolReason, true> = {
-  not_listed: true,
-  hidden_tools: true,
-  blocked_in_space: true,
-  definition_not_approved: true,
-  name_collision: true,
+/**
+ * Every reason the platform stamps, with its label's i18n key (`agents` namespace): a new one in
+ * core is a type error here until it is listed. The one list the parser and the card read.
+ */
+export const UNAVAILABLE_REASON_KEYS: Record<UnavailableToolReason, string> = {
+  not_listed: "run.unavailableTools.reason.not_listed",
+  hidden_tools: "run.unavailableTools.reason.hidden_tools",
+  blocked_in_space: "run.unavailableTools.reason.blocked_in_space",
+  definition_not_approved: "run.unavailableTools.reason.definition_not_approved",
+  name_collision: "run.unavailableTools.reason.name_collision",
 };
+
+/** The label's key for a reason; `null` is one this build does not know. */
+export const unavailableReasonKey = (reason: UnavailableToolReason | null): string =>
+  reason === null ? "run.unavailableTools.reason.unknown" : UNAVAILABLE_REASON_KEYS[reason];
 
 export interface UnavailableTool {
   integrationId: string;
@@ -27,7 +34,7 @@ export interface UnavailableTool {
 }
 
 const isUnavailableReason = (value: unknown): value is UnavailableToolReason =>
-  typeof value === "string" && Object.keys(UNAVAILABLE_REASONS).includes(value);
+  typeof value === "string" && Object.prototype.hasOwnProperty.call(UNAVAILABLE_REASON_KEYS, value);
 
 /** Safe-narrows `runs.metadata.unavailable_tools`: the tools a run's agent asked for that were not served. */
 export function parseUnavailableTools(metadata: unknown): UnavailableTool[] {

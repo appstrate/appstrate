@@ -9,8 +9,14 @@
  */
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
+import { ChevronRight } from "lucide-react";
 import { Button } from "@appstrate/ui/components/button";
 import { Badge } from "@appstrate/ui/components/badge";
+import {
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
+} from "@appstrate/ui/components/collapsible";
 import {
   useIntegrationToolPolicy,
   useIntegrationToolPolicyActions,
@@ -34,12 +40,15 @@ import { ToolPolicySkeleton } from "../loading-skeletons";
 import { ErrorState } from "../page-states";
 import { OptionSelect } from "../app-ui/option-select";
 import { SettingsGroup } from "../settings/setting-row";
+import { SettingsHeading } from "../settings/settings-heading";
 
 type CatalogTool = { name: string; status?: string; origin?: string };
 
 /** What the draft editor lends the review: the declared names and the way to declare more. */
 export interface ToolDeclaration {
   declared: ReadonlySet<string>;
+  /** The draft holds no unsaved edit: what it declares is saved. */
+  saved: boolean;
   declare: (names: string[]) => void;
 }
 
@@ -64,8 +73,9 @@ export function IntegrationToolPolicySection({
   const query = useIntegrationToolPolicy(packageId, review);
   const actions = useIntegrationToolPolicyActions(packageId);
   if (!review && !declaration) return null;
-  if (review && query.isLoading) return <ToolPolicySkeleton />;
-  if (review && (query.error || !query.data)) return <ErrorState error={query.error} />;
+  // A policy not asked for yet (the scope is not ready) is a policy still loading.
+  if (review && query.error && !query.data) return <ErrorState error={query.error} />;
+  if (review && !query.data) return <ToolPolicySkeleton />;
   return (
     <ToolPolicyView
       policy={query.data ?? NO_POLICY}
@@ -74,7 +84,7 @@ export function IntegrationToolPolicySection({
       declaration={declaration}
       busy={actions.isPending}
       onApprove={(item) => actions.approve(approvalBody(item))}
-      onBlock={(name) => actions.block(blockBody(name))}
+      onBlock={(name, onDone) => actions.block(blockBody(name), onDone)}
       onRevoke={actions.revoke}
       onUnblock={actions.unblock}
     />
@@ -100,37 +110,28 @@ export function ToolPolicyView({
   declaration?: ToolDeclaration;
   busy: boolean;
   onApprove: (item: { name: string; fingerprint: string }) => void;
-  onBlock: (name: string) => void;
-  onRevoke: (name: string) => void;
+  /** `onDone` runs on success: the confirmation closes then, not on the click. */
+  onBlock: (name: string, onDone: () => void) => void;
+  onRevoke: (name: string, onDone: () => void) => void;
   onUnblock: (name: string) => void;
 }) {
   const { t } = useTranslation("agents");
   // Blocking and withdrawing an approval take a tool from every agent of the space, like
   // deactivating a package there (which asks): they ask too. Approving and unblocking give back.
+  // The target outlives the dialog's close, so its title keeps the name while it fades out.
   const [confirm, setConfirm] = useState<{ kind: "block" | "revoke"; name: string } | null>(null);
+  const [confirmOpen, setConfirmOpen] = useState(false);
+  const ask = (kind: "block" | "revoke", name: string) => {
+    setConfirm({ kind, name });
+    setConfirmOpen(true);
+  };
   const items = review ? reviewItems(tools, policy) : [];
   const declarable = declaration ? declarableTools(tools) : [];
-  const declarableSet = new Set(declarable);
-  const reviewed = new Set(items.map((item) => item.name));
-  const unreviewed = declarable.filter((name) => !reviewed.has(name));
   const toDeclare = declarable.filter((name) => !declaration?.declared.has(name));
   const approved = [...latestApprovals(policy.approvals).values()];
   const blockable = blockableTools(tools, policy.blocks);
   return (
     <div className="flex flex-col gap-2" data-testid="integration-tool-policy">
-      {declaration && toDeclare.length > 0 && (
-        <div className="flex justify-end">
-          <Button
-            type="button"
-            size="sm"
-            variant="outline"
-            onClick={() => declaration.declare(toDeclare)}
-            data-testid="tool-declare-all"
-          >
-            {t("integrationTools.policy.declare.all")}
-          </Button>
-        </div>
-      )}
       {review && (
         <SettingsGroup title={t("integrationTools.policy.review.title")}>
           <p className="text-muted-foreground mb-3 text-sm">
@@ -154,7 +155,8 @@ export function ToolPolicyView({
                       <div className="flex min-w-0 flex-col gap-1">
                         <span className="text-sm font-medium break-words">{item.name}</span>
                         {item.description && (
-                          <span className="text-muted-foreground text-sm break-words">
+                          // The whole description is in the definition below.
+                          <span className="text-muted-foreground line-clamp-3 text-sm break-words">
                             {item.description}
                           </span>
                         )}
@@ -170,6 +172,9 @@ export function ToolPolicyView({
                             type="button"
                             size="sm"
                             disabled={busy}
+                            aria-label={t("integrationTools.policy.aria.approve", {
+                              name: item.name,
+                            })}
                             onClick={() => onApprove({ name: item.name, fingerprint })}
                           >
                             {t("integrationTools.policy.approve")}
@@ -180,41 +185,19 @@ export function ToolPolicyView({
                           size="sm"
                           variant="outline"
                           disabled={busy}
-                          onClick={() => setConfirm({ kind: "block", name: item.name })}
+                          aria-label={t("integrationTools.policy.aria.block", { name: item.name })}
+                          onClick={() => ask("block", item.name)}
                         >
                           {t("integrationTools.policy.block")}
                         </Button>
                       </div>
                     </div>
-                    {declaration && declarableSet.has(item.name) && (
-                      <DeclareControl name={item.name} declaration={declaration} />
-                    )}
                     <DefinitionCompare item={item} />
                   </li>
                 );
               })}
             </ul>
           )}
-        </SettingsGroup>
-      )}
-
-      {declaration && unreviewed.length > 0 && (
-        <SettingsGroup title={t("integrationTools.policy.declare.title")}>
-          <p className="text-muted-foreground mb-3 text-sm">
-            {t("integrationTools.policy.declare.description")}
-          </p>
-          <ul className="divide-y rounded-lg border">
-            {unreviewed.map((name) => (
-              <li
-                key={name}
-                className="flex flex-wrap items-center justify-between gap-3 p-3"
-                data-testid={`tool-undeclared-${name}`}
-              >
-                <span className="min-w-0 text-sm font-medium break-words">{name}</span>
-                <DeclareControl name={name} declaration={declaration} />
-              </li>
-            ))}
-          </ul>
         </SettingsGroup>
       )}
 
@@ -230,7 +213,8 @@ export function ToolPolicyView({
                 })}
                 action={t("integrationTools.policy.revoke")}
                 busy={busy}
-                onAction={() => setConfirm({ kind: "revoke", name: approval.tool_name })}
+                ariaLabel={t("integrationTools.policy.aria.revoke", { name: approval.tool_name })}
+                onAction={() => ask("revoke", approval.tool_name)}
               />
             ))}
           </ul>
@@ -253,6 +237,7 @@ export function ToolPolicyView({
                   })}
                   action={t("integrationTools.policy.unblock")}
                   busy={busy}
+                  ariaLabel={t("integrationTools.policy.aria.unblock", { name: block.tool_name })}
                   onAction={() => onUnblock(block.tool_name)}
                 />
               ))}
@@ -261,7 +246,7 @@ export function ToolPolicyView({
           {blockable.length > 0 && (
             <OptionSelect
               value={undefined}
-              onValueChange={(name) => setConfirm({ kind: "block", name })}
+              onValueChange={(name) => ask("block", name)}
               disabled={busy}
               className="max-w-sm"
               placeholder={t("integrationTools.policy.blocked.add")}
@@ -272,13 +257,49 @@ export function ToolPolicyView({
         </SettingsGroup>
       )}
 
+      {declaration && declarable.length > 0 && (
+        <section className="mb-8" data-testid="tool-declaration">
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <SettingsHeading
+              level="group"
+              title={t("integrationTools.policy.declare.title")}
+              description={t("integrationTools.policy.declare.description")}
+              className="mb-3"
+            />
+            {toDeclare.length > 0 && (
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                onClick={() => declaration.declare(toDeclare)}
+                data-testid="tool-declare-all"
+              >
+                {t("integrationTools.policy.declare.all")}
+              </Button>
+            )}
+          </div>
+          <ul className="divide-y rounded-lg border">
+            {declarable.map((name) => (
+              <li
+                key={name}
+                className="flex flex-wrap items-center justify-between gap-3 p-3"
+                data-testid={`tool-undeclared-${name}`}
+              >
+                <span className="min-w-0 text-sm font-medium break-words">{name}</span>
+                <DeclareControl name={name} declaration={declaration} />
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
+
       <ConfirmModal
-        open={confirm !== null}
-        onClose={() => setConfirm(null)}
+        open={confirmOpen}
+        onClose={() => setConfirmOpen(false)}
         title={
           confirm?.kind === "revoke"
             ? t("integrationTools.policy.confirm.revoke.title", { name: confirm.name })
-            : t("integrationTools.policy.confirm.block.title", { name: confirm?.name })
+            : t("integrationTools.policy.confirm.block.title", { name: confirm?.name ?? "" })
         }
         description={
           confirm?.kind === "revoke"
@@ -293,9 +314,9 @@ export function ToolPolicyView({
         isPending={busy}
         onConfirm={() => {
           if (!confirm) return;
-          if (confirm.kind === "block") onBlock(confirm.name);
-          else onRevoke(confirm.name);
-          setConfirm(null);
+          const close = () => setConfirmOpen(false);
+          if (confirm.kind === "block") onBlock(confirm.name, close);
+          else onRevoke(confirm.name, close);
         }}
       />
     </div>
@@ -308,22 +329,25 @@ function DeclareControl({ name, declaration }: { name: string; declaration: Tool
   if (declaration.declared.has(name)) {
     return (
       <p className="text-muted-foreground text-sm" data-testid={`tool-declared-${name}`}>
-        {t("integrationTools.policy.declare.declared")}
+        {t(
+          declaration.saved
+            ? "integrationTools.policy.declare.declaredSaved"
+            : "integrationTools.policy.declare.declaredUnsaved",
+        )}
       </p>
     );
   }
   return (
-    <div>
-      <Button
-        type="button"
-        size="sm"
-        variant="outline"
-        onClick={() => declaration.declare([name])}
-        data-testid={`tool-declare-${name}`}
-      >
-        {t("integrationTools.policy.declare.button")}
-      </Button>
-    </div>
+    <Button
+      type="button"
+      size="sm"
+      variant="outline"
+      aria-label={t("integrationTools.policy.aria.declare", { name })}
+      onClick={() => declaration.declare([name])}
+      data-testid={`tool-declare-${name}`}
+    >
+      {t("integrationTools.policy.declare.button")}
+    </Button>
   );
 }
 
@@ -331,12 +355,14 @@ function ToolRow({
   name,
   meta,
   action,
+  ariaLabel,
   busy,
   onAction,
 }: {
   name: string;
   meta: string;
   action: string;
+  ariaLabel: string;
   busy: boolean;
   onAction: () => void;
 }) {
@@ -349,7 +375,14 @@ function ToolRow({
         <span className="text-sm font-medium break-words">{name}</span>
         <span className="text-muted-foreground text-xs">{meta}</span>
       </div>
-      <Button type="button" size="sm" variant="outline" disabled={busy} onClick={onAction}>
+      <Button
+        type="button"
+        size="sm"
+        variant="outline"
+        disabled={busy}
+        aria-label={ariaLabel}
+        onClick={onAction}
+      >
         {action}
       </Button>
     </li>
@@ -357,7 +390,14 @@ function ToolRow({
 }
 
 /** The listed definition: as a diff against the approved one when this replaces it, as is otherwise. */
-function DefinitionCompare({ item }: { item: ReviewItem }) {
+export function DefinitionCompare({
+  item,
+  defaultOpen = item.approved !== null || item.definition === null,
+}: {
+  item: ReviewItem;
+  /** Open for a changed definition (the diff is what the reviewer came for) or one too large to show. */
+  defaultOpen?: boolean;
+}) {
   const { t } = useTranslation("agents");
   if (item.fingerprint === null) {
     return (
@@ -369,11 +409,12 @@ function DefinitionCompare({ item }: { item: ReviewItem }) {
   const current = item.definition;
   const previous = item.approved?.definition ?? null;
   return (
-    <details>
-      <summary className="text-muted-foreground hover:text-foreground cursor-pointer text-sm">
+    <Collapsible defaultOpen={defaultOpen}>
+      <CollapsibleTrigger className="group text-muted-foreground hover:text-foreground flex items-center gap-1 text-sm">
+        <ChevronRight className="size-4 transition-transform group-data-[state=open]:rotate-90" />
         {t("integrationTools.policy.review.definition")}
-      </summary>
-      <div className="mt-2" data-testid={`tool-definition-${item.name}`}>
+      </CollapsibleTrigger>
+      <CollapsibleContent className="mt-2" data-testid={`tool-definition-${item.name}`}>
         {current === null ? (
           <p className="text-muted-foreground text-sm">
             {t("integrationTools.policy.review.definitionTooLarge")}
@@ -389,7 +430,7 @@ function DefinitionCompare({ item }: { item: ReviewItem }) {
         ) : (
           <JsonView data={current} />
         )}
-      </div>
-    </details>
+      </CollapsibleContent>
+    </Collapsible>
   );
 }

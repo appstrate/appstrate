@@ -305,9 +305,11 @@ export function useIntegrationToolPolicyActions(packageId: string) {
   return {
     approve: (body: Parameters<typeof approve.mutate>[0]["body"]) =>
       approve.mutate({ params: { path }, body }),
-    revoke: (toolName: string) => revoke.mutate({ params: { path: { ...path, toolName } } }),
-    block: (body: Parameters<typeof block.mutate>[0]["body"]) =>
-      block.mutate({ params: { path }, body }),
+    /** `onDone` runs once the write succeeded (a confirmation closes then). */
+    revoke: (toolName: string, onDone?: () => void) =>
+      revoke.mutate({ params: { path: { ...path, toolName } } }, { onSuccess: onDone }),
+    block: (body: Parameters<typeof block.mutate>[0]["body"], onDone?: () => void) =>
+      block.mutate({ params: { path }, body }, { onSuccess: onDone }),
     unblock: (toolName: string) => unblock.mutate({ params: { path: { ...path, toolName } } }),
     isPending: approve.isPending || revoke.isPending || block.isPending || unblock.isPending,
   };

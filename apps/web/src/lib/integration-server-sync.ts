@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
-// Server sync of an integration's DRAFT: the request body, the connection choice a refusal offers,
-// and the merge of the server's answer into the draft.
+// The creation wizard's server discovery: the merge of the server's proposal into the draft. Also
+// the connection choice a refusal offers, shared with the tool listing's refresh.
 
 import {
   resolveIntegrationToolCatalog,
@@ -79,12 +79,13 @@ export function mergeServerSync(
   return manifest;
 }
 
-export type ServerSyncBody = NonNullable<
+/** The body of a server read (discover, tool-snapshot refresh): both take the same one. */
+export type ConnectionChoiceBody = NonNullable<
   paths["/api/integrations/{packageId}/discover"]["post"]["requestBody"]
 >["content"]["application/json"];
 
 /** A connection id only once the caller chose a candidate from a refusal: governance picks first. */
-export function serverSyncBody(connectionId?: string): ServerSyncBody {
+export function connectionChoiceBody(connectionId?: string): ConnectionChoiceBody {
   return connectionId ? { connection_id: connectionId } : {};
 }
 

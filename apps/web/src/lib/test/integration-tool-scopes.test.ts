@@ -1,7 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { describe, expect, it } from "bun:test";
-import { countToolsWithoutScopes, hasOAuthAuth } from "../integration-tool-scopes.ts";
+import {
+  countToolsWithoutScopes,
+  hasOAuthAuth,
+  isToolWithoutPermission,
+} from "../integration-tool-scopes.ts";
 
 describe("countToolsWithoutScopes", () => {
   it("counts the available tools with no required scope", () => {
@@ -23,6 +27,23 @@ describe("countToolsWithoutScopes", () => {
         { status: "blocked" },
       ]),
     ).toBe(0);
+  });
+});
+
+describe("isToolWithoutPermission", () => {
+  it("holds for an available tool whatever its origin, with no scope listed", () => {
+    expect(isToolWithoutPermission({})).toBe(true);
+    expect(isToolWithoutPermission({ status: "available", policy: { required_scopes: {} } })).toBe(
+      true,
+    );
+    expect(
+      isToolWithoutPermission({ status: "available", policy: { required_scopes: { a: [] } } }),
+    ).toBe(true);
+  });
+
+  it("fails for a tool with a scope or one an agent cannot call", () => {
+    expect(isToolWithoutPermission({ policy: { required_scopes: { a: ["read"] } } })).toBe(false);
+    expect(isToolWithoutPermission({ status: "pending" })).toBe(false);
   });
 });
 

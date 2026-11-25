@@ -6,8 +6,8 @@ import { syncConnectionCandidates } from "../../lib/integration-server-sync";
 import { OptionSelect } from "../app-ui/option-select";
 
 /**
- * The connections a `must_choose_connection` sync refusal offers, as a picker whose choice
- * retries the sync with it. Nothing for any other error.
+ * The connections a `must_choose_connection` server read (discover, tool listing) refusal offers,
+ * as a picker whose choice retries the read with it. Nothing for any other error.
  */
 export function SyncConnectionChoice({
   error,
@@ -27,8 +27,8 @@ export function SyncConnectionChoice({
       onValueChange={onChoose}
       disabled={disabled}
       className="max-w-sm"
-      aria-label={t("integrationEditor.sync.chooseConnection")}
-      placeholder={t("integrationEditor.sync.chooseConnection")}
+      aria-label={t("integrationEditor.connectionChoice.choose")}
+      placeholder={t("integrationEditor.connectionChoice.choose")}
       options={candidates.map((c) =>
         candidateSelectOption(c, {
           sharedByOther: t("schedule.connectionOverrides.sharedByOther"),

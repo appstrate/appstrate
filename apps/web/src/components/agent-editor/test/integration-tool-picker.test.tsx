@@ -217,7 +217,7 @@ describe("IntegrationToolPicker — unknown permissions", () => {
     },
   }).queryKey;
 
-  function renderWith(authType: string): string {
+  function renderWith(authType: string, origin = "approved"): string {
     const qc = new QueryClient();
     qc.setQueryData(DETAIL_KEY, {
       manifest: { auths: {} },
@@ -228,7 +228,7 @@ describe("IntegrationToolPicker — unknown permissions", () => {
         {
           name: "extra",
           status: "available",
-          origin: "approved",
+          origin,
           modified: false,
           fingerprint: "f",
         },
@@ -248,5 +248,9 @@ describe("IntegrationToolPicker — unknown permissions", () => {
     const flag = i18n.t("agents:packageTools.scopesUnknown");
     expect(renderWith("oauth2")).toContain(flag);
     expect(renderWith("api_key")).not.toContain(flag);
+  });
+
+  it("flags a declared tool without scope like the counter counts it", () => {
+    expect(renderWith("oauth2", "declared")).toContain(i18n.t("agents:packageTools.scopesUnknown"));
   });
 });

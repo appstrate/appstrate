@@ -125,6 +125,15 @@ describe("declarableTools", () => {
       ]),
     ).toEqual(["b", "c", "d"]);
   });
+
+  it("leaves out the tools the server no longer lists", () => {
+    expect(
+      declarableTools([
+        { name: "gone", origin: "approved", status: "missing" },
+        { name: "here", origin: "listed", status: "pending" },
+      ]),
+    ).toEqual(["here"]);
+  });
 });
 
 describe("declareTools", () => {

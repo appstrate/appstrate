@@ -63,11 +63,19 @@ function Settings({
       detail={{
         ...DETAIL,
         active,
-        manifest: (remote ? { source: { kind: "remote" } } : {}) as typeof DETAIL.manifest,
+        manifest: (remote
+          ? {
+              source: {
+                kind: "remote",
+                remote: { url: "https://mcp.acme.test", transport: "streamable-http" },
+              },
+            }
+          : {}) as typeof DETAIL.manifest,
       }}
       blockUserConnections={false}
       spaceIds={spaceIds}
       configureIn={configureIn}
+      published
       isOwned={false}
       versionGrants={{ canRestore: false, canDelete: false }}
     />

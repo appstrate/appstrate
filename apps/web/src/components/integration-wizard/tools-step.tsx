@@ -31,7 +31,7 @@ import { useUpdatePackage } from "../../hooks/use-mutations";
 import { useCreateVersion, type Versioned } from "../../hooks/use-packages";
 import { errorMessage } from "../../lib/mutation-error";
 import {
-  serverSyncBody,
+  connectionChoiceBody,
   syncConnectionCandidates,
   type ServerSyncProposal,
 } from "../../lib/integration-server-sync";
@@ -137,7 +137,7 @@ function ServerCatalog({
     queryFn: async () => {
       const { data } = await client.POST("/api/integrations/{packageId}/discover", {
         params: { path: { packageId } },
-        body: serverSyncBody(connectionId),
+        body: connectionChoiceBody(connectionId),
       });
       return data!;
     },

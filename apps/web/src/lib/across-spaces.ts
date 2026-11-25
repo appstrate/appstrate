@@ -22,6 +22,18 @@ export function rowSpace(
 }
 
 /**
+ * `preferred` when the row is placed there, else `fallback`: a read of a package in a space it is
+ * not placed in is a 404, so a preferred space is only used where the row proves it carries it.
+ */
+export function spaceCarrying(
+  preferred: string | null | undefined,
+  spaceIds: readonly string[] | undefined,
+  fallback: string | undefined,
+): string | undefined {
+  return preferred && spaceIds?.includes(preferred) ? preferred : fallback;
+}
+
+/**
  * `path` as it was within the current space (or for a row of no space); naming the row's space
  * otherwise, merged into the query `path` already carries, its hash kept last.
  */

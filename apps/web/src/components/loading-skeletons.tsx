@@ -713,34 +713,26 @@ export function SettingsSkeleton({ rows = 3, className }: { rows?: number; class
 }
 
 /**
- * The space's tool policy while it loads: `ToolPolicyView`'s groups (a title, its hint, then the
- * review cards, then the blocked group's picker).
+ * The space's tool policy while it loads: `ToolPolicyView`'s groups in their common case (the
+ * review's title, hint and « nothing to review » line, then the blocked group's picker).
  */
 export function ToolPolicySkeleton() {
+  // The common case: nothing to review, nothing approved, the block picker. Each group is
+  // `SettingsGroup`'s chrome (`mb-8`, a `mb-4` heading) over the body's own description line.
   return (
-    <Waiting className="flex flex-col gap-8">
-      <div>
-        <SkeletonLine className="w-40 text-base font-semibold" />
-        <SkeletonLine className="mt-1 mb-3 w-2/3 text-sm" />
-        {Array.from({ length: 2 }, (_, i) => (
-          <div key={i} className="mb-3 flex flex-col gap-3 rounded-lg border p-4">
-            <div className="flex items-start justify-between gap-3">
-              <div className="flex flex-col gap-1">
-                <SkeletonLine className="w-32 text-sm" />
-                <SkeletonLine className="w-56 text-sm" />
-              </div>
-              <div className="flex gap-2">
-                <Skeleton className="h-8 w-24" />
-                <Skeleton className="h-8 w-20" />
-              </div>
-            </div>
-            <SkeletonLine className="w-28 text-sm" />
-          </div>
-        ))}
+    <Waiting className="flex flex-col gap-2">
+      <div className="mb-8">
+        <header className="mb-4">
+          <SkeletonLine className="w-40 text-base font-semibold" />
+        </header>
+        <SkeletonLine className="mb-3 w-2/3 text-sm" />
+        <SkeletonLine className="w-36 text-sm" />
       </div>
-      <div>
-        <SkeletonLine className="w-32 text-base font-semibold" />
-        <SkeletonLine className="mt-1 mb-3 w-1/2 text-sm" />
+      <div className="mb-8">
+        <header className="mb-4">
+          <SkeletonLine className="w-32 text-base font-semibold" />
+        </header>
+        <SkeletonLine className="mb-3 w-1/2 text-sm" />
         <Skeleton className="h-9 w-full max-w-sm" />
       </div>
     </Waiting>

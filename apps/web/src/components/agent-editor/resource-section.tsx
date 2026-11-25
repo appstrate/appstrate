@@ -43,7 +43,7 @@ import {
   TableHeader,
   TableRow,
 } from "@appstrate/ui/components/table";
-import { rowSpace } from "../../lib/across-spaces";
+import { rowSpace, spaceCarrying } from "../../lib/across-spaces";
 import { useCurrentSpaceId, useSpaceLink } from "../../hooks/use-current-space";
 import { deedEntry, deedInSpaces, spaceDeedLabels } from "../space-deed";
 import { useOverviewMode } from "../../hooks/use-overview-mode";
@@ -75,7 +75,10 @@ export function ResourceSection({
   emptyLabel: string;
   selectedEntries: ResourceEntry[];
   onChange: (update: (prev: ResourceEntry[]) => ResourceEntry[]) => void;
-  /** The agent's home space: its approvals and blocks are the ones a save judges against. */
+  /**
+   * The agent's home space: its approvals and blocks are the ones a save judges against. Used
+   * where the integration is placed there; elsewhere the row's own space reads it.
+   */
   toolPolicySpaceId: string | null;
 }) {
   const { t } = useTranslation(["agents", "settings", "common"]);
@@ -352,7 +355,11 @@ export function ResourceSection({
         <ToolsModal
           name={byId.get(toolsEntry.id)?.name || toolsEntry.id}
           entry={toolsEntry}
-          spaceId={toolPolicySpaceId ?? undefined}
+          spaceId={spaceCarrying(
+            toolPolicySpaceId,
+            byId.get(toolsEntry.id)?.space_ids,
+            readSpace(byId.get(toolsEntry.id)),
+          )}
           onClose={() => setToolsId(null)}
           onApply={(next) => {
             replaceEntry(toolsEntry.id, next);

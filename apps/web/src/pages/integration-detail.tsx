@@ -132,6 +132,7 @@ export function IntegrationSettings({
   configureIn,
   definition,
   isOwned,
+  published,
   versionGrants,
 }: {
   packageId: string;
@@ -148,6 +149,8 @@ export function IntegrationSettings({
   definition?: Versioned<OrgPackageItemDetail>;
   /** A system integration has no version history of its own. */
   isOwned: boolean;
+  /** A version is published: the server's tools are read from the latest one. */
+  published: boolean;
   /** What the version history may do: restore needs the home space's write, delete its delete. */
   versionGrants: { canRestore: boolean; canDelete: boolean };
 }) {
@@ -171,7 +174,7 @@ export function IntegrationSettings({
     if (clientTarget !== null && !hasClientTable) closeClient();
   }, [clientTarget, hasClientTable, closeClient]);
 
-  const toolSnapshot = toolSnapshotInfo(packageId, detail);
+  const toolSnapshot = toolSnapshotInfo(packageId, detail, published);
   // Only a remote integration lists tools a space can review. The review is one space's: it
   // follows the sections set in a space (`isIntegrationSpaceSection`) in « Tous les espaces ».
   // An author of the draft reads it too, to declare the listed tools.
@@ -642,6 +645,7 @@ export function IntegrationDetailPage() {
             // Write authority is the package's HOME space, never the space being browsed.
             definition={homeWritable && pkg ? pkg : undefined}
             isOwned={isOwned}
+            published={(pkg?.version_count ?? 0) > 0}
             versionGrants={{
               canRestore: isOwned && !!homeWritable,
               canDelete: isOwned && !!homeDeletable,

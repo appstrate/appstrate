@@ -17,6 +17,7 @@ import {
   isRunDegraded,
   parseDegradedIntegrations,
   parseUnavailableTools,
+  unavailableReasonKey,
   type UnavailableTool,
 } from "../../lib/run-degradation";
 
@@ -27,35 +28,13 @@ export function RunDegradedBadge({ metadata }: { metadata: unknown }) {
   return <MetaBadge label={t("run.degraded.badge")} title={t("run.degraded.hint")} />;
 }
 
-function unavailableReasonLabel(
-  reason: UnavailableTool["reason"],
-  t: (key: string) => string,
-): string {
-  switch (reason) {
-    case "not_listed":
-      return t("run.unavailableTools.reason.not_listed");
-    case "hidden_tools":
-      return t("run.unavailableTools.reason.hidden_tools");
-    case "blocked_in_space":
-      return t("run.unavailableTools.reason.blocked_in_space");
-    case "definition_not_approved":
-      return t("run.unavailableTools.reason.definition_not_approved");
-    case "name_collision":
-      return t("run.unavailableTools.reason.name_collision");
-    case null:
-      return t("run.unavailableTools.reason.unknown");
-    default:
-      return reason satisfies never;
-  }
-}
-
 function UnavailableToolItem({ tool }: { tool: UnavailableTool }) {
   const { t } = useTranslation("agents");
   const displayName = useIntegrationName(tool.integrationId);
   return (
     <HealthCardItem
       title={<span className="font-mono text-xs break-all">{tool.name}</span>}
-      description={`${displayName} · ${unavailableReasonLabel(tool.reason, t)}`}
+      description={`${displayName} · ${t(unavailableReasonKey(tool.reason))}`}
       actions={null}
     />
   );

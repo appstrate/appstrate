@@ -112,9 +112,16 @@ export function blockableTools(
   return catalog.map((tool) => tool.name).filter((name) => !blocked.has(name));
 }
 
-/** The catalog's tools the integration does not declare yet (listed or approved only). */
-export function declarableTools(catalog: readonly { name: string; origin?: string }[]): string[] {
-  return catalog.filter((tool) => tool.origin !== "declared").map((tool) => tool.name);
+/**
+ * The catalog's tools the integration does not declare yet (listed or approved only), minus those
+ * the server no longer lists (`missing`): declaring a tool that is gone would only write a dead entry.
+ */
+export function declarableTools(
+  catalog: readonly { name: string; origin?: string; status?: string }[],
+): string[] {
+  return catalog
+    .filter((tool) => tool.origin !== "declared" && tool.status !== "missing")
+    .map((tool) => tool.name);
 }
 
 /** The manifest with an empty `tools_policy` entry appended per name not declared yet. */

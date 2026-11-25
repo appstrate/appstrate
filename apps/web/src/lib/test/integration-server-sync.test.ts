@@ -4,7 +4,7 @@ import { describe, expect, it } from "bun:test";
 import { ApiError } from "../../api/errors.ts";
 import {
   mergeServerSync,
-  serverSyncBody,
+  connectionChoiceBody,
   syncConnectionCandidates,
   type ServerSyncProposal,
 } from "../integration-server-sync.ts";
@@ -124,13 +124,13 @@ describe("mergeServerSync", () => {
   });
 });
 
-describe("serverSyncBody", () => {
+describe("connectionChoiceBody", () => {
   it("lets the proxy apply governance and choose on the initial request", () => {
-    expect(serverSyncBody()).toEqual({});
+    expect(connectionChoiceBody()).toEqual({});
   });
 
   it("names only a connection the caller explicitly selected", () => {
-    expect(serverSyncBody("chosen")).toEqual({ connection_id: "chosen" });
+    expect(connectionChoiceBody("chosen")).toEqual({ connection_id: "chosen" });
   });
 });
 

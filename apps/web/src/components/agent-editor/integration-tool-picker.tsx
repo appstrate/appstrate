@@ -14,7 +14,7 @@
  */
 
 import { toggleValue } from "../../lib/toggle-value";
-import { hasOAuthAuth } from "../../lib/integration-tool-scopes";
+import { hasOAuthAuth, isToolWithoutPermission } from "../../lib/integration-tool-scopes";
 import { type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { ChevronRight } from "lucide-react";
@@ -420,10 +420,7 @@ function IntegrationToolPanel({ packageId, spaceId, entry, onChange }: Integrati
               status: tool.status,
               origin: tool.origin,
               modified: tool.modified,
-              scopesUnknown:
-                tool.origin === "approved" &&
-                hasOAuthAuth(detail.auths) &&
-                Object.values(tool.policy?.required_scopes ?? {}).every((s) => s.length === 0),
+              scopesUnknown: hasOAuthAuth(detail.auths) && isToolWithoutPermission(tool),
             }))}
             selection={{ values: selectedTools, onToggle: toggleTool }}
           />

@@ -4,12 +4,13 @@
  * Package AFPS › Outils: an integration's tools and the policy each one
  * carries, as one table.
  *
- * Both come from the package alone: the local server's declared `tools[]`
- * (or the manifest's `tools_policy` keys) for the catalog, the manifest's
- * `tools_policy` for the scopes a tool requires. Nothing about them is set
- * per organization or per space, and which tools an agent may call is chosen
- * in the agent. So they are one section of the package: the catalog as a
- * table, the policy edited from each row, in a modal.
+ * The scopes a tool requires come from the package alone (the manifest's
+ * `tools_policy`), so they are edited here, per row, in a modal. The catalog
+ * is the package's too (the local server's declared `tools[]`, or the
+ * `tools_policy` keys), plus, for a remote server, the tools it lists and each
+ * space's verdict on them (`status`): what a space approves or blocks is set
+ * in `IntegrationToolPolicySection`, and which tools an agent calls is chosen
+ * in the agent.
  *
  * The catalog is the server's reading of the SAVED package (empty while the
  * package is being created); the scopes follow the draft, so an applied change
@@ -27,6 +28,7 @@ import { formatDateField } from "../../lib/format-date";
 import { errorMessage } from "../../lib/mutation-error";
 import { countToolsWithoutScopes } from "../../lib/integration-tool-scopes";
 import type { ToolSnapshotInfo } from "../../lib/integration-tool-snapshot";
+import { connectionChoiceBody } from "../../lib/integration-server-sync";
 import { SyncConnectionChoice } from "./sync-connection-choice";
 import { Alert, AlertDescription, AlertTitle } from "@appstrate/ui/components/alert";
 import { Button } from "@appstrate/ui/components/button";
@@ -213,7 +215,7 @@ function ToolSnapshotSummary({
   const run = (connectionId?: string) =>
     refresh.mutate({
       params: { path: { packageId: snapshot.packageId } },
-      body: connectionId ? { connection_id: connectionId } : {},
+      body: connectionChoiceBody(connectionId),
     });
   const withoutScopes = snapshot.oauth
     ? countToolsWithoutScopes(
@@ -256,13 +258,20 @@ function ToolSnapshotSummary({
           <Button
             type="button"
             variant="outline"
-            disabled={refresh.isPending}
+            disabled={refresh.isPending || !snapshot.published}
             onClick={() => run()}
             data-testid="integration-tool-snapshot-refresh"
           >
             {refresh.isPending ? <Spinner /> : <RefreshCw />}
             {t("integrationTools.snapshot.refresh")}
           </Button>
+          <p className="text-muted-foreground text-xs" data-testid="integration-tool-snapshot-hint">
+            {t(
+              snapshot.published
+                ? "integrationTools.snapshot.refreshHint"
+                : "integrationTools.snapshot.refreshUnpublished",
+            )}
+          </p>
           {refresh.error != null && (
             <p role="alert" className="text-destructive text-sm">
               {errorMessage(refresh.error)}

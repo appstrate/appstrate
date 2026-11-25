@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { hasOAuthAuth } from "./integration-tool-scopes";
+import { readIntegrationSource } from "./package-manifest";
 
 /** The server's last stored listing, with what the tools section needs to show it and ask for another. */
 export interface ToolSnapshotInfo {
@@ -16,8 +17,10 @@ export interface ToolSnapshotInfo {
   } | null;
   /** The label of the connection the server was listed with; `null` for none (or one since removed). */
   connectionLabel: string | null;
-  /** The integration's source is a remote server: a listing can be asked for. */
+  /** The source is a Streamable HTTP remote server (an SSE one cannot be listed): a listing can be asked for. */
   remote: boolean;
+  /** A version is published: the listing is read from the latest one, so there is none to read before. */
+  published: boolean;
   /** An OAuth integration: its tools without a permission are counted. */
   oauth: boolean;
 }
@@ -26,11 +29,16 @@ export interface ToolSnapshotInfo {
 interface SnapshotDetail {
   tool_snapshot:
     (NonNullable<ToolSnapshotInfo["summary"]> & { connection_id: string | null }) | null;
-  manifest: { source?: { kind?: string } };
+  manifest: { source?: unknown };
   auths: readonly { type: string; connections: readonly { id: string; label: string }[] }[];
 }
 
-export function toolSnapshotInfo(packageId: string, detail: SnapshotDetail): ToolSnapshotInfo {
+export function toolSnapshotInfo(
+  packageId: string,
+  detail: SnapshotDetail,
+  published: boolean,
+): ToolSnapshotInfo {
+  const source = readIntegrationSource(detail.manifest.source);
   const connectionId = detail.tool_snapshot?.connection_id;
   return {
     packageId,
@@ -40,7 +48,8 @@ export function toolSnapshotInfo(packageId: string, detail: SnapshotDetail): Too
           .flatMap((auth) => auth.connections)
           .find((connection) => connection.id === connectionId)?.label ?? null)
       : null,
-    remote: detail.manifest.source?.kind === "remote",
+    remote: source?.kind === "remote" && source.transport !== "sse",
+    published,
     oauth: hasOAuthAuth(detail.auths),
   };
 }

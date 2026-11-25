@@ -35,6 +35,7 @@ const snapshot = (overrides: Partial<ToolSnapshotInfo> = {}): ToolSnapshotInfo =
   summary,
   connectionLabel: null,
   remote: true,
+  published: true,
   oauth: true,
   ...overrides,
 });
@@ -92,8 +93,19 @@ describe("the tool snapshot summary", () => {
     expect(view(snapshot(), { permissions: [] })).not.toContain(REFRESH);
   });
 
+  it("disables the read until a version is published, and says the read uses the published one", () => {
+    const button = (html: string) =>
+      /<button[^>]*integration-tool-snapshot-refresh[^>]*>/.exec(html)?.[0] ?? "";
+    const unpublished = view(snapshot({ published: false }));
+    expect(button(unpublished)).toContain('disabled=""');
+    expect(unpublished).toContain("Publiez une version de l’intégration");
+    const published = view(snapshot());
+    expect(button(published)).not.toContain('disabled=""');
+    expect(published).toContain("dernière version publiée");
+  });
+
   it("says the server was never read when no listing is stored", () => {
-    expect(view(snapshot({ summary: null }))).toContain("Le serveur n'a pas encore été lu");
+    expect(view(snapshot({ summary: null }))).toContain("Le serveur n’a pas encore été lu");
   });
 
   it("counts the tools without a declared permission of an OAuth integration only", () => {

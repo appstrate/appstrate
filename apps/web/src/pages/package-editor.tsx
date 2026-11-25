@@ -349,6 +349,7 @@ function IntegrationEditorInner({
   // Declaring a listed tool edits the draft; saving and publishing stay the author's.
   const declaration: ToolDeclaration = {
     declared: new Set(Object.keys(asRecord(state.manifest.tools_policy))),
+    saved: !editor.isDirty,
     declare: (names) =>
       editor.setState((s) => ({ ...s, manifest: declareTools(s.manifest, names) })),
   };

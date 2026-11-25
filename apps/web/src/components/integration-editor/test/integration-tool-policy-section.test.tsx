@@ -21,7 +21,7 @@ afterAll(() => {
 
 const { i18nReady } = await import("../../../i18n.ts");
 const { render } = await import("../../../test/render.tsx");
-const { IntegrationToolPolicySection, ToolPolicyView } =
+const { DefinitionCompare, IntegrationToolPolicySection, ToolPolicyView } =
   await import("../integration-tool-policy-section.tsx");
 
 await i18nReady;
@@ -77,14 +77,58 @@ describe("ToolPolicyView", () => {
   it("shows a first definition as a JSON tree, with no diff", () => {
     const html = view(
       {
-        listed: [{ name: "search", fingerprint: "a", definition: { description: "Search v1" } }],
+        listed: [
+          {
+            name: "search",
+            fingerprint: "a",
+            definition: { description: "Search v1", marker: "UniqueField" },
+          },
+        ],
         approvals: [],
         blocks: [],
       },
       [{ name: "search", status: "pending" }],
     );
-    expect(html).toContain("Search v1");
-    expect(html).not.toContain("Définition approuvée");
+    // Closed until asked for: a first definition has nothing to compare.
+    expect(html).toContain("Voir la définition");
+    expect(html).not.toContain("UniqueField");
+    const open = render(
+      <DefinitionCompare
+        defaultOpen
+        item={{
+          name: "search",
+          fingerprint: "a",
+          definition: { description: "Search v1", marker: "UniqueField" },
+          description: "Search v1",
+          approved: null,
+        }}
+      />,
+    );
+    expect(open).toContain("UniqueField");
+    expect(open).not.toContain("Définition approuvée");
+  });
+
+  it("names the tool in each action's accessible label", () => {
+    const html = view(
+      {
+        listed: [{ name: "search", fingerprint: "a", definition: {} }],
+        approvals: [
+          {
+            tool_name: "old",
+            fingerprint: "o",
+            definition: {},
+            approved_by: null,
+            approved_at: "2026-11-01T00:00:00.000Z",
+          },
+        ],
+        blocks: [{ tool_name: "export", blocked_by: null, blocked_at: "2026-11-02T00:00:00.000Z" }],
+      },
+      [{ name: "search", status: "pending" }],
+    );
+    expect(html).toContain('aria-label="Approuver search"');
+    expect(html).toContain('aria-label="Bloquer search"');
+    expect(html).toContain('aria-label="Retirer l’approbation de old"');
+    expect(html).toContain('aria-label="Débloquer export"');
   });
 
   it("lists a pending tool no listing carries, with the way to read the server and nothing to approve", () => {
@@ -129,12 +173,14 @@ describe("ToolPolicyView declaration", () => {
   ];
   const declaration = (declared: string[] = []): ToolDeclaration => ({
     declared: new Set(declared),
+    saved: false,
     declare: noop,
   });
 
   it("offers to declare reviewed and unreviewed listed tools, never the declared ones", () => {
     const html = view(empty, catalog, { declaration: declaration() });
     expect(html).toContain('data-testid="tool-declare-search"');
+    expect(html).toContain('aria-label="Déclarer search dans l’intégration"');
     expect(html).toContain('data-testid="tool-undeclared-open"');
     expect(html).toContain('data-testid="tool-declare-open"');
     expect(html).not.toContain('data-testid="tool-declare-mine"');
@@ -146,6 +192,33 @@ describe("ToolPolicyView declaration", () => {
     const html = view(empty, catalog);
     expect(html).not.toContain("tool-declare-");
     expect(html).not.toContain("Déclarer");
+  });
+
+  it("groups the author's declarations under their own heading, apart from the space's decisions", () => {
+    const html = view(empty, catalog, { declaration: declaration() });
+    const group = html.slice(html.indexOf('data-testid="tool-declaration"'));
+    expect(group).toContain("Déclaration dans l’intégration");
+    expect(group).toContain('data-testid="tool-declare-all"');
+    expect(html.slice(0, html.indexOf('data-testid="tool-declaration"'))).not.toContain(
+      "tool-declare-",
+    );
+  });
+
+  it("does not offer to declare a tool the server no longer lists", () => {
+    const html = view(empty, [{ name: "gone", status: "missing", origin: "approved" }], {
+      declaration: declaration(),
+    });
+    expect(html).not.toContain("tool-declare-gone");
+  });
+
+  it("says a tool is declared in the draft until saved, then that a version applies it", () => {
+    const unsaved = view(empty, catalog, { declaration: declaration(["search"]) });
+    expect(unsaved).toContain("Déclaré dans le brouillon");
+    const saved = view(empty, catalog, {
+      declaration: { ...declaration(["search"]), saved: true },
+    });
+    expect(saved).toContain("Déclaré : publiez une version pour l’appliquer.");
+    expect(saved).not.toContain("brouillon");
   });
 
   it("says a tool is declared in the draft, and drops the bulk action when none remains", () => {
@@ -167,7 +240,7 @@ describe("ToolPolicyView declaration", () => {
 });
 
 describe("IntegrationToolPolicySection", () => {
-  const declaration: ToolDeclaration = { declared: new Set(), declare: noop };
+  const declaration: ToolDeclaration = { declared: new Set(), saved: true, declare: noop };
 
   it("renders nothing without a space review nor a declaration", () => {
     expect(
