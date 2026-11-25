@@ -7,15 +7,17 @@ description: How Appstrate tracks the tools a remote MCP server lists, which one
   Tool snapshots, approvals and blocks are not yet in the latest release.
 </Callout>
 
-A [remote MCP integration](/integrations/how-integrations-work#sources-how-the-agent-reaches-the-service) offers the tools its server lists, and that list can change without the integration changing. Appstrate keeps track of it and lets each space decide which tools its agents may use. This page covers that mechanism. Integrations with `source.kind: "none"` or `"local"` have no server to list and are not concerned, except that [blocking](#block-a-tool) applies to `api_call` too.
+A [remote MCP integration](/integrations/how-integrations-work#sources-how-the-agent-reaches-the-service) offers the tools its server lists, and that list can change without the integration changing. Appstrate keeps track of it and lets each space decide which tools its agents may use. This page covers that mechanism. Integrations with `source.kind: "none"` or `"local"` have no remote server to list: snapshots and approvals do not concern them, but [blocking](#block-a-tool) applies to the tools of every source and to `api_call` and `api_upload`.
 
 ## The tool snapshot
 
 For each connection, the platform stores what the server last listed: the **tool snapshot**. It is refreshed when:
 
-- tools are listed outside a run (the agent editor, a direct tool listing through the credential proxy) or the integration creation wizard reads the server;
+- tools are listed outside a run (the agent editor, a direct tool listing through the credential proxy);
 - a platform run boots: the sidecar reports what the server listed to the run;
-- someone selects **Read the server again** on the integration's **Tools** tab. This needs the right to call the integration with that connection.
+- someone selects **Read the server again** on the integration's **Tools** tab. It reads the latest published version of the integration and needs the right to call it with that connection.
+
+**Read the server again** is refused before any version is published, for a server on the SSE transport, with `credential_proxy_closed` when the space closed the credential proxy, and with `remote_url_unrenderable` when the connection's variables do not render the server URL.
 
 The **Tools** tab shows the date of the last read, how many tools were added, gone or changed since the previous one, and the connection used. If the server returned more tools than the platform keeps, the list is marked **Truncated list**. A tool missing from a truncated list is never judged gone.
 
@@ -59,7 +61,7 @@ Open the integration, then its **Tools** tab. Under **Tools to review** are the 
 - A definition too large to be kept cannot be reviewed, so it cannot be approved.
 - **Withdraw approval** makes the tool unavailable again in this space until it is approved anew.
 
-Space admins holding `integrations:configure` receive a **Tools to review** notification when a listing brings a new or changed undeclared tool they could approve.
+A **Tools to review** notification goes to the holders of `integrations:configure` when a snapshot brings a new or changed undeclared tool that is still awaiting approval. It is sent only for a closed catalog and only in the spaces where the integration is active and the tool is pending (not declared, blocked, or already approved at its current definition). For a snapshot of a connection, only the holders who can use that connection are notified. Each person has at most one unread notice per space and integration: a new listing does not stack another.
 
 Approvals are per space. Approving a tool in one space does not make it usable in another.
 
@@ -75,11 +77,11 @@ On the **Tools** tab of the integration editor, **Declare in the integration** (
 - **After declaring**: a declared tool no longer needs approval. If the server later changes its definition, the tool is signalled as modified but never held back, as for any declared tool.
 - **Nothing is removed**: declaring only adds. A declared tool the server stops listing stays in the list as `missing`.
 
-The integration creation wizard keeps its own read of the server (`POST /api/integrations/{packageId}/discover`): at creation there is no published version and no snapshot yet. It is also what offers to save the server's instructions as `INTEGRATION.md`; the editor does not propose them again.
+The integration creation wizard keeps its own read of the server (`POST /api/integrations/{packageId}/discover`): it reads the draft, which is not what runs use, so it records no snapshot. It is also what offers to save the server's instructions as `INTEGRATION.md`; the editor does not propose them again.
 
 ## Block a tool
 
-**Block** (or **Block a tool…** to name one) makes a tool neither offered nor callable in the space, declared or not, on an open or a closed catalog. It also applies to `api_call` and `api_upload`; blocking `api_upload` alone applies to runs only. **Unblock** reverses it.
+**Block** (or **Block a tool…** to name one) makes a tool neither offered nor callable in the space, declared or not, on an open or a closed catalog. It applies to the tools of every integration source (remote, local or none) and to `api_call` and `api_upload`; blocking `api_upload` alone applies to runs only. A policy route accepts any name the server listed (1 to 256 characters). **Unblock** reverses it.
 
 ## Who can change a policy
 
@@ -91,7 +93,7 @@ The agent editor greys out tools that are unavailable and says why, but never re
 
 ## When a run cannot have a tool
 
-A run whose selected tools are unavailable does not fail: it continues without them and is marked **degraded**. The run page shows **Tools unavailable during this run**, listing each tool with its reason, and the model is told in its system prompt which tools it does not have.
+A run whose selected tools are unavailable does not fail: it continues without them and is marked **degraded**. This includes a blocked `api_call` or `api_upload`: it is removed from the run and reported with `blocked_in_space`, like any selected tool the space blocks. A selection of all tools (`"*"`) resolved at run time against a closed catalog version exposes only the declared and approved tools. The run page shows **Tools unavailable during this run**, listing each tool with its reason, and the model is told in its system prompt which tools it does not have.
 
 | Reason shown                          | Meaning                                                                               |
 | ------------------------------------- | ------------------------------------------------------------------------------------- |
@@ -102,6 +104,11 @@ A run whose selected tools are unavailable does not fail: it continues without t
 | Blocked in this space                 | `blocked_in_space`: the space blocks it.                                              |
 
 A run that selects no usable tool at all still fails at boot, as described in [How integrations work](/integrations/how-integrations-work#declaring-integrations-in-an-agent).
+
+## Limits
+
+- The fingerprint covers a tool's `name`, `title`, `description`, `inputSchema`, `outputSchema` and `annotations`. It does not cover `_meta`, `icons` or `execution`, and it cannot see the code behind a definition: a server can change what a tool does while its definition stays the same, and an approval stays valid.
+- A run launched from the CLI on the caller's machine (`runOrigin: "remote"`, for example `appstrate run --local`) does not receive the space's blocks and approvals: the CLI connects itself to the unauthenticated remote MCP integrations and applies only the agent's selection and `hidden_tools`, skips authenticated remote integrations, and the platform records such a run's tool listing as no snapshot. Blocks and approvals are not a security boundary for a run executed on the caller's own machine.
 
 ## Reaching the server directly is refused
 
