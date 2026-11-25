@@ -212,6 +212,24 @@ export const isOverlayPath = (path: string) =>
 /** The overlay tree's not-found routes: an unmatched address under an overlay is answered there, not by the dashboard. */
 export const OVERLAY_NOT_FOUND_PATHS = OVERLAY_PREFIXES.map((prefix) => `${prefix}/*`);
 
+/** Opens the Studio's screens; a role without it keeps the chat and every other product. */
+export const STUDIO_PERMISSION = "studio:read";
+
+/**
+ * The Studio's screens: every route a permission opens, outside the chat and the settings. An
+ * `open` route (a file, a notification) states its own rule; the settings stand over either product.
+ */
+function requiresStudio(path: RoutePath): boolean {
+  return "anyOf" in ROUTE_ACCESS[path] && !isUnder(path, "/chat") && !isSettingsPath(path);
+}
+
+/** Whether a set of grants opens a gated route: its own permissions, and the Studio's for its screens. */
+export function grantsRoute(path: RoutePath, can: (permission: Permission) => boolean): boolean {
+  const access: RouteAccess = ROUTE_ACCESS[path];
+  if (!("anyOf" in access)) return false;
+  return access.anyOf.some(can) && (!requiresStudio(path) || can(STUDIO_PERMISSION));
+}
+
 /** `absent`: the route does not exist here (module not loaded, or team-space route in a personal space). */
 type RouteVerdict = "absent" | "granted" | "denied";
 
@@ -225,5 +243,5 @@ export function routeVerdict(
   if (access.feature && !features[access.feature]) return "absent";
   if (access.teamSpaceOnly && inPersonalSpace) return "absent";
   if ("open" in access) return "granted";
-  return access.anyOf.some(can) ? "granted" : "denied";
+  return grantsRoute(path, can) ? "granted" : "denied";
 }

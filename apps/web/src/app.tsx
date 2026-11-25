@@ -3,7 +3,7 @@
 import { useEffect, Suspense, type ReactNode } from "react";
 import { Routes, Route, Outlet, useLocation, useSearchParams, Navigate } from "react-router-dom";
 import { PackageIndexPage } from "./pages/package-index";
-import { DashboardPage } from "./pages/dashboard";
+import { HomePage } from "./pages/home-page";
 import { InviteAcceptPage } from "./pages/invite-accept";
 import { LoginPage } from "./pages/login";
 import { RegisterPage } from "./pages/register";
@@ -54,6 +54,8 @@ import { useOrg } from "./hooks/use-org";
 import { useGlobalRunSync } from "./hooks/use-global-run-sync";
 import { useSpaceResolver } from "./hooks/use-current-space";
 import { useOverviewRules } from "./hooks/use-overview-mode";
+import { useCanReach, useStudioReach } from "./hooks/use-can-reach";
+import { usePermissions } from "./hooks/use-permissions";
 import { NotFoundPage, RouteGate } from "./components/route-gate";
 import { useChatSidebarStore, useSidebarStore } from "./stores/sidebar-store";
 import { Spinner } from "@appstrate/ui/components/spinner";
@@ -270,7 +272,7 @@ const authCallbackRoute = (
  * (`lib/route-access.ts`): a route without one, or one without a page, fails to compile.
  */
 const PAGES: Record<RoutePath, ReactNode> = {
-  "/": <DashboardPage />,
+  "/": <HomePage />,
   "/agents": <PackageIndexPage type="agent" />,
   "/agents/:scope/:name": <UnifiedPackageDetailPage type="agent" />,
   "/agents/:scope/:name/:version": <UnifiedPackageDetailPage type="agent" />,
@@ -460,7 +462,13 @@ function MainLayout({ search }: { search: string }) {
   const chatSidebar = useChatSidebarStore();
   const { pathname } = useLocation();
   const product = isUnder(pathname, "/chat") ? "chat" : "studio";
-  const sidebar = product === "chat" ? chatSidebar : studioSidebar;
+  // Without the Studio, a page outside the chat (a file, a notification, a refusal) keeps the
+  // chat's navigation, the only one the reader has.
+  const studio = useStudioReach();
+  const { ready } = usePermissions();
+  const chatReachable = useCanReach()("/chat");
+  const navProduct = product === "chat" || (ready && !studio && chatReachable) ? "chat" : "studio";
+  const sidebar = navProduct === "chat" ? chatSidebar : studioSidebar;
   useSpaceResolver(search);
   useOverviewRules();
   useGlobalRunSync();
@@ -477,7 +485,7 @@ function MainLayout({ search }: { search: string }) {
             : undefined
         }
       >
-        <AppSidebar product={product} />
+        <AppSidebar product={navProduct} />
         {/* Studio: the scroll lives HERE, not on an inner div (which would narrow the content
             by the scrollbar width and misalign it with the header). Chat owns its height. */}
         <SidebarInset

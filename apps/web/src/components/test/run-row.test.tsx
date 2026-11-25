@@ -7,6 +7,9 @@ import { memberSpaceClient, renderInSpace, testSpace } from "../../test/space-co
 import { makeRun } from "../../test/run-fixture.ts";
 import i18n, { i18nReady } from "../../i18n.ts";
 import { RunRow } from "../run-row.tsx";
+import { installFakeStorage } from "../../test/fake-storage.ts";
+
+installFakeStorage({ __APP_CONFIG__: { features: {}, trustedOrigins: [] } });
 
 await i18nReady;
 await i18n.changeLanguage("fr");
