@@ -40,7 +40,6 @@ export interface OrgWideSpaces {
   ceiling?: ReadonlySet<string>;
   orgPermissions?: ReadonlySet<string>;
   originSpaceId?: string;
-  spaceChoice?: { spaceId: string; tool: string; operationId?: string };
   beforeAct?: (spaceId: string) => Promise<void>;
 }
 

@@ -91,7 +91,6 @@ const stubStrategy: AuthStrategy = {
           name: currentCtx.user.name,
         },
         orgId: currentCtx.orgId,
-        orgSlug: currentCtx.org.slug,
         orgRole: "admin",
         authMethod: "stub-dashboard",
         principalKind: "delegate",
@@ -108,7 +107,6 @@ const stubStrategy: AuthStrategy = {
           name: currentCtx.user.name,
         },
         orgId: currentCtx.orgId,
-        orgSlug: currentCtx.org.slug,
         orgRole: "admin",
         authMethod: "stub-dashboard",
         principalKind: "delegate",
@@ -143,7 +141,6 @@ const stubStrategy: AuthStrategy = {
         name: currentCtx.user.name,
       },
       orgId: currentCtx.orgId,
-      orgSlug: currentCtx.org.slug,
       orgRole: "admin",
       authMethod: "stub-strategy",
       // "admin" is the branch carrying `endUser` below — the two must agree.

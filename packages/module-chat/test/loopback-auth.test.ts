@@ -250,26 +250,10 @@ describe("the spaces a bearer is bound to", () => {
     ).toBeUndefined();
   });
 
-  it("refuses a signed origin or user selection outside the bearer's reach", async () => {
+  it("refuses a signed origin outside the bearer's reach", async () => {
     const bearer = { ...claims, permissions: ["mcp:read"], spaceIds: ["spc_a"] };
     expect(
       await resolve(mintMcpLoopbackToken({ ...bearer, originSpaceId: "spc_outside" })),
-    ).toBeNull();
-    expect(
-      await resolve(
-        mintMcpLoopbackToken({
-          ...bearer,
-          spaceChoice: { tool: "run_and_wait", spaceId: "spc_outside" },
-        }),
-      ),
-    ).toBeNull();
-    expect(
-      await resolve(
-        mintMcpLoopbackToken({
-          ...bearer,
-          spaceChoice: { tool: "invoke_operation", spaceId: "spc_a" },
-        }),
-      ),
     ).toBeNull();
     const ephemeral = await resolve(mintMcpLoopbackToken({ ...bearer, originSpaceId: "spc_a" }));
     expect(ephemeral?.extra?.originSpaceId).toBe("spc_a");

@@ -2512,31 +2512,21 @@ describe("handleChatStream", () => {
         return input.platformMcp.organization;
       }
 
-      it("signs the current user choice separately from the origin and records only the space the platform enters", async () => {
+      it("signs the origin and records only the space the platform enters", async () => {
         const sessionId = mintSessionId();
-        const choice = { tool: "invoke_operation", operationId: "listAgents", spaceId: spaceB };
         const { res, calls } = await turn(sessionId, {
           body: { spaceId: ctx.defaultSpaceId },
-          parts: [
-            { type: "text", text: "Beta" },
-            { type: "data-space-choice", data: choice },
-          ],
+          parts: [{ type: "text", text: "Beta" }],
         });
         expect(res.status).toBe(200);
         await collectUiChunks(res);
         await waitForAssistantPersist(sessionId);
         const mcp = calls[0]!.platformMcp;
-        expect(mcp.organization).toMatchObject({
-          originSpaceId: ctx.defaultSpaceId,
-          spaceChoice: choice,
-        });
+        expect(mcp.organization).toMatchObject({ originSpaceId: ctx.defaultSpaceId });
         const resolved = await chatLoopbackStrategy.authenticate({
           headers: new Headers(mcp.headers),
         } as never);
-        expect(resolved?.extra).toMatchObject({
-          originSpaceId: ctx.defaultSpaceId,
-          spaceChoice: choice,
-        });
+        expect(resolved?.extra).toMatchObject({ originSpaceId: ctx.defaultSpaceId });
         const record = resolved?.extra?.beforeMcpSpaceAct;
         expect(typeof record).toBe("function");
         if (typeof record !== "function") throw new Error("missing recorder");
@@ -2545,35 +2535,6 @@ describe("handleChatStream", () => {
         expect(await touched(sessionId)).toEqual([]);
         await record(spaceB);
         expect(await touched(sessionId)).toEqual([spaceB]);
-
-        const next = await turn(sessionId, {
-          messageId: "next",
-          history: [
-            { id: "original", role: "user", parts: [{ type: "data-space-choice", data: choice }] },
-          ],
-        });
-        expect(next.res.status).toBe(200);
-        await collectUiChunks(next.res);
-        expect(next.calls[0]!.platformMcp.organization.spaceChoice).toBeUndefined();
-      });
-
-      it("refuses a repeated, malformed or no-longer-eligible choice before starting the engine", async () => {
-        const choice = {
-          type: "data-space-choice",
-          data: { tool: "run_and_wait", spaceId: spaceB },
-        };
-        for (const [parts, status] of [
-          [[choice, choice], 400],
-          [[{ ...choice, data: { spaceId: spaceB } }], 400],
-          [[{ ...choice, data: { tool: "invoke_operation", spaceId: spaceB } }], 400],
-          [[{ ...choice, data: { ...choice.data, spaceId: spaceC } }], 403],
-        ] as const) {
-          const { res, calls } = await turn(mintSessionId(), {
-            parts: [{ type: "text", text: "Beta" }, ...parts],
-          });
-          expect(res.status).toBe(status);
-          expect(calls).toEqual([]);
-        }
       });
 
       it("records a named space once, notifies on growth only, and reads the space of a URI", async () => {

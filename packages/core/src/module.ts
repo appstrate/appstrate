@@ -933,7 +933,6 @@ export type PrincipalKind = (typeof PRINCIPAL_KINDS)[number];
 interface AuthResolutionBase {
   user: { id: string; email: string; name: string };
   orgId?: string;
-  orgSlug?: string;
   /**
    * Strategy-chosen identifier for this auth method (e.g. "oidc", "mtls",
    * "webhook-hmac"). Written to `c.set("authMethod", ...)`. NOT constrained

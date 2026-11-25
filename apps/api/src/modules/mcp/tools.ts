@@ -140,7 +140,6 @@ import { buildPackageFileTools } from "./package-file-tools.ts";
 import {
   ACTIVE_SPACES_META_KEY,
   OPERATION_SPACES_META_KEY,
-  SPACE_CHOICE_META_KEY,
   describeSpace,
   projectActiveInSpaces,
 } from "@appstrate/core/mcp-spaces";
@@ -150,7 +149,6 @@ import {
   withOperationTarget,
   isInlineRunSource,
   effectiveOperationScope,
-  chosenCallSpace,
   TOOL_SPACE_RULES,
 } from "./call-space.ts";
 import { forbidden, notFound } from "../../lib/errors.ts";
@@ -2439,7 +2437,9 @@ function buildGetMeTool(ctx: McpToolContext, surface: McpSurface): AppstrateTool
       "Return the caller's working context in the space of the call: `user`, `org` (with the " +
       "organization `role`), `space`, `connections`, `agents`, `skills` and `recent_runs`" +
       (ctx.orgSpaces
-        ? ", and `spaces`: your role in each space you reach, which, not the organization role, decides each call"
+        ? ", and `spaces`: your role in each space you reach, which, not the organization role, " +
+          "decides each call. With no space designated, it returns `user`, `org` and `spaces` " +
+          "alone: call it first without `space_id` to see which spaces you reach"
         : "") +
       ". `connections` holds one entry per " +
       "integration with a connection the caller may bind in THIS space, its own or shared into it " +
@@ -2474,13 +2474,18 @@ function buildGetMeTool(ctx: McpToolContext, surface: McpSurface): AppstrateTool
     inputSchema: { type: "object", additionalProperties: false, properties: {} },
   };
 
-  const handler = async (): Promise<CallToolResult> => {
+  const handler = async (args: Record<string, unknown>): Promise<CallToolResult> => {
     const start = performance.now();
     // Trusted in-process re-entry — same rationale as invoke_operation: lets the
     // org-pinned MCP token reach a space-scoped route, in the space it entered.
+    const headers = dispatchHeaders(ctx.authHeaders);
+    // Org-wide with no designated space: the space this request entered only opened the
+    // endpoint, so the route answers at the organization level.
+    if (ctx.orgSpaces && resolveCallSpace("get_me", args, ctx.orgSpaces).kind === "none")
+      headers.delete("x-space-id");
     const request = new Request(new URL("/api/me/context", ctx.origin).toString(), {
       method: "GET",
-      headers: dispatchHeaders(ctx.authHeaders),
+      headers,
     });
     const response = await ctx.dispatch(request);
     emit(ctx, {
@@ -2652,21 +2657,27 @@ const ORGANIZATION_LEVEL_SPACE_ID =
 /** `space_id`, listing the spaces itself: clients truncate server instructions. */
 function spaceIdProperty(
   spaces: OrgWideSpaces,
-  optional: boolean,
+  kind: (typeof TOOL_SPACE_RULES)[McpToolName]["kind"],
   perOperation: boolean,
 ): Record<string, unknown> {
   const reached = spaces.reachable.map(describeSpace).join("; ");
-  return {
-    type: "string",
-    enum: spaces.reachable.map((s) => s.id),
-    description: optional
-      ? `The one space to search, by id: ${reached}. Pass it when the request or context designates a space, ` +
-        "including when that space has no matches. Omit it for an explicitly cross-space search or when the space is unknown. " +
-        "Each item's `granted_in` names the spaces where you reach it."
-      : `The space this call acts in, by id: ${reached}. Choose it in the order given in the ` +
-        "server instructions." +
-        (perOperation ? ORGANIZATION_LEVEL_SPACE_ID : ""),
-  };
+  let description: string;
+  if (kind === "search")
+    description =
+      `The one space to search, by id: ${reached}. Pass it when the request or context designates a space, ` +
+      "including when that space has no matches. Omit it for an explicitly cross-space search or when the space is unknown. " +
+      "Each item's `granted_in` names the spaces where you reach it.";
+  else if (kind === "optional")
+    description =
+      `The space whose context to return, by id: ${reached}. Omit it when no space is designated: ` +
+      "the answer then holds your identity, your organization role and `spaces`, without the " +
+      "lists that belong to one space.";
+  else
+    description =
+      `The space this call acts in, by id: ${reached}. Choose it in the order given in the ` +
+      "server instructions." +
+      (perOperation ? ORGANIZATION_LEVEL_SPACE_ID : "");
+  return { type: "string", enum: spaces.reachable.map((s) => s.id), description };
 }
 
 /**
@@ -2709,7 +2720,7 @@ function withSpaceArgument(
   const name = tool.descriptor.name as McpToolName;
   const declared = TOOL_SPACE_RULES[name];
   if (declared.kind === "none") return tool;
-  const optional = declared.kind === "search";
+  const optional = declared.kind === "search" || declared.kind === "optional";
   // Required unless the operation the call names acts in no space.
   const perOperation = name === "invoke_operation" || name === "describe";
   const act = declared.grant;
@@ -2727,7 +2738,7 @@ function withSpaceArgument(
       ...schema,
       properties: {
         ...schema.properties,
-        space_id: spaceIdProperty(spaces, optional, perOperation),
+        space_id: spaceIdProperty(spaces, declared.kind, perOperation),
       },
     },
   };
@@ -2735,20 +2746,6 @@ function withSpaceArgument(
     descriptor,
     handler: async (args, extra) => {
       const resolved = resolveCallSpace(name, args, spaces);
-      const chosen = chosenCallSpace(name, args, spaces);
-      if (
-        chosen !== undefined &&
-        ((args.space_id !== undefined && args.space_id !== chosen) ||
-          (resolved.kind === "space" &&
-            resolved.target !== undefined &&
-            resolved.target !== chosen))
-      ) {
-        return refusalResult({
-          code: "space_mismatch",
-          error: "The call must use the space the user chose.",
-          arguments: ["space_id"],
-        });
-      }
       const entered =
         resolved.kind !== "none" && (resolved.kind === "space" || resolved.id !== undefined);
       const need = act === "runs" && args.kind === "inline" ? "composes" : act;
@@ -2782,11 +2779,10 @@ function withSpaceArgument(
               error: "No reachable space grants this operation.",
               granted_in: [],
             });
-          const missing = spaceArgumentRefusal({ ...spaces, reachable: candidates }, resolved.id)!;
-          return {
-            ...refusalResult(missing),
-            _meta: { [SPACE_CHOICE_META_KEY]: candidates.map((s) => s.id) },
-          };
+          // The model asks the user which of these spaces, then calls again with it.
+          return refusalResult(
+            spaceArgumentRefusal({ ...spaces, reachable: candidates }, resolved.id)!,
+          );
         }
       }
       if (entered || (name === "invoke_operation" && need === "invokes")) {
@@ -2832,9 +2828,7 @@ function withSpaceArgument(
         result._meta?.[OPERATION_SPACES_META_KEY] !== undefined
       )
         return result;
-      const meta: Record<string, unknown> = { ...result._meta, [OPERATION_SPACES_META_KEY]: ids };
-      if (name === "call_integration_tool") delete meta[SPACE_CHOICE_META_KEY];
-      return { ...result, _meta: meta };
+      return { ...result, _meta: { ...result._meta, [OPERATION_SPACES_META_KEY]: ids } };
     },
   };
 }
