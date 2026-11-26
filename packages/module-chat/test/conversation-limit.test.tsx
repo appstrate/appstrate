@@ -20,6 +20,7 @@ import {
   limitedSpaceOf,
   type ConversationScope,
 } from "../src/ui/conversation-scope.ts";
+import { useOffersContextAllSpaces } from "../src/ui/composer-panel.ts";
 import { ComposerTools } from "../src/ui/composer-tools.tsx";
 import { ComposerToolsPanel, LimitLevel } from "../src/ui/composer-tools-panel.tsx";
 import {
@@ -513,7 +514,20 @@ describe("the tools panel's limit rows", () => {
     expect(out).toContain("composer.limit.generic");
     expect(out).toContain("lucide-chevron-right");
     expect(out).not.toContain("data-spaces=");
-    expect(out).not.toContain('role="switch"');
+    // The limit is a plain row here; the panel's one switch is the every-space context.
+    expect(out).toMatch(/<button type="button" class="[^"]*" data-testid="composer-limit-item">/);
+    expect(out.match(/role="switch"/g)).toHaveLength(1);
+    expect(out).toContain('data-testid="composer-context-all-spaces-item"');
+  });
+
+  it("offers the every-space context only to a conversation that can use several spaces", () => {
+    const one = entry(conversationScope(), ["spc_a"]);
+    expect(one).not.toContain("composer-context-all-spaces-item");
+    const limited = entry(conversationScope({ originSpaceId: "spc_a", restricted: true }), [
+      "spc_a",
+      "spc_b",
+    ]);
+    expect(limited).not.toContain("composer-context-all-spaces-item");
   });
 
   it("choose level: lists the acting spaces, each a row the host names", () => {
@@ -591,5 +605,29 @@ describe("the composer's attach button", () => {
     const out = render({ unavailable: "preview" });
     expect(out).toContain("composer.attachPreview");
     expect(out).not.toContain("composer.attachUnavailable");
+  });
+});
+
+describe("when the every-space context switch is on offer", () => {
+  const offered = (acting: string[], restricted: boolean): boolean => {
+    let seen: boolean | undefined;
+    function Probe() {
+      seen = useOffersContextAllSpaces();
+      return null;
+    }
+    renderToStaticMarkup(
+      <ChatHostProvider value={testHost({ actingSpaceIds: acting })}>
+        <ConversationScopeProvider value={conversationScope({ restricted })}>
+          <Probe />
+        </ConversationScopeProvider>
+      </ChatHostProvider>,
+    );
+    return seen!;
+  };
+
+  it("is on offer only to a conversation that can act in more than one space and is not limited", () => {
+    expect(offered(["spc_a", "spc_b"], false)).toBe(true);
+    expect(offered(["spc_a"], false)).toBe(false);
+    expect(offered(["spc_a", "spc_b"], true)).toBe(false);
   });
 });

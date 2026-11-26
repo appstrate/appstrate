@@ -32,12 +32,20 @@ import { inputSettingsSchema } from "../lib/jsonb-schemas.ts";
 import { orgOrSystemFilter, notEphemeralFilter } from "../lib/package-helpers.ts";
 import type { DbOrTx, Tx } from "../lib/db-helpers.ts";
 import { asRecord } from "@appstrate/core/safe-json";
+import { isRuntimeBoundIntegration } from "@appstrate/core/integration";
 import type { PackageType } from "@appstrate/core/validation";
 import type { ResolvedRunConfig } from "@appstrate/shared-types";
 import type { OrgScope, SpaceScope } from "../lib/scope.ts";
 import { assertSpaceInScope, spaceListingOrder } from "./spaces.ts";
 import { listOrgOffers, placementReadFilter, placementRowJoin } from "./package-placement.ts";
 import { getLatestVersionId } from "./package-versions.ts";
+import {
+  governingIntegrationManifest,
+  readPublishedIntegrationManifests,
+} from "./integration-service.ts";
+import { isAuthConnectable, readOAuthClientRegistrations } from "./reconnect-methods.ts";
+import { userConnectionsBlocked } from "./connection-reach.ts";
+import type { AfpsManifestAuth } from "./integration-manifest-helpers.ts";
 import {
   inactiveDeclaredIntegrations,
   inactiveRequiredIntegrationIds,
@@ -1093,4 +1101,48 @@ export async function updateSpacePackage(
       });
   };
   return opts?.tx ? work(opts.tx) : db.transaction(work);
+}
+
+/**
+ * The integrations active here, outside the runtime-bound ones, that `connected` does not name and
+ * for which a connect flow can start ({@link isAuthConnectable} on at least one auth). One whose
+ * members' connections the space blocks is left out unless the caller `canConfigure`, as connection
+ * creation refuses it. Whole or withheld: more than the cap returns no ids, never a prefix.
+ */
+export async function listConnectableIntegrations(
+  scope: SpaceScope,
+  connected: ReadonlySet<string>,
+  opts: { canConfigure: boolean },
+): Promise<{ integrations: string[]; truncated: boolean; total: number }> {
+  const active = await listActivePackages(scope.orgId, [scope.spaceId], "integration");
+  const open = active.filter(
+    (row) => !connected.has(row.id) && !isRuntimeBoundIntegration(row.draftManifest),
+  );
+  const openIds = open.map((row) => row.id);
+  const [blocked, published, registrations] = await Promise.all([
+    opts.canConfigure || openIds.length === 0
+      ? []
+      : db
+          .select({ id: packages.id })
+          .from(packages)
+          .where(
+            and(inArray(packages.id, openIds), userConnectionsBlocked(scope.spaceId, packages.id)),
+          ),
+    readPublishedIntegrationManifests(openIds, scope.orgId),
+    openIds.length === 0 ? [] : readOAuthClientRegistrations(scope.orgId, openIds, [scope.spaceId]),
+  ]);
+  const blockedIds = new Set(blocked.map((row) => row.id));
+  const ids = open
+    .filter((row) => {
+      if (blockedIds.has(row.id)) return false;
+      const manifest = governingIntegrationManifest(row.id, published, row.draftManifest);
+      return Object.entries(manifest?.auths ?? {}).some(([key, auth]) =>
+        isAuthConnectable(row.id, manifest!, key, auth as AfpsManifestAuth, registrations),
+      );
+    })
+    .map((row) => row.id)
+    .sort();
+  return ids.length > DEFAULT_PACKAGE_HINT_LIMIT
+    ? { integrations: [], truncated: true, total: ids.length }
+    : { integrations: ids, truncated: false, total: ids.length };
 }

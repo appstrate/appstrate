@@ -15,13 +15,22 @@ import {
   BookOpenIcon,
   ChevronRightIcon,
   CpuIcon,
+  LayersIcon,
   MapPinIcon,
   PackageIcon,
   PaperclipIcon,
   SparklesIcon,
 } from "lucide-react";
 import { attachUnavailableKey } from "./attachment-adapter.ts";
-import { useComposerPanel, useOffersInlineRunModel } from "./composer-panel.ts";
+import {
+  useComposerPanel,
+  useOffersContextAllSpaces,
+  useOffersInlineRunModel,
+} from "./composer-panel.ts";
+import {
+  setContextAllSpacesEnabled,
+  useContextAllSpacesEnabled,
+} from "./context-all-spaces-store.ts";
 import { ContextDetail } from "./context-gauge.tsx";
 import {
   limitAvailability,
@@ -216,6 +225,9 @@ export function ComposerToolsPanel({ authorsPackages }: { authorsPackages: boole
   const creationMode = usePackageAuthoringEnabled();
   const offersInlineRunModel = useOffersInlineRunModel();
   const inlineRunModel = useInlineRunModelEnabled();
+  const offersContextAllSpaces = useOffersContextAllSpaces();
+  const contextAllSpaces = useContextAllSpacesEnabled();
+  const contextAllSpacesId = useId();
   const creationId = useId();
   const inlineId = useId();
   const body = useRef<HTMLDivElement>(null);
@@ -302,6 +314,17 @@ export function ComposerToolsPanel({ authorsPackages }: { authorsPackages: boole
           />
         )}
         <LimitRows onChoose={() => setLevel("limit")} />
+        {offersContextAllSpaces && (
+          <SheetMenuSwitchRow
+            id={contextAllSpacesId}
+            icon={<LayersIcon />}
+            label={t("composer.contextAllSpaces")}
+            hint={t("composer.contextAllSpaces.hint")}
+            checked={contextAllSpaces}
+            onCheckedChange={setContextAllSpacesEnabled}
+            testId="composer-context-all-spaces-item"
+          />
+        )}
         {authorsPackages && (
           <SheetMenuSwitchRow
             id={creationId}

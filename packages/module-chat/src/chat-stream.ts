@@ -58,6 +58,7 @@ import {
   persistAssistantMessage,
   storedHistory,
   touchSessionSpace,
+  touchSessionSpaces,
 } from "./persistence.ts";
 import { registerStopController, unregisterStopController } from "./stop-registry.ts";
 import { setActiveStream, clearActiveStream, type TurnScope } from "./resumable.ts";
@@ -156,6 +157,8 @@ export const chatStreamSchema = z
     package_authoring: z.boolean().optional(),
     /** Runs the inline runs this turn launches on its model and generation; absent = off. */
     inline_runs_use_chat_model: z.boolean().optional(),
+    /** Details every space of the turn, recording each that shows an entry; absent = off. */
+    context_all_spaces: z.boolean().optional(),
     /**
      * The skill settings of a conversation this turn creates (or of an ephemeral turn): ignored
      * for an existing one, whose settings the skills PATCH changes.
@@ -343,6 +346,7 @@ export async function handleChatStream(
       selection: { ...DEFAULT_SKILL_SELECTION, ...bodySkills },
       spaceId: created?.spaceId ?? null,
       restricted: created?.restricted ?? false,
+      touched: [],
     };
   };
   const conversation: Promise<TurnConversation> =
@@ -455,8 +459,18 @@ export async function handleChatStream(
         return fileId ? fileSpaceId(orgId, fileId, { chatSessionId, personalSpaceId }) : undefined;
       },
     };
+    // Detailed without recording: the origin and touched spaces are recorded already, and the
+    // personal space holds the caller's own data, which they cannot lose access to. Every other
+    // space is detailed only when the user asked for them all, and recorded before inference.
+    const engaged = new Set(
+      [conv.spaceId, personalSpaceId, ...conv.touched].filter((id) => id !== null),
+    );
+    const detailSpaces =
+      body.context_all_spaces === true ? spaces : spaces.filter((space) => engaged.has(space.id));
     return {
       skills: conv.selection,
+      detailSpaces,
+      engaged,
       // See `turnUsesDrafts`.
       skillDrafts: turnUsesDrafts(callerPermissions, body.package_authoring !== false),
       // The caller's own connection over the turn's spaces (see `callerMcpOpener`): the turn's
@@ -514,12 +528,14 @@ export async function handleChatStream(
         permissions,
         capabilities,
         spaces,
+        detailSpaces,
         originSpace,
         restricted,
         openCaller,
       }) =>
         buildCallerContextBlock(c, {
           spaces,
+          detailSpaces,
           origin: originSpace,
           restricted,
           user,
@@ -531,8 +547,8 @@ export async function handleChatStream(
           cited,
           drafts: skillDrafts,
           // Read before the turn's claim exists: over the caller's own connection, opened only
-          // when the turn lists or injects skills.
-          openSkillsClient: openCaller,
+          // when the turn has skills or space details to read.
+          openCaller,
         }).finally(() => {
           phaseBMs = Date.now() - phaseBStart;
         }),
@@ -542,8 +558,11 @@ export async function handleChatStream(
       (error: unknown) => ({ ok: false as const, error }),
     );
 
-  const [models, { permissions, capabilities, spaces, organization, scope, openCaller }, stored] =
-    await Promise.all([listModels(origin, inferenceHeaders, platformFetch), turn, historyStored]);
+  const [
+    models,
+    { permissions, capabilities, spaces, organization, scope, openCaller, engaged },
+    stored,
+  ] = await Promise.all([listModels(origin, inferenceHeaders, platformFetch), turn, historyStored]);
   messages = withStoredAgentPromptTexts(
     withStoredHistoryFiles(messages, stored.files),
     stored.launches,
@@ -621,7 +640,12 @@ export async function handleChatStream(
   // Join phase B. This is the one place its failure is allowed to surface.
   const contextResult = await contextBlockPromise;
   if (!contextResult.ok) throw contextResult.error;
-  const { text: contextBlock, injected: injectedSkills, skillStatus } = contextResult;
+  const {
+    text: contextBlock,
+    injected: injectedSkills,
+    skillStatus,
+    detailedSpaceIds,
+  } = contextResult;
 
   // Assemble the system prompt: the tool-grounding prompt, with no inline MCP
   // instructions — the engine's own MCP handshake delivers them.
@@ -630,8 +654,9 @@ export async function handleChatStream(
   // prompt through the MCP server's `instructions`, which this route does not
   // fetch; the engine appends them and applies the policy itself
   // (`pi-chat/engine.ts`). Re-applying it to this prompt would match nothing — and
-  // could only misfire, since the context block below carries org-authored names
-  // (spaces, skills) and would be truncated at any that happened to spell the heading.
+  // could only misfire, since the context block below carries org-authored text
+  // (names of spaces, skills, integrations and agents, agent descriptions) and would be
+  // truncated at any that happened to spell the heading.
   // The block always opens with its own heading, so it is never empty.
   const system = `${buildSystemPrompt(capabilities)}\n\n${contextBlock}`;
 
@@ -696,6 +721,32 @@ export async function handleChatStream(
     claimTurnMs = Date.now() - claimStart;
   }
 
+  // A refused turn leaves no half-written state: the slot and the stream marker are given back.
+  const abandonClaim = async () => {
+    slot.release();
+    if (claimedSessionId) await clearActiveStream(claimedSessionId, streamId).catch(() => {});
+  };
+
+  // The spaces the block showed an entry of beyond those engaged: recorded after the claim (a
+  // refused turn widens nothing) and before inference, like an attachment's space.
+  const recordedDetails = detailedSpaceIds.filter((id) => !engaged.has(id));
+  if (recordedDetails.length > 0 && chatSessionId) {
+    try {
+      await touchSessionSpaces(
+        {
+          id: chatSessionId,
+          orgId,
+          userId: user.id,
+          originSpaceId: organization.originSpaceId ?? null,
+        },
+        recordedDetails,
+      );
+    } catch (err) {
+      await abandonClaim();
+      throw err;
+    }
+  }
+
   // Materialize the new turn's composer attachments into durable, session-scoped
   // files and rewrite each `upload://` (or already-`appfile://`) file part
   // to its stable `appfile://` URI, before the turn is persisted (persistence
@@ -729,8 +780,7 @@ export async function handleChatStream(
         });
       });
     } catch (err) {
-      slot.release();
-      if (claimedSessionId) await clearActiveStream(claimedSessionId, streamId).catch(() => {});
+      await abandonClaim();
       throw err;
     }
     messages[messages.length - 1] = lastMessage;
