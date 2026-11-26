@@ -1,19 +1,20 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Consecutive reads folded into one line. A turn that looks things up before it
+ * Consecutive lookups folded into one line. A turn that looks things up before it
  * answers (search, describe, read, get_me…) otherwise stacks a card per call above
  * the answer; folded, they read « 4 consultations » with the glyphs of what they
  * touched, one click from the cards. Writes are never folded: every call that may
- * change something keeps its own card in the transcript, and so does a read that
- * failed (errors stay inline).
+ * change something keeps its own card in the transcript.
  *
- * What counts as a read is decided before the call runs: the engine stamps the call
- * of a tool the platform declares a lookup (`isLookupTool`, `@appstrate/core/mcp-presentation`)
- * with `providerMetadata.appstrate.lookup` (`pi-chat/ui-stream-mapper.ts`), so a successful
- * read joins its group as it starts; only a failure leaves it, when its error lands. Reasoning
- * between reads folds with them: the run of activity before an answer is one group. A group holding fewer than two reads draws no header and folds
- * nothing, with the same tree, so the second read folds it without remounting the cards.
+ * What counts as a lookup is `isLookupCall` (`activity-group.ts`), the rule the context
+ * panel counts by: the engine stamps the call of a tool the platform declares a lookup
+ * before it runs (`providerMetadata.appstrate.lookup`, `pi-chat/ui-stream-mapper.ts`), so a
+ * lookup joins its group as it starts; one that fails or is denied leaves it when its outcome
+ * lands, and its card shows the error among the actions. Reasoning between lookups folds with
+ * them: the run of activity before an answer is one group. A group holding fewer than two
+ * lookups draws no header and folds nothing, with the same tree, so the second one folds it
+ * without remounting the cards.
  */
 
 import * as React from "react";
@@ -28,7 +29,7 @@ import {
   CollapsibleTrigger,
 } from "@appstrate/ui/components/collapsible";
 import { useChatHost } from "./runtime-context.ts";
-import { presentationOf } from "./tool-presentation.ts";
+import { useCallPresentations } from "./call-presentation.ts";
 import { SubjectStack } from "./subject-glyph.tsx";
 
 /** Reads a group needs before it folds. */
@@ -36,7 +37,7 @@ const FOLD_AT = 2;
 
 interface ToolCallLike {
   readonly type: string;
-  readonly result?: unknown;
+  readonly toolCallId?: string;
 }
 
 export function ActivityGroup({
@@ -52,15 +53,20 @@ export function ActivityGroup({
   const running = useAuiState(
     (s) => s.message.status?.type === "running" && s.message.parts.length - 1 === last,
   );
-  const { reads, subjects } = React.useMemo(() => {
-    const calls = indices.map((i) => parts[i]).filter((p) => p?.type === "tool-call");
-    const found: PresentationSubject[] = [];
-    for (const call of calls) {
-      const subject = presentationOf(call?.result)?.subject;
-      if (subject) found.push(subject);
-    }
-    return { reads: calls.length, subjects: found };
-  }, [indices, parts]);
+  const callIds = React.useMemo(
+    () =>
+      indices.flatMap((i) => {
+        const part = parts[i];
+        return part?.type === "tool-call" && part.toolCallId ? [part.toolCallId] : [];
+      }),
+    [indices, parts],
+  );
+  const presentations = useCallPresentations(callIds);
+  const subjects = React.useMemo(
+    () => presentations.flatMap((p): PresentationSubject[] => (p?.subject ? [p.subject] : [])),
+    [presentations],
+  );
+  const reads = callIds.length;
   const [readerOpen, setReaderOpen] = React.useState(false);
   const folded = reads >= FOLD_AT;
 

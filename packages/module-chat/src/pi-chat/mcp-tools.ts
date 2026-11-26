@@ -97,7 +97,11 @@ interface PiToolResult {
    * contract), so a replay walks the stored text under the scope the live call had.
    */
   relayed?: true;
-  /** How the call's card shows it, as the platform stamped it (`_meta["dev.appstrate/presentation"]`). */
+  /**
+   * How the call is shown, as the platform stamped it (`_meta["dev.appstrate/presentation"]`).
+   * Never serialized to the model: the UI stream carries it as the result's provider metadata
+   * (`ui-stream-mapper.ts`), not in the stored output.
+   */
   presentation?: ToolPresentation;
 }
 

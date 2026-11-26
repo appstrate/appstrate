@@ -429,7 +429,6 @@ function ConversationActivity({
 }
 
 const CALL_TONE: Record<ConversationToolCall["status"], string> = {
-  running: "text-muted-foreground",
   success: "text-muted-foreground",
   error: "text-destructive",
   denied: "text-warning",
@@ -456,7 +455,7 @@ function ActivitySkeleton() {
 function IntegrationsUsed({ tools }: { tools: ConversationTools | null }) {
   const { t } = useTranslation("chat");
   // As the platform presented each call: no read of its own.
-  const integrations = (tools?.integrations ?? []).map(({ integration }) => ({
+  const integrations = (tools?.integrations ?? []).map((integration) => ({
     id: integration.id,
     name: integration.display_name ?? integration.id,
     icon: integration.icon ?? null,

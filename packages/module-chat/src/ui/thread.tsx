@@ -20,6 +20,7 @@ import {
   useAuiEvent,
   useAuiState,
   unstable_useComposerInput,
+  type ToolCallMessagePartComponent,
 } from "@assistant-ui/react";
 import {
   AlertTriangleIcon,
@@ -44,13 +45,12 @@ import { ToolFallback } from "./tool-fallback.tsx";
 import { ActivityGroup } from "./reads-group.tsx";
 import { activityGroupOf } from "./activity-group.ts";
 import {
-  InvokeOperationToolUI,
-  SearchToolUI,
-  DescribeToolUI,
-  ImportPackageFileToolUI,
-  RunAndWaitToolUI,
+  ImportPackageFileTool,
+  InvokeOperationTool,
+  RunAndWaitTool,
+  SearchTool,
 } from "./tool-uis.tsx";
-import { ReadResourceToolUI, ReadToolUI } from "./skill-load.tsx";
+import { ResourceReadTool } from "./skill-load.tsx";
 import { parseResume, INTEGRATION_RESUME_MARKER } from "./auth-offer.ts";
 import { IntegrationIcon } from "@appstrate/ui/components/integration-icon";
 import {
@@ -164,17 +164,9 @@ export function Thread({
           // Lets a control inside find this thread's own composer (`ScrollToBottom`).
           data-chat-thread=""
         >
-          {/* Register the rich tool cards (these render nothing themselves). */}
           {initialComposerDraft && canWrite && (
             <InitialComposerDraft draft={initialComposerDraft} seededRef={seededDraft} />
           )}
-          <InvokeOperationToolUI />
-          <RunAndWaitToolUI />
-          <SearchToolUI />
-          <DescribeToolUI />
-          <ImportPackageFileToolUI />
-          <ReadResourceToolUI />
-          <ReadToolUI />
 
           {/* Empty: composer centered mid-screen for a strong first impression.
           Non-empty: classic scrollable transcript with a sticky footer. */}
@@ -970,8 +962,18 @@ export function MessageError() {
   );
 }
 
+/** The rich cards, by tool name; a call of any other tool is drawn by `ToolFallback`. */
+const TOOL_CARDS: Partial<Record<string, ToolCallMessagePartComponent>> = {
+  invoke_operation: InvokeOperationTool,
+  run_and_wait: RunAndWaitTool,
+  search: SearchTool,
+  import_package_file: ImportPackageFileTool,
+  read_resource: ResourceReadTool,
+  read: ResourceReadTool,
+};
+
 /**
- * Reasoning and reads fold into one activity group (`reads-group.tsx`); reasoning keeps its own
+ * Reasoning and lookups fold into one activity group (`reads-group.tsx`); reasoning keeps its own
  * disclosure inside it. `activityGroupOf` is module-level: assistant-ui memoizes the group tree
  * on its identity.
  */
@@ -995,8 +997,10 @@ function AssistantParts() {
             return <MarkdownText />;
           case "reasoning":
             return <ReasoningText />;
-          case "tool-call":
-            return part.toolUI ?? <ToolFallback {...part} />;
+          case "tool-call": {
+            const Card = TOOL_CARDS[part.toolName] ?? ToolFallback;
+            return <Card {...part} />;
+          }
           case "indicator":
             return <ThinkingIndicator />;
           default:

@@ -24,7 +24,7 @@
  * defensively so the client's tool UIs render consistently regardless.
  */
 
-import type { UIMessageChunk } from "ai";
+import type { ProviderMetadata, UIMessageChunk } from "ai";
 import { isTurnBudgetNote } from "@appstrate/core/chat-turn-metadata";
 import type {
   AgentSessionEvent,
@@ -334,27 +334,32 @@ export class PiChatUiStreamMapper {
     }
   }
 
+  /**
+   * A tool's outcome. The platform's presentation of the call (`mcp-tools.ts`) rides the result's
+   * `providerMetadata.appstrate.presentation`, the one field the AI SDK keeps for a result on a
+   * success and on a failure alike (`resultProviderMetadata` on the stored part): an error chunk
+   * carries no output, and a failed call keeps its name and integration.
+   */
   private mapToolExecutionEnd(ev: {
     toolCallId: string;
     result: unknown;
     isError: boolean;
   }): UIMessageChunk[] {
+    const { output, presentation } = splitPresentation(persistedToolOutput(ev.result));
+    const meta = presentation !== undefined && {
+      providerMetadata: { appstrate: { presentation } } as ProviderMetadata,
+    };
     if (ev.isError) {
       return [
         {
           type: "tool-output-error",
           toolCallId: ev.toolCallId,
-          errorText: stringifyToolResult(persistedToolOutput(ev.result)),
+          errorText: stringifyToolResult(output),
+          ...meta,
         },
       ];
     }
-    return [
-      {
-        type: "tool-output-available",
-        toolCallId: ev.toolCallId,
-        output: persistedToolOutput(ev.result),
-      },
-    ];
+    return [{ type: "tool-output-available", toolCallId: ev.toolCallId, output, ...meta }];
   }
 
   private captureMessageEnd(message: unknown): void {
@@ -492,6 +497,13 @@ function persistedToolOutput(result: unknown): unknown {
   if (!("details" in result)) return result;
   const { details: _details, persistedContent, ...rest } = result as Record<string, unknown>;
   return Array.isArray(persistedContent) ? { ...rest, content: persistedContent } : rest;
+}
+
+/** The output without the platform's presentation, and the presentation, kept apart. */
+function splitPresentation(output: unknown): { output: unknown; presentation?: unknown } {
+  if (!output || typeof output !== "object" || !("presentation" in output)) return { output };
+  const { presentation, ...rest } = output as Record<string, unknown>;
+  return { output: rest, presentation };
 }
 
 /** Flatten a Pi tool result (`AgentToolResult` content blocks) to text for error output. */

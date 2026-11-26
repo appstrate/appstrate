@@ -13,10 +13,7 @@ import { showCall, type ShownCall } from "@appstrate/module-chat/tool-presentati
 export function useConversationTools(conversationId: string | null, active: boolean) {
   const query = useSessionDetail(active ? conversationId : null);
   const session = query.data;
-  const tools = useMemo(
-    () => (session ? conversationTools(session.messages, session.generating) : null),
-    [session],
-  );
+  const tools = useMemo(() => (session ? conversationTools(session.messages) : null), [session]);
   return { tools, isLoading: query.isLoading, error: query.error };
 }
 
@@ -24,8 +21,9 @@ export function useConversationTools(conversationId: string | null, active: bool
 export function useToolLabel() {
   const { t } = useTranslation("chat");
   return (call: ConversationToolCall): ShownCall =>
-    showCall({ toolName: call.toolName, args: call.input, result: call.result }, (key, params) =>
-      t(key, params ?? {}),
+    showCall(
+      { toolName: call.toolName, args: call.input, presentation: call.presentation },
+      (key, params) => t(key, params ?? {}),
     );
 }
 

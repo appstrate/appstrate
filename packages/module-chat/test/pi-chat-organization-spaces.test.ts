@@ -11,12 +11,16 @@
  */
 
 import { describe, expect, it } from "bun:test";
-import type { ExtensionAPI } from "@appstrate/runner-pi";
+import { isToolUIPart, readUIMessageStream, type UIMessage, type UIMessageChunk } from "ai";
+import { loadPiCodingAgentSdk, type Api, type ExtensionAPI } from "@appstrate/runner-pi";
 
 import { ACTIVE_SPACES_META_KEY, OPERATION_SPACES_META_KEY } from "@appstrate/core/mcp-spaces";
 import { TOOL_PRESENTATION_META_KEY } from "@appstrate/core/mcp-presentation";
 import { platformMcpUrl } from "../src/platform-mcp.ts";
 import { buildPlatformMcpTools, type TurnSpaces } from "../src/pi-chat/mcp-tools.ts";
+import { PiChatUiStreamMapper } from "../src/pi-chat/ui-stream-mapper.ts";
+import type { AgentSessionEvent } from "../src/pi-chat/pi-events.ts";
+import { buildStructuredPiTurn, type PiHistoryModel } from "../src/pi-chat/structured-session.ts";
 
 /** Nothing listens here: a hop that escapes the injected fetch throws. */
 const ORIGIN = "http://127.0.0.1:1";
@@ -276,6 +280,57 @@ async function tools(
 
 const text = (result: { content: Array<{ text: string }> }) => result.content[0]!.text;
 
+const USER: UIMessage = { id: "u1", role: "user", parts: [{ type: "text", text: "go" }] };
+const REPLAY_MODEL: PiHistoryModel = {
+  api: "openai-completions" as Api,
+  provider: "openai",
+  model: "preset_org",
+};
+
+/** One call and its result, through the chat's UI stream into the message the AI SDK stores. */
+async function streamedCall(
+  id: string,
+  name: string,
+  args: Record<string, unknown>,
+  result: unknown,
+): Promise<UIMessage> {
+  const toolCall = { type: "toolCall", id, name, arguments: args };
+  const events = [
+    { type: "message_start", message: { role: "assistant" } },
+    {
+      type: "message_update",
+      message: {},
+      assistantMessageEvent: {
+        type: "toolcall_start",
+        contentIndex: 0,
+        partial: { content: [toolCall] },
+      },
+    },
+    {
+      type: "message_update",
+      message: {},
+      assistantMessageEvent: { type: "toolcall_end", contentIndex: 0, toolCall, partial: {} },
+    },
+    { type: "tool_execution_end", toolCallId: id, toolName: name, result, isError: false },
+    { type: "message_end", message: { role: "assistant", stopReason: "stop" } },
+  ] as AgentSessionEvent[];
+  const mapper = new PiChatUiStreamMapper();
+  const chunks: UIMessageChunk[] = [
+    mapper.startChunk("a1"),
+    ...events.flatMap((event) => mapper.map(event)),
+    { type: "finish" },
+  ];
+  const stream = new ReadableStream<UIMessageChunk>({
+    start(controller) {
+      for (const chunk of chunks) controller.enqueue(chunk);
+      controller.close();
+    },
+  });
+  let last: UIMessage | undefined;
+  for await (const message of readUIMessageStream({ stream })) last = message;
+  return last!;
+}
+
 describe("a forwarded tool", () => {
   const remote = (meta: Record<string, unknown>, isError = false) => ({
     content: [{ type: "text", text: "platform response" }],
@@ -292,21 +347,38 @@ describe("a forwarded tool", () => {
         [OPERATION_SPACES_META_KEY]: [],
         [TOOL_PRESENTATION_META_KEY]: presentation,
       });
-      const result = (await tool("invoke_operation").execute("c1", {
-        operation_id: "listModels",
-        space_id: "spc_beta",
-      })) as { presentation?: unknown; content: Array<{ text: string }> };
-      expect(result.presentation).toEqual(presentation);
-      expect(JSON.stringify(result.content)).not.toContain("List models");
+      const args = { operation_id: "listModels", space_id: "spc_beta" };
+      const result = await tool("invoke_operation").execute("c1", args);
+      expect((result as { presentation?: unknown }).presentation).toEqual(presentation);
+
+      // The call as the chat streams it, stores it, and replays it on the next turn.
+      const message = await streamedCall("c1", "invoke_operation", args, result);
+      const part = message.parts.find(isToolUIPart)!;
+      expect(part).toMatchObject({
+        state: "output-available",
+        resultProviderMetadata: { appstrate: { presentation } },
+      });
+      // Out of the stored output: a replay that finds no text in it sends the output's JSON.
+      expect(JSON.stringify("output" in part ? part.output : null)).not.toContain("List models");
+      const next: UIMessage = { id: "u2", role: "user", parts: [{ type: "text", text: "ok" }] };
+      const { estimateTokens } = await loadPiCodingAgentSdk();
+      const turn = buildStructuredPiTurn([USER, message, next], REPLAY_MODEL, {
+        estimateTokens,
+        baseTokens: 0,
+        fileDelivery: { image: false, pdf: false },
+      });
+      const replayed = JSON.stringify(turn.history);
+      expect(replayed).toContain("platform response");
+      expect(replayed).not.toContain("List models");
+
       // A malformed stamp is no presentation.
       transport.answers.remote = remote({
         [OPERATION_SPACES_META_KEY]: [],
         [TOOL_PRESENTATION_META_KEY]: { title: "" },
       });
-      const malformed = (await tool("invoke_operation").execute("c2", {
-        operation_id: "listModels",
-        space_id: "spc_beta",
-      })) as { presentation?: unknown };
+      const malformed = (await tool("invoke_operation").execute("c2", args)) as {
+        presentation?: unknown;
+      };
       expect("presentation" in malformed).toBe(false);
     } finally {
       await built.close();

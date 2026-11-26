@@ -13,13 +13,15 @@ import { callSpaceOf } from "./conversation-scope.ts";
 import { deriveToolPhase } from "./tool-result.ts";
 import { useChatHost } from "./runtime-context.ts";
 import { showCall } from "./tool-presentation.ts";
+import { useCallPresentation } from "./call-presentation.ts";
 
 export const ToolFallback: ToolCallMessagePartComponent = (props) => {
   const { t } = useChatHost();
+  const presentation = useCallPresentation(props.toolCallId);
   return (
     <ToolCallCard
       phase={deriveToolPhase(props)}
-      {...showCall(props, t)}
+      {...showCall({ ...props, presentation }, t)}
       args={props.args}
       result={props.result}
       isError={props.isError}

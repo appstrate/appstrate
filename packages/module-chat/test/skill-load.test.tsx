@@ -10,6 +10,7 @@
 import { describe, expect, it } from "bun:test";
 import { renderToStaticMarkup } from "react-dom/server";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { MessageProvider, type ThreadMessage } from "@assistant-ui/react";
 
 import { CHAT_SKILLS_CONTENT_BUDGET_CHARS } from "../src/skills.ts";
 import { ChatHostProvider, ChatTransportProvider } from "../src/ui/runtime-context.ts";
@@ -45,6 +46,22 @@ const host = testHost({
   t: (key, options) => (options?.name ? `${key} name=${String(options.name)}` : key),
 });
 
+/** The assistant message a card sits in, as the thread mounts it. */
+const MESSAGE = {
+  id: "msg_1",
+  role: "assistant",
+  content: [],
+  status: { type: "complete", reason: "stop" },
+  metadata: {
+    unstable_state: null,
+    unstable_annotations: [],
+    unstable_data: [],
+    steps: [],
+    custom: {},
+  },
+  createdAt: new Date(0),
+} as unknown as ThreadMessage;
+
 function render(
   part: {
     toolName?: string;
@@ -70,7 +87,9 @@ function render(
       <ChatHostProvider value={host}>
         <ChatTransportProvider value={transport}>
           <ConversationSkillsProvider value={conversation}>
-            <ResourceReadTool {...(props as unknown as Parameters<typeof ResourceReadTool>[0])} />
+            <MessageProvider message={MESSAGE} index={0}>
+              <ResourceReadTool {...(props as unknown as Parameters<typeof ResourceReadTool>[0])} />
+            </MessageProvider>
           </ConversationSkillsProvider>
         </ChatTransportProvider>
       </ChatHostProvider>

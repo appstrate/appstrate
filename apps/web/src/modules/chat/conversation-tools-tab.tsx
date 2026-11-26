@@ -3,15 +3,14 @@
 import { useId, useState } from "react";
 import { ArrowLeftIcon, MessageSquareIcon, WrenchIcon } from "lucide-react";
 import { useTranslation } from "react-i18next";
-import {
-  revealToolCall,
-  type ConversationToolCall,
-  type ConversationToolStatus,
+import type {
+  ConversationToolCall,
+  ConversationToolStatus,
 } from "@appstrate/module-chat/conversation-tools";
+import { revealToolCall } from "@appstrate/module-chat/reveal-tool-call";
 import type { ShownCall } from "@appstrate/module-chat/tool-presentation";
 import { cn } from "@appstrate/ui/cn";
 import { Button } from "@appstrate/ui/components/button";
-import { Spinner } from "@appstrate/ui/components/spinner";
 import { IntegrationIcon } from "@appstrate/ui/components/integration-icon";
 import { Switch } from "@appstrate/ui/components/switch";
 import { EmptyState, ErrorState } from "../../components/page-states";
@@ -21,21 +20,19 @@ import { RowSpaceName } from "../../components/run-row";
 import { spansSpaces, useConversationTools, useToolLabel } from "./use-conversation-tools";
 
 const STATUS_KEY: Record<Exclude<ConversationToolStatus, "success">, string> = {
-  running: "context.tools.status.running",
   error: "context.tools.status.error",
   denied: "context.tools.status.denied",
 };
 
 const STATUS_TONE: Record<ConversationToolStatus, string> = {
-  running: "text-muted-foreground",
   success: "text-muted-foreground",
   error: "text-destructive",
   denied: "text-warning",
 };
 
 /**
- * The call's icon, a spinner while it runs: the logo of the integration it acted on, as its card
- * draws it, else its icon (`showCall`) in its status' tone.
+ * The call's icon: the logo of the integration it acted on, as its card draws it, else its icon
+ * (`showCall`) in its status' tone.
  */
 export function ToolCallIcon({
   call,
@@ -46,9 +43,6 @@ export function ToolCallIcon({
   shown: ShownCall;
   className?: string;
 }) {
-  if (call.status === "running") {
-    return <Spinner className={cn("text-muted-foreground", className)} />;
-  }
   if (shown.subject?.kind === "integration") {
     return <IntegrationIcon src={shown.subject.icon} className={cn("rounded-sm", className)} />;
   }

@@ -8,7 +8,7 @@
  */
 
 import { useId } from "react";
-import { makeAssistantToolUI, type ToolCallMessagePartProps } from "@assistant-ui/react";
+import type { ToolCallMessagePartProps } from "@assistant-ui/react";
 import { PinIcon } from "lucide-react";
 import { Button } from "@appstrate/ui/components/button";
 import { SKILL_DIRECTIVE } from "../directives.ts";
@@ -122,13 +122,3 @@ export function ResourceReadTool(props: ResourceReadProps) {
   const skill = skillLoadOf(props.args);
   return skill ? <SkillLoad skill={skill} props={props} /> : <ToolFallback {...props} />;
 }
-
-export const ReadResourceToolUI = makeAssistantToolUI<Record<string, unknown>, unknown>({
-  toolName: "read_resource",
-  render: ResourceReadTool,
-});
-
-export const ReadToolUI = makeAssistantToolUI<Record<string, unknown>, unknown>({
-  toolName: "read",
-  render: ResourceReadTool,
-});

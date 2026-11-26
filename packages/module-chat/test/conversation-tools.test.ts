@@ -1,19 +1,24 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * `src/ui/conversation-tools.ts` — a conversation's tool calls from its stored messages, and
- * `showCall` (`src/ui/tool-presentation.ts`), how each one is named.
+ * `src/ui/conversation-tools.ts` — a conversation's tool calls from its stored messages, and the
+ * integrations they reached.
  */
 
 import { describe, expect, it } from "bun:test";
 import type { UIMessage } from "ai";
+import type { ToolPresentation } from "@appstrate/core/mcp-presentation";
 import { conversationTools } from "../src/ui/conversation-tools.ts";
-import { showCall } from "../src/ui/tool-presentation.ts";
 
 /** An MCP text result, as the chat stores it. */
-const mcp = (payload: unknown, presentation?: unknown) => ({
+const mcp = (payload: unknown, extra: Record<string, unknown> = {}) => ({
   content: [{ type: "text", text: JSON.stringify(payload) }],
-  ...(presentation ? { presentation } : {}),
+  ...extra,
+});
+
+/** The provider metadata the engine stamps a presentation in (`ui-stream-mapper.ts`). */
+const presented = (presentation: ToolPresentation) => ({
+  resultProviderMetadata: { appstrate: { presentation } },
 });
 
 const GMAIL = {
@@ -22,16 +27,7 @@ const GMAIL = {
   display_name: "Gmail",
   icon: "https://example.test/gmail.svg",
 } as const;
-
-/** The presentation the platform stamps on a Gmail tool call. */
-const gmailTool = (title: string) => ({
-  title,
-  subject: GMAIL,
-});
-
-/** Keys back, with their params when given: enough to see which one a label used. */
-const t = (key: string, params?: Record<string, unknown>) =>
-  typeof params?.defaultValue === "string" ? `${key}|${params.defaultValue}` : key;
+const GITHUB = { kind: "integration", id: "@acme/github", display_name: "GitHub" } as const;
 
 const user = (id: string) =>
   ({ id, role: "user", parts: [{ type: "text", text: "hi" }] }) as UIMessage;
@@ -89,65 +85,134 @@ describe("conversationTools", () => {
     ]);
   });
 
-  it("holds a call with no outcome as running only in the turn being generated", () => {
-    const pending = call("p1", "invoke_operation", { state: "input-available", input: {} });
-    const messages = [assistant("a1", [pending]), user("u2"), assistant("a2", [pending])];
-    expect(conversationTools(messages, true).calls.map((c) => c.status)).toEqual([
-      "error",
-      "running",
+  it("holds a stored call with no outcome as cut short, in the last turn too", () => {
+    // The assistant message is stored when its turn ends: a call kept without an outcome is one
+    // the turn's end cut, never one still running.
+    const { calls } = conversationTools([
+      user("u1"),
+      assistant("a1", [call("p1", "invoke_operation", { state: "input-available", input: {} })]),
     ]);
-    expect(conversationTools(messages, false).calls.map((c) => c.status)).toEqual([
-      "error",
-      "error",
+    expect(calls.map((c) => c.status)).toEqual(["error"]);
+  });
+
+  it("keeps the presentation of a call, failed or not", () => {
+    const { calls } = conversationTools([
+      assistant("a1", [
+        call("ok", "call_integration_tool", {
+          state: "output-available",
+          input: { tool: "appstrate_gmail__api_call" },
+          output: mcp({ results: [{ status: 200 }] }),
+          ...presented({ title: "API call", method: "GET", subject: GMAIL }),
+        }),
+        call("ko", "call_integration_tool", {
+          state: "output-error",
+          input: { tool: "acme_github__create_issue" },
+          errorText: "403 Resource not accessible",
+          ...presented({ title: "Create issue", subject: GITHUB }),
+        }),
+      ]),
+    ]);
+    expect(calls.map((c) => c.presentation?.subject?.id)).toEqual([
+      "@appstrate/gmail",
+      "@acme/github",
     ]);
   });
 
-  it("names the integration a call reached from its presentation", () => {
-    const { calls, integrations } = conversationTools([
+  it("counts an integration the calls reached, success or failure upstream, once each", () => {
+    const { integrations } = conversationTools([
       assistant("a1", [
         call("i1", "call_integration_tool", {
           state: "output-available",
-          input: { tool: "appstrate_gmail__send", arguments: {} },
-          output: mcp({ ok: true }, gmailTool("Send")),
+          input: { tool: "appstrate_gmail__api_call" },
+          output: mcp({ results: [{ status: 200 }] }),
+          ...presented({ title: "API call", method: "GET", subject: GMAIL }),
         }),
+        // The integration's own failure, relayed.
         call("i2", "call_integration_tool", {
-          state: "output-available",
-          input: { tool: "appstrate_gmail__list", arguments: {} },
-          output: mcp({ ok: true }, gmailTool("List")),
+          state: "output-error",
+          input: { tool: "acme_github__create_issue" },
+          errorText: "403 Resource not accessible",
+          ...presented({ title: "Create issue", subject: GITHUB }),
         }),
-        // Persisted before the platform stamped presentations: no integration is guessed.
+        // A relayed result whose own payload carries a `code` is still the integration's.
         call("i3", "call_integration_tool", {
           state: "output-available",
-          input: { tool: "unlisted__tool", arguments: {} },
+          input: { tool: "acme_github__get_issue" },
+          output: mcp({ code: "not_found" }, { relayed: true }),
+          ...presented({ title: "Get issue", subject: GITHUB }),
+        }),
+        call("i4", "call_integration_tool", {
+          state: "output-available",
+          input: { tool: "appstrate_gmail__api_call" },
+          output: mcp({ results: [{ status: 200 }] }),
+          ...presented({ title: "API call", method: "DELETE", subject: GMAIL }),
+        }),
+      ]),
+    ]);
+    expect(integrations).toEqual([GMAIL, GITHUB]);
+  });
+
+  it("counts no integration for a refusal, a denial, an operation or an unpresented call", () => {
+    const { integrations } = conversationTools([
+      assistant("a1", [
+        // The platform refused the arguments: nothing was sent.
+        call("r1", "call_integration_tool", {
+          state: "output-available",
+          input: { tool: "appstrate_gmail__api_call" },
+          output: mcp({ code: "missing_argument", error: "arguments.method is required." }),
+          ...presented({ title: "API call", subject: GMAIL }),
+        }),
+        call("r2", "call_integration_tool", {
+          state: "output-denied",
+          input: { tool: "appstrate_gmail__api_call" },
+          ...presented({ title: "API call", subject: GMAIL }),
+        }),
+        call("r3", "invoke_operation", {
+          state: "output-available",
+          input: { operation_id: "getIntegration" },
+          output: mcp({ status: 200, body: {} }),
+          ...presented({ title: "Get", method: "GET", tag: "Integrations", subject: GMAIL }),
+        }),
+        call("r4", "call_integration_tool", {
+          state: "output-available",
+          input: { tool: "unlisted__tool" },
           output: mcp({ ok: true }),
         }),
       ]),
     ]);
-    expect(calls.map((c) => c.integration?.id)).toEqual([
-      "@appstrate/gmail",
-      "@appstrate/gmail",
-      undefined,
-    ]);
-    expect(integrations).toEqual([{ integration: GMAIL, calls: 2 }]);
+    expect(integrations).toEqual([]);
   });
 
-  it("counts a call as a lookup only by the engine's stamp", () => {
+  it("counts a lookup by the engine's stamp, and never a failed one", () => {
+    const lookup = { callProviderMetadata: { appstrate: { lookup: true } } };
     const { calls } = conversationTools([
       assistant("a1", [
         call("l1", "search", {
           state: "output-available",
           input: { query: "x" },
           output: mcp({ results: [] }),
-          callProviderMetadata: { appstrate: { lookup: true } },
+          ...lookup,
         }),
         call("l2", "invoke_operation", {
           state: "output-available",
           input: { operation_id: "listRuns" },
           output: mcp({ status: 200 }),
         }),
+        call("l3", "describe", {
+          state: "output-available",
+          input: { id: "x" },
+          output: mcp({ status: 404, error: "nope" }),
+          ...lookup,
+        }),
+        call("l4", "search", { state: "output-error", input: {}, errorText: "boom", ...lookup }),
       ]),
     ]);
-    expect(calls.map((c) => c.lookup)).toEqual([true, false]);
+    expect(calls.map((c) => [c.status, c.lookup])).toEqual([
+      ["success", true],
+      ["success", false],
+      ["error", false],
+      ["error", false],
+    ]);
   });
 
   it("reads the space a call acted in from its stamp", () => {
@@ -162,71 +227,5 @@ describe("conversationTools", () => {
       ]),
     ]);
     expect(calls[0]?.spaceId).toBe("spc_team");
-  });
-});
-
-describe("showCall", () => {
-  it("names a call by its own tool and arguments until a presentation lands", () => {
-    expect(
-      showCall({ toolName: "invoke_operation", args: { operation_id: "deleteAgent" } }, t),
-    ).toMatchObject({ label: "tool.op.other", idText: "deleteAgent" });
-    expect(
-      showCall({ toolName: "run_and_wait", args: { scope: "@acme", name: "triage" } }, t),
-    ).toMatchObject({ label: "tool.name.run_and_wait|run_and_wait", idText: "@acme/triage" });
-    // The tool's own name: the namespace (never holding `__`) is a lossy cut of the package id.
-    expect(
-      showCall(
-        { toolName: "call_integration_tool", args: { tool: "acme_crm__find__by_email" } },
-        t,
-      ),
-    ).toMatchObject({ idText: "find__by_email" });
-    expect(
-      showCall({ toolName: "call_integration_tool", args: { tool: "find" } }, t),
-    ).toMatchObject({
-      idText: "find",
-    });
-    expect(showCall({ toolName: "get_me", args: {} }, t)).toMatchObject({
-      label: "tool.name.get_me|get_me",
-    });
-  });
-
-  it("draws an integration call under its integration, the label naming the tool", () => {
-    const shown = showCall(
-      {
-        toolName: "call_integration_tool",
-        args: { tool: "appstrate_gmail__send" },
-        result: mcp({ ok: true }, gmailTool("Send")),
-      },
-      t,
-    );
-    expect(shown).toMatchObject({ label: "Gmail · Send", subject: GMAIL });
-    expect(shown.idText).toBeUndefined();
-  });
-
-  it("draws an operation by its method and tag", () => {
-    const shown = showCall(
-      {
-        toolName: "invoke_operation",
-        args: { operation_id: "deleteAgent" },
-        result: mcp(
-          { status: 204 },
-          {
-            title: "Delete agent",
-            method: "DELETE",
-            tag: "Agents",
-          },
-        ),
-      },
-      t,
-    );
-    expect(shown.label).toBe("tool.verb.DELETE|DELETE · tool.tag.Agents|Agents");
-    // The operation's id, never its English summary.
-    expect(shown.idText).toBe("deleteAgent");
-  });
-
-  it("ignores a presentation the schema refuses", () => {
-    expect(
-      showCall({ toolName: "get_me", args: {}, result: mcp({}, { title: 42 }) }, t),
-    ).toMatchObject({ label: "tool.name.get_me|get_me" });
   });
 });

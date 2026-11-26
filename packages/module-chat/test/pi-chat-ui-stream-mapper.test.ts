@@ -515,6 +515,47 @@ describe("the space a tool call is stamped with", () => {
   });
 });
 
+describe("a call's presentation", () => {
+  const presentation = {
+    title: "Create issue",
+    subject: { kind: "integration", id: "@acme/github", display_name: "GitHub" },
+  };
+  const end = (isError: boolean): AgentSessionEvent => ({
+    type: "tool_execution_end",
+    toolCallId: "gh-1",
+    toolName: "call_integration_tool",
+    result: {
+      content: [{ type: "text", text: "403 Resource not accessible" }],
+      details: {},
+      relayed: true,
+      presentation,
+    },
+    isError,
+  });
+
+  it("rides the result's provider metadata, out of the stored output", () => {
+    expect(run([end(false)]).chunks).toEqual([
+      {
+        type: "tool-output-available",
+        toolCallId: "gh-1",
+        output: { content: [{ type: "text", text: "403 Resource not accessible" }], relayed: true },
+        providerMetadata: { appstrate: { presentation } },
+      },
+    ]);
+  });
+
+  it("rides a failure's chunk too, which carries no output", () => {
+    expect(run([end(true)]).chunks).toEqual([
+      {
+        type: "tool-output-error",
+        toolCallId: "gh-1",
+        errorText: "403 Resource not accessible",
+        providerMetadata: { appstrate: { presentation } },
+      },
+    ]);
+  });
+});
+
 describe("a call of a lookup tool", () => {
   const call = (name: string): AgentSessionEvent[] => [
     { type: "message_start", message: {} },
