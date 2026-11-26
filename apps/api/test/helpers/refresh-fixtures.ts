@@ -19,7 +19,7 @@ import { seedPackage } from "./seed.ts";
 
 export const GMAIL_PACKAGE_ID = "@official/gmail";
 
-export function gmailManifest(tokenUrl: string): IntegrationManifest {
+function gmailManifest(tokenUrl: string): IntegrationManifest {
   return {
     schema_version: "0.1",
     type: "integration",
