@@ -41,7 +41,6 @@ const RUNNER = [
   "integrations:read",
   "integrations:connect",
   "integrations:disconnect",
-  "studio:read",
 ];
 
 // The stores read `localStorage` at module init, so it exists before the

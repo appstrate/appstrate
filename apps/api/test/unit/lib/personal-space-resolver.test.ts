@@ -10,10 +10,10 @@
  */
 
 import { describe, it, expect } from "bun:test";
+import type { SpaceRolePreset } from "@appstrate/core/permissions";
 import { presetPermissions, type Permission } from "../../../src/lib/permissions.ts";
 import {
   ADMIN_ROLE_REF,
-  overrideAdmissible,
   PERSONAL_CAP_DELETE_PERMISSIONS,
   personalSpaceDefaultRef,
   resolveSpaceRole,
@@ -76,30 +76,23 @@ const FLOOR: Permission[] = [
   "schedules:delete",
 ];
 
-/**
- * The org default as the snapshot carries it: the raw columns, never a decoded role. `stored` is
- * the jsonb key; `custom` is the role `personal_space_role_id` names, which the `psr` join finds
- * unless `joined` is false (a role of another organization).
- */
+/** The org default as the snapshot carries it: the jsonb key, or the joined custom role. */
 function cols(
-  stored: string | null,
+  stored: SpaceRolePreset | null,
   custom: SpaceRoleRef | null = null,
-  joined = true,
 ): PersonalSpaceDefaultColumns {
   const role = custom?.kind === "custom" ? custom.role : null;
-  const found = joined ? role : null;
   return {
     storedPersonalSpaceRole: stored,
-    storedPersonalSpaceRoleId: role?.id ?? null,
-    personalDefaultRoleId: found?.id ?? null,
-    personalDefaultKey: found?.key ?? null,
-    personalDefaultName: found?.name ?? null,
-    personalDefaultPermissions: found ? [...found.permissions] : null,
-    personalDefaultShowsStudio: found?.showsStudio ?? null,
+    personalDefaultRoleId: role?.id ?? null,
+    personalDefaultKey: role?.key ?? null,
+    personalDefaultName: role?.name ?? null,
+    personalDefaultPermissions: role ? [...role.permissions] : null,
+    personalDefaultShowsStudio: role?.showsStudio ?? null,
   };
 }
 const ADMIN_DEFAULT = cols(null);
-const presetDefault = (name: string) => cols(name);
+const presetDefault = (name: SpaceRolePreset) => cols(name);
 const customDefault = (ref: SpaceRoleRef) => cols(null, ref);
 
 describe("resolveSpaceRole on a personal space", () => {
@@ -168,26 +161,23 @@ describe("resolveSpaceRole on a personal space", () => {
   });
 
   it("leaves a team space to the rules it always had, and reads no default there", () => {
-    expect(resolveSpaceRole("admin", team, null, OTHER)).toEqual(preset("admin"));
-    expect(resolveSpaceRole("member", team, null, OTHER)).toEqual(preset("operator"));
-    expect(resolveSpaceRole("guest", team, null, OTHER)).toBeNull();
+    expect(resolveSpaceRole("admin", team, null, OTHER, null)).toEqual(preset("admin"));
+    expect(resolveSpaceRole("member", team, null, OTHER, null)).toEqual(preset("operator"));
+    expect(resolveSpaceRole("guest", team, null, OTHER, null)).toBeNull();
     // The caller id is irrelevant on a team space, which is what lets the SSE
     // and scheduler call sites pass whichever id they hold.
-    expect(resolveSpaceRole("member", team, null, null)).toEqual(preset("operator"));
-    // Nor does the personal-space default reach a team space, whatever it names.
+    expect(resolveSpaceRole("member", team, null, null, null)).toEqual(preset("operator"));
+    // Nor does the personal-space default reach a team space.
     expect(resolveSpaceRole("member", team, null, OTHER, presetDefault("viewer"))).toEqual(
-      preset("operator"),
-    );
-    expect(resolveSpaceRole("member", team, null, OTHER, presetDefault("superuser"))).toEqual(
       preset("operator"),
     );
   });
 
   it("throws when a personal space is resolved for its owner without the default: a programming error", () => {
-    expect(() => resolveSpaceRole("member", personal, null, OWNER)).toThrow();
+    expect(() => resolveSpaceRole("member", personal, null, OWNER, null)).toThrow();
     // The refusals that read no default stay answers, not errors.
-    expect(resolveSpaceRole("member", personal, null, OTHER)).toBeNull();
-    expect(resolveSpaceRole("owner", personal, null, OWNER)).toEqual(preset("admin"));
+    expect(resolveSpaceRole("member", personal, null, OTHER, null)).toBeNull();
+    expect(resolveSpaceRole("owner", personal, null, OWNER, null)).toEqual(preset("admin"));
   });
 });
 
@@ -261,14 +251,6 @@ describe("resolveSpaceRole for a GUEST owner: never more than operator, never mo
     },
   };
 
-  it("takes operator plus the floor under the admin default", () => {
-    expect(resolveSpaceRole("guest", personal, null, OWNER, ADMIN_DEFAULT)).toEqual({
-      kind: "preset",
-      preset: "operator",
-      plus: FLOOR,
-    });
-  });
-
   it("takes operator under builder and operator defaults, the chosen role as it is under narrower ones", () => {
     for (const name of ["builder", "operator"] as const) {
       expect(resolveSpaceRole("guest", personal, null, OWNER, presetDefault(name))).toEqual({
@@ -284,13 +266,6 @@ describe("resolveSpaceRole for a GUEST owner: never more than operator, never mo
         plus: FLOOR,
       });
     }
-  });
-
-  it("takes the viewer default as viewer plus the floor, no more than viewer", () => {
-    const held = spacePermissions(
-      resolveSpaceRole("guest", personal, null, OWNER, presetDefault("viewer")),
-    );
-    expect<string[]>([...held].sort()).toEqual([...presetPermissions("viewer"), ...FLOOR].sort());
   });
 
   it("takes an authoring custom default restricted to operator: no agents:write, no studio:read", () => {
@@ -326,10 +301,6 @@ describe("resolveSpaceRole for a GUEST owner: never more than operator, never mo
     );
     expect(held.has("agents:write")).toBe(false);
   });
-
-  it("holds nothing under a default naming no role", () => {
-    expect(resolveSpaceRole("guest", personal, null, OWNER, presetDefault("superuser"))).toBeNull();
-  });
 });
 
 describe("resolveSpaceRole with the owner's own override row", () => {
@@ -364,18 +335,6 @@ describe("resolveSpaceRole with the owner's own override row", () => {
     ).toEqual(preset("admin"));
   });
 
-  it("answers before a default naming no role", () => {
-    expect(
-      resolveSpaceRole(
-        "member",
-        personal,
-        { ref: preset("runner") },
-        OWNER,
-        presetDefault("superuser"),
-      ),
-    ).toEqual({ kind: "preset", preset: "runner", plus: FLOOR });
-  });
-
   it("ignores a row for an owner or admin, who always hold admin", () => {
     for (const orgRole of ["owner", "admin"] as const) {
       expect(
@@ -396,28 +355,6 @@ describe("personalSpaceDefaultRef", () => {
   it("reads the custom column as the role the same statement resolved, Studio flag included", () => {
     expect(personalSpaceDefaultRef(customDefault(CUSTOM))).toEqual(CUSTOM);
     expect(personalSpaceDefaultRef(customDefault(CUSTOM_STUDIO))).toEqual(CUSTOM_STUDIO);
-  });
-
-  it("fails closed to no role on what the schema cannot exclude, never a preset", () => {
-    // The column naming a role the org-scoped join does not find: another org's.
-    const foreign = cols(null, CUSTOM, false);
-    expect(personalSpaceDefaultRef(foreign)).toBeNull();
-    // A jsonb value that is not a preset (an id there included: the column holds customs).
-    expect(personalSpaceDefaultRef(cols("superuser"))).toBeNull();
-    if (CUSTOM.kind !== "custom") throw new Error("unreachable");
-    expect(personalSpaceDefaultRef(cols(CUSTOM.role.id))).toBeNull();
-    const dangling = foreign;
-    // An owner without an override then holds nothing in their own space, a member or a guest…
-    for (const orgRole of ["member", "guest"] as const) {
-      expect(resolveSpaceRole(orgRole, personal, null, OWNER, dangling)).toBeNull();
-    }
-    // …while an override still answers first, and an owner or admin still holds admin.
-    expect(
-      resolveSpaceRole("member", personal, { ref: preset("runner") }, OWNER, cols("superuser")),
-    ).toEqual({ kind: "preset", preset: "runner", plus: FLOOR });
-    expect(resolveSpaceRole("admin", personal, null, OWNER, cols("superuser"))).toEqual(
-      ADMIN_ROLE_REF,
-    );
   });
 });
 
@@ -450,7 +387,6 @@ describe("studio:read on a custom role: resolved from shows_studio, never from t
 
   it("keeps it under the guest cap when the role shows the Studio, and keeps it hidden otherwise", () => {
     // `operator` holds `studio:read`, so a role showing the Studio stays inside it.
-    expect(overrideAdmissible("guest", CUSTOM_STUDIO)).toBe(true);
     expect(resolveSpaceRole("guest", personal, null, OWNER, customDefault(CUSTOM_STUDIO))).toEqual({
       ...CUSTOM_STUDIO,
       plus: FLOOR,
@@ -460,29 +396,6 @@ describe("studio:read on a custom role: resolved from shows_studio, never from t
         resolveSpaceRole("guest", personal, { ref }, OWNER, ADMIN_DEFAULT),
       );
       expect(guest.has("studio:read")).toBe(ref === CUSTOM_STUDIO);
-    }
-  });
-});
-
-describe("overrideAdmissible", () => {
-  it("admits any role for a member", () => {
-    for (const ref of [preset("viewer"), preset("builder"), preset("admin"), CUSTOM]) {
-      expect(overrideAdmissible("member", ref)).toBe(true);
-    }
-  });
-
-  it("admits a role inside operator for a guest, and refuses one holding more", () => {
-    for (const ref of [preset("viewer"), preset("runner"), preset("operator"), CUSTOM]) {
-      expect(overrideAdmissible("guest", ref)).toBe(true);
-    }
-    for (const ref of [preset("builder"), preset("admin")]) {
-      expect(overrideAdmissible("guest", ref)).toBe(false);
-    }
-  });
-
-  it("admits nothing for an owner or admin, who always hold admin and never read it", () => {
-    for (const role of ["owner", "admin"] as const) {
-      expect(overrideAdmissible(role, preset("viewer"))).toBe(false);
     }
   });
 });

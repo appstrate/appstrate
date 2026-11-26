@@ -7,7 +7,7 @@ import { SettingRow } from "./setting-row";
 import { SaveFeedback } from "./save-feedback";
 import { SpaceRoleSelect } from "../space-role-select";
 import { ConfirmModal } from "../confirm-modal";
-import { useOrg } from "../../hooks/use-org";
+import { invalidatePersonalSpaceRoleWrite, useOrg } from "../../hooks/use-org";
 import {
   useOrgSettings,
   usePersonalSpaceRoleImpact,
@@ -17,7 +17,6 @@ import { usePermissions } from "../../hooks/use-permissions";
 import { useSpaceRoleOptions } from "../../hooks/use-roles";
 import { fieldWriteState } from "../../lib/field-write-state";
 import { onMutationError } from "../../lib/mutation-error";
-import { invalidatePackageCaches, invalidatePaths } from "../../lib/query-keys";
 import {
   orgPersonalSpaceRoleBody,
   personalSpaceRoleImpactDescription,
@@ -46,7 +45,7 @@ export function PersonalSpaceRoleSetting() {
   const [pending, setPending] = useState<PendingPersonalSpaceRole | null>(null);
   if (!currentOrg) return null;
   const mayWrite = can("org:settings");
-  const value = storedRoleToSelectValue(orgSettings?.personal_space_role);
+  const value = orgSettings ? storedRoleToSelectValue(orgSettings.personal_space_role) : "";
   const written = fieldWriteState(update, "personal_space_role");
 
   const write = (next: string) =>
@@ -56,11 +55,9 @@ export function PersonalSpaceRoleSetting() {
         body: orgPersonalSpaceRoleBody(next),
       },
       {
-        // The role changes the permissions each space serves and the verdicts carried by package rows.
         onSuccess: () => {
           setPending(null);
-          void invalidatePaths(queryClient, ["/api/spaces", "/api/spaces/{id}"]);
-          invalidatePackageCaches(queryClient);
+          invalidatePersonalSpaceRoleWrite(queryClient);
         },
       },
     );
@@ -68,7 +65,11 @@ export function PersonalSpaceRoleSetting() {
   const pick = (next: string) => {
     setCheckFailed(false);
     setChecking(true);
-    pickPersonalSpaceRole(next, { impactOf, write, askConfirmation: setPending })
+    pickPersonalSpaceRole(next, {
+      impactOf: (role) => impactOf(currentOrg.id, role),
+      write,
+      askConfirmation: setPending,
+    })
       .catch((error: Error) => {
         // Nothing written: reported like a refused write, under the setting and in a toast.
         setCheckFailed(true);
@@ -90,7 +91,7 @@ export function PersonalSpaceRoleSetting() {
             <SpaceRoleSelect
               id="personal-space-role"
               ariaLabelledBy={labelId}
-              className="w-full sm:w-[240px]"
+              className="w-full sm:w-56"
               value={value}
               options={options}
               fallbackLabel={t("orgSettings.personalSpaceRoleUnknown")}

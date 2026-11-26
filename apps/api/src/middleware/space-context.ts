@@ -4,11 +4,7 @@ import { markHandler } from "./handler-marker.ts";
 import type { Context, Next } from "hono";
 import type { AppEnv } from "../types/index.ts";
 import { ApiError, forbidden, invalidRequest, notFound } from "../lib/errors.ts";
-import {
-  validateSpaceInOrg,
-  type SpaceAccessSnapshot,
-  type SpaceContextRow,
-} from "../lib/space-lookup.ts";
+import { validateSpaceInOrg, type SpaceContextRow } from "../lib/space-lookup.ts";
 import { setSpaceContextApplier } from "@appstrate/core/permissions";
 import {
   callerOrgRole,
@@ -16,6 +12,7 @@ import {
   callerSpaceAccess,
   callerSpaceAccessById,
   effectiveInSpace,
+  type CallerSpaceAccess,
 } from "../lib/view-as.ts";
 import { resolveSpaceRole } from "../lib/space-role.ts";
 
@@ -113,8 +110,7 @@ function spaceNotFound(spaceId: string): ApiError {
 async function admitSpace(
   c: Context<AppEnv>,
   space: SpaceContextRow,
-  preloaded?: Pick<SpaceAccessSnapshot, "space" | "member"> &
-    Partial<Pick<SpaceAccessSnapshot, "personalDefault">>,
+  preloaded?: CallerSpaceAccess,
 ): Promise<SpaceContextRow> {
   // An end-user belongs to a space, never to a person (RBAC spec §3.6): a
   // personal space is a 404 for it whatever else it carries.

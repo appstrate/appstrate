@@ -3,10 +3,12 @@
 import type { TFunction } from "i18next";
 import { isSpaceRolePreset } from "@appstrate/core/permissions";
 import type { components } from "../api/client";
+import type { operations } from "../api/schema";
 import {
   spaceRoleAssignment,
   spaceRoleLabel,
   spaceRoleValue,
+  type RoleObject,
   type SpaceRolePreset,
 } from "../hooks/use-roles";
 
@@ -15,21 +17,16 @@ type OrgMember = components["schemas"]["OrgMember"];
 /** The select value of « selon l'organisation »: no override of the member's own. */
 export const FOLLOW_ORG_DEFAULT = "org-default";
 
-/** The default of an organization that never set `personal_space_role`. */
-const DEFAULT_STORED_ROLE = "admin";
-
 /** A stored org setting is a preset key or a custom role id (`srl_…`); a select carries `preset:<key>` / `custom:<id>`. */
-export function storedRoleToSelectValue(stored: string | undefined): string {
-  const key = stored || DEFAULT_STORED_ROLE;
-  return isSpaceRolePreset(key)
-    ? spaceRoleValue({ preset_role: key })
-    : spaceRoleValue({ custom_role_id: key });
+export function storedRoleToSelectValue(stored: string): string {
+  return isSpaceRolePreset(stored)
+    ? spaceRoleValue({ preset_role: stored })
+    : spaceRoleValue({ custom_role_id: stored });
 }
 
 /**
- * What « selon l'organisation » resolves to for a member: the role the server reports
- * (`personal_space_default_role`, guest cap applied), named as the role selects name it. `null`
- * when the org default names no role of the organization: the setting is invalid, said so.
+ * What « selon l'organisation » resolves to for a member (`personal_space_default_role`, guest cap
+ * applied), named as the role selects name it, or said invalid when it names no role.
  */
 export function followLabel(member: OrgMember, t: (key: string) => string): string {
   return (
@@ -71,11 +68,27 @@ export function memberPersonalSpaceRoleRequest(
   };
 }
 
-/** What a candidate org default would stop: `GET /api/orgs/{orgId}/personal-space-role/impact`. */
-export interface PersonalSpaceRoleImpact {
-  schedules: number;
-  members: number;
+/**
+ * The select values a guest may pick: the roles granting nothing beyond `operator`, where the
+ * server caps a guest's role anyway.
+ */
+export function guestRoleValues(
+  roles: Pick<RoleObject, "id" | "kind" | "key" | "permissions">[] | undefined,
+): Set<string> {
+  const operator = new Set(
+    roles?.find((r) => r.kind === "preset" && r.key === "operator")?.permissions,
+  );
+  return new Set(
+    (roles ?? [])
+      .filter((r) => r.permissions.every((permission) => operator.has(permission)))
+      .map((r) =>
+        spaceRoleValue({ preset_role: r.kind === "preset" ? r.key : null, custom_role_id: r.id }),
+      ),
+  );
 }
+
+type PersonalSpaceRoleImpact =
+  operations["getPersonalSpaceRoleImpact"]["responses"][200]["content"]["application/json"];
 
 /** A pick of the org default held until the admin confirms it. */
 export interface PendingPersonalSpaceRole {
@@ -84,9 +97,8 @@ export interface PendingPersonalSpaceRole {
 }
 
 /**
- * A pick of the org's personal-space default: its impact is read first. A pick that would disable
- * schedules is held for confirmation (`askConfirmation`); any other is written at once. A failed
- * read writes nothing and rejects with its error.
+ * A pick of the org's personal-space default: one that would disable schedules is held for
+ * confirmation, any other written at once. A failed impact read writes nothing and rejects.
  */
 export async function pickPersonalSpaceRole(
   selectValue: string,

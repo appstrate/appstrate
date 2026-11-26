@@ -21,13 +21,10 @@ export function RoleMatrix({ roles }: { roles: RoleObject[] }) {
   const { data: vocabulary } = useRoleVocabulary();
 
   // Rows: the catalog once loaded; before that every permission some role holds (admin holds the
-  // lot). The Studio is its own last row, read from `shows_studio` for every role: the catalog
-  // does not list it, a custom role never stores it, a preset spells it among its permissions.
+  // lot). The Studio is its own last row, read from `shows_studio`.
   const permissions = vocabulary
     ? vocabulary.flatMap((group) => group.permissions.map((entry) => entry.permission))
-    : [...new Set(roles.flatMap((role) => role.permissions))]
-        .filter((permission) => permission !== STUDIO_PERMISSION)
-        .sort();
+    : [...new Set(roles.flatMap((role) => role.permissions))].sort();
   const columnKey = (role: RoleObject) => role.id ?? role.key;
   const held = new Map(roles.map((role) => [columnKey(role), new Set(role.permissions)]));
   const showsStudio = new Map(roles.map((role) => [columnKey(role), role.shows_studio]));

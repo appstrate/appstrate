@@ -399,8 +399,7 @@ export async function createClient(input: CreateClientInput): Promise<OAuthClien
     input.level === "org" ? (input.signupRole ?? "member") : "member";
   const signupSpaceAssignments = input.level === "org" ? (input.signupSpaceAssignments ?? []) : [];
 
-  // Validation and insert share a transaction: the custom roles the grants name
-  // stay `FOR KEY SHARE`-locked against `deleteSpaceRole` until the row commits.
+  // One transaction: the custom roles the grants name stay share-locked against `deleteSpaceRole`.
   const inserted = await db.transaction(async (tx) => {
     if (input.level === "org") {
       await assertSpaceAssignmentsValid(
@@ -561,8 +560,7 @@ export async function updateClient(
   if (input.signupSpaceAssignments !== undefined)
     set.signupSpaceAssignments = input.signupSpaceAssignments;
 
-  // Same transaction as the validation, so a custom role the grants name stays
-  // `FOR KEY SHARE`-locked against `deleteSpaceRole` until the row commits.
+  // One transaction: the custom roles the grants name stay share-locked against `deleteSpaceRole`.
   const [row] = await db.transaction(async (tx) => {
     if (signupOrgId !== null && existing) {
       await assertSpaceAssignmentsValid(

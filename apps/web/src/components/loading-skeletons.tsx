@@ -229,7 +229,7 @@ function useOpensWithSpaceLine(type: PackageType, tab: string): boolean {
   const configures = useSpacesFor({ permission: "agents:configure" }).offered;
   const readsIntegrations = useSpacesFor({ permission: "integrations:read" }).offered;
   const readsAgent = useSpacesFor({ permission: "agents:read" }).offered;
-  const readsSchedules = useAdmittingSpaces("schedules", "studio").length > 0;
+  const readsSchedules = useAdmittingSpaces("schedules").length > 0;
   const configuresIntegration = useSpacesFor({ permission: "integrations:configure" }).offered;
   if (!on) return false;
   if (type === "agent" && tab === "settings") {

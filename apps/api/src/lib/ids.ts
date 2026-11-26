@@ -28,11 +28,7 @@ export function assertSpaceId(id: string, param = "space_id"): void {
 }
 
 /**
- * Whether `id` is a canonical space-role id (`SPACE_ROLE_ID_REGEX`: `srl_` + a canonical
- * lowercase dashed UUID — exactly what `prefixedId("srl")` mints). Same reasoning as
- * `SPACE_ID_RE` (`@appstrate/db/ids`): a role id arrives on a path param
- * (`/api/roles/:id`) and in a `space_members.custom_role_id` write, and both would
- * otherwise answer 404 for a malformed id, saying nothing about WHY. The predicate half of
+ * Whether `id` is a canonical space-role id (`SPACE_ROLE_ID_REGEX`). The predicate half of
  * {@link assertSpaceRoleId}, for the body field that is validated by Zod
  * (`spaceRoleAssignmentShape.custom_role_id`) rather than by a throw.
  */

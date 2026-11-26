@@ -7,6 +7,7 @@ installFakeStorage({ __APP_CONFIG__: { features: {}, trustedOrigins: [] } });
 
 const {
   FOLLOW_ORG_DEFAULT,
+  guestRoleValues,
   memberOverrideToSelectValue,
   memberPersonalSpaceRoleRequest,
   orgPersonalSpaceRoleBody,
@@ -40,8 +41,7 @@ describe("select values", () => {
     expect(memberOverrideToSelectValue({ custom_role_id: "srl_abc" })).toBe("custom:srl_abc");
   });
 
-  it("reads the stored org role, admin when absent", () => {
-    expect(storedRoleToSelectValue(undefined)).toBe("preset:admin");
+  it("reads the stored org role", () => {
     expect(storedRoleToSelectValue("runner")).toBe("preset:runner");
     expect(storedRoleToSelectValue("srl_abc")).toBe("custom:srl_abc");
   });
@@ -49,5 +49,24 @@ describe("select values", () => {
   it("writes the org role as a bare key or id", () => {
     expect(orgPersonalSpaceRoleBody("preset:runner")).toEqual({ personal_space_role: "runner" });
     expect(orgPersonalSpaceRoleBody("custom:srl_abc")).toEqual({ personal_space_role: "srl_abc" });
+  });
+});
+
+describe("guestRoleValues", () => {
+  it("offers a guest only the roles granting nothing beyond operator", () => {
+    const role = (kind: "preset" | "custom", key: string, permissions: string[]) => ({
+      id: kind === "custom" ? `srl_${key}` : null,
+      kind,
+      key,
+      permissions,
+    });
+    const values = guestRoleValues([
+      role("preset", "admin", ["agents:read", "agents:write"]),
+      role("preset", "operator", ["agents:read", "agents:run"]),
+      role("preset", "viewer", ["agents:read"]),
+      role("custom", "reader", ["agents:read"]),
+      role("custom", "author", ["agents:write"]),
+    ]);
+    expect([...values]).toEqual(["preset:operator", "preset:viewer", "custom:srl_reader"]);
   });
 });

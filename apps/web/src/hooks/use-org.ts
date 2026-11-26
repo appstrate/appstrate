@@ -71,6 +71,12 @@ export function invalidateMemberWrite(queryClient: QueryClient): void {
   void invalidateIntegrationQueries(queryClient);
 }
 
+/** A personal-space role changes the permissions each space serves and the verdicts package rows carry. */
+export function invalidatePersonalSpaceRoleWrite(queryClient: QueryClient): void {
+  void invalidatePaths(queryClient, ["/api/spaces", "/api/spaces/{id}"]);
+  invalidatePackageCaches(queryClient);
+}
+
 export function useRemoveMember() {
   const qc = useQueryClient();
   return $api.useMutation("delete", "/api/orgs/{orgId}/members/{userId}", {
@@ -88,32 +94,23 @@ export function useMemberDepartureImpact(orgId: string | undefined, userId: stri
   );
 }
 
-/**
- * A member's own role in their personal space: PUT sets it, DELETE returns them to the
- * organization default. The member list carries it; the space's permissions and the package
- * verdicts follow it.
- */
+/** A member's own role in their personal space: PUT sets it, DELETE returns them to the org default. */
 export function useSetMemberPersonalSpaceRole() {
   const qc = useQueryClient();
-  const orgId = useCurrentOrgId();
-  const put = $api.useMutation("put", "/api/orgs/{orgId}/members/{userId}/personal-space-role");
-  const clear = $api.useMutation(
-    "delete",
-    "/api/orgs/{orgId}/members/{userId}/personal-space-role",
-  );
-  const settle = () => {
+  const onSuccess = () => {
     void invalidateOrgDetail(qc);
-    void invalidatePaths(qc, ["/api/spaces", "/api/spaces/{id}"]);
-    invalidatePackageCaches(qc);
+    invalidatePersonalSpaceRoleWrite(qc);
   };
+  const path = "/api/orgs/{orgId}/members/{userId}/personal-space-role" as const;
+  const put = $api.useMutation("put", path, { onSuccess });
+  const clear = $api.useMutation("delete", path, { onSuccess });
   return {
     isPending: put.isPending || clear.isPending,
-    apply: (userId: string, selectValue: string) => {
-      if (!orgId) return;
+    apply: (orgId: string, userId: string, selectValue: string) => {
       const params = { path: { orgId, userId } };
       const request = memberPersonalSpaceRoleRequest(selectValue);
-      if (request.method === "DELETE") clear.mutate({ params }, { onSuccess: settle });
-      else put.mutate({ params, body: request.body }, { onSuccess: settle });
+      if (request.method === "DELETE") clear.mutate({ params });
+      else put.mutate({ params, body: request.body });
     },
   };
 }

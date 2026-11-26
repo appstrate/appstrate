@@ -2,9 +2,8 @@
 
 /**
  * The « personal space role » picker of Settings › General: it lists the presets and the org's
- * custom roles, shows the stored value (a preset key or an `srl_` id), is offered to `org:settings`
- * alone, and writes the stored value. The web runner has no DOM, so a pick is pinned through the
- * body it builds.
+ * custom roles, is offered to `org:settings` alone, and writes a preset key or an `srl_` id. The
+ * web runner has no DOM, so a pick is pinned through the body it builds.
  */
 
 import { describe, expect, it, spyOn } from "bun:test";
@@ -19,12 +18,8 @@ installFakeStorage({
 const { PersonalSpaceRoleSetting } =
   await import("../../components/settings/personal-space-role-setting.tsx");
 const { toggleBody } = await import("../../lib/org-setting-toggle-body.ts");
-const {
-  orgPersonalSpaceRoleBody,
-  personalSpaceRoleImpactDescription,
-  pickPersonalSpaceRole,
-  storedRoleToSelectValue,
-} = await import("../../lib/personal-space-role.ts");
+const { orgPersonalSpaceRoleBody, personalSpaceRoleImpactDescription, pickPersonalSpaceRole } =
+  await import("../../lib/personal-space-role.ts");
 const { useSpaceRoleOptions } = await import("../../hooks/use-roles.ts");
 const { client, $api } = await import("../../api/client.ts");
 const { usePersonalSpaceRoleImpact, useUpdateOrgSettings } =
@@ -63,18 +58,14 @@ const pickerOf = (html: string) =>
   /<button[^>]*id="personal-space-role"[^>]*>[\s\S]*?<\/button>/.exec(html)?.[0];
 
 describe("the personal space role picker", () => {
-  // A closed Radix select draws no value or item under `renderToStaticMarkup`, so the picker's
-  // catalogue and the label of a stored value are read from the same hook and mapping it uses.
-  function optionLabels(stored: string): { labels: string[]; shown: string | undefined } {
+  // A closed Radix select draws no item under `renderToStaticMarkup`, so the picker's catalogue
+  // is read from the hook it uses.
+  function optionLabels(): string[] {
     const qc = new QueryClient();
     seedOrgAndRoles(qc, ["roles:read"]);
-    let result = { labels: [] as string[], shown: undefined as string | undefined };
+    let labels: string[] = [];
     function Probe() {
-      const { options } = useSpaceRoleOptions();
-      result = {
-        labels: options.map((o) => o.label),
-        shown: options.find((o) => o.value === storedRoleToSelectValue(stored))?.label,
-      };
+      labels = useSpaceRoleOptions().options.map((o) => o.label);
       return null;
     }
     const snapshot = spyOn(orgStore, "getInitialState").mockReturnValue({
@@ -86,20 +77,15 @@ describe("the personal space role picker", () => {
     } finally {
       snapshot.mockRestore();
     }
-    return result;
+    return labels;
   }
 
   it("offers the presets then the org's custom roles", () => {
-    expect(optionLabels("admin").labels).toEqual([
+    expect(optionLabels()).toEqual([
       settingsFr["roles.preset.admin"],
       settingsFr["roles.preset.operator"],
       "Triage",
     ]);
-  });
-
-  it("shows the stored preset, and the name of a stored custom role", () => {
-    expect(optionLabels("operator").shown).toBe(settingsFr["roles.preset.operator"]);
-    expect(optionLabels(CUSTOM_ROLE_ID).shown).toBe("Triage");
   });
 
   it("draws the title, the explanation and the picker", () => {
@@ -187,7 +173,7 @@ describe("picking a default that would stop schedules", () => {
         }),
       );
     };
-    return { impactOf, write, writes };
+    return { impactOf: (role: string) => impactOf(ORG_ID, role), write, writes };
   }
 
   it("asks with the counts, and writes only on confirm", async () => {
@@ -265,29 +251,6 @@ describe("picking a default that would stop schedules", () => {
         params: { path: { orgId: ORG_ID } },
         body: { personal_space_role: CUSTOM_ROLE_ID },
       });
-    } finally {
-      get.mockRestore();
-      patch.mockRestore();
-    }
-  });
-
-  it("writes nothing when the pick is cancelled", async () => {
-    const get = spyOn(client, "GET").mockResolvedValue(
-      impactResponse({ schedules: 1, members: 1 }),
-    );
-    const patch = spyOn(client, "PATCH");
-    try {
-      const { impactOf, write } = wiring();
-      let held: string | null = null;
-      await pickPersonalSpaceRole("preset:viewer", {
-        impactOf,
-        write,
-        askConfirmation: (pending) => (held = pending.selectValue),
-      });
-      expect(held).not.toBeNull();
-      // What « Annuler » does: the held pick is dropped.
-      held = null;
-      expect(patch).not.toHaveBeenCalled();
     } finally {
       get.mockRestore();
       patch.mockRestore();

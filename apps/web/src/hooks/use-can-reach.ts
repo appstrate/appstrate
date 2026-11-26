@@ -6,9 +6,8 @@ import { useAppConfig } from "./use-app-config";
 import { useOverviewMode } from "./use-overview-mode";
 import { useSpaces } from "./use-spaces";
 import { useSpaceLink } from "./use-current-space";
-import { holdsStudio, routeVerdict, type RoutePath } from "../lib/route-access";
+import { routeVerdict, STUDIO_PERMISSION, type RoutePath } from "../lib/route-access";
 import { routeOf } from "../lib/route-match";
-import { runDetailPath } from "../lib/package-paths";
 import { homeOf } from "../lib/home-route";
 import { spacesWhere, spanningRouteVerdict } from "../lib/space-lists";
 
@@ -71,10 +70,8 @@ export function useCanReachInSpace(): (target: string, spaceId: string | undefin
 
 /**
  * The link to `path` in a row's space, entering it when it is not the working one, or `undefined`
- * where the page does not open for the reader: judged in the row's space ({@link useCanReachInSpace}:
- * a role without the Studio gets no link into it), or in « Tous les espaces », which keeps the mode
- * on such a page, where some space admits it ({@link useCanReach}). The one rule of every link a
- * row or the chat draws into a space's page.
+ * where the page does not open for the reader: judged in the row's space, or in « Tous les
+ * espaces » where some space admits it.
  */
 export function useReachableSpaceLink(): (
   path: string,
@@ -91,25 +88,15 @@ export function useReachableSpaceLink(): (
   );
 }
 
-/** A run's page, in the run's space: `undefined` for a run with no agent left to live under, or whose page does not open for the reader. */
-export function useRunPageHref(run: {
-  id: string;
-  packageId?: string | null;
-  spaceId?: string;
-}): string | undefined {
-  const link = useReachableSpaceLink();
-  return run.packageId ? link(runDetailPath(run.packageId, run.id), run.spaceId) : undefined;
-}
-
-/**
- * Whether the reader reaches the Studio: the working space grants it, or in « Tous les espaces »
- * some space does, as the mode's lists open where one admits them.
- */
+/** Whether the reader reaches the Studio: in the working space, or in « Tous les espaces » in some space. */
 export function useStudioReach(): boolean {
   const { can } = usePermissions();
   const { on } = useOverviewMode();
   const { data: spaces } = useSpaces();
-  return holdsStudio(can) || (on && spacesWhere(spaces, holdsStudio).length > 0);
+  return (
+    can(STUDIO_PERMISSION) ||
+    (on && spacesWhere(spaces, (grant) => grant(STUDIO_PERMISSION)).length > 0)
+  );
 }
 
 /** Whether the reach verdicts are answers yet: until the permission set loads every one reads as refused. */

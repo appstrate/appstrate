@@ -33,7 +33,7 @@ const FILTER_PARAMS = ["user", "kind", "status", "q", "space"] as const;
 export function RunsPage() {
   const { t } = useTranslation(["agents", "common"]);
   const { on: spanning } = useOverviewMode();
-  const runSpaces = useAdmittingSpaces("runs", "studio");
+  const runSpaces = useAdmittingSpaces("runs");
   const spaceFilter = useSpaceFilter("runs", spanning);
   // « Tout marquer comme lu » marks what the list shows: the working space, or each space
   // admitting the list that the space filter keeps.

@@ -1689,12 +1689,12 @@
         }
       },
       "foreignKeys": {
-        "organizations_personal_space_role_id_space_roles_id_fk": {
-          "name": "organizations_personal_space_role_id_space_roles_id_fk",
+        "organizations_personal_space_role_fk": {
+          "name": "organizations_personal_space_role_fk",
           "tableFrom": "organizations",
           "tableTo": "space_roles",
-          "columnsFrom": ["personal_space_role_id"],
-          "columnsTo": ["id"],
+          "columnsFrom": ["personal_space_role_id", "id"],
+          "columnsTo": ["id", "org_id"],
           "onDelete": "restrict",
           "onUpdate": "no action"
         },
@@ -1725,6 +1725,10 @@
         "organizations_icon_length": {
           "name": "organizations_icon_length",
           "value": "octet_length(icon) <= 16384"
+        },
+        "organizations_personal_space_role_preset": {
+          "name": "organizations_personal_space_role_preset",
+          "value": "NOT (org_settings ? 'personal_space_role') OR COALESCE(org_settings ->> 'personal_space_role' IN ('admin', 'builder', 'operator', 'runner', 'viewer'), false)"
         }
       },
       "isRLSEnabled": false
@@ -2120,6 +2124,27 @@
             },
             {
               "expression": "key",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "uq_space_roles_id_org_id": {
+          "name": "uq_space_roles_id_org_id",
+          "columns": [
+            {
+              "expression": "id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "org_id",
               "isExpression": false,
               "asc": true,
               "nulls": "last"

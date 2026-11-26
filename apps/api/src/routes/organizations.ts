@@ -255,11 +255,7 @@ async function memberSpacesForCaller(
   return listSpacesOfMembers(orgId, readable);
 }
 
-/**
- * A member's personal-space role as the member DTO shows it: their own override and the role the
- * org default alone would give them (guest cap applied). Only a caller who may change it sees
- * either; both are `null` otherwise.
- */
+/** A member's personal-space override and default role, both `null` unless `mayChange`. */
 async function personalSpaceView(orgId: string, mayChange: boolean, userIds?: readonly string[]) {
   const [overrides, orgDefault] = mayChange
     ? await Promise.all([
@@ -269,9 +265,8 @@ async function personalSpaceView(orgId: string, mayChange: boolean, userIds?: re
     : [new Map<string, SpaceRoleAssignment>(), null];
   return (userId: string, orgRole: OrgRole) => ({
     personal_space_role: overrides.get(userId) ?? null,
-    personal_space_default_role: mayChange
-      ? toSpaceRoleWire(defaultPersonalSpaceRole(orgRole, orgDefault))
-      : null,
+    personal_space_default_role:
+      orgDefault && toSpaceRoleWire(defaultPersonalSpaceRole(orgRole, orgDefault)),
   });
 }
 
@@ -632,7 +627,6 @@ router.put("/:orgId/members/:userId", requirePermission("members", "change-role"
         customRoleId: row.customRoleId,
       })),
     },
-    // The member's own personal-space role the change made inadmissible, dropped with it.
     after: { role: data.role, personalSpaceRoleCleared },
     orgIdOverride: orgId,
   });
@@ -643,7 +637,6 @@ router.put("/:orgId/members/:userId", requirePermission("members", "change-role"
 
 /** One member as the members list in GET /orgs/:orgId serializes it — a write's bare response. */
 async function memberDto(c: Context<AppEnv>, orgId: string, userId: string) {
-  // Both callers sit behind `requirePermission("members", "change-role")`.
   const [member, memberSpaces, personalSpaceOf] = await Promise.all([
     getOrgMemberWithProfile(orgId, userId),
     memberSpacesForCaller(c, orgId),
@@ -661,9 +654,7 @@ async function memberDto(c: Context<AppEnv>, orgId: string, userId: string) {
   };
 }
 
-// PUT /api/orgs/:orgId/members/:userId/personal-space-role — the member's own role in their
-// personal space, overriding the org's `personal_space_role` (RBAC spec §3.6). Same guard as
-// the org role change: it is the same kind of decision about the same member.
+// PUT /api/orgs/:orgId/members/:userId/personal-space-role — override the org default (§3.6)
 router.put(
   "/:orgId/members/:userId/personal-space-role",
   requirePermission("members", "change-role"),
@@ -689,8 +680,7 @@ router.put(
   },
 );
 
-// DELETE /api/orgs/:orgId/members/:userId/personal-space-role — back to the org default.
-// Idempotent: 204 whether or not an override was set.
+// DELETE /api/orgs/:orgId/members/:userId/personal-space-role — back to the default, idempotent
 router.delete(
   "/:orgId/members/:userId/personal-space-role",
   requirePermission("members", "change-role"),
@@ -744,11 +734,9 @@ router.post("/:orgId/leave", async (c) => {
   return c.body(null, 204);
 });
 
-/** Query of `GET …/personal-space-role/impact`: the candidate default, as the settings PATCH takes it. */
 const personalSpaceRoleImpactQuerySchema = z.object({ role: personalSpaceRoleSettingSchema });
 
 // GET /api/orgs/:orgId/personal-space-role/impact?role=… — what the candidate default would stop
-// (RBAC spec §3.6). Read-only, counts only, under the guard of the write it previews.
 router.get(
   "/:orgId/personal-space-role/impact",
   requirePermission("org", "settings"),

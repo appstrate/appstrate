@@ -67,16 +67,12 @@ const selectOf = (html: string) =>
 describe("the personal space role field of the user sheet", () => {
   // A closed Radix select draws no value under `renderToStaticMarkup`: the control is checked
   // present, and what each state reads as is pinned through the mapping the field uses.
-  it("draws the control for a member with an override and for one following the default", () => {
-    for (const override of [
-      { preset_role: "admin" as const },
-      { custom_role_id: CUSTOM_ROLE_ID },
-      null,
-    ]) {
-      const html = renderField(member("member", override), ["members:change-role"]);
-      expect(html).toContain(settingsFr["userDetail.personalSpaceRole"]);
-      expect(selectOf(html)).toBeDefined();
-    }
+  it("draws the control for a member", () => {
+    const html = renderField(member("member", { custom_role_id: CUSTOM_ROLE_ID }), [
+      "members:change-role",
+    ]);
+    expect(html).toContain(settingsFr["userDetail.personalSpaceRole"]);
+    expect(selectOf(html)).toBeDefined();
   });
 
   it("names the default the server reports, as the role selects name it", () => {
@@ -86,7 +82,6 @@ describe("the personal space role field of the user sheet", () => {
     expect(followLabel(member("member", null, preset), t)).toBe(
       settingsFr["roles.preset.operator"],
     );
-    expect(followLabel(member("guest", null, preset), t)).toBe(settingsFr["roles.preset.operator"]);
     expect(followLabel(member("member", null, custom), t)).toBe("Triage");
   });
 

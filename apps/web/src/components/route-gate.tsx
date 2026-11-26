@@ -76,10 +76,7 @@ export function UnavailableState({ children }: { children?: ReactNode }) {
   );
 }
 
-/**
- * The address matches no route: said, with the way back to what `/` shows the reader (the chat for
- * a role without the Studio), instead of landing there unexplained.
- */
+/** The address matches no route: said, with the way back to what `/` shows the reader. */
 export function NotFoundPage() {
   const { t } = useTranslation("common");
   const chat = useHome() === "chat";

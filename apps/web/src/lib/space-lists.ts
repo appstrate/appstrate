@@ -38,22 +38,19 @@ export type SpaceGate = (permission: string) => boolean;
 const accessOf = (path: RoutePath) =>
   ROUTE_ACCESS[path] as { anyOf?: readonly string[]; spansSpaces?: boolean };
 
-/** A space admits a route where its gate opens it: the screen's rule, the Studio included. */
+/** A space admits a route where its gate opens it. */
 const routeAdmits =
   (path: RoutePath) =>
   (can: SpaceGate): boolean =>
     grantsRoute(path, can);
 
-/**
- * A space admits a list where its gate grants the list route's own permissions: the data rule,
- * whichever product reads the rows (the chat's context panel lists them without the Studio).
- */
+/** A space admits a list where its gate grants the list route's own permissions, Studio or not. */
 export const listAdmits =
   (list: SpaceList) =>
   (can: SpaceGate): boolean =>
     ROUTE_ACCESS[LIST_ROUTE[list]].anyOf.some(can);
 
-/** The product a list is shown in: the Studio's screens also ask the Studio of each space. */
+/** The product a list is shown in: the Studio's screens also ask each space for the Studio. */
 export type ListSurface = "studio" | "chat";
 
 export const listAdmitsOn = (list: SpaceList, surface: ListSurface) =>
@@ -122,10 +119,7 @@ export function spaceChoice(
   return { kind: "ask" };
 }
 
-/**
- * The « Tous les espaces » is offered from two spaces granting at least one list's own permissions.
- * The Studio is not asked: the chat holds the mode too, for a role without the Studio as well.
- */
+/** The « Tous les espaces » is offered from two spaces granting at least one list's own permissions. */
 export function overviewOffered(spaces: readonly ListedSpace[] | undefined): boolean {
   const admits = (can: SpaceGate) => SPACE_LISTS.some((list) => listAdmits(list)(can));
   return spacesWhere(spaces, admits).length >= 2;

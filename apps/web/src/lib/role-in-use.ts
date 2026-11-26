@@ -2,12 +2,7 @@
 
 import type { TFunction } from "i18next";
 
-/**
- * The sentence of a 409 `role_in_use`: one clause per kind of holder the refusal counts — the
- * organization's default role of personal spaces, space members (a personal-space override
- * included), pending invitations, OIDC sign-up policies. Naming only one makes the refusal look
- * wrong when the blocker is another.
- */
+/** The sentence of a 409 `role_in_use`: one clause per kind of holder the refusal counts. */
 export function roleInUseMessage(
   details: Record<string, unknown> | undefined,
   t: TFunction,

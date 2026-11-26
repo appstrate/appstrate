@@ -256,7 +256,7 @@ describe("custom space roles", () => {
       const { data } = (await (await req("GET", "/api/roles")).json()) as { data: RoleWire[] };
       for (const preset of data.filter((r) => r.kind === "preset")) {
         expect(preset.shows_studio, preset.key).toBe(true);
-        expect(preset.permissions, preset.key).toContain("studio:read");
+        expect(preset.permissions, preset.key).not.toContain("studio:read");
       }
     });
 

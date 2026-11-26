@@ -67,10 +67,9 @@ export function useWorkingSpaceWording(ns: string) {
 
 /**
  * The spaces that admit `list` on `surface`: where a list spanning spaces finds its rows, judged
- * by each row's space rather than the working one. The Studio's screens list only the spaces
- * opening the Studio; the chat lists every space granting the rows.
+ * by each row's space rather than the working one.
  */
-export function useAdmittingSpaces(list: SpaceList, surface: ListSurface) {
+export function useAdmittingSpaces(list: SpaceList, surface: ListSurface = "studio") {
   const { data: spaces } = useSpaces();
   return spacesWhere(spaces, listAdmitsOn(list, surface));
 }

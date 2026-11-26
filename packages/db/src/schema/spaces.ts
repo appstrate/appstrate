@@ -135,9 +135,7 @@ export const spaceRoles = pgTable(
       .array()
       .notNull()
       .default(sql`'{}'::text[]`),
-    // Whether a holder sees the Studio (`studio:read`, RBAC spec §3.3). A display grant the role
-    // resolves, never one `permissions` stores: true = shown, as every preset does. A constant
-    // default, so every row predating the column reads true, which is what it held before.
+    // Resolves `studio:read` (RBAC spec §3.3), never stored in `permissions`.
     showsStudio: boolean("shows_studio").notNull().default(true),
     createdBy: text("created_by").references(() => user.id, { onDelete: "set null" }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
@@ -145,6 +143,8 @@ export const spaceRoles = pgTable(
   },
   (table) => [
     uniqueIndex("idx_space_roles_org_key").on(table.orgId, table.key),
+    // Target of the org-scoped `organizations_personal_space_role_fk`.
+    uniqueIndex("uq_space_roles_id_org_id").on(table.id, table.orgId),
     // Referencing-side index for the `user` SET NULL action.
     index("idx_space_roles_created_by").on(table.createdBy),
     check(

@@ -44,10 +44,7 @@ export interface SpaceRoleWire {
   name: string;
   description: string | null;
   permissions: string[];
-  /**
-   * Whether the role resolves `studio:read` (`space_roles.shows_studio`): always `true` for a
-   * preset. Never one of `permissions`, which is what a write accepts back.
-   */
+  /** Whether the role resolves `studio:read`, never listed in `permissions`; `true` on a preset. */
   shows_studio: boolean;
   /**
    * Stored entries this deployment cannot name — always empty for a preset.
@@ -104,7 +101,10 @@ function presetWire(preset: SpaceRolePreset): SpaceRoleWire {
     key: preset,
     name: preset,
     description: null,
-    permissions: [...presetPermissions(preset)].sort(),
+    // Without the resolved grants `shows_studio` carries, so it is what a write accepts back.
+    permissions: [...presetPermissions(preset)]
+      .filter((permission) => !RESOLVED_SPACE_PERMISSIONS.has(permission))
+      .sort(),
     shows_studio: true,
     // A preset is code, not a row: nothing can be stored on it that the
     // deployment does not name.
@@ -139,9 +139,6 @@ export async function listSpaceRoles(orgId: string): Promise<SpaceRoleWire[]> {
  *
  * The set must read what it acts on (`missingReadGrants`). A missing read is
  * named, never added: that would grant what the author did not pick.
- *
- * A resolved grant (`RESOLVED_SPACE_PERMISSIONS` — `studio:read`) is refused like an unknown
- * one: the role carries it in a column of its own (`shows_studio`), never in this array.
  */
 function normalizePermissions(permissions: string[]): string[] {
   const known = assignableSpaceLevelPermissions();
@@ -274,18 +271,14 @@ interface RoleHolders {
   pendingInvitationCount: number;
   /** The org's OIDC clients whose `signup_space_assignments` name this role. */
   signupAssignmentCount: number;
-  /** `organizations.personal_space_role_id` names this role: every member's personal-space default. */
+  /** The org's personal-space default names this role. */
   orgDefault: boolean;
 }
 
 /**
- * Four things hold a bundle: a `space_members` row (a member's own override in their
- * personal space included), a PENDING invitation whose JSONB `space_assignments` name it,
- * an org OIDC client whose JSONB `signup_space_assignments` name it, and the org's
- * personal-space default (`organizations.personal_space_role_id`). The two JSONB holders have
- * no FK, so deleting under them would strand the invitee with an assignment that never
- * applies or refuse every SSO signup of the client; the other two have a RESTRICT FK, and
- * counting them first is what turns its violation into a 409 that names them.
+ * What holds a bundle: `space_members` rows (personal-space overrides included), the org's
+ * personal-space default, and PENDING invitations and OIDC clients whose JSONB assignments name
+ * it; those two have no FK, so a delete under them would strand an assignment that never applies.
  */
 async function countRoleHolders(orgId: string, id: string, executor: DbOrTx): Promise<RoleHolders> {
   const assigned = await executor
@@ -347,14 +340,10 @@ function roleInUse(key: string, counts: RoleHolders): never {
 
 /**
  * Holders are counted rather than left to `ON DELETE RESTRICT`, whose error
- * names neither the role nor how many people would lose access. The role row is
- * locked `FOR UPDATE` before the count, and every writer that names a custom role reads
- * that row `FOR KEY SHARE` in its own write transaction (`updateOrgSettings`,
- * `setPersonalSpaceRoleOverride`, `saveSpaceMember`, the OIDC client writes through
- * `assertSpaceAssignmentsValid`): it either commits first and is counted (409), or reads
- * after the delete and answers 404. A pending invitation is validated outside its insert's
- * transaction, so one saved concurrently can still slip past the count; acceptance then
- * skips the assignment as a role that no longer exists.
+ * names neither the role nor how many people would lose access. The row is locked
+ * `FOR UPDATE` first; every writer naming a custom role share-locks it (`lockOrgSpaceRole`), so it
+ * is counted (409) or answers 404. A pending invitation, validated outside its insert's
+ * transaction, can still slip past; acceptance then skips the vanished role.
  */
 export async function deleteSpaceRole(orgId: string, id: string): Promise<SpaceRoleWire> {
   return db.transaction(async (tx) => {

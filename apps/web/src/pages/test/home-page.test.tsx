@@ -30,7 +30,7 @@ const inSpace = (node: ReactElement, permissions: string[], studio: boolean) =>
 
 describe("HomePage", () => {
   it("sends a role without the Studio to the chat: no dashboard, no refusal", () => {
-    // `Navigate` draws no markup; the redirect itself is `homeOf`'s (lib/test/home-route.test.ts).
+    // `ToChat` draws no markup; the redirect itself is `homeOf`'s (lib/test/home-route.test.ts).
     expect(inSpace(<HomePage />, ["chat:read"], false)).toBe("");
   });
 

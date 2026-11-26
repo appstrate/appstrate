@@ -895,8 +895,9 @@ constraint org_proxies org_proxies_pkey PRIMARY KEY (id)
 constraint org_proxies org_proxies_source_valid CHECK ((source = ANY (ARRAY['built-in'::text, 'custom'::text])))
 constraint organizations organizations_created_by_user_id_fk FOREIGN KEY (created_by) REFERENCES "user"(id) ON DELETE SET NULL
 constraint organizations organizations_icon_length CHECK ((octet_length(icon) <= 16384))
-constraint organizations organizations_personal_space_role_id_space_roles_id_fk FOREIGN KEY (personal_space_role_id) REFERENCES space_roles(id) ON DELETE RESTRICT
+constraint organizations organizations_personal_space_role_fk FOREIGN KEY (personal_space_role_id, id) REFERENCES space_roles(id, org_id) ON DELETE RESTRICT
 constraint organizations organizations_personal_space_role_one_shape CHECK (((personal_space_role_id IS NULL) OR (NOT (org_settings ? 'personal_space_role'::text))))
+constraint organizations organizations_personal_space_role_preset CHECK (((NOT (org_settings ? 'personal_space_role'::text)) OR COALESCE(((org_settings ->> 'personal_space_role'::text) = ANY (ARRAY['admin'::text, 'builder'::text, 'operator'::text, 'runner'::text, 'viewer'::text])), false)))
 constraint organizations organizations_pkey PRIMARY KEY (id)
 constraint organizations organizations_slug_unique UNIQUE (slug)
 constraint package_dist_tags package_dist_tags_package_id_packages_id_fk FOREIGN KEY (package_id) REFERENCES packages(id) ON DELETE CASCADE
@@ -1267,6 +1268,7 @@ index CREATE UNIQUE INDEX uq_org_invitations_pending ON public.org_invitations U
 index CREATE UNIQUE INDEX uq_org_models_unaliased_binding ON public.org_models USING btree (org_id, credential_id, model_id) WHERE (aliased = false)
 index CREATE UNIQUE INDEX uq_org_models_unbound ON public.org_models USING btree (org_id, provider_id, model_id) WHERE (credential_id IS NULL)
 index CREATE UNIQUE INDEX uq_runs_id_org_id ON public.runs USING btree (id, org_id)
+index CREATE UNIQUE INDEX uq_space_roles_id_org_id ON public.space_roles USING btree (id, org_id)
 index CREATE UNIQUE INDEX uq_spaces_id_org_id ON public.spaces USING btree (id, org_id)
 index CREATE UNIQUE INDEX uq_spaces_org_owner ON public.spaces USING btree (org_id, owner_user_id) WHERE (owner_user_id IS NOT NULL)
 index CREATE UNIQUE INDEX uq_storage_deletion_jobs_pending ON public.storage_deletion_jobs USING btree (bucket, storage_key) WHERE (completed_at IS NULL)

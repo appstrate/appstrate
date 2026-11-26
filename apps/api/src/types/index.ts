@@ -8,15 +8,7 @@ export type { OrgRole } from "@appstrate/shared-types";
 // Re-exported from @appstrate/validation. The AgentManifest type is Zod-inferred
 // and covers all agent manifest fields (name, version, type, dependencies, input/output, timeout).
 
-import type { z } from "zod";
 import type { AgentManifest } from "@appstrate/core/validation";
-import type { orgSettingsReadSchema } from "@appstrate/core/permissions";
-
-/**
- * The stored `org_settings` document as read: `personal_space_role` is a preset there, never the
- * custom default (`organizations.personal_space_role_id`), so it is not the served `OrgSettings`.
- */
-type StoredOrgSettings = z.output<typeof orgSettingsReadSchema>;
 export type { AgentManifest };
 
 // --- Loaded Package (manifest + prompt from DB) ---
@@ -127,10 +119,9 @@ export type AppEnv = {
      * middleware) read settings from context instead of issuing a second
      * organizations query. Absent when org context was resolved inline by
      * non-session auth (API key, module strategies) or skipped entirely —
-     * consumers must fall back to `getOrgSettings()` in that case. The stored document only:
-     * its `personal_space_role` never names a custom default (`getOrgSettings` reads that).
+     * consumers must fall back to `getOrgSettings()` in that case.
      */
-    orgSettings?: StoredOrgSettings;
+    orgSettings?: import("@appstrate/shared-types").OrgSettings;
     /** Set by auth strategies that defer org resolution to X-Org-Id middleware. */
     deferOrgResolution?: boolean;
     /**

@@ -441,6 +441,7 @@ export type { SpaceAssignment };
 import type { orgSettingsWireSchema } from "@appstrate/core/permissions";
 /** The org settings as the API serves them (`GET /api/orgs/{orgId}/settings`). */
 export type OrgSettings = z.output<typeof orgSettingsWireSchema>;
+
 /**
  * Mirrored by an OpenAPI response schema, and reached only by name.
  *
@@ -465,15 +466,11 @@ export interface OrganizationMember {
   spaces: OrganizationMemberSpace[];
   /** Their own role in their personal space, overriding the org default; `null` = follows it. */
   personal_space_role: SpaceRoleAssignment | null;
-  /**
-   * The role this member would hold in their own personal space by the org default alone, guest
-   * cap applied; `null` when the default names no role. Read with `personal_space_role`: only a
-   * caller who may change the role sees either, and both are `null` for everyone else.
-   */
+  /** Their role there by the org default alone; both `null` without `members:change-role`. */
   personal_space_default_role: SpaceMember["role"];
 }
 
-/** A role given to someone: one preset, or one custom role. Also a member's personal-space override. */
+/** A role given to someone: one preset, or one custom role. */
 export type SpaceRoleAssignment = { preset_role: SpaceRolePreset } | { custom_role_id: string };
 
 /** One space an org member reaches — the per-member projection of `GET /api/spaces/:id/members`. */

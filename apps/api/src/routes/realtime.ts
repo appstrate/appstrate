@@ -129,7 +129,7 @@ async function resolveSpaceGrants(
   space: SpaceContextRow,
   memberRow: SpaceMemberRow | null,
   callerId: string | null,
-  personalDefault: PersonalSpaceDefaultColumns | undefined,
+  personalDefault: PersonalSpaceDefaultColumns | null,
 ): Promise<ReadonlySet<string> | null> {
   const ref = resolveSpaceRole(
     personaFor(c, orgId)?.orgRole ?? realRole,

@@ -15,13 +15,7 @@ import { ApiError } from "./errors.ts";
 import { alias } from "drizzle-orm/pg-core";
 import { db } from "@appstrate/db/client";
 import { organizations, spaceMembers, spaceRoles, spaces } from "@appstrate/db/schema";
-import {
-  isSpaceRolePreset,
-  type OrgRole,
-  type SpaceRolePreset,
-  type SpaceVisibility,
-} from "@appstrate/core/permissions";
-import { logger } from "./logger.ts";
+import type { OrgRole, SpaceRolePreset, SpaceVisibility } from "@appstrate/core/permissions";
 import { partitionSpacePermissions, presetPermissions, type Permission } from "./permissions.ts";
 
 export interface SpaceAccessRow {
@@ -36,31 +30,15 @@ export interface CustomSpaceRole {
   id: string;
   key: string;
   name: string;
-  /** The stored bundle; never holds a resolved grant (`RESOLVED_SPACE_PERMISSIONS`). */
   permissions: readonly string[];
-  /** `space_roles.shows_studio`: the role resolves `studio:read` (RBAC spec §3.3). */
+  /** Resolves `studio:read` (RBAC spec §3.3). */
   showsStudio: boolean;
 }
 
-/**
- * Two shapes, not one string: the DB stores presets under a CHECK and customs under an FK.
- * Two optional adjustments, both the platform's own and never read from a stored bundle, applied
- * in this order by {@link spacePermissions}: `within` keeps only the permissions it lists, then
- * `plus` adds the permissions it lists (the personal-space delete floor rides on it).
- */
-export type SpaceRoleRef =
-  | {
-      kind: "preset";
-      preset: SpaceRolePreset;
-      within?: readonly Permission[];
-      plus?: readonly Permission[];
-    }
-  | {
-      kind: "custom";
-      role: CustomSpaceRole;
-      within?: readonly Permission[];
-      plus?: readonly Permission[];
-    };
+/** Two shapes, not one string: the DB stores presets under a CHECK and customs under an FK. */
+export type SpaceRoleRef = (
+  { kind: "preset"; preset: SpaceRolePreset } | { kind: "custom"; role: CustomSpaceRole }
+) & { within?: readonly Permission[]; plus?: readonly Permission[] };
 
 export const ADMIN_ROLE_REF: Readonly<SpaceRoleRef> = Object.freeze({
   kind: "preset",
@@ -68,9 +46,8 @@ export const ADMIN_ROLE_REF: Readonly<SpaceRoleRef> = Object.freeze({
 });
 
 /**
- * Granted on top of the role an owner holds in their own personal space short of `admin`, through
- * an override or the org default, so nothing they already own there becomes impossible to stop
- * or remove (RBAC spec §3.6).
+ * Granted on top of the role an owner holds in their own personal space short of `admin`, so
+ * nothing they already own there becomes impossible to stop or remove (RBAC spec §3.6).
  */
 export const PERSONAL_CAP_DELETE_PERMISSIONS: readonly Permission[] = [
   "agents:delete",
@@ -85,13 +62,7 @@ function withPersonalSpaceFloor(ref: SpaceRoleRef): SpaceRoleRef {
   return { ...ref, plus: PERSONAL_CAP_DELETE_PERMISSIONS };
 }
 
-/**
- * What a guest takes of the role it chose in its own personal space: never more than `operator`
- * (a guest is invited to USE, not to author on the organization's budget), never more than the
- * chosen role, then the floor. Named for what it is: `operator` when the chosen role covers it,
- * the chosen role itself when it already sits inside `operator`, the chosen role restricted to
- * `operator` (`within`) otherwise.
- */
+/** A guest's share of `chosen`: within `operator` (a guest USES, never authors), then the floor. */
 function guestPersonalRole(chosen: SpaceRoleRef): SpaceRoleRef {
   const operator = presetPermissions("operator");
   const granted = spacePermissions(chosen);
@@ -103,36 +74,11 @@ function guestPersonalRole(chosen: SpaceRoleRef): SpaceRoleRef {
   return withPersonalSpaceFloor({ ...chosen, within });
 }
 
-/**
- * Whether `ref` may stand as the personal-space override of a member holding `orgRole`: never an
- * owner or admin, who always hold `admin` there and never read it; a guest only a role inside
- * `operator`; a member any role. The ONE predicate the write and the org-role change share.
- */
-export function overrideAdmissible(orgRole: OrgRole, ref: SpaceRoleRef): boolean {
-  if (orgRole === "owner" || orgRole === "admin") return false;
-  if (orgRole === "member") return true;
-  const operator = presetPermissions("operator");
-  for (const permission of spacePermissions(ref)) {
-    if (!operator.has(permission)) return false;
-  }
-  return true;
-}
-
-/**
- * The org's default role in personal spaces, read from the SAME statement as the space (RBAC
- * spec §4.4): joined on `organizations`, never cached. Two shapes, like a membership: a preset
- * in `org_settings.personal_space_role`, a custom role in `organizations.personal_space_role_id`
- * (FK, and a CHECK refuses both at once). The custom role is the left join of `psr`, an alias of
- * `space_roles` also scoped to `organizations.id`, so it never binds to a `space_roles` the outer
- * query joins for the membership, nor to a role of another org. Readers select
- * {@link PERSONAL_SPACE_DEFAULT_COLUMNS} and join {@link personalSpaceDefaultOn}; the raw columns
- * travel, and only the owner branch of {@link resolveSpaceRole} decodes them.
- */
+/** The org's custom personal-space default, aliased apart from an outer `space_roles` join. */
 export const psr = alias(spaceRoles, "psr");
 
 export const PERSONAL_SPACE_DEFAULT_COLUMNS = {
-  storedPersonalSpaceRole: sql<string | null>`${organizations.orgSettings}->>'personal_space_role'`,
-  storedPersonalSpaceRoleId: organizations.personalSpaceRoleId,
+  storedPersonalSpaceRole: sql<SpaceRolePreset | null>`${organizations.orgSettings}->>'personal_space_role'`,
   personalDefaultRoleId: psr.id,
   personalDefaultKey: psr.key,
   personalDefaultName: psr.name,
@@ -140,18 +86,10 @@ export const PERSONAL_SPACE_DEFAULT_COLUMNS = {
   personalDefaultShowsStudio: psr.showsStudio,
 } as const;
 
-export const personalSpaceDefaultOn = and(
-  eq(psr.id, organizations.personalSpaceRoleId),
-  eq(psr.orgId, organizations.id),
-);
+export const personalSpaceDefaultOn = eq(psr.id, organizations.personalSpaceRoleId);
 
-/** The raw columns of the org default, as {@link PERSONAL_SPACE_DEFAULT_COLUMNS} selects them. */
 export interface PersonalSpaceDefaultColumns {
-  /** The jsonb key: a preset when it is set. */
-  storedPersonalSpaceRole: string | null;
-  /** `organizations.personal_space_role_id`: the custom default, when set. */
-  storedPersonalSpaceRoleId: string | null;
-  /** The `psr` join: set only when the column names a role of THIS org. */
+  storedPersonalSpaceRole: SpaceRolePreset | null;
   personalDefaultRoleId: string | null;
   personalDefaultKey: string | null;
   personalDefaultName: string | null;
@@ -159,59 +97,29 @@ export interface PersonalSpaceDefaultColumns {
   personalDefaultShowsStudio: boolean | null;
 }
 
-/**
- * The org default for a member's own personal space, before the floor: the custom role of the
- * column, else the preset of the jsonb key, else `admin`. The FK and the CHECK exclude a deleted
- * role and both shapes at once; `null` (no role, logged) is left for the two cases the schema
- * cannot exclude — a jsonb value that is not a preset, and a column naming a role of another
- * organization, both writable only outside the platform. Never a narrow preset in their place:
- * every preset opens the Studio, which the setting may exist to withhold.
- */
-export function personalSpaceDefaultRef(row: PersonalSpaceDefaultColumns): SpaceRoleRef | null {
-  if (row.storedPersonalSpaceRoleId !== null) {
-    if (row.personalDefaultRoleId !== null) {
-      return toRef({
-        presetRole: null,
-        customRoleId: row.personalDefaultRoleId,
-        customKey: row.personalDefaultKey,
-        customName: row.personalDefaultName,
-        customPermissions: row.personalDefaultPermissions,
-        customShowsStudio: row.personalDefaultShowsStudio,
-      });
-    }
-    logger.error(
-      "organizations.personal_space_role_id names a role of another organization; personal spaces without an override grant nothing",
-      { personalSpaceRoleId: row.storedPersonalSpaceRoleId },
-    );
-    return null;
+/** The org default, before the floor: the custom role, else the preset, else `admin`. */
+export function personalSpaceDefaultRef(row: PersonalSpaceDefaultColumns): SpaceRoleRef {
+  if (row.personalDefaultRoleId !== null) {
+    return toRef({
+      presetRole: null,
+      customRoleId: row.personalDefaultRoleId,
+      customKey: row.personalDefaultKey,
+      customName: row.personalDefaultName,
+      customPermissions: row.personalDefaultPermissions,
+      customShowsStudio: row.personalDefaultShowsStudio,
+    });
   }
   const stored = row.storedPersonalSpaceRole;
-  if (stored === null) return ADMIN_ROLE_REF;
-  if (isSpaceRolePreset(stored)) return { kind: "preset", preset: stored };
-  logger.error(
-    "org setting personal_space_role is not a preset; personal spaces without an override grant nothing",
-    { personalSpaceRole: stored },
-  );
-  return null;
+  return stored === null ? ADMIN_ROLE_REF : { kind: "preset", preset: stored };
 }
 
-/**
- * What an owner holds in their own personal space once the role is chosen, floor and guest cap
- * included. `chosen` is their override or the org default; `null` is no role.
- */
-function personalSpaceRoleOf(orgRole: "member" | "guest", chosen: SpaceRoleRef | null) {
-  if (!chosen) return null;
+/** What an owner holds in their own personal space once the role is chosen (override or default). */
+function personalSpaceRoleOf(orgRole: "member" | "guest", chosen: SpaceRoleRef): SpaceRoleRef {
   return orgRole === "guest" ? guestPersonalRole(chosen) : withPersonalSpaceFloor(chosen);
 }
 
-/**
- * What a member or guest holds in their own personal space by the org default alone (RBAC spec
- * §3.6), as a member without an override does. Owners and admins hold `admin`.
- */
-export function defaultPersonalSpaceRole(
-  orgRole: OrgRole,
-  orgDefault: SpaceRoleRef | null,
-): SpaceRoleRef | null {
+/** What a member holds in their own personal space by the org default alone (RBAC spec §3.6). */
+export function defaultPersonalSpaceRole(orgRole: OrgRole, orgDefault: SpaceRoleRef): SpaceRoleRef {
   if (orgRole === "owner" || orgRole === "admin") return ADMIN_ROLE_REF;
   return personalSpaceRoleOf(orgRole, orgDefault);
 }
@@ -231,17 +139,14 @@ export interface SpaceMemberRow {
  *
  * `space` and `memberRow` MUST come from ONE statement, `orgRole` from the
  * request's admission (RBAC spec §4.4): read apart, they can pair states that
- * never coexisted and grant what neither did. `personalSpaceDefault` is the
- * org's `personal_space_role` columns, read in that same
- * statement; only the owner branch decodes it, and a personal space resolved without it is a
- * programming error (throws): a caller that never reads a personal space passes nothing.
+ * never coexisted and grant what neither did. Same for `personalDefault` (`null`: a team space).
  */
 export function resolveSpaceRole(
   orgRole: OrgRole,
   space: SpaceAccessRow,
   memberRow: SpaceMemberRow | null,
   callerId: string | null,
-  personalDefault?: PersonalSpaceDefaultColumns,
+  personalDefault: PersonalSpaceDefaultColumns | null,
 ): SpaceRoleRef | null {
   // FIRST LINE, before the org role: a personal space belongs to one member and
   // to nobody else (RBAC spec §3.6). An organization owner or admin gets
@@ -249,13 +154,7 @@ export function resolveSpaceRole(
   // space (`POST /api/spaces/{id}/convert-to-team`) is the one way in, and it is
   // audited.
   //
-  // The owner: an org owner or admin always holds `admin`. Anyone else holds the role they
-  // chose: their own explicit row on the space (the per-member override, written only by
-  // `PUT /api/orgs/{orgId}/members/{userId}/personal-space-role`), else the org default. A
-  // member holds it with the delete floor, short of `admin`, so the owner can still stop and
-  // remove what they own. A GUEST (invited to USE one thing, not to author on the organization's
-  // LLM budget) holds the chosen role capped to `operator` ({@link guestPersonalRole}), floor
-  // included, whichever of the two chose it.
+  // The owner: `admin` for an org owner or admin, else their override or the org default.
   if (space.ownerUserId !== null) {
     if (space.ownerUserId !== callerId) return null;
     if (orgRole === "owner" || orgRole === "admin") return ADMIN_ROLE_REF;
@@ -293,10 +192,7 @@ export function resolveSpaceRole(
  */
 export function spacePermissions(ref: SpaceRoleRef | null): Set<Permission> {
   if (!ref) return new Set<Permission>();
-  // `within` and `plus` are applied AFTER the custom bundle is partitioned, in that order:
-  // (base ∩ within) ∪ plus. They are the platform's own, never strings a stored bundle carries.
-  // A custom role resolves `studio:read` from its own column, never from the stored array
-  // (`RESOLVED_SPACE_PERMISSIONS`); every preset holds it.
+  // (base ∩ within) ∪ plus. A custom role's `studio:read` comes from its column, never its array.
   let granted: Set<Permission>;
   if (ref.kind === "preset") {
     granted = presetPermissions(ref.preset);
@@ -312,13 +208,7 @@ export function spacePermissions(ref: SpaceRoleRef | null): Set<Permission> {
   return granted;
 }
 
-/**
- * One custom role of the org, held `FOR KEY SHARE` until the caller's transaction commits:
- * `deleteSpaceRole` locks the same row `FOR UPDATE` before counting its holders, so a delete and
- * the write naming the role serialize, and the delete answers the 409 naming them instead of an
- * FK violation (the org default and an override have one, a pending invitation or a deferred
- * grant has none). 404 when the id is no role of the org (`param` names the offending body field).
- */
+/** One org custom role, share-locked until commit against `deleteSpaceRole`; 404 when none. */
 export async function lockOrgSpaceRole(
   tx: DbOrTx,
   orgId: string,

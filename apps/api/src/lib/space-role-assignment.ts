@@ -54,10 +54,7 @@ export const spaceAssignmentSchema = exactlyOneRole(
   }),
 );
 
-/**
- * The two nullable role columns of a `space_members` row — exactly one is set. Audit payloads
- * name a role this way, in camelCase explicit keys (CASING_CONVENTIONS 4m), never as the body.
- */
+/** A `space_members` row's role columns, one set; how audits name a role (CASING_CONVENTIONS 4m). */
 export type SpaceRoleColumns = {
   presetRole: SpaceRolePreset | null;
   customRoleId: string | null;

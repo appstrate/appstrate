@@ -26,7 +26,7 @@ import { useAdmittingSpaces } from "./use-overview-mode";
 export function useSpaceFilter(list: SpaceList, spanning: boolean) {
   const { t } = useTranslation("common");
   const [params, setParams] = useSearchParams();
-  const admitting = useAdmittingSpaces(list, "studio");
+  const admitting = useAdmittingSpaces(list);
   const state = resolveSpaceFilter(
     spanning ? params.get(SPACE_PARAM) : null,
     spanning ? admitting : [],

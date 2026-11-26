@@ -54,7 +54,6 @@ import {
 import { rolesPageDeeds } from "./rbac-deeds";
 import { errorMessage } from "../../lib/mutation-error";
 import { roleInUseMessage } from "../../lib/role-in-use";
-import { STUDIO_PERMISSION } from "../../lib/route-access";
 import type { ViewAsPreset } from "../../lib/view-as-preset";
 
 const ROLE_TABS = ["org", "space"] as const;
@@ -262,23 +261,10 @@ export function OrgSettingsRolesPage() {
   );
 }
 
-/**
- * A role you may not edit, read in place: what it is for, and what it grants. The Studio is read
- * from `shows_studio`, as for a custom role, never from a preset's `studio:read` entry: one line
- * for both kinds.
- */
+/** A role you may not edit, read in place: what it is for, and what it grants. */
 function RoleViewModal({ role, onClose }: { role: RoleObject; onClose: () => void }) {
   const { t } = useTranslation(["settings", "common"]);
   const description = spaceRoleDescription(role, t);
-  const permissions = role.permissions.filter((permission) => permission !== STUDIO_PERMISSION);
-  const groups = groupPermissionsByResource([...permissions].sort()).map(
-    ([resource, group]): [string, string[]] => [
-      permissionResourceLabel(resource, t),
-      group.map((permission) => permissionLabel(permission, t)),
-    ],
-  );
-  if (role.shows_studio)
-    groups.push([permissionResourceLabel("studio", t), [t("roles.showsStudio")]]);
 
   return (
     <Modal
@@ -290,53 +276,38 @@ function RoleViewModal({ role, onClose }: { role: RoleObject; onClose: () => voi
         {description && <p className="text-muted-foreground text-sm">{description}</p>}
         <div>
           <div className="mb-2 text-sm font-medium">
-            {t("roles.permissionCount", { count: permissions.length })}
+            {t("roles.permissionCount", { count: role.permissions.length })}
           </div>
           <dl className="divide-border divide-y rounded-lg border">
-            {groups.map(([resource, labels]) => (
-              <div
-                key={resource}
-                className="grid gap-1 px-3 py-2 sm:grid-cols-[10rem_minmax(0,1fr)] sm:gap-4"
-              >
-                <dt className="text-sm font-medium">{resource}</dt>
-                <dd>
-                  <ul className="text-muted-foreground flex flex-col gap-0.5 text-sm">
-                    {labels.map((label) => (
-                      <li key={label}>{label}</li>
-                    ))}
-                  </ul>
-                </dd>
+            {groupPermissionsByResource([...role.permissions].sort()).map(
+              ([resource, permissions]) => (
+                <div
+                  key={resource}
+                  className="grid gap-1 px-3 py-2 sm:grid-cols-[10rem_minmax(0,1fr)] sm:gap-4"
+                >
+                  <dt className="text-sm font-medium">{permissionResourceLabel(resource, t)}</dt>
+                  <dd>
+                    <ul className="text-muted-foreground flex flex-col gap-0.5 text-sm">
+                      {permissions.map((permission) => (
+                        <li key={permission} title={permission}>
+                          {permissionLabel(permission, t)}
+                        </li>
+                      ))}
+                    </ul>
+                  </dd>
+                </div>
+              ),
+            )}
+            {role.shows_studio && (
+              <div className="grid gap-1 px-3 py-2 sm:grid-cols-[10rem_minmax(0,1fr)] sm:gap-4">
+                <dt className="text-sm font-medium">{permissionResourceLabel("studio", t)}</dt>
+                <dd className="text-muted-foreground text-sm">{t("roles.showsStudio")}</dd>
               </div>
-            ))}
+            )}
           </dl>
         </div>
       </div>
     </Modal>
-  );
-}
-
-/**
- * Whether the role's holders see the Studio: `shows_studio`, its own setting beside the
- * permissions (the API refuses `studio:read` in them). Display only, which the label says.
- */
-export function ShowsStudioField({
-  checked,
-  onChange,
-  disabled,
-}: {
-  checked: boolean;
-  onChange: (checked: boolean) => void;
-  disabled?: boolean;
-}) {
-  const { t } = useTranslation(["settings", "common"]);
-  return (
-    <CheckboxField
-      id="role-shows-studio"
-      checked={checked}
-      onCheckedChange={(next) => onChange(next === true)}
-      disabled={disabled}
-      label={t("roles.showsStudio")}
-    />
   );
 }
 
@@ -529,13 +500,16 @@ function RoleFormModal({ role, onClose }: { role: RoleObject | null; onClose: ()
         )}
         <UnavailablePermissions permissions={unavailable} />
       </div>
-      <ShowsStudioField
+      <CheckboxField
+        id="role-shows-studio"
         checked={showsStudio}
-        onChange={(next) => {
-          setShowsStudio(next);
+        onCheckedChange={(next) => {
+          setShowsStudio(next === true);
           setFormError(null);
         }}
         disabled={isPending}
+        label={t("roles.showsStudio")}
+        description={t("roles.showsStudioHint")}
       />
     </FormModal>
   );

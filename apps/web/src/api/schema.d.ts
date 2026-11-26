@@ -3396,7 +3396,7 @@ export interface paths {
         get?: never;
         /**
          * Change member role
-         * @description Change a member's role. Owners can manage every other member, owners included, and are the only ones who may assign `owner` or change an owner's role; admins can manage guests and members and assign `guest`, `member` or `admin`. Nobody changes their own role. The caller is judged on their current role in the organization. Granting `owner` or changing an owner's role requires a dashboard session — any token (API key, OAuth/MCP client, CLI) is refused with 403 even when its user is an owner. The member's own role in their personal space (`setMemberPersonalSpaceRole`) is kept only when it is still admissible for the new role, and dropped otherwise (audited as `personalSpaceRoleCleared`).
+         * @description Change a member's role. Owners can manage every other member, owners included, and are the only ones who may assign `owner` or change an owner's role; admins can manage guests and members and assign `guest`, `member` or `admin`. Nobody changes their own role. The caller is judged on their current role in the organization. Granting `owner` or changing an owner's role requires a dashboard session — any token (API key, OAuth/MCP client, CLI) is refused with 403 even when its user is an owner. The member's own role in their personal space (`setMemberPersonalSpaceRole`) is dropped by a promotion to owner or admin (audited as `personalSpaceRoleCleared`) and kept otherwise.
          */
         put: operations["changeMemberRole"];
         post?: never;
@@ -3440,7 +3440,7 @@ export interface paths {
         get?: never;
         /**
          * Set a member's role in their personal space
-         * @description Give one member or guest their own role in their personal space, overriding the organization's `personal_space_role` default Body: exactly one of `preset_role` / `custom_role_id`; a `custom_role_id` must name a role of this organization (404 otherwise). A member holds the chosen role plus, short of `admin`, `agents:delete`, `skills:delete`, `integrations:delete` and `schedules:delete` there. A guest holds it capped to `operator` (the permissions the chosen role shares with `operator`, plus the deletes), so a role granting more than `operator` is refused for a guest: `409 guest_role_too_broad`. The personal space is provisioned if the member has none yet. Owners and admins always hold `admin` in their own personal space: targeting one is `409 redundant_space_role`. A change of the member's org role keeps the override only when it is still admissible for the new role, by the same rule as this write: any override survives a move to member, one within `operator` (`viewer`, `runner`, `operator`, or such a custom role) survives a demotion to guest, a broader one (`builder`, `admin`) is dropped, and so is any override on a promotion to owner or admin. A dropped override is recorded in the `org.member_role_updated` audit entry (`personalSpaceRoleCleared`). Leaving or being removed drops it too; nothing restores a dropped override. A custom role named by an override cannot be deleted (`409 role_in_use`). Same guard as `changeMemberRole` (`members:change-role`).
+         * @description Give one member or guest their own role in their personal space, overriding the organization's `personal_space_role` default Body: exactly one of `preset_role` / `custom_role_id`; a `custom_role_id` must name a role of this organization (404 otherwise). A member holds the chosen role plus, short of `admin`, `agents:delete`, `skills:delete`, `integrations:delete` and `schedules:delete` there. A guest holds it capped to `operator` (the permissions the chosen role shares with `operator`, plus the deletes), whatever role is set. The personal space is provisioned if the member has none yet. Owners and admins always hold `admin` in their own personal space: targeting one is `409 redundant_space_role`. A change of the member's org role keeps the override, a guest's capped as above, except a promotion to owner or admin, which drops it. A dropped override is recorded in the `org.member_role_updated` audit entry (`personalSpaceRoleCleared`). Leaving or being removed drops it too; nothing restores a dropped override. A custom role named by an override cannot be deleted (`409 role_in_use`). Same guard as `changeMemberRole` (`members:change-role`).
          */
         put: operations["setMemberPersonalSpaceRole"];
         post?: never;
@@ -5187,7 +5187,7 @@ export interface paths {
         };
         /**
          * List space members
-         * @description Everyone who actually reaches the space, not just everyone who was added: explicit rows, org owners/admins (`source: "org_role"`) and — in an `open` space — every org member, as in a personal space its owner without an override (`source: "open_space"`).
+         * @description Everyone who actually reaches the space, not just everyone who was added: explicit rows, org owners/admins (`source: "org_role"`) and — in an `open` space — every org member (`source: "open_space"`).
          */
         get: operations["listSpaceMembers"];
         put?: never;
@@ -6973,7 +6973,7 @@ export interface components {
             } | {
                 custom_role_id: string;
             };
-            /** @description The role this member would hold in their own personal space by the organization's `personal_space_role` default alone, without any override of their own and with the guest cap applied: `admin` for an owner or admin, `operator` for a guest under a default broader than `operator`. `null` when the default names no role of the organization, and for every member when the caller lacks `members:change-role`: only a caller who may change the member's role reads it, alongside `personal_space_role`. The platform's delete permissions held on top of the role are not part of it. */
+            /** @description The role this member would hold in their own personal space by the organization's `personal_space_role` default alone, without any override of their own and with the guest cap applied: `admin` for an owner or admin, `operator` for a guest under a default broader than `operator`. `null` for every member when the caller lacks `members:change-role`: only a caller who may change the member's role reads it, alongside `personal_space_role`. The platform's delete permissions held on top of the role are not part of it. */
             personal_space_default_role: {
                 /** @enum {string} */
                 kind: "preset" | "custom";
@@ -6985,7 +6985,7 @@ export interface components {
             id: string;
             name: string;
             /**
-             * @description How the member reaches the space: an explicit row, their org role (owner/admin), or a default (`open_space`): an open space's default role, or the organization's `personal_space_role` in their own personal space.
+             * @description How the member reaches the space: an explicit row, their org role (owner/admin), or the open space's default.
              * @enum {string}
              */
             source: "explicit" | "org_role" | "open_space";
@@ -7474,7 +7474,7 @@ export interface components {
             key: string;
             name: string;
             description: string | null;
-            /** @description Space-level permission strings the role grants on this deployment, sorted. A custom bundle is projected through the same vocabulary enforcement uses, so this array is always one a `PATCH` accepts back. A preset lists `studio:read`; a custom bundle never does, and resolves it from `shows_studio` instead. */
+            /** @description Space-level permission strings the role grants on this deployment, sorted. A custom bundle is projected through the same vocabulary enforcement uses, so this array is always one a `PATCH` accepts back: never `studio:read`, which `shows_studio` carries. */
             permissions: string[];
             /** @description Whether holders of the role see the Studio (they resolve `studio:read`). A display setting, not a boundary: the REST API and an MCP client answer the role's other permissions either way. Always `true` for a preset. */
             shows_studio: boolean;
@@ -7880,7 +7880,7 @@ export interface components {
             /** @enum {string} */
             org_role: "owner" | "admin" | "member" | "guest";
             /**
-             * @description How the principal reaches the space: an explicit row, their org role (owner/admin), or a default (`open_space`): an open space's default role, or the organization's `personal_space_role` in their own personal space.
+             * @description How the principal reaches the space: an explicit row, their org role (owner/admin), or the open space's default.
              * @enum {string}
              */
             source: "explicit" | "org_role" | "open_space";
@@ -22175,7 +22175,7 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
-            /** @description The target is an owner or admin, who always hold `admin` in their personal space (`redundant_space_role`), or a guest and the role grants more than `operator` (`guest_role_too_broad`) */
+            /** @description The target is an owner or admin, who always hold `admin` in their personal space (`redundant_space_role`) */
             409: {
                 headers: {
                     [name: string]: unknown;

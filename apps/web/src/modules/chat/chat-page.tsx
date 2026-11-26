@@ -155,8 +155,7 @@ export function ChatModulePage() {
     window.addEventListener("popstate", onHistoryNavigation);
     return () => window.removeEventListener("popstate", onHistoryNavigation);
   }, []);
-  // A run a conversation launched opens in its space, entering it when it is not this one, and
-  // only where the route gate would open it (a role without the Studio gets no link into it).
+  // A run a conversation launched opens in its space, entering it when it is not this one.
   const linkInSpace = useReachableSpaceLink();
   // The very same uploader every SchemaForm file field uses — including its
   // refresh of the org storage gauge — into the space the chat names for each file.

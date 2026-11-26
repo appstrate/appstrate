@@ -14,8 +14,9 @@
 import { describe, it, expect, beforeEach } from "bun:test";
 import { and, eq, sql } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
-import { spaces } from "@appstrate/db/schema";
+import { organizations, spaces } from "@appstrate/db/schema";
 import { truncateAll } from "../../helpers/db.ts";
+import { seedSpaceRole } from "../../helpers/seed.ts";
 import { createTestContext, createTestUser, type TestContext } from "../../helpers/auth.ts";
 import { prefixedId } from "@appstrate/db/ids";
 import { ensurePersonalSpace } from "@appstrate/db/provision-org";
@@ -133,5 +134,26 @@ describe("spaces — personal-space constraints", () => {
       db.execute(sql`DELETE FROM "user" WHERE id = ${ctx.user.id}`),
       /spaces_owner_user_id_user_id_fk|foreign key/i,
     );
+  });
+});
+
+describe("organizations — personal-space default constraints (migration 0114)", () => {
+  it("refuses a custom default of another organization and a stored key that is no preset", async () => {
+    await truncateAll();
+    const ctx = await createTestContext({ orgSlug: "default-owner" });
+    const other = await createTestContext({ orgSlug: "default-other" });
+    const foreign = await seedSpaceRole({ orgId: other.orgId, permissions: ["agents:read"] });
+    const write = (set: Partial<typeof organizations.$inferInsert>) =>
+      db.update(organizations).set(set).where(eq(organizations.id, ctx.orgId));
+    await expectDbViolation(
+      write({ personalSpaceRoleId: foreign.id }),
+      /organizations_personal_space_role_fk/,
+    );
+    for (const value of ["superuser", null, 5]) {
+      await expectDbViolation(
+        write({ orgSettings: { personal_space_role: value } }),
+        /organizations_personal_space_role_preset/,
+      );
+    }
   });
 });

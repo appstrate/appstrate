@@ -115,8 +115,8 @@ function PackageDetailBody({ type }: { type: "agent" | "skill" }) {
   // espaces » a tab listing rows across spaces opens where some space admits its list (runs,
   // agents) or grants its read (memory); the agent's own content where a readable placement grants full access.
   const { on: overview } = useOverviewMode();
-  const runSpaces = useAdmittingSpaces("runs", "studio");
-  const agentSpaces = useAdmittingSpaces("agents", "studio");
+  const runSpaces = useAdmittingSpaces("runs");
+  const agentSpaces = useAdmittingSpaces("agents");
   const memoryReach = useSpacesFor({ permission: "persistence:read" });
   const agentReach = useSpacesFor({ permission: "agents:read" }, detail?.read_space_ids);
   const tabReads = {

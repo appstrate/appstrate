@@ -1042,7 +1042,7 @@ export const schemas = {
         type: ["object", "null"],
         required: ["kind", "key", "name"],
         description:
-          "The role this member would hold in their own personal space by the organization's `personal_space_role` default alone, without any override of their own and with the guest cap applied: `admin` for an owner or admin, `operator` for a guest under a default broader than `operator`. `null` when the default names no role of the organization, and for every member when the caller lacks `members:change-role`: only a caller who may change the member's role reads it, alongside `personal_space_role`. The platform's delete permissions held on top of the role are not part of it.",
+          "The role this member would hold in their own personal space by the organization's `personal_space_role` default alone, without any override of their own and with the guest cap applied: `admin` for an owner or admin, `operator` for a guest under a default broader than `operator`. `null` for every member when the caller lacks `members:change-role`: only a caller who may change the member's role reads it, alongside `personal_space_role`. The platform's delete permissions held on top of the role are not part of it.",
         properties: {
           kind: { type: "string", enum: ["preset", "custom"] },
           key: { type: "string" },
@@ -1061,7 +1061,7 @@ export const schemas = {
         type: "string",
         enum: ["explicit", "org_role", "open_space"],
         description:
-          "How the member reaches the space: an explicit row, their org role (owner/admin), or a default (`open_space`): an open space's default role, or the organization's `personal_space_role` in their own personal space.",
+          "How the member reaches the space: an explicit row, their org role (owner/admin), or the open space's default.",
       },
       role: {
         type: ["object", "null"],
@@ -3077,7 +3077,7 @@ export const schemas = {
         type: "string",
         enum: ["explicit", "org_role", "open_space"],
         description:
-          "How the principal reaches the space: an explicit row, their org role (owner/admin), or a default (`open_space`): an open space's default role, or the organization's `personal_space_role` in their own personal space.",
+          "How the principal reaches the space: an explicit row, their org role (owner/admin), or the open space's default.",
       },
       role: {
         type: ["object", "null"],
@@ -3140,8 +3140,8 @@ export const schemas = {
         description:
           "Space-level permission strings the role grants on this deployment, sorted. " +
           "A custom bundle is projected through the same vocabulary enforcement uses, so " +
-          "this array is always one a `PATCH` accepts back. A preset lists `studio:read`; a " +
-          "custom bundle never does, and resolves it from `shows_studio` instead.",
+          "this array is always one a `PATCH` accepts back: never `studio:read`, which " +
+          "`shows_studio` carries.",
       },
       shows_studio: {
         type: "boolean",

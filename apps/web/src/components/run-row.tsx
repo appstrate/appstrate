@@ -5,7 +5,8 @@ import type { AgentListItem, EnrichedRun } from "@appstrate/shared-types";
 import { cn } from "@appstrate/ui/cn";
 import { RunStatusBadge } from "./status-badge";
 import { RunIdentity } from "./run-identity";
-import { useRunPageHref } from "../hooks/use-can-reach";
+import { runDetailPath } from "../lib/package-paths";
+import { useReachableSpaceLink } from "../hooks/use-can-reach";
 import { SpaceNameOf } from "./space-name";
 
 /**
@@ -14,8 +15,7 @@ import { SpaceNameOf } from "./space-name";
  * table's « Run » column), then the run's space in a list spanning spaces (the runs table's
  * « Espace » cell), then its status.
  * The row is the run's link when the run still has an agent to live under and its page opens
- * for the reader (`useRunPageHref`: in its own space, one withholding the Studio lists the run
- * unlinked; in « Tous les espaces », where some space admits it).
+ * for the reader.
  */
 export function RunRow({
   run,
@@ -35,7 +35,8 @@ export function RunRow({
   spanning?: boolean;
   className?: string;
 }) {
-  const href = useRunPageHref(run);
+  const linkInSpace = useReachableSpaceLink();
+  const href = run.packageId && linkInSpace(runDetailPath(run.packageId, run.id), run.spaceId);
   const content = (
     <>
       <RunIdentity run={run} agent={{ name: agentName, identity: agent }} />

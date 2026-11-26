@@ -16,8 +16,8 @@ import { toggleBody, type OrgToggleField } from "../../lib/org-setting-toggle-bo
 
 /**
  * An organization boolean setting as a self-saving switch row (`org:settings`). A skeleton stands
- * in until the settings load, so a click can never send a value read off a default; a refusal is said once, by the global
- * mutation toast.
+ * in until the settings load, so a click can never send a value read off a default; a refusal is
+ * said once, by the global mutation toast.
  */
 export function OrgSettingToggle({
   id,

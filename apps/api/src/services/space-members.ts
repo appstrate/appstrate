@@ -172,13 +172,7 @@ async function listMembersOfSpaces(
       name: row.displayName ?? row.name ?? null,
       email: row.email ?? null,
       org_role: row.orgRole,
-      // Implicit and not by org role: an open space's default, or the org's default in the
-      // owner's own personal space (a guest's included).
-      source: member
-        ? "explicit"
-        : row.orgRole === "owner" || row.orgRole === "admin"
-          ? "org_role"
-          : "open_space",
+      source: member ? "explicit" : row.orgRole === "member" ? "open_space" : "org_role",
       role: toSpaceRoleWire(effective),
       createdAt: row.createdAt?.toISOString() ?? null,
     });
@@ -264,12 +258,11 @@ export async function saveSpaceMember(params: {
 }
 
 /**
- * A personal space has exactly one member — its owner (RBAC spec §3.6, decision
- * 10). "Personal" has to mean one thing: collaboration goes through a team space,
- * distribution through sharing. Converting the space
- * (`POST /api/spaces/{id}/convert-to-team`) is what makes it grantable. The one row it
- * may hold, the owner's override of the org default, has its own door on the org
- * members API; these generic doors refuse it both ways.
+ * A personal space has exactly one member — its owner — and no row for them here
+ * (RBAC spec §3.6, decision 10). "Personal" has to mean one thing: collaboration
+ * goes through a team space, distribution through sharing. Converting the space
+ * (`POST /api/spaces/{id}/convert-to-team`) is what makes it grantable. The owner's
+ * override of the org default has its own door on the org members API.
  */
 async function assertSpaceTakesMembers(tx: DbOrTx, spaceId: string): Promise<void> {
   const [space] = await tx
@@ -352,15 +345,12 @@ export async function removeSpaceMember(params: {
 }): Promise<SpaceMemberRemoval> {
   const { orgId, space, userId } = params;
   return db.transaction(async (tx) => {
-    // The owner's row on their personal space is the per-member override of the org
-    // default: only `/api/orgs/{orgId}/members/{userId}/personal-space-role` drops it.
+    // Its owner's override: only `/api/orgs/{orgId}/members/{userId}/personal-space-role`.
     if (space.ownerUserId !== null) throw personalSpaceHasNoMembers();
     const target = await lockOrgMember(tx, orgId, userId);
     await lockSpaceRow(tx, space.id);
-    // The standing is the TARGET's, so the caller id is theirs. No member row: the
-    // removal is about to delete the only one there could be. A team space (a
-    // personal one threw above), so there is no personal-space default to pass.
-    const accessAfter = target ? resolveSpaceRole(target.role, space, null, userId) : null;
+    // The standing is the TARGET's, in a team space, without the row about to be deleted.
+    const accessAfter = target ? resolveSpaceRole(target.role, space, null, userId, null) : null;
     assertCanGrantSpaceRole(params.actorPermissions, accessAfter);
     const existing = await loadSpaceMember(space.id, userId, tx);
     if (!existing) return removal(false, accessAfter, nothingUnshared());
@@ -410,10 +400,8 @@ export async function deleteSpaceMembershipsInOrg(
   orgId: string,
   userId: string,
 ): Promise<RevokedSpaceAssignment[]> {
-  // Every space of the org, personal ones included: the only row a personal space
-  // holds is its owner's override of the org default
-  // (`setPersonalSpaceRoleOverride`), which an owner or admin never reads and an
-  // exit must not leave to revive on a re-invite.
+  // Every space of the org, personal ones included: an exit must not leave the
+  // personal-space override to revive on a re-invite.
   const orgSpaces = await tx.select({ id: spaces.id }).from(spaces).where(eq(spaces.orgId, orgId));
   if (orgSpaces.length === 0) return [];
   return tx
@@ -685,8 +673,7 @@ async function sharesOfOwnersWithoutAccess(
       (row) =>
         row.orgRole === null ||
         row.userId === departedUserId ||
-        // The owner may be judged in their own personal space, where a default naming no role
-        // of the org resolves to no role: the true default is read, in the same statement.
+        // The owner may be judged in their own personal space: its default, same statement.
         resolveSpaceRole(row.orgRole, row.space, memberFromJoin(row), row.userId, row) === null,
     )
     .map((row) => ({ connectionId: row.id, spaceId: row.space.id }));
@@ -712,8 +699,7 @@ async function assignmentColumns(
     assertCanGrantSpaceRole(actorPermissions, { kind: "preset", preset: assignment.preset_role });
     return { presetRole: assignment.preset_role, customRoleId: null };
   }
-  // Held to the caller's commit: a concurrent `deleteSpaceRole` either counts this row (409)
-  // or wins first and this read finds nothing (404), never an FK violation on the write.
+  // Share-locked: a concurrent `deleteSpaceRole` answers 409 or this 404, never an FK violation.
   const role = await lockOrgSpaceRole(tx, orgId, assignment.custom_role_id);
   assertCanGrantSpaceRole(actorPermissions, { kind: "custom", role });
   return { presetRole: null, customRoleId: role.id };

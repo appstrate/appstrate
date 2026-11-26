@@ -13,7 +13,7 @@
 
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "bun:test";
 import { eq } from "drizzle-orm";
-import { organizations, runs, schedules } from "@appstrate/db/schema";
+import { runs, schedules } from "@appstrate/db/schema";
 import { getTestApp } from "../../helpers/app.ts";
 import { db, truncateAll } from "../../helpers/db.ts";
 import { expectProblem } from "../../helpers/assertions.ts";
@@ -39,7 +39,7 @@ import {
   seedDefaultOrgModel,
   waitForRunPipelineSettled,
 } from "../../helpers/run-connection-fixtures.ts";
-import { DELETES, listSpaces, personalOf } from "../../helpers/personal-space.ts";
+import { DELETES, personalOf } from "../../helpers/personal-space.ts";
 import { _setOrchestratorForTesting } from "../../../src/services/orchestrator/index.ts";
 
 import { triggerScheduledRun } from "../../../src/services/scheduler.ts";
@@ -481,24 +481,6 @@ describe("personal_space_role: operator", () => {
         expect(guestOwn.permissions).not.toContain("agents:write");
         for (const permission of DELETES) expect(guestOwn.permissions).toContain(permission);
       });
-    });
-
-    it("fails closed to no role when the default names another org's role, never a preset opening the Studio", async () => {
-      // The FK keeps the named role in existence; what it cannot exclude is a role of ANOTHER
-      // organization, written outside the platform (the API refuses it through lockOrgSpaceRole).
-      const other = await createTestContext({ orgSlug: "otherorg" });
-      const foreign = await seedSpaceRole({ orgId: other.orgId, permissions: ["agents:read"] });
-      await db
-        .update(organizations)
-        .set({ personalSpaceRoleId: foreign.id })
-        .where(eq(organizations.id, owner.orgId));
-
-      // A member and a guest hold nothing in their own space, so it is not listed to them…
-      for (const ctx of [member, guest]) {
-        expect((await listSpaces(ctx)).filter((s) => s.personal)).toEqual([]);
-      }
-      // …while an org admin keeps admin there.
-      expect((await personalOf(admin)).role).toMatchObject({ key: "admin" });
     });
   });
 });
