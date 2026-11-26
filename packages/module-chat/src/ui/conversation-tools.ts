@@ -1,19 +1,18 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * A conversation's tool calls, for the context panel: what the assistant did, in order, and the
- * integrations it used. Pure, like `conversationStats`.
+ * A conversation's tool calls, for the context panel: what the assistant did, in order. Pure, like `conversationStats`.
  *
  * It reads the conversation's messages as the open chat holds them (`live-conversation.ts`): its
  * history and the turn in flight. A call without an outcome is running while its turn runs;
  * in a turn that ended it was cut short. What a call's outcome says beyond its output is read off
  * the stamp the engine put on it (`callOutcome`, `pi-chat/ui-stream-mapper.ts`), on a success and
- * on a failure alike: its presentation, whether its integration answered, how long it ran.
+ * on a failure alike: its presentation, how long it ran.
  */
 
 import { getToolName, isToolUIPart, type UIMessage } from "ai";
 import { unwrapMcpResult } from "@appstrate/core/mcp-result";
-import type { PresentationSubject, ToolPresentation } from "@appstrate/core/mcp-presentation";
+import type { ToolPresentation } from "@appstrate/core/mcp-presentation";
 import { deriveToolPhase, extractErrorMessage } from "./tool-result.ts";
 import { callOutcome, callPresentation } from "./tool-presentation.ts";
 import { isLookupCall } from "./activity-group.ts";
@@ -51,8 +50,6 @@ export interface ConversationToolCall {
 export interface ConversationTools {
   /** In conversation order. */
   calls: ConversationToolCall[];
-  /** The integrations that answered a call, in order of first answer. */
-  integrations: PresentationSubject[];
 }
 
 type ToolPart = Extract<UIMessage["parts"][number], { toolCallId: string }>;
@@ -76,30 +73,12 @@ function statusOf(part: ToolPart, output: unknown, turnRuns: boolean): Conversat
 }
 
 /**
- * The integration a call used: the integration the platform presented it under, when the engine
- * stamped that the integration answered (`answered`, `pi-chat/mcp-tools.ts`). A refusal of the
- * platform before sending, and a call the user denied, carry no such stamp.
- */
-function answeringIntegration(part: ToolPart): PresentationSubject | undefined {
-  const subject = callPresentation(part)?.subject;
-  return subject?.kind === "integration" && callOutcome(part)?.answered === true
-    ? subject
-    : undefined;
-}
-
-/** The calls of one assistant message, and the integrations that answered them, in order. */
-interface MessageTools {
-  calls: ConversationToolCall[];
-  integrations: PresentationSubject[];
-}
-
-/**
  * Each message's calls, kept while the message object is: a turn streams by replacing its last
  * message only, so a finished message is derived once and its calls keep their identity.
  */
 const byMessage = new WeakMap<
   UIMessage,
-  { turn: number; turnRuns: boolean; tools: MessageTools }
+  { turn: number; turnRuns: boolean; calls: ConversationToolCall[] }
 >();
 
 /** Each messages array's calls: the panel's readers of one frame share one derivation. */
@@ -108,11 +87,10 @@ const byMessages = new WeakMap<
   { running: boolean; tools: ConversationTools }
 >();
 
-function messageTools(message: UIMessage, turn: number, turnRuns: boolean): MessageTools {
+function messageCalls(message: UIMessage, turn: number, turnRuns: boolean): ConversationToolCall[] {
   const cached = byMessage.get(message);
-  if (cached && cached.turn === turn && cached.turnRuns === turnRuns) return cached.tools;
+  if (cached && cached.turn === turn && cached.turnRuns === turnRuns) return cached.calls;
   const calls: ConversationToolCall[] = [];
-  const integrations: PresentationSubject[] = [];
   for (const part of message.parts) {
     if (!isToolUIPart(part)) continue;
     const toolName = getToolName(part);
@@ -146,17 +124,13 @@ function messageTools(message: UIMessage, turn: number, turnRuns: boolean): Mess
       ...(spaceId ? { spaceId } : {}),
       ...(runId ? { runId } : {}),
     });
-    const answered = answeringIntegration(part);
-    if (answered) integrations.push(answered);
   }
-  const tools = { calls, integrations };
-  byMessage.set(message, { turn, turnRuns, tools });
-  return tools;
+  byMessage.set(message, { turn, turnRuns, calls });
+  return calls;
 }
 
 /**
- * The calls of `messages`, in order, and the integrations that answered them. `running`: the
- * last message is the turn in flight.
+ * The calls of `messages`, in order. `running`: the last message is the turn in flight.
  */
 export function conversationTools(
   messages: readonly UIMessage[],
@@ -165,18 +139,13 @@ export function conversationTools(
   const cached = byMessages.get(messages);
   if (cached && cached.running === running) return cached.tools;
   const calls: ConversationToolCall[] = [];
-  const integrations = new Map<string, PresentationSubject>();
   let turn = 0;
   for (const [index, message] of messages.entries()) {
     if (message.role !== "assistant") continue;
     turn += 1;
-    const tools = messageTools(message, turn, running && index === messages.length - 1);
-    calls.push(...tools.calls);
-    for (const answered of tools.integrations) {
-      if (!integrations.has(answered.id)) integrations.set(answered.id, answered);
-    }
+    calls.push(...messageCalls(message, turn, running && index === messages.length - 1));
   }
-  const tools = { calls, integrations: [...integrations.values()] };
+  const tools = { calls };
   byMessages.set(messages, { running, tools });
   return tools;
 }

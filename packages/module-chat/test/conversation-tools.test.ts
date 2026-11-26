@@ -1,8 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * `src/ui/conversation-tools.ts` — a conversation's tool calls from its stored messages, and the
- * integrations they reached.
+ * `src/ui/conversation-tools.ts` — a conversation's tool calls from its stored messages.
  */
 
 import { describe, expect, it } from "bun:test";
@@ -18,15 +17,11 @@ const mcp = (payload: unknown, extra: Record<string, unknown> = {}) => ({
 
 /**
  * The provider metadata the engine stamps a call's outcome in (`ui-stream-mapper.ts`): its
- * presentation, and whether its integration answered (`answered`, `pi-chat/mcp-tools.ts`).
+ * presentation and its duration.
  */
-const presented = (
-  presentation: ToolPresentation,
-  outcome: { answered?: true; durationMs?: number } = {},
-) => ({
+const presented = (presentation: ToolPresentation, outcome: { durationMs?: number } = {}) => ({
   resultProviderMetadata: { appstrate: { presentation, ...outcome } },
 });
-const ANSWERED = { answered: true } as const;
 
 const GMAIL = {
   kind: "integration",
@@ -186,78 +181,6 @@ describe("conversationTools", () => {
       "@appstrate/gmail",
       "@acme/github",
     ]);
-  });
-
-  it("counts an integration that answered a call, success or failure upstream, once each", () => {
-    const { integrations } = conversationTools([
-      assistant("a1", [
-        call("i1", "call_integration_tool", {
-          state: "output-available",
-          input: { tool: "appstrate_gmail__api_call" },
-          output: mcp({ results: [{ status: 200 }] }),
-          ...presented({ title: "API call", method: "GET", subject: GMAIL }, ANSWERED),
-        }),
-        // The integration's own failure, relayed.
-        call("i2", "call_integration_tool", {
-          state: "output-error",
-          input: { tool: "acme_github__create_issue" },
-          errorText: "403 Resource not accessible",
-          ...presented({ title: "Create issue", subject: GITHUB }, ANSWERED),
-        }),
-        // Whatever its payload carries, a call the engine stamped answered is the integration's.
-        call("i3", "call_integration_tool", {
-          state: "output-available",
-          input: { tool: "acme_github__get_issue" },
-          output: mcp({ code: "not_found" }, { relayed: true }),
-          ...presented({ title: "Get issue", subject: GITHUB }, ANSWERED),
-        }),
-        call("i4", "call_integration_tool", {
-          state: "output-available",
-          input: { tool: "appstrate_gmail__api_call" },
-          output: mcp({ results: [{ status: 200 }] }),
-          ...presented({ title: "API call", method: "DELETE", subject: GMAIL }, ANSWERED),
-        }),
-      ]),
-    ]);
-    expect(integrations).toEqual([GMAIL, GITHUB]);
-  });
-
-  it("counts no integration for a refusal, a denial, an operation or an unpresented call", () => {
-    const { integrations } = conversationTools([
-      assistant("a1", [
-        // The platform refused the arguments: nothing was sent, nothing stamped it answered.
-        call("r1", "call_integration_tool", {
-          state: "output-error",
-          input: { tool: "appstrate_gmail__api_call" },
-          errorText: JSON.stringify({ code: "missing_argument", error: "method is required." }),
-          ...presented({ title: "API call", subject: GMAIL }),
-        }),
-        // A success the engine did not stamp answered is not counted either.
-        call("r5", "call_integration_tool", {
-          state: "output-available",
-          input: { tool: "appstrate_gmail__api_call" },
-          output: mcp({ results: [{ status: 200 }] }),
-          ...presented({ title: "API call", subject: GMAIL }),
-        }),
-        call("r2", "call_integration_tool", {
-          state: "output-denied",
-          input: { tool: "appstrate_gmail__api_call" },
-          ...presented({ title: "API call", subject: GMAIL }),
-        }),
-        call("r3", "invoke_operation", {
-          state: "output-available",
-          input: { operation_id: "getIntegration" },
-          output: mcp({ status: 200, body: {} }),
-          ...presented({ title: "Get", method: "GET", tag: "Integrations", subject: GMAIL }),
-        }),
-        call("r4", "call_integration_tool", {
-          state: "output-available",
-          input: { tool: "unlisted__tool" },
-          output: mcp({ ok: true }),
-        }),
-      ]),
-    ]);
-    expect(integrations).toEqual([]);
   });
 
   it("counts a lookup by the engine's stamp or a read presentation, and never a failed one", () => {

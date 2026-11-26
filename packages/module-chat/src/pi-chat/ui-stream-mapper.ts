@@ -513,14 +513,12 @@ function persistedToolOutput(result: unknown): unknown {
 /**
  * What a call's outcome tells the UI, as `providerMetadata.appstrate` of its result chunk:
  * - `presentation`: how the platform presents the call (`mcp-tools.ts`);
- * - `answered`: the integration behind a `call_integration_tool` answered at least once;
  * - `durationMs`: how long the tool ran, as Pi measured it;
  * - `actedSpaceIds`: on a failure, the spaces the call acted in (`mcp-tools.ts`), which a success
  *   carries in its output and a failure, reduced to its error text, keeps here.
  */
 type ToolOutcomeMetadata = {
   presentation?: unknown;
-  answered?: true;
   durationMs?: number;
   actedSpaceIds?: readonly unknown[];
 };
@@ -535,13 +533,12 @@ function actedSpacesOf(output: unknown): readonly unknown[] | undefined {
 function splitOutcome(output: unknown): { output: unknown; outcome: ToolOutcomeMetadata } {
   if (!output || typeof output !== "object" || Array.isArray(output))
     return { output, outcome: {} };
-  if (!("presentation" in output) && !("answered" in output)) return { output, outcome: {} };
-  const { presentation, answered, ...rest } = output as Record<string, unknown>;
+  if (!("presentation" in output)) return { output, outcome: {} };
+  const { presentation, ...rest } = output as Record<string, unknown>;
   return {
     output: rest,
     outcome: {
       ...(presentation !== undefined && { presentation }),
-      ...(answered === true && { answered: true as const }),
     },
   };
 }

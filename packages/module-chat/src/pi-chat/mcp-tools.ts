@@ -103,11 +103,6 @@ interface PiToolResult {
    * (`ui-stream-mapper.ts`), not in the stored output.
    */
   presentation?: ToolPresentation;
-  /**
-   * A `call_integration_tool` the integration answered at least once ({@link integrationAnswered}).
-   * Carried like {@link presentation}: the result's provider metadata, on a success and a failure.
-   */
-  answered?: true;
 }
 
 /**
@@ -195,27 +190,6 @@ export function mcpResultToPi(
     ...(offers.length > 0 ? { connectOffers: offers } : {}),
     ...(isRelayedResult(result) ? { relayed: true as const } : {}),
   };
-}
-
-/**
- * Whether the integration behind a `call_integration_tool` answered at least once: a remote
- * tool's result the platform relayed (`markRelayedResult`), or an `api_call` batch holding an
- * upstream response (`results[]` entry with a `status`, whatever it is: a relayed 401 is an
- * answer). The platform's refusals before sending (`{ status, code, detail }`, an entry's
- * `error`) are not.
- */
-function integrationAnswered(result: RemoteToolResult): boolean {
-  if (isRelayedResult(result)) return true;
-  const results = (result.structuredContent as { results?: unknown } | undefined)?.results;
-  return (
-    Array.isArray(results) &&
-    results.some(
-      (entry) =>
-        typeof entry === "object" &&
-        entry !== null &&
-        typeof (entry as { status?: unknown }).status === "number",
-    )
-  );
 }
 
 type RemoteToolResult = Awaited<ReturnType<AppstrateMcpClient["callTool"]>>;
@@ -639,16 +613,11 @@ function makeForwardExtension(
           { name: tool.name, arguments: args },
           { signal: callSignal },
         );
-        // What the platform says of the call, for its card, and whether the integration answered:
-        // stamped on every result of it, whichever branch below builds it.
+        // What the platform says of the call, for its card: stamped on every result of it,
+        // whichever branch below builds it.
         const presentation = readToolPresentation(received._meta);
-        const answered = toolName === "call_integration_tool" && integrationAnswered(received);
         const out = await forwardedResult(toolCallId, args, received);
-        return {
-          ...out,
-          ...(presentation && { presentation }),
-          ...(answered && { answered: true as const }),
-        };
+        return { ...out, ...(presentation && { presentation }) };
       },
     });
   };

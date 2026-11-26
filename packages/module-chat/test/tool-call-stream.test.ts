@@ -75,7 +75,7 @@ const text = (value: unknown) => [{ type: "text", text: JSON.stringify(value) }]
 
 /**
  * The turn: two lookups (one fails), a relayed failure of GitHub, a Gmail read. The results are
- * the Pi results the chat's tool returns (`pi-chat/mcp-tools.ts`), `answered` included.
+ * the Pi results the chat's tool returns (`pi-chat/mcp-tools.ts`).
  */
 const EVENTS: AgentSessionEvent[] = [
   { type: "message_start", message: { role: "assistant" } },
@@ -110,7 +110,6 @@ const EVENTS: AgentSessionEvent[] = [
       content: [{ type: "text", text: "403 Resource not accessible" }],
       details: {},
       relayed: true,
-      answered: true,
       presentation: { title: "Create issue", subject: GITHUB },
     },
     true,
@@ -124,7 +123,6 @@ const EVENTS: AgentSessionEvent[] = [
     {
       content: text({ results: [{ index: 0, status: 200 }] }),
       details: {},
-      answered: true,
       presentation: { title: "API call", method: "GET", subject: GMAIL },
     },
   ),
@@ -186,7 +184,7 @@ describe("a turn's tool calls, from the engine's chunks", () => {
 
   it("brings the presentation of a success and of a failure to the panel and the card", async () => {
     const message = await streamedMessage();
-    const { calls, integrations } = conversationTools([message]);
+    const { calls } = conversationTools([message]);
     const labels = calls.map(
       (c) =>
         showCall({ toolName: c.toolName, args: c.input, presentation: c.presentation }, t).label,
@@ -198,7 +196,6 @@ describe("a turn's tool calls, from the engine's chunks", () => {
       durationMs: 12,
     });
     expect(calls[3]).not.toHaveProperty("durationMs");
-    expect(integrations).toEqual([GITHUB, GMAIL]);
 
     // The card: the assistant-ui message is bound to the AI SDK one it was converted from.
     // Only its binding is read: the rest of the message is not the test's.
@@ -215,11 +212,11 @@ describe("a turn's tool calls, from the engine's chunks", () => {
     expect(callPresentation(sourceToolPart(threadMessage, "g1"))?.subject).toEqual(GITHUB);
   });
 
-  it("stores no presentation, answer or duration in a call's output", async () => {
+  it("stores no presentation or duration in a call's output", async () => {
     const message = await streamedMessage();
     for (const part of message.parts.filter(isToolUIPart)) {
       const output = JSON.stringify(("output" in part ? part.output : undefined) ?? null);
-      for (const key of ["presentation", "answered", "durationMs"]) {
+      for (const key of ["presentation", "durationMs"]) {
         expect(output).not.toContain(key);
       }
     }

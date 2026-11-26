@@ -22,7 +22,6 @@ import { Fact, FactGrid } from "@appstrate/ui/components/fact-grid";
 import { MimeIcon } from "@appstrate/ui/components/mime-icon";
 import { formatCompactTokens, formatTokenFigure } from "@appstrate/ui/context-window";
 import { ErrorState } from "../../components/page-states";
-import { IntegrationLogoStack } from "../../components/integration-logo-stack";
 import { RowSpaceName, RunLink } from "../../components/run-row";
 import { RunStatusBadge } from "../../components/status-badge";
 import { Waiting } from "../../components/loading-skeletons";
@@ -480,10 +479,9 @@ function ActivityGroup({
 }
 
 /**
- * Everything the conversation did, in one view: what failed first (only when something did), the
- * integrations its calls reached, then its runs, its files and its actions (lookups apart), the
- * latest of each on one line. A group with nothing in it is left out; a group whose tab the reader
- * cannot see too. Each group stands on its own read: the calls and the integrations, held by the
+ * Everything the conversation did, in one view: what failed first (only when something did), then
+ * its runs, its files and its actions (lookups apart), the latest of each on one line. A group with nothing in it is left out; a group whose tab the reader
+ * cannot see too. Each group stands on its own read: the calls, held by the
  * conversation, show at once; a group whose read is on its way waits in its shape, one whose read
  * failed with nothing held says so in its place. The zone says it waits once, whatever waits.
  */
@@ -577,7 +575,6 @@ function SummaryActivity({
           </ActivityGroup>
         </div>
       ) : null}
-      <IntegrationsUsed tools={tools} />
       {nothing ? (
         <p className="text-muted-foreground px-4 py-3 text-sm">{t("context.summary.noActivity")}</p>
       ) : (
@@ -639,33 +636,7 @@ function SummaryActivity({
 }
 
 /**
- * The integrations the conversation's calls reached, on one line, named in words: the logos beside
- * the names say nothing more, so assistive tech hears the names once. Nothing when none did.
- */
-function IntegrationsUsed({ tools }: { tools: ConversationTools }) {
-  const { t } = useTranslation("chat");
-  // As the platform presented each call: no read of its own.
-  const integrations = tools.integrations.map((integration) => ({
-    id: integration.id,
-    name: integration.display_name ?? integration.id,
-    icon: integration.icon ?? null,
-  }));
-  if (integrations.length === 0) return null;
-  return (
-    <section className="flex min-h-10 items-center gap-2 px-4 py-2">
-      <h3 className="shrink-0 text-sm font-medium">{t("context.summary.integrations")}</h3>
-      <span className="ml-auto flex min-w-0 items-center gap-2 pl-2">
-        <span className="text-muted-foreground min-w-0 truncate text-xs">
-          {integrations.map((integration) => integration.name).join(", ")}
-        </span>
-        <IntegrationLogoStack integrations={integrations} decorative />
-      </span>
-    </section>
-  );
-}
-
-/**
- * The conversation in one view: its title and gist, the integrations it reached, then all it did
+ * The conversation in one view: its title and gist, then all it did
  * (runs, files, actions) on one line each, each group leading to its tab; its models, the reader's
  * access and its details fold to one line each.
  */

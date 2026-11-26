@@ -2,8 +2,7 @@
 
 /**
  * A `call_integration_tool` call's outcome, from the platform's MCP result to the context panel:
- * whether it failed is the server's `isError`, and whether its integration was used is declared
- * (a relayed result, or an upstream response in an `api_call` batch), never guessed off a payload.
+ * whether it failed is the server's `isError`, never guessed off a payload.
  *
  * The platform MCP server is an in-process stub answering the result shapes the platform builds
  * (`apps/api/src/modules/mcp`: `jsonResult`, `refusalResult`, `withPresentation`, the relayed
@@ -233,16 +232,13 @@ describe("a call_integration_tool call's outcome", () => {
     expect(results.r).toMatchObject({
       isError: true,
       relayed: true,
-      answered: true,
       presentation: { title: "Create issue", subject: GITHUB },
     });
     expect(results.b).toMatchObject({ isError: true, presentation: { subject: GMAIL } });
-    expect(results.b).not.toHaveProperty("answered");
     expect(results.p).not.toHaveProperty("isError");
-    expect(results.p).toMatchObject({ answered: true });
   });
 
-  it("is failed exactly when the server says so, and used only when the integration answered", async () => {
+  it("is failed exactly when the server says so", async () => {
     const { tools } = await turn([
       { id: "b", answer: "refused_batch" },
       { id: "p", answer: "partial_batch" },
@@ -266,16 +262,5 @@ describe("a call_integration_tool call's outcome", () => {
       status: "error",
       error: "Gmail is not connected in this space.",
     });
-    // The partial batch reached Gmail, the relayed 401 reached GitHub; the two refusals did not.
-    expect(tools.integrations).toEqual([GMAIL, GITHUB]);
-  });
-
-  it("counts no integration for a turn of refusals", async () => {
-    const { tools } = await turn([
-      { id: "b", answer: "refused_batch" },
-      { id: "m", answer: "missing_connection" },
-    ]);
-    expect(tools.calls.map((c) => c.status)).toEqual(["error", "error"]);
-    expect(tools.integrations).toEqual([]);
   });
 });

@@ -346,6 +346,5 @@
   "context.summary.seeAll": "Tout voir",
   "context.summary.seeAllCount": "Tout voir ({{count}})",
   "context.summary.seeAllRuns": "Tout voir dans Runs",
-  "context.summary.seeAllTools": "Tout voir dans Outils",
-  "context.summary.integrations": "Intégrations utilisées"
+  "context.summary.seeAllTools": "Tout voir dans Outils"
 }
