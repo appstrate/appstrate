@@ -14,6 +14,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (`integration_connection` | `model_provider_credential`). One best-effort announcement per
   `needs_reconnection` false to true flip; carries the `CredentialDeathCause`
   (`CREDENTIAL_DEATH_CAUSES`, `@appstrate/core/sidecar-types`).
+- **`@appstrate/core/mcp-presentation`**: how a client shows one MCP tool call.
+  `TOOL_PRESENTATION_META_KEY` (`dev.appstrate/presentation`) names the `_meta` entry the platform
+  stamps on a tool result, `toolPresentationSchema` describes it (types `ToolPresentation`,
+  `PresentationSubject`; a search lists at most `MAX_PRESENTED_ITEMS`) and `readToolPresentation`
+  reads it. `TOOL_LOOKUP_META_KEY` (`dev.appstrate/lookup`) marks, on a tool descriptor, a tool
+  whose calls only look things up although `readOnlyHint` is withheld; `isLookupTool` reads either.
+- **`isTurnBudgetNote`** (`@appstrate/core/chat-turn-metadata`): whether a tool result's text part
+  is the chat's model-facing turn-budget line (`formatTurnBudgetNote`).
 - `SPACE_ROLE_ID_REGEX` and `isSpaceRolePreset` in `@appstrate/core/permissions`.
 - `personalSpaceRoleSettingSchema` (a preset key or a custom space role id: the wire value of
   `personal_space_role`) and `orgSettingsWireSchema` (`orgSettingsReadSchema` with
@@ -25,6 +33,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **`unwrapMcpResult`** (`@appstrate/core/mcp-result`) leaves the turn-budget line, the last
+  block, out of a plain-text result: a failed call's message no longer ends with the model's `[turn budget] …`.
 - **New core resource `studio`, permission `studio:read`** — BREAKING. The `CoreResource` and
   `Permission` unions widen (`CoreResources.studio`; the `Permission` type gains `studio:read`), and
   a module that declares a `studio` permission resource is refused at load

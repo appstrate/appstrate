@@ -297,6 +297,7 @@ function boundedCatalog(tools: SanitisedTool[], truncated: boolean): ReadCatalog
 interface ServerTool {
   name: string;
   description?: string;
+  title?: string;
   input_schema: Tool["inputSchema"];
   /** Present when the server declares one. */
   output_schema?: NonNullable<Tool["outputSchema"]>;
@@ -396,6 +397,7 @@ export async function listRemoteTools(
       .map(({ tool, reduced }) => ({
         name: tool.name,
         ...(tool.description !== undefined ? { description: tool.description } : {}),
+        ...serverTitle(tool),
         input_schema: tool.inputSchema,
         ...(tool.outputSchema !== undefined ? { output_schema: tool.outputSchema } : {}),
         ...(reduced.length > 0 ? { schema_reduced: reduced } : {}),
@@ -403,6 +405,14 @@ export async function listRemoteTools(
     listed: true,
     truncatedAt: described.truncated ? described.tools.length : null,
   };
+}
+
+/** The server's display name for a sanitised tool: `title`, else `annotations.title`, if not blank. */
+function serverTitle(tool: Tool): Pick<ServerTool, "title"> {
+  const title = [tool.title, tool.annotations?.title]
+    .map((candidate) => candidate?.trim())
+    .find(Boolean);
+  return title ? { title } : {};
 }
 
 /**

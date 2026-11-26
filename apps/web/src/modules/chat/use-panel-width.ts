@@ -6,11 +6,11 @@ import { useCallback, useEffect, useState, type RefObject } from "react";
  * What the panel shows decides its width: a list stays narrow beside the
  * thread, the details take a little more, a previewed file the most.
  */
-export type PanelView = "list" | "info" | "file";
+export type PanelView = "list" | "detail" | "file";
 
 const STORAGE_KEY = "appstrate:chat-context-width";
 const PANEL_MIN_WIDTH = 300;
-const PANEL_DEFAULT_WIDTH: Record<PanelView, number> = { list: 360, info: 400, file: 560 };
+const PANEL_DEFAULT_WIDTH: Record<PanelView, number> = { list: 360, detail: 400, file: 560 };
 const PANEL_MAX_RATIO = 0.6;
 
 const storageKey = (view: PanelView) => `${STORAGE_KEY}:${view}`;
@@ -41,7 +41,7 @@ function storeWidth(view: PanelView, width: number | null) {
 export function usePanelWidth(panelRef: RefObject<HTMLElement | null>, view: PanelView) {
   const [stored, setStored] = useState<Record<PanelView, number>>(() => ({
     list: readStoredWidth("list") ?? PANEL_DEFAULT_WIDTH.list,
-    info: readStoredWidth("info") ?? PANEL_DEFAULT_WIDTH.info,
+    detail: readStoredWidth("detail") ?? PANEL_DEFAULT_WIDTH.detail,
     file: readStoredWidth("file") ?? PANEL_DEFAULT_WIDTH.file,
   }));
   const [areaWidth, setAreaWidth] = useState(0);

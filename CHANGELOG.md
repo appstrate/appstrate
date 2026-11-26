@@ -27,6 +27,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - New `GET /api/orgs/{orgId}/personal-space-role/impact?role=<preset | srl_…>` (`org:settings`, the guard of the settings write): `{ schedules, members }`, the enabled schedules members and guests following the default would lose at their next firing under that role, and their distinct owners. Read-only; a custom id of another organization answers `404` (`param: role`). Settings asks for confirmation before writing a default that would disable any.
 - A custom default is stored in the new column `organizations.personal_space_role_id`, under a foreign key, and a preset stays in `org_settings.personal_space_role`; a CHECK keeps a row from holding both. A composite foreign key keeps that column on a role of the same organization, and a CHECK keeps the stored key on a preset. The wire value is unchanged. No migration step for `personal_space_role`: stored `admin` and `operator` keep their meaning for members, and the new column is `NULL` on every existing row.
 
+### MCP clients
+
+- Platform tools list `icons` (inline SVG, light and dark theme), and a tool result carries `_meta["dev.appstrate/presentation"]` when the server knows more of the call than its descriptor: the operation's tag and method, the subject acted on, a remote integration tool's title, and for `search` a count and its items (#2398, #2405). The `search` and `describe` descriptors that may read a remote catalog carry `_meta["dev.appstrate/lookup"]: true`. `GET /api/credential-proxy/tools` lists the tools' `integrations` and a remote tool's sanitised `title`. See [Showing a call](docs/guides/connecting-mcp-clients.md#showing-a-call).
+
 ## [1.0.0-beta.71] - 2026-11-24
 
 ### Module authors

@@ -145,18 +145,20 @@ describe("the conversation panel", () => {
     );
   }
 
-  it("lists the runs and files tabs where some space admits them, else Info alone", () => {
-    expect(renderOverview(<Tabs />, spaces).html).toContain("<p>runs,info</p>");
+  it("lists the runs and files tabs where some space admits them, beside Summary and Tools", () => {
+    expect(renderOverview(<Tabs />, spaces).html).toContain("<p>summary,runs,tools</p>");
     const files = [space("spc_a", ["chat:read"]), space("spc_b", ["chat:read", "files:read"])];
-    expect(renderOverview(<Tabs />, files).html).toContain("<p>files,info</p>");
-    expect(renderOverview(<Tabs />, [space("spc_a", ["chat:read"])]).html).toContain("<p>info</p>");
+    expect(renderOverview(<Tabs />, files).html).toContain("<p>summary,files,tools</p>");
+    expect(renderOverview(<Tabs />, [space("spc_a", ["chat:read"])]).html).toContain(
+      "<p>summary,tools</p>",
+    );
   });
 
   it("lists the runs and files tabs for a role without the Studio: the chat keeps its data", () => {
     const chatOnly = [
       testSpace("spc_a", ["chat:read", "runs:read", "files:read"], "spc_a", { studio: false }),
     ];
-    expect(renderOverview(<Tabs />, chatOnly).html).toContain("<p>runs,files,info</p>");
+    expect(renderOverview(<Tabs />, chatOnly).html).toContain("<p>summary,runs,files,tools</p>");
   });
 
   it("lists a run of a space without the Studio, unlinked: its page is a Studio screen", () => {
@@ -244,7 +246,7 @@ describe("a file of another space in the context panel", () => {
     const { queryClient } = renderOverview(
       <ShownFile
         file={{ id: "file_1", name: "a.md", spaceId: "spc_b" }}
-        backToList={false}
+        from="thread"
         onClose={() => {}}
       />,
       spaces,
@@ -258,7 +260,7 @@ describe("a file of another space in the context panel", () => {
     const { queryClient } = renderOverview(
       <ShownFile
         file={{ id: "file_1", name: "a.md", spaceId: "spc_a" }}
-        backToList={false}
+        from="thread"
         onClose={() => {}}
       />,
       spaces,

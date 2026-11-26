@@ -8,7 +8,7 @@ import { defaultDirectiveFormatter } from "@assistant-ui/core";
 import type { DirectiveChipProps } from "@assistant-ui/react-lexical";
 import { cn } from "@appstrate/ui/cn";
 import { AGENT_DIRECTIVE, SKILL_DIRECTIVE, directiveSegments } from "../directives.ts";
-import { DirectiveAgentGlyph } from "./agent-glyph.tsx";
+import { KnownAgentGlyph } from "./agent-glyph.tsx";
 
 /** A 1em square on the text's baseline: its content is out of flow, so it cannot move it. */
 function ChipSlot({ className, children }: { className?: string; children: ReactNode }) {
@@ -39,7 +39,11 @@ export function DirectiveChip({ directiveType, directiveId, label, className }: 
     >
       <ChipSlot className="mr-1">
         {directiveType === AGENT_DIRECTIVE ? (
-          <DirectiveAgentGlyph promptName={directiveId} label={label} className="size-full" />
+          <KnownAgentGlyph
+            agentRef={{ promptName: directiveId }}
+            label={label}
+            className="size-full"
+          />
         ) : (
           <BookOpenIcon className="text-muted-foreground size-full" aria-hidden="true" />
         )}

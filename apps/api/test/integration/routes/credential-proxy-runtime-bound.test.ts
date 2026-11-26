@@ -88,6 +88,7 @@ describe("a runtime-bound integration outside a run", () => {
       expect(res.status).toBe(200);
       expect(await res.json()).toEqual({
         tools: [],
+        integrations: [],
         connections: [],
         not_ready: [],
         unlisted: [],

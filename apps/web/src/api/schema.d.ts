@@ -12655,6 +12655,8 @@ export interface operations {
                             connection_required?: boolean;
                             /** @description `remote` only: the name the server lists the tool by, which `tools/call` takes. */
                             remote_name?: string;
+                            /** @description `remote` only, when the server gives one: the tool's display name (`title`, else `annotations.title`), sanitised. Server text, for display only. */
+                            title?: string;
                             /** @description `remote` only: the tool's input schema, sanitised as in a run. */
                             input_schema?: {
                                 [key: string]: unknown;
@@ -12676,6 +12678,13 @@ export interface operations {
                             missing_scopes?: {
                                 [key: string]: string[];
                             };
+                        }[];
+                        /** @description The integrations of `tools`, each once: how a client names and draws them. */
+                        integrations: {
+                            integration_package_id: string;
+                            display_name: string;
+                            /** @description Its manifest icon: an Iconify id or an image URL. */
+                            icon?: string;
                         }[];
                         /** @description The connections the tools reach, each once. */
                         connections: {

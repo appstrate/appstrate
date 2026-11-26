@@ -2,12 +2,12 @@
 // Copyright 2026 Appstrate
 
 /**
- * Exit for runner-registered Pi tools. Pi ignores an `isError` on a value
- * returned from `execute` (pi-coding-agent `docs/extensions.md`, "Signaling
- * errors"); a throw is what flags the call as failed. An error result throws
- * its text blocks as the message, which Pi rebuilds into the tool result —
- * image blocks and `details` (e.g. an MCP `structuredContent` error envelope)
- * do not survive into the run log.
+ * Exit for runner-registered Pi tools. Pi flags a call failed on a throw or on
+ * a returned `isError: true` (agent-loop `executePreparedToolCall`); this
+ * result type carries no `isError`, so an error result throws its text blocks
+ * as the message, which Pi rebuilds into the tool result — image blocks and
+ * `details` (e.g. an MCP `structuredContent` error envelope) do not survive
+ * into the run log.
  */
 
 export type PiToolContent =
