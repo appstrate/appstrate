@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **`spaceActs`, `describeSpaceActs`, `SpaceAct`, `SpaceActFlags`** (`@appstrate/core/mcp-spaces`).
+  The acts a caller holds in one space (`invoke_operations`, `run_agents`, `inline_runs`,
+  `call_integration_tools`, `create_packages`), in one vocabulary for the MCP `get_me` tool's
+  `spaces[].can` and the chat's context block, and the line that names them after a space.
+
 ### Removed
 
 - **`SPACE_CHOICE_META_KEY`** — BREAKING (`@appstrate/core/mcp-spaces`). An MCP call that needs a

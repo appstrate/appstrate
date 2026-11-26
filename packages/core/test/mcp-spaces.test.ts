@@ -4,7 +4,9 @@ import { describe, it, expect } from "bun:test";
 import {
   ACTIVE_IN_SPACES_HINT,
   describeSpace,
+  describeSpaceActs,
   projectActiveInSpaces,
+  spaceActs,
   spaceIdRefusal,
 } from "../src/mcp-spaces.ts";
 
@@ -21,6 +23,49 @@ describe("describeSpace", () => {
   it("marks the caller's own personal space", () => {
     expect(describeSpace({ id: "spc_p", name: "Perso", role: "admin", personal: true })).toBe(
       "Perso (`spc_p`, role admin, your personal space)",
+    );
+  });
+});
+
+describe("spaceActs", () => {
+  const none = {
+    invokes: false,
+    runs: false,
+    composes: false,
+    callsIntegrationTools: false,
+    createsPackages: false,
+  };
+
+  it("names the acts granted, in one fixed order whatever the flags' order", () => {
+    expect(spaceActs(none)).toEqual([]);
+    expect(
+      spaceActs({ ...none, createsPackages: true, runs: true, invokes: true, composes: true }),
+    ).toEqual(["invoke_operations", "run_agents", "inline_runs", "create_packages"]);
+    expect(spaceActs({ ...none, invokes: true, callsIntegrationTools: true })).toEqual([
+      "invoke_operations",
+      "call_integration_tools",
+    ]);
+  });
+});
+
+describe("describeSpaceActs", () => {
+  it("follows the space's line with what the caller may do there", () => {
+    expect(
+      describeSpaceActs({
+        id: "spc_p",
+        name: "Perso",
+        role: "admin",
+        personal: true,
+        can: ["invoke_operations", "inline_runs"],
+      }),
+    ).toBe(
+      "Perso (`spc_p`, role admin, your personal space) — can: invoke_operations, inline_runs",
+    );
+  });
+
+  it("says a space allowing no act is for looking things up only", () => {
+    expect(describeSpaceActs({ id: "spc_v", name: "Lecture", role: "viewer", can: [] })).toBe(
+      "Lecture (`spc_v`, role viewer) — can: nothing but looking things up",
     );
   });
 });

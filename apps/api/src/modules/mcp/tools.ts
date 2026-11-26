@@ -156,6 +156,7 @@ import type { DispatchContext } from "./api-call-batch.ts";
 import {
   grantedIn,
   grantedSpaces,
+  mcpSpaceActs,
   spaceIdsWhere,
   spaceArgumentRefusal,
   recordOperationSpaces,
@@ -2438,8 +2439,10 @@ function buildGetMeTool(ctx: McpToolContext, surface: McpSurface): AppstrateTool
       "organization `role`), `space`, `connections`, `agents`, `skills` and `recent_runs`" +
       (ctx.orgSpaces
         ? ", and `spaces`: your role in each space you reach, which, not the organization role, " +
-          "decides each call. With no space designated, it returns `user`, `org` and `spaces` " +
-          "alone: call it first without `space_id` to see which spaces you reach"
+          "decides each call, and `can`, the acts that role allows there (`invoke_operations`, " +
+          "`run_agents`, `inline_runs`, `call_integration_tools`, `create_packages`): an act not " +
+          "listed is refused in that space. With no space designated, it returns `user`, `org` " +
+          "and `spaces` alone: call it first without `space_id` to see which spaces you reach"
         : "") +
       ". `connections` holds one entry per " +
       "integration with a connection the caller may bind in THIS space, its own or shared into it " +
@@ -2501,6 +2504,7 @@ function buildGetMeTool(ctx: McpToolContext, surface: McpSurface): AppstrateTool
       name: s.name,
       role: s.role,
       personal: s.personal,
+      can: mcpSpaceActs(s.surface),
     }));
     return readResponse(response, spaces ? { spaces } : undefined);
   };

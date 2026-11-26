@@ -640,6 +640,43 @@ describe("buildCallerContextBlock", () => {
       openSkillsClient: client,
     });
 
+  it("names every space of the turn with the acts the turn holds there, in reach order", async () => {
+    const personal = reachableSpace({
+      id: "spc_p",
+      name: "Perso",
+      role: "admin",
+      personal: true,
+      credentialProxyOpen: true,
+      permissions: [...BUILDER, "credential-proxy:call-own", "chat:read", "chat:write"],
+    });
+    const viewer = reachableSpace({
+      id: "spc_v",
+      name: "Lecture",
+      role: "viewer",
+      permissions: ["mcp:read", "chat:read", "chat:write"],
+    });
+    const text = (
+      await buildCallerContextBlock(fakeContext({ orgRole: "member" }), {
+        spaces: [personal, viewer],
+        restricted: false,
+        user,
+        capabilities: caps(BUILDER),
+        // The turn's set bounds every space: authoring off removes package creation everywhere.
+        permissions: [...NO_AUTHORING, "credential-proxy:call-own"],
+        skills: { skillDiscovery: true, pinnedSkills: [] },
+        cited: [],
+        drafts: false,
+        openSkillsClient: NO_SKILLS,
+      })
+    ).text;
+    const section = text.slice(text.indexOf("## Spaces you can act in"));
+    expect(section.split("\n").slice(0, 3)).toEqual([
+      "## Spaces you can act in",
+      "- Perso (`spc_p`, role admin, your personal space) — can: invoke_operations, run_agents, call_integration_tools",
+      "- Lecture (`spc_v`, role viewer) — can: nothing but looking things up",
+    ]);
+  });
+
   it("marks the turn's permissions as a role preview while one is on, and only then", async () => {
     const build = async (vars: Record<string, unknown>) =>
       (await block({ vars, permissions: ["mcp:read"] })).text;
