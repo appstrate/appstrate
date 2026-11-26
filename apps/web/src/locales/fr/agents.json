@@ -699,7 +699,6 @@
   "integrationEditor.discover.warning.authorization_server_pkce_unsupported": "Ce serveur d’autorisation n’annonce pas PKCE avec la méthode S256 : une intégration créée depuis ce serveur ne pourra pas se connecter, la connexion sera refusée.",
   "integrationEditor.discover.warning.authorization_server_blocked": "Le serveur d’autorisation qu’annonce ce serveur MCP est à une adresse refusée : il n’a pas été interrogé.",
   "integrationEditor.discover.warning.instructions_truncated": "Les instructions du serveur dépassent la limite : elles sont coupées à la dernière ligne qui tient.",
-  "integrationEditor.discover.warning.tools_truncated": "Le serveur a renvoyé plus d’outils que la limite : la liste est tronquée.",
   "integrationEditor.connectionChoice.choose": "Choisir la connexion à utiliser",
   "integrationEditor.identityFromServer.button": "Reprendre l’identité du serveur",
   "integrationEditor.identityFromServer.help": "Lit le serveur de ce brouillon et ne remplit que les champs d’identité vides ; enregistrez le brouillon pour les conserver.",
