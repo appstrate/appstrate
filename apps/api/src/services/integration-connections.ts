@@ -2521,12 +2521,7 @@ function announceConnectionDeath(
   });
 }
 
-/**
- * One of the two `needs_reconnection = true` flip points of this table (the other is
- * {@link recordIntegrationRefreshFailure}): keeps the credentials, and announces only the call
- * that flipped the flag (`needs_reconnection = false` in the WHERE, `RETURNING` the row). No-op
- * once the row is gone or already flagged.
- */
+/** One of two flip points; announces only its own flip. */
 export async function markIntegrationConnectionNeedsReconnection(
   connectionId: string,
   cause: CredentialDeathCause,

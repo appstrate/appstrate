@@ -58,8 +58,7 @@ export const webhookEventSchema = z.enum([
   // the actor is missing or under-scoped on one or more integration
   // connections. No run row exists when this fires.
   "run.connection_missing",
-  // Fired by `onCredentialNeedsReconnection` when a stored credential (an integration connection
-  // or a model-provider credential) dies. No run row exists when this fires.
+  // Fired by `onCredentialNeedsReconnection` when a stored credential dies. No run row.
   "credential.needs_reconnection",
 ]);
 

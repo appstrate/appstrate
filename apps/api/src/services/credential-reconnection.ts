@@ -1,10 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-/**
- * The announcement of a credential's death. Every writer of `needs_reconnection = true` calls
- * {@link announceCredentialNeedsReconnection} when, and only when, its own write flipped the flag
- * from false to true: one best-effort announcement per flip, whichever path flagged it.
- */
+/** Announces a credential's death: one call per `needs_reconnection` false-to-true flip. */
 
 import { eq } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
@@ -68,11 +64,7 @@ async function notifyConnectionOwner(params: IntegrationDeath): Promise<void> {
   });
 }
 
-/**
- * Fire-and-forget, best effort; never throws into the refresh path. Writes the bell notice
- * (integration connections only: a model-provider credential has no recipient decided yet, #1310)
- * and emits `onCredentialNeedsReconnection`, which never throws.
- */
+/** Best effort, never throws. Bell notice for integration connections only (no model-credential recipient, #1310). */
 export function announceCredentialNeedsReconnection(
   params: CredentialNeedsReconnectionParams,
 ): void {

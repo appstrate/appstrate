@@ -29646,7 +29646,7 @@ export interface operations {
                     level: "org";
                     /** Format: uri */
                     url: string;
-                    /** @description `credential.needs_reconnection` is announced once, best effort, when a stored credential dies (its `needs_reconnection` flips to true), never again while it stays flagged. Its delivery `data.object` is `{ object: "credential", kind, cause, ... }`: `kind: "integration_connection"` adds `connectionId`, `packageId` (the integration), `authKey`, `spaceId` (null for an org-level connection) and `owner: { type, id }`; `kind: "model_provider_credential"` adds `credentialId` and `providerId`. An integration connection reaches its space's webhooks and the org-level ones, a `packageId` filter matching the integration; a model-provider credential reaches org-level webhooks without a package filter only. */
+                    /** @description `credential.needs_reconnection` is announced once, best effort, when a stored credential dies. Payload and routing: docs/site/features/webhooks.mdx. */
                     events: ("run.started" | "run.success" | "run.failed" | "run.timeout" | "run.cancelled" | "run.connection_missing" | "credential.needs_reconnection")[];
                     packageId?: string | null;
                     /**
@@ -29663,7 +29663,7 @@ export interface operations {
                     spaceId: string;
                     /** Format: uri */
                     url: string;
-                    /** @description `credential.needs_reconnection` is announced once, best effort, when a stored credential dies (its `needs_reconnection` flips to true), never again while it stays flagged. Its delivery `data.object` is `{ object: "credential", kind, cause, ... }`: `kind: "integration_connection"` adds `connectionId`, `packageId` (the integration), `authKey`, `spaceId` (null for an org-level connection) and `owner: { type, id }`; `kind: "model_provider_credential"` adds `credentialId` and `providerId`. An integration connection reaches its space's webhooks and the org-level ones, a `packageId` filter matching the integration; a model-provider credential reaches org-level webhooks without a package filter only. */
+                    /** @description `credential.needs_reconnection` is announced once, best effort, when a stored credential dies. Payload and routing: docs/site/features/webhooks.mdx. */
                     events: ("run.started" | "run.success" | "run.failed" | "run.timeout" | "run.cancelled" | "run.connection_missing" | "credential.needs_reconnection")[];
                     packageId?: string | null;
                     /**

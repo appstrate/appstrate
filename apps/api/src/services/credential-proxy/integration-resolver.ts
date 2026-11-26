@@ -35,6 +35,7 @@ import {
 } from "../integration-manifest-helpers.ts";
 import { actorOwns, type Actor } from "../../lib/actor.ts";
 import { connectionVariablesOf } from "../../lib/connection-identity.ts";
+import { getErrorMessage } from "@appstrate/core/errors";
 import { logger } from "../../lib/logger.ts";
 import { decryptStoredCredential } from "../../lib/stored-credential.ts";
 import { notFound, type ResolutionFieldError } from "../../lib/errors.ts";
@@ -181,15 +182,25 @@ export async function resolveIntegrationProxyCredentials(
   let payload: ProxyCredentialsPayload | null = null;
   let credentialRevision = connection.credentialRevision;
   const authDef = manifest.auths?.[connection.authKey];
-  const outcome = authDef
-    ? await refreshConnectionCredential({
+  let outcome: Awaited<ReturnType<typeof refreshConnectionCredential>> | null = null;
+  if (authDef) {
+    try {
+      outcome = await refreshConnectionCredential({
         connection,
         integrationId: input.integrationId,
         manifest,
         authDef,
         trigger: { kind: "expiring" },
-      })
-    : null;
+      });
+    } catch (err) {
+      // The stored token may still be valid: a failed pre-check must not fail the call.
+      logger.warn("credential-proxy: pre-send refresh failed — serving the stored credential", {
+        integrationId: input.integrationId,
+        connectionId: connection.id,
+        error: getErrorMessage(err),
+      });
+    }
+  }
   switch (outcome?.status) {
     case "refreshed":
       // The 401 path names the credential the call carried: the one just written.

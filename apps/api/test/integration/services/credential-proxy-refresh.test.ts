@@ -987,4 +987,25 @@ describe("proxyCall — the pre-check refreshes an expiring credential before it
     expect(res.status).toBe(200);
     expect(sent).toEqual(["Bearer stale_token"]);
   });
+
+  it("serves the stored credential when the pre-check throws while the token is still valid", async () => {
+    // Inside the lead but not expired: a missing key makes the refresh throw (503), not return a verdict.
+    await setup(
+      ctx,
+      packageId,
+      { access_token: "live_token", refresh_token: "rt_valid" },
+      BEARER_DELIVERY,
+      2 * 60_000,
+    );
+    await db
+      .update(integrationOauthClients)
+      .set({ clientSecretEncrypted: `v1:k0gone:${Buffer.alloc(40).toString("base64")}` })
+      .where(eq(integrationOauthClients.integrationId, packageId));
+    const { sent, fakeFetch } = wire();
+
+    const res = await call(fakeFetch);
+
+    expect(res.status).toBe(200);
+    expect(sent).toEqual(["Bearer live_token"]);
+  });
 });
