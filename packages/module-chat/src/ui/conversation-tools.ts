@@ -97,7 +97,10 @@ export function conversationTools(
 ): ConversationTools {
   const listed = new Map<string, string>();
   const calls: ConversationToolCall[] = [];
-  const lastAssistant = messages.findLastIndex((message) => message.role === "assistant");
+  let lastAssistant = -1;
+  messages.forEach((message, index) => {
+    if (message.role === "assistant") lastAssistant = index;
+  });
   let turn = 0;
 
   messages.forEach((message, index) => {

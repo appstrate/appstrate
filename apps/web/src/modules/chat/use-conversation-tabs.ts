@@ -1,24 +1,31 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { ActivityIcon, FilesIcon, InfoIcon } from "lucide-react";
+import { ActivityIcon, FilesIcon, InfoIcon, WrenchIcon } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { useAdmittingSpaces } from "../../hooks/use-overview-mode";
 import type { ConversationSidebarTab } from "./conversation-sidebar-state";
 
 /**
- * `chat:read` opens the page, not the runs and files two tabs list. A stored
- * tab the caller can no longer see resolves to Info, which always stays.
+ * `chat:read` opens the page, not the runs and files two tabs list. The tool calls are the
+ * conversation's own, read with it. A stored tab the caller can no longer see resolves to Info,
+ * which always stays.
  */
 export function useConversationTabs(selected: ConversationSidebarTab) {
   const { t } = useTranslation("chat");
   // Any space's grants: a conversation lists the runs and files of every space it acted in.
   const runs = useAdmittingSpaces("runs").length > 0;
   const files = useAdmittingSpaces("files").length > 0;
-  const readable: Record<ConversationSidebarTab, boolean> = { runs, files, info: true };
+  const readable: Record<ConversationSidebarTab, boolean> = {
+    runs,
+    files,
+    tools: true,
+    info: true,
+  };
   const tabs = (
     [
       { id: "runs", Icon: ActivityIcon, label: t("common:nav.runs") },
       { id: "files", Icon: FilesIcon, label: t("common:nav.files") },
+      { id: "tools", Icon: WrenchIcon, label: t("context.tabs.tools") },
       { id: "info", Icon: InfoIcon, label: t("context.tabs.info") },
     ] as const satisfies readonly {
       id: ConversationSidebarTab;

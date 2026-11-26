@@ -272,5 +272,21 @@
   "context.info.modelTurnsFailed_other": "{{model}} · {{count}} turns, {{failed}} failed",
   "context.info.tokens": "Tokens",
   "context.info.tokensReadGenerated": "{{read}} read · {{generated}} generated",
-  "context.info.tokensScope": "Excludes runs launched from the conversation, counted in the Runs tab."
+  "context.info.tokensScope": "Excludes runs launched from the conversation, counted in the Runs tab.",
+  "context.tabs.tools": "Tools",
+  "context.tools.empty": "The assistant has not called any tool in this conversation yet.",
+  "context.tools.noAction": "No action yet: the assistant has only looked things up.",
+  "context.tools.showLookups_one": "Show the lookup ({{count}})",
+  "context.tools.showLookups_other": "Show lookups ({{count}})",
+  "context.tools.turn": "Turn {{turn}}",
+  "context.tools.lookup": "Lookup",
+  "context.tools.noTarget": "No target",
+  "context.tools.status.running": "Running",
+  "context.tools.status.success": "Succeeded",
+  "context.tools.status.error": "Failed",
+  "context.tools.status.denied": "Denied",
+  "context.tools.backToList": "Back to tools",
+  "context.tools.showInThread": "See in the thread",
+  "context.tools.notInThread": "This call is not shown in the thread.",
+  "context.tools.gone": "This call is no longer part of the conversation."
 }

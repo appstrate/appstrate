@@ -6,6 +6,7 @@ import {
   conversationSidebarReducer,
   heldLocalUrl,
   shownFile,
+  shownToolCallId,
   type ConversationSidebarState,
 } from "./conversation-sidebar-state";
 
@@ -76,6 +77,7 @@ describe("conversation sidebar state", () => {
       activeTab: "runs",
       selectedFile: file("file_a"),
       fileFromList: false,
+      selectedToolCallId: null,
     };
 
     expect(conversationSidebarReducer(state, { type: "conversation-change" })).toEqual({
@@ -83,6 +85,7 @@ describe("conversation sidebar state", () => {
       activeTab: "runs",
       selectedFile: null,
       fileFromList: false,
+      selectedToolCallId: null,
     });
   });
 
@@ -137,5 +140,36 @@ describe("conversation sidebar state", () => {
     expect(shownFile(withFile)).toEqual(file("file_a"));
     expect(shownFile({ ...withFile, activeTab: "info" })).toBeNull();
     expect(shownFile(conversationSidebarReducer(withFile, { type: "close-file" }))).toBeNull();
+  });
+});
+
+describe("conversation sidebar tool calls", () => {
+  it("shows a tool call over the Tools tab and goes back to its list", () => {
+    const shown = conversationSidebarReducer(INITIAL_CONVERSATION_SIDEBAR_STATE, {
+      type: "show-tool-call",
+      toolCallId: "call_1",
+    });
+    expect(shown).toMatchObject({ expanded: true, activeTab: "tools" });
+    expect(shownToolCallId(shown)).toBe("call_1");
+
+    const back = conversationSidebarReducer(shown, { type: "close-tool-call" });
+    expect(back).toMatchObject({ expanded: true, activeTab: "tools" });
+    expect(shownToolCallId(back)).toBeNull();
+  });
+
+  it("drops the shown call on a tab choice, a reopening and a conversation change", () => {
+    const shown = conversationSidebarReducer(INITIAL_CONVERSATION_SIDEBAR_STATE, {
+      type: "show-tool-call",
+      toolCallId: "call_1",
+    });
+    const tab = conversationSidebarReducer(shown, { type: "select-tab", tab: "tools" });
+    expect(shownToolCallId(tab)).toBeNull();
+
+    const closed = conversationSidebarReducer(shown, { type: "toggle" });
+    expect(shownToolCallId(closed)).toBe("call_1");
+    expect(shownToolCallId(conversationSidebarReducer(closed, { type: "toggle" }))).toBeNull();
+
+    const changed = conversationSidebarReducer(shown, { type: "conversation-change" });
+    expect(shownToolCallId(changed)).toBeNull();
   });
 });

@@ -145,11 +145,13 @@ describe("the conversation panel", () => {
     );
   }
 
-  it("lists the runs and files tabs where some space admits them, else Info alone", () => {
-    expect(renderOverview(<Tabs />, spaces).html).toContain("<p>runs,info</p>");
+  it("lists the runs and files tabs where some space admits them, beside Tools and Info", () => {
+    expect(renderOverview(<Tabs />, spaces).html).toContain("<p>runs,tools,info</p>");
     const files = [space("spc_a", ["chat:read"]), space("spc_b", ["chat:read", "files:read"])];
-    expect(renderOverview(<Tabs />, files).html).toContain("<p>files,info</p>");
-    expect(renderOverview(<Tabs />, [space("spc_a", ["chat:read"])]).html).toContain("<p>info</p>");
+    expect(renderOverview(<Tabs />, files).html).toContain("<p>files,tools,info</p>");
+    expect(renderOverview(<Tabs />, [space("spc_a", ["chat:read"])]).html).toContain(
+      "<p>tools,info</p>",
+    );
   });
 });
 

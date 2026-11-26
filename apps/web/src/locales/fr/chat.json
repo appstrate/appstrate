@@ -272,5 +272,21 @@
   "context.info.modelTurnsFailed_other": "{{model}} · {{count}} tours, dont {{failed}} en échec",
   "context.info.tokens": "Tokens",
   "context.info.tokensReadGenerated": "{{read}} lus · {{generated}} générés",
-  "context.info.tokensScope": "Hors runs lancés depuis la conversation, comptés dans l’onglet Runs."
+  "context.info.tokensScope": "Hors runs lancés depuis la conversation, comptés dans l’onglet Runs.",
+  "context.tabs.tools": "Outils",
+  "context.tools.empty": "L’assistant n’a encore appelé aucun outil dans cette conversation.",
+  "context.tools.noAction": "Aucune action pour l’instant : l’assistant n’a fait que consulter.",
+  "context.tools.showLookups_one": "Afficher la consultation ({{count}})",
+  "context.tools.showLookups_other": "Afficher les consultations ({{count}})",
+  "context.tools.turn": "Tour {{turn}}",
+  "context.tools.lookup": "Consultation",
+  "context.tools.noTarget": "Sans cible",
+  "context.tools.status.running": "En cours",
+  "context.tools.status.success": "Réussi",
+  "context.tools.status.error": "Échec",
+  "context.tools.status.denied": "Refusé",
+  "context.tools.backToList": "Revenir aux outils",
+  "context.tools.showInThread": "Voir dans le fil",
+  "context.tools.notInThread": "Cet appel n’est pas affiché dans le fil.",
+  "context.tools.gone": "Cet appel ne fait plus partie de la conversation."
 }

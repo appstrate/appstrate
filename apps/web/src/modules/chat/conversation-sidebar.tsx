@@ -34,8 +34,10 @@ import { otherSpaceFileContext } from "../../lib/file-link";
 import { localViewableFile } from "../../lib/files";
 import { formatBytes } from "../../lib/format-bytes";
 import { formatDateField, formatRelativeTime } from "../../lib/format-date";
+import { ConversationToolsList, ShownToolCall } from "./conversation-tools-tab";
 import {
   shownFile,
+  shownToolCallId,
   type ConversationSidebarAction,
   type ConversationSidebarState,
   type ConversationSidebarTab,
@@ -533,6 +535,7 @@ function ConversationContext({
   // Read from the state, not the readable tabs: a file the thread opens shows
   // even for a caller whose Files tab is not drawn.
   const previewedFile = shownFile(state);
+  const shownCall = shownToolCallId(state);
 
   if (previewedFile) {
     return (
@@ -591,6 +594,27 @@ function ConversationContext({
                 onSelect={(file) => dispatch({ type: "show-file", file, fromList: true })}
               />
             ) : null}
+            {id === "tools" ? (
+              shownCall ? (
+                <ShownToolCall
+                  key={shownCall}
+                  conversationId={conversationId}
+                  toolCallId={shownCall}
+                  active={active}
+                  onBack={() => dispatch({ type: "close-tool-call" })}
+                  // The phone's sheet covers the thread: it closes to show the card.
+                  onReveal={() => closable && dispatch({ type: "toggle" })}
+                />
+              ) : (
+                <ConversationToolsList
+                  conversationId={conversationId}
+                  active={active}
+                  onSelect={(call) =>
+                    dispatch({ type: "show-tool-call", toolCallId: call.toolCallId })
+                  }
+                />
+              )
+            ) : null}
             {id === "info" ? (
               <ConversationInfo conversationId={conversationId} active={active} />
             ) : null}
@@ -618,7 +642,12 @@ export function ConversationSidebar({
   const panelRef = useRef<HTMLElement>(null);
   const [dragging, setDragging] = useState(false);
   const { activeTab } = useConversationTabs(state.activeTab);
-  const view: PanelView = shownFile(state) ? "file" : activeTab.id === "info" ? "info" : "list";
+  // A tool call's detail reads like the details: input and output take a little more than a list.
+  const view: PanelView = shownFile(state)
+    ? "file"
+    : activeTab.id === "info" || shownToolCallId(state)
+      ? "info"
+      : "list";
   const size = usePanelWidth(panelRef, view);
 
   // Desktop: the panel floats over the thread's right side, inside the conversation. The thread
