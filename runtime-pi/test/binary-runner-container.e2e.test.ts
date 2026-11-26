@@ -90,7 +90,6 @@ function spec(): IntegrationSpawnSpec {
   return {
     integrationId: INTEG_ID,
     namespace: NAMESPACE,
-    connection: { id: "conn-binary", label: "probe", accountId: null },
     sourceKind: "local",
     manifest: {
       name: INTEG_ID,

@@ -220,7 +220,11 @@ export async function makeBundleEntryExecutable(
   entryPoint: string,
 ): Promise<void> {
   const abs = resolveBundleEntry(bundleRoot, entryPoint);
-  const st = await lstat(abs).catch(() => null);
+  const st = await lstat(abs).catch((err: unknown) => {
+    const code = (err as NodeJS.ErrnoException | null)?.code;
+    if (code === "ENOENT" || code === "ENOTDIR") return null;
+    throw err;
+  });
   if (!st?.isFile()) {
     throw new Error(`integration entryPoint "${entryPoint}" is not a regular file in the bundle`);
   }

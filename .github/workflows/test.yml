@@ -413,8 +413,9 @@ jobs:
     #      (`binary-runner-container.e2e.test.ts`, #2383): a native entry
     #      bundled 0644 must be executable once `docker cp`'d into the runner.
     #
-    # Hence both images are built here, from the same checkout: a pair is only
-    # comparable when both halves come from the code under test. Same
+    # Hence the pi + sidecar pair is built here from the same checkout (a pair
+    # is only comparable when both halves come from the code under test), plus
+    # the binary runner image the docker integration adapter spawns. Same
     # label-OR-main policy as the other heavy jobs (opt-in pre-merge via the
     # `e2e` label, always post-merge on main).
     if: contains(github.event.pull_request.labels.*.name, 'e2e') || github.ref == 'refs/heads/main'
