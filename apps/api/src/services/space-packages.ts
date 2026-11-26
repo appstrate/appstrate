@@ -571,14 +571,10 @@ export function activeSpaceIds() {
 }
 
 /**
- * ORDER BY for the active-package reads: {@link listActivePackages} (the agent
- * index, the integration resolver), {@link listServedSkillPlacements} and
- * `listActivePackageHints`. By id alone: no provenance ranks ahead of another,
- * so a model reading any of them is handed no preference, and an index and the
- * hints for it list the same set in the same order.
- *
- * A total order, since Postgres does not order rows within an equal sort key:
- * two identical get_me calls answer the same list, which the prompt cache needs.
+ * ORDER BY of the active-package reads, by package id alone: no provenance ranks
+ * first, so a model reading any of them is handed no preference. Shared by
+ * {@link listActivePackages}, {@link listServedSkillPlacements} and
+ * `listActivePackageHints`.
  */
 function packageListingOrder() {
   return [packages.id];
@@ -692,16 +688,6 @@ export function isPublished(row: { source: string | null; latestVersionId: numbe
 const DEFAULT_PACKAGE_HINT_LIMIT = 15;
 
 /**
- * The one shape of a capped get_me list: whole, or withheld. A list past `limit`
- * keeps none of its entries, since any subset would rank some above the rest;
- * `total` and `truncated` send the reader to `search`.
- */
-function hintList<T>(entries: T[], total: number, limit: number) {
-  const truncated = total > limit;
-  return { entries: truncated ? [] : entries, truncated, total };
-}
-
-/**
  * Options every hint listing takes. `homeWritable` is a callback rather than a
  * context because the rule that answers it (`homeWireForCaller`) needs the Hono
  * request — the caller's role in the package's home space, its view-as persona,
@@ -723,13 +709,13 @@ interface HintOptions {
  * bounded hint for the get_me caller context. "Could use" is
  * {@link activePackagesFilter}, the activation half of the run gate: a system
  * package, or a placement row that says `enabled`. Past `limit` the list is
- * withheld ({@link hintList}): the catalog stays reachable via `search`.
+ * withheld whole, since any subset would rank some entries above the rest:
+ * `total` and `truncated` send the reader to `search`.
  *
  * Bounded IN SQL. One get_me call runs it twice (agents, then skills): the
- * activation filter and the LIMIT sit in the query, so at most `limit` rows'
- * manifests (`draft_manifest` JSONB) cross the wire, and `total` rides along as
- * a window count over the filtered set (evaluated before the LIMIT, so it is
- * the size of the whole catalog, not of the page).
+ * activation filter and the LIMIT sit in the query, `total` rides along as a
+ * window count over the filtered set (evaluated before the LIMIT), and the
+ * manifests (`draft_manifest` JSONB) are only selected when the set fits `limit`.
  *
  * The base hint (id/name/description/source) is uniform across package types;
  * `project` layers on the type-specific extras from the manifest. Access gating
@@ -755,7 +741,7 @@ async function listActivePackageHints<T extends PackageHint>(
       type: packages.type,
       source: packages.source,
       homeSpaceId: packages.homeSpaceId,
-      draftManifest: packages.draftManifest,
+      draftManifest: sql<unknown>`CASE WHEN count(*) OVER () <= ${limit} THEN ${packages.draftManifest} END`,
       // `latest` dist-tag version id — non-null iff the package has a published
       // version. Lets `published` below be answered without an N+1 (a draft-only
       // agent must be run with `version=draft`).
@@ -769,7 +755,9 @@ async function listActivePackageHints<T extends PackageHint>(
     .orderBy(...packageListingOrder())
     .limit(limit);
 
-  const { entries: kept, truncated, total } = hintList(rows, rows[0]?.total ?? 0, limit);
+  const total = rows[0]?.total ?? 0;
+  const truncated = total > limit;
+  const kept = truncated ? [] : rows;
 
   const items = kept.map((row) => {
     const manifest = asRecord(row.draftManifest) as Record<string, unknown>;

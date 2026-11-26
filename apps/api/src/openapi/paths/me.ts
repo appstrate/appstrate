@@ -997,8 +997,9 @@ export const mePaths = {
                       "Agents ACTIVE in the current space, ordered by id, each with the required " +
                       "integrations that keep it from launching here. Only " +
                       "present when the caller holds the `agents:run` permission; empty otherwise. " +
-                      "Listed whole or not at all: empty when `agents_truncated` is true, the " +
-                      "agents then reachable via `search` or the `listAgents` operation.",
+                      "Listed whole or not at all: past 15 agents the list is empty, " +
+                      "`agents_truncated` is true, and the agents are reachable via the " +
+                      "`listAgents` operation (the MCP `search` tool finds them by keyword).",
                     items: {
                       type: "object",
                       required: [
@@ -1059,9 +1060,9 @@ export const mePaths = {
                       "Skills the caller could attach to an agent in the current space, " +
                       "ordered by id. A catalogue read, not a runnable hint: only present when the " +
                       "caller holds the `skills:read` permission; empty otherwise. Skills are not run directly — declare them under an agent " +
-                      "manifest's `dependencies.skills`. Listed whole or not at all: empty when " +
-                      "`skills_truncated` is true, the skills then reachable via `search` or the " +
-                      "`listSkills` operation.",
+                      "manifest's `dependencies.skills`. Listed whole or not at all: past 15 skills the " +
+                      "list is empty, `skills_truncated` is true, and the skills are reachable via the " +
+                      "`listSkills` operation (the MCP `search` tool finds them by keyword).",
                     items: {
                       type: "object",
                       required: [

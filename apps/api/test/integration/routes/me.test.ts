@@ -759,8 +759,8 @@ describe("Me API (/api/me)", () => {
     });
 
     it("lists agents and skills whole by id, or withholds them past the cap", async () => {
-      // A system agent sorts by its id, not ahead of the org's own.
-      await seedPackage({ id: "@asys/agent", orgId: null, source: "system" });
+      // A system agent sorts by its id (last here), not ahead of the org's own.
+      await seedPackage({ id: "@zsys/agent", orgId: null, source: "system" });
       const seedActive = async (id: string, type: "agent" | "skill") => {
         await seedPackage({ id, orgId: ctx.orgId, type, homeSpaceId: ctx.defaultSpaceId });
         await seedSpacePackage(ctx.defaultSpaceId, id);
@@ -777,7 +777,7 @@ describe("Me API (/api/me)", () => {
         };
 
       const whole = await read();
-      expect(whole.agents.map((a) => a.packageId)).toEqual(["@asys/agent", "@ctx/a", "@ctx/b"]);
+      expect(whole.agents.map((a) => a.packageId)).toEqual(["@ctx/a", "@ctx/b", "@zsys/agent"]);
 
       // 15 is the cap: 16 active agents and 16 active skills list none of theirs.
       for (let i = 0; i < 13; i++) await seedActive(`@ctx/agent-${i}`, "agent");
