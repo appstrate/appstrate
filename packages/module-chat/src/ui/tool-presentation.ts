@@ -112,3 +112,9 @@ export function toolPresentation(toolName: string, input: unknown): ToolPresenta
       return { Icon: WrenchIcon, label: toolName };
   }
 }
+
+/** A card's icon, label and target (`idText`), as the context panel names the same call. */
+export function presented(call: { toolName: string; args: unknown }) {
+  const { Icon, labelKey, label, target } = toolPresentation(call.toolName, call.args);
+  return { Icon, labelKey, label, idText: target };
+}

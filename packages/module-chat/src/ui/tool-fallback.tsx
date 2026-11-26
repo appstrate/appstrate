@@ -7,7 +7,8 @@
  */
 
 import type { ToolCallMessagePartComponent } from "@assistant-ui/react";
-import { presented, ToolCallCard } from "./tool-uis.tsx";
+import { ToolCallCard } from "./tool-uis.tsx";
+import { presented } from "./tool-presentation.ts";
 import { callSpaceOf } from "./conversation-scope.ts";
 import { deriveToolPhase } from "./tool-result.ts";
 

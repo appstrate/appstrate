@@ -54,7 +54,7 @@ import {
   type CreatedPackage,
 } from "./package-created.ts";
 import { unwrapMcpResult } from "@appstrate/core/mcp-result";
-import { operationPresentation, toolPresentation } from "./tool-presentation.ts";
+import { operationPresentation, presented } from "./tool-presentation.ts";
 import {
   definedEntries,
   deriveToolPhase,
@@ -473,12 +473,6 @@ export const ImportPackageFileToolUI = makeAssistantToolUI<Record<string, unknow
     );
   },
 });
-
-/** The card's icon, label and target, as the context panel names the same call. */
-export function presented(props: AnyToolProps) {
-  const { Icon, labelKey, label, target } = toolPresentation(props.toolName, props.args);
-  return { Icon, labelKey, label, idText: target };
-}
 
 export const SearchToolUI = makeAssistantToolUI<Record<string, unknown>, unknown>({
   toolName: "search",
