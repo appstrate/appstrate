@@ -1,10 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * How a client shows one MCP tool call: what it did and to what. The platform stamps it on every
- * tool result under `_meta["dev.appstrate/presentation"]`, from what only the server knows (the
- * operation's OpenAPI method and tag, the integration behind a proxied tool), so a client never
- * guesses from a tool name or an id.
+ * How a client shows one MCP tool call: what it did and to what. The platform's MCP server stamps
+ * it on every result of its tools under `_meta["dev.appstrate/presentation"]`, from what only the
+ * server knows (the operation's OpenAPI method and tag, the integration behind a proxied tool), so
+ * a client never guesses from a tool name or an id. Display data only: a result's `content` is
+ * unchanged, and a client that forwards `_meta` to a model forwards this too.
  */
 
 import { z } from "zod";
@@ -16,7 +17,7 @@ const presentationSubjectSchema = z.object({
   /** Package id (`@scope/name`), or the user's id. */
   id: z.string().min(1),
   display_name: z.string().min(1).optional(),
-  /** An integration's manifest icon. */
+  /** An integration's manifest icon: an Iconify id or an image URL. */
   icon: z.string().min(1).optional(),
 });
 
@@ -27,13 +28,17 @@ export type PresentationSubject = z.infer<typeof presentationSubjectSchema>;
 export const MAX_PRESENTED_ITEMS = 8;
 
 export const toolPresentationSchema = z.object({
-  /** What the call does, as its source names it (OpenAPI `summary`, the server's tool title). */
+  /**
+   * What the call does, a fixed label, never the call's arguments: the tool's title (else its
+   * name), an operation's OpenAPI `summary`, a third-party server's title for its tool.
+   */
   title: z.string().min(1),
-  /** `invoke_operation`: the operation's first OpenAPI tag and its HTTP method. */
+  /** `invoke_operation`: the operation's first OpenAPI tag. */
   tag: z.string().min(1).optional(),
+  /** The HTTP method: an operation's, or an integration `api_call` request's (none for a batch). */
   method: z.string().min(1).optional(),
   subject: presentationSubjectSchema.optional(),
-  /** `search`: how many items it found, and the distinct subjects of the first ones shown. */
+  /** `search`: how many items it found, and the distinct subjects its first shown items name. */
   count: z.number().int().nonnegative().optional(),
   items: z.array(presentationSubjectSchema).max(MAX_PRESENTED_ITEMS).optional(),
 });

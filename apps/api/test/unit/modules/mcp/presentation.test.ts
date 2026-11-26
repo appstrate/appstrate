@@ -15,9 +15,9 @@ import {
   TOOL_LOOKUP_META_KEY,
   TOOL_PRESENTATION_META_KEY,
 } from "@appstrate/core/mcp-presentation";
-import { getCatalog } from "../../catalog.ts";
-import { descriptorPresentation, presentTools, withPresentation } from "../../presentation.ts";
-import { registerTestPlatformApp } from "../../../../../test/helpers/platform-app.ts";
+import { getCatalog } from "../../../../src/modules/mcp/catalog.ts";
+import { presentTools, withPresentation } from "../../../../src/modules/mcp/presentation.ts";
+import { registerTestPlatformApp } from "../../../helpers/platform-app.ts";
 
 // The catalog reads the platform app's operations.
 await registerTestPlatformApp();
@@ -39,20 +39,17 @@ async function call(definition: AppstrateToolDefinition, args: Record<string, un
   return { result, presentation: readToolPresentation(result._meta) };
 }
 
-describe("descriptorPresentation", () => {
-  it("names a tool as MCP does: title, then annotations.title, then name", () => {
-    const base = { name: "list_files", inputSchema: { type: "object" as const } };
-    expect(descriptorPresentation(base)).toEqual({ title: "list_files" });
-    expect(descriptorPresentation({ ...base, annotations: { title: "List" } })).toEqual({
-      title: "List",
-    });
-    expect(
-      descriptorPresentation({ ...base, title: "List files", annotations: { title: "List" } }),
-    ).toEqual({ title: "List files" });
-  });
-});
-
 describe("presentTools", () => {
+  it("names a call nothing describes as MCP names its tool: title, then annotations.title, then name", async () => {
+    const titled = async (descriptor: Partial<Tool>) =>
+      (await call(tool({ name: "list_files", ...descriptor }, text({})))).presentation;
+    expect(await titled({})).toEqual({ title: "list_files" });
+    expect(await titled({ annotations: { title: "List" } })).toEqual({ title: "List" });
+    expect(await titled({ title: "List files", annotations: { title: "List" } })).toEqual({
+      title: "List files",
+    });
+  });
+
   it("stamps the descriptor's presentation on a result nothing describes", async () => {
     const { result, presentation } = await call(
       tool({ name: "read", annotations: { title: "Read resource", readOnlyHint: true } }, text({})),
@@ -97,6 +94,41 @@ describe("presentTools", () => {
       });
       expect(presentation?.subject).toEqual({ kind, id: "@acme/triage" });
     }
+  });
+
+  it("names the agent a run's or a schedule's operation is under, whatever its tag", async () => {
+    const cases = [
+      ["runAgent", "Runs"],
+      ["createSchedule", "Schedules"],
+    ] as const;
+    for (const [operationId, tag] of cases) {
+      const { presentation } = await call(tool({ name: "invoke_operation" }, text({})), {
+        operation_id: operationId,
+        path_params: { scope: "@acme", name: "triage" },
+      });
+      expect(presentation).toMatchObject({ tag, subject: { kind: "agent", id: "@acme/triage" } });
+    }
+  });
+
+  it("takes the id from the parameter after the kind's segment, whatever its name", async () => {
+    const op = [...getCatalog().operations.values()].find(
+      (candidate) =>
+        candidate.pathTemplate ===
+        "/api/me/integration-pins/{agentPackageId}/integrations/{integrationPackageId}",
+    )!;
+    const { presentation } = await call(tool({ name: "invoke_operation" }, text({})), {
+      operation_id: op.operationId,
+      path_params: { agentPackageId: "@acme/triage", integrationPackageId: "@acme/gmail" },
+    });
+    expect(presentation?.subject).toEqual({ kind: "integration", id: "@acme/gmail" });
+  });
+
+  it("names no subject when the arguments leave the package's id out", async () => {
+    const { presentation } = await call(tool({ name: "invoke_operation" }, text({})), {
+      operation_id: "runAgent",
+      path_params: { scope: "acme" },
+    });
+    expect(presentation?.subject).toBeUndefined();
   });
 
   it("names no subject for a path that targets no package", async () => {
@@ -173,7 +205,7 @@ describe("operation tags ↔ chat locales", () => {
   for (const lang of ["fr", "en"]) {
     it(`gives every tag a sentence in ${lang}, and no tag that is gone`, async () => {
       const locale = (await Bun.file(
-        new URL(`../../../../../../web/src/locales/${lang}/chat.json`, import.meta.url),
+        new URL(`../../../../../web/src/locales/${lang}/chat.json`, import.meta.url),
       ).json()) as Record<string, string>;
       const keyed = Object.keys(locale)
         .filter((key) => key.startsWith("tool.tag."))

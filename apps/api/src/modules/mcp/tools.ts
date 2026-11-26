@@ -610,6 +610,9 @@ function discoveryHints(
     : { annotations: { title, readOnlyHint: true, idempotentHint: true, openWorldHint: false } };
 }
 
+/** `search`'s title, on its descriptor and its results: a label, never the caller's query. */
+const SEARCH_TITLE = "Search";
+
 function buildSearchTool(
   ctx: McpToolContext,
   surface: McpSurface,
@@ -631,7 +634,7 @@ function buildSearchTool(
       "role may not invoke are listed apart under `denied`, with the permissions they need: " +
       "report that to the user instead of trying them." +
       (kinds.includes("integration_tool") ? INTEGRATION_TOOLS_DESCRIPTION : ""),
-    ...discoveryHints("Search", kinds),
+    ...discoveryHints(SEARCH_TITLE, kinds),
     inputSchema: {
       type: "object",
       additionalProperties: false,
@@ -711,7 +714,8 @@ function buildSearchTool(
     let found = 0;
     let denied: number | undefined;
     const searched = new Set<string>();
-    const subjects: PresentationSubject[] = [];
+    // Each entity once: a skill placed in several spaces is an item per space.
+    const subjects = new Map<string, PresentationSubject>();
     for (const { kind, named, outcome } of outcomes) {
       if ("refused" in outcome) {
         if (named) return refusalResult(outcome.refused);
@@ -720,7 +724,10 @@ function buildSearchTool(
       sections[KINDS[kind].section] = outcome.section;
       shown += Array.isArray(outcome.section.items) ? outcome.section.items.length : 0;
       if (typeof outcome.section.total === "number") found += outcome.section.total;
-      subjects.push(...(outcome.subjects ?? []));
+      for (const subject of outcome.subjects ?? []) {
+        const key = `${subject.kind} ${subject.id}`;
+        if (!subjects.has(key)) subjects.set(key, subject);
+      }
       denied = outcome.denied ?? denied;
       for (const id of outcome.searched ?? []) searched.add(id);
     }
@@ -739,9 +746,9 @@ function buildSearchTool(
         ...(readSpaceIds.length > 0 ? { searched_spaces: readSpaceIds } : {}),
       }),
       {
-        title: typeof args.query === "string" && args.query ? args.query : "Search",
+        title: SEARCH_TITLE,
         count: found,
-        items: subjects.slice(0, MAX_PRESENTED_ITEMS),
+        items: [...subjects.values()].slice(0, MAX_PRESENTED_ITEMS),
       },
     );
   };

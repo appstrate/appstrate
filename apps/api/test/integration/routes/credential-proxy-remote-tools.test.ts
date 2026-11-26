@@ -75,8 +75,13 @@ beforeAll(() => {
   restoreEgress = allowLoopbackOAuthEgress();
   server = startFakeMcpServer({
     tools: [
-      { name: "search", description: "Full-text search." },
-      "create",
+      { name: "search", title: "Se\u200Barch documents", description: "Full-text search." },
+      // A display name in `annotations.title` alone, hidden Unicode in it.
+      {
+        name: "create",
+        description: "Tool create",
+        annotations: { title: " Create a\u200B document\u202E " },
+      },
       "delete",
       "undeclared",
       {
@@ -215,6 +220,12 @@ describe("the typed tools of a remote MCP integration", () => {
       ["acme_docs__forge", "forge"],
     ]);
     expect(tools[0]).toMatchObject({ description: `${ID}. Full-text search.` });
+    // The server's display name, sanitised: `title`, else `annotations.title`, else none.
+    expect(tools.map((tool) => tool.title)).toEqual([
+      "Search documents",
+      "Create a document",
+      undefined,
+    ]);
     expect(tools.some((tool) => tool.catalog_unreadable)).toBe(false);
     expect(server.requests.every((r) => r.headers.get("authorization") === `Bearer ${TOKEN}`)).toBe(
       true,

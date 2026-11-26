@@ -297,6 +297,7 @@ function reachedBy<C extends { connection_id: string; scopes_granted: string[] }
 /**
  * The integration tools section of a search, ranked by `tokens`, the remote catalogs read from the
  * cache alone when `cachedOnly`; one read per space (one for a pinned connection), concurrently.
+ * `subjects`: the integrations of the tools shown, each once, for the call's presentation.
  */
 export async function searchIntegrationTools(
   spaces: readonly McpSpace[] | undefined,
@@ -429,7 +430,10 @@ function integrationSubjects(
   });
 }
 
-/** How a call of `tool` is shown: its integration, and the server's title for it or the request's method. */
+/**
+ * How a call of `tool` is shown, with its integration as subject: a typed tool by its server's
+ * title (else its name there), an `api_call` as `API call` with the request's method.
+ */
 function toolCallPresentation(
   read: CallableListing,
   tool: CallableTool,

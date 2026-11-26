@@ -5,12 +5,17 @@
  * draws one. Inline `data:` SVG: a client fetches nothing, and the server reveals no URL. One per
  * theme, the stroke contrasting with its background.
  *
- * The shapes are Lucide's (ISC licence, https://lucide.dev), the set the dashboard uses.
+ * The shapes are Lucide's (ISC licence, https://lucide.dev), the icon set of the dashboard, which
+ * picks its own glyph per tool in its chat: the two need not match.
+ *
+ * Keyed by {@link McpToolName}, so a tool renamed or added without its icon fails to typecheck
+ * (the union is held to the declared tools by the `mcp catalog` unit test).
  */
 
 import type { Tool } from "@modelcontextprotocol/sdk/types.js";
+import type { McpToolName } from "./tools.ts";
 
-const SHAPES: Partial<Record<string, string>> = {
+const SHAPES = {
   search: '<path d="m21 21-4.34-4.34"/><circle cx="11" cy="11" r="8"/>',
   describe:
     '<path d="M12 5v16"/><path d="M20.001 19A2 2 0 0022 17V5a2 2 0 00-1.999-2L16 3.002A5 5 0 0012 5a5 5 0 00-4-2H4a2 2 0 00-2 2v12a2 2 0 001.999 2H8a5 5 0 014 2 5 5 0 014-2z"/>',
@@ -31,17 +36,17 @@ const SHAPES: Partial<Record<string, string>> = {
     '<path d="M6 22a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h8a2.4 2.4 0 0 1 1.704.706l3.588 3.588A2.4 2.4 0 0 1 20 8v12a2 2 0 0 1-2 2z"/><path d="M14 2v5a1 1 0 0 0 1 1h5"/><path d="m9 15 2 2 4-4"/>',
   get_runtime_capabilities:
     '<path d="M12 20v2"/><path d="M12 2v2"/><path d="M17 20v2"/><path d="M17 2v2"/><path d="M2 12h2"/><path d="M2 17h2"/><path d="M2 7h2"/><path d="M20 12h2"/><path d="M20 17h2"/><path d="M20 7h2"/><path d="M7 20v2"/><path d="M7 2v2"/><rect x="4" y="4" width="16" height="16" rx="2"/><rect x="8" y="8" width="8" height="8" rx="1"/>',
-};
+} satisfies Record<McpToolName, string>;
 
 function svgDataUri(shape: string, stroke: string): string {
   const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="${stroke}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${shape}</svg>`;
   return `data:image/svg+xml;base64,${btoa(svg)}`;
 }
 
-/** The icons of a platform tool, by name; `undefined` for a tool with none. */
+/** The icons of a platform tool, by name; `undefined` for a name no platform tool has. */
 export function toolIcons(name: string): Tool["icons"] {
-  const shape = SHAPES[name];
-  if (!shape) return undefined;
+  if (!Object.hasOwn(SHAPES, name)) return undefined;
+  const shape = SHAPES[name as McpToolName];
   return [
     {
       src: svgDataUri(shape, "#18181b"),

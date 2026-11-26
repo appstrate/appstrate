@@ -288,7 +288,8 @@ const INPUT_SCHEMA_WITHHELD_NOTE =
 /**
  * Sanitise a single MCP {@link Tool} descriptor. Returns a fresh copy —
  * never mutates the input — with all known injection vectors stripped
- * and length caps enforced.
+ * and length caps enforced. Its display names, `title` and `annotations.title`,
+ * are bounded like a parameter description.
  *
  * The sanitised `inputSchema` and `outputSchema` share a budget of
  * {@link MAX_SCHEMA_SERIALISED_BYTES}. A descriptor over it is degraded, never
@@ -351,8 +352,15 @@ export function sanitiseToolDescriptor(tool: Tool): {
     ...(description !== undefined ? { description } : {}),
     ...(sanitisedMeta !== undefined ? { _meta: sanitisedMeta } : {}),
   };
+  // A display name, either of them: a client shows `title`, else `annotations.title`.
   if (typeof tool.title === "string") {
     out.title = sanitiseTextField(tool.title, MAX_PARAMETER_DESCRIPTION_BYTES);
+  }
+  if (typeof tool.annotations?.title === "string") {
+    out.annotations = {
+      ...tool.annotations,
+      title: sanitiseTextField(tool.annotations.title, MAX_PARAMETER_DESCRIPTION_BYTES),
+    };
   }
   return { tool: out, reduced };
 }

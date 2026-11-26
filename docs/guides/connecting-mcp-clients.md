@@ -578,11 +578,15 @@ role. Runs keep their connections there:
   within 45 s `upstream_timeout` (the tool may have run), the server refusing
   the connection's credential `upstream_credential_rejected` (`upstream_status`,
   and `credential.status` `needs_reconnection` when the connection is now
-  flagged for its owner to reconnect), any other server fault `bad_gateway`. The
-  server's tool annotations are not relayed: `call_integration_tool` stays
-  annotated destructive and open-world; `search` and `describe` are annotated
-  open-world and not read-only wherever they declare the `integration_tool`
-  kind, read-only otherwise.
+  flagged for its owner to reconnect), any other server fault `bad_gateway`. Of
+  the server's tool annotations only its display name is relayed: `title`, else
+  `annotations.title`, with hidden Unicode and control characters stripped and
+  cut at 512 bytes, as the listing's `title` and a call's presentation title
+  (see "Showing a call" below). Its behaviour hints (`readOnlyHint`,
+  `destructiveHint`, …) are not: `call_integration_tool` stays annotated
+  destructive and open-world; `search` and `describe` are annotated open-world
+  and not read-only wherever they declare the `integration_tool` kind,
+  read-only otherwise.
 - **Rate limit.** Each route has its own bucket, at the proxy's per-minute
   rate: a search counts one request against `GET /api/credential-proxy/tools`;
   a call counts one there too (it resolves the tool by name), then each request
@@ -682,3 +686,33 @@ declares a non-empty `output.schema`.
 Streaming/SSE operations (live logs, realtime) cannot be called through
 `invoke_operation` — use `run_and_wait`, fetch logs, or poll instead. Nor can
 the credential proxy: use `call_integration_tool`.
+
+### Showing a call
+
+Display data for a client that draws tool calls. None of it changes a
+result's `content`; the schema is `toolPresentationSchema` in
+`@appstrate/core/mcp-presentation`, read with `readToolPresentation`.
+
+- **Icons.** Every tool in `tools/list` carries `icons` (MCP `Tool.icons`): two
+  inline `data:image/svg+xml` icons, `theme: "light"` and `theme: "dark"`.
+  Nothing is fetched.
+- **Lookups.** `search` and `describe` declaring the `integration_tool` kind
+  withhold `readOnlyHint` (they may read a third-party catalog) and carry
+  `_meta["dev.appstrate/lookup"]: true` instead: their calls only look things
+  up. `isLookupTool` reads either.
+- **Presentation.** Every result carries
+  `_meta["dev.appstrate/presentation"]`:
+  - `title`: a fixed label, never the call's arguments: the tool's title, an
+    operation's OpenAPI `summary` (`invoke_operation`), a remote server's title
+    for its tool, else its name, or `API call` for an `{ns}__api_call`
+    (`call_integration_tool`);
+  - `tag`: an operation's first OpenAPI tag; `method`: its HTTP method, or the
+    method of an `{ns}__api_call` request (none for a batch);
+  - `subject` (`{ kind, id, display_name?, icon? }`, `kind` one of `agent`,
+    `skill`, `integration`, `user`): the package an operation's path names by
+    its `agents`, `skills` or `integrations` segment (so a run or schedule
+    operation under `/api/agents/{scope}/{name}` names that agent), the
+    integration `call_integration_tool` reached, its refusal of the arguments
+    included, the caller `get_me` answered for;
+  - `count` and `items` (`search`): how many items it found, and at most 8
+    distinct agents, skills and integrations its first items name.

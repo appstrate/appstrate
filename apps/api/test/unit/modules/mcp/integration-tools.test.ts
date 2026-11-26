@@ -27,6 +27,7 @@ import { isValidSessionId } from "../../../../src/services/credential-proxy/sess
 import {
   _setBatchDeadlineForTesting,
   executeApiCall,
+  MAX_RESULT_BYTES,
 } from "../../../../src/modules/mcp/api-call-batch.ts";
 import { registerTestPlatformApp } from "../../../helpers/platform-app.ts";
 import { noExtra, parseResult, toolsFor } from "./helpers.ts";
@@ -1731,6 +1732,24 @@ describe("call_integration_tool — a result past the budget", () => {
       .byName.get("call_integration_tool")!
       .handler({ tool: "acme_docs__search", arguments: {} }, noExtra);
   const jsonBytes = (value: unknown) => new TextEncoder().encode(JSON.stringify(value)).byteLength;
+
+  it("bounds a result that fits alone but not with its presentation stamp", async () => {
+    const frame = jsonBytes({ result: { content: [{ type: "text", text: "" }] } });
+    const upstream = {
+      content: [{ type: "text", text: "a".repeat(MAX_RESULT_BYTES - frame - 8) }],
+    };
+    // The server's answer is within the budget; the stamp the platform adds is what crosses it.
+    expect(jsonBytes({ result: upstream })).toBeLessThanOrEqual(MAX_RESULT_BYTES);
+    const result = await relayedResult(upstream);
+    expect(result._meta).toEqual({
+      "dev.appstrate/truncated": true,
+      "dev.appstrate/relayed": true,
+      ...SEARCH_STAMP,
+    });
+    expect(jsonBytes(result)).toBeLessThanOrEqual(MAX_RESULT_BYTES);
+    const [cut] = (result.content as Array<{ text: string }>).map((block) => block.text);
+    expect(cut).toContain("\n[cut: ");
+  });
 
   it("cuts a text block to its text alone, dropping the fields that made it too large", async () => {
     const result = await relayedResult({

@@ -15,8 +15,6 @@ import {
   stripReservedResultMeta,
   type AppstrateMcpClient,
   type ToolDescriptorReduction,
-  MAX_PARAMETER_DESCRIPTION_BYTES,
-  sanitiseTextField,
 } from "@appstrate/mcp-transport";
 import { createCache } from "@appstrate/core/cache";
 import { getErrorMessage } from "@appstrate/core/errors";
@@ -410,10 +408,13 @@ export async function listRemoteTools(
   };
 }
 
-/** The server's display name for a tool (MCP: `title`, else `annotations.title`), sanitised. */
+/**
+ * The server's display name for a tool (MCP: `title`, else `annotations.title`), from a
+ * descriptor `sanitiseToolDescriptor` already sanitised: a blank one names nothing.
+ */
 function serverTitle(tool: Tool): Pick<ServerTool, "title"> {
   const title = [tool.title, tool.annotations?.title]
-    .map((candidate) => sanitiseTextField(candidate, MAX_PARAMETER_DESCRIPTION_BYTES)?.trim())
+    .map((candidate) => candidate?.trim())
     .find(Boolean);
   return title ? { title } : {};
 }
