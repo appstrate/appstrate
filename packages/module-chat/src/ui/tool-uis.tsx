@@ -20,19 +20,7 @@
 
 import * as React from "react";
 import { makeAssistantToolUI, type ToolCallMessagePartProps } from "@assistant-ui/react";
-import {
-  ArrowUpRightIcon,
-  BookOpenIcon,
-  BracesIcon,
-  PencilIcon,
-  PlayIcon,
-  PlusIcon,
-  SearchIcon,
-  Trash2Icon,
-  UploadIcon,
-  ZapIcon,
-  type LucideIcon,
-} from "lucide-react";
+import { ArrowUpRightIcon, BracesIcon, PlayIcon, type LucideIcon } from "lucide-react";
 import { formatDuration } from "@appstrate/core/format";
 import { Button } from "@appstrate/ui/components/button";
 import { Spinner } from "@appstrate/ui/components/spinner";
@@ -66,6 +54,7 @@ import {
   type CreatedPackage,
 } from "./package-created.ts";
 import { unwrapMcpResult } from "@appstrate/core/mcp-result";
+import { operationPresentation, toolPresentation } from "./tool-presentation.ts";
 import {
   definedEntries,
   deriveToolPhase,
@@ -81,17 +70,6 @@ import {
  * card (button + auto-resume on completion — see oauth-connect-card).
  */
 const INITIATE_CONNECT_OP = "initiateIntegrationConnect";
-
-// Readable label + icon for an Appstrate API operation, by verb prefix — a
-// heuristic, not an exhaustive operationId map (which would rot). The first
-// match wins; unmatched ops fall back to the neutral `tool.op.other`.
-const OP_RULES: { re: RegExp; labelKey: string; Icon: LucideIcon }[] = [
-  { re: /^(run|trigger|execute|start)/i, labelKey: "tool.op.launch", Icon: PlayIcon },
-  { re: /^(create|post|add|import|upload)/i, labelKey: "tool.op.create", Icon: PlusIcon },
-  { re: /^(update|patch|put|set|rename|configure)/i, labelKey: "tool.op.update", Icon: PencilIcon },
-  { re: /^(delete|remove|cancel|archive)/i, labelKey: "tool.op.delete", Icon: Trash2Icon },
-  { re: /^(list|get|search|find|read)/i, labelKey: "tool.op.read", Icon: SearchIcon },
-];
 
 // assistant-stream ToolCallTiming = { startedAt, completedAt? } (epoch ms;
 // completedAt absent while running).
@@ -222,7 +200,10 @@ export function ToolCallCard({
 
   const border = phase === "error" ? "border-destructive/40" : "";
   return (
-    <div className={`bg-card text-card-foreground my-3 w-full rounded-lg border ${border}`}>
+    <div
+      data-tool-call-id={toolCallId}
+      className={`bg-card text-card-foreground my-3 w-full rounded-lg border ${border}`}
+    >
       {/* Fixed h-9 header row: the HTTP badge (taller than the text line) and
           the duration appear when the result lands — a py-based row would grow
           by a few px at that moment. Fixed height makes result arrival a 0px
@@ -345,6 +326,7 @@ function RunLaunchCard(props: AnyToolProps): React.ReactNode {
   const spaceId = callSpaceOf(props);
   return (
     <ChatRunProgressCard
+      toolCallId={props.toolCallId}
       runId={runId}
       initialStatus={extractRunStatus(props.result)}
       agentLabel={agentLabel}
@@ -405,10 +387,7 @@ export const InvokeOperationToolUI = makeAssistantToolUI<
       return <RunLaunchCard {...props} />;
     }
 
-    const rule = OP_RULES.find((r) => r.re.test(opId)) ?? {
-      Icon: ZapIcon,
-      labelKey: "tool.op.other",
-    };
+    const rule = operationPresentation(opId);
     const spaceId = callSpaceOf(props);
     const created =
       phase === "success" ? packageCreatedByOperation(opId, unwrapMcpResult(result)) : null;
@@ -478,9 +457,7 @@ export const ImportPackageFileToolUI = makeAssistantToolUI<Record<string, unknow
     return (
       <ToolCallCard
         phase={phase}
-        Icon={UploadIcon}
-        labelKey="tool.importPackageFile"
-        idText={stringArg(props.args, "file_uri")}
+        {...presented(props)}
         args={props.args}
         result={props.result}
         isError={props.isError}
@@ -497,9 +474,10 @@ export const ImportPackageFileToolUI = makeAssistantToolUI<Record<string, unknow
   },
 });
 
-function stringArg(args: Record<string, unknown> | undefined, key: string): string | undefined {
-  const v = args?.[key];
-  return typeof v === "string" && v ? v : undefined;
+/** The card's icon, label and target, as the context panel names the same call. */
+export function presented(props: AnyToolProps) {
+  const { Icon, labelKey, label, target } = toolPresentation(props.toolName, props.args);
+  return { Icon, labelKey, label, idText: target };
 }
 
 export const SearchToolUI = makeAssistantToolUI<Record<string, unknown>, unknown>({
@@ -507,9 +485,7 @@ export const SearchToolUI = makeAssistantToolUI<Record<string, unknown>, unknown
   render: (props: AnyToolProps) => (
     <ToolCallCard
       phase={deriveToolPhase(props)}
-      Icon={SearchIcon}
-      labelKey="tool.search"
-      idText={stringArg(props.args, "query")}
+      {...presented(props)}
       args={props.args}
       result={props.result}
       isError={props.isError}
@@ -525,9 +501,7 @@ export const DescribeToolUI = makeAssistantToolUI<Record<string, unknown>, unkno
   render: (props: AnyToolProps) => (
     <ToolCallCard
       phase={deriveToolPhase(props)}
-      Icon={BookOpenIcon}
-      labelKey="tool.describe"
-      idText={stringArg(props.args, "id")}
+      {...presented(props)}
       args={props.args}
       result={props.result}
       isError={props.isError}

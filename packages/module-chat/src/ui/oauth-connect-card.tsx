@@ -329,7 +329,10 @@ export function OAuthConnectCard({
   // outcome). Fixed row heights so state transitions — preparing → idle →
   // pending → connected/error — are 0px layout changes.
   return (
-    <div className="bg-card text-card-foreground my-3 flex w-full flex-col gap-2 rounded-lg border px-3 py-3 text-sm">
+    <div
+      data-tool-call-id={toolCallId}
+      className="bg-card text-card-foreground my-3 flex w-full flex-col gap-2 rounded-lg border px-3 py-3 text-sm"
+    >
       <div className="flex h-5 items-center gap-2">
         <IntegrationIcon src={meta?.icon} className="size-4 shrink-0" />
         <span className="min-w-0 flex-1 truncate">

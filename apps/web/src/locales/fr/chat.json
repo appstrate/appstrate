@@ -70,6 +70,7 @@
   "tool.op.delete": "Suppression",
   "tool.op.read": "Lecture",
   "tool.op.other": "Opération",
+  "tool.integrationTool": "Outil d’intégration",
   "tool.importPackageFile": "Import de package",
   "tool.packageCreated.open": "Ouvrir le package créé",
   "tool.search": "Recherche",

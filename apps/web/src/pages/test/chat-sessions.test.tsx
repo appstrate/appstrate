@@ -169,6 +169,7 @@ describe("chat surfaces held to the caller's grants", () => {
       render(
         <ChatHostProvider value={hostWith(granted)}>
           <ChatRunProgressCard
+            toolCallId="call_1"
             runId="run_1"
             initialStatus="running"
             initialPackageId="@acme/bot"
