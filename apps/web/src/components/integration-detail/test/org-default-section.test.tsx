@@ -16,7 +16,7 @@ import type { IntegrationConnection } from "../../../hooks/use-integrations.ts";
 installFakeStorage({ __APP_CONFIG__: { features: {}, trustedOrigins: [] } });
 
 const { OrgDefaultSection } = await import("../org-default-section.tsx");
-const { DefaultConnectionSettings } = await import("../default-connection-section.tsx");
+const { AccessRulesSection } = await import("../access-rules-section.tsx");
 const { orgStore } = await import("../../../stores/org-store.ts");
 const { spaceStore } = await import("../../../stores/space-store.ts");
 const { render } = await import("../../../test/render.tsx");
@@ -150,14 +150,7 @@ function section(
   try {
     return render(
       retiredAuth ? (
-        <DefaultConnectionSettings
-          packageId={INTEGRATION}
-          detail={{
-            active: true,
-            auths: [],
-            proxy_connection: { status: "not_required", imposed: enforce },
-          }}
-        />
+        <AccessRulesSection packageId={INTEGRATION} blockUserConnections={false} existingOnly />
       ) : (
         <OrgDefaultSection packageId={INTEGRATION} />
       ),

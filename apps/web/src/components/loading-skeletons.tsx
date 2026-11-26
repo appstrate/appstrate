@@ -205,12 +205,20 @@ export function ListTabSkeleton() {
 }
 
 /** A list tab (runs, connections, usage): its toolbar over the table's own card. */
-function ListTabBlocks({ spaceLine = false }: { spaceLine?: boolean }) {
+function ListTabBlocks({
+  spaceLine = false,
+  footerLine = false,
+}: {
+  spaceLine?: boolean;
+  /** The one line under the table: an integration's default account (`DefaultConnectionLine`). */
+  footerLine?: boolean;
+}) {
   return (
     <>
       {spaceLine && <SpaceLineBlocks />}
       <ToolbarBlocks columns />
       <TableBlocks framed />
+      {footerLine && <SkeletonLine className="mt-4 w-72 text-sm" />}
     </>
   );
 }
@@ -268,14 +276,7 @@ function useOpensWithSpaceLine(type: PackageType, tab: string): boolean {
  * A framed two-pane tab (settings, a run's results): `AgentDetailSplit`'s rail beside its section,
  * in the tab panel's card.
  */
-function RailPanelBlocks({
-  spaceLine = false,
-  rows,
-}: {
-  spaceLine?: boolean;
-  /** The open section's rows, when it has fewer than `SettingsSkeleton`'s default. */
-  rows?: number;
-}) {
+function RailPanelBlocks({ spaceLine = false }: { spaceLine?: boolean }) {
   return (
     <Card className="@container/split overflow-hidden">
       <div className="grid min-h-[610px] grid-cols-1 @xl/split:grid-cols-[14rem_minmax(0,1fr)]">
@@ -299,7 +300,7 @@ function RailPanelBlocks({
                 <SkeletonLine className="w-1/3 text-sm leading-relaxed" />
               </div>
             </header>
-            <SettingsSkeleton rows={rows} />
+            <SettingsSkeleton />
           </div>
         </div>
       </div>
@@ -382,16 +383,7 @@ export function PackageDetailSkeleton({ type }: { type: PackageType }) {
   const title = useCachedPackageName(type, packageId);
   const tab = useOpenTab();
   const spaceLine = useOpensWithSpaceLine(type, tab);
-  const search = new URLSearchParams(useLocation().search);
-  const configuresIntegration = useSpacesFor({ permission: "integrations:configure" }).offered;
-  // « Création de connexions » is one setting; the other sections hold several.
-  const opensAccess =
-    type === "integration" &&
-    resolveIntegrationSettingsSection(search.get("integrationSettings"), {
-      canConfigure: configuresIntegration,
-      isOwned: true,
-      hasDefinition: true,
-    }) === "access";
+  const { on: overview } = useOverviewMode();
   return (
     <DetailPageSkeleton
       title={title}
@@ -403,11 +395,14 @@ export function PackageDetailSkeleton({ type }: { type: PackageType }) {
       spaces
       panel={
         tab === "settings" ? (
-          <RailPanelBlocks spaceLine={spaceLine} rows={opensAccess ? 1 : undefined} />
+          <RailPanelBlocks spaceLine={spaceLine} />
         ) : tab === "memory" ? (
           <MemoryTabBlocks />
         ) : tab === "runs" || tab === "connections" || tab === "usedBy" ? (
-          <ListTabBlocks spaceLine={spaceLine} />
+          <ListTabBlocks
+            spaceLine={spaceLine}
+            footerLine={type === "integration" && tab === "connections" && !overview}
+          />
         ) : type === "agent" ? (
           <AgentOverviewSkeleton />
         ) : type === "integration" ? (

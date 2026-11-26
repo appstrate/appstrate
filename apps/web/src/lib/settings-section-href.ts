@@ -25,7 +25,6 @@ export type IntegrationSettingsSection =
   | "functioning"
   | "authentication"
   | "access"
-  | "default-connection"
   | "identity"
   | "source"
   | "auth-methods"
