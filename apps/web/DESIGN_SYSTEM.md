@@ -896,10 +896,12 @@ canvas, surfaces on it are white cards, and heights hold across states (no jump)
 The context panel (`modules/chat/conversation-sidebar.tsx`) is transparent on that
 canvas and floats beside the thread: its cards and its previewed file are `Card` /
 `FileArtifact` with `FLOATING_FRAME` (`rounded-2xl shadow-xs`), the one place a card
-takes a shadow outside what floats over the page. It opens on the Summary (the
-conversation's facts, what needs the reader, the integrations it reached, the latest
-runs, files and actions each leading to its tab, models and tokens, access), beside
-Runs, Files and Tools; Tools lists the calls read from the stored messages
+takes a shadow outside what floats over the page. It opens on the Summary, which reads
+without scrolling: the title and its gist, then what needs the reader and the
+integrations it reached (always shown), then one folded line per section (runs, files,
+actions, models and tokens, access, details) naming its count and latest item, each
+unfolding in place (`Collapsible`, remembered per browser) and leading to its tab. Beside it,
+Runs, Files and Tools; a narrow panel keeps the inactive tabs' icons only. Tools lists the calls read from the stored messages
 (`@appstrate/module-chat/conversation-tools`), named as their cards name them
 (`tool-presentation.ts`), lookups behind a switch. Its width follows what it shows (a
 list, the details or a call, a file), each remembered per browser.
