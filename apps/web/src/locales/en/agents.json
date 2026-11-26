@@ -340,6 +340,8 @@
   "integrationTools.policy.declare.all": "Declare all listed tools",
   "run.degradedIntegrations.title": "Connection lost during this run",
   "run.degradedIntegrations.message": "These integrations returned an authentication error and must be reconnected before the next launch.",
+  "run.scopeRequests.title": "Additional permissions requested during this run",
+  "run.scopeRequests.message": "A server refused a call for lack of permissions these connections do not hold: their owner can reconnect them with those permissions.",
   "run.modelFallback.title": "Model replaced",
   "run.modelFallback.message": "The model chosen for this run was no longer available: the organization default model served instead.",
   "run.modelFallback.chosen": "Model chosen: {{model}}",

@@ -14,10 +14,13 @@
 import { useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Link } from "react-router-dom";
-import { Bot, Pencil, Plus, RefreshCw, Trash2 } from "lucide-react";
+import { Bot, Pencil, Plus, RefreshCw, ShieldPlus, Trash2 } from "lucide-react";
 import { DropdownMenuItem, DropdownMenuLabel } from "@appstrate/ui/components/dropdown-menu";
 import { InlineEditableLabel } from "../inline-editable-label";
-import { ConnectionStatusBadge } from "../integration-connect/connection-status-badge";
+import {
+  ConnectionRequestedScopesBadge,
+  ConnectionStatusBadge,
+} from "../integration-connect/connection-status-badge";
 import { ConnectionShareEditor } from "../integration-connect/connection-share-editor";
 import { ConnectionVariablesLine } from "../integration-connect/connection-variables-line";
 import { useHostedConnectPopup } from "../integration-connect/use-hosted-connect-popup";
@@ -148,8 +151,9 @@ export function AccountCell({
 /** Connected, or needing a reconnection its owner alone can perform. */
 export function StatusCell({ connection }: { connection: ConnectionRow }) {
   return (
-    <div className="flex min-w-0 items-center gap-2">
+    <div className="flex min-w-0 flex-wrap items-center gap-2">
       <ConnectionStatusBadge needsReconnection={connection.needs_reconnection} />
+      <ConnectionRequestedScopesBadge scopes={connection.requested_scopes ?? []} />
     </div>
   );
 }
@@ -280,6 +284,21 @@ export function ConnectionActionsCell({
               void openPopup({ packageId, authKey, connectionId: connection.id, space }),
             hidden: !canRenew,
             testId: `connection-reconnect-${connection.id}`,
+          },
+          {
+            id: "reconnect-scopes",
+            label: t("integration.connection.reconnectWithScopes"),
+            icon: ShieldPlus,
+            onSelect: () =>
+              void openPopup({
+                packageId,
+                authKey,
+                connectionId: connection.id,
+                scopes: connection.requested_scopes,
+                space,
+              }),
+            hidden: !canRenew || (connection.requested_scopes ?? []).length === 0,
+            testId: `connection-reconnect-scopes-${connection.id}`,
           },
           {
             id: "replacement",

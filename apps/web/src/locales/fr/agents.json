@@ -340,6 +340,8 @@
   "integrationTools.policy.declare.all": "Déclarer tous les outils listés",
   "run.degradedIntegrations.title": "Connexion perdue pendant ce run",
   "run.degradedIntegrations.message": "Ces intégrations ont renvoyé une erreur d'authentification et doivent être reconnectées avant le prochain lancement.",
+  "run.scopeRequests.title": "Droits supplémentaires demandés pendant ce run",
+  "run.scopeRequests.message": "Un serveur a refusé un appel faute de droits que ces connexions n’ont pas : leur propriétaire peut les reconnecter avec ces droits.",
   "run.modelFallback.title": "Modèle remplacé",
   "run.modelFallback.message": "Le modèle choisi pour ce run n'était plus accessible : le modèle par défaut de l'organisation a servi à la place.",
   "run.modelFallback.chosen": "Modèle choisi : {{model}}",

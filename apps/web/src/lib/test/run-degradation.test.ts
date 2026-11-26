@@ -4,6 +4,7 @@ import { describe, expect, it } from "bun:test";
 import i18n, { i18nReady } from "../../i18n.ts";
 import {
   isRunDegraded,
+  parseScopeRequests,
   parseUnavailableTools,
   UNAVAILABLE_REASON_KEYS,
   unavailableReasonKey,
@@ -52,6 +53,30 @@ describe("parseUnavailableTools", () => {
       ],
     }).map((tool) => tool.reason);
     expect(reasons).toEqual(["definition_not_approved", null, null]);
+  });
+});
+
+describe("parseScopeRequests", () => {
+  it("reads the stamped entries and drops the malformed ones", () => {
+    expect(
+      parseScopeRequests({
+        scope_requests: [
+          { integration_id: "@a/b", connection_id: "c1", scopes: ["mail.send", 3] },
+          { integration_id: "@a/b", connection_id: "c2", scopes: [] },
+          { integration_id: "@a/b", scopes: ["x"] },
+          null,
+        ],
+      }),
+    ).toEqual([{ integrationId: "@a/b", connectionId: "c1", scopes: ["mail.send"] }]);
+    expect(parseScopeRequests({ scope_requests: "x" })).toEqual([]);
+  });
+
+  it("flags the run as degraded", () => {
+    expect(
+      isRunDegraded({
+        scope_requests: [{ integration_id: "i", connection_id: "c", scopes: ["s"] }],
+      }),
+    ).toBe(true);
   });
 });
 

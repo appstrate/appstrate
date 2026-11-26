@@ -56,9 +56,35 @@ export function parseUnavailableTools(metadata: unknown): UnavailableTool[] {
   });
 }
 
+export interface ScopeRequest {
+  integrationId: string;
+  connectionId: string;
+  scopes: string[];
+}
+
+/** Safe-narrows `runs.metadata.scope_requests`: the scopes a server asked for that a connection of the run does not hold. */
+export function parseScopeRequests(metadata: unknown): ScopeRequest[] {
+  if (metadata == null || typeof metadata !== "object") return [];
+  const raw = (metadata as Record<string, unknown>).scope_requests;
+  if (!Array.isArray(raw)) return [];
+  return raw.flatMap((item) => {
+    if (item == null || typeof item !== "object") return [];
+    const { integration_id, connection_id, scopes } = item as Record<string, unknown>;
+    if (typeof integration_id !== "string" || typeof connection_id !== "string") return [];
+    const named = Array.isArray(scopes)
+      ? scopes.filter((s): s is string => typeof s === "string")
+      : [];
+    return named.length > 0
+      ? [{ integrationId: integration_id, connectionId: connection_id, scopes: named }]
+      : [];
+  });
+}
+
 /** Whether the run carries a warning its list row should flag. */
 export function isRunDegraded(metadata: unknown): boolean {
   return (
-    parseDegradedIntegrations(metadata).length > 0 || parseUnavailableTools(metadata).length > 0
+    parseDegradedIntegrations(metadata).length > 0 ||
+    parseUnavailableTools(metadata).length > 0 ||
+    parseScopeRequests(metadata).length > 0
   );
 }

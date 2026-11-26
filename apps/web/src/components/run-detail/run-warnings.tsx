@@ -6,6 +6,8 @@ import type { EnrichedRun } from "@appstrate/shared-types";
 import { useIntegrationName } from "../../hooks/use-integration-name";
 import { useCanReach } from "../../hooks/use-can-reach";
 import { useModels } from "../../hooks/use-models";
+import { useMyConnections } from "../../hooks/use-me-connections";
+import { useHostedConnectPopup } from "../integration-connect/use-hosted-connect-popup";
 import { usePermissions } from "../../hooks/use-permissions";
 import type { RunModelFallback } from "../../lib/run-model-fallback";
 import { packageDetailPath } from "../../lib/package-paths";
@@ -16,8 +18,10 @@ import { MetaBadge } from "../status-badge";
 import {
   isRunDegraded,
   parseDegradedIntegrations,
+  parseScopeRequests,
   parseUnavailableTools,
   unavailableReasonKey,
+  type ScopeRequest,
   type UnavailableTool,
 } from "../../lib/run-degradation";
 
@@ -65,6 +69,41 @@ function DegradedIntegrationItem({ integrationId }: { integrationId: string }) {
       actions={
         canReach(integrationPath) ? (
           <HealthAction to={integrationPath}>{t("btn.reconnect")}</HealthAction>
+        ) : null
+      }
+    />
+  );
+}
+
+/** The reconnect that grants the scopes is the connection owner's: only their own list holds it. */
+function ScopeRequestItem({ request }: { request: ScopeRequest }) {
+  const { t } = useTranslation(["agents", "settings"]);
+  const displayName = useIntegrationName(request.integrationId);
+  const { data: groups } = useMyConnections();
+  const { openPopup } = useHostedConnectPopup();
+  const owned = groups
+    ?.flatMap((g) => g.connections)
+    .find((c) => c.connection_id === request.connectionId);
+  const spaceId = owned?.reconnect_space_id;
+  return (
+    <HealthCardItem
+      title={displayName}
+      description={`${owned ? `${owned.label} · ` : ""}${request.scopes.join(", ")}`}
+      actions={
+        owned && spaceId ? (
+          <HealthAction
+            onClick={() =>
+              void openPopup({
+                packageId: request.integrationId,
+                authKey: owned.auth_key,
+                connectionId: request.connectionId,
+                scopes: request.scopes,
+                space: { orgId: owned.org.id, spaceId },
+              })
+            }
+          >
+            {t("integration.connection.reconnectWithScopes", { ns: "settings" })}
+          </HealthAction>
         ) : null
       }
     />
@@ -125,6 +164,7 @@ function ResolvedModelFallback({
 /**
  * What the run left behind without failing, as warning cards (never a banner: a finished run is
  * history): model fallback; an integration's terminal auth failure (401 surviving refresh);
+ * scopes a server asked for that a connection of the run does not hold (the owner reconnects with them);
  * tools the agent asked for that the run could not serve; a `partial` outputs sweep, where deliverables were LOST though the run may have SUCCEEDED.
  */
 export function RunWarnings({
@@ -137,6 +177,7 @@ export function RunWarnings({
   const { t } = useTranslation("agents");
   const degraded = parseDegradedIntegrations(run.metadata);
   const unavailable = parseUnavailableTools(run.metadata);
+  const scopeRequests = parseScopeRequests(run.metadata);
   const lost = partialArtifactFailures(run.artifacts);
   return (
     <>
@@ -150,6 +191,23 @@ export function RunWarnings({
             <ul className="px-4">
               {degraded.map((id) => (
                 <DegradedIntegrationItem key={id} integrationId={id} />
+              ))}
+            </ul>
+          </HealthCard>
+        </div>
+      )}
+      {scopeRequests.length > 0 && (
+        <div className="mb-6">
+          <HealthCard title={t("run.scopeRequests.title")} tone="warning" badge={null}>
+            <p className="text-muted-foreground px-4 pt-3 text-xs">
+              {t("run.scopeRequests.message")}
+            </p>
+            <ul className="px-4">
+              {scopeRequests.map((request) => (
+                <ScopeRequestItem
+                  key={`${request.integrationId}:${request.connectionId}`}
+                  request={request}
+                />
               ))}
             </ul>
           </HealthCard>
