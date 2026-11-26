@@ -53,6 +53,7 @@ live under the governance surface.
 
 ## Events listened to
 
+- `onCredentialNeedsReconnection` — a stored credential died (`needs_reconnection` flipped to true, once per death). Dispatches `credential.needs_reconnection`: `data.object` is `{ object: "credential", kind, cause, … }`; `kind: "integration_connection"` adds `connectionId`, `integrationId`, `authKey`, `spaceId` (null for an org-level connection) and `owner`, `kind: "model_provider_credential"` adds `credentialId` and `providerId`. A connection reaches its space's webhooks and the org-level ones, matching a package filter on its integration; a model credential reaches org-level webhooks without a package filter only.
 - `onRunStatusChange` — broadcast from core on every run lifecycle transition. The handler dispatches delivery jobs to the BullMQ webhook queue for every subscription whose event list includes the new status and whose optional package filter matches. Delivery is asynchronous and isolated per subscription.
 
 ## Workers & background activity

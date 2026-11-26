@@ -207,7 +207,7 @@ export async function resolveLiveIntegrationCredentials(
     // a credential nobody can read is dead — flag + 410, even on a plain read.
     // `return` rather than a bare `await`: the helper's `Promise<never>` does
     // not narrow `fields` on its own, and everything below reads it non-null.
-    await markIntegrationConnectionNeedsReconnection(connection.id);
+    await markIntegrationConnectionNeedsReconnection(connection.id, "credentials_undecryptable");
     return throwTerminal("credentials_undecryptable");
   }
 

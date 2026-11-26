@@ -134,6 +134,31 @@ describe("NotificationContent", () => {
     expect(html).not.toContain(`href="/agents/${PACKAGE_ID}/runs/run_4"`);
   });
 
+  it("renders a `credential_needs_reconnection` row as the connection to reconnect, on its own page", () => {
+    const html = renderList([
+      {
+        id: "n12",
+        spaceId: SPACE,
+        type: "credential_needs_reconnection",
+        runId: null,
+        payload: {
+          kind: "integration_connection",
+          packageId: "@acme/gmail",
+          integration_name: "Gmail",
+          connection_id: "5f9c1d9e-6a5b-4d0e-9a53-3c1f0f2b7a10",
+          label: "pierre@acme.test",
+          auth_key: "primary",
+          cause: "refresh_token_revoked",
+        },
+        read_at: null,
+        createdAt: "2026-09-10T10:00:00.000Z",
+      },
+    ]);
+
+    expect(html).toContain("La connexion pierre@acme.test (Gmail) doit être reconnectée");
+    expect(html).toContain('href="/notifications/n12"');
+  });
+
   it("names the sender of an `agent_message` from an unlisted agent by the name stamped on its run", () => {
     const html = renderList([
       {

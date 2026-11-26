@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { packageTypeValues, runAlertStatusValues } from "@appstrate/db/schema";
+import { CREDENTIAL_FAILURE_CAUSES } from "@appstrate/core/sidecar-types";
 import { STD_RESPONSE_HEADERS } from "../headers.ts";
 import { ORG_READ_REACH } from "../parameters.ts";
 
@@ -85,6 +86,38 @@ const notificationObject = {
         },
         title: { type: "string", description: "Headline the agent wrote (`notify` tool)." },
         message: { type: "string", description: "Body the agent wrote (`notify` tool)." },
+      },
+    }),
+    notificationOf("credential_needs_reconnection", {
+      required: [
+        "kind",
+        "packageId",
+        "integration_name",
+        "connection_id",
+        "label",
+        "auth_key",
+        "cause",
+      ],
+      properties: {
+        kind: {
+          type: "string",
+          const: "integration_connection",
+          description:
+            "What died. Only an integration connection notifies its owner for now; no notification is written for a model-provider credential.",
+        },
+        packageId: { type: "string", description: "The connection's integration (`@scope/name`)." },
+        integration_name: {
+          type: ["string", "null"],
+          description: "The integration's display name as stamped when the notice was written.",
+        },
+        connection_id: { type: "string", format: "uuid" },
+        label: { type: "string", description: "The connection's label." },
+        auth_key: { type: "string", description: "The auth of the integration it was made with." },
+        cause: {
+          type: "string",
+          enum: [...CREDENTIAL_FAILURE_CAUSES],
+          description: "Why the credential is dead.",
+        },
       },
     }),
   ],

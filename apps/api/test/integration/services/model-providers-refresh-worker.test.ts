@@ -63,7 +63,7 @@ async function seedOauthCred(
     expiresAt: opts.expiresAtMs,
   });
   if (opts.needsReconnection) {
-    await markCredentialNeedsReconnection(fx.orgId, id);
+    await markCredentialNeedsReconnection(fx.orgId, id, "refresh_token_revoked");
   }
   return id;
 }

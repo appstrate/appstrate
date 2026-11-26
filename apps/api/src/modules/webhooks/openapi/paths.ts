@@ -8,6 +8,8 @@ const sharedCreateProps = {
   events: {
     type: "array",
     minItems: 1,
+    description:
+      '`credential.needs_reconnection` fires once when a stored credential dies (its `needs_reconnection` flips to true), never again while it stays flagged. Its delivery `data.object` is `{ object: "credential", kind, cause, ... }`: `kind: "integration_connection"` adds `connectionId`, `integrationId`, `authKey`, `spaceId` (null for an org-level connection) and `owner: { type, id }`; `kind: "model_provider_credential"` adds `credentialId` and `providerId`. An integration connection reaches its space\'s webhooks and the org-level ones, the integration being the package a `packageId` filter matches; a model-provider credential reaches org-level webhooks without a package filter only.',
     items: {
       type: "string",
       enum: [
@@ -17,6 +19,7 @@ const sharedCreateProps = {
         "run.timeout",
         "run.cancelled",
         "run.connection_missing",
+        "credential.needs_reconnection",
       ],
     },
   },
@@ -319,6 +322,7 @@ export const webhooksPaths = {
                       "run.timeout",
                       "run.cancelled",
                       "run.connection_missing",
+                      "credential.needs_reconnection",
                     ],
                   },
                 },

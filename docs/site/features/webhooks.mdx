@@ -50,15 +50,16 @@ In the web app, the **Webhooks** page creates and edits webhooks, shows the deli
 
 ## Events
 
-| Event                    | Sent when                                                                                                                         |
-| ------------------------ | --------------------------------------------------------------------------------------------------------------------------------- |
-| `run.started`            | The run moves from `pending` to `running`.                                                                                        |
-| `run.success`            | The run finished successfully.                                                                                                    |
-| `run.failed`             | The run failed. This includes a scheduled tick that could not start, and a run stopped by the [watchdog](/features/run-liveness). |
-| `run.timeout`            | The run exceeded its timeout.                                                                                                     |
-| `run.cancelled`          | The run was cancelled.                                                                                                            |
-| `run.connection_missing` | A launch was refused because the actor lacks a usable connection to a required integration. No run exists.                        |
-| `test.ping`              | You called `POST /api/webhooks/{id}/test`. Never subscribed to, always delivered.                                                 |
+| Event                           | Sent when                                                                                                                                                                           |
+| ------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `run.started`                   | The run moves from `pending` to `running`.                                                                                                                                          |
+| `run.success`                   | The run finished successfully.                                                                                                                                                      |
+| `run.failed`                    | The run failed. This includes a scheduled tick that could not start, and a run stopped by the [watchdog](/features/run-liveness).                                                   |
+| `run.timeout`                   | The run exceeded its timeout.                                                                                                                                                       |
+| `run.cancelled`                 | The run was cancelled.                                                                                                                                                              |
+| `run.connection_missing`        | A launch was refused because the actor lacks a usable connection to a required integration. No run exists.                                                                          |
+| `credential.needs_reconnection` | A stored credential died (its `needs_reconnection` flag flipped to true): sent once per death. Org-level webhooks receive every one, space webhooks the connections of their space. |
+| `test.ping`                     | You called `POST /api/webhooks/{id}/test`. Never subscribed to, always delivered.                                                                                                   |
 
 ## Event envelope
 
@@ -93,6 +94,8 @@ In the web app, the **Webhooks** page creates and edits webhooks, shows the deli
 `data.object` carries `id`, `packageId` and `status` on every run event. Terminal events add `duration` (milliseconds). `run.success` adds `result` (an object holding the `output`). Failed, timed out and cancelled runs add `error` (a string). Runs of an inline agent add `package: { "ephemeral": true }`. Fetch `GET /api/runs/{id}` for everything else (input, cost, files).
 
 For `run.connection_missing`, `data.object` has `object: "run_attempt"`, the `packageId`, the `actor` (`type` and `id`) and an `errors` list. Treat it as informational: nothing was persisted.
+
+For `credential.needs_reconnection`, `data.object` has `object: "credential"`, a `kind` and the `cause`. `kind: "integration_connection"` adds `connectionId`, `integrationId`, `authKey`, `spaceId` (`null` for an org-level connection) and `owner` (`type` and `id`), and a `packageId` filter matches `integrationId`. `kind: "model_provider_credential"` adds `credentialId` and `providerId`, and reaches org-level webhooks without a package filter only.
 
 ### Payload modes
 

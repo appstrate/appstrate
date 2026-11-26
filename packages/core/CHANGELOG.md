@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **`onCredentialNeedsReconnection`** (`@appstrate/core/module`, `ModuleEvents`) and its
+  `CredentialNeedsReconnectionParams` payload, discriminated by `kind`
+  (`integration_connection` | `model_provider_credential`). Broadcast once when a credential's
+  `needs_reconnection` flips from false to true; carries the `CredentialFailureCause`.
+
 ### Removed
 
 - **`SPACE_CHOICE_META_KEY`** — BREAKING (`@appstrate/core/mcp-spaces`). An MCP call that needs a

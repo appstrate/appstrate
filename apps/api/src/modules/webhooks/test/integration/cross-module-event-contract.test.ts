@@ -27,6 +27,8 @@ import { createTestUser, createTestOrg } from "../../../../../test/helpers/auth.
 import webhooksModule from "../../index.ts";
 import { createWebhook, initWebhookWorker, shutdownWebhookWorker } from "../../service.ts";
 import { webhookDeliveries } from "@appstrate/db/schema";
+import { seedPackage, seedSpace } from "../../../../../test/helpers/seed.ts";
+import { seedWebhook } from "../helpers/seed.ts";
 
 setDefaultTimeout(30_000);
 
@@ -151,5 +153,71 @@ describe("cross-module contract — onRunStatusChange → webhook delivery", () 
     const row = await waitForDelivery(webhook.id, WAIT_TIMEOUT_MS);
     expect(row).not.toBeNull();
     expect(row?.eventType).toBe("run.connection_missing");
+  });
+
+  describe("onCredentialNeedsReconnection → credential.needs_reconnection", () => {
+    const INTEGRATION = "@acme/gmail";
+    const connection = (over: { spaceId: string | null }) =>
+      ({
+        kind: "integration_connection",
+        orgId,
+        spaceId: over.spaceId,
+        connectionId: crypto.randomUUID(),
+        integrationId: INTEGRATION,
+        authKey: "primary",
+        owner: { type: "user", id: "u_test" },
+        cause: "refresh_token_revoked",
+      }) as const;
+
+    /** Webhook ids that received a delivery, once the dispatch has settled. */
+    async function delivered(ids: string[]): Promise<string[]> {
+      await new Promise((r) => setTimeout(r, 1500));
+      const rows = await db
+        .select({ webhookId: webhookDeliveries.webhookId })
+        .from(webhookDeliveries);
+      return ids.filter((id) => rows.some((r) => r.webhookId === id)).sort();
+    }
+
+    async function seeds() {
+      const other = await seedSpace({ orgId, name: "Other" });
+      await seedPackage({ id: INTEGRATION, type: "integration", orgId });
+      await seedPackage({ id: "@acme/other", type: "integration", orgId });
+      const event = ["credential.needs_reconnection"];
+      const mk = (over: { spaceId?: string; packageId?: string }) =>
+        seedWebhook({ orgId, events: event, ...over }).then((w) => w.id);
+      return {
+        org: await mk({}),
+        orgForIntegration: await mk({ packageId: INTEGRATION }),
+        orgForOther: await mk({ packageId: "@acme/other" }),
+        space: await mk({ spaceId }),
+        otherSpace: await mk({ spaceId: other.id }),
+      };
+    }
+
+    it("a space connection reaches its space's and the org-level webhooks, package filter on its integration", async () => {
+      const w = await seeds();
+      await webhooksModule.events!.onCredentialNeedsReconnection!(connection({ spaceId }));
+      expect(await delivered(Object.values(w))).toEqual(
+        [w.org, w.orgForIntegration, w.space].sort(),
+      );
+    });
+
+    it("an org-level connection reaches the org-level webhooks only", async () => {
+      const w = await seeds();
+      await webhooksModule.events!.onCredentialNeedsReconnection!(connection({ spaceId: null }));
+      expect(await delivered(Object.values(w))).toEqual([w.org, w.orgForIntegration].sort());
+    });
+
+    it("a model-provider credential reaches the org-level webhooks without a package filter only", async () => {
+      const w = await seeds();
+      await webhooksModule.events!.onCredentialNeedsReconnection!({
+        kind: "model_provider_credential",
+        orgId,
+        credentialId: crypto.randomUUID(),
+        providerId: "openai",
+        cause: "refresh_failures_exhausted",
+      });
+      expect(await delivered(Object.values(w))).toEqual([w.org]);
+    });
   });
 });

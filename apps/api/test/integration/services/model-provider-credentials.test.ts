@@ -445,7 +445,7 @@ describe("model-provider-credentials service — oauth path", () => {
       expiresAt: null,
     });
 
-    await markCredentialNeedsReconnection(ctx.orgId, id);
+    await markCredentialNeedsReconnection(ctx.orgId, id, "refresh_token_revoked");
     // loadInferenceCredentials gates dead OAuth rows — null is the signal.
     expect(await loadInferenceCredentials(ctx.orgId, id)).toBeNull();
     // The list view surfaces the raw flag for UI affordances.
@@ -772,9 +772,9 @@ describe("model-provider-credentials service — aggregator + inference loader",
         expiresAt: Date.now() + 3600 * 1000,
       });
 
-      // Simulate the refresh worker flagging the credential after a
+      // Simulate the refresh path flagging the credential after a
       // 400 invalid_grant from the upstream provider.
-      await markCredentialNeedsReconnection(org.id, imported.credentialId);
+      await markCredentialNeedsReconnection(org.id, imported.credentialId, "refresh_token_revoked");
 
       // The loader returns null when the OAuth blob's needsReconnection flag
       // is set, so callers fall through to their own "credential unusable"

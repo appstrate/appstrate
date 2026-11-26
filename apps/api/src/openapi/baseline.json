@@ -18440,7 +18440,7 @@
         "operationId": "getMyContext",
         "tags": ["Profile"],
         "summary": "The caller's working context for an AI agent",
-        "description": "Returns the caller's identity, their role in the pinned org, and the integrations they could attach when building an agent in the current space (their own, or shared into it). One payload powering the MCP `get_me` tool and direct API/MCP callers — so an agent can prefer already-connected integrations and respect the caller's role (operations beyond it 403 at invoke time). The space is the one the credential (API key, token) is bound to — an `X-Space-Id` naming another is refused — else the one `X-Space-Id` names; with neither the request is a 400.",
+        "description": "Returns the caller's identity, their role in the pinned org, and the integrations they could attach when building an agent in the current space (their own, or shared into it). One payload powering the MCP `get_me` tool and direct API/MCP callers — so an agent can prefer already-connected integrations and respect the caller's role (operations beyond it 403 at invoke time). The space is the one the credential (API key, token) is bound to — an `X-Space-Id` naming another is refused — else the one `X-Space-Id` names. With neither, the answer holds `user` and `org` alone: every other field belongs to one space.",
         "parameters": [
           {
             "$ref": "#/components/parameters/XOrgId"
@@ -18464,19 +18464,19 @@
               "application/json": {
                 "schema": {
                   "type": "object",
-                  "required": [
-                    "user",
-                    "org",
-                    "space",
-                    "connections",
-                    "recent_runs",
-                    "agents",
-                    "agents_truncated",
-                    "agents_total",
-                    "skills",
-                    "skills_truncated",
-                    "skills_total"
-                  ],
+                  "required": ["user", "org"],
+                  "dependentRequired": {
+                    "space": [
+                      "connections",
+                      "recent_runs",
+                      "agents",
+                      "agents_truncated",
+                      "agents_total",
+                      "skills",
+                      "skills_truncated",
+                      "skills_total"
+                    ]
+                  },
                   "properties": {
                     "user": {
                       "type": "object",
@@ -18495,7 +18495,7 @@
                     },
                     "org": {
                       "type": "object",
-                      "required": ["id", "role"],
+                      "required": ["id", "role", "name", "slug"],
                       "properties": {
                         "id": {
                           "type": "string"
@@ -18505,18 +18505,18 @@
                           "enum": ["owner", "admin", "member", "guest", "end_user"]
                         },
                         "name": {
-                          "type": ["string", "null"],
+                          "type": "string",
                           "description": "Human-readable organization name."
                         },
                         "slug": {
-                          "type": ["string", "null"],
+                          "type": "string",
                           "description": "Organization slug."
                         }
                       }
                     },
                     "space": {
                       "type": "object",
-                      "description": "The space this request resolved to. Every list in this payload is scoped to it. An empty list means nothing of that kind is available to this caller in this space, this is not the space you meant, or the caller's permissions do not cover that list.",
+                      "description": "The space this request resolved to, absent when it named none (as is every list). Every list in this payload is scoped to it. An empty list means nothing of that kind is available to this caller in this space, this is not the space you meant, or the caller's permissions do not cover that list.",
                       "required": ["id", "name", "personal"],
                       "properties": {
                         "id": {
@@ -20589,6 +20589,103 @@
                                 "format": "date-time"
                               }
                             }
+                          },
+                          {
+                            "type": "object",
+                            "required": [
+                              "id",
+                              "spaceId",
+                              "type",
+                              "runId",
+                              "payload",
+                              "read_at",
+                              "createdAt"
+                            ],
+                            "properties": {
+                              "id": {
+                                "type": "string",
+                                "format": "uuid",
+                                "description": "Notification id"
+                              },
+                              "spaceId": {
+                                "type": "string",
+                                "description": "The space it was written in: its run, and its own read (`GET /api/notifications/{id}`), are that space's."
+                              },
+                              "type": {
+                                "type": "string",
+                                "const": "credential_needs_reconnection"
+                              },
+                              "runId": {
+                                "type": ["string", "null"],
+                                "description": "Originating run id, when the notification references one"
+                              },
+                              "payload": {
+                                "type": ["object", "null"],
+                                "additionalProperties": false,
+                                "description": "Render-without-join data.",
+                                "required": [
+                                  "kind",
+                                  "packageId",
+                                  "integration_name",
+                                  "connection_id",
+                                  "label",
+                                  "auth_key",
+                                  "cause"
+                                ],
+                                "properties": {
+                                  "kind": {
+                                    "type": "string",
+                                    "const": "integration_connection",
+                                    "description": "What died. Only an integration connection notifies its owner for now; no notification is written for a model-provider credential."
+                                  },
+                                  "packageId": {
+                                    "type": "string",
+                                    "description": "The connection's integration (`@scope/name`)."
+                                  },
+                                  "integration_name": {
+                                    "type": ["string", "null"],
+                                    "description": "The integration's display name as stamped when the notice was written."
+                                  },
+                                  "connection_id": {
+                                    "type": "string",
+                                    "format": "uuid"
+                                  },
+                                  "label": {
+                                    "type": "string",
+                                    "description": "The connection's label."
+                                  },
+                                  "auth_key": {
+                                    "type": "string",
+                                    "description": "The auth of the integration it was made with."
+                                  },
+                                  "cause": {
+                                    "type": "string",
+                                    "enum": [
+                                      "connection_flagged",
+                                      "refresh_token_revoked",
+                                      "refresh_token_missing",
+                                      "refresh_failures_exhausted",
+                                      "unrefreshable",
+                                      "credentials_undecryptable",
+                                      "upstream_transient",
+                                      "discovery_transient",
+                                      "connection_changed",
+                                      "oauth_client_rejected"
+                                    ],
+                                    "description": "Why the credential is dead."
+                                  }
+                                }
+                              },
+                              "read_at": {
+                                "type": ["string", "null"],
+                                "format": "date-time",
+                                "description": "When the recipient marked it read; null if unread"
+                              },
+                              "createdAt": {
+                                "type": "string",
+                                "format": "date-time"
+                              }
+                            }
                           }
                         ]
                       }
@@ -20873,6 +20970,103 @@
                                   "message": {
                                     "type": "string",
                                     "description": "Body the agent wrote (`notify` tool)."
+                                  }
+                                }
+                              },
+                              "read_at": {
+                                "type": ["string", "null"],
+                                "format": "date-time",
+                                "description": "When the recipient marked it read; null if unread"
+                              },
+                              "createdAt": {
+                                "type": "string",
+                                "format": "date-time"
+                              }
+                            }
+                          },
+                          {
+                            "type": "object",
+                            "required": [
+                              "id",
+                              "spaceId",
+                              "type",
+                              "runId",
+                              "payload",
+                              "read_at",
+                              "createdAt"
+                            ],
+                            "properties": {
+                              "id": {
+                                "type": "string",
+                                "format": "uuid",
+                                "description": "Notification id"
+                              },
+                              "spaceId": {
+                                "type": "string",
+                                "description": "The space it was written in: its run, and its own read (`GET /api/notifications/{id}`), are that space's."
+                              },
+                              "type": {
+                                "type": "string",
+                                "const": "credential_needs_reconnection"
+                              },
+                              "runId": {
+                                "type": ["string", "null"],
+                                "description": "Originating run id, when the notification references one"
+                              },
+                              "payload": {
+                                "type": ["object", "null"],
+                                "additionalProperties": false,
+                                "description": "Render-without-join data.",
+                                "required": [
+                                  "kind",
+                                  "packageId",
+                                  "integration_name",
+                                  "connection_id",
+                                  "label",
+                                  "auth_key",
+                                  "cause"
+                                ],
+                                "properties": {
+                                  "kind": {
+                                    "type": "string",
+                                    "const": "integration_connection",
+                                    "description": "What died. Only an integration connection notifies its owner for now; no notification is written for a model-provider credential."
+                                  },
+                                  "packageId": {
+                                    "type": "string",
+                                    "description": "The connection's integration (`@scope/name`)."
+                                  },
+                                  "integration_name": {
+                                    "type": ["string", "null"],
+                                    "description": "The integration's display name as stamped when the notice was written."
+                                  },
+                                  "connection_id": {
+                                    "type": "string",
+                                    "format": "uuid"
+                                  },
+                                  "label": {
+                                    "type": "string",
+                                    "description": "The connection's label."
+                                  },
+                                  "auth_key": {
+                                    "type": "string",
+                                    "description": "The auth of the integration it was made with."
+                                  },
+                                  "cause": {
+                                    "type": "string",
+                                    "enum": [
+                                      "connection_flagged",
+                                      "refresh_token_revoked",
+                                      "refresh_token_missing",
+                                      "refresh_failures_exhausted",
+                                      "unrefreshable",
+                                      "credentials_undecryptable",
+                                      "upstream_transient",
+                                      "discovery_transient",
+                                      "connection_changed",
+                                      "oauth_client_rejected"
+                                    ],
+                                    "description": "Why the credential is dead."
                                   }
                                 }
                               },
@@ -21263,6 +21457,103 @@
                           "format": "date-time"
                         }
                       }
+                    },
+                    {
+                      "type": "object",
+                      "required": [
+                        "id",
+                        "spaceId",
+                        "type",
+                        "runId",
+                        "payload",
+                        "read_at",
+                        "createdAt"
+                      ],
+                      "properties": {
+                        "id": {
+                          "type": "string",
+                          "format": "uuid",
+                          "description": "Notification id"
+                        },
+                        "spaceId": {
+                          "type": "string",
+                          "description": "The space it was written in: its run, and its own read (`GET /api/notifications/{id}`), are that space's."
+                        },
+                        "type": {
+                          "type": "string",
+                          "const": "credential_needs_reconnection"
+                        },
+                        "runId": {
+                          "type": ["string", "null"],
+                          "description": "Originating run id, when the notification references one"
+                        },
+                        "payload": {
+                          "type": ["object", "null"],
+                          "additionalProperties": false,
+                          "description": "Render-without-join data.",
+                          "required": [
+                            "kind",
+                            "packageId",
+                            "integration_name",
+                            "connection_id",
+                            "label",
+                            "auth_key",
+                            "cause"
+                          ],
+                          "properties": {
+                            "kind": {
+                              "type": "string",
+                              "const": "integration_connection",
+                              "description": "What died. Only an integration connection notifies its owner for now; no notification is written for a model-provider credential."
+                            },
+                            "packageId": {
+                              "type": "string",
+                              "description": "The connection's integration (`@scope/name`)."
+                            },
+                            "integration_name": {
+                              "type": ["string", "null"],
+                              "description": "The integration's display name as stamped when the notice was written."
+                            },
+                            "connection_id": {
+                              "type": "string",
+                              "format": "uuid"
+                            },
+                            "label": {
+                              "type": "string",
+                              "description": "The connection's label."
+                            },
+                            "auth_key": {
+                              "type": "string",
+                              "description": "The auth of the integration it was made with."
+                            },
+                            "cause": {
+                              "type": "string",
+                              "enum": [
+                                "connection_flagged",
+                                "refresh_token_revoked",
+                                "refresh_token_missing",
+                                "refresh_failures_exhausted",
+                                "unrefreshable",
+                                "credentials_undecryptable",
+                                "upstream_transient",
+                                "discovery_transient",
+                                "connection_changed",
+                                "oauth_client_rejected"
+                              ],
+                              "description": "Why the credential is dead."
+                            }
+                          }
+                        },
+                        "read_at": {
+                          "type": ["string", "null"],
+                          "format": "date-time",
+                          "description": "When the recipient marked it read; null if unread"
+                        },
+                        "createdAt": {
+                          "type": "string",
+                          "format": "date-time"
+                        }
+                      }
                     }
                   ]
                 },
@@ -21505,6 +21796,103 @@
                             "message": {
                               "type": "string",
                               "description": "Body the agent wrote (`notify` tool)."
+                            }
+                          }
+                        },
+                        "read_at": {
+                          "type": ["string", "null"],
+                          "format": "date-time",
+                          "description": "When the recipient marked it read; null if unread"
+                        },
+                        "createdAt": {
+                          "type": "string",
+                          "format": "date-time"
+                        }
+                      }
+                    },
+                    {
+                      "type": "object",
+                      "required": [
+                        "id",
+                        "spaceId",
+                        "type",
+                        "runId",
+                        "payload",
+                        "read_at",
+                        "createdAt"
+                      ],
+                      "properties": {
+                        "id": {
+                          "type": "string",
+                          "format": "uuid",
+                          "description": "Notification id"
+                        },
+                        "spaceId": {
+                          "type": "string",
+                          "description": "The space it was written in: its run, and its own read (`GET /api/notifications/{id}`), are that space's."
+                        },
+                        "type": {
+                          "type": "string",
+                          "const": "credential_needs_reconnection"
+                        },
+                        "runId": {
+                          "type": ["string", "null"],
+                          "description": "Originating run id, when the notification references one"
+                        },
+                        "payload": {
+                          "type": ["object", "null"],
+                          "additionalProperties": false,
+                          "description": "Render-without-join data.",
+                          "required": [
+                            "kind",
+                            "packageId",
+                            "integration_name",
+                            "connection_id",
+                            "label",
+                            "auth_key",
+                            "cause"
+                          ],
+                          "properties": {
+                            "kind": {
+                              "type": "string",
+                              "const": "integration_connection",
+                              "description": "What died. Only an integration connection notifies its owner for now; no notification is written for a model-provider credential."
+                            },
+                            "packageId": {
+                              "type": "string",
+                              "description": "The connection's integration (`@scope/name`)."
+                            },
+                            "integration_name": {
+                              "type": ["string", "null"],
+                              "description": "The integration's display name as stamped when the notice was written."
+                            },
+                            "connection_id": {
+                              "type": "string",
+                              "format": "uuid"
+                            },
+                            "label": {
+                              "type": "string",
+                              "description": "The connection's label."
+                            },
+                            "auth_key": {
+                              "type": "string",
+                              "description": "The auth of the integration it was made with."
+                            },
+                            "cause": {
+                              "type": "string",
+                              "enum": [
+                                "connection_flagged",
+                                "refresh_token_revoked",
+                                "refresh_token_missing",
+                                "refresh_failures_exhausted",
+                                "unrefreshable",
+                                "credentials_undecryptable",
+                                "upstream_transient",
+                                "discovery_transient",
+                                "connection_changed",
+                                "oauth_client_rejected"
+                              ],
+                              "description": "Why the credential is dead."
                             }
                           }
                         },

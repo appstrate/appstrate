@@ -166,7 +166,7 @@ async function doRefresh(
         connectionId,
       },
     );
-    await markIntegrationConnectionNeedsReconnection(connectionId);
+    await markIntegrationConnectionNeedsReconnection(connectionId, "refresh_token_missing");
     throw new RefreshVerdictError("dead", "refresh_token_missing");
   }
 
@@ -247,7 +247,7 @@ async function exchangeFailureVerdict(
 ): Promise<RefreshVerdictError> {
   switch (err.kind) {
     case "revoked":
-      await markIntegrationConnectionNeedsReconnection(log.connectionId);
+      await markIntegrationConnectionNeedsReconnection(log.connectionId, "refresh_token_revoked");
       return new RefreshVerdictError("dead", "refresh_token_revoked", { cause: err });
     case "client_rejected":
       logger.error("Integration refresh refused — the token endpoint rejected the OAuth client", {

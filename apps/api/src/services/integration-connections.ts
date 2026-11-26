@@ -41,6 +41,8 @@ import {
   decryptCredentials,
   decryptCredentialsToStringMap,
 } from "@appstrate/connect";
+import type { CredentialFailureCause } from "@appstrate/core/sidecar-types";
+import { announceCredentialNeedsReconnection } from "./credential-reconnection.ts";
 import { issuerOfClientMetadataDocumentRef } from "../lib/integration-client-metadata.ts";
 import {
   resolveSystemClientForAuth,
@@ -2491,14 +2493,64 @@ export async function getIntegrationConnectionCredentialFields(
   return fields === KEY_UNAVAILABLE ? null : fields;
 }
 
-/** The only `needs_reconnection = true` write keeping the credentials; no-op once the row is gone. */
+/** The columns an announcement of a connection's death reads, off the row that flipped. */
+const deathColumns = {
+  orgId: integrationConnections.orgId,
+  spaceId: integrationConnections.spaceId,
+  integrationId: integrationConnections.integrationId,
+  authKey: integrationConnections.authKey,
+  userId: integrationConnections.userId,
+  endUserId: integrationConnections.endUserId,
+};
+
+/** Announce the death of the connection `connectionId`; its owner is the user XOR the end-user. */
+function announceConnectionDeath(
+  connectionId: string,
+  row: Pick<
+    typeof integrationConnections.$inferSelect,
+    "orgId" | "spaceId" | "integrationId" | "authKey" | "userId" | "endUserId"
+  >,
+  cause: CredentialFailureCause,
+): void {
+  const owner = row.userId
+    ? ({ type: "user", id: row.userId } as const)
+    : row.endUserId
+      ? ({ type: "end_user", id: row.endUserId } as const)
+      : null;
+  if (!owner) return;
+  announceCredentialNeedsReconnection({
+    kind: "integration_connection",
+    orgId: row.orgId,
+    spaceId: row.spaceId,
+    connectionId,
+    integrationId: row.integrationId,
+    authKey: row.authKey,
+    owner,
+    cause,
+  });
+}
+
+/**
+ * One of the two `needs_reconnection = true` flip points of this table (the other is
+ * {@link recordIntegrationRefreshFailure}): keeps the credentials, and announces only the call
+ * that flipped the flag (`needs_reconnection = false` in the WHERE, `RETURNING` the row). No-op
+ * once the row is gone or already flagged.
+ */
 export async function markIntegrationConnectionNeedsReconnection(
   connectionId: string,
+  cause: CredentialFailureCause,
 ): Promise<void> {
-  await db
+  const [flipped] = await db
     .update(integrationConnections)
     .set({ needsReconnection: true, updatedAt: new Date() })
-    .where(eq(integrationConnections.id, connectionId));
+    .where(
+      and(
+        eq(integrationConnections.id, connectionId),
+        eq(integrationConnections.needsReconnection, false),
+      ),
+    )
+    .returning(deathColumns);
+  if (flipped) announceConnectionDeath(connectionId, flipped, cause);
 }
 
 /** How {@link recordIntegrationRefreshFailure} counts a failure toward `maxFailures`. */
@@ -2511,7 +2563,9 @@ type RefreshFailureGate =
 /**
  * Record a credential failure (a transient refresh failure, or an upstream rejection of an
  * unrefreshable credential): increment and escalation in one statement, so concurrent failures lose
- * no count; `needsReconnection` is OR'd, never cleared. `null` when no row was counted.
+ * no count; `needsReconnection` is OR'd, never cleared. The statement joins the row's previous
+ * flag (locked `FOR UPDATE` in a CTE, `UPDATE ... FROM`), so it knows whether THIS statement
+ * flipped it and announces exactly then. `null` when no row was counted.
  */
 export async function recordIntegrationRefreshFailure(
   connectionId: string,
@@ -2523,24 +2577,46 @@ export async function recordIntegrationRefreshFailure(
     "reachable" in gate
       ? sql`${failures} >= ${maxFailures}`
       : sql`${failures} >= ${maxFailures} AND ${integrationConnections.expiresAt} IS NOT NULL AND ${integrationConnections.expiresAt} < now() - make_interval(secs => ${gate.graceSeconds})`;
+  const prev = db.$with("prev").as(
+    db
+      .select({
+        id: integrationConnections.id,
+        wasFlagged: integrationConnections.needsReconnection,
+      })
+      .from(integrationConnections)
+      .where(
+        and(
+          eq(integrationConnections.id, connectionId),
+          "reachable" in gate ? gate.reachable : undefined,
+        ),
+      )
+      .for("update"),
+  );
   const [row] = await db
+    .with(prev)
     .update(integrationConnections)
     .set({
       refreshFailureCount: failures,
       needsReconnection: sql`${integrationConnections.needsReconnection} OR (${escalates})`,
       updatedAt: sql`now()`,
     })
-    .where(
-      and(
-        eq(integrationConnections.id, connectionId),
-        "reachable" in gate ? gate.reachable : undefined,
-      ),
-    )
+    .from(prev)
+    .where(eq(integrationConnections.id, prev.id))
     .returning({
       failures: integrationConnections.refreshFailureCount,
       needsReconnection: integrationConnections.needsReconnection,
+      wasFlagged: prev.wasFlagged,
+      ...deathColumns,
     });
-  return row ?? null;
+  if (!row) return null;
+  if (row.needsReconnection && !row.wasFlagged) {
+    announceConnectionDeath(
+      connectionId,
+      row,
+      "reachable" in gate ? "unrefreshable" : "refresh_failures_exhausted",
+    );
+  }
+  return { failures: row.failures, needsReconnection: row.needsReconnection };
 }
 
 /**
