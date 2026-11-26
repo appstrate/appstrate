@@ -27,7 +27,11 @@ export interface SummaryInput<Run extends { id: string }, File> {
   calls: readonly ConversationToolCall[];
   /** The latest runs; absent when the reader reads runs in no space. */
   runs?: CountedRows<Run>;
-  /** The latest runs that failed; absent with `runs`. */
+  /**
+   * The latest runs that failed, as many as the Runs tab lists: the summary draws a few, and a
+   * failed call whose run is among any of them is left to that run. Absent with `runs`, or while
+   * they cannot be read: every failed call then stands on its own.
+   */
   failedRuns?: CountedRows<Run>;
   /** The latest files; absent when the reader reads files in no space. */
   files?: PagedRows<File>;
@@ -43,8 +47,17 @@ export interface SummaryGroup<T> {
 }
 
 export interface SummaryModel<Run, File> {
-  /** What failed (runs, then calls), absent when nothing did. */
-  attention: { runs: Run[]; calls: ConversationToolCall[]; count: number } | null;
+  /**
+   * What failed (runs, then calls), absent when nothing did. `moreRuns` / `moreCalls`: it holds
+   * more of that kind than it draws, so it leads to that kind's tab.
+   */
+  attention: {
+    runs: Run[];
+    calls: ConversationToolCall[];
+    count: number;
+    moreRuns: boolean;
+    moreCalls: boolean;
+  } | null;
   runs: SummaryGroup<Run> | null;
   files: SummaryGroup<File> | null;
   /** The calls that acted (lookups apart). */
@@ -83,7 +96,10 @@ export function summaryModel<Run extends { id: string }, File>({
 }: SummaryInput<Run, File>): SummaryModel<Run, File> {
   const failed = failedCalls(calls, new Set((failedRuns?.rows ?? []).map((run) => run.id)));
   // The failed runs the server counts, then the failed calls no failed run already holds.
-  const attentionCount = (failedRuns?.total ?? 0) + failed.length;
+  const failedRunCount = failedRuns?.total ?? 0;
+  const attentionCount = failedRunCount + failed.length;
+  const attentionRuns = (failedRuns?.rows ?? []).slice(0, SUMMARY_ROWS);
+  const attentionCalls = failed.slice(0, SUMMARY_ROWS);
   const actions = calls.filter((call) => !call.lookup).reverse();
   const fileRows = files?.rows.slice(0, SUMMARY_ROWS) ?? [];
   return {
@@ -91,9 +107,11 @@ export function summaryModel<Run extends { id: string }, File>({
       attentionCount === 0
         ? null
         : {
-            runs: (failedRuns?.rows ?? []).slice(0, SUMMARY_ROWS),
-            calls: failed.slice(0, SUMMARY_ROWS),
+            runs: attentionRuns,
+            calls: attentionCalls,
             count: attentionCount,
+            moreRuns: failedRunCount > attentionRuns.length,
+            moreCalls: failed.length > attentionCalls.length,
           },
     runs: counted(runs),
     files:

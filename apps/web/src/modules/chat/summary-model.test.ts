@@ -60,7 +60,42 @@ describe("summaryModel", () => {
       runs: counted([failedRun]),
       failedRuns: counted([failedRun], 4),
     });
-    expect(model.attention).toEqual({ runs: [failedRun], calls: [failedLookup], count: 5 });
+    expect(model.attention).toEqual({
+      runs: [failedRun],
+      calls: [failedLookup],
+      count: 5,
+      moreRuns: true,
+      moreCalls: false,
+    });
+  });
+
+  it("leaves a failed call to its run when that run is past the rows drawn", () => {
+    // Four failed runs read, three drawn: the call of the fourth is still that run's failure.
+    const failedRuns = ["run_4", "run_3", "run_2", "run_1"].map(run);
+    const launchOfFourth = call({ status: "error", runId: "run_1" });
+    const model = summaryModel({
+      calls: [launchOfFourth],
+      runs: counted(failedRuns),
+      failedRuns: counted(failedRuns),
+    });
+    expect(model.attention).toEqual({
+      runs: failedRuns.slice(0, SUMMARY_ROWS),
+      calls: [],
+      count: 4,
+      moreRuns: true,
+      moreCalls: false,
+    });
+  });
+
+  it("counts every failed call on its own while the failed runs cannot be read", () => {
+    const launch = call({ status: "error", runId: "run_f" });
+    expect(summaryModel({ calls: [launch], runs: counted([run("run_f")]) }).attention).toEqual({
+      runs: [],
+      calls: [launch],
+      count: 1,
+      moreRuns: false,
+      moreCalls: false,
+    });
   });
 
   it("keeps a failed call whose run did not fail: the call's failure is its own", () => {
@@ -71,7 +106,13 @@ describe("summaryModel", () => {
       runs: counted([run("run_live")]),
       failedRuns: counted([]),
     });
-    expect(model.attention).toEqual({ runs: [], calls: [cutShort], count: 1 });
+    expect(model.attention).toEqual({
+      runs: [],
+      calls: [cutShort],
+      count: 1,
+      moreRuns: false,
+      moreCalls: false,
+    });
   });
 
   it("draws at most its rows of each failure kind, the count holding them all", () => {
@@ -80,6 +121,8 @@ describe("summaryModel", () => {
     expect(model.attention?.calls).toHaveLength(SUMMARY_ROWS);
     expect(model.attention?.count).toBe(5);
     expect(model.attention?.runs).toEqual([]);
+    expect(model.attention?.moreCalls).toBe(true);
+    expect(model.attention?.moreRuns).toBe(false);
   });
 
   it("counts the runs with the server's total, not the rows it read", () => {

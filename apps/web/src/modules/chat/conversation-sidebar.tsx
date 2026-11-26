@@ -30,6 +30,7 @@ import {
   type ConversationSidebarTab,
   type LocalSidebarFile,
   type SidebarFile,
+  type SidebarOrigin,
   type StoredSidebarFile,
 } from "./conversation-sidebar-state";
 import { PanelResizeHandle } from "./panel-resize";
@@ -79,24 +80,28 @@ export function ConversationContextToggle({
   );
 }
 
+/** What closing a shown file does, said by its X: back where it was opened from. */
+const FILE_CLOSE_LABEL: Record<SidebarOrigin, string> = {
+  thread: "context.collapse",
+  list: "context.backToFiles",
+  summary: "context.backToSummary",
+};
+
 /**
  * The file's frame IS the panel: its header replaces the panel's. Its X closes
- * the panel, or goes back to the file list the file was opened from.
+ * the panel, or goes back to the file list or the summary the file was opened from.
  */
 export function ShownFile({
   file,
-  backToList,
+  from,
   onClose,
 }: {
   file: SidebarFile;
-  backToList: boolean;
+  from: SidebarOrigin;
   onClose: () => void;
 }) {
   const { t } = useTranslation("chat");
-  const close = {
-    label: backToList ? t("context.backToFiles") : t("context.collapse"),
-    onClick: onClose,
-  };
+  const close = { label: t(FILE_CLOSE_LABEL[from]), onClick: onClose };
   return "local" in file ? (
     <ShownLocalFile file={file} onClose={close} />
   ) : (
@@ -164,12 +169,15 @@ function ConversationContext({
   state,
   dispatch,
   closable,
+  onShowInThread,
 }: {
   conversationId: string | null;
   state: ConversationSidebarState;
   dispatch: Dispatch<ConversationSidebarAction>;
   /** The phone's sheet has no header toggle beside it: it carries its own close. */
   closable: boolean;
+  /** "See in the thread": bring the call's card into view, where the panel leaves room for it. */
+  onShowInThread: (call: ConversationToolCall) => void;
 }) {
   // The desktop column stays mounted while closed (for its transition): its
   // reads wait until it is open. The phone's sheet unmounts its content when closed.
@@ -181,22 +189,12 @@ function ConversationContext({
   const previewedFile = shownFile(state);
   const shownCall = shownToolCallId(state);
 
-  const showInThread = (call: ConversationToolCall) => {
-    // The phone's sheet covers the thread: it closes to show the card.
-    if (closable) dispatch({ type: "toggle" });
-    // The thread is drawn under the panel: reveal once the panel made room for it. Missed, the
-    // panel opens again on the call to say so.
-    requestAnimationFrame(() =>
-      dispatch({ type: "revealed", toolCallId: call.toolCallId, found: revealToolCall(call) }),
-    );
-  };
-
   if (previewedFile) {
     return (
       <div className="min-h-0 flex-1 p-3">
         <ShownFile
           file={previewedFile}
-          backToList={state.fileFromList}
+          from={state.fileFrom}
           onClose={() => dispatch({ type: "close-file" })}
         />
       </div>
@@ -215,24 +213,24 @@ function ConversationContext({
           FLOATING_FRAME,
         )}
       >
-        {/* A narrow panel cannot fit four labelled tabs: the others keep their icon and name it
-            to assistive tech and on hover, the active one keeps its label. */}
+        {/* Every tab keeps its name in words: a narrow panel drops the icons and tightens the
+            tabs (as a detail page's do below `sm`), and scrolls them sideways if they still do
+            not fit. 40 px tabs on touch, denser under a mouse. */}
         <AgentDetailPaneHeader className="@container justify-end gap-2">
-          <TabsList className="h-9 min-w-0" aria-label={t("context.label")}>
-            {tabs.map(({ id, Icon, label }) => (
-              <TabsTrigger
-                key={id}
-                value={id}
-                title={label}
-                className="min-w-0 gap-1.5 px-2.5 @sm:px-3"
-              >
-                <Icon className="size-4 shrink-0" />
-                <span className={cn("truncate", id !== activeTab.id && "sr-only @sm:not-sr-only")}>
+          <div className="no-scrollbar scroll-fade-x min-w-0 overflow-x-auto">
+            <TabsList className="h-auto w-max p-1" aria-label={t("context.label")}>
+              {tabs.map(({ id, Icon, label }) => (
+                <TabsTrigger
+                  key={id}
+                  value={id}
+                  className="desktop-pointer:h-7 h-10 gap-1.5 px-2 @sm:px-3"
+                >
+                  <Icon aria-hidden="true" className="hidden size-4 shrink-0 @sm:block" />
                   {label}
-                </span>
-              </TabsTrigger>
-            ))}
-          </TabsList>
+                </TabsTrigger>
+              ))}
+            </TabsList>
+          </div>
           {closable ? (
             <Button
               variant="ghost"
@@ -254,7 +252,7 @@ function ConversationContext({
               <ConversationFiles
                 conversationId={conversationId}
                 active={active}
-                onSelect={(file) => dispatch({ type: "show-file", file, fromList: true })}
+                onSelect={(file) => dispatch({ type: "show-file", file, from: "list" })}
               />
             ) : null}
             {id === "tools" ? (
@@ -265,15 +263,18 @@ function ConversationContext({
                   toolCallId={shownCall}
                   active={active}
                   missing={revealMissed(state)}
+                  from={state.toolCallFrom}
                   onBack={() => dispatch({ type: "close-tool-call" })}
-                  onShowInThread={showInThread}
+                  onShowInThread={onShowInThread}
                 />
               ) : (
                 <ConversationToolsList
                   conversationId={conversationId}
                   active={active}
+                  showLookups={state.showLookups}
+                  onShowLookupsChange={(show) => dispatch({ type: "show-lookups", show })}
                   onSelect={(call) =>
-                    dispatch({ type: "show-tool-call", toolCallId: call.toolCallId })
+                    dispatch({ type: "show-tool-call", toolCallId: call.toolCallId, from: "list" })
                   }
                 />
               )
@@ -308,7 +309,23 @@ export function ConversationSidebar({
   const desktop = useMediaQuery(LG_AND_UP);
   const panelRef = useRef<HTMLElement>(null);
   const [dragging, setDragging] = useState(false);
+  // The call "See in the thread" waits to reveal until the phone's sheet has closed.
+  const pendingReveal = useRef<ConversationToolCall | null>(null);
   const { activeTab } = useConversationTabs(state.activeTab);
+  const reveal = (call: ConversationToolCall) =>
+    // Missed, the panel opens again on the call to say so.
+    dispatch({ type: "revealed", toolCallId: call.toolCallId, found: revealToolCall(call) });
+  const showInThread = (call: ConversationToolCall) => {
+    if (desktop) {
+      // The panel floats beside the thread: the card is revealed in place.
+      reveal(call);
+      return;
+    }
+    // The phone's sheet covers the thread: it closes first, and the card is revealed once it has,
+    // in place of the focus the sheet would give back to its trigger (`onCloseAutoFocus`).
+    pendingReveal.current = call;
+    dispatch({ type: "toggle" });
+  };
   // The summary and a tool call's detail take a little more than a list.
   const view: PanelView = shownFile(state)
     ? "file"
@@ -368,6 +385,7 @@ export function ConversationSidebar({
             state={state}
             dispatch={dispatch}
             closable={false}
+            onShowInThread={showInThread}
           />
         </aside>
       ) : (
@@ -382,6 +400,14 @@ export function ConversationSidebar({
             // The panel's header carries the one close control.
             showCloseButton={false}
             className="bg-canvas flex w-[min(92vw,36rem)] flex-col gap-0 p-0 sm:max-w-none"
+            onCloseAutoFocus={(event) => {
+              const call = pendingReveal.current;
+              if (!call) return;
+              pendingReveal.current = null;
+              // The revealed card takes the focus, not the toggle that opened the sheet.
+              event.preventDefault();
+              reveal(call);
+            }}
           >
             <SheetTitle className="sr-only">{t("context.label")}</SheetTitle>
             <ConversationContext
@@ -389,6 +415,7 @@ export function ConversationSidebar({
               state={state}
               dispatch={dispatch}
               closable
+              onShowInThread={showInThread}
             />
           </SheetContent>
         </Sheet>

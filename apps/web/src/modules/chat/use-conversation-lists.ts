@@ -14,6 +14,16 @@ const LIST_LIMIT = 100;
 /** The statuses a run ends on when it failed (a cancelled run was stopped, not failed). */
 export const FAILED_RUN_STATUSES = ["failed", "timeout"] as const satisfies readonly RunStatus[];
 
+/**
+ * What a panel read shows: its answer once it has one, kept through a refetch that fails; its
+ * error only while it holds nothing; else its wait (a read on its way, or held while the panel is
+ * closed).
+ */
+export function readShown(query: { data: unknown; error: unknown }): "ready" | "error" | "pending" {
+  if (query.data !== undefined) return "ready";
+  return query.error ? "error" : "pending";
+}
+
 interface ListRead {
   /** Rows to read: the tab's list by default, the summary asks only for the ones it draws. */
   limit?: number;

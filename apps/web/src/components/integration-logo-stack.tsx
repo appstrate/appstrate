@@ -16,15 +16,18 @@ const MAX_LOGOS = 4;
  * tooltip, one a line. The tile is a space tile's ({@link STACK_TILE}), filled by the logo on its
  * white ground (`PackageIcon`), clipped to the tile's corners. One named in `inactive` (a required integration not
  * active in the space, which refuses the launch) is dimmed and said so in the tooltip. Nothing
- * when the agent uses none.
+ * when the agent uses none. `decorative` when the names are written beside it: the logos alone,
+ * out of the accessibility tree and with no tooltip, so nothing is said twice.
  */
 export function IntegrationLogoStack({
   integrations,
   inactive,
+  decorative = false,
 }: {
   /** What the stack draws of each: an agent's integrations, or those a conversation reached. */
   integrations: readonly Pick<AgentListIntegration, "id" | "name" | "icon">[];
   inactive?: readonly string[];
+  decorative?: boolean;
 }) {
   const { t } = useTranslation("common");
   if (integrations.length === 0) return null;
@@ -35,35 +38,42 @@ export function IntegrationLogoStack({
       ? t("integrationStack.inactive", { name: integration.name })
       : integration.name,
   }));
+  const logos = (
+    <TileStack
+      items={integrations}
+      keyOf={(integration) => integration.id}
+      render={(integration, className) => (
+        <span
+          data-testid="integration-logo"
+          className={cn("flex shrink-0 overflow-hidden", STACK_TILE, className)}
+        >
+          <PackageIcon
+            type="integration"
+            icon={integration.icon}
+            size="xs"
+            className={cn("rounded-none", isInactive(integration.id) && "opacity-40 grayscale")}
+          />
+        </span>
+      )}
+      tileClass={STACK_TILE}
+      max={MAX_LOGOS}
+      testId="integration-logo-stack"
+    />
+  );
+  if (decorative) {
+    return (
+      <span aria-hidden="true" className="flex shrink-0">
+        {logos}
+      </span>
+    );
+  }
   const label = t("integrationStack.label", { names: named.map((n) => n.text).join(", ") });
   return (
     <Tooltip>
       <TooltipTrigger asChild>
         {/* Raised over a card's or a row's stretched link, or it would swallow the hover. */}
         <span tabIndex={0} role="img" aria-label={label} className="relative z-10 flex shrink-0">
-          <TileStack
-            items={integrations}
-            keyOf={(integration) => integration.id}
-            render={(integration, className) => (
-              <span
-                data-testid="integration-logo"
-                className={cn("flex shrink-0 overflow-hidden", STACK_TILE, className)}
-              >
-                <PackageIcon
-                  type="integration"
-                  icon={integration.icon}
-                  size="xs"
-                  className={cn(
-                    "rounded-none",
-                    isInactive(integration.id) && "opacity-40 grayscale",
-                  )}
-                />
-              </span>
-            )}
-            tileClass={STACK_TILE}
-            max={MAX_LOGOS}
-            testId="integration-logo-stack"
-          />
+          {logos}
         </span>
       </TooltipTrigger>
       {/* One name a line: an agent may use more integrations than a line holds. */}

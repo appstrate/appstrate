@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import type { Dispatch, ReactNode } from "react";
-import { Link } from "react-router-dom";
+import { useId, type Dispatch, type ReactNode } from "react";
 import { ActivityIcon, ChevronRightIcon } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { useNowTick } from "@appstrate/ui/use-now-tick";
@@ -24,12 +23,11 @@ import { MimeIcon } from "@appstrate/ui/components/mime-icon";
 import { formatCompactTokens, formatTokenFigure } from "@appstrate/ui/context-window";
 import { ErrorState } from "../../components/page-states";
 import { IntegrationLogoStack } from "../../components/integration-logo-stack";
+import { RowSpaceName, RunLink } from "../../components/run-row";
 import { RunStatusBadge } from "../../components/status-badge";
 import { Waiting } from "../../components/loading-skeletons";
 import { SkeletonLine } from "../../components/skeleton-line";
-import { useSpaceLink } from "../../hooks/use-current-space";
 import { formatBytes } from "../../lib/format-bytes";
-import { runDetailPath } from "../../lib/package-paths";
 import { formatDateField, formatRelativeTime } from "../../lib/format-date";
 import { ChatAccessSummary } from "./chat-access-summary";
 import type {
@@ -40,6 +38,7 @@ import { ToolCallIcon } from "./conversation-tools-tab";
 import { SUMMARY_ROWS, summaryModel, type SummaryGroup } from "./summary-model";
 import {
   FAILED_RUN_STATUSES,
+  readShown,
   useConversationFiles,
   useConversationRuns,
 } from "./use-conversation-lists";
@@ -77,31 +76,49 @@ function ConversationId({ id }: { id: string }) {
 }
 
 /** A line of the summary's activity: 40 px, a touch target like every chat control. */
-const ROW_CLASS =
-  "hover:bg-muted/50 flex min-h-10 w-full items-center gap-2.5 px-4 py-1.5 text-left text-sm transition-colors";
+const LINE_CLASS = "flex min-h-10 w-full items-center gap-2.5 px-4 py-1.5 text-left text-sm";
+
+/** A line that opens something in the panel: it hovers like a list row. */
+const BUTTON_LINE_CLASS = cn(LINE_CLASS, "hover:bg-muted/50 transition-colors");
 
 /** A group's heading line: as tall as its "See all" on touch, denser under a mouse. */
 const GROUP_HEAD_CLASS = "desktop-pointer:min-h-7 flex min-h-10 items-center gap-1.5 px-4";
 
-/** The activity on its way, in the shape of one group: its heading and its lines. No `status` of its own. */
-function ActivityBlocks() {
+/** A folding section's line, folded or not. */
+const DISCLOSURE_LINE_CLASS = "flex min-h-10 w-full items-center justify-start gap-2 px-4 py-2";
+
+/** The summary's sections, in the order it draws them. */
+const SECTIONS: readonly { id: SummarySectionId; width: string }[] = [
+  { id: "usage", width: "w-28" },
+  { id: "access", width: "w-24" },
+  { id: "details", width: "w-16" },
+];
+
+/**
+ * One group of the activity on its way, in its shape: its heading and its lines. Hidden from
+ * assistive tech: the zone that waits says so once.
+ */
+function GroupSkeleton() {
   return (
-    <div className="flex flex-col gap-1 py-2">
+    <div aria-hidden="true" className="flex flex-col">
       <div className={GROUP_HEAD_CLASS}>
         <SkeletonLine className="w-12 text-xs font-medium" />
       </div>
-      {["w-32", "w-40", "w-28"].map((width, i) => (
-        <div key={i} className="flex min-h-10 items-center gap-2.5 px-4 py-1.5">
-          <SkeletonLine className="w-4 text-sm" />
-          <SkeletonLine className={cn("text-sm font-medium", width)} />
+      {["w-32", "w-40", "w-28"].slice(0, SUMMARY_ROWS).map((width) => (
+        <div key={width} className={LINE_CLASS}>
+          <SkeletonLine className="w-4" />
+          <SkeletonLine className={cn("font-medium", width)} />
         </div>
       ))}
     </div>
   );
 }
 
-/** The summary while the conversation loads: its header lines, its activity, its folded lines. */
-function SummarySkeleton() {
+/**
+ * The summary while the conversation loads: its header lines, its activity, its sections as the
+ * reader left them, folded to their line or open on their content.
+ */
+function SummarySkeleton({ sections }: { sections: ReturnType<typeof useSummarySections> }) {
   return (
     <Waiting>
       <div className="divide-y">
@@ -109,11 +126,22 @@ function SummarySkeleton() {
           <SkeletonLine className="w-2/3 text-sm font-semibold" />
           <SkeletonLine className="w-1/2 text-xs" />
         </div>
-        <ActivityBlocks />
-        {["w-28", "w-24", "w-16"].map((width, i) => (
-          <div key={i} className="flex min-h-10 items-center gap-2 px-4 py-2">
-            <span className="size-4 shrink-0" />
-            <SkeletonLine className={cn("text-sm font-medium", width)} />
+        <div className="py-2">
+          <GroupSkeleton />
+        </div>
+        {SECTIONS.map(({ id, width }) => (
+          <div key={id}>
+            <div className={DISCLOSURE_LINE_CLASS}>
+              <span className="size-4 shrink-0" />
+              <SkeletonLine className={cn("text-sm font-medium", width)} />
+            </div>
+            {sections.isOpen(id) ? (
+              <div className="flex flex-col gap-1 px-4 pt-1 pb-3">
+                {["w-1/3", "w-2/3", "w-1/2"].map((line) => (
+                  <SkeletonLine key={line} className={cn("text-sm", line)} />
+                ))}
+              </div>
+            ) : null}
           </div>
         ))}
       </div>
@@ -228,11 +256,16 @@ function SummaryDisclosure({
     <Collapsible open={open} onOpenChange={onOpenChange} asChild>
       <section>
         <h3>
-          <CollapsibleTrigger className="hover:bg-muted/50 focus-visible:ring-ring flex min-h-10 w-full items-center justify-start gap-2 px-4 py-2 text-left transition-colors focus-visible:ring-2 focus-visible:outline-none focus-visible:ring-inset">
+          <CollapsibleTrigger
+            className={cn(
+              DISCLOSURE_LINE_CLASS,
+              "hover:bg-muted/50 focus-visible:ring-ring text-left transition-colors focus-visible:ring-2 focus-visible:outline-none focus-visible:ring-inset",
+            )}
+          >
             <ChevronRightIcon
               aria-hidden="true"
               className={cn(
-                "text-muted-foreground size-4 shrink-0 transition-transform",
+                "text-muted-foreground duration-fast ease-surface size-4 shrink-0 transition-transform",
                 open && "rotate-90",
               )}
             />
@@ -255,16 +288,21 @@ function folding(sections: ReturnType<typeof useSummarySections>, id: SummarySec
   return { open: sections.isOpen(id), onOpenChange: (open: boolean) => sections.setOpen(id, open) };
 }
 
-/** One item of the activity on one line: its icon, its name, what it acted on, then its outcome. */
+/**
+ * One item of the activity on one line: its icon, its name, what it acted on, the space it is in
+ * (a list spanning spaces), then its outcome. Laid in its line's own flex row.
+ */
 function ActivityLine({
   icon,
   label,
   detail,
+  space,
   trailing,
 }: {
   icon: ReactNode;
   label: string;
   detail?: string;
+  space?: ReactNode;
   trailing?: ReactNode;
 }) {
   return (
@@ -278,6 +316,7 @@ function ActivityLine({
           <span className="text-muted-foreground min-w-0 truncate text-xs">{detail}</span>
         ) : null}
       </span>
+      {space}
       {trailing ? <span className="flex shrink-0 items-center">{trailing}</span> : null}
     </>
   );
@@ -286,27 +325,29 @@ function ActivityLine({
 type ConversationRun = ReturnType<typeof useConversationRuns>["runs"][number];
 type ConversationFile = ReturnType<typeof useConversationFiles>["files"][number];
 
-/** A run on one line, leading to its page, as the Runs tab's rows do. */
-function RunLine({ run, agentName }: { run: ConversationRun; agentName: string }) {
-  const linkInSpace = useSpaceLink();
-  const line = (
-    <ActivityLine
-      icon={<ActivityIcon />}
-      label={agentName}
-      detail={`#${run.runNumber}`}
-      trailing={<RunStatusBadge status={run.status} unread={run.unread} compact />}
-    />
-  );
-  return run.packageId ? (
-    <Link
-      to={linkInSpace(runDetailPath(run.packageId, run.id), run.spaceId)}
-      state={{ runNumber: run.runNumber }}
-      className={ROW_CLASS}
-    >
-      {line}
-    </Link>
-  ) : (
-    <div className={ROW_CLASS}>{line}</div>
+/**
+ * A run on one line, leading to its page as the Runs tab's rows do (`RunLink`), naming its space
+ * in a list spanning spaces.
+ */
+function RunLine({
+  run,
+  agentName,
+  spanning,
+}: {
+  run: ConversationRun;
+  agentName: string;
+  spanning: boolean;
+}) {
+  return (
+    <RunLink run={run} className={LINE_CLASS}>
+      <ActivityLine
+        icon={<ActivityIcon />}
+        label={agentName}
+        detail={`#${run.runNumber}`}
+        space={spanning ? <RowSpaceName spaceId={run.spaceId} /> : null}
+        trailing={<RunStatusBadge status={run.status} unread={run.unread} compact />}
+      />
+    </RunLink>
   );
 }
 
@@ -323,8 +364,10 @@ function CallLine({
   return (
     <button
       type="button"
-      className={ROW_CLASS}
-      onClick={() => dispatch({ type: "show-tool-call", toolCallId: call.toolCallId })}
+      className={BUTTON_LINE_CLASS}
+      onClick={() =>
+        dispatch({ type: "show-tool-call", toolCallId: call.toolCallId, from: "summary" })
+      }
     >
       <ActivityLine
         icon={<ToolCallIcon call={call} shown={shown} />}
@@ -342,10 +385,57 @@ function CallLine({
   );
 }
 
+/** A file on one line, opening it over the Files tab, back to the summary once closed. */
+function FileLine({
+  file,
+  dispatch,
+}: {
+  file: ConversationFile;
+  dispatch: Dispatch<ConversationSidebarAction>;
+}) {
+  return (
+    <button
+      type="button"
+      className={BUTTON_LINE_CLASS}
+      onClick={() =>
+        dispatch({
+          type: "show-file",
+          file: { id: file.id, name: file.name, spaceId: file.spaceId },
+          from: "summary",
+        })
+      }
+    >
+      <ActivityLine
+        icon={<MimeIcon mime={file.mime} name={file.name} />}
+        label={file.name}
+        trailing={
+          <span className="text-muted-foreground text-xs tabular-nums">
+            {formatBytes(file.size)}
+          </span>
+        }
+      />
+    </button>
+  );
+}
+
+/** A group's "See all" at the end of its lines, naming the tab it leads to. */
+function SeeAllLine({ label, onClick }: { label: string; onClick: () => void }) {
+  return (
+    <Button
+      variant="ghost"
+      size="sm"
+      className="text-muted-foreground desktop-pointer:h-7 mx-2.5 h-10 self-start px-1.5 text-xs"
+      onClick={onClick}
+    >
+      {label}
+    </Button>
+  );
+}
+
 /**
- * A group of the activity: its name, its latest lines, and, when it holds more, "See all" to its
- * tab, with the count when the server gives one. `count` beside the name is for a group with no
- * tab of its own.
+ * A group of the activity, a section named by its heading: its name, its latest lines, and, when
+ * it holds more, "See all" to its tab, with the count when the server gives one. `count` beside
+ * the name is for a group with no tab of its own.
  */
 function ActivityGroup({
   title,
@@ -361,10 +451,13 @@ function ActivityGroup({
   children: ReactNode;
 }) {
   const { t } = useTranslation("chat");
+  const headingId = useId();
   return (
-    <div className="flex flex-col">
+    <section className="flex flex-col" aria-labelledby={headingId}>
       <div className={GROUP_HEAD_CLASS}>
-        <h4 className="text-muted-foreground text-xs font-medium">{title}</h4>
+        <h3 id={headingId} className="text-muted-foreground text-xs font-medium">
+          {title}
+        </h3>
         {count !== undefined ? (
           <span className="text-muted-foreground text-xs tabular-nums">{count}</span>
         ) : null}
@@ -382,7 +475,7 @@ function ActivityGroup({
         ) : null}
       </div>
       {children}
-    </div>
+    </section>
   );
 }
 
@@ -390,7 +483,9 @@ function ActivityGroup({
  * Everything the conversation did, in one view: what failed first (only when something did), the
  * integrations its calls reached, then its runs, its files and its actions (lookups apart), the
  * latest of each on one line. A group with nothing in it is left out; a group whose tab the reader
- * cannot see too. Its reads wait together, under one `status`.
+ * cannot see too. Each group stands on its own read: the calls and the integrations, held by the
+ * conversation, show at once; a group whose read is on its way waits in its shape, one whose read
+ * failed with nothing held says so in its place. The zone says it waits once, whatever waits.
  */
 function SummaryActivity({
   conversationId,
@@ -409,60 +504,90 @@ function SummaryActivity({
   seeAll: (tab: ConversationSidebarTab) => () => void;
   dispatch: Dispatch<ConversationSidebarAction>;
 }) {
-  const { t } = useTranslation("chat");
-  const latest = { limit: SUMMARY_ROWS };
-  const runs = useConversationRuns(conversationId, active && showsRuns, latest);
+  const { t } = useTranslation(["chat", "common"]);
+  const runs = useConversationRuns(conversationId, active && showsRuns, { limit: SUMMARY_ROWS });
+  // Read as the Runs tab lists them: a failed call whose run is among any of them is that run's.
   const failedRuns = useConversationRuns(conversationId, active && showsRuns, {
-    ...latest,
     status: FAILED_RUN_STATUSES,
   });
-  const files = useConversationFiles(conversationId, active && showsFiles, latest);
-  const reads = [
-    ...(showsRuns ? [runs.query, failedRuns.query] : []),
-    ...(showsFiles ? [files.query] : []),
-  ];
-  const failure = reads.find((read) => read.error)?.error;
-
-  if (failure) return <ErrorState error={failure} compact />;
-  if (reads.some((read) => read.isPending)) {
-    return (
-      <Waiting>
-        <ActivityBlocks />
-      </Waiting>
-    );
-  }
+  const files = useConversationFiles(conversationId, active && showsFiles, {
+    limit: SUMMARY_ROWS,
+  });
+  const runsRead = showsRuns ? readShown(runs.query) : null;
+  const failedRead = showsRuns ? readShown(failedRuns.query) : null;
+  const filesRead = showsFiles ? readShown(files.query) : null;
 
   const model = summaryModel<ConversationRun, ConversationFile>({
     calls: tools.calls,
-    ...(showsRuns
-      ? {
-          runs: { rows: runs.runs, total: runs.total },
-          failedRuns: { rows: failedRuns.runs, total: failedRuns.total },
-        }
+    ...(runsRead === "ready" ? { runs: { rows: runs.runs, total: runs.total } } : {}),
+    ...(failedRead === "ready"
+      ? { failedRuns: { rows: failedRuns.runs, total: failedRuns.total } }
       : {}),
-    ...(showsFiles ? { files: { rows: files.files, hasMore: files.hasMore } } : {}),
+    ...(filesRead === "ready" ? { files: { rows: files.files, hasMore: files.hasMore } } : {}),
   });
   const { attention } = model;
+  // While the failed runs are read, « À vérifier » waits only when a failed call already calls for it.
+  const attentionWaits = failedRead === "pending" && attention !== null;
+  const waiting = attentionWaits || runsRead === "pending" || filesRead === "pending";
+  const nothing =
+    !model.runs &&
+    !model.files &&
+    !model.actions &&
+    runsRead !== "pending" &&
+    runsRead !== "error" &&
+    filesRead !== "pending" &&
+    filesRead !== "error";
 
   return (
     <>
-      {attention ? (
-        <section className="flex flex-col py-2" aria-label={t("context.summary.attention")}>
-          <ActivityGroup title={t("context.summary.attention")} count={attention.count}>
-            {attention.runs.map((run) => (
-              <RunLine key={run.id} run={run} agentName={failedRuns.agentName(run)} />
+      {waiting ? (
+        <span role="status" className="sr-only">
+          {t("common:loading")}
+        </span>
+      ) : null}
+      {attentionWaits ? (
+        <div className="py-2">
+          <GroupSkeleton />
+        </div>
+      ) : failedRead === "error" || attention ? (
+        <div className="py-2">
+          <ActivityGroup
+            title={t("context.summary.attention")}
+            // Unread failed runs: the count would hold only the calls.
+            count={failedRead === "error" ? undefined : attention?.count}
+          >
+            {failedRead === "error" ? <ErrorState error={failedRuns.query.error} compact /> : null}
+            {attention?.runs.map((run) => (
+              <RunLine
+                key={run.id}
+                run={run}
+                agentName={failedRuns.agentName(run)}
+                spanning={failedRuns.spanning}
+              />
             ))}
-            {attention.calls.map((call) => (
+            {attention?.moreRuns ? (
+              <SeeAllLine label={t("context.summary.seeAllRuns")} onClick={seeAll("runs")} />
+            ) : null}
+            {attention?.calls.map((call) => (
               <CallLine key={call.toolCallId} call={call} dispatch={dispatch} />
             ))}
+            {attention?.moreCalls ? (
+              <SeeAllLine label={t("context.summary.seeAllTools")} onClick={seeAll("tools")} />
+            ) : null}
           </ActivityGroup>
-        </section>
+        </div>
       ) : null}
       <IntegrationsUsed tools={tools} />
-      {!model.runs && !model.files && !model.actions ? (
+      {nothing ? (
         <p className="text-muted-foreground px-4 py-3 text-sm">{t("context.summary.noActivity")}</p>
       ) : (
-        <section className="flex flex-col gap-1 py-2" aria-label={t("context.summary.activity")}>
+        <div className="flex flex-col gap-1 py-2">
+          {runsRead === "pending" ? <GroupSkeleton /> : null}
+          {runsRead === "error" ? (
+            <ActivityGroup title={t("common:nav.runs")}>
+              <ErrorState error={runs.query.error} compact />
+            </ActivityGroup>
+          ) : null}
           {model.runs ? (
             <ActivityGroup
               title={t("common:nav.runs")}
@@ -470,8 +595,19 @@ function SummaryActivity({
               onSeeAll={seeAll("runs")}
             >
               {model.runs.rows.map((run) => (
-                <RunLine key={run.id} run={run} agentName={runs.agentName(run)} />
+                <RunLine
+                  key={run.id}
+                  run={run}
+                  agentName={runs.agentName(run)}
+                  spanning={runs.spanning}
+                />
               ))}
+            </ActivityGroup>
+          ) : null}
+          {filesRead === "pending" ? <GroupSkeleton /> : null}
+          {filesRead === "error" ? (
+            <ActivityGroup title={t("common:nav.files")}>
+              <ErrorState error={files.query.error} compact />
             </ActivityGroup>
           ) : null}
           {model.files ? (
@@ -481,34 +617,13 @@ function SummaryActivity({
               onSeeAll={seeAll("files")}
             >
               {model.files.rows.map((file) => (
-                <button
-                  key={file.id}
-                  type="button"
-                  className={ROW_CLASS}
-                  onClick={() =>
-                    dispatch({
-                      type: "show-file",
-                      file: { id: file.id, name: file.name, spaceId: file.spaceId },
-                      fromList: true,
-                    })
-                  }
-                >
-                  <ActivityLine
-                    icon={<MimeIcon mime={file.mime} name={file.name} />}
-                    label={file.name}
-                    trailing={
-                      <span className="text-muted-foreground text-xs tabular-nums">
-                        {formatBytes(file.size)}
-                      </span>
-                    }
-                  />
-                </button>
+                <FileLine key={file.id} file={file} dispatch={dispatch} />
               ))}
             </ActivityGroup>
           ) : null}
           {model.actions ? (
             <ActivityGroup
-              title={t("context.summary.calls")}
+              title={t("context.tabs.tools")}
               group={model.actions}
               onSeeAll={seeAll("tools")}
             >
@@ -517,13 +632,16 @@ function SummaryActivity({
               ))}
             </ActivityGroup>
           ) : null}
-        </section>
+        </div>
       )}
     </>
   );
 }
 
-/** The integrations the conversation's calls reached, on one line. Nothing when none did. */
+/**
+ * The integrations the conversation's calls reached, on one line, named in words: the logos beside
+ * the names say nothing more, so assistive tech hears the names once. Nothing when none did.
+ */
 function IntegrationsUsed({ tools }: { tools: ConversationTools }) {
   const { t } = useTranslation("chat");
   // As the platform presented each call: no read of its own.
@@ -540,7 +658,7 @@ function IntegrationsUsed({ tools }: { tools: ConversationTools }) {
         <span className="text-muted-foreground min-w-0 truncate text-xs">
           {integrations.map((integration) => integration.name).join(", ")}
         </span>
-        <IntegrationLogoStack integrations={integrations} />
+        <IntegrationLogoStack integrations={integrations} decorative />
       </span>
     </section>
   );
@@ -583,9 +701,12 @@ export function ConversationSummary({
       </div>
     );
   }
-  if (query.error) return <ErrorState error={query.error} compact />;
+  // A refetch that fails keeps the conversation already read.
+  if (query.data === undefined && query.error) return <ErrorState error={query.error} compact />;
   // Not read yet, or held while the panel is closed: never an error.
-  if (query.data === undefined || tools === undefined) return <SummarySkeleton />;
+  if (query.data === undefined || tools === undefined) {
+    return <SummarySkeleton sections={sections} />;
+  }
   // The server holds no such conversation.
   if (query.data === null || tools === null) return <ErrorState compact />;
 

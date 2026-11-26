@@ -17,44 +17,57 @@ export interface LocalSidebarFile {
 
 export type SidebarFile = StoredSidebarFile | LocalSidebarFile;
 
+/**
+ * Where a detail shown over its tab (a file, a tool call) was opened from, so closing it goes back
+ * there: the thread (closing the detail closes the panel), its tab's list, or the summary.
+ */
+export type SidebarOrigin = "thread" | "list" | "summary";
+
 export interface ConversationSidebarState {
   expanded: boolean;
   activeTab: ConversationSidebarTab;
   /** The file shown over the Files tab, null when the tab shows its list. */
   selectedFile: SidebarFile | null;
-  /** The shown file was opened from the list: closing it goes back to the list. */
-  fileFromList: boolean;
+  /** Where the shown file was opened from. */
+  fileFrom: SidebarOrigin;
   /** The tool call shown over the Tools tab, null when the tab shows its list. */
   selectedToolCallId: string | null;
-  /** The tool call whose card "See in the thread" last looked for and did not find. */
-  missedRevealId: string | null;
+  /** Where the shown tool call was opened from: its list or the summary. */
+  toolCallFrom: Exclude<SidebarOrigin, "thread">;
+  /** "See in the thread" looked for the shown call's card and did not find it. */
+  revealMissed: boolean;
+  /** The Tools tab lists the lookups beside the actions. */
+  showLookups: boolean;
 }
 
 export type ConversationSidebarAction =
   | { type: "toggle" }
   | { type: "select-tab"; tab: ConversationSidebarTab }
-  | { type: "show-file"; file: SidebarFile; fromList?: boolean }
+  | { type: "show-file"; file: SidebarFile; from?: SidebarOrigin }
   | { type: "close-file" }
-  | { type: "show-tool-call"; toolCallId: string }
+  | { type: "show-tool-call"; toolCallId: string; from?: Exclude<SidebarOrigin, "thread"> }
   | { type: "close-tool-call" }
   /** What "See in the thread" found: missed, the panel opens again on the call to say so. */
   | { type: "revealed"; toolCallId: string; found: boolean }
+  | { type: "show-lookups"; show: boolean }
   | { type: "conversation-change" };
 
 export const INITIAL_CONVERSATION_SIDEBAR_STATE: ConversationSidebarState = {
   expanded: false,
   activeTab: "summary",
   selectedFile: null,
-  fileFromList: false,
+  fileFrom: "thread",
   selectedToolCallId: null,
-  missedRevealId: null,
+  toolCallFrom: "list",
+  revealMissed: false,
+  showLookups: false,
 };
 
 /**
- * State behind the chat's context panel. A file shows in the Files tab over its
- * list: closing it closes the panel when opened from the thread, goes back to
- * the list when opened from the list. A tool call shows in the Tools tab over its
- * list, and closing it goes back to the list. Choosing a tab shows that tab's own content.
+ * State behind the chat's context panel. A file shows in the Files tab over its list, a tool call
+ * in the Tools tab over its list. Closing either goes back where it was opened from: the thread
+ * (a file: the panel closes), its tab's list, or the summary. Choosing a tab shows that tab's own
+ * content. Whether the Tools tab lists the lookups is the reader's, kept until they change it.
  *
  * Opening the panel always shows its tabs: a file is shown by a "show-file",
  * never restored. Collapsing keeps it, so it stays drawn while the panel slides
@@ -76,7 +89,7 @@ export function conversationSidebarReducer(
             expanded: true,
             selectedFile: null,
             selectedToolCallId: null,
-            missedRevealId: null,
+            revealMissed: false,
           };
     case "select-tab":
       return {
@@ -85,7 +98,7 @@ export function conversationSidebarReducer(
         activeTab: action.tab,
         selectedFile: null,
         selectedToolCallId: null,
-        missedRevealId: null,
+        revealMissed: false,
       };
     case "show-file":
       return {
@@ -93,34 +106,45 @@ export function conversationSidebarReducer(
         expanded: true,
         activeTab: "files",
         selectedFile: action.file,
-        fileFromList: action.fromList === true,
+        fileFrom: action.from ?? "thread",
       };
     case "close-file":
-      return state.fileFromList
-        ? { ...state, selectedFile: null }
-        : { ...state, expanded: false, selectedFile: null };
+      return {
+        ...state,
+        selectedFile: null,
+        ...(state.fileFrom === "thread" ? { expanded: false } : {}),
+        ...(state.fileFrom === "summary" ? { activeTab: "summary" as const } : {}),
+      };
     case "show-tool-call":
       return {
         ...state,
         expanded: true,
         activeTab: "tools",
         selectedToolCallId: action.toolCallId,
-        missedRevealId: null,
+        toolCallFrom: action.from ?? "list",
+        revealMissed: false,
       };
     case "close-tool-call":
-      return { ...state, selectedToolCallId: null, missedRevealId: null };
+      return {
+        ...state,
+        activeTab: state.toolCallFrom === "summary" ? "summary" : "tools",
+        selectedToolCallId: null,
+        revealMissed: false,
+      };
     case "revealed":
       return action.found
-        ? { ...state, missedRevealId: null }
+        ? { ...state, revealMissed: false }
         : {
             ...state,
             expanded: true,
             activeTab: "tools",
             selectedToolCallId: action.toolCallId,
-            missedRevealId: action.toolCallId,
+            revealMissed: true,
           };
+    case "show-lookups":
+      return { ...state, showLookups: action.show };
     case "conversation-change":
-      return { ...state, selectedFile: null, selectedToolCallId: null, missedRevealId: null };
+      return { ...state, selectedFile: null, selectedToolCallId: null, revealMissed: false };
   }
 }
 
@@ -136,8 +160,7 @@ export function shownToolCallId(state: ConversationSidebarState): string | null 
 
 /** Whether "See in the thread" missed the card of the call the panel shows. */
 export function revealMissed(state: ConversationSidebarState): boolean {
-  const shown = shownToolCallId(state);
-  return shown !== null && state.missedRevealId === shown;
+  return shownToolCallId(state) !== null && state.revealMissed;
 }
 
 /**

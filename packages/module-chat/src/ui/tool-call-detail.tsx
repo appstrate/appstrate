@@ -2,8 +2,9 @@
 
 /**
  * A tool call's detail, wherever it is opened: the card's dialog in the thread and the call's view
- * in the context panel. Its input, its output, its error, and the card's metadata, each as raw
- * JSON; a section with nothing in it is left out (`undefined`, `null`, `""`, `{}`, `[]`).
+ * in the context panel. Its input, its output and the card's metadata, each as raw JSON, and its
+ * error as the card words it, in the destructive tone; a section with nothing in it is left out
+ * (`undefined`, `null`, `""`, `{}`, `[]`).
  *
  * `t` is passed, not read from the chat's host: the context panel is drawn outside the chat.
  */
@@ -20,15 +21,23 @@ function hasContent(value: unknown): boolean {
   return true;
 }
 
-function DetailSection({ title, value, t }: { title: string; value: unknown; t: ChatTranslate }) {
-  if (!hasContent(value)) return null;
+function DetailSection({ title, children }: { title: string; children: React.ReactNode }) {
   return (
     <section className="flex flex-col gap-1">
       <h4 className="text-muted-foreground text-[0.65rem] font-semibold tracking-wide uppercase">
         {title}
       </h4>
-      <JsonView value={value} copyLabel={t("common:btn.copy")} />
+      {children}
     </section>
+  );
+}
+
+function JsonSection({ title, value, t }: { title: string; value: unknown; t: ChatTranslate }) {
+  if (!hasContent(value)) return null;
+  return (
+    <DetailSection title={title}>
+      <JsonView value={value} copyLabel={t("common:btn.copy")} />
+    </DetailSection>
   );
 }
 
@@ -51,10 +60,14 @@ export function ToolCallDetail({
 }) {
   return (
     <div className="flex flex-col gap-4">
-      <DetailSection title={t("tool.detail.input")} value={input} t={t} />
-      <DetailSection title={t("tool.detail.output")} value={output} t={t} />
-      <DetailSection title={t("tool.detail.error")} value={error} t={t} />
-      <DetailSection title={t("tool.detail.metadata")} value={metadata} t={t} />
+      <JsonSection title={t("tool.detail.input")} value={input} t={t} />
+      <JsonSection title={t("tool.detail.output")} value={output} t={t} />
+      {error ? (
+        <DetailSection title={t("tool.detail.error")}>
+          <p className="text-destructive text-xs break-words whitespace-pre-wrap">{error}</p>
+        </DetailSection>
+      ) : null}
+      <JsonSection title={t("tool.detail.metadata")} value={metadata} t={t} />
     </div>
   );
 }

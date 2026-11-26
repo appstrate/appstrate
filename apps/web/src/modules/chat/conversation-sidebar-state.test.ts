@@ -74,21 +74,16 @@ describe("conversation sidebar state", () => {
 
   it("clears the shown file on navigation but keeps the user's panel layout", () => {
     const state: ConversationSidebarState = {
+      ...INITIAL_CONVERSATION_SIDEBAR_STATE,
       expanded: false,
       activeTab: "runs",
       selectedFile: file("file_a"),
-      fileFromList: false,
-      selectedToolCallId: null,
-      missedRevealId: null,
+      showLookups: true,
     };
 
     expect(conversationSidebarReducer(state, { type: "conversation-change" })).toEqual({
-      expanded: false,
-      activeTab: "runs",
+      ...state,
       selectedFile: null,
-      fileFromList: false,
-      selectedToolCallId: null,
-      missedRevealId: null,
     });
   });
 
@@ -96,7 +91,7 @@ describe("conversation sidebar state", () => {
     const fromList = conversationSidebarReducer(INITIAL_CONVERSATION_SIDEBAR_STATE, {
       type: "show-file",
       file: file("file_a"),
-      fromList: true,
+      from: "list",
     });
     expect(conversationSidebarReducer(fromList, { type: "close-file" })).toMatchObject({
       expanded: true,
@@ -110,6 +105,20 @@ describe("conversation sidebar state", () => {
     });
     expect(conversationSidebarReducer(fromThread, { type: "close-file" })).toMatchObject({
       expanded: false,
+    });
+  });
+
+  it("closes a file opened from the summary back to the summary", () => {
+    const fromSummary = conversationSidebarReducer(INITIAL_CONVERSATION_SIDEBAR_STATE, {
+      type: "show-file",
+      file: file("file_a"),
+      from: "summary",
+    });
+    expect(shownFile(fromSummary)).toEqual(file("file_a"));
+    expect(conversationSidebarReducer(fromSummary, { type: "close-file" })).toMatchObject({
+      expanded: true,
+      activeTab: "summary",
+      selectedFile: null,
     });
   });
 
@@ -158,6 +167,60 @@ describe("conversation sidebar tool calls", () => {
     const back = conversationSidebarReducer(shown, { type: "close-tool-call" });
     expect(back).toMatchObject({ expanded: true, activeTab: "tools" });
     expect(shownToolCallId(back)).toBeNull();
+  });
+
+  it("goes back to the summary from a call opened there, and to the list from one opened there", () => {
+    const fromSummary = conversationSidebarReducer(INITIAL_CONVERSATION_SIDEBAR_STATE, {
+      type: "show-tool-call",
+      toolCallId: "call_1",
+      from: "summary",
+    });
+    expect(shownToolCallId(fromSummary)).toBe("call_1");
+    const back = conversationSidebarReducer(fromSummary, { type: "close-tool-call" });
+    expect(back).toMatchObject({ expanded: true, activeTab: "summary" });
+    expect(shownToolCallId(back)).toBeNull();
+
+    // A miss reopens on the call: its way back still leads to the summary.
+    const missed = conversationSidebarReducer(fromSummary, {
+      type: "revealed",
+      toolCallId: "call_1",
+      found: false,
+    });
+    expect(conversationSidebarReducer(missed, { type: "close-tool-call" }).activeTab).toBe(
+      "summary",
+    );
+
+    const fromList = conversationSidebarReducer(back, {
+      type: "show-tool-call",
+      toolCallId: "call_2",
+      from: "list",
+    });
+    expect(conversationSidebarReducer(fromList, { type: "close-tool-call" }).activeTab).toBe(
+      "tools",
+    );
+  });
+
+  it("keeps the lookups' switch through a call's detail, a tab choice and a reopening", () => {
+    const shown = conversationSidebarReducer(INITIAL_CONVERSATION_SIDEBAR_STATE, {
+      type: "show-lookups",
+      show: true,
+    });
+    expect(shown.showLookups).toBe(true);
+    const detail = conversationSidebarReducer(shown, {
+      type: "show-tool-call",
+      toolCallId: "call_1",
+    });
+    const back = conversationSidebarReducer(detail, { type: "close-tool-call" });
+    expect(back.showLookups).toBe(true);
+    const elsewhere = conversationSidebarReducer(back, { type: "select-tab", tab: "summary" });
+    const reopened = conversationSidebarReducer(
+      conversationSidebarReducer(elsewhere, { type: "toggle" }),
+      { type: "toggle" },
+    );
+    expect(reopened.showLookups).toBe(true);
+    expect(
+      conversationSidebarReducer(reopened, { type: "show-lookups", show: false }).showLookups,
+    ).toBe(false);
   });
 
   it("drops the shown call on a tab choice, a reopening and a conversation change", () => {

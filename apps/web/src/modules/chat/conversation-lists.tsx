@@ -9,7 +9,7 @@ import { TextSkeleton } from "../../components/loading-skeletons";
 import { formatBytes } from "../../lib/format-bytes";
 import { formatDateField } from "../../lib/format-date";
 import type { StoredSidebarFile } from "./conversation-sidebar-state";
-import { useConversationFiles, useConversationRuns } from "./use-conversation-lists";
+import { readShown, useConversationFiles, useConversationRuns } from "./use-conversation-lists";
 
 /** The runs a conversation launched, newest first. */
 export function ConversationRuns({
@@ -28,9 +28,10 @@ export function ConversationRuns({
   if (!conversationId) {
     return <EmptyState message={t("context.unsaved")} icon={ActivityIcon} compact />;
   }
-  if (query.error) return <ErrorState error={query.error} compact />;
+  const read = readShown(query);
+  if (read === "error") return <ErrorState error={query.error} compact />;
   // Pending covers a read not yet answered and one held while the panel is closed.
-  if (query.isPending) return <TextSkeleton className="p-4" />;
+  if (read === "pending") return <TextSkeleton className="p-4" />;
   if (runs.length === 0) {
     return <EmptyState message={t("context.runs.empty")} icon={ActivityIcon} compact />;
   }
@@ -68,8 +69,9 @@ export function ConversationFiles({
   if (!conversationId) {
     return <EmptyState message={t("context.unsaved")} icon={FilesIcon} compact />;
   }
-  if (query.error) return <ErrorState error={query.error} compact />;
-  if (query.isPending) return <TextSkeleton className="p-4" />;
+  const read = readShown(query);
+  if (read === "error") return <ErrorState error={query.error} compact />;
+  if (read === "pending") return <TextSkeleton className="p-4" />;
   if (files.length === 0) {
     return <EmptyState message={t("context.files.empty")} icon={FilesIcon} compact />;
   }

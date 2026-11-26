@@ -225,7 +225,7 @@ describe("a file of another space in the context panel", () => {
     const { queryClient } = renderOverview(
       <ShownFile
         file={{ id: "file_1", name: "a.md", spaceId: "spc_b" }}
-        backToList={false}
+        from="thread"
         onClose={() => {}}
       />,
       spaces,
@@ -239,7 +239,7 @@ describe("a file of another space in the context panel", () => {
     const { queryClient } = renderOverview(
       <ShownFile
         file={{ id: "file_1", name: "a.md", spaceId: "spc_a" }}
-        backToList={false}
+        from="thread"
         onClose={() => {}}
       />,
       spaces,

@@ -901,10 +901,16 @@ without scrolling: the title and its gist, the integrations reached, then the ac
 in one view (runs, files and actions, the latest of each on one line, a failure in its
 own tone, each group leading to its tab), then models, access and details folded to one
 line each (`Collapsible`, remembered per browser). Beside it,
-Runs, Files and Tools; a narrow panel keeps the inactive tabs' icons only. Tools lists the calls read from the stored messages
-(`@appstrate/module-chat/conversation-tools`), named as their cards name them
-(`tool-presentation.ts`), lookups behind a switch. Its width follows what it shows (a
-list, the details or a call, a file), each remembered per browser.
+Runs, Files and Tools, each named in words on every format: a narrow panel drops the
+tabs' icons, tightens them and scrolls them sideways past its width. Each group of the
+Summary stands on its own read (waiting in its shape, or saying its failure in its place);
+what the conversation holds (its calls, its integrations) shows at once. Tools lists the
+calls as the open chat holds them, the turn in flight included, else as stored
+(`@appstrate/module-chat/conversation-tools`, `live-conversation`), named as their cards
+name them (`tool-presentation.ts`), lookups behind a switch the panel keeps; a call's
+detail is the card's (`tool-call-detail`). A file or a call opened from the Summary leads
+back to it. Its width follows what it shows (a list, the details or a call, a file), each
+remembered per browser.
 
 ## 14. Modules and feature gating
 

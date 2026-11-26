@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
+import type { ReactNode } from "react";
 import { Link } from "react-router-dom";
 import type { AgentListItem, EnrichedRun } from "@appstrate/shared-types";
 import { cn } from "@appstrate/ui/cn";
@@ -34,7 +35,6 @@ export function RunRow({
   spanning?: boolean;
   className?: string;
 }) {
-  const linkInSpace = useSpaceLink();
   const content = (
     <>
       <RunIdentity run={run} agent={{ name: agentName, identity: agent }} />
@@ -44,18 +44,41 @@ export function RunRow({
   );
 
   // Its own container: a compact status follows the row's width, not the screen's.
-  const rowClass = cn("@container flex min-h-16 items-center gap-3 px-4 py-3", className);
+  return (
+    <RunLink
+      run={run}
+      className={cn("@container flex min-h-16 items-center gap-3 px-4 py-3", className)}
+    >
+      {content}
+    </RunLink>
+  );
+}
 
+/**
+ * A run's row, whatever it draws of the run: the run's link, hovering like a list row, when the run
+ * still has an agent to live under, else a plain row. {@link RunRow}, and the chat summary's
+ * one-line runs.
+ */
+export function RunLink({
+  run,
+  className,
+  children,
+}: {
+  run: Pick<EnrichedRun, "id" | "packageId" | "runNumber" | "spaceId">;
+  className: string;
+  children: ReactNode;
+}) {
+  const linkInSpace = useSpaceLink();
   return run.packageId ? (
     <Link
       to={linkInSpace(runDetailPath(run.packageId, run.id), run.spaceId)}
       state={{ runNumber: run.runNumber }}
-      className={cn(rowClass, "hover:bg-muted/50 transition-colors")}
+      className={cn(className, "hover:bg-muted/50 transition-colors")}
     >
-      {content}
+      {children}
     </Link>
   ) : (
-    <div className={rowClass}>{content}</div>
+    <div className={className}>{children}</div>
   );
 }
 

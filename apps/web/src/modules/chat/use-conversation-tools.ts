@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { useMemo } from "react";
-import { useTranslation } from "react-i18next";
 import { useSessionDetail } from "@appstrate/module-chat/unread";
 import { useLiveConversation } from "@appstrate/module-chat/live-conversation";
 import {
@@ -10,12 +9,14 @@ import {
   type ConversationToolStatus,
 } from "@appstrate/module-chat/conversation-tools";
 import { showCall, type ShownCall } from "@appstrate/module-chat/tool-presentation";
+import { useChatTranslate } from "./use-chat-runtime";
 
 /**
  * The calls of the conversation `conversationId` while shown: as the open chat holds them
- * (`useLiveConversation`), the turn in flight included, else as the server stores them.
- * `undefined` until the conversation is read (held while the panel is closed), `null` when the
- * server holds no such conversation.
+ * (`useLiveConversation`), the turn in flight included, else as the server stores them, read only
+ * while no open chat holds them. `tools` is `undefined` until either answers (held while the panel
+ * is closed), `null` when the server holds no such conversation. `error` only while nothing is
+ * held: a refetch that fails keeps the calls already read.
  */
 export function useConversationTools(conversationId: string | null, active: boolean) {
   const live = useLiveConversation(conversationId, active);
@@ -25,17 +26,14 @@ export function useConversationTools(conversationId: string | null, active: bool
     if (live) return conversationTools(live.messages, { running: live.running });
     return session === undefined ? undefined : session && conversationTools(session.messages);
   }, [live, session]);
-  return { tools, error: live ? null : query.error };
+  return { tools, error: tools === undefined ? query.error : null };
 }
 
 /** The call as its card in the thread shows it (`showCall`): label, target, what it acted on. */
 export function useToolLabel() {
-  const { t } = useTranslation("chat");
+  const t = useChatTranslate();
   return (call: ConversationToolCall): ShownCall =>
-    showCall(
-      { toolName: call.toolName, args: call.input, presentation: call.presentation },
-      (key, params) => t(key, params ?? {}),
-    );
+    showCall({ toolName: call.toolName, args: call.input, presentation: call.presentation }, t);
 }
 
 /** Whether the calls acted in more than one space, so each row names its own. */
@@ -45,7 +43,7 @@ export function spansSpaces(calls: readonly ConversationToolCall[]): boolean {
 
 /** A call's outcome in words, wherever the panel names it. */
 export const TOOL_STATUS_LABEL: Record<ConversationToolStatus, string> = {
-  running: "common:status.running",
+  running: "context.tools.status.running",
   success: "context.tools.status.success",
   error: "context.tools.status.error",
   denied: "context.tools.status.denied",

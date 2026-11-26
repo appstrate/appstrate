@@ -212,6 +212,7 @@
   "run.output.showJson": "Show JSON",
   "run.output.showFields": "Show fields",
   "context.backToFiles": "Back to the files",
+  "context.backToSummary": "Back to the summary",
   "welcome.readOnly": "Pick a conversation in the list to reread it.",
   "threads.new": "New conversation",
   "threads.delete.title": "Delete this conversation?",
@@ -328,6 +329,7 @@
   "context.tools.turn": "Turn {{turn}}",
   "context.tools.lookup": "Lookup",
   "context.tools.status.success": "Succeeded",
+  "context.tools.status.running": "Running",
   "context.tools.status.error": "Failed",
   "context.tools.status.denied": "Denied",
   "context.tools.backToList": "Back to tools",
@@ -339,10 +341,10 @@
   "context.summary.messages_other": "{{count}} messages",
   "context.summary.details": "Details",
   "context.summary.attention": "Needs attention",
-  "context.summary.activity": "Activity",
   "context.summary.noActivity": "No activity yet.",
-  "context.summary.calls": "Calls",
   "context.summary.seeAll": "See all",
   "context.summary.seeAllCount": "See all ({{count}})",
+  "context.summary.seeAllRuns": "See all in Runs",
+  "context.summary.seeAllTools": "See all in Tools",
   "context.summary.integrations": "Integrations used"
 }
