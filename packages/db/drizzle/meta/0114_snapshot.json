@@ -1,5 +1,5 @@
 {
-  "id": "e4745e91-62b8-460d-afe0-a97b606ebeac",
+  "id": "140ba93e-8d5f-4f02-abcd-69d61ab26517",
   "prevId": "c138be01-7c5e-40a3-9d73-4a7d476216dc",
   "version": "7",
   "dialect": "postgresql",
@@ -5379,7 +5379,7 @@
         },
         "notifications_type_valid": {
           "name": "notifications_type_valid",
-          "value": "type IN ('run_failed', 'package_shared', 'agent_message')"
+          "value": "type IN ('run_failed', 'package_shared', 'agent_message', 'credential_needs_reconnection')"
         }
       },
       "isRLSEnabled": false
