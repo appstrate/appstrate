@@ -88,9 +88,9 @@ class McpCredentialRejectedError extends Error {
   }
 }
 
-export const MAX_LISTED_TOOLS = 500;
+const MAX_LISTED_TOOLS = 500;
 /** Bounds a server answering `nextCursor` forever with empty pages. */
-export const MAX_LISTED_PAGES = 20;
+const MAX_LISTED_PAGES = 20;
 /** The longest tool name read (MCP's own bound); a longer one is dropped. */
 const MAX_TOOL_NAME_LENGTH = 128;
 
