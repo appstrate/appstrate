@@ -52,4 +52,4 @@ CREATE UNIQUE INDEX "uq_space_integration_tool_blocks" ON "space_integration_too
 CREATE INDEX "idx_space_integration_tool_blocks_package" ON "space_integration_tool_blocks" USING btree ("package_id");--> statement-breakpoint
 CREATE INDEX "idx_space_integration_tool_blocks_blocked_by" ON "space_integration_tool_blocks" USING btree ("blocked_by") WHERE "space_integration_tool_blocks"."blocked_by" IS NOT NULL;--> statement-breakpoint
 CREATE UNIQUE INDEX "uq_notifications_tools_review_unread" ON "notifications" USING btree ("space_id","recipient_type","recipient_id",("payload"->>'packageId')) WHERE "notifications"."type" = 'integration_tools_review' AND "notifications"."read_at" IS NULL;--> statement-breakpoint
-ALTER TABLE "notifications" ADD CONSTRAINT "notifications_type_valid" CHECK (type IN ('run_failed', 'package_shared', 'agent_message', 'integration_tools_review'));
+ALTER TABLE "notifications" ADD CONSTRAINT "notifications_type_valid" CHECK (type IN ('run_failed', 'package_shared', 'agent_message', 'credential_needs_reconnection', 'integration_tools_review'));

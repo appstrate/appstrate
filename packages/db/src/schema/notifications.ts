@@ -12,6 +12,7 @@ import {
 } from "drizzle-orm/pg-core";
 import { sql } from "drizzle-orm";
 import type { RunStatus } from "@appstrate/core/run-status";
+import type { CredentialDeathCause } from "@appstrate/core/sidecar-types";
 import type { PackageType } from "./enums.ts";
 import { organizations } from "./organizations.ts";
 import { spaces } from "./spaces.ts";
@@ -54,6 +55,7 @@ export const notificationTypeValues = [
   "run_failed",
   "package_shared",
   "agent_message",
+  "credential_needs_reconnection",
   "integration_tools_review",
 ] as const;
 export type NotificationType = (typeof notificationTypeValues)[number];
@@ -80,6 +82,17 @@ export interface NotificationPayloads {
     agent_name: string | null;
     title: string;
     message: string;
+  };
+  /**
+   * A credential of the recipient died. Integration connections only for now: a model-provider
+   * credential has no recipient decided yet (#1310), so it reaches the event and webhook alone.
+   */
+  credential_needs_reconnection: {
+    packageId: string;
+    /** The integration's display name stamped at write time. */
+    integration_name: string;
+    label: string;
+    cause: CredentialDeathCause;
   };
   /** A remote integration's catalog changed in a way the space has not reviewed yet. */
   integration_tools_review: { packageId: string; display_name: string };

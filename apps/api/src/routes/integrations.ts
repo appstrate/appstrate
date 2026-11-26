@@ -743,7 +743,7 @@ const resolveCallbackClient: OAuthClientResolver = async (ref) => {
   );
   return resolveIntegrationClientById(
     ref.clientRef,
-    ref.spaceId,
+    { orgId: ref.orgId, spaceId: ref.spaceId },
     ref.packageId,
     ref.authKey,
     auth.token_endpoint_auth_method,

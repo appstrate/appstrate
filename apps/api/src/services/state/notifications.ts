@@ -193,6 +193,26 @@ export async function insertToolReviewNotifications(params: {
     .onConflictDoNothing();
 }
 
+/**
+ * Tell a connection's owner that it died. No dedup index: one announcement per flip, and there is
+ * no `runId`. Model-provider credentials write no row here: who receives it is undecided (#1310).
+ */
+export async function createCredentialNeedsReconnectionNotification(params: {
+  orgId: string;
+  spaceId: string;
+  recipient: Actor;
+  payload: NotificationPayloads["credential_needs_reconnection"];
+}): Promise<void> {
+  await db.insert(notifications).values({
+    orgId: params.orgId,
+    spaceId: params.spaceId,
+    recipientType: params.recipient.type,
+    recipientId: params.recipient.id,
+    type: "credential_needs_reconnection",
+    payload: toPgSafe(params.payload),
+  });
+}
+
 // --- The feed ---
 //
 // The bell: every notification of the caller, newest first. What reaches it was

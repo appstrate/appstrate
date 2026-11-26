@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Constraints of migration 0114: the snapshot's one-row-per-target index (NULL connection
+ * Constraints of migration 0115: the snapshot's one-row-per-target index (NULL connection
  * included), the approvals' per-fingerprint uniqueness, the blocks' per-tool uniqueness, the
  * composite space/org FK, and the `integration_tools_review` notification kind with its
  * one-unread-per-(space, recipient, package) index.
@@ -36,7 +36,7 @@ async function violation(run: Promise<unknown>): Promise<{ code: string; name: s
   throw new Error("expected a constraint violation");
 }
 
-describe("integration tool policy schema (migration 0114)", () => {
+describe("integration tool policy schema (migration 0115)", () => {
   let ctx: TestContext;
   let packageId: string;
 

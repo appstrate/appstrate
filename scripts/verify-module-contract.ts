@@ -253,6 +253,7 @@ const HOOK_LEDGER: Record<HookMember, NamedLedgerEntry> = {
 const EVENT_LEDGER: Record<EventMember, NamedLedgerEntry> = {
   onRunStatusChange: { owners: ["webhooks", "module-chat"] },
   onRunConnectionMissing: { owners: ["webhooks"] },
+  onCredentialNeedsReconnection: { owners: ["webhooks"] },
   onOrgCreate: { owners: ["mcp", "module-billing"] },
   onOrgDelete: { owners: ["mcp", "module-billing"] },
   onOrgMemberRemove: { owners: ["module-billing"] },

@@ -41,6 +41,8 @@ import {
   decryptCredentials,
   decryptCredentialsToStringMap,
 } from "@appstrate/connect";
+import type { CredentialDeathCause } from "@appstrate/core/sidecar-types";
+import { announceCredentialNeedsReconnection } from "./credential-reconnection.ts";
 import { issuerOfClientMetadataDocumentRef } from "../lib/integration-client-metadata.ts";
 import {
   resolveSystemClientForAuth,
@@ -253,6 +255,9 @@ export async function loadManifestOrThrow(
 /** What every credential and spawn resolver reads of a connection row (`id`: refresh write-back). */
 interface ActorConnectionRow {
   id: string;
+  /** The row's own scope (`spaceId` `null`: org level): it picks the OAuth client tiers refresh may use. */
+  orgId: string;
+  spaceId: string | null;
   credentialsEncrypted: string;
   expiresAt: Date | null;
   scopesGranted: string[];
@@ -355,17 +360,7 @@ function reachableConnection(
  * Short, non-reversible digest of the stored ciphertext: any credential write changes it, so a
  * caller holding a superseded credential can say which one it holds without seeing the current one.
  */
-const credentialRevision = sql<string>`left(encode(sha256(convert_to(${integrationConnections.credentialsEncrypted}, 'UTF8')), 'hex'), 16)`;
-
-/** The connection's current {@link credentialRevision}; `null` once the row is gone. */
-export async function readCredentialRevision(connectionId: string): Promise<string | null> {
-  const [row] = await db
-    .select({ credentialRevision })
-    .from(integrationConnections)
-    .where(eq(integrationConnections.id, connectionId))
-    .limit(1);
-  return row?.credentialRevision ?? null;
-}
+export const credentialRevision = sql<string>`left(encode(sha256(convert_to(${integrationConnections.credentialsEncrypted}, 'UTF8')), 'hex'), 16)`;
 
 /**
  * A connection by id, in the space, within the actor's reach (own or shared): the spawn and
@@ -383,6 +378,8 @@ export async function loadAccessibleConnectionById(
   const [row] = await db
     .select({
       id: integrationConnections.id,
+      orgId: integrationConnections.orgId,
+      spaceId: integrationConnections.spaceId,
       integrationId: integrationConnections.integrationId,
       authKey: integrationConnections.authKey,
       credentialsEncrypted: integrationConnections.credentialsEncrypted,
@@ -784,6 +781,8 @@ type SelectableRow = Awaited<ReturnType<typeof loadSelectableRows>>[number];
 function toResolvedRow(row: SelectableRow): ResolvedConnectionRow {
   const {
     id,
+    orgId,
+    spaceId,
     authKey,
     credentialsEncrypted,
     credentialRevision,
@@ -796,6 +795,8 @@ function toResolvedRow(row: SelectableRow): ResolvedConnectionRow {
   } = row;
   return {
     id,
+    orgId,
+    spaceId,
     authKey,
     credentialsEncrypted,
     credentialRevision,
@@ -1589,13 +1590,15 @@ export function resolveConnectClient(
 /**
  * Resolve a pinned `client_ref` to the credentials that mint and refresh a connection's tokens: the
  * system registry, then this instance's metadata documents (public, bound to the server their URL
- * names), then `integration_oauth_clients` scoped to the space's tiers, integration and auth. The
+ * names), then `integration_oauth_clients` of the connection's own scope: its space's tier, and its
+ * org's (the only one an org-level connection has), by integration and auth. The
  * method comes back coherent with the secret; the row's declaration wins over the manifest's.
  * `null`: no such client here, or an unreadable ciphertext; a missing key id throws the 503.
  */
 export async function resolveIntegrationClientById(
   clientRef: string,
-  spaceId: string,
+  /** The connection's scope, never its caller's: another space's client must not resolve. */
+  clientScope: { orgId: string; spaceId: string | null },
   integrationId: string,
   authKey: string,
   manifestAuthMethod: string | undefined,
@@ -1627,7 +1630,6 @@ export async function resolveIntegrationClientById(
   if (!isUuid(clientRef)) return null;
 
   // 3) Custom client of this space or its org, by id AND fully scoped.
-  const spaceOrg = db.select({ orgId: spaces.orgId }).from(spaces).where(eq(spaces.id, spaceId));
   const [row] = await db
     .select({
       clientId: integrationOauthClients.clientId,
@@ -1639,12 +1641,12 @@ export async function resolveIntegrationClientById(
     .where(
       and(
         eq(integrationOauthClients.id, clientRef),
+        eq(integrationOauthClients.orgId, clientScope.orgId),
         or(
-          eq(integrationOauthClients.spaceId, spaceId),
-          and(
-            isNull(integrationOauthClients.spaceId),
-            inArray(integrationOauthClients.orgId, spaceOrg),
-          ),
+          clientScope.spaceId === null
+            ? undefined
+            : eq(integrationOauthClients.spaceId, clientScope.spaceId),
+          isNull(integrationOauthClients.spaceId),
         ),
         eq(integrationOauthClients.integrationId, integrationId),
         eq(integrationOauthClients.authKey, authKey),
@@ -2247,12 +2249,20 @@ function writerView(target: { scope: SpaceScope; delegated?: boolean }): Connect
 /**
  * The single writer of the credential columns of `integration_connections`: every acquisition and
  * refresh converges here. An explicit `connectionId` updates, none inserts (no upsert by account).
- * `null` only for an `update-by-id` that wrote nothing.
+ * `update-by-id` returns the written credential's revision, `null` when it wrote nothing.
  */
+export async function persistCredentialBundle(
+  target: Extract<PersistTarget, { kind: "update-by-id" }>,
+  input: PersistCredentialInput,
+): Promise<{ credentialRevision: string } | null>;
 export async function persistCredentialBundle(
   target: PersistTarget,
   input: PersistCredentialInput,
-): Promise<IntegrationConnectionSummary | null> {
+): Promise<IntegrationConnectionSummary | null>;
+export async function persistCredentialBundle(
+  target: PersistTarget,
+  input: PersistCredentialInput,
+): Promise<IntegrationConnectionSummary | { credentialRevision: string } | null> {
   const hasInputs = input.inputs && Object.keys(input.inputs).length > 0;
   const ciphertext = encryptCredentialEnvelope({
     outputs: input.credentials,
@@ -2309,6 +2319,7 @@ export async function persistCredentialBundle(
           variables: input.variables ?? null,
           oauthResource: input.oauthResource ?? null,
           expiresAt: input.expiresAt ?? null,
+          refreshCheckedAt: now,
           label: labelValue,
           createdAt: now,
           updatedAt: now,
@@ -2334,6 +2345,8 @@ export async function persistCredentialBundle(
     needsReconnection: input.needsReconnection ?? false,
     // A credential write proves the connection healthy: the escalation count restarts.
     refreshFailureCount: 0,
+    // A fresh credential needs no sweep visit before the next day.
+    refreshCheckedAt: now,
     updatedAt: now,
   };
   if (input.accountId !== undefined) set.accountId = input.accountId;
@@ -2450,8 +2463,12 @@ export async function persistCredentialBundle(
     eq(integrationConnections.credentialsEncrypted, credentialsEncrypted),
     clearsReconnection ? eq(integrationConnections.needsReconnection, false) : undefined,
   );
-  const [row] = await db.update(integrationConnections).set(set).where(byIdWhere).returning();
-  return row ? serializeIntegrationConnection(row, { here: null, shares: [], owner: null }) : null;
+  const [row] = await db
+    .update(integrationConnections)
+    .set(set)
+    .where(byIdWhere)
+    .returning({ credentialRevision });
+  return row ?? null;
 }
 
 /**
@@ -2482,14 +2499,50 @@ export async function getIntegrationConnectionCredentialFields(
   return fields === KEY_UNAVAILABLE ? null : fields;
 }
 
-/** The only `needs_reconnection = true` write keeping the credentials; no-op once the row is gone. */
+/** The columns an announcement of a connection's death reads, off the row that flipped. */
+const deathColumns = {
+  orgId: integrationConnections.orgId,
+  spaceId: integrationConnections.spaceId,
+  integrationId: integrationConnections.integrationId,
+  authKey: integrationConnections.authKey,
+  userId: integrationConnections.userId,
+  endUserId: integrationConnections.endUserId,
+};
+
+/** Announce the death of the connection `connectionId` to its owner (the CHECK: user XOR end user). */
+function announceConnectionDeath(
+  connectionId: string,
+  row: Pick<typeof integrationConnections.$inferSelect, keyof typeof deathColumns>,
+  cause: CredentialDeathCause,
+): void {
+  announceCredentialNeedsReconnection({
+    kind: "integration_connection",
+    orgId: row.orgId,
+    spaceId: row.spaceId,
+    connectionId,
+    packageId: row.integrationId,
+    authKey: row.authKey,
+    owner: actorFromIds(row.userId, row.endUserId)!,
+    cause,
+  });
+}
+
+/** One of two flip points; announces only its own flip. */
 export async function markIntegrationConnectionNeedsReconnection(
   connectionId: string,
+  cause: CredentialDeathCause,
 ): Promise<void> {
-  await db
+  const [flipped] = await db
     .update(integrationConnections)
     .set({ needsReconnection: true, updatedAt: new Date() })
-    .where(eq(integrationConnections.id, connectionId));
+    .where(
+      and(
+        eq(integrationConnections.id, connectionId),
+        eq(integrationConnections.needsReconnection, false),
+      ),
+    )
+    .returning(deathColumns);
+  if (flipped) announceConnectionDeath(connectionId, flipped, cause);
 }
 
 /** How {@link recordIntegrationRefreshFailure} counts a failure toward `maxFailures`. */
@@ -2502,7 +2555,9 @@ type RefreshFailureGate =
 /**
  * Record a credential failure (a transient refresh failure, or an upstream rejection of an
  * unrefreshable credential): increment and escalation in one statement, so concurrent failures lose
- * no count; `needsReconnection` is OR'd, never cleared. `null` when no row was counted.
+ * no count; `needsReconnection` is OR'd, never cleared. The statement joins the row's previous
+ * flag (locked `FOR UPDATE` in a CTE, `UPDATE ... FROM`), so it knows whether THIS statement
+ * flipped it and announces exactly then. `null` when no row was counted.
  */
 export async function recordIntegrationRefreshFailure(
   connectionId: string,
@@ -2514,24 +2569,46 @@ export async function recordIntegrationRefreshFailure(
     "reachable" in gate
       ? sql`${failures} >= ${maxFailures}`
       : sql`${failures} >= ${maxFailures} AND ${integrationConnections.expiresAt} IS NOT NULL AND ${integrationConnections.expiresAt} < now() - make_interval(secs => ${gate.graceSeconds})`;
+  const prev = db.$with("prev").as(
+    db
+      .select({
+        id: integrationConnections.id,
+        wasFlagged: integrationConnections.needsReconnection,
+      })
+      .from(integrationConnections)
+      .where(
+        and(
+          eq(integrationConnections.id, connectionId),
+          "reachable" in gate ? gate.reachable : undefined,
+        ),
+      )
+      .for("update"),
+  );
   const [row] = await db
+    .with(prev)
     .update(integrationConnections)
     .set({
       refreshFailureCount: failures,
       needsReconnection: sql`${integrationConnections.needsReconnection} OR (${escalates})`,
       updatedAt: sql`now()`,
     })
-    .where(
-      and(
-        eq(integrationConnections.id, connectionId),
-        "reachable" in gate ? gate.reachable : undefined,
-      ),
-    )
+    .from(prev)
+    .where(eq(integrationConnections.id, prev.id))
     .returning({
       failures: integrationConnections.refreshFailureCount,
       needsReconnection: integrationConnections.needsReconnection,
+      wasFlagged: prev.wasFlagged,
+      ...deathColumns,
     });
-  return row ?? null;
+  if (!row) return null;
+  if (row.needsReconnection && !row.wasFlagged) {
+    announceConnectionDeath(
+      connectionId,
+      row,
+      "reachable" in gate ? "unrefreshable" : "refresh_failures_exhausted",
+    );
+  }
+  return { failures: row.failures, needsReconnection: row.needsReconnection };
 }
 
 /**

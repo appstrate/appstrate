@@ -546,7 +546,7 @@ export class OAuth2Strategy implements IntegrationConnectStrategy {
         ctx.authKey,
         manifest,
         auth,
-        ctx.scope.spaceId,
+        ctx.scope,
         { clientRef, oauthResource },
       );
     } catch (err) {

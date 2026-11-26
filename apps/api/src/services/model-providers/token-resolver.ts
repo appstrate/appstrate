@@ -214,7 +214,7 @@ async function doRefresh(credentialId: string, expectedOrgId?: string): Promise<
     throw needsReconnection(credentialId, "connection_flagged");
   }
   if (!state.blob.refreshToken) {
-    await markCredentialNeedsReconnection(state.orgId, credentialId);
+    await markCredentialNeedsReconnection(state.orgId, credentialId, "refresh_token_missing");
     throw needsReconnection(credentialId, "refresh_token_missing");
   }
 
@@ -240,7 +240,7 @@ async function doRefresh(credentialId: string, expectedOrgId?: string): Promise<
     if (!(err instanceof RefreshError)) throw err;
     switch (err.kind) {
       case "revoked":
-        await markCredentialNeedsReconnection(state.orgId, credentialId);
+        await markCredentialNeedsReconnection(state.orgId, credentialId, "refresh_token_revoked");
         throw needsReconnection(credentialId, "refresh_token_revoked");
       case "client_rejected":
         logger.error("oauth model provider: token endpoint rejected the OAuth client", {

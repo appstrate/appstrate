@@ -12,6 +12,9 @@ import type { paths } from "../api/client";
 export type NotificationItem =
   paths["/api/notifications"]["get"]["responses"]["200"]["content"]["application/json"]["data"][number];
 
+/** The preferences page listing the caller's own connections, where one is reconnected. */
+const RECONNECT_PATH = "/preferences/connections";
+
 /** What a row says and where it leads (`null` when that page is closed to the caller). */
 interface NotificationRow {
   title: string;
@@ -21,6 +24,8 @@ interface NotificationRow {
   /** The line under the row: its date, and who sent it for an agent's message. */
   meta: string;
   target: string | null;
+  /** The locale key of the button leading to `target`. */
+  targetLabel: string;
 }
 
 /**
@@ -47,6 +52,22 @@ export function notificationRow(
       message: null,
       meta: date,
       target: href && canReach(href) ? href : null,
+      targetLabel: "notifications.openPackage",
+    };
+  }
+  if (notification.type === "credential_needs_reconnection") {
+    // The owner's own connections: where a dead connection is reconnected.
+    const dead = notification.payload;
+    return {
+      title: t("notifications.credentialNeedsReconnection", {
+        label: dead?.label ?? "",
+        integration: dead?.integration_name ?? "",
+      }),
+      status: null,
+      message: dead ? t(`notifications.credentialCause.${dead.cause}`) : null,
+      meta: date,
+      target: canReach(RECONNECT_PATH) ? RECONNECT_PATH : null,
+      targetLabel: "notifications.reconnect",
     };
   }
   if (notification.type === "integration_tools_review") {
@@ -63,6 +84,7 @@ export function notificationRow(
       message: null,
       meta: date,
       target: href && canReach(href) ? href : null,
+      targetLabel: "notifications.reviewTools",
     };
   }
   const packageId = notification.payload?.packageId ?? null;
@@ -81,6 +103,7 @@ export function notificationRow(
       message: sent?.message ?? null,
       meta: t("notifications.agentMessageFrom", { agent, date }),
       target,
+      targetLabel: "notifications.openRun",
     };
   }
   // A run that needs attention: it failed or timed out.
@@ -95,6 +118,7 @@ export function notificationRow(
     message: null,
     meta: date,
     target,
+    targetLabel: "notifications.openRun",
   };
 }
 

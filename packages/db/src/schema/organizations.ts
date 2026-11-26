@@ -279,16 +279,14 @@ export const modelProviderCredentials = pgTable(
     baseUrlOverride: text("base_url_override"),
     /**
      * Denormalized OAuth token expiry — duplicates `blob.expiresAt` from the
-     * encrypted blob to enable an efficient SQL filter in the refresh worker
-     * scan (avoids decrypting every row to test a single timestamp).
+     * encrypted blob to enable an efficient SQL filter in the background
+     * refresh sweep (avoids decrypting every row to test a single timestamp).
      *
      * The blob remains the source of truth; this column is a cache, written
-     * by `updateOAuthCredentialTokens` / `createOAuthCredential`. NULL for
-     * api-key credentials, OAuth blobs without an upstream-supplied expiry,
-     * and (transiently) for rows that pre-date the column — those self-cure
-     * on the next refresh. The worker's predicate (`expires_at IS NULL OR
-     * expires_at < cutoff`) covers the backfill window without a one-shot
-     * decrypt-and-rewrite migration.
+     * by `updateBlob` (whenever the next blob's expiry differs) and by
+     * `createOAuthCredential` / `reconnectOAuthCredential`. NULL for api-key
+     * credentials and OAuth blobs without an upstream-supplied expiry. The
+     * background refresh sweep reads it: a row with a NULL expiry is never due.
      */
     expiresAt: timestamp("expires_at", { withTimezone: true }),
     // Consecutive token-refresh failures classified as *transient* (network /
@@ -305,6 +303,19 @@ export const modelProviderCredentials = pgTable(
     refreshFailureCount: integer("refresh_failure_count").notNull().default(0),
     // An api-key credential reuses the counter for consecutive upstream 401s,
     // reset by any successful call (`clearModelCredentialRejections`).
+    /**
+     * When the background refresh sweep last visited the row, or a credential was last written
+     * (`createOAuthCredential`, `reconnectOAuthCredential`, `updateOAuthCredentialTokens`). NULL =
+     * never visited, so due. The sweep's due predicate reads it: one visit per row per day.
+     */
+    refreshCheckedAt: timestamp("refresh_checked_at", { withTimezone: true }),
+    /**
+     * Denormalized `blob.needsReconnection`, mirrored by `updateBlob` whenever the next blob's flag
+     * differs and written false by create / reconnect. The blob stays the source of truth. The
+     * background refresh sweep skips a flagged row without decrypting it. A row flagged in its blob
+     * before this column existed is brought in line by `scripts/migration/0058`.
+     */
+    needsReconnection: boolean("needs_reconnection").notNull().default(false),
     // NOTE — there is deliberately no `last_refresh_failure_at` here. There was
     // one, written beside `refresh_failure_count` on every transient refresh
     // failure and read by nothing: no route, no DTO, no OpenAPI field, no
