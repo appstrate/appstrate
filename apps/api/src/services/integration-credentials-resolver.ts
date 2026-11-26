@@ -39,7 +39,6 @@ import {
   assertIntegrationActive,
   loadAccessibleConnectionById,
   markIntegrationConnectionNeedsReconnection,
-  readCredentialRevision,
   upstreamRejectionStreak,
 } from "./integration-connections.ts";
 import {
@@ -212,7 +211,7 @@ export async function resolveLiveIntegrationCredentials(
   }
 
   let expiresAtEpochMs = connection.expiresAt ? connection.expiresAt.getTime() : null;
-  let credentialRevision: string | null = connection.credentialRevision;
+  let { credentialRevision } = connection;
 
   const outcome = await refreshConnectionCredential({
     connection,
@@ -260,7 +259,7 @@ export async function resolveLiveIntegrationCredentials(
       break;
     case "refreshed":
       fields = outcome.fields;
-      credentialRevision = await readCredentialRevision(connection.id);
+      ({ credentialRevision } = outcome);
       expiresAtEpochMs = outcome.expiresAt ? outcome.expiresAt.getTime() : null;
       break;
   }
@@ -294,7 +293,7 @@ export async function resolveLiveIntegrationCredentials(
   out.expiresAtEpochMs[authKey] = expiresAtEpochMs;
   const streak = upstreamRejectionStreak(connection);
   if (streak > 0) out.rejectionStreak = streak;
-  if (credentialRevision !== null) out.credentialRevision = credentialRevision;
+  out.credentialRevision = credentialRevision;
 
   return out;
 }

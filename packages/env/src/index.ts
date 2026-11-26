@@ -398,11 +398,8 @@ export const envSchema = z
     // connection — escalation requires the token to be genuinely dead. An auth
     // that cannot refresh counts upstream 401s against the same limit, with no
     // expiry gate and no reset short of a reconnect (cumulative, not a streak).
-    // The grace is 3 days because the background refresh sweep retries a
-    // failing idle credential at most once a day, so 5 failures span ~5 days,
-    // while on-demand callers can fail 5 times in minutes during a provider
-    // outage; 3 days keeps such a burst from flagging a credential that is
-    // still recoverable. Model-provider credentials read the same two variables.
+    // Grace is 3 days: the sweep retries an idle credential once a day (docs/ENV.md).
+    // Model-provider credentials read the same two variables.
     INTEGRATION_REFRESH_MAX_FAILURES: z.coerce.number().int().positive().default(5),
     INTEGRATION_REFRESH_GRACE_SECONDS: z.coerce.number().int().nonnegative().default(259200),
 

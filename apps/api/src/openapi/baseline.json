@@ -20623,54 +20623,28 @@
                                 "type": ["object", "null"],
                                 "additionalProperties": false,
                                 "description": "Render-without-join data.",
-                                "required": [
-                                  "kind",
-                                  "packageId",
-                                  "integration_name",
-                                  "connection_id",
-                                  "label",
-                                  "auth_key",
-                                  "cause"
-                                ],
+                                "required": ["packageId", "integration_name", "label", "cause"],
                                 "properties": {
-                                  "kind": {
-                                    "type": "string",
-                                    "const": "integration_connection",
-                                    "description": "What died. Only an integration connection notifies its owner for now; no notification is written for a model-provider credential."
-                                  },
                                   "packageId": {
                                     "type": "string",
                                     "description": "The connection's integration (`@scope/name`)."
                                   },
                                   "integration_name": {
-                                    "type": ["string", "null"],
-                                    "description": "The integration's display name as stamped when the notice was written."
-                                  },
-                                  "connection_id": {
                                     "type": "string",
-                                    "format": "uuid"
+                                    "description": "The integration's display name as stamped when the notice was written."
                                   },
                                   "label": {
                                     "type": "string",
                                     "description": "The connection's label."
                                   },
-                                  "auth_key": {
-                                    "type": "string",
-                                    "description": "The auth of the integration it was made with."
-                                  },
                                   "cause": {
                                     "type": "string",
                                     "enum": [
-                                      "connection_flagged",
                                       "refresh_token_revoked",
                                       "refresh_token_missing",
                                       "refresh_failures_exhausted",
                                       "unrefreshable",
-                                      "credentials_undecryptable",
-                                      "upstream_transient",
-                                      "discovery_transient",
-                                      "connection_changed",
-                                      "oauth_client_rejected"
+                                      "credentials_undecryptable"
                                     ],
                                     "description": "Why the credential is dead."
                                   }
@@ -21017,54 +20991,28 @@
                                 "type": ["object", "null"],
                                 "additionalProperties": false,
                                 "description": "Render-without-join data.",
-                                "required": [
-                                  "kind",
-                                  "packageId",
-                                  "integration_name",
-                                  "connection_id",
-                                  "label",
-                                  "auth_key",
-                                  "cause"
-                                ],
+                                "required": ["packageId", "integration_name", "label", "cause"],
                                 "properties": {
-                                  "kind": {
-                                    "type": "string",
-                                    "const": "integration_connection",
-                                    "description": "What died. Only an integration connection notifies its owner for now; no notification is written for a model-provider credential."
-                                  },
                                   "packageId": {
                                     "type": "string",
                                     "description": "The connection's integration (`@scope/name`)."
                                   },
                                   "integration_name": {
-                                    "type": ["string", "null"],
-                                    "description": "The integration's display name as stamped when the notice was written."
-                                  },
-                                  "connection_id": {
                                     "type": "string",
-                                    "format": "uuid"
+                                    "description": "The integration's display name as stamped when the notice was written."
                                   },
                                   "label": {
                                     "type": "string",
                                     "description": "The connection's label."
                                   },
-                                  "auth_key": {
-                                    "type": "string",
-                                    "description": "The auth of the integration it was made with."
-                                  },
                                   "cause": {
                                     "type": "string",
                                     "enum": [
-                                      "connection_flagged",
                                       "refresh_token_revoked",
                                       "refresh_token_missing",
                                       "refresh_failures_exhausted",
                                       "unrefreshable",
-                                      "credentials_undecryptable",
-                                      "upstream_transient",
-                                      "discovery_transient",
-                                      "connection_changed",
-                                      "oauth_client_rejected"
+                                      "credentials_undecryptable"
                                     ],
                                     "description": "Why the credential is dead."
                                   }
@@ -21491,54 +21439,28 @@
                           "type": ["object", "null"],
                           "additionalProperties": false,
                           "description": "Render-without-join data.",
-                          "required": [
-                            "kind",
-                            "packageId",
-                            "integration_name",
-                            "connection_id",
-                            "label",
-                            "auth_key",
-                            "cause"
-                          ],
+                          "required": ["packageId", "integration_name", "label", "cause"],
                           "properties": {
-                            "kind": {
-                              "type": "string",
-                              "const": "integration_connection",
-                              "description": "What died. Only an integration connection notifies its owner for now; no notification is written for a model-provider credential."
-                            },
                             "packageId": {
                               "type": "string",
                               "description": "The connection's integration (`@scope/name`)."
                             },
                             "integration_name": {
-                              "type": ["string", "null"],
-                              "description": "The integration's display name as stamped when the notice was written."
-                            },
-                            "connection_id": {
                               "type": "string",
-                              "format": "uuid"
+                              "description": "The integration's display name as stamped when the notice was written."
                             },
                             "label": {
                               "type": "string",
                               "description": "The connection's label."
                             },
-                            "auth_key": {
-                              "type": "string",
-                              "description": "The auth of the integration it was made with."
-                            },
                             "cause": {
                               "type": "string",
                               "enum": [
-                                "connection_flagged",
                                 "refresh_token_revoked",
                                 "refresh_token_missing",
                                 "refresh_failures_exhausted",
                                 "unrefreshable",
-                                "credentials_undecryptable",
-                                "upstream_transient",
-                                "discovery_transient",
-                                "connection_changed",
-                                "oauth_client_rejected"
+                                "credentials_undecryptable"
                               ],
                               "description": "Why the credential is dead."
                             }
@@ -21843,54 +21765,28 @@
                           "type": ["object", "null"],
                           "additionalProperties": false,
                           "description": "Render-without-join data.",
-                          "required": [
-                            "kind",
-                            "packageId",
-                            "integration_name",
-                            "connection_id",
-                            "label",
-                            "auth_key",
-                            "cause"
-                          ],
+                          "required": ["packageId", "integration_name", "label", "cause"],
                           "properties": {
-                            "kind": {
-                              "type": "string",
-                              "const": "integration_connection",
-                              "description": "What died. Only an integration connection notifies its owner for now; no notification is written for a model-provider credential."
-                            },
                             "packageId": {
                               "type": "string",
                               "description": "The connection's integration (`@scope/name`)."
                             },
                             "integration_name": {
-                              "type": ["string", "null"],
-                              "description": "The integration's display name as stamped when the notice was written."
-                            },
-                            "connection_id": {
                               "type": "string",
-                              "format": "uuid"
+                              "description": "The integration's display name as stamped when the notice was written."
                             },
                             "label": {
                               "type": "string",
                               "description": "The connection's label."
                             },
-                            "auth_key": {
-                              "type": "string",
-                              "description": "The auth of the integration it was made with."
-                            },
                             "cause": {
                               "type": "string",
                               "enum": [
-                                "connection_flagged",
                                 "refresh_token_revoked",
                                 "refresh_token_missing",
                                 "refresh_failures_exhausted",
                                 "unrefreshable",
-                                "credentials_undecryptable",
-                                "upstream_transient",
-                                "discovery_transient",
-                                "connection_changed",
-                                "oauth_client_rejected"
+                                "credentials_undecryptable"
                               ],
                               "description": "Why the credential is dead."
                             }

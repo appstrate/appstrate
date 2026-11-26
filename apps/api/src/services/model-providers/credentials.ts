@@ -30,7 +30,7 @@ import { toISORequired } from "../../lib/date-helpers.ts";
 import { ApiError, forbidden, invalidRequest, notFound } from "../../lib/errors.ts";
 import { getModelProvider } from "./registry.ts";
 import type {
-  CredentialFailureCause,
+  CredentialDeathCause,
   ModelApiShape,
   OAuthTokenResponse,
 } from "@appstrate/core/sidecar-types";
@@ -526,10 +526,9 @@ export async function createOAuthCredential(input: CreateOAuthCredentialInput): 
       label: input.label,
       providerId: input.providerId,
       credentialsEncrypted: encryptCredentials(blob as unknown as Record<string, unknown>),
-      // Mirror the blob's expiry and flag onto their columns so the refresh
-      // sweep can filter at SQL level. Blob remains source of truth.
+      // Mirror the blob's expiry onto its column so the refresh sweep can
+      // filter at SQL level. Blob remains source of truth.
       expiresAt: expiresAt !== null ? new Date(expiresAt) : null,
-      needsReconnection: false,
       refreshCheckedAt: new Date(),
       createdBy: input.userId,
       ownerUserId,
@@ -682,6 +681,7 @@ export async function updateModelProviderCredential(
     const next: ApiKeyBlob = { kind: "api_key", apiKey: patch.apiKey };
     updates.credentialsEncrypted = encryptCredentials(next as unknown as Record<string, unknown>);
     updates.refreshFailureCount = 0;
+    updates.needsReconnection = false;
   }
 
   if (Object.keys(updates).length === 0) return;
@@ -912,16 +912,14 @@ interface UpdateOAuthCredentialTokensInput {
 }
 
 /**
- * Shared blob read-modify-write: select → decrypt → apply `mutate` →
- * re-encrypt → update (org-scoped). `mutate` returns the next blob, or `null`
- * to leave a blob (of the wrong kind, or already in the wanted state) alone;
- * a missing or unreadable row is a no-op. Resolves the row's `providerId`
- * when it wrote, `null` when it did not: the flip points of `needsReconnection`
- * announce on a write only. The denormalized `expiresAt` and `needsReconnection`
- * columns are mirrored ONLY when the next blob's value differs from the existing
- * one — so callers that don't touch expiry (e.g. {@link markCredentialNeedsReconnection})
- * leave that column untouched. `extraColumns` lets a caller piggyback plain
- * column writes (e.g. the refresh-failure streak reset) onto the same UPDATE.
+ * Shared blob read-modify-write: select → decrypt → apply `mutate` → re-encrypt → update
+ * (org-scoped). `mutate` returns the next blob, or `null` to leave it alone (wrong kind, or
+ * already in the wanted state); a missing or unreadable row is a no-op. Resolves the row's
+ * `providerId` when it wrote, `null` otherwise: the `needsReconnection` flip points announce on a
+ * write only. The denormalized `expiresAt` and `needsReconnection` columns are mirrored only when
+ * the next blob's value differs, so callers that don't touch expiry leave that column alone.
+ * `extraColumns` piggybacks plain column writes (e.g. the refresh-failure streak reset) onto the
+ * same UPDATE.
  */
 async function updateBlob(
   orgId: string,
@@ -1040,7 +1038,7 @@ export async function updateOAuthCredentialTokens(
 export async function markCredentialNeedsReconnection(
   orgId: string,
   id: string,
-  cause: CredentialFailureCause,
+  cause: CredentialDeathCause,
 ): Promise<void> {
   const wrote = await updateBlob(orgId, id, (existing) =>
     existing.needsReconnection ? null : { ...existing, needsReconnection: true },
@@ -1052,7 +1050,7 @@ function announceModelCredentialDeath(
   orgId: string,
   credentialId: string,
   providerId: string,
-  cause: CredentialFailureCause,
+  cause: CredentialDeathCause,
 ): void {
   announceCredentialNeedsReconnection({
     kind: "model_provider_credential",

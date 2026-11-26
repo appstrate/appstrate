@@ -18,7 +18,7 @@ import type { Logger } from "./logger.ts";
 import type { ModuleResource, ModuleResources, OrgRole, SpaceRolePreset } from "./permissions.ts";
 import type { ModulePrincipalPermissions } from "./principal-permissions.ts";
 import type { ModelPayer } from "./model-payer.ts";
-import type { CredentialFailureCause, ModelApiShape } from "./sidecar-types.ts";
+import type { CredentialDeathCause, ModelApiShape } from "./sidecar-types.ts";
 import type {
   ChatAttachmentRequest,
   ChatAttachmentContent,
@@ -541,11 +541,10 @@ export interface ModuleEvents {
    */
   onRunConnectionMissing: (params: RunConnectionMissingParams) => void | Promise<void>;
   /**
-   * A stored credential died — broadcast once per death, on the `needs_reconnection` false to true
-   * transition only (never again while the credential stays flagged), whichever path flagged it:
-   * a revoked or missing refresh token, unreadable ciphertext, exhausted refresh failures or
-   * upstream rejections. Covers integration connections and model-provider credentials. Lets a
-   * module tell the owner (webhook, notification, e-mail) before the next run discovers it.
+   * A stored credential died: one best-effort announcement (fire-and-forget after commit) per
+   * `needs_reconnection` false to true flip, never while the credential stays flagged, whichever
+   * path flagged it. Covers integration connections and model-provider credentials. Lets a module
+   * tell the owner (webhook, notification, e-mail) before the next run discovers it.
    */
   onCredentialNeedsReconnection: (
     params: CredentialNeedsReconnectionParams,
@@ -1266,18 +1265,18 @@ export type CredentialNeedsReconnectionParams =
       /** `null` for an org-level connection serving every space of the organization. */
       spaceId: string | null;
       connectionId: string;
-      /** Integration package id (`@scope/name`). */
-      integrationId: string;
+      /** The integration's package id (`@scope/name`). */
+      packageId: string;
       authKey: string;
       owner: { type: "user" | "end_user"; id: string };
-      cause: CredentialFailureCause;
+      cause: CredentialDeathCause;
     }
   | {
       kind: "model_provider_credential";
       orgId: string;
       credentialId: string;
       providerId: string;
-      cause: CredentialFailureCause;
+      cause: CredentialDeathCause;
     };
 
 /** Parameters passed to the `onRunConnectionMissing` event. */

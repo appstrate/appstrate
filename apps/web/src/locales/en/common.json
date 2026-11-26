@@ -499,7 +499,6 @@
   "notifications.credentialCause.refresh_failures_exhausted": "Renewing access failed repeatedly over several days. Reconnect to restore it.",
   "notifications.credentialCause.unrefreshable": "The provider rejects the credential and it cannot be renewed. Reconnect to restore access.",
   "notifications.credentialCause.credentials_undecryptable": "The stored credential can no longer be read. Reconnect to restore access.",
-  "notifications.credentialCause.other": "Access to this service is no longer valid. Reconnect to restore it.",
   "notifications.reconnect": "Reconnect",
   "library.indexEmptyHint": "What is placed here but switched off, and what has been shared with you, is in the <1>catalog</1>.",
   "library.cannotActivate": "You do not have permission to activate this package in this space",

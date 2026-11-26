@@ -41,7 +41,7 @@ import {
   decryptCredentials,
   decryptCredentialsToStringMap,
 } from "@appstrate/connect";
-import type { CredentialFailureCause } from "@appstrate/core/sidecar-types";
+import type { CredentialDeathCause } from "@appstrate/core/sidecar-types";
 import { announceCredentialNeedsReconnection } from "./credential-reconnection.ts";
 import { issuerOfClientMetadataDocumentRef } from "../lib/integration-client-metadata.ts";
 import {
@@ -354,7 +354,7 @@ function reachableConnection(
  * Short, non-reversible digest of the stored ciphertext: any credential write changes it, so a
  * caller holding a superseded credential can say which one it holds without seeing the current one.
  */
-const credentialRevision = sql<string>`left(encode(sha256(convert_to(${integrationConnections.credentialsEncrypted}, 'UTF8')), 'hex'), 16)`;
+export const credentialRevision = sql<string>`left(encode(sha256(convert_to(${integrationConnections.credentialsEncrypted}, 'UTF8')), 'hex'), 16)`;
 
 /** The connection's current {@link credentialRevision}; `null` once the row is gone. */
 export async function readCredentialRevision(connectionId: string): Promise<string | null> {
@@ -2253,12 +2253,20 @@ function writerView(target: { scope: SpaceScope; delegated?: boolean }): Connect
 /**
  * The single writer of the credential columns of `integration_connections`: every acquisition and
  * refresh converges here. An explicit `connectionId` updates, none inserts (no upsert by account).
- * `null` only for an `update-by-id` that wrote nothing.
+ * `update-by-id` returns the written credential's revision, `null` when it wrote nothing.
  */
+export async function persistCredentialBundle(
+  target: Extract<PersistTarget, { kind: "update-by-id" }>,
+  input: PersistCredentialInput,
+): Promise<{ credentialRevision: string } | null>;
 export async function persistCredentialBundle(
   target: PersistTarget,
   input: PersistCredentialInput,
-): Promise<IntegrationConnectionSummary | null> {
+): Promise<IntegrationConnectionSummary | null>;
+export async function persistCredentialBundle(
+  target: PersistTarget,
+  input: PersistCredentialInput,
+): Promise<IntegrationConnectionSummary | { credentialRevision: string } | null> {
   const hasInputs = input.inputs && Object.keys(input.inputs).length > 0;
   const ciphertext = encryptCredentialEnvelope({
     outputs: input.credentials,
@@ -2459,8 +2467,12 @@ export async function persistCredentialBundle(
     eq(integrationConnections.credentialsEncrypted, credentialsEncrypted),
     clearsReconnection ? eq(integrationConnections.needsReconnection, false) : undefined,
   );
-  const [row] = await db.update(integrationConnections).set(set).where(byIdWhere).returning();
-  return row ? serializeIntegrationConnection(row, { here: null, shares: [], owner: null }) : null;
+  const [row] = await db
+    .update(integrationConnections)
+    .set(set)
+    .where(byIdWhere)
+    .returning({ credentialRevision });
+  return row ?? null;
 }
 
 /**
@@ -2501,29 +2513,20 @@ const deathColumns = {
   endUserId: integrationConnections.endUserId,
 };
 
-/** Announce the death of the connection `connectionId`; its owner is the user XOR the end-user. */
+/** Announce the death of the connection `connectionId` to its owner (the CHECK: user XOR end user). */
 function announceConnectionDeath(
   connectionId: string,
-  row: Pick<
-    typeof integrationConnections.$inferSelect,
-    "orgId" | "spaceId" | "integrationId" | "authKey" | "userId" | "endUserId"
-  >,
-  cause: CredentialFailureCause,
+  row: Pick<typeof integrationConnections.$inferSelect, keyof typeof deathColumns>,
+  cause: CredentialDeathCause,
 ): void {
-  const owner = row.userId
-    ? ({ type: "user", id: row.userId } as const)
-    : row.endUserId
-      ? ({ type: "end_user", id: row.endUserId } as const)
-      : null;
-  if (!owner) return;
   announceCredentialNeedsReconnection({
     kind: "integration_connection",
     orgId: row.orgId,
     spaceId: row.spaceId,
     connectionId,
-    integrationId: row.integrationId,
+    packageId: row.integrationId,
     authKey: row.authKey,
-    owner,
+    owner: actorFromIds(row.userId, row.endUserId)!,
     cause,
   });
 }
@@ -2536,7 +2539,7 @@ function announceConnectionDeath(
  */
 export async function markIntegrationConnectionNeedsReconnection(
   connectionId: string,
-  cause: CredentialFailureCause,
+  cause: CredentialDeathCause,
 ): Promise<void> {
   const [flipped] = await db
     .update(integrationConnections)

@@ -58,8 +58,8 @@ export const webhookEventSchema = z.enum([
   // the actor is missing or under-scoped on one or more integration
   // connections. No run row exists when this fires.
   "run.connection_missing",
-  // Fired by `onCredentialNeedsReconnection` once, when a stored credential (an integration
-  // connection or a model-provider credential) dies. No run row exists when this fires.
+  // Fired by `onCredentialNeedsReconnection` when a stored credential (an integration connection
+  // or a model-provider credential) dies. No run row exists when this fires.
   "credential.needs_reconnection",
 ]);
 
@@ -615,14 +615,13 @@ async function getDeliveryQueue(): Promise<JobQueue<DeliveryJobData>> {
  *
  * Fires both **org-level** webhooks (pinned to the org, `space_id IS NULL`)
  * and **space-level** webhooks pinned to the run's space. A `null` `spaceId` (an event with no
- * space) reaches org-level webhooks only. `packageId` is what a webhook's package filter is
- * matched against; absent, only webhooks without a filter receive the event.
+ * space) reaches org-level webhooks only. A webhook's package filter is matched against
+ * `run.packageId`; absent, only webhooks without a filter receive the event.
  */
 export async function dispatchWebhookEvents(
   scope: { orgId: string; spaceId: string | null },
   eventType: WebhookEventType,
   run: Record<string, unknown>,
-  packageId: string | undefined = typeof run.packageId === "string" ? run.packageId : undefined,
 ): Promise<void> {
   const rows = await db
     .select({
@@ -648,7 +647,7 @@ export async function dispatchWebhookEvents(
 
   for (const wh of rows) {
     if (!wh.events?.includes(eventType)) continue;
-    if (wh.packageId && wh.packageId !== packageId) continue;
+    if (wh.packageId && wh.packageId !== run.packageId) continue;
 
     const { eventId, payload } = buildEventEnvelope({
       eventType,
@@ -957,39 +956,15 @@ export function dispatchRunConnectionMissingWebhook(
   });
 }
 
-/**
- * Fire-and-forget webhook dispatch for a credential that needs reconnecting. An integration
- * connection reaches the webhooks of its space (none for an org-level connection) and the
- * org-level ones, matched on its integration as the package; a model-provider credential has no
- * space and no package, so it reaches the org-level webhooks without a package filter. The
- * envelope's inner object is tagged `credential`.
- */
+/** Fire-and-forget; routing and payload: `docs/site/features/webhooks.mdx`. */
 export function dispatchCredentialNeedsReconnectionWebhook(
   params: CredentialNeedsReconnectionParams,
 ): void {
-  const isConnection = params.kind === "integration_connection";
+  const { orgId, ...rest } = params;
   dispatchWebhookEvents(
-    { orgId: params.orgId, spaceId: isConnection ? params.spaceId : null },
+    { orgId, spaceId: "spaceId" in params ? params.spaceId : null },
     "credential.needs_reconnection",
-    isConnection
-      ? {
-          object: "credential",
-          kind: params.kind,
-          connectionId: params.connectionId,
-          integrationId: params.integrationId,
-          authKey: params.authKey,
-          spaceId: params.spaceId,
-          owner: params.owner,
-          cause: params.cause,
-        }
-      : {
-          object: "credential",
-          kind: params.kind,
-          credentialId: params.credentialId,
-          providerId: params.providerId,
-          cause: params.cause,
-        },
-    isConnection ? params.integrationId : undefined,
+    { object: "credential", ...rest },
   ).catch((err) => {
     logger.warn("credential.needs_reconnection webhook dispatch failed", {
       kind: params.kind,

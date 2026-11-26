@@ -47,7 +47,6 @@ import {
   connectionParam,
   listReachableConnections,
   proxyConnectionVerdicts,
-  readCredentialRevision,
   selectAccessibleConnection,
   upstreamRejectionStreak,
   type ConnectionNaming,
@@ -192,26 +191,11 @@ export async function resolveIntegrationProxyCredentials(
       })
     : null;
   switch (outcome?.status) {
-    case "refreshed": {
+    case "refreshed":
       // The 401 path names the credential the call carried: the one just written.
-      const revision = await readCredentialRevision(connection.id);
-      if (revision === null) {
-        throw new IntegrationCredentialNotFoundError(noConnectionMessage(input));
-      }
-      credentialRevision = revision;
-      payload = buildPayloadFromFields(
-        manifest,
-        connection.authKey,
-        outcome.fields,
-        connection.variables,
-      );
-      if (!payload) {
-        throw new IntegrationCredentialNotFoundError(
-          `Integration '${input.integrationId}' auth '${connection.authKey}' has no resolvable credentials`,
-        );
-      }
+      credentialRevision = outcome.credentialRevision;
+      payload = payloadOrThrow(input.integrationId, manifest, connection, outcome.fields);
       break;
-    }
     case "dead": {
       // Flagged just now: the selection answers as it does for a connection flagged before the call.
       const reselected = await resolveConnection(input, manifest);
@@ -554,6 +538,15 @@ function buildPayload(
       `Failed to decrypt credentials for integration '${integrationId}'`,
     );
   }
+  return payloadOrThrow(integrationId, manifest, connection, fields);
+}
+
+function payloadOrThrow(
+  integrationId: string,
+  manifest: IntegrationManifest,
+  connection: ResolvedConnectionRow,
+  fields: Record<string, string>,
+): ProxyCredentialsPayload {
   const payload = buildPayloadFromFields(
     manifest,
     connection.authKey,

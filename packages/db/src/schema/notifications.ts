@@ -12,7 +12,7 @@ import {
 } from "drizzle-orm/pg-core";
 import { sql } from "drizzle-orm";
 import type { RunStatus } from "@appstrate/core/run-status";
-import type { CredentialFailureCause } from "@appstrate/core/sidecar-types";
+import type { CredentialDeathCause } from "@appstrate/core/sidecar-types";
 import type { PackageType } from "./enums.ts";
 import { organizations } from "./organizations.ts";
 import { spaces } from "./spaces.ts";
@@ -87,14 +87,11 @@ export interface NotificationPayloads {
    * credential has no recipient decided yet (#1310), so it reaches the event and webhook alone.
    */
   credential_needs_reconnection: {
-    kind: "integration_connection";
     packageId: string;
-    /** The integration's display name stamped at write time; null when it carries none. */
-    integration_name: string | null;
-    connection_id: string;
+    /** The integration's display name stamped at write time. */
+    integration_name: string;
     label: string;
-    auth_key: string;
-    cause: CredentialFailureCause;
+    cause: CredentialDeathCause;
   };
 }
 

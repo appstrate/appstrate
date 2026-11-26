@@ -11,7 +11,6 @@
 import { z } from "zod";
 import type {
   AppstrateModule,
-  CredentialNeedsReconnectionParams,
   RunConnectionMissingParams,
   RunStatusChangeParams,
 } from "@appstrate/core/module";
@@ -131,8 +130,7 @@ const webhooksModule: AppstrateModule = {
 
   events: {
     onRunStatusChange: (params: RunStatusChangeParams) => dispatchRunWebhook(params),
-    onCredentialNeedsReconnection: (params: CredentialNeedsReconnectionParams) =>
-      dispatchCredentialNeedsReconnectionWebhook(params),
+    onCredentialNeedsReconnection: dispatchCredentialNeedsReconnectionWebhook,
     onRunConnectionMissing: (params: RunConnectionMissingParams) => {
       dispatchRunConnectionMissingWebhook(
         { orgId: params.orgId, spaceId: params.spaceId },

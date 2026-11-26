@@ -300,9 +300,9 @@ export const modelProviderCredentials = pgTable(
     // of every run dying opaquely. Reset to 0 on any successful token write
     // (`updateOAuthCredentialTokens`). Mirrors
     // `integration_connections.refresh_failure_count`.
+    refreshFailureCount: integer("refresh_failure_count").notNull().default(0),
     // An api-key credential reuses the counter for consecutive upstream 401s,
     // reset by any successful call (`clearModelCredentialRejections`).
-    refreshFailureCount: integer("refresh_failure_count").notNull().default(0),
     /**
      * When the background refresh sweep last visited the row, or a credential was last written
      * (`createOAuthCredential`, `reconnectOAuthCredential`, `updateOAuthCredentialTokens`). NULL =
@@ -311,9 +311,9 @@ export const modelProviderCredentials = pgTable(
     refreshCheckedAt: timestamp("refresh_checked_at", { withTimezone: true }),
     /**
      * Denormalized `blob.needsReconnection`, mirrored by `updateBlob` whenever the next blob's flag
-     * differs and written false by create / reconnect. The blob stays the source of truth; a
-     * mismatch found on a read is repaired. The background refresh sweep skips a flagged row
-     * without decrypting it.
+     * differs and written false by create / reconnect. The blob stays the source of truth. The
+     * background refresh sweep skips a flagged row without decrypting it. A row flagged in its blob
+     * before this column existed is brought in line by `scripts/migration/0058`.
      */
     needsReconnection: boolean("needs_reconnection").notNull().default(false),
     // NOTE — there is deliberately no `last_refresh_failure_at` here. There was

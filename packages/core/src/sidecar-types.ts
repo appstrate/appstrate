@@ -794,6 +794,17 @@ export const CREDENTIAL_FAILURE_CAUSES = [
 
 export type CredentialFailureCause = (typeof CREDENTIAL_FAILURE_CAUSES)[number];
 
+/** The causes that flip a credential to `needs_reconnection`: the subset of the above that kills one. */
+export const CREDENTIAL_DEATH_CAUSES = [
+  "refresh_token_revoked",
+  "refresh_token_missing",
+  "refresh_failures_exhausted",
+  "unrefreshable",
+  "credentials_undecryptable",
+] as const satisfies readonly CredentialFailureCause[];
+
+export type CredentialDeathCause = (typeof CREDENTIAL_DEATH_CAUSES)[number];
+
 /**
  * Prefix the sidecar's connect-login puts on the ONE error class written for
  * the person logging in: an `isError: true` CallToolResult from the

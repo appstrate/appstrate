@@ -1,20 +1,13 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Background credential refresh sweep: keeps the refresh tokens of idle OAuth2 credentials alive.
+ * Background credential refresh sweep: exercises the refresh tokens of idle OAuth2 credentials
+ * (`integration_connections` and OAuth `model_provider_credentials`) so a provider cannot expire
+ * them unused. Mechanics: docs/architecture/INTEGRATIONS_RUNTIME.md.
  *
- * A provider that expires unused refresh tokens kills a credential nobody touches. The sweep
- * exercises those tokens; it does not keep access tokens fresh (a credential in use refreshes
- * itself on the read path). A row is due when its token expires within the refresh lead or has
- * expired, and no visit stamped `refresh_checked_at` in the last {@link VISIT_INTERVAL_MS}. The
- * claim stamps that column BEFORE the attempt, success or failure, so a failing row is retried
- * once a day, and every credential write stamps it too, so a credential refreshed on demand is not
- * visited again within the interval. A still-valid token is never exchanged.
- *
- * Two sources share the scan: `integration_connections` and the OAuth `model_provider_credentials`.
- * The claim is one atomic `UPDATE … WHERE id IN (SELECT … FOR UPDATE SKIP LOCKED)`: it dedupes
- * across instances and overlapping scans, and decrypts nothing. Refresh jobs are not retried by
- * the queue: the claim spent the visit.
+ * Invariants: the claim stamps `refresh_checked_at` BEFORE the attempt, success or failure (a failing
+ * row is retried once a day, and refresh jobs are not retried by the queue); a still-valid token is
+ * never exchanged; the claim decrypts nothing.
  */
 
 import { and, asc, eq, inArray, isNotNull, isNull, lt, or, sql } from "drizzle-orm";
@@ -28,7 +21,7 @@ import { createQueue, type JobQueue, type QueueJob } from "../infra/queue/index.
 import { logger } from "../lib/logger.ts";
 import { ApiError } from "../lib/errors.ts";
 import type { AfpsManifestAuth } from "./integration-manifest-helpers.ts";
-import { readCredentialRevision } from "./integration-connections.ts";
+import { credentialRevision } from "./integration-connections.ts";
 import { readIntegrationManifestForProxy } from "./integration-service.ts";
 import { refreshConnectionCredential } from "./integration-token-refresh.ts";
 import { listModelProviders } from "./model-providers/registry.ts";
@@ -42,8 +35,8 @@ const SCAN_CRON = "43 * * * *";
 
 /** Rows claimed per source per scan; the rest is claimed by the next scan. */
 const CLAIM_LIMIT = 500;
-/** A row is visited at most once per interval. */
-const VISIT_INTERVAL_MS = 24 * 60 * 60 * 1000;
+/** Once a day: one cron period short of 24 h, so scan-start jitter never defers a visit an hour. */
+const VISIT_INTERVAL_MS = 23 * 60 * 60 * 1000;
 
 export type CredentialRefreshKind = "integration_connection" | "model_provider_credential";
 
@@ -55,8 +48,8 @@ interface CredentialRefreshJobData {
 type ScanJobData = Record<string, never>;
 
 interface RefreshSource {
-  /** Stamp and return the ids of up to `limit` due rows. */
-  claim(limit: number): Promise<string[]>;
+  /** Stamp with `now` and return the ids of up to `limit` rows due at `now`. */
+  claim(limit: number, now: Date): Promise<string[]>;
   /** Refresh one claimed row; logs its outcome and never throws on a verdict. */
   refreshOne(id: string, log: Logger): Promise<void>;
 }
@@ -74,13 +67,19 @@ async function getRefreshQueue(): Promise<JobQueue<CredentialRefreshJobData>> {
   return refreshQueue;
 }
 
-/** Expires within the lead (or already has), and was not visited within the interval. */
-function dueByExpiry(expiresAt: AnyPgColumn, refreshCheckedAt: AnyPgColumn) {
-  const now = Date.now();
+/** Not flagged, expires within the lead (or already has), and was not visited within the interval. */
+function due(
+  t: { expiresAt: AnyPgColumn; refreshCheckedAt: AnyPgColumn; needsReconnection: AnyPgColumn },
+  now: Date,
+) {
   return and(
-    isNotNull(expiresAt),
-    lt(expiresAt, new Date(now + OAUTH_REFRESH_LEAD_MS)),
-    or(isNull(refreshCheckedAt), lt(refreshCheckedAt, new Date(now - VISIT_INTERVAL_MS))),
+    sql`NOT ${t.needsReconnection}`,
+    isNotNull(t.expiresAt),
+    lt(t.expiresAt, new Date(now.getTime() + OAUTH_REFRESH_LEAD_MS)),
+    or(
+      isNull(t.refreshCheckedAt),
+      lt(t.refreshCheckedAt, new Date(now.getTime() - VISIT_INTERVAL_MS)),
+    ),
   );
 }
 
@@ -88,24 +87,19 @@ function dueByExpiry(expiresAt: AnyPgColumn, refreshCheckedAt: AnyPgColumn) {
 // integration_connections
 // ─────────────────────────────────────────────
 
-async function claimIntegrationConnections(limit: number): Promise<string[]> {
+async function claimIntegrationConnections(limit: number, now: Date): Promise<string[]> {
   const t = integrationConnections;
-  // The index predicate spelled as the index states it, so the scan rides `idx_integration_conn_refresh_due`.
-  const due = and(
-    isNotNull(t.clientRef),
-    sql`NOT ${t.needsReconnection}`,
-    dueByExpiry(t.expiresAt, t.refreshCheckedAt),
-  );
+  // Spelled as `idx_integration_conn_refresh_due` states it, so the scan rides the index.
   const candidates = db
     .select({ id: t.id })
     .from(t)
-    .where(due)
+    .where(and(isNotNull(t.clientRef), due(t, now)))
     .orderBy(asc(t.expiresAt))
     .limit(limit)
     .for("update", { skipLocked: true });
   const rows = await db
     .update(t)
-    .set({ refreshCheckedAt: new Date() })
+    .set({ refreshCheckedAt: now })
     .where(inArray(t.id, candidates))
     .returning({ id: t.id });
   return rows.map((r) => r.id);
@@ -121,6 +115,7 @@ async function refreshIntegrationConnection(id: string, log: Logger): Promise<vo
       integrationId: t.integrationId,
       authKey: t.authKey,
       credentialsEncrypted: t.credentialsEncrypted,
+      credentialRevision,
       clientRef: t.clientRef,
       oauthResource: t.oauthResource,
       expiresAt: t.expiresAt,
@@ -145,11 +140,9 @@ async function refreshIntegrationConnection(id: string, log: Logger): Promise<vo
     log.info("credential_refresh_integration_skipped", { ...fields, reason: "auth_not_declared" });
     return;
   }
-  const credentialRevision = await readCredentialRevision(id);
-  if (credentialRevision === null) return;
 
   const outcome = await refreshConnectionCredential({
-    connection: { ...row, credentialRevision },
+    connection: row,
     integrationId,
     manifest: read.manifest,
     authDef,
@@ -178,7 +171,7 @@ async function refreshIntegrationConnection(id: string, log: Logger): Promise<vo
 // model_provider_credentials
 // ─────────────────────────────────────────────
 
-async function claimModelCredentials(limit: number): Promise<string[]> {
+async function claimModelCredentials(limit: number, now: Date): Promise<string[]> {
   const oauthProviderIds = listModelProviders()
     .filter((p) => p.authMode === "oauth2")
     .map((p) => p.providerId);
@@ -188,19 +181,13 @@ async function claimModelCredentials(limit: number): Promise<string[]> {
   const candidates = db
     .select({ id: t.id })
     .from(t)
-    .where(
-      and(
-        inArray(t.providerId, oauthProviderIds),
-        sql`NOT ${t.needsReconnection}`,
-        dueByExpiry(t.expiresAt, t.refreshCheckedAt),
-      ),
-    )
+    .where(and(inArray(t.providerId, oauthProviderIds), due(t, now)))
     .orderBy(asc(t.expiresAt))
     .limit(limit)
     .for("update", { skipLocked: true });
   const rows = await db
     .update(t)
-    .set({ refreshCheckedAt: new Date() })
+    .set({ refreshCheckedAt: now })
     .where(inArray(t.id, candidates))
     .returning({ id: t.id });
   return rows.map((r) => r.id);
@@ -216,27 +203,20 @@ async function refreshModelCredential(id: string, log: Logger): Promise<void> {
       durationMs: Date.now() - startedAt,
     });
   } catch (err) {
-    const cause = err instanceof ApiError ? err.extensions?.cause : undefined;
-    if (err instanceof ApiError && err.status === 404) {
-      // Deleted between the claim and this job: nothing left to refresh.
-      log.debug("credential_refresh_model_gone", { credentialId: id });
+    if (!(err instanceof ApiError)) throw err;
+    const cause = err.extensions?.cause;
+    const fields = { credentialId: id, cause, durationMs: Date.now() - startedAt };
+    if (err.status === 404) {
+      // Deleted since the claim, or a blob nobody can decrypt: the resolver answers both 404.
+      log.warn("credential_refresh_model_unavailable", fields);
       return;
     }
-    if (err instanceof ApiError && err.status === 410) {
+    if (err.status === 410) {
       if (cause === "connection_flagged") {
-        // The column mirrors the blob's flag; a mismatch found here is repaired, so the row is
-        // not claimed again.
-        await db
-          .update(modelProviderCredentials)
-          .set({ needsReconnection: true })
-          .where(eq(modelProviderCredentials.id, id));
+        log.debug("credential_refresh_model_skipped_flagged", fields);
+      } else {
+        log.warn("credential_refresh_model_needs_reconnection", fields);
       }
-      log.warn(
-        cause === "connection_flagged"
-          ? "credential_refresh_model_skipped_already_flagged"
-          : "credential_refresh_model_needs_reconnection",
-        { credentialId: id, cause, durationMs: Date.now() - startedAt },
-      );
       return;
     }
     // Already recorded by the resolver, whose streak escalates to `needsReconnection`.
@@ -252,37 +232,42 @@ const SOURCES: Record<CredentialRefreshKind, RefreshSource> = {
   model_provider_credential: { claim: claimModelCredentials, refreshOne: refreshModelCredential },
 };
 
-const KINDS = Object.keys(SOURCES) as CredentialRefreshKind[];
-
 // ─────────────────────────────────────────────
 // Scan + job handlers
 // ─────────────────────────────────────────────
 
-/** Claim the due rows of every source and enqueue one refresh job per row. */
+type ScanCounts = { claimed: number; enqueued: number };
+
+/** Claim the due rows of one source and enqueue one refresh job per row. */
+async function scanKind(
+  kind: CredentialRefreshKind,
+  queue: JobQueue<CredentialRefreshJobData>,
+  now: Date,
+): Promise<ScanCounts> {
+  const ids = await SOURCES[kind].claim(CLAIM_LIMIT, now);
+  let enqueued = 0;
+  for (const id of ids) {
+    try {
+      await queue.add("refresh", { kind, id });
+      enqueued++;
+    } catch (err) {
+      // The visit is spent: the row is retried tomorrow.
+      logger.warn("credential_refresh_enqueue_failed", { kind, id, error: getErrorMessage(err) });
+    }
+  }
+  return { claimed: ids.length, enqueued };
+}
+
+/** One `now` for the due predicate and the visit stamp, so the interval does not drift. */
 export async function scanCredentialRefreshes(): Promise<
-  Record<CredentialRefreshKind, { claimed: number; enqueued: number }>
+  Record<CredentialRefreshKind, ScanCounts>
 > {
   const queue = await getRefreshQueue();
-  const counts = {} as Record<CredentialRefreshKind, { claimed: number; enqueued: number }>;
-  for (const kind of KINDS) {
-    const ids = await SOURCES[kind].claim(CLAIM_LIMIT);
-    let enqueued = 0;
-    for (const id of ids) {
-      try {
-        await queue.add("refresh", { kind, id });
-        enqueued++;
-      } catch (err) {
-        // The visit is spent: the row is retried tomorrow.
-        logger.warn("credential_refresh_enqueue_failed", {
-          kind,
-          id,
-          error: getErrorMessage(err),
-        });
-      }
-    }
-    counts[kind] = { claimed: ids.length, enqueued };
-  }
-  return counts;
+  const now = new Date();
+  return {
+    integration_connection: await scanKind("integration_connection", queue, now),
+    model_provider_credential: await scanKind("model_provider_credential", queue, now),
+  };
 }
 
 async function handleScanJob(_job: QueueJob<ScanJobData>): Promise<void> {

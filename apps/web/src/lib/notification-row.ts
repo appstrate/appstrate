@@ -14,15 +14,6 @@ export type NotificationItem =
 /** The preferences page listing the caller's own connections, where one is reconnected. */
 const RECONNECT_PATH = "/preferences/connections";
 
-/** Causes that flip a connection to needs_reconnection, each with its own sentence. */
-const RECONNECTION_CAUSES = [
-  "refresh_token_revoked",
-  "refresh_token_missing",
-  "refresh_failures_exhausted",
-  "unrefreshable",
-  "credentials_undecryptable",
-] as const;
-
 /** What a row says and where it leads (`null` when that page is closed to the caller). */
 interface NotificationRow {
   title: string;
@@ -69,14 +60,10 @@ export function notificationRow(
     return {
       title: t("notifications.credentialNeedsReconnection", {
         label: dead?.label ?? "",
-        integration: dead?.integration_name ?? dead?.packageId ?? "",
+        integration: dead?.integration_name ?? "",
       }),
       status: null,
-      message: t(
-        `notifications.credentialCause.${
-          RECONNECTION_CAUSES.find((cause) => cause === dead?.cause) ?? "other"
-        }`,
-      ),
+      message: dead ? t(`notifications.credentialCause.${dead.cause}`) : null,
       meta: date,
       target: canReach(RECONNECT_PATH) ? RECONNECT_PATH : null,
       targetLabel: "notifications.reconnect",

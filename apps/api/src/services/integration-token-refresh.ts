@@ -33,6 +33,7 @@ import { dedupedRefresh } from "../lib/deduped-refresh.ts";
 import { encryptionKeyUnavailable } from "../lib/stored-credential.ts";
 import { OAUTH_REFRESH_LEAD_MS, type CredentialFailureCause } from "@appstrate/core/sidecar-types";
 import {
+  credentialRevision,
   persistCredentialBundle,
   markIntegrationConnectionNeedsReconnection,
   recordIntegrationRefreshFailure,
@@ -48,6 +49,8 @@ interface IntegrationRefreshResult {
   fields: Record<string, string>;
   /** Parsed `expires_at` from the token response, or `null` if upstream did not return `expires_in`. */
   expiresAt: Date | null;
+  /** Of the stored credential these fields are: the one an upstream rejection would name. */
+  credentialRevision: string;
 }
 
 /** A refresh's verdict, thrown out of `dedupedRefresh`. `flaggedBefore`: before the lock. */
@@ -101,6 +104,7 @@ async function refreshUnderLock(
       const [row] = await db
         .select({
           credentialsEncrypted: integrationConnections.credentialsEncrypted,
+          credentialRevision,
           expiresAt: integrationConnections.expiresAt,
           scopesGranted: integrationConnections.scopesGranted,
           clientRef: integrationConnections.clientRef,
@@ -129,6 +133,7 @@ async function refreshUnderLock(
         return {
           fields: decryptCredentialsToStringMap(row.credentialsEncrypted),
           expiresAt: row.expiresAt,
+          credentialRevision: row.credentialRevision,
         };
       }
       return null;
@@ -238,7 +243,7 @@ async function doRefresh(
       : new RefreshVerdictError("retry", "connection_changed");
   }
 
-  return { fields: newCreds, expiresAt };
+  return { fields: newCreds, expiresAt, credentialRevision: written.credentialRevision };
 }
 
 async function exchangeFailureVerdict(
@@ -275,7 +280,12 @@ async function exchangeFailureVerdict(
  * usable; `dead`: flagged. `detail` is for logs.
  */
 type ConnectionRefreshOutcome =
-  | { status: "refreshed"; fields: Record<string, string>; expiresAt: Date | null }
+  | {
+      status: "refreshed";
+      fields: Record<string, string>;
+      expiresAt: Date | null;
+      credentialRevision: string;
+    }
   | { status: "kept"; cause?: CredentialFailureCause; detail?: string }
   | {
       status: "retry";
@@ -390,7 +400,7 @@ export async function refreshConnectionCredential(input: {
     }
     throw err;
   }
-  return { status: "refreshed", fields: refreshed.fields, expiresAt: refreshed.expiresAt };
+  return { status: "refreshed", ...refreshed };
 }
 
 function expiresWithinLeadWindow(expiresAt: Date | null): boolean {

@@ -11,8 +11,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **`onCredentialNeedsReconnection`** (`@appstrate/core/module`, `ModuleEvents`) and its
   `CredentialNeedsReconnectionParams` payload, discriminated by `kind`
-  (`integration_connection` | `model_provider_credential`). Broadcast once when a credential's
-  `needs_reconnection` flips from false to true; carries the `CredentialFailureCause`.
+  (`integration_connection` | `model_provider_credential`). One best-effort announcement per
+  `needs_reconnection` false to true flip; carries the `CredentialDeathCause`
+  (`CREDENTIAL_DEATH_CAUSES`, `@appstrate/core/sidecar-types`).
 
 ### Removed
 
