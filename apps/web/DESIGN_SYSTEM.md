@@ -892,7 +892,10 @@ uses `@appstrate/ui` primitives and the host's `t` (`chat.json`), it cannot
 import from `apps/web`. A tool call is a `ToolCallCard` (`tool-uis.tsx`),
 reasoning a collapsible group (`reasoning.tsx`), the working indicator
 (`ThinkingStatus`, same file) the spark: four coral balls swapping diagonals, pure
-CSS (`.spark` in `styles.css`), still under reduced motion. A run started from the chat is a
+CSS (`.spark` in `styles.css`), still under reduced motion. A running turn holds one spark,
+on one line: the loading line (« Réflexion en cours… », the turn's clock from 1 s), the reasoning
+row it is thinking in, or the header of the folded lookups it ends in, which then reads the step
+in progress, the count and the clock; a settled reasoning row reads its first line. A run started from the chat is a
 `ChatRunProgressCard`, the model picker `model-select.tsx`, whose list is the shared `ModelPickerList` (section 5). The thread sits on the
 canvas, surfaces on it are white cards, and heights hold across states (no jump).
 The context panel (`modules/chat/conversation-sidebar.tsx`) is transparent on that

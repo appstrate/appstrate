@@ -65,7 +65,6 @@
   "tool.search.count_other": "{{count}} résultats",
   "tool.requests_one": "{{count}} requête",
   "tool.requests_other": "{{count}} requêtes",
-  "tool.reads.running": "Consultation en cours…",
   "tool.reads.done_one": "{{count}} consultation",
   "tool.reads.done_other": "{{count}} consultations",
   "tool.reads.failed_one": "{{count}} en échec",

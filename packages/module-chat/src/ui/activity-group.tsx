@@ -10,6 +10,10 @@
  * lookups draws no header, with the same tree, so the next one folds it without remounting cards.
  * A call the context panel reveals (`reveal-tool-call.ts`) opens its group: a folded one does not
  * mount its cards.
+ *
+ * Folded and ending the running message, its header reads like a coding agent's status line: the
+ * spark (the turn's status region, beside the trigger), the step in progress, the lookup count, the
+ * turn's clock. Settled: the count, the failed count, what the lookups touched.
  */
 
 import * as React from "react";
@@ -17,7 +21,6 @@ import { useAuiState } from "@assistant-ui/react";
 import { ChevronRightIcon, EyeIcon } from "lucide-react";
 import type { PresentationSubject } from "@appstrate/core/mcp-presentation";
 import { Button } from "@appstrate/ui/components/button";
-import { Spinner } from "@appstrate/ui/components/spinner";
 import {
   Collapsible,
   CollapsibleContent,
@@ -25,45 +28,49 @@ import {
 } from "@appstrate/ui/components/collapsible";
 import { useChatHost } from "./runtime-context.ts";
 import { SubjectStack } from "./subject-glyph.tsx";
-import type { GroupablePart } from "./conversation-tools.ts";
+import { FOLD_AT, lookupsAt, type GroupablePart } from "./conversation-tools.ts";
+import { ThinkingStatus } from "./reasoning.tsx";
+import { useTurnClock } from "./use-turn-clock.ts";
+import { showStep } from "./turn-status.ts";
 import { deriveToolPhase } from "./tool-result.ts";
 import type { StoredResults } from "./use-call-presentation.ts";
 import { forgetRevealedToolCalls, useRevealedToolCalls } from "./reveal-tool-call.ts";
 import { DISCLOSURE_TRIGGER_CLASS } from "./touch-targets.ts";
 
-const FOLD_AT = 2;
-
-function callsAt(parts: readonly GroupablePart[], indices: readonly number[]): GroupablePart[] {
-  return indices.flatMap((i) => {
-    const part = parts[i];
-    return part?.type === "tool-call" && part.toolCallId ? [part] : [];
-  });
-}
+/** A thread part as the header reads it: a call's name and arguments for {@link showStep}. */
+type StepPart = GroupablePart & { readonly toolName?: string; readonly args?: unknown };
 
 export function ActivityGroup({
   indices,
-  running,
   stored,
   children,
 }: {
   indices: readonly number[];
-  running: boolean;
   stored: StoredResults;
   children: React.ReactNode;
 }) {
   const { t } = useChatHost();
   // Strings, not arrays: a selector returning a fresh value would re-render forever.
   const joinedIds = useAuiState((s) =>
-    callsAt(s.message.parts as readonly GroupablePart[], indices)
+    lookupsAt(s.message.parts as readonly GroupablePart[], indices)
       .map((part) => part.toolCallId)
       .join("\n"),
   );
   const failed = useAuiState(
     (s) =>
-      callsAt(s.message.parts as readonly GroupablePart[], indices).filter(
+      lookupsAt(s.message.parts as readonly GroupablePart[], indices).filter(
         (part) => deriveToolPhase(part) === "error",
       ).length,
   );
+  const lastIndex = indices[indices.length - 1];
+  // The step in progress while this group ends the running message, as JSON: a string selector.
+  const stepJson = useAuiState((s) => {
+    if (s.message.status?.type !== "running" || s.message.parts.length - 1 !== lastIndex) return "";
+    const part = s.message.parts[lastIndex] as StepPart | undefined;
+    if (!part) return "";
+    const presentation = part.toolCallId ? stored.get(part.toolCallId)?.presentation : undefined;
+    return JSON.stringify(showStep(part, presentation, t));
+  });
   const callIds = React.useMemo(() => (joinedIds ? joinedIds.split("\n") : []), [joinedIds]);
   const subjects = React.useMemo(
     () =>
@@ -78,6 +85,9 @@ export function ActivityGroup({
   const reads = callIds.length;
   const [readerOpen, setReaderOpen] = React.useState(false);
   const folded = reads >= FOLD_AT;
+  const running = folded && stepJson !== "";
+  const clock = useTurnClock(running);
+  const step = running ? (JSON.parse(stepJson) as ReturnType<typeof showStep>) : undefined;
   const onOpenChange = (open: boolean) => {
     setReaderOpen(open);
     if (!open) forgetRevealedToolCalls(callIds);
@@ -86,17 +96,34 @@ export function ActivityGroup({
   return (
     <Collapsible open={folded ? readerOpen || revealed : true} onOpenChange={onOpenChange}>
       {folded ? (
-        <CollapsibleTrigger asChild>
-          <Button variant="ghost" size="sm" className={`my-1 ${DISCLOSURE_TRIGGER_CLASS}`}>
-            {running ? <Spinner className="size-4" /> : <EyeIcon />}
-            {running ? t("tool.reads.running") : t("tool.reads.done", { count: reads })}
-            {failed > 0 ? (
-              <span className="text-destructive">{t("tool.reads.failed", { count: failed })}</span>
-            ) : null}
-            <SubjectStack subjects={subjects} />
-            <ChevronRightIcon className="duration-fast ease-surface transition-transform group-data-[state=open]:rotate-90" />
-          </Button>
-        </CollapsibleTrigger>
+        <div className="my-1 flex min-w-0 items-center gap-2">
+          {/* A sibling of the trigger: a live region inside a button is not exposed. */}
+          {running ? <ThinkingStatus /> : null}
+          <CollapsibleTrigger asChild>
+            <Button variant="ghost" size="sm" className={`min-w-0 ${DISCLOSURE_TRIGGER_CLASS}`}>
+              {step ? (
+                <>
+                  <span className="text-foreground min-w-0 truncate">{step.label}</span>
+                  {step.idText ? <span className="min-w-0 truncate">{step.idText}</span> : null}
+                  <span className="shrink-0">{t("tool.reads.done", { count: reads })}</span>
+                  {clock ? <span className="shrink-0 tabular-nums">{clock}</span> : null}
+                </>
+              ) : (
+                <>
+                  <EyeIcon />
+                  {t("tool.reads.done", { count: reads })}
+                  {failed > 0 ? (
+                    <span className="text-destructive">
+                      {t("tool.reads.failed", { count: failed })}
+                    </span>
+                  ) : null}
+                  <SubjectStack subjects={subjects} />
+                </>
+              )}
+              <ChevronRightIcon className="duration-fast ease-surface transition-transform group-data-[state=open]:rotate-90" />
+            </Button>
+          </CollapsibleTrigger>
+        </div>
       ) : null}
       <CollapsibleContent
         className={

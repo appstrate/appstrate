@@ -65,7 +65,6 @@
   "tool.search.count_other": "{{count}} results",
   "tool.requests_one": "{{count}} request",
   "tool.requests_other": "{{count}} requests",
-  "tool.reads.running": "Looking things up…",
   "tool.reads.done_one": "{{count}} lookup",
   "tool.reads.done_other": "{{count}} lookups",
   "tool.reads.failed_one": "{{count}} failed",
