@@ -30,7 +30,7 @@ function render(granted: string[]): string {
           {
             id: "chs_1",
             title: "Budget",
-            unread: false,
+            unread: true,
             generating: false,
             updatedAt: "",
             space_ids: ["spc_a"],
@@ -39,7 +39,7 @@ function render(granted: string[]): string {
             id: "chs_2",
             title: null,
             unread: false,
-            generating: false,
+            generating: true,
             updatedAt: "",
             space_ids: ["spc_a"],
           },
@@ -61,7 +61,6 @@ function render(granted: string[]): string {
               renderSpaces={(ids, options) =>
                 options?.tilesOnly ? `tiles:${ids.join(",")}` : ids.join(", ")
               }
-              formatAge={() => "age"}
             />
           </ChatTransportProvider>
         </SidebarProvider>
@@ -93,6 +92,26 @@ describe("a conversation row's « … »", () => {
     expect(button).toContain("desktop-pointer:group-hover/menu-item:opacity-100");
     expect(button).toContain("desktop-pointer:group-focus-within/menu-item:opacity-100");
   });
+
+  it("takes the place of the whole right side (tiles and status) under a mouse", () => {
+    const trailing = render(["chat:read", "chat:write"]).match(
+      /<span[^>]*data-testid="chat-session-trailing"[^>]*>/,
+    )?.[0];
+    expect(trailing).toContain("desktop-pointer:min-w-6");
+    expect(trailing).toContain("desktop-pointer:group-hover/menu-item:opacity-0");
+    expect(trailing).toContain("desktop-pointer:group-focus-within/menu-item:opacity-0");
+    expect(trailing).toContain("desktop-pointer:group-has-[[data-state=open]]/menu-item:opacity-0");
+  });
+});
+
+describe("a reader's right side", () => {
+  it("stays on hover: a reader has no « … » to take its place", () => {
+    const html = render(["chat:read"]);
+    const trailing = html.match(/<span[^>]*data-testid="chat-session-trailing"[^>]*>/)?.[0];
+    expect(trailing).toBeDefined();
+    expect(trailing).not.toContain("opacity-0");
+    expect(html).not.toContain("threads.actions.openFor");
+  });
 });
 
 describe("the conversation search on a phone", () => {
@@ -122,28 +141,81 @@ describe("the conversation search on a phone", () => {
   });
 });
 
-describe("a conversation's spaces, on every format", () => {
-  const html = render(["chat:read", "chat:write"]);
+describe("a conversation row, on every format", () => {
+  for (const [who, granted] of [
+    ["a writer", ["chat:read", "chat:write"]],
+    ["a reader", ["chat:read"]],
+  ] as const) {
+    const html = render([...granted]);
 
-  it("closes a writer's title line with their tiles, with no names line", () => {
-    const tiles = html.match(/<span[^>]*data-testid="chat-session-space-tiles"[^>]*>[^<]*/)?.[0];
-    expect(tiles).toContain("tiles:spc_a");
-    expect(tiles).not.toMatch(/max-md:|md:hidden/);
-    expect(html).not.toContain('data-testid="chat-session-spaces"');
-  });
+    it(`is one line for ${who}: the title, then the space tiles`, () => {
+      const tiles = html.match(/<span[^>]*data-testid="chat-session-space-tiles"[^>]*>[^<]*/)?.[0];
+      expect(tiles).toContain("tiles:spc_a");
+      expect(html).not.toContain('data-testid="chat-session-spaces"');
+      expect(html).toMatch(/flex min-w-0 flex-1 items-center gap-2/);
+      expect(html).toContain("desktop-pointer:h-8");
+    });
 
-  it("puts a writer's title and tiles on one line, as tall as Studio's rows under a mouse", () => {
-    expect(html).toMatch(/flex min-w-0 flex-1 flex-row items-center gap-2/);
-    expect(html).toContain("desktop-pointer:h-8");
-  });
+    it(`ends the right side with the status, never a date, for ${who}`, () => {
+      expect(html.match(/data-testid="chat-session-status"/g)).toHaveLength(2);
+      // The tiles come first, the status last: one block, aligned on the right.
+      const trailing = html.match(
+        /data-testid="chat-session-trailing"[\s\S]*?<\/span><\/span>/,
+      )?.[0];
+      expect(trailing?.indexOf("chat-session-space-tiles")).toBeLessThan(
+        trailing!.indexOf("chat-session-status"),
+      );
+      expect(html).toContain('aria-label="threads.unread"');
+      expect(html).toContain('aria-label="threads.generating"');
+    });
+  }
+});
 
-  it("names them on a line of their own for a reader, whose row has no « … » to name them in", () => {
-    const reader = render(["chat:read"]);
-    const names = reader.match(/<span[^>]*data-testid="chat-session-spaces"[^>]*>/)?.[0];
-    expect(names).toBeDefined();
-    expect(names).not.toContain("hidden");
-    expect(reader).not.toContain("chat-session-space-tiles");
-    expect(reader).toMatch(/flex min-w-0 flex-1 flex-col gap-0\.5/);
-    expect(reader).not.toContain("desktop-pointer:h-8");
-  });
+describe("the list while it loads", () => {
+  /** The list with nothing cached yet: its first page is still on its way. */
+  function loading(granted: string[]): string {
+    return renderToString(
+      <QueryClientProvider client={new QueryClient()}>
+        <TooltipProvider>
+          <SidebarProvider>
+            <ChatTransportProvider value={transport}>
+              <ChatConversationList
+                activeId={null}
+                t={(key) => key}
+                can={(permission) => granted.includes(permission)}
+                renderSpaces={(ids) => ids.join(", ")}
+              />
+            </ChatTransportProvider>
+          </SidebarProvider>
+        </TooltipProvider>
+      </QueryClientProvider>,
+    );
+  }
+  /** The right padding of a row's box, which sets where its space tiles end. */
+  const padding = (box: string | undefined) =>
+    box
+      ?.match(/class="([^"]*)"/)?.[1]
+      ?.split(/\s+/)
+      .filter((token) => /^(desktop-pointer:)?pr-/.test(token))
+      .sort()
+      .join(" ");
+
+  for (const [who, granted] of [
+    ["a writer", ["chat:read", "chat:write"]],
+    ["a reader", ["chat:read"]],
+  ] as const) {
+    it(`stands where the loaded list will for ${who}: search, a date label, rows`, () => {
+      const html = loading([...granted]);
+      expect(html).toContain('type="search"');
+      expect(html).not.toContain("threads.title");
+      expect(html).toMatch(/data-sidebar="group-label"[^>]*class="[^"]*mt-1 h-6/);
+      const skeleton = html.match(/<div data-sidebar="menu-skeleton"[^>]*>/)?.[0];
+      const row = render([...granted]).match(
+        /<button[^>]*data-sidebar="menu-button"[^>]*data-size="lg"[^>]*>/,
+      )?.[0];
+      expect(skeleton).toContain("desktop-pointer:h-8");
+      if (granted.includes("chat:write")) expect(padding(row)).toBe("desktop-pointer:pr-2 pr-11");
+      expect(padding(skeleton)).toBe(padding(row));
+    });
+  }
 });

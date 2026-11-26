@@ -33,7 +33,9 @@ import { useChat } from "@ai-sdk/react";
 import type { UIMessage } from "ai";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Button } from "@appstrate/ui/components/button";
+import { cn } from "@appstrate/ui/cn";
 import { ConversationSkeleton } from "./conversation-skeleton.tsx";
+import { THREAD_SIDE_PADDING_CLASS } from "./phone-text.ts";
 import { useLatest } from "./use-latest.ts";
 import { recordUploadResolutions } from "./upload.ts";
 import { Thread } from "./thread.tsx";
@@ -109,6 +111,8 @@ import {
   setSelectedModel,
 } from "./model-store.ts";
 import { getPackageAuthoringEnabled } from "./package-authoring-store.ts";
+import { getContextAllSpacesEnabled } from "./context-all-spaces-store.ts";
+import { useOffersContextAllSpaces } from "./composer-panel.ts";
 import { getInlineRunModelEnabled } from "./inline-run-model-store.ts";
 import { latestTurnModelId } from "./turn-model.ts";
 import { ComposerTools } from "./composer-tools.tsx";
@@ -584,7 +588,10 @@ function ConversationNotFound({
     <div
       role="status"
       data-testid="chat-conversation-not-found"
-      className="flex h-full flex-col items-center justify-center gap-3 px-4 text-center"
+      className={cn(
+        "flex h-full flex-col items-center justify-center gap-3 text-center",
+        THREAD_SIDE_PADDING_CLASS,
+      )}
     >
       <p className="text-sm font-medium">{t("conversation.notFound.title")}</p>
       <p className="text-muted-foreground max-w-sm text-sm">{t("conversation.notFound.hint")}</p>
@@ -638,6 +645,8 @@ function ConversationInner({
   const filterSpaceId = transport?.spaceId ?? null;
   // Read when the turn starts (the row it creates), not a reason to re-run the effect below.
   const getScope = useLatest(scope);
+  // Sent only while the switch is offered: a hidden switch left on must not widen the turn.
+  const getOffersContextAllSpaces = useLatest(useOffersContextAllSpaces());
   // The transport read at request time for the same reason: `useChat` keeps the first one it saw.
   const getTransport = useLatest(transport);
   // The seed, frozen: `useChat` reads it once.
@@ -680,12 +689,13 @@ function ConversationInner({
             generation: getCompatibleGenerationSettings(),
             packageAuthoring: getPackageAuthoringEnabled(),
             inlineRunsUseChatModel: getInlineRunModelEnabled(),
+            contextAllSpaces: getOffersContextAllSpaces() && getContextAllSpacesEnabled(),
             skills: takeForTurn(),
             creation: getCreation(),
           });
         },
       }),
-    [buildHeaders, takeForTurn, getCreation, getTransport],
+    [buildHeaders, takeForTurn, getCreation, getTransport, getOffersContextAllSpaces],
   );
 
   const chat = useChat({

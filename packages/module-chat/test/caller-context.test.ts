@@ -11,7 +11,7 @@ import { describe, expect, it } from "bun:test";
 import {
   formatCallerContext,
   buildCallerContextBlock,
-  type ChatSkillsClient,
+  type ChatCallerClient,
 } from "../src/prompt.ts";
 import { turnCapabilities } from "../src/capabilities.ts";
 import { DEFAULT_SKILL_SELECTION } from "../src/skills.ts";
@@ -206,6 +206,23 @@ describe("formatCallerContext", () => {
     expect(out).not.toContain("pins it to the conversation");
     expect(out).toContain("does not fit");
     expect(out).not.toContain('<skill id="@acme/huge"');
+  });
+
+  it("keeps the listed skills in their budget at one level for all, never a first few", () => {
+    const raw = { user: { name: "Ada" }, org: { role: "member" } };
+    const many = (count: number, description: string) =>
+      Array.from({ length: count }, (_, i) =>
+        listedSkill(`@acme/skill-${String(i).padStart(3, "0")}`, description, "1.0.0"),
+      );
+    const bare = contextText(raw, { ...BASE_OPTS, skillCatalogue: many(60, "d".repeat(200)) });
+    expect(bare).toContain("Descriptions are left out for room");
+    expect(bare).toContain("- `@acme/skill-000` (v1.0.0)");
+    expect(bare).toContain("- `@acme/skill-059` (v1.0.0)");
+    expect(bare).not.toContain("ddd");
+
+    const counted = contextText(raw, { ...BASE_OPTS, skillCatalogue: many(400, "Short.") });
+    expect(counted).toContain("400 skills are available, not listed here for room");
+    expect(counted).not.toContain("@acme/skill-");
   });
 
   it("lists the turn's skills with discovery on, and none when the turn cannot load one", () => {
@@ -530,7 +547,7 @@ describe("formatCallerContext", () => {
 });
 
 /** A skills connection that fails the test if the block opens it. */
-const NO_SKILLS = async (): Promise<ChatSkillsClient> => {
+const NO_SKILLS = async (): Promise<ChatCallerClient> => {
   throw new Error("the skills connection was opened");
 };
 
@@ -558,6 +575,8 @@ function fakeSkillsClient(opts: {
   savedAfterList?: Record<string, string>;
   blobs?: Record<string, string>;
   listFails?: "published" | "draft";
+  /** `get_me`'s body per `space_id`; a space absent from it fails its call. */
+  getMe?: Record<string, Record<string, unknown>>;
 }) {
   const calls: string[] = [];
   const signals: (AbortSignal | undefined)[] = [];
@@ -574,7 +593,7 @@ function fakeSkillsClient(opts: {
         ),
       };
     });
-  const client: ChatSkillsClient = {
+  const client: ChatCallerClient = {
     listSkills: async (options) => {
       signals.push(options?.signal);
       const draft = options?.meta?.[SKILL_DEFINITION_META_KEY] === "draft";
@@ -590,6 +609,14 @@ function fakeSkillsClient(opts: {
       const text = opts.savedAfterList?.[uri] ?? opts.texts[uri];
       if (text === undefined) throw new Error("Resource not found");
       return { contents: [{ uri, mimeType: "text/markdown", text }] };
+    },
+    callTool: async ({ name, arguments: args }, options) => {
+      signals.push(options?.signal);
+      const spaceId = String(args?.space_id);
+      calls.push(`${name} ${spaceId}`);
+      const body = opts.getMe?.[spaceId];
+      if (!body) throw new Error("get_me failed");
+      return { content: [], structuredContent: { status: 200, body } };
     },
     close: async () => {
       calls.push("close");
@@ -622,7 +649,7 @@ describe("buildCallerContextBlock", () => {
     pins?: string[];
     cited?: string[];
     drafts?: boolean;
-    client?: (signal: AbortSignal) => Promise<ChatSkillsClient>;
+    client?: (signal: AbortSignal) => Promise<ChatCallerClient>;
     permissions?: string[];
     capabilities?: ReturnType<typeof caps>;
     skillDiscovery?: boolean;
@@ -631,14 +658,176 @@ describe("buildCallerContextBlock", () => {
     buildCallerContextBlock(fakeContext(vars), {
       spaces: REACH,
       restricted: false,
+      detailSpaces: [],
       user,
       capabilities,
       permissions,
       skills: { skillDiscovery, pinnedSkills: pins },
       cited,
       drafts,
-      openSkillsClient: client,
+      openCaller: client,
     });
+
+  it("names every space of the turn with the acts the turn holds there, in reach order", async () => {
+    const personal = reachableSpace({
+      id: "spc_p",
+      name: "Perso",
+      role: "admin",
+      personal: true,
+      credentialProxyOpen: true,
+      permissions: [...BUILDER, "credential-proxy:call-own", "chat:read", "chat:write"],
+    });
+    const viewer = reachableSpace({
+      id: "spc_v",
+      name: "Lecture",
+      role: "viewer",
+      permissions: ["mcp:read", "chat:read", "chat:write"],
+    });
+    const text = (
+      await buildCallerContextBlock(fakeContext({ orgRole: "member" }), {
+        spaces: [personal, viewer],
+        restricted: false,
+        detailSpaces: [],
+        user,
+        capabilities: caps(BUILDER),
+        // The turn's set bounds every space: authoring off removes package creation everywhere.
+        permissions: [...NO_AUTHORING, "credential-proxy:call-own"],
+        skills: { skillDiscovery: true, pinnedSkills: [] },
+        cited: [],
+        drafts: false,
+        openCaller: NO_SKILLS,
+      })
+    ).text;
+    const section = text.slice(text.indexOf("## Spaces you can act in"));
+    expect(section.split("\n").slice(0, 3)).toEqual([
+      "## Spaces you can act in",
+      "- Perso (`spc_p`, role admin, your personal space) — can: invoke_operations, run_agents, call_integration_tools",
+      "- Lecture (`spc_v`, role viewer) — can: nothing but looking things up",
+    ]);
+  });
+
+  it("reads what the engaged spaces hold over the skills' connection, where the turn may read it", async () => {
+    const grants = [...BUILDER, "integrations:read", "chat:read", "chat:write"];
+    const perso = reachableSpace({
+      id: "spc_p",
+      name: "Perso",
+      personal: true,
+      permissions: grants,
+    });
+    const ventes = reachableSpace({ id: "spc_v", name: "Ventes", permissions: grants });
+    // Neither `integrations:read` nor `agents:run` there: nothing to read.
+    const lecture = reachableSpace({ id: "spc_r", name: "Lecture", permissions: ["mcp:read"] });
+    const A = "skill://spc_p/acme/a/a/SKILL.md";
+    const caller = fakeSkillsClient({
+      published: [skillEntry(A, "1.0.0")],
+      texts: { [A]: "a body" },
+      getMe: {
+        spc_p: {
+          space: { id: "spc_p" },
+          connections: [],
+          connectable_integrations: ["@appstrate/slack"],
+          agents: [{ packageId: "@acme/digest", display_name: "Digest", published: true }],
+          agents_total: 1,
+        },
+        // `spc_v` is absent: its get_me fails and it is left out.
+      },
+    });
+    const build = () =>
+      buildCallerContextBlock(fakeContext({ orgRole: "member" }), {
+        spaces: [perso, ventes, lecture],
+        detailSpaces: [ventes, perso, lecture],
+        restricted: false,
+        user,
+        capabilities: caps(grants),
+        permissions: grants,
+        skills: { skillDiscovery: false, pinnedSkills: ["@acme/a"] },
+        cited: [],
+        drafts: false,
+        openCaller: caller.open,
+      });
+    const { text } = await build();
+    expect(caller.calls.sort()).toEqual([
+      "close",
+      "get_me spc_p",
+      "get_me spc_v",
+      `resources/read ${A}`,
+      "skills/list",
+    ]);
+    // One connection, one deadline, for the skills and the details.
+    expect(new Set(caller.signals).size).toBe(1);
+    const section = text.slice(text.indexOf("## What these spaces hold"));
+    expect(section).toContain("As read at the start of this turn, for Perso.");
+    expect(section).toContain("- `@appstrate/slack` — not connected in Perso");
+    expect(section).toContain("- `@acme/digest` (Digest) — in Perso");
+    expect(section).not.toContain("Ventes");
+    // The same reads render the same block: the system prompt's cache holds.
+    expect((await build()).text).toBe(text);
+  });
+
+  it("reads the pinned skills while many slow details are read, a few at a time", async () => {
+    const grants = [...BUILDER, "integrations:read", "chat:read", "chat:write"];
+    const many = Array.from({ length: 24 }, (_, i) =>
+      reachableSpace({ id: `spc_${i}`, name: `Equipe ${i}`, permissions: grants }),
+    );
+    const A = "skill://spc_0/acme/a/a/SKILL.md";
+    const caller = fakeSkillsClient({
+      published: [skillEntry(A, "1.0.0")],
+      texts: { [A]: "a body" },
+      getMe: Object.fromEntries(
+        many.map((space) => [
+          space.id,
+          { space: { id: space.id }, connections: [], connectable_integrations: [], agents: [] },
+        ]),
+      ),
+    });
+    let inFlight = 0;
+    let peak = 0;
+    const open = async (signal: AbortSignal) => {
+      const client = await caller.open(signal);
+      return {
+        ...client,
+        callTool: async (...args: Parameters<typeof client.callTool>) => {
+          inFlight++;
+          peak = Math.max(peak, inFlight);
+          await new Promise((resolve) => setTimeout(resolve, 20));
+          inFlight--;
+          return client.callTool(...args);
+        },
+      };
+    };
+    const { text, injected } = await buildCallerContextBlock(fakeContext({ orgRole: "member" }), {
+      spaces: many,
+      detailSpaces: many,
+      restricted: false,
+      user,
+      capabilities: caps(grants),
+      permissions: grants,
+      skills: { skillDiscovery: false, pinnedSkills: ["@acme/a"] },
+      cited: [],
+      drafts: false,
+      openCaller: open,
+    });
+    expect(Object.keys(injected.skills)).toEqual(["@acme/a"]);
+    expect(text).toContain("a body");
+    expect(peak).toBeLessThanOrEqual(4);
+    expect(caller.calls.filter((call) => call.startsWith("get_me"))).toHaveLength(24);
+  });
+
+  it("opens no connection when there are neither skills nor details to read", async () => {
+    const { text } = await buildCallerContextBlock(fakeContext({ orgRole: "member" }), {
+      spaces: REACH,
+      detailSpaces: [reachableSpace({ id: "spc_r", permissions: ["mcp:read"] })],
+      restricted: false,
+      user,
+      capabilities: caps(BUILDER),
+      permissions: BUILDER,
+      skills: { skillDiscovery: false, pinnedSkills: [] },
+      cited: [],
+      drafts: false,
+      openCaller: NO_SKILLS,
+    });
+    expect(text).not.toContain("## What these spaces hold");
+  });
 
   it("marks the turn's permissions as a role preview while one is on, and only then", async () => {
     const build = async (vars: Record<string, unknown>) =>

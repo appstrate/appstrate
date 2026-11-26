@@ -171,8 +171,8 @@ export function ChatModulePage() {
   //
   // The shell hands the chat a definite height (its inset never scrolls), so
   // the thread scrolls internally and the composer stays pinned at the bottom.
-  // The context panel is a sibling of the thread, INSIDE the shell's content
-  // area: it belongs to the conversation, and it opens in a sheet on narrow screens.
+  // The context panel opens over the thread's right side, INSIDE the shell's
+  // content area: it belongs to the conversation, and it opens in a sheet on narrow screens.
   // One toggle sits in the shell's header, portaled there for the page's lifetime;
   // the tabs live in the panel's own header.
   return (
@@ -183,39 +183,36 @@ export function ChatModulePage() {
           <ChatConversationRenameButton activeId={conversationId ?? null} t={translate} can={can} />
           <ConversationContextToggle expanded={sidebarState.expanded} dispatch={dispatchSidebar} />
         </ShellHeaderActions>
-        <div className="relative flex min-h-0 min-w-0 flex-1">
-          <div className="min-w-0 flex-1">
-            <ChatPage
-              transport={transport}
-              conversationId={conversationId ?? null}
-              newChatKey={location.key}
-              initialComposerDraft={initialComposerDraft}
-              onConversationChange={onConversationChange}
-              onOpenFile={presentFile}
-              useFileImageSrc={useFileImageSrc}
-              uploadFile={uploadFile}
-              t={translate}
-              can={can}
-              canIn={canIn}
-              actingSpaceIds={actingSpaceIds}
-              attachTarget={attachTarget}
-              personalModelCredentials={orgSettings?.personal_model_credentials}
-              modelCredentials={modelCredentials}
-              formatBytes={formatBytes}
-              lang={i18n.language}
-              onPackagesChanged={onPackagesChanged}
-              firstName={firstName || null}
-              renderSpaces={renderSpaces}
-              linkInSpace={linkInSpace}
-              useSpaceLabelOf={useSpaceLabelOf}
-            />
-          </div>
-          <ConversationSidebar
+        <ConversationSidebar
+          conversationId={conversationId ?? null}
+          state={sidebarState}
+          dispatch={dispatchSidebar}
+        >
+          <ChatPage
+            transport={transport}
             conversationId={conversationId ?? null}
-            state={sidebarState}
-            dispatch={dispatchSidebar}
+            newChatKey={location.key}
+            initialComposerDraft={initialComposerDraft}
+            onConversationChange={onConversationChange}
+            onOpenFile={presentFile}
+            useFileImageSrc={useFileImageSrc}
+            uploadFile={uploadFile}
+            t={translate}
+            can={can}
+            canIn={canIn}
+            actingSpaceIds={actingSpaceIds}
+            attachTarget={attachTarget}
+            personalModelCredentials={orgSettings?.personal_model_credentials}
+            modelCredentials={modelCredentials}
+            formatBytes={formatBytes}
+            lang={i18n.language}
+            onPackagesChanged={onPackagesChanged}
+            firstName={firstName || null}
+            renderSpaces={renderSpaces}
+            linkInSpace={linkInSpace}
+            useSpaceLabelOf={useSpaceLabelOf}
           />
-        </div>
+        </ConversationSidebar>
       </SelectConversationProvider>
     </ChatTransportProvider>
   );

@@ -45,7 +45,6 @@ import { issuerOfClientMetadataDocumentRef } from "../lib/integration-client-met
 import {
   resolveSystemClientForAuth,
   getDefaultSystemIntegrationClient,
-  listSystemIntegrationClientsFor,
   type SystemIntegrationClientDefinition,
 } from "./integration-client-registry.ts";
 import { isActiveHere, placementVia, type PlacementVia } from "./package-activation.ts";
@@ -97,7 +96,11 @@ import {
   type ConnectionCaller,
 } from "./connection-reach.ts";
 import { shareableSpaces } from "./connection-shares.ts";
-import { readOAuthClientRegistrations, reconnectMethods } from "./reconnect-methods.ts";
+import {
+  authClientFlags,
+  readOAuthClientRegistrations,
+  reconnectMethods,
+} from "./reconnect-methods.ts";
 import {
   boundSpacesOf,
   reconnectScopeAllows,
@@ -174,6 +177,7 @@ import type { IntegrationAuthStatus } from "@appstrate/shared-types";
 import {
   readIntegrationManifestForConnect,
   readIntegrationManifestForProxy,
+  governingIntegrationManifest,
   readPublishedIntegrationManifests,
 } from "./integration-service.ts";
 import { assertSpaceInScope } from "./spaces.ts";
@@ -2774,25 +2778,20 @@ export async function listUsableIntegrationsForActor(
   if (rows.length === 0) return [];
 
   const listedIds = [...new Set(rows.map((row) => row.integrationId))];
-  const [pkgRows, { manifests: published, unpublished }] = await Promise.all([
+  const [pkgRows, published] = await Promise.all([
     db
       .select({ id: packages.id, draftManifest: packages.draftManifest })
       .from(packages)
       .where(inArray(packages.id, listedIds)),
     readPublishedIntegrationManifests(listedIds, scope.orgId),
   ]);
-  const draftAuths = new Map(
-    pkgRows.map((p) => [p.id, (p.draftManifest as IntegrationManifest | null)?.auths] as const),
-  );
-  const declaresAuth = (row: { integrationId: string; authKey: string }) => {
-    const manifest = published.get(row.integrationId);
-    const auths = manifest
-      ? manifest.auths
-      : unpublished.has(row.integrationId)
-        ? draftAuths.get(row.integrationId)
-        : undefined;
-    return Object.hasOwn(auths ?? {}, row.authKey);
-  };
+  const drafts = new Map(pkgRows.map((p) => [p.id, p.draftManifest] as const));
+  const declaresAuth = (row: { integrationId: string; authKey: string }) =>
+    Object.hasOwn(
+      governingIntegrationManifest(row.integrationId, published, drafts.get(row.integrationId))
+        ?.auths ?? {},
+      row.authKey,
+    );
 
   const acc = new Map<
     string,
@@ -3460,11 +3459,6 @@ export async function getIntegrationAuthStatuses(
     manifest,
     connectionIds: toolSnapshotConnectionIds(manifest, allConnections),
   });
-  // The clients a connect of the auth can use: a classic auth chooses among the manual rows only
-  // (`loadClientTiers`), so a leftover auto-provisioned row does not make it connectable.
-  const hasUsableOAuthClient = (key: string, autoProvisioned: boolean) =>
-    oauthClients.some((r) => r.authKey === key && (autoProvisioned || !r.autoProvisioned));
-
   const auths: IntegrationAuthStatus[] = Object.entries(authsMap).map(([key, rawAuth]) => {
     // The run-policy `required` flag lives under `_meta["dev.appstrate/auth"]` (absent = false).
     const auth = rawAuth as AfpsManifestAuth;
@@ -3481,11 +3475,7 @@ export async function getIntegrationAuthStatuses(
       // `block_user_connections` a shared connection is a member's only path to a run.
       // Agent-agnostic: a run's readiness is `validateInlineRun`'s.
       ready: keyConnections.some((c) => !c.needs_reconnection),
-      has_oauth_client: hasUsableOAuthClient(key, usesAutoProvisionedClient(manifest, auth)),
-      // A shared platform client (SYSTEM_INTEGRATIONS) also serves connect.
-      has_system_client: listSystemIntegrationClientsFor(packageId, key).length > 0,
-      // Provisioned at connect time (CIMD or DCR): connectable without a registered client.
-      client_auto_provisioned: usesAutoProvisionedClient(manifest, auth),
+      ...authClientFlags(packageId, manifest, key, auth, oauthClients),
     };
   });
 

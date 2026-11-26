@@ -17,6 +17,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `judgeToolApprovals(manifest, approvals)` in `@appstrate/core/integration` keeps the approvals that can count for an integration: it drops those of declared tools, of hidden tools, and all of them when the catalog is open (`allow_undeclared_tools`). Generic over the row type; extra fields are kept.
 - `validateAgentIntegrationScopes` takes `options.approvedTools`: names approved in the space count as known tools of a closed catalog, through `judgeToolApprovals` (a hidden name never validates).
 - `isListedToolName` in `@appstrate/core/naming` tells whether a server-listed tool name is safe to quote to a model or a log.
+- **`spaceActs`, `SpaceAct`** (`@appstrate/core/mcp-spaces`).
+  The acts a caller holds in one space (`invoke_operations`, `run_agents`, `inline_runs`,
+  `call_integration_tools`, `create_packages`), in one vocabulary for the MCP `get_me` tool's
+  `spaces[].can` and the chat's context block.
 
 ### Changed
 
@@ -32,6 +36,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`AuthResolution.orgSlug`** — BREAKING (`@appstrate/core/module`). No strategy supplied it, so a
   bearer resolved inline reached routes without an organization slug or name; the platform now
   reads both from the organization `orgId` names, for every inline resolution.
+- **`formatAge`** — BREAKING (`@appstrate/core/format`). Its one reader, the chat's conversation
+  list, no longer shows an age per row: the day groups (« Aujourd'hui », …) carry it. Use
+  `formatRelativeTime` for a relative date.
 
 ## [18.0.0] — 2026-11-24
 
