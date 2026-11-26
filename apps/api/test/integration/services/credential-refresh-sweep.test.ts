@@ -4,11 +4,7 @@
 
 import { describe, it, expect, beforeEach, afterEach, afterAll } from "bun:test";
 import { eq, inArray } from "drizzle-orm";
-import {
-  decryptCredentialsToStringMap,
-  encryptCredentialEnvelope,
-  encryptCredentials,
-} from "@appstrate/connect";
+import { decryptCredentialsToStringMap, encryptCredentials } from "@appstrate/connect";
 import {
   integrationConnections,
   integrationOauthClients,
@@ -17,7 +13,11 @@ import {
 import { db, truncateAll } from "../../helpers/db.ts";
 import { createTestContext, type TestContext } from "../../helpers/auth.ts";
 import { seedOrgModelProviderOAuth, seedPublishedVersion } from "../../helpers/seed.ts";
-import { GMAIL_PACKAGE_ID, seedPinnedClient } from "../../helpers/refresh-fixtures.ts";
+import {
+  GMAIL_PACKAGE_ID,
+  seedPinnedClient,
+  seedRefreshConnection,
+} from "../../helpers/refresh-fixtures.ts";
 import { restoreDiscoveredModules } from "../../helpers/test-modules.ts";
 import { announced, installDeathSpy, settle, until } from "../../helpers/credential-death-spy.ts";
 import { seedTestModelProviders } from "../../helpers/model-providers.ts";
@@ -45,7 +45,6 @@ describe("credential refresh sweep — integration connections", () => {
   let ctx: TestContext;
   let clientId: string;
 
-  let seq = 0;
   async function seedConnection(opts: {
     /** Relative to now; `null` = no expiry. */
     expiresInMs: number | null;
@@ -59,29 +58,15 @@ describe("credential refresh sweep — integration connections", () => {
     clientRef?: string;
     authKey?: string;
   }): Promise<string> {
-    seq += 1;
-    const [row] = await db
-      .insert(integrationConnections)
-      .values({
-        integrationId: GMAIL_PACKAGE_ID,
-        authKey: opts.authKey ?? "primary",
-        accountId: `acct-${seq}`,
-        label: `acct-${seq}`,
-        orgId: ctx.orgId,
-        spaceId: opts.spaceId === undefined ? ctx.defaultSpaceId : opts.spaceId,
-        userId: ctx.user.id,
-        credentialsEncrypted: encryptCredentialEnvelope({
-          outputs: { access_token: "stale_token", refresh_token: "rt_old" },
-        }),
-        scopesGranted: ["openid"],
-        clientRef: opts.oauth === false ? null : (opts.clientRef ?? clientId),
-        expiresAt: opts.expiresInMs === null ? null : new Date(Date.now() + opts.expiresInMs),
-        refreshCheckedAt:
-          opts.visitedAgoMs == null ? null : new Date(Date.now() - opts.visitedAgoMs),
-        needsReconnection: opts.needsReconnection ?? false,
-      })
-      .returning({ id: integrationConnections.id });
-    return row!.id;
+    return seedRefreshConnection(ctx, opts.oauth === false ? null : (opts.clientRef ?? clientId), {
+      refreshToken: "rt_old",
+      scopesGranted: ["openid"],
+      spaceId: opts.spaceId,
+      authKey: opts.authKey,
+      needsReconnection: opts.needsReconnection,
+      expiresAt: opts.expiresInMs === null ? null : new Date(Date.now() + opts.expiresInMs),
+      refreshCheckedAt: opts.visitedAgoMs == null ? null : new Date(Date.now() - opts.visitedAgoMs),
+    });
   }
 
   async function readRow(id: string) {
@@ -91,9 +76,6 @@ describe("credential refresh sweep — integration connections", () => {
       .where(eq(integrationConnections.id, id));
     return row!;
   }
-
-  const tokenRequests = () =>
-    mockServer.requests.filter((r) => r.method === "POST" && r.path === "/token");
 
   beforeEach(async () => {
     await truncateAll();
@@ -163,8 +145,10 @@ describe("credential refresh sweep — integration connections", () => {
 
       await scanCredentialRefreshes();
 
-      expect(tokenRequests()).toHaveLength(1);
-      expect(new URLSearchParams(tokenRequests()[0]!.body).get("refresh_token")).toBe("rt_old");
+      expect(mockServer.tokenRequests()).toHaveLength(1);
+      expect(new URLSearchParams(mockServer.tokenRequests()[0]!.body).get("refresh_token")).toBe(
+        "rt_old",
+      );
       expect(decryptCredentialsToStringMap((await readRow(id)).credentialsEncrypted)).toMatchObject(
         { access_token: "fresh_token" },
       );
@@ -192,7 +176,7 @@ describe("credential refresh sweep — integration connections", () => {
 
       await scanCredentialRefreshes();
 
-      expect(tokenRequests()).toHaveLength(1);
+      expect(mockServer.tokenRequests()).toHaveLength(1);
       expect(decryptCredentialsToStringMap((await readRow(id)).credentialsEncrypted)).toMatchObject(
         { access_token: "fresh_token" },
       );
@@ -241,7 +225,7 @@ describe("credential refresh sweep — integration connections", () => {
 
       expect(await claimedIntegrations()).toBe(1);
 
-      expect(tokenRequests()).toHaveLength(0);
+      expect(mockServer.tokenRequests()).toHaveLength(0);
       const after = await readRow(id);
       expect(after.credentialsEncrypted).toBe(before.credentialsEncrypted);
       expect(after.refreshFailureCount).toBe(0);

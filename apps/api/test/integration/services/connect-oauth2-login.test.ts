@@ -11,7 +11,7 @@
  * confidential one (`client_secret_basic`) checks the other client authentication.
  */
 
-import { readCredentialRevision } from "../../helpers/credential-revision.ts";
+import { readCredentialRevision } from "../../helpers/refresh-fixtures.ts";
 import { describe, it, expect, beforeEach, afterEach, spyOn } from "bun:test";
 import { eq } from "drizzle-orm";
 import { decryptCredentialsToStringMap } from "@appstrate/connect";

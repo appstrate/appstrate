@@ -1,15 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-/**
- * The announcement of a credential's death: every path that flips `needs_reconnection` from false
- * to true announces exactly once, through `onCredentialNeedsReconnection`, and no path announces
- * again against a row already flagged. An integration connection's owner also gets a bell row
- * (in the connection's space, else the space it was connected from, else the owner's personal
- * space); a model-provider credential writes none.
- *
- * The announcement is fire-and-forget (`credential-death-spy`), so each assertion polls and each
- * test settles once, after its last write, before asserting nothing more arrived.
- */
+/** Every path flipping `needs_reconnection` announces once, never against a flagged row; the bell goes to an integration owner only. */
 
 import { describe, it, expect, beforeEach, afterEach, afterAll } from "bun:test";
 import { eq } from "drizzle-orm";
@@ -24,15 +15,15 @@ import {
 import { restoreDiscoveredModules } from "../../helpers/test-modules.ts";
 import { announced, installDeathSpy, settle, until } from "../../helpers/credential-death-spy.ts";
 import { createMockOAuthServer, type MockOAuthServer } from "../../helpers/oauth-server.ts";
-import { readCredentialRevision } from "../../helpers/credential-revision.ts";
 import {
   GMAIL_PACKAGE_ID,
+  readCredentialRevision,
   readRefreshTarget,
   refreshOf,
   seedPinnedClient,
+  seedRefreshConnection,
 } from "../../helpers/refresh-fixtures.ts";
-import { integrationConnections, notifications } from "@appstrate/db/schema";
-import { encryptCredentialEnvelope } from "@appstrate/connect";
+import { notifications } from "@appstrate/db/schema";
 import {
   markIntegrationConnectionNeedsReconnection,
   recordIntegrationRefreshFailure,
@@ -67,39 +58,13 @@ describe("integration connection death", () => {
   afterEach(() => oauth.stop());
   afterAll(async () => restoreDiscoveredModules());
 
-  async function seedConnection(
-    opts: {
-      refreshToken?: string;
-      expiresAt?: Date;
-      spaceId?: string | null;
-      originSpaceId?: string | null;
-      endUserId?: string;
-      clientRef?: string | null;
-    } = {},
-  ): Promise<string> {
-    const [row] = await db
-      .insert(integrationConnections)
-      .values({
-        integrationId: GMAIL_PACKAGE_ID,
-        authKey: "primary",
-        accountId: `acct-${crypto.randomUUID()}`,
-        label: "Pierre Gmail",
-        orgId: ctx.orgId,
-        spaceId: opts.spaceId === undefined ? ctx.defaultSpaceId : opts.spaceId,
-        originSpaceId: opts.originSpaceId ?? null,
-        ...(opts.endUserId ? { endUserId: opts.endUserId } : { userId: ctx.user.id }),
-        credentialsEncrypted: encryptCredentialEnvelope({
-          outputs: {
-            access_token: "old-access",
-            ...(opts.refreshToken === "" ? {} : { refresh_token: opts.refreshToken ?? "rt-1" }),
-          },
-        }),
-        clientRef: opts.clientRef === undefined ? clientId : opts.clientRef,
-        ...(opts.expiresAt ? { expiresAt: opts.expiresAt } : {}),
-      })
-      .returning({ id: integrationConnections.id });
-    return row!.id;
-  }
+  const seedConnection = (
+    opts: Parameters<typeof seedRefreshConnection>[2] & { clientRef?: string | null } = {},
+  ) =>
+    seedRefreshConnection(ctx, opts.clientRef === undefined ? clientId : opts.clientRef, {
+      label: "Pierre Gmail",
+      ...opts,
+    });
 
   const reach = () =>
     ({ spaceId: ctx.defaultSpaceId, actor: { type: "user", id: ctx.user.id } }) as const;

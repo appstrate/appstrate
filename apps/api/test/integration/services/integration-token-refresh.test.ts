@@ -1,20 +1,14 @@
 // SPDX-License-Identifier: Apache-2.0
 
-/**
- * `refreshConnectionCredential` — the one decision over a connection's credential — and the
- * refresh it runs: the write-back (outputs kept, `scopes_granted` overwritten only by an echoed
- * `scope`, OAuth 2 §5.1), the freshness short-circuit on both sides of the lead window, the
- * pinning to the upstream the caller read, and the refresh-failure escalation.
- *
- * A controllable Bun.serve stands in for the token endpoint, which the manifest declares; each
- * connection pins a per-space OAuth client so the refresh context builds.
- */
+/** `refreshConnectionCredential`: write-back, freshness window, upstream pinning, failure escalation (token endpoint: local Bun.serve). */
 
 import {
   GMAIL_PACKAGE_ID,
+  readCredentialRevision,
   readRefreshTarget,
   refreshOf,
   seedPinnedClient,
+  seedRefreshConnection,
 } from "../../helpers/refresh-fixtures.ts";
 import { describe, it, expect, beforeEach, afterEach } from "bun:test";
 import { db, truncateAll } from "../../helpers/db.ts";
@@ -22,7 +16,6 @@ import { createTestContext, type TestContext } from "../../helpers/auth.ts";
 import { seedSpace } from "../../helpers/seed.ts";
 import { integrationConnections, integrationOauthClients } from "@appstrate/db/schema";
 import { eq } from "drizzle-orm";
-import { readCredentialRevision } from "../../helpers/credential-revision.ts";
 import {
   decryptCredentialsToStringMap,
   encryptCredentialEnvelope,
@@ -165,38 +158,11 @@ describe("refreshConnectionCredential — the refresh and its write-back", () =>
     token.stop();
   });
 
-  async function seedConnection(
-    initialScopes: string[],
+  const seedConnection = (
+    scopesGranted: string[],
     expiresAt?: Date,
-    extraOutputs: Record<string, string> = {},
-  ): Promise<string> {
-    const ciphertext = encryptCredentialEnvelope({
-      outputs: {
-        access_token: "old-access",
-        accessToken: "old-access",
-        refresh_token: "rt-1",
-        refreshToken: "rt-1",
-        ...extraOutputs,
-      },
-    });
-    const [row] = await db
-      .insert(integrationConnections)
-      .values({
-        integrationId: GMAIL_PACKAGE_ID,
-        authKey: "primary",
-        accountId: "acct-1",
-        label: "acct-1",
-        orgId: ctx.orgId,
-        spaceId: ctx.defaultSpaceId,
-        userId: ctx.user.id,
-        credentialsEncrypted: ciphertext,
-        scopesGranted: initialScopes,
-        clientRef: clientId,
-        ...(expiresAt ? { expiresAt } : {}),
-      })
-      .returning({ id: integrationConnections.id });
-    return row!.id;
-  }
+    outputs: Record<string, string> = {},
+  ) => seedRefreshConnection(ctx, clientId, { scopesGranted, expiresAt, outputs });
 
   const refresh = async (connId: string, trigger: RefreshTrigger = rejected(ctx)) =>
     refreshOf(await readRefreshTarget(connId), token.url, trigger);
@@ -240,6 +206,30 @@ describe("refreshConnectionCredential — the refresh and its write-back", () =>
     expect(token.requests()).toBe(1);
     const stored = decryptCredentialsToStringMap((await fetchEncrypted(connId))!);
     expect(stored.access_token).toBe("org-access");
+  });
+
+  it("never refreshes through a client of another space or another org", async () => {
+    const otherOrg = await createTestContext({ orgSlug: "refresh-foreign" });
+    const otherSpace = await seedSpace({ orgId: ctx.orgId, name: "Other" });
+    for (const scope of [
+      { orgId: ctx.orgId, spaceId: otherSpace.id },
+      { orgId: otherOrg.orgId, spaceId: otherOrg.defaultSpaceId },
+    ]) {
+      const [foreign] = await db
+        .insert(integrationOauthClients)
+        .values({
+          ...scope,
+          integrationId: GMAIL_PACKAGE_ID,
+          authKey: "primary",
+          clientId: "foreign-cid",
+          clientSecretEncrypted: encryptCredentials({ client_secret: "foreign-csec" }),
+        })
+        .returning({ id: integrationOauthClients.id });
+      const connId = await seedRefreshConnection(ctx, foreign!.id, { scopesGranted: ["read"] });
+
+      expect((await refresh(connId)).status).not.toBe("refreshed");
+    }
+    expect(token.requests()).toBe(0);
   });
 
   it("keeps the outputs a refresh response does not send again, and takes those it does", async () => {
@@ -507,38 +497,8 @@ describe("integration refresh-failure escalation", () => {
     token.stop();
   });
 
-  async function seedConn(opts: {
-    expiresAt: Date | null;
-    refreshFailureCount?: number;
-    needsReconnection?: boolean;
-  }): Promise<string> {
-    const ciphertext = encryptCredentialEnvelope({
-      outputs: {
-        access_token: "old-access",
-        accessToken: "old-access",
-        refresh_token: "rt-1",
-        refreshToken: "rt-1",
-      },
-    });
-    const [row] = await db
-      .insert(integrationConnections)
-      .values({
-        integrationId: GMAIL_PACKAGE_ID,
-        authKey: "primary",
-        accountId: "acct-1",
-        label: "acct-1",
-        orgId: ctx.orgId,
-        spaceId: ctx.defaultSpaceId,
-        userId: ctx.user.id,
-        credentialsEncrypted: ciphertext,
-        expiresAt: opts.expiresAt,
-        refreshFailureCount: opts.refreshFailureCount ?? 0,
-        needsReconnection: opts.needsReconnection ?? false,
-        clientRef: clientId,
-      })
-      .returning({ id: integrationConnections.id });
-    return row!.id;
-  }
+  const seedConn = (opts: Parameters<typeof seedRefreshConnection>[2]) =>
+    seedRefreshConnection(ctx, clientId, opts);
 
   function readRow(connId: string) {
     return db

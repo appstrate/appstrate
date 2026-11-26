@@ -10,7 +10,7 @@
  * (RFC 9728 → RFC 8414 → RFC 7591) and counts the registrations it receives.
  */
 
-import { readCredentialRevision } from "../../helpers/credential-revision.ts";
+import { readCredentialRevision } from "../../helpers/refresh-fixtures.ts";
 import { describe, it, expect, beforeAll, afterAll, beforeEach } from "bun:test";
 import { eq } from "drizzle-orm";
 import { db, truncateAll } from "../../helpers/db.ts";

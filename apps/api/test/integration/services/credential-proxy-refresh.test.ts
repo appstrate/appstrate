@@ -235,7 +235,7 @@ describe("proxyCall — 401 refresh-retry on buffered bodies (integration-backed
     expect(captured[1]!.authorization).toBe("Bearer fresh_token");
     expect(res.authRefreshed).toBeUndefined();
 
-    const tokenReqs = mockServer.requests.filter((r) => r.method === "POST" && r.path === "/token");
+    const tokenReqs = mockServer.tokenRequests();
     expect(tokenReqs).toHaveLength(1);
     const refreshBody = new URLSearchParams(tokenReqs[0]!.body);
     expect(refreshBody.get("grant_type")).toBe("refresh_token");
@@ -360,7 +360,7 @@ describe("proxyCall — 401 refresh-retry on buffered bodies (integration-backed
 
     expect(res.status).toBe(200);
     expect(captured).toEqual(["Bearer stale_token", "Bearer fresh_token"]);
-    const tokenReqs = mockServer.requests.filter((r) => r.method === "POST" && r.path === "/token");
+    const tokenReqs = mockServer.tokenRequests();
     expect(new URLSearchParams(tokenReqs[0]!.body).get("refresh_token")).toBe("rt_valid");
   });
 
@@ -519,7 +519,7 @@ describe("proxyCall — 401 refresh-retry on buffered bodies (integration-backed
     expect(res.status).toBe(403);
     expect(upstreamCalls).toBe(1);
 
-    const tokenReqs = mockServer.requests.filter((r) => r.method === "POST" && r.path === "/token");
+    const tokenReqs = mockServer.tokenRequests();
     expect(tokenReqs).toHaveLength(0);
   });
 
@@ -565,7 +565,7 @@ describe("proxyCall — 401 refresh-retry on buffered bodies (integration-backed
     expect(res.authRefreshed).toBe(true);
     expect(upstreamCalls).toBe(1);
 
-    const tokenReqs = mockServer.requests.filter((r) => r.method === "POST" && r.path === "/token");
+    const tokenReqs = mockServer.tokenRequests();
     expect(tokenReqs).toHaveLength(1);
   });
 
@@ -619,7 +619,7 @@ describe("proxyCall — 401 refresh-retry on buffered bodies (integration-backed
 
     // The refresh POST authenticated as the SYSTEM client (default auth method
     // client_secret_basic → Authorization: Basic base64(client_id:secret)).
-    const tokenReqs = mockServer.requests.filter((r) => r.method === "POST" && r.path === "/token");
+    const tokenReqs = mockServer.tokenRequests();
     expect(tokenReqs).toHaveLength(1);
     const authHeader = tokenReqs[0]!.headers?.authorization ?? "";
     const decoded = authHeader.startsWith("Basic ")
@@ -701,7 +701,7 @@ describe("proxyCall — an X-Run-Id run is re-checked on the 401 refresh", () =>
       headers: {},
       fetch: fakeFetch,
     });
-    const tokenReqs = mockServer.requests.filter((r) => r.method === "POST" && r.path === "/token");
+    const tokenReqs = mockServer.tokenRequests();
     return { status: res.status, upstreamCalls, refreshes: tokenReqs.length };
   }
 
@@ -868,15 +868,26 @@ describe("proxyCall — the pre-check refreshes an expiring credential before it
     ctx = await createTestContext({ orgSlug: "cprefreshorg" });
   });
 
-  function wire() {
+  /** The token sent upstream is recorded; the Nth upstream call answers `status(N)`. */
+  function wire(status: (n: number) => number = () => 200) {
     const sent: Array<string | null> = [];
     const fakeFetch = (async (url: string, init: RequestInit) => {
       if (String(url).startsWith(mockServer.url)) return fetch(url, init);
       sent.push(new Headers(init.headers).get("authorization"));
-      return new Response("{}", { status: 200 });
+      return new Response("{}", { status: status(sent.length) });
     }) as unknown as typeof fetch;
     return { sent, fakeFetch };
   }
+
+  /** A credential already past its expiry, so the pre-check refreshes it. */
+  const setupExpired = () =>
+    setup(
+      ctx,
+      packageId,
+      { access_token: "stale_token", refresh_token: "rt_valid" },
+      BEARER_DELIVERY,
+      -60_000,
+    );
 
   const call = (fakeFetch: typeof fetch) =>
     proxyCall({
@@ -891,40 +902,20 @@ describe("proxyCall — the pre-check refreshes an expiring credential before it
       fetch: fakeFetch,
     });
 
-  const tokenRequests = () =>
-    mockServer.requests.filter((r) => r.method === "POST" && r.path === "/token");
-
   it("sends the refreshed token on the first call after expiry, with one exchange", async () => {
-    await setup(
-      ctx,
-      packageId,
-      { access_token: "stale_token", refresh_token: "rt_valid" },
-      BEARER_DELIVERY,
-      -60_000,
-    );
+    await setupExpired();
     const { sent, fakeFetch } = wire();
 
     const res = await call(fakeFetch);
 
     expect(res.status).toBe(200);
     expect(sent).toEqual(["Bearer fresh_token"]);
-    expect(tokenRequests()).toHaveLength(1);
+    expect(mockServer.tokenRequests()).toHaveLength(1);
   });
 
   it("names the credential it just wrote, so a 401 on the refreshed token is refreshed again", async () => {
-    await setup(
-      ctx,
-      packageId,
-      { access_token: "stale_token", refresh_token: "rt_valid" },
-      BEARER_DELIVERY,
-      -60_000,
-    );
-    const sent: Array<string | null> = [];
-    const fakeFetch = (async (url: string, init: RequestInit) => {
-      if (String(url).startsWith(mockServer.url)) return fetch(url, init);
-      sent.push(new Headers(init.headers).get("authorization"));
-      return new Response("{}", { status: sent.length === 1 ? 401 : 200 });
-    }) as unknown as typeof fetch;
+    await setupExpired();
+    const { sent, fakeFetch } = wire((n) => (n === 1 ? 401 : 200));
 
     const res = await call(fakeFetch);
 
@@ -932,7 +923,7 @@ describe("proxyCall — the pre-check refreshes an expiring credential before it
     // second exchange only happen when the pre-check handed back the revision it wrote.
     expect(res.status).toBe(200);
     expect(sent).toEqual(["Bearer fresh_token", "Bearer fresh_token"]);
-    expect(tokenRequests()).toHaveLength(2);
+    expect(mockServer.tokenRequests()).toHaveLength(2);
   });
 
   it("sends the stored token untouched while it is valid beyond the lead", async () => {
@@ -942,17 +933,11 @@ describe("proxyCall — the pre-check refreshes an expiring credential before it
     await call(fakeFetch);
 
     expect(sent).toEqual(["Bearer live_token"]);
-    expect(tokenRequests()).toHaveLength(0);
+    expect(mockServer.tokenRequests()).toHaveLength(0);
   });
 
   it("answers the flagged-connection 409 when the pre-check finds the refresh token revoked", async () => {
-    await setup(
-      ctx,
-      packageId,
-      { access_token: "stale_token", refresh_token: "rt_valid" },
-      BEARER_DELIVERY,
-      -60_000,
-    );
+    await setupExpired();
     mockServer.setTokenStatus(400);
     mockServer.setTokenResponse({ error: "invalid_grant" });
     const { sent, fakeFetch } = wire();
@@ -971,13 +956,7 @@ describe("proxyCall — the pre-check refreshes an expiring credential before it
   });
 
   it("serves the stored credential when the exchange fails transiently", async () => {
-    await setup(
-      ctx,
-      packageId,
-      { access_token: "stale_token", refresh_token: "rt_valid" },
-      BEARER_DELIVERY,
-      -60_000,
-    );
+    await setupExpired();
     mockServer.setTokenStatus(503);
     mockServer.setTokenResponse({ error: "temporarily_unavailable" });
     const { sent, fakeFetch } = wire();

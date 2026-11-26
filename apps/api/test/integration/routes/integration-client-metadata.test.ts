@@ -15,7 +15,7 @@
  * protocol-checked.
  */
 
-import { readCredentialRevision } from "../../helpers/credential-revision.ts";
+import { readCredentialRevision } from "../../helpers/refresh-fixtures.ts";
 import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach } from "bun:test";
 import { _resetCacheForTesting as resetEnvCache } from "@appstrate/env";
 import { eq } from "drizzle-orm";

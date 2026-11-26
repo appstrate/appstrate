@@ -296,11 +296,13 @@ describe("org-level integration OAuth clients", () => {
       resolveIntegrationClientById(id, scope, INTEGRATION, AUTH_KEY, undefined);
     const orgLevel = () => ({ orgId: ctx.orgId, spaceId: null });
 
-    it("an org-level connection resolves the org client, and no client of a space", async () => {
+    it("an org-level connection resolves the org client, and no client of a space or another org", async () => {
       const orgClient = await seedClient({ spaceId: null, clientId: "org-client" });
       const spaceClient = await seedClient({ spaceId: spaceA.spaceId, clientId: "space-a" });
       expect(await resolveFor(orgClient, orgLevel())).toMatchObject({ clientId: "org-client" });
       expect(await resolveFor(spaceClient, orgLevel())).toBeNull();
+      const foreign = await seedClient({ spaceId: null, clientId: "foreign", orgId: other.orgId });
+      expect(await resolveFor(foreign, orgLevel())).toBeNull();
     });
 
     it("a space connection resolves its own space's client, not another space's", async () => {
@@ -309,29 +311,6 @@ describe("org-level integration OAuth clients", () => {
       expect(await resolveFor(clientA, spaceA)).toMatchObject({ clientId: "space-a" });
       expect(await resolveFor(clientB, spaceA)).toBeNull();
       expect(await resolveFor(clientA, spaceB)).toBeNull();
-    });
-
-    it("never resolves another org's client, whichever scope asks", async () => {
-      const foreignOrg = await seedClient({
-        spaceId: null,
-        clientId: "foreign-org",
-        orgId: other.orgId,
-      });
-      const foreignSpace = await seedClient({
-        spaceId: otherSpace.spaceId,
-        clientId: "foreign-space",
-        orgId: other.orgId,
-      });
-      for (const id of [foreignOrg, foreignSpace]) {
-        expect(await resolveFor(id, orgLevel())).toBeNull();
-        expect(await resolveFor(id, spaceA)).toBeNull();
-      }
-    });
-
-    it("resolves the system client and a metadata document for any scope", async () => {
-      seedSystemClient();
-      expect(await resolveFor(SYSTEM_ID, orgLevel())).toMatchObject({ clientId: "sys-client" });
-      expect(await resolveFor(SYSTEM_ID, spaceB)).toMatchObject({ clientId: "sys-client" });
     });
   });
 

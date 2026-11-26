@@ -26,6 +26,7 @@ import { describe, it, expect } from "bun:test";
 import { readFileSync, readdirSync, statSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join, relative } from "node:path";
+import { CREDENTIAL_DEATH_CAUSES } from "@appstrate/core/sidecar-types";
 import type { ScheduleWireDto } from "@appstrate/shared-types";
 
 /**
@@ -382,5 +383,16 @@ describe("schedule disabled reasons", () => {
     expect(reasons.filter((reason) => !allKeys.has(`schedule.disabledReason.${reason}`))).toEqual(
       [],
     );
+  });
+});
+
+describe("credential death causes", () => {
+  it("each have a sentence in en and fr", () => {
+    for (const bundle of [en, fr]) {
+      const common = bundle.get("common")!;
+      for (const cause of CREDENTIAL_DEATH_CAUSES) {
+        expect(common[`notifications.credentialCause.${cause}`]).toBeTruthy();
+      }
+    }
   });
 });

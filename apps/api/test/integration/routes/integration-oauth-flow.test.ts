@@ -19,7 +19,7 @@
  * asserted is the platform's wire behaviour, not a mock's recorded bytes.
  */
 
-import { readCredentialRevision } from "../../helpers/credential-revision.ts";
+import { readCredentialRevision } from "../../helpers/refresh-fixtures.ts";
 import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach } from "bun:test";
 import { getTestApp } from "../../helpers/app.ts";
 import { truncateAll, db } from "../../helpers/db.ts";

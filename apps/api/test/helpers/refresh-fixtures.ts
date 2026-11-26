@@ -4,7 +4,8 @@
 
 import { eq } from "drizzle-orm";
 import { integrationConnections, integrationOauthClients } from "@appstrate/db/schema";
-import { encryptCredentials } from "@appstrate/connect";
+import { encryptCredentialEnvelope, encryptCredentials } from "@appstrate/connect";
+import { credentialRevision } from "../../src/services/integration-connections.ts";
 import type { IntegrationManifest } from "@appstrate/core/integration";
 import type { AfpsManifestAuth } from "../../src/services/integration-manifest-helpers.ts";
 import {
@@ -13,7 +14,6 @@ import {
   type RefreshTrigger,
 } from "../../src/services/integration-token-refresh.ts";
 import type { TestContext } from "./auth.ts";
-import { readCredentialRevision } from "./credential-revision.ts";
 import { db } from "./db.ts";
 import { seedPackage } from "./seed.ts";
 
@@ -77,6 +77,69 @@ export async function seedPinnedClient(ctx: TestContext, tokenUrl: string): Prom
     })
     .returning({ id: integrationOauthClients.id });
   return client!.id;
+}
+
+/** The connection's current `credentialRevision`; `null` once the row is gone. */
+export async function readCredentialRevision(connectionId: string): Promise<string | null> {
+  const [row] = await db
+    .select({ credentialRevision })
+    .from(integrationConnections)
+    .where(eq(integrationConnections.id, connectionId))
+    .limit(1);
+  return row?.credentialRevision ?? null;
+}
+
+/** A Gmail connection pinned to `clientRef` (a space-owned OAuth connection by default). */
+export async function seedRefreshConnection(
+  ctx: TestContext,
+  clientRef: string | null,
+  opts: {
+    /** `""` stores no refresh token. */
+    refreshToken?: string;
+    /** `null`: no expiry. */
+    expiresAt?: Date | null;
+    /** `null`: an org-level connection. */
+    spaceId?: string | null;
+    originSpaceId?: string;
+    endUserId?: string;
+    authKey?: string;
+    label?: string;
+    scopesGranted?: string[];
+    /** Extra stored outputs, beside access and refresh token. */
+    outputs?: Record<string, string>;
+    refreshFailureCount?: number;
+    needsReconnection?: boolean;
+    refreshCheckedAt?: Date | null;
+  } = {},
+): Promise<string> {
+  const accountId = `acct-${crypto.randomUUID()}`;
+  const [row] = await db
+    .insert(integrationConnections)
+    .values({
+      integrationId: GMAIL_PACKAGE_ID,
+      authKey: opts.authKey ?? "primary",
+      accountId,
+      label: opts.label ?? accountId,
+      orgId: ctx.orgId,
+      spaceId: opts.spaceId === undefined ? ctx.defaultSpaceId : opts.spaceId,
+      originSpaceId: opts.originSpaceId ?? null,
+      ...(opts.endUserId ? { endUserId: opts.endUserId } : { userId: ctx.user.id }),
+      credentialsEncrypted: encryptCredentialEnvelope({
+        outputs: {
+          access_token: "old-access",
+          ...(opts.refreshToken === "" ? {} : { refresh_token: opts.refreshToken ?? "rt-1" }),
+          ...opts.outputs,
+        },
+      }),
+      scopesGranted: opts.scopesGranted ?? [],
+      clientRef,
+      expiresAt: opts.expiresAt ?? null,
+      refreshCheckedAt: opts.refreshCheckedAt ?? null,
+      refreshFailureCount: opts.refreshFailureCount ?? 0,
+      needsReconnection: opts.needsReconnection ?? false,
+    })
+    .returning({ id: integrationConnections.id });
+  return row!.id;
 }
 
 export type RefreshFixtureTarget = RefreshTarget & {

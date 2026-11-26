@@ -27,7 +27,7 @@
  * with no clock games for the lead window.
  */
 
-import { readCredentialRevision } from "../../helpers/credential-revision.ts";
+import { readCredentialRevision } from "../../helpers/refresh-fixtures.ts";
 import { describe, it, expect, beforeEach, afterEach } from "bun:test";
 import { db, truncateAll } from "../../helpers/db.ts";
 import { createTestContext, createTestUser, type TestContext } from "../../helpers/auth.ts";
