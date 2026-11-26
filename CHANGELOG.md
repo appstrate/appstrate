@@ -20,6 +20,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Installs that ran with `OAUTH_REFRESH_WORKER_ENABLED=true` and Redis keep an inert `oauth-model-refresh-scan` scheduler: `redis-cli --scan --pattern 'bull:oauth-model-refresh-scan:*' | xargs redis-cli del`.
 - The first sweeps after deploy visit every expired OAuth2 credential (none has a visit stamp yet), so connections that died long ago are flagged and announced (bell and webhook) then, up to 500 per source per hour.
 
+- A connection now records the scopes a server asked for with `403 insufficient_scope` and does not hold (`integration_connections.requested_scopes`, shown to the owner as `requested_scopes` on the account connection list and the integration's connection list; a run that hit it carries `metadata.scope_requests`). The owner grants them with « Reconnecter avec ces droits » (a reconnect in place); `upstream_credential_rejected` also carries the refused `connection_id` (#2415). The sidecar reports it through the new run-token route `POST /internal/integration-credentials/{scope}/{name}/scopes-requested`: update the platform before the runtime image. Migration 0116 adds the column and applies at boot.
+
 ## [1.0.0-beta.71] - 2026-11-24
 
 ### Module authors

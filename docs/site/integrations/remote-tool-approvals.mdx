@@ -116,7 +116,7 @@ A run that selects no usable tool at all still fails at boot, as described in [H
 
 An integration's own MCP endpoint cannot be called as plain HTTP through the credential proxy or an in-run `api_call`: the call is refused with `403 remote_mcp_endpoint_not_proxied`. Tools are the way in, because they are where the policy applies.
 
-When a server refuses a call with a Bearer challenge (`401`, or `403 insufficient_scope`), the resulting `upstream_credential_rejected` problem carries `required_scopes`, the scopes the server asked for, and an in-run `api_call` result names them.
+When a server refuses a call with a Bearer challenge (`401`, or `403 insufficient_scope`), the resulting `upstream_credential_rejected` problem carries `required_scopes`, the scopes the server asked for, and the `connection_id` it refused, and an in-run `api_call` result names the scopes. The connection's owner can grant them in one step: see [When a server asks for more scopes](/integrations/how-integrations-work#when-a-server-asks-for-more-scopes).
 
 ## Exporting an agent
 

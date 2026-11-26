@@ -126,6 +126,12 @@ List your own connections with `GET /api/me/connections` and delete one with `DE
 
 Scopes are inferred, not typed in by hand. An integration lists the scopes the provider offers in `scope_catalog` and maps each tool to the scopes it needs in `tools_policy.{tool}.required_scopes`. An agent declares the tools it wants, and the platform requests the union of the integration's default scopes, the scopes of the selected tools, and what the account already granted. In the agent editor, **Advanced: pin extra scopes** lists the scopes the integration offers, for the cases the tools do not cover (an `api_call` integration has no per-tool scopes). Re-consenting never shrinks an existing grant. If a later token refresh returns a narrower grant than an installed agent needs, the connection is flagged as needing reconnection.
 
+### When a server asks for more scopes
+
+An integration created from a URL declares no per-tool scopes, so the server's own answer tells which ones a call needs. When a server refuses a call with `403 insufficient_scope` and names scopes the connection does not hold (RFC 6750), the platform records them on the connection: its `requested_scopes`, at most 20 valid scope tokens, shown only to the connection's owner. A run that hit it carries them in `metadata.scope_requests` (`integration_id`, `connection_id`, `scopes`).
+
+The owner sees **Droits supplémentaires demandés** on the connection (account connections, integration **Connections** tab, run page) and grants them with **Reconnecter avec ces droits**: a reconnect in place (`initiateIntegrationConnect` with `connection_id` and `scopes`) that keeps what the connection already holds. The record is cleared once a reconnect grants the scopes. A scope outside the auth's `scope_catalog` is refused with `scope_not_in_catalog`. Nothing reconnects without the owner. An agent in the chat or over MCP forwards the refusal's `connection_id` and `required_scopes` to `initiateIntegrationConnect` once the user agrees.
+
 ## Declaring integrations in an agent
 
 An agent manifest splits the version from the configuration. Excerpt of the agent manifest:
