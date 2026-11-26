@@ -10,7 +10,6 @@ import { cn } from "@appstrate/ui/cn";
 import { Fact, FactGrid } from "@appstrate/ui/components/fact-grid";
 import { formatCompactTokens, formatTokenFigure } from "@appstrate/ui/context-window";
 import { Button } from "@appstrate/ui/components/button";
-import { Card } from "@appstrate/ui/components/card";
 import { Sheet, SheetContent, SheetTitle } from "@appstrate/ui/components/sheet";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@appstrate/ui/components/tabs";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@appstrate/ui/components/tooltip";
@@ -55,8 +54,9 @@ const CONVERSATION_CONTEXT_PANEL_ID = "conversation-context-panel";
 const SCROLLBAR_GUTTER = "1rem";
 
 /**
- * The panel's own frame: it floats beside the thread, so its cards (and the
- * previewed file) are rounder than a page's and lifted by a light shadow.
+ * The panel's own frame, ONE block whatever it shows (the tabs over their content, or a previewed
+ * file): it floats over the thread, so it is rounder than a page's card and lifted by a light
+ * shadow.
  */
 const FLOATING_FRAME = "overflow-hidden rounded-2xl shadow-xs";
 
@@ -198,11 +198,7 @@ export function ConversationRuns({
     return <EmptyState message={t("context.unsaved")} icon={ActivityIcon} compact />;
   }
   if (query.isLoading) {
-    return (
-      <Card className={FLOATING_FRAME}>
-        <TextSkeleton className="p-4" />
-      </Card>
-    );
+    return <TextSkeleton className="p-4" />;
   }
   if (query.error) return <ErrorState error={query.error} compact />;
   const runs = query.data?.data ?? [];
@@ -211,7 +207,7 @@ export function ConversationRuns({
   }
 
   return (
-    <Card className={cn("divide-y", FLOATING_FRAME)}>
+    <div className="divide-y">
       {runs.map((run) => (
         <RunRow
           key={run.id}
@@ -225,7 +221,7 @@ export function ConversationRuns({
           className="px-3"
         />
       ))}
-    </Card>
+    </div>
   );
 }
 
@@ -252,11 +248,7 @@ export function ConversationFiles({
     return <EmptyState message={t("context.unsaved")} icon={FilesIcon} compact />;
   }
   if (query.isLoading) {
-    return (
-      <Card className={FLOATING_FRAME}>
-        <TextSkeleton className="p-4" />
-      </Card>
-    );
+    return <TextSkeleton className="p-4" />;
   }
   if (query.error) return <ErrorState error={query.error} compact />;
   const files = query.data?.data ?? [];
@@ -265,7 +257,7 @@ export function ConversationFiles({
   }
 
   return (
-    <Card className={cn("divide-y", FLOATING_FRAME)}>
+    <div className="divide-y">
       {files.map((file) => (
         <button
           key={file.id}
@@ -291,7 +283,7 @@ export function ConversationFiles({
           {named && <RowSpaceName spaceId={file.spaceId} />}
         </button>
       ))}
-    </Card>
+    </div>
   );
 }
 
@@ -501,7 +493,7 @@ function ConversationInfo({
       ? undefined
       : (detail.data ?? null);
   return (
-    <Card className={cn("divide-y", FLOATING_FRAME)}>
+    <div className="divide-y">
       <ConversationDetails conversationId={conversationId} active={active} />
       <div className="p-4">
         <ChatAccessSummary conversation={conversation} />
@@ -511,14 +503,15 @@ function ConversationInfo({
           <ConversationId id={conversationId} />
         </div>
       ) : null}
-    </Card>
+    </div>
   );
 }
 
 /**
- * The panel's content, in the desktop column or in the phone's sheet. The tabs
- * sit in a header band of their own (Radix wires the tab/tabpanel ARIA); a
- * shown file replaces all of it with the file's frame.
+ * The panel's content, in the desktop column or in the phone's sheet: one block, the tabs in its
+ * header band (Radix wires the tab/tabpanel ARIA) over the selected tab's content. The block is as
+ * tall as that content, up to the room it has; past it, the content scrolls inside. A shown file
+ * replaces the block with the file's own, in the same frame, the whole height.
  */
 function ConversationContext({
   conversationId,
@@ -543,7 +536,7 @@ function ConversationContext({
 
   if (previewedFile) {
     return (
-      <div className="h-full p-3">
+      <div className="min-h-0 flex-1 p-3">
         <ShownFile
           file={previewedFile}
           backToList={state.fileFromList}
@@ -554,54 +547,57 @@ function ConversationContext({
   }
 
   return (
-    <Tabs
-      value={activeTab.id}
-      onValueChange={(tab) => dispatch({ type: "select-tab", tab: tab as ConversationSidebarTab })}
-      className="flex h-full min-h-0 flex-col"
-    >
-      <AgentDetailPaneHeader className="justify-end gap-2 border-b-0">
-        <TabsList className="h-9 min-w-0" aria-label={t("context.label")}>
-          {tabs.map(({ id, Icon, label }) => (
-            <TabsTrigger key={id} value={id} className="gap-1.5">
-              <Icon className="size-4 shrink-0" />
-              <span className="truncate">{label}</span>
-            </TabsTrigger>
-          ))}
-        </TabsList>
-        {closable ? (
-          <Button
-            variant="ghost"
-            size="icon-sm"
-            className="shrink-0"
-            aria-label={t("context.collapse")}
-            onClick={() => dispatch({ type: "toggle" })}
-          >
-            <XIcon />
-          </Button>
-        ) : null}
-      </AgentDetailPaneHeader>
-      {tabs.map(({ id }) => (
-        <TabsContent
-          key={id}
-          value={id}
-          className="mt-0 min-h-0 flex-1 overflow-auto px-3 pt-1 pb-3"
-        >
-          {id === "runs" ? (
-            <ConversationRuns conversationId={conversationId} active={active} />
+    <div className="flex min-h-0 flex-col p-3">
+      <Tabs
+        value={activeTab.id}
+        onValueChange={(tab) =>
+          dispatch({ type: "select-tab", tab: tab as ConversationSidebarTab })
+        }
+        className={cn(
+          "bg-card text-card-foreground flex min-h-0 flex-col gap-0 border",
+          FLOATING_FRAME,
+        )}
+      >
+        <AgentDetailPaneHeader className="justify-end gap-2">
+          <TabsList className="h-9 min-w-0" aria-label={t("context.label")}>
+            {tabs.map(({ id, Icon, label }) => (
+              <TabsTrigger key={id} value={id} className="gap-1.5">
+                <Icon className="size-4 shrink-0" />
+                <span className="truncate">{label}</span>
+              </TabsTrigger>
+            ))}
+          </TabsList>
+          {closable ? (
+            <Button
+              variant="ghost"
+              size="icon-sm"
+              className="shrink-0"
+              aria-label={t("context.collapse")}
+              onClick={() => dispatch({ type: "toggle" })}
+            >
+              <XIcon />
+            </Button>
           ) : null}
-          {id === "files" ? (
-            <ConversationFiles
-              conversationId={conversationId}
-              active={active}
-              onSelect={(file) => dispatch({ type: "show-file", file, fromList: true })}
-            />
-          ) : null}
-          {id === "info" ? (
-            <ConversationInfo conversationId={conversationId} active={active} />
-          ) : null}
-        </TabsContent>
-      ))}
-    </Tabs>
+        </AgentDetailPaneHeader>
+        {tabs.map(({ id }) => (
+          <TabsContent key={id} value={id} className="mt-0 min-h-0 overflow-auto">
+            {id === "runs" ? (
+              <ConversationRuns conversationId={conversationId} active={active} />
+            ) : null}
+            {id === "files" ? (
+              <ConversationFiles
+                conversationId={conversationId}
+                active={active}
+                onSelect={(file) => dispatch({ type: "show-file", file, fromList: true })}
+              />
+            ) : null}
+            {id === "info" ? (
+              <ConversationInfo conversationId={conversationId} active={active} />
+            ) : null}
+          </TabsContent>
+        ))}
+      </Tabs>
+    </div>
   );
 }
 
@@ -648,7 +644,9 @@ export function ConversationSidebar({
           aria-label={t("context.label")}
           inert={!state.expanded}
           className={cn(
-            "ease-surface absolute inset-y-0 right-4 transition-[opacity,translate]",
+            "ease-surface absolute top-0 right-4 flex max-h-full flex-col transition-[opacity,translate]",
+            // A file takes the whole height; the tabs' block is as tall as its content.
+            view === "file" && "bottom-0",
             state.expanded
               ? "duration-base translate-x-0 opacity-100"
               : "duration-fast pointer-events-none translate-x-6 opacity-0",
