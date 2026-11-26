@@ -77,8 +77,6 @@ const filesKey: QueryKey = [
   },
 ];
 const LATEST_RUNS = { limit: 3 };
-// The failed runs are read as the Runs tab lists them, not as the summary draws them.
-const FAILED_RUNS = { limit: 100, status: ["failed", "timeout"] };
 
 const list = (data: unknown[], total = data.length) => ({
   object: "list",
@@ -127,10 +125,11 @@ function toolPart(
     lookup = false,
     state = "output-available",
     durationMs,
-  }: { lookup?: boolean; state?: string; durationMs?: number } = {},
+    tool = "invoke_operation",
+  }: { lookup?: boolean; state?: string; durationMs?: number; tool?: string } = {},
 ) {
   return {
-    type: "tool-invoke_operation",
+    type: `tool-${tool}`,
     toolCallId,
     state,
     input: { operation_id: toolCallId },
@@ -203,13 +202,11 @@ describe("the summary, open", () => {
   function summary(
     parts: unknown[],
     runs: unknown[],
-    failedRuns: unknown[],
     { active = true, prepare }: { active?: boolean; prepare?: (qc: QueryClient) => void } = {},
   ): string {
     const queryClient = memberSpaceClient(spaces);
     seedConversation(queryClient, [parts]);
     queryClient.setQueryData(runsKey(LATEST_RUNS), list(runs));
-    queryClient.setQueryData(runsKey(FAILED_RUNS), list(failedRuns));
     queryClient.setQueryData(filesKey, { object: "list", data: [], hasMore: false });
     prepare?.(queryClient);
     return render(
@@ -218,58 +215,54 @@ describe("the summary, open", () => {
     );
   }
 
-  const failedLookup = {
-    type: "tool-search",
-    toolCallId: "call_1",
-    state: "output-error",
-    input: { query: "gmail" },
-    errorText: "boom",
-  };
+  it("draws « Intégrations » with the integration calls, lookups included, and never a platform call", () => {
+    const html = summary(
+      [
+        toolPart("call_i", { tool: "call_integration_tool" }),
+        toolPart("call_l", { tool: "call_integration_tool", lookup: true }),
+        toolPart("call_p"),
+        toolPart("call_s", { tool: "search", lookup: true }),
+      ],
+      [],
+    );
+    expect(html).toContain(i18n.t("chat:context.summary.integrations"));
+    // One line per integration call (the plug icon), none for the platform's own.
+    expect(html.split("lucide-plug").length - 1).toBe(2);
+    expect(html).not.toContain(i18n.t("chat:context.tabs.tools"));
+  });
 
-  it("leads with « À vérifier »: the failed runs, then the failed calls, a lookup included", () => {
+  it("leaves « Intégrations » out when only platform tools were called", () => {
+    const html = summary([toolPart("call_p")], []);
+    expect(html).not.toContain(i18n.t("chat:context.summary.integrations"));
+    expect(html).toContain(i18n.t("chat:context.summary.noActivity"));
+  });
+
+  it("shows a failure on its own run and call line", () => {
     const failed = makeRun({ id: "run_7", runNumber: 7, status: "failed" });
-    const html = summary([failedLookup], [failed], [failed]);
-    expect(html).toContain("À vérifier");
+    const failedCall = toolPart("call_f", { tool: "call_integration_tool", state: "output-error" });
+    const html = summary([failedCall], [failed]);
     expect(html).toContain("#7");
     expect(html).toContain(i18n.t("chat:context.tools.status.error"));
-    expect(html.indexOf("À vérifier")).toBeLessThan(html.indexOf(i18n.t("common:nav.runs")));
-    expect(html).not.toContain(i18n.t("chat:context.summary.seeAllRuns"));
-  });
-
-  it("leads from « À vérifier » to the Runs tab when it draws fewer failed runs than it counts", () => {
-    const failed = [4, 3, 2, 1].map((n) =>
-      makeRun({ id: `run_${n}`, runNumber: n, status: "failed" }),
-    );
-    const html = summary([], failed, failed);
-    expect(html).toContain("#4");
-    expect(html).not.toContain("#1<");
-    expect(html).toContain(i18n.t("chat:context.summary.seeAllRuns"));
-  });
-
-  it("leaves « À vérifier » out when nothing failed", () => {
-    const html = summary([], [makeRun({ id: "run_8", runNumber: 8 })], []);
-    expect(html).not.toContain("À vérifier");
-    expect(html).toContain("#8");
   });
 
   it("keeps what the cache holds while the panel closes: no skeleton, no read lost", () => {
-    const html = summary([], [makeRun({ id: "run_9", runNumber: 9 })], [], { active: false });
+    const html = summary([], [makeRun({ id: "run_9", runNumber: 9 })], { active: false });
     expect(html).toContain("Rapport");
     expect(html).toContain("#9");
     expect(html).not.toContain('role="status"');
   });
 
   it("shows its calls at once while the runs are read, the runs waiting in their place", () => {
-    const html = summary([toolPart("call_a")], [], [], {
+    const html = summary([toolPart("call_a", { tool: "call_integration_tool" })], [], {
       prepare: (qc) => qc.removeQueries({ queryKey: runsKey(LATEST_RUNS), exact: true }),
     });
-    expect(html).toContain(i18n.t("chat:context.tabs.tools"));
+    expect(html).toContain(i18n.t("chat:context.summary.integrations"));
     expect(html.split('role="status"').length - 1).toBe(1);
   });
 
   it("says a failed read in its group alone, the other groups shown", () => {
     // Held closed: open, the read would be tried again on mount.
-    const html = summary([toolPart("call_a")], [], [], {
+    const html = summary([toolPart("call_a", { tool: "call_integration_tool" })], [], {
       active: false,
       prepare: (qc) => {
         qc.removeQueries({ queryKey: runsKey(LATEST_RUNS), exact: true });
@@ -277,12 +270,12 @@ describe("the summary, open", () => {
       },
     });
     expect(html).toContain(i18n.t("common:error.generic"));
-    expect(html).toContain(i18n.t("chat:context.tabs.tools"));
+    expect(html).toContain(i18n.t("chat:context.summary.integrations"));
     expect(html).toContain("Rapport");
   });
 
   it("keeps the runs it holds when their refetch fails", () => {
-    const html = summary([], [], [], {
+    const html = summary([], [], {
       prepare: (qc) => failRead(qc, runsKey(LATEST_RUNS), list([makeRun({ runNumber: 11 })])),
     });
     expect(html).toContain("#11");

@@ -27,12 +27,6 @@ export interface SummaryInput<Run extends { id: string }, File> {
   calls: readonly ConversationToolCall[];
   /** The latest runs; absent when the reader reads runs in no space. */
   runs?: CountedRows<Run>;
-  /**
-   * The latest runs that failed, as many as the Runs tab lists: the summary draws a few, and a
-   * failed call whose run is among any of them is left to that run. Absent with `runs`, or while
-   * they cannot be read: every failed call then stands on its own.
-   */
-  failedRuns?: CountedRows<Run>;
   /** The latest files; absent when the reader reads files in no space. */
   files?: PagedRows<File>;
 }
@@ -47,42 +41,18 @@ export interface SummaryGroup<T> {
 }
 
 export interface SummaryModel<Run, File> {
-  /**
-   * What failed (runs, then calls), absent when nothing did. `moreRuns` / `moreCalls`: it holds
-   * more of that kind than it draws, so it leads to that kind's tab.
-   */
-  attention: {
-    runs: Run[];
-    calls: ConversationToolCall[];
-    count: number;
-    moreRuns: boolean;
-    moreCalls: boolean;
-  } | null;
   runs: SummaryGroup<Run> | null;
   files: SummaryGroup<File> | null;
-  /** The calls that acted (lookups apart). */
-  actions: SummaryGroup<ConversationToolCall> | null;
+  /** The calls made on a connected integration, lookups included: a read on one is activity too. */
+  integrationCalls: SummaryGroup<ConversationToolCall> | null;
 }
 
-/**
- * The calls that failed, latest first, a failed lookup included. A call whose run is among the
- * failed runs read (`failedRunIds`) is left to that run: its failure is the run's, listed once with
- * the runs. One whose run did not fail (a wait cut short while the run goes on) stays. When the
- * failed runs read are only a page of more (`allFailedRunsRead` false), a call carrying a run id
- * is left to the runs the server counts: its run is taken to be one of them, already in the total.
- */
-export function failedCalls(
-  calls: readonly ConversationToolCall[],
-  failedRunIds: ReadonlySet<string>,
-  allFailedRunsRead = true,
-): ConversationToolCall[] {
-  return calls
-    .filter(
-      (call) =>
-        call.status === "error" &&
-        !(call.runId !== undefined && (!allFailedRunsRead || failedRunIds.has(call.runId))),
-    )
-    .reverse();
+/** The one chat tool that reaches an integration; every other tool acts on the platform. */
+const INTEGRATION_CALL_TOOL = "call_integration_tool";
+
+/** Whether a call acted on a connected integration, a lookup included. */
+export function isIntegrationCall(call: ConversationToolCall): boolean {
+  return call.toolName === INTEGRATION_CALL_TOOL;
 }
 
 function counted<T>(list: CountedRows<T> | undefined): SummaryGroup<T> | null {
@@ -95,38 +65,16 @@ function counted<T>(list: CountedRows<T> | undefined): SummaryGroup<T> | null {
 export function summaryModel<Run extends { id: string }, File>({
   calls,
   runs,
-  failedRuns,
   files,
 }: SummaryInput<Run, File>): SummaryModel<Run, File> {
-  const failedRunRows = failedRuns?.rows ?? [];
-  const failed = failedCalls(
-    calls,
-    new Set(failedRunRows.map((run) => run.id)),
-    failedRuns === undefined || failedRuns.total <= failedRunRows.length,
-  );
-  // The failed runs the server counts, then the failed calls no failed run already holds.
-  const failedRunCount = failedRuns?.total ?? 0;
-  const attentionCount = failedRunCount + failed.length;
-  const attentionRuns = (failedRuns?.rows ?? []).slice(0, SUMMARY_ROWS);
-  const attentionCalls = failed.slice(0, SUMMARY_ROWS);
-  const actions = calls.filter((call) => !call.lookup).reverse();
+  const integrationCalls = calls.filter(isIntegrationCall).reverse();
   const fileRows = files?.rows.slice(0, SUMMARY_ROWS) ?? [];
   return {
-    attention:
-      attentionCount === 0
-        ? null
-        : {
-            runs: attentionRuns,
-            calls: attentionCalls,
-            count: attentionCount,
-            moreRuns: failedRunCount > attentionRuns.length,
-            moreCalls: failed.length > attentionCalls.length,
-          },
     runs: counted(runs),
     files:
       files && fileRows.length > 0
         ? { rows: fileRows, more: files.hasMore || files.rows.length > fileRows.length }
         : null,
-    actions: counted({ rows: actions, total: actions.length }),
+    integrationCalls: counted({ rows: integrationCalls, total: integrationCalls.length }),
   };
 }

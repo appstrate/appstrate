@@ -35,12 +35,7 @@ import type {
 } from "./conversation-sidebar-state";
 import { ToolCallIcon } from "./conversation-tools-tab";
 import { SUMMARY_ROWS, summaryModel, type SummaryGroup } from "./summary-model";
-import {
-  FAILED_RUN_STATUSES,
-  readShown,
-  useConversationFiles,
-  useConversationRuns,
-} from "./use-conversation-lists";
+import { readShown, useConversationFiles, useConversationRuns } from "./use-conversation-lists";
 import {
   TOOL_STATUS_LABEL,
   TOOL_STATUS_TONE,
@@ -418,20 +413,6 @@ function FileLine({
   );
 }
 
-/** A group's "See all" at the end of its lines, naming the tab it leads to. */
-function SeeAllLine({ label, onClick }: { label: string; onClick: () => void }) {
-  return (
-    <Button
-      variant="ghost"
-      size="sm"
-      className="text-muted-foreground desktop-pointer:h-7 mx-2.5 h-10 self-start px-1.5 text-xs"
-      onClick={onClick}
-    >
-      {label}
-    </Button>
-  );
-}
-
 /**
  * A group of the activity, a section named by its heading: its name, its latest lines, and, when
  * it holds more, "See all" to its tab, with the count when the server gives one. `count` beside
@@ -480,9 +461,9 @@ function ActivityGroup({
 }
 
 /**
- * Everything the conversation did, in one view: what failed first (only when something did), then
- * its runs, its files and its actions (lookups apart), the latest of each on one line. A group with nothing in it is left out; a group whose tab the reader
- * cannot see too. Each group stands on its own read: the calls, held by the
+ * What the conversation did, in one view: its runs, its files and its integration calls (lookups
+ * included), the latest of each on one line. A group with nothing in it is left out; a group whose
+ * tab the reader cannot see too. Each group stands on its own read: the calls, held by the
  * conversation, show at once; a group whose read is on its way waits in its shape, one whose read
  * failed with nothing held says so in its place. The zone says it waits once, whatever waits.
  */
@@ -505,33 +486,22 @@ function SummaryActivity({
 }) {
   const { t } = useTranslation(["chat", "common"]);
   const runs = useConversationRuns(conversationId, active && showsRuns, { limit: SUMMARY_ROWS });
-  // Read as the Runs tab lists them: a failed call whose run is among any of them is that run's.
-  const failedRuns = useConversationRuns(conversationId, active && showsRuns, {
-    status: FAILED_RUN_STATUSES,
-  });
   const files = useConversationFiles(conversationId, active && showsFiles, {
     limit: SUMMARY_ROWS,
   });
   const runsRead = showsRuns ? readShown(runs.query) : null;
-  const failedRead = showsRuns ? readShown(failedRuns.query) : null;
   const filesRead = showsFiles ? readShown(files.query) : null;
 
   const model = summaryModel<ConversationRun, ConversationFile>({
     calls: tools.calls,
     ...(runsRead === "ready" ? { runs: { rows: runs.runs, total: runs.total } } : {}),
-    ...(failedRead === "ready"
-      ? { failedRuns: { rows: failedRuns.runs, total: failedRuns.total } }
-      : {}),
     ...(filesRead === "ready" ? { files: { rows: files.files, hasMore: files.hasMore } } : {}),
   });
-  const { attention } = model;
-  // While the failed runs are read, « À vérifier » waits only when a failed call already calls for it.
-  const attentionWaits = failedRead === "pending" && attention !== null;
-  const waiting = attentionWaits || runsRead === "pending" || filesRead === "pending";
+  const waiting = runsRead === "pending" || filesRead === "pending";
   const nothing =
     !model.runs &&
     !model.files &&
-    !model.actions &&
+    !model.integrationCalls &&
     runsRead !== "pending" &&
     runsRead !== "error" &&
     filesRead !== "pending" &&
@@ -543,38 +513,6 @@ function SummaryActivity({
         <span role="status" className="sr-only">
           {t("common:loading")}
         </span>
-      ) : null}
-      {attentionWaits ? (
-        <div className="py-2">
-          <GroupSkeleton />
-        </div>
-      ) : failedRead === "error" || attention ? (
-        <div className="py-2">
-          <ActivityGroup
-            title={t("context.summary.attention")}
-            // Unread failed runs: the count would hold only the calls.
-            count={failedRead === "error" ? undefined : attention?.count}
-          >
-            {failedRead === "error" ? <ErrorState error={failedRuns.query.error} compact /> : null}
-            {attention?.runs.map((run) => (
-              <RunLine
-                key={run.id}
-                run={run}
-                agentName={failedRuns.agentName(run)}
-                spanning={failedRuns.spanning}
-              />
-            ))}
-            {attention?.moreRuns ? (
-              <SeeAllLine label={t("context.summary.seeAllRuns")} onClick={seeAll("runs")} />
-            ) : null}
-            {attention?.calls.map((call) => (
-              <CallLine key={call.toolCallId} call={call} dispatch={dispatch} />
-            ))}
-            {attention?.moreCalls ? (
-              <SeeAllLine label={t("context.summary.seeAllTools")} onClick={seeAll("tools")} />
-            ) : null}
-          </ActivityGroup>
-        </div>
       ) : null}
       {nothing ? (
         <p className="text-muted-foreground px-4 py-3 text-sm">{t("context.summary.noActivity")}</p>
@@ -619,13 +557,13 @@ function SummaryActivity({
               ))}
             </ActivityGroup>
           ) : null}
-          {model.actions ? (
+          {model.integrationCalls ? (
             <ActivityGroup
-              title={t("context.tabs.tools")}
-              group={model.actions}
+              title={t("context.summary.integrations")}
+              group={model.integrationCalls}
               onSeeAll={seeAll("tools")}
             >
-              {model.actions.rows.map((call) => (
+              {model.integrationCalls.rows.map((call) => (
                 <CallLine key={call.toolCallId} call={call} dispatch={dispatch} />
               ))}
             </ActivityGroup>
@@ -637,9 +575,9 @@ function SummaryActivity({
 }
 
 /**
- * The conversation in one view: its title and gist, then all it did
- * (runs, files, actions) on one line each, each group leading to its tab; its models, the reader's
- * access and its details fold to one line each.
+ * The conversation in one view: its title and gist, then all it did (runs, files, integration
+ * calls) on one line each, each group leading to its tab; its models, the reader's access and its
+ * details fold to one line each.
  */
 export function ConversationSummary({
   conversationId,

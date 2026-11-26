@@ -1,6 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import type { RunStatus } from "@appstrate/core/run-status";
 import { $api } from "../../api/client";
 import { useAgents } from "../../hooks/use-packages";
 import { useFiles } from "../../hooks/use-files";
@@ -10,9 +9,6 @@ import { useListScope } from "../../hooks/use-org-scope";
 
 /** Read at most this many of a conversation's runs or files: what the Runs and Files tabs list. */
 const LIST_LIMIT = 100;
-
-/** The statuses a run ends on when it failed (a cancelled run was stopped, not failed). */
-export const FAILED_RUN_STATUSES = ["failed", "timeout"] as const satisfies readonly RunStatus[];
 
 /**
  * What a panel read shows: its answer once it has one, kept through a refetch that fails; its
@@ -36,7 +32,7 @@ interface ListRead {
 export function useConversationRuns(
   conversationId: string | null,
   active: boolean,
-  { limit = LIST_LIMIT, status }: ListRead & { status?: readonly RunStatus[] } = {},
+  { limit = LIST_LIMIT }: ListRead = {},
 ) {
   const admitting = useAdmittingSpaces("runs");
   const canRead = admitting.length > 0;
@@ -50,7 +46,6 @@ export function useConversationRuns(
   const filters = {
     chat_session_id: conversationId ?? undefined,
     limit,
-    ...(status ? { status: [...status] } : {}),
   };
   // A conversation belongs to the organization: the runs it launched, in every space.
   const query = $api.useQuery(
