@@ -1,7 +1,7 @@
 # Refresh en arrière-plan des connexions OAuth2 d'intégration (#2411)
 
 Plan de refactor. Établi par lecture de `origin/main` (d75d5a647) et du code source de Nango
-(`NangoHQ/nango@6f0c1f6`, 2026-11-26). Rien n'est implémenté.
+(`NangoHQ/nango@6f0c1f6`, 2026-11-26). Implémenté sur la branche `feat/background-credential-refresh-2411` (PR à venir).
 
 ## Constat
 
@@ -17,17 +17,17 @@ sur Tiime) : seul le déclencheur manque.
 La doc dit « refreshes each access token at least once every 24 hours ». Le code fait autre chose,
 et c'est le code qui est le standard à suivre :
 
-| Sujet | Nango, dans le code | Source |
-| --- | --- | --- |
-| Cadence | Cron toutes les 10 min, lot de 100, séquentiel, verrou global, budget = l'intervalle | `packages/server/lib/crons/refreshConnections.ts` |
-| Sélection | `last_fetched_at < now − 1 j` (ou NULL) et non épuisée. **Aucun critère d'expiration** | `connection.service.ts:1115-1146` |
-| Décision | `instantRefresh: false` : échange **seulement si le jeton est expiré ou à moins de 15 min** de l'être. Sans `expires_at` : rien. Sans refresh token : rien | `credentials/refresh.ts:613, 669-700` |
-| Reprise | `last_fetched_at` est écrit **avant** toute tentative, succès ou échec : une connexion est visitée au plus une fois par jour | `refresh.ts:95` |
-| Connexions actives | Tout fetch ou appel proxy avance `last_fetched_at` : le cron ne les touche jamais | idem |
-| Arrêt | 4 **jours calendaires distincts** en échec sans succès entre eux (une rafale compte pour un) → `refresh_exhausted`. Ensuite ni cron ni refresh à la demande ; seul un refresh forcé ou une reconnexion relance | `connections/utils.ts:10`, `connection.service.ts:981-1004` |
-| Classification | Aucune : `invalid_grant` n'est pas lu, une révocation subit les mêmes 4 jours | `oauth2.client.ts:207-216` |
-| Notification | Webhook `type: "auth", operation: "refresh", success: false` à **chaque** échec, plus une ligne d'erreur active par connexion ; webhook de rétablissement si une erreur active est levée | `hooks.ts:272-404` |
-| Étalement | Aucun jitter | — |
+| Sujet              | Nango, dans le code                                                                                                                                                                                            | Source                                                      |
+| ------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------- |
+| Cadence            | Cron toutes les 10 min, lot de 100, séquentiel, verrou global, budget = l'intervalle                                                                                                                           | `packages/server/lib/crons/refreshConnections.ts`           |
+| Sélection          | `last_fetched_at < now − 1 j` (ou NULL) et non épuisée. **Aucun critère d'expiration**                                                                                                                         | `connection.service.ts:1115-1146`                           |
+| Décision           | `instantRefresh: false` : échange **seulement si le jeton est expiré ou à moins de 15 min** de l'être. Sans `expires_at` : rien. Sans refresh token : rien                                                     | `credentials/refresh.ts:613, 669-700`                       |
+| Reprise            | `last_fetched_at` est écrit **avant** toute tentative, succès ou échec : une connexion est visitée au plus une fois par jour                                                                                   | `refresh.ts:95`                                             |
+| Connexions actives | Tout fetch ou appel proxy avance `last_fetched_at` : le cron ne les touche jamais                                                                                                                              | idem                                                        |
+| Arrêt              | 4 **jours calendaires distincts** en échec sans succès entre eux (une rafale compte pour un) → `refresh_exhausted`. Ensuite ni cron ni refresh à la demande ; seul un refresh forcé ou une reconnexion relance | `connections/utils.ts:10`, `connection.service.ts:981-1004` |
+| Classification     | Aucune : `invalid_grant` n'est pas lu, une révocation subit les mêmes 4 jours                                                                                                                                  | `oauth2.client.ts:207-216`                                  |
+| Notification       | Webhook `type: "auth", operation: "refresh", success: false` à **chaque** échec, plus une ligne d'erreur active par connexion ; webhook de rétablissement si une erreur active est levée                       | `hooks.ts:272-404`                                          |
+| Étalement          | Aucun jitter                                                                                                                                                                                                   | —                                                           |
 
 Conséquences à retenir :
 
@@ -50,18 +50,18 @@ la réponse se perd, inutile chez LinkedIn (durée fixe de 365 j), et pénalisé
 
 ## Écarts avec la proposition de l'issue
 
-| Issue | Plan | Raison |
-| --- | --- | --- |
-| Plancher : échange forcé toutes les 24 h, jeton valide compris, déclencheur `keepalive` | **Abandonné.** Visite quotidienne, échange seulement si expiré ou dans la marge | C'est ce que fait Nango. Un échange sur jeton valide dépense une rotation sans rien prouver. Le déclencheur `expiring` existant suffit : pas de troisième déclencheur |
-| « Rafraîchi **avant** `expiresAt` sans run ni appel » | Rafraîchi **au plus 24 h + un intervalle de scan après** la dernière vérification | Le worker garantit la survie du refresh token. La fraîcheur est le rôle du chemin à la demande (voir étape 4) |
-| Colonne `last_refreshed_at` | Colonne `refresh_checked_at`, écrite **avant** la tentative | Horodater le succès seul fait retenter une connexion en échec à chaque scan (72 fois en 3 jours, et sans fin pour `oauth_client_rejected`, qui n'est pas compté). Horodater la visite borne tout à une tentative par jour, comme `last_fetched_at` |
-| Budget d'échecs d'arrière-plan distinct, fenêtre d'arrêt de N jours | **Aucun nouvel état.** `needs_reconnection` est déjà l'état d'arrêt ; seul le défaut de la fenêtre de grâce change (étape 5) | Avec une tentative par jour, `INTEGRATION_REFRESH_MAX_FAILURES = 5` sur un jeton expiré donne 5 jours : l'ordre de grandeur de Nango (4 jours). `invalid_grant` continue de marquer tout de suite, ce que Nango ne sait pas faire |
-| Variables d'env : marge, intervalle, fenêtre | **Aucune nouvelle.** Constantes dans le fichier | Aucun opérateur n'a de raison de les régler |
-| Interrupteur, ou repli sur `OAUTH_REFRESH_WORKER_ENABLED` | **Inconditionnel pour les deux tables ; la variable est retirée** (étape 6) | Un worker éteint par défaut ne corrige pas le cas rapporté, et sa justification (« le chemin réactif couvre la correction ») est ce que l'issue réfute |
-| Worker des modèles laissé tel quel | **Aligné dans la même PR** (étape 3) | Il échange de force 24 h avant expiration, toutes les 6 h : la règle que ce plan rejette. Deux règles pour un même travail ne décrivent pas un système |
-| Événement `integration.connection.needs_reconnection`, #1310 « à concevoir ensemble » | **Un événement nommé pour les deux côtés dès la première version** (étape 10) | `@appstrate/core` est publié : renommer un événement plus tard est une majeure |
-| Jitter | Aucun | Nango n'en a pas ; le plafond du lot et la concurrence étalent déjà |
-| `_meta` de manifeste pour désactiver le keep-alive | Sans objet | Plus d'échange sur jeton valide, donc plus rien à désactiver |
+| Issue                                                                                   | Plan                                                                                                                         | Raison                                                                                                                                                                                                                                             |
+| --------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Plancher : échange forcé toutes les 24 h, jeton valide compris, déclencheur `keepalive` | **Abandonné.** Visite quotidienne, échange seulement si expiré ou dans la marge                                              | C'est ce que fait Nango. Un échange sur jeton valide dépense une rotation sans rien prouver. Le déclencheur `expiring` existant suffit : pas de troisième déclencheur                                                                              |
+| « Rafraîchi **avant** `expiresAt` sans run ni appel »                                   | Rafraîchi **au plus 24 h + un intervalle de scan après** la dernière vérification                                            | Le worker garantit la survie du refresh token. La fraîcheur est le rôle du chemin à la demande (voir étape 4)                                                                                                                                      |
+| Colonne `last_refreshed_at`                                                             | Colonne `refresh_checked_at`, écrite **avant** la tentative                                                                  | Horodater le succès seul fait retenter une connexion en échec à chaque scan (72 fois en 3 jours, et sans fin pour `oauth_client_rejected`, qui n'est pas compté). Horodater la visite borne tout à une tentative par jour, comme `last_fetched_at` |
+| Budget d'échecs d'arrière-plan distinct, fenêtre d'arrêt de N jours                     | **Aucun nouvel état.** `needs_reconnection` est déjà l'état d'arrêt ; seul le défaut de la fenêtre de grâce change (étape 5) | Avec une tentative par jour, `INTEGRATION_REFRESH_MAX_FAILURES = 5` sur un jeton expiré donne 5 jours : l'ordre de grandeur de Nango (4 jours). `invalid_grant` continue de marquer tout de suite, ce que Nango ne sait pas faire                  |
+| Variables d'env : marge, intervalle, fenêtre                                            | **Aucune nouvelle.** Constantes dans le fichier                                                                              | Aucun opérateur n'a de raison de les régler                                                                                                                                                                                                        |
+| Interrupteur, ou repli sur `OAUTH_REFRESH_WORKER_ENABLED`                               | **Inconditionnel pour les deux tables ; la variable est retirée** (étape 6)                                                  | Un worker éteint par défaut ne corrige pas le cas rapporté, et sa justification (« le chemin réactif couvre la correction ») est ce que l'issue réfute                                                                                             |
+| Worker des modèles laissé tel quel                                                      | **Aligné dans la même PR** (étape 3)                                                                                         | Il échange de force 24 h avant expiration, toutes les 6 h : la règle que ce plan rejette. Deux règles pour un même travail ne décrivent pas un système                                                                                             |
+| Événement `integration.connection.needs_reconnection`, #1310 « à concevoir ensemble »   | **Un événement nommé pour les deux côtés dès la première version** (étape 10)                                                | `@appstrate/core` est publié : renommer un événement plus tard est une majeure                                                                                                                                                                     |
+| Jitter                                                                                  | Aucun                                                                                                                        | Nango n'en a pas ; le plafond du lot et la concurrence étalent déjà                                                                                                                                                                                |
+| `_meta` de manifeste pour désactiver le keep-alive                                      | Sans objet                                                                                                                   | Plus d'échange sur jeton valide, donc plus rien à désactiver                                                                                                                                                                                       |
 
 ## Doctrine du projet appliquée
 
@@ -135,8 +135,8 @@ la réponse se perd, inutile chez LinkedIn (durée fixe de 365 j), et pénalisé
     `client_ref IS NOT NULL AND NOT needs_reconnection AND expires_at < now() + marge AND (refresh_checked_at IS NULL OR refresh_checked_at < now() − 24 h)`.
     Rien n'est déchiffré au scan.
   - Modèles : `provider_id IN (<fournisseurs OAuth>) AND expires_at < now() + marge AND (refresh_checked_at …)`.
-    `needsReconnection` vit dans le blob chiffré : il est lu par `refreshOne`, plus par le scan
-    (une visite par jour et par ligne, le déchiffrement n'y coûte rien de mesurable).
+    `needs_reconnection` est une colonne reflétée du blob chiffré : la réclamation n'élit jamais un
+    identifiant marqué, comme pour les connexions.
 - `refreshOne`, intégrations : relit la ligne, charge le dernier manifeste publié
   (`readIntegrationManifestForProxy(…, null)`, comme le proxy hors run), appelle
   `refreshConnectionCredential` avec `{ kind: "expiring" }`. Manifeste ou auth introuvable : journal
@@ -227,7 +227,7 @@ la réponse se perd, inutile chez LinkedIn (durée fixe de 365 j), et pénalisé
   cette PR.
 - Module webhooks : un événement `credential.needs_reconnection` dans `webhookEventSchema`, même
   discriminant dans la charge. Un webhook d'espace reçoit les connexions de son espace ; un webhook
-  d'organisation reçoit tout, identifiants de modèles compris (ils n'ont pas d'espace).
+  d'organisation reçoit celles-ci aussi (filtre de paquet respecté) ; un identifiant de modèle n'a ni espace ni paquet : seuls les webhooks d'organisation sans filtre de paquet le reçoivent.
   OpenAPI → `generate:api` + baseline.
 - Cloche : type `credential_needs_reconnection` (`notificationTypeValues`, `NotificationPayloads`,
   migration qui réécrit le CHECK `notifications_type_valid`), charge discriminée de la même façon.
@@ -248,7 +248,6 @@ la réponse se perd, inutile chez LinkedIn (durée fixe de 365 j), et pénalisé
   fonctionnel.
 - **Renommer `refresh_failure_count`**, qui compte à la fois les échecs transitoires OAuth et les
   rejets 401 d'identifiants non rafraîchissables : le mélange précède ce plan, qui ne l'aggrave pas.
-- **Sortir `needsReconnection` du blob chiffré des modèles** : sans objet à une visite par jour.
 
 ## Critères d'acceptation (révisés)
 

@@ -307,7 +307,7 @@ The runner→platform ingestion routes (`/api/runs/{id}/events*`) carry this voc
 | `LlmUsageRetryJob` (`entry: LlmUsageEntry`, `onConflict`) | `apps/api/src/services/llm-usage-retry.ts`, `llm-usage-ledger.ts` |
 | `CredentialRefreshJobData` (`kind`, `id`)                 | `apps/api/src/services/credential-refresh-sweep.ts`               |
 
-The model-provider refresh scan, the pairing cleanup and the personal-space sweeper queues carry an empty payload.
+The credential refresh scan, the pairing cleanup and the personal-space sweeper queues carry an empty payload; the credential refresh queue carries `{ kind, id }`.
 
 #### Carve-out 4l — Logger fields (pino convention)
 
