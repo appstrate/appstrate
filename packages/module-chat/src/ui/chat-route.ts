@@ -47,6 +47,8 @@ export function turnBody(args: {
   generation: ModelGenerationSettings;
   packageAuthoring: boolean;
   inlineRunsUseChatModel: boolean;
+  /** Details every space of the turn in its context; sent only when on. */
+  contextAllSpaces: boolean;
   skills: ChatSkillSelection | undefined;
   creation: ConversationCreation | undefined;
 }) {
@@ -57,6 +59,7 @@ export function turnBody(args: {
     generation,
     packageAuthoring,
     inlineRunsUseChatModel,
+    contextAllSpaces,
     skills,
     creation,
   } = args;
@@ -67,6 +70,7 @@ export function turnBody(args: {
     generation,
     package_authoring: packageAuthoring,
     inline_runs_use_chat_model: inlineRunsUseChatModel,
+    ...(contextAllSpaces && { context_all_spaces: true }),
     ...creation,
     ...(creation &&
       skills && {

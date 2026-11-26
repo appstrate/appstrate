@@ -32,7 +32,9 @@ import {
   canRunAgents,
 } from "@appstrate/core/permissions";
 import { PACKAGE_TYPE_ROUTE_SEGMENT } from "@appstrate/core/package-files";
-import { reaches, turnCapabilities } from "@appstrate/module-chat/capabilities";
+import { reaches, spaceActsInTurn, turnCapabilities } from "@appstrate/module-chat/capabilities";
+import { deriveMcpSurface } from "../../../../src/modules/mcp/tools.ts";
+import { mcpSpaceActs } from "../../../../src/modules/mcp/spaces.ts";
 import { getCatalog, type CatalogOperation } from "../../../../src/modules/mcp/catalog.ts";
 import type { AppEnv } from "../../../../src/types/index.ts";
 
@@ -868,6 +870,43 @@ describe("hand-written predicates agree with the guards they stand for", () => {
       expect(verdicts).toEqual(new Set([true, false]));
     });
   }
+
+  it("names the same acts per space in the chat's context block and in get_me", () => {
+    // The chat derives a space's acts from the turn's grants there; the MCP server from the
+    // routes' guards (`deriveMcpSurface`). Both open and closed direct access are judged. Only a
+    // space the transport admits is listed on either side (`listReachableSpaces`, the chat's
+    // acting set), so a set without it is no space of either.
+    const disagreements: string[] = [];
+    const seen = new Set<string>();
+    for (const [label, set] of sets.filter(([, set]) => transport(set))) {
+      for (const credentialProxyOpen of [true, false]) {
+        const chat = spaceActsInTurn((p) => set.has(p), {
+          permissions: [...set],
+          credentialProxyOpen,
+        });
+        const mcp = mcpSpaceActs(
+          deriveMcpSurface(set, undefined, { type: "user", id: "user_1" }, true, {
+            credentialProxyOpen,
+          }),
+        );
+        if (chat.join() !== mcp.join()) {
+          disagreements.push(
+            `${label} (proxy ${credentialProxyOpen ? "open" : "closed"}): chat [${chat}] vs mcp [${mcp}]`,
+          );
+        }
+        for (const act of mcp) seen.add(act);
+      }
+    }
+    expect(disagreements).toEqual([]);
+    // The control: every act was granted somewhere, so the comparison is not of empty lists.
+    expect([...seen].sort()).toEqual([
+      "call_integration_tools",
+      "create_packages",
+      "inline_runs",
+      "invoke_operations",
+      "run_agents",
+    ]);
+  });
 
   it("keeps the raw grants the web chip hardcodes equal to the operations' guards", () => {
     // `apps/web/src/modules/chat/chat-access.ts` cannot be imported here; it

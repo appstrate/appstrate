@@ -32,12 +32,20 @@ import { inputSettingsSchema } from "../lib/jsonb-schemas.ts";
 import { orgOrSystemFilter, notEphemeralFilter } from "../lib/package-helpers.ts";
 import type { DbOrTx, Tx } from "../lib/db-helpers.ts";
 import { asRecord } from "@appstrate/core/safe-json";
+import { isRuntimeBoundIntegration } from "@appstrate/core/integration";
 import type { PackageType } from "@appstrate/core/validation";
 import type { ResolvedRunConfig } from "@appstrate/shared-types";
 import type { OrgScope, SpaceScope } from "../lib/scope.ts";
 import { assertSpaceInScope, spaceListingOrder } from "./spaces.ts";
 import { listOrgOffers, placementReadFilter, placementRowJoin } from "./package-placement.ts";
 import { getLatestVersionId } from "./package-versions.ts";
+import {
+  governingIntegrationManifest,
+  readPublishedIntegrationManifests,
+} from "./integration-service.ts";
+import { isAuthConnectable, readOAuthClientRegistrations } from "./reconnect-methods.ts";
+import { userConnectionsBlocked } from "./connection-reach.ts";
+import type { AfpsManifestAuth } from "./integration-manifest-helpers.ts";
 import {
   inactiveDeclaredIntegrations,
   inactiveRequiredIntegrationIds,
@@ -571,18 +579,13 @@ export function activeSpaceIds() {
 }
 
 /**
- * ORDER BY for the TWO reads below — {@link listActivePackages}, which the
- * agent index and the served skills draw from, and `listActivePackageHints`,
- * the capped caller-context list: system first, then by id. One function so an index and
- * the hints the model is handed for it cannot rank the SAME active set
- * differently.
- *
- * The tie-break is load-bearing — Postgres does not order rows within an equal
- * sort key. It makes the cap stable, since which 15 of N survive is otherwise
- * undefined, and two identical get_me calls answer the same list.
+ * ORDER BY of the active-package reads, by package id alone: no provenance ranks
+ * first, so a model reading any of them is handed no preference. Shared by
+ * {@link listActivePackages}, {@link listServedSkillPlacements} and
+ * `listActivePackageHints`.
  */
 function packageListingOrder() {
-  return [sql`CASE WHEN ${packages.source} = 'system' THEN 0 ELSE 1 END`, packages.id];
+  return [packages.id];
 }
 
 /**
@@ -713,17 +716,14 @@ interface HintOptions {
  * List the packages of one `type` an actor in this space could use, as a
  * bounded hint for the get_me caller context. "Could use" is
  * {@link activePackagesFilter}, the activation half of the run gate: a system
- * package, or a placement row that says `enabled`. The list is capped (`limit`) so a
- * large catalog doesn't bloat the payload — the long tail stays reachable
- * via `search`.
+ * package, or a placement row that says `enabled`. Past `limit` the list is
+ * withheld whole, since any subset would rank some entries above the rest:
+ * `total` and `truncated` send the reader to `search`.
  *
  * Bounded IN SQL. One get_me call runs it twice (agents, then skills): the
- * activation filter and the LIMIT sit in the query, so only the
- * returned rows' manifests (`draft_manifest` JSONB) cross the wire, and
- * `total` rides along as a window count over the filtered set (evaluated
- * before the LIMIT, so it is the size of the whole catalog, not of the page).
- * The ordering is `packageListingOrder` — a total order, which is what
- * makes the cap deterministic.
+ * activation filter and the LIMIT sit in the query, `total` rides along as a
+ * window count over the filtered set (evaluated before the LIMIT), and the
+ * manifests (`draft_manifest` JSONB) are only selected when the set fits `limit`.
  *
  * The base hint (id/name/description/source) is uniform across package types;
  * `project` layers on the type-specific extras from the manifest. Access gating
@@ -749,7 +749,7 @@ async function listActivePackageHints<T extends PackageHint>(
       type: packages.type,
       source: packages.source,
       homeSpaceId: packages.homeSpaceId,
-      draftManifest: packages.draftManifest,
+      draftManifest: sql<unknown>`CASE WHEN count(*) OVER () <= ${limit} THEN ${packages.draftManifest} END`,
       // `latest` dist-tag version id — non-null iff the package has a published
       // version. Lets `published` below be answered without an N+1 (a draft-only
       // agent must be run with `version=draft`).
@@ -764,8 +764,10 @@ async function listActivePackageHints<T extends PackageHint>(
     .limit(limit);
 
   const total = rows[0]?.total ?? 0;
+  const truncated = total > limit;
+  const kept = truncated ? [] : rows;
 
-  const items = rows.map((row) => {
+  const items = kept.map((row) => {
     const manifest = asRecord(row.draftManifest) as Record<string, unknown>;
     const base: PackageHint = {
       packageId: typeof manifest.name === "string" ? manifest.name : row.id,
@@ -781,7 +783,7 @@ async function listActivePackageHints<T extends PackageHint>(
     return project(base, manifest);
   });
 
-  return { items, rows, truncated: total > items.length, total };
+  return { items, rows: kept, truncated, total };
 }
 
 /** One entry in the active-agent hint exposed via get_me. */
@@ -794,9 +796,9 @@ interface ActiveAgentHint extends PackageHint {
 
 interface ActiveAgentHintsResult {
   agents: ActiveAgentHint[];
-  /** True when the catalog was capped by `limit` (more reachable via search). */
+  /** True when the catalog exceeded `limit`, `agents` then empty (reach it via search). */
   truncated: boolean;
-  /** Total active agents before the cap. */
+  /** Total active agents. */
   total: number;
 }
 
@@ -840,9 +842,9 @@ interface ActiveSkill extends PackageHint {
 
 interface ActiveSkillsResult {
   skills: ActiveSkill[];
-  /** True when the catalog was capped by `limit` (more reachable via search). */
+  /** True when the catalog exceeded `limit`, `skills` then empty (reach it via search). */
   truncated: boolean;
-  /** Total active skills before the cap. */
+  /** Total active skills. */
   total: number;
 }
 
@@ -1093,4 +1095,48 @@ export async function updateSpacePackage(
       });
   };
   return opts?.tx ? work(opts.tx) : db.transaction(work);
+}
+
+/**
+ * The integrations active here, outside the runtime-bound ones, that `connected` does not name and
+ * for which a connect flow can start ({@link isAuthConnectable} on at least one auth). One whose
+ * members' connections the space blocks is left out unless the caller `canConfigure`, as connection
+ * creation refuses it. Whole or withheld: more than the cap returns no ids, never a prefix.
+ */
+export async function listConnectableIntegrations(
+  scope: SpaceScope,
+  connected: ReadonlySet<string>,
+  opts: { canConfigure: boolean },
+): Promise<{ integrations: string[]; truncated: boolean; total: number }> {
+  const active = await listActivePackages(scope.orgId, [scope.spaceId], "integration");
+  const open = active.filter(
+    (row) => !connected.has(row.id) && !isRuntimeBoundIntegration(row.draftManifest),
+  );
+  const openIds = open.map((row) => row.id);
+  const [blocked, published, registrations] = await Promise.all([
+    opts.canConfigure || openIds.length === 0
+      ? []
+      : db
+          .select({ id: packages.id })
+          .from(packages)
+          .where(
+            and(inArray(packages.id, openIds), userConnectionsBlocked(scope.spaceId, packages.id)),
+          ),
+    readPublishedIntegrationManifests(openIds, scope.orgId),
+    openIds.length === 0 ? [] : readOAuthClientRegistrations(scope.orgId, openIds, [scope.spaceId]),
+  ]);
+  const blockedIds = new Set(blocked.map((row) => row.id));
+  const ids = open
+    .filter((row) => {
+      if (blockedIds.has(row.id)) return false;
+      const manifest = governingIntegrationManifest(row.id, published, row.draftManifest);
+      return Object.entries(manifest?.auths ?? {}).some(([key, auth]) =>
+        isAuthConnectable(row.id, manifest!, key, auth as AfpsManifestAuth, registrations),
+      );
+    })
+    .map((row) => row.id)
+    .sort();
+  return ids.length > DEFAULT_PACKAGE_HINT_LIMIT
+    ? { integrations: [], truncated: true, total: ids.length }
+    : { integrations: ids, truncated: false, total: ids.length };
 }

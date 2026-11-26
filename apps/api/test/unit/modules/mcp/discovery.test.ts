@@ -162,18 +162,18 @@ describe("search over agents and skills", () => {
     expect(result.agents).toEqual({
       total: 2,
       items: [
-        {
-          id: "@acme/invoice-sorter",
-          display_name: "Invoice sorter",
-          description: "Sorts invoices.",
-          published: true,
-        },
         // No display name: the id stands in.
         {
           id: "@acme/draft-only",
           display_name: "@acme/draft-only",
           description: "Not yet published.",
           published: false,
+        },
+        {
+          id: "@acme/invoice-sorter",
+          display_name: "Invoice sorter",
+          description: "Sorts invoices.",
+          published: true,
         },
       ],
     });
