@@ -6,6 +6,8 @@
 # manifest declares `server.type: "binary"`. The bundle ships a
 # self-contained executable; the runner just provides libc + TLS
 # trust and runs it.
+# The entry must be a musl-compatible executable for the image's CPU
+# architecture; the sidecar marks it executable.
 
 ARG RUNTIME_IMAGE=alpine:3.22.4
 FROM ${RUNTIME_IMAGE} AS runtime
