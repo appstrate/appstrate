@@ -142,12 +142,9 @@ describe("NotificationContent", () => {
         type: "credential_needs_reconnection",
         runId: null,
         payload: {
-          kind: "integration_connection",
           packageId: "@acme/gmail",
           integration_name: "Gmail",
-          connection_id: "5f9c1d9e-6a5b-4d0e-9a53-3c1f0f2b7a10",
           label: "pierre@acme.test",
-          auth_key: "primary",
           cause: "refresh_token_revoked",
         },
         read_at: null,
@@ -156,7 +153,7 @@ describe("NotificationContent", () => {
     ]);
 
     expect(html).toContain("Gmail : la connexion pierre@acme.test doit être reconnectée");
-    expect(html).toContain("Le fournisseur a révoqué l’accès");
+    expect(html).toContain("Le fournisseur a révoqué l'accès");
     expect(html).toContain('href="/notifications/n12"');
   });
 

@@ -356,16 +356,6 @@ function reachableConnection(
  */
 export const credentialRevision = sql<string>`left(encode(sha256(convert_to(${integrationConnections.credentialsEncrypted}, 'UTF8')), 'hex'), 16)`;
 
-/** The connection's current {@link credentialRevision}; `null` once the row is gone. */
-export async function readCredentialRevision(connectionId: string): Promise<string | null> {
-  const [row] = await db
-    .select({ credentialRevision })
-    .from(integrationConnections)
-    .where(eq(integrationConnections.id, connectionId))
-    .limit(1);
-  return row?.credentialRevision ?? null;
-}
-
 /**
  * A connection by id, in the space, within the actor's reach (own or shared): the spawn and
  * live-credential resolvers' run-bound load. `integrationId` is a required filter: the id is

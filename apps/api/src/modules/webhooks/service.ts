@@ -956,15 +956,22 @@ export function dispatchRunConnectionMissingWebhook(
   });
 }
 
+/** A credential's death as the `credential.needs_reconnection` delivery's inner object. */
+export function credentialWebhookObject(
+  params: CredentialNeedsReconnectionParams,
+): Record<string, unknown> {
+  const { orgId: _orgId, ...rest } = params;
+  return { object: "credential", ...rest };
+}
+
 /** Fire-and-forget; routing and payload: `docs/site/features/webhooks.mdx`. */
 export function dispatchCredentialNeedsReconnectionWebhook(
   params: CredentialNeedsReconnectionParams,
 ): void {
-  const { orgId, ...rest } = params;
   dispatchWebhookEvents(
-    { orgId, spaceId: "spaceId" in params ? params.spaceId : null },
+    { orgId: params.orgId, spaceId: "spaceId" in params ? params.spaceId : null },
     "credential.needs_reconnection",
-    { object: "credential", ...rest },
+    credentialWebhookObject(params),
   ).catch((err) => {
     logger.warn("credential.needs_reconnection webhook dispatch failed", {
       kind: params.kind,

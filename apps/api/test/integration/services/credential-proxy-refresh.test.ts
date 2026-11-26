@@ -911,6 +911,30 @@ describe("proxyCall — the pre-check refreshes an expiring credential before it
     expect(tokenRequests()).toHaveLength(1);
   });
 
+  it("names the credential it just wrote, so a 401 on the refreshed token is refreshed again", async () => {
+    await setup(
+      ctx,
+      packageId,
+      { access_token: "stale_token", refresh_token: "rt_valid" },
+      BEARER_DELIVERY,
+      -60_000,
+    );
+    const sent: Array<string | null> = [];
+    const fakeFetch = (async (url: string, init: RequestInit) => {
+      if (String(url).startsWith(mockServer.url)) return fetch(url, init);
+      sent.push(new Headers(init.headers).get("authorization"));
+      return new Response("{}", { status: sent.length === 1 ? 401 : 200 });
+    }) as unknown as typeof fetch;
+
+    const res = await call(fakeFetch);
+
+    // A rejection naming a revision other than the stored one is not refreshed: the replay and the
+    // second exchange only happen when the pre-check handed back the revision it wrote.
+    expect(res.status).toBe(200);
+    expect(sent).toEqual(["Bearer fresh_token", "Bearer fresh_token"]);
+    expect(tokenRequests()).toHaveLength(2);
+  });
+
   it("sends the stored token untouched while it is valid beyond the lead", async () => {
     await setup(ctx, packageId, { access_token: "live_token", refresh_token: "rt_valid" });
     const { sent, fakeFetch } = wire();

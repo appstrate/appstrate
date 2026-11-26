@@ -1,7 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { describe, it, expect } from "bun:test";
-import { buildEventEnvelope, runStatusWebhookObject } from "../../service.ts";
+import {
+  buildEventEnvelope,
+  credentialWebhookObject,
+  runStatusWebhookObject,
+} from "../../service.ts";
 import { CURRENT_API_VERSION } from "../../../../lib/api-versions.ts";
 
 describe("buildEventEnvelope", () => {
@@ -154,5 +158,58 @@ describe("runStatusWebhookObject", () => {
       [],
     );
     expect(runStatusWebhookObject(started)).not.toHaveProperty("integrationsUnbound");
+  });
+});
+
+describe("credential.needs_reconnection body", () => {
+  const body = (params: Parameters<typeof credentialWebhookObject>[0]) =>
+    (
+      buildEventEnvelope({
+        eventType: "credential.needs_reconnection",
+        run: credentialWebhookObject(params),
+        payloadMode: "full",
+      }).payload as { type: string; data: { object: unknown } }
+    ).data.object;
+
+  it("names an integration connection by its package, auth, space and owner", () => {
+    expect(
+      body({
+        kind: "integration_connection",
+        orgId: "org_1",
+        spaceId: "spc_1",
+        connectionId: "conn_1",
+        packageId: "@acme/gmail",
+        authKey: "primary",
+        owner: { type: "user", id: "u_1" },
+        cause: "refresh_token_revoked",
+      }),
+    ).toEqual({
+      object: "credential",
+      kind: "integration_connection",
+      spaceId: "spc_1",
+      connectionId: "conn_1",
+      packageId: "@acme/gmail",
+      authKey: "primary",
+      owner: { type: "user", id: "u_1" },
+      cause: "refresh_token_revoked",
+    });
+  });
+
+  it("names a model-provider credential by its id and provider, with no space", () => {
+    expect(
+      body({
+        kind: "model_provider_credential",
+        orgId: "org_1",
+        credentialId: "cred_1",
+        providerId: "openai",
+        cause: "unrefreshable",
+      }),
+    ).toEqual({
+      object: "credential",
+      kind: "model_provider_credential",
+      credentialId: "cred_1",
+      providerId: "openai",
+      cause: "unrefreshable",
+    });
   });
 });

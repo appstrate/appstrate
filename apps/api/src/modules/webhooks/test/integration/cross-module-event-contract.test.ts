@@ -163,33 +163,28 @@ describe("cross-module contract — onRunStatusChange → webhook delivery", () 
         orgId,
         spaceId: over.spaceId,
         connectionId: crypto.randomUUID(),
-        integrationId: INTEGRATION,
+        packageId: INTEGRATION,
         authKey: "primary",
         owner: { type: "user", id: "u_test" },
         cause: "refresh_token_revoked",
       }) as const;
 
     /**
-     * Webhook ids that received a delivery. Polls until `expected` distinct webhooks have a delivery
-     * row (or a 5 s deadline), then reads once more so a delivery to an unexpected webhook that
-     * lands right behind the last expected one still shows.
+     * Webhook ids that received a delivery: waits for each expected one, then reads once more, so a
+     * delivery to an unexpected webhook enqueued right behind them still shows.
      */
-    async function delivered(ids: string[], expected: number): Promise<string[]> {
-      const read = async () => {
-        const rows = await db
-          .select({ webhookId: webhookDeliveries.webhookId })
-          .from(webhookDeliveries);
-        return new Set(rows.map((r) => r.webhookId));
-      };
-      const deadline = Date.now() + 5000;
-      let seen = await read();
-      while (seen.size < expected && Date.now() < deadline) {
-        await new Promise((r) => setTimeout(r, 25));
-        seen = await read();
+    async function deliveredTo(all: string[], expected: string[]): Promise<string[]> {
+      for (const id of expected) {
+        expect((await waitForDelivery(id, WAIT_TIMEOUT_MS))?.eventType).toBe(
+          "credential.needs_reconnection",
+        );
       }
       await new Promise((r) => setTimeout(r, 100));
-      seen = await read();
-      return ids.filter((id) => seen.has(id)).sort();
+      const rows = await db
+        .select({ webhookId: webhookDeliveries.webhookId })
+        .from(webhookDeliveries);
+      const seen = new Set(rows.map((r) => r.webhookId));
+      return all.filter((id) => seen.has(id)).sort();
     }
 
     async function seeds() {
@@ -211,15 +206,15 @@ describe("cross-module contract — onRunStatusChange → webhook delivery", () 
     it("a space connection reaches its space's and the org-level webhooks, package filter on its integration", async () => {
       const w = await seeds();
       await webhooksModule.events!.onCredentialNeedsReconnection!(connection({ spaceId }));
-      expect(await delivered(Object.values(w), 3)).toEqual(
-        [w.org, w.orgForIntegration, w.space].sort(),
-      );
+      const expected = [w.org, w.orgForIntegration, w.space].sort();
+      expect(await deliveredTo(Object.values(w), expected)).toEqual(expected);
     });
 
     it("an org-level connection reaches the org-level webhooks only", async () => {
       const w = await seeds();
       await webhooksModule.events!.onCredentialNeedsReconnection!(connection({ spaceId: null }));
-      expect(await delivered(Object.values(w), 2)).toEqual([w.org, w.orgForIntegration].sort());
+      const expected = [w.org, w.orgForIntegration].sort();
+      expect(await deliveredTo(Object.values(w), expected)).toEqual(expected);
     });
 
     it("a model-provider credential reaches the org-level webhooks without a package filter only", async () => {
@@ -231,7 +226,7 @@ describe("cross-module contract — onRunStatusChange → webhook delivery", () 
         providerId: "openai",
         cause: "refresh_failures_exhausted",
       });
-      expect(await delivered(Object.values(w), 1)).toEqual([w.org]);
+      expect(await deliveredTo(Object.values(w), [w.org])).toEqual([w.org]);
     });
   });
 });

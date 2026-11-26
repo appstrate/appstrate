@@ -50,6 +50,7 @@ import {
   listOrgModelProviderCredentials,
   loadInferenceCredentials,
   markCredentialNeedsReconnection,
+  reconnectOAuthCredential,
   clearModelCredentialRejections,
   recordModelCredentialRejection,
   updateModelProviderCredential,
@@ -61,7 +62,7 @@ import {
   resetModelProviders,
 } from "../../../src/services/model-providers/registry.ts";
 import { seedTestModelProviders } from "../../helpers/model-providers.ts";
-import { corruptCredentialBlob } from "../../helpers/seed.ts";
+import { corruptCredentialBlob, seedOrgModelProviderOAuth } from "../../helpers/seed.ts";
 import { initSystemModelProviderKeys } from "../../../src/services/model-registry.ts";
 
 /** An organization administrator of `orgId`: manages its organization credentials. */
@@ -453,6 +454,88 @@ describe("model-provider-credentials service — oauth path", () => {
       (k) => k.source === "custom",
     );
     expect(list[0]!.needs_reconnection).toBe(true);
+  });
+});
+
+describe("model-provider-credentials service — the columns the refresh sweep reads", () => {
+  beforeEach(async () => {
+    await truncateAll();
+  });
+
+  const columnsOf = async (id: string) =>
+    (
+      await db
+        .select({
+          flagged: modelProviderCredentials.needsReconnection,
+          expiresAt: modelProviderCredentials.expiresAt,
+          visitedAt: modelProviderCredentials.refreshCheckedAt,
+        })
+        .from(modelProviderCredentials)
+        .where(eq(modelProviderCredentials.id, id))
+    )[0]!;
+
+  it("mirrors the flag on flip and clears it on reconnect", async () => {
+    const ctx = await createTestContext({ orgSlug: "mpc-mirror" });
+    const id = await seedOrgModelProviderOAuth({ orgId: ctx.orgId }).then((c) => c.id);
+    expect((await columnsOf(id)).flagged).toBe(false);
+
+    await markCredentialNeedsReconnection(ctx.orgId, id, "refresh_token_revoked");
+    expect((await columnsOf(id)).flagged).toBe(true);
+
+    const reconnected = await reconnectOAuthCredential({
+      id,
+      providerId: "test-oauth",
+      orgId: ctx.orgId,
+      userId: ctx.user.id,
+      accessToken: "a2",
+      refreshToken: "r2",
+      expiresAt: Date.now() + 3_600_000,
+    });
+    expect(reconnected).toBe(true);
+    expect((await columnsOf(id)).flagged).toBe(false);
+  });
+
+  it("create, token update and reconnect each stamp refresh_checked_at, and keep expires_at in step", async () => {
+    const ctx = await createTestContext({ orgSlug: "mpc-stamp" });
+    const clearVisit = () =>
+      db
+        .update(modelProviderCredentials)
+        .set({ refreshCheckedAt: null })
+        .where(eq(modelProviderCredentials.id, id));
+    const id = await createOAuthCredential({
+      orgId: ctx.orgId,
+      userId: ctx.user.id,
+      ownerUserId: ctx.user.id,
+      label: "stamped",
+      providerId: "test-oauth",
+      accessToken: "a",
+      refreshToken: "r",
+      expiresAt: 1_000_000,
+    });
+    expect(await columnsOf(id)).toMatchObject({ expiresAt: new Date(1_000_000) });
+    expect((await columnsOf(id)).visitedAt).not.toBeNull();
+
+    await clearVisit();
+    await updateOAuthCredentialTokens(ctx.orgId, id, {
+      accessToken: "a2",
+      refreshToken: "r2",
+      expiresAt: 2_000_000,
+    });
+    expect(await columnsOf(id)).toMatchObject({ expiresAt: new Date(2_000_000) });
+    expect((await columnsOf(id)).visitedAt).not.toBeNull();
+
+    await clearVisit();
+    await reconnectOAuthCredential({
+      id,
+      providerId: "test-oauth",
+      orgId: ctx.orgId,
+      userId: ctx.user.id,
+      accessToken: "a3",
+      refreshToken: "r3",
+      expiresAt: 3_000_000,
+    });
+    expect(await columnsOf(id)).toMatchObject({ expiresAt: new Date(3_000_000) });
+    expect((await columnsOf(id)).visitedAt).not.toBeNull();
   });
 });
 

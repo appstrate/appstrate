@@ -7,9 +7,8 @@
  * (in the connection's space, else the space it was connected from, else the owner's personal
  * space); a model-provider credential writes none.
  *
- * A module registered through `loadModulesFromInstances` records the event; the announcement is
- * fire-and-forget, so each assertion polls. A controllable Bun.serve stands in for the token
- * endpoint of the driver-level paths.
+ * The announcement is fire-and-forget (`credential-death-spy`), so each assertion polls and each
+ * test settles once, after its last write, before asserting nothing more arrived.
  */
 
 import { describe, it, expect, beforeEach, afterEach, afterAll } from "bun:test";
@@ -20,28 +19,22 @@ import {
   seedEndUser,
   seedOrgModelProviderKey,
   seedOrgModelProviderOAuth,
-  seedPackage,
   seedSpace,
 } from "../../helpers/seed.ts";
 import { restoreDiscoveredModules } from "../../helpers/test-modules.ts";
+import { announced, installDeathSpy, settle, until } from "../../helpers/credential-death-spy.ts";
+import { createMockOAuthServer, type MockOAuthServer } from "../../helpers/oauth-server.ts";
+import { readCredentialRevision } from "../../helpers/credential-revision.ts";
 import {
-  integrationConnections,
-  integrationOauthClients,
-  modelProviderCredentials,
-  notifications,
-} from "@appstrate/db/schema";
-import { encryptCredentialEnvelope, encryptCredentials } from "@appstrate/connect";
-import type { IntegrationManifest } from "@appstrate/core/integration";
-import type { AppstrateModule, CredentialNeedsReconnectionParams } from "@appstrate/core/module";
-import { loadModulesFromInstances, resetModules } from "../../../src/lib/modules/module-loader.ts";
-import type { AfpsManifestAuth } from "../../../src/services/integration-manifest-helpers.ts";
-import {
-  refreshConnectionCredential,
-  type RefreshTarget,
-} from "../../../src/services/integration-token-refresh.ts";
+  GMAIL_PACKAGE_ID,
+  readRefreshTarget,
+  refreshOf,
+  seedPinnedClient,
+} from "../../helpers/refresh-fixtures.ts";
+import { integrationConnections, notifications } from "@appstrate/db/schema";
+import { encryptCredentialEnvelope } from "@appstrate/connect";
 import {
   markIntegrationConnectionNeedsReconnection,
-  readCredentialRevision,
   recordIntegrationRefreshFailure,
   recordUnrefreshableRejection,
 } from "../../../src/services/integration-connections.ts";
@@ -52,144 +45,26 @@ import {
 } from "../../../src/services/model-providers/credentials.ts";
 import { getEnv } from "@appstrate/env";
 
-const PACKAGE_ID = "@official/gmail";
 const HOUR_MS = 3_600_000;
-
-// ─── The event listener ─────────────────────────────────────
-
-const announced: CredentialNeedsReconnectionParams[] = [];
-
-async function installListener(): Promise<void> {
-  announced.length = 0;
-  resetModules();
-  const mod: AppstrateModule = {
-    manifest: { id: "death-spy", name: "Death Spy", version: "1.0.0" },
-    async init() {},
-    events: { onCredentialNeedsReconnection: (params) => void announced.push(params) },
-  };
-  await loadModulesFromInstances([mod], {
-    redisUrl: null,
-    appUrl: "http://localhost:3000",
-    getSendMail: async () => async () => {},
-    getOrgOwnerEmails: async () => [],
-    getOrgMembers: async () => [],
-    getOrgName: async () => null,
-    services: {} as never,
-  });
-}
-
-const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
-
-/** Poll until `predicate` holds (the announcement is fire-and-forget). */
-async function until(predicate: () => boolean | Promise<boolean>): Promise<void> {
-  for (let i = 0; i < 100; i++) {
-    if (await predicate()) return;
-    await sleep(20);
-  }
-  throw new Error("announcement never arrived");
-}
-
-/** A second call against a flagged row announces nothing: give a stray announcement time to land. */
-async function settle(): Promise<void> {
-  await sleep(250);
-}
-
-// ─── Token endpoint ─────────────────────────────────────────
-
-function startTokenServer(): {
-  url: string;
-  respond: (body: object, status?: number) => void;
-  stop: () => void;
-} {
-  let body: object = {};
-  let status = 200;
-  const server = Bun.serve({
-    port: 0,
-    hostname: "127.0.0.1",
-    fetch: () =>
-      new Response(JSON.stringify(body), {
-        status,
-        headers: { "Content-Type": "application/json" },
-      }),
-  });
-  return {
-    url: `http://${server.hostname}:${server.port}/token`,
-    respond: (b, s = 200) => {
-      body = b;
-      status = s;
-    },
-    stop: () => void server.stop(),
-  };
-}
-
-function gmailManifest(tokenUrl: string): IntegrationManifest {
-  return {
-    schema_version: "0.1",
-    type: "integration",
-    name: PACKAGE_ID,
-    version: "1.0.0",
-    display_name: "Gmail",
-    source: {
-      kind: "local",
-      server: {
-        type: "node",
-        entry_point: "server/index.js",
-        mcp_config: { command: "node", args: ["server/index.js"] },
-      },
-    },
-    auths: {
-      primary: {
-        type: "oauth2",
-        authorization_endpoint: "https://idp/a",
-        token_endpoint: tokenUrl,
-        authorized_uris: ["https://api/*"],
-        delivery: {
-          http: {
-            in: "header",
-            name: "Authorization",
-            prefix: "Bearer ",
-            value: "{$credential.access_token}",
-          },
-        },
-      },
-    },
-  } as unknown as IntegrationManifest;
-}
 
 // ─── Integration connections ────────────────────────────────
 
 describe("integration connection death", () => {
   let ctx: TestContext;
-  let token: ReturnType<typeof startTokenServer>;
+  let oauth: MockOAuthServer;
+  let tokenUrl: string;
   let clientId: string;
 
   beforeEach(async () => {
     await truncateAll();
-    await installListener();
+    await installDeathSpy();
     ctx = await createTestContext({ orgSlug: "death" });
-    token = startTokenServer();
-    await seedPackage({
-      id: PACKAGE_ID,
-      orgId: ctx.orgId,
-      type: "integration",
-      source: "local",
-      draftManifest: gmailManifest(token.url) as unknown as Record<string, unknown>,
-    });
-    const [client] = await db
-      .insert(integrationOauthClients)
-      .values({
-        orgId: ctx.orgId,
-        spaceId: ctx.defaultSpaceId,
-        integrationId: PACKAGE_ID,
-        authKey: "primary",
-        clientId: "cid",
-        clientSecretEncrypted: encryptCredentials({ client_secret: "csec" }),
-      })
-      .returning({ id: integrationOauthClients.id });
-    clientId = client!.id;
+    oauth = createMockOAuthServer();
+    tokenUrl = `${oauth.url}/token`;
+    clientId = await seedPinnedClient(ctx, tokenUrl);
   });
 
-  afterEach(() => token.stop());
+  afterEach(() => oauth.stop());
   afterAll(async () => restoreDiscoveredModules());
 
   async function seedConnection(
@@ -205,7 +80,7 @@ describe("integration connection death", () => {
     const [row] = await db
       .insert(integrationConnections)
       .values({
-        integrationId: PACKAGE_ID,
+        integrationId: GMAIL_PACKAGE_ID,
         authKey: "primary",
         accountId: `acct-${crypto.randomUUID()}`,
         label: "Pierre Gmail",
@@ -226,84 +101,72 @@ describe("integration connection death", () => {
     return row!.id;
   }
 
-  /** The driver: `refreshConnectionCredential` as a rejected call asks for it. */
+  const reach = () =>
+    ({ spaceId: ctx.defaultSpaceId, actor: { type: "user", id: ctx.user.id } }) as const;
+
+  /** `refreshConnectionCredential` as an upstream rejection asks for it. */
   async function drive(connId: string) {
-    const [row] = await db
-      .select({
-        id: integrationConnections.id,
-        orgId: integrationConnections.orgId,
-        spaceId: integrationConnections.spaceId,
-        credentialsEncrypted: integrationConnections.credentialsEncrypted,
-        clientRef: integrationConnections.clientRef,
-        oauthResource: integrationConnections.oauthResource,
-        expiresAt: integrationConnections.expiresAt,
-      })
-      .from(integrationConnections)
-      .where(eq(integrationConnections.id, connId));
-    const target: RefreshTarget & { expiresAt: Date | null; credentialRevision: string } = {
-      ...row!,
-      credentialRevision: (await readCredentialRevision(connId))!,
-    };
-    return refreshConnectionCredential({
-      connection: { ...target, authKey: "primary" },
-      integrationId: PACKAGE_ID,
-      manifest: gmailManifest(token.url),
-      authDef: gmailManifest(token.url).auths!.primary as AfpsManifestAuth,
-      trigger: {
-        kind: "rejected",
-        revision: null,
-        reach: { spaceId: ctx.defaultSpaceId, actor: { type: "user", id: ctx.user.id } },
-      },
+    return refreshOf(await readRefreshTarget(connId), tokenUrl, {
+      kind: "rejected",
+      revision: null,
+      reach: reach(),
     });
   }
 
   const bellRows = () =>
     db.select().from(notifications).where(eq(notifications.type, "credential_needs_reconnection"));
 
-  it("a revoked refresh token announces once; a second refresh of the flagged row announces nothing", async () => {
-    const connId = await seedConnection();
-    token.respond({ error: "invalid_grant" }, 400);
-
-    expect(await drive(connId)).toMatchObject({ status: "dead", cause: "refresh_token_revoked" });
-    await until(() => announced.length === 1);
-    expect(announced[0]).toEqual({
-      kind: "integration_connection",
-      orgId: ctx.orgId,
-      spaceId: ctx.defaultSpaceId,
-      connectionId: connId,
-      integrationId: PACKAGE_ID,
-      authKey: "primary",
-      owner: { type: "user", id: ctx.user.id },
+  // The three causes share one flip point (`markIntegrationConnectionNeedsReconnection`):
+  // one announcement, however often the flagged row is hit again.
+  const deaths = [
+    {
       cause: "refresh_token_revoked",
-    });
+      seed: {},
+      flip: async (id: string) => {
+        oauth.setTokenStatus(400);
+        oauth.setTokenResponse({ error: "invalid_grant" });
+        await drive(id);
+      },
+    },
+    {
+      cause: "refresh_token_missing",
+      seed: { refreshToken: "" },
+      flip: async (id: string) => {
+        await drive(id);
+      },
+    },
+    {
+      cause: "credentials_undecryptable",
+      seed: {},
+      flip: (id: string) =>
+        markIntegrationConnectionNeedsReconnection(id, "credentials_undecryptable"),
+    },
+  ] as const;
 
-    await drive(connId);
-    await settle();
-    expect(announced).toHaveLength(1);
-  });
+  it.each(deaths)(
+    "$cause announces once, however often the flagged row is hit again",
+    async (death) => {
+      const connId = await seedConnection(death.seed);
 
-  it("a connection without a refresh token announces once, with refresh_token_missing", async () => {
-    const connId = await seedConnection({ refreshToken: "" });
+      await death.flip(connId);
+      await until(() => announced.length === 1);
+      await death.flip(connId);
+      await settle();
 
-    expect(await drive(connId)).toMatchObject({ status: "dead", cause: "refresh_token_missing" });
-    await until(() => announced.length === 1);
-    expect(announced[0]).toMatchObject({ cause: "refresh_token_missing", connectionId: connId });
-
-    await drive(connId);
-    await settle();
-    expect(announced).toHaveLength(1);
-  });
-
-  it("an undecryptable credential announces once, with credentials_undecryptable", async () => {
-    const connId = await seedConnection();
-    await markIntegrationConnectionNeedsReconnection(connId, "credentials_undecryptable");
-    await markIntegrationConnectionNeedsReconnection(connId, "credentials_undecryptable");
-
-    await until(() => announced.length === 1);
-    await settle();
-    expect(announced).toHaveLength(1);
-    expect(announced[0]).toMatchObject({ cause: "credentials_undecryptable" });
-  });
+      expect(announced).toEqual([
+        {
+          kind: "integration_connection",
+          orgId: ctx.orgId,
+          spaceId: ctx.defaultSpaceId,
+          connectionId: connId,
+          packageId: GMAIL_PACKAGE_ID,
+          authKey: "primary",
+          owner: { type: "user", id: ctx.user.id },
+          cause: death.cause,
+        },
+      ]);
+    },
+  );
 
   it("the transient-failure escalation announces on the failure that flips, never before or after", async () => {
     const connId = await seedConnection({ expiresAt: new Date(Date.now() - 2 * HOUR_MS) });
@@ -311,16 +174,13 @@ describe("integration connection death", () => {
 
     expect(await failure()).toEqual({ failures: 1, needsReconnection: false });
     expect(await failure()).toEqual({ failures: 2, needsReconnection: false });
-    await settle();
-    expect(announced).toHaveLength(0);
-
     expect(await failure()).toEqual({ failures: 3, needsReconnection: true });
     await until(() => announced.length === 1);
-    expect(announced[0]).toMatchObject({ cause: "refresh_failures_exhausted" });
-
     expect(await failure()).toEqual({ failures: 4, needsReconnection: true });
     await settle();
+
     expect(announced).toHaveLength(1);
+    expect(announced[0]).toMatchObject({ cause: "refresh_failures_exhausted" });
   });
 
   it("concurrent failures crossing the threshold announce exactly once", async () => {
@@ -339,23 +199,17 @@ describe("integration connection death", () => {
     const connId = await seedConnection({ clientRef: null });
     const max = getEnv().INTEGRATION_REFRESH_MAX_FAILURES;
     const revision = (await readCredentialRevision(connId))!;
-    const reach = {
-      spaceId: ctx.defaultSpaceId,
-      actor: { type: "user", id: ctx.user.id },
-    } as const;
-    const reject = () => recordUnrefreshableRejection(connId, PACKAGE_ID, reach, revision, max);
+    const reject = () =>
+      recordUnrefreshableRejection(connId, GMAIL_PACKAGE_ID, reach(), revision, max);
 
     for (let i = 0; i < max - 1; i++) await reject();
-    await settle();
-    expect(announced).toHaveLength(0);
-
     expect(await reject()).toMatchObject({ needsReconnection: true });
     await until(() => announced.length === 1);
-    expect(announced[0]).toMatchObject({ cause: "unrefreshable" });
-
     await reject();
     await settle();
+
     expect(announced).toHaveLength(1);
+    expect(announced[0]).toMatchObject({ cause: "unrefreshable" });
   });
 
   describe("the bell row", () => {
@@ -371,15 +225,12 @@ describe("integration connection death", () => {
         recipientType: "user",
         recipientId: ctx.user.id,
         runId: null,
-        payload: {
-          kind: "integration_connection",
-          packageId: PACKAGE_ID,
-          integration_name: "Gmail",
-          connection_id: connId,
-          label: "Pierre Gmail",
-          auth_key: "primary",
-          cause: "refresh_token_revoked",
-        },
+      });
+      expect(row!.payload).toEqual({
+        packageId: GMAIL_PACKAGE_ID,
+        integration_name: "Gmail",
+        label: "Pierre Gmail",
+        cause: "refresh_token_revoked",
       });
     });
 
@@ -443,7 +294,7 @@ describe("model-provider credential death", () => {
 
   beforeEach(async () => {
     await truncateAll();
-    await installListener();
+    await installDeathSpy();
     ctx = await createTestContext({ orgSlug: "model-death" });
   });
 
@@ -455,19 +306,19 @@ describe("model-provider credential death", () => {
   it("a revoked refresh token announces once and writes no bell row", async () => {
     const cred = await seedOrgModelProviderOAuth({ orgId: ctx.orgId });
     await markCredentialNeedsReconnection(ctx.orgId, cred.id, "refresh_token_revoked");
-
     await until(() => announced.length === 1);
-    expect(announced[0]).toEqual({
-      kind: "model_provider_credential",
-      orgId: ctx.orgId,
-      credentialId: cred.id,
-      providerId: "test-oauth",
-      cause: "refresh_token_revoked",
-    });
-
     await markCredentialNeedsReconnection(ctx.orgId, cred.id, "refresh_token_revoked");
     await settle();
-    expect(announced).toHaveLength(1);
+
+    expect(announced).toEqual([
+      {
+        kind: "model_provider_credential",
+        orgId: ctx.orgId,
+        credentialId: cred.id,
+        providerId: "test-oauth",
+        cause: "refresh_token_revoked",
+      },
+    ]);
     expect(await bellCount()).toBe(0);
   });
 
@@ -476,27 +327,19 @@ describe("model-provider credential death", () => {
       orgId: ctx.orgId,
       expiresAt: Date.now() - 2 * HOUR_MS,
     });
-    // The denormalized expiry the escalation gate reads.
-    await db
-      .update(modelProviderCredentials)
-      .set({ expiresAt: new Date(Date.now() - 2 * HOUR_MS) })
-      .where(eq(modelProviderCredentials.id, cred.id));
     const failure = () => recordModelCredentialRefreshFailure(ctx.orgId, cred.id, 2, 3600);
 
     expect(await failure()).toEqual({ failures: 1, needsReconnection: false });
-    await settle();
-    expect(announced).toHaveLength(0);
-
     expect(await failure()).toEqual({ failures: 2, needsReconnection: true });
     await until(() => announced.length === 1);
+    await failure();
+    await settle();
+
+    expect(announced).toHaveLength(1);
     expect(announced[0]).toMatchObject({
       kind: "model_provider_credential",
       cause: "refresh_failures_exhausted",
     });
-
-    await failure();
-    await settle();
-    expect(announced).toHaveLength(1);
     expect(await bellCount()).toBe(0);
   });
 
@@ -506,23 +349,22 @@ describe("model-provider credential death", () => {
       providerId: "openai",
       apiKey: "sk-dead",
     });
+    const reject = () => recordModelCredentialRejection(ctx.orgId, cred.id, "sk-dead");
     const max = getEnv().INTEGRATION_REFRESH_MAX_FAILURES;
-    for (let i = 0; i < max - 1; i++)
-      await recordModelCredentialRejection(ctx.orgId, cred.id, "sk-dead");
-    await settle();
-    expect(announced).toHaveLength(0);
 
-    await recordModelCredentialRejection(ctx.orgId, cred.id, "sk-dead");
+    for (let i = 0; i < max; i++) await reject();
     await until(() => announced.length === 1);
-    expect(announced[0]).toMatchObject({
-      kind: "model_provider_credential",
-      credentialId: cred.id,
-      providerId: "openai",
-      cause: "unrefreshable",
-    });
-
-    await recordModelCredentialRejection(ctx.orgId, cred.id, "sk-dead");
+    await reject();
     await settle();
-    expect(announced).toHaveLength(1);
+
+    expect(announced).toEqual([
+      {
+        kind: "model_provider_credential",
+        orgId: ctx.orgId,
+        credentialId: cred.id,
+        providerId: "openai",
+        cause: "unrefreshable",
+      },
+    ]);
   });
 });

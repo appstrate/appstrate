@@ -15,6 +15,7 @@
  * protocol-checked.
  */
 
+import { readCredentialRevision } from "../../helpers/credential-revision.ts";
 import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach } from "bun:test";
 import { _resetCacheForTesting as resetEnvCache } from "@appstrate/env";
 import { eq } from "drizzle-orm";
@@ -41,7 +42,6 @@ import {
 import { refreshConnectionCredential } from "../../../src/services/integration-token-refresh.ts";
 import {
   createIntegrationOAuthClient,
-  readCredentialRevision,
   readIntegrationAuth,
   resolveConnectClient,
   resolveIntegrationClientById,

@@ -5,7 +5,7 @@
  * visit, and what the per-row job does with a claimed row of each kind.
  *
  * A row is due when its token expires within the refresh lead (or has) AND no visit stamped
- * `refresh_checked_at` in the last 24 h. The jobs are driven directly (`handleCredentialRefreshJob`)
+ * `refresh_checked_at` within the visit interval (23 h). The jobs are driven directly (`handleCredentialRefreshJob`)
  * rather than through a queue; the token endpoint is the canned OAuth server (integrations) or a
  * `fetch` swap (model providers).
  */
@@ -13,6 +13,7 @@
 import { describe, it, expect, beforeEach, afterEach, afterAll } from "bun:test";
 import { eq, inArray } from "drizzle-orm";
 import {
+  decryptCredentials,
   decryptCredentialsToStringMap,
   encryptCredentialEnvelope,
   encryptCredentials,
@@ -25,23 +26,20 @@ import {
 import type { Logger } from "@appstrate/core/logger";
 import { db, truncateAll } from "../../helpers/db.ts";
 import { createTestContext, type TestContext } from "../../helpers/auth.ts";
-import { seedPackage, seedPublishedVersion } from "../../helpers/seed.ts";
+import {
+  seedOrgModelProviderOAuth,
+  seedPackage,
+  seedPublishedVersion,
+} from "../../helpers/seed.ts";
+import { restoreDiscoveredModules } from "../../helpers/test-modules.ts";
+import { announced, installDeathSpy, settle, until } from "../../helpers/credential-death-spy.ts";
 import { seedTestModelProviders } from "../../helpers/model-providers.ts";
 import { createMockOAuthServer } from "../../helpers/oauth-server.ts";
 import {
   httpHeaderDelivery,
   localIntegrationManifest,
 } from "../../helpers/integration-manifests.ts";
-import {
-  createApiKeyCredential,
-  createOAuthCredential,
-  markCredentialNeedsReconnection,
-  reconnectOAuthCredential,
-} from "../../../src/services/model-providers/credentials.ts";
-import { readCredentialRevision } from "../../../src/services/integration-connections.ts";
-import { readIntegrationManifestForProxy } from "../../../src/services/integration-service.ts";
-import { refreshConnectionCredential } from "../../../src/services/integration-token-refresh.ts";
-import type { AfpsManifestAuth } from "../../../src/services/integration-manifest-helpers.ts";
+import { createApiKeyCredential } from "../../../src/services/model-providers/credentials.ts";
 import {
   handleCredentialRefreshJob,
   scanCredentialRefreshes,
@@ -58,6 +56,7 @@ const mockServer = createMockOAuthServer();
 afterAll(async () => {
   mockServer.stop();
   await shutdownCredentialRefreshSweep();
+  restoreDiscoveredModules();
 });
 
 interface LogLine {
@@ -287,15 +286,6 @@ describe("credential refresh sweep — integration connections", () => {
       ]);
     });
 
-    it("exchanges nothing for a token that is still valid", async () => {
-      await publish();
-      const id = await seedConnection({ expiresInMs: HOUR });
-
-      await runJob("integration_connection", id);
-
-      expect(tokenRequests()).toHaveLength(0);
-    });
-
     it("counts a transient failure and does not claim the row again on the next scan", async () => {
       await publish();
       const id = await seedConnection({ expiresInMs: -HOUR });
@@ -353,34 +343,6 @@ describe("credential refresh sweep — integration connections", () => {
         await runJob("integration_connection", "00000000-0000-0000-0000-000000000000"),
       ).toEqual([]);
     });
-
-    it("performs one exchange when the job races an on-demand refresh of the same connection", async () => {
-      await publish();
-      const id = await seedConnection({ expiresInMs: -HOUR });
-
-      // The proxy pre-check: the same call on the same row, trigger `expiring`.
-      const onDemand = async () => {
-        const row = await readRow(id);
-        const read = await readIntegrationManifestForProxy(INTEGRATION_ID, ctx.orgId, null);
-        if (!read.ok) throw new Error("manifest not readable");
-        const authDef = read.manifest.auths?.google as AfpsManifestAuth;
-        const credentialRevision = await readCredentialRevision(id);
-        return refreshConnectionCredential({
-          connection: { ...row, credentialRevision: credentialRevision! },
-          integrationId: INTEGRATION_ID,
-          manifest: read.manifest,
-          authDef,
-          trigger: { kind: "expiring" },
-        });
-      };
-
-      await Promise.all([runJob("integration_connection", id), onDemand()]);
-
-      expect(tokenRequests()).toHaveLength(1);
-      const fields = decryptCredentialsToStringMap((await readRow(id)).credentialsEncrypted);
-      expect(fields.refresh_token).toBe("rt_rotated");
-      expect(fields.access_token).toBe("fresh_token");
-    });
   });
 });
 
@@ -389,50 +351,59 @@ describe("credential refresh sweep — integration connections", () => {
 describe("credential refresh sweep — model provider credentials", () => {
   let ctx: TestContext;
   let exchanges: number;
+  /** The token endpoint's next answer. */
+  let tokenAnswer: { status: number; body: object };
 
   async function seedOAuth(opts: {
     expiresInMs: number | null;
     visitedAgoMs?: number | null;
     flagged?: boolean;
+    refreshToken?: string;
   }): Promise<string> {
-    const id = await createOAuthCredential({
+    const cred = await seedOrgModelProviderOAuth({
       orgId: ctx.orgId,
-      userId: ctx.user.id,
-      ownerUserId: ctx.user.id,
-      label: "Test oauth",
-      providerId: "test-oauth",
-      accessToken: "stale-access",
-      refreshToken: "rt-old",
+      refreshToken: opts.refreshToken ?? "rt-old",
       expiresAt: opts.expiresInMs === null ? null : Date.now() + opts.expiresInMs,
+      needsReconnection: opts.flagged ?? false,
     });
-    if (opts.flagged) await markCredentialNeedsReconnection(ctx.orgId, id, "refresh_token_revoked");
-    // A credential write stamps the visit; the sweep's own state is what the test sets.
-    await db
-      .update(modelProviderCredentials)
-      .set({
-        refreshCheckedAt:
-          opts.visitedAgoMs == null ? null : new Date(Date.now() - opts.visitedAgoMs),
-      })
+    if (opts.visitedAgoMs != null) {
+      await db
+        .update(modelProviderCredentials)
+        .set({ refreshCheckedAt: new Date(Date.now() - opts.visitedAgoMs) })
+        .where(eq(modelProviderCredentials.id, cred.id));
+    }
+    return cred.id;
+  }
+
+  async function readRow(id: string) {
+    const [row] = await db
+      .select()
+      .from(modelProviderCredentials)
       .where(eq(modelProviderCredentials.id, id));
-    return id;
+    return row!;
   }
 
   beforeEach(async () => {
     await truncateAll();
+    await installDeathSpy();
     seedTestModelProviders();
     ctx = await createTestContext({ orgSlug: "sweeporg" });
     exchanges = 0;
+    tokenAnswer = {
+      status: 200,
+      body: {
+        access_token: "new-access",
+        refresh_token: "rt-new",
+        token_type: "Bearer",
+        expires_in: 3600,
+      },
+    };
     globalThis.fetch = (async () => {
       exchanges += 1;
-      return new Response(
-        JSON.stringify({
-          access_token: "new-access",
-          refresh_token: "rt-new",
-          token_type: "Bearer",
-          expires_in: 3600,
-        }),
-        { status: 200, headers: { "Content-Type": "application/json" } },
-      );
+      return new Response(JSON.stringify(tokenAnswer.body), {
+        status: tokenAnswer.status,
+        headers: { "Content-Type": "application/json" },
+      });
     }) as unknown as typeof fetch;
   });
 
@@ -450,10 +421,11 @@ describe("credential refresh sweep — model provider credentials", () => {
     expect((await claimedModels()).sort()).toEqual([expired, expiring].sort());
   });
 
-  it("skips a credential visited within the day, valid beyond the lead, or with no expiry", async () => {
+  it("skips a credential visited within the day, valid beyond the lead, flagged, or with no expiry", async () => {
     await seedOAuth({ expiresInMs: -HOUR, visitedAgoMs: HOUR });
     await seedOAuth({ expiresInMs: 10 * 60_000 });
     await seedOAuth({ expiresInMs: null });
+    await seedOAuth({ expiresInMs: -HOUR, flagged: true });
     expect(await claimedModels()).toEqual([]);
   });
 
@@ -479,59 +451,75 @@ describe("credential refresh sweep — model provider credentials", () => {
     expect((await scanCredentialRefreshes()).model_provider_credential.claimed).toBe(0);
   });
 
-  it("refreshes an expired credential through the token endpoint", async () => {
+  it("refreshes an expired credential: new tokens, new expiry, a fresh visit stamp, a cleared streak", async () => {
     const id = await seedOAuth({ expiresInMs: -HOUR });
+    await db
+      .update(modelProviderCredentials)
+      .set({ refreshFailureCount: 2 })
+      .where(eq(modelProviderCredentials.id, id));
+    const startedAt = Date.now();
 
     const lines = await runJob("model_provider_credential", id);
 
     expect(exchanges).toBe(1);
     expect(lines.map((l) => [l.level, l.msg])).toEqual([["info", "credential_refresh_model_ok"]]);
+    const row = await readRow(id);
+    expect(row.expiresAt!.getTime()).toBeGreaterThan(startedAt + 3000_000);
+    expect(row.refreshCheckedAt!.getTime()).toBeGreaterThanOrEqual(startedAt);
+    expect(row.refreshFailureCount).toBe(0);
+    expect(decryptCredentials<{ accessToken: string }>(row.credentialsEncrypted)).toMatchObject({
+      accessToken: "new-access",
+      refreshToken: "rt-new",
+    });
   });
 
-  it("never exchanges a credential whose token is still valid", async () => {
-    const id = await seedOAuth({ expiresInMs: HOUR });
-
-    await runJob("model_provider_credential", id);
-
-    expect(exchanges).toBe(0);
-  });
-
-  it("warns, without exchanging, on an already-flagged credential", async () => {
-    const id = await seedOAuth({ expiresInMs: -HOUR, flagged: true });
+  it("counts a failed exchange, does not throw, and leaves the credential usable", async () => {
+    const id = await seedOAuth({ expiresInMs: -HOUR });
+    tokenAnswer = { status: 503, body: { error: "temporarily_unavailable" } };
 
     const lines = await runJob("model_provider_credential", id);
 
-    expect(exchanges).toBe(0);
+    expect(lines.map((l) => [l.level, l.msg])).toEqual([["error", "credential_refresh_failed"]]);
+    const row = await readRow(id);
+    expect(row.refreshFailureCount).toBe(1);
+    expect(row.needsReconnection).toBe(false);
+  });
+
+  // The refresh that ends dead: flagged, announced once, and out of the due set for good.
+  it.each([
+    {
+      cause: "refresh_token_revoked",
+      refreshToken: "rt-old",
+      answer: { status: 400, body: { error: "invalid_grant" } },
+      exchanged: 1,
+    },
+    { cause: "refresh_token_missing", refreshToken: "", answer: null, exchanged: 0 },
+  ])("a refresh ending in $cause flags and announces the credential once", async (death) => {
+    const id = await seedOAuth({ expiresInMs: -HOUR, refreshToken: death.refreshToken });
+    if (death.answer) tokenAnswer = death.answer;
+
+    const lines = await runJob("model_provider_credential", id);
+    await until(() => announced.length === 1);
+    await settle();
+
+    expect(exchanges).toBe(death.exchanged);
     expect(lines).toEqual([
       {
         level: "warn",
-        msg: "credential_refresh_model_skipped_already_flagged",
-        data: expect.objectContaining({ credentialId: id, cause: "connection_flagged" }),
+        msg: "credential_refresh_model_needs_reconnection",
+        data: expect.objectContaining({ credentialId: id, cause: death.cause }),
       },
     ]);
-  });
-
-  it("does not claim a flagged credential, even when it is expired and never visited", async () => {
-    await seedOAuth({ expiresInMs: -HOUR, flagged: true });
-    expect(await claimedModels()).toEqual([]);
-  });
-
-  it("repairs the column when the blob is flagged but the column is not, so the next scan skips it", async () => {
-    const id = await seedOAuth({ expiresInMs: -HOUR, flagged: true });
-    // A row flagged before the column existed: blob flagged, column false.
-    await db
-      .update(modelProviderCredentials)
-      .set({ needsReconnection: false, refreshCheckedAt: null })
-      .where(eq(modelProviderCredentials.id, id));
-    expect(await claimedModels()).toEqual([id]);
-
-    await runJob("model_provider_credential", id);
-
-    const [row] = await db
-      .select({ flagged: modelProviderCredentials.needsReconnection })
-      .from(modelProviderCredentials)
-      .where(eq(modelProviderCredentials.id, id));
-    expect(row!.flagged).toBe(true);
+    expect((await readRow(id)).needsReconnection).toBe(true);
+    expect(announced).toEqual([
+      {
+        kind: "model_provider_credential",
+        orgId: ctx.orgId,
+        credentialId: id,
+        providerId: "test-oauth",
+        cause: death.cause,
+      },
+    ]);
     await db
       .update(modelProviderCredentials)
       .set({ refreshCheckedAt: null })
@@ -539,44 +527,27 @@ describe("credential refresh sweep — model provider credentials", () => {
     expect(await claimedModels()).toEqual([]);
   });
 
-  it("mirrors the flag on flip and clears it on reconnect", async () => {
-    const id = await seedOAuth({ expiresInMs: -HOUR });
-    const flagged = async () =>
-      (
-        await db
-          .select({ f: modelProviderCredentials.needsReconnection })
-          .from(modelProviderCredentials)
-          .where(eq(modelProviderCredentials.id, id))
-      )[0]!.f;
-    expect(await flagged()).toBe(false);
-    await markCredentialNeedsReconnection(ctx.orgId, id, "refresh_token_revoked");
-    expect(await flagged()).toBe(true);
-    const ok = await reconnectOAuthCredential({
-      id,
-      providerId: "test-oauth",
-      orgId: ctx.orgId,
-      userId: ctx.user.id,
-      accessToken: "a2",
-      refreshToken: "r2",
-      expiresAt: Date.now() + HOUR,
-    });
-    expect(ok).toBe(true);
-    expect(await flagged()).toBe(false);
-  });
-
-  it("returns silently for a credential deleted between the claim and the job", async () => {
-    const lines = await runJob("model_provider_credential", crypto.randomUUID());
-    expect(lines.filter((l) => l.level === "error" || l.level === "warn")).toEqual([]);
-  });
-
-  it("logs an error and does not throw when the exchange fails", async () => {
-    const id = await seedOAuth({ expiresInMs: -HOUR });
-    globalThis.fetch = (async () => {
-      throw new Error("network down");
-    }) as unknown as typeof fetch;
+  it("skips, without exchanging or announcing, a credential flagged since the claim", async () => {
+    const id = await seedOAuth({ expiresInMs: -HOUR, flagged: true });
 
     const lines = await runJob("model_provider_credential", id);
+    await settle();
 
-    expect(lines.map((l) => [l.level, l.msg])).toEqual([["error", "credential_refresh_failed"]]);
+    expect(exchanges).toBe(0);
+    expect(announced).toEqual([]);
+    expect(lines).toEqual([
+      {
+        level: "debug",
+        msg: "credential_refresh_model_skipped_flagged",
+        data: expect.objectContaining({ credentialId: id, cause: "connection_flagged" }),
+      },
+    ]);
+  });
+
+  it("warns, and throws nothing, for a credential deleted between the claim and the job", async () => {
+    const lines = await runJob("model_provider_credential", crypto.randomUUID());
+    expect(lines.map((l) => [l.level, l.msg])).toEqual([
+      ["warn", "credential_refresh_model_unavailable"],
+    ]);
   });
 });
