@@ -8,6 +8,7 @@
 import { describe, it, expect, afterEach } from "bun:test";
 import { buildSidecarRuntimeDeps } from "../app.ts";
 import { executeApiCall } from "../credential-proxy.ts";
+import { noJournal } from "./helpers/call-journal.ts";
 
 const realFetch = globalThis.fetch;
 afterEach(() => {
@@ -48,6 +49,7 @@ describe("sidecar runtime deps — api_call transport", () => {
         // preload lists it in EGRESS_ALLOW_INTERNAL_HOSTS), and with it the pin.
         declaredUris: ["https://*.example.com/**"],
         resolveHost: async () => ["203.0.113.9"],
+        journal: noJournal,
         fetchCredentials: async () => ({
           credentials: { api_key: "k" },
           authorizedUris: ["https://*.example.com/**"],

@@ -58,6 +58,9 @@ const CONFIG_PATH = "/config/config.json";
  */
 const TRANSPILER_CACHE_PATH = "/runtime/.transpiler-cache";
 
+/** Above the sidecar's journal POST timeout (3 s), so a drain that is landing is not cut short. */
+const SIDECAR_STOP_GRACE_MS = 4_000;
+
 function log(msg: string): void {
   process.stdout.write(`[supervisor] ${msg}\n`);
 }
@@ -111,7 +114,7 @@ const runHostCmd: RunHostCmd = (cmd, stdin) =>
 interface Child {
   pid: number;
   exited: Promise<number>;
-  kill: () => void;
+  signal: (signal: NodeJS.Signals) => void;
 }
 
 /**
@@ -170,7 +173,7 @@ function spawnAs(
       resolve(126);
     });
   });
-  return { pid: proc.pid ?? -1, exited, kill: () => proc.kill("SIGKILL") };
+  return { pid: proc.pid ?? -1, exited, signal: (signal) => proc.kill(signal) };
 }
 
 /** MMDS V2 store shape — the broker payload the daemon PUT (snake_case wire). */
@@ -314,8 +317,18 @@ async function main(): Promise<void> {
   const code = await agent.exited;
   log(`agent exited ${code}`);
 
-  sidecar.kill();
-  await Promise.race([sidecar.exited, delay(2000)]);
+  // SIGTERM first: within the grace the sidecar sends the call journal it still
+  // holds (the platform takes it while the run is `running`, i.e. when the
+  // agent died without finalizing), then exits on its own.
+  sidecar.signal("SIGTERM");
+  const stopped = await Promise.race([
+    sidecar.exited.then(() => true),
+    delay(SIDECAR_STOP_GRACE_MS).then(() => false),
+  ]);
+  if (!stopped) {
+    sidecar.signal("SIGKILL");
+    await Promise.race([sidecar.exited, delay(2000)]);
+  }
 
   printExitMarker(code);
   powerOff();

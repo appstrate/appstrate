@@ -66,6 +66,7 @@ import { receiveSecrets } from "@appstrate/runner-pi/secret-env";
 import { resolvePiContextWindow } from "@appstrate/runner-pi/pi-model";
 import { buildMcpDirectFactories } from "./mcp/direct.ts";
 import { fetchIntegrationBootReport } from "./mcp/integration-boot-report.ts";
+import { flushBeforeFinalize, flushSidecarCallJournal } from "./mcp/call-journal-flush.ts";
 import {
   agentPackagePath,
   provisionWorkspace,
@@ -163,7 +164,9 @@ for (const warning of env.warnings) {
 
 const AGENT_RUN_ID = env.runId;
 
-const sink = new HttpSink({
+// Every finalize first drains the sidecar's call journal: the platform takes it only while the run
+// is `running`, which the finalize POST ends (`mcp/call-journal-flush.ts`).
+const httpSink = new HttpSink({
   url: env.sink.url,
   finalizeUrl: env.sink.finalizeUrl,
   runSecret: env.sink.secret,
@@ -184,6 +187,9 @@ const sink = new HttpSink({
   maxAttempts: 8,
   maxBackoffMs: 2000,
 });
+const sink = flushBeforeFinalize(httpSink, () =>
+  flushSidecarCallJournal(env.sidecarUrl, env.sidecarAuthToken),
+);
 
 // --- Liveness keep-alive ---
 //

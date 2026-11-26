@@ -10,6 +10,7 @@ import {
   type IntegrationCredentialsSource,
   type IntegrationCredentialsWire,
 } from "../integration-credentials-source.ts";
+import { noJournal } from "./helpers/call-journal.ts";
 
 function fakeSource(
   payload: {
@@ -375,6 +376,7 @@ describe("createApiCallCredentialAdapter + executeApiCall — rendered vs declar
         return new Response("{}", { headers: { "Set-Cookie": "sess=S; Path=/" } });
       }) as unknown as typeof fetch,
       reportedAuthFailures: new Set<string>(),
+      journal: noJournal,
       resolveHost,
       declaredUris,
       fetchCredentials: adapter.fetchCredentials,

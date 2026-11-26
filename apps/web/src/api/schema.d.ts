@@ -3222,6 +3222,26 @@ export interface paths {
         patch: operations["updateChatSession"];
         trace?: never;
     };
+    "/api/orgs/{orgId}/chat/sessions/{id}/integrations": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List the integrations a chat session reached
+         * @description Each integration the conversation reached, once, in order of its first call, read from the integration call journal: its own calls (through the credential proxy) and those of the runs it launched (reported by each run's sidecar). A call reached an integration when it was sent to it, whatever its outcome, a catalog listing included. Calls made before the journal recorded their conversation are not counted. Empty when it reached none. The conversation's author only (404 otherwise, as `GET …/sessions/{id}`).
+         */
+        get: operations["listChatSessionIntegrations"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/orgs/{orgId}/chat/sessions/{id}/read": {
         parameters: {
             query?: never;
@@ -5626,6 +5646,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/internal/integration-calls": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Journal the upstream calls a run's sidecar dispatched
+         * @description Sidecar-only. Auth via Bearer run token. A batch of the upstream calls the run's sidecar dispatched for its integrations (the `api_call` tool, the MITM listener, a remote MCP server's operations, a local MCP server's `tools/call` when no MITM listener sees its upstream requests), one record per call that may have reached the upstream, taken from its final attempt. Each is written to the connection-call journal (`connection_calls`) with the run's organization, space, actor and API key, `auth_method` `run_token`, `run_id` set and the batch's request id; the sidecar sends none of those. Every record is checked before any is written, against the run's frozen kickoff snapshot alone — never the live agent or the space's activation, so a call that left stays journaled when its integration is switched off or the agent edited or deleted mid-run: a non-null `connection_id` is one the run bound to that integration (else `400 connection_not_in_run`), and a record with a null `connection_id` names an integration the run resolved (else `400 invalid_request`); one record that fails refuses the whole batch. The text of a record is bounded at 2048 characters and stored truncated to the journal's own caps. A run with no actor writes nothing and answers `204`. A record carrying `credential_revision` (a 2xx answered with that credential) also ends the connection's rejection streak: a non-OAuth2 connection's count of consecutive upstream rejections is reset to 0, unless the connection no longer holds that credential, the run's actor can no longer reach it (deleted, unshared, moved to another space), or it is already flagged `needsReconnection`. An OAuth2 connection's count tracks token refreshes and is left untouched. A token whose run is no longer `running` is refused (`403`).
+         */
+        post: operations["reportIntegrationCalls"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/internal/integration-credentials/{scope}/{name}": {
         parameters: {
             query?: never;
@@ -5660,26 +5700,6 @@ export interface paths {
          * @description Sidecar-only. Same response shape and same required `connection_id` selector as the GET endpoint. Reports an upstream 401 on the named connection's credential, which is refreshed regardless of its remaining lifetime (OAuth2) or counted as a rejection (an auth nothing can refresh). Called by the MITM listener's `refreshOnUnauthorized` hook. A rejection is evidence only against the credential it names: when `credential_revision` names one the connection no longer holds, the call is a read — `200` exactly as the GET, nothing refreshed or counted. A connection already flagged `needsReconnection` answers `410` without any token exchange, so its refresh token is never spent. An internal fault that is no verdict on the connection (a database error, an incoherent OAuth client configuration) answers `500`, with nothing flagged or counted. An ephemeral CONNECT run's token is refused here with `409 connect_run_no_refresh`: the platform holds no stored credential for that connection yet — minting one is the reason the connect run exists — so there is nothing a refresh could produce.
          */
         post: operations["refreshIntegrationCredentials"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/internal/integration-credentials/{scope}/{name}/upstream-success": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * End a connection's upstream-rejection streak
-         * @description Sidecar-only. Same Bearer run token, agent-dependency and activation checks and bound-connection check as the GET endpoint; `connection_id` and `credential_revision` are always required. Called once, fire-and-forget, after a successful (2xx) upstream call through the named connection when its credentials payload carried `rejection_streak`, or after the sidecar saw a rejection counted in this run: a non-OAuth2 connection's count of consecutive upstream rejections is reset to 0. Nothing is reset when the connection no longer holds the credential named by `credential_revision`, when the run has no actor or its actor can no longer reach the connection (deleted, unshared, moved to another space), or when the connection is already flagged `needsReconnection`. An OAuth2 connection's count tracks token refreshes and is left untouched. Idempotent. An ephemeral CONNECT run's token is refused with `409 connect_run_no_refresh`, as on the refresh endpoint.
-         */
-        post: operations["reportIntegrationUpstreamSuccess"];
         delete?: never;
         options?: never;
         head?: never;
@@ -6454,6 +6474,14 @@ export interface components {
             /** Format: date-time */
             updatedAt: string;
         };
+        ChatSessionIntegration: {
+            /** @description `@scope/name` integration package id. */
+            id: string;
+            /** @description The integration manifest's `display_name`; the id when it declares none or the package is gone. */
+            display_name: string;
+            /** @description The integration manifest's `icon` (an Iconify id or an image URL); null when it declares none or the package is gone. */
+            icon: string | null;
+        };
         ConnectionResolutionItem: components["schemas"]["ResolutionFieldError"] & {
             /** @enum {string} */
             code?: "not_connected" | "needs_reconnection" | "pinned_connection_unavailable" | "override_connection_unavailable" | "override_outranked" | "connection_set_too_large" | "must_choose_connection" | "insufficient_scopes" | "auth_key_mismatch" | "auth_serves_no_selected_tool" | "auth_key_serves_no_selected_tool" | "auth_key_on_unauthenticated_integration" | "required_integration_unbound" | "integration_not_active" | "integration_not_found" | "integration_wrong_type" | "integration_invalid_manifest" | "remote_binds_one_connection";
@@ -6626,9 +6654,9 @@ export interface components {
             expires_at_epoch_ms: {
                 [key: string]: number | null;
             };
-            /** @description Consecutive upstream rejections counted against this non-OAuth2 connection; omitted when none. The sidecar reports its next successful call to `POST .../upstream-success`, which ends the streak. */
+            /** @description Consecutive upstream rejections counted against this non-OAuth2 connection; omitted when none. The sidecar journals its next successful call on the credential with that credential's revision (`POST /internal/integration-calls`), which ends the streak. */
             rejection_streak?: number;
-            /** @description Opaque revision of the stored credential this payload carries (a short digest of its ciphertext; every credential write changes it). The sidecar sends it back as `credential_revision` on `/refresh` and `/upstream-success`, so a rejection or a success is applied to this credential only. Omitted on a connect run's empty payload. */
+            /** @description Opaque revision of the stored credential this payload carries (a short digest of its ciphertext; every credential write changes it). The sidecar sends it back as `credential_revision` on `/refresh` and on a streak-ending record of `/internal/integration-calls`, so a rejection or a success is applied to this credential only. Omitted on a connect run's empty payload. */
             credential_revision?: string;
         };
         IntegrationIndexItem: {
@@ -13933,14 +13961,16 @@ export interface operations {
                             actor_id: string;
                             /** @description The API key the actor acted through, if any. */
                             apiKeyId: string | null;
-                            /** @description How the caller authenticated (`api_key`, an OAuth token kind, …). */
+                            /** @description How the caller authenticated (`api_key`, an OAuth token kind, …); `run_token` for a call a platform run's sidecar made. */
                             auth_method: string;
-                            /** @description The run the call declared (`X-Run-Id`), if any. */
+                            /** @description The run whose sidecar made the call, or the run the call declared (`X-Run-Id`), if any. */
                             runId: string | null;
+                            /** @description The chat conversation that issued the call, if any. Null when the call declared a run (at most one of `runId` and `chat_session_id` is set), and on calls recorded before the conversation was journaled. */
+                            chat_session_id: string | null;
                             /** @description The call's HTTP method. */
                             method: string;
-                            /** @description The target's host as the caller wrote it, before substitution: a `{{field}}` placeholder is kept as written, never its value. `<templated>` or `<unparseable>` when the target names no readable host. */
-                            host: string;
+                            /** @description The target's host as the caller wrote it, before substitution: a `{{field}}` placeholder is kept as written, never its value. `<templated>` or `<unparseable>` when the target names no readable host. Null for a `tools/call` of a local MCP server a run's sidecar answered without seeing its upstream requests (an env- or files-delivery integration, or one with no credential). */
+                            host: string | null;
                             /** @description The upstream's HTTP status (`200`, `404`, …), or the proxy's own problem code when the proxy answered itself (`unauthorized_target`, `upstream_timeout`, …). */
                             outcome: string;
                             duration_ms: number;
@@ -17543,14 +17573,16 @@ export interface operations {
                             actor_id: string;
                             /** @description The API key the actor acted through, if any. */
                             apiKeyId: string | null;
-                            /** @description How the caller authenticated (`api_key`, an OAuth token kind, …). */
+                            /** @description How the caller authenticated (`api_key`, an OAuth token kind, …); `run_token` for a call a platform run's sidecar made. */
                             auth_method: string;
-                            /** @description The run the call declared (`X-Run-Id`), if any. */
+                            /** @description The run whose sidecar made the call, or the run the call declared (`X-Run-Id`), if any. */
                             runId: string | null;
+                            /** @description The chat conversation that issued the call, if any. Null when the call declared a run (at most one of `runId` and `chat_session_id` is set), and on calls recorded before the conversation was journaled. */
+                            chat_session_id: string | null;
                             /** @description The call's HTTP method. */
                             method: string;
-                            /** @description The target's host as the caller wrote it, before substitution: a `{{field}}` placeholder is kept as written, never its value. `<templated>` or `<unparseable>` when the target names no readable host. */
-                            host: string;
+                            /** @description The target's host as the caller wrote it, before substitution: a `{{field}}` placeholder is kept as written, never its value. `<templated>` or `<unparseable>` when the target names no readable host. Null for a `tools/call` of a local MCP server a run's sidecar answered without seeing its upstream requests (an env- or files-delivery integration, or one with no credential). */
+                            host: string | null;
                             /** @description The upstream's HTTP status (`200`, `404`, …), or the proxy's own problem code when the proxy answered itself (`unauthorized_target`, `upstream_timeout`, …). */
                             outcome: string;
                             duration_ms: number;
@@ -21623,6 +21655,42 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetail"];
                 };
             };
+        };
+    };
+    listChatSessionIntegrations: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Organization ID. */
+                orgId: components["parameters"]["OrgIdPath"];
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The integrations reached */
+            200: {
+                headers: {
+                    "Request-Id": components["headers"]["RequestId"];
+                    "Appstrate-Version": components["headers"]["AppstrateVersion"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @enum {string} */
+                        object: "list";
+                        data: components["schemas"]["ChatSessionIntegration"][];
+                        /** @description Always false: the list is whole. */
+                        hasMore: boolean;
+                    };
+                };
+            };
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            /** @description Rate limited (120/min per caller) */
+            429: components["responses"]["RateLimited"];
         };
     };
     markChatSessionRead: {
@@ -30470,6 +30538,60 @@ export interface operations {
             };
         };
     };
+    reportIntegrationCalls: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    calls: {
+                        /** @description The integration's package id (`@scope/name`). */
+                        integration_id: string;
+                        /**
+                         * Format: uuid
+                         * @description The bound connection the call went through; `null` for an integration that binds none.
+                         */
+                        connection_id: string | null;
+                        /** @description The request's HTTP method (an RFC 9110 token), `POST` for a local MCP server's `tools/call`. Stored truncated to 16 characters. */
+                        method: string;
+                        /** @description The target's host as the caller wrote it, before any credential substitution: a `{{field}}` placeholder stays as written. Stored truncated to 255 characters. `null` for a `tools/call` of a local MCP server with no MITM listener (env- or files-delivery, or no credential), whose upstream requests the sidecar does not see. */
+                        host: string | null;
+                        /** @description The upstream's HTTP status (any three digits: some upstreams answer outside 1xx-5xx), or the failure code of a call that was sent and got no response: `unauthorized_target`, `blocked_target`, `upstream_unresolvable`, `upstream_unreachable`, `upstream_timeout`. */
+                        outcome: string;
+                        duration_ms: number;
+                        /** @description Set on a 2xx answered with the injected credential when it ends a rejection streak the sidecar knows of: the `credential_revision` of that credential. Only with a non-null `connection_id` and a 2xx `outcome`. */
+                        credential_revision?: string;
+                    }[];
+                };
+            };
+        };
+        responses: {
+            /** @description Journaled (nothing with no actor). */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description `invalid_request`: a malformed body (more than 100 records, an unknown field, a value out of its bounds, a `credential_revision` on a record that cannot end a streak), or a record with a null `connection_id` names an integration the run did not resolve (`param` points at it); or `connection_not_in_run`: a record names a connection the run did not bind to its integration (`param` points at it). */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            500: components["responses"]["InternalServerError"];
+        };
+    };
     getIntegrationCredentials: {
         parameters: {
             query?: {
@@ -30618,7 +30740,7 @@ export interface operations {
                 };
             };
             500: components["responses"]["InternalServerError"];
-            /** @description Not refreshed now; the connection stays usable. A successful upstream call through a non-OAuth2 connection (`upstream-success`) or a reconnect resets the count of its rejections. */
+            /** @description Not refreshed now; the connection stays usable. A successful upstream call through a non-OAuth2 connection (journaled with its `credential_revision` on `POST /internal/integration-calls`) or a reconnect resets the count of its rejections. */
             502: {
                 headers: {
                     [name: string]: unknown;
@@ -30634,56 +30756,6 @@ export interface operations {
                 };
             };
             503: components["responses"]["EncryptionKeyUnavailable"];
-        };
-    };
-    reportIntegrationUpstreamSuccess: {
-        parameters: {
-            query: {
-                /** @description The connection this run bound to the integration: a member of `runs.resolved_connections[<integration id>]`. An id the run did not bind is a `400 connection_not_in_run`. */
-                connection_id: string;
-                /** @description The `credential_revision` of the credential the successful call carried. */
-                credential_revision: string;
-            };
-            header?: never;
-            path: {
-                /** @description Package scope (e.g. @myorg) */
-                scope: components["parameters"]["PackageScope"];
-                /** @description Package name */
-                name: components["parameters"]["PackageName"];
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Streak ended (or none to end on that credential). */
-            204: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-            /** @description The `connection_id` selector is missing, malformed, or names a connection this run did not bind. `invalid_request` — absent or not a uuid; the platform never picks a connection on the caller's behalf. `connection_not_in_run` — a well-formed id that is not in `runs.resolved_connections` for this integration; the run token authorises this run's bound set only. A missing or malformed `credential_revision` is an `invalid_request` too. */
-            400: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/problem+json": components["schemas"]["ProblemDetail"];
-                };
-            };
-            401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
-            404: components["responses"]["NotFound"];
-            /** @description The definition this run executes is no longer readable (`run_definition_gone` / `run_agent_deleted`, as on the GET endpoint), so the run token's authorization set cannot be decided; or `connect_run_no_refresh` — the caller is an ephemeral connect run, which holds no stored credential. */
-            409: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/problem+json": components["schemas"]["ProblemDetail"];
-                };
-            };
-            500: components["responses"]["InternalServerError"];
         };
     };
     runLlmProxyAnthropicMessages: {

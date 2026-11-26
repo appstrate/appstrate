@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { $api } from "../../api/client";
+import { ACROSS_SPACES_POLL_MS } from "../../lib/across-spaces";
+import { useCurrentOrgId } from "../../hooks/use-org";
 import { useAgents } from "../../hooks/use-packages";
 import { useFiles } from "../../hooks/use-files";
 import { useAdmittingSpaces } from "../../hooks/use-overview-mode";
@@ -65,4 +67,20 @@ export function useConversationFiles(conversationId: string | null, active: bool
     // Each row names its space once there are several.
     named: admitting.length > 1,
   };
+}
+
+/**
+ * The integrations a conversation reached, from the call journal: its own calls and its runs'.
+ * Polled like its runs, since a run in any space adds to it; a `chat_session_update` also
+ * invalidates it (`matchesChatSessionQuery`).
+ */
+export function useConversationIntegrations(conversationId: string | null, active: boolean) {
+  const orgId = useCurrentOrgId();
+  const query = $api.useQuery(
+    "get",
+    "/api/orgs/{orgId}/chat/sessions/{id}/integrations",
+    { params: { path: { orgId: orgId ?? "", id: conversationId ?? "" } } },
+    { enabled: !!orgId && !!conversationId && active, refetchInterval: ACROSS_SPACES_POLL_MS },
+  );
+  return { query, integrations: query.data?.data ?? [] };
 }

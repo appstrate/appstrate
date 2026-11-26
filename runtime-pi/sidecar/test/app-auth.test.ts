@@ -66,11 +66,19 @@ const PROTECTED_ROUTES = [
     name: "ALL /llm/*",
     path: "/llm/v1/messages",
     init: { method: "POST", headers: { "Content-Type": "application/json" } } as RequestInit,
+    okStatus: 200,
   },
   {
     name: "GET /integrations/boot-report",
     path: "/integrations/boot-report",
     init: {} as RequestInit,
+    okStatus: 200,
+  },
+  {
+    name: "POST /calls/flush",
+    path: "/calls/flush",
+    init: { method: "POST" } as RequestInit,
+    okStatus: 204,
   },
   {
     name: "ALL /mcp",
@@ -84,6 +92,7 @@ const PROTECTED_ROUTES = [
       },
       body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/list" }),
     } as RequestInit,
+    okStatus: 200,
   },
 ] as const;
 
@@ -118,7 +127,7 @@ describe("sidecar control surface — agent authentication", () => {
         // other than 401 proves the middleware handed off — the handler's own
         // status is that route's business, asserted in its own suite.
         expect(res.status).not.toBe(401);
-        expect(res.status).toBe(200);
+        expect(res.status).toBe(route.okStatus);
       });
     });
   }
@@ -147,11 +156,11 @@ describe("sidecar control surface — agent authentication", () => {
       const res = await app.request(route.path, withToken(route.init, TOKEN));
       expect(res.status).toBe(401);
     }
-    // Control: the same routes on a configured sidecar answer 200.
+    // Control: the same routes on a configured sidecar answer.
     const configured = createApp(makeDeps());
     for (const route of PROTECTED_ROUTES) {
       const res = await configured.request(route.path, withToken(route.init, TOKEN));
-      expect(res.status).toBe(200);
+      expect(res.status).toBe(route.okStatus);
     }
     // …and /health stays up on the unconfigured one — an unauthenticatable
     // sidecar is still a container the orchestrator has to be able to probe.

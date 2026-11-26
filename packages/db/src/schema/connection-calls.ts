@@ -13,9 +13,10 @@ import {
 } from "drizzle-orm/pg-core";
 
 /**
- * Journal of the credential proxy's calls outside a run and for remote runs (`X-Run-Id`): one row
- * per call or MCP operation that was dispatched to an upstream (and so may have reached it), with
- * or without a credential, whatever its outcome. Written by `recordConnectionCall`
+ * Journal of the upstream calls made for an integration: one row per call or MCP operation that
+ * was dispatched to an upstream (and so may have reached it), with or without a credential,
+ * whatever its outcome, from the credential proxy or a platform run's sidecar
+ * (`POST /internal/integration-calls`). Written by `recordConnectionCalls`
  * (`apps/api/src/services/credential-proxy/call-journal.ts`), best-effort like `recordAudit`.
  *
  * No foreign keys, on any column, for the reason `audit_events` states: the journal outlives the
@@ -28,10 +29,13 @@ import {
  * connection was gone by then. `actor_type` / `actor_id` are who acted, `api_key_id` the key
  * they acted through, if any.
  *
+ * `run_id` is the run the call belongs to, `chat_session_id` the conversation whose loopback
+ * bearer issued it: at most one of the two (`connection_calls_one_context`).
+ *
  * `host` comes from the target as the caller wrote it, before substitution: a `{{field}}`
- * placeholder is stored as written, so the row never holds a decrypted credential value. `outcome`
- * is the upstream's HTTP status as a string, or the proxy's own problem code when the proxy
- * answered itself.
+ * placeholder is stored as written, so the row never holds a decrypted credential value; NULL for
+ * an operation of a local MCP server. `outcome` is the upstream's HTTP status as a string, or the
+ * proxy's (or sidecar's) own failure code when it answered itself after dispatch.
  */
 export const connectionCalls = pgTable(
   "connection_calls",
@@ -48,17 +52,25 @@ export const connectionCalls = pgTable(
     apiKeyId: text("api_key_id"),
     authMethod: text("auth_method").notNull(),
     runId: text("run_id"),
+    chatSessionId: text("chat_session_id"),
     method: text("method").notNull(),
-    host: text("host").notNull(),
+    host: text("host"),
     outcome: text("outcome").notNull(),
     durationMs: integer("duration_ms").notNull(),
     requestId: text("request_id").notNull(),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (table) => [
-    // Both reads page on `id DESC`: a space's calls, and one connection's.
+    // The reads page on `id DESC`: a space's calls, one connection's, conversation's or run's.
     index("idx_connection_calls_space_id").on(table.spaceId, table.id),
     index("idx_connection_calls_connection_id").on(table.connectionId, table.id),
+    index("idx_connection_calls_chat_session_id")
+      .on(table.chatSessionId, table.id)
+      .where(sql`${table.chatSessionId} IS NOT NULL`),
+    index("idx_connection_calls_run_id")
+      .on(table.runId, table.id)
+      .where(sql`${table.runId} IS NOT NULL`),
+    check("connection_calls_one_context", sql`run_id IS NULL OR chat_session_id IS NULL`),
     check("connection_calls_actor_type_valid", sql`actor_type IN ('user', 'end_user')`),
     check(
       "connection_calls_no_connection_no_owner",

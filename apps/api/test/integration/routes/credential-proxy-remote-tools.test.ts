@@ -44,6 +44,8 @@ import {
 import { getTestApp } from "../../helpers/app.ts";
 import { truncateAll } from "../../helpers/db.ts";
 import { seedApiKey } from "../../helpers/seed.ts";
+import { loopbackHeaders } from "../../helpers/loopback.ts";
+import { CHAT_LOOPBACK_AUTH_METHOD } from "@appstrate/core/chat-contract";
 import { seedShares } from "../../helpers/connection-shares.ts";
 import { flushRedis } from "../../helpers/redis.ts";
 import { createTestContext, memberContext, type TestContext } from "../../helpers/auth.ts";
@@ -397,7 +399,12 @@ describe("the typed tools of a remote MCP integration", () => {
       integrationId: ID,
       connectionId,
       reach: "own",
-      caller: { apiKeyId: null, authMethod: "api_key", requestId: "req_journal" },
+      caller: {
+        apiKeyId: null,
+        authMethod: "api_key",
+        requestId: "req_journal",
+        chatSessionId: null,
+      },
       deadline: AbortSignal.timeout(5_000),
     });
     const post = (message: Record<string, unknown>) =>
@@ -717,7 +724,33 @@ describe("the typed tools of a remote MCP integration", () => {
       .from(connectionCalls)
       .where(eq(connectionCalls.connectionId, connectionId));
     expect(rows.map((row) => row.outcome)).toEqual(["200"]);
-    expect(rows[0]).toMatchObject({ integrationId: ID, runId: null, method: "POST" });
+    expect(rows[0]).toMatchObject({
+      integrationId: ID,
+      runId: null,
+      chatSessionId: null,
+      method: "POST",
+    });
+  });
+
+  it("journals a tools/call issued by a chat conversation with that conversation", async () => {
+    await seedProxyIntegration(ctx, remote());
+    const connectionId = await seedProxyConnection(ctx, ID, "api_key", { token: TOKEN });
+    const bearer = loopbackHeaders(ctx, ctx.orgId, {
+      orgRole: "owner",
+      permissions: ["credential-proxy:call-own"],
+      chatSessionId: "chat_journal",
+    }).Authorization!.slice("Bearer ".length);
+
+    const res = await post("call", { integration_package_id: ID, name: "search" }, bearer);
+    expect(res.status).toBe(200);
+    await drainAudits(5_000);
+    const rows = await db
+      .select()
+      .from(connectionCalls)
+      .where(eq(connectionCalls.connectionId, connectionId));
+    expect(rows.map((row) => [row.authMethod, row.runId, row.chatSessionId])).toEqual([
+      [CHAT_LOOPBACK_AUTH_METHOD, null, "chat_journal"],
+    ]);
   });
 
   it("drops the reserved `_meta` keys from the server's result, the runtime events included", async () => {
@@ -932,7 +965,12 @@ describe("the typed tools of a remote MCP integration", () => {
         scope: { orgId: ctx.orgId, spaceId: ctx.defaultSpaceId },
         actor: { type: "user" as const, id: ctx.user.id },
         reach: "own" as const,
-        caller: { apiKeyId: null, authMethod: "api_key", requestId: "req_deadline" },
+        caller: {
+          apiKeyId: null,
+          authMethod: "api_key",
+          requestId: "req_deadline",
+          chatSessionId: null,
+        },
         signal: new AbortController().signal,
         connectOffers: null,
       };
@@ -1512,7 +1550,12 @@ describe("the typed tools of a remote MCP integration", () => {
           scope: { orgId: ctx.orgId, spaceId: ctx.defaultSpaceId },
           actor: { type: "user" as const, id: ctx.user.id },
           reach: "own" as const,
-          caller: { apiKeyId: null, authMethod: "api_key", requestId: "req_wait" },
+          caller: {
+            apiKeyId: null,
+            authMethod: "api_key",
+            requestId: "req_wait",
+            chatSessionId: null,
+          },
           signal: new AbortController().signal,
           connectOffers: null,
         };

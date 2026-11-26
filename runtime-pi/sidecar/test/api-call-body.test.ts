@@ -26,6 +26,7 @@ import { buildSidecarRuntimeDeps, type AppDeps } from "../app.ts";
 import { createTestApp } from "./helpers/authed-app.ts";
 import { buildApiCallHost } from "./helpers/api-call-host.ts";
 import type { CredentialsResponse } from "../helpers.ts";
+import { noJournal } from "./helpers/call-journal.ts";
 
 const integrationCreds = (token = "tok-abc"): CredentialsResponse => ({
   credentials: { access_token: token },
@@ -64,6 +65,7 @@ async function makeApp(overrides?: Partial<AppDeps>, token = "tok-abc") {
         declaredUris: ["https://api.example.com/**"],
         fetchCredentials: async () => integrationCreds(token),
         refreshCredentials: async () => integrationCreds(token),
+        journal: noJournal,
       },
     ],
     runtimeDeps,
