@@ -6,8 +6,10 @@ import { useSessionDetail } from "@appstrate/module-chat/unread";
 import {
   conversationTools,
   type ConversationToolCall,
+  type ConversationTools,
 } from "@appstrate/module-chat/conversation-tools";
 import { toolPresentation } from "@appstrate/module-chat/tool-presentation";
+import { useIntegrationsById } from "../../hooks/use-integrations";
 
 /** The calls of the conversation `conversationId`, read from its stored messages while shown. */
 export function useConversationTools(conversationId: string | null, active: boolean) {
@@ -20,11 +22,33 @@ export function useConversationTools(conversationId: string | null, active: bool
   return { tools, isLoading: query.isLoading, error: query.error };
 }
 
-/** The call's name, as its card in the thread names it. */
-export function useToolLabel() {
+export interface ToolCallLabel {
+  title: string;
+  target?: string;
+  /** The logo of the integration the call reached (`null`: it has none); absent for other calls. */
+  logo?: string | null;
+}
+
+/**
+ * The call's name, as its card in the thread names it, except a call reaching a readable
+ * integration: named after that integration, with its logo. The integrations are read once for
+ * all of `tools`, the read the summary's integration line makes.
+ */
+export function useToolLabel(tools: ConversationTools | null) {
   const { t } = useTranslation("chat");
-  return (call: ConversationToolCall) => {
+  const ids = useMemo(() => (tools?.integrations ?? []).map((use) => use.packageId), [tools]);
+  const { data } = useIntegrationsById(ids);
+  const rows = new Map((data ?? []).map((row) => [row.id, row] as const));
+  return (call: ConversationToolCall): ToolCallLabel => {
     const { labelKey, label, target } = toolPresentation(call.toolName, call.input);
+    const integration = call.integrationPackageId ? rows.get(call.integrationPackageId) : undefined;
+    if (integration) {
+      return {
+        title: integration.manifest.display_name ?? integration.id,
+        target,
+        logo: integration.manifest.icon ?? null,
+      };
+    }
     return { title: labelKey ? t(labelKey) : (label ?? call.toolName), target };
   };
 }

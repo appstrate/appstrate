@@ -162,9 +162,12 @@ describe("toolPresentation", () => {
       labelKey: "tool.op.launch",
       target: "@acme/triage",
     });
-    expect(toolPresentation("call_integration_tool", { tool: "acme_crm__find" })).toMatchObject({
-      labelKey: "tool.integrationTool",
-      target: "acme_crm__find",
+    // The tool's own name: the namespace (never holding `__`) is a lossy cut of the package id.
+    expect(
+      toolPresentation("call_integration_tool", { tool: "acme_crm__find__by_email" }),
+    ).toMatchObject({ labelKey: "tool.integrationTool", target: "find__by_email" });
+    expect(toolPresentation("call_integration_tool", { tool: "find" })).toMatchObject({
+      target: "find",
     });
     expect(toolPresentation("get_me", {})).toMatchObject({ label: "get_me" });
   });

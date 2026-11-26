@@ -93,12 +93,17 @@ export function toolPresentation(toolName: string, input: unknown): ToolPresenta
         target: scope && name ? `${scope}/${name}` : undefined,
       };
     }
-    case "call_integration_tool":
+    case "call_integration_tool": {
+      // `{namespace}__{tool}`: no namespace holds `__`, and it is a lossy cut of the package id,
+      // so only the tool's own name is worth reading.
+      const id = stringField(input, "tool");
+      const cut = id?.indexOf("__") ?? -1;
       return {
         Icon: PlugIcon,
         labelKey: "tool.integrationTool",
-        target: stringField(input, "tool"),
+        target: id && cut > 0 ? id.slice(cut + 2) : id,
       };
+    }
     case "import_package_file":
       return {
         Icon: UploadIcon,

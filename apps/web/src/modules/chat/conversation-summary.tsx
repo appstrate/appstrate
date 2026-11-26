@@ -309,7 +309,7 @@ function ConversationActivity({
 }) {
   const { t } = useTranslation("chat");
   const linkInSpace = useSpaceLink();
-  const label = useToolLabel();
+  const label = useToolLabel(tools);
   const runs = useConversationRuns(conversationId, showsRuns);
   const files = useConversationFiles(conversationId, showsFiles);
   const actions = (tools?.calls ?? []).filter((call) => !call.lookup);
@@ -401,7 +401,7 @@ function ConversationActivity({
             .slice(-ACTIVITY_ROWS)
             .reverse()
             .map((call) => {
-              const { title, target } = label(call);
+              const { title, target, logo } = label(call);
               return (
                 <button
                   key={call.toolCallId}
@@ -410,7 +410,7 @@ function ConversationActivity({
                   onClick={() => dispatch({ type: "show-tool-call", toolCallId: call.toolCallId })}
                 >
                   <ActivityLine
-                    icon={<ToolCallIcon call={call} />}
+                    icon={<ToolCallIcon call={call} logo={logo} />}
                     label={title}
                     detail={target}
                     trailing={

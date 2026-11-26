@@ -12,12 +12,18 @@ import { toolPresentation } from "@appstrate/module-chat/tool-presentation";
 import { cn } from "@appstrate/ui/cn";
 import { Button } from "@appstrate/ui/components/button";
 import { Spinner } from "@appstrate/ui/components/spinner";
+import { IntegrationIcon } from "@appstrate/ui/components/integration-icon";
 import { Switch } from "@appstrate/ui/components/switch";
 import { EmptyState, ErrorState } from "../../components/page-states";
 import { JsonView } from "../../components/json-view";
 import { TextSkeleton } from "../../components/loading-skeletons";
 import { RowSpaceName } from "../../components/run-row";
-import { spansSpaces, useConversationTools, useToolLabel } from "./use-conversation-tools";
+import {
+  spansSpaces,
+  useConversationTools,
+  useToolLabel,
+  type ToolCallLabel,
+} from "./use-conversation-tools";
 
 const STATUS_KEY: Record<Exclude<ConversationToolStatus, "success">, string> = {
   running: "context.tools.status.running",
@@ -32,27 +38,33 @@ const STATUS_TONE: Record<ConversationToolStatus, string> = {
   denied: "text-warning",
 };
 
-/** The call's tool icon in its status' tone, a spinner while it runs. */
+/**
+ * The call's icon, a spinner while it runs: the logo of the integration it reached (`logo`, from
+ * {@link ToolCallLabel}), else its tool's icon in its status' tone.
+ */
 export function ToolCallIcon({
   call,
-  className,
+  logo,
+  className = "size-4",
 }: {
   call: ConversationToolCall;
+  logo?: string | null;
   className?: string;
 }) {
+  if (call.status === "running") {
+    return <Spinner className={cn("text-muted-foreground", className)} />;
+  }
+  if (logo !== undefined)
+    return <IntegrationIcon src={logo} className={cn("rounded-sm", className)} />;
   const { Icon } = toolPresentation(call.toolName, call.input);
-  return call.status === "running" ? (
-    <Spinner className={cn("text-muted-foreground", className)} />
-  ) : (
-    <Icon aria-hidden="true" className={cn(STATUS_TONE[call.status], className)} />
-  );
+  return <Icon aria-hidden="true" className={cn(STATUS_TONE[call.status], className)} />;
 }
 
 /** The call's lead glyph: its icon on a tile. */
-function ToolGlyph({ call }: { call: ConversationToolCall }) {
+function ToolGlyph({ call, logo }: { call: ConversationToolCall; logo?: string | null }) {
   return (
     <span className="bg-muted flex size-8 shrink-0 items-center justify-center rounded-lg">
-      <ToolCallIcon call={call} className="size-4" />
+      <ToolCallIcon call={call} logo={logo} />
     </span>
   );
 }
@@ -60,16 +72,18 @@ function ToolGlyph({ call }: { call: ConversationToolCall }) {
 /** One call: its tool, what it acted on, its outcome when it is not a plain success. */
 export function ToolCallRow({
   call,
+  label,
   spanning,
   onSelect,
 }: {
   call: ConversationToolCall;
+  label: ToolCallLabel;
   /** The calls acted in several spaces: the row names its own. */
   spanning: boolean;
   onSelect: () => void;
 }) {
   const { t } = useTranslation("chat");
-  const { title, target } = useToolLabel()(call);
+  const { title, target, logo } = label;
   const outcome =
     call.status === "success"
       ? call.lookup
@@ -82,7 +96,7 @@ export function ToolCallRow({
       className="hover:bg-muted/50 flex min-h-14 w-full items-center gap-3 px-4 py-2.5 text-left transition-colors"
       onClick={onSelect}
     >
-      <ToolGlyph call={call} />
+      <ToolGlyph call={call} logo={logo} />
       <span className="min-w-0 flex-1">
         <span className="block truncate text-sm font-medium">{title}</span>
         <span className="text-muted-foreground block truncate text-xs">
@@ -108,6 +122,7 @@ export function ConversationToolsList({
   const switchId = useId();
   const [showLookups, setShowLookups] = useState(false);
   const { tools, isLoading, error } = useConversationTools(conversationId, active);
+  const label = useToolLabel(tools);
 
   if (!conversationId) {
     return <EmptyState message={t("context.unsaved")} icon={WrenchIcon} compact />;
@@ -151,6 +166,7 @@ export function ConversationToolsList({
                   <ToolCallRow
                     key={call.toolCallId}
                     call={call}
+                    label={label(call)}
                     spanning={spanning}
                     onSelect={() => onSelect(call)}
                   />
@@ -193,9 +209,9 @@ export function ShownToolCall({
   onReveal: () => void;
 }) {
   const { t } = useTranslation("chat");
-  const label = useToolLabel();
   const [missing, setMissing] = useState(false);
   const { tools, isLoading, error } = useConversationTools(conversationId, active);
+  const label = useToolLabel(tools);
   const call = tools?.calls.find((candidate) => candidate.toolCallId === toolCallId);
 
   const back = (
@@ -215,12 +231,12 @@ export function ShownToolCall({
     );
   }
 
-  const { title, target } = label(call);
+  const { title, target, logo } = label(call);
   return (
     <div className="flex flex-col gap-4 p-3">
       {back}
       <div className="flex items-start gap-3 px-1">
-        <ToolGlyph call={call} />
+        <ToolGlyph call={call} logo={logo} />
         <div className="min-w-0 flex-1">
           <h3 className="text-sm font-medium break-words">{title}</h3>
           {target ? (
