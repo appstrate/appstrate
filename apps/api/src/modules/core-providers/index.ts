@@ -234,7 +234,7 @@ const opencodeGo: ModelProviderDefinition = {
   publicModelListing: true,
   featuredModels: [
     "kimi-k2.7-code",
-    "glm-5.2",
+    "glm-5.3",
     "deepseek-v4-pro",
     "deepseek-v4.1-flash",
     "mimo-v2.5",
