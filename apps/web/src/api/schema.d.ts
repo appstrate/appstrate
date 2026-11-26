@@ -21190,6 +21190,8 @@ export interface operations {
                     package_authoring?: boolean;
                     /** @description Launches the inline runs of this turn on the turn's model and generation settings (`modelId` and `generation` of `POST /api/runs/inline`, judged like any explicit model); absent = off, they run on the default model. A saved agent's run keeps its own model. */
                     inline_runs_use_chat_model?: boolean;
+                    /** @description Details in the assistant's context the integrations and agents of every space of the turn, not only those the conversation already depends on (its origin, the caller's personal space, the spaces it acted in); absent = off. Each space whose details show at least one entry is then recorded on the conversation, which is listed and opened only while its author reaches every space it recorded. */
+                    context_all_spaces?: boolean;
                     /** @description The pins of a conversation this turn creates (see ChatSession `pins`), written with its row; also honoured by an ephemeral turn (no `id`). Ignored for an existing conversation, whose pins change through PATCH /api/orgs/{orgId}/chat/sessions/{id}/skills. */
                     pins?: string[];
                     /** @description The discovery switch of a conversation this turn creates (see ChatSession `skill_discovery`); absent = on. Same rule as `pins`: ignored for an existing conversation. */
