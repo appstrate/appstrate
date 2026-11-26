@@ -278,13 +278,7 @@ describe("org-level integration OAuth clients", () => {
     it("resolves an org client from every space of the org", async () => {
       const id = await seedClient({ spaceId: null, clientId: "org-client", isDefault: true });
       for (const scope of [spaceA, spaceB]) {
-        const c = await resolveIntegrationClientById(
-          id,
-          scope.spaceId,
-          INTEGRATION,
-          AUTH_KEY,
-          undefined,
-        );
+        const c = await resolveIntegrationClientById(id, scope, INTEGRATION, AUTH_KEY, undefined);
         expect(c).toMatchObject({ clientId: "org-client", clientSecret: "org-client-secret" });
       }
     });
@@ -292,14 +286,52 @@ describe("org-level integration OAuth clients", () => {
     it("does not resolve an org client from a space of another org", async () => {
       const id = await seedClient({ spaceId: null, clientId: "org-client", isDefault: true });
       expect(
-        await resolveIntegrationClientById(
-          id,
-          otherSpace.spaceId,
-          INTEGRATION,
-          AUTH_KEY,
-          undefined,
-        ),
+        await resolveIntegrationClientById(id, otherSpace, INTEGRATION, AUTH_KEY, undefined),
       ).toBeNull();
+    });
+  });
+
+  describe("refresh by client_ref: the connection's scope picks the tiers", () => {
+    const resolveFor = (id: string, scope: { orgId: string; spaceId: string | null }) =>
+      resolveIntegrationClientById(id, scope, INTEGRATION, AUTH_KEY, undefined);
+    const orgLevel = () => ({ orgId: ctx.orgId, spaceId: null });
+
+    it("an org-level connection resolves the org client, and no client of a space", async () => {
+      const orgClient = await seedClient({ spaceId: null, clientId: "org-client" });
+      const spaceClient = await seedClient({ spaceId: spaceA.spaceId, clientId: "space-a" });
+      expect(await resolveFor(orgClient, orgLevel())).toMatchObject({ clientId: "org-client" });
+      expect(await resolveFor(spaceClient, orgLevel())).toBeNull();
+    });
+
+    it("a space connection resolves its own space's client, not another space's", async () => {
+      const clientA = await seedClient({ spaceId: spaceA.spaceId, clientId: "space-a" });
+      const clientB = await seedClient({ spaceId: spaceB.spaceId, clientId: "space-b" });
+      expect(await resolveFor(clientA, spaceA)).toMatchObject({ clientId: "space-a" });
+      expect(await resolveFor(clientB, spaceA)).toBeNull();
+      expect(await resolveFor(clientA, spaceB)).toBeNull();
+    });
+
+    it("never resolves another org's client, whichever scope asks", async () => {
+      const foreignOrg = await seedClient({
+        spaceId: null,
+        clientId: "foreign-org",
+        orgId: other.orgId,
+      });
+      const foreignSpace = await seedClient({
+        spaceId: otherSpace.spaceId,
+        clientId: "foreign-space",
+        orgId: other.orgId,
+      });
+      for (const id of [foreignOrg, foreignSpace]) {
+        expect(await resolveFor(id, orgLevel())).toBeNull();
+        expect(await resolveFor(id, spaceA)).toBeNull();
+      }
+    });
+
+    it("resolves the system client and a metadata document for any scope", async () => {
+      seedSystemClient();
+      expect(await resolveFor(SYSTEM_ID, orgLevel())).toMatchObject({ clientId: "sys-client" });
+      expect(await resolveFor(SYSTEM_ID, spaceB)).toMatchObject({ clientId: "sys-client" });
     });
   });
 
@@ -566,7 +598,7 @@ describe("org-level integration OAuth clients", () => {
       expect(promoted).toMatchObject({ id, spaceId: null, isDefault: true, client_id: "space-a" });
       for (const scope of [spaceA, spaceB]) {
         expect(
-          await resolveIntegrationClientById(id, scope.spaceId, INTEGRATION, AUTH_KEY, undefined),
+          await resolveIntegrationClientById(id, scope, INTEGRATION, AUTH_KEY, undefined),
         ).toMatchObject({ clientId: "space-a", clientSecret: "space-a-secret" });
       }
       const [conn] = await db

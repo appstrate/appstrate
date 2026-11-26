@@ -212,9 +212,11 @@ async function refresh(ctx: TestContext, connectionId: string): Promise<void> {
     integrationId: INTEGRATION,
     manifest: manifest as IntegrationManifest,
     authDef: auth as AfpsManifestAuth,
-    scope,
-    actor: { type: "user", id: ctx.user.id },
-    trigger: { kind: "rejected", revision: null },
+    trigger: {
+      kind: "rejected",
+      revision: null,
+      reach: { spaceId: scope.spaceId, actor: { type: "user", id: ctx.user.id } },
+    },
   });
   expect(outcome.status).toBe("refreshed");
 }

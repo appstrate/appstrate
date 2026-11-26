@@ -56,6 +56,10 @@ interface MutableCredentialsWire {
   credentialRevision?: string;
 }
 
+/** What the run's sidecar reports: it names no actor, so the run context supplies `reach`. */
+type RunRefreshTrigger =
+  { kind: "expiring" } | Omit<Extract<RefreshTrigger, { kind: "rejected" }>, "reach">;
+
 /**
  * NEVER returns an empty payload — the sidecar would read it as "skip the MITM
  * listener" and boot uncredentialed — so every unproducible credential throws.
@@ -92,7 +96,7 @@ export async function resolveLiveIntegrationCredentials(
      */
     resolvedIntegrationVersions?: Record<string, ResolvedIntegrationVersion> | null;
   },
-  trigger: RefreshTrigger = { kind: "expiring" },
+  trigger: RunRefreshTrigger = { kind: "expiring" },
 ): Promise<IntegrationCredentialsWire> {
   if (!context.actor) {
     // Scheduled runs without an actor cannot connect to user-scoped
@@ -215,9 +219,10 @@ export async function resolveLiveIntegrationCredentials(
     integrationId,
     manifest,
     authDef,
-    scope: { orgId: context.orgId, spaceId: context.spaceId },
-    actor: context.actor,
-    trigger,
+    trigger:
+      trigger.kind === "rejected"
+        ? { ...trigger, reach: { spaceId: context.spaceId, actor: context.actor } }
+        : trigger,
   });
   switch (outcome.status) {
     case "dead":

@@ -509,7 +509,7 @@ describe("authorization server chosen per connection (AFPS §7.3)", () => {
       "oauth",
       forgeManifest("@myorg/forge"),
       auth,
-      ctx.defaultSpaceId,
+      { orgId: ctx.orgId, spaceId: ctx.defaultSpaceId },
       conn!,
     );
     expect(refresh!.resource).toBe(`${base}/api/v4/mcp`);
@@ -736,7 +736,7 @@ describe("authorization server chosen per connection (AFPS §7.3)", () => {
         "oauth",
         forgeManifest("@myorg/forge"),
         auth,
-        ctx.defaultSpaceId,
+        { orgId: ctx.orgId, spaceId: ctx.defaultSpaceId },
         conn!,
       );
       expect(refresh).toMatchObject({
@@ -770,7 +770,7 @@ describe("authorization server chosen per connection (AFPS §7.3)", () => {
       "oauth",
       forgeManifest("@myorg/forge"),
       auth,
-      ctx.defaultSpaceId,
+      { orgId: ctx.orgId, spaceId: ctx.defaultSpaceId },
       { clientRef: client!.id, oauthResource: null },
     );
     expect(refresh!.tokenEndpoint).toBe(`${otherBase}/oauth/token`);
@@ -786,7 +786,7 @@ describe("authorization server chosen per connection (AFPS §7.3)", () => {
         "oauth",
         forgeManifest("@myorg/forge"),
         auth,
-        ctx.defaultSpaceId,
+        { orgId: ctx.orgId, spaceId: ctx.defaultSpaceId },
         { clientRef: client!.id, oauthResource: null },
         async () => ({ tokenEndpoint }),
       );
@@ -813,7 +813,7 @@ describe("authorization server chosen per connection (AFPS §7.3)", () => {
         "oauth",
         fixed,
         fixedAuth,
-        ctx.defaultSpaceId,
+        { orgId: ctx.orgId, spaceId: ctx.defaultSpaceId },
         { clientRef: client!.id, oauthResource: null },
         async () => ({ tokenEndpoint }),
       );
@@ -843,7 +843,7 @@ describe("authorization server chosen per connection (AFPS §7.3)", () => {
         "oauth",
         republished,
         republishedAuth,
-        ctx.defaultSpaceId,
+        { orgId: ctx.orgId, spaceId: ctx.defaultSpaceId },
         { clientRef: client!.id, oauthResource: null },
         async () => ({ tokenEndpoint: "http://93.184.215.14/oauth/token" }),
       ),

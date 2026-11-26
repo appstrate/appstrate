@@ -241,7 +241,7 @@ describe("auto-provisioned OAuth clients at the org tier", () => {
     for (const scope of [spaceA, spaceB]) {
       expect(await usableIds(scope.spaceId)).toEqual([fromA, fromB].sort());
       expect(
-        await resolveIntegrationClientById(clients[0]!.id, scope.spaceId, REMOTE, AUTH_KEY, "none"),
+        await resolveIntegrationClientById(clients[0]!.id, scope, REMOTE, AUTH_KEY, "none"),
       ).toEqual({
         clientId: clients[0]!.clientId,
         clientSecret: "",
@@ -276,9 +276,11 @@ describe("auto-provisioned OAuth clients at the org tier", () => {
       })
       .returning({ id: integrationConnections.id });
 
-    expect(
-      await resolveIntegrationClientById(legacy, spaceA.spaceId, REMOTE, AUTH_KEY, "none"),
-    ).toEqual({ clientId: "legacy", clientSecret: "", tokenEndpointAuthMethod: "none" });
+    expect(await resolveIntegrationClientById(legacy, spaceA, REMOTE, AUTH_KEY, "none")).toEqual({
+      clientId: "legacy",
+      clientSecret: "",
+      tokenEndpointAuthMethod: "none",
+    });
     expect(await usableIds(spaceB.spaceId)).toEqual([]);
 
     const clientRef = await connectClientRef(spaceA);
@@ -361,9 +363,11 @@ describe("auto-provisioned OAuth clients at the org tier", () => {
       integrationId: REMOTE,
       manifest,
       authDef,
-      scope: spaceA,
-      actor,
-      trigger: { kind: "rejected", revision: null },
+      trigger: {
+        kind: "rejected",
+        revision: null,
+        reach: { spaceId: spaceA.spaceId, actor },
+      },
     });
   }
 

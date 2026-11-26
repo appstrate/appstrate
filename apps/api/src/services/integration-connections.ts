@@ -247,6 +247,9 @@ async function loadManifestOrThrow(
 /** What every credential and spawn resolver reads of a connection row (`id`: refresh write-back). */
 interface ActorConnectionRow {
   id: string;
+  /** The row's own scope (`spaceId` `null`: org level): it picks the OAuth client tiers refresh may use. */
+  orgId: string;
+  spaceId: string | null;
   credentialsEncrypted: string;
   expiresAt: Date | null;
   scopesGranted: string[];
@@ -377,6 +380,8 @@ export async function loadAccessibleConnectionById(
   const [row] = await db
     .select({
       id: integrationConnections.id,
+      orgId: integrationConnections.orgId,
+      spaceId: integrationConnections.spaceId,
       integrationId: integrationConnections.integrationId,
       authKey: integrationConnections.authKey,
       credentialsEncrypted: integrationConnections.credentialsEncrypted,
@@ -778,6 +783,8 @@ type SelectableRow = Awaited<ReturnType<typeof loadSelectableRows>>[number];
 function toResolvedRow(row: SelectableRow): ResolvedConnectionRow {
   const {
     id,
+    orgId,
+    spaceId,
     authKey,
     credentialsEncrypted,
     credentialRevision,
@@ -790,6 +797,8 @@ function toResolvedRow(row: SelectableRow): ResolvedConnectionRow {
   } = row;
   return {
     id,
+    orgId,
+    spaceId,
     authKey,
     credentialsEncrypted,
     credentialRevision,
@@ -1583,13 +1592,15 @@ export function resolveConnectClient(
 /**
  * Resolve a pinned `client_ref` to the credentials that mint and refresh a connection's tokens: the
  * system registry, then this instance's metadata documents (public, bound to the server their URL
- * names), then `integration_oauth_clients` scoped to the space's tiers, integration and auth. The
+ * names), then `integration_oauth_clients` of the connection's own scope: its space's tier, and its
+ * org's (the only one an org-level connection has), by integration and auth. The
  * method comes back coherent with the secret; the row's declaration wins over the manifest's.
  * `null`: no such client here, or an unreadable ciphertext; a missing key id throws the 503.
  */
 export async function resolveIntegrationClientById(
   clientRef: string,
-  spaceId: string,
+  /** The connection's scope, never its caller's: another space's client must not resolve. */
+  clientScope: { orgId: string; spaceId: string | null },
   integrationId: string,
   authKey: string,
   manifestAuthMethod: string | undefined,
@@ -1621,7 +1632,6 @@ export async function resolveIntegrationClientById(
   if (!isUuid(clientRef)) return null;
 
   // 3) Custom client of this space or its org, by id AND fully scoped.
-  const spaceOrg = db.select({ orgId: spaces.orgId }).from(spaces).where(eq(spaces.id, spaceId));
   const [row] = await db
     .select({
       clientId: integrationOauthClients.clientId,
@@ -1634,10 +1644,12 @@ export async function resolveIntegrationClientById(
       and(
         eq(integrationOauthClients.id, clientRef),
         or(
-          eq(integrationOauthClients.spaceId, spaceId),
+          clientScope.spaceId === null
+            ? undefined
+            : eq(integrationOauthClients.spaceId, clientScope.spaceId),
           and(
             isNull(integrationOauthClients.spaceId),
-            inArray(integrationOauthClients.orgId, spaceOrg),
+            eq(integrationOauthClients.orgId, clientScope.orgId),
           ),
         ),
         eq(integrationOauthClients.integrationId, integrationId),
@@ -2303,6 +2315,7 @@ export async function persistCredentialBundle(
           variables: input.variables ?? null,
           oauthResource: input.oauthResource ?? null,
           expiresAt: input.expiresAt ?? null,
+          refreshCheckedAt: now,
           label: labelValue,
           createdAt: now,
           updatedAt: now,
@@ -2328,6 +2341,8 @@ export async function persistCredentialBundle(
     needsReconnection: input.needsReconnection ?? false,
     // A credential write proves the connection healthy: the escalation count restarts.
     refreshFailureCount: 0,
+    // A fresh credential needs no sweep visit before the next day.
+    refreshCheckedAt: now,
     updatedAt: now,
   };
   if (input.accountId !== undefined) set.accountId = input.accountId;

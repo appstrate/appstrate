@@ -512,6 +512,8 @@ describe("OAuth2Strategy — connect.login acquisition", () => {
     const outcome = await refreshConnectionCredential({
       connection: {
         id: row.id,
+        orgId: row.orgId,
+        spaceId: row.spaceId,
         authKey: "primary",
         credentialsEncrypted: row.credentialsEncrypted,
         clientRef: row.clientRef,
@@ -522,9 +524,11 @@ describe("OAuth2Strategy — connect.login acquisition", () => {
       integrationId: INTEGRATION,
       manifest: manifest(upstream.base) as unknown as IntegrationManifest,
       authDef: (manifest(upstream.base).auths as Record<string, AfpsManifestAuth>).primary!,
-      scope: connectCtx.scope,
-      actor,
-      trigger: { kind: "rejected", revision: null },
+      trigger: {
+        kind: "rejected",
+        revision: null,
+        reach: { spaceId: connectCtx.scope.spaceId, actor },
+      },
     });
 
     expect(outcome.status).toBe("refreshed");

@@ -113,6 +113,10 @@ export const integrationConnections = pgTable(
     // (`clearUpstreamRejections`); an OAuth2 count is not reset by one. Reset
     // to 0 on any successful credential write (`persistCredentialBundle`).
     refreshFailureCount: integer("refresh_failure_count").notNull().default(0),
+    // When the background refresh sweep last visited the row, or a credential was last written
+    // (`persistCredentialBundle`). NULL = never visited, so due. The sweep's due predicate reads it:
+    // one visit per row per day.
+    refreshCheckedAt: timestamp("refresh_checked_at", { withTimezone: true }),
     // NOTE — there is deliberately no `last_refresh_failure_at` here, and the
     // same note sits on the `model_provider_credentials` twin. There was one,
     // written beside `refresh_failure_count` on every transient refresh failure
@@ -167,6 +171,12 @@ export const integrationConnections = pgTable(
     index("idx_integration_conn_space")
       .on(table.spaceId)
       .where(sql`${table.spaceId} IS NOT NULL`),
+    // The background refresh sweep's due scan: OAuth2 (`client_ref` set) rows still refreshable.
+    index("idx_integration_conn_refresh_due")
+      .on(table.expiresAt)
+      .where(
+        sql`${table.clientRef} IS NOT NULL AND NOT ${table.needsReconnection} AND ${table.expiresAt} IS NOT NULL`,
+      ),
     index("idx_integration_conn_origin")
       .on(table.originSpaceId)
       .where(sql`${table.originSpaceId} IS NOT NULL`),

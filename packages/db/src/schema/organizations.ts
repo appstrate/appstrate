@@ -305,6 +305,10 @@ export const modelProviderCredentials = pgTable(
     refreshFailureCount: integer("refresh_failure_count").notNull().default(0),
     // An api-key credential reuses the counter for consecutive upstream 401s,
     // reset by any successful call (`clearModelCredentialRejections`).
+    // When the background refresh sweep last visited the row, or a credential was last written
+    // (`createOAuthCredential`, `reconnectOAuthCredential`, `updateOAuthCredentialTokens`). NULL = never visited, so due. The
+    // sweep's due predicate reads it: one visit per row per day.
+    refreshCheckedAt: timestamp("refresh_checked_at", { withTimezone: true }),
     // NOTE — there is deliberately no `last_refresh_failure_at` here. There was
     // one, written beside `refresh_failure_count` on every transient refresh
     // failure and read by nothing: no route, no DTO, no OpenAPI field, no

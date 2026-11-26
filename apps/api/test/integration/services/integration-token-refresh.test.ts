@@ -37,7 +37,17 @@ import {
 const PACKAGE_ID = "@official/gmail";
 
 /** An upstream 401 on the credential the connection holds. */
-const REJECTED: RefreshTrigger = { kind: "rejected", revision: null };
+function rejected(
+  ctx: TestContext,
+  spaceId: string = ctx.defaultSpaceId,
+  revision: string | null = null,
+): RefreshTrigger {
+  return {
+    kind: "rejected",
+    revision,
+    reach: { spaceId, actor: { type: "user", id: ctx.user.id } },
+  };
+}
 const EXPIRING: RefreshTrigger = { kind: "expiring" };
 
 interface TokenServer {
@@ -178,6 +188,8 @@ async function readTarget(connId: string): Promise<Target> {
   const [row] = await db
     .select({
       id: integrationConnections.id,
+      orgId: integrationConnections.orgId,
+      spaceId: integrationConnections.spaceId,
       credentialsEncrypted: integrationConnections.credentialsEncrypted,
       clientRef: integrationConnections.clientRef,
       oauthResource: integrationConnections.oauthResource,
@@ -193,15 +205,13 @@ function refreshOf(
   ctx: TestContext,
   token: TokenServer,
   target: Target,
-  trigger: RefreshTrigger = REJECTED,
+  trigger: RefreshTrigger = rejected(ctx),
 ) {
   return refreshConnectionCredential({
     connection: { ...target, authKey: "primary" },
     integrationId: PACKAGE_ID,
     manifest: gmailManifest(token.url),
     authDef: gmailManifest(token.url).auths!.primary as AfpsManifestAuth,
-    scope: { orgId: ctx.orgId, spaceId: ctx.defaultSpaceId },
-    actor: { type: "user", id: ctx.user.id },
     trigger,
   });
 }
@@ -281,7 +291,7 @@ describe("refreshConnectionCredential — the refresh and its write-back", () =>
     return row!.id;
   }
 
-  const refresh = async (connId: string, trigger: RefreshTrigger = REJECTED) =>
+  const refresh = async (connId: string, trigger: RefreshTrigger = rejected(ctx)) =>
     refreshOf(ctx, token, await readTarget(connId), trigger);
 
   it("preserves scopesGranted when the refresh response omits `scope`", async () => {
@@ -318,9 +328,7 @@ describe("refreshConnectionCredential — the refresh and its write-back", () =>
       integrationId: PACKAGE_ID,
       manifest: gmailManifest(token.url),
       authDef: gmailManifest(token.url).auths!.primary as AfpsManifestAuth,
-      scope: { orgId: ctx.orgId, spaceId: other.id },
-      actor: { type: "user", id: ctx.user.id },
-      trigger: REJECTED,
+      trigger: rejected(ctx, other.id),
     });
 
     expect(refreshedFields(outcome).access_token).toBe("org-access");
@@ -473,7 +481,7 @@ describe("refreshConnectionCredential — the refresh and its write-back", () =>
       .where(eq(integrationConnections.id, connId));
     token.setResponse({ access_token: "must-not-be-fetched", expires_in: 3600 });
 
-    expect(await refresh(connId, { kind: "rejected", revision: held })).toMatchObject({
+    expect(await refresh(connId, rejected(ctx, ctx.defaultSpaceId, held))).toMatchObject({
       status: "kept",
     });
     expect(token.requests()).toBe(0);
@@ -491,7 +499,7 @@ describe("refreshConnectionCredential — the refresh and its write-back", () =>
 
     const target = await readTarget(connId);
     const [forced, proactive] = await Promise.all([
-      refreshOf(ctx, token, target, REJECTED),
+      refreshOf(ctx, token, target, rejected(ctx)),
       refreshOf(ctx, token, target, EXPIRING),
     ]);
 
@@ -691,7 +699,7 @@ describe("integration refresh-failure escalation", () => {
     expect((await readRow(connId)).needsReconnection).toBe(true);
   });
 
-  const refresh = async (connId: string, trigger: RefreshTrigger = REJECTED) =>
+  const refresh = async (connId: string, trigger: RefreshTrigger = rejected(ctx)) =>
     refreshOf(ctx, token, await readTarget(connId), trigger);
 
   it("a successful refresh resets the failure streak", async () => {

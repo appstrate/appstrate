@@ -154,6 +154,7 @@ column integration_connections.needs_reconnection boolean not null default false
 column integration_connections.oauth_resource text
 column integration_connections.org_id uuid not null
 column integration_connections.origin_space_id text
+column integration_connections.refresh_checked_at timestamp with time zone
 column integration_connections.refresh_failure_count integer not null default 0
 column integration_connections.scopes_granted text[] not null default '{}'::text[]
 column integration_connections.share_all_spaces boolean not null default false
@@ -231,6 +232,7 @@ column model_provider_credentials.label text not null
 column model_provider_credentials.org_id uuid not null
 column model_provider_credentials.owner_user_id text
 column model_provider_credentials.provider_id text not null
+column model_provider_credentials.refresh_checked_at timestamp with time zone
 column model_provider_credentials.refresh_failure_count integer not null default 0
 column model_provider_credentials.updated_at timestamp with time zone not null default now()
 column model_provider_pairings.consumed_at timestamp with time zone
@@ -1056,6 +1058,7 @@ index CREATE INDEX idx_integration_conn_end_user ON public.integration_connectio
 index CREATE INDEX idx_integration_conn_lookup ON public.integration_connections USING btree (integration_package_id, space_id, auth_key)
 index CREATE INDEX idx_integration_conn_org ON public.integration_connections USING btree (org_id, integration_package_id, auth_key)
 index CREATE INDEX idx_integration_conn_origin ON public.integration_connections USING btree (origin_space_id) WHERE (origin_space_id IS NOT NULL)
+index CREATE INDEX idx_integration_conn_refresh_due ON public.integration_connections USING btree (expires_at) WHERE (((client_ref IS NOT NULL) AND (NOT needs_reconnection)) AND (expires_at IS NOT NULL))
 index CREATE INDEX idx_integration_conn_space ON public.integration_connections USING btree (space_id) WHERE (space_id IS NOT NULL)
 index CREATE INDEX idx_integration_conn_user ON public.integration_connections USING btree (user_id) WHERE (user_id IS NOT NULL)
 index CREATE INDEX idx_integration_oauth_clients_lookup ON public.integration_oauth_clients USING btree (space_id, integration_package_id, auth_key)

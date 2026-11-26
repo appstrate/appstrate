@@ -216,7 +216,7 @@ describe("integration multi-client", () => {
       seedSystemClient("sys-secret");
       const c = await resolveIntegrationClientById(
         SYSTEM_ID,
-        ctx.defaultSpaceId,
+        { orgId: ctx.orgId, spaceId: ctx.defaultSpaceId },
         INTEGRATION,
         AUTH_KEY,
         undefined,
@@ -232,7 +232,7 @@ describe("integration multi-client", () => {
       const customId = await seedCustomClient("custom-client-id", "custom-secret");
       const c = await resolveIntegrationClientById(
         customId,
-        ctx.defaultSpaceId,
+        { orgId: ctx.orgId, spaceId: ctx.defaultSpaceId },
         INTEGRATION,
         AUTH_KEY,
         undefined,
@@ -248,7 +248,7 @@ describe("integration multi-client", () => {
       const customId = await seedCustomClient("custom-client-id", "custom-secret");
       const c = await resolveIntegrationClientById(
         customId,
-        "spc_someone_else",
+        { orgId: ctx.orgId, spaceId: "spc_someone_else" },
         INTEGRATION,
         AUTH_KEY,
         undefined,
@@ -260,7 +260,7 @@ describe("integration multi-client", () => {
       const customId = await seedCustomClient("custom-client-id", "custom-secret");
       const c = await resolveIntegrationClientById(
         customId,
-        ctx.defaultSpaceId,
+        { orgId: ctx.orgId, spaceId: ctx.defaultSpaceId },
         "@other/integration",
         AUTH_KEY,
         undefined,
@@ -280,7 +280,7 @@ describe("integration multi-client", () => {
       const resolve = () =>
         resolveIntegrationClientById(
           customId,
-          ctx.defaultSpaceId,
+          { orgId: ctx.orgId, spaceId: ctx.defaultSpaceId },
           INTEGRATION,
           AUTH_KEY,
           undefined,
@@ -298,7 +298,7 @@ describe("integration multi-client", () => {
     it("returns null when the id resolves to neither a system nor a custom client", async () => {
       const c = await resolveIntegrationClientById(
         "unknown-id",
-        ctx.defaultSpaceId,
+        { orgId: ctx.orgId, spaceId: ctx.defaultSpaceId },
         INTEGRATION,
         AUTH_KEY,
         undefined,
@@ -322,7 +322,7 @@ describe("integration multi-client", () => {
       ]);
       const c = await resolveIntegrationClientById(
         SYSTEM_ID,
-        ctx.defaultSpaceId,
+        { orgId: ctx.orgId, spaceId: ctx.defaultSpaceId },
         INTEGRATION,
         AUTH_KEY,
         undefined,
@@ -334,7 +334,7 @@ describe("integration multi-client", () => {
       seedSystemClient("should-be-ignored");
       const c = await resolveIntegrationClientById(
         SYSTEM_ID,
-        ctx.defaultSpaceId,
+        { orgId: ctx.orgId, spaceId: ctx.defaultSpaceId },
         INTEGRATION,
         AUTH_KEY,
         "none",
@@ -352,7 +352,7 @@ describe("integration multi-client", () => {
       const customId = await seedCustomClient("custom-client-id", "custom-secret");
       const c = await resolveIntegrationClientById(
         customId,
-        ctx.defaultSpaceId,
+        { orgId: ctx.orgId, spaceId: ctx.defaultSpaceId },
         INTEGRATION,
         AUTH_KEY,
         "none",
@@ -373,7 +373,7 @@ describe("integration multi-client", () => {
         AUTH_KEY,
         LOCAL_MANIFEST,
         OAUTH2_AUTH,
-        ctx.defaultSpaceId,
+        { orgId: ctx.orgId, spaceId: ctx.defaultSpaceId },
         { clientRef: SYSTEM_ID, oauthResource: null },
       );
       expect(ctxOut).not.toBeNull();
@@ -388,7 +388,7 @@ describe("integration multi-client", () => {
         AUTH_KEY,
         LOCAL_MANIFEST,
         OAUTH2_AUTH,
-        ctx.defaultSpaceId,
+        { orgId: ctx.orgId, spaceId: ctx.defaultSpaceId },
         { clientRef: customId, oauthResource: null },
       );
       expect(ctxOut).not.toBeNull();
@@ -402,7 +402,7 @@ describe("integration multi-client", () => {
         AUTH_KEY,
         LOCAL_MANIFEST,
         OAUTH2_AUTH,
-        ctx.defaultSpaceId,
+        { orgId: ctx.orgId, spaceId: ctx.defaultSpaceId },
         { clientRef: "removed-id", oauthResource: null },
       );
       expect(ctxOut).toBeNull();
@@ -417,7 +417,7 @@ describe("integration multi-client", () => {
         AUTH_KEY,
         LOCAL_MANIFEST,
         OAUTH2_AUTH,
-        ctx.defaultSpaceId,
+        { orgId: ctx.orgId, spaceId: ctx.defaultSpaceId },
         { clientRef: null, oauthResource: null },
       );
       expect(ctxOut).toBeNull();
@@ -430,7 +430,7 @@ describe("integration multi-client", () => {
         AUTH_KEY,
         LOCAL_MANIFEST,
         PUBLIC_AUTH,
-        ctx.defaultSpaceId,
+        { orgId: ctx.orgId, spaceId: ctx.defaultSpaceId },
         { clientRef: SYSTEM_ID, oauthResource: null },
       );
       expect(ctxOut).not.toBeNull();
@@ -449,7 +449,7 @@ describe("integration multi-client", () => {
         AUTH_KEY,
         LOCAL_MANIFEST,
         OAUTH2_AUTH,
-        ctx.defaultSpaceId,
+        { orgId: ctx.orgId, spaceId: ctx.defaultSpaceId },
         { clientRef: pinned, oauthResource: null },
       );
       expect(ctxOut!.clientSecret).toBe("rt-secret");

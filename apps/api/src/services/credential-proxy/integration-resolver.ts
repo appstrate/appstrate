@@ -211,9 +211,11 @@ export async function forceRefreshIntegrationProxyCredentials(
     integrationId: input.integrationId,
     manifest,
     authDef,
-    scope: { orgId: input.orgId, spaceId: input.spaceId },
-    actor: input.actor,
-    trigger: { kind: "rejected", revision: rejectedRevision },
+    trigger: {
+      kind: "rejected",
+      revision: rejectedRevision,
+      reach: { spaceId: input.spaceId, actor: input.actor },
+    },
   });
   let fields: Record<string, string> | null;
   switch (outcome.status) {

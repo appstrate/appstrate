@@ -524,6 +524,7 @@ export async function createOAuthCredential(input: CreateOAuthCredentialInput): 
       // Mirror `blob.expiresAt` onto the dedicated column so the refresh
       // worker scan can filter at SQL level. Blob remains source of truth.
       expiresAt: expiresAt !== null ? new Date(expiresAt) : null,
+      refreshCheckedAt: new Date(),
       createdBy: input.userId,
       ownerUserId,
     },
@@ -620,6 +621,7 @@ export async function reconnectOAuthCredential(
         credentialsEncrypted: encryptCredentials(blob as unknown as Record<string, unknown>),
         expiresAt: expiresAt !== null ? new Date(expiresAt) : null,
         refreshFailureCount: 0,
+        refreshCheckedAt: new Date(),
         updatedAt: new Date(),
       })
       .where(where);
@@ -1010,7 +1012,7 @@ export async function updateOAuthCredentialTokens(
     // working refresh proves the credential is healthy again, so the
     // escalation counter must not carry over. See
     // `recordModelCredentialRefreshFailure`.
-    { refreshFailureCount: 0 },
+    { refreshFailureCount: 0, refreshCheckedAt: new Date() },
   );
 }
 
