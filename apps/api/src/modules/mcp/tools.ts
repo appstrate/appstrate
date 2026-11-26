@@ -138,7 +138,11 @@ import {
 } from "./discovery.ts";
 import { buildPackageFileTools } from "./package-file-tools.ts";
 import { presentTools, withPresentation } from "./presentation.ts";
-import { MAX_PRESENTED_ITEMS, type PresentationSubject } from "@appstrate/core/mcp-presentation";
+import {
+  MAX_PRESENTED_ITEMS,
+  TOOL_LOOKUP_META_KEY,
+  type PresentationSubject,
+} from "@appstrate/core/mcp-presentation";
 import {
   ACTIVE_SPACES_META_KEY,
   OPERATION_SPACES_META_KEY,
@@ -590,11 +594,20 @@ function invalidFilter(args: Record<string, unknown>): Refusal | undefined {
   return undefined;
 }
 
-/** Read-only, unless the kind of integration tools is declared: reading its catalog reaches third-party servers. */
-function discoveryAnnotations(title: string, kinds: readonly DiscoveryKind[]): Tool["annotations"] {
+/**
+ * Read-only, unless the kind of integration tools is declared: reading its catalog reaches
+ * third-party servers, so `readOnlyHint` is withheld and the descriptor is stamped a lookup instead.
+ */
+function discoveryHints(
+  title: string,
+  kinds: readonly DiscoveryKind[],
+): Pick<Tool, "annotations" | "_meta"> {
   return kinds.includes("integration_tool")
-    ? { title, ...INTEGRATION_KIND_ANNOTATIONS }
-    : { title, readOnlyHint: true, idempotentHint: true, openWorldHint: false };
+    ? {
+        annotations: { title, ...INTEGRATION_KIND_ANNOTATIONS },
+        _meta: { [TOOL_LOOKUP_META_KEY]: true },
+      }
+    : { annotations: { title, readOnlyHint: true, idempotentHint: true, openWorldHint: false } };
 }
 
 function buildSearchTool(
@@ -618,7 +631,7 @@ function buildSearchTool(
       "role may not invoke are listed apart under `denied`, with the permissions they need: " +
       "report that to the user instead of trying them." +
       (kinds.includes("integration_tool") ? INTEGRATION_TOOLS_DESCRIPTION : ""),
-    annotations: discoveryAnnotations("Search", kinds),
+    ...discoveryHints("Search", kinds),
     inputSchema: {
       type: "object",
       additionalProperties: false,
@@ -727,8 +740,6 @@ function buildSearchTool(
       }),
       {
         title: typeof args.query === "string" && args.query ? args.query : "Search",
-        read_only: true,
-        destructive: false,
         count: found,
         items: subjects.slice(0, MAX_PRESENTED_ITEMS),
       },
@@ -961,7 +972,7 @@ function buildDescribeTool(
           "with call_integration_tool, how to read its result and what its connections' fields " +
           "mean. Its remote catalog is read from its server when not cached."
         : ""),
-    annotations: discoveryAnnotations("Describe", kinds),
+    ...discoveryHints("Describe", kinds),
     inputSchema: {
       type: "object",
       additionalProperties: false,

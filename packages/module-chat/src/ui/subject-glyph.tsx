@@ -9,22 +9,8 @@ import * as React from "react";
 import { CircleUserIcon, SparklesIcon } from "lucide-react";
 import type { PresentationSubject } from "@appstrate/core/mcp-presentation";
 import { IntegrationIcon } from "@appstrate/ui/components/integration-icon";
-import { AgentGlyph } from "./agent-glyph.tsx";
-import { useChatCommands } from "./use-chat-commands.ts";
+import { KnownAgentGlyph } from "./agent-glyph.tsx";
 import { subjectName } from "./tool-presentation.ts";
-
-/** An agent's tile, looked up in the `/` menu's data (shared query key: no extra request). */
-function AgentSubjectGlyph({
-  subject,
-  className,
-}: {
-  subject: PresentationSubject;
-  className?: string;
-}) {
-  const { data } = useChatCommands(true);
-  const agent = data?.agents.find((a) => a.packageId === subject.id);
-  return <AgentGlyph agent={agent} label={subjectName(subject)} className={className} />;
-}
 
 /** The glyph of what a call acted on: the integration's logo, the agent's tile, the user. */
 export function SubjectGlyph({
@@ -38,13 +24,17 @@ export function SubjectGlyph({
     case "integration":
       return <IntegrationIcon src={subject.icon} className={`${className} shrink-0 rounded-sm`} />;
     case "agent":
-      return <AgentSubjectGlyph subject={subject} className={className} />;
+      return (
+        <KnownAgentGlyph
+          agentRef={{ packageId: subject.id }}
+          label={subjectName(subject)}
+          className={className}
+        />
+      );
     case "skill":
       return <SparklesIcon className={`text-muted-foreground ${className} shrink-0`} />;
     case "user":
       return <CircleUserIcon className={`text-muted-foreground ${className} shrink-0`} />;
-    default:
-      return null;
   }
 }
 

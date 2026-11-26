@@ -971,15 +971,13 @@ export function MessageError() {
 }
 
 /**
- * Module-level: assistant-ui memoizes the group tree on its identity. Reasoning and
- * reads fold into one activity group (`reads-group.tsx`); reasoning keeps its own
- * disclosure inside it.
+ * Reasoning and reads fold into one activity group (`reads-group.tsx`); reasoning keeps its own
+ * disclosure inside it. `activityGroupOf` is module-level: assistant-ui memoizes the group tree
+ * on its identity.
  */
-const groupAssistantPart = (part: Parameters<typeof activityGroupOf>[0]) => activityGroupOf(part);
-
 function AssistantParts() {
   return (
-    <MessagePrimitive.GroupedParts groupBy={groupAssistantPart}>
+    <MessagePrimitive.GroupedParts groupBy={activityGroupOf}>
       {({ part, children }) => {
         switch (part.type) {
           case "group-activity":

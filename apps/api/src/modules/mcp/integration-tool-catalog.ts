@@ -313,8 +313,6 @@ const integrationListingSchema = z.looseObject({
         kind: z.literal("remote"),
         remote_name: z.string(),
         title: z.string().optional(),
-        read_only_hint: z.literal(true).optional(),
-        destructive_hint: z.literal(true).optional(),
         input_schema: schemaObject,
         output_schema: schemaObject.optional(),
         schema_reduced: z.array(z.enum(TOOL_DESCRIPTOR_REDUCTIONS)).optional(),

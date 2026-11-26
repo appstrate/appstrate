@@ -12600,16 +12600,6 @@ export interface operations {
                             remote_name?: string;
                             /** @description `remote` only, when the server gives one: the tool's display name (`title`, else `annotations.title`), sanitised. Server text, for display only. */
                             title?: string;
-                            /**
-                             * @description `remote` only: the server declares the tool reads only (`annotations.readOnlyHint`). An untrusted hint, for display only: nothing is gated on it.
-                             * @enum {boolean}
-                             */
-                            read_only_hint?: true;
-                            /**
-                             * @description `remote` only: the server declares the tool may destroy (`annotations.destructiveHint`). An untrusted hint, for display only.
-                             * @enum {boolean}
-                             */
-                            destructive_hint?: true;
                             /** @description `remote` only: the tool's input schema, sanitised as in a run. */
                             input_schema?: {
                                 [key: string]: unknown;

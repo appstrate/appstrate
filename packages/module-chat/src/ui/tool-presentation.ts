@@ -5,8 +5,7 @@
  * (`@appstrate/core/mcp-presentation`, relayed by the engine as `result.presentation`):
  * the integration, agent or user the call acted on, and for an operation its HTTP
  * method and OpenAPI tag. The card guesses nothing from a tool name or an operation id;
- * before the result lands it shows the tool's own label, and a result without a
- * presentation (a reply persisted before the stamp existed) keeps that label.
+ * until a result carries a presentation it shows the tool's own label.
  */
 
 import { EyeIcon, PencilIcon, PlusIcon, Trash2Icon, ZapIcon, type LucideIcon } from "lucide-react";
@@ -77,22 +76,13 @@ export function presentCall(
   fallbackLabel: string,
 ): PresentedCall {
   const subject = p.subject;
-  // `call_integration_tool`: « GitHub · Search issues ».
-  if (p.subject?.kind === "integration") {
-    return { label: `${subjectName(p.subject)} · ${p.title}`, subject };
-  }
+  const idText = subject ? { idText: subjectName(subject) } : {};
+  // An operation or a proxied request: « Lecture · Agents », « Écriture ».
   const op = operationLabel(p, t);
-  if (op) {
-    return {
-      label: op,
-      subject,
-      Icon: methodIcon(p.method) ?? ZapIcon,
-      idText: p.subject ? subjectName(p.subject) : p.title,
-    };
+  if (op) return { label: op, subject, Icon: methodIcon(p.method) ?? ZapIcon, ...idText };
+  // A remote integration tool: « GitHub · Search issues ».
+  if (subject?.kind === "integration") {
+    return { label: `${subjectName(subject)} · ${p.title}`, subject };
   }
-  return {
-    label: fallbackLabel,
-    subject,
-    ...(p.subject ? { idText: subjectName(p.subject) } : {}),
-  };
+  return { label: fallbackLabel, subject, ...idText };
 }

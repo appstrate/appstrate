@@ -2,18 +2,16 @@
 
 /**
  * The presentation stamped on every tool result (`@appstrate/core/mcp-presentation`): what the
- * call did, to what, and whether it wrote, so a client draws it without guessing from a tool name.
+ * call did and to what, so a client draws it without guessing from a tool name.
  * {@link presentTools} stamps every tool's results once, at the edge of the tool list: a tool that
  * knows more than its descriptor states it here, from its arguments and result, or in its handler
  * (`search` and `call_integration_tool`, which alone hold the integrations they read). Whatever a
- * handler stamps wins, and a result nothing describes gets its descriptor's title and hints.
+ * handler stamps wins, and a result nothing describes gets its descriptor's title.
  */
 
 import type { CallToolResult, Tool } from "@modelcontextprotocol/sdk/types.js";
 import type { AppstrateToolDefinition } from "@appstrate/mcp-transport";
 import {
-  isReadOnlyMethod,
-  TOOL_LOOKUP_META_KEY,
   TOOL_PRESENTATION_META_KEY,
   type PresentationSubject,
   type ToolPresentation,
@@ -31,28 +29,20 @@ export function withPresentation(
   return { ...result, _meta: { ...result._meta, [TOOL_PRESENTATION_META_KEY]: presentation } };
 }
 
-/**
- * The presentation a descriptor implies: its title and MCP hints. `destructiveHint` counts only
- * when stated on a tool that writes; MCP's default (`true`) would mark every unknown tool.
- */
+/** The presentation a descriptor implies: its display name (MCP: `title`, `annotations.title`, `name`). */
 export function descriptorPresentation(descriptor: Tool): ToolPresentation {
-  const hints = descriptor.annotations;
-  const readOnly = hints?.readOnlyHint === true;
-  return {
-    title: hints?.title ?? descriptor.title ?? descriptor.name,
-    read_only: readOnly,
-    destructive: !readOnly && hints?.destructiveHint === true,
-  };
+  return { title: descriptor.title ?? descriptor.annotations?.title ?? descriptor.name };
 }
 
-/** The tag of an operation whose package path parameter names an agent or an integration. */
-const SUBJECT_KIND_BY_TAG: Record<string, PresentationSubject["kind"]> = {
-  Agents: "agent",
-  Integrations: "integration",
-};
+/** The package kind an operation path names (`/api/agents/{…}`, `/api/packages/skills/{…}`, …). */
+const SUBJECT_KIND_IN_PATH = /\/(?:org-)?(agents|skills|integrations)\/\{/;
+const SUBJECT_KIND = { agents: "agent", skills: "skill", integrations: "integration" } as const;
 
-/** The package an operation's path parameters name (`packageId`, or `scope` and `name`). */
-function packageSubject(tag: string | undefined, args: Record<string, unknown>) {
+/** The agent, skill or integration an operation's path parameters name (`packageId`, or `scope` and `name`). */
+function packageSubject(pathTemplate: string, args: Record<string, unknown>) {
+  const segment = SUBJECT_KIND_IN_PATH.exec(pathTemplate)?.[1] as
+    keyof typeof SUBJECT_KIND | undefined;
+  if (!segment) return undefined;
   const params = asRecord(args.path_params) ?? {};
   const id =
     typeof params.packageId === "string"
@@ -60,12 +50,10 @@ function packageSubject(tag: string | undefined, args: Record<string, unknown>) 
       : typeof params.scope === "string" && typeof params.name === "string"
         ? `${params.scope.startsWith("@") ? "" : "@"}${params.scope}/${params.name}`
         : undefined;
-  if (!id) return undefined;
-  const kind = (tag === undefined ? undefined : SUBJECT_KIND_BY_TAG[tag]) ?? "package";
-  return { kind, id } satisfies PresentationSubject;
+  return id ? ({ kind: SUBJECT_KIND[segment], id } satisfies PresentationSubject) : undefined;
 }
 
-/** `invoke_operation`: the OpenAPI operation named, its method deciding whether it wrote. */
+/** `invoke_operation`: the OpenAPI operation named. */
 function presentOperation(args: Record<string, unknown>): ToolPresentation | undefined {
   const op =
     typeof args.operation_id === "string"
@@ -73,11 +61,9 @@ function presentOperation(args: Record<string, unknown>): ToolPresentation | und
       : undefined;
   if (!op) return undefined;
   const tag = op.tags[0];
-  const subject = packageSubject(tag, args);
+  const subject = packageSubject(op.pathTemplate, args);
   return {
     title: op.summary || op.operationId,
-    read_only: isReadOnlyMethod(op.method),
-    destructive: op.method === "DELETE",
     ...(tag ? { tag } : {}),
     method: op.method,
     ...(subject ? { subject } : {}),
@@ -95,23 +81,10 @@ function presentCaller(descriptor: Tool, result: CallToolResult): ToolPresentati
   };
 }
 
-/**
- * Tools that only look things up although MCP's `readOnlyHint` is withheld: with the kind of
- * integration tools, `search` and `describe` may read a third-party catalog, which journals a
- * call and can refresh a token, but they change nothing of the caller's.
- */
-const LOOKUP_TOOLS: ReadonlySet<string> = new Set(["search", "describe"]);
-
-/** `descriptor` as a client draws it: its icons, unless it declares its own, and the lookup stamp. */
-function presentDescriptor(descriptor: Tool): Tool {
+/** `descriptor` with its icons, unless it declares its own. */
+function withIcons(descriptor: Tool): Tool {
   const icons = descriptor.icons ? undefined : toolIcons(descriptor.name);
-  const lookup = LOOKUP_TOOLS.has(descriptor.name);
-  if (!icons && !lookup) return descriptor;
-  return {
-    ...descriptor,
-    ...(icons ? { icons } : {}),
-    ...(lookup ? { _meta: { ...descriptor._meta, [TOOL_LOOKUP_META_KEY]: true } } : {}),
-  };
+  return icons ? { ...descriptor, icons } : descriptor;
 }
 
 type Presenter = (
@@ -125,11 +98,11 @@ const PRESENTERS: Partial<Record<string, Presenter>> = {
   get_me: (descriptor, _args, result) => presentCaller(descriptor, result),
 };
 
-/** Every tool's results stamped with their presentation, and its descriptor as a client draws it. */
+/** Every tool's results stamped with their presentation, and its descriptor given its icons. */
 export function presentTools(tools: AppstrateToolDefinition[]): AppstrateToolDefinition[] {
   return tools.map((tool) => ({
     ...tool,
-    descriptor: presentDescriptor(tool.descriptor),
+    descriptor: withIcons(tool.descriptor),
     handler: async (args, extra) => {
       const result = await tool.handler(args, extra);
       if (result._meta?.[TOOL_PRESENTATION_META_KEY] !== undefined) return result;

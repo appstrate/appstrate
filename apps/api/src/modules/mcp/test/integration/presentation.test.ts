@@ -40,26 +40,15 @@ async function call(definition: AppstrateToolDefinition, args: Record<string, un
 }
 
 describe("descriptorPresentation", () => {
-  it("reads the title and the read-only hint", () => {
-    expect(
-      descriptorPresentation({
-        name: "list_files",
-        inputSchema: { type: "object" },
-        annotations: { title: "List files", readOnlyHint: true },
-      }),
-    ).toEqual({ title: "List files", read_only: true, destructive: false });
-  });
-
-  it("counts destructiveHint only when stated, never MCP's default", () => {
-    const base = { name: "x", inputSchema: { type: "object" as const } };
-    expect(descriptorPresentation(base)).toEqual({
-      title: "x",
-      read_only: false,
-      destructive: false,
+  it("names a tool as MCP does: title, then annotations.title, then name", () => {
+    const base = { name: "list_files", inputSchema: { type: "object" as const } };
+    expect(descriptorPresentation(base)).toEqual({ title: "list_files" });
+    expect(descriptorPresentation({ ...base, annotations: { title: "List" } })).toEqual({
+      title: "List",
     });
     expect(
-      descriptorPresentation({ ...base, annotations: { destructiveHint: true } }).destructive,
-    ).toBe(true);
+      descriptorPresentation({ ...base, title: "List files", annotations: { title: "List" } }),
+    ).toEqual({ title: "List files" });
   });
 });
 
@@ -68,13 +57,13 @@ describe("presentTools", () => {
     const { result, presentation } = await call(
       tool({ name: "read", annotations: { title: "Read resource", readOnlyHint: true } }, text({})),
     );
-    expect(presentation).toEqual({ title: "Read resource", read_only: true, destructive: false });
+    expect(presentation).toEqual({ title: "Read resource" });
     // The model's channel is untouched.
     expect(result.content).toEqual(text({}).content);
   });
 
   it("keeps what a handler stamped itself", async () => {
-    const own = { title: "Search", read_only: true, destructive: false, count: 3 };
+    const own = { title: "Search", count: 3 };
     const { presentation } = await call(tool({ name: "search" }, withPresentation(text({}), own)));
     expect(presentation).toEqual(own);
   });
@@ -90,22 +79,35 @@ describe("presentTools", () => {
       title: op.summary || op.operationId,
       tag: op.tags[0],
       method: "DELETE",
-      read_only: false,
-      destructive: true,
     });
   });
 
-  it("marks a GET operation read-only and names the package its path targets", async () => {
+  it("names the agent, skill or integration an operation's path targets", async () => {
+    const ops = [...getCatalog().operations.values()];
+    const byPath = (pattern: RegExp) => ops.find((op) => pattern.test(op.pathTemplate))!;
+    const cases = [
+      [byPath(/^\/api\/agents\/\{scope\}\/\{name\}\/model$/), "agent"],
+      [byPath(/^\/api\/packages\/skills\/\{scope\}\/\{name\}$/), "skill"],
+      [byPath(/^\/api\/packages\/integrations\/\{scope\}\/\{name\}$/), "integration"],
+    ] as const;
+    for (const [op, kind] of cases) {
+      const { presentation } = await call(tool({ name: "invoke_operation" }, text({})), {
+        operation_id: op.operationId,
+        path_params: { scope: "acme", name: "triage" },
+      });
+      expect(presentation?.subject).toEqual({ kind, id: "@acme/triage" });
+    }
+  });
+
+  it("names no subject for a path that targets no package", async () => {
+    const op = [...getCatalog().operations.values()].find(
+      (candidate) => candidate.pathTemplate === "/api/runs/{id}",
+    )!;
     const { presentation } = await call(tool({ name: "invoke_operation" }, text({})), {
-      operation_id: "getAgentModel",
-      path_params: { scope: "@acme", name: "triage" },
+      operation_id: op.operationId,
+      path_params: { id: "run_1" },
     });
-    expect(presentation).toMatchObject({
-      method: "GET",
-      read_only: true,
-      destructive: false,
-      subject: { kind: "agent", id: "@acme/triage" },
-    });
+    expect(presentation?.subject).toBeUndefined();
   });
 
   it("falls back to the descriptor for an unknown operation", async () => {
@@ -156,18 +158,28 @@ describe("tool icons", () => {
   });
 });
 
-describe("lookup stamp", () => {
-  it("marks search and describe lookups, and nothing else", () => {
-    const [search, describeTool, invoke] = presentTools([
-      tool({ name: "search" }, text({})),
-      tool({ name: "describe" }, text({})),
-      tool({ name: "invoke_operation" }, text({})),
-    ]);
-    expect(search!.descriptor._meta?.[TOOL_LOOKUP_META_KEY]).toBe(true);
-    expect(describeTool!.descriptor._meta?.[TOOL_LOOKUP_META_KEY]).toBe(true);
-    expect(invoke!.descriptor._meta?.[TOOL_LOOKUP_META_KEY]).toBeUndefined();
-    expect(isLookupTool(search!.descriptor)).toBe(true);
-    expect(isLookupTool(invoke!.descriptor)).toBe(false);
+describe("isLookupTool", () => {
+  it("reads readOnlyHint or the lookup stamp, nothing else", () => {
     expect(isLookupTool({ annotations: { readOnlyHint: true } })).toBe(true);
+    expect(isLookupTool({ _meta: { [TOOL_LOOKUP_META_KEY]: true } })).toBe(true);
+    expect(isLookupTool({ annotations: { readOnlyHint: false } })).toBe(false);
+    expect(isLookupTool({})).toBe(false);
   });
+});
+
+describe("operation tags ↔ chat locales", () => {
+  // A card shows an operation's first tag translated (`tool.tag.<tag>`, the chat namespace).
+  const tags = new Set([...getCatalog().operations.values()].flatMap((op) => op.tags.slice(0, 1)));
+  for (const lang of ["fr", "en"]) {
+    it(`gives every tag a sentence in ${lang}, and no tag that is gone`, async () => {
+      const locale = (await Bun.file(
+        new URL(`../../../../../../web/src/locales/${lang}/chat.json`, import.meta.url),
+      ).json()) as Record<string, string>;
+      const keyed = Object.keys(locale)
+        .filter((key) => key.startsWith("tool.tag."))
+        .map((key) => key.slice("tool.tag.".length));
+      expect([...tags].filter((tag) => !keyed.includes(tag)).sort()).toEqual([]);
+      expect(keyed.filter((tag) => !tags.has(tag)).sort()).toEqual([]);
+    });
+  }
 });

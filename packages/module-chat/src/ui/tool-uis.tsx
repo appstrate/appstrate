@@ -123,25 +123,25 @@ function Meta({
 }
 
 /**
- * Single leading icon per row: what the call acted on (`lead`: an integration's
+ * Single leading icon per row: the glyph of what the call acted on (an integration's
  * logo, an agent's tile) when the platform named it, else the verb icon, tinted by phase
- * (neutral / destructive). While running it is replaced by a spinner. Status is
+ * (neutral / error). While running it is replaced by a spinner. Status is
  * otherwise carried by the HTTP badge, the red border, and the inline error —
  * no separate status icon, so the row shows one coherent glyph.
  */
 function LeadIcon({
   phase,
   Icon,
-  lead,
+  subject,
 }: {
   phase: ToolPhase;
   Icon: LucideIcon;
-  lead?: React.ReactNode;
+  subject?: PresentationSubject;
 }) {
   if (phase === "running") {
     return <Spinner className="text-muted-foreground size-4 shrink-0" />;
   }
-  if (lead) return lead;
+  if (subject) return <SubjectGlyph subject={subject} />;
   const tone = phase === "error" ? "text-destructive" : "text-muted-foreground";
   return <Icon className={`size-4 shrink-0 ${tone}`} />;
 }
@@ -209,7 +209,6 @@ export function ToolCallCard({
   footer?: React.ReactNode;
 }) {
   const { t } = useChatHost();
-  const lead = subject ? <SubjectGlyph subject={subject} /> : undefined;
   const title = labelKey ? t(labelKey) : (label ?? "");
   const [open, setOpen] = React.useState(false);
   // `unwrapMcpResult` JSON-parses the tool payload. Unmemoized it re-parsed on
@@ -238,7 +237,7 @@ export function ToolCallCard({
         className="hover:bg-muted/50 flex h-9 w-full items-center gap-2 rounded-lg px-3 text-left text-sm"
         onClick={() => setOpen(true)}
       >
-        <LeadIcon phase={phase} Icon={Icon} lead={lead} />
+        <LeadIcon phase={phase} Icon={Icon} subject={subject} />
         <span className="flex min-w-0 flex-1 items-center gap-2 truncate">
           <span className="font-medium">{title}</span>
           {idText ? <code className="text-muted-foreground truncate text-xs">{idText}</code> : null}
@@ -255,7 +254,7 @@ export function ToolCallCard({
         <Modal
           title={
             <span className="flex items-center gap-2">
-              {lead ?? <Icon className="size-4 shrink-0" />}
+              {subject ? <SubjectGlyph subject={subject} /> : <Icon className="size-4 shrink-0" />}
               {title}
               {idText ? <code className="text-muted-foreground text-xs">{idText}</code> : null}
             </span>

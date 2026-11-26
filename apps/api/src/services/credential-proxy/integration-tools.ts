@@ -73,10 +73,8 @@ interface RemoteTool extends ToolBase {
   kind: "remote";
   /** The name the server lists it by: `tools/call` takes it. */
   remote_name: string;
-  /** The server's display name for it, and the hints it declares (untrusted, for display only). */
+  /** The server's display name for it (untrusted, for display only). */
   title?: string;
-  read_only_hint?: true;
-  destructive_hint?: true;
   input_schema: Record<string, unknown>;
   output_schema?: Record<string, unknown>;
   /** The schema shown is partial: the budget steps applied to the server's descriptor, in order. */
@@ -456,8 +454,6 @@ async function remoteTools(
       description: upstream.description ? `${about}. ${upstream.description}` : `${about}.`,
       remote_name: upstream.name,
       ...(upstream.title ? { title: upstream.title } : {}),
-      ...(upstream.read_only_hint ? { read_only_hint: true as const } : {}),
-      ...(upstream.destructive_hint ? { destructive_hint: true as const } : {}),
       input_schema: upstream.input_schema,
       ...(upstream.output_schema ? { output_schema: upstream.output_schema } : {}),
       ...(upstream.schema_reduced ? { schema_reduced: upstream.schema_reduced } : {}),

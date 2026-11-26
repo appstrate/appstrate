@@ -12,6 +12,8 @@
 
 import { describe, it, expect, afterEach } from "bun:test";
 import type { AppstrateRequestExtra } from "@appstrate/mcp-transport";
+import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
+import { TOOL_PRESENTATION_META_KEY } from "@appstrate/core/mcp-presentation";
 import { withImpliedPermissions } from "@appstrate/core/permissions";
 import {
   FORWARDED_AUTH_HEADERS,
@@ -149,6 +151,10 @@ const listingOf =
           ),
         ).values(),
       ],
+      // Each integration a tool reaches, named once.
+      integrations: [...new Set(tools.map((tool) => String(tool.integration_package_id)))].map(
+        (id) => ({ integration_package_id: id, display_name: id }),
+      ),
       not_ready: rest.not_ready ?? [],
       unlisted: rest.unlisted ?? [],
       truncated_catalogs: rest.truncated_catalogs ?? [],
@@ -1367,7 +1373,11 @@ describe("typed tools of a remote MCP integration", () => {
     // Relayed as the server answered, marked relayed whatever it claimed.
     expect(result).toEqual({
       ...upstream,
-      _meta: { "acme.example/page": 2, "dev.appstrate/relayed": true },
+      _meta: {
+        "acme.example/page": 2,
+        "dev.appstrate/relayed": true,
+        [TOOL_PRESENTATION_META_KEY]: expect.any(Object),
+      },
     });
     const call = callTool(made.calls)!;
     expect(await call.json()).toEqual({
@@ -1463,7 +1473,10 @@ describe("typed tools of a remote MCP integration", () => {
       .get("call_integration_tool")!
       .handler({ tool: "acme_docs__search", arguments: { q: "x" } }, noExtra);
     // As is, marked relayed: a third party wrote it whole.
-    expect(result).toEqual({ ...upstream, _meta: { "dev.appstrate/relayed": true } });
+    expect(result).toEqual({
+      ...upstream,
+      _meta: { "dev.appstrate/relayed": true, [TOOL_PRESENTATION_META_KEY]: expect.any(Object) },
+    });
   });
 
   it("explains missing_scopes in a typed tool's usage only", async () => {
@@ -1705,6 +1718,7 @@ describe("call_integration_tool — a result past the budget", () => {
     expect(result._meta).toEqual({
       "dev.appstrate/truncated": true,
       "dev.appstrate/relayed": true,
+      [TOOL_PRESENTATION_META_KEY]: expect.any(Object),
     });
     expect(jsonBytes(result)).toBeLessThanOrEqual(256 * 1024);
   });
@@ -1714,7 +1728,15 @@ describe("call_integration_tool — a result past the budget", () => {
     makeTools(CALL_OWN, () => Response.json({ result: upstream }), true, fixture)
       .byName.get("call_integration_tool")!
       .handler({ tool: "acme_docs__search", arguments: {} }, noExtra);
-  const jsonBytes = (value: unknown) => new TextEncoder().encode(JSON.stringify(value)).byteLength;
+  /**
+   * The bytes of what the server answered, as relayed: the platform's presentation stamp is its
+   * own display metadata, outside the budget (its size has a bound of its own).
+   */
+  const jsonBytes = (result: CallToolResult) => {
+    const { [TOOL_PRESENTATION_META_KEY]: stamp, ...meta } = result._meta ?? {};
+    expect(stamp).toBeDefined();
+    return new TextEncoder().encode(JSON.stringify({ ...result, _meta: meta })).byteLength;
+  };
 
   it("cuts a text block to its text alone, dropping the fields that made it too large", async () => {
     const result = await relayedResult({

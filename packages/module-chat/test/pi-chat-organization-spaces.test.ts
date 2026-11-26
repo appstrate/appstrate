@@ -287,7 +287,7 @@ describe("a forwarded tool", () => {
     const transport = transcript();
     const { built, tool } = await tools(transport);
     try {
-      const presentation = { title: "List models", read_only: true, destructive: false };
+      const presentation = { title: "List models" };
       transport.answers.remote = remote({
         [OPERATION_SPACES_META_KEY]: [],
         [TOOL_PRESENTATION_META_KEY]: presentation,

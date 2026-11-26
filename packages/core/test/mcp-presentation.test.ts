@@ -2,14 +2,13 @@
 
 import { describe, it, expect } from "bun:test";
 import {
-  isReadOnlyMethod,
   MAX_PRESENTED_ITEMS,
   readToolPresentation,
   TOOL_PRESENTATION_META_KEY,
 } from "../src/mcp-presentation.ts";
 
 describe("readToolPresentation", () => {
-  const valid = { title: "Search", read_only: true, destructive: false };
+  const valid = { title: "Search" };
 
   it("reads the stamp under its key", () => {
     expect(readToolPresentation({ [TOOL_PRESENTATION_META_KEY]: valid })).toEqual(valid);
@@ -26,6 +25,14 @@ describe("readToolPresentation", () => {
     ).toBeUndefined();
   });
 
+  it("reads no subject of a kind it does not know", () => {
+    expect(
+      readToolPresentation({
+        [TOOL_PRESENTATION_META_KEY]: { ...valid, subject: { kind: "package", id: "@a/b" } },
+      }),
+    ).toBeUndefined();
+  });
+
   it("bounds the subjects a search lists", () => {
     const items = Array.from({ length: MAX_PRESENTED_ITEMS + 1 }, (_, i) => ({
       kind: "agent" as const,
@@ -34,12 +41,5 @@ describe("readToolPresentation", () => {
     expect(
       readToolPresentation({ [TOOL_PRESENTATION_META_KEY]: { ...valid, items } }),
     ).toBeUndefined();
-  });
-});
-
-describe("isReadOnlyMethod", () => {
-  it("is GET and HEAD alone, in any case", () => {
-    expect(["GET", "head", "Get"].every(isReadOnlyMethod)).toBe(true);
-    expect(["POST", "PUT", "PATCH", "DELETE"].some(isReadOnlyMethod)).toBe(false);
   });
 });

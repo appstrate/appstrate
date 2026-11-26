@@ -301,10 +301,6 @@ interface ServerTool {
   description?: string;
   /** The server's display name for it (`title`, else `annotations.title`). */
   title?: string;
-  /** The server declares it reads only (`annotations.readOnlyHint: true`). */
-  read_only_hint?: true;
-  /** The server declares it may destroy (`annotations.destructiveHint: true`). */
-  destructive_hint?: true;
   input_schema: Tool["inputSchema"];
   /** Present when the server declares one. */
   output_schema?: NonNullable<Tool["outputSchema"]>;
@@ -404,7 +400,7 @@ export async function listRemoteTools(
       .map(({ tool, reduced }) => ({
         name: tool.name,
         ...(tool.description !== undefined ? { description: tool.description } : {}),
-        ...serverHints(tool),
+        ...serverTitle(tool),
         input_schema: tool.inputSchema,
         ...(tool.outputSchema !== undefined ? { output_schema: tool.outputSchema } : {}),
         ...(reduced.length > 0 ? { schema_reduced: reduced } : {}),
@@ -414,21 +410,12 @@ export async function listRemoteTools(
   };
 }
 
-/**
- * What the server says of a tool beyond its schema, for how a client shows its calls: hints only,
- * never trusted to gate anything (MCP: "annotations ... should be considered untrusted").
- */
-function serverHints(
-  tool: Tool,
-): Pick<ServerTool, "title" | "read_only_hint" | "destructive_hint"> {
+/** The server's display name for a tool (MCP: `title`, else `annotations.title`), sanitised. */
+function serverTitle(tool: Tool): Pick<ServerTool, "title"> {
   const title = [tool.title, tool.annotations?.title]
     .map((candidate) => sanitiseTextField(candidate, MAX_PARAMETER_DESCRIPTION_BYTES)?.trim())
     .find(Boolean);
-  return {
-    ...(title ? { title } : {}),
-    ...(tool.annotations?.readOnlyHint === true ? { read_only_hint: true as const } : {}),
-    ...(tool.annotations?.destructiveHint === true ? { destructive_hint: true as const } : {}),
-  };
+  return title ? { title } : {};
 }
 
 /**
