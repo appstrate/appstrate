@@ -6,7 +6,6 @@ import { RefreshCw } from "lucide-react";
 import { Button } from "@appstrate/ui/components/button";
 import { Spinner } from "@appstrate/ui/components/spinner";
 import { errorMessage } from "../../lib/mutation-error";
-import type { ServerReadBlock } from "../../lib/integration-server-sync";
 import type { SnapshotRefreshBlock } from "../../lib/integration-tool-snapshot";
 import { DisabledReasonTooltip } from "../disabled-reason-tooltip";
 import { SyncConnectionChoice } from "./sync-connection-choice";
@@ -29,7 +28,7 @@ export function ServerReadControl({
 }: {
   label: string;
   /** Why the server cannot be read; `null` when it can. */
-  blockedBy: ServerReadBlock | SnapshotRefreshBlock | null;
+  blockedBy: SnapshotRefreshBlock | null;
   isPending: boolean;
   error: unknown;
   onRun: (connectionId?: string) => void;

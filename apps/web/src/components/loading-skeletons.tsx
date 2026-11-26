@@ -705,27 +705,16 @@ export function SettingsSkeleton({ rows = 3, className }: { rows?: number; class
 }
 
 /**
- * The space's tool policy while it loads: `ToolPolicyView`'s groups in their common case (the
- * review's title, hint and « nothing to review » line, then the blocked group's picker).
+ * The space's tool review while the policy loads: what `ToolPolicyView` draws under its heading
+ * and hint (the heading stays, the policy is not needed to draw it) in the common case, a card.
  */
 export function ToolPolicySkeleton() {
-  // The common case: nothing to review, nothing approved, the block picker. Each group is
-  // `SettingsGroup`'s chrome (`mb-8`, a `mb-4` heading) over the body's own description line.
   return (
-    <Waiting className="flex flex-col gap-2">
-      <div className="mb-8">
-        <header className="mb-4">
-          <SkeletonLine className="w-40 text-base font-semibold" />
-        </header>
-        <SkeletonLine className="mb-3 w-2/3 text-sm" />
-        <SkeletonLine className="w-36 text-sm" />
-      </div>
-      <div className="mb-8">
-        <header className="mb-4">
-          <SkeletonLine className="w-32 text-base font-semibold" />
-        </header>
-        <SkeletonLine className="mb-3 w-1/2 text-sm" />
-        <Skeleton className="h-9 w-full max-w-sm" />
+    <Waiting>
+      <div className="flex flex-col gap-3 rounded-lg border p-4">
+        <SkeletonLine className="w-40 text-sm" />
+        <SkeletonLine className="w-2/3 text-sm" />
+        <Skeleton className="h-8 w-44" />
       </div>
     </Waiting>
   );

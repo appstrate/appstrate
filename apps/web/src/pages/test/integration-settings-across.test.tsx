@@ -156,7 +156,7 @@ describe("an integration's configuration with a space selected", () => {
 // same lines and never reads or writes a space the page does not name.
 describe("an integration's tool review", () => {
   const POLICY = 'data-testid="integration-tool-policy"';
-  const AREA = 'data-testid="integration-tool-policy-area"';
+  const REVIEW = 'data-testid="tool-review"';
   const POLICY_KEY = [
     "get",
     "/api/integrations/{packageId}/tool-policy",
@@ -188,15 +188,14 @@ describe("an integration's tool review", () => {
 
   it("names the space it is set in, in « Tous les espaces »", () => {
     const html = tools(true, ["integrations:configure"]);
-    expect(html).toContain(AREA);
     expect(html).toContain(SPACE_LINE);
-    expect(html).toContain(POLICY);
+    expect(html).toContain(REVIEW);
   });
 
   it("reads nothing of the working space it is off in", () => {
     const html = tools(true, ["integrations:configure"], ["spc_b"]);
     expect(html).toContain(SPACE_LINE);
-    expect(html).not.toContain(POLICY);
+    expect(html).not.toContain(REVIEW);
   });
 
   it("points at « Activer » while the integration is off, and says what the role refuses", () => {
@@ -205,17 +204,17 @@ describe("an integration's tool review", () => {
     expect(refused).toContain(
       settingsT("integration.config.roleLimitIn", { space: "Studio" }).replace(/'/g, "&#x27;"),
     );
-    expect(refused).not.toContain(POLICY);
+    expect(refused).not.toContain(REVIEW);
   });
 
   it("is absent where no space of the integration offers configuring it", () => {
-    expect(tools(true, [], ["spc_a"])).not.toContain(AREA);
-    expect(tools(false, [])).not.toContain(AREA);
+    expect(tools(true, [], ["spc_a"])).not.toContain(POLICY);
+    expect(tools(false, [])).not.toContain(POLICY);
   });
 
   it("shows plainly with a space selected", () => {
     const html = tools(false, ["integrations:configure"]);
-    expect(html).toContain(POLICY);
+    expect(html).toContain(REVIEW);
     expect(html).not.toContain(SPACE_LINE);
   });
 });

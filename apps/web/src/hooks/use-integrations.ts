@@ -278,12 +278,12 @@ export function useIntegrationToolPolicy(packageId: string | undefined, enabled:
   );
 }
 
+export type ToolPolicyAction = "approve" | "revoke" | "block" | "unblock";
+
 /**
  * The tool policy's four writes. Each refreshes every integrations read: the detail's
  * `tool_catalog` statuses move with the policy. A refusal is toasted by the mutation cache.
  */
-export type ToolPolicyAction = "approve" | "revoke" | "block" | "unblock";
-
 export function useIntegrationToolPolicyActions(packageId: string) {
   const qc = useQueryClient();
   const onSuccess = () => invalidateIntegrationQueries(qc);
@@ -305,8 +305,9 @@ export function useIntegrationToolPolicyActions(packageId: string) {
     { onSuccess },
   );
   return {
-    approve: (body: Parameters<typeof approve.mutate>[0]["body"]) =>
-      approve.mutate({ params: { path }, body }),
+    /** `onDone` runs once the write succeeded (a confirmation closes then). */
+    approve: (body: Parameters<typeof approve.mutate>[0]["body"], onDone?: () => void) =>
+      approve.mutate({ params: { path }, body }, { onSuccess: onDone }),
     /** `onDone` runs once the write succeeded (a confirmation closes then). */
     revoke: (toolName: string, onDone?: () => void) =>
       revoke.mutate({ params: { path: { ...path, toolName } } }, { onSuccess: onDone }),

@@ -1,10 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
 
-/** The slice of a catalog entry the scope counter reads. */
+import { isUsableToolStatus } from "../components/agent-editor/tool-selection";
+import type { ToolCatalogEntry } from "./integration-tool-policy";
+
+/** A tool as the table shows it: its status (absent for a catalog without a verdict) and its scopes. */
 interface ScopedTool {
-  /** Absent: a catalog without a verdict, whose tools all count as usable. */
-  status?: string;
-  policy?: { required_scopes?: Readonly<Record<string, readonly string[]>> };
+  status?: ToolCatalogEntry["status"];
+  permissions?: Readonly<Record<string, readonly string[]>>;
 }
 
 /**
@@ -21,8 +23,8 @@ export function hasOAuthAuth(auths: readonly { type: string }[]): boolean {
  */
 export function isToolWithoutPermission(tool: ScopedTool): boolean {
   return (
-    (tool.status ?? "available") === "available" &&
-    Object.values(tool.policy?.required_scopes ?? {}).every((scopes) => scopes.length === 0)
+    isUsableToolStatus(tool.status) &&
+    Object.values(tool.permissions ?? {}).every((scopes) => scopes.length === 0)
   );
 }
 

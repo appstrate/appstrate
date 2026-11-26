@@ -6,9 +6,13 @@
  */
 
 import { describe, expect, it } from "bun:test";
-import { i18nReady } from "../../../i18n.ts";
-import { render } from "../../../test/render.tsx";
-import { IntegrationToolsSection } from "../integration-tools-section.tsx";
+import { installThemeEnv } from "../../../test/theme-env.ts";
+
+installThemeEnv();
+
+const { i18nReady } = await import("../../../i18n.ts");
+const { render } = await import("../../../test/render.tsx");
+const { IntegrationToolsSection } = await import("../integration-tools-section.tsx");
 
 await i18nReady;
 
@@ -21,7 +25,11 @@ const manifest = {
 describe("IntegrationToolsSection without a saved catalog", () => {
   it("lists the tools the draft declares a policy for, with their scopes", () => {
     const html = render(
-      <IntegrationToolsSection tools={[]} edit={{ manifest, onChange: () => {} }} />,
+      <IntegrationToolsSection
+        packageId="@acme/crm"
+        tools={[]}
+        edit={{ manifest, onChange: () => {} }}
+      />,
     );
     expect(html).toContain("list_issues");
     expect(html).toContain("issues:read");
@@ -29,7 +37,11 @@ describe("IntegrationToolsSection without a saved catalog", () => {
 
   it("offers the wildcard toggle", () => {
     const html = render(
-      <IntegrationToolsSection tools={[]} edit={{ manifest, onChange: () => {} }} />,
+      <IntegrationToolsSection
+        packageId="@acme/crm"
+        tools={[]}
+        edit={{ manifest, onChange: () => {} }}
+      />,
     );
     expect(html).toContain('data-testid="integration-editor-allow-undeclared-tools"');
   });

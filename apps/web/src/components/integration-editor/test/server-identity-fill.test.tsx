@@ -7,10 +7,15 @@ import { ServerIdentityFill } from "../server-identity-fill.tsx";
 
 await i18nReady;
 
-const apply = async () => [];
-
 function renderFill(blockedBy: "sse" | "no_permission" | "no_connection" | null) {
-  return render(<ServerIdentityFill packageId="@acme/x" blockedBy={blockedBy} apply={apply} />);
+  return render(
+    <ServerIdentityFill
+      packageId="@acme/x"
+      blockedBy={blockedBy}
+      manifest={{}}
+      onChange={() => {}}
+    />,
+  );
 }
 
 describe("ServerIdentityFill", () => {

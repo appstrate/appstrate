@@ -9,20 +9,7 @@ import {
   linkedSpacePath,
   linkedSpaceStep,
   rowSpace,
-  spaceCarrying,
 } from "../across-spaces.ts";
-
-describe("spaceCarrying", () => {
-  it("keeps the preferred space where the row is placed", () => {
-    expect(spaceCarrying("spc_home", ["spc_a", "spc_home"], "spc_a")).toBe("spc_home");
-  });
-
-  it("falls back where the row is not placed in it, or its placements are unknown", () => {
-    expect(spaceCarrying("spc_home", ["spc_a"], "spc_a")).toBe("spc_a");
-    expect(spaceCarrying("spc_home", undefined, undefined)).toBeUndefined();
-    expect(spaceCarrying(null, ["spc_a"], "spc_a")).toBe("spc_a");
-  });
-});
 
 describe("rowSpace", () => {
   it("opens a row listed in the current space there", () => {

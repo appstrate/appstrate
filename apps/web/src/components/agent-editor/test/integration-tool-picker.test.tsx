@@ -13,6 +13,7 @@ import { $api } from "../../../api/client.ts";
 import i18n, { i18nReady } from "../../../i18n.ts";
 import { installFakeStorage } from "../../../test/fake-storage.ts";
 import { render } from "../../../test/render.tsx";
+import { memberSpaceClient, renderInSpace, testSpace } from "../../../test/space-context.ts";
 import { IntegrationToolPicker } from "../integration-tool-picker.tsx";
 import type { ResourceEntry } from "../types.ts";
 
@@ -151,17 +152,19 @@ describe("IntegrationToolPicker — inferred scopes", () => {
 // A tool the space cannot serve (absent from the server, awaiting approval, blocked) is greyed and
 // cannot be added; one already selected stays selected and says it will not be there at launch.
 describe("IntegrationToolPicker — tool status", () => {
-  const DETAIL_KEY = $api.queryOptions("get", "/api/integrations/{packageId}", {
-    params: {
-      path: { packageId: ID },
-      header: { "X-Org-Id": undefined, "X-Space-Id": undefined },
-    },
-  }).queryKey;
+  // The reader is in « Atelier »; `spaceName` reads the statuses in the space « Équipe Léa ».
+  const detailKey = (spaceId: string) =>
+    $api.queryOptions("get", "/api/integrations/{packageId}", {
+      params: { path: { packageId: ID }, header: { "X-Org-Id": "org_1", "X-Space-Id": spaceId } },
+    }).queryKey;
 
   function renderOver(tools: string[], spaceName?: string): string {
-    const qc = new QueryClient();
+    const qc = memberSpaceClient([
+      testSpace("spc_a", ["integrations:read"]),
+      testSpace("spc_lea", ["integrations:read"], "Équipe Léa"),
+    ]);
     const base = { modified: false, fingerprint: null, origin: "declared" };
-    qc.setQueryData(DETAIL_KEY, {
+    qc.setQueryData(detailKey(spaceName ? "spc_lea" : "spc_a"), {
       manifest: { auths: {} },
       auths: [],
       active: true,
@@ -174,14 +177,14 @@ describe("IntegrationToolPicker — tool status", () => {
         { ...base, name: "no_tool", status: "blocked", modified: true },
       ],
     });
-    return render(
+    return renderInSpace(
       <IntegrationToolPicker
         packageId={ID}
-        spaceName={spaceName}
+        spaceId={spaceName ? "spc_lea" : undefined}
         entry={{ id: ID, version: "*", tools }}
         onChange={() => {}}
       />,
-      { queryClient: qc },
+      { queryClient: qc, overview: false },
     );
   }
 
@@ -194,8 +197,8 @@ describe("IntegrationToolPicker — tool status", () => {
 
   it("shows the reason of each unusable tool and disables adding it", () => {
     const html = renderOver([]);
-    expect(html).toContain(i18n.t("agents:packageTools.reason.pending"));
-    expect(html).toContain(i18n.t("agents:packageTools.reason.blocked"));
+    expect(html).toContain("En attente d’approbation dans cet espace");
+    expect(html).toContain("Bloqué dans cet espace");
     expect(html).toContain("Absent du serveur à la dernière lecture (");
     expect(html).toContain(i18n.t("agents:packageTools.modified"));
     const disabled = (name: string) =>

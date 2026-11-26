@@ -48,6 +48,8 @@ import {
 import { Button } from "@appstrate/ui/components/button";
 import { PackageToolCatalog } from "../package-detail/package-tool-catalog";
 import { useIntegrationDetail } from "../../hooks/use-integrations";
+import { useCurrentSpaceId } from "../../hooks/use-current-space";
+import { useSpaceLabelOf } from "../../hooks/use-spaces";
 import type { ResourceEntry } from "./types";
 import { isPlatformEntry } from "./utils";
 import { TextSkeleton } from "../loading-skeletons";
@@ -55,8 +57,6 @@ import { TextSkeleton } from "../loading-skeletons";
 interface IntegrationToolPickerProps {
   packageId: string;
   spaceId?: string;
-  /** The space the statuses are read in, when it is not the one the reader is in. */
-  spaceName?: string;
   entry: ResourceEntry;
   onChange: (next: ResourceEntry) => void;
 }
@@ -103,14 +103,12 @@ function RequiredIntegrationToggle({ packageId, entry, onChange }: IntegrationTo
   );
 }
 
-function IntegrationToolPanel({
-  packageId,
-  spaceId,
-  spaceName,
-  entry,
-  onChange,
-}: IntegrationToolPickerProps) {
+function IntegrationToolPanel({ packageId, spaceId, entry, onChange }: IntegrationToolPickerProps) {
   const { t } = useTranslation("settings");
+  // The statuses are the space's the detail is read in: named when it is not the reader's own.
+  const spaceLabelOf = useSpaceLabelOf();
+  const workingSpaceId = useCurrentSpaceId();
+  const spaceName = spaceId && spaceId !== workingSpaceId ? spaceLabelOf(spaceId) : undefined;
   const { data: detail, isLoading } = useIntegrationDetail(packageId, spaceId);
 
   if (isLoading) {
@@ -425,15 +423,20 @@ function IntegrationToolPanel({
           <PackageToolCatalog
             listedAt={detail.tool_snapshot?.listed_at}
             spaceName={spaceName}
-            tools={nativeCatalog.map((tool) => ({
-              name: tool.name,
-              description: tool.description,
-              permissions: tool.policy?.required_scopes,
-              status: tool.status,
-              origin: tool.origin,
-              modified: tool.modified,
-              scopesUnknown: hasOAuthAuth(detail.auths) && isToolWithoutPermission(tool),
-            }))}
+            tools={nativeCatalog.map((tool) => {
+              const permissions = tool.policy?.required_scopes;
+              return {
+                name: tool.name,
+                description: tool.description,
+                permissions,
+                status: tool.status,
+                origin: tool.origin,
+                modified: tool.modified,
+                scopesUnknown:
+                  hasOAuthAuth(detail.auths) &&
+                  isToolWithoutPermission({ status: tool.status, permissions }),
+              };
+            })}
             selection={{ values: selectedTools, onToggle: toggleTool }}
           />
         </div>

@@ -3,19 +3,24 @@
 /** Pure tool-selection transforms for the integration picker, kept DOM-free for unit tests. */
 
 import { apiUploadToolNameFor } from "@appstrate/core/integration";
+import type { ToolCatalogEntry } from "../../lib/integration-tool-policy";
+
+/** A tool an agent can call: no verdict (a catalog without one) or `available`. */
+export function isUsableToolStatus(status: ToolCatalogEntry["status"] | undefined): boolean {
+  return status === undefined || status === "available";
+}
 
 /**
- * What « Tout sélectionner » may add: the tools whose checkbox is enabled (a missing, pending or
- * blocked tool is not callable), plus the ones already selected, which stay toggleable.
+ * What « Tout sélectionner » may add: the usable tools, plus the ones already selected, which stay
+ * toggleable so they can be dropped. The checkbox of a saved tool dropped since stays enabled too
+ * (to take it back); this bulk action never re-adds it.
  */
 export function selectableNativeToolNames(
-  catalog: readonly { name: string; status?: "available" | "missing" | "pending" | "blocked" }[],
+  catalog: readonly { name: string; status?: ToolCatalogEntry["status"] }[],
   selected: ReadonlySet<string>,
 ): string[] {
   return catalog
-    .filter(
-      (tool) => tool.status === undefined || tool.status === "available" || selected.has(tool.name),
-    )
+    .filter((tool) => isUsableToolStatus(tool.status) || selected.has(tool.name))
     .map((tool) => tool.name);
 }
 

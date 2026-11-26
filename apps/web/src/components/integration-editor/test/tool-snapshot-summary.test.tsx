@@ -7,10 +7,10 @@
  */
 
 import { describe, expect, it } from "bun:test";
-import { installSpaStorage } from "../../../test/fake-storage.ts";
-import type { ToolSnapshotInfo } from "../../../lib/integration-tool-snapshot.ts";
+import { installThemeEnv } from "../../../test/theme-env.ts";
+import type { ToolSnapshot } from "../../../lib/integration-tool-snapshot.ts";
 
-installSpaStorage();
+installThemeEnv();
 
 const { default: i18n, i18nReady } = await import("../../../i18n.ts");
 const { memberSpaceClient, renderInSpace, testSpace } =
@@ -24,36 +24,33 @@ const REFRESH = 'data-testid="integration-tool-snapshot-refresh"';
 const TRUNCATED = 'data-testid="integration-tool-snapshot-truncated"';
 
 const summary = {
+  connection_id: null,
   listed_at: "2026-11-20T10:00:00.000Z",
   added: 1,
   missing: 0,
   modified: 2,
   truncated: false,
 };
-const snapshot = (overrides: Partial<ToolSnapshotInfo> = {}): ToolSnapshotInfo => ({
-  packageId: "@acme/crm",
+const snapshot = (overrides: Partial<ToolSnapshot> = {}): ToolSnapshot => ({
   summary,
   connectionLabel: null,
-  remote: true,
-  published: true,
   oauth: true,
-  active: true,
-  unauthenticated: false,
-  hasConnection: true,
+  refreshBlock: null,
   ...overrides,
 });
-const tools = [
-  { name: "search", description: "", status: "available" as const },
-  { name: "send", description: "", status: "available" as const },
-];
+const tools = ["search", "send"].map((name) => ({
+  name,
+  description: "",
+  status: "available" as const,
+  origin: "declared" as const,
+  modified: false,
+}));
 
-function view(
-  info: ToolSnapshotInfo,
-  { permissions = ["credential-proxy:call-own"], edit = false } = {},
-): string {
-  const queryClient = memberSpaceClient([testSpace("spc_a", permissions)]);
+function view(info: ToolSnapshot | undefined, { edit = false } = {}): string {
+  const queryClient = memberSpaceClient([testSpace("spc_a", ["credential-proxy:call-own"])]);
   return renderInSpace(
     <IntegrationToolsSection
+      packageId="@acme/crm"
       tools={tools}
       snapshot={info}
       edit={
@@ -91,7 +88,7 @@ describe("the tool snapshot summary", () => {
   });
 
   it("renders no summary for an integration whose source has no listing", () => {
-    const html = view(snapshot({ remote: false }));
+    const html = view(undefined);
     expect(html).not.toContain("integration-tool-snapshot");
     expect(html).not.toContain(REFRESH);
     expect(html).not.toContain("Dernière lecture du serveur");
@@ -106,15 +103,10 @@ describe("the tool snapshot summary", () => {
     expect(html).toContain("dernière version publiée");
   });
 
-  it.each([
-    ["no permission", { permissions: [] }, snapshot(), "Vous n’avez pas le droit"],
-    ["unpublished", {}, snapshot({ published: false }), "Publiez une version de l’intégration"],
-    ["inactive here", {}, snapshot({ active: false }), "Activez l’intégration dans cet espace"],
-    ["no connection", {}, snapshot({ hasConnection: false }), "Connectez d’abord un compte"],
-  ])("shows the read disabled with its reason: %s", (_label, options, info, reason) => {
-    const html = view(info, options);
+  it("shows the read disabled with its reason, and no hint, when it would be refused", () => {
+    const html = view(snapshot({ refreshBlock: "unpublished" }));
     expect(button(html)).toContain('disabled=""');
-    expect(html).toContain(reason);
+    expect(html).toContain("Publiez une version de l’intégration");
     expect(html).not.toContain("integration-tool-snapshot-hint");
   });
 

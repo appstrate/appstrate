@@ -282,7 +282,7 @@
   "apiError.remote_url_unrenderable": "This integration builds its server URL from the connection's details, and they do not produce a valid URL. Reconnect it with valid values.",
   "apiError.tool_blocked_in_space": "This tool is blocked in this space.",
   "apiError.remote_mcp_endpoint_not_proxied": "This MCP endpoint can only be reached through the integration's tools, which apply this space's tool policy.",
-  "apiError.tool_approvals_limit": "This tool already has the maximum number of approved definitions: a withdrawal removes every approved definition of the tool: withdraw the tool's approvals first, then approve the definition to keep.",
+  "apiError.tool_approvals_limit": "This tool already has the maximum number of approved definitions. Withdrawing an approval removes every approved definition of the tool, so withdraw the tool's approvals first, then approve the definition to keep.",
   "apiError.tool_blocks_limit": "This space already blocks the maximum number of tools of this integration: lift a block before adding another.",
   "apiError.tool_catalog_open": "This integration allows undeclared tools: none needs an approval.",
   "apiError.tool_hidden": "The platform hides this tool in every space: it cannot be approved.",

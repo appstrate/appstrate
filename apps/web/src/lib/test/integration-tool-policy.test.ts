@@ -4,7 +4,6 @@ import { describe, expect, it } from "bun:test";
 import {
   approvalBody,
   blockBody,
-  blockableTools,
   canonicalDefinitionJson,
   declarableTools,
   declareTools,
@@ -32,9 +31,9 @@ const policy: Pick<ToolPolicy, "listed" | "approvals" | "blocks"> = {
   blocks: [{ tool_name: "export", blocked_by: null, blocked_at: "2026-11-02T00:00:00.000Z" }],
 };
 const catalog = [
-  { name: "declared", status: "available" },
-  { name: "search", status: "pending" },
-  { name: "export", status: "blocked" },
+  { name: "declared", status: "available" as const },
+  { name: "search", status: "pending" as const },
+  { name: "export", status: "blocked" as const },
 ];
 
 describe("reviewItems", () => {
@@ -103,14 +102,16 @@ describe("canonicalDefinitionJson", () => {
 
 describe("bodies", () => {
   it("pins the payloads the writes send", () => {
-    expect(approvalBody({ name: "search", fingerprint: "fp-new" })).toEqual({
+    expect(approvalBody([{ name: "search", fingerprint: "fp-new" }])).toEqual({
       tools: [{ name: "search", fingerprint: "fp-new" }],
     });
+    expect(
+      approvalBody([
+        { name: "a", fingerprint: "1" },
+        { name: "b", fingerprint: "2" },
+      ]).tools,
+    ).toHaveLength(2);
     expect(blockBody("search")).toEqual({ tools: ["search"] });
-  });
-
-  it("offers only tools not blocked yet", () => {
-    expect(blockableTools(catalog, policy.blocks)).toEqual(["declared", "search"]);
   });
 });
 

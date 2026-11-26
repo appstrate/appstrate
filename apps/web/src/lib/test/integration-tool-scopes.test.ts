@@ -12,9 +12,9 @@ describe("countToolsWithoutScopes", () => {
     expect(
       countToolsWithoutScopes([
         { status: "available" },
-        { status: "available", policy: { required_scopes: {} } },
-        { status: "available", policy: { required_scopes: { oauth: [] } } },
-        { status: "available", policy: { required_scopes: { oauth: ["mail.read"] } } },
+        { status: "available", permissions: {} },
+        { status: "available", permissions: { oauth: [] } },
+        { status: "available", permissions: { oauth: ["mail.read"] } },
       ]),
     ).toBe(3);
   });
@@ -33,16 +33,12 @@ describe("countToolsWithoutScopes", () => {
 describe("isToolWithoutPermission", () => {
   it("holds for an available tool whatever its origin, with no scope listed", () => {
     expect(isToolWithoutPermission({})).toBe(true);
-    expect(isToolWithoutPermission({ status: "available", policy: { required_scopes: {} } })).toBe(
-      true,
-    );
-    expect(
-      isToolWithoutPermission({ status: "available", policy: { required_scopes: { a: [] } } }),
-    ).toBe(true);
+    expect(isToolWithoutPermission({ status: "available", permissions: {} })).toBe(true);
+    expect(isToolWithoutPermission({ status: "available", permissions: { a: [] } })).toBe(true);
   });
 
   it("fails for a tool with a scope or one an agent cannot call", () => {
-    expect(isToolWithoutPermission({ policy: { required_scopes: { a: ["read"] } } })).toBe(false);
+    expect(isToolWithoutPermission({ permissions: { a: ["read"] } })).toBe(false);
     expect(isToolWithoutPermission({ status: "pending" })).toBe(false);
   });
 });

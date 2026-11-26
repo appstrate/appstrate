@@ -2,6 +2,7 @@
 
 import { useState, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
+import type { TFunction } from "i18next";
 import { Wrench } from "lucide-react";
 import { cn } from "@appstrate/ui/cn";
 import { Checkbox } from "@appstrate/ui/components/checkbox";
@@ -14,44 +15,31 @@ import { rowActionsColumn } from "../row-actions-column";
 import { useLocalListParams } from "../../lib/list-params";
 import { matchesSearch } from "../../lib/strings";
 import { formatDateField } from "../../lib/format-date";
-import { isToolToggleDisabled } from "../../lib/tool-toggle";
+import type { ToolCatalogEntry } from "../../lib/integration-tool-policy";
+import { isUsableToolStatus } from "../agent-editor/tool-selection";
 
-export interface PackageTool {
-  name: string;
-  description?: string;
-  permissions?: Readonly<Record<string, readonly string[]>>;
-  /** What the space can do with the tool; absent for a catalog that carries no verdict. */
-  status?: "available" | "missing" | "pending" | "blocked";
-  /** `approved`: undeclared, validated in this space. */
-  origin?: "declared" | "approved" | "listed";
-  /** The listed definition changed since first seen. */
-  modified?: boolean;
-  /** Required scopes are unknown on an authenticated integration. */
-  scopesUnknown?: boolean;
-}
+/** What the table shows of a tool; a catalog without a space verdict leaves `status`, `origin`, `modified` out. */
+export type PackageTool = Pick<ToolCatalogEntry, "name" | "description"> &
+  Partial<Pick<ToolCatalogEntry, "status" | "origin" | "modified">> & {
+    permissions?: Readonly<Record<string, readonly string[]>>;
+    /** Required scopes are unknown on an authenticated integration. */
+    scopesUnknown?: boolean;
+  };
 
 /** Why a tool is not usable here, as the line under its name; `null` for a usable tool. */
-function useUnavailableReason(
+function unavailableReason(
   tool: PackageTool,
   listedAt: string | null | undefined,
-  spaceName: string | undefined,
+  space: string,
+  t: TFunction<"agents">,
 ) {
-  const { t } = useTranslation("agents");
   if (tool.status === "missing") {
     return listedAt
       ? t("packageTools.reason.missingAt", { date: formatDateField(listedAt) })
       : t("packageTools.reason.missing");
   }
-  if (tool.status === "pending") {
-    return spaceName
-      ? t("packageTools.reason.pendingIn", { space: spaceName })
-      : t("packageTools.reason.pending");
-  }
-  if (tool.status === "blocked") {
-    return spaceName
-      ? t("packageTools.reason.blockedIn", { space: spaceName })
-      : t("packageTools.reason.blocked");
-  }
+  if (tool.status === "pending") return t("packageTools.reason.pending", { space });
+  if (tool.status === "blocked") return t("packageTools.reason.blocked", { space });
   return null;
 }
 
@@ -60,18 +48,18 @@ function ToolNameCell({
   listedAt,
   selection,
   saved,
-  spaceName,
+  space,
 }: {
   tool: PackageTool;
   listedAt: string | null | undefined;
-  /** The space the statuses are read in, when it is not the one the reader is in. */
-  spaceName: string | undefined;
+  /** The space the statuses are read in. */
+  space: string;
   selection: { values: ReadonlySet<string>; onToggle: (name: string) => void } | undefined;
   /** The selection the catalog opened with. */
   saved: ReadonlySet<string>;
 }) {
   const { t } = useTranslation("agents");
-  const reason = useUnavailableReason(tool, listedAt, spaceName);
+  const reason = unavailableReason(tool, listedAt, space, t);
   const selected = selection?.values.has(tool.name) ?? false;
   return (
     <div className="flex items-start gap-2">
@@ -80,11 +68,9 @@ function ToolNameCell({
           className="mt-0.5"
           aria-label={t("packageTools.select", { name: tool.name })}
           checked={selected}
-          disabled={isToolToggleDisabled({
-            unusable: reason !== null,
-            selected,
-            saved: saved.has(tool.name),
-          })}
+          // A tool of the saved selection stays toggleable, dropped or not, so it can be taken
+          // back; an unusable one never selected cannot be added.
+          disabled={!isUsableToolStatus(tool.status) && !selected && !saved.has(tool.name)}
           onCheckedChange={() => selection.onToggle(tool.name)}
         />
       )}
@@ -103,11 +89,7 @@ function ToolNameCell({
         <div className="flex flex-wrap gap-1.5 empty:hidden">
           {/* An approval whose definition moved, or a blocked tool, is no longer what it approved. */}
           {tool.origin === "approved" && reason === null && (
-            <Badge variant="secondary">
-              {spaceName
-                ? t("packageTools.approvedIn", { space: spaceName })
-                : t("packageTools.approved")}
-            </Badge>
+            <Badge variant="secondary">{t("packageTools.approved", { space })}</Badge>
           )}
           {tool.scopesUnknown && <Badge variant="outline">{t("packageTools.scopesUnknown")}</Badge>}
           {tool.modified && (
@@ -130,7 +112,7 @@ export function PackageToolCatalog({
   listedAt,
   spaceName,
 }: {
-  /** The space the tools' statuses are read in, named when it is not the reader's current one. */
+  /** The space the statuses are read in, named when it is not the reader's current one. */
   spaceName?: string;
   /** The list's one "Actions" menu, when the catalog is edited where it is read. */
   actions?: ReactNode;
@@ -145,6 +127,7 @@ export function PackageToolCatalog({
   };
 }) {
   const { t } = useTranslation("agents");
+  const space = spaceName ?? t("packageTools.thisSpace");
   // Read once: the selection as saved, before this session's toggles.
   const [saved] = useState<ReadonlySet<string>>(() => new Set(selection?.values));
   const authKeys = [
@@ -175,7 +158,7 @@ export function PackageToolCatalog({
           listedAt={listedAt}
           selection={selection}
           saved={saved}
-          spaceName={spaceName}
+          space={space}
         />
       ),
     },

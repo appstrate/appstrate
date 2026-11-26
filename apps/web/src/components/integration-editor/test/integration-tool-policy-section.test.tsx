@@ -1,23 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { afterAll, describe, expect, it } from "bun:test";
-import { installSpaStorage } from "../../../test/fake-storage.ts";
+import { describe, expect, it } from "bun:test";
+import { installThemeEnv } from "../../../test/theme-env.ts";
 import type { ToolPolicy } from "../../../lib/integration-tool-policy.ts";
-import type { ToolDeclaration } from "../integration-tool-policy-section.tsx";
+import type { ToolDeclaration, ToolPolicyControls } from "../integration-tool-policy-section.tsx";
 
-// The definition diff reaches the editor's theme store, which touches `matchMedia` and the
-// document root on import.
-installSpaStorage({ matchMedia: () => ({ matches: false, addEventListener: () => {} }) });
-Object.defineProperty(globalThis, "document", {
-  configurable: true,
-  value: {
-    documentElement: { classList: { add: () => {}, remove: () => {} } },
-    querySelector: () => null,
-  },
-});
-afterAll(() => {
-  Reflect.deleteProperty(globalThis, "document");
-});
+installThemeEnv();
 
 const { i18nReady } = await import("../../../i18n.ts");
 const { render } = await import("../../../test/render.tsx");
@@ -27,39 +15,66 @@ const { DefinitionCompare, IntegrationToolPolicySection, ToolPolicyView } =
 await i18nReady;
 
 const noop = () => {};
-const view = (
-  policy: ToolPolicy,
-  tools: { name: string; status?: string; origin?: string }[],
-  options: { review?: boolean; declaration?: ToolDeclaration } = {},
-) =>
-  render(
+type Row = {
+  name: string;
+  status?: "available" | "missing" | "pending" | "blocked";
+  origin?: "declared" | "approved" | "listed";
+};
+const approval = (name: string, fingerprint: string, definition = {}) => ({
+  tool_name: name,
+  fingerprint,
+  definition,
+  approved_by: null,
+  approved_at: "2026-11-01T00:00:00.000Z",
+});
+const blocked = (name: string) => ({
+  tool_name: name,
+  blocked_by: null,
+  blocked_at: "2026-11-02T00:00:00.000Z",
+});
+const empty: ToolPolicy = { listed: [], approvals: [], blocks: [] };
+
+/** Renders the view and hands back the controls the table would receive. */
+function view(
+  policy: ToolPolicy | null,
+  tools: Row[],
+  options: {
+    review?: boolean;
+    declaration?: ToolDeclaration;
+    pending?: (action: string, name: string) => boolean;
+    onApprove?: (items: { name: string; fingerprint: string }[]) => void;
+    onUnblock?: (name: string) => void;
+  } = {},
+) {
+  let controls!: ToolPolicyControls;
+  const html = render(
     <ToolPolicyView
       policy={policy}
       tools={tools}
       review={options.review ?? true}
       declaration={options.declaration}
-      pending={() => false}
-      onApprove={noop}
+      pending={options.pending ?? (() => false)}
+      onApprove={options.onApprove ?? noop}
       onBlock={noop}
       onRevoke={noop}
-      onUnblock={noop}
-    />,
+      onUnblock={options.onUnblock ?? noop}
+    >
+      {(c) => {
+        controls = c;
+        return null;
+      }}
+    </ToolPolicyView>,
   );
+  const ids = (name: string) => controls.rowActions({ name }).map((action) => action.id);
+  return { html, controls, ids };
+}
 
-describe("ToolPolicyView", () => {
-  it("shows a pending tool with its definition, as a diff against the approval it replaces", () => {
-    const html = view(
+describe("ToolPolicyView review", () => {
+  it("shows a pending tool with its definition, as a diff against the approval it replaces, and the way to act", () => {
+    const { html } = view(
       {
         listed: [{ name: "search", fingerprint: "b", definition: { description: "Search v2" } }],
-        approvals: [
-          {
-            tool_name: "search",
-            fingerprint: "a",
-            definition: { description: "Search v1" },
-            approved_by: null,
-            approved_at: "2026-11-01T00:00:00.000Z",
-          },
-        ],
+        approvals: [approval("search", "a", { description: "Search v1" })],
         blocks: [],
       },
       [{ name: "search", status: "pending" }],
@@ -70,236 +85,277 @@ describe("ToolPolicyView", () => {
     // The diff's header names both sides; its Monaco body renders client-side only.
     expect(html).toContain("Définition approuvée");
     expect(html).toContain("Définition actuelle");
-    expect(html).toContain("Retirer l’approbation");
   });
 
   it("shows a first definition as a JSON tree, with no diff", () => {
-    const html = view(
-      {
-        listed: [
-          {
-            name: "search",
-            fingerprint: "a",
-            definition: { description: "Search v1", marker: "UniqueField" },
-          },
-        ],
-        approvals: [],
-        blocks: [],
-      },
-      [{ name: "search", status: "pending" }],
-    );
-    // Open for every review item: approving grants it to every agent of the space.
+    const item = {
+      name: "search",
+      fingerprint: "a",
+      definition: { description: "Search v1", marker: "UniqueField" },
+      description: "Search v1",
+      approved: null,
+    };
+    const { html } = view({ listed: [item], approvals: [], blocks: [] }, [
+      { name: "search", status: "pending" },
+    ]);
     expect(html).toContain("Voir la définition");
     expect(html).toContain("UniqueField");
-    const open = render(
-      <DefinitionCompare
-        item={{
-          name: "search",
-          fingerprint: "a",
-          definition: { description: "Search v1", marker: "UniqueField" },
-          description: "Search v1",
-          approved: null,
-        }}
-      />,
+    expect(html).not.toContain("Définition approuvée");
+    expect(render(<DefinitionCompare item={item} defaultOpen={false} />)).not.toContain(
+      "UniqueField",
     );
-    expect(open).toContain("UniqueField");
-    expect(open).not.toContain("Définition approuvée");
-  });
-
-  it("names the tool in each action's accessible label", () => {
-    const html = view(
-      {
-        listed: [{ name: "search", fingerprint: "a", definition: {} }],
-        approvals: [
-          {
-            tool_name: "old",
-            fingerprint: "o",
-            definition: {},
-            approved_by: null,
-            approved_at: "2026-11-01T00:00:00.000Z",
-          },
-        ],
-        blocks: [{ tool_name: "export", blocked_by: null, blocked_at: "2026-11-02T00:00:00.000Z" }],
-      },
-      [{ name: "search", status: "pending" }],
-    );
-    expect(html).toContain('aria-label="Approuver search"');
-    expect(html).toContain('aria-label="Bloquer search"');
-    expect(html).toContain('aria-label="Retirer l’approbation de old"');
-    expect(html).toContain('aria-label="Débloquer export"');
   });
 
   it("lists a pending tool no listing carries, with the way to read the server and nothing to approve", () => {
-    const html = view({ listed: [], approvals: [], blocks: [] }, [
-      { name: "ghost", status: "pending" },
-    ]);
+    const { html, ids } = view(empty, [{ name: "ghost", status: "pending" }]);
     expect(html).toContain('data-testid="tool-review-ghost"');
     expect(html).toContain("Relire le serveur");
     expect(html).not.toContain('aria-label="Approuver ghost"');
     expect(html).toContain('aria-label="Bloquer ghost"');
+    expect(ids("ghost")).not.toContain("approve");
   });
 
   it("explains a definition too large to keep", () => {
-    const html = view(
+    const { html } = view(
       { listed: [{ name: "big", fingerprint: "x", definition: null }], approvals: [], blocks: [] },
       [{ name: "big", status: "pending" }],
     );
     expect(html).toContain("Définition trop volumineuse, non conservée");
   });
 
-  it("lists the blocked tools with their way back, and says when nothing waits", () => {
-    const html = view(
-      {
-        listed: [],
-        approvals: [],
-        blocks: [{ tool_name: "export", blocked_by: null, blocked_at: "2026-11-02T00:00:00.000Z" }],
-      },
-      [{ name: "export", status: "blocked" }],
+  it("says when nothing waits, and keeps the review loading until the policy is read", () => {
+    expect(view(empty, [{ name: "export", status: "blocked" }]).html).toContain(
+      "Aucun outil à examiner",
     );
-    expect(html).toContain("Aucun outil à examiner");
-    expect(html).toContain('data-testid="tool-policy-export"');
-    expect(html).toContain("Débloquer");
+    const loading = view(null, [{ name: "export", status: "pending" }]).html;
+    expect(loading).not.toContain("Aucun outil à examiner");
+    expect(loading).not.toContain('data-testid="tool-review-export"');
+  });
+
+  const waiting = (count: number) => ({
+    policy: {
+      listed: Array.from({ length: count }, (_, i) => ({
+        name: `tool_${i}`,
+        fingerprint: `fp${i}`,
+        definition: { description: `Tool ${i}` },
+      })),
+      approvals: [],
+      blocks: [],
+    },
+    tools: Array.from({ length: count }, (_, i) => ({
+      name: `tool_${i}`,
+      status: "pending" as const,
+    })),
+  });
+  const closed = (html: string) => html.match(/aria-expanded="false"/g)?.length ?? 0;
+
+  it("opens every definition up to three cards, none beyond unless it is a changed one", () => {
+    const few = waiting(3);
+    expect(closed(view(few.policy, few.tools).html)).toBe(0);
+    const many = waiting(4);
+    expect(closed(view(many.policy, many.tools).html)).toBe(4);
+    const changed = {
+      ...many.policy,
+      approvals: [approval("tool_0", "old", { description: "Before" })],
+    };
+    expect(closed(view(changed, many.tools).html)).toBe(3);
+  });
+
+  it("offers « Approuver tout » from two approvable tools, with one confirmed body", () => {
+    const two = waiting(2);
+    expect(view(two.policy, two.tools).html).toContain('data-testid="tool-approve-all"');
+    const one = waiting(1);
+    expect(view(one.policy, one.tools).html).not.toContain('data-testid="tool-approve-all"');
+    expect(view(two.policy, two.tools, { review: false }).html).not.toContain("tool-approve-all");
+  });
+
+  it("spins and locks only the clicked tool, its card buttons and its row", () => {
+    const two = waiting(2);
+    const { html, controls } = view(two.policy, two.tools, {
+      pending: (action, name) => action === "approve" && name === "tool_0",
+    });
+    const button = (label: string) =>
+      new RegExp(`<button[^>]*aria-label="${label}"[^>]*>(?:(?!</button>).)*</button>`, "s").exec(
+        html,
+      )?.[0] ?? "";
+    expect(button("Approuver tool_0")).toContain("animate-spin");
+    expect(button("Approuver tool_0")).toContain('disabled=""');
+    expect(button("Bloquer tool_0")).not.toContain("animate-spin");
+    expect(button("Bloquer tool_0")).toContain('disabled=""');
+    for (const label of ["Approuver tool_1", "Bloquer tool_1"]) {
+      expect(button(label)).not.toContain('disabled=""');
+    }
+    expect(controls.isBusy("tool_0")).toBe(true);
+    expect(controls.isBusy("tool_1")).toBe(false);
   });
 });
 
-describe("ToolPolicyView pending writes", () => {
+describe("ToolPolicyView row actions", () => {
   const policy: ToolPolicy = {
     listed: [
-      { name: "search", fingerprint: "a", definition: {} },
-      { name: "export", fingerprint: "b", definition: {} },
+      { name: "waiting", fingerprint: "w", definition: {} },
+      { name: "twice", fingerprint: "t1", definition: {} },
+      { name: "twice", fingerprint: "t2", definition: {} },
     ],
-    approvals: [],
-    blocks: [],
+    approvals: [approval("approved", "p")],
+    blocks: [blocked("shut"), blocked("gone")],
   };
-  const tools = [
-    { name: "search", status: "pending" },
-    { name: "export", status: "pending" },
+  const tools: Row[] = [
+    { name: "waiting", status: "pending", origin: "listed" },
+    { name: "twice", status: "pending", origin: "listed" },
+    { name: "approved", status: "available", origin: "approved" },
+    { name: "shut", status: "blocked", origin: "listed" },
+    { name: "plain", status: "available", origin: "declared" },
   ];
-  const button = (html: string, label: string) =>
-    new RegExp(`<button[^>]*aria-label="${label}"[^>]*>(?:(?!</button>).)*</button>`, "s").exec(
-      html,
-    )?.[0] ?? "";
 
-  it("spins and locks only the clicked row's button, and the tool's other action", () => {
-    const html = render(
-      <ToolPolicyView
-        policy={policy}
-        tools={tools}
-        review
-        pending={(action, name) => action === "approve" && name === "search"}
-        onApprove={noop}
-        onBlock={noop}
-        onRevoke={noop}
-        onUnblock={noop}
-      />,
-    );
-    const approve = button(html, "Approuver search");
-    expect(approve).toContain("animate-spin");
-    expect(approve).toContain('disabled=""');
-    const block = button(html, "Bloquer search");
-    expect(block).not.toContain("animate-spin");
-    expect(block).toContain('disabled=""');
-    for (const label of ["Approuver export", "Bloquer export"]) {
-      expect(button(html, label)).not.toContain("animate-spin");
-      expect(button(html, label)).not.toContain('disabled=""');
-    }
+  it("offers each tool the deeds its state allows", () => {
+    const { ids } = view(policy, tools);
+    expect(ids("waiting")).toEqual(["approve", "block"]);
+    // Two listed definitions: approving one blind is ambiguous, the cards carry the diff.
+    expect(ids("twice")).toEqual(["block"]);
+    expect(ids("approved")).toEqual(["revoke", "block"]);
+    expect(ids("shut")).toEqual(["unblock"]);
+    expect(ids("plain")).toEqual(["block"]);
+  });
+
+  it("draws the withdrawal and the block as destructive deeds", () => {
+    const { controls } = view(policy, tools);
+    const destructive = (name: string) =>
+      controls
+        .rowActions({ name })
+        .filter((action) => action.destructive)
+        .map((action) => action.id);
+    expect(destructive("approved")).toEqual(["revoke", "block"]);
+    expect(destructive("waiting")).toEqual(["block"]);
+  });
+
+  it("keeps a block the catalog no longer carries as a row to unblock", () => {
+    const { controls, ids } = view(policy, tools);
+    expect(controls.extraRows).toEqual([{ name: "gone", status: "blocked" }]);
+    expect(ids("gone")).toEqual(["unblock"]);
+  });
+
+  it("approves the one definition a row waits on, and unblocks by name", () => {
+    const approved: unknown[] = [];
+    const unblocked: string[] = [];
+    const { controls } = view(policy, tools, {
+      onApprove: (items) => approved.push(items),
+      onUnblock: (name) => unblocked.push(name),
+    });
+    controls.rowActions({ name: "waiting" })[0]!.onSelect?.();
+    controls.rowActions({ name: "shut" })[0]!.onSelect?.();
+    expect(approved).toEqual([[{ name: "waiting", fingerprint: "w" }]]);
+    expect(unblocked).toEqual(["shut"]);
+  });
+
+  it("locks a busy row's deeds", () => {
+    const { controls } = view(policy, tools, { pending: (_, name) => name === "waiting" });
+    expect(controls.rowActions({ name: "waiting" }).every((action) => action.disabled)).toBe(true);
+    expect(controls.rowActions({ name: "plain" }).some((action) => action.disabled)).toBe(false);
+  });
+
+  it("offers no decision to a reader who cannot configure, nor before the policy is read", () => {
+    expect(view(policy, tools, { review: false }).ids("waiting")).toEqual([]);
+    expect(view(null, tools).ids("waiting")).toEqual([]);
   });
 });
 
 describe("ToolPolicyView declaration", () => {
-  const empty: ToolPolicy = { listed: [], approvals: [], blocks: [] };
-  const catalog = [
+  const catalog: Row[] = [
     { name: "search", status: "pending", origin: "listed" },
     { name: "open", status: "available", origin: "listed" },
     { name: "mine", status: "available", origin: "declared" },
+    { name: "gone", status: "missing", origin: "approved" },
   ];
-  const declaration = (declared: string[] = []): ToolDeclaration => ({
-    declared: new Set(declared),
-    saved: false,
-    declare: noop,
+  const declaration = (declared: string[] = []) => {
+    const calls: string[][] = [];
+    const value: ToolDeclaration = {
+      declared: new Set(declared),
+      saved: false,
+      declare: (names) => calls.push(names),
+    };
+    return { value, calls };
+  };
+  const declareIds = (ids: (name: string) => string[], names: string[]) =>
+    names.filter((name) => ids(name).includes("declare"));
+
+  it("offers to declare reviewed and unreviewed listed tools, never the declared ones nor the missing ones", () => {
+    const { ids } = view(empty, catalog, { declaration: declaration().value });
+    expect(declareIds(ids, ["search", "open", "mine", "gone"])).toEqual(["search", "open"]);
   });
 
-  it("offers to declare reviewed and unreviewed listed tools, never the declared ones", () => {
-    const html = view(empty, catalog, { declaration: declaration() });
-    expect(html).toContain('data-testid="tool-declare-search"');
-    expect(html).toContain('aria-label="Déclarer search dans l’intégration"');
-    expect(html).toContain('data-testid="tool-undeclared-open"');
-    expect(html).toContain('data-testid="tool-declare-open"');
-    expect(html).not.toContain('data-testid="tool-declare-mine"');
-    expect(html).toContain("Déclarer dans l’intégration");
-    expect(html).toContain('data-testid="tool-declare-all"');
+  it("declares one tool, or every listed one from the list menu", () => {
+    const { value, calls } = declaration();
+    const { controls } = view(empty, catalog, { declaration: value });
+    controls
+      .rowActions({ name: "open" })
+      .find((action) => action.id === "declare")
+      ?.onSelect?.();
+    controls.listActions[0]!.onSelect?.();
+    expect(calls).toEqual([["open"], ["search", "open"]]);
+    expect(controls.listActions[0]!.testId).toBe("tool-declare-all");
+  });
+
+  it("drops a declared tool's deed, and the list deed when none remains", () => {
+    const { ids, controls } = view(empty, catalog, {
+      declaration: declaration(["search", "open"]).value,
+    });
+    expect(declareIds(ids, ["search", "open"])).toEqual([]);
+    expect(controls.listActions).toEqual([]);
   });
 
   it("offers nothing to declare without a declaration", () => {
-    const html = view(empty, catalog);
-    expect(html).not.toContain("tool-declare-");
-    expect(html).not.toContain("Déclarer");
-  });
-
-  it("groups the author's declarations under their own heading, apart from the space's decisions", () => {
-    const html = view(empty, catalog, { declaration: declaration() });
-    const group = html.slice(html.indexOf('data-testid="tool-declaration"'));
-    expect(group).toContain("Déclaration dans l’intégration");
-    expect(group).toContain('data-testid="tool-declare-all"');
-    expect(html.slice(0, html.indexOf('data-testid="tool-declaration"'))).not.toContain(
-      "tool-declare-",
-    );
-  });
-
-  it("does not offer to declare a tool the server no longer lists", () => {
-    const html = view(empty, [{ name: "gone", status: "missing", origin: "approved" }], {
-      declaration: declaration(),
-    });
-    expect(html).not.toContain("tool-declare-gone");
-  });
-
-  it("says a tool is declared in the draft until saved, then that a version applies it", () => {
-    const unsaved = view(empty, catalog, { declaration: declaration(["search"]) });
-    expect(unsaved).toContain("Déclaré dans le brouillon");
-    const saved = view(empty, catalog, {
-      declaration: { ...declaration(["search"]), saved: true },
-    });
-    expect(saved).toContain("Déclaré : publiez une version pour l’appliquer.");
-    expect(saved).not.toContain("Déclaré dans le brouillon");
-  });
-
-  it("says a tool is declared in the draft, and drops the bulk action when none remains", () => {
-    const html = view(empty, catalog, { declaration: declaration(["search", "open"]) });
-    expect(html).toContain('data-testid="tool-declared-search"');
-    expect(html).toContain("Déclaré dans le brouillon");
-    expect(html).not.toContain('data-testid="tool-declare-open"');
-    expect(html).not.toContain('data-testid="tool-declare-all"');
+    const { ids, controls } = view(empty, catalog);
+    expect(declareIds(ids, ["search", "open"])).toEqual([]);
+    expect(controls.listActions).toEqual([]);
   });
 
   it("keeps the declarations and drops the decisions for a reader who cannot configure", () => {
-    const html = view(empty, catalog, { review: false, declaration: declaration() });
-    expect(html).toContain('data-testid="tool-undeclared-search"');
-    expect(html).toContain('data-testid="tool-declare-all"');
+    const { html, ids } = view(empty, catalog, { review: false, declaration: declaration().value });
+    expect(ids("search")).toEqual(["declare"]);
     expect(html).not.toContain('data-testid="tool-review-search"');
     expect(html).not.toContain('aria-label="Approuver ');
-    expect(html).not.toContain('aria-label="Bloquer ');
   });
 });
 
 describe("IntegrationToolPolicySection", () => {
+  const table = (controls: ToolPolicyControls) => (
+    <p data-testid="table">{controls.rowActions({ name: "export_notes" }).length}</p>
+  );
   const declaration: ToolDeclaration = { declared: new Set(), saved: true, declare: noop };
+  const tools = [{ name: "export_notes", status: "pending" as const, origin: "listed" as const }];
 
-  it("renders nothing without a space review nor a declaration", () => {
-    expect(
-      render(<IntegrationToolPolicySection packageId="@acme/crm" tools={[]} review={false} />),
-    ).toBe("");
+  it("draws the table alone without access", () => {
+    const html = render(
+      <IntegrationToolPolicySection tools={tools}>{table}</IntegrationToolPolicySection>,
+    );
+    expect(html).toContain('<p data-testid="table">0</p>');
+    expect(html).not.toContain("integration-tool-policy");
   });
 
-  it("offers the declare controls to an author outside the review, without the space policy", () => {
+  it("offers the declare deed to an author outside the review, without the space policy", () => {
     const html = render(
       <IntegrationToolPolicySection
-        packageId="@acme/crm"
-        tools={[{ name: "export_notes", status: "pending", origin: "listed" }]}
-        review={false}
-        declaration={declaration}
-      />,
+        access={{ packageId: "@acme/crm", review: false, declaration }}
+        tools={tools}
+      >
+        {table}
+      </IntegrationToolPolicySection>,
     );
-    expect(html).toContain('data-testid="tool-declare-export_notes"');
+    expect(html).toContain('<p data-testid="table">1</p>');
     expect(html).not.toContain('aria-label="Approuver ');
+  });
+
+  it("frames the table with the banner, and loads the review of a reader who may configure", () => {
+    const html = render(
+      <IntegrationToolPolicySection
+        access={{ packageId: "@acme/crm", review: true, banner: <i data-testid="banner" /> }}
+        tools={tools}
+      >
+        {table}
+      </IntegrationToolPolicySection>,
+    );
+    expect(html.indexOf('data-testid="banner"')).toBeLessThan(html.indexOf('data-testid="table"'));
+    expect(html).toContain("Outils à examiner");
   });
 });

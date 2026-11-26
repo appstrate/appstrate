@@ -11,6 +11,15 @@ import type { paths } from "../api/client";
 export type ToolPolicy =
   paths["/api/integrations/{packageId}/tool-policy"]["get"]["responses"]["200"]["content"]["application/json"];
 
+/** One entry of an integration's `tool_catalog`: a tool and what the working space can do with it. */
+export type ToolCatalogEntry = NonNullable<
+  paths["/api/integrations/{packageId}"]["get"]["responses"]["200"]["content"]["application/json"]["tool_catalog"]
+>[number];
+
+/** The slice of a catalog entry the policy reads; a catalog without a verdict leaves the rest out. */
+export type CatalogRow = Pick<ToolCatalogEntry, "name"> &
+  Partial<Pick<ToolCatalogEntry, "status" | "origin">>;
+
 type ToolDefinition = ToolPolicy["listed"][number]["definition"];
 
 /** One tool awaiting a verdict. */
@@ -42,7 +51,7 @@ export function latestApprovals(approvals: readonly Approval[]): Map<string, App
  * connections may list two), and one without a definition for a tool no listing carries.
  */
 export function reviewItems(
-  catalog: readonly { name: string; status?: string }[],
+  catalog: readonly CatalogRow[],
   policy: Pick<ToolPolicy, "listed" | "approvals">,
 ): ReviewItem[] {
   const pending = catalog.filter((tool) => tool.status === "pending").map((tool) => tool.name);
@@ -97,28 +106,17 @@ export function canonicalDefinitionJson(definition: unknown): string {
   return JSON.stringify(sorted(definition), null, 2);
 }
 
-export const approvalBody = (item: { name: string; fingerprint: string }) => ({
-  tools: [{ name: item.name, fingerprint: item.fingerprint }],
+export const approvalBody = (items: readonly { name: string; fingerprint: string }[]) => ({
+  tools: items.map(({ name, fingerprint }) => ({ name, fingerprint })),
 });
 
 export const blockBody = (name: string) => ({ tools: [name] });
-
-/** The catalog's tools a space can still block: not blocked yet. */
-export function blockableTools(
-  catalog: readonly { name: string }[],
-  blocks: ToolPolicy["blocks"],
-): string[] {
-  const blocked = new Set(blocks.map((block) => block.tool_name));
-  return catalog.map((tool) => tool.name).filter((name) => !blocked.has(name));
-}
 
 /**
  * The catalog's tools the integration does not declare yet (listed or approved only), minus those
  * the server no longer lists (`missing`): declaring a tool that is gone would only write a dead entry.
  */
-export function declarableTools(
-  catalog: readonly { name: string; origin?: string; status?: string }[],
-): string[] {
+export function declarableTools(catalog: readonly CatalogRow[]): string[] {
   return catalog
     .filter((tool) => tool.origin !== "declared" && tool.status !== "missing")
     .map((tool) => tool.name);

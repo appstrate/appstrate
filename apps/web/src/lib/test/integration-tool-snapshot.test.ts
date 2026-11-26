@@ -1,60 +1,53 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { describe, expect, it } from "bun:test";
-import { snapshotRefreshBlock, toolSnapshotInfo } from "../integration-tool-snapshot.ts";
+import { toolSnapshot } from "../integration-tool-snapshot.ts";
 
-const detail = (source: unknown) => ({
+const CONNECTION = "11111111-1111-4111-8111-111111111111";
+const detail = (overrides: Partial<Parameters<typeof toolSnapshot>[0]> = {}) => ({
   active: true,
   tool_snapshot: null,
-  manifest: { source },
   auths: [],
-});
-const remote = (transport: string) => ({
-  kind: "remote",
-  remote: { url: "https://mcp.acme.test", transport },
+  ...overrides,
 });
 
-describe("toolSnapshotInfo", () => {
+describe("toolSnapshot", () => {
   it("offers the listing of a Streamable HTTP remote server only", () => {
-    expect(toolSnapshotInfo("@a/b", detail(remote("streamable-http")), true).remote).toBe(true);
-    expect(toolSnapshotInfo("@a/b", detail(remote("sse")), true).remote).toBe(false);
-    expect(toolSnapshotInfo("@a/b", detail({ kind: "none" }), true).remote).toBe(false);
-    expect(toolSnapshotInfo("@a/b", detail(undefined), true).remote).toBe(false);
+    expect(toolSnapshot(detail(), "available", true)).toBeDefined();
+    expect(toolSnapshot(detail(), "sse", true)).toBeUndefined();
+    expect(toolSnapshot(detail(), null, true)).toBeUndefined();
   });
 
-  it("carries whether a version is published, the one the listing is read from", () => {
-    expect(toolSnapshotInfo("@a/b", detail(remote("streamable-http")), false).published).toBe(
-      false,
+  it("names the connection the server was listed with, and whether the integration is OAuth", () => {
+    const snapshot = toolSnapshot(
+      detail({
+        tool_snapshot: {
+          connection_id: CONNECTION,
+          listed_at: "2026-11-20T10:00:00.000Z",
+          truncated: false,
+          added: 0,
+          missing: 0,
+          modified: 0,
+        },
+        auths: [{ type: "oauth2", connections: [{ id: CONNECTION, label: "Compte de Léa" }] }],
+      }),
+      "available",
+      true,
     );
-  });
-});
-
-describe("snapshotRefreshBlock", () => {
-  const ok = {
-    remote: true,
-    published: true,
-    active: true,
-    unauthenticated: false,
-    hasConnection: true,
-  };
-
-  it("offers nothing for a source that cannot be listed", () => {
-    expect(snapshotRefreshBlock({ ...ok, remote: false }, true)).toBeNull();
+    expect(snapshot?.connectionLabel).toBe("Compte de Léa");
+    expect(snapshot?.oauth).toBe(true);
+    expect(toolSnapshot(detail(), "available", true)?.connectionLabel).toBeNull();
   });
 
   it("names the first reason the refresh would be refused", () => {
-    expect(snapshotRefreshBlock(ok, true)).toBeNull();
-    expect(snapshotRefreshBlock({ ...ok, published: false, active: false }, true)).toBe(
-      "unpublished",
-    );
-    expect(snapshotRefreshBlock({ ...ok, active: false }, true)).toBe("inactive");
-    expect(snapshotRefreshBlock(ok, false)).toBe("no_permission");
-    expect(snapshotRefreshBlock({ ...ok, hasConnection: false }, true)).toBe("no_connection");
-  });
-
-  it("reads an unauthenticated server without a connection nor the proxy permission", () => {
-    expect(
-      snapshotRefreshBlock({ ...ok, unauthenticated: true, hasConnection: false }, false),
-    ).toBeNull();
+    const block = (
+      published: boolean,
+      active: boolean,
+      availability: "available" | "no_connection",
+    ) => toolSnapshot(detail({ active }), availability, published)?.refreshBlock;
+    expect(block(true, true, "available")).toBeNull();
+    expect(block(false, false, "available")).toBe("unpublished");
+    expect(block(true, false, "available")).toBe("inactive");
+    expect(block(true, true, "no_connection")).toBe("no_connection");
   });
 });
