@@ -14,7 +14,7 @@
  * spells it — `POST /api/spaces/{id}/packages` and
  * `DELETE /api/spaces/{id}/packages/{scope}/{name}` (RBAC spec §6.10).
  *   - `GET    /:packageId`                           — manifest + per-auth status for caller
- *   - `POST   /:packageId/discover`                  — a manifest proposal from the connected server
+ *   - `POST   /:packageId/discover`                  — the connected server's identity, as a manifest proposal
  *   - `POST   /:packageId/tool-snapshot/refresh`     — list the server's tools again, now, into the snapshot
  *   - `GET    /:packageId/tool-policy`               — the tools listed, and what the space approved and blocked
  *   - `POST   /:packageId/tool-policy/approvals`     — admin, dashboard session: approve undeclared tool definitions
@@ -132,6 +132,7 @@ import {
   loadStreamableRemote,
 } from "../services/credential-proxy/remote-tools.ts";
 import { remoteToolsCaller } from "../lib/remote-tools-caller.ts";
+import { proxyCaller } from "../services/credential-proxy/call-journal.ts";
 import {
   reachOutsideRun,
   reachOutsideRunIfPermitted,
@@ -1116,8 +1117,9 @@ export function createIntegrationsRouter() {
     });
   });
 
-  // What the connected server says about this integration (tools, serverInfo, instructions), for
-  // its editor; editing the result needs write authority on the package's home. An authenticated
+  // What the connected server says about this integration (serverInfo, instructions), for its
+  // editor; its tools are read only by the tool snapshot. Editing the result needs write
+  // authority on the package's home. An authenticated
   // draft's MCP exchange rides the credential proxy, under the proxy's own permission outside a
   // run; an unauthenticated one (AFPS §7.2) reaches its server directly and asks no proxy right.
   router.post("/:packageId{@[^/]+/[^/]+}/discover", rateLimit(10), async (c) => {
@@ -1135,18 +1137,13 @@ export function createIntegrationsRouter() {
         assertPermission(c, "credential-proxy", "call-own");
         return reachOutsideRun(callerPermissions(c), c.get("space")!);
       },
-      caller: {
-        apiKeyId: c.get("apiKeyId") || null,
-        authMethod: c.get("authMethod"),
-        requestId: c.get("requestId"),
-      },
+      caller: proxyCaller(c, null),
       signal: c.req.raw.signal,
     });
     return c.json({
       manifest: proposal.manifest,
       icon_source: proposal.iconSource,
       instructions: proposal.instructions,
-      tools: proposal.tools.map(({ readOnly, ...tool }) => ({ ...tool, read_only: readOnly })),
       warnings: proposal.warnings,
     });
   });

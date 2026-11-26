@@ -37,18 +37,19 @@ export function AgentGlyph({
   );
 }
 
-/** The glyph of the agent a chip names, from the commands query (one request per conversation scope: the key is shared with the `/` menu). */
-export function DirectiveAgentGlyph({
-  promptName,
+/** The glyph of an agent the commands query knows (its key is shared with the `/` menu). */
+export function KnownAgentGlyph({
+  agentRef,
   label,
   className,
 }: {
-  promptName: string;
+  agentRef: { promptName: string } | { packageId: string };
   label: string;
   className?: string;
 }) {
   const { data } = useChatCommands(true);
-  // A directive's id is the agent's prompt name.
-  const agent = data?.agents.find((a) => a.name === promptName);
+  const agent = data?.agents.find((a) =>
+    "packageId" in agentRef ? a.packageId === agentRef.packageId : a.name === agentRef.promptName,
+  );
   return <AgentGlyph agent={agent} label={label} className={className} />;
 }

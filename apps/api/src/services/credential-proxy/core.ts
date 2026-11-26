@@ -35,6 +35,7 @@ import {
   credentialUnusableMessage,
   credentialUrlPolicy,
   fetchApiCall,
+  mayHaveReachedUpstream,
   prepareApiCallRequest,
   type PreparedApiCallRequest,
   redactionFields,
@@ -613,13 +614,7 @@ function toProxyCallError(
 ): Error {
   const redactedHost = templateHost(target);
   const failure = classifyApiCallFailure(err);
-  // Only a refusal of the initial target sends nothing; a timeout or transport fault may follow it.
-  const sent =
-    failure.redirect ||
-    failure.code === "upstream_timeout" ||
-    failure.code === "upstream_unreachable"
-      ? connectionId
-      : undefined;
+  const sent = mayHaveReachedUpstream(failure) ? connectionId : undefined;
   switch (failure.code) {
     case "unauthorized_target":
     case "blocked_target": {

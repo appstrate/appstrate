@@ -4,6 +4,7 @@
 
 import { describe, expect, it } from "bun:test";
 import { installFakeStorage } from "../../test/fake-storage.ts";
+import { STUDIO_PERMISSION } from "../../lib/route-access.ts";
 
 installFakeStorage();
 
@@ -16,6 +17,7 @@ const {
   holdsOverview,
   isListRow,
   listAdmits,
+  listAdmitsOn,
   spanningRouteVerdict,
   overviewOffered,
   spaceChoice,
@@ -26,13 +28,21 @@ const {
 const space = (id: string, permissions: string[], access = "member") => ({
   id,
   access,
-  permissions,
+  permissions: [STUDIO_PERMISSION, ...permissions],
 });
 const TWO = [space("spc_a", ["runs:read"]), space("spc_b", ["files:read"])];
 
 describe("overviewOffered", () => {
   it("is offered from two spaces admitting at least one list, not necessarily the same", () => {
     expect(overviewOffered(TWO)).toBe(true);
+  });
+
+  it("is offered to a role without the Studio, whose chat holds the mode", () => {
+    const withoutStudio = TWO.map((s) => ({
+      ...s,
+      permissions: s.permissions.filter((p) => p !== STUDIO_PERMISSION),
+    }));
+    expect(overviewOffered(withoutStudio)).toBe(true);
   });
 
   it("is not offered from one such space, nor counting a space without a role or a list", () => {
@@ -60,7 +70,7 @@ describe("listAdmits", () => {
   const gate =
     (...held: string[]) =>
     (permission: string) =>
-      held.includes(permission);
+      permission === STUDIO_PERMISSION || held.includes(permission);
 
   it("admits a list where the permissions of its route hold", () => {
     expect(listAdmits("runs")(gate("runs:read-all"))).toBe(true);
@@ -69,6 +79,14 @@ describe("listAdmits", () => {
     expect(listAdmits("skills")(gate("skills:read"))).toBe(true);
     expect(listAdmits("integrations")(gate("integrations:read"))).toBe(true);
     expect(listAdmits("skills")(gate("agents:read", "integrations:read"))).toBe(false);
+  });
+
+  it("judges the data alone: a space withholding the Studio admits the list for the chat, not for the Studio", () => {
+    const withoutStudio = (permission: string) => permission === "runs:read-all";
+    expect(listAdmits("runs")(withoutStudio)).toBe(true);
+    expect(listAdmitsOn("runs", "chat")(withoutStudio)).toBe(true);
+    expect(listAdmitsOn("runs", "studio")(withoutStudio)).toBe(false);
+    expect(listAdmitsOn("runs", "studio")(gate("runs:read-all"))).toBe(true);
   });
 
   it("judges each space by its own set, through spacesWhere", () => {

@@ -596,6 +596,8 @@ export function IntegrationDetailPage() {
 
       {needsWizardFinish({
         manifest: m,
+        // Unread, a package is not yet known to be unpublished.
+        published: pkgLoading || (pkg?.version_count ?? 0) > 0,
         homeWritable: !!homeWritable,
         canOpenWizard: canReach("/integrations/new/mcp"),
       }) && (

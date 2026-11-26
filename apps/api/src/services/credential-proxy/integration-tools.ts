@@ -79,6 +79,8 @@ interface RemoteTool extends ToolBase {
   kind: "remote";
   /** The name the server lists it by: `tools/call` takes it. */
   remote_name: string;
+  /** The server's display name for it: untrusted, for display only. */
+  title?: string;
   input_schema: Record<string, unknown>;
   output_schema?: Record<string, unknown>;
   /** The schema shown is partial: the budget steps applied to the server's descriptor, in order. */
@@ -90,6 +92,12 @@ interface RemoteTool extends ToolBase {
 }
 
 export type IntegrationTool = ApiCallTool | RemoteTool;
+
+interface ListedIntegrationIdentity {
+  integration_package_id: string;
+  display_name: string;
+  icon?: string;
+}
 
 interface UnlistedIntegration {
   integration_package_id: string;
@@ -103,6 +111,8 @@ interface TruncatedCatalog {
 
 export interface IntegrationToolListing {
   tools: IntegrationTool[];
+  /** The integrations of `tools`, once each. */
+  integrations: ListedIntegrationIdentity[];
   connections: ConnectionOutsideRun[];
   /** The integrations active here that the caller has no usable connection of. */
   not_ready: IntegrationOutsideRun[];
@@ -285,7 +295,7 @@ function apiCallTools(entry: ListedIntegration): ApiCallTool[] {
   const configs = getApiCallConfigs(manifest);
   const described = typeof manifest.description === "string" ? manifest.description.trim() : "";
   // A sentence follows it: a description left open is closed.
-  const about = `${manifest.display_name ?? manifest.name}.${
+  const about = `${manifest.display_name || manifest.name}.${
     described ? ` ${/[.!?…]$/.test(described) ? described : `${described}.`}` : ""
   }`;
   return configs.flatMap((config): ApiCallTool[] => {
@@ -410,7 +420,7 @@ async function remoteTools(
       },
     };
   }
-  const about = manifest.display_name ?? manifest.name;
+  const about = manifest.display_name || manifest.name;
   const remoteTool = (
     name: string,
     upstream: RemoteToolCatalog["tools"][number],
@@ -434,6 +444,7 @@ async function remoteTools(
       integration_package_id: integrationId,
       description: upstream.description ? `${about}. ${upstream.description}` : `${about}.`,
       remote_name: upstream.name,
+      ...(upstream.title ? { title: upstream.title } : {}),
       input_schema: upstream.input_schema,
       ...(upstream.output_schema ? { output_schema: upstream.output_schema } : {}),
       ...(upstream.schema_reduced ? { schema_reduced: upstream.schema_reduced } : {}),
@@ -555,10 +566,21 @@ export async function listIntegrationTools(
     const ids = new Set(tools.map((tool) => tool.integration_package_id));
     return reachable.filter((c) => ids.has(c.integration_package_id));
   };
+  const identitiesOf = (tools: IntegrationTool[]): ListedIntegrationIdentity[] =>
+    [...new Set(tools.map((tool) => tool.integration_package_id))].map((id) => {
+      const manifest = manifests.get(id)!;
+      // AFPS allows an empty `display_name`.
+      return {
+        integration_package_id: id,
+        display_name: manifest.display_name || manifest.name,
+        ...(typeof manifest.icon === "string" && manifest.icon ? { icon: manifest.icon } : {}),
+      };
+    });
   const httpMatch = named([...httpTools.values()].flat());
   if (query.name !== undefined && httpMatch.length > 0) {
     return {
       tools: httpMatch,
+      integrations: identitiesOf(httpMatch),
       connections: connectionsOf(httpMatch),
       not_ready: [],
       unlisted: [],
@@ -623,6 +645,7 @@ export async function listIntegrationTools(
   const shown = named(tools);
   return {
     tools: shown,
+    integrations: identitiesOf(shown),
     connections: connectionsOf(shown),
     not_ready: notReady,
     unlisted,

@@ -7,6 +7,7 @@
 
 import { createContext, useContext, type ReactNode } from "react";
 import { actsIn, useChatHost, type ChatHost } from "./runtime-context.ts";
+import { callOutcome } from "./tool-presentation.ts";
 
 export interface ConversationScope {
   /**
@@ -117,15 +118,19 @@ export function limitedSpaceOf(
 /**
  * The space a tool call acted in, as the engine stamped it on the call
  * (`providerMetadata.appstrate.spaceId`): read from the call, never from the conversation's present
- * limit, which can change afterwards. `undefined` for a call that acts in no space.
+ * limit, which can change afterwards. `undefined` for a call that acts in no space. A failure's
+ * resolved spaces ride on the stored part's `resultProviderMetadata` (`callOutcome`).
  */
 export function callSpaceOf(part: {
   providerMetadata?: unknown;
   result?: unknown;
+  resultProviderMetadata?: unknown;
 }): string | undefined {
   // A settled tool knows the execution scope, including a target named by path or a
   // genuinely organization-wide call with an empty list. Without a resolved scope, use the input stamp.
-  const resolved = (part.result as { actedSpaceIds?: unknown } | undefined)?.actedSpaceIds;
+  const resolved =
+    (part.result as { actedSpaceIds?: unknown } | undefined)?.actedSpaceIds ??
+    callOutcome(part)?.actedSpaceIds;
   if (Array.isArray(resolved)) {
     const target = resolved[resolved.length - 1];
     return typeof target === "string" ? target : undefined;

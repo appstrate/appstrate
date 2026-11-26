@@ -1,5 +1,5 @@
 {
-  "id": "3964a514-9772-4bc2-beae-8b404418cab1",
+  "id": "abf7faf7-b029-42e3-9716-ec41326b2613",
   "prevId": "140ba93e-8d5f-4f02-abcd-69d61ab26517",
   "version": "7",
   "dialect": "postgresql",
@@ -1611,6 +1611,12 @@
           "notNull": true,
           "default": "'{}'::jsonb"
         },
+        "personal_space_role_id": {
+          "name": "personal_space_role_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
         "default_model_id": {
           "name": "default_model_id",
           "type": "text",
@@ -1678,6 +1684,21 @@
           "concurrently": false,
           "method": "btree",
           "with": {}
+        },
+        "idx_organizations_personal_space_role_id": {
+          "name": "idx_organizations_personal_space_role_id",
+          "columns": [
+            {
+              "expression": "personal_space_role_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
         }
       },
       "foreignKeys": {
@@ -1688,6 +1709,15 @@
           "columnsFrom": ["created_by"],
           "columnsTo": ["id"],
           "onDelete": "set null",
+          "onUpdate": "no action"
+        },
+        "organizations_personal_space_role_fk": {
+          "name": "organizations_personal_space_role_fk",
+          "tableFrom": "organizations",
+          "tableTo": "space_roles",
+          "columnsFrom": ["personal_space_role_id", "id"],
+          "columnsTo": ["id", "org_id"],
+          "onDelete": "restrict",
           "onUpdate": "no action"
         }
       },
@@ -1701,6 +1731,14 @@
       },
       "policies": {},
       "checkConstraints": {
+        "organizations_personal_space_role_one_shape": {
+          "name": "organizations_personal_space_role_one_shape",
+          "value": "personal_space_role_id IS NULL OR NOT (org_settings ? 'personal_space_role')"
+        },
+        "organizations_personal_space_role_preset": {
+          "name": "organizations_personal_space_role_preset",
+          "value": "NOT (org_settings ? 'personal_space_role') OR COALESCE(org_settings ->> 'personal_space_role' IN ('admin', 'builder', 'operator', 'runner', 'viewer'), false)"
+        },
         "organizations_icon_length": {
           "name": "organizations_icon_length",
           "value": "octet_length(icon) <= 16384"
@@ -2059,6 +2097,13 @@
           "notNull": true,
           "default": "'{}'::text[]"
         },
+        "shows_studio": {
+          "name": "shows_studio",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": true
+        },
         "created_by": {
           "name": "created_by",
           "type": "text",
@@ -2092,6 +2137,27 @@
             },
             {
               "expression": "key",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "uq_space_roles_id_org_id": {
+          "name": "uq_space_roles_id_org_id",
+          "columns": [
+            {
+              "expression": "id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "org_id",
               "isExpression": false,
               "asc": true,
               "nulls": "last"
@@ -5338,40 +5404,6 @@
           "concurrently": false,
           "method": "btree",
           "with": {}
-        },
-        "uq_notifications_tools_review_unread": {
-          "name": "uq_notifications_tools_review_unread",
-          "columns": [
-            {
-              "expression": "space_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "recipient_type",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "recipient_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "(\"payload\"->>'packageId')",
-              "asc": true,
-              "isExpression": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": true,
-          "where": "\"notifications\".\"type\" = 'integration_tools_review' AND \"notifications\".\"read_at\" IS NULL",
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
         }
       },
       "foreignKeys": {
@@ -5413,7 +5445,7 @@
         },
         "notifications_type_valid": {
           "name": "notifications_type_valid",
-          "value": "type IN ('run_failed', 'package_shared', 'agent_message', 'credential_needs_reconnection', 'integration_tools_review')"
+          "value": "type IN ('run_failed', 'package_shared', 'agent_message', 'credential_needs_reconnection')"
         }
       },
       "isRLSEnabled": false
@@ -6734,437 +6766,6 @@
           "value": "cardinality(connection_ids) BETWEEN 1 AND 20"
         }
       },
-      "isRLSEnabled": false
-    },
-    "public.integration_tool_snapshots": {
-      "name": "integration_tool_snapshots",
-      "schema": "",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "uuid",
-          "primaryKey": true,
-          "notNull": true,
-          "default": "gen_random_uuid()"
-        },
-        "org_id": {
-          "name": "org_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "package_id": {
-          "name": "package_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "connection_id": {
-          "name": "connection_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "listed_at": {
-          "name": "listed_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        },
-        "truncated": {
-          "name": "truncated",
-          "type": "boolean",
-          "primaryKey": false,
-          "notNull": true,
-          "default": false
-        },
-        "tools": {
-          "name": "tools",
-          "type": "jsonb",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "'[]'::jsonb"
-        }
-      },
-      "indexes": {
-        "idx_integration_tool_snapshots_connection": {
-          "name": "idx_integration_tool_snapshots_connection",
-          "columns": [
-            {
-              "expression": "connection_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "where": "\"integration_tool_snapshots\".\"connection_id\" IS NOT NULL",
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        },
-        "idx_integration_tool_snapshots_package": {
-          "name": "idx_integration_tool_snapshots_package",
-          "columns": [
-            {
-              "expression": "package_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        }
-      },
-      "foreignKeys": {
-        "integration_tool_snapshots_org_id_organizations_id_fk": {
-          "name": "integration_tool_snapshots_org_id_organizations_id_fk",
-          "tableFrom": "integration_tool_snapshots",
-          "tableTo": "organizations",
-          "columnsFrom": ["org_id"],
-          "columnsTo": ["id"],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        },
-        "integration_tool_snapshots_package_id_packages_id_fk": {
-          "name": "integration_tool_snapshots_package_id_packages_id_fk",
-          "tableFrom": "integration_tool_snapshots",
-          "tableTo": "packages",
-          "columnsFrom": ["package_id"],
-          "columnsTo": ["id"],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        },
-        "integration_tool_snapshots_connection_org_fk": {
-          "name": "integration_tool_snapshots_connection_org_fk",
-          "tableFrom": "integration_tool_snapshots",
-          "tableTo": "integration_connections",
-          "columnsFrom": ["connection_id", "org_id"],
-          "columnsTo": ["id", "org_id"],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {
-        "uq_integration_tool_snapshots_target": {
-          "name": "uq_integration_tool_snapshots_target",
-          "nullsNotDistinct": true,
-          "columns": ["org_id", "package_id", "connection_id"]
-        }
-      },
-      "policies": {},
-      "checkConstraints": {},
-      "isRLSEnabled": false
-    },
-    "public.space_integration_tool_approvals": {
-      "name": "space_integration_tool_approvals",
-      "schema": "",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "uuid",
-          "primaryKey": true,
-          "notNull": true,
-          "default": "gen_random_uuid()"
-        },
-        "space_id": {
-          "name": "space_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "org_id": {
-          "name": "org_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "package_id": {
-          "name": "package_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "tool_name": {
-          "name": "tool_name",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "fingerprint": {
-          "name": "fingerprint",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "definition": {
-          "name": "definition",
-          "type": "jsonb",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "approved_by": {
-          "name": "approved_by",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "approved_at": {
-          "name": "approved_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        }
-      },
-      "indexes": {
-        "uq_space_integration_tool_approvals": {
-          "name": "uq_space_integration_tool_approvals",
-          "columns": [
-            {
-              "expression": "space_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "package_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "tool_name",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "fingerprint",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": true,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        },
-        "idx_space_integration_tool_approvals_package": {
-          "name": "idx_space_integration_tool_approvals_package",
-          "columns": [
-            {
-              "expression": "package_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        },
-        "idx_space_integration_tool_approvals_approved_by": {
-          "name": "idx_space_integration_tool_approvals_approved_by",
-          "columns": [
-            {
-              "expression": "approved_by",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "where": "\"space_integration_tool_approvals\".\"approved_by\" IS NOT NULL",
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        }
-      },
-      "foreignKeys": {
-        "space_integration_tool_approvals_package_id_packages_id_fk": {
-          "name": "space_integration_tool_approvals_package_id_packages_id_fk",
-          "tableFrom": "space_integration_tool_approvals",
-          "tableTo": "packages",
-          "columnsFrom": ["package_id"],
-          "columnsTo": ["id"],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        },
-        "space_integration_tool_approvals_approved_by_user_id_fk": {
-          "name": "space_integration_tool_approvals_approved_by_user_id_fk",
-          "tableFrom": "space_integration_tool_approvals",
-          "tableTo": "user",
-          "columnsFrom": ["approved_by"],
-          "columnsTo": ["id"],
-          "onDelete": "set null",
-          "onUpdate": "no action"
-        },
-        "space_integration_tool_approvals_space_org_fk": {
-          "name": "space_integration_tool_approvals_space_org_fk",
-          "tableFrom": "space_integration_tool_approvals",
-          "tableTo": "spaces",
-          "columnsFrom": ["space_id", "org_id"],
-          "columnsTo": ["id", "org_id"],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "policies": {},
-      "checkConstraints": {},
-      "isRLSEnabled": false
-    },
-    "public.space_integration_tool_blocks": {
-      "name": "space_integration_tool_blocks",
-      "schema": "",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "uuid",
-          "primaryKey": true,
-          "notNull": true,
-          "default": "gen_random_uuid()"
-        },
-        "space_id": {
-          "name": "space_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "org_id": {
-          "name": "org_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "package_id": {
-          "name": "package_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "tool_name": {
-          "name": "tool_name",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "blocked_by": {
-          "name": "blocked_by",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "blocked_at": {
-          "name": "blocked_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        }
-      },
-      "indexes": {
-        "uq_space_integration_tool_blocks": {
-          "name": "uq_space_integration_tool_blocks",
-          "columns": [
-            {
-              "expression": "space_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "package_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "tool_name",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": true,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        },
-        "idx_space_integration_tool_blocks_package": {
-          "name": "idx_space_integration_tool_blocks_package",
-          "columns": [
-            {
-              "expression": "package_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        },
-        "idx_space_integration_tool_blocks_blocked_by": {
-          "name": "idx_space_integration_tool_blocks_blocked_by",
-          "columns": [
-            {
-              "expression": "blocked_by",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "where": "\"space_integration_tool_blocks\".\"blocked_by\" IS NOT NULL",
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        }
-      },
-      "foreignKeys": {
-        "space_integration_tool_blocks_package_id_packages_id_fk": {
-          "name": "space_integration_tool_blocks_package_id_packages_id_fk",
-          "tableFrom": "space_integration_tool_blocks",
-          "tableTo": "packages",
-          "columnsFrom": ["package_id"],
-          "columnsTo": ["id"],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        },
-        "space_integration_tool_blocks_blocked_by_user_id_fk": {
-          "name": "space_integration_tool_blocks_blocked_by_user_id_fk",
-          "tableFrom": "space_integration_tool_blocks",
-          "tableTo": "user",
-          "columnsFrom": ["blocked_by"],
-          "columnsTo": ["id"],
-          "onDelete": "set null",
-          "onUpdate": "no action"
-        },
-        "space_integration_tool_blocks_space_org_fk": {
-          "name": "space_integration_tool_blocks_space_org_fk",
-          "tableFrom": "space_integration_tool_blocks",
-          "tableTo": "spaces",
-          "columnsFrom": ["space_id", "org_id"],
-          "columnsTo": ["id", "org_id"],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "policies": {},
-      "checkConstraints": {},
       "isRLSEnabled": false
     },
     "public.uploads": {

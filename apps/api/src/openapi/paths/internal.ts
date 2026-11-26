@@ -302,64 +302,22 @@ export const internalPaths = {
           "`integration_connection_needs_reconnection`: the credential is dead and the connection is flagged `needsReconnection`; the run records the integration as degraded and the sidecar stops retrying. Counted failures flag it at `INTEGRATION_REFRESH_MAX_FAILURES` (an OAuth2 token only once expired past `INTEGRATION_REFRESH_GRACE_SECONDS`); a rejected handshake (`rejected_request=handshake`) of an auth nothing can refresh flags it at once.",
         ),
         "502": credentialFailure(
-          "Not refreshed now; the connection stays usable. A successful upstream call through a non-OAuth2 connection (`upstream-success`) or a reconnect resets the count of its rejections.",
+          "Not refreshed now; the connection stays usable. A successful upstream call through a non-OAuth2 connection (journaled with its `credential_revision` on `POST /internal/integration-calls`) or a reconnect resets the count of its rejections.",
         ),
         "503": { $ref: "#/components/responses/EncryptionKeyUnavailable" },
         "500": { $ref: "#/components/responses/InternalServerError" },
       },
     },
   },
-  "/internal/integration-credentials/{scope}/{name}/upstream-success": {
+  "/internal/integration-calls": {
     post: {
-      operationId: "reportIntegrationUpstreamSuccess",
+      operationId: "reportIntegrationCalls",
       "x-appstrate-space": { kind: "organization" },
       tags: ["Internal"],
-      summary: "End a connection's upstream-rejection streak",
+      summary: "Journal the upstream calls a run's sidecar dispatched",
       description:
-        "Sidecar-only. Same Bearer run token, agent-dependency and activation checks and bound-connection check as the GET endpoint; `connection_id` and `credential_revision` are always required. Called once, fire-and-forget, after a successful (2xx) upstream call through the named connection when its credentials payload carried `rejection_streak`, or after the sidecar saw a rejection counted in this run: a non-OAuth2 connection's count of consecutive upstream rejections is reset to 0. Nothing is reset when the connection no longer holds the credential named by `credential_revision`, when the run has no actor or its actor can no longer reach the connection (deleted, unshared, moved to another space), or when the connection is already flagged `needsReconnection`. An OAuth2 connection's count tracks token refreshes and is left untouched. Idempotent. An ephemeral CONNECT run's token is refused with `409 connect_run_no_refresh`, as on the refresh endpoint.",
+        "Sidecar-only. Auth via Bearer run token. A batch of the upstream calls the run's sidecar dispatched for its integrations (the `api_call` tool, the MITM listener, a remote MCP server's operations, a local MCP server's `tools/call` when no MITM listener sees its upstream requests), one record per call that may have reached the upstream, taken from its final attempt. Each is written to the connection-call journal (`connection_calls`) with the run's organization, space, actor and API key, `auth_method` `run_token`, `run_id` set and the batch's request id; the sidecar sends none of those. Every record is checked before any is written, against the run's frozen kickoff snapshot alone — never the live agent or the space's activation, so a call that left stays journaled when its integration is switched off or the agent edited or deleted mid-run: a non-null `connection_id` is one the run bound to that integration (else `400 connection_not_in_run`), and a record with a null `connection_id` names an integration the run resolved (else `400 invalid_request`); one record that fails refuses the whole batch. The text of a record is bounded at 2048 characters and stored truncated to the journal's own caps. A run with no actor writes nothing and answers `204`. A record carrying `credential_revision` (a 2xx answered with that credential) also ends the connection's rejection streak: a non-OAuth2 connection's count of consecutive upstream rejections is reset to 0, unless the connection no longer holds that credential, the run's actor can no longer reach it (deleted, unshared, moved to another space), or it is already flagged `needsReconnection`. An OAuth2 connection's count tracks token refreshes and is left untouched. A token whose run is no longer `running` is refused (`403`).",
       security: [{ bearerExecToken: [] }],
-      parameters: [
-        { $ref: "#/components/parameters/PackageScope" },
-        { $ref: "#/components/parameters/PackageName" },
-        boundConnectionIdParam,
-        {
-          ...credentialRevisionParam,
-          required: true,
-          description: "The `credential_revision` of the credential the successful call carried.",
-        },
-      ],
-      responses: {
-        "204": { description: "Streak ended (or none to end on that credential)." },
-        "400": {
-          ...connectionSelector400,
-          description: `${connectionSelector400.description} A missing or malformed \`credential_revision\` is an \`invalid_request\` too.`,
-        },
-        "401": { $ref: "#/components/responses/Unauthorized" },
-        "403": { $ref: "#/components/responses/Forbidden" },
-        "404": { $ref: "#/components/responses/NotFound" },
-        "409": {
-          ...integrationCredentialsConflict409,
-          description:
-            "The definition this run executes is no longer readable (`run_definition_gone` / `run_agent_deleted`, as on the GET endpoint), so the run token's authorization set cannot be decided; or `connect_run_no_refresh` — the caller is an ephemeral connect run, which holds no stored credential.",
-        },
-        "500": { $ref: "#/components/responses/InternalServerError" },
-      },
-    },
-  },
-  "/internal/integration-credentials/{scope}/{name}/scopes-requested": {
-    post: {
-      operationId: "reportIntegrationScopesRequested",
-      "x-appstrate-space": { kind: "organization" },
-      tags: ["Internal"],
-      summary: "Report the scopes a server asked for that a connection does not hold",
-      description:
-        "Sidecar-only. Same Bearer run token, agent-dependency and activation checks and bound-connection check as `upstream-success` (`connection_id` is required). Called fire-and-forget when a call through the connection was refused with HTTP 403 `insufficient_scope` naming `scopes` (RFC 6750 §3.1). The platform keeps the valid scope tokens the connection does not already hold, at most 20, as the connection's `requested_scopes`, and stamps the run's `metadata.scope_requests[]` (`integration_id`, `connection_id`, `scopes`: the connection's whole standing demand). Nothing is recorded when the run has no actor or its actor can no longer reach the connection. A reconnect that grants the scopes clears them. Idempotent. An ephemeral CONNECT run's token is refused with `409 connect_run_no_refresh`.",
-      security: [{ bearerExecToken: [] }],
-      parameters: [
-        { $ref: "#/components/parameters/PackageScope" },
-        { $ref: "#/components/parameters/PackageName" },
-        boundConnectionIdParam,
-      ],
       requestBody: {
         required: true,
         content: {
@@ -367,14 +325,76 @@ export const internalPaths = {
             schema: {
               type: "object",
               additionalProperties: false,
-              required: ["scopes"],
+              required: ["calls"],
               properties: {
-                scopes: {
+                calls: {
                   type: "array",
                   minItems: 1,
-                  maxItems: 20,
-                  items: { type: "string", maxLength: 256 },
-                  description: "The scopes the server's challenge named.",
+                  maxItems: 100,
+                  items: {
+                    type: "object",
+                    additionalProperties: false,
+                    required: [
+                      "integration_id",
+                      "connection_id",
+                      "method",
+                      "host",
+                      "outcome",
+                      "duration_ms",
+                    ],
+                    properties: {
+                      integration_id: {
+                        type: "string",
+                        minLength: 1,
+                        maxLength: 214,
+                        description: "The integration's package id (`@scope/name`).",
+                      },
+                      connection_id: {
+                        type: ["string", "null"],
+                        format: "uuid",
+                        description:
+                          "The bound connection the call went through; `null` for an integration that binds none.",
+                      },
+                      method: {
+                        type: "string",
+                        maxLength: 2048,
+                        pattern: "^[!#$%&'*+.^_`|~0-9A-Za-z-]+$",
+                        description:
+                          "The request's HTTP method (an RFC 9110 token), `POST` for a local MCP server's `tools/call`. Stored truncated to 16 characters.",
+                      },
+                      host: {
+                        type: ["string", "null"],
+                        minLength: 1,
+                        maxLength: 2048,
+                        description:
+                          "The target's host as the caller wrote it, before any credential substitution: a `{{field}}` placeholder stays as written. Stored truncated to 255 characters. `null` for a `tools/call` of a local MCP server with no MITM listener (env- or files-delivery, or no credential), whose upstream requests the sidecar does not see.",
+                      },
+                      outcome: {
+                        type: "string",
+                        description:
+                          "The upstream's HTTP status (any three digits: some upstreams answer outside 1xx-5xx), or the failure code of a call that was sent and got no response: `unauthorized_target`, `blocked_target`, `upstream_unresolvable`, `upstream_unreachable`, `upstream_timeout`.",
+                      },
+                      duration_ms: {
+                        type: "integer",
+                        minimum: 0,
+                        maximum: 2147483647,
+                      },
+                      credential_revision: {
+                        type: "string",
+                        pattern: "^[0-9a-f]{16}$",
+                        description:
+                          "Set on a 2xx answered with the injected credential when it ends a rejection streak the sidecar knows of: the `credential_revision` of that credential. Only with a non-null `connection_id` and a 2xx `outcome`.",
+                      },
+                      required_scopes: {
+                        type: "array",
+                        minItems: 1,
+                        maxItems: 20,
+                        items: { type: "string" },
+                        description:
+                          "Set on a `403` answered through a connection whose `WWW-Authenticate` challenge is `insufficient_scope` and names scopes: the valid scope tokens it named. The platform records them as the connection's step-up demand (`requested_scopes`, minus what it holds) when the run's actor still reaches it, and stamps the run's `metadata.scope_requests[]` with the connection's whole standing demand. Only with a non-null `connection_id` and a `403` `outcome`.",
+                      },
+                    },
+                  },
                 },
               },
             },
@@ -382,12 +402,19 @@ export const internalPaths = {
         },
       },
       responses: {
-        "204": { description: "Report recorded." },
-        "400": connectionSelector400,
+        "204": { description: "Journaled (nothing with no actor)." },
+        "400": {
+          description:
+            "`invalid_request`: a malformed body (more than 100 records, an unknown field, a value out of its bounds, a `credential_revision` on a record that cannot end a streak, a `required_scopes` on a record that is no 403 through a connection), or a record with a null `connection_id` names an integration the run did not resolve (`param` points at it); or `connection_not_in_run`: a record names a connection the run did not bind to its integration (`param` points at it).",
+          content: {
+            "application/problem+json": {
+              schema: { $ref: "#/components/schemas/ProblemDetail" },
+            },
+          },
+        },
         "401": { $ref: "#/components/responses/Unauthorized" },
         "403": { $ref: "#/components/responses/Forbidden" },
         "404": { $ref: "#/components/responses/NotFound" },
-        "409": integrationCredentialsConflict409,
         "500": { $ref: "#/components/responses/InternalServerError" },
       },
     },
@@ -399,7 +426,7 @@ export const internalPaths = {
       tags: ["Internal"],
       summary: "Report the tools a run's boot listed from a remote integration",
       description:
-        "Sidecar-only. Same Bearer run token and agent-dependency and activation checks as the GET endpoint. `connection_id` names a connection this run bound to the integration, as for `upstream-success`; it is omitted only for an integration that binds none (an unauthenticated one). Called once per connection, fire-and-forget, after the sidecar registered the integration's tools. `tools` are the MCP descriptors as the server returned them (the platform computes their fingerprints itself); the sidecar cuts them at 1 MiB and sets `truncated`, which is sent with `tools` and only with them. A report without `tools` (a local integration's unavailable list) records only `unavailable`, never a snapshot. The body is bounded at 1 MiB plus a 256 KiB envelope margin (`413` past it). A descriptor that is not a valid tool (no name, no object `inputSchema`) is dropped on its own and marks the listing truncated: it never refuses the report. `unavailable` lists the tools the agent selected that this run does not expose, each with its reason; the run's `metadata.unavailable_tools[]` is stamped with them (`integration_id`, `name`, `reason`; only the first 50 of one report are kept). The listing becomes the integration's tool snapshot only when the run is executed by the platform: a remote-origin run's sidecar is on the caller's machine and is no authority on organization state, so its listing is dropped; the platform's own endpoint integration never gets a snapshot.",
+        "Sidecar-only. Same Bearer run token and agent-dependency and activation checks as the GET endpoint. `connection_id` names a connection this run bound to the integration; it is omitted only for an integration that binds none (an unauthenticated one). Called once per connection, fire-and-forget, after the sidecar registered the integration's tools. `tools` are the MCP descriptors as the server returned them (the platform computes their fingerprints itself); the sidecar cuts them at 1 MiB and sets `truncated`, which is sent with `tools` and only with them. A report without `tools` (a local integration's unavailable list) records only `unavailable`, never a snapshot. The body is bounded at 1 MiB plus a 256 KiB envelope margin (`413` past it). A descriptor that is not a valid tool (no name, no object `inputSchema`) is dropped on its own and marks the listing truncated: it never refuses the report. `unavailable` lists the tools the agent selected that this run does not expose, each with its reason; the run's `metadata.unavailable_tools[]` is stamped with them (`integration_id`, `name`, `reason`; only the first 50 of one report are kept). The listing becomes the integration's tool snapshot only when the run is executed by the platform: a remote-origin run's sidecar is on the caller's machine and is no authority on organization state, so its listing is dropped; the platform's own endpoint integration never gets a snapshot.",
       security: [{ bearerExecToken: [] }],
       parameters: [
         { $ref: "#/components/parameters/PackageScope" },

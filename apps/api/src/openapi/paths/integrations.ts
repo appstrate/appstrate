@@ -1302,9 +1302,9 @@ export const integrationsPaths = {
     post: {
       operationId: "syncIntegrationFromServer",
       tags: ["Integrations"],
-      summary: "Propose manifest fields from the integration's connected MCP server",
+      summary: "Propose identity fields from the integration's connected MCP server",
       description:
-        "Reads the remote MCP server of the integration's draft (the working copy being edited, published or not) and returns a proposal for that draft: manifest fields (`display_name`, `homepage`, `tools`, `tools_policy`, `default_tools`), an icon, the server's instructions and warnings. It writes nothing, neither to the draft (the caller merges the proposal and saves) nor to the tool snapshot: the snapshot is what the PUBLISHED integration's server listed, recorded by runs and by `POST /api/integrations/{packageId}/tool-snapshot/refresh`, and this read speaks for the draft. This is the read of the integration creation wizard, where there is no published version and no recorded snapshot yet; the integration editor works from the tool snapshot instead. The server is reached through the credential proxy, authorized against the draft — the same connection selection outside a run, `authorized_uris` allowlist, egress guard and 401 refresh as `/api/credential-proxy/proxy`, its listing journaled as one call of the connection (`GET /api/integrations/calls`); the server's own values (`Mcp-Session-Id`, cursors) are sent back as written, never substituted; an integration declaring no auths (AFPS §7.2) has nothing to inject, and its server is reached directly, egress-guarded on every hop, without a connection. The proposal holds: every tool of `tools/list` (cursor pagination, at most 500 tools over 20 pages of at most 2 MiB each) as an empty `tools_policy` entry each and as an entry of `tools`, and as `default_tools` only the tools annotated `readOnlyHint: true` and not `destructiveHint: true`, `serverInfo.title` (else `name`) as `display_name`, `description`, `websiteUrl` as `homepage`, a raster of `serverInfo.icons` (else the site's icon) as `icon_source`, and `instructions` (at most 32 KiB, cut at a line boundary with an `instructions_truncated` warning; omitted when the package already has its own `INTEGRATION.md`). The whole read is bounded to 20 seconds, the icon lookup included (best-effort: past the bound it finds none). Only a Streamable HTTP server is supported. Requires write authority on the package in its home space and, when the draft declares auths, `credential-proxy:call-own` in the current space (with `credential-proxy:call`, a connection shared into the space is usable too). Rate limited to 10 requests per minute.",
+        "Opens a session on the remote MCP server of the integration's draft (the working copy being edited, published or not) and returns the identity it reports: manifest fields (`display_name`, `description`, `homepage`, `icon`), an icon source, the server's instructions and warnings. It lists no tool and writes nothing, neither to the draft (the caller merges the proposal and saves) nor to the tool snapshot: tools are read only by the snapshot of the PUBLISHED integration, recorded by runs and by `POST /api/integrations/{packageId}/tool-snapshot/refresh`. The session is the same as the snapshot's: through the credential proxy, authorized against the draft (the same connection selection outside a run, `authorized_uris` allowlist, egress guard and 401 refresh as `/api/credential-proxy/proxy`, journaled as one call of the connection, `GET /api/integrations/calls`); an integration declaring no auths (AFPS §7.2) is reached directly, egress-guarded on every hop, without a connection. The proposal holds `serverInfo.title` (else `name`) as `display_name`, `description`, `websiteUrl` as `homepage`, a raster of `serverInfo.icons` (else the site's icon) as `icon_source`, and `instructions` (at most 32 KiB, cut at a line boundary with an `instructions_truncated` warning; omitted when the package already has its own `INTEGRATION.md`). Bounded to 20 seconds, the icon lookup included (best-effort). Only a Streamable HTTP server is supported. Requires write authority on the package in its home space and, when the draft declares auths, `credential-proxy:call-own` in the current space. Rate limited to 10 requests per minute.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XSpaceId" },
@@ -1337,25 +1337,13 @@ export const integrationsPaths = {
             "application/json": {
               schema: {
                 type: "object",
-                required: ["manifest", "icon_source", "instructions", "tools", "warnings"],
+                required: ["manifest", "icon_source", "instructions", "warnings"],
                 properties: {
                   manifest: {
                     type: "object",
-                    required: ["default_tools", "tools_policy"],
                     description:
-                      "A partial AFPS integration manifest: only the fields the server reported.",
+                      "A partial AFPS integration manifest: only the identity fields the server reported.",
                     properties: {
-                      default_tools: {
-                        type: "array",
-                        items: { type: "string" },
-                        description:
-                          "The selection an agent inherits: only the tools the server annotates `readOnlyHint: true` and not `destructiveHint: true`, in server order; empty when it annotates none. Discovering a tool never selects it otherwise.",
-                      },
-                      tools_policy: {
-                        type: "object",
-                        additionalProperties: { type: "object" },
-                        description: "Every tool listed, each with an empty policy.",
-                      },
                       display_name: { type: "string" },
                       description: { type: "string" },
                       homepage: { type: "string", format: "uri" },
@@ -1372,41 +1360,6 @@ export const integrationsPaths = {
                     description:
                       "The server's `initialize` instructions, for the editor to propose as `INTEGRATION.md`; null when it sent none, or when the package's draft already holds an `INTEGRATION.md` (whatever its content, empty included).",
                   },
-                  tools: {
-                    type: "array",
-                    description:
-                      "Every tool listed, in server order, one entry per name (the first listed wins), for the editor to show and select from. MCP annotations are the server's untrusted hints: `read_only` only drives the `default_tools` pre-selection.",
-                    items: {
-                      type: "object",
-                      required: ["name", "read_only", "destructive"],
-                      properties: {
-                        name: { type: "string" },
-                        title: {
-                          type: "string",
-                          maxLength: 200,
-                          description:
-                            "The tool's `title` (else `annotations.title`), trimmed, at most 200 characters (a cut ends with `…`); absent when empty.",
-                        },
-                        description: {
-                          type: "string",
-                          maxLength: 1024,
-                          description:
-                            "The tool's `description`, trimmed, at most 1024 characters (a cut ends with `…`); absent when empty.",
-                        },
-                        read_only: {
-                          type: "boolean",
-                          description:
-                            "True only when the server annotates the tool `readOnlyHint: true`.",
-                        },
-                        destructive: {
-                          type: "boolean",
-                          description:
-                            "True only when the server annotates the tool `destructiveHint: true`. An untrusted hint like `read_only`; a destructive tool is never in the proposal's `default_tools`, even when also annotated read-only.",
-                        },
-                      },
-                      additionalProperties: false,
-                    },
-                  },
                   warnings: {
                     type: "array",
                     items: {
@@ -1415,7 +1368,7 @@ export const integrationsPaths = {
                       properties: {
                         code: {
                           type: "string",
-                          enum: ["tools_truncated", "instructions_truncated"],
+                          enum: ["instructions_truncated"],
                         },
                         message: { type: "string" },
                       },

@@ -288,10 +288,14 @@ export interface IntegrationCredentialsSource extends MitmCredentialSource {
   ): Promise<boolean>;
   /** True once the platform answered a refresh with 410: the connection is flagged for reconnection. */
   needsReconnection(): boolean;
-  /** Required here: this factory always reports ({@link MitmCredentialSource.reportUpstreamSuccess}). */
-  reportUpstreamSuccess(credentialRevision: string | undefined): void;
-  /** Tell the platform which scopes a server's 403 `insufficient_scope` named (fire-and-forget). */
-  reportScopesRequested(scopes: readonly string[]): void;
+  /**
+   * A 2xx on the injected credential built with `credentialRevision`: the revision its journal
+   * record carries to end the rejection streak, `undefined` with none pending. A superseded
+   * revision is returned too (the platform resets nothing) and leaves the held one pending.
+   */
+  streakEndingRevision(credentialRevision: string | undefined): string | undefined;
+  /** The record carrying `credentialRevision` did not land: the streak is pending again. */
+  streakNotEnded(credentialRevision: string): void;
 }
 
 /**
@@ -379,48 +383,16 @@ export function createIntegrationCredentialsSource(
   let rejectionPending = (payload.rejectionStreak ?? 0) > 0;
   let flagged = false;
 
-  const reportUpstreamSuccess = (revision: string | undefined): void => {
-    if (!rejectionPending || options.connectionId === undefined || revision === undefined) return;
+  const streakEndingRevision = (revision: string | undefined): string | undefined => {
+    if (!rejectionPending || options.connectionId === undefined || revision === undefined) {
+      return undefined;
+    }
     // A verdict on a superseded credential leaves the held one's streak pending.
     if (revision === payload.credentialRevision) rejectionPending = false;
-    postIntegrationUpstreamSuccess(options.integrationId, options.connectionId, revision, {
-      ...options,
-      fetchFn,
-    }).then(
-      (res) => {
-        if (!res.ok)
-          logger.warn("integration upstream success report refused", {
-            ...logCtx,
-            status: res.status,
-          });
-      },
-      (err: unknown) =>
-        logger.warn("integration upstream success report failed", {
-          ...logCtx,
-          error: err instanceof Error ? err.message : String(err),
-        }),
-    );
+    return revision;
   };
-
-  const reportScopesRequested = (scopes: readonly string[]): void => {
-    if (options.connectionId === undefined) return;
-    postIntegrationScopesRequested(options.integrationId, options.connectionId, scopes, {
-      ...options,
-      fetchFn,
-    }).then(
-      (res) => {
-        if (!res.ok)
-          logger.warn("integration scopes-requested report refused", {
-            ...logCtx,
-            status: res.status,
-          });
-      },
-      (err: unknown) =>
-        logger.warn("integration scopes-requested report failed", {
-          ...logCtx,
-          error: err instanceof Error ? err.message : String(err),
-        }),
-    );
+  const streakNotEnded = (revision: string): void => {
+    if (revision === payload.credentialRevision) rejectionPending = true;
   };
 
   const current = (): IntegrationCredentialsPayload => ({
@@ -620,8 +592,8 @@ export function createIntegrationCredentialsSource(
     current,
     deliveryPlans,
     refreshOnUnauthorized,
-    reportUpstreamSuccess,
-    reportScopesRequested,
+    streakEndingRevision,
+    streakNotEnded,
     needsReconnection: () => flagged,
     snapshot: () => payload,
     setSessionOutputs,
@@ -698,41 +670,6 @@ export function postIntegrationCredentialsRefresh(
     {
       method: "POST",
       headers: { Authorization: `Bearer ${opts.runToken}` },
-    },
-  );
-}
-
-/** A call with `credentialRevision` succeeded upstream: end the connection's rejection streak. */
-function postIntegrationUpstreamSuccess(
-  integrationId: string,
-  connectionId: string,
-  credentialRevision: string,
-  opts: { platformApiUrl: string; runToken: string; fetchFn?: typeof fetch },
-): Promise<Response> {
-  const fetchFn = opts.fetchFn ?? fetch;
-  return fetchFn(
-    `${opts.platformApiUrl}/internal/integration-credentials/${integrationId}/upstream-success${credentialsQuery(connectionId, credentialRevision)}`,
-    {
-      method: "POST",
-      headers: { Authorization: `Bearer ${opts.runToken}` },
-    },
-  );
-}
-
-/** A call through the connection was refused `insufficient_scope` naming `scopes`. */
-function postIntegrationScopesRequested(
-  integrationId: string,
-  connectionId: string,
-  scopes: readonly string[],
-  opts: { platformApiUrl: string; runToken: string; fetchFn?: typeof fetch },
-): Promise<Response> {
-  const fetchFn = opts.fetchFn ?? fetch;
-  return fetchFn(
-    `${opts.platformApiUrl}/internal/integration-credentials/${integrationId}/scopes-requested${credentialsQuery(connectionId)}`,
-    {
-      method: "POST",
-      headers: { Authorization: `Bearer ${opts.runToken}`, "Content-Type": "application/json" },
-      body: JSON.stringify({ scopes }),
     },
   );
 }

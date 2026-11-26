@@ -13,9 +13,11 @@ import {
 } from "@appstrate/db/schema";
 import { getErrorMessage } from "@appstrate/core/errors";
 import { asRecord } from "@appstrate/core/safe-json";
+import { readJsonBody } from "@appstrate/core/request-body";
+import type { ApiCallFailureCode } from "@appstrate/afps-runtime/resolvers";
 import { parseBearer } from "@appstrate/core/bearer";
 import { zipArtifact } from "@appstrate/core/zip";
-import { getLocalServer } from "@appstrate/core/integration";
+import { getLocalServer, scopeTokenSchema } from "@appstrate/core/integration";
 import { downloadVersionZipForExecution } from "../services/package-storage.ts";
 import { readPackageSnapshot } from "../services/package-files.ts";
 import {
@@ -27,6 +29,8 @@ import { isInvalidTextRepresentation } from "../lib/db-helpers.ts";
 import { parseSignedToken } from "../lib/run-token.ts";
 import { verifyRunToken } from "../lib/verify-run-token.ts";
 import { requireRunBoundMember } from "../lib/run-bound-connection.ts";
+import { trackAudit } from "../services/audit.ts";
+import { recordConnectionCalls } from "../services/credential-proxy/call-journal.ts";
 import { serveRunMcp } from "../services/run-tools-mcp.ts";
 import { RUN_ROUTE_RATE_PER_MIN, rateLimitByBearer } from "../middleware/rate-limit.ts";
 import {
@@ -42,7 +46,6 @@ import {
   observedToolNameSchema,
   observedToolSchema,
 } from "@appstrate/core/sidecar-types";
-import { readJsonBody } from "@appstrate/core/request-body";
 import { bodyLimit } from "../middleware/body-limit.ts";
 import {
   getRunEffectiveAgent,
@@ -82,6 +85,7 @@ import {
   isIntegrationActive,
 } from "../services/integration-connections.ts";
 import { SCOPED_PACKAGE_ROUTE } from "./scoped-package-route.ts";
+import type { AppEnv } from "../types/index.ts";
 import { orgOrSystemFilter } from "../lib/package-helpers.ts";
 import {
   isConnectId,
@@ -241,11 +245,6 @@ const EMPTY_CREDENTIALS_WIRE = {
  */
 const TOOLS_OBSERVED_MAX_BODY_BYTES = OBSERVED_TOOLS_MAX_BYTES + 256 * 1024;
 
-export const scopesRequestedSchema = z.strictObject({
-  /** What the server's `insufficient_scope` challenge named; the platform keeps the valid tokens. */
-  scopes: z.array(z.string().max(256)).min(1).max(20),
-});
-
 export const toolsObservedSchema = z
   .strictObject({
     /**
@@ -267,9 +266,84 @@ export const toolsObservedSchema = z
     message: "`truncated` qualifies `tools`: send both or neither",
     path: ["truncated"],
   });
+/** A credential's revision as a credentials payload carries it (`credential_revision`). */
+const credentialRevisionSchema = z.string().regex(/^[0-9a-f]{16}$/);
+
+/** The `auth_method` of a call a platform run's sidecar journals: its run token. */
+const RUN_SIDECAR_AUTH_METHOD = "run_token";
+
+/** The failure codes after dispatch a sidecar reports as an outcome: the platform proxy's own. */
+const DISPATCHED_FAILURE_CODES = [
+  "unauthorized_target",
+  "blocked_target",
+  "upstream_unresolvable",
+  "upstream_unreachable",
+  "upstream_timeout",
+] as const satisfies readonly ApiCallFailureCode[];
+
+/** Most scopes one record names (the sidecar keeps at most as many from a challenge). */
+const MAX_REQUIRED_SCOPES_PER_CALL = 20;
+
+/** Most records one `POST /internal/integration-calls` takes. */
+const MAX_INTEGRATION_CALLS_PER_BATCH = 100;
+
+/**
+ * Hard bound on a record's text fields. `recordConnectionCalls` truncates to the columns' own caps:
+ * a long value is stored cut, never a reason to refuse the batch.
+ */
+const MAX_INTEGRATION_CALL_TEXT = 2048;
+
+const integrationCallRecordSchema = z
+  .object({
+    integration_id: z.string().min(1).max(214),
+    connection_id: z.uuid().nullable(),
+    // An HTTP method token (RFC 9110 §9.1).
+    method: z
+      .string()
+      .max(MAX_INTEGRATION_CALL_TEXT)
+      .regex(/^[!#$%&'*+.^_`|~0-9A-Za-z-]+$/),
+    // NULL: an operation of a local MCP server, whose upstream requests the sidecar does not see.
+    host: z
+      .string()
+      .min(1)
+      .max(MAX_INTEGRATION_CALL_TEXT)
+      .regex(/^[^\s\p{Cc}]+$/u)
+      .nullable(),
+    // Any three-digit status an upstream answers (some answer outside 1xx-5xx, e.g. 999).
+    outcome: z.union([z.string().regex(/^[0-9]{3}$/), z.enum(DISPATCHED_FAILURE_CODES)]),
+    duration_ms: z.int().min(0).max(2_147_483_647),
+    credential_revision: credentialRevisionSchema.optional(),
+    // What a `403 insufficient_scope` challenge named: the connection's step-up demand.
+    required_scopes: z.array(scopeTokenSchema).min(1).max(MAX_REQUIRED_SCOPES_PER_CALL).optional(),
+  })
+  .strict()
+  .refine(
+    (call) =>
+      call.credential_revision === undefined ||
+      (call.connection_id !== null && /^2[0-9]{2}$/.test(call.outcome)),
+    {
+      message: "`credential_revision` ends a streak: only on a 2xx outcome through a connection.",
+      path: ["credential_revision"],
+    },
+  )
+  .refine(
+    (call) =>
+      call.required_scopes === undefined || (call.connection_id !== null && call.outcome === "403"),
+    {
+      message:
+        "`required_scopes` names a step-up demand: only on a 403 outcome through a connection.",
+      path: ["required_scopes"],
+    },
+  );
+
+export const integrationCallsBodySchema = z
+  .object({
+    calls: z.array(integrationCallRecordSchema).min(1).max(MAX_INTEGRATION_CALLS_PER_BATCH),
+  })
+  .strict();
 
 export function createInternalRouter(ratePerMin = RUN_ROUTE_RATE_PER_MIN) {
-  const router = new Hono();
+  const router = new Hono<AppEnv>();
 
   // Rate limit all internal endpoints per run token and per concrete path
   // (`limiterPath` falls back to the path under a `*` pattern), so
@@ -387,14 +461,11 @@ export function createInternalRouter(ratePerMin = RUN_ROUTE_RATE_PER_MIN) {
     );
   }
 
-  /** `?credential_revision`, absent only where `required` is false; anything but a revision is a 400. */
-  function credentialRevisionQuery(c: Context, required: boolean): string | undefined {
+  /** `?credential_revision`, when present; anything but a revision is a 400. */
+  function credentialRevisionQuery(c: Context): string | undefined {
     const raw = c.req.query("credential_revision");
-    if (raw === undefined && !required) return undefined;
-    const parsed = z
-      .string()
-      .regex(/^[0-9a-f]{16}$/)
-      .safeParse(raw);
+    if (raw === undefined) return undefined;
+    const parsed = credentialRevisionSchema.safeParse(raw);
     if (!parsed.success) {
       throw invalidRequest(
         "`credential_revision` must be the revision a credentials payload carried.",
@@ -551,7 +622,7 @@ export function createInternalRouter(ratePerMin = RUN_ROUTE_RATE_PER_MIN) {
         },
         {
           kind: "rejected",
-          revision: credentialRevisionQuery(c, false) ?? null,
+          revision: credentialRevisionQuery(c) ?? null,
           handshake: rejectedHandshakeQuery(c),
         },
       );
@@ -571,52 +642,88 @@ export function createInternalRouter(ratePerMin = RUN_ROUTE_RATE_PER_MIN) {
     return c.json(serializeIntegrationCredentialsWire(result));
   });
 
-  // POST /internal/integration-credentials/:scope/:name/upstream-success
-  // Sidecar-only: a call with credential `credential_revision` succeeded upstream, ending the
-  // connection's rejection streak. Same run checks as the GET, and the run's actor must still
-  // reach the connection (own or shared, same space and integration) — else nothing is reset.
-  router.post(`/integration-credentials/${SCOPED_PACKAGE_ROUTE}/upstream-success`, async (c) => {
-    const packageId = `${c.req.param("scope")}/${c.req.param("name")}`;
-    await refuseConnectRun(c, packageId);
+  // POST /internal/integration-calls
+  // Sidecar-only. Attribution reads the run's FROZEN snapshot alone, never the live agent or the
+  // space's activation, so a call that left stays journaled when the run's integrations change.
+  router.post("/integration-calls", async (c) => {
     const { runId, run } = await verifyRunToken(c);
-    await assertAgentDeclaresIntegration(packageId, run, runId);
-    const bound = requireBoundConnection(c, packageId, run, runId);
-    const revision = credentialRevisionQuery(c, true)!;
+    const { calls } = await readJsonBody(c, integrationCallsBodySchema);
+    const connectionIds = calls.map((call, i) => {
+      if (call.connection_id === null) {
+        if (run.resolvedIntegrationVersions?.[call.integration_id]) return null;
+        logger.warn("integration calls refused — the run froze no such integration", {
+          runId,
+          integrationId: call.integration_id,
+        });
+        throw invalidRequest(
+          `This run resolved no integration '${call.integration_id}'.`,
+          `calls[${i}].integration_id`,
+        );
+      }
+      return requireRunBoundMember({
+        runId,
+        packageId: call.integration_id,
+        connectionId: call.connection_id.toLowerCase(),
+        bound: run.resolvedConnections?.[call.integration_id] ?? [],
+        param: `calls[${i}].connection_id`,
+      }).connectionId;
+    });
     const actor = actorFromIds(run.userId, run.endUserId);
-    if (actor) {
+    if (!actor) {
+      logger.warn("integration calls not journaled — the run has no actor", {
+        runId,
+        records: calls.length,
+      });
+      return c.body(null, 204);
+    }
+    const requestId = c.get("requestId");
+    // Off the response path, in one statement that keeps the batch's order.
+    void trackAudit(
+      recordConnectionCalls(
+        calls.map((call, i) => ({
+          orgId: run.orgId,
+          spaceId: run.spaceId,
+          connectionId: connectionIds[i] ?? null,
+          integrationId: call.integration_id,
+          actor,
+          apiKeyId: run.apiKeyId,
+          authMethod: RUN_SIDECAR_AUTH_METHOD,
+          runId,
+          chatSessionId: null,
+          method: call.method,
+          host: call.host,
+          outcome: call.outcome,
+          durationMs: call.duration_ms,
+          requestId,
+        })),
+      ),
+    );
+    // A record carrying `credential_revision` ends its connection's rejection streak.
+    for (const [i, call] of calls.entries()) {
+      const connectionId = connectionIds[i];
+      if (call.credential_revision === undefined || !connectionId) continue;
       await clearReachableUpstreamRejections(
-        bound.connectionId,
-        packageId,
+        connectionId,
+        call.integration_id,
         { spaceId: run.spaceId, actor },
-        revision,
+        call.credential_revision,
       );
     }
-    return c.body(null, 204);
-  });
-
-  // POST /internal/integration-credentials/:scope/:name/scopes-requested
-  // Sidecar-only: a call through a bound connection was refused `insufficient_scope` naming
-  // `scopes`. Same run checks as `upstream-success`, and the run's actor must still reach the
-  // connection. Records the connection's standing demand and stamps the run's metadata with it.
-  router.post(`/integration-credentials/${SCOPED_PACKAGE_ROUTE}/scopes-requested`, async (c) => {
-    const packageId = `${c.req.param("scope")}/${c.req.param("name")}`;
-    await refuseConnectRun(c, packageId);
-    const { runId, run } = await verifyRunToken(c);
-    await assertAgentDeclaresIntegration(packageId, run, runId);
-    const bound = requireBoundConnection(c, packageId, run, runId);
-    const body = await readJsonBody(c, scopesRequestedSchema);
-    const actor = actorFromIds(run.userId, run.endUserId);
-    if (actor) {
+    // A record carrying `required_scopes` is the connection's step-up demand: recorded on it
+    // (reach checked for the run's actor) and stamped on the run.
+    for (const [i, call] of calls.entries()) {
+      const connectionId = connectionIds[i];
+      if (call.required_scopes === undefined || !connectionId) continue;
       const standing = await recordRequestedScopes(
-        bound.connectionId,
-        packageId,
+        connectionId,
+        call.integration_id,
         { spaceId: run.spaceId, actor },
-        body.scopes,
+        call.required_scopes,
       );
       if (standing?.length) {
         await recordRunScopeRequest(run.orgId, runId, {
-          integrationId: packageId,
-          connectionId: bound.connectionId,
+          integrationId: call.integration_id,
+          connectionId,
           scopes: standing,
         });
       }
@@ -626,7 +733,7 @@ export function createInternalRouter(ratePerMin = RUN_ROUTE_RATE_PER_MIN) {
 
   // POST /internal/integration-credentials/:scope/:name/tools-observed
   // Sidecar-only: what a run's boot listed from a remote integration's server (the raw MCP
-  // descriptors) and which selected tools it could not expose. Same run checks as `upstream-success`.
+  // descriptors) and which selected tools it could not expose. Same run checks as the credentials GET.
   // The run's metadata always records the unavailable tools; the listing becomes the integration's
   // snapshot only for a platform-origin run (a remote-origin sidecar runs on the caller's
   // machine and is no authority on org state) and never for the platform's own endpoint integration.

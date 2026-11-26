@@ -1814,8 +1814,8 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * Propose manifest fields from the integration's connected MCP server
-         * @description Reads the remote MCP server of the integration's draft (the working copy being edited, published or not) and returns a proposal for that draft: manifest fields (`display_name`, `homepage`, `tools`, `tools_policy`, `default_tools`), an icon, the server's instructions and warnings. It writes nothing, neither to the draft (the caller merges the proposal and saves) nor to the tool snapshot: the snapshot is what the PUBLISHED integration's server listed, recorded by runs and by `POST /api/integrations/{packageId}/tool-snapshot/refresh`, and this read speaks for the draft. This is the read of the integration creation wizard, where there is no published version and no recorded snapshot yet; the integration editor works from the tool snapshot instead. The server is reached through the credential proxy, authorized against the draft — the same connection selection outside a run, `authorized_uris` allowlist, egress guard and 401 refresh as `/api/credential-proxy/proxy`, its listing journaled as one call of the connection (`GET /api/integrations/calls`); the server's own values (`Mcp-Session-Id`, cursors) are sent back as written, never substituted; an integration declaring no auths (AFPS §7.2) has nothing to inject, and its server is reached directly, egress-guarded on every hop, without a connection. The proposal holds: every tool of `tools/list` (cursor pagination, at most 500 tools over 20 pages of at most 2 MiB each) as an empty `tools_policy` entry each and as an entry of `tools`, and as `default_tools` only the tools annotated `readOnlyHint: true` and not `destructiveHint: true`, `serverInfo.title` (else `name`) as `display_name`, `description`, `websiteUrl` as `homepage`, a raster of `serverInfo.icons` (else the site's icon) as `icon_source`, and `instructions` (at most 32 KiB, cut at a line boundary with an `instructions_truncated` warning; omitted when the package already has its own `INTEGRATION.md`). The whole read is bounded to 20 seconds, the icon lookup included (best-effort: past the bound it finds none). Only a Streamable HTTP server is supported. Requires write authority on the package in its home space and, when the draft declares auths, `credential-proxy:call-own` in the current space (with `credential-proxy:call`, a connection shared into the space is usable too). Rate limited to 10 requests per minute.
+         * Propose identity fields from the integration's connected MCP server
+         * @description Opens a session on the remote MCP server of the integration's draft (the working copy being edited, published or not) and returns the identity it reports: manifest fields (`display_name`, `description`, `homepage`, `icon`), an icon source, the server's instructions and warnings. It lists no tool and writes nothing, neither to the draft (the caller merges the proposal and saves) nor to the tool snapshot: tools are read only by the snapshot of the PUBLISHED integration, recorded by runs and by `POST /api/integrations/{packageId}/tool-snapshot/refresh`. The session is the same as the snapshot's: through the credential proxy, authorized against the draft (the same connection selection outside a run, `authorized_uris` allowlist, egress guard and 401 refresh as `/api/credential-proxy/proxy`, journaled as one call of the connection, `GET /api/integrations/calls`); an integration declaring no auths (AFPS §7.2) is reached directly, egress-guarded on every hop, without a connection. The proposal holds `serverInfo.title` (else `name`) as `display_name`, `description`, `websiteUrl` as `homepage`, a raster of `serverInfo.icons` (else the site's icon) as `icon_source`, and `instructions` (at most 32 KiB, cut at a line boundary with an `instructions_truncated` warning; omitted when the package already has its own `INTEGRATION.md`). Bounded to 20 seconds, the icon lookup included (best-effort). Only a Streamable HTTP server is supported. Requires write authority on the package in its home space and, when the draft declares auths, `credential-proxy:call-own` in the current space. Rate limited to 10 requests per minute.
          */
         post: operations["syncIntegrationFromServer"];
         delete?: never;
@@ -3342,6 +3342,26 @@ export interface paths {
         patch: operations["updateChatSession"];
         trace?: never;
     };
+    "/api/orgs/{orgId}/chat/sessions/{id}/integrations": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List the integrations a chat session reached
+         * @description Each integration the conversation reached, once, in order of its first call, read from the integration call journal: its own calls (through the credential proxy) and those of the runs it launched (reported by each run's sidecar). A call reached an integration when it was sent to it, whatever its outcome, a catalog listing included. Calls made before the journal recorded their conversation are not counted. Empty when it reached none. The conversation's author only (404 otherwise, as `GET …/sessions/{id}`).
+         */
+        get: operations["listChatSessionIntegrations"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/orgs/{orgId}/chat/sessions/{id}/read": {
         parameters: {
             query?: never;
@@ -3516,7 +3536,7 @@ export interface paths {
         get?: never;
         /**
          * Change member role
-         * @description Change a member's role. Owners can manage every other member, owners included, and are the only ones who may assign `owner` or change an owner's role; admins can manage guests and members and assign `guest`, `member` or `admin`. Nobody changes their own role. The caller is judged on their current role in the organization. Granting `owner` or changing an owner's role requires a dashboard session — any token (API key, OAuth/MCP client, CLI) is refused with 403 even when its user is an owner.
+         * @description Change a member's role. Owners can manage every other member, owners included, and are the only ones who may assign `owner` or change an owner's role; admins can manage guests and members and assign `guest`, `member` or `admin`. Nobody changes their own role. The caller is judged on their current role in the organization. Granting `owner` or changing an owner's role requires a dashboard session — any token (API key, OAuth/MCP client, CLI) is refused with 403 even when its user is an owner. The member's own role in their personal space (`setMemberPersonalSpaceRole`) is dropped by a promotion to owner or admin (audited as `personalSpaceRoleCleared`) and kept otherwise.
          */
         put: operations["changeMemberRole"];
         post?: never;
@@ -3545,6 +3565,30 @@ export interface paths {
         put?: never;
         post?: never;
         delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/orgs/{orgId}/members/{userId}/personal-space-role": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Set a member's role in their personal space
+         * @description Give one member or guest their own role in their personal space, overriding the organization's `personal_space_role` default Body: exactly one of `preset_role` / `custom_role_id`; a `custom_role_id` must name a role of this organization (404 otherwise). A member holds the chosen role plus, short of `admin`, `agents:delete`, `skills:delete`, `integrations:delete` and `schedules:delete` there. A guest holds it capped to `operator` (the permissions the chosen role shares with `operator`, plus the deletes), whatever role is set. The personal space is provisioned if the member has none yet. Owners and admins always hold `admin` in their own personal space: targeting one is `409 redundant_space_role`. A change of the member's org role keeps the override, a guest's capped as above, except a promotion to owner or admin, which drops it. A dropped override is recorded in the `org.member_role_updated` audit entry (`personalSpaceRoleCleared`). Leaving or being removed drops it too; nothing restores a dropped override. A custom role named by an override cannot be deleted (`409 role_in_use`). Same guard as `changeMemberRole` (`members:change-role`).
+         */
+        put: operations["setMemberPersonalSpaceRole"];
+        post?: never;
+        /**
+         * Return a member to the organization default in their personal space
+         * @description Drop the member's own role in their personal space, so they hold the organization's `personal_space_role` again (for a guest, capped to `operator`). Idempotent: 204 whether or not an override was set. 404 when the user is not a member of the organization. Same guard as `changeMemberRole` (`members:change-role`).
+         */
+        delete: operations["clearMemberPersonalSpaceRole"];
         options?: never;
         head?: never;
         patch?: never;
@@ -3642,6 +3686,26 @@ export interface paths {
          * @description Read-only index of the skills of every space of the organization where the caller holds `skills:read`: the rows of `GET /api/packages/skills`, one row per package ACTIVE in at least one of those spaces, in the order of the single-space index (newest first, then by id). `space_ids` names those spaces (map them to names with `GET /api/spaces`), the package's home first when it is one of them, then in the order of `GET /api/spaces`. `home_space_id` and the `home_*` flags follow the caller's role in the package's home, as on the single-space index. A caller who reads this type in no space gets an empty list. An unknown query parameter is rejected with `400`. A space the caller holds no role in (a `closed` space not joined, a `private` space they are not a member of) contributes nothing, and a credential pinned to a space (a space API key, a space-bound MCP token) reaches that space only. No `X-Space-Id`: the organization is the path's. An end-user is refused with `403`.
          */
         get: operations["listOrgSkills"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/orgs/{orgId}/personal-space-role/impact": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Preview what a personal-space default would stop
+         * @description What setting the organization's `personal_space_role` to `role` would stop, without writing anything. `schedules` counts the ENABLED schedules in live personal spaces whose actor is the space's owner, a member or guest who follows the default (no override of their own, see `setMemberPersonalSpaceRole`) and would hold, under `role`, a resolved role without `agents:run` (guest cap and delete floor applied, as the resolver applies them). Each such schedule disables itself at its next fire (`disabled_reason: actor_invalid`), and restoring the role does not re-enable it. `members` counts the distinct owners of those schedules. Owners and admins always hold `admin` in their own personal space and are never counted; a `role` that grants `agents:run` answers `{ schedules: 0, members: 0 }`. A snapshot, which a later change can make stale. It discloses only counts, to a caller who may already rewrite the setting: same guard as `updateOrgSettings` (`org:settings`).
+         */
+        get: operations["getPersonalSpaceRoleImpact"];
         put?: never;
         post?: never;
         delete?: never;
@@ -4681,7 +4745,7 @@ export interface paths {
         put?: never;
         /**
          * Create a custom space role
-         * @description Define an organization-scoped bundle of space-level permissions. Requires `roles:write` (owner/admin) and nothing else — custom roles ship with the open-source platform. Every permission is validated against `GET /api/roles/vocabulary`; an unknown string is a 400 naming it, never a silent drop. The set must also be coherent: a permission whose vocabulary entry has a non-empty `requires_one_of` comes with one of those reads, and a set missing one is a 400 naming each missing read. `requires_one_of` is the authority on which permissions need a read and which reads satisfy it. The read is never added for you.
+         * @description Define an organization-scoped bundle of space-level permissions. Requires `roles:write` (owner/admin) and nothing else — custom roles ship with the open-source platform. Every permission is validated against `GET /api/roles/vocabulary`; an unknown string is a 400 naming it, never a silent drop, and so is `studio:read`, which a custom role holds through `shows_studio` instead. The set must also be coherent: a permission whose vocabulary entry has a non-empty `requires_one_of` comes with one of those reads, and a set missing one is a 400 naming each missing read. `requires_one_of` is the authority on which permissions need a read and which reads satisfy it. The read is never added for you.
          */
         post: operations["createRole"];
         delete?: never;
@@ -4699,7 +4763,7 @@ export interface paths {
         };
         /**
          * List the permissions a custom role may hold
-         * @description The space-level permission strings a custom role can be built from, grouped by resource. `api_key_grantable` mirrors `GET /api/api-keys/available-scopes`; `requires_one_of` names the reads a role holding the permission must also hold.
+         * @description The space-level permission strings a custom role can be built from, grouped by resource. `api_key_grantable` mirrors `GET /api/api-keys/available-scopes`; `requires_one_of` names the reads a role holding the permission must also hold. `studio:read` is not listed: a custom role holds it through `shows_studio`.
          */
         get: operations["listRoleVocabulary"];
         put?: never;
@@ -4722,14 +4786,14 @@ export interface paths {
         post?: never;
         /**
          * Delete a custom space role
-         * @description Remove a bundle. Requires `roles:delete` (owner/admin). Refused with 409 `role_in_use` while any space member holds the role or any PENDING invitation assigns it — the problem body carries `member_count` and `pending_invitation_count`. Reassign them first.
+         * @description Remove a bundle. Requires `roles:delete` (owner/admin). Refused with 409 `role_in_use` while any space member holds the role (a member's own override in their personal space included), any PENDING invitation assigns it, an OIDC client's sign-up policy (`signup_space_assignments`) assigns it, or the organization's `personal_space_role` setting names it — the problem body carries `member_count`, `pending_invitation_count`, `signup_assignment_count` and `org_default`. Reassign them, edit the sign-up policies, or change that setting, first.
          */
         delete: operations["deleteRole"];
         options?: never;
         head?: never;
         /**
          * Update a custom space role
-         * @description Rename, re-describe or re-scope a bundle. Requires `roles:write`. The `srl_` id never changes, so assignments follow the edit. A `permissions` array is validated as on create: an unknown string is a 400 naming it, and a set holding a permission without one of the reads its vocabulary entry's `requires_one_of` names is a 400 naming each missing read. A request without `permissions` is not re-judged.
+         * @description Rename, re-describe or re-scope a bundle. Requires `roles:write`. The `srl_` id never changes, so assignments follow the edit. A `permissions` array is validated as on create: an unknown string is a 400 naming it, and a set holding a permission without one of the reads its vocabulary entry's `requires_one_of` names is a 400 naming each missing read. A request without `permissions` is not re-judged. `shows_studio` alone changes whether holders see the Studio.
          */
         patch: operations["updateRole"];
         trace?: never;
@@ -5290,7 +5354,7 @@ export interface paths {
         post?: never;
         /**
          * Remove a space member
-         * @description Drop the explicit role. `access_after` says whether the member keeps implicit access (an `open` space) or loses the space entirely. Refused with 403 if the member's current role is one the caller could not have granted, or if removing the row would grant implicit permissions the caller does not hold.
+         * @description Drop the explicit role. `access_after` says whether the member keeps implicit access (an `open` space) or loses the space entirely. Refused with 403 if the member's current role is one the caller could not have granted, or if removing the row would grant implicit permissions the caller does not hold. A personal space is refused with 409 `personal_space_has_no_members`: its owner's own role there is cleared with `DELETE /api/orgs/{orgId}/members/{userId}/personal-space-role`.
          */
         delete: operations["removeSpaceMember"];
         options?: never;
@@ -5702,6 +5766,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/internal/integration-calls": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Journal the upstream calls a run's sidecar dispatched
+         * @description Sidecar-only. Auth via Bearer run token. A batch of the upstream calls the run's sidecar dispatched for its integrations (the `api_call` tool, the MITM listener, a remote MCP server's operations, a local MCP server's `tools/call` when no MITM listener sees its upstream requests), one record per call that may have reached the upstream, taken from its final attempt. Each is written to the connection-call journal (`connection_calls`) with the run's organization, space, actor and API key, `auth_method` `run_token`, `run_id` set and the batch's request id; the sidecar sends none of those. Every record is checked before any is written, against the run's frozen kickoff snapshot alone — never the live agent or the space's activation, so a call that left stays journaled when its integration is switched off or the agent edited or deleted mid-run: a non-null `connection_id` is one the run bound to that integration (else `400 connection_not_in_run`), and a record with a null `connection_id` names an integration the run resolved (else `400 invalid_request`); one record that fails refuses the whole batch. The text of a record is bounded at 2048 characters and stored truncated to the journal's own caps. A run with no actor writes nothing and answers `204`. A record carrying `credential_revision` (a 2xx answered with that credential) also ends the connection's rejection streak: a non-OAuth2 connection's count of consecutive upstream rejections is reset to 0, unless the connection no longer holds that credential, the run's actor can no longer reach it (deleted, unshared, moved to another space), or it is already flagged `needsReconnection`. An OAuth2 connection's count tracks token refreshes and is left untouched. A token whose run is no longer `running` is refused (`403`).
+         */
+        post: operations["reportIntegrationCalls"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/internal/integration-credentials/{scope}/{name}": {
         parameters: {
             query?: never;
@@ -5742,26 +5826,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/internal/integration-credentials/{scope}/{name}/scopes-requested": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Report the scopes a server asked for that a connection does not hold
-         * @description Sidecar-only. Same Bearer run token, agent-dependency and activation checks and bound-connection check as `upstream-success` (`connection_id` is required). Called fire-and-forget when a call through the connection was refused with HTTP 403 `insufficient_scope` naming `scopes` (RFC 6750 §3.1). The platform keeps the valid scope tokens the connection does not already hold, at most 20, as the connection's `requested_scopes`, and stamps the run's `metadata.scope_requests[]` (`integration_id`, `connection_id`, `scopes`: the connection's whole standing demand). Nothing is recorded when the run has no actor or its actor can no longer reach the connection. A reconnect that grants the scopes clears them. Idempotent. An ephemeral CONNECT run's token is refused with `409 connect_run_no_refresh`.
-         */
-        post: operations["reportIntegrationScopesRequested"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/internal/integration-credentials/{scope}/{name}/tools-observed": {
         parameters: {
             query?: never;
@@ -5773,29 +5837,9 @@ export interface paths {
         put?: never;
         /**
          * Report the tools a run's boot listed from a remote integration
-         * @description Sidecar-only. Same Bearer run token and agent-dependency and activation checks as the GET endpoint. `connection_id` names a connection this run bound to the integration, as for `upstream-success`; it is omitted only for an integration that binds none (an unauthenticated one). Called once per connection, fire-and-forget, after the sidecar registered the integration's tools. `tools` are the MCP descriptors as the server returned them (the platform computes their fingerprints itself); the sidecar cuts them at 1 MiB and sets `truncated`, which is sent with `tools` and only with them. A report without `tools` (a local integration's unavailable list) records only `unavailable`, never a snapshot. The body is bounded at 1 MiB plus a 256 KiB envelope margin (`413` past it). A descriptor that is not a valid tool (no name, no object `inputSchema`) is dropped on its own and marks the listing truncated: it never refuses the report. `unavailable` lists the tools the agent selected that this run does not expose, each with its reason; the run's `metadata.unavailable_tools[]` is stamped with them (`integration_id`, `name`, `reason`; only the first 50 of one report are kept). The listing becomes the integration's tool snapshot only when the run is executed by the platform: a remote-origin run's sidecar is on the caller's machine and is no authority on organization state, so its listing is dropped; the platform's own endpoint integration never gets a snapshot.
+         * @description Sidecar-only. Same Bearer run token and agent-dependency and activation checks as the GET endpoint. `connection_id` names a connection this run bound to the integration; it is omitted only for an integration that binds none (an unauthenticated one). Called once per connection, fire-and-forget, after the sidecar registered the integration's tools. `tools` are the MCP descriptors as the server returned them (the platform computes their fingerprints itself); the sidecar cuts them at 1 MiB and sets `truncated`, which is sent with `tools` and only with them. A report without `tools` (a local integration's unavailable list) records only `unavailable`, never a snapshot. The body is bounded at 1 MiB plus a 256 KiB envelope margin (`413` past it). A descriptor that is not a valid tool (no name, no object `inputSchema`) is dropped on its own and marks the listing truncated: it never refuses the report. `unavailable` lists the tools the agent selected that this run does not expose, each with its reason; the run's `metadata.unavailable_tools[]` is stamped with them (`integration_id`, `name`, `reason`; only the first 50 of one report are kept). The listing becomes the integration's tool snapshot only when the run is executed by the platform: a remote-origin run's sidecar is on the caller's machine and is no authority on organization state, so its listing is dropped; the platform's own endpoint integration never gets a snapshot.
          */
         post: operations["reportIntegrationToolsObserved"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/internal/integration-credentials/{scope}/{name}/upstream-success": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * End a connection's upstream-rejection streak
-         * @description Sidecar-only. Same Bearer run token, agent-dependency and activation checks and bound-connection check as the GET endpoint; `connection_id` and `credential_revision` are always required. Called once, fire-and-forget, after a successful (2xx) upstream call through the named connection when its credentials payload carried `rejection_streak`, or after the sidecar saw a rejection counted in this run: a non-OAuth2 connection's count of consecutive upstream rejections is reset to 0. Nothing is reset when the connection no longer holds the credential named by `credential_revision`, when the run has no actor or its actor can no longer reach the connection (deleted, unshared, moved to another space), or when the connection is already flagged `needsReconnection`. An OAuth2 connection's count tracks token refreshes and is left untouched. Idempotent. An ephemeral CONNECT run's token is refused with `409 connect_run_no_refresh`, as on the refresh endpoint.
-         */
-        post: operations["reportIntegrationUpstreamSuccess"];
         delete?: never;
         options?: never;
         head?: never;
@@ -6570,6 +6614,14 @@ export interface components {
             /** Format: date-time */
             updatedAt: string;
         };
+        ChatSessionIntegration: {
+            /** @description `@scope/name` integration package id. */
+            id: string;
+            /** @description The integration manifest's `display_name`; the id when it declares none or the package is gone. */
+            display_name: string;
+            /** @description The integration manifest's `icon` (an Iconify id or an image URL); null when it declares none or the package is gone. */
+            icon: string | null;
+        };
         ConnectionResolutionItem: components["schemas"]["ResolutionFieldError"] & {
             /** @enum {string} */
             code?: "not_connected" | "needs_reconnection" | "pinned_connection_unavailable" | "override_connection_unavailable" | "override_outranked" | "connection_set_too_large" | "must_choose_connection" | "insufficient_scopes" | "auth_key_mismatch" | "auth_serves_no_selected_tool" | "auth_key_serves_no_selected_tool" | "auth_key_on_unauthenticated_integration" | "required_integration_unbound" | "integration_not_active" | "integration_not_found" | "integration_wrong_type" | "integration_invalid_manifest" | "remote_binds_one_connection";
@@ -6742,9 +6794,9 @@ export interface components {
             expires_at_epoch_ms: {
                 [key: string]: number | null;
             };
-            /** @description Consecutive upstream rejections counted against this non-OAuth2 connection; omitted when none. The sidecar reports its next successful call to `POST .../upstream-success`, which ends the streak. */
+            /** @description Consecutive upstream rejections counted against this non-OAuth2 connection; omitted when none. The sidecar journals its next successful call on the credential with that credential's revision (`POST /internal/integration-calls`), which ends the streak. */
             rejection_streak?: number;
-            /** @description Opaque revision of the stored credential this payload carries (a short digest of its ciphertext; every credential write changes it). The sidecar sends it back as `credential_revision` on `/refresh` and `/upstream-success`, so a rejection or a success is applied to this credential only. Omitted on a connect run's empty payload. */
+            /** @description Opaque revision of the stored credential this payload carries (a short digest of its ciphertext; every credential write changes it). The sidecar sends it back as `credential_revision` on `/refresh` and on a streak-ending record of `/internal/integration-calls`, so a rejection or a success is applied to this credential only. Omitted on a connect run's empty payload. */
             credential_revision?: string;
         };
         IntegrationIndexItem: {
@@ -7082,6 +7134,20 @@ export interface components {
             joinedAt: string;
             /** @description The spaces this member reaches, among those whose member list the caller may read (`GET /api/spaces/{id}/members`'s own rule, per space: `space-members:read` there for explicit members, plus `members:read` for implicit ones). A credential pinned to a space reads that space only. Ordered as `GET /api/spaces` lists them. */
             spaces: components["schemas"]["OrgMemberSpace"][];
+            /** @description The member's own role in their personal space, overriding the organization's `personal_space_role` (set with `PUT /api/orgs/{orgId}/members/{userId}/personal-space-role`). `null`: they follow the organization default. Always `null` for an owner or admin, who hold `admin` there, and for every member when the caller lacks `members:change-role`: only a caller who may change it reads it. */
+            personal_space_role: null | {
+                /** @enum {string} */
+                preset_role: "admin" | "builder" | "operator" | "runner" | "viewer";
+            } | {
+                custom_role_id: string;
+            };
+            /** @description The role this member would hold in their own personal space by the organization's `personal_space_role` default alone, without any override of their own and with the guest cap applied: `admin` for an owner or admin, `operator` for a guest under a default broader than `operator`. `null` for every member when the caller lacks `members:change-role`: only a caller who may change the member's role reads it, alongside `personal_space_role`. The platform's delete permissions held on top of the role are not part of it. */
+            personal_space_default_role: {
+                /** @enum {string} */
+                kind: "preset" | "custom";
+                key: string;
+                name: string;
+            } | null;
         };
         OrgMemberSpace: {
             id: string;
@@ -7273,11 +7339,8 @@ export interface components {
             dashboard_sso_enabled?: boolean;
             /** @description Whether members may bring personal model credentials. Defaults to true. When false, adding one (`owner_type: user` on `POST /api/model-provider-credentials` or on `POST /api/model-providers-oauth/pairing`) answers `403 personal_model_credentials_disabled`, and the personal credentials that already exist serve nothing: a model the organization leaves unbound is refused (`409 model_credential_required`), and a run on one is refused at its next call. Always present on read; optional on PATCH. */
             personal_model_credentials: boolean;
-            /**
-             * @description The role an organization MEMBER holds in their own personal space. Defaults to `admin`. `operator` caps it: the member runs published, active agents (a plain launch without a published version returns `404 no_published_version`). An explicit draft launch requires write access in the package’s home space (`403 draft_not_writable` otherwise). Existing schedules keep their previously authorized draft selectors. The member activates and deactivates packages, connects integrations, and can still delete the agents, skills, integrations and schedules they already have there (`agents:delete`, `skills:delete`, `integrations:delete`, `schedules:delete`), but can no longer create, edit, publish, share, configure or compose an inline run, nor rename the space. Owners and admins keep `admin` in their own personal space and a guest stays `operator`. Computed on every request: switching it back restores `admin` with no other write. Always present on read; optional on PATCH.
-             * @enum {string}
-             */
-            personal_space_role: "admin" | "operator";
+            /** @description The role an organization member or guest holds by default in their own personal space: a preset key (`admin`, `builder`, `operator`, `runner`, `viewer`) or the id of one of this organization's custom space roles (`srl_…`). Defaults to `admin`. On write, a custom id that is not a role of this organization answers `404 not_found`; while a custom role is named here it cannot be deleted (`409 role_in_use` with `org_default: true`). A member holds the role chosen (this default, or their own override) plus `agents:delete`, `skills:delete`, `integrations:delete` and `schedules:delete` short of `admin`, so the member can still remove what they already have. Below `admin` the member loses what the role withholds — e.g. without `agents:write` no create, edit or inline run (`403 inline_run_not_allowed_in_space`); a plain launch runs the published version (`404 no_published_version` without one) and an explicit draft launch requires write access in the package's home space (`403 draft_not_writable`). Existing schedules keep their previously authorized draft selectors. Owners and admins always hold `admin` in their own personal space. A guest takes this default too, always capped to `operator`: the permissions of the chosen role that `operator` also grants, plus the deletes above. A default broader than `operator` (`admin`, `builder`) gives a guest `operator`; a narrower one (`viewer`, `runner`) gives the guest that role as it is; a custom role gives the guest that role restricted to what `operator` grants. Restricting the default never gives a guest more. A member's or guest's own override (`PUT /api/orgs/{orgId}/members/{userId}/personal-space-role`) wins over this default. Computed on every request: changing it takes effect with no other write. Always present on read; optional on PATCH. */
+            personal_space_role: string & (("admin" | "builder" | "operator" | "runner" | "viewer") | string);
         };
         Organization: {
             id: string;
@@ -7579,8 +7642,10 @@ export interface components {
             key: string;
             name: string;
             description: string | null;
-            /** @description Space-level permission strings the role grants on this deployment, sorted. A custom bundle is projected through the same vocabulary enforcement uses, so this array is always one a `PATCH` accepts back. */
+            /** @description Space-level permission strings the role grants on this deployment, sorted. A custom bundle is projected through the same vocabulary enforcement uses, so this array is always one a `PATCH` accepts back: never `studio:read`, which `shows_studio` carries. */
             permissions: string[];
+            /** @description Whether holders of the role see the Studio (they resolve `studio:read`). A display setting, not a boundary: the REST API and an MCP client answer the role's other permissions either way. Always `true` for a preset. */
+            shows_studio: boolean;
             /** @description Entries stored on the bundle that this deployment cannot name — their module is no longer loaded — sorted. They grant nothing and are never part of `permissions`; sending a `permissions` array without them is what drops them from the row. Always empty for a preset. */
             unavailable_permissions: string[];
             /** Format: date-time */
@@ -12760,6 +12825,8 @@ export interface operations {
                             connection_required?: boolean;
                             /** @description `remote` only: the name the server lists the tool by, which `tools/call` takes. */
                             remote_name?: string;
+                            /** @description `remote` only, when the server gives one: the tool's display name (`title`, else `annotations.title`), sanitised. Server text, for display only. */
+                            title?: string;
                             /** @description `remote` only: the tool's input schema, sanitised as in a run. */
                             input_schema?: {
                                 [key: string]: unknown;
@@ -12781,6 +12848,13 @@ export interface operations {
                             missing_scopes?: {
                                 [key: string]: string[];
                             };
+                        }[];
+                        /** @description The integrations of `tools`, each once: how a client names and draws them. */
+                        integrations: {
+                            integration_package_id: string;
+                            display_name: string;
+                            /** @description Its manifest icon: an Iconify id or an image URL. */
+                            icon?: string;
                         }[];
                         /** @description The connections the tools reach, each once. */
                         connections: {
@@ -14050,14 +14124,16 @@ export interface operations {
                             actor_id: string;
                             /** @description The API key the actor acted through, if any. */
                             apiKeyId: string | null;
-                            /** @description How the caller authenticated (`api_key`, an OAuth token kind, …). */
+                            /** @description How the caller authenticated (`api_key`, an OAuth token kind, …); `run_token` for a call a platform run's sidecar made. */
                             auth_method: string;
-                            /** @description The run the call declared (`X-Run-Id`), if any. */
+                            /** @description The run whose sidecar made the call, or the run the call declared (`X-Run-Id`), if any. */
                             runId: string | null;
+                            /** @description The chat conversation that issued the call, if any. Null when the call declared a run (at most one of `runId` and `chat_session_id` is set), and on calls recorded before the conversation was journaled. */
+                            chat_session_id: string | null;
                             /** @description The call's HTTP method. */
                             method: string;
-                            /** @description The target's host as the caller wrote it, before substitution: a `{{field}}` placeholder is kept as written, never its value. `<templated>` or `<unparseable>` when the target names no readable host. */
-                            host: string;
+                            /** @description The target's host as the caller wrote it, before substitution: a `{{field}}` placeholder is kept as written, never its value. `<templated>` or `<unparseable>` when the target names no readable host. Null for a `tools/call` of a local MCP server a run's sidecar answered without seeing its upstream requests (an env- or files-delivery integration, or one with no credential). */
+                            host: string | null;
                             /** @description The upstream's HTTP status (`200`, `404`, …), or the proxy's own problem code when the proxy answered itself (`unauthorized_target`, `upstream_timeout`, …). */
                             outcome: string;
                             duration_ms: number;
@@ -15747,14 +15823,8 @@ export interface operations {
                 };
                 content: {
                     "application/json": {
-                        /** @description A partial AFPS integration manifest: only the fields the server reported. */
+                        /** @description A partial AFPS integration manifest: only the identity fields the server reported. */
                         manifest: {
-                            /** @description The selection an agent inherits: only the tools the server annotates `readOnlyHint: true` and not `destructiveHint: true`, in server order; empty when it annotates none. Discovering a tool never selects it otherwise. */
-                            default_tools: string[];
-                            /** @description Every tool listed, each with an empty policy. */
-                            tools_policy: {
-                                [key: string]: Record<string, never>;
-                            };
                             display_name?: string;
                             description?: string;
                             /** Format: uri */
@@ -15765,21 +15835,9 @@ export interface operations {
                         icon_source: string | null;
                         /** @description The server's `initialize` instructions, for the editor to propose as `INTEGRATION.md`; null when it sent none, or when the package's draft already holds an `INTEGRATION.md` (whatever its content, empty included). */
                         instructions: string | null;
-                        /** @description Every tool listed, in server order, one entry per name (the first listed wins), for the editor to show and select from. MCP annotations are the server's untrusted hints: `read_only` only drives the `default_tools` pre-selection. */
-                        tools: {
-                            name: string;
-                            /** @description The tool's `title` (else `annotations.title`), trimmed, at most 200 characters (a cut ends with `…`); absent when empty. */
-                            title?: string;
-                            /** @description The tool's `description`, trimmed, at most 1024 characters (a cut ends with `…`); absent when empty. */
-                            description?: string;
-                            /** @description True only when the server annotates the tool `readOnlyHint: true`. */
-                            read_only: boolean;
-                            /** @description True only when the server annotates the tool `destructiveHint: true`. An untrusted hint like `read_only`; a destructive tool is never in the proposal's `default_tools`, even when also annotated read-only. */
-                            destructive: boolean;
-                        }[];
                         warnings: {
                             /** @enum {string} */
-                            code: "tools_truncated" | "instructions_truncated";
+                            code: "instructions_truncated";
                             message: string;
                         }[];
                     };
@@ -18138,14 +18196,16 @@ export interface operations {
                             actor_id: string;
                             /** @description The API key the actor acted through, if any. */
                             apiKeyId: string | null;
-                            /** @description How the caller authenticated (`api_key`, an OAuth token kind, …). */
+                            /** @description How the caller authenticated (`api_key`, an OAuth token kind, …); `run_token` for a call a platform run's sidecar made. */
                             auth_method: string;
-                            /** @description The run the call declared (`X-Run-Id`), if any. */
+                            /** @description The run whose sidecar made the call, or the run the call declared (`X-Run-Id`), if any. */
                             runId: string | null;
+                            /** @description The chat conversation that issued the call, if any. Null when the call declared a run (at most one of `runId` and `chat_session_id` is set), and on calls recorded before the conversation was journaled. */
+                            chat_session_id: string | null;
                             /** @description The call's HTTP method. */
                             method: string;
-                            /** @description The target's host as the caller wrote it, before substitution: a `{{field}}` placeholder is kept as written, never its value. `<templated>` or `<unparseable>` when the target names no readable host. */
-                            host: string;
+                            /** @description The target's host as the caller wrote it, before substitution: a `{{field}}` placeholder is kept as written, never its value. `<templated>` or `<unparseable>` when the target names no readable host. Null for a `tools/call` of a local MCP server a run's sidecar answered without seeing its upstream requests (an env- or files-delivery integration, or one with no credential). */
+                            host: string | null;
                             /** @description The upstream's HTTP status (`200`, `404`, …), or the proxy's own problem code when the proxy answered itself (`unauthorized_target`, `upstream_timeout`, …). */
                             outcome: string;
                             duration_ms: number;
@@ -21553,7 +21613,13 @@ export interface operations {
                      *                 "name": "admin"
                      *               }
                      *             }
-                     *           ]
+                     *           ],
+                     *           "personal_space_role": null,
+                     *           "personal_space_default_role": {
+                     *             "kind": "preset",
+                     *             "key": "admin",
+                     *             "name": "admin"
+                     *           }
                      *         },
                      *         {
                      *           "userId": "usr_def456",
@@ -21572,7 +21638,15 @@ export interface operations {
                      *                 "name": "operator"
                      *               }
                      *             }
-                     *           ]
+                     *           ],
+                     *           "personal_space_role": {
+                     *             "preset_role": "builder"
+                     *           },
+                     *           "personal_space_default_role": {
+                     *             "kind": "preset",
+                     *             "key": "admin",
+                     *             "name": "admin"
+                     *           }
                      *         }
                      *       ],
                      *       "invitations": []
@@ -22256,6 +22330,42 @@ export interface operations {
             };
         };
     };
+    listChatSessionIntegrations: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Organization ID. */
+                orgId: components["parameters"]["OrgIdPath"];
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The integrations reached */
+            200: {
+                headers: {
+                    "Request-Id": components["headers"]["RequestId"];
+                    "Appstrate-Version": components["headers"]["AppstrateVersion"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @enum {string} */
+                        object: "list";
+                        data: components["schemas"]["ChatSessionIntegration"][];
+                        /** @description Always false: the list is whole. */
+                        hasMore: boolean;
+                    };
+                };
+            };
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            /** @description Rate limited (120/min per caller) */
+            429: components["responses"]["RateLimited"];
+        };
+    };
     markChatSessionRead: {
         parameters: {
             query?: never;
@@ -22719,7 +22829,13 @@ export interface operations {
                      *             "name": "admin"
                      *           }
                      *         }
-                     *       ]
+                     *       ],
+                     *       "personal_space_role": null,
+                     *       "personal_space_default_role": {
+                     *         "kind": "preset",
+                     *         "key": "admin",
+                     *         "name": "admin"
+                     *       }
                      *     }
                      */
                     "application/json": components["schemas"]["OrgMember"];
@@ -22834,6 +22950,78 @@ export interface operations {
                         hasMore: boolean;
                     };
                 };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    setMemberPersonalSpaceRole: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                orgId: string;
+                userId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** @enum {string} */
+                    preset_role?: "admin" | "builder" | "operator" | "runner" | "viewer";
+                    custom_role_id?: string;
+                } & (unknown | unknown);
+            };
+        };
+        responses: {
+            /** @description Updated member — same shape as the members list in GET /api/orgs/{orgId} */
+            200: {
+                headers: {
+                    "Request-Id": components["headers"]["RequestId"];
+                    "Appstrate-Version": components["headers"]["AppstrateVersion"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OrgMember"];
+                };
+            };
+            400: components["responses"]["ValidationError"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            /** @description The target is an owner or admin, who always hold `admin` in their personal space (`redundant_space_role`) */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+        };
+    };
+    clearMemberPersonalSpaceRole: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                orgId: string;
+                userId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Override cleared, or there was none */
+            204: {
+                headers: {
+                    "Request-Id": components["headers"]["RequestId"];
+                    "Appstrate-Version": components["headers"]["AppstrateVersion"];
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
@@ -23368,6 +23556,56 @@ export interface operations {
             403: components["responses"]["Forbidden"];
         };
     };
+    getPersonalSpaceRoleImpact: {
+        parameters: {
+            query: {
+                /** @description The candidate default, as `updateOrgSettings` takes `personal_space_role`: a preset key or the id of one of this organization's custom space roles. */
+                role: ("admin" | "builder" | "operator" | "runner" | "viewer") | string;
+            };
+            header?: never;
+            path: {
+                orgId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description What the candidate default would stop */
+            200: {
+                headers: {
+                    "Request-Id": components["headers"]["RequestId"];
+                    "Appstrate-Version": components["headers"]["AppstrateVersion"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "schedules": 3,
+                     *       "members": 2
+                     *     }
+                     */
+                    "application/json": {
+                        /** @description Enabled schedules that would disable themselves at their next fire. */
+                        schedules: number;
+                        /** @description Distinct members and guests owning those schedules. */
+                        members: number;
+                    };
+                };
+            };
+            400: components["responses"]["ValidationError"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            /** @description `role` names a custom role id that is not a role of this organization */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+        };
+    };
     listOrgRuns: {
         parameters: {
             query?: {
@@ -23653,11 +23891,8 @@ export interface operations {
                     dashboard_sso_enabled?: boolean;
                     /** @description Whether members may bring personal model credentials. Defaults to true. When false, adding one (`owner_type: user` on `POST /api/model-provider-credentials` or on `POST /api/model-providers-oauth/pairing`) answers `403 personal_model_credentials_disabled`, and the personal credentials that already exist serve nothing: a model the organization leaves unbound is refused (`409 model_credential_required`), and a run on one is refused at its next call. Always present on read; optional on PATCH. */
                     personal_model_credentials?: boolean;
-                    /**
-                     * @description The role an organization MEMBER holds in their own personal space. Defaults to `admin`. `operator` caps it: the member runs published, active agents (a plain launch without a published version returns `404 no_published_version`). An explicit draft launch requires write access in the package’s home space (`403 draft_not_writable` otherwise). Existing schedules keep their previously authorized draft selectors. The member activates and deactivates packages, connects integrations, and can still delete the agents, skills, integrations and schedules they already have there (`agents:delete`, `skills:delete`, `integrations:delete`, `schedules:delete`), but can no longer create, edit, publish, share, configure or compose an inline run, nor rename the space. Owners and admins keep `admin` in their own personal space and a guest stays `operator`. Computed on every request: switching it back restores `admin` with no other write. Always present on read; optional on PATCH.
-                     * @enum {string}
-                     */
-                    personal_space_role?: "admin" | "operator";
+                    /** @description The role an organization member or guest holds by default in their own personal space: a preset key (`admin`, `builder`, `operator`, `runner`, `viewer`) or the id of one of this organization's custom space roles (`srl_…`). Defaults to `admin`. On write, a custom id that is not a role of this organization answers `404 not_found`; while a custom role is named here it cannot be deleted (`409 role_in_use` with `org_default: true`). A member holds the role chosen (this default, or their own override) plus `agents:delete`, `skills:delete`, `integrations:delete` and `schedules:delete` short of `admin`, so the member can still remove what they already have. Below `admin` the member loses what the role withholds — e.g. without `agents:write` no create, edit or inline run (`403 inline_run_not_allowed_in_space`); a plain launch runs the published version (`404 no_published_version` without one) and an explicit draft launch requires write access in the package's home space (`403 draft_not_writable`). Existing schedules keep their previously authorized draft selectors. Owners and admins always hold `admin` in their own personal space. A guest takes this default too, always capped to `operator`: the permissions of the chosen role that `operator` also grants, plus the deletes above. A default broader than `operator` (`admin`, `builder`) gives a guest `operator`; a narrower one (`viewer`, `runner`) gives the guest that role as it is; a custom role gives the guest that role restricted to what `operator` grants. Restricting the default never gives a guest more. A member's or guest's own override (`PUT /api/orgs/{orgId}/members/{userId}/personal-space-role`) wins over this default. Computed on every request: changing it takes effect with no other write. Always present on read; optional on PATCH. */
+                    personal_space_role?: string & (("admin" | "builder" | "operator" | "runner" | "viewer") | string);
                 };
             };
         };
@@ -23676,6 +23911,15 @@ export interface operations {
             400: components["responses"]["ValidationError"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
+            /** @description `personal_space_role` names a custom role id that is not a role of this organization */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
         };
     };
     listAgentPackages: {
@@ -26773,8 +27017,13 @@ export interface operations {
                     key: string;
                     name: string;
                     description?: string | null;
-                    /** @description Space-level permission strings the role grants (at least one). */
+                    /** @description Space-level permission strings the role grants (at least one). Never `studio:read`: a 400, the role resolves it from `shows_studio`. */
                     permissions: string[];
+                    /**
+                     * @description Whether holders see the Studio (they resolve `studio:read`). Default `true`. A display setting, not a boundary: the API answers the role's other permissions either way.
+                     * @default true
+                     */
+                    shows_studio?: boolean;
                 };
             };
         };
@@ -26875,6 +27124,10 @@ export interface operations {
                         member_count: number;
                         /** @description Pending invitations whose `space_assignments` name this role. */
                         pending_invitation_count: number;
+                        /** @description The organization's OIDC clients whose `signup_space_assignments` assign this role. */
+                        signup_assignment_count: number;
+                        /** @description Whether the organization's `personal_space_role` setting names this role. */
+                        org_default: boolean;
                     };
                 };
             };
@@ -26900,6 +27153,8 @@ export interface operations {
                     name?: string;
                     description?: string | null;
                     permissions?: string[];
+                    /** @description Whether holders see the Studio (they resolve `studio:read`). Absent = unchanged. */
+                    shows_studio?: boolean;
                 };
             };
         };
@@ -29548,6 +29803,15 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
+            /** @description The space is a personal space (`personal_space_has_no_members`) */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
         };
     };
     updateSpaceMember: {
@@ -30997,6 +31261,62 @@ export interface operations {
             };
         };
     };
+    reportIntegrationCalls: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    calls: {
+                        /** @description The integration's package id (`@scope/name`). */
+                        integration_id: string;
+                        /**
+                         * Format: uuid
+                         * @description The bound connection the call went through; `null` for an integration that binds none.
+                         */
+                        connection_id: string | null;
+                        /** @description The request's HTTP method (an RFC 9110 token), `POST` for a local MCP server's `tools/call`. Stored truncated to 16 characters. */
+                        method: string;
+                        /** @description The target's host as the caller wrote it, before any credential substitution: a `{{field}}` placeholder stays as written. Stored truncated to 255 characters. `null` for a `tools/call` of a local MCP server with no MITM listener (env- or files-delivery, or no credential), whose upstream requests the sidecar does not see. */
+                        host: string | null;
+                        /** @description The upstream's HTTP status (any three digits: some upstreams answer outside 1xx-5xx), or the failure code of a call that was sent and got no response: `unauthorized_target`, `blocked_target`, `upstream_unresolvable`, `upstream_unreachable`, `upstream_timeout`. */
+                        outcome: string;
+                        duration_ms: number;
+                        /** @description Set on a 2xx answered with the injected credential when it ends a rejection streak the sidecar knows of: the `credential_revision` of that credential. Only with a non-null `connection_id` and a 2xx `outcome`. */
+                        credential_revision?: string;
+                        /** @description Set on a `403` answered through a connection whose `WWW-Authenticate` challenge is `insufficient_scope` and names scopes: the valid scope tokens it named. The platform records them as the connection's step-up demand (`requested_scopes`, minus what it holds) when the run's actor still reaches it, and stamps the run's `metadata.scope_requests[]` with the connection's whole standing demand. Only with a non-null `connection_id` and a `403` `outcome`. */
+                        required_scopes?: string[];
+                    }[];
+                };
+            };
+        };
+        responses: {
+            /** @description Journaled (nothing with no actor). */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description `invalid_request`: a malformed body (more than 100 records, an unknown field, a value out of its bounds, a `credential_revision` on a record that cannot end a streak, a `required_scopes` on a record that is no 403 through a connection), or a record with a null `connection_id` names an integration the run did not resolve (`param` points at it); or `connection_not_in_run`: a record names a connection the run did not bind to its integration (`param` points at it). */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            500: components["responses"]["InternalServerError"];
+        };
+    };
     getIntegrationCredentials: {
         parameters: {
             query?: {
@@ -31145,7 +31465,7 @@ export interface operations {
                 };
             };
             500: components["responses"]["InternalServerError"];
-            /** @description Not refreshed now; the connection stays usable. A successful upstream call through a non-OAuth2 connection (`upstream-success`) or a reconnect resets the count of its rejections. */
+            /** @description Not refreshed now; the connection stays usable. A successful upstream call through a non-OAuth2 connection (journaled with its `credential_revision` on `POST /internal/integration-calls`) or a reconnect resets the count of its rejections. */
             502: {
                 headers: {
                     [name: string]: unknown;
@@ -31161,61 +31481,6 @@ export interface operations {
                 };
             };
             503: components["responses"]["EncryptionKeyUnavailable"];
-        };
-    };
-    reportIntegrationScopesRequested: {
-        parameters: {
-            query: {
-                /** @description The connection this run bound to the integration: a member of `runs.resolved_connections[<integration id>]`. An id the run did not bind is a `400 connection_not_in_run`. */
-                connection_id: string;
-            };
-            header?: never;
-            path: {
-                /** @description Package scope (e.g. @myorg) */
-                scope: components["parameters"]["PackageScope"];
-                /** @description Package name */
-                name: components["parameters"]["PackageName"];
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": {
-                    /** @description The scopes the server's challenge named. */
-                    scopes: string[];
-                };
-            };
-        };
-        responses: {
-            /** @description Report recorded. */
-            204: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-            /** @description The `connection_id` selector is missing, malformed, or names a connection this run did not bind. `invalid_request` — absent or not a uuid; the platform never picks a connection on the caller's behalf. `connection_not_in_run` — a well-formed id that is not in `runs.resolved_connections` for this integration; the run token authorises this run's bound set only. */
-            400: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/problem+json": components["schemas"]["ProblemDetail"];
-                };
-            };
-            401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
-            404: components["responses"]["NotFound"];
-            /** @description The definition this run executes is no longer readable, so the run token's authorization set cannot be decided. Two distinct causes, told apart by the problem `code`: `run_definition_gone` — the `package_versions` snapshot pinned by `runs.version_ref` was deleted while the run was in flight (the agent row is still there; re-publishing that version restores it); `run_agent_deleted` — the agent package itself was deleted mid-run (`runs.package_id` is `ON DELETE SET NULL`, so the run survives for observability) and nothing will restore that definition. There is deliberately no draft fallback in either case: the run's authorization set may never be re-derived from the mutable draft. Both are `409`, not `410`, which on this endpoint means the credential was revoked upstream, and not `404`, which here means the integration is not a dependency of the running agent or not active in the space. A third cause shares the status on this endpoint: `integration_auth_undeclared` — the integration manifest VERSION frozen for this run (`runs.resolved_integration_versions`) does not declare the `auth_key` the run's connection was created against (the auth was renamed or removed after the connection was made). Nothing can be injected without that declaration, and the credential is deliberately NOT flagged `needsReconnection`: it is intact and may still be valid under another manifest version, so `410` would both mislabel it and destroy a working connection over a manifest edit. */
-            409: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/problem+json": components["schemas"]["ProblemDetail"];
-                };
-            };
-            500: components["responses"]["InternalServerError"];
         };
     };
     reportIntegrationToolsObserved: {
@@ -31277,56 +31542,6 @@ export interface operations {
             };
             /** @description The body exceeds 1 MiB plus the 256 KiB envelope margin. */
             413: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/problem+json": components["schemas"]["ProblemDetail"];
-                };
-            };
-            500: components["responses"]["InternalServerError"];
-        };
-    };
-    reportIntegrationUpstreamSuccess: {
-        parameters: {
-            query: {
-                /** @description The connection this run bound to the integration: a member of `runs.resolved_connections[<integration id>]`. An id the run did not bind is a `400 connection_not_in_run`. */
-                connection_id: string;
-                /** @description The `credential_revision` of the credential the successful call carried. */
-                credential_revision: string;
-            };
-            header?: never;
-            path: {
-                /** @description Package scope (e.g. @myorg) */
-                scope: components["parameters"]["PackageScope"];
-                /** @description Package name */
-                name: components["parameters"]["PackageName"];
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Streak ended (or none to end on that credential). */
-            204: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-            /** @description The `connection_id` selector is missing, malformed, or names a connection this run did not bind. `invalid_request` — absent or not a uuid; the platform never picks a connection on the caller's behalf. `connection_not_in_run` — a well-formed id that is not in `runs.resolved_connections` for this integration; the run token authorises this run's bound set only. A missing or malformed `credential_revision` is an `invalid_request` too. */
-            400: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/problem+json": components["schemas"]["ProblemDetail"];
-                };
-            };
-            401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
-            404: components["responses"]["NotFound"];
-            /** @description The definition this run executes is no longer readable (`run_definition_gone` / `run_agent_deleted`, as on the GET endpoint), so the run token's authorization set cannot be decided; or `connect_run_no_refresh` — the caller is an ephemeral connect run, which holds no stored credential. */
-            409: {
                 headers: {
                     [name: string]: unknown;
                 };

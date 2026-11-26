@@ -479,7 +479,7 @@ export { toolDefinitionFingerprint } from "./tool-fingerprint.ts";
 
 // The `fetch` an MCP client transport is given, built from a `(url, init)` sender.
 export { boundResourceResponse } from "./resource-response.ts";
-export { mcpFetch } from "./mcp-fetch.ts";
+export { isMcpOperationExchange, mcpFetch } from "./mcp-fetch.ts";
 
 // Upstream-response metadata wire format — `_meta` key, header
 // allowlist, and `UpstreamMeta` type shared by the sidecar serializer

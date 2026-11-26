@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { beforeEach, describe, it, expect } from "bun:test";
+import { noCallReporter } from "./helpers/call-journal.ts";
 import {
   bootIntegrations,
   connectPlatformIntegration,
@@ -163,6 +164,7 @@ describe("bootIntegrations — an integration bound to the runtime", () => {
       result = await bootIntegrations([spec], {
         platformApiUrl: PLATFORM_API_URL,
         runToken: "run-token",
+        callReporter: noCallReporter,
         fetchFn,
       });
       expect(result.report.ok).toBe(true);
@@ -196,6 +198,7 @@ describe("bootIntegrations — platform endpoint tools-observed report", () => {
       result = await bootIntegrations([{ ...spec, toolAllowlist: ["log", "gone"] }], {
         platformApiUrl: PLATFORM_API_URL,
         runToken: "run-token",
+        callReporter: noCallReporter,
         fetchFn,
         retryDelayMs: () => 0,
       });

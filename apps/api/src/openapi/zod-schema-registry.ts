@@ -38,7 +38,7 @@ import {
 // --- API Key schemas (routes/api-keys.ts) ---
 import { createApiKeySchema } from "../routes/api-keys.ts";
 import { callRemoteToolSchema } from "../routes/credential-proxy.ts";
-import { scopesRequestedSchema, toolsObservedSchema } from "../routes/internal.ts";
+import { integrationCallsBodySchema, toolsObservedSchema } from "../routes/internal.ts";
 
 // --- Organization schemas (routes/organizations.ts) ---
 import {
@@ -47,6 +47,7 @@ import {
   addMemberSchema,
   updateInvitationSchema,
   updateRoleSchema,
+  personalSpaceRoleOverrideSchema,
 } from "../routes/organizations.ts";
 
 // --- Org settings schema (services/organizations.ts) ---
@@ -306,6 +307,12 @@ const coreSchemas: OpenApiSchemaEntry[] = [
     path: "/api/orgs/{orgId}/members/{userId}",
     jsonSchema: toJsonSchema(updateRoleSchema),
     description: "Update member role",
+  },
+  {
+    method: "PUT",
+    path: "/api/orgs/{orgId}/members/{userId}/personal-space-role",
+    jsonSchema: toJsonSchema(personalSpaceRoleOverrideSchema),
+    description: "Set a member's role in their personal space",
   },
   {
     method: "PATCH",
@@ -569,12 +576,6 @@ const coreSchemas: OpenApiSchemaEntry[] = [
   // ─── Sidecar reports ────────────────────────────────────────────────────
   {
     method: "POST",
-    path: "/internal/integration-credentials/{scope}/{name}/scopes-requested",
-    jsonSchema: toJsonSchema(scopesRequestedSchema),
-    description: "Report the scopes a server asked for that a connection does not hold",
-  },
-  {
-    method: "POST",
     path: "/internal/integration-credentials/{scope}/{name}/tools-observed",
     jsonSchema: toJsonSchema(toolsObservedSchema),
     description: "Report the tools a run listed from a remote integration",
@@ -586,6 +587,14 @@ const coreSchemas: OpenApiSchemaEntry[] = [
     path: "/api/credential-proxy/tools/call",
     jsonSchema: toJsonSchema(callRemoteToolSchema),
     description: "Call a typed tool of a remote MCP integration",
+  },
+
+  // ─── Internal (sidecar) ─────────────────────────────────────────────────
+  {
+    method: "POST",
+    path: "/internal/integration-calls",
+    jsonSchema: toJsonSchema(integrationCallsBodySchema),
+    description: "Journal the upstream calls a run's sidecar dispatched",
   },
 
   // ─── Integrations ───────────────────────────────────────────────────────

@@ -7,7 +7,7 @@
 
 import { chatActsIn } from "@appstrate/core/chat-contract";
 import { CORE_RESOURCE_LEVELS } from "@appstrate/core/permissions";
-import { isUnder, ROUTE_ACCESS, SETTINGS_INDEX, type RoutePath } from "./route-access";
+import { grantsRoute, isUnder, ROUTE_ACCESS, SETTINGS_INDEX, type RoutePath } from "./route-access";
 
 /** Only `member` access enters: scoping to a listed `access: "none"` space 403s every request. */
 export function isSpaceEnterable(space: { access: string }): boolean {
@@ -42,10 +42,19 @@ const accessOf = (path: RoutePath) =>
 const routeAdmits =
   (path: RoutePath) =>
   (can: SpaceGate): boolean =>
-    accessOf(path).anyOf?.some(can) ?? false;
+    grantsRoute(path, can);
 
-/** A space admits a list where its gate opens the list's route. */
-export const listAdmits = (list: SpaceList) => routeAdmits(LIST_ROUTE[list]);
+/** A space admits a list where its gate grants the list route's own permissions, Studio or not. */
+export const listAdmits =
+  (list: SpaceList) =>
+  (can: SpaceGate): boolean =>
+    ROUTE_ACCESS[LIST_ROUTE[list]].anyOf.some(can);
+
+/** The product a list is shown in: the Studio's screens also ask each space for the Studio. */
+export type ListSurface = "studio" | "chat";
+
+export const listAdmitsOn = (list: SpaceList, surface: ListSurface) =>
+  surface === "chat" ? listAdmits(list) : routeAdmits(LIST_ROUTE[list]);
 
 interface ListedSpace {
   id: string;
@@ -110,7 +119,7 @@ export function spaceChoice(
   return { kind: "ask" };
 }
 
-/** The « Tous les espaces » is offered from two spaces admitting at least one of the lists. */
+/** The « Tous les espaces » is offered from two spaces granting at least one list's own permissions. */
 export function overviewOffered(spaces: readonly ListedSpace[] | undefined): boolean {
   const admits = (can: SpaceGate) => SPACE_LISTS.some((list) => listAdmits(list)(can));
   return spacesWhere(spaces, admits).length >= 2;

@@ -10,7 +10,7 @@ export type SpaceMemberObject = components["schemas"]["SpaceMemberObject"];
 /** What a seat control reads of a person in a space: who, how they reach it, and as what. */
 export type SpaceSeat = Pick<SpaceMemberObject, "userId" | "org_role" | "source" | "role">;
 
-/** Everyone who reaches the space: explicit rows, org owners/admins (`org_role`) and, in an `open` space, every org member (`open_space`). */
+/** Everyone who reaches the space: explicit rows, org owners/admins (`org_role`) and, by default, every org member of an `open` space or the owner of a personal space (`open_space`). */
 export function useSpaceMembers(spaceId: string, enabled = true) {
   const scope = useOrgOnlyScope();
   return $api.useQuery(

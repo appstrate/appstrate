@@ -89,6 +89,21 @@ describe("extractErrorMessage", () => {
     expect(extractErrorMessage({ status: 503 })).toBe("HTTP 503");
     expect(extractErrorMessage({ status: 403, body: {} })).toBe("HTTP 403");
   });
+
+  it("reads a refusal's JSON error text for its message, never its JSON", () => {
+    const refusal = JSON.stringify({ code: "missing_argument", error: "method is required." });
+    expect(extractErrorMessage(refusal)).toBe("method is required.");
+    expect(extractErrorMessage({ error: refusal })).toBe("method is required.");
+  });
+
+  it("reads a nested error or refusal object", () => {
+    expect(extractErrorMessage({ error: { code: "forbidden", detail: "Refusé" } })).toBe("Refusé");
+    expect(extractErrorMessage({ refusal: { message: "not listed" } })).toBe("not listed");
+  });
+
+  it("says what a batch's first failed request says", () => {
+    expect(extractErrorMessage({ results: [{ status: 200 }, { status: 404 }] })).toBe("HTTP 404");
+  });
 });
 
 describe("httpStatusOf", () => {

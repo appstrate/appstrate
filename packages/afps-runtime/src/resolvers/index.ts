@@ -115,6 +115,7 @@ export {
   classifyApiCallFailure,
   fetchApiCall,
   HOP_BY_HOP_HEADERS,
+  mayHaveReachedUpstream,
   redactCredentialHost,
 } from "./api-call-engine.ts";
 

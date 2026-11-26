@@ -3,25 +3,27 @@
 /**
  * Default rendering for any MCP tool call with no dedicated rich card: the same
  * compact, error-aware row as the modeled tools (raw input/output JSON in a
- * modal on click), with a generic icon and the tool name as label.
+ * modal on click), named as the context panel names the same call (`showCall`).
  */
 
-import type { ToolCallMessagePartComponent } from "@assistant-ui/react";
-import { WrenchIcon } from "lucide-react";
-import { ToolCallCard } from "./tool-uis.tsx";
-import { callSpaceOf } from "./conversation-scope.ts";
+import { ToolCallCard, type ToolCardProps } from "./tool-uis.tsx";
+import { cardSpaceOf } from "./use-call-presentation.ts";
 import { deriveToolPhase } from "./tool-result.ts";
+import { useChatHost } from "./runtime-context.ts";
+import { showCall } from "./tool-presentation.ts";
 
-export const ToolFallback: ToolCallMessagePartComponent = (props) => (
-  <ToolCallCard
-    phase={deriveToolPhase(props)}
-    Icon={WrenchIcon}
-    label={props.toolName}
-    args={props.args}
-    result={props.result}
-    isError={props.isError}
-    toolCallId={props.toolCallId}
-    timing={props.timing}
-    spaceId={callSpaceOf(props)}
-  />
-);
+export function ToolFallback(props: ToolCardProps) {
+  const { t } = useChatHost();
+  return (
+    <ToolCallCard
+      phase={deriveToolPhase(props)}
+      {...showCall({ ...props, presentation: props.stored?.presentation }, t)}
+      args={props.args}
+      result={props.result}
+      isError={props.isError}
+      toolCallId={props.toolCallId}
+      timing={props.timing}
+      spaceId={cardSpaceOf(props)}
+    />
+  );
+}

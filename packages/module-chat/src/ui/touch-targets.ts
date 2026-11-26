@@ -19,3 +19,7 @@ export const USER_ACTION_BAR_CLASS = `mt-0.5 h-11 justify-end desktop-pointer:h-
 
 /** Reserve the button's real box so a tap cannot remove a chip from its neighboring action. */
 export const CHIP_REMOVE_CLASS = "flex size-10 shrink-0 items-center justify-center";
+
+/** A thread disclosure's `size="sm"` ghost trigger: 40 px on touch, 36 px under a mouse. */
+export const DISCLOSURE_TRIGGER_CLASS =
+  "text-muted-foreground hover:text-foreground group -ml-2 h-10 gap-1.5 px-2 desktop-pointer:h-9";

@@ -709,6 +709,36 @@ describe("personal spaces — the write rules", () => {
       { code: "personal_space_has_no_members" },
     );
   });
+
+  it("refuses the generic doors on the owner's own override row too", async () => {
+    // The override has its own door; holding `admin` through it, the owner may manage
+    // members of a team space, never re-role or drop their own row here.
+    const set = await app.request(
+      `/api/orgs/${owner.orgId}/members/${member.user.id}/personal-space-role`,
+      {
+        method: "PUT",
+        headers: { Cookie: owner.cookie, "Content-Type": "application/json" },
+        body: JSON.stringify({ preset_role: "admin" }),
+      },
+    );
+    expect(set.status, await set.clone().text()).toBe(200);
+    const memberPersonal = await ownPersonalSpace(member);
+    const self = `/api/spaces/${memberPersonal.id}/members/${member.user.id}`;
+    await expectProblem(
+      await app.request(self, {
+        method: "PATCH",
+        headers: { ...orgOnlyHeaders(member), "Content-Type": "application/json" },
+        body: JSON.stringify({ preset_role: "admin" }),
+      }),
+      409,
+      { code: "personal_space_has_no_members" },
+    );
+    await expectProblem(
+      await app.request(self, { method: "DELETE", headers: orgOnlyHeaders(member) }),
+      409,
+      { code: "personal_space_has_no_members" },
+    );
+  });
 });
 
 describe("personal spaces — references that bypass the package routes", () => {

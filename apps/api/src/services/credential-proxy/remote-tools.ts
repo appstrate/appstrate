@@ -39,7 +39,10 @@ import {
   type ProxyReach,
 } from "../integration-connections.ts";
 import { renderRemoteSource } from "../integration-manifest-helpers.ts";
-import { readIntegrationManifestForProxy } from "../integration-service.ts";
+import {
+  readIntegrationManifestForProxy,
+  type ResolvedIntegrationVersion,
+} from "../integration-service.ts";
 import {
   approvedFingerprintsByTool,
   approvedToolNames,
@@ -60,8 +63,8 @@ import {
   untilAborted,
   untrustedFields,
   untrustedText,
-  type ProxyCaller,
 } from "./mcp-over-proxy.ts";
+import type { ProxyCaller } from "./call-journal.ts";
 
 /**
  * The deadlines, kept under an MCP client's 60 s request timeout. `call_integration_tool`
@@ -284,12 +287,19 @@ export function offeredRemoteToolNames(
 /** A failed operation, with the HTTP status of the last exchange its server answered. */
 type OperationFailure = (err: unknown, receivedStatus: number | undefined) => unknown;
 
-/** One operation on the server: through `connectionId`, or directly when it is `null`. */
-async function withClient<T>(
+/**
+ * The one way a session is opened on a remote server, whoever asks (a catalog listing, a tool
+ * call, the editor's identity read): through `connectionId`, or directly when it is `null`, with
+ * the proxy's authorization, the egress guard, the journal and the deadline of either path.
+ * `version` is the one the proxy authorizes against: the draft for the editor, else the latest
+ * published, the one runs freeze.
+ */
+export async function withMcpSession<T>(
   input: Omit<RemoteToolsInput, "signal"> & {
     connectionId: string | null;
     timeoutMs: number;
     signal: AbortSignal | null;
+    version?: ResolvedIntegrationVersion;
   },
   url: string,
   use: (client: AppstrateMcpClient, signal: AbortSignal) => Promise<T>,
@@ -310,7 +320,12 @@ async function withClient<T>(
           // The activation check `proxyCall` makes on each exchange: switched off since, nothing is sent.
           beforeExchange: () => assertIntegrationActive(input.integrationId, input.scope.spaceId),
         })
-      : proxiedMcpOperation({ ...base, connectionId: input.connectionId, reach: input.reach });
+      : proxiedMcpOperation({
+          ...base,
+          connectionId: input.connectionId,
+          reach: input.reach,
+          ...(input.version ? { version: input.version } : {}),
+        });
   let client: AppstrateMcpClient | undefined;
   try {
     return await operation.guard(
@@ -349,6 +364,7 @@ function boundedCatalog(tools: SanitisedTool[], truncated: boolean): ReadCatalog
 interface ServerTool {
   name: string;
   description?: string;
+  title?: string;
   input_schema: Tool["inputSchema"];
   /** Present when the server declares one. */
   output_schema?: NonNullable<Tool["outputSchema"]>;
@@ -431,7 +447,7 @@ export async function listRemoteTools(
   if (described === undefined && !input.signal.aborted && !input.cachedOnly) {
     const load = async () => {
       let listed: { tools: Tool[]; truncated: boolean } | undefined;
-      const catalog = await withClient(
+      const catalog = await withMcpSession(
         { ...input, connectionId, timeoutMs: timeouts.listMs, signal: null },
         url,
         async (client, signal) => {
@@ -513,6 +529,7 @@ export async function listRemoteTools(
       .map(({ tool, reduced }) => ({
         name: tool.name,
         ...(tool.description !== undefined ? { description: tool.description } : {}),
+        ...serverTitle(tool),
         input_schema: tool.inputSchema,
         ...(tool.outputSchema !== undefined ? { output_schema: tool.outputSchema } : {}),
         ...(reduced.length > 0 ? { schema_reduced: reduced } : {}),
@@ -521,6 +538,14 @@ export async function listRemoteTools(
     listed: true,
     truncatedAt: described.truncated ? described.tools.length : null,
   };
+}
+
+/** The server's display name for a sanitised tool: `title`, else `annotations.title`, if not blank. */
+function serverTitle(tool: Tool): Pick<ServerTool, "title"> {
+  const title = [tool.title, tool.annotations?.title]
+    .map((candidate) => candidate?.trim())
+    .find(Boolean);
+  return title ? { title } : {};
 }
 
 /**
@@ -583,7 +608,7 @@ export async function callRemoteTool(
   // definition was listed on this client, so the SDK validates no output and raises no -32602
   // of its own after the call: one caught here is the server's.
   let calling = false;
-  const result = await withClient(
+  const result = await withMcpSession(
     { ...input, connectionId, timeoutMs: timeouts.callMs },
     url,
     (client, signal) => {

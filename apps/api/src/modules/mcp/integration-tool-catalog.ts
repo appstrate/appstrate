@@ -314,6 +314,7 @@ const integrationListingSchema = z.looseObject({
         ...toolFields,
         kind: z.literal("remote"),
         remote_name: z.string(),
+        title: z.string().optional(),
         input_schema: schemaObject,
         output_schema: schemaObject.optional(),
         schema_reduced: z.array(z.enum(TOOL_DESCRIPTOR_REDUCTIONS)).optional(),
@@ -321,6 +322,13 @@ const integrationListingSchema = z.looseObject({
         missing_scopes: z.record(z.string(), stringList).optional(),
       }),
     ]),
+  ),
+  integrations: z.array(
+    z.looseObject({
+      integration_package_id: z.string(),
+      display_name: z.string().min(1),
+      icon: z.string().optional(),
+    }),
   ),
   connections: z.array(
     z.looseObject({

@@ -8,7 +8,6 @@
  */
 
 import { useId } from "react";
-import { makeAssistantToolUI, type ToolCallMessagePartProps } from "@assistant-ui/react";
 import { PinIcon } from "lucide-react";
 import { Button } from "@appstrate/ui/components/button";
 import { SKILL_DIRECTIVE } from "../directives.ts";
@@ -23,7 +22,9 @@ import {
 } from "./chat-skills.ts";
 import { DirectiveChip } from "./directive-chip.tsx";
 import { useChatHost } from "./runtime-context.ts";
+import { REVEAL_RING_CLASS, useRevealAnchor } from "./reveal-tool-call.ts";
 import { ToolFallback } from "./tool-fallback.tsx";
+import type { ToolCardProps } from "./tool-uis.tsx";
 import { deriveToolPhase } from "./tool-result.ts";
 import { useChatCommands } from "./use-chat-commands.ts";
 import { useConversationSkillsContext } from "./use-conversation-skills.ts";
@@ -34,7 +35,7 @@ const CHIP_CLASS: Record<SkillLoadState, string | undefined> = {
   error: "text-muted-foreground border-dashed bg-transparent",
 };
 
-type ResourceReadProps = ToolCallMessagePartProps<Record<string, unknown>, unknown>;
+type ResourceReadProps = ToolCardProps;
 
 /**
  * Pins the skill read to the conversation: offered once the server holds the conversation and
@@ -87,10 +88,17 @@ function SkillLoad({
   props: ResourceReadProps;
 }) {
   const { t } = useChatHost();
+  const anchor = useRevealAnchor(props.toolCallId);
   const phase = deriveToolPhase(props);
   const state = skillLoadState(phase);
   return (
-    <div data-testid="skill-load" data-phase={phase} data-state={state} className="my-1.5 text-sm">
+    <div
+      {...anchor}
+      data-testid="skill-load"
+      data-phase={phase}
+      data-state={state}
+      className={`my-1.5 rounded-md text-sm ${REVEAL_RING_CLASS}`}
+    >
       <span className="flex flex-wrap items-center gap-1.5">
         <DirectiveChip
           directiveType={SKILL_DIRECTIVE}
@@ -122,13 +130,3 @@ export function ResourceReadTool(props: ResourceReadProps) {
   const skill = skillLoadOf(props.args);
   return skill ? <SkillLoad skill={skill} props={props} /> : <ToolFallback {...props} />;
 }
-
-export const ReadResourceToolUI = makeAssistantToolUI<Record<string, unknown>, unknown>({
-  toolName: "read_resource",
-  render: ResourceReadTool,
-});
-
-export const ReadToolUI = makeAssistantToolUI<Record<string, unknown>, unknown>({
-  toolName: "read",
-  render: ResourceReadTool,
-});

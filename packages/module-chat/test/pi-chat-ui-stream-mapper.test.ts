@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { describe, expect, it } from "bun:test";
+import { formatTurnBudgetNote } from "@appstrate/core/chat-turn-metadata";
 import {
   dispatchSpace,
   PiChatUiStreamMapper,
@@ -176,6 +177,33 @@ describe("PiChatUiStreamMapper", () => {
     ]);
     expect(run([{ ...end, isError: true }]).chunks).toEqual([
       { type: "tool-output-error", toolCallId: "file-1", errorText: receipt.text },
+    ]);
+  });
+
+  it("leaves the model's final turn-budget line out of a tool error's text, and no other", () => {
+    const budget = formatTurnBudgetNote({ remainingMs: 558_000, stepsUsed: 7 });
+    const chunks = run([
+      {
+        type: "tool_execution_end",
+        toolCallId: "gh-1",
+        toolName: "call_integration_tool",
+        result: {
+          content: [
+            { type: "text", text: "403 Resource not accessible" },
+            { type: "text", text: "[turn budget] hidden" },
+            { type: "text", text: budget },
+          ],
+          details: {},
+        },
+        isError: true,
+      },
+    ]).chunks;
+    expect(chunks).toEqual([
+      {
+        type: "tool-output-error",
+        toolCallId: "gh-1",
+        errorText: "403 Resource not accessible[turn budget] hidden",
+      },
     ]);
   });
 
@@ -489,6 +517,103 @@ describe("the space a tool call is stamped with", () => {
 
   it("stamps nothing for a space outside the turn's, which the call is refused in", () => {
     expect("providerMetadata" in available({ space_id: "spc_x" }, new Set(["spc_o"]))).toBe(false);
+  });
+});
+
+describe("a call's presentation", () => {
+  const presentation = {
+    title: "Create issue",
+    subject: { kind: "integration", id: "@acme/github", display_name: "GitHub" },
+  };
+  const end = (isError: boolean): AgentSessionEvent => ({
+    type: "tool_execution_end",
+    toolCallId: "gh-1",
+    toolName: "call_integration_tool",
+    result: {
+      content: [{ type: "text", text: "403 Resource not accessible" }],
+      details: {},
+      relayed: true,
+      presentation,
+    },
+    isError,
+  });
+
+  it("keeps a failure's acted spaces beside its presentation, a success's in its output", () => {
+    const acted = (isError: boolean): AgentSessionEvent => {
+      const event = end(isError) as Extract<AgentSessionEvent, { type: "tool_execution_end" }>;
+      return { ...event, result: { ...(event.result as object), actedSpaceIds: ["spc_target"] } };
+    };
+    expect(run([acted(true)]).chunks).toEqual([
+      {
+        type: "tool-output-error",
+        toolCallId: "gh-1",
+        errorText: "403 Resource not accessible",
+        providerMetadata: { appstrate: { presentation, actedSpaceIds: ["spc_target"] } },
+      },
+    ]);
+    expect(run([acted(false)]).chunks).toEqual([
+      {
+        type: "tool-output-available",
+        toolCallId: "gh-1",
+        output: {
+          content: [{ type: "text", text: "403 Resource not accessible" }],
+          relayed: true,
+          actedSpaceIds: ["spc_target"],
+        },
+        providerMetadata: { appstrate: { presentation } },
+      },
+    ]);
+  });
+});
+
+describe("a call of a lookup tool", () => {
+  const call = (name: string): AgentSessionEvent[] => [
+    { type: "message_start", message: {} },
+    {
+      type: "message_update",
+      message: {},
+      assistantMessageEvent: {
+        type: "toolcall_start",
+        contentIndex: 0,
+        partial: { content: [{ type: "toolCall", id: "call_1", name }] },
+      },
+    } as AgentSessionEvent,
+    {
+      type: "message_update",
+      message: {},
+      assistantMessageEvent: {
+        type: "toolcall_end",
+        contentIndex: 0,
+        toolCall: { id: "call_1", name, arguments: { space_id: "spc_o" } },
+        partial: {},
+      },
+    } as AgentSessionEvent,
+  ];
+  const stamps = (name: string) => {
+    const mapper = new PiChatUiStreamMapper({ turnSpaces: new Set(["spc_o"]) });
+    mapper.describeLookupTools(new Set(["search"]));
+    const chunks = call(name).flatMap((e) => mapper.map(e)) as Array<{
+      type: string;
+      providerMetadata?: unknown;
+    }>;
+    return {
+      start: chunks.find((c) => c.type === "tool-input-start")?.providerMetadata,
+      available: chunks.find((c) => c.type === "tool-input-available")?.providerMetadata,
+    };
+  };
+
+  it("is stamped a lookup from its first chunk, beside the space it acted in", () => {
+    expect(stamps("mcp__platform__search")).toEqual({
+      start: { appstrate: { lookup: true } },
+      available: { appstrate: { spaceId: "spc_o", lookup: true } },
+    });
+  });
+
+  it("stamps nothing of the kind on a tool that writes", () => {
+    expect(stamps("mcp__platform__invoke_operation")).toEqual({
+      start: undefined,
+      available: { appstrate: { spaceId: "spc_o" } },
+    });
   });
 });
 

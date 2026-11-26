@@ -18,7 +18,8 @@ import {
 import { FileAttachment } from "../../../../../packages/module-chat/src/ui/file-attachment.tsx";
 import { ChatRunProgressCard } from "../../../../../packages/module-chat/src/ui/chat-run-progress-card.tsx";
 import { render } from "../../test/render.tsx";
-import { ConversationUsage } from "../../modules/chat/conversation-sidebar.tsx";
+import { ConversationUsage } from "../../modules/chat/conversation-summary.tsx";
+import { conversationStats } from "@appstrate/module-chat/conversation-stats";
 import { mergeTurnMetadata } from "@appstrate/core/chat-turn-metadata";
 import chatFr from "../../locales/fr/chat.json";
 import i18n, { i18nReady } from "../../i18n.ts";
@@ -169,6 +170,7 @@ describe("chat surfaces held to the caller's grants", () => {
       render(
         <ChatHostProvider value={hostWith(granted)}>
           <ChatRunProgressCard
+            toolCallId="call_1"
             runId="run_1"
             initialStatus="running"
             initialPackageId="@acme/bot"
@@ -218,12 +220,18 @@ describe("conversation sidebar usage", () => {
       ],
       usage: {},
     }) as unknown as Parameters<typeof ConversationUsage>[0]["session"];
+  const usage = (assumed: boolean) => {
+    const conversation = session(assumed);
+    return (
+      <ConversationUsage session={conversation} stats={conversationStats(conversation.messages)} />
+    );
+  };
 
   it("marks an assumed window with ≈ and says why", async () => {
     await i18nReady;
     await i18n.changeLanguage("fr");
     await i18n.loadNamespaces("chat");
-    const html = render(<ConversationUsage session={session(true)} />);
+    const html = render(usage(true));
     expect(html).toContain("≈");
     expect(html).toContain(chatFr["contextUsage.windowAssumed"].split("{{window}}")[0]!.trim());
   });
@@ -232,7 +240,7 @@ describe("conversation sidebar usage", () => {
     await i18nReady;
     await i18n.changeLanguage("fr");
     await i18n.loadNamespaces("chat");
-    const html = render(<ConversationUsage session={session(false)} />);
+    const html = render(usage(false));
     expect(html).not.toContain("≈");
     expect(html).not.toContain(chatFr["contextUsage.windowAssumed"].split("{{window}}")[0]!.trim());
   });

@@ -3,47 +3,42 @@
 import { useRef, useState, type Dispatch, type ReactNode } from "react";
 import { ActivityIcon, FilesIcon, PanelRightCloseIcon, PanelRightIcon, XIcon } from "lucide-react";
 import { useTranslation } from "react-i18next";
-import { useNowTick } from "@appstrate/ui/use-now-tick";
-import { useSessionDetail } from "@appstrate/module-chat/unread";
-import { conversationStats } from "@appstrate/module-chat/conversation-stats";
+import type { ConversationToolCall } from "@appstrate/module-chat/conversation-tools";
+import { revealToolCall } from "@appstrate/module-chat/reveal-tool-call";
 import { cn } from "@appstrate/ui/cn";
-import { Fact, FactGrid } from "@appstrate/ui/components/fact-grid";
-import { formatCompactTokens, formatTokenFigure } from "@appstrate/ui/context-window";
 import { Button } from "@appstrate/ui/components/button";
 import { Sheet, SheetContent, SheetTitle } from "@appstrate/ui/components/sheet";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@appstrate/ui/components/tabs";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@appstrate/ui/components/tooltip";
 import { MimeIcon } from "@appstrate/ui/components/mime-icon";
-import { CopyButton } from "@appstrate/ui/components/copy-button";
-import { $api } from "../../api/client";
 import { AgentDetailPaneHeader } from "../../components/agent-detail/agent-detail-split";
 import { EmptyState, ErrorState } from "../../components/page-states";
 import { FileArtifact } from "../../components/file-artifact";
 import { RowSpaceName, RunRow } from "../../components/run-row";
-import { TextSkeleton, Waiting } from "../../components/loading-skeletons";
-import { SkeletonLine } from "../../components/skeleton-line";
-import { useAgents } from "../../hooks/use-packages";
-import { useFile, useFiles } from "../../hooks/use-files";
+import { TextSkeleton } from "../../components/loading-skeletons";
+import { useFile } from "../../hooks/use-files";
 import { useCurrentOrgId } from "../../hooks/use-org";
 import { useCurrentSpaceId } from "../../hooks/use-current-space";
-import { useAdmittingSpaces } from "../../hooks/use-overview-mode";
 import { useConversationTabs } from "./use-conversation-tabs";
-import { useRunAgentName } from "../../hooks/use-run-agent-name";
-import { useListScope } from "../../hooks/use-org-scope";
 import { otherSpaceFileContext } from "../../lib/file-link";
 import { localViewableFile } from "../../lib/files";
 import { formatBytes } from "../../lib/format-bytes";
-import { formatDateField, formatRelativeTime } from "../../lib/format-date";
+import { formatDateField } from "../../lib/format-date";
+import { readShown, useConversationFiles, useConversationRuns } from "./use-conversation-lists";
+import { ConversationSummary } from "./conversation-summary";
+import { ConversationToolsList, ShownToolCall } from "./conversation-tools-tab";
 import {
+  revealMissed,
   shownFile,
+  shownToolCallId,
   type ConversationSidebarAction,
   type ConversationSidebarState,
   type ConversationSidebarTab,
   type LocalSidebarFile,
   type SidebarFile,
+  type SidebarOrigin,
   type StoredSidebarFile,
 } from "./conversation-sidebar-state";
-import { ChatAccessSummary } from "./chat-access-summary";
 import { PanelResizeHandle } from "./panel-resize";
 import { usePanelWidth, type PanelView } from "./use-panel-width";
 import { LG_AND_UP, useMediaQuery } from "../../hooks/use-media-query";
@@ -91,24 +86,28 @@ export function ConversationContextToggle({
   );
 }
 
+/** What closing a shown file does, said by its X: back where it was opened from. */
+const FILE_CLOSE_LABEL: Record<SidebarOrigin, string> = {
+  thread: "context.collapse",
+  list: "context.backToFiles",
+  summary: "context.backToSummary",
+};
+
 /**
  * The file's frame IS the panel: its header replaces the panel's. Its X closes
- * the panel, or goes back to the file list the file was opened from.
+ * the panel, or goes back to the file list or the summary the file was opened from.
  */
 export function ShownFile({
   file,
-  backToList,
+  from,
   onClose,
 }: {
   file: SidebarFile;
-  backToList: boolean;
+  from: SidebarOrigin;
   onClose: () => void;
 }) {
   const { t } = useTranslation("chat");
-  const close = {
-    label: backToList ? t("context.backToFiles") : t("context.collapse"),
-    onClick: onClose,
-  };
+  const close = { label: t(FILE_CLOSE_LABEL[from]), onClick: onClose };
   return "local" in file ? (
     <ShownLocalFile file={file} onClose={close} />
   ) : (
@@ -173,35 +172,18 @@ export function ConversationRuns({
   active: boolean;
 }) {
   const { t } = useTranslation("chat");
-  const admitting = useAdmittingSpaces("runs");
-  const canRead = admitting.length > 0;
-  // Spanning: the conversation's runs are every space's, polled (the SSE stream carries one space).
-  const scope = useListScope(true, canRead);
-  // Their agents are every space's too: read from the index spanning spaces, while shown.
-  const shown = active && !!conversationId;
-  const { data: agents } = useAgents({ spanning: true, enabled: shown });
-  const agentById = new Map((agents ?? []).map((agent) => [agent.id, agent] as const));
-  const agentName = useRunAgentName({ spanning: true, enabled: shown });
-  const filters = { chat_session_id: conversationId ?? undefined, limit: 100 };
-  // A conversation belongs to the organization: the runs it launched, in every space.
-  const query = $api.useQuery(
-    "get",
-    "/api/orgs/{orgId}/runs",
-    { params: { path: { orgId: scope.orgId ?? "" }, query: filters } },
-    {
-      enabled: scope.enabled && canRead && active && !!conversationId,
-      refetchInterval: scope.refetchInterval,
-    },
+  const { query, runs, agentName, agentById, spanning } = useConversationRuns(
+    conversationId,
+    active,
   );
 
   if (!conversationId) {
     return <EmptyState message={t("context.unsaved")} icon={ActivityIcon} compact />;
   }
-  if (query.isLoading) {
-    return <TextSkeleton className="p-4" />;
-  }
-  if (query.error) return <ErrorState error={query.error} compact />;
-  const runs = query.data?.data ?? [];
+  const read = readShown(query);
+  if (read === "error") return <ErrorState error={query.error} compact />;
+  // Pending covers a read not yet answered and one held while the panel is closed.
+  if (read === "pending") return <TextSkeleton className="p-4" />;
   if (runs.length === 0) {
     return <EmptyState message={t("context.runs.empty")} icon={ActivityIcon} compact />;
   }
@@ -215,9 +197,7 @@ export function ConversationRuns({
           agentName={agentName(run)}
           agent={run.packageId ? agentById.get(run.packageId) : undefined}
           dense
-          // The list spans the spaces the reader reads runs in: each row names its own once
-          // there are several.
-          spanning={admitting.length > 1}
+          spanning={spanning}
           className="px-3"
         />
       ))}
@@ -235,23 +215,15 @@ export function ConversationFiles({
   onSelect: (file: StoredSidebarFile) => void;
 }) {
   const { t } = useTranslation("chat");
-  // The list spans the spaces the reader reads files in: each row names its own once there are several.
-  const named = useAdmittingSpaces("files").length > 1;
-  const query = useFiles({
-    spanning: true,
-    contextChatSessionId: conversationId ?? undefined,
-    limit: 100,
-    enabled: active && !!conversationId,
-  });
+  const { query, files, named } = useConversationFiles(conversationId, active);
 
   if (!conversationId) {
     return <EmptyState message={t("context.unsaved")} icon={FilesIcon} compact />;
   }
-  if (query.isLoading) {
-    return <TextSkeleton className="p-4" />;
-  }
-  if (query.error) return <ErrorState error={query.error} compact />;
-  const files = query.data?.data ?? [];
+  const read = readShown(query);
+  if (read === "error") return <ErrorState error={query.error} compact />;
+  // Pending covers a read not yet answered and one held while the panel is closed.
+  if (read === "pending") return <TextSkeleton className="p-4" />;
   if (files.length === 0) {
     return <EmptyState message={t("context.files.empty")} icon={FilesIcon} compact />;
   }
@@ -287,226 +259,6 @@ export function ConversationFiles({
   );
 }
 
-function InfoDate({ iso }: { iso: string }) {
-  const now = useNowTick();
-  return (
-    <>
-      <span>{formatRelativeTime(iso, now, "long")}</span>
-      <span className="text-muted-foreground block text-xs">{formatDateField(iso)}</span>
-    </>
-  );
-}
-
-function ConversationId({ id }: { id: string }) {
-  const { t } = useTranslation(["chat", "common"]);
-  return (
-    <div className="text-muted-foreground flex items-center gap-1 text-xs">
-      <code className="min-w-0 flex-1 truncate font-mono">{id}</code>
-      <CopyButton
-        value={id}
-        className="desktop-pointer:size-6 shrink-0"
-        aria-label={`${t("common:btn.copy")} (${t("chat:context.info.id")})`}
-      />
-    </div>
-  );
-}
-
-/** The details while they load, row for row; a date row is two lines (age, then date). */
-function ConversationDetailsSkeleton() {
-  const row = (key: string, width: string, lines = 1) => (
-    <div key={key}>
-      <SkeletonLine className="w-20 text-xs" />
-      <div className="mt-1">
-        {Array.from({ length: lines }, (_, i) => (
-          <SkeletonLine key={i} className={i ? "w-16 text-xs" : cn("text-sm", width)} />
-        ))}
-      </div>
-    </div>
-  );
-  return (
-    <Waiting className="divide-y">
-      <div className="flex flex-col gap-4 p-4">
-        <SkeletonLine className="w-2/3 text-base font-semibold" />
-        <div className="flex flex-col gap-3">
-          {row("created", "w-24", 2)}
-          {row("activity", "w-24", 2)}
-          {row("messages", "w-8")}
-          {row("status", "w-16")}
-        </div>
-      </div>
-      <div className="flex flex-col gap-2 p-4">
-        <SkeletonLine className="w-32 text-sm font-medium" />
-        <div className="flex flex-col gap-3">
-          {row("context", "w-28")}
-          {row("models", "w-40")}
-          {row("tokens", "w-36")}
-        </div>
-        <SkeletonLine className="w-3/4 text-xs" />
-      </div>
-    </Waiting>
-  );
-}
-
-/**
- * The models that closed the conversation's turns and the context it carries, from the turns' own
- * metadata, beside the tokens every metered call consumed, from the server's ledger sum.
- */
-export function ConversationUsage({
-  session,
-}: {
-  session: NonNullable<ReturnType<typeof useSessionDetail>["data"]>;
-}) {
-  const { t, i18n } = useTranslation("chat");
-  const { models, context } = conversationStats(session.messages);
-  const { usage } = session;
-  const read =
-    (usage.input_tokens ?? 0) +
-    (usage.cache_read_input_tokens ?? 0) +
-    (usage.cache_creation_input_tokens ?? 0);
-  const generated = usage.output_tokens ?? 0;
-  const metered = read + generated > 0;
-
-  return (
-    <section className="flex flex-col gap-2">
-      <h3 className="text-sm font-medium">{t("context.info.usageTitle")}</h3>
-      {models.length === 0 && !context && !metered ? (
-        <p className="text-muted-foreground text-sm">{t("context.info.noTurn")}</p>
-      ) : (
-        <>
-          <FactGrid columns={1}>
-            {context ? (
-              <Fact label={t("context.info.currentContext")}>
-                <span className="whitespace-nowrap tabular-nums">
-                  {t("contextUsage.counts", {
-                    used: formatCompactTokens(context.tokens, i18n.language),
-                    max: formatTokenFigure(
-                      context.window,
-                      context.windowAssumed === true,
-                      i18n.language,
-                    ),
-                  })}
-                </span>
-                {context.windowAssumed === true ? (
-                  <span className="text-muted-foreground block text-xs">
-                    {t("contextUsage.windowAssumed", {
-                      window: formatCompactTokens(context.window, i18n.language),
-                    })}
-                  </span>
-                ) : null}
-              </Fact>
-            ) : null}
-            {models.length > 0 ? (
-              <Fact label={t("context.info.models", { count: models.length })}>
-                <ul className="flex flex-col gap-0.5">
-                  {models.map((model) => (
-                    <li key={model.modelId}>
-                      {model.failed > 0
-                        ? t("context.info.modelTurnsFailed", {
-                            model: model.label,
-                            count: model.turns,
-                            failed: model.failed,
-                          })
-                        : t("context.info.modelTurns", { model: model.label, count: model.turns })}
-                    </li>
-                  ))}
-                </ul>
-              </Fact>
-            ) : null}
-            {metered ? (
-              <Fact label={t("context.info.tokens")}>
-                {t("context.info.tokensReadGenerated", {
-                  read: formatCompactTokens(read, i18n.language),
-                  generated: formatCompactTokens(generated, i18n.language),
-                })}
-              </Fact>
-            ) : null}
-          </FactGrid>
-          {metered ? (
-            <p className="text-muted-foreground text-xs">{t("context.info.tokensScope")}</p>
-          ) : null}
-        </>
-      )}
-    </section>
-  );
-}
-
-function ConversationDetails({
-  conversationId,
-  active,
-}: {
-  conversationId: string | null;
-  active: boolean;
-}) {
-  const { t } = useTranslation("chat");
-  const query = useSessionDetail(active ? conversationId : null);
-
-  if (!conversationId) {
-    return <p className="text-muted-foreground p-4 text-sm">{t("context.unsaved")}</p>;
-  }
-  if (query.isLoading) return <ConversationDetailsSkeleton />;
-  if (query.error || !query.data) return <ErrorState error={query.error} compact />;
-
-  const session = query.data;
-  const rows: [string, ReactNode][] = [
-    [t("context.info.created"), <InfoDate key="created" iso={session.createdAt} />],
-    [t("context.info.lastActivity"), <InfoDate key="activity" iso={session.updatedAt} />],
-    [t("context.info.messages"), String(session.messages.length)],
-    [
-      t("context.info.status"),
-      session.generating ? t("context.info.generating") : t("context.info.idle"),
-    ],
-  ];
-
-  return (
-    <>
-      <div className="flex flex-col gap-4 p-4">
-        <h3 className="text-base font-semibold break-words">
-          {session.title || t("context.info.untitled")}
-        </h3>
-        <FactGrid columns={1}>
-          {rows.map(([label, value]) => (
-            <Fact key={label} label={label}>
-              {value}
-            </Fact>
-          ))}
-        </FactGrid>
-      </div>
-      <div className="p-4">
-        <ConversationUsage session={session} />
-      </div>
-    </>
-  );
-}
-
-function ConversationInfo({
-  conversationId,
-  active,
-}: {
-  conversationId: string | null;
-  active: boolean;
-}) {
-  // The same query as the details': the access judges the conversation's own scope.
-  const detail = useSessionDetail(active ? conversationId : null);
-  const conversation = !conversationId
-    ? null
-    : detail.isLoading
-      ? undefined
-      : (detail.data ?? null);
-  return (
-    <div className="divide-y">
-      <ConversationDetails conversationId={conversationId} active={active} />
-      <div className="p-4">
-        <ChatAccessSummary conversation={conversation} />
-      </div>
-      {conversationId ? (
-        <div className="px-4 py-2">
-          <ConversationId id={conversationId} />
-        </div>
-      ) : null}
-    </div>
-  );
-}
-
 /**
  * The panel's content, in the desktop column or in the phone's sheet: one block, the tabs in its
  * header band (Radix wires the tab/tabpanel ARIA) over the selected tab's content. The block is as
@@ -518,28 +270,32 @@ function ConversationContext({
   state,
   dispatch,
   closable,
+  onShowInThread,
 }: {
   conversationId: string | null;
   state: ConversationSidebarState;
   dispatch: Dispatch<ConversationSidebarAction>;
   /** The phone's sheet has no header toggle beside it: it carries its own close. */
   closable: boolean;
+  /** "See in the thread": bring the call's card into view, where the panel leaves room for it. */
+  onShowInThread: (call: ConversationToolCall) => void;
 }) {
   // The desktop column stays mounted while closed (for its transition): its
-  // reads wait until it is open.
+  // reads wait until it is open. The phone's sheet unmounts its content when closed.
   const active = state.expanded;
   const { t } = useTranslation("chat");
   const { tabs, activeTab } = useConversationTabs(state.activeTab);
   // Read from the state, not the readable tabs: a file the thread opens shows
   // even for a caller whose Files tab is not drawn.
   const previewedFile = shownFile(state);
+  const shownCall = shownToolCallId(state);
 
   if (previewedFile) {
     return (
       <div className="min-h-0 flex-1 p-3">
         <ShownFile
           file={previewedFile}
-          backToList={state.fileFromList}
+          from={state.fileFrom}
           onClose={() => dispatch({ type: "close-file" })}
         />
       </div>
@@ -558,15 +314,24 @@ function ConversationContext({
           FLOATING_FRAME,
         )}
       >
-        <AgentDetailPaneHeader className="justify-end gap-2">
-          <TabsList className="h-9 min-w-0" aria-label={t("context.label")}>
-            {tabs.map(({ id, Icon, label }) => (
-              <TabsTrigger key={id} value={id} className="gap-1.5">
-                <Icon className="size-4 shrink-0" />
-                <span className="truncate">{label}</span>
-              </TabsTrigger>
-            ))}
-          </TabsList>
+        {/* Every tab keeps its name in words: a narrow panel drops the icons and tightens the
+            tabs (as a detail page's do below `sm`), and scrolls them sideways if they still do
+            not fit. 40 px tabs on touch, denser under a mouse. */}
+        <AgentDetailPaneHeader className="@container justify-end gap-2">
+          <div className="no-scrollbar scroll-fade-x min-w-0 overflow-x-auto">
+            <TabsList className="h-auto w-max p-1" aria-label={t("context.label")}>
+              {tabs.map(({ id, Icon, label }) => (
+                <TabsTrigger
+                  key={id}
+                  value={id}
+                  className="desktop-pointer:h-7 h-10 gap-1.5 px-2 @sm:px-3"
+                >
+                  <Icon aria-hidden="true" className="hidden size-4 shrink-0 @sm:block" />
+                  {label}
+                </TabsTrigger>
+              ))}
+            </TabsList>
+          </div>
           {closable ? (
             <Button
               variant="ghost"
@@ -588,11 +353,39 @@ function ConversationContext({
               <ConversationFiles
                 conversationId={conversationId}
                 active={active}
-                onSelect={(file) => dispatch({ type: "show-file", file, fromList: true })}
+                onSelect={(file) => dispatch({ type: "show-file", file, from: "list" })}
               />
             ) : null}
-            {id === "info" ? (
-              <ConversationInfo conversationId={conversationId} active={active} />
+            {id === "tools" ? (
+              shownCall ? (
+                <ShownToolCall
+                  key={shownCall}
+                  conversationId={conversationId}
+                  toolCallId={shownCall}
+                  active={active}
+                  missing={revealMissed(state)}
+                  from={state.toolCallFrom}
+                  onBack={() => dispatch({ type: "close-tool-call" })}
+                  onShowInThread={onShowInThread}
+                />
+              ) : (
+                <ConversationToolsList
+                  conversationId={conversationId}
+                  active={active}
+                  showLookups={state.showLookups}
+                  onShowLookupsChange={(show) => dispatch({ type: "show-lookups", show })}
+                  onSelect={(call) =>
+                    dispatch({ type: "show-tool-call", toolCallId: call.toolCallId, from: "list" })
+                  }
+                />
+              )
+            ) : null}
+            {id === "summary" ? (
+              <ConversationSummary
+                conversationId={conversationId}
+                active={active}
+                dispatch={dispatch}
+              />
             ) : null}
           </TabsContent>
         ))}
@@ -617,8 +410,29 @@ export function ConversationSidebar({
   const desktop = useMediaQuery(LG_AND_UP);
   const panelRef = useRef<HTMLElement>(null);
   const [dragging, setDragging] = useState(false);
+  // The call "See in the thread" waits to reveal until the phone's sheet has closed.
+  const pendingReveal = useRef<ConversationToolCall | null>(null);
   const { activeTab } = useConversationTabs(state.activeTab);
-  const view: PanelView = shownFile(state) ? "file" : activeTab.id === "info" ? "info" : "list";
+  const reveal = (call: ConversationToolCall) =>
+    // Missed, the panel opens again on the call to say so.
+    dispatch({ type: "revealed", toolCallId: call.toolCallId, found: revealToolCall(call) });
+  const showInThread = (call: ConversationToolCall) => {
+    if (desktop) {
+      // The panel floats beside the thread: the card is revealed in place.
+      reveal(call);
+      return;
+    }
+    // The phone's sheet covers the thread: it closes first, and the card is revealed once it has,
+    // in place of the focus the sheet would give back to its trigger (`onCloseAutoFocus`).
+    pendingReveal.current = call;
+    dispatch({ type: "toggle" });
+  };
+  // The summary and a tool call's detail take a little more than a list.
+  const view: PanelView = shownFile(state)
+    ? "file"
+    : activeTab.id === "summary" || shownToolCallId(state)
+      ? "detail"
+      : "list";
   const size = usePanelWidth(panelRef, view);
 
   // Desktop: the panel floats over the thread's right side, inside the conversation. The thread
@@ -635,8 +449,11 @@ export function ConversationSidebar({
       className="relative flex min-h-0 min-w-0 flex-1"
       style={{ ["--chat-context-inset" as string]: inset }}
     >
-      {/* While the panel is resized, the thread's padding follows the pointer, not its transition. */}
-      <div className={cn("min-w-0 flex-1", dragging && "[&_*]:transition-none")}>{children}</div>
+      {/* While the panel is resized, the thread's padding follows the pointer, not its transition.
+          `isolate` keeps the thread's raised layers (a card's space name is `z-10`) under the panel. */}
+      <div className={cn("isolate min-w-0 flex-1", dragging && "[&_*]:transition-none")}>
+        {children}
+      </div>
       {desktop ? (
         <aside
           ref={panelRef}
@@ -669,6 +486,7 @@ export function ConversationSidebar({
             state={state}
             dispatch={dispatch}
             closable={false}
+            onShowInThread={showInThread}
           />
         </aside>
       ) : (
@@ -683,6 +501,14 @@ export function ConversationSidebar({
             // The panel's header carries the one close control.
             showCloseButton={false}
             className="bg-canvas flex w-[min(92vw,36rem)] flex-col gap-0 p-0 sm:max-w-none"
+            onCloseAutoFocus={(event) => {
+              const call = pendingReveal.current;
+              if (!call) return;
+              pendingReveal.current = null;
+              // The revealed card takes the focus, not the toggle that opened the sheet.
+              event.preventDefault();
+              reveal(call);
+            }}
           >
             <SheetTitle className="sr-only">{t("context.label")}</SheetTitle>
             <ConversationContext
@@ -690,6 +516,7 @@ export function ConversationSidebar({
               state={state}
               dispatch={dispatch}
               closable
+              onShowInThread={showInThread}
             />
           </SheetContent>
         </Sheet>

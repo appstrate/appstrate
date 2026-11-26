@@ -330,11 +330,24 @@ export function ToolPolicyView({
                             {item.description}
                           </span>
                         )}
-                        {item.approved && (
-                          <Badge variant="outline" className="w-fit">
-                            {t("integrationTools.policy.review.changed")}
-                          </Badge>
-                        )}
+                        <div className="flex flex-wrap items-center gap-2 empty:hidden">
+                          {item.approved && (
+                            <Badge variant="outline" className="w-fit">
+                              {t("integrationTools.policy.review.changed")}
+                            </Badge>
+                          )}
+                          {/* The server's own claims about itself: labelled as such, never a verdict. */}
+                          {item.hints.readOnly && (
+                            <Badge variant="secondary" className="w-fit font-normal">
+                              {t("integrationTools.policy.review.hint.readOnly")}
+                            </Badge>
+                          )}
+                          {item.hints.destructive && (
+                            <Badge variant="destructive" className="w-fit font-normal">
+                              {t("integrationTools.policy.review.hint.destructive")}
+                            </Badge>
+                          )}
+                        </div>
                       </div>
                       <div className="flex shrink-0 gap-2">
                         {fingerprint !== null && (

@@ -32,6 +32,7 @@ import {
   type ApiCallIntegrationConfig,
   type ApiCallToolDeps,
 } from "../sidecar/mcp.ts";
+import { noJournal } from "../sidecar/test/helpers/call-journal.ts";
 
 interface CapturedTool {
   name: string;
@@ -115,6 +116,7 @@ function apiIntegration(
       unreachableApiCallDependency as unknown as ApiCallIntegrationConfig["fetchCredentials"],
     refreshCredentials:
       unreachableApiCallDependency as unknown as ApiCallIntegrationConfig["refreshCredentials"],
+    journal: noJournal,
     ...(uploadProtocols ? { uploadProtocols } : {}),
     ...(toolName ? { toolName } : {}),
   };

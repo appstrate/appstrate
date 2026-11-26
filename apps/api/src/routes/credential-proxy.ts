@@ -66,7 +66,11 @@ import {
 // every runner apply one value. The streaming/buffered decision is
 // header-driven (X-Stream-Request), not threshold-driven, so only the hard cap
 // is needed here.
-import { MAX_STREAMED_BODY_SIZE, templateTarget } from "@appstrate/afps-runtime/resolvers";
+import {
+  MAX_STREAMED_BODY_SIZE,
+  templateHost,
+  templateTarget,
+} from "@appstrate/afps-runtime/resolvers";
 
 /** Wall-clock timeout for piping an upstream streaming response to the client. */
 const STREAMING_PIPE_TIMEOUT_MS = 5 * 60 * 1000; // 5 minutes
@@ -95,7 +99,7 @@ import {
 } from "../lib/errors.ts";
 import { proxyProblem, proxyStatusMarker, relayedProxyStatus } from "../lib/proxy-status.ts";
 import { bodyReadError, proxyCall, ProxyCallError } from "../services/credential-proxy/core.ts";
-import { recordConnectionCall } from "../services/credential-proxy/call-journal.ts";
+import { proxyCaller, recordConnectionCalls } from "../services/credential-proxy/call-journal.ts";
 import { trackAudit } from "../services/audit.ts";
 import { PROXY_CONTROL_HEADERS } from "../services/credential-proxy/control-headers.ts";
 import { isValidSessionId, bindOrCheckSession } from "../services/credential-proxy/session.ts";
@@ -323,6 +327,7 @@ export function createCredentialProxyRouter() {
       );
 
       const jar = await getCookieJarStore();
+      const caller = proxyCaller(c, runId);
       const started = Date.now();
       // One row per call that may have sent the connection's credential, written once its outcome
       // is known: the upstream's status for a call relayed (a buffered body read to its end, a
@@ -330,21 +335,21 @@ export function createCredentialProxyRouter() {
       // Off the response path; `drainAudits` flushes it at shutdown.
       const journal = (connectionId: string, outcome: string) =>
         void trackAudit(
-          recordConnectionCall({
-            orgId,
-            spaceId,
-            connectionId,
-            integrationId,
-            actor,
-            apiKeyId,
-            authMethod,
-            runId,
-            method,
-            target,
-            outcome,
-            durationMs: Date.now() - started,
-            requestId: c.get("requestId"),
-          }),
+          recordConnectionCalls([
+            {
+              ...caller,
+              orgId,
+              spaceId,
+              connectionId,
+              integrationId,
+              actor,
+              runId,
+              method,
+              host: templateHost(target),
+              outcome,
+              durationMs: Date.now() - started,
+            },
+          ]),
         );
 
       try {

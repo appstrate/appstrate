@@ -11,9 +11,10 @@ import { rememberedSpaceKey } from "../stores/space-store";
 import { routeOf } from "../lib/route-match";
 import {
   holdsOverview,
-  listAdmits,
+  listAdmitsOn,
   overviewOffered,
   spacesWhere,
+  type ListSurface,
   type SpaceList,
 } from "../lib/space-lists";
 import { useSpaceLabelOf, useSpaces } from "./use-spaces";
@@ -65,12 +66,12 @@ export function useWorkingSpaceWording(ns: string) {
 }
 
 /**
- * The spaces that admit `list`: where a list spanning spaces finds its rows, judged by each
- * row's space rather than the working one.
+ * The spaces that admit `list` on `surface`: where a list spanning spaces finds its rows, judged
+ * by each row's space rather than the working one.
  */
-export function useAdmittingSpaces(list: SpaceList) {
+export function useAdmittingSpaces(list: SpaceList, surface: ListSurface = "studio") {
   const { data: spaces } = useSpaces();
-  return spacesWhere(spaces, listAdmits(list));
+  return spacesWhere(spaces, listAdmitsOn(list, surface));
 }
 
 function withdraw(key: string): void {
