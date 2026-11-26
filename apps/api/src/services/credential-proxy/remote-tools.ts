@@ -297,7 +297,6 @@ function boundedCatalog(tools: SanitisedTool[], truncated: boolean): ReadCatalog
 interface ServerTool {
   name: string;
   description?: string;
-  /** The server's display name for it (`title`, else `annotations.title`). */
   title?: string;
   input_schema: Tool["inputSchema"];
   /** Present when the server declares one. */
@@ -408,10 +407,7 @@ export async function listRemoteTools(
   };
 }
 
-/**
- * The server's display name for a tool (MCP: `title`, else `annotations.title`), from a
- * descriptor `sanitiseToolDescriptor` already sanitised: a blank one names nothing.
- */
+/** The server's display name for a sanitised tool: `title`, else `annotations.title`, if not blank. */
 function serverTitle(tool: Tool): Pick<ServerTool, "title"> {
   const title = [tool.title, tool.annotations?.title]
     .map((candidate) => candidate?.trim())

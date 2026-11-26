@@ -585,7 +585,7 @@ role. Runs keep their connections there:
   flagged for its owner to reconnect), any other server fault `bad_gateway`. Of
   the server's descriptor, only its display name is relayed: `title`, else
   `annotations.title`, with hidden Unicode and control characters stripped and
-  cut at 512 bytes, as the listing's `title` and a call's presentation title
+  cut at 512 bytes, as the listing's `title` and a call's presentation `title`
   (see "Showing a call" below). Its behaviour hints (`readOnlyHint`,
   `destructiveHint`, …) are not: `call_integration_tool` stays annotated
   destructive and open-world; `search` and `describe` are annotated open-world
@@ -704,14 +704,12 @@ result's `content`; the schema is `toolPresentationSchema` in
   withhold `readOnlyHint` (they may read a third-party catalog) and carry
   `_meta["dev.appstrate/lookup"]: true` instead: their calls only look things
   up. `isLookupTool` reads either.
-- **Presentation.** Every result carries
-  `_meta["dev.appstrate/presentation"]`, a failed call's included (a tool that
-  fails unexpectedly answers `isError` with the error's message, not a JSON-RPC
-  error):
-  - `title`: a fixed label, never the call's arguments: the tool's title, an
-    operation's OpenAPI `summary` (`invoke_operation`), a remote server's title
-    for its tool, else its name, or `API call` for an `{ns}__api_call`
-    (`call_integration_tool`);
+- **Presentation.** A result carries `_meta["dev.appstrate/presentation"]`
+  when the server knows more of the call than its tool's descriptor, a failed
+  call's included (a tool that fails unexpectedly answers `isError` with the
+  error's message, not a JSON-RPC error):
+  - `title` (`call_integration_tool` of a remote server's tool): the server's
+    title for it, else its name there, never the call's arguments;
   - `tag`: an operation's first OpenAPI tag; `method`: its HTTP method, or the
     method of an `{ns}__api_call` holding one request (none for a batch of
     several);

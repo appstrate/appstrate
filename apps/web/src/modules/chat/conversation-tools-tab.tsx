@@ -6,9 +6,9 @@ import { useTranslation } from "react-i18next";
 import type { ConversationToolCall } from "@appstrate/module-chat/conversation-tools";
 import type { ShownCall } from "@appstrate/module-chat/tool-presentation";
 import { ToolCallDetail } from "@appstrate/module-chat/tool-call-detail";
+import { SubjectGlyph } from "@appstrate/module-chat/subject-glyph";
 import { cn } from "@appstrate/ui/cn";
 import { Button } from "@appstrate/ui/components/button";
-import { IntegrationIcon } from "@appstrate/ui/components/integration-icon";
 import { Skeleton } from "@appstrate/ui/components/skeleton";
 import { Switch } from "@appstrate/ui/components/switch";
 import { EmptyState, ErrorState } from "../../components/page-states";
@@ -20,7 +20,7 @@ import type { SidebarOrigin } from "./conversation-sidebar-state";
 import {
   TOOL_STATUS_LABEL,
   TOOL_STATUS_TONE,
-  spansSpaces,
+  actsInSeveralSpaces,
   useConversationTools,
   useToolLabel,
 } from "./use-conversation-tools";
@@ -32,24 +32,20 @@ const PANEL_BUTTON = "desktop-pointer:h-9 h-10";
 /** The line holding the lookups' switch: the whole line is its label, a 40 px target. */
 const SWITCH_LINE_CLASS = "flex min-h-10 items-center justify-between gap-3 border-b px-4";
 
-/** A turn's heading band over its calls. */
 const TURN_HEAD_CLASS =
   "text-muted-foreground bg-muted/40 border-b px-4 py-1.5 text-xs font-medium";
 
 /** One call's row: its glyph tile beside two lines. */
 const CALL_ROW_CLASS = "flex min-h-14 w-full items-center gap-3 px-4 py-2.5";
 
-/** The call's glyph tile. */
 const GLYPH_CLASS = "flex size-8 shrink-0 items-center justify-center rounded-lg";
 
 /**
- * The call's icon: the logo of the integration it acted on, as its card draws it, else its icon
- * (`showCall`) in its status' tone.
+ * The call's icon: the glyph of what it acted on, as its card draws it, else its icon (`showCall`)
+ * in its status' tone.
  */
 export function ToolCallIcon({ call, shown }: { call: ConversationToolCall; shown: ShownCall }) {
-  if (shown.subject?.kind === "integration") {
-    return <IntegrationIcon src={shown.subject.icon} className="size-4 rounded-sm" />;
-  }
+  if (shown.subject) return <SubjectGlyph subject={shown.subject} />;
   const { Icon } = shown;
   return <Icon aria-hidden="true" className={cn("size-4", TOOL_STATUS_TONE[call.status])} />;
 }
@@ -175,7 +171,7 @@ export function ConversationToolsList({
 
   const lookups = tools.calls.filter((call) => call.lookup).length;
   const shown = showLookups ? tools.calls : tools.calls.filter((call) => !call.lookup);
-  const spanning = spansSpaces(shown);
+  const spanning = actsInSeveralSpaces(shown);
   const turns = [...new Set(shown.map((call) => call.turn))];
 
   return (

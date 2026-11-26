@@ -8,7 +8,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### MCP clients
 
-- Platform tools list `icons` (inline SVG, light and dark theme), and every tool result carries `_meta["dev.appstrate/presentation"]`: a title, the operation's tag and method, the subject acted on, and for `search` a count and its items (#2398, #2405). `search` and `describe` that may read a remote catalog carry `_meta["dev.appstrate/lookup"]: true`. `GET /api/credential-proxy/tools` lists the tools' `integrations` and a remote tool's sanitised `title`. See [Showing a call](docs/guides/connecting-mcp-clients.md#showing-a-call).
+- Platform tools list `icons` (inline SVG, light and dark theme), and a tool result carries `_meta["dev.appstrate/presentation"]` when the server knows more of the call than its descriptor: the operation's tag and method, the subject acted on, a remote integration tool's title, and for `search` a count and its items (#2398, #2405). The `search` and `describe` descriptors that may read a remote catalog carry `_meta["dev.appstrate/lookup"]: true`. `GET /api/credential-proxy/tools` lists the tools' `integrations` and a remote tool's sanitised `title`. See [Showing a call](docs/guides/connecting-mcp-clients.md#showing-a-call).
 
 ## [1.0.0-beta.71] - 2026-11-24
 

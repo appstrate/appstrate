@@ -28,7 +28,6 @@ import { isValidSessionId } from "../../../../src/services/credential-proxy/sess
 import {
   _setBatchDeadlineForTesting,
   executeApiCall,
-  MAX_RESULT_BYTES,
 } from "../../../../src/modules/mcp/api-call-batch.ts";
 import { registerTestPlatformApp } from "../../../helpers/platform-app.ts";
 import { noExtra, parseResult, toolsFor } from "./helpers.ts";
@@ -1221,51 +1220,25 @@ describe("call_integration_tool — an api_call's presentation", () => {
 
   it("names the method of its one request", async () => {
     expect(await presented({ requests: [get({ method: "DELETE" })] })).toEqual({
-      title: "API call",
       method: "DELETE",
       subject,
     });
   });
 
   it("names no method for a batch of several", async () => {
-    expect(await presented({ requests: [get(), get({ method: "POST" })] })).toEqual({
-      title: "API call",
-      subject,
-    });
+    expect(await presented({ requests: [get(), get({ method: "POST" })] })).toEqual({ subject });
   });
 
   it("reads refused arguments the same way, guessing nothing", async () => {
     // One request refused for a field it does not declare: its method is still the call's.
     expect(await presented({ requests: [get({ method: "PUT", bogus: 1 })] })).toEqual({
-      title: "API call",
       method: "PUT",
       subject,
     });
     // A refused batch, and a method outside `requests`, name none.
     for (const args of [{ requests: [get(), { method: 7 }] }, { method: "GET", target: TARGET }]) {
-      expect(await presented(args)).toEqual({ title: "API call", subject });
+      expect(await presented(args)).toEqual({ subject });
     }
-  });
-
-  it("keeps the presentation of an integration whose display name is blank, naming it by id", async () => {
-    const blank: Fixture = {
-      listing: async () => {
-        const body = (await listingOf([apiCallTool()])().json()) as Record<string, unknown>;
-        return Response.json({
-          ...body,
-          integrations: [{ integration_package_id: INTEGRATION, display_name: "", icon: "" }],
-        });
-      },
-    };
-    const made = makeTools(CALL_OWN, () => relayedJson({ ok: true }), true, blank);
-    const result = await made.byName
-      .get("call_integration_tool")!
-      .handler({ tool: TOOL, arguments: { requests: [get()] } }, noExtra);
-    expect(readToolPresentation(result._meta)).toEqual({
-      title: "API call",
-      method: "GET",
-      subject: { kind: "integration", id: INTEGRATION },
-    });
   });
 });
 
@@ -1779,7 +1752,7 @@ describe("call_integration_tool — a result past the budget", () => {
       "dev.appstrate/relayed": true,
       ...SEARCH_STAMP,
     });
-    expect(jsonBytes(result)).toBeLessThanOrEqual(256 * 1024);
+    expect(jsonBytes(result)).toBeLessThanOrEqual(BUDGET);
   });
 
   /** What `call_integration_tool` relays for a tool answering `upstream`. */
@@ -1788,48 +1761,14 @@ describe("call_integration_tool — a result past the budget", () => {
       .byName.get("call_integration_tool")!
       .handler({ tool: "acme_docs__search", arguments: {} }, noExtra);
   const jsonBytes = (value: unknown) => new TextEncoder().encode(JSON.stringify(value)).byteLength;
-
-  it("bounds a result that fits alone but not with its presentation stamp", async () => {
-    const frame = jsonBytes({ result: { content: [{ type: "text", text: "" }] } });
-    const upstream = {
-      content: [{ type: "text", text: "a".repeat(MAX_RESULT_BYTES - frame - 8) }],
-    };
-    // The server's answer is within the budget; the stamp the platform adds is what crosses it.
-    expect(jsonBytes({ result: upstream })).toBeLessThanOrEqual(MAX_RESULT_BYTES);
-    const result = await relayedResult(upstream);
-    expect(result._meta).toEqual({
-      "dev.appstrate/truncated": true,
-      "dev.appstrate/relayed": true,
-      ...SEARCH_STAMP,
-    });
-    expect(jsonBytes(result)).toBeLessThanOrEqual(MAX_RESULT_BYTES);
-    const [cut] = (result.content as Array<{ text: string }>).map((block) => block.text);
-    expect(cut).toContain("\n[cut: ");
-  });
-
-  it("relays a result whose marked and stamped JSON is the budget exactly, and bounds one a byte over", async () => {
-    const relayedMeta = { "dev.appstrate/relayed": true, ...SEARCH_STAMP };
-    // What leaves for a text of `n` bytes: the result, its relayed mark and its presentation.
-    const leaving = (n: number) => ({
-      content: [{ type: "text" as const, text: "a".repeat(n) }],
-      _meta: relayedMeta,
-    });
-    const exact = MAX_RESULT_BYTES - jsonBytes(leaving(0));
-    expect(jsonBytes(leaving(exact))).toBe(MAX_RESULT_BYTES);
-
-    const fits = await relayedResult({ content: leaving(exact).content });
-    expect(fits).toEqual(leaving(exact));
-
-    const over = await relayedResult({ content: leaving(exact + 1).content });
-    expect(over._meta).toEqual({ "dev.appstrate/truncated": true, ...relayedMeta });
-    expect(jsonBytes(over)).toBeLessThanOrEqual(MAX_RESULT_BYTES);
-  });
+  // The budget bounds the server's result: the presentation stamp rides beside it.
+  const BUDGET = 256 * 1024 + jsonBytes(SEARCH_STAMP);
 
   it("cuts a text block to its text alone, dropping the fields that made it too large", async () => {
     const result = await relayedResult({
       content: [{ type: "text", text: "x", _meta: { pad: "p".repeat(1536 * 1024) } }],
     });
-    expect(jsonBytes(result)).toBeLessThanOrEqual(256 * 1024);
+    expect(jsonBytes(result)).toBeLessThanOrEqual(BUDGET);
     const [cut] = result.content as Array<Record<string, unknown>>;
     expect(Object.keys(cut!).sort()).toEqual(["text", "type"]);
     expect(cut!.text).toStartWith("x\n[cut: 1 of 1 bytes kept");
@@ -1839,7 +1778,7 @@ describe("call_integration_tool — a result past the budget", () => {
     const result = await relayedResult({
       content: [{ type: "text", text: "\u0001".repeat(600 * 1024) }],
     });
-    expect(jsonBytes(result)).toBeLessThanOrEqual(256 * 1024);
+    expect(jsonBytes(result)).toBeLessThanOrEqual(BUDGET);
     const [cut] = (result.content as Array<{ text: string }>).map((block) => block.text);
     // Each control character weighs six bytes as JSON.
     expect(cut!.split("\n[cut: ")[0]!.length).toBeGreaterThan(40 * 1024);
@@ -1850,7 +1789,7 @@ describe("call_integration_tool — a result past the budget", () => {
       content: Array.from({ length: 2000 }, (_, i) => ({ type: "text", text: `${i}`.repeat(80) })),
       structuredContent: { rows: "r".repeat(300 * 1024) },
     });
-    expect(jsonBytes(result)).toBeLessThanOrEqual(256 * 1024);
+    expect(jsonBytes(result)).toBeLessThanOrEqual(BUDGET);
     expect(result.structuredContent).toBeUndefined();
     const texts = (result.content as Array<{ text: string }>).map((block) => block.text);
     expect(texts.at(-1)).toContain("and its structuredContent dropped");
@@ -1864,7 +1803,7 @@ describe("call_integration_tool — a result past the budget", () => {
       ],
       structuredContent: { count: 1 },
     });
-    expect(jsonBytes(result)).toBeLessThanOrEqual(256 * 1024);
+    expect(jsonBytes(result)).toBeLessThanOrEqual(BUDGET);
     expect(result.structuredContent).toEqual({ count: 1 });
   });
 

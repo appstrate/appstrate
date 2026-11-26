@@ -73,7 +73,7 @@ interface RemoteTool extends ToolBase {
   kind: "remote";
   /** The name the server lists it by: `tools/call` takes it. */
   remote_name: string;
-  /** The server's display name for it (untrusted, for display only). */
+  /** The server's display name for it: untrusted, for display only. */
   title?: string;
   input_schema: Record<string, unknown>;
   output_schema?: Record<string, unknown>;
@@ -87,11 +87,9 @@ interface RemoteTool extends ToolBase {
 
 export type IntegrationTool = ApiCallTool | RemoteTool;
 
-/** How an integration whose tools a listing shows is named and drawn. */
 interface ListedIntegrationIdentity {
   integration_package_id: string;
   display_name: string;
-  /** Its manifest icon (an Iconify id or an image URL), when it declares one. */
   icon?: string;
 }
 
@@ -572,7 +570,7 @@ export async function listIntegrationTools(
   const identitiesOf = (tools: IntegrationTool[]): ListedIntegrationIdentity[] =>
     [...new Set(tools.map((tool) => tool.integration_package_id))].map((id) => {
       const manifest = manifests.get(id)!;
-      // AFPS allows an empty `display_name`: it names nothing, the package name does.
+      // AFPS allows an empty `display_name`.
       return {
         integration_package_id: id,
         display_name: manifest.display_name || manifest.name,

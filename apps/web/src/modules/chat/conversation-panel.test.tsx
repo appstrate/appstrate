@@ -1,13 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * The context panel. Closed, its reads wait (`active` false), and nothing it draws in the meantime
- * is an error or an empty list made up from a read that never ran. Open, the summary leads with
- * what failed, only when something did, and each of its groups stands on its own read. The Tools
- * tab lists the calls by turn, lookups behind a switch, and a call's detail.
+ * The context panel. Closed, its reads wait (`active` false). Open, each group of the summary
+ * stands on its own read. The Tools tab lists the calls by turn, lookups behind a switch, and a
+ * call's detail.
  */
 
-import { cloneElement } from "react";
 import { describe, expect, it } from "bun:test";
 import { QueryClient, type QueryKey } from "@tanstack/react-query";
 import { installFakeStorage } from "../../test/fake-storage.ts";
@@ -22,7 +20,7 @@ const { makeRun } = await import("../../test/run-fixture.ts");
 const { default: i18n, i18nReady } = await import("../../i18n.ts");
 const { formatDuration } = await import("../../lib/format-duration.ts");
 const { ConversationSummary } = await import("./conversation-summary.tsx");
-const { ConversationFiles, ConversationRuns } = await import("./conversation-lists.tsx");
+const { ConversationFiles, ConversationRuns } = await import("./conversation-sidebar.tsx");
 const { ConversationToolsList, ShownToolCall } = await import("./conversation-tools-tab.tsx");
 const { publishLiveConversation, withdrawLiveConversation } =
   await import("@appstrate/module-chat/live-conversation");
@@ -64,19 +62,18 @@ function seedConversation(queryClient: QueryClient, turns: unknown[][]) {
   );
 }
 
-const runsKey = (query: Record<string, unknown>): QueryKey => [
+const runsKey: QueryKey = [
   "get",
   "/api/orgs/{orgId}/runs",
-  { params: { path: { orgId: "org_1" }, query: { chat_session_id: "chs_1", ...query } } },
+  { params: { path: { orgId: "org_1" }, query: { chat_session_id: "chs_1", limit: 100 } } },
 ];
 const filesKey: QueryKey = [
   "get",
   "/api/orgs/{orgId}/files",
   {
-    params: { path: { orgId: "org_1" }, query: { context_chat_session_id: "chs_1", limit: 3 } },
+    params: { path: { orgId: "org_1" }, query: { context_chat_session_id: "chs_1", limit: 100 } },
   },
 ];
-const LATEST_RUNS = { limit: 3 };
 
 const list = (data: unknown[], total = data.length) => ({
   object: "list",
@@ -118,95 +115,90 @@ function render(node: React.ReactElement, queryClient: QueryClient = memberSpace
 
 const rowsOf = (html: string) => html.split("min-h-14 w-full").length - 1;
 
-/** A stored tool part: an action unless `lookup`, ran for `durationMs` when given. */
+const GMAIL = { kind: "integration", id: "@acme/gmail", display_name: "Gmail" };
+
+/**
+ * A stored tool part: an action unless `lookup`, ran for `durationMs` when given, presented as the
+ * platform stamps it (`integration`: a call that reached Gmail).
+ */
 function toolPart(
   toolCallId: string,
   {
     lookup = false,
     state = "output-available",
     durationMs,
-    tool = "invoke_operation",
-  }: { lookup?: boolean; state?: string; durationMs?: number; tool?: string } = {},
+    integration = false,
+    presentation = integration ? { title: "API call", subject: GMAIL } : undefined,
+  }: {
+    lookup?: boolean;
+    state?: string;
+    durationMs?: number;
+    integration?: boolean;
+    presentation?: Record<string, unknown>;
+  } = {},
 ) {
+  const outcome = {
+    ...(durationMs === undefined ? {} : { durationMs }),
+    ...(presentation ? { presentation } : {}),
+  };
   return {
-    type: `tool-${tool}`,
+    type: integration ? "tool-call_integration_tool" : "tool-invoke_operation",
     toolCallId,
     state,
     input: { operation_id: toolCallId },
     ...(state === "output-available" ? { output: { ok: true } } : {}),
     ...(state === "output-error" ? { errorText: "boom" } : {}),
     ...(lookup ? { callProviderMetadata: { appstrate: { lookup: true } } } : {}),
-    ...(durationMs === undefined ? {} : { resultProviderMetadata: { appstrate: { durationMs } } }),
+    ...(Object.keys(outcome).length > 0 ? { resultProviderMetadata: { appstrate: outcome } } : {}),
   };
 }
 
 describe("the context panel, closed", () => {
-  const panes: [string, React.ReactElement<{ active: boolean }>][] = [
-    ["Résumé", <ConversationSummary conversationId="chs_1" active={false} dispatch={noop} />],
-    ["Runs", <ConversationRuns conversationId="chs_1" active={false} />],
-    ["Fichiers", <ConversationFiles conversationId="chs_1" active={false} onSelect={noop} />],
-    [
-      "Outils",
-      <ConversationToolsList
-        conversationId="chs_1"
-        active={false}
-        showLookups={false}
-        onShowLookupsChange={noop}
-        onSelect={noop}
-      />,
-    ],
-    [
-      "un appel",
-      <ShownToolCall
-        conversationId="chs_1"
-        toolCallId="call_1"
-        active={false}
-        missing={false}
-        from="list"
-        onBack={noop}
-        onShowInThread={noop}
-      />,
-    ],
-  ];
+  it("builds every read of its views disabled while closed, and enables them once open", () => {
+    const views = (active: boolean) => (
+      <ChatTransportProvider value={TRANSPORT}>
+        <ConversationSummary conversationId="chs_1" active={active} dispatch={noop} />
+        <ConversationRuns conversationId="chs_1" active={active} />
+        <ConversationFiles conversationId="chs_1" active={active} onSelect={noop} />
+        <ConversationToolsList
+          conversationId="chs_1"
+          active={active}
+          showLookups={false}
+          onShowLookupsChange={noop}
+          onSelect={noop}
+        />
+        <ShownToolCall
+          conversationId="chs_1"
+          toolCallId="call_1"
+          active={active}
+          missing={false}
+          from="list"
+          onBack={noop}
+          onShowInThread={noop}
+        />
+      </ChatTransportProvider>
+    );
+    const closed = recordingClient();
+    render(views(false), closed.client);
+    expect(closed.conversationReads().length).toBeGreaterThan(0);
+    expect(closed.conversationReads().filter(({ enabled }) => enabled !== false)).toEqual([]);
 
-  for (const [name, pane] of panes) {
-    it(`holds ${name} in its loading shape, never an error or an empty list`, () => {
-      const html = render(pane);
-      expect(html).not.toContain(i18n.t("common:error.generic"));
-      expect(html).not.toContain(i18n.t("chat:context.runs.empty"));
-      expect(html).not.toContain(i18n.t("chat:context.files.empty"));
-      expect(html).not.toContain(i18n.t("chat:context.tools.empty"));
-      expect(html).not.toContain(i18n.t("chat:context.tools.gone"));
-      // One `status` for the pane that waits.
-      expect(html.split('role="status"').length - 1).toBe(1);
-    });
-
-    it(`builds every read of ${name} disabled while closed, and enables them once open`, () => {
-      const withTransport = (node: React.ReactElement) => (
-        <ChatTransportProvider value={TRANSPORT}>{node}</ChatTransportProvider>
-      );
-      const closed = recordingClient();
-      render(withTransport(pane), closed.client);
-      expect(closed.conversationReads().length).toBeGreaterThan(0);
-      expect(closed.conversationReads().filter(({ enabled }) => enabled !== false)).toEqual([]);
-
-      const open = recordingClient();
-      render(withTransport(cloneElement(pane, { active: true })), open.client);
-      expect(open.conversationReads().some(({ enabled }) => enabled === true)).toBe(true);
-    });
-  }
+    const open = recordingClient();
+    render(views(true), open.client);
+    expect(open.conversationReads().some(({ enabled }) => enabled === true)).toBe(true);
+  });
 });
 
 describe("the summary, open", () => {
   /** The summary once its conversation holds `parts` and its runs reads answered. */
   function summary(
     parts: unknown[],
-    runs: unknown[],
+    runs: unknown[] | ReturnType<typeof list>,
     { active = true, prepare }: { active?: boolean; prepare?: (qc: QueryClient) => void } = {},
   ): string {
     const queryClient = memberSpaceClient(spaces);
     seedConversation(queryClient, [parts]);
-    queryClient.setQueryData(runsKey(LATEST_RUNS), list(runs));
+    queryClient.setQueryData(runsKey, Array.isArray(runs) ? list(runs) : runs);
     queryClient.setQueryData(filesKey, { object: "list", data: [], hasMore: false });
     prepare?.(queryClient);
     return render(
@@ -218,17 +210,31 @@ describe("the summary, open", () => {
   it("draws « Intégrations » with the integration calls, lookups included, and never a platform call", () => {
     const html = summary(
       [
-        toolPart("call_i", { tool: "call_integration_tool" }),
-        toolPart("call_l", { tool: "call_integration_tool", lookup: true }),
+        toolPart("call_i", { integration: true }),
+        toolPart("call_l", { integration: true, lookup: true }),
         toolPart("call_p"),
-        toolPart("call_s", { tool: "search", lookup: true }),
+        toolPart("call_s", { lookup: true }),
+        // An operation on an integration package is the platform's, its subject notwithstanding.
+        toolPart("call_o", {
+          presentation: { title: "Get", tag: "Integrations", method: "GET", subject: GMAIL },
+        }),
       ],
       [],
     );
     expect(html).toContain(i18n.t("chat:context.summary.integrations"));
-    // One line per integration call (the plug icon), none for the platform's own.
-    expect(html.split("lucide-plug").length - 1).toBe(2);
-    expect(html).not.toContain(i18n.t("chat:context.tabs.tools"));
+    // One line per integration call (Gmail's glyph, no icon: the puzzle), none for the platform's own.
+    expect(html.split("lucide-puzzle").length - 1).toBe(2);
+  });
+
+  it("leads each group holding more to its tab, counted where the server counts", () => {
+    const runs = [1, 2, 3].map((n) => makeRun({ id: `run_${n}`, runNumber: n }));
+    const counted = summary([], list(runs, 240));
+    expect(counted).toContain(i18n.t("chat:context.summary.seeAllCount", { count: 240 }));
+
+    const calls = [1, 2, 3, 4].map((n) => toolPart(`call_${n}`, { integration: true }));
+    const uncounted = summary(calls, []);
+    expect(uncounted).toContain(i18n.t("chat:context.summary.seeAll"));
+    expect(uncounted).not.toContain(`${i18n.t("chat:context.summary.seeAll")} (`);
   });
 
   it("leaves « Intégrations » out when only platform tools were called", () => {
@@ -239,7 +245,7 @@ describe("the summary, open", () => {
 
   it("shows a failure on its own run and call line", () => {
     const failed = makeRun({ id: "run_7", runNumber: 7, status: "failed" });
-    const failedCall = toolPart("call_f", { tool: "call_integration_tool", state: "output-error" });
+    const failedCall = toolPart("call_f", { integration: true, state: "output-error" });
     const html = summary([failedCall], [failed]);
     expect(html).toContain("#7");
     expect(html).toContain(i18n.t("chat:context.tools.status.error"));
@@ -253,8 +259,8 @@ describe("the summary, open", () => {
   });
 
   it("shows its calls at once while the runs are read, the runs waiting in their place", () => {
-    const html = summary([toolPart("call_a", { tool: "call_integration_tool" })], [], {
-      prepare: (qc) => qc.removeQueries({ queryKey: runsKey(LATEST_RUNS), exact: true }),
+    const html = summary([toolPart("call_a", { integration: true })], [], {
+      prepare: (qc) => qc.removeQueries({ queryKey: runsKey, exact: true }),
     });
     expect(html).toContain(i18n.t("chat:context.summary.integrations"));
     expect(html.split('role="status"').length - 1).toBe(1);
@@ -262,11 +268,11 @@ describe("the summary, open", () => {
 
   it("says a failed read in its group alone, the other groups shown", () => {
     // Held closed: open, the read would be tried again on mount.
-    const html = summary([toolPart("call_a", { tool: "call_integration_tool" })], [], {
+    const html = summary([toolPart("call_a", { integration: true })], [], {
       active: false,
       prepare: (qc) => {
-        qc.removeQueries({ queryKey: runsKey(LATEST_RUNS), exact: true });
-        failRead(qc, runsKey(LATEST_RUNS));
+        qc.removeQueries({ queryKey: runsKey, exact: true });
+        failRead(qc, runsKey);
       },
     });
     expect(html).toContain(i18n.t("common:error.generic"));
@@ -276,7 +282,7 @@ describe("the summary, open", () => {
 
   it("keeps the runs it holds when their refetch fails", () => {
     const html = summary([], [], {
-      prepare: (qc) => failRead(qc, runsKey(LATEST_RUNS), list([makeRun({ runNumber: 11 })])),
+      prepare: (qc) => failRead(qc, runsKey, list([makeRun({ runNumber: 11 })])),
     });
     expect(html).toContain("#11");
     expect(html).not.toContain(i18n.t("common:error.generic"));

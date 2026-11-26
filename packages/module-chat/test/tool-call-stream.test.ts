@@ -7,22 +7,24 @@
  * `readUIMessageStream` (the client's `useChat` and the server's persistence run the same
  * processing). The panel reads that message (`conversationTools`). The thread reads the
  * assistant-ui part `@assistant-ui/ai-sdk` converts it to: that converter is not exported, so
- * {@link threadPart} restates the two fields the grouping and the cards read, as
- * `@assistant-ui/ai-sdk@0.0.19` `src/converters/convertMessage.ts` (l. 559-571 and 660-664) sets
- * them, and the card reaches the stored part through the message binding assistant-ui keeps
+ * {@link threadPart} restates the fields the grouping and the cards read (`convertMessage.ts`),
+ * and the card reaches the stored part through the message binding assistant-ui keeps
  * (`bindExternalStoreMessage`, `getExternalStoreMessages`).
  */
 
 import { describe, expect, it } from "bun:test";
-import { getToolName, isToolUIPart, readUIMessageStream, type UIMessage } from "ai";
-import type { UIMessageChunk } from "ai";
+import { getToolName, isToolUIPart, type UIMessage } from "ai";
 import { bindExternalStoreMessage, type ThreadMessage } from "@assistant-ui/react";
+import type { ExtensionAPI } from "@appstrate/runner-pi";
+import { TOOL_PRESENTATION_META_KEY } from "@appstrate/core/mcp-presentation";
+import { buildPlatformMcpTools } from "../src/pi-chat/mcp-tools.ts";
 import { PiChatUiStreamMapper } from "../src/pi-chat/ui-stream-mapper.ts";
 import type { AgentSessionEvent } from "../src/pi-chat/pi-events.ts";
-import { conversationTools } from "../src/ui/conversation-tools.ts";
-import { activityGroupOf } from "../src/ui/activity-group.ts";
+import { activityGroupOf, conversationTools } from "../src/ui/conversation-tools.ts";
 import { callPresentation, showCall } from "../src/ui/tool-presentation.ts";
-import { sourceToolPart } from "../src/ui/use-call-presentation.ts";
+import { resultMetadataOf } from "../src/ui/use-call-presentation.ts";
+import { streamedMessage, stubPlatformMcp, toolCallEvents } from "./pi-turn.ts";
+import { inertTurnSpaces } from "./turn-spaces.ts";
 
 const GMAIL = { kind: "integration", id: "@appstrate/gmail", display_name: "Gmail" } as const;
 const GITHUB = { kind: "integration", id: "@acme/github", display_name: "GitHub" } as const;
@@ -41,25 +43,7 @@ function call(
   durationMs?: number,
 ): AgentSessionEvent[] {
   return [
-    {
-      type: "message_update",
-      message: {},
-      assistantMessageEvent: {
-        type: "toolcall_start",
-        contentIndex: index,
-        partial: { content: Object.assign([], { [index]: { type: "toolCall", id, name } }) },
-      },
-    } as AgentSessionEvent,
-    {
-      type: "message_update",
-      message: {},
-      assistantMessageEvent: {
-        type: "toolcall_end",
-        contentIndex: index,
-        toolCall: { id, name, arguments: args },
-        partial: {},
-      },
-    } as AgentSessionEvent,
+    ...toolCallEvents(index, id, name, args),
     {
       type: "tool_execution_end",
       toolCallId: id,
@@ -78,7 +62,6 @@ const text = (value: unknown) => [{ type: "text", text: JSON.stringify(value) }]
  * the Pi results the chat's tool returns (`pi-chat/mcp-tools.ts`).
  */
 const EVENTS: AgentSessionEvent[] = [
-  { type: "message_start", message: { role: "assistant" } },
   ...call(
     0,
     "s1",
@@ -87,7 +70,7 @@ const EVENTS: AgentSessionEvent[] = [
     {
       content: text({ results: [] }),
       details: {},
-      presentation: { title: "Search", count: 1, items: [GITHUB] },
+      presentation: { count: 1, items: [GITHUB] },
     },
   ),
   ...call(
@@ -95,11 +78,7 @@ const EVENTS: AgentSessionEvent[] = [
     "s2",
     "search",
     { query: "x" },
-    {
-      content: text({ status: 500, error: "down" }),
-      details: {},
-      presentation: { title: "Search" },
-    },
+    { content: text({ status: 500, error: "down" }), details: {} },
   ),
   ...call(
     2,
@@ -123,30 +102,15 @@ const EVENTS: AgentSessionEvent[] = [
     {
       content: text({ results: [{ index: 0, status: 200 }] }),
       details: {},
-      presentation: { title: "API call", method: "GET", subject: GMAIL },
+      presentation: { method: "GET", subject: GMAIL },
     },
   ),
-  { type: "message_end", message: { role: "assistant", stopReason: "stop" } },
 ];
 
-/** The message the AI SDK folds the mapper's chunks into. */
-async function streamedMessage(): Promise<UIMessage> {
+function streamedTurn(): Promise<UIMessage> {
   const mapper = new PiChatUiStreamMapper();
   mapper.describeLookupTools(new Set(["search"]));
-  const chunks: UIMessageChunk[] = [
-    mapper.startChunk("a1"),
-    ...EVENTS.flatMap((event) => mapper.map(event)),
-    { type: "finish" },
-  ];
-  const stream = new ReadableStream<UIMessageChunk>({
-    start(controller) {
-      for (const chunk of chunks) controller.enqueue(chunk);
-      controller.close();
-    },
-  });
-  let last: UIMessage | undefined;
-  for await (const message of readUIMessageStream({ stream })) last = message;
-  return last!;
+  return streamedMessage(EVENTS, mapper);
 }
 
 /** The assistant-ui `tool-call` part of a stored part, as `convertMessage.ts` builds it. */
@@ -169,21 +133,21 @@ function threadPart(part: Extract<UIMessage["parts"][number], { toolCallId: stri
 
 describe("a turn's tool calls, from the engine's chunks", () => {
   it("is folded by the thread off the stamp, counted by the panel off the stamp and presentation", async () => {
-    const message = await streamedMessage();
+    const message = await streamedTurn();
     const parts = message.parts.filter(isToolUIPart);
     expect(parts.map((part) => part.toolCallId)).toEqual(["s1", "s2", "g1", "m1"]);
 
     const folded = parts.map((part) => activityGroupOf(threadPart(part)) !== null);
     const lookups = conversationTools([message]).calls.map((c) => c.lookup);
-    // The stamped search folds; the failed search and the failed write do not, nor the Gmail GET,
-    // whose method lands with its result: its card stays where it was drawn.
-    expect(folded).toEqual([true, false, false, false]);
+    // Both stamped searches fold, the failed one included; the failed write does not, nor the
+    // Gmail GET, whose method lands with its result: its card stays where it was drawn.
+    expect(folded).toEqual([true, true, false, false]);
     // The panel counts the GET a lookup.
     expect(lookups).toEqual([true, false, false, true]);
   });
 
   it("brings the presentation of a success and of a failure to the panel and the card", async () => {
-    const message = await streamedMessage();
+    const message = await streamedTurn();
     const { calls } = conversationTools([message]);
     const labels = calls.map(
       (c) =>
@@ -205,20 +169,165 @@ describe("a turn's tool calls, from the engine's chunks", () => {
       content: [],
     } as unknown as ThreadMessage;
     bindExternalStoreMessage(threadMessage, message);
-    for (const c of calls) {
-      expect(callPresentation(sourceToolPart(threadMessage, c.toolCallId))).toEqual(c.presentation);
-    }
+    const stored = resultMetadataOf(threadMessage);
+    const card = (id: string) => callPresentation({ resultProviderMetadata: stored.get(id) });
+    for (const c of calls) expect(card(c.toolCallId)).toEqual(c.presentation);
     // The failed GitHub call keeps its integration on the card as in the panel.
-    expect(callPresentation(sourceToolPart(threadMessage, "g1"))?.subject).toEqual(GITHUB);
+    expect(card("g1")?.subject).toEqual(GITHUB);
   });
+});
 
-  it("stores no presentation or duration in a call's output", async () => {
-    const message = await streamedMessage();
-    for (const part of message.parts.filter(isToolUIPart)) {
-      const output = JSON.stringify(("output" in part ? part.output : undefined) ?? null);
-      for (const key of ["presentation", "durationMs"]) {
-        expect(output).not.toContain(key);
+/** `jsonResult` (`tool-results.ts`): the payload as text and as `structuredContent`. */
+function jsonResult(payload: Record<string, unknown>, isError: boolean) {
+  return {
+    content: [{ type: "text", text: JSON.stringify(payload) }],
+    isError,
+    structuredContent: isError
+      ? { ...payload, kind: typeof payload.status === "number" ? "route_refusal" : "tool_refusal" }
+      : payload,
+  };
+}
+
+/** `withPresentation` (`presentation.ts`), and the relayed mark of a remote server's answer. */
+function presented(
+  result: Record<string, unknown>,
+  presentation: Record<string, unknown>,
+  relayed = false,
+) {
+  return {
+    ...result,
+    _meta: {
+      [TOOL_PRESENTATION_META_KEY]: presentation,
+      ...(relayed && { "dev.appstrate/relayed": true }),
+    },
+  };
+}
+
+const NOT_SENT = { code: "not_sent", detail: "Not sent: the batch reached its deadline first." };
+
+/**
+ * What the platform answers a `call_integration_tool` call (the shapes `apps/api/src/modules/mcp`
+ * builds), the Pi result the chat's tool makes of it, and the call the panel shows.
+ */
+const OUTCOMES: Record<
+  string,
+  {
+    answer: Record<string, unknown>;
+    failed: boolean;
+    result: Record<string, unknown>;
+    shown: Record<string, unknown>;
+  }
+> = {
+  // Every request refused before it was sent.
+  refused_batch: {
+    answer: presented(
+      jsonResult(
+        {
+          session_id: "cps_1",
+          results: [
+            { index: 0, error: NOT_SENT },
+            { index: 1, error: NOT_SENT },
+          ],
+        },
+        true,
+      ),
+      { subject: GMAIL },
+    ),
+    failed: true,
+    result: { presentation: { subject: GMAIL } },
+    shown: { status: "error", error: NOT_SENT.detail, presentation: { subject: GMAIL } },
+  },
+  // One request answered, one refused: not an error.
+  partial_batch: {
+    answer: presented(
+      jsonResult(
+        {
+          session_id: "cps_2",
+          results: [
+            { index: 0, status: 200, headers: {}, body: { messages: [] } },
+            { index: 1, error: { code: "not_sent", detail: "Not sent." } },
+          ],
+        },
+        false,
+      ),
+      { subject: GMAIL },
+    ),
+    failed: false,
+    result: {},
+    shown: { status: "success" },
+  },
+  // A remote tool's 401, relayed as its server answered it.
+  relayed_401: {
+    answer: presented(
+      { content: [{ type: "text", text: "401 Bad credentials" }], isError: true },
+      { title: "Create issue", subject: GITHUB },
+      true,
+    ),
+    failed: true,
+    result: { relayed: true, presentation: { title: "Create issue", subject: GITHUB } },
+    shown: { status: "error", error: "401 Bad credentials", presentation: { subject: GITHUB } },
+  },
+  // The integration has no usable connection here: refused before any exchange.
+  missing_connection: {
+    answer: presented(
+      jsonResult(
+        {
+          integration_package_id: "@appstrate/gmail",
+          refusal: {
+            status: 409,
+            title: "Conflict",
+            detail: "Gmail is not connected in this space.",
+          },
+        },
+        true,
+      ),
+      { subject: GMAIL },
+    ),
+    failed: true,
+    result: {},
+    shown: { status: "error", error: "Gmail is not connected in this space." },
+  },
+};
+
+describe("a call_integration_tool call's outcome", () => {
+  it("is failed exactly when the server says so, with its presentation, relayed or not", async () => {
+    const mcp = stubPlatformMcp(
+      [{ name: "call_integration_tool", inputSchema: { type: "object" } }],
+      (params) => OUTCOMES[String(params.arguments?.tool)]!.answer,
+    );
+    const built = await buildPlatformMcpTools({
+      ...mcp,
+      headers: {},
+      organization: inertTurnSpaces(),
+      writeChunk: () => {},
+      fileDelivery: { image: false, pdf: false },
+      signal: new AbortController().signal,
+      turnBudget: { deadlineAt: Date.now() + 60_000, stepCount: () => 0 },
+    });
+    type Executed = { name: string; execute: (id: string, params: unknown) => Promise<unknown> };
+    const registered: Executed[] = [];
+    const pi = {
+      registerTool: (tool: Executed) => registered.push(tool),
+    } as unknown as ExtensionAPI;
+    for (const factory of built.extensionFactories) factory(pi);
+    const tool = registered.find((candidate) => candidate.name === "call_integration_tool")!;
+
+    // Each call executed by the chat's own tool, then reported as Pi reports it.
+    const events: AgentSessionEvent[] = [];
+    try {
+      for (const [index, [name, outcome]] of Object.entries(OUTCOMES).entries()) {
+        const args = { tool: name, arguments: { requests: [{}, {}] } };
+        const result = (await tool.execute(name, args)) as Record<string, unknown>;
+        expect(result).toMatchObject(outcome.result);
+        expect(result.isError).toBe(outcome.failed || undefined);
+        events.push(...call(index, name, "call_integration_tool", args, result, outcome.failed));
       }
+    } finally {
+      await built.close();
+    }
+    const { calls } = conversationTools([await streamedMessage(events)]);
+    for (const [name, outcome] of Object.entries(OUTCOMES)) {
+      expect(calls.find((c) => c.toolCallId === name)).toMatchObject(outcome.shown);
     }
   });
 });

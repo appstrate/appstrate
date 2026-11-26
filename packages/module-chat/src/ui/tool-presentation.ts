@@ -1,16 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * How a tool call is shown, wherever it is shown: its card in the thread and its row in the
- * conversation's context panel both read {@link showCall}, with the presentation
- * {@link callPresentation} reads off the call's stored part.
- *
- * Once the result lands, the call is drawn from the presentation the platform stamps on it
- * (`@appstrate/core/mcp-presentation`), which the engine relays as the result's provider metadata
- * (`pi-chat/ui-stream-mapper.ts`), on a success and on a failure alike: the integration, agent or
- * user it acted on, and for an operation or a proxied request its HTTP method. Nothing is guessed
- * from an operation id, and no English text of the server is shown for a proxied request. Until a
- * result carries a presentation, the call keeps its own name and what its arguments name.
+ * How a tool call is shown, in the thread and in the context panel alike ({@link showCall}): from
+ * the presentation the platform stamps on its result (`@appstrate/core/mcp-presentation`), else
+ * its own name and what its arguments name.
  */
 
 import {
@@ -35,11 +28,9 @@ import {
 import { asRecordOrNull } from "@appstrate/core/safe-json";
 import type { ChatTranslate } from "./runtime-context.ts";
 
-/** One call as its card and its panel row show it. */
 export interface ShownCall {
-  /** Drawn unless `subject` is: its glyph wins. */
+  /** Drawn unless `subject` is. */
   Icon: LucideIcon;
-  /** Already translated. */
   label: string;
   idText?: string;
   subject?: PresentationSubject;
@@ -50,17 +41,13 @@ function stringField(input: unknown, key: string): string | undefined {
   return typeof value === "string" && value ? value : undefined;
 }
 
-/**
- * The name `call_integration_tool` calls a tool by, within its integration: `{namespace}__{tool}`,
- * where no namespace holds `__` and the namespace is a lossy cut of the package id.
- */
+/** `call_integration_tool`'s tool, without its `{namespace}__` (no namespace holds `__`). */
 function integrationToolName(input: unknown): string | undefined {
   const id = stringField(input, "tool");
   const cut = id?.indexOf("__") ?? -1;
   return id && cut > 0 ? id.slice(cut + 2) : id;
 }
 
-/** A call's icon and what its arguments name (an operation, a tool, a query, a file). */
 function ownTarget(toolName: string, input: unknown): { Icon: LucideIcon; target?: string } {
   switch (toolName) {
     case "invoke_operation":
@@ -86,21 +73,14 @@ function ownTarget(toolName: string, input: unknown): { Icon: LucideIcon; target
   }
 }
 
-/**
- * What the engine stamped on a call's outcome (`pi-chat/ui-stream-mapper.ts`):
- * `resultProviderMetadata.appstrate` of its stored tool part, present on a success and on a
- * failure alike; `null` while the call runs.
- */
+/** The engine's stamp on a call's outcome, failed or not (`ui-stream-mapper.ts`); `null` while it runs. */
 export function callOutcome(part: object | undefined): Record<string, unknown> | null {
   const metadata =
     part && "resultProviderMetadata" in part ? part.resultProviderMetadata : undefined;
   return asRecordOrNull(asRecordOrNull(metadata)?.appstrate);
 }
 
-/**
- * The presentation stamped on a call's result ({@link callOutcome}). `undefined` while the call
- * runs, or for a malformed stamp.
- */
+/** The presentation stamped on a call's outcome; `undefined` while it runs, or malformed. */
 export function callPresentation(part: object | undefined): ToolPresentation | undefined {
   const raw = callOutcome(part)?.presentation;
   if (raw === undefined) return undefined;
@@ -108,10 +88,7 @@ export function callPresentation(part: object | undefined): ToolPresentation | u
   return parsed.success ? parsed.data : undefined;
 }
 
-/**
- * The verb icon of an HTTP method; `undefined` for a method that names none. POST is neutral: it
- * does not say what the request does (RFC 9110 §9.3.3), so it draws an action, not a creation.
- */
+/** POST draws an action, not a creation: it does not say what the request does. */
 function methodIcon(method: string): LucideIcon | undefined {
   switch (method) {
     case "GET":
@@ -129,55 +106,40 @@ function methodIcon(method: string): LucideIcon | undefined {
   }
 }
 
-/** « Lecture », « Action », « Mise à jour »: the method's verb, translated. */
 function verbOf(method: string, t: ChatTranslate): string {
   return t(`tool.verb.${method}`, { defaultValue: method });
 }
 
-/** The name a subject is shown under. */
 export function subjectName(subject: PresentationSubject): string {
   return subject.display_name ?? subject.id;
 }
 
-/** An integration's `api_*` tool (`{ns}__api_call`, its upload twin): a proxied request. */
+/** `{ns}__api_call` or its upload twin: a proxied request. */
 function isProxiedRequest(input: unknown): boolean {
   return integrationToolName(input)?.startsWith("api_") === true;
 }
 
-/** The requests a proxied call sends (`arguments.requests`); `undefined` for any other call. */
 function proxiedRequests(input: unknown): unknown[] | undefined {
   if (!isProxiedRequest(input)) return undefined;
   const requests = asRecordOrNull(asRecordOrNull(input)?.arguments)?.requests;
   return Array.isArray(requests) ? requests : undefined;
 }
 
-/**
- * The path a proxied request targets (`requests[0].target`), without its origin, query string or
- * fragment: what the request reads or writes, short enough for a row.
- */
+/** The path a proxied request targets, without origin, query or fragment. */
 function targetPath(request: unknown): string | undefined {
   const target = stringField(request, "target");
   if (!target) return undefined;
   try {
     return new URL(target).pathname;
   } catch {
-    // A relative target: the path is what precedes its query or fragment.
     return target.split(/[?#]/, 1)[0] || undefined;
   }
 }
 
 /**
- * How a call is shown: from the platform's presentation once it landed, else its own name. A
- * label reads « domain · what », wherever the call is drawn.
- *
- * - An operation (an OpenAPI tag and method): « Agents · Lecture », identified by its subject,
- *   else its operation id.
- * - A call that reached an integration, drawn with its logo: « Gmail · Lecture » for a proxied
- *   request, identified by the path it targets, « Gmail · 3 requêtes » for a batch,
- *   « GitHub · Search issues » for a remote tool (the title its server gives it). A proxied call
- *   whose request cannot be read, or a call whose tool cannot, says « Gmail · Outil
- *   d'intégration »: the server's own label for a proxied request is English, never shown.
- * - Any other tool: its own name (`tool.name.<tool>`), identified by its subject or its arguments.
+ * A label reads « domain · what »: « Agents · Lecture » for an operation, « Gmail · Lecture » or
+ * « Gmail · 3 requêtes » for a proxied request, « GitHub · Search issues » for a remote tool (a
+ * proxied request's own English label is never shown), else the tool's own name.
  */
 export function showCall(
   call: { toolName: string; args: unknown; presentation?: ToolPresentation | undefined },
@@ -195,7 +157,7 @@ export function showCall(
     const idText = subject ? subjectName(subject) : own.target;
     return {
       Icon,
-      label: `${t(`tool.tag.${p.tag}`, { defaultValue: p.tag })} · ${verbOf(method, t)}`,
+      label: `${t(`tool.tag.${p.tag}`)} · ${verbOf(method, t)}`,
       ...(idText ? { idText } : {}),
       ...(subject ? { subject } : {}),
     };
@@ -203,7 +165,6 @@ export function showCall(
   if (subject?.kind === "integration") {
     const requests = proxiedRequests(call.args);
     const path = method && requests?.length === 1 ? targetPath(requests[0]) : undefined;
-    // A proxied request names its method, a batch its requests; a remote tool keeps its title.
     const what = method
       ? verbOf(method, t)
       : requests !== undefined && requests.length > 1

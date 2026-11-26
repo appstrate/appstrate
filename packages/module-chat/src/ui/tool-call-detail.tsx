@@ -1,12 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * A tool call's detail, wherever it is opened: the card's dialog in the thread and the call's view
- * in the context panel. Its input, its output and the card's metadata, each as raw JSON, and its
- * error as the card words it, in the destructive tone; a section with nothing in it is left out
- * (`undefined`, `null`, `""`, `{}`, `[]`).
- *
- * `t` is passed, not read from the chat's host: the context panel is drawn outside the chat.
+ * A tool call's detail, in the card's dialog and in the context panel; an empty section is left
+ * out. `t` is passed: the context panel is drawn outside the chat's host.
  */
 
 import type { ChatTranslate } from "./runtime-context.ts";
@@ -49,13 +45,10 @@ export function ToolCallDetail({
   metadata,
 }: {
   t: ChatTranslate;
-  /** The call's arguments. */
   input: unknown;
-  /** Its result, unwrapped (`unwrapMcpResult`). */
+  /** Unwrapped (`unwrapMcpResult`). */
   output: unknown;
-  /** What a failed call says. */
   error?: string | undefined;
-  /** The card's own facts about the call (its id, HTTP status, duration). */
   metadata?: Record<string, unknown> | undefined;
 }) {
   return (

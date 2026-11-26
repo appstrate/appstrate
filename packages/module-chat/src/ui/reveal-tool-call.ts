@@ -1,26 +1,16 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Bring a tool call's card into view in the thread, from the context panel.
- *
- * The thread draws what this store says ({@link useRevealedToolCalls}): the activity group holding
- * a revealed call opens (`activity-group-view.tsx`), since a folded group does not mount its cards
- * (Radix `CollapsibleContent`), and the revealed card carries `data-revealed`, which its own class
- * rings ({@link REVEAL_RING_CLASS}). The store is written in `flushSync`, so the card is on the
- * page when {@link revealToolCall} looks for it.
- *
- * Motion is the design system's (`apps/web/DESIGN_SYSTEM.md`, Motion): the scroll takes the
- * thread's own `scroll-behavior`, and the ring fades on `duration-fast` with `ease-surface`;
- * reduced motion is handled once by the stylesheet, never here.
+ * Bring a tool call's card into view in the thread, from the context panel: its activity group
+ * opens (a folded one does not mount its cards) and the card is ringed while it holds the focus.
  */
 
 import * as React from "react";
 import { flushSync } from "react-dom";
 
 interface RevealState {
-  /** The calls whose group was opened to show them, until the reader folds it again. */
+  /** Calls whose group was opened for them, until the reader folds it. */
   readonly opened: ReadonlySet<string>;
-  /** The call whose card is marked, until the focus leaves it. */
   readonly marked: string | null;
 }
 
@@ -39,12 +29,10 @@ function subscribe(listener: () => void): () => void {
 
 const snapshot = () => state;
 
-/** What the thread shows of the revealed calls. */
 export function useRevealedToolCalls(): RevealState {
   return React.useSyncExternalStore(subscribe, snapshot, snapshot);
 }
 
-/** The reader folded a group again: its calls no longer hold it open. */
 export function forgetRevealedToolCalls(toolCallIds: readonly string[]): void {
   if (!toolCallIds.some((id) => state.opened.has(id))) return;
   const opened = new Set(state.opened);
@@ -56,11 +44,7 @@ export function forgetRevealedToolCalls(toolCallIds: readonly string[]): void {
 export const REVEAL_RING_CLASS =
   "transition-shadow duration-fast ease-surface data-[revealed]:ring-2 data-[revealed]:ring-ring";
 
-/**
- * What a call's card carries: its anchor, focusable by script (out of the tab order) for a card
- * without a control of its own, and the mark while it is the revealed one, dropped when the focus
- * leaves the card.
- */
+/** A card's anchor: focusable by script only, marked while it is the revealed one. */
 export function useRevealAnchor(toolCallId: string | undefined) {
   const { marked } = useRevealedToolCalls();
   return {
@@ -75,15 +59,12 @@ export function useRevealAnchor(toolCallId: string | undefined) {
   };
 }
 
-/**
- * Bring the card of the call `toolCallId` into view and give it the focus, opening the group
- * that folds it. True only when the card itself took the focus; false when the thread draws no
- * card for the call.
- */
+/** True only when the card took the focus; false when the thread draws none for the call. */
 export function revealToolCall(call: { toolCallId: string }): boolean {
   const thread = document.querySelector("[data-chat-thread]");
   if (!thread) return false;
   const { toolCallId } = call;
+  // Synchronous, so the opened group's card is on the page below.
   flushSync(() => write({ opened: new Set(state.opened).add(toolCallId), marked: toolCallId }));
   const card = thread.querySelector<HTMLElement>(`[data-tool-call-id="${CSS.escape(toolCallId)}"]`);
   if (!card) {
@@ -91,7 +72,6 @@ export function revealToolCall(call: { toolCallId: string }): boolean {
     return false;
   }
   card.scrollIntoView({ block: "center" });
-  // The card's own control takes the focus: a keyboard reader lands where the eye does.
   const control = card.querySelector<HTMLElement>("button, a[href]");
   (control ?? card).focus({ preventScroll: true });
   return card.contains(document.activeElement);

@@ -1,30 +1,21 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Consecutive lookups folded into one line. A turn that looks things up before it
- * answers (search, describe, read, get_me…) otherwise stacks a card per call above
- * the answer; folded, they read « 4 consultations » with the glyphs of what they
- * touched, one click from the cards. Writes are never folded: every call that may
- * change something keeps its own card in the transcript.
+ * Consecutive lookups folded into one line (« 4 consultations », the glyphs of what they touched),
+ * one click from their cards; a call that may change something keeps its own card.
  *
- * What folds is `activityGroupOf` (`activity-group.ts`): the engine stamps the call of a tool
- * the platform declares a lookup before it runs (`providerMetadata.appstrate.lookup`,
- * `pi-chat/ui-stream-mapper.ts`), so such a lookup joins its group as it starts, and one that
- * fails or is denied leaves it then, its card showing the error among the actions. A call whose
- * presentation names a read (`GET`, `HEAD`) is known only once its result lands: the context
- * panel counts it a lookup (`isLookupCall`), the thread keeps its card where it was drawn, among
- * the actions. Reasoning between lookups folds with them: the run of
- * activity before an answer is one group. A group holding fewer than two lookups draws no header
- * and folds nothing, with the same tree, so the second one folds it without remounting the cards.
- *
- * A call the context panel reveals (`reveal-tool-call.ts`) opens its group: a folded group does
- * not mount its cards.
+ * A call joins on the engine's pre-call stamp alone (`activityGroupOf`), so no card moves when its
+ * result lands: a failed lookup stays in its group, shown failed on its own row and counted in the
+ * header. Reasoning between lookups folds with them. A group holding fewer than {@link FOLD_AT}
+ * lookups draws no header, with the same tree, so the next one folds it without remounting cards.
+ * A call the context panel reveals (`reveal-tool-call.ts`) opens its group: a folded one does not
+ * mount its cards.
  */
 
 import * as React from "react";
 import { useAuiState } from "@assistant-ui/react";
 import { ChevronRightIcon, EyeIcon } from "lucide-react";
-import type { PresentationSubject, ToolPresentation } from "@appstrate/core/mcp-presentation";
+import type { PresentationSubject } from "@appstrate/core/mcp-presentation";
 import { Button } from "@appstrate/ui/components/button";
 import { Spinner } from "@appstrate/ui/components/spinner";
 import {
@@ -34,49 +25,53 @@ import {
 } from "@appstrate/ui/components/collapsible";
 import { useChatHost } from "./runtime-context.ts";
 import { SubjectStack } from "./subject-glyph.tsx";
-import type { GroupablePart } from "./activity-group.ts";
+import type { GroupablePart } from "./conversation-tools.ts";
+import { deriveToolPhase } from "./tool-result.ts";
+import type { StoredResults } from "./use-call-presentation.ts";
 import { forgetRevealedToolCalls, useRevealedToolCalls } from "./reveal-tool-call.ts";
 import { DISCLOSURE_TRIGGER_CLASS } from "./touch-targets.ts";
 
-/** Reads a group needs before it folds. */
 const FOLD_AT = 2;
 
-/** The call ids of the tool calls at `indices`, as one string: a stable selection. */
-function callIdsAt(parts: readonly GroupablePart[], indices: readonly number[]): string {
-  return indices
-    .flatMap((i) => {
-      const part = parts[i];
-      return part?.type === "tool-call" && part.toolCallId ? [part.toolCallId] : [];
-    })
-    .join("\n");
+function callsAt(parts: readonly GroupablePart[], indices: readonly number[]): GroupablePart[] {
+  return indices.flatMap((i) => {
+    const part = parts[i];
+    return part?.type === "tool-call" && part.toolCallId ? [part] : [];
+  });
 }
 
 export function ActivityGroup({
   indices,
-  presentations,
+  running,
+  stored,
   children,
 }: {
   indices: readonly number[];
-  /** The message's call presentations (`useCallPresentations`), by call id. */
-  presentations: ReadonlyMap<string, ToolPresentation>;
+  running: boolean;
+  stored: StoredResults;
   children: React.ReactNode;
 }) {
   const { t } = useChatHost();
+  // Strings, not arrays: a selector returning a fresh value would re-render forever.
   const joinedIds = useAuiState((s) =>
-    callIdsAt(s.message.parts as readonly GroupablePart[], indices),
+    callsAt(s.message.parts as readonly GroupablePart[], indices)
+      .map((part) => part.toolCallId)
+      .join("\n"),
+  );
+  const failed = useAuiState(
+    (s) =>
+      callsAt(s.message.parts as readonly GroupablePart[], indices).filter(
+        (part) => deriveToolPhase(part) === "error",
+      ).length,
   );
   const callIds = React.useMemo(() => (joinedIds ? joinedIds.split("\n") : []), [joinedIds]);
-  const last = indices[indices.length - 1];
-  const running = useAuiState(
-    (s) => s.message.status?.type === "running" && s.message.parts.length - 1 === last,
-  );
   const subjects = React.useMemo(
     () =>
       callIds.flatMap((id): PresentationSubject[] => {
-        const subject = presentations.get(id)?.subject;
+        const subject = stored.get(id)?.presentation?.subject;
         return subject ? [subject] : [];
       }),
-    [callIds, presentations],
+    [callIds, stored],
   );
   const { opened } = useRevealedToolCalls();
   const revealed = callIds.some((id) => opened.has(id));
@@ -95,6 +90,9 @@ export function ActivityGroup({
           <Button variant="ghost" size="sm" className={`my-1 ${DISCLOSURE_TRIGGER_CLASS}`}>
             {running ? <Spinner className="size-4" /> : <EyeIcon />}
             {running ? t("tool.reads.running") : t("tool.reads.done", { count: reads })}
+            {failed > 0 ? (
+              <span className="text-destructive">{t("tool.reads.failed", { count: failed })}</span>
+            ) : null}
             <SubjectStack subjects={subjects} />
             <ChevronRightIcon className="duration-fast ease-surface transition-transform group-data-[state=open]:rotate-90" />
           </Button>

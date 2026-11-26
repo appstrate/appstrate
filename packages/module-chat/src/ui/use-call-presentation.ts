@@ -1,17 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * The platform's presentation of a call in the thread, read where the context panel reads it: on
- * the stored tool part (`callPresentation`). assistant-ui's `tool-call` part does not carry it:
- * `@assistant-ui/ai-sdk` forwards a part's `callProviderMetadata` as `providerMetadata` and turns
- * a failure into `{ error: errorText }`, dropping `resultProviderMetadata`. So the card reads the
- * AI SDK message the assistant-ui one was converted from (`getExternalStoreMessages`).
- *
- * What is selected from the store is the stored part's `resultProviderMetadata`, never the message:
- * the in-flight message is replaced on every chunk, and its parts are copied with it
- * (`ReactChatState.replaceMessage` in `@ai-sdk/react` snapshots `{ ...part }`), but a part's
- * `resultProviderMetadata` is the object its result chunk set (`updateToolPart` in `ai`), kept by
- * that shallow copy. A card therefore re-renders when its own call's result lands, not per chunk.
+ * What the thread's cards read off a call's stored part, where the context panel reads it:
+ * assistant-ui's `tool-call` part drops `resultProviderMetadata` (`@assistant-ui/ai-sdk`), so it
+ * is read off the AI SDK message behind it (`getExternalStoreMessages`).
  */
 
 import * as React from "react";
@@ -19,19 +11,26 @@ import { getExternalStoreMessages, useAuiState, type ThreadMessage } from "@assi
 import { isToolUIPart, type UIMessage } from "ai";
 import type { ToolPresentation } from "@appstrate/core/mcp-presentation";
 import { callPresentation } from "./tool-presentation.ts";
+import { callSpaceOf } from "./conversation-scope.ts";
 
-/** The stored tool part of the call `toolCallId`, in the AI SDK messages behind `message`. */
-export function sourceToolPart(message: ThreadMessage, toolCallId: string) {
-  for (const source of getExternalStoreMessages<UIMessage>(message)) {
-    for (const part of source.parts) {
-      if (isToolUIPart(part) && part.toolCallId === toolCallId) return part;
-    }
-  }
-  return undefined;
+export interface StoredResult {
+  readonly resultProviderMetadata: unknown;
+  readonly presentation: ToolPresentation | undefined;
+}
+
+export type StoredResults = ReadonlyMap<string, StoredResult>;
+
+/** A failure keeps no result: its resolved space rides on the stored part. */
+export function cardSpaceOf(card: {
+  providerMetadata?: unknown;
+  result?: unknown;
+  stored?: StoredResult | undefined;
+}): string | undefined {
+  return callSpaceOf({ ...card, ...card.stored });
 }
 
 /** The stored parts' `resultProviderMetadata` of the tool calls behind `message`, by call id. */
-function resultMetadataOf(message: ThreadMessage): Map<string, unknown> {
+export function resultMetadataOf(message: ThreadMessage): Map<string, unknown> {
   const metadata = new Map<string, unknown>();
   for (const source of getExternalStoreMessages<UIMessage>(message)) {
     for (const part of source.parts) {
@@ -50,9 +49,8 @@ function sameEntries(a: ReadonlyMap<string, unknown>, b: ReadonlyMap<string, unk
 }
 
 /**
- * A selector of the message's result metadata ({@link resultMetadataOf}) that returns the map it
- * returned last while its entries are the same objects: a selector returning a fresh map would
- * re-render forever (`turn-error-state.ts`). One per hook instance.
+ * Keeps the last map while its entries are the same objects: the in-flight message is copied on
+ * every chunk, its parts' `resultProviderMetadata` is not, and a fresh map would re-render forever.
  */
 function stableResultMetadataSelector() {
   let last: ReadonlyMap<string, unknown> = new Map();
@@ -63,28 +61,18 @@ function stableResultMetadataSelector() {
   };
 }
 
-/**
- * The presentations of the current message's calls, by call id, as one value that changes only
- * when a call's result metadata does.
- */
-export function useCallPresentations(): ReadonlyMap<string, ToolPresentation> {
+/** The current message's stored results, by call id: a new value only when one lands. */
+export function useStoredResults(): StoredResults {
   const [select] = React.useState(stableResultMetadataSelector);
   const metadata = useAuiState(select);
   return React.useMemo(() => {
-    const presentations = new Map<string, ToolPresentation>();
-    for (const [id, value] of metadata) {
-      const presentation = callPresentation({ resultProviderMetadata: value });
-      if (presentation) presentations.set(id, presentation);
+    const results = new Map<string, StoredResult>();
+    for (const [id, resultProviderMetadata] of metadata) {
+      results.set(id, {
+        resultProviderMetadata,
+        presentation: callPresentation({ resultProviderMetadata }),
+      });
     }
-    return presentations;
+    return results;
   }, [metadata]);
-}
-
-/** The presentation of the call `toolCallId` of the current message. */
-export function useCallPresentation(toolCallId: string): ToolPresentation | undefined {
-  const metadata = useAuiState((s) => {
-    const part = sourceToolPart(s.message, toolCallId);
-    return part && "resultProviderMetadata" in part ? part.resultProviderMetadata : undefined;
-  });
-  return React.useMemo(() => callPresentation({ resultProviderMetadata: metadata }), [metadata]);
 }

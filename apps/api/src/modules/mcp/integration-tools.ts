@@ -25,11 +25,7 @@ import { z } from "zod";
 import type { CallToolResult, Tool } from "@modelcontextprotocol/sdk/types.js";
 import type { AppstrateRequestExtra, AppstrateToolDefinition } from "@appstrate/mcp-transport";
 import { renderFieldPath } from "@appstrate/core/api-errors";
-import {
-  TOOL_PRESENTATION_META_KEY,
-  type PresentationSubject,
-  type ToolPresentation,
-} from "@appstrate/core/mcp-presentation";
+import type { PresentationSubject, ToolPresentation } from "@appstrate/core/mcp-presentation";
 import type { DispatchContext } from "./api-call-batch.ts";
 import { INTEGRATION_TOOLS_PATH } from "./catalog.ts";
 import { readSpaces, spacesShown, unsearched } from "./discovery.ts";
@@ -297,7 +293,6 @@ function reachedBy<C extends { connection_id: string; scopes_granted: string[] }
 /**
  * The integration tools section of a search, ranked by `tokens`, the remote catalogs read from the
  * cache alone when `cachedOnly`; one read per space (one for a pinned connection), concurrently.
- * `subjects`: the integrations of the tools shown, each once, for the call's presentation.
  */
 export async function searchIntegrationTools(
   spaces: readonly McpSpace[] | undefined,
@@ -424,17 +419,13 @@ function integrationSubjects(
     return {
       kind: "integration",
       id,
-      ...(identity?.display_name ? { display_name: identity.display_name } : {}),
+      ...(identity && { display_name: identity.display_name }),
       ...(identity?.icon ? { icon: identity.icon } : {}),
     };
   });
 }
 
-/**
- * The method of an `api_call` holding one request (`{ requests: [{ method }] }`), upper-cased; none
- * for a batch of several, or where the arguments hold no such method (a refusal of unparsed
- * arguments is read the same way, nothing guessed).
- */
+/** The method of an `api_call` holding one request, upper-cased; none for a batch, or none read. */
 function singleRequestMethod(args: unknown): string | undefined {
   const requests = asRecord(args)?.requests;
   if (!Array.isArray(requests) || requests.length !== 1) return undefined;
@@ -442,10 +433,7 @@ function singleRequestMethod(args: unknown): string | undefined {
   return typeof method === "string" && method ? method.toUpperCase() : undefined;
 }
 
-/**
- * How a call of `tool` is shown, with its integration as subject: a typed tool by its server's
- * title (else its name there), an `api_call` as `API call` with the method of its one request.
- */
+/** How a call of `tool` is shown: its integration, and a typed tool's title or an `api_call`'s method. */
 function toolCallPresentation(
   read: CallableListing,
   tool: CallableTool,
@@ -456,7 +444,7 @@ function toolCallPresentation(
     return { title: tool.title || tool.remote_name, ...(subject ? { subject } : {}) };
   }
   const method = singleRequestMethod(args);
-  return { title: "API call", ...(method ? { method } : {}), ...(subject ? { subject } : {}) };
+  return { ...(method ? { method } : {}), ...(subject ? { subject } : {}) };
 }
 
 /**
@@ -620,7 +608,6 @@ export function buildCallIntegrationToolTool(ctx: IntegrationToolContext): Appst
     }
     if ("refusal" in found) return refuse(found.refusal);
     const { tool } = found;
-    // Once the tool is known, a refusal of its arguments names it too.
     const refuseCall = (refusal: Refusal): CallToolResult =>
       withPresentation(refuse(refusal), toolCallPresentation(read, tool, call.data.arguments));
 
@@ -664,16 +651,7 @@ export function buildCallIntegrationToolTool(ctx: IntegrationToolContext): Appst
       }
     }
     const presentation = toolCallPresentation(read, tool, toolArguments);
-    // The stamp's JSON and the comma before it, counted against the relayed result's budget.
-    const reservedBytes =
-      new TextEncoder().encode(JSON.stringify({ [TOOL_PRESENTATION_META_KEY]: presentation }))
-        .byteLength - 1;
-    const outcome = await tool.execute(
-      toolArguments,
-      extra,
-      call.data.connection_id,
-      reservedBytes,
-    );
+    const outcome = await tool.execute(toolArguments, extra, call.data.connection_id);
     if ("code" in outcome) return withPresentation(refuse(outcome), presentation);
     ctx.observe({
       tool: "call_integration_tool",

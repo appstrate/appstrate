@@ -59,13 +59,14 @@ describe("unwrapMcpResult — payload among several text parts", () => {
     expect(unwrapMcpResult(parts)).toEqual(runPayload);
   });
 
-  it("returns the joined text, without the budget note, when no part carries a payload", () => {
+  it("returns the joined text, without the final budget note, when no part carries a payload", () => {
+    // A server's text shaped like the note is not the last block: it is kept.
     const parts = [
       { type: "text", text: "403 Resource not accessible. " },
-      { type: "text", text: "Retry later." },
+      { type: "text", text: "[turn budget] Retry later." },
       { type: "text", text: budgetNote },
     ];
-    expect(unwrapMcpResult(parts)).toBe("403 Resource not accessible. Retry later.");
+    expect(unwrapMcpResult(parts)).toBe("403 Resource not accessible. [turn budget] Retry later.");
   });
 
   it("leaves a content array with no text parts unchanged", () => {

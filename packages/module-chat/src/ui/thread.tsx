@@ -20,7 +20,6 @@ import {
   useAuiEvent,
   useAuiState,
   unstable_useComposerInput,
-  type ToolCallMessagePartComponent,
 } from "@assistant-ui/react";
 import {
   AlertTriangleIcon,
@@ -42,14 +41,15 @@ import { cn } from "@appstrate/ui/cn";
 import { MarkdownText, ReasoningText } from "./markdown-text.tsx";
 import { ReasoningGroup, ThinkingStatus } from "./reasoning.tsx";
 import { ToolFallback } from "./tool-fallback.tsx";
-import { ActivityGroup } from "./activity-group-view.tsx";
-import { activityGroupOf } from "./activity-group.ts";
-import { useCallPresentations } from "./use-call-presentation.ts";
+import { ActivityGroup } from "./activity-group.tsx";
+import { activityGroupOf } from "./conversation-tools.ts";
+import { useStoredResults } from "./use-call-presentation.ts";
 import {
   ImportPackageFileTool,
   InvokeOperationTool,
   RunAndWaitTool,
   SearchTool,
+  type ToolCardProps,
 } from "./tool-uis.tsx";
 import { ResourceReadTool } from "./skill-load.tsx";
 import { parseResume, INTEGRATION_RESUME_MARKER } from "./auth-offer.ts";
@@ -957,31 +957,34 @@ export function MessageError() {
   );
 }
 
-/** The rich cards, by tool name; a call of any other tool is drawn by `ToolFallback`. */
-const TOOL_CARDS: Partial<Record<string, ToolCallMessagePartComponent>> = {
-  invoke_operation: InvokeOperationTool,
-  run_and_wait: RunAndWaitTool,
-  search: SearchTool,
-  import_package_file: ImportPackageFileTool,
-  read_resource: ResourceReadTool,
-  read: ResourceReadTool,
+/**
+ * Memoized: GroupedParts renders every part on each chunk, while a settled part's state, and so
+ * its props, keep their identity.
+ */
+const ToolFallbackCard = React.memo(ToolFallback);
+const ResourceReadCard = React.memo(ResourceReadTool);
+const TOOL_CARDS: Partial<Record<string, React.ComponentType<ToolCardProps>>> = {
+  invoke_operation: React.memo(InvokeOperationTool),
+  run_and_wait: React.memo(RunAndWaitTool),
+  search: React.memo(SearchTool),
+  import_package_file: React.memo(ImportPackageFileTool),
+  read_resource: ResourceReadCard,
+  read: ResourceReadCard,
 };
 
-/**
- * Reasoning and lookups fold into one activity group (`activity-group-view.tsx`); reasoning keeps
- * its own disclosure inside it. The grouping reads only what a call carries as it starts
- * (`activityGroupOf`), so assistant-ui's group tree, memoized on the `groupBy` identity, keeps one;
- * the group reads the calls' presentations for the glyphs of what they touched.
- */
 function AssistantParts() {
-  const presentations = useCallPresentations();
+  const stored = useStoredResults();
   return (
     <MessagePrimitive.GroupedParts groupBy={activityGroupOf}>
       {({ part, children }) => {
         switch (part.type) {
           case "group-activity":
             return (
-              <ActivityGroup indices={part.indices} presentations={presentations}>
+              <ActivityGroup
+                indices={part.indices}
+                running={part.status.type === "running"}
+                stored={stored}
+              >
                 {children}
               </ActivityGroup>
             );
@@ -999,8 +1002,8 @@ function AssistantParts() {
           case "reasoning":
             return <ReasoningText />;
           case "tool-call": {
-            const Card = TOOL_CARDS[part.toolName] ?? ToolFallback;
-            return <Card {...part} />;
+            const Card = TOOL_CARDS[part.toolName] ?? ToolFallbackCard;
+            return <Card {...part} stored={stored.get(part.toolCallId)} />;
           }
           // GroupedParts draws the indicator only while the message runs.
           case "indicator":

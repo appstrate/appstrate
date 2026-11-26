@@ -1,10 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
 
-/**
- * The glyph of what a tool call acted on, as the platform presented it
- * (`tool-presentation.ts`): an integration's logo, an agent's tile, a skill, the user.
- */
-
 import * as React from "react";
 import { BookOpenIcon, CircleUserIcon } from "lucide-react";
 import type { PresentationSubject } from "@appstrate/core/mcp-presentation";
@@ -38,10 +33,9 @@ export function SubjectGlyph({
   }
 }
 
-/** Subjects a stack shows, at most; the rest are counted, not drawn. */
 const MAX_STACKED = 4;
 
-/** Overlapping glyphs of distinct subjects (a search's results, a group's reads). */
+/** Overlapping glyphs of distinct subjects (a search's results, a group's reads), past 4 « +N ». */
 export function SubjectStack({ subjects }: { subjects: readonly PresentationSubject[] }) {
   const distinct = React.useMemo(() => {
     const seen = new Set<string>();
@@ -53,6 +47,7 @@ export function SubjectStack({ subjects }: { subjects: readonly PresentationSubj
     });
   }, [subjects]);
   if (distinct.length === 0) return null;
+  const hidden = distinct.length - MAX_STACKED;
   return (
     <span className="flex shrink-0 items-center -space-x-1" aria-hidden="true">
       {distinct.slice(0, MAX_STACKED).map((s) => (
@@ -60,6 +55,11 @@ export function SubjectStack({ subjects }: { subjects: readonly PresentationSubj
           <SubjectGlyph subject={s} className="size-3.5" />
         </span>
       ))}
+      {hidden > 0 ? (
+        <span className="bg-muted text-muted-foreground ring-card inline-flex h-3.5 min-w-3.5 items-center justify-center rounded-sm px-0.5 text-[9px] leading-none font-medium tabular-nums ring-2">
+          +{hidden}
+        </span>
+      ) : null}
     </span>
   );
 }

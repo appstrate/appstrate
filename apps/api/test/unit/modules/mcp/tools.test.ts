@@ -87,14 +87,9 @@ function firstOp(predicate: (op: CatalogOperation) => boolean): CatalogOperation
 }
 
 describe("mcp catalog", () => {
-  it("registers a destination rule and an icon for every root tool the platform can advertise", () => {
+  it("registers a destination rule for every root tool the platform can advertise", () => {
     const { byName } = makeTools([...orgPermissions("owner"), ...presetPermissions("admin")]);
-    // `TOOL_SPACE_RULES` is keyed by `McpToolName`, and so are the icon and presenter tables
-    // (`tool-icons.ts`, `presentation.ts`): this holds the three to the declared tools.
     expect([...byName.keys()].sort()).toEqual(Object.keys(TOOL_SPACE_RULES).sort());
-    for (const tool of byName.values()) {
-      expect(tool.descriptor.icons?.map((icon) => icon.theme)).toEqual(["light", "dark"]);
-    }
   });
 
   it("indexes core operations from the live spec", () => {

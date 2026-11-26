@@ -180,7 +180,7 @@ describe("PiChatUiStreamMapper", () => {
     ]);
   });
 
-  it("leaves the model's turn-budget line out of a tool error's text", () => {
+  it("leaves the model's final turn-budget line out of a tool error's text, and no other", () => {
     const budget = formatTurnBudgetNote({ remainingMs: 558_000, stepsUsed: 7 });
     const chunks = run([
       {
@@ -190,6 +190,7 @@ describe("PiChatUiStreamMapper", () => {
         result: {
           content: [
             { type: "text", text: "403 Resource not accessible" },
+            { type: "text", text: "[turn budget] hidden" },
             { type: "text", text: budget },
           ],
           details: {},
@@ -198,7 +199,11 @@ describe("PiChatUiStreamMapper", () => {
       },
     ]).chunks;
     expect(chunks).toEqual([
-      { type: "tool-output-error", toolCallId: "gh-1", errorText: "403 Resource not accessible" },
+      {
+        type: "tool-output-error",
+        toolCallId: "gh-1",
+        errorText: "403 Resource not accessible[turn budget] hidden",
+      },
     ]);
   });
 
@@ -533,32 +538,10 @@ describe("a call's presentation", () => {
     isError,
   });
 
-  it("rides the result's provider metadata, out of the stored output", () => {
-    expect(run([end(false)]).chunks).toEqual([
-      {
-        type: "tool-output-available",
-        toolCallId: "gh-1",
-        output: { content: [{ type: "text", text: "403 Resource not accessible" }], relayed: true },
-        providerMetadata: { appstrate: { presentation } },
-      },
-    ]);
-  });
-
-  it("rides a failure's chunk too, which carries no output", () => {
-    expect(run([end(true)]).chunks).toEqual([
-      {
-        type: "tool-output-error",
-        toolCallId: "gh-1",
-        errorText: "403 Resource not accessible",
-        providerMetadata: { appstrate: { presentation } },
-      },
-    ]);
-  });
-
   it("keeps a failure's acted spaces beside its presentation, a success's in its output", () => {
     const acted = (isError: boolean): AgentSessionEvent => {
       const event = end(isError) as Extract<AgentSessionEvent, { type: "tool_execution_end" }>;
-      return { ...event, result: { ...event.result, actedSpaceIds: ["spc_target"] } };
+      return { ...event, result: { ...(event.result as object), actedSpaceIds: ["spc_target"] } };
     };
     expect(run([acted(true)]).chunks).toEqual([
       {

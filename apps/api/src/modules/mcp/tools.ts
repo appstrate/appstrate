@@ -597,7 +597,7 @@ function invalidFilter(args: Record<string, unknown>): Refusal | undefined {
 
 /**
  * Read-only, unless the kind of integration tools is declared: reading its catalog reaches
- * third-party servers, so `readOnlyHint` is withheld and the descriptor is stamped a lookup instead.
+ * third-party servers, so the descriptor is stamped a lookup instead.
  */
 function discoveryHints(
   title: string,
@@ -610,9 +610,6 @@ function discoveryHints(
       }
     : { annotations: { title, readOnlyHint: true, idempotentHint: true, openWorldHint: false } };
 }
-
-/** `search`'s title, on its descriptor and its results: a label, never the caller's query. */
-const SEARCH_TITLE = "Search";
 
 function buildSearchTool(
   ctx: McpToolContext,
@@ -635,7 +632,7 @@ function buildSearchTool(
       "role may not invoke are listed apart under `denied`, with the permissions they need: " +
       "report that to the user instead of trying them." +
       (kinds.includes("integration_tool") ? INTEGRATION_TOOLS_DESCRIPTION : ""),
-    ...discoveryHints(SEARCH_TITLE, kinds),
+    ...discoveryHints("Search", kinds),
     inputSchema: {
       type: "object",
       additionalProperties: false,
@@ -746,11 +743,7 @@ function buildSearchTool(
         ...sections,
         ...(readSpaceIds.length > 0 ? { searched_spaces: readSpaceIds } : {}),
       }),
-      {
-        title: SEARCH_TITLE,
-        count: found,
-        items: [...subjects.values()].slice(0, MAX_PRESENTED_ITEMS),
-      },
+      { count: found, items: [...subjects.values()].slice(0, MAX_PRESENTED_ITEMS) },
     );
   };
 

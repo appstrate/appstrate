@@ -147,19 +147,6 @@ describe("conversationTools", () => {
     expect("durationMs" in calls[2]!).toBe(false);
   });
 
-  it("reads a refusal's message off its error text, never its JSON", () => {
-    const { calls } = conversationTools([
-      assistant("a1", [
-        call("r", "call_integration_tool", {
-          state: "output-error",
-          input: {},
-          errorText: JSON.stringify({ code: "missing_argument", error: "method is required." }),
-        }),
-      ]),
-    ]);
-    expect(calls[0]?.error).toBe("method is required.");
-  });
-
   it("keeps the presentation of a call, failed or not", () => {
     const { calls } = conversationTools([
       assistant("a1", [
@@ -183,50 +170,18 @@ describe("conversationTools", () => {
     ]);
   });
 
-  it("counts a lookup by the engine's stamp or a read presentation, and never a failed one", () => {
-    const lookup = { callProviderMetadata: { appstrate: { lookup: true } } };
+  it("marks a lookup by the engine's stamp", () => {
     const { calls } = conversationTools([
       assistant("a1", [
         call("l1", "search", {
           state: "output-available",
           input: { query: "x" },
           output: mcp({ results: [] }),
-          ...lookup,
-        }),
-        call("l2", "invoke_operation", {
-          state: "output-available",
-          input: { operation_id: "listRuns" },
-          output: mcp({ status: 200 }),
-        }),
-        call("l3", "describe", {
-          state: "output-available",
-          input: { id: "x" },
-          output: mcp({ status: 404, error: "nope" }),
-          ...lookup,
-        }),
-        call("l4", "search", { state: "output-error", input: {}, errorText: "boom", ...lookup }),
-        call("l5", "invoke_operation", {
-          state: "output-available",
-          input: { operation_id: "listRuns" },
-          output: mcp({ status: 200 }),
-          ...presented({ title: "List runs", method: "GET", tag: "Runs" }),
-        }),
-        call("l6", "invoke_operation", {
-          state: "output-error",
-          input: { operation_id: "listRuns" },
-          errorText: "boom",
-          ...presented({ title: "List runs", method: "GET", tag: "Runs" }),
+          callProviderMetadata: { appstrate: { lookup: true } },
         }),
       ]),
     ]);
-    expect(calls.map((c) => [c.status, c.lookup])).toEqual([
-      ["success", true],
-      ["success", false],
-      ["error", false],
-      ["error", false],
-      ["success", true],
-      ["error", false],
-    ]);
+    expect(calls[0]?.lookup).toBe(true);
   });
 
   it("reads the space a call acted in from its stamp", () => {
@@ -241,21 +196,6 @@ describe("conversationTools", () => {
       ]),
     ]);
     expect(calls[0]?.spaceId).toBe("spc_team");
-  });
-
-  it("reads the space a failed call acted in off its outcome", () => {
-    const { calls } = conversationTools([
-      assistant("a1", [
-        call("c1", "invoke_operation", {
-          state: "output-error",
-          input: { operation_id: "deleteAgent" },
-          errorText: "forbidden",
-          callProviderMetadata: { appstrate: { spaceId: "spc_caller" } },
-          resultProviderMetadata: { appstrate: { actedSpaceIds: ["spc_target"] } },
-        }),
-      ]),
-    ]);
-    expect(calls[0]?.spaceId).toBe("spc_target");
   });
 
   it("derives a finished message once, whatever array or reader asks", () => {

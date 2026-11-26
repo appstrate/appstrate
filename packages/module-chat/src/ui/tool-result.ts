@@ -100,7 +100,7 @@ function pickMessage(rec: Record<string, unknown> | null): string | undefined {
   return undefined;
 }
 
-/** A JSON object written as text (a failed call's error text, a refusal's content), else null. */
+/** A JSON object written as text (a failure's error text), else null. */
 function jsonRecordOf(text: string): Record<string, unknown> | null {
   if (!text.trimStart().startsWith("{")) return null;
   try {
@@ -112,15 +112,10 @@ function jsonRecordOf(text: string): Record<string, unknown> | null {
 
 /**
  * Human-readable error message from an unwrapped failure payload. Looks at the
- * top level first, then at a nested `error` or `refusal` object (a refused request of a
- * batch, `{ code, detail }`; an integration the platform could not list), then digs into the HTTP `body` (the real error for a 4xx/5xx
- * lives there — e.g. a problem+json `{ title, detail }`), falling back to a bare
- * `HTTP <status>` when nothing carries a message. A batch (`results`) says what its
- * first failed request says.
- *
- * A failed call reaches the card as `{ error: <its error text> }`, and that text is
- * the tool's content: a refusal's JSON (`{ code, error, hint }`) is read for its
- * message rather than shown as JSON.
+ * top level first, then at a nested `error` or `refusal` object, then digs into the HTTP `body` (the real error for a 4xx/5xx
+ * lives there — e.g. a problem+json `{ title, detail }`), only falling back to
+ * a bare `HTTP <status>` when nothing carries a message; a batch says what its first failure says.
+ * A refusal's JSON error text is read for its message, never shown as JSON.
  */
 export function extractErrorMessage(unwrapped: unknown): string | undefined {
   if (typeof unwrapped === "string") {

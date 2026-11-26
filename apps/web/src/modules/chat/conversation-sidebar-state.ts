@@ -28,11 +28,9 @@ export interface ConversationSidebarState {
   activeTab: ConversationSidebarTab;
   /** The file shown over the Files tab, null when the tab shows its list. */
   selectedFile: SidebarFile | null;
-  /** Where the shown file was opened from. */
   fileFrom: SidebarOrigin;
   /** The tool call shown over the Tools tab, null when the tab shows its list. */
   selectedToolCallId: string | null;
-  /** Where the shown tool call was opened from: its list or the summary. */
   toolCallFrom: Exclude<SidebarOrigin, "thread">;
   /** "See in the thread" looked for the shown call's card and did not find it. */
   revealMissed: boolean;
@@ -47,7 +45,6 @@ export type ConversationSidebarAction =
   | { type: "close-file" }
   | { type: "show-tool-call"; toolCallId: string; from?: Exclude<SidebarOrigin, "thread"> }
   | { type: "close-tool-call" }
-  /** What "See in the thread" found: missed, the panel opens again on the call to say so. */
   | { type: "revealed"; toolCallId: string; found: boolean }
   | { type: "show-lookups"; show: boolean }
   | { type: "conversation-change" };
@@ -65,9 +62,8 @@ export const INITIAL_CONVERSATION_SIDEBAR_STATE: ConversationSidebarState = {
 
 /**
  * State behind the chat's context panel. A file shows in the Files tab over its list, a tool call
- * in the Tools tab over its list. Closing either goes back where it was opened from: the thread
- * (a file: the panel closes), its tab's list, or the summary. Choosing a tab shows that tab's own
- * content. Whether the Tools tab lists the lookups is the reader's, kept until they change it.
+ * in the Tools tab over its list; closing either goes back where it was opened from
+ * (`SidebarOrigin`). Choosing a tab shows that tab's own content.
  *
  * Opening the panel always shows its tabs: a file is shown by a "show-file",
  * never restored. Collapsing keeps it, so it stays drawn while the panel slides

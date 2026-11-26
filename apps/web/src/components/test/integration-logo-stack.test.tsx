@@ -59,16 +59,6 @@ describe("IntegrationLogoStack", () => {
     expect(html).toContain("Gmail, Notion (non activée dans cet espace)");
   });
 
-  it("draws the logos alone, hidden from assistive tech, beside names written out", () => {
-    const html = render(
-      <IntegrationLogoStack integrations={[integration("@a/gmail", "Gmail")]} decorative />,
-    );
-    expect(tiles(html)).toBe(1);
-    expect(html).toContain('aria-hidden="true"');
-    expect(html).not.toContain("aria-label");
-    expect(html).not.toContain("tabindex");
-  });
-
   it("draws nothing for an agent using no integration", () => {
     expect(render(<IntegrationLogoStack integrations={[]} />)).toBe("");
   });

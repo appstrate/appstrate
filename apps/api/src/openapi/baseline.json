@@ -30142,7 +30142,8 @@
                             "type": "string"
                           },
                           "display_name": {
-                            "type": "string"
+                            "type": "string",
+                            "minLength": 1
                           },
                           "icon": {
                             "type": "string",

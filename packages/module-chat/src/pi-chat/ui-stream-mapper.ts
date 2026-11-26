@@ -26,6 +26,7 @@
 
 import type { ProviderMetadata, UIMessageChunk } from "ai";
 import { isTurnBudgetNote } from "@appstrate/core/chat-turn-metadata";
+import type { ToolPresentation } from "@appstrate/core/mcp-presentation";
 import type {
   AgentSessionEvent,
   PiAssistantMessageEvent,
@@ -132,11 +133,7 @@ export class PiChatUiStreamMapper {
     this.onFirstModelEvent = options.onFirstModelEvent;
   }
 
-  /**
-   * The tools whose calls only look things up (`isLookupTool`), known once the platform's MCP
-   * surface is read (before the first model call). A call of one is stamped `providerMetadata.appstrate.lookup` from its
-   * first chunk, so the card that folds reads together places it before any result arrives.
-   */
+  /** Stamped `lookup` from a call's first chunk, so the UI folds it before its result arrives. */
   describeLookupTools(tools: ReadonlySet<string>): void {
     this.lookupTools = tools;
   }
@@ -337,12 +334,8 @@ export class PiChatUiStreamMapper {
   }
 
   /**
-   * A tool's outcome, failed exactly when Pi says so (`isError`: the tool's MCP result was an error,
-   * or it threw). What the UI reads of the outcome rides the result's `providerMetadata.appstrate`
-   * ({@link ToolOutcomeMetadata}), because `@assistant-ui/ai-sdk` hands a card the part's
-   * `callProviderMetadata` only and turns a failure into `{ error: errorText }`: the card and the
-   * context panel read it off the stored part (`resultProviderMetadata`), which the AI SDK keeps
-   * on a success and on a failure alike, where an error chunk carries no output.
+   * What the UI reads of an outcome rides `providerMetadata.appstrate`: the AI SDK stores it
+   * (`resultProviderMetadata`) on a failure too, whose chunk carries no output.
    */
   private mapToolExecutionEnd(ev: {
     toolCallId: string;
@@ -350,10 +343,10 @@ export class PiChatUiStreamMapper {
     isError: boolean;
     durationMs?: number;
   }): UIMessageChunk[] {
-    const { output, outcome } = splitOutcome(persistedToolOutput(ev.result));
+    const { output, presentation } = persistedToolOutput(ev.result);
     const acted = ev.isError ? actedSpacesOf(output) : undefined;
     const appstrate: ToolOutcomeMetadata = {
-      ...outcome,
+      ...(presentation && { presentation }),
       ...(acted && { actedSpaceIds: acted }),
       ...(ev.durationMs !== undefined && { durationMs: ev.durationMs }),
     };
@@ -502,23 +495,27 @@ function toolCallAt(partial: unknown, index: number): PiToolCallBlock | undefine
  * whatever else the result carries, minus `details`. The in-memory Pi result
  * itself is untouched (`mcp-tools.ts` builds it with `details`).
  */
-function persistedToolOutput(result: unknown): unknown {
-  if (result == null) return null;
-  if (typeof result !== "object" || Array.isArray(result)) return result;
-  if (!("details" in result)) return result;
-  const { details: _details, persistedContent, ...rest } = result as Record<string, unknown>;
-  return Array.isArray(persistedContent) ? { ...rest, content: persistedContent } : rest;
+function persistedToolOutput(result: unknown): {
+  output: unknown;
+  presentation?: ToolPresentation;
+} {
+  if (result == null) return { output: null };
+  if (typeof result !== "object" || Array.isArray(result)) return { output: result };
+  const {
+    details: _details,
+    persistedContent,
+    presentation,
+    ...rest
+  } = result as Record<string, unknown> & { presentation?: ToolPresentation };
+  return {
+    output: Array.isArray(persistedContent) ? { ...rest, content: persistedContent } : rest,
+    ...(presentation && { presentation }),
+  };
 }
 
-/**
- * What a call's outcome tells the UI, as `providerMetadata.appstrate` of its result chunk:
- * - `presentation`: how the platform presents the call (`mcp-tools.ts`);
- * - `durationMs`: how long the tool ran, as Pi measured it;
- * - `actedSpaceIds`: on a failure, the spaces the call acted in (`mcp-tools.ts`), which a success
- *   carries in its output and a failure, reduced to its error text, keeps here.
- */
+/** `actedSpaceIds`: a failure's, which keeps no output to carry them. */
 type ToolOutcomeMetadata = {
-  presentation?: unknown;
+  presentation?: ToolPresentation;
   durationMs?: number;
   actedSpaceIds?: readonly unknown[];
 };
@@ -529,33 +526,18 @@ function actedSpacesOf(output: unknown): readonly unknown[] | undefined {
   return Array.isArray(acted) ? acted : undefined;
 }
 
-/** The output without what the UI reads as metadata ({@link ToolOutcomeMetadata}), kept apart. */
-function splitOutcome(output: unknown): { output: unknown; outcome: ToolOutcomeMetadata } {
-  if (!output || typeof output !== "object" || Array.isArray(output))
-    return { output, outcome: {} };
-  if (!("presentation" in output)) return { output, outcome: {} };
-  const { presentation, ...rest } = output as Record<string, unknown>;
-  return {
-    output: rest,
-    outcome: {
-      ...(presentation !== undefined && { presentation }),
-    },
-  };
-}
-
 /** Flatten a Pi tool result (`AgentToolResult` content blocks) to text for error output. */
 function stringifyToolResult(result: unknown): string {
   if (typeof result === "string") return result;
   if (result && typeof result === "object") {
     const content = (result as { content?: unknown }).content;
     if (Array.isArray(content)) {
-      // The turn-budget line is the model's, not part of the error the reader sees.
-      return content
-        .map((c) =>
-          c && typeof c === "object" && "text" in c ? String((c as { text: unknown }).text) : "",
-        )
-        .filter((text) => !isTurnBudgetNote(text))
-        .join("");
+      const texts = content.map((c) =>
+        c && typeof c === "object" && "text" in c ? String((c as { text: unknown }).text) : "",
+      );
+      // The model's turn-budget note, always the last block: a block earlier is a server's text.
+      if (isTurnBudgetNote(texts.at(-1) ?? "")) texts.pop();
+      return texts.join("");
     }
     return JSON.stringify(result);
   }

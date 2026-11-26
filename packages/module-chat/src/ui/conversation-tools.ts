@@ -1,13 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * A conversation's tool calls, for the context panel: what the assistant did, in order. Pure, like `conversationStats`.
- *
- * It reads the conversation's messages as the open chat holds them (`live-conversation.ts`): its
- * history and the turn in flight. A call without an outcome is running while its turn runs;
- * in a turn that ended it was cut short. What a call's outcome says beyond its output is read off
- * the stamp the engine put on it (`callOutcome`, `pi-chat/ui-stream-mapper.ts`), on a success and
- * on a failure alike: its presentation, how long it ran.
+ * A conversation's tool calls, for the context panel, in order: pure, like `conversationStats`. It
+ * reads the messages the open chat holds (`live-conversation.ts`), the turn in flight included.
+ * What counts as a lookup lives here too, for the panel and the thread's activity group.
  */
 
 import { getToolName, isToolUIPart, type UIMessage } from "ai";
@@ -15,7 +11,6 @@ import { unwrapMcpResult } from "@appstrate/core/mcp-result";
 import type { ToolPresentation } from "@appstrate/core/mcp-presentation";
 import { deriveToolPhase, extractErrorMessage } from "./tool-result.ts";
 import { callOutcome, callPresentation } from "./tool-presentation.ts";
-import { isLookupCall } from "./activity-group.ts";
 import { callSpaceOf } from "./conversation-scope.ts";
 import { extractRunId } from "./run-events.ts";
 
@@ -54,6 +49,43 @@ export interface ConversationTools {
 
 type ToolPart = Extract<UIMessage["parts"][number], { toolCallId: string }>;
 
+/** The engine stamped the call a lookup before it ran (`appstrate.lookup`, `ui-stream-mapper.ts`). */
+function stampedLookup(callMetadata: unknown): boolean {
+  return (
+    (callMetadata as { appstrate?: { lookup?: unknown } } | undefined)?.appstrate?.lookup === true
+  );
+}
+
+export interface GroupablePart {
+  readonly type: string;
+  readonly toolCallId?: string;
+  readonly providerMetadata?: unknown;
+  readonly status?: { readonly type: string } | undefined;
+  readonly result?: unknown;
+  readonly isError?: boolean | undefined;
+}
+
+/** The thread's group path of an assistant part (`groupBy`, drawn by `activity-group.tsx`). */
+export function activityGroupOf(
+  part: GroupablePart,
+): readonly ("group-activity" | "group-reasoning")[] | null {
+  if (part.type === "reasoning") return ["group-activity", "group-reasoning"];
+  if (part.type === "tool-call" && stampedLookup(part.providerMetadata)) return ["group-activity"];
+  return null;
+}
+
+/** A lookup, unless it failed: a stamped one, or presented as a read once its result landed. */
+export function isLookupCall(
+  callMetadata: unknown,
+  presentation: ToolPresentation | undefined,
+  status: ConversationToolStatus,
+): boolean {
+  if (status === "error" || status === "denied") return false;
+  if (stampedLookup(callMetadata)) return true;
+  const method = presentation?.method?.toUpperCase();
+  return method === "GET" || method === "HEAD";
+}
+
 function statusOf(part: ToolPart, output: unknown, turnRuns: boolean): ConversationToolStatus {
   switch (part.state) {
     case "output-denied":
@@ -72,16 +104,12 @@ function statusOf(part: ToolPart, output: unknown, turnRuns: boolean): Conversat
   }
 }
 
-/**
- * Each message's calls, kept while the message object is: a turn streams by replacing its last
- * message only, so a finished message is derived once and its calls keep their identity.
- */
+/** A turn streams by replacing its last message only: a finished one is derived once. */
 const byMessage = new WeakMap<
   UIMessage,
   { turn: number; turnRuns: boolean; calls: ConversationToolCall[] }
 >();
 
-/** Each messages array's calls: the panel's readers of one frame share one derivation. */
 const byMessages = new WeakMap<
   readonly UIMessage[],
   { running: boolean; tools: ConversationTools }
@@ -129,9 +157,7 @@ function messageCalls(message: UIMessage, turn: number, turnRuns: boolean): Conv
   return calls;
 }
 
-/**
- * The calls of `messages`, in order. `running`: the last message is the turn in flight.
- */
+/** The calls of `messages`, in order. `running`: the last message is the turn in flight. */
 export function conversationTools(
   messages: readonly UIMessage[],
   { running = false }: { running?: boolean } = {},

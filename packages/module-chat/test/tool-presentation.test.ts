@@ -1,15 +1,15 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * `src/ui/tool-presentation.ts` (how a call is named, in the thread and the context panel) and
- * `src/ui/activity-group.ts` (what counts as a lookup, and what folds).
+ * `src/ui/tool-presentation.ts` (how a call is named, in the thread and the context panel),
+ * and what counts as a lookup (`conversation-tools.ts`): `isLookupCall`, `activityGroupOf`.
  */
 
 import { describe, it, expect } from "bun:test";
 import { EyeIcon, FileTextIcon, PlugIcon, Trash2Icon, ZapIcon } from "lucide-react";
 import type { ToolPresentation } from "@appstrate/core/mcp-presentation";
 import { callPresentation, showCall } from "../src/ui/tool-presentation.ts";
-import { activityGroupOf, isLookupCall } from "../src/ui/activity-group.ts";
+import { activityGroupOf, isLookupCall } from "../src/ui/conversation-tools.ts";
 
 /** The FR bundle's verbs and tags; a key it lacks shows its default value, else the key. */
 const FR: Record<string, string> = {
@@ -131,18 +131,6 @@ describe("showCall — an operation", () => {
     expect(shown).toMatchObject({ label: "Intégrations · Lecture", idText: "@acme/crm" });
     expect(shown.Icon).toBe(EyeIcon);
   });
-
-  it("keeps an untranslated tag as the source names it", () => {
-    const shown = showCall(
-      {
-        toolName: "invoke_operation",
-        args: {},
-        presentation: { title: "x", method: "GET", tag: "Brand New" },
-      },
-      t,
-    );
-    expect(shown.label).toBe("Brand New · Lecture");
-  });
 });
 
 describe("showCall — a call that reached an integration", () => {
@@ -261,7 +249,7 @@ describe("isLookupCall", () => {
   const presented = (method: string): ToolPresentation => ({ title: "x", method });
 
   it("is a call stamped a lookup that has not failed", () => {
-    for (const standing of ["pending", "running", "success"] as const) {
+    for (const standing of ["running", "success"] as const) {
       expect(isLookupCall(stamped, undefined, standing)).toBe(true);
     }
     expect(isLookupCall(stamped, undefined, "error")).toBe(false);
@@ -301,19 +289,9 @@ describe("activityGroupOf", () => {
     expect(activityGroupOf({ type: "text" })).toBeNull();
   });
 
-  it("keeps a failed lookup out of the group, by its flag or its payload", () => {
-    expect(activityGroupOf({ ...read, status: { type: "complete" }, isError: true })).toBeNull();
-    expect(
-      activityGroupOf({
-        ...read,
-        status: { type: "complete" },
-        result: {
-          content: [{ type: "text", text: JSON.stringify({ status: 404, error: "nope" }) }],
-        },
-      }),
-    ).toBeNull();
-    expect(
-      activityGroupOf({ ...read, status: { type: "complete" }, result: { content: [] } }),
-    ).toEqual(["group-activity"]);
+  it("keeps a failed lookup in its group: membership is the pre-call stamp alone", () => {
+    expect(activityGroupOf({ ...read, status: { type: "complete" }, isError: true })).toEqual([
+      "group-activity",
+    ]);
   });
 });

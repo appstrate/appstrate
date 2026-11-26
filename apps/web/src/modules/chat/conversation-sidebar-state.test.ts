@@ -270,7 +270,7 @@ describe("conversation sidebar tool calls", () => {
     expect(shownToolCallId(missed)).toBe("call_1");
     expect(revealMissed(missed)).toBe(true);
 
-    // Another call, the list or a later success no longer carry the miss.
+    // Another call or the list no longer carry the miss.
     const other = conversationSidebarReducer(missed, {
       type: "show-tool-call",
       toolCallId: "call_2",
@@ -279,11 +279,5 @@ describe("conversation sidebar tool calls", () => {
     expect(revealMissed(conversationSidebarReducer(missed, { type: "close-tool-call" }))).toBe(
       false,
     );
-    const found = conversationSidebarReducer(missed, {
-      type: "revealed",
-      toolCallId: "call_1",
-      found: true,
-    });
-    expect(revealMissed(found)).toBe(false);
   });
 });

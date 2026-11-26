@@ -1,44 +1,25 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { useEffect, useState } from "react";
+import { createKeyedLocalStore } from "../../stores/local-storage";
+import { toggleValue } from "../../lib/toggle-value";
 
 /** The summary's folding sections. */
 export type SummarySectionId = "usage" | "access" | "details";
 
-const STORAGE_KEY = "appstrate:chat-summary-open";
-
-function readOpen(): Set<string> {
-  try {
-    const stored: unknown = JSON.parse(localStorage.getItem(STORAGE_KEY) ?? "[]");
-    return new Set(Array.isArray(stored) ? stored.filter((id) => typeof id === "string") : []);
-  } catch {
-    return new Set();
-  }
-}
-
-function storeOpen(open: ReadonlySet<string>) {
-  try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify([...open]));
-  } catch {
-    // Private mode or blocked storage: the sections just fold again on the next page.
-  }
-}
+const openSections = createKeyedLocalStore<string[]>(
+  "appstrate:chat-summary-",
+  (value) => (Array.isArray(value) ? value.filter((v): v is string => typeof v === "string") : []),
+  [],
+);
 
 /**
  * Which of the summary's sections the reader unfolded: all folded at first, so the summary reads
  * at a glance, then as the reader left them, remembered per browser.
  */
 export function useSummarySections() {
-  const [open, setOpen] = useState<ReadonlySet<string>>(readOpen);
-  useEffect(() => storeOpen(open), [open]);
+  const [open, setOpen] = openSections.useValue("open");
   return {
-    isOpen: (id: SummarySectionId) => open.has(id),
-    setOpen: (id: SummarySectionId, next: boolean) =>
-      setOpen((current) => {
-        const updated = new Set(current);
-        if (next) updated.add(id);
-        else updated.delete(id);
-        return updated;
-      }),
+    isOpen: (id: SummarySectionId) => open.includes(id),
+    toggle: (id: SummarySectionId) => setOpen(toggleValue(open, id)),
   };
 }

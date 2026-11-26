@@ -37,11 +37,7 @@ export function AgentGlyph({
   );
 }
 
-/**
- * The glyph of an agent named by its prompt name (a directive's id) or its package id (a tool
- * call's subject), from the commands query (one request per conversation scope: the key is shared
- * with the `/` menu).
- */
+/** The glyph of an agent the commands query knows (its key is shared with the `/` menu). */
 export function KnownAgentGlyph({
   agentRef,
   label,

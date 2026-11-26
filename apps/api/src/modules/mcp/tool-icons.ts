@@ -1,15 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * The icon of each platform tool in `tools/list` (MCP `Tool.icons`, SEP-973), for a client that
- * draws one. Inline `data:` SVG: a client fetches nothing, and the server reveals no URL. One per
- * theme, the stroke contrasting with its background.
- *
- * The shapes are Lucide's (ISC licence, https://lucide.dev), the icon set of the dashboard, which
- * picks its own glyph per tool in its chat: the two need not match.
- *
- * Keyed by {@link McpToolName}, so a tool renamed or added without its icon fails to typecheck
- * (the union is held to the declared tools by the `mcp catalog` unit test).
+ * The icon of each platform tool in `tools/list` (MCP `Tool.icons`): inline `data:` SVG, so a
+ * client fetches nothing, one per theme. Shapes from Lucide (ISC licence, https://lucide.dev).
  */
 
 import type { Tool } from "@modelcontextprotocol/sdk/types.js";

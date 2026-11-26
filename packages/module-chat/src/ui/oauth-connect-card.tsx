@@ -123,6 +123,7 @@ export function OAuthConnectCard({
   state,
   packageId,
   toolCallId,
+  anchorsCall = false,
   errorText,
   runStarted = false,
   expiresAt,
@@ -138,6 +139,8 @@ export function OAuthConnectCard({
    * axis of the resume claim (see {@link claimResume}).
    */
   toolCallId?: string;
+  /** The call's own card, revealed by the context panel; not one drawn under its run's. */
+  anchorsCall?: boolean;
   /** Set when the initiate call itself failed (no auth url will ever arrive). */
   errorText?: string;
   /** The offer came from a run that started without the integration. */
@@ -147,7 +150,7 @@ export function OAuthConnectCard({
   /** The space the call acted in (the call names one): the card reads there. */
   spaceId?: string;
 }) {
-  const anchor = useRevealAnchor(toolCallId);
+  const anchor = useRevealAnchor(anchorsCall ? toolCallId : undefined);
   const aui = useAui();
   const transport = useChatTransport();
   // The scoping headers alone: the host keeps this function across a list-filter change, which

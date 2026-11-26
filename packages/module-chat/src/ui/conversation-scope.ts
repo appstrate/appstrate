@@ -118,10 +118,8 @@ export function limitedSpaceOf(
 /**
  * The space a tool call acted in, as the engine stamped it on the call
  * (`providerMetadata.appstrate.spaceId`): read from the call, never from the conversation's present
- * limit, which can change afterwards. `undefined` for a call that acts in no space.
- *
- * `resultProviderMetadata` is the stored part's, where a failure's resolved spaces ride
- * (`callOutcome`): a failure keeps no result.
+ * limit, which can change afterwards. `undefined` for a call that acts in no space. A failure's
+ * resolved spaces ride on the stored part's `resultProviderMetadata` (`callOutcome`).
  */
 export function callSpaceOf(part: {
   providerMetadata?: unknown;

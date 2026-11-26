@@ -7,33 +7,8 @@ import { useAdmittingSpaces } from "../../hooks/use-overview-mode";
 import { useRunAgentName } from "../../hooks/use-run-agent-name";
 import { useListScope } from "../../hooks/use-org-scope";
 
-/** Read at most this many of a conversation's runs or files: what the Runs and Files tabs list. */
-const LIST_LIMIT = 100;
-
-/**
- * What a panel read shows: its answer once it has one, kept through a refetch that fails; its
- * error only while it holds nothing; else its wait (a read on its way, or held while the panel is
- * closed).
- */
-export function readShown(query: { data: unknown; error: unknown }): "ready" | "error" | "pending" {
-  if (query.data !== undefined) return "ready";
-  return query.error ? "error" : "pending";
-}
-
-interface ListRead {
-  /** Rows to read: the tab's list by default, the summary asks only for the ones it draws. */
-  limit?: number;
-}
-
-/**
- * The runs a conversation launched, in every space the reader reads runs in, newest first. `total`
- * is the server's count of every matching run, whatever `limit` read.
- */
-export function useConversationRuns(
-  conversationId: string | null,
-  active: boolean,
-  { limit = LIST_LIMIT }: ListRead = {},
-) {
+/** The runs a conversation launched, in every space the reader reads runs in, newest first. */
+export function useConversationRuns(conversationId: string | null, active: boolean) {
   const admitting = useAdmittingSpaces("runs");
   const canRead = admitting.length > 0;
   // Spanning: the conversation's runs are every space's, polled (the SSE stream carries one space).
@@ -43,10 +18,7 @@ export function useConversationRuns(
   const { data: agents } = useAgents({ spanning: true, enabled: shown });
   const agentById = new Map((agents ?? []).map((agent) => [agent.id, agent] as const));
   const agentName = useRunAgentName({ spanning: true, enabled: shown });
-  const filters = {
-    chat_session_id: conversationId ?? undefined,
-    limit,
-  };
+  const filters = { chat_session_id: conversationId ?? undefined, limit: 100 };
   // A conversation belongs to the organization: the runs it launched, in every space.
   const query = $api.useQuery(
     "get",
@@ -68,20 +40,13 @@ export function useConversationRuns(
   };
 }
 
-/**
- * The files of a conversation, in every space the reader reads files in, newest first. The list
- * counts nothing: `hasMore` says whether rows past `limit` exist.
- */
-export function useConversationFiles(
-  conversationId: string | null,
-  active: boolean,
-  { limit = LIST_LIMIT }: ListRead = {},
-) {
+/** The files of a conversation, in every space the reader reads files in, newest first. */
+export function useConversationFiles(conversationId: string | null, active: boolean) {
   const admitting = useAdmittingSpaces("files");
   const query = useFiles({
     spanning: true,
     contextChatSessionId: conversationId ?? undefined,
-    limit,
+    limit: 100,
     enabled: active && !!conversationId,
   });
   return {

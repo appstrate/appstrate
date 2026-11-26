@@ -12,9 +12,8 @@
  * Tone is driven by the actual result (`deriveToolPhase`), not the verb — a
  * failed call always renders as an error.
  *
- * One shared `<ToolCallCard>` does the work; the cards of the tools below are thin wrappers
- * that name the call as the context panel does (`showCall`), from the presentation read off its
- * stored part (`useCallPresentation`). The thread picks a card by tool name (`thread.tsx`).
+ * One shared `<ToolCallCard>` does the work; the cards below name the call as the context panel
+ * does (`showCall`). The thread picks a card by tool name (`thread.tsx`).
  * `invoke_operation` additionally short-circuits to the interactive
  * `OAuthConnectCard` when it kicks off an integration OAuth flow.
  */
@@ -27,7 +26,6 @@ import { Button } from "@appstrate/ui/components/button";
 import { Spinner } from "@appstrate/ui/components/spinner";
 import { StructuredOutput } from "@appstrate/ui/components/structured-output";
 import { Modal } from "./modal.tsx";
-import { callSpaceOf } from "./conversation-scope.ts";
 import { useChatHost } from "./runtime-context.ts";
 import { ToolCallDetail } from "./tool-call-detail.tsx";
 import { REVEAL_RING_CLASS, useRevealAnchor } from "./reveal-tool-call.ts";
@@ -57,7 +55,7 @@ import {
 } from "./package-created.ts";
 import { unwrapMcpResult } from "@appstrate/core/mcp-result";
 import { showCall } from "./tool-presentation.ts";
-import { useCallPresentation } from "./use-call-presentation.ts";
+import { cardSpaceOf, type StoredResult } from "./use-call-presentation.ts";
 import { SubjectGlyph, SubjectStack } from "./subject-glyph.tsx";
 import type { PresentationSubject } from "@appstrate/core/mcp-presentation";
 import {
@@ -245,7 +243,10 @@ export function ToolCallCard({
   );
 }
 
-type AnyToolProps = ToolCallMessagePartProps<Record<string, unknown>, unknown>;
+/** A card's props: its part, and what its stored part says (`useStoredResults`). */
+export type ToolCardProps = ToolCallMessagePartProps<Record<string, unknown>, unknown> & {
+  stored?: StoredResult | undefined;
+};
 
 /**
  * A finished run's detail: its structured output as labelled facts, the raw
@@ -287,7 +288,7 @@ function RunOutputDetails({
  * extraction. Hooks need a component, and `InvokeOperationTool` reaches this
  * branch conditionally, so the `useMemo` cannot live in its body.
  */
-function RunLaunchCard(props: AnyToolProps): React.ReactNode {
+function RunLaunchCard(props: ToolCardProps): React.ReactNode {
   const { t } = useChatHost();
   const runId = extractRunId(props.result);
   const initialFiles = React.useMemo(() => extractRunFiles(props.result), [props.result]);
@@ -316,7 +317,7 @@ function RunLaunchCard(props: AnyToolProps): React.ReactNode {
   const packageId =
     extractRunPackageId(props.result) ?? (agentLabel?.startsWith("@") ? agentLabel : undefined);
   // The call names the space the run ran in: the card reads and links there.
-  const spaceId = callSpaceOf(props);
+  const spaceId = cardSpaceOf(props);
   return (
     <ChatRunProgressCard
       toolCallId={props.toolCallId}
@@ -337,11 +338,11 @@ function RunLaunchCard(props: AnyToolProps): React.ReactNode {
 /** `invoke_operation`'s arguments, as its cards read them. */
 type InvokeOperationArgs = { operation_id?: string; path_params?: { packageId?: string } };
 
-export function InvokeOperationTool(props: AnyToolProps) {
+export function InvokeOperationTool(props: ToolCardProps) {
   const { t } = useChatHost();
   const { result } = props;
   const args = props.args as InvokeOperationArgs | undefined;
-  const presentation = useCallPresentation(props.toolCallId);
+  const presentation = props.stored?.presentation;
   const opId = args?.operation_id ?? "";
   const phase = deriveToolPhase(props);
 
@@ -357,8 +358,9 @@ export function InvokeOperationTool(props: AnyToolProps) {
     if (offer || phase !== "success") {
       return (
         <OAuthConnectCard
+          anchorsCall
           // It reads the integration where the call acted.
-          spaceId={callSpaceOf(props)}
+          spaceId={cardSpaceOf(props)}
           authUrl={offer?.authUrl}
           state={offer?.state}
           // The session route returns no `packageId`; the call's own path
@@ -382,7 +384,7 @@ export function InvokeOperationTool(props: AnyToolProps) {
   }
 
   const shown = showCall({ toolName: "invoke_operation", args, presentation }, t);
-  const spaceId = callSpaceOf(props);
+  const spaceId = cardSpaceOf(props);
   const created =
     phase === "success" ? packageCreatedByOperation(opId, unwrapMcpResult(result)) : null;
   return (
@@ -438,11 +440,11 @@ function CreatedPackageLink({
   );
 }
 
-export function ImportPackageFileTool(props: AnyToolProps) {
+export function ImportPackageFileTool(props: ToolCardProps) {
   const { t } = useChatHost();
-  const presentation = useCallPresentation(props.toolCallId);
+  const presentation = props.stored?.presentation;
   const phase = deriveToolPhase(props);
-  const spaceId = callSpaceOf(props);
+  const spaceId = cardSpaceOf(props);
   const created =
     phase === "success" ? packageCreatedByImport(unwrapMcpResult(props.result)) : null;
   return (
@@ -464,9 +466,9 @@ export function ImportPackageFileTool(props: AnyToolProps) {
   );
 }
 
-export function SearchTool(props: AnyToolProps) {
+export function SearchTool(props: ToolCardProps) {
   const { t } = useChatHost();
-  const presentation = useCallPresentation(props.toolCallId);
+  const presentation = props.stored?.presentation;
   return (
     <ToolCallCard
       phase={deriveToolPhase(props)}
@@ -484,7 +486,7 @@ export function SearchTool(props: AnyToolProps) {
       isError={props.isError}
       toolCallId={props.toolCallId}
       timing={props.timing}
-      spaceId={callSpaceOf(props)}
+      spaceId={cardSpaceOf(props)}
     />
   );
 }
@@ -503,14 +505,14 @@ export function SearchTool(props: AnyToolProps) {
 // once the call settles — by then it may have lapsed, so the card gets its expiry.
 // Zero offers adds nothing: unlike the invoke_operation connect branch there is
 // no placeholder card here, because the run panel already holds its geometry.
-export function RunAndWaitTool(props: AnyToolProps) {
+export function RunAndWaitTool(props: ToolCardProps) {
   return (
     <>
       <RunLaunchCard {...props} />
       {extractRunAndWaitAuthOffers(props).map((offer) => (
         <OAuthConnectCard
           key={offer.authUrl}
-          spaceId={callSpaceOf(props)}
+          spaceId={cardSpaceOf(props)}
           authUrl={offer.authUrl}
           state={offer.state}
           packageId={offer.packageId}

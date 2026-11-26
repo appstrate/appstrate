@@ -11,7 +11,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **`@appstrate/core/mcp-presentation`**: how a client shows one MCP tool call.
   `TOOL_PRESENTATION_META_KEY` (`dev.appstrate/presentation`) names the `_meta` entry the platform
-  stamps on every tool result, `toolPresentationSchema` describes it (types `ToolPresentation`,
+  stamps on a tool result, `toolPresentationSchema` describes it (types `ToolPresentation`,
   `PresentationSubject`; a search lists at most `MAX_PRESENTED_ITEMS`) and `readToolPresentation`
   reads it. `TOOL_LOOKUP_META_KEY` (`dev.appstrate/lookup`) marks, on a tool descriptor, a tool
   whose calls only look things up although `readOnlyHint` is withheld; `isLookupTool` reads either.
@@ -24,8 +24,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- **`unwrapMcpResult`** (`@appstrate/core/mcp-result`) leaves the turn-budget line out of a
-  plain-text result: a failed call's message no longer ends with the model's `[turn budget] …`.
+- **`unwrapMcpResult`** (`@appstrate/core/mcp-result`) leaves the turn-budget line, the last
+  block, out of a plain-text result: a failed call's message no longer ends with the model's `[turn budget] …`.
 
 ### Removed
 

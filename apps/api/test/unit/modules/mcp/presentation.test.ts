@@ -1,19 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
 
-/**
- * The presentation every tool result carries (`_meta["dev.appstrate/presentation"]`): stamped
- * once by `presentTools`, from the descriptor unless the tool knows more, never over what a handler
- * stamped itself.
- */
+/** `presentTools`: the presentation a tool knows of its call, never over what its handler stamped. */
 
 import { describe, it, expect } from "bun:test";
 import type { CallToolResult, Tool } from "@modelcontextprotocol/sdk/types.js";
 import type { AppstrateToolDefinition } from "@appstrate/mcp-transport";
-import {
-  isLookupTool,
-  readToolPresentation,
-  TOOL_LOOKUP_META_KEY,
-} from "@appstrate/core/mcp-presentation";
+import { readToolPresentation, type PresentationSubject } from "@appstrate/core/mcp-presentation";
 import { getCatalog } from "../../../../src/modules/mcp/catalog.ts";
 import { collectModuleOpenApi } from "../../../../../../scripts/lib/module-openapi.ts";
 import { presentTools, withPresentation } from "../../../../src/modules/mcp/presentation.ts";
@@ -40,149 +32,96 @@ async function call(definition: AppstrateToolDefinition, args: Record<string, un
 }
 
 describe("presentTools", () => {
-  it("names a call nothing describes as MCP names its tool: title, then annotations.title, then name", async () => {
-    const titled = async (descriptor: Partial<Tool>) =>
-      (await call(tool({ name: "list_files", ...descriptor }, text({})))).presentation;
-    expect(await titled({})).toEqual({ title: "list_files" });
-    expect(await titled({ annotations: { title: "List" } })).toEqual({ title: "List" });
-    expect(await titled({ title: "List files", annotations: { title: "List" } })).toEqual({
-      title: "List files",
-    });
+  it("keeps what a handler stamped, and stamps nothing a tool knows nothing of", async () => {
+    const own = { count: 3 };
+    const stamped = await call(tool({ name: "search" }, withPresentation(text({}), own)));
+    expect(stamped.presentation).toEqual(own);
+    const plain = await call(tool({ name: "read", annotations: { title: "Read" } }, text({})));
+    expect(plain.result).toEqual(text({}));
   });
 
-  it("stamps the descriptor's presentation on a result nothing describes", async () => {
-    const { result, presentation } = await call(
-      tool({ name: "read", annotations: { title: "Read resource", readOnlyHint: true } }, text({})),
-    );
-    expect(presentation).toEqual({ title: "Read resource" });
-    // The model's channel is untouched.
-    expect(result.content).toEqual(text({}).content);
-  });
-
-  it("keeps what a handler stamped itself", async () => {
-    const own = { title: "Search", count: 3 };
-    const { presentation } = await call(tool({ name: "search" }, withPresentation(text({}), own)));
-    expect(presentation).toEqual(own);
-  });
-
-  it("names an operation by its OpenAPI summary, tag and method", async () => {
+  it("names an operation by its tag and method", async () => {
     const op = [...getCatalog().operations.values()].find(
       (candidate) => candidate.method === "DELETE" && candidate.tags.length > 0,
     )!;
     const { presentation } = await call(tool({ name: "invoke_operation" }, text({})), {
       operation_id: op.operationId,
     });
-    expect(presentation).toMatchObject({
-      title: op.summary || op.operationId,
-      tag: op.tags[0],
-      method: "DELETE",
+    expect(presentation).toMatchObject({ tag: op.tags[0], method: "DELETE" });
+    const unknown = await call(tool({ name: "invoke_operation" }, text({})), {
+      operation_id: "noSuchOperation",
     });
+    expect(unknown.presentation).toBeUndefined();
   });
 
-  it("names the agent, skill or integration an operation's path targets", async () => {
+  it("names the package an operation's path aims at, from its arguments", async () => {
     const ops = [...getCatalog().operations.values()];
-    const byPath = (pattern: RegExp) => ops.find((op) => pattern.test(op.pathTemplate))!;
-    const cases = [
-      [byPath(/^\/api\/agents\/\{scope\}\/\{name\}\/model$/), "agent"],
-      [byPath(/^\/api\/packages\/skills\/\{scope\}\/\{name\}$/), "skill"],
-      [byPath(/^\/api\/packages\/integrations\/\{scope\}\/\{name\}$/), "integration"],
-    ] as const;
-    for (const [op, kind] of cases) {
+    const at = (path: RegExp | string) =>
+      ops.find((op) =>
+        typeof path === "string" ? op.pathTemplate === path : path.test(op.pathTemplate),
+      )!.operationId;
+    const acme = { scope: "acme", name: "triage" };
+    const cases: [string, Record<string, string>, PresentationSubject | undefined][] = [
+      [
+        at(/^\/api\/agents\/\{scope\}\/\{name\}\/model$/),
+        acme,
+        { kind: "agent", id: "@acme/triage" },
+      ],
+      [
+        at(/^\/api\/packages\/skills\/\{scope\}\/\{name\}$/),
+        acme,
+        { kind: "skill", id: "@acme/triage" },
+      ],
+      [
+        at(/^\/api\/packages\/integrations\/\{scope\}\/\{name\}$/),
+        acme,
+        { kind: "integration", id: "@acme/triage" },
+      ],
+      // A run's or a schedule's operation names the agent it is under, whatever its tag.
+      ["runAgent", { scope: "@acme", name: "triage" }, { kind: "agent", id: "@acme/triage" }],
+      ["createSchedule", acme, { kind: "agent", id: "@acme/triage" }],
+      // The parameter after the kind's segment, whatever its name.
+      [
+        at("/api/me/integration-pins/{agentPackageId}/integrations/{integrationPackageId}"),
+        { agentPackageId: "@acme/triage", integrationPackageId: "@acme/gmail" },
+        { kind: "integration", id: "@acme/gmail" },
+      ],
+      // The arguments leave the id out, or the path names no package.
+      ["runAgent", { scope: "acme" }, undefined],
+      [at("/api/runs/{id}"), { id: "run_1" }, undefined],
+    ];
+    for (const [operation_id, path_params, subject] of cases) {
       const { presentation } = await call(tool({ name: "invoke_operation" }, text({})), {
-        operation_id: op.operationId,
-        path_params: { scope: "acme", name: "triage" },
+        operation_id,
+        path_params,
       });
-      expect(presentation?.subject).toEqual({ kind, id: "@acme/triage" });
+      expect(presentation?.subject).toEqual(subject);
     }
-  });
-
-  it("names the agent a run's or a schedule's operation is under, whatever its tag", async () => {
-    const cases = [
-      ["runAgent", "Runs"],
-      ["createSchedule", "Schedules"],
-    ] as const;
-    for (const [operationId, tag] of cases) {
-      const { presentation } = await call(tool({ name: "invoke_operation" }, text({})), {
-        operation_id: operationId,
-        path_params: { scope: "@acme", name: "triage" },
-      });
-      expect(presentation).toMatchObject({ tag, subject: { kind: "agent", id: "@acme/triage" } });
-    }
-  });
-
-  it("takes the id from the parameter after the kind's segment, whatever its name", async () => {
-    const op = [...getCatalog().operations.values()].find(
-      (candidate) =>
-        candidate.pathTemplate ===
-        "/api/me/integration-pins/{agentPackageId}/integrations/{integrationPackageId}",
-    )!;
-    const { presentation } = await call(tool({ name: "invoke_operation" }, text({})), {
-      operation_id: op.operationId,
-      path_params: { agentPackageId: "@acme/triage", integrationPackageId: "@acme/gmail" },
-    });
-    expect(presentation?.subject).toEqual({ kind: "integration", id: "@acme/gmail" });
-  });
-
-  it("names no subject when the arguments leave the package's id out", async () => {
-    const { presentation } = await call(tool({ name: "invoke_operation" }, text({})), {
-      operation_id: "runAgent",
-      path_params: { scope: "acme" },
-    });
-    expect(presentation?.subject).toBeUndefined();
-  });
-
-  it("names no subject for a path that targets no package", async () => {
-    const op = [...getCatalog().operations.values()].find(
-      (candidate) => candidate.pathTemplate === "/api/runs/{id}",
-    )!;
-    const { presentation } = await call(tool({ name: "invoke_operation" }, text({})), {
-      operation_id: op.operationId,
-      path_params: { id: "run_1" },
-    });
-    expect(presentation?.subject).toBeUndefined();
-  });
-
-  it("falls back to the descriptor for an unknown operation", async () => {
-    const { presentation } = await call(
-      tool({ name: "invoke_operation", annotations: { title: "Invoke API operation" } }, text({})),
-      { operation_id: "noSuchOperation" },
-    );
-    expect(presentation?.title).toBe("Invoke API operation");
   });
 
   it("answers a handler's throw as a failed call, presented like any other result", async () => {
-    const throwing = (name: string, title: string) =>
+    const throwing = (name: string) =>
       ({
-        descriptor: { name, annotations: { title }, inputSchema: { type: "object" } },
+        descriptor: { name, inputSchema: { type: "object" } },
         handler: async () => {
           throw new Error("database unreachable");
         },
       }) satisfies AppstrateToolDefinition;
-    const op = [...getCatalog().operations.values()].find(
-      (candidate) => candidate.pathTemplate === "/api/agents/{scope}/{name}/model",
-    )!;
-    const invoked = await call(throwing("invoke_operation", "Invoke API operation"), {
-      operation_id: op.operationId,
+    const invoked = await call(throwing("invoke_operation"), {
+      operation_id: "runAgent",
       path_params: { scope: "acme", name: "triage" },
     });
-    expect(invoked.result.isError).toBe(true);
-    expect(invoked.result.content).toEqual([{ type: "text", text: "database unreachable" }]);
-    // What the call aimed at, although it failed.
-    expect(invoked.presentation).toMatchObject({
-      title: op.summary || op.operationId,
-      subject: { kind: "agent", id: "@acme/triage" },
+    expect(invoked.result).toMatchObject({
+      isError: true,
+      content: [{ type: "text", text: "database unreachable" }],
     });
-    const read = await call(throwing("read", "Read resource"));
-    expect(read.result.isError).toBe(true);
-    expect(read.presentation).toEqual({ title: "Read resource" });
+    // What the call aimed at, although it failed.
+    expect(invoked.presentation?.subject).toEqual({ kind: "agent", id: "@acme/triage" });
   });
 
   it("names the caller get_me answered for", async () => {
     const { presentation } = await call(
-      tool(
-        { name: "get_me", annotations: { title: "Get caller context", readOnlyHint: true } },
-        text({ status: 200, body: { user: { id: "usr_1", name: "Ada" } } }),
-      ),
+      tool({ name: "get_me" }, text({ status: 200, body: { user: { id: "usr_1", name: "Ada" } } })),
     );
     expect(presentation?.subject).toEqual({ kind: "user", id: "usr_1", display_name: "Ada" });
   });
@@ -204,15 +143,6 @@ describe("tool icons", () => {
   it("leaves a tool it draws no icon for as it is", () => {
     const [unknown] = presentTools([tool({ name: "x" }, text({}))]);
     expect(unknown!.descriptor.icons).toBeUndefined();
-  });
-});
-
-describe("isLookupTool", () => {
-  it("reads readOnlyHint or the lookup stamp, nothing else", () => {
-    expect(isLookupTool({ annotations: { readOnlyHint: true } })).toBe(true);
-    expect(isLookupTool({ _meta: { [TOOL_LOOKUP_META_KEY]: true } })).toBe(true);
-    expect(isLookupTool({ annotations: { readOnlyHint: false } })).toBe(false);
-    expect(isLookupTool({})).toBe(false);
   });
 });
 

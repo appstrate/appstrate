@@ -922,7 +922,7 @@ export const credentialProxyPaths = {
                       additionalProperties: false,
                       properties: {
                         integration_package_id: { type: "string" },
-                        display_name: { type: "string" },
+                        display_name: { type: "string", minLength: 1 },
                         icon: {
                           type: "string",
                           description: "Its manifest icon: an Iconify id or an image URL.",

@@ -1,21 +1,18 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Which calls the chat stamps a lookup: the tools the platform declares lookups (`isLookupTool`:
- * `readOnlyHint`, or the `dev.appstrate/lookup` stamp), read off its MCP surface by
- * `buildPlatformMcpTools` and handed by the engine to the UI-stream mapper.
- *
- * The MCP handshake runs against an in-process stub server; the session is injected
+ * Which calls the chat stamps a lookup: the tools the platform declares lookups (`isLookupTool`),
+ * read off its MCP surface, and the chat's own `read_resource`. The session is injected
  * (`PiChatInput.createSession`) and replays one call of each tool.
  */
 
 import { describe, expect, it } from "bun:test";
 import type { UIMessage } from "ai";
 import { TOOL_LOOKUP_META_KEY } from "@appstrate/core/mcp-presentation";
-import { buildPlatformMcpTools } from "../src/pi-chat/mcp-tools.ts";
 import { createPiOAuthModelBinding } from "../src/pi-chat/model-binding.ts";
 import { runPiChat } from "../src/pi-chat/engine.ts";
 import type { PiChatSession } from "../src/pi-chat/turn-control.ts";
+import { stubPlatformMcp } from "./pi-turn.ts";
 import { inertTurnSpaces } from "./turn-spaces.ts";
 
 const schema = { type: "object" };
@@ -26,51 +23,7 @@ const TOOLS = [
   { name: "invoke_operation", inputSchema: schema, annotations: { readOnlyHint: false } },
 ];
 
-/** A distinct URL per use: the MCP surface is cached by it. */
-const mcpUrl = () => `http://127.0.0.1:1/api/mcp/o/org_lookup_${crypto.randomUUID()}`;
-
-const mcpFetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
-  const req = new Request(input, init);
-  if (req.method === "GET") return new Response(null, { status: 405 });
-  if (req.method === "DELETE") return new Response(null, { status: 202 });
-  const msg = (await req.json()) as { id?: unknown; method?: string };
-  if (msg.id === undefined) return new Response(null, { status: 202 });
-  const result =
-    msg.method === "initialize"
-      ? {
-          protocolVersion: "2025-06-18",
-          capabilities: { tools: {} },
-          serverInfo: { name: "stub-platform-mcp", version: "1.0.0" },
-        }
-      : msg.method === "tools/list"
-        ? { tools: TOOLS }
-        : {};
-  const headers = msg.method === "initialize" ? { "mcp-session-id": "sess_lookup" } : undefined;
-  return Response.json({ jsonrpc: "2.0", id: msg.id, result }, { headers });
-}) as typeof fetch;
-
-describe("buildPlatformMcpTools", () => {
-  it("names the tools the platform declares lookups, the chat's resource read, and no other", async () => {
-    const built = await buildPlatformMcpTools({
-      url: mcpUrl(),
-      headers: {},
-      organization: inertTurnSpaces(),
-      fetch: mcpFetch,
-      writeChunk: () => {},
-      fileDelivery: { image: false, pdf: false },
-      signal: new AbortController().signal,
-      turnBudget: { deadlineAt: Date.now() + 60_000, stepCount: () => 0 },
-    });
-    try {
-      // `read_resource` is the chat's own resource read, a lookup whatever the surface.
-      expect([...built.lookupTools].sort()).toEqual(["describe", "read_resource", "search"]);
-    } finally {
-      await built.close();
-    }
-  });
-});
-
-/** A session that calls each tool of {@link TOOLS} once. */
+/** A session that calls each tool of {@link TOOLS} once, and `read_resource`. */
 function callingSession(): PiChatSession {
   let listener: (event: unknown) => void = () => {};
   return {
@@ -94,7 +47,7 @@ function callingSession(): PiChatSession {
         },
       };
       listener({ type: "message_start", message });
-      TOOLS.forEach(({ name }, contentIndex) => {
+      [...TOOLS.map((tool) => tool.name), "read_resource"].forEach((name, contentIndex) => {
         const toolCall = { type: "toolCall", id: `call_${name}`, name, arguments: {} };
         const content = Object.assign([], { [contentIndex]: toolCall });
         listener({
@@ -161,7 +114,7 @@ describe("a chat turn", () => {
       ] as UIMessage[],
       system: "You are a helpful assistant.",
       generation: {},
-      platformMcp: { url: mcpUrl(), headers: {}, organization: inertTurnSpaces(), fetch: mcpFetch },
+      platformMcp: { ...stubPlatformMcp(TOOLS), headers: {}, organization: inertTurnSpaces() },
       abortSignal: new AbortController().signal,
       onError: (error) => String(error),
       recordUsage: () => {},
@@ -171,6 +124,7 @@ describe("a chat turn", () => {
       describe: { appstrate: { lookup: true } },
       search: { appstrate: { lookup: true } },
       invoke_operation: undefined,
+      read_resource: { appstrate: { lookup: true } },
     });
   }, 20_000);
 });

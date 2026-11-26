@@ -12,11 +12,9 @@ import { showCall, type ShownCall } from "@appstrate/module-chat/tool-presentati
 import { useChatTranslate } from "./use-chat-runtime";
 
 /**
- * The calls of the conversation `conversationId` while shown: as the open chat holds them
- * (`useLiveConversation`), the turn in flight included, else as the server stores them, read only
- * while no open chat holds them. `tools` is `undefined` until either answers (held while the panel
- * is closed), `null` when the server holds no such conversation. `error` only while nothing is
- * held: a refetch that fails keeps the calls already read.
+ * The conversation's calls: as the open chat holds them (`useLiveConversation`), the turn in
+ * flight included, else as the server stores them. `tools` is `undefined` until either answers,
+ * `null` when the server holds no such conversation; `error` only while nothing is held.
  */
 export function useConversationTools(conversationId: string | null, active: boolean) {
   const live = useLiveConversation(conversationId, active);
@@ -36,12 +34,10 @@ export function useToolLabel() {
     showCall({ toolName: call.toolName, args: call.input, presentation: call.presentation }, t);
 }
 
-/** Whether the calls acted in more than one space, so each row names its own. */
-export function spansSpaces(calls: readonly ConversationToolCall[]): boolean {
+export function actsInSeveralSpaces(calls: readonly ConversationToolCall[]): boolean {
   return new Set(calls.map((call) => call.spaceId).filter(Boolean)).size > 1;
 }
 
-/** A call's outcome in words, wherever the panel names it. */
 export const TOOL_STATUS_LABEL: Record<ConversationToolStatus, string> = {
   running: "context.tools.status.running",
   success: "context.tools.status.success",

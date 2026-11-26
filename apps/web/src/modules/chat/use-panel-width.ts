@@ -4,8 +4,7 @@ import { useCallback, useEffect, useState, type RefObject } from "react";
 
 /**
  * What the panel shows decides its width: a list stays narrow beside the
- * thread, a detail (the summary, a tool call) takes a little more, a previewed
- * file the most.
+ * thread, the details take a little more, a previewed file the most.
  */
 export type PanelView = "list" | "detail" | "file";
 

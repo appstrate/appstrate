@@ -11,16 +11,15 @@
  */
 
 import { describe, expect, it } from "bun:test";
-import { isToolUIPart, readUIMessageStream, type UIMessage, type UIMessageChunk } from "ai";
+import { isToolUIPart, type UIMessage } from "ai";
 import { loadPiCodingAgentSdk, type Api, type ExtensionAPI } from "@appstrate/runner-pi";
 
 import { ACTIVE_SPACES_META_KEY, OPERATION_SPACES_META_KEY } from "@appstrate/core/mcp-spaces";
 import { TOOL_PRESENTATION_META_KEY } from "@appstrate/core/mcp-presentation";
 import { platformMcpUrl } from "../src/platform-mcp.ts";
 import { buildPlatformMcpTools, type TurnSpaces } from "../src/pi-chat/mcp-tools.ts";
-import { PiChatUiStreamMapper } from "../src/pi-chat/ui-stream-mapper.ts";
-import type { AgentSessionEvent } from "../src/pi-chat/pi-events.ts";
 import { buildStructuredPiTurn, type PiHistoryModel } from "../src/pi-chat/structured-session.ts";
+import { streamedMessage, toolCallEvents } from "./pi-turn.ts";
 
 /** Nothing listens here: a hop that escapes the injected fetch throws. */
 const ORIGIN = "http://127.0.0.1:1";
@@ -287,50 +286,6 @@ const REPLAY_MODEL: PiHistoryModel = {
   model: "preset_org",
 };
 
-/** One call and its result, through the chat's UI stream into the message the AI SDK stores. */
-async function streamedCall(
-  id: string,
-  name: string,
-  args: Record<string, unknown>,
-  result: unknown,
-): Promise<UIMessage> {
-  const toolCall = { type: "toolCall", id, name, arguments: args };
-  const events = [
-    { type: "message_start", message: { role: "assistant" } },
-    {
-      type: "message_update",
-      message: {},
-      assistantMessageEvent: {
-        type: "toolcall_start",
-        contentIndex: 0,
-        partial: { content: [toolCall] },
-      },
-    },
-    {
-      type: "message_update",
-      message: {},
-      assistantMessageEvent: { type: "toolcall_end", contentIndex: 0, toolCall, partial: {} },
-    },
-    { type: "tool_execution_end", toolCallId: id, toolName: name, result, isError: false },
-    { type: "message_end", message: { role: "assistant", stopReason: "stop" } },
-  ] as AgentSessionEvent[];
-  const mapper = new PiChatUiStreamMapper();
-  const chunks: UIMessageChunk[] = [
-    mapper.startChunk("a1"),
-    ...events.flatMap((event) => mapper.map(event)),
-    { type: "finish" },
-  ];
-  const stream = new ReadableStream<UIMessageChunk>({
-    start(controller) {
-      for (const chunk of chunks) controller.enqueue(chunk);
-      controller.close();
-    },
-  });
-  let last: UIMessage | undefined;
-  for await (const message of readUIMessageStream({ stream })) last = message;
-  return last!;
-}
-
 describe("a forwarded tool", () => {
   const remote = (meta: Record<string, unknown>, isError = false) => ({
     content: [{ type: "text", text: "platform response" }],
@@ -352,7 +307,16 @@ describe("a forwarded tool", () => {
       expect((result as { presentation?: unknown }).presentation).toEqual(presentation);
 
       // The call as the chat streams it, stores it, and replays it on the next turn.
-      const message = await streamedCall("c1", "invoke_operation", args, result);
+      const message = await streamedMessage([
+        ...toolCallEvents(0, "c1", "invoke_operation", args),
+        {
+          type: "tool_execution_end",
+          toolCallId: "c1",
+          toolName: "invoke_operation",
+          result,
+          isError: false,
+        },
+      ]);
       const part = message.parts.find(isToolUIPart)!;
       expect(part).toMatchObject({
         state: "output-available",
@@ -370,16 +334,6 @@ describe("a forwarded tool", () => {
       const replayed = JSON.stringify(turn.history);
       expect(replayed).toContain("platform response");
       expect(replayed).not.toContain("List models");
-
-      // A malformed stamp is no presentation.
-      transport.answers.remote = remote({
-        [OPERATION_SPACES_META_KEY]: [],
-        [TOOL_PRESENTATION_META_KEY]: { title: "" },
-      });
-      const malformed = (await tool("invoke_operation").execute("c2", args)) as {
-        presentation?: unknown;
-      };
-      expect("presentation" in malformed).toBe(false);
     } finally {
       await built.close();
     }

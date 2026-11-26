@@ -6,9 +6,8 @@ import { useAdmittingSpaces } from "../../hooks/use-overview-mode";
 import type { ConversationSidebarTab } from "./conversation-sidebar-state";
 
 /**
- * `chat:read` opens the page, not the runs and files two tabs list. The summary and the tool calls
- * are the conversation's own, read with it. A stored tab the caller can no longer see resolves to
- * the summary, which always stays.
+ * `chat:read` opens the page, not the runs and files two tabs list. A selected
+ * tab the caller can no longer see resolves to the summary, which always stays.
  */
 export function useConversationTabs(selected: ConversationSidebarTab) {
   const { t } = useTranslation("chat");

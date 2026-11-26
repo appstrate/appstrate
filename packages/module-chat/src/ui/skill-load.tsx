@@ -8,7 +8,6 @@
  */
 
 import { useId } from "react";
-import type { ToolCallMessagePartProps } from "@assistant-ui/react";
 import { PinIcon } from "lucide-react";
 import { Button } from "@appstrate/ui/components/button";
 import { SKILL_DIRECTIVE } from "../directives.ts";
@@ -25,6 +24,7 @@ import { DirectiveChip } from "./directive-chip.tsx";
 import { useChatHost } from "./runtime-context.ts";
 import { REVEAL_RING_CLASS, useRevealAnchor } from "./reveal-tool-call.ts";
 import { ToolFallback } from "./tool-fallback.tsx";
+import type { ToolCardProps } from "./tool-uis.tsx";
 import { deriveToolPhase } from "./tool-result.ts";
 import { useChatCommands } from "./use-chat-commands.ts";
 import { useConversationSkillsContext } from "./use-conversation-skills.ts";
@@ -35,7 +35,7 @@ const CHIP_CLASS: Record<SkillLoadState, string | undefined> = {
   error: "text-muted-foreground border-dashed bg-transparent",
 };
 
-type ResourceReadProps = ToolCallMessagePartProps<Record<string, unknown>, unknown>;
+type ResourceReadProps = ToolCardProps;
 
 /**
  * Pins the skill read to the conversation: offered once the server holds the conversation and

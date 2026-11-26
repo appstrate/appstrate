@@ -5,7 +5,10 @@ import { ActivityIcon, ChevronRightIcon } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { useNowTick } from "@appstrate/ui/use-now-tick";
 import { useSessionDetail } from "@appstrate/module-chat/unread";
-import { conversationStats } from "@appstrate/module-chat/conversation-stats";
+import {
+  conversationStats,
+  type ConversationStats,
+} from "@appstrate/module-chat/conversation-stats";
 import type {
   ConversationToolCall,
   ConversationTools,
@@ -34,8 +37,7 @@ import type {
   ConversationSidebarTab,
 } from "./conversation-sidebar-state";
 import { ToolCallIcon } from "./conversation-tools-tab";
-import { SUMMARY_ROWS, summaryModel, type SummaryGroup } from "./summary-model";
-import { readShown, useConversationFiles, useConversationRuns } from "./use-conversation-lists";
+import { useConversationFiles, useConversationRuns } from "./use-conversation-lists";
 import {
   TOOL_STATUS_LABEL,
   TOOL_STATUS_TONE,
@@ -69,6 +71,26 @@ function ConversationId({ id }: { id: string }) {
   );
 }
 
+/** The latest lines each group of the activity draws before its "See all". */
+const SUMMARY_ROWS = 3;
+
+/**
+ * What a read shows: its answer once it has one, kept through a refetch that fails; its error
+ * only while it holds nothing; else its wait (on its way, or held while the panel is closed).
+ */
+function readShown(query: { data: unknown; error: unknown }): "ready" | "error" | "pending" {
+  if (query.data !== undefined) return "ready";
+  return query.error ? "error" : "pending";
+}
+
+/**
+ * Whether a call reached a connected integration, as its card draws it (`showCall`): an operation
+ * on an integration package carries the integration as subject too, but under its OpenAPI tag.
+ */
+function reachedIntegration({ presentation }: ConversationToolCall): boolean {
+  return presentation?.subject?.kind === "integration" && !presentation.tag;
+}
+
 /** A line of the summary's activity: 40 px, a touch target like every chat control. */
 const LINE_CLASS = "flex min-h-10 w-full items-center gap-2.5 px-4 py-1.5 text-left text-sm";
 
@@ -78,10 +100,8 @@ const BUTTON_LINE_CLASS = cn(LINE_CLASS, "hover:bg-muted/50 transition-colors");
 /** A group's heading line: as tall as its "See all" on touch, denser under a mouse. */
 const GROUP_HEAD_CLASS = "desktop-pointer:min-h-7 flex min-h-10 items-center gap-1.5 px-4";
 
-/** A folding section's line, folded or not. */
 const DISCLOSURE_LINE_CLASS = "flex min-h-10 w-full items-center justify-start gap-2 px-4 py-2";
 
-/** The summary's sections, in the order it draws them. */
 const SECTIONS: readonly { id: SummarySectionId; width: string }[] = [
   { id: "usage", width: "w-28" },
   { id: "access", width: "w-24" },
@@ -149,11 +169,12 @@ function SummarySkeleton({ sections }: { sections: ReturnType<typeof useSummaryS
  */
 export function ConversationUsage({
   session,
+  stats: { models, context },
 }: {
   session: NonNullable<ReturnType<typeof useSessionDetail>["data"]>;
+  stats: ConversationStats;
 }) {
   const { t, i18n } = useTranslation("chat");
-  const { models, context } = conversationStats(session.messages);
   const { usage } = session;
   const read =
     (usage.input_tokens ?? 0) +
@@ -277,9 +298,8 @@ function SummaryDisclosure({
   );
 }
 
-/** The folding props of one section. */
 function folding(sections: ReturnType<typeof useSummarySections>, id: SummarySectionId) {
-  return { open: sections.isOpen(id), onOpenChange: (open: boolean) => sections.setOpen(id, open) };
+  return { open: sections.isOpen(id), onOpenChange: () => sections.toggle(id) };
 }
 
 /**
@@ -415,19 +435,16 @@ function FileLine({
 
 /**
  * A group of the activity, a section named by its heading: its name, its latest lines, and, when
- * it holds more, "See all" to its tab, with the count when the server gives one. `count` beside
- * the name is for a group with no tab of its own.
+ * it holds more (`onSeeAll`), "See all" to its tab, with `total` when the server counts it.
  */
 function ActivityGroup({
   title,
-  count,
-  group,
+  total,
   onSeeAll,
   children,
 }: {
   title: string;
-  count?: number;
-  group?: Pick<SummaryGroup<unknown>, "more" | "total">;
+  total?: number;
   onSeeAll?: () => void;
   children: ReactNode;
 }) {
@@ -439,19 +456,16 @@ function ActivityGroup({
         <h3 id={headingId} className="text-muted-foreground text-xs font-medium">
           {title}
         </h3>
-        {count !== undefined ? (
-          <span className="text-muted-foreground text-xs tabular-nums">{count}</span>
-        ) : null}
-        {group?.more && onSeeAll ? (
+        {onSeeAll ? (
           <Button
             variant="ghost"
             size="sm"
             className="text-muted-foreground desktop-pointer:h-6 ml-auto h-10 px-1.5 text-xs tabular-nums"
             onClick={onSeeAll}
           >
-            {group.total === undefined
+            {total === undefined
               ? t("context.summary.seeAll")
-              : t("context.summary.seeAllCount", { count: group.total })}
+              : t("context.summary.seeAllCount", { count: total })}
           </Button>
         ) : null}
       </div>
@@ -485,26 +499,19 @@ function SummaryActivity({
   dispatch: Dispatch<ConversationSidebarAction>;
 }) {
   const { t } = useTranslation(["chat", "common"]);
-  const runs = useConversationRuns(conversationId, active && showsRuns, { limit: SUMMARY_ROWS });
-  const files = useConversationFiles(conversationId, active && showsFiles, {
-    limit: SUMMARY_ROWS,
-  });
+  const runs = useConversationRuns(conversationId, active && showsRuns);
+  const files = useConversationFiles(conversationId, active && showsFiles);
   const runsRead = showsRuns ? readShown(runs.query) : null;
   const filesRead = showsFiles ? readShown(files.query) : null;
-
-  const model = summaryModel<ConversationRun, ConversationFile>({
-    calls: tools.calls,
-    ...(runsRead === "ready" ? { runs: { rows: runs.runs, total: runs.total } } : {}),
-    ...(filesRead === "ready" ? { files: { rows: files.files, hasMore: files.hasMore } } : {}),
-  });
+  const runRows = runsRead === "ready" ? runs.runs.slice(0, SUMMARY_ROWS) : [];
+  const fileRows = filesRead === "ready" ? files.files.slice(0, SUMMARY_ROWS) : [];
+  const calls = tools.calls.filter(reachedIntegration).reverse();
+  const callRows = calls.slice(0, SUMMARY_ROWS);
   const waiting = runsRead === "pending" || filesRead === "pending";
   const nothing =
-    !model.runs &&
-    !model.files &&
-    !model.integrationCalls &&
-    runsRead !== "pending" &&
+    runRows.length + fileRows.length + callRows.length === 0 &&
+    !waiting &&
     runsRead !== "error" &&
-    filesRead !== "pending" &&
     filesRead !== "error";
 
   return (
@@ -524,13 +531,13 @@ function SummaryActivity({
               <ErrorState error={runs.query.error} compact />
             </ActivityGroup>
           ) : null}
-          {model.runs ? (
+          {runRows.length > 0 ? (
             <ActivityGroup
               title={t("common:nav.runs")}
-              group={model.runs}
-              onSeeAll={seeAll("runs")}
+              total={runs.total}
+              onSeeAll={runs.total > SUMMARY_ROWS ? seeAll("runs") : undefined}
             >
-              {model.runs.rows.map((run) => (
+              {runRows.map((run) => (
                 <RunLine
                   key={run.id}
                   run={run}
@@ -546,24 +553,24 @@ function SummaryActivity({
               <ErrorState error={files.query.error} compact />
             </ActivityGroup>
           ) : null}
-          {model.files ? (
+          {fileRows.length > 0 ? (
             <ActivityGroup
               title={t("common:nav.files")}
-              group={model.files}
-              onSeeAll={seeAll("files")}
+              onSeeAll={
+                files.hasMore || files.files.length > SUMMARY_ROWS ? seeAll("files") : undefined
+              }
             >
-              {model.files.rows.map((file) => (
+              {fileRows.map((file) => (
                 <FileLine key={file.id} file={file} dispatch={dispatch} />
               ))}
             </ActivityGroup>
           ) : null}
-          {model.integrationCalls ? (
+          {callRows.length > 0 ? (
             <ActivityGroup
               title={t("context.summary.integrations")}
-              group={model.integrationCalls}
-              onSeeAll={seeAll("tools")}
+              onSeeAll={calls.length > SUMMARY_ROWS ? seeAll("tools") : undefined}
             >
-              {model.integrationCalls.rows.map((call) => (
+              {callRows.map((call) => (
                 <CallLine key={call.toolCallId} call={call} dispatch={dispatch} />
               ))}
             </ActivityGroup>
@@ -622,7 +629,7 @@ export function ConversationSummary({
 
   const session = query.data;
   const title = session.title || t("context.summary.untitled");
-  const { models } = conversationStats(session.messages);
+  const stats = conversationStats(session.messages);
   const gist = [
     t("context.summary.messages", { count: session.messages.length }),
     session.generating ? t("context.summary.generating") : null,
@@ -650,10 +657,10 @@ export function ConversationSummary({
       />
       <SummaryDisclosure
         title={t("context.summary.usageTitle")}
-        preview={models.map((model) => model.label).join(", ") || undefined}
+        preview={stats.models.map((model) => model.label).join(", ") || undefined}
         {...folding(sections, "usage")}
       >
-        <ConversationUsage session={session} />
+        <ConversationUsage session={session} stats={stats} />
       </SummaryDisclosure>
       {access(session)}
       <SummaryDisclosure title={t("context.summary.details")} {...folding(sections, "details")}>
@@ -661,9 +668,6 @@ export function ConversationSummary({
           <FactGrid columns={1}>
             <Fact label={t("context.summary.created")}>
               <InfoDate iso={session.createdAt} />
-            </Fact>
-            <Fact label={t("context.summary.lastActivity")}>
-              <InfoDate iso={session.updatedAt} />
             </Fact>
           </FactGrid>
           <ConversationId id={conversationId} />

@@ -24,8 +24,8 @@ const { SpaceTilesOf } = await import("../../components/space-name.tsx");
 const { renderSpaces } = await import("./render-spaces.tsx");
 const { ConversationSpacesControl } = await import("./conversation-spaces.tsx");
 const { ChatSidebar } = await import("./chat-sidebar.tsx");
-const { ShownFile } = await import("./conversation-sidebar.tsx");
-const { ConversationFiles, ConversationRuns } = await import("./conversation-lists.tsx");
+const { ConversationFiles, ConversationRuns, ShownFile } =
+  await import("./conversation-sidebar.tsx");
 const { useConversationTabs } = await import("./use-conversation-tabs.ts");
 const { useChatCan, useChatTransport } = await import("./use-chat-runtime.ts");
 const { usePermissions } = await import("../../hooks/use-permissions.ts");

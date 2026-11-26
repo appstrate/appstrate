@@ -77,8 +77,8 @@ function isTextPart(value: unknown): value is { type: "text"; text: string } {
  * `{"id":"run_…"}[turn budget] …` is not JSON. Hence the rule for an array: the
  * first text part that parses on its own wins — producers put the payload in
  * one block, anything after it is prose. When no part parses, the joined text
- * is returned, so a plain-text result still reads verbatim — the budget line
- * left out, or a plain-text error would end with it. Without this the
+ * is returned, so a plain-text result still reads verbatim, less the budget
+ * note. Without this the
  * payload reads as a string, and every consumer reading a record out of it (run
  * id/status, error shapes) silently degrades — a failed call would read as a success.
  */
@@ -102,8 +102,10 @@ export function unwrapMcpResult(value: unknown, depth = 0): unknown {
     // own, else the joined text (no payload here, just prose).
     const parts = value.filter(isTextPart);
     if (parts.length > 0) {
-      // The chat's turn-budget note is the model's: a reader never sees it, joined or not.
-      const texts = parts.map((p) => p.text).filter((text) => !isTurnBudgetNote(text));
+      const texts = parts.map((p) => p.text);
+      // The chat's turn-budget note, always the last block, is the model's: one earlier is not it.
+      const last: unknown = value[value.length - 1];
+      if (isTextPart(last) && isTurnBudgetNote(last.text)) texts.pop();
       for (const text of texts) {
         const part = unwrapMcpResult(text, depth + 1);
         if (typeof part === "object" && part !== null) return part;
