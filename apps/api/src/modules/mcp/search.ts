@@ -45,18 +45,28 @@ function compareKeywordScores(a: KeywordScore, b: KeywordScore, tokens: readonly
   );
 }
 
-/** `items` matching `tokens` (all when there are none), best first, ties kept in the order given. */
+const byCodePoint = (a: string, b: string) => (a < b ? -1 : a > b ? 1 : 0);
+
+/**
+ * `items` matching `tokens` (all when there are none), best first. Equal scores fall back to the
+ * name, then the text: an order the items carry themselves, whatever space or read listed them first.
+ */
 export function rankByKeywords<T>(
   items: readonly T[],
   tokens: readonly string[],
   fields: (item: T) => { name: string; text: string },
 ): { item: T; score: KeywordScore }[] {
   return items
-    .map((item, order) => {
+    .map((item) => {
       const { name, text } = fields(item);
-      return { item, order, score: keywordScore(name, text, tokens) };
+      return { item, name, text, score: keywordScore(name, text, tokens) };
     })
     .filter(({ score }) => tokens.length === 0 || score.inName + score.inText > 0)
-    .sort((a, b) => compareKeywordScores(a.score, b.score, tokens) || a.order - b.order)
+    .sort(
+      (a, b) =>
+        compareKeywordScores(a.score, b.score, tokens) ||
+        byCodePoint(a.name, b.name) ||
+        byCodePoint(a.text, b.text),
+    )
     .map(({ item, score }) => ({ item, score }));
 }

@@ -32,6 +32,7 @@ import {
   seedPackageShare,
   seedPublishedVersion,
   seedSpace,
+  seedSpacePackage,
 } from "../../helpers/seed.ts";
 import {
   apiIntegrationManifest,
@@ -223,6 +224,20 @@ describe("the type index reads the same rule as the run gate", () => {
     expect(await listSkillIndex()).not.toContain(SYSTEM_SKILL);
     expect((await activate(SYSTEM_SKILL)).status).toBe(201);
     expect(await listSkillIndex()).toContain(SYSTEM_SKILL);
+  });
+
+  it("ranks no provenance first: newest first, a system package among the others", async () => {
+    const newer = "@doors/newer-skill";
+    await seedPackage({
+      id: newer,
+      orgId: ctx.orgId,
+      type: "skill",
+      homeSpaceId: ctx.defaultSpaceId,
+      createdAt: new Date(Date.now() + 60_000),
+      draftManifest: { name: newer, version: "1.0.0", type: "skill" },
+    });
+    await seedSpacePackage(ctx.defaultSpaceId, newer);
+    expect(await listSkillIndex()).toEqual([newer, SYSTEM_SKILL]);
   });
 });
 

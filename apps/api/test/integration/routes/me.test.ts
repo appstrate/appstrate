@@ -760,6 +760,39 @@ describe("Me API (/api/me)", () => {
       expect(body.skills_truncated).toBe(false);
     });
 
+    it("lists agents and skills whole by id, or withholds them past the cap", async () => {
+      // A system agent sorts by its id (last here), not ahead of the org's own.
+      await seedPackage({ id: "@zsys/agent", orgId: null, source: "system" });
+      const seedActive = async (id: string, type: "agent" | "skill") => {
+        await seedPackage({ id, orgId: ctx.orgId, type, homeSpaceId: ctx.defaultSpaceId });
+        await seedSpacePackage(ctx.defaultSpaceId, id);
+      };
+      for (const n of ["b", "a"]) await seedActive(`@ctx/${n}`, "agent");
+      const read = async () =>
+        (await (await app.request("/api/me/context", { headers: authHeaders(ctx) })).json()) as {
+          agents: { packageId: string }[];
+          agents_truncated: boolean;
+          agents_total: number;
+          skills: { packageId: string }[];
+          skills_truncated: boolean;
+          skills_total: number;
+        };
+
+      const whole = await read();
+      expect(whole.agents.map((a) => a.packageId)).toEqual(["@ctx/a", "@ctx/b", "@zsys/agent"]);
+
+      // 15 is the cap: 16 active agents and 16 active skills list none of theirs.
+      for (let i = 0; i < 13; i++) await seedActive(`@ctx/agent-${i}`, "agent");
+      for (let i = 0; i < 16; i++) await seedActive(`@ctx/skill-${i}`, "skill");
+      const capped = await read();
+      expect(capped.agents).toEqual([]);
+      expect(capped.agents_truncated).toBe(true);
+      expect(capped.agents_total).toBe(16);
+      expect(capped.skills).toEqual([]);
+      expect(capped.skills_truncated).toBe(true);
+      expect(capped.skills_total).toBe(16);
+    });
+
     it("answers with identity and org role alone when the request names no space", async () => {
       const res = await app.request("/api/me/context", {
         headers: { Cookie: ctx.cookie, "X-Org-Id": ctx.orgId },

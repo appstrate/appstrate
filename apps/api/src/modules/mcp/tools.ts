@@ -607,7 +607,8 @@ function buildSearchTool(
     description:
       `Search what you can act on, by keyword: ${kinds.map((k) => KINDS[k].section).join(", ")}. ` +
       "Returns one section per kind searched, each with its `total` and its `items`, capped at " +
-      "`limit`; every item carries the `id` describe takes. " +
+      "`limit`, best match first and equal matches by name, an order that ranks no space; every " +
+      "item carries the `id` describe takes. " +
       (uses ? `Each kind is used by its own tool: ${uses}. ` : "") +
       "Without keywords, a section lists its kind (`tag` narrows operations). Operations your " +
       "role may not invoke are listed apart under `denied`, with the permissions they need: " +
@@ -734,14 +735,10 @@ function readingIn(ctx: McpToolContext, space: McpSpace | undefined): DispatchCo
 async function searchOperations({ ctx, spaces, tokens, tag, limit }: SearchCall) {
   let matches = [...getCatalog().operations.values()];
   if (tag) matches = matches.filter((op) => op.tags.some((t) => t.toLowerCase() === tag));
-  const scored = rankByKeywords(
-    matches.sort((a, b) => a.operationId.localeCompare(b.operationId)),
-    tokens,
-    (op) => ({
-      name: op.operationId,
-      text: `${op.summary} ${op.description} ${op.pathTemplate} ${op.tags.join(" ")}`,
-    }),
-  );
+  const scored = rankByKeywords(matches, tokens, (op) => ({
+    name: op.operationId,
+    text: `${op.summary} ${op.description} ${op.pathTemplate} ${op.tags.join(" ")}`,
+  }));
   const grantedHere = (op: CatalogOperation) => (space: McpSpace) =>
     operationGranted(op, space.permissions, ctx.ceiling);
 
@@ -2477,8 +2474,9 @@ function buildGetMeTool(ctx: McpToolContext, surface: McpSurface): AppstrateTool
       "connecting one makes it usable here. It is whole or withheld: more than 15 and it is " +
       "empty with `connectable_integrations_truncated` true and the count in " +
       "`connectable_integrations_total`; `search` finds them by keyword. " +
-      "`agents` and `skills` are capped (`agents_truncated`, `skills_truncated`): `search` finds " +
-      "the rest by keyword.",
+      "`agents` and `skills` are listed whole, by id, or not at all: past 15 entries a list is " +
+      "empty, with `agents_truncated` / `skills_truncated` true and `agents_total` / " +
+      "`skills_total` counting it, and `search` finds its entries by keyword.",
     annotations: {
       title: "Get caller context",
       readOnlyHint: true,
