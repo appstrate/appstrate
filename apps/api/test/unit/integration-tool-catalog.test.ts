@@ -114,6 +114,17 @@ describe("resolveEffectiveToolCatalog — undeclared tools on a closed catalog",
       modified: false,
     });
   });
+  it("carries the description the server listed; none when no listing has one", () => {
+    const described: ToolSnapshotView = {
+      truncated: false,
+      tools: [
+        { name: "u", fingerprint: FP_A, changed_at: null, definition: null },
+        { name: "u", fingerprint: FP_B, changed_at: null, definition: { description: "Search" } },
+      ],
+    };
+    expect(one(m, "u", policy(), [described]).description).toBe("Search");
+    expect(one(m, "u", policy(), [snap({ u: {} })]).description).toBeUndefined();
+  });
   it("approved with the live fingerprint: available", () => {
     expect(one(m, "u", policy([["u", FP_A]]), [snap({ u: {} })])).toMatchObject({
       status: "available",
