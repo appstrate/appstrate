@@ -7,7 +7,8 @@ CREATE TABLE "integration_tool_snapshots" (
 	"connection_id" uuid,
 	"listed_at" timestamp with time zone DEFAULT now() NOT NULL,
 	"truncated" boolean DEFAULT false NOT NULL,
-	"tools" jsonb DEFAULT '[]'::jsonb NOT NULL
+	"tools" jsonb DEFAULT '[]'::jsonb NOT NULL,
+	CONSTRAINT "uq_integration_tool_snapshots_target" UNIQUE NULLS NOT DISTINCT("org_id","package_id","connection_id")
 );
 --> statement-breakpoint
 CREATE TABLE "space_integration_tool_approvals" (
@@ -42,7 +43,6 @@ ALTER TABLE "space_integration_tool_approvals" ADD CONSTRAINT "space_integration
 ALTER TABLE "space_integration_tool_blocks" ADD CONSTRAINT "space_integration_tool_blocks_package_id_packages_id_fk" FOREIGN KEY ("package_id") REFERENCES "public"."packages"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "space_integration_tool_blocks" ADD CONSTRAINT "space_integration_tool_blocks_blocked_by_user_id_fk" FOREIGN KEY ("blocked_by") REFERENCES "public"."user"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "space_integration_tool_blocks" ADD CONSTRAINT "space_integration_tool_blocks_space_org_fk" FOREIGN KEY ("space_id","org_id") REFERENCES "public"."spaces"("id","org_id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
-CREATE UNIQUE INDEX "uq_integration_tool_snapshots_target" ON "integration_tool_snapshots" USING btree ("org_id","package_id",coalesce("connection_id"::text, ''));--> statement-breakpoint
 CREATE INDEX "idx_integration_tool_snapshots_connection" ON "integration_tool_snapshots" USING btree ("connection_id") WHERE "integration_tool_snapshots"."connection_id" IS NOT NULL;--> statement-breakpoint
 CREATE INDEX "idx_integration_tool_snapshots_package" ON "integration_tool_snapshots" USING btree ("package_id");--> statement-breakpoint
 CREATE UNIQUE INDEX "uq_space_integration_tool_approvals" ON "space_integration_tool_approvals" USING btree ("space_id","package_id","tool_name","fingerprint");--> statement-breakpoint

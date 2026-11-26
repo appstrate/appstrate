@@ -15,6 +15,7 @@ import {
   jsonb,
   index,
   uniqueIndex,
+  unique,
   foreignKey,
 } from "drizzle-orm/pg-core";
 import { sql } from "drizzle-orm";
@@ -57,12 +58,9 @@ export const integrationToolSnapshots = pgTable(
     tools: jsonb("tools").$type<ToolSnapshotEntry[]>().notNull().default([]),
   },
   (table) => [
-    // `coalesce` stands in for NULLS NOT DISTINCT, which drizzle offers on `unique()` only, not `uniqueIndex()`.
-    uniqueIndex("uq_integration_tool_snapshots_target").on(
-      table.orgId,
-      table.packageId,
-      sql`coalesce(${table.connectionId}::text, '')`,
-    ),
+    unique("uq_integration_tool_snapshots_target")
+      .on(table.orgId, table.packageId, table.connectionId)
+      .nullsNotDistinct(),
     // Composite so a snapshot can only point at a connection of its own organization; MATCH SIMPLE
     // leaves the unauthenticated row (NULL connection) unconstrained.
     foreignKey({

@@ -1,5 +1,5 @@
 {
-  "id": "adb262a6-1c9c-44c2-975c-7c746e0d6c9e",
+  "id": "3964a514-9772-4bc2-beae-8b404418cab1",
   "prevId": "140ba93e-8d5f-4f02-abcd-69d61ab26517",
   "version": "7",
   "dialect": "postgresql",
@@ -6788,33 +6788,6 @@
         }
       },
       "indexes": {
-        "uq_integration_tool_snapshots_target": {
-          "name": "uq_integration_tool_snapshots_target",
-          "columns": [
-            {
-              "expression": "org_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "package_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "coalesce(\"connection_id\"::text, '')",
-              "asc": true,
-              "isExpression": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": true,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        },
         "idx_integration_tool_snapshots_connection": {
           "name": "idx_integration_tool_snapshots_connection",
           "columns": [
@@ -6877,7 +6850,13 @@
         }
       },
       "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
+      "uniqueConstraints": {
+        "uq_integration_tool_snapshots_target": {
+          "name": "uq_integration_tool_snapshots_target",
+          "nullsNotDistinct": true,
+          "columns": ["org_id", "package_id", "connection_id"]
+        }
+      },
       "policies": {},
       "checkConstraints": {},
       "isRLSEnabled": false

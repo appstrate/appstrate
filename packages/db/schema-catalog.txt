@@ -830,6 +830,7 @@ constraint integration_tool_snapshots integration_tool_snapshots_connection_org_
 constraint integration_tool_snapshots integration_tool_snapshots_org_id_organizations_id_fk FOREIGN KEY (org_id) REFERENCES organizations(id) ON DELETE CASCADE
 constraint integration_tool_snapshots integration_tool_snapshots_package_id_packages_id_fk FOREIGN KEY (package_id) REFERENCES packages(id) ON DELETE CASCADE
 constraint integration_tool_snapshots integration_tool_snapshots_pkey PRIMARY KEY (id)
+constraint integration_tool_snapshots uq_integration_tool_snapshots_target UNIQUE NULLS NOT DISTINCT (org_id, package_id, connection_id)
 constraint jwks jwks_pkey PRIMARY KEY (id)
 constraint llm_usage llm_usage_api_key_id_api_keys_id_fk FOREIGN KEY (api_key_id) REFERENCES api_keys(id) ON DELETE SET NULL
 constraint llm_usage llm_usage_chat_session_id_chat_sessions_id_fk FOREIGN KEY (chat_session_id) REFERENCES chat_sessions(id) ON DELETE SET NULL
@@ -1301,7 +1302,7 @@ index CREATE UNIQUE INDEX uq_chat_sessions_id_org_id ON public.chat_sessions USI
 index CREATE UNIQUE INDEX uq_files_id_org_id ON public.files USING btree (id, org_id)
 index CREATE UNIQUE INDEX uq_files_run_output_dedup ON public.files USING btree (run_id, sha256, name) WHERE (purpose = 'agent_output'::file_purpose)
 index CREATE UNIQUE INDEX uq_integration_conn_id_org_id ON public.integration_connections USING btree (id, org_id)
-index CREATE UNIQUE INDEX uq_integration_tool_snapshots_target ON public.integration_tool_snapshots USING btree (org_id, package_id, COALESCE((connection_id)::text, ''::text))
+index CREATE UNIQUE INDEX uq_integration_tool_snapshots_target ON public.integration_tool_snapshots USING btree (org_id, package_id, connection_id) NULLS NOT DISTINCT
 index CREATE UNIQUE INDEX uq_llm_usage_proxy_request_id ON public.llm_usage USING btree (request_id) WHERE ((source = 'proxy'::llm_usage_source) AND (request_id IS NOT NULL))
 index CREATE UNIQUE INDEX uq_llm_usage_runner_run_id ON public.llm_usage USING btree (run_id) WHERE ((source = 'runner'::llm_usage_source) AND (run_id IS NOT NULL))
 index CREATE UNIQUE INDEX uq_model_provider_credentials_id_provider_id ON public.model_provider_credentials USING btree (id, provider_id)
