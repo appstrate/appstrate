@@ -392,7 +392,7 @@ jobs:
 
   runtime-e2e:
     name: Runtime container e2e
-    # The only pre-merge job that runs the REAL runtime images, and it gates three
+    # The only pre-merge job that runs the REAL runtime images, and it gates four
     # regressions that live exclusively there:
     #
     #   1. The runtime-pi file-provisioning spin only reproduces in the BUNDLED
@@ -409,6 +409,9 @@ jobs:
     #   3. Run-scoped secrets out of reach of the agent uid
     #      (`runtime-secrets-container.e2e.test.ts`): the launcher/entrypoint
     #      split and `/proc` access of the built image, invisible in-process.
+    #   4. A `binary` local integration spawning in the real runner image
+    #      (`binary-runner-container.e2e.test.ts`, #2383): a native entry
+    #      bundled 0644 must be executable once `docker cp`'d into the runner.
     #
     # Hence both images are built here, from the same checkout: a pair is only
     # comparable when both halves come from the code under test. Same
@@ -449,6 +452,11 @@ jobs:
       - name: Build appstrate-sidecar image
         run: docker build -t appstrate-sidecar:latest -f runtime-pi/sidecar/Dockerfile .
 
+      # The binary runner the docker integration adapter spawns for a
+      # `server.type: "binary"` integration; `:latest` is its default ref.
+      - name: Build appstrate-mcp-runner-binary image
+        run: docker build -t appstrate-mcp-runner-binary:latest -f runtime-pi/runners/binary/Dockerfile runtime-pi/runners/binary
+
       # The root bunfig preload boots the test docker-compose stack
       # unconditionally; start it so the preload is satisfied (the e2e itself
       # uses only its own in-process mock sink, not the DB).
@@ -456,7 +464,7 @@ jobs:
         run: docker compose -f test/setup/docker-compose.test.yml up -d --wait
 
       - name: Run runtime container e2e suites
-        run: bun test --timeout=15000 runtime-pi/test/provision-container.e2e.test.ts runtime-pi/test/inference-container.e2e.test.ts runtime-pi/test/runtime-secrets-container.e2e.test.ts
+        run: bun test --timeout=15000 runtime-pi/test/provision-container.e2e.test.ts runtime-pi/test/inference-container.e2e.test.ts runtime-pi/test/runtime-secrets-container.e2e.test.ts runtime-pi/test/binary-runner-container.e2e.test.ts
 
   # Decides whether a PR touches what the Playwright suite exercises. `E2E tests`
   # is a required check, and a job skipped by its own `if:` satisfies it, so the
