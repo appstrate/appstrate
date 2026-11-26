@@ -1645,14 +1645,12 @@ export async function resolveIntegrationClientById(
     .where(
       and(
         eq(integrationOauthClients.id, clientRef),
+        eq(integrationOauthClients.orgId, clientScope.orgId),
         or(
           clientScope.spaceId === null
             ? undefined
             : eq(integrationOauthClients.spaceId, clientScope.spaceId),
-          and(
-            isNull(integrationOauthClients.spaceId),
-            eq(integrationOauthClients.orgId, clientScope.orgId),
-          ),
+          isNull(integrationOauthClients.spaceId),
         ),
         eq(integrationOauthClients.integrationId, integrationId),
         eq(integrationOauthClients.authKey, authKey),

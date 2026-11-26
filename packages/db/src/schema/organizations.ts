@@ -283,12 +283,10 @@ export const modelProviderCredentials = pgTable(
      * refresh sweep (avoids decrypting every row to test a single timestamp).
      *
      * The blob remains the source of truth; this column is a cache, written
-     * by `updateOAuthCredentialTokens` / `createOAuthCredential`. NULL for
-     * api-key credentials, OAuth blobs without an upstream-supplied expiry,
-     * and (transiently) for rows that pre-date the column — those self-cure
-     * on the next refresh. The worker's predicate (`expires_at IS NULL OR
-     * expires_at < cutoff`) covers the backfill window without a one-shot
-     * decrypt-and-rewrite migration.
+     * by `updateBlob` (whenever the next blob's expiry differs) and by
+     * `createOAuthCredential` / `reconnectOAuthCredential`. NULL for api-key
+     * credentials and OAuth blobs without an upstream-supplied expiry. The
+     * background refresh sweep reads it: a row with a NULL expiry is never due.
      */
     expiresAt: timestamp("expires_at", { withTimezone: true }),
     // Consecutive token-refresh failures classified as *transient* (network /
@@ -302,13 +300,22 @@ export const modelProviderCredentials = pgTable(
     // of every run dying opaquely. Reset to 0 on any successful token write
     // (`updateOAuthCredentialTokens`). Mirrors
     // `integration_connections.refresh_failure_count`.
-    refreshFailureCount: integer("refresh_failure_count").notNull().default(0),
     // An api-key credential reuses the counter for consecutive upstream 401s,
     // reset by any successful call (`clearModelCredentialRejections`).
-    // When the background refresh sweep last visited the row, or a credential was last written
-    // (`createOAuthCredential`, `reconnectOAuthCredential`, `updateOAuthCredentialTokens`). NULL = never visited, so due. The
-    // sweep's due predicate reads it: one visit per row per day.
+    refreshFailureCount: integer("refresh_failure_count").notNull().default(0),
+    /**
+     * When the background refresh sweep last visited the row, or a credential was last written
+     * (`createOAuthCredential`, `reconnectOAuthCredential`, `updateOAuthCredentialTokens`). NULL =
+     * never visited, so due. The sweep's due predicate reads it: one visit per row per day.
+     */
     refreshCheckedAt: timestamp("refresh_checked_at", { withTimezone: true }),
+    /**
+     * Denormalized `blob.needsReconnection`, mirrored by `updateBlob` whenever the next blob's flag
+     * differs and written false by create / reconnect. The blob stays the source of truth; a
+     * mismatch found on a read is repaired. The background refresh sweep skips a flagged row
+     * without decrypting it.
+     */
+    needsReconnection: boolean("needs_reconnection").notNull().default(false),
     // NOTE — there is deliberately no `last_refresh_failure_at` here. There was
     // one, written beside `refresh_failure_count` on every transient refresh
     // failure and read by nothing: no route, no DTO, no OpenAPI field, no

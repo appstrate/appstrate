@@ -40,7 +40,8 @@ async function notifyConnectionOwner(params: IntegrationDeath): Promise<void> {
     .from(packages)
     .where(eq(packages.id, params.integrationId))
     .limit(1);
-  const displayName = (integration?.manifest as { display_name?: unknown } | null)?.display_name;
+  const integrationName = (integration?.manifest as { display_name?: unknown } | null)
+    ?.display_name;
   const spaceId =
     params.spaceId ??
     row.originSpaceId ??
@@ -61,7 +62,7 @@ async function notifyConnectionOwner(params: IntegrationDeath): Promise<void> {
     payload: {
       kind: "integration_connection",
       packageId: params.integrationId,
-      integration_name: typeof displayName === "string" ? displayName : null,
+      integration_name: typeof integrationName === "string" ? integrationName : null,
       connection_id: params.connectionId,
       label: row.label,
       auth_key: params.authKey,

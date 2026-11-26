@@ -526,9 +526,10 @@ export async function createOAuthCredential(input: CreateOAuthCredentialInput): 
       label: input.label,
       providerId: input.providerId,
       credentialsEncrypted: encryptCredentials(blob as unknown as Record<string, unknown>),
-      // Mirror `blob.expiresAt` onto the dedicated column so the refresh
-      // worker scan can filter at SQL level. Blob remains source of truth.
+      // Mirror the blob's expiry and flag onto their columns so the refresh
+      // sweep can filter at SQL level. Blob remains source of truth.
       expiresAt: expiresAt !== null ? new Date(expiresAt) : null,
+      needsReconnection: false,
       refreshCheckedAt: new Date(),
       createdBy: input.userId,
       ownerUserId,
@@ -625,6 +626,7 @@ export async function reconnectOAuthCredential(
       .set({
         credentialsEncrypted: encryptCredentials(blob as unknown as Record<string, unknown>),
         expiresAt: expiresAt !== null ? new Date(expiresAt) : null,
+        needsReconnection: false,
         refreshFailureCount: 0,
         refreshCheckedAt: new Date(),
         updatedAt: new Date(),
@@ -915,10 +917,10 @@ interface UpdateOAuthCredentialTokensInput {
  * to leave a blob (of the wrong kind, or already in the wanted state) alone;
  * a missing or unreadable row is a no-op. Resolves the row's `providerId`
  * when it wrote, `null` when it did not: the flip points of `needsReconnection`
- * announce on a write only. The denormalized `expiresAt` column is mirrored
- * ONLY when the next blob's `expiresAt` differs from the existing one — so
- * callers that don't touch expiry (e.g. {@link markCredentialNeedsReconnection})
- * leave the column untouched. `extraColumns` lets a caller piggyback plain
+ * announce on a write only. The denormalized `expiresAt` and `needsReconnection`
+ * columns are mirrored ONLY when the next blob's value differs from the existing
+ * one — so callers that don't touch expiry (e.g. {@link markCredentialNeedsReconnection})
+ * leave that column untouched. `extraColumns` lets a caller piggyback plain
  * column writes (e.g. the refresh-failure streak reset) onto the same UPDATE.
  */
 async function updateBlob(
@@ -969,6 +971,10 @@ async function updateBlob(
       next.expiresAt !== existing.expiresAt
     ) {
       set.expiresAt = next.expiresAt !== null ? new Date(next.expiresAt) : null;
+    }
+    // Same for the death flag: the sweep skips a flagged row from this column alone.
+    if (!!next.needsReconnection !== !!existing.needsReconnection) {
+      set.needsReconnection = !!next.needsReconnection;
     }
 
     const updated = await db

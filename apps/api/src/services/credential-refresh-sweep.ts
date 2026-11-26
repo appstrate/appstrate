@@ -8,8 +8,8 @@
  * itself on the read path). A row is due when its token expires within the refresh lead or has
  * expired, and no visit stamped `refresh_checked_at` in the last {@link VISIT_INTERVAL_MS}. The
  * claim stamps that column BEFORE the attempt, success or failure, so a failing row is retried
- * once a day, and every credential write stamps it too, so a credential in use is never claimed.
- * A still-valid token is never exchanged.
+ * once a day, and every credential write stamps it too, so a credential refreshed on demand is not
+ * visited again within the interval. A still-valid token is never exchanged.
  *
  * Two sources share the scan: `integration_connections` and the OAuth `model_provider_credentials`.
  * The claim is one atomic `UPDATE … WHERE id IN (SELECT … FOR UPDATE SKIP LOCKED)`: it dedupes
@@ -189,7 +189,11 @@ async function claimModelCredentials(limit: number): Promise<string[]> {
     .select({ id: t.id })
     .from(t)
     .where(
-      and(inArray(t.providerId, oauthProviderIds), dueByExpiry(t.expiresAt, t.refreshCheckedAt)),
+      and(
+        inArray(t.providerId, oauthProviderIds),
+        sql`NOT ${t.needsReconnection}`,
+        dueByExpiry(t.expiresAt, t.refreshCheckedAt),
+      ),
     )
     .orderBy(asc(t.expiresAt))
     .limit(limit)
@@ -213,7 +217,20 @@ async function refreshModelCredential(id: string, log: Logger): Promise<void> {
     });
   } catch (err) {
     const cause = err instanceof ApiError ? err.extensions?.cause : undefined;
+    if (err instanceof ApiError && err.status === 404) {
+      // Deleted between the claim and this job: nothing left to refresh.
+      log.debug("credential_refresh_model_gone", { credentialId: id });
+      return;
+    }
     if (err instanceof ApiError && err.status === 410) {
+      if (cause === "connection_flagged") {
+        // The column mirrors the blob's flag; a mismatch found here is repaired, so the row is
+        // not claimed again.
+        await db
+          .update(modelProviderCredentials)
+          .set({ needsReconnection: true })
+          .where(eq(modelProviderCredentials.id, id));
+      }
       log.warn(
         cause === "connection_flagged"
           ? "credential_refresh_model_skipped_already_flagged"
