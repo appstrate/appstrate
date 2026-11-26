@@ -27,8 +27,10 @@
  * - The comparison is constant-time, so the marker cannot be brute-forced via
  *   response-timing analysis.
  * - The marker grants exactly ONE thing: an exemption from outbound resource
- *   confinement. It does not authenticate, elevate, or alter identity — the
- *   dispatched request still runs the full auth pipeline + RBAC.
+ *   confinement. It does not authenticate or elevate — the dispatched request
+ *   still runs the full auth pipeline + RBAC, under the caller's own identity.
+ *   It can only narrow: `requireDashboardSession` refuses a marked request, so
+ *   a decision reserved to a person on screen cannot be made through the MCP.
  */
 
 import type { Context } from "hono";

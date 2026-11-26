@@ -22,7 +22,6 @@ import {
   missingScopesForConnection,
   resolveIntegrationToolCatalog,
   type IntegrationManifest,
-  type ToolSpacePolicy,
 } from "@appstrate/core/integration";
 import { mapWithConcurrency } from "@appstrate/core/map-with-concurrency";
 import { API_CALL_TOOL_NAME, API_UPLOAD_TOOL_NAME } from "@appstrate/afps-shared/api-tool-naming";
@@ -38,7 +37,11 @@ import type { ToolDescriptorReduction } from "@appstrate/mcp-transport";
 import { ApiError, notFound } from "../../lib/errors.ts";
 import { logger } from "../../lib/logger.ts";
 import type { ProxyConnectionStatus } from "../integration-connections.ts";
-import { approvedToolNames, loadToolSpacePolicy } from "../integration-tool-catalog.ts";
+import {
+  approvedToolNames,
+  loadToolSpacePolicy,
+  type ToolSpacePolicy,
+} from "../integration-tool-catalog.ts";
 import {
   activeIntegrationIds,
   connectionsOutsideRun,

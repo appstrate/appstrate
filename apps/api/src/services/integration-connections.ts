@@ -94,6 +94,7 @@ import {
   ownRowInSpace,
   ownUsableInSpace,
   sharedInto,
+  usableByAnyUserInSpace,
   usableInSpace,
   type ConnectionCaller,
 } from "./connection-reach.ts";
@@ -130,15 +131,14 @@ import {
   allowsUndeclaredTools,
   isUnauthenticatedIntegration,
   readDefaultTools,
-  type EffectiveToolEntry,
   type ConnectionCandidate,
   type ConnectionOverrides,
   type ConnectionResolutionError,
   type IntegrationManifest,
 } from "@appstrate/core/integration";
 import type { ConnectionReach } from "@appstrate/shared-types";
-import { loadEffectiveToolCatalog } from "./integration-tool-catalog.ts";
-import type { ToolSnapshot } from "./integration-tool-snapshots.ts";
+import { loadEffectiveToolCatalog, type EffectiveToolEntry } from "./integration-tool-catalog.ts";
+import type { ToolSnapshot } from "./integration-tool-snapshot-reads.ts";
 import type { ConnectionVariables } from "./connect/connection-variables.ts";
 import { connectionVariablesOf, sameConnectionVariables } from "../lib/connection-identity.ts";
 import {
@@ -766,6 +766,26 @@ export async function listReachableConnections(
       inReach(context.spaceId, context.actor),
     ),
   );
+}
+
+/**
+ * Of `userIds`, those whose usable connections in `spaceId` include `connectionId`: everyone when
+ * it is shared into the space, else its owner when the space lets the owner bind it. One query.
+ */
+export async function usersReachingConnection(
+  spaceId: string,
+  connectionId: string,
+  userIds: readonly string[],
+): Promise<string[]> {
+  if (userIds.length === 0) return [];
+  const [row] = await db
+    .select({ userId: integrationConnections.userId, shared: sql<boolean>`${sharedInto(spaceId)}` })
+    .from(integrationConnections)
+    .where(
+      and(eq(integrationConnections.id, connectionId), usableByAnyUserInSpace(spaceId, userIds)),
+    );
+  if (!row) return [];
+  return row.shared ? [...userIds] : userIds.filter((id) => id === row.userId);
 }
 
 function loadSelectableRows(where: SQL | undefined) {

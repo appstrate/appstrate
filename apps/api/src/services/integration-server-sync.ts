@@ -21,7 +21,7 @@ import { fetchWithin } from "../lib/egress-host-guard.ts";
 import { logger } from "../lib/logger.ts";
 import type { SpaceScope } from "../lib/scope.ts";
 import { ProxyCallError } from "./credential-proxy/core.ts";
-import { resolveRemoteConnection } from "./credential-proxy/remote-tools.ts";
+import { resolveRemoteConnection, streamableRemote } from "./credential-proxy/remote-tools.ts";
 import {
   directMcpOperation,
   listToolPages,
@@ -93,24 +93,7 @@ export async function syncIntegrationFromServer(input: {
       detail: `Draft for '${packageId}' is invalid; fix the manifest before synchronizing.`,
     });
   }
-  const source = loaded.manifest.source;
-  if (source?.kind !== "remote") {
-    throw new ApiError({
-      status: 422,
-      code: "integration_not_remote",
-      title: "Not a Remote Integration",
-      detail: `Integration '${packageId}' is not backed by a remote MCP server.`,
-    });
-  }
-  const { transport } = source.remote;
-  if (transport === "sse") {
-    throw new ApiError({
-      status: 422,
-      code: "sync_transport_unsupported",
-      title: "Transport Not Supported",
-      detail: `Integration '${packageId}' uses the SSE transport; only Streamable HTTP servers can be synchronized.`,
-    });
-  }
+  streamableRemote(packageId, loaded.manifest);
 
   const unauthenticated = isUnauthenticatedIntegration(loaded.manifest);
   const reach = unauthenticated ? null : input.proxyReach();

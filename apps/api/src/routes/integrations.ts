@@ -114,14 +114,10 @@ import {
   recordAuditFromContext,
   recordAuditsFromContext,
 } from "./../services/audit.ts";
-import {
-  listIntegrations,
-  listIntegrationsAtRemoteUrl,
-  readIntegrationManifestForProxy,
-} from "../services/integration-service.ts";
+import { listIntegrations, listIntegrationsAtRemoteUrl } from "../services/integration-service.ts";
 import { discoverRemoteIntegration } from "../services/integration-discovery.ts";
 import { syncIntegrationFromServer } from "../services/integration-server-sync.ts";
-import { readToolSnapshots } from "../services/integration-tool-snapshots.ts";
+import { readToolSnapshots } from "../services/integration-tool-snapshot-reads.ts";
 import {
   approveTools,
   blockTools,
@@ -133,10 +129,8 @@ import {
 import { observedToolNameSchema, toolFingerprintSchema } from "@appstrate/core/sidecar-types";
 import {
   listRemoteTools,
-  resolveRemoteConnection,
-  streamableRemote,
+  loadStreamableRemote,
 } from "../services/credential-proxy/remote-tools.ts";
-import { assertActiveOutsideRun } from "../services/credential-proxy/integration-resolver.ts";
 import { remoteToolsCaller } from "../lib/remote-tools-caller.ts";
 import {
   reachOutsideRun,
@@ -1170,21 +1164,12 @@ export function createIntegrationsRouter() {
       const scope = getSpaceScope(c);
       await assertIsIntegration(scope, packageId);
       const body = await readJsonBody(c, syncFromServerSchema, { allowEmpty: true });
-      await assertActiveOutsideRun(scope, packageId);
-      const loaded = await readIntegrationManifestForProxy(packageId, scope.orgId, null);
-      if (!loaded.ok) throw notFound(`Integration '${packageId}' has no published version`);
-      const manifest = streamableRemote(packageId, loaded.manifest);
-      const caller = remoteToolsCaller(c);
-      const { connectionId } = await resolveRemoteConnection(
-        { ...caller, integrationId: packageId, connectionId: body.connection_id },
-        manifest,
-      );
-      const startedAt = new Date();
+      const manifest = await loadStreamableRemote(scope, packageId);
       const catalog = await listRemoteTools({
-        ...caller,
+        ...remoteToolsCaller(c),
         integrationId: packageId,
         manifest,
-        ...(connectionId ? { connectionId } : {}),
+        ...(body.connection_id ? { connectionId: body.connection_id } : {}),
         fresh: true,
       });
       if (!catalog.listed) {
@@ -1195,14 +1180,9 @@ export function createIntegrationsRouter() {
       const [snapshot] = await readToolSnapshots({
         orgId: scope.orgId,
         packageId,
-        connectionIds: [connectionId],
+        connectionIds: [catalog.connectionId],
       });
-      // A listing whose snapshot did not land would answer with the one before it: the platform's
-      // own failure, not the server's.
-      if (!snapshot || snapshot.listedAt < startedAt) {
-        logger.error("tool snapshot refresh: listed but not recorded", { packageId });
-        throw internalError();
-      }
+      if (!snapshot) throw internalError();
       return c.json({
         tool_snapshot: {
           connection_id: snapshot.connectionId,
@@ -1217,8 +1197,12 @@ export function createIntegrationsRouter() {
   // ─── Space tool policy ─────────────────────
 
   const toolPolicyTarget = (c: Context<AppEnv>): ToolPolicyTarget => {
-    const [caller, orgRole] = spaceListCaller(c);
-    return { scope: getSpaceScope(c), packageId: c.req.param("packageId")!, caller, orgRole };
+    const scope = getSpaceScope(c);
+    return {
+      scope,
+      packageId: c.req.param("packageId")!,
+      caller: connectionCaller(c, scope.spaceId),
+    };
   };
   // A decision on what the space lets agents run is a person's, made on the dashboard.
   const configureToolPolicy = requirePermission("integrations", "configure");
@@ -1247,8 +1231,9 @@ export function createIntegrationsRouter() {
     "/:packageId{@[^/]+/[^/]+}/tool-policy",
     requirePermission("integrations", "read"),
     async (c) => {
-      await assertIsIntegration(getSpaceScope(c), c.req.param("packageId")!);
-      return c.json(await getToolPolicy(toolPolicyTarget(c)));
+      const target = toolPolicyTarget(c);
+      await assertIsIntegration(target.scope, target.packageId);
+      return c.json(await getToolPolicy(target));
     },
   );
 
@@ -1261,7 +1246,7 @@ export function createIntegrationsRouter() {
       const target = toolPolicyTarget(c);
       await assertIsIntegration(target.scope, target.packageId);
       const body = await readJsonBody(c, approveToolsSchema);
-      const approved = await approveTools(target, body.tools, c.get("user")?.id ?? null);
+      const approved = await approveTools(target, body.tools, c.get("user")!.id);
       await toolPolicyAudit(c, "integration.tool.approved", approved);
       return c.body(null, 204);
     },
@@ -1273,8 +1258,7 @@ export function createIntegrationsRouter() {
     configureToolPolicy,
     requireDashboardSession,
     async (c) => {
-      const scope = getSpaceScope(c);
-      const packageId = c.req.param("packageId")!;
+      const { scope, packageId } = toolPolicyTarget(c);
       await assertIsIntegration(scope, packageId);
       const toolName = toolNameParam(c);
       const revoked = await revokeToolApproval(scope, packageId, toolName);
@@ -1289,11 +1273,10 @@ export function createIntegrationsRouter() {
     configureToolPolicy,
     requireDashboardSession,
     async (c) => {
-      const scope = getSpaceScope(c);
-      const packageId = c.req.param("packageId")!;
+      const { scope, packageId } = toolPolicyTarget(c);
       await assertIsIntegration(scope, packageId);
       const body = await readJsonBody(c, blockToolsSchema);
-      const blocked = await blockTools(scope, packageId, body.tools, c.get("user")?.id ?? null);
+      const blocked = await blockTools(scope, packageId, body.tools, c.get("user")!.id);
       await toolPolicyAudit(
         c,
         "integration.tool.blocked",
@@ -1309,8 +1292,7 @@ export function createIntegrationsRouter() {
     configureToolPolicy,
     requireDashboardSession,
     async (c) => {
-      const scope = getSpaceScope(c);
-      const packageId = c.req.param("packageId")!;
+      const { scope, packageId } = toolPolicyTarget(c);
       await assertIsIntegration(scope, packageId);
       const toolName = toolNameParam(c);
       if (await unblockTool(scope, packageId, toolName)) {

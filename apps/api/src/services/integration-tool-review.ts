@@ -12,14 +12,14 @@ import { db } from "@appstrate/db/client";
 import { spaces, type NotificationPayloads } from "@appstrate/db/schema";
 import { logger } from "../lib/logger.ts";
 import { listSpacePermissionHolders } from "../lib/space-role.ts";
-import { listReachableConnections } from "./integration-connections.ts";
+import { usersReachingConnection } from "./integration-connections.ts";
 import { readIntegrationManifestForConnect } from "./integration-service.ts";
 import {
   effectiveCatalogOf,
   judgeToolSpacePolicy,
   readToolSpaceRowsForSpaces,
 } from "./integration-tool-catalog.ts";
-import { readToolSnapshots } from "./integration-tool-snapshots.ts";
+import { readToolSnapshots } from "./integration-tool-snapshot-reads.ts";
 import { insertToolReviewNotifications } from "./state/notifications.ts";
 import { spacesActiveForAll } from "./space-packages.ts";
 
@@ -30,7 +30,7 @@ import { spacesActiveForAll } from "./space-packages.ts";
  * Silent when the catalog is open (undeclared tools are usable there). Per space where the
  * integration is active, only when one of `names` is still `pending` there (not declared, blocked
  * or approved at its current definition); recipients are the `integrations:configure` holders of
- * that space who reach the snapshot's connection among their own usable ones (no connection:
+ * that space who reach the snapshot's connection among their usable ones (no connection:
  * every holder). One unread notice per (space, recipient, integration): the partial unique index
  * absorbs the rest. Never throws: a snapshot caller must not fail on it.
  */
@@ -77,18 +77,7 @@ export async function scheduleToolReviewNotifications(params: {
       const recipients =
         connectionId === null
           ? holders
-          : (
-              await Promise.all(
-                holders.map(async (userId) => {
-                  const usable = await listReachableConnections(
-                    { spaceId, actor: { type: "user", id: userId } },
-                    "usable",
-                    [packageId],
-                  );
-                  return usable.some((row) => row.id === connectionId) ? userId : null;
-                }),
-              )
-            ).filter((userId): userId is string => userId !== null);
+          : await usersReachingConnection(spaceId, connectionId, holders);
       await insertToolReviewNotifications({
         orgId,
         spaceId,

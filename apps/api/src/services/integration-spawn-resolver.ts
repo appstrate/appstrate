@@ -35,7 +35,6 @@ import type { AfpsHttpDelivery as ConnectAfpsHttpDelivery } from "@appstrate/con
 import {
   allowsUndeclaredTools,
   displayAccountId,
-  getApiCallConfigs,
   getAppstrateConnectMeta,
   getIntegrationSourceKind,
   getLocalServer,
@@ -59,7 +58,6 @@ import type {
   ApiCallSpec,
   UnavailableToolReason,
 } from "@appstrate/core/sidecar-types";
-import { OBSERVED_TOOLS_MAX_COUNT } from "@appstrate/core/sidecar-types";
 
 import { UNAVAILABLE_INTEGRATION_REASONS } from "@appstrate/afps-runtime/bundle";
 import { isVariableTemplate } from "@appstrate/afps-shared/connection-variables";
@@ -68,7 +66,8 @@ import { logger } from "../lib/logger.ts";
 import {
   apiCallBlocks,
   approvedFingerprintsByTool,
-  approvedToolNames,
+  namedToolSelection,
+  syntheticToolNames,
   loadToolSpacePolicy,
 } from "./integration-tool-catalog.ts";
 import {
@@ -397,22 +396,23 @@ async function resolveOne(
   // closed remote catalog an undeclared tool the agent names is offered only at a definition the
   // space approved (declared tools are never held back by a changed definition).
   const policy = await loadToolSpacePolicy({ orgId, spaceId }, integrationId, manifest);
-  const selectedConfigs = selectedApiCallConfigs(manifest, effectiveSelection);
+  const judgedConfigs = selectedApiCallConfigs(manifest, effectiveSelection).map((cfg) => ({
+    cfg,
+    ...apiCallBlocks(cfg, policy.blocks),
+  }));
   // Selected and blocked: removed below, so the run says why the tool is missing.
-  const unavailableTools = selectedConfigs
-    .flatMap((cfg) => {
-      const { callBlocked, uploadBlocked } = apiCallBlocks(cfg, policy.blocks);
+  const unavailableTools = judgedConfigs
+    .flatMap(({ cfg, callBlocked, uploadBlocked }) => {
       if (callBlocked) return [cfg.toolName];
       return uploadBlocked ? [cfg.uploadToolName!] : [];
     })
     .map((name) => ({ name, reason: "blocked_in_space" as const }));
-  const selectedApiCalls: ApiCallSpec[] = selectedConfigs
+  const selectedApiCalls: ApiCallSpec[] = judgedConfigs
     // An `api_upload` dispatches through its `api_call`: blocking the call removes both.
-    .filter((cfg) => !apiCallBlocks(cfg, policy.blocks).callBlocked)
-    .map((cfg) => {
+    .filter(({ callBlocked }) => !callBlocked)
+    .map(({ cfg, uploadBlocked }) => {
       const auth = manifest.auths?.[cfg.authKey] as AfpsManifestAuth | undefined;
-      const upload =
-        cfg.uploadProtocols.length > 0 && !apiCallBlocks(cfg, policy.blocks).uploadBlocked;
+      const upload = cfg.uploadProtocols.length > 0 && !uploadBlocked;
       return {
         authKey: cfg.authKey,
         toolName: cfg.toolName,
@@ -544,27 +544,17 @@ async function resolveOne(
     ...workspaceMount,
   });
   const approvedByTool = approvedFingerprintsByTool(policy);
-  const catalogNames = resolveIntegrationToolCatalog({ integration: manifest }).map((e) => e.name);
-  const declaredNames = new Set(catalogNames);
+  const declaredNames = new Set(
+    resolveIntegrationToolCatalog({ integration: manifest }).map((e) => e.name),
+  );
   const closedRemote = sourceKind === "remote" && !allowsUndeclaredTools(manifest);
   // A wildcard on a closed remote catalog is not "every tool the server lists": it is what the
   // manifest declares plus what the space approved, named like an explicit selection.
   const closedWildcard = wildcardSelection && closedRemote;
   // The synthetic `api_call`/`api_upload` names are the platform's, granted by the selection of
   // their own, never named to the server.
-  const platformTools = new Set(
-    getApiCallConfigs(manifest).flatMap((cfg) => [
-      cfg.toolName,
-      cfg.uploadToolName ?? cfg.toolName,
-    ]),
-  );
-  const namedSelection: readonly string[] = closedWildcard
-    ? [
-        ...catalogNames,
-        // Bounded like the fingerprints map the sidecar validates: past it the extra approvals are left out (closed).
-        ...[...approvedToolNames(policy)].slice(0, OBSERVED_TOOLS_MAX_COUNT),
-      ].filter((name) => !platformTools.has(name))
-    : ((effectiveSelection ?? []) as readonly string[]);
+  const platformTools = syntheticToolNames(manifest);
+  const namedSelection = namedToolSelection(manifest, effectiveSelection, policy);
   const approvedToolFingerprints = closedRemote
     ? Object.fromEntries(
         namedSelection

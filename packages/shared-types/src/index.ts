@@ -45,7 +45,6 @@ export type {
   IntegrationOrgDefault,
   IntegrationPin,
   IntegrationSummary,
-  IntegrationToolCatalogEntry,
 } from "./integrations.ts";
 
 export type { UserProfile } from "@appstrate/db/schema";

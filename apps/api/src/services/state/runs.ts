@@ -48,6 +48,7 @@ import {
   type RunStatus,
 } from "@appstrate/core/run-status";
 import { ACTIVE_RUN_STATUSES } from "@appstrate/db/run-status";
+import { getErrorMessage } from "@appstrate/core/errors";
 import { extractFileIds } from "@appstrate/core/file-uri";
 import { getEnv } from "@appstrate/env";
 import { logger } from "../../lib/logger.ts";
@@ -988,7 +989,7 @@ export async function recordRunDegradedIntegration(
     logger.warn("Failed to record degraded integration on run metadata", {
       runId,
       integrationId,
-      error: err instanceof Error ? err.message : String(err),
+      error: getErrorMessage(err),
     });
   }
 }
@@ -1052,7 +1053,7 @@ export async function recordRunUnavailableTools(
   } catch (err) {
     logger.warn("Failed to record unavailable tools on run metadata", {
       runId,
-      error: err instanceof Error ? err.message : String(err),
+      error: getErrorMessage(err),
     });
   }
 }

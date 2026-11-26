@@ -11,6 +11,7 @@ import {
   packageVersions,
   type runs,
 } from "@appstrate/db/schema";
+import { getErrorMessage } from "@appstrate/core/errors";
 import { asRecord } from "@appstrate/core/safe-json";
 import { parseBearer } from "@appstrate/core/bearer";
 import { zipArtifact } from "@appstrate/core/zip";
@@ -252,12 +253,8 @@ export const toolsObservedSchema = z
       )
       .max(OBSERVED_TOOLS_MAX_COUNT),
   })
-  .refine((body) => body.tools !== undefined || body.truncated === undefined, {
-    message: "`truncated` qualifies `tools`: send it only with them",
-    path: ["truncated"],
-  })
-  .refine((body) => body.tools === undefined || body.truncated !== undefined, {
-    message: "`truncated` is required with `tools`",
+  .refine((body) => (body.tools === undefined) === (body.truncated === undefined), {
+    message: "`truncated` qualifies `tools`: send both or neither",
     path: ["truncated"],
   });
 
@@ -618,7 +615,6 @@ export function createInternalRouter(ratePerMin = RUN_ROUTE_RATE_PER_MIN) {
       );
       if (
         body.tools !== undefined &&
-        body.truncated !== undefined &&
         run.runOrigin === "platform" &&
         !listRuntimeBoundSystemIntegrationIds().includes(packageId)
       ) {
@@ -637,7 +633,7 @@ export function createInternalRouter(ratePerMin = RUN_ROUTE_RATE_PER_MIN) {
           logger.warn("tools-observed: tool snapshot not recorded", {
             runId,
             packageId,
-            error: err instanceof Error ? err.message : String(err),
+            error: getErrorMessage(err),
           }),
         );
       }

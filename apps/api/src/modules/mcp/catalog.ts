@@ -108,7 +108,8 @@ const RUN_TOOLS_MCP_PATHS: ReadonlySet<string> = new Set(["/internal/mcp", "/api
  * already serves piecewise, and the credential proxy and its tool routes, which
  * `call_integration_tool` and the `integration_tool` kind of `search` and `describe`
  * alone reach (`integration-tools.ts`), and the writes of a space's tool policy, which only the
- * dashboard's own session makes (`requireDashboardSession`).
+ * dashboard's own session makes (`requireDashboardSession` refuses them here regardless; kept out
+ * of the catalog for discoverability).
  */
 function isExcludedPath(pathTemplate: string): boolean {
   return (

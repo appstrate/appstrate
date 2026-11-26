@@ -7,14 +7,20 @@
  */
 
 import { and, desc, eq, inArray } from "drizzle-orm";
+import { isToolsWildcard } from "@appstrate/core/dependencies";
 import {
+  allowsUndeclaredTools,
+  getApiCallConfigs,
+  hiddenToolNames,
   judgeToolApprovals,
-  resolveEffectiveToolCatalog,
-  type EffectiveToolEntry,
+  resolveIntegrationToolCatalog,
   type IntegrationManifest,
-  type ToolSpacePolicy,
+  type IntegrationToolCatalogEntry,
 } from "@appstrate/core/integration";
-import { MAX_APPROVED_FINGERPRINTS_PER_TOOL } from "@appstrate/core/sidecar-types";
+import {
+  MAX_APPROVED_FINGERPRINTS_PER_TOOL,
+  OBSERVED_TOOLS_MAX_COUNT,
+} from "@appstrate/core/sidecar-types";
 import { db } from "@appstrate/db/client";
 import {
   spaceIntegrationToolApprovals,
@@ -23,70 +29,40 @@ import {
 } from "@appstrate/db/schema";
 import { ApiError } from "../lib/errors.ts";
 import type { SpaceScope } from "../lib/scope.ts";
-import { readToolSnapshots, type ToolSnapshot } from "./integration-tool-snapshots.ts";
+import { type ToolSnapshot, readToolSnapshots } from "./integration-tool-snapshot-reads.ts";
 
-/** What a run-path read of the space's decisions needs: names, fingerprints, and recency. */
-interface PolicyRows {
-  approvals: { tool_name: string; fingerprint: string; approved_at: Date }[];
-  blocks: { tool_name: string }[];
-}
-
-/** What the review read adds: each approval's reviewed definition and author, each block's. */
-interface ReviewRows {
-  approvals: (PolicyRows["approvals"][number] & {
+/** What a space decided about one integration's tools, as stored: approvals newest first. */
+interface ToolSpaceRows {
+  approvals: {
+    tool_name: string;
+    fingerprint: string;
+    approved_at: Date;
     definition: ToolDefinition;
     approved_by: string | null;
-  })[];
+  }[];
   blocks: { tool_name: string; blocked_by: string | null; blocked_at: Date }[];
 }
 
-/**
- * The rows of every space in `spaceIds` on `packageId`: one query each for approvals (newest
- * first) and blocks. `review: false` selects only what judging a policy reads; `review: true`
- * adds the definitions and authors the review surface shows.
- */
+/** The rows of every space in `spaceIds` on `packageId`: one query for approvals, one for blocks. */
 export async function readToolSpaceRowsForSpaces(
   orgId: string,
   spaceIds: readonly string[],
   packageId: string,
-): Promise<Map<string, PolicyRows>>;
-export async function readToolSpaceRowsForSpaces(
-  orgId: string,
-  spaceIds: readonly string[],
-  packageId: string,
-  review: true,
-): Promise<Map<string, ReviewRows>>;
-export async function readToolSpaceRowsForSpaces(
-  orgId: string,
-  spaceIds: readonly string[],
-  packageId: string,
-  review = false,
-): Promise<Map<string, PolicyRows | ReviewRows>> {
-  const bySpace = new Map<string, { approvals: object[]; blocks: object[] }>(
+): Promise<Map<string, ToolSpaceRows>> {
+  const bySpace = new Map<string, ToolSpaceRows>(
     spaceIds.map((id) => [id, { approvals: [], blocks: [] }]),
   );
-  if (spaceIds.length === 0) return bySpace as Map<string, PolicyRows>;
-  const approvalColumns = {
-    spaceId: spaceIntegrationToolApprovals.spaceId,
-    tool_name: spaceIntegrationToolApprovals.toolName,
-    fingerprint: spaceIntegrationToolApprovals.fingerprint,
-    approved_at: spaceIntegrationToolApprovals.approvedAt,
-  };
-  const blockColumns = {
-    spaceId: spaceIntegrationToolBlocks.spaceId,
-    tool_name: spaceIntegrationToolBlocks.toolName,
-  };
+  if (spaceIds.length === 0) return bySpace;
   const [approvals, blocks] = await Promise.all([
     db
-      .select(
-        review
-          ? {
-              ...approvalColumns,
-              definition: spaceIntegrationToolApprovals.definition,
-              approved_by: spaceIntegrationToolApprovals.approvedBy,
-            }
-          : approvalColumns,
-      )
+      .select({
+        spaceId: spaceIntegrationToolApprovals.spaceId,
+        tool_name: spaceIntegrationToolApprovals.toolName,
+        fingerprint: spaceIntegrationToolApprovals.fingerprint,
+        approved_at: spaceIntegrationToolApprovals.approvedAt,
+        definition: spaceIntegrationToolApprovals.definition,
+        approved_by: spaceIntegrationToolApprovals.approvedBy,
+      })
       .from(spaceIntegrationToolApprovals)
       .where(
         and(
@@ -97,15 +73,12 @@ export async function readToolSpaceRowsForSpaces(
       )
       .orderBy(desc(spaceIntegrationToolApprovals.approvedAt)),
     db
-      .select(
-        review
-          ? {
-              ...blockColumns,
-              blocked_by: spaceIntegrationToolBlocks.blockedBy,
-              blocked_at: spaceIntegrationToolBlocks.blockedAt,
-            }
-          : blockColumns,
-      )
+      .select({
+        spaceId: spaceIntegrationToolBlocks.spaceId,
+        tool_name: spaceIntegrationToolBlocks.toolName,
+        blocked_by: spaceIntegrationToolBlocks.blockedBy,
+        blocked_at: spaceIntegrationToolBlocks.blockedAt,
+      })
       .from(spaceIntegrationToolBlocks)
       .where(
         and(
@@ -117,21 +90,15 @@ export async function readToolSpaceRowsForSpaces(
   ]);
   for (const { spaceId, ...row } of approvals) bySpace.get(spaceId)?.approvals.push(row);
   for (const { spaceId, ...row } of blocks) bySpace.get(spaceId)?.blocks.push(row);
-  return bySpace as Map<string, PolicyRows | ReviewRows>;
+  return bySpace;
 }
 
-/** The rows of one space: {@link readToolSpaceRowsForSpaces} of that space alone. */
-async function readToolSpaceRows(scope: SpaceScope, packageId: string): Promise<PolicyRows> {
-  const rows = await readToolSpaceRowsForSpaces(scope.orgId, [scope.spaceId], packageId);
-  return rows.get(scope.spaceId)!;
-}
-
-/** What the review surface shows of the space's decisions: definitions and authors included. */
-export async function readToolSpaceReviewRows(
+/** The rows of one space, definitions and authors included: what the review surface shows. */
+export async function readToolSpaceRows(
   scope: SpaceScope,
   packageId: string,
-): Promise<ReviewRows> {
-  const rows = await readToolSpaceRowsForSpaces(scope.orgId, [scope.spaceId], packageId, true);
+): Promise<ToolSpaceRows> {
+  const rows = await readToolSpaceRowsForSpaces(scope.orgId, [scope.spaceId], packageId);
   return rows.get(scope.spaceId)!;
 }
 
@@ -141,7 +108,7 @@ export async function readToolSpaceReviewRows(
  * recorded before it changed).
  */
 export function judgeToolSpacePolicy(
-  rows: PolicyRows,
+  rows: ToolSpaceRows,
   manifest: IntegrationManifest,
 ): ToolSpacePolicy {
   return {
@@ -215,10 +182,151 @@ export function approvedFingerprintsByTool(policy: ToolSpacePolicy): Map<string,
   return byTool;
 }
 
+/** The undeclared tools the space approved a definition of, blocked or not. */
+export function approvedNames(policy: ToolSpacePolicy): Set<string> {
+  return new Set(policy.approvals.map((a) => a.tool_name));
+}
+
 /** The undeclared tools the space approved a definition of and does not block. */
 export function approvedToolNames(policy: ToolSpacePolicy): Set<string> {
   const blocked = new Set(policy.blocks);
-  return new Set(policy.approvals.map((a) => a.tool_name).filter((name) => !blocked.has(name)));
+  return new Set([...approvedNames(policy)].filter((name) => !blocked.has(name)));
+}
+
+/** The names of the platform's own `api_call` / `api_upload` tools: granted by their own selection, never named to a server. */
+export function syntheticToolNames(manifest: IntegrationManifest): Set<string> {
+  return new Set(
+    getApiCallConfigs(manifest).flatMap((config) =>
+      config.uploadToolName ? [config.toolName, config.uploadToolName] : [config.toolName],
+    ),
+  );
+}
+
+/**
+ * The tool names an agent's selection names on `manifest`. A wildcard on a closed remote catalog
+ * is not "every tool the server lists": it is what the manifest declares plus what the space
+ * approved (bounded like the fingerprints map the sidecar validates), less the platform's own
+ * tools. A wildcard elsewhere names none (the surface is not enumerated), else the explicit list.
+ */
+export function namedToolSelection(
+  manifest: IntegrationManifest,
+  selection: readonly string[] | "*" | undefined,
+  policy: ToolSpacePolicy,
+): readonly string[] {
+  if (!isToolsWildcard(selection)) return selection ?? [];
+  if (manifest.source?.kind !== "remote" || allowsUndeclaredTools(manifest)) return [];
+  const platformTools = syntheticToolNames(manifest);
+  return [
+    ...resolveIntegrationToolCatalog({ integration: manifest }).map((e) => e.name),
+    ...[...approvedToolNames(policy)].slice(0, OBSERVED_TOOLS_MAX_COUNT),
+  ].filter((name) => !platformTools.has(name));
+}
+
+type EffectiveToolStatus = "available" | "missing" | "pending" | "blocked";
+/** `declared`: in the manifest's catalog; `approved`: undeclared, approved in the space; `listed`: only the server lists it. */
+type EffectiveToolOrigin = "declared" | "approved" | "listed";
+
+/** A catalog entry with what the space policy and the live server listings say about it. */
+export interface EffectiveToolEntry extends IntegrationToolCatalogEntry {
+  status: EffectiveToolStatus;
+  origin: EffectiveToolOrigin;
+  /**
+   * Declared tool: a listing carries a definition that changed since first seen (a signal only,
+   * nothing acknowledges it). Undeclared approved tool: a listed fingerprint is not approved.
+   */
+  modified: boolean;
+}
+
+/** The space's decisions on one integration's tools. */
+export interface ToolSpacePolicy {
+  approvals: readonly { tool_name: string; fingerprint: string }[];
+  blocks: readonly string[];
+}
+
+/** One stored listing of the server (one per connection). */
+export interface ToolSnapshotView {
+  tools: readonly { name: string; fingerprint: string; changed_at: string | null }[];
+  truncated: boolean;
+}
+
+interface ResolveEffectiveToolCatalogInput {
+  integration: IntegrationManifest;
+  /** `null`: no space context, nothing approved or blocked. */
+  policy: ToolSpacePolicy | null;
+  snapshots: readonly ToolSnapshotView[];
+}
+
+/**
+ * The catalog an agent can actually use in a space: the manifest's declared tools, plus the
+ * undeclared ones the server lists, judged against the space's approvals and blocks.
+ * Declared tools are never held back by a changed definition (`modified` only signals it);
+ * on a closed catalog an undeclared tool needs an approval of its current fingerprint.
+ * Declared tools first in catalog order, the rest by name.
+ */
+export function resolveEffectiveToolCatalog(
+  input: ResolveEffectiveToolCatalogInput,
+): EffectiveToolEntry[] {
+  const { integration, policy, snapshots } = input;
+  const declared = resolveIntegrationToolCatalog({ integration });
+  const declaredNames = new Set(declared.map((e) => e.name));
+  // Hidden tools are neither declared nor approvable: the server may list them, the space never sees them.
+  const hidden = hiddenToolNames(integration);
+  const open = allowsUndeclaredTools(integration);
+  const blocked = new Set(policy?.blocks ?? []);
+
+  const approvals = new Map<string, Set<string>>();
+  for (const a of judgeToolApprovals(integration, policy?.approvals ?? [])) {
+    const set = approvals.get(a.tool_name) ?? new Set<string>();
+    set.add(a.fingerprint);
+    approvals.set(a.tool_name, set);
+  }
+
+  const listings = new Map<string, { fingerprint: string; changed_at: string | null }[]>();
+  for (const snapshot of snapshots) {
+    for (const tool of snapshot.tools) {
+      const list = listings.get(tool.name) ?? [];
+      list.push(tool);
+      listings.set(tool.name, list);
+    }
+  }
+  // Absence proves nothing once a listing was cut short, or when nothing was ever listed.
+  const absenceIsMissing = snapshots.length > 0 && !snapshots.some((s) => s.truncated);
+
+  const judge = (
+    entry: IntegrationToolCatalogEntry,
+    origin: EffectiveToolOrigin,
+  ): EffectiveToolEntry => {
+    const listed = listings.get(entry.name);
+    let status: EffectiveToolStatus;
+    let modified = false;
+    if (!listed) {
+      status = absenceIsMissing ? "missing" : "available";
+    } else {
+      const approved = approvals.get(entry.name);
+      modified =
+        origin === "declared"
+          ? listed.some((l) => l.changed_at !== null)
+          : approved !== undefined && listed.some((l) => !approved.has(l.fingerprint));
+      if (origin === "declared" || open) {
+        status = "available";
+      } else if (approved && listed.some((l) => approved.has(l.fingerprint))) {
+        status = "available";
+      } else {
+        status = "pending";
+      }
+    }
+    if (blocked.has(entry.name)) status = "blocked";
+    return { ...entry, status, origin, modified };
+  };
+
+  const undeclared = [...new Set([...listings.keys(), ...approvals.keys()])]
+    .filter((name) => !declaredNames.has(name) && !hidden.has(name))
+    .sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));
+
+  return [
+    ...declared.map((entry) => judge(entry, "declared")),
+    ...undeclared.map((name) => judge({ name }, approvals.has(name) ? "approved" : "listed")),
+  ];
 }
 
 /** The effective catalog of `manifest` judged against a policy and the snapshots read. */
@@ -227,18 +335,7 @@ export function effectiveCatalogOf(
   policy: ToolSpacePolicy | null,
   snapshots: readonly ToolSnapshot[],
 ): EffectiveToolEntry[] {
-  return resolveEffectiveToolCatalog({
-    integration: manifest,
-    policy,
-    snapshots: snapshots.map((s) => ({
-      truncated: s.truncated,
-      tools: s.tools.map(({ name, fingerprint, changed_at }) => ({
-        name,
-        fingerprint,
-        changed_at,
-      })),
-    })),
-  });
+  return resolveEffectiveToolCatalog({ integration: manifest, policy, snapshots });
 }
 
 /** The effective catalog, with the snapshots it was judged against. */

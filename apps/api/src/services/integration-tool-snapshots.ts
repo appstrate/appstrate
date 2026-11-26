@@ -7,7 +7,7 @@
  */
 
 import type { Tool } from "@modelcontextprotocol/sdk/types.js";
-import { and, eq, inArray, isNull, or } from "drizzle-orm";
+import { and, eq, isNull } from "drizzle-orm";
 import { OBSERVED_TOOLS_MAX_COUNT } from "@appstrate/core/sidecar-types";
 import { sanitiseToolDescriptor, toolDefinitionFingerprint } from "@appstrate/mcp-transport";
 import { db } from "@appstrate/db/client";
@@ -21,13 +21,6 @@ import { scheduleToolReviewNotifications } from "./integration-tool-review.ts";
 
 /** Past this many serialised bytes of definitions in one snapshot, the rest keep only their identity. */
 const MAX_DEFINITION_BYTES = 512 * 1024;
-
-export interface ToolSnapshot {
-  connectionId: string | null;
-  listedAt: Date;
-  truncated: boolean;
-  tools: ToolSnapshotEntry[];
-}
 
 interface SnapshotTarget {
   orgId: string;
@@ -160,35 +153,4 @@ export async function recordToolSnapshot(
     );
   }
   return result;
-}
-
-/** The snapshots of the integration's targets named: a connection's, or `null` for the shared one. */
-export async function readToolSnapshots(input: {
-  orgId: string;
-  packageId: string;
-  connectionIds: readonly (string | null)[];
-}): Promise<ToolSnapshot[]> {
-  const connections = input.connectionIds.filter((id): id is string => id !== null);
-  const targets = [
-    ...(connections.length > 0
-      ? [inArray(integrationToolSnapshots.connectionId, connections)]
-      : []),
-    ...(input.connectionIds.includes(null) ? [isNull(integrationToolSnapshots.connectionId)] : []),
-  ];
-  if (targets.length === 0) return [];
-  return db
-    .select({
-      connectionId: integrationToolSnapshots.connectionId,
-      listedAt: integrationToolSnapshots.listedAt,
-      truncated: integrationToolSnapshots.truncated,
-      tools: integrationToolSnapshots.tools,
-    })
-    .from(integrationToolSnapshots)
-    .where(
-      and(
-        eq(integrationToolSnapshots.orgId, input.orgId),
-        eq(integrationToolSnapshots.packageId, input.packageId),
-        or(...targets),
-      ),
-    );
 }

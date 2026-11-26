@@ -878,6 +878,13 @@ const connectLogin502Headers = {
 const problemJson = {
   "application/problem+json": { schema: { $ref: "#/components/schemas/ProblemDetail" } },
 } as const;
+/** The refusal of a tool-policy write: a credential that is not the dashboard's session, or a missing permission. */
+const dashboardSessionRequired = {
+  description:
+    "`dashboard_session_required` — the credential is not a dashboard session; otherwise `integrations:configure` is missing.",
+  headers: STD_RESPONSE_HEADERS,
+  content: problemJson,
+};
 const grantMayBeRedeemedProperty = {
   grant_may_be_redeemed: {
     type: "boolean",
@@ -1585,6 +1592,7 @@ export const integrationsPaths = {
             "application/json": {
               schema: {
                 type: "object",
+                additionalProperties: false,
                 required: ["listed", "approvals", "blocks"],
                 properties: {
                   listed: {
@@ -1700,12 +1708,7 @@ export const integrationsPaths = {
           headers: STD_RESPONSE_HEADERS,
           content: problemJson,
         },
-        "403": {
-          description:
-            "`dashboard_session_required` — the credential is not a dashboard session; otherwise `integrations:configure` is missing.",
-          headers: STD_RESPONSE_HEADERS,
-          content: problemJson,
-        },
+        "403": dashboardSessionRequired,
         "429": { $ref: "#/components/responses/RateLimited" },
         "404": { $ref: "#/components/responses/NotFound" },
         "409": {
@@ -1733,12 +1736,7 @@ export const integrationsPaths = {
       responses: {
         "204": { description: "No approval of the tool remains", headers: STD_RESPONSE_HEADERS },
         "400": { $ref: "#/components/responses/ValidationError" },
-        "403": {
-          description:
-            "`dashboard_session_required` — the credential is not a dashboard session; otherwise `integrations:configure` is missing.",
-          headers: STD_RESPONSE_HEADERS,
-          content: problemJson,
-        },
+        "403": dashboardSessionRequired,
         "429": { $ref: "#/components/responses/RateLimited" },
         "404": { $ref: "#/components/responses/NotFound" },
       },
@@ -1779,12 +1777,7 @@ export const integrationsPaths = {
       responses: {
         "204": { description: "Blocked", headers: STD_RESPONSE_HEADERS },
         "400": { $ref: "#/components/responses/ValidationError" },
-        "403": {
-          description:
-            "`dashboard_session_required` — the credential is not a dashboard session; otherwise `integrations:configure` is missing.",
-          headers: STD_RESPONSE_HEADERS,
-          content: problemJson,
-        },
+        "403": dashboardSessionRequired,
         "429": { $ref: "#/components/responses/RateLimited" },
         "404": { $ref: "#/components/responses/NotFound" },
         "409": {
@@ -1812,12 +1805,7 @@ export const integrationsPaths = {
       responses: {
         "204": { description: "The tool is not blocked", headers: STD_RESPONSE_HEADERS },
         "400": { $ref: "#/components/responses/ValidationError" },
-        "403": {
-          description:
-            "`dashboard_session_required` — the credential is not a dashboard session; otherwise `integrations:configure` is missing.",
-          headers: STD_RESPONSE_HEADERS,
-          content: problemJson,
-        },
+        "403": dashboardSessionRequired,
         "429": { $ref: "#/components/responses/RateLimited" },
         "404": { $ref: "#/components/responses/NotFound" },
       },

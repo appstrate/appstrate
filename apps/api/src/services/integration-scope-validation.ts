@@ -51,7 +51,7 @@ import {
 import type { IntegrationManifest } from "@appstrate/core/integration";
 import type { ValidationFieldError } from "@appstrate/core/api-errors";
 import { db } from "@appstrate/db/client";
-import { loadToolSpacePolicy } from "./integration-tool-catalog.ts";
+import { approvedNames, loadToolSpacePolicy } from "./integration-tool-catalog.ts";
 import { packageDistTags, packageVersions, packages } from "@appstrate/db/schema";
 import { and, eq, isNull, or } from "drizzle-orm";
 
@@ -439,14 +439,12 @@ export async function validateAgentIntegrationSelections(
     // Undeclared tools the space approved: callable and nameable like declared ones.
     const approvedTools = toolPolicySpaceId
       ? [
-          ...new Set(
-            (
-              await loadToolSpacePolicy(
-                { orgId, spaceId: toolPolicySpaceId },
-                entry.id,
-                judgedManifest,
-              )
-            ).approvals.map((a) => a.tool_name),
+          ...approvedNames(
+            await loadToolSpacePolicy(
+              { orgId, spaceId: toolPolicySpaceId },
+              entry.id,
+              judgedManifest,
+            ),
           ),
         ]
       : [];

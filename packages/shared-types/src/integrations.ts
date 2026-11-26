@@ -12,7 +12,6 @@ import type {
   ConnectionResolutionSource,
   ConnectionScopeFit,
   IntegrationManifest,
-  IntegrationToolCatalogEntry,
 } from "@appstrate/core/integration";
 import type { ResolutionFieldError } from "@appstrate/core/api-errors";
 
@@ -161,20 +160,6 @@ export interface IntegrationAuthStatus {
    */
   client_auto_provisioned: boolean;
 }
-
-/**
- * One entry in the agent-facing tool catalog the picker consumes. Resolved
- * server-side by `resolveIntegrationToolCatalog` from a local source's
- * `source.server.tools` minus `hidden_tools` and auto-hidden
- * connect.tool primitives. Falls back to the integration's sparse
- * `tools_policy{}` keys when the server declares no `tools`. Per-tool `policy`
- * is attached verbatim from `integration.tools_policy[name]` when declared.
- *
- * Re-exported from `@appstrate/core` rather than duplicated: the resolver
- * already emits this exact wire shape (snake_case `policy.required_scopes`),
- * so backend producer and frontend consumer read one definition.
- */
-export type { IntegrationToolCatalogEntry };
 
 export interface IntegrationOAuthClient {
   /** Row UUID — the `client_ref` handle for rotate / delete / default-client. */

@@ -93,14 +93,9 @@ type ProxyCallInput = {
   connectionId?: string;
   /** How the caller names `connectionId`; the header when omitted. */
   connectionNaming?: ConnectionNaming;
-  /**
-   * The call IS the remote MCP transport (`mcp-over-proxy.ts`): the endpoint it targets is its own,
-   * and the caller applies the space's tool policy per tool. Every other call applies the policy
-   * here: a blocked `api_call` (or a blocked `api_upload` on a streamed upload) is refused, and
-   * the integration's MCP endpoint is refused at the target and at every redirect hop.
-   */
+  /** The call is the remote MCP transport itself; what that changes is on `ResolveIntegrationProxyInput` (`integration-resolver.ts`). */
   mcpTransport?: true;
-  /** A streamed upload (the `api_upload` door): a blocked `api_upload` refuses it too. */
+  /** A streamed upload (the `api_upload` door), as `ResolveIntegrationProxyInput` documents it. */
   upload?: true;
 
   /** Scoped integration package name (e.g. `@afps/gmail`). */
