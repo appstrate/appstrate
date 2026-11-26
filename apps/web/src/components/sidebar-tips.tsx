@@ -199,7 +199,7 @@ function TipStack({
       aria-label={t("tips.label")}
       data-testid="sidebar-tips"
       className={cn(
-        "group/tips duration-base ease-surface relative px-2 pt-2 pb-2 transition-[padding] [@media(max-height:759px)]:hidden",
+        "group/tips duration-base ease-surface relative px-3 pt-2 pb-3 transition-[padding] [@media(max-height:759px)]:hidden",
         count > 1 && "hover:pt-7",
       )}
       onPointerEnter={() => setHovered(true)}
@@ -211,7 +211,7 @@ function TipStack({
         <button
           type="button"
           aria-label={t("tips.next", { title: t(TIP_COPY[next].title) })}
-          className="focus-visible:ring-ring absolute inset-x-2 top-0 z-40 h-2 cursor-pointer rounded-t-lg outline-none group-hover/tips:h-7 focus-visible:ring-2"
+          className="focus-visible:ring-ring absolute inset-x-3 top-0 z-40 h-2 cursor-pointer rounded-t-lg outline-none group-hover/tips:h-7 focus-visible:ring-2"
           onClick={() => {
             setTurnedByHand(true);
             setLeaving(current);
