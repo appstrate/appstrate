@@ -13,7 +13,7 @@
  * seed.
  *
  * Lookups during the request hot path (token resolver, llm-proxy,
- * refresh worker) MUST go through this registry — never reach into a
+ * credential refresh sweep) MUST go through this registry — never reach into a
  * module's internal state directly. The provider id is the only stable
  * identifier between the DB row and the runtime.
  *

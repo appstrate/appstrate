@@ -19,6 +19,7 @@
  * asserted is the platform's wire behaviour, not a mock's recorded bytes.
  */
 
+import { readCredentialRevision } from "../../helpers/refresh-fixtures.ts";
 import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach } from "bun:test";
 import { getTestApp } from "../../helpers/app.ts";
 import { truncateAll, db } from "../../helpers/db.ts";
@@ -47,10 +48,7 @@ import {
 import { and, eq } from "drizzle-orm";
 import { decryptCredentialsToStringMap } from "@appstrate/connect";
 import { refreshConnectionCredential } from "../../../src/services/integration-token-refresh.ts";
-import {
-  readCredentialRevision,
-  readIntegrationAuth,
-} from "../../../src/services/integration-connections.ts";
+import { readIntegrationAuth } from "../../../src/services/integration-connections.ts";
 import { getCache } from "../../../src/infra/index.ts";
 import type { AfpsManifestAuth } from "../../../src/services/integration-manifest-helpers.ts";
 import type { IntegrationManifest } from "@appstrate/core/integration";
@@ -212,9 +210,11 @@ async function refresh(ctx: TestContext, connectionId: string): Promise<void> {
     integrationId: INTEGRATION,
     manifest: manifest as IntegrationManifest,
     authDef: auth as AfpsManifestAuth,
-    scope,
-    actor: { type: "user", id: ctx.user.id },
-    trigger: { kind: "rejected", revision: null },
+    trigger: {
+      kind: "rejected",
+      revision: null,
+      reach: { spaceId: scope.spaceId, actor: { type: "user", id: ctx.user.id } },
+    },
   });
   expect(outcome.status).toBe("refreshed");
 }

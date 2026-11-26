@@ -15,6 +15,7 @@
  * protocol-checked.
  */
 
+import { readCredentialRevision } from "../../helpers/refresh-fixtures.ts";
 import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach } from "bun:test";
 import { _resetCacheForTesting as resetEnvCache } from "@appstrate/env";
 import { eq } from "drizzle-orm";
@@ -41,7 +42,6 @@ import {
 import { refreshConnectionCredential } from "../../../src/services/integration-token-refresh.ts";
 import {
   createIntegrationOAuthClient,
-  readCredentialRevision,
   readIntegrationAuth,
   resolveConnectClient,
   resolveIntegrationClientById,
@@ -454,9 +454,11 @@ describe("auto-provisioned client: CIMD first, DCR as fallback", () => {
       integrationId: INTEGRATION,
       manifest: manifest as IntegrationManifest,
       authDef: auth as AfpsManifestAuth,
-      scope,
-      actor: { type: "user", id: ctx.user.id },
-      trigger: { kind: "rejected", revision: null },
+      trigger: {
+        kind: "rejected",
+        revision: null,
+        reach: { spaceId: scope.spaceId, actor: { type: "user", id: ctx.user.id } },
+      },
     });
     expect(outcome.status).toBe("refreshed");
     expect(provider.tokenRequests[1]).toMatchObject({ grantType: "refresh_token", status: 200 });
@@ -993,7 +995,7 @@ describe("auto-provisioned client: CIMD first, DCR as fallback", () => {
     expect(
       await resolveIntegrationClientById(
         before.picked!.clientRef,
-        ctx.defaultSpaceId,
+        { orgId: ctx.orgId, spaceId: ctx.defaultSpaceId },
         INTEGRATION,
         AUTH_KEY,
         "none",
@@ -1314,7 +1316,7 @@ describe("a metadata-document client_ref resolves without a row", () => {
     expect(
       await resolveIntegrationClientById(
         documentUrl(issuer),
-        "spc_unused",
+        { orgId: "org_unused", spaceId: "spc_unused" },
         INTEGRATION,
         AUTH_KEY,
         undefined,
@@ -1331,7 +1333,7 @@ describe("a metadata-document client_ref resolves without a row", () => {
     expect(
       await resolveIntegrationClientById(
         documentUrl("https://gitlab.example.org", "https://old.example.com"),
-        "spc_unused",
+        { orgId: "org_unused", spaceId: "spc_unused" },
         INTEGRATION,
         AUTH_KEY,
         undefined,

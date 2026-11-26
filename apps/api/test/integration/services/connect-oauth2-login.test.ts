@@ -11,6 +11,7 @@
  * confidential one (`client_secret_basic`) checks the other client authentication.
  */
 
+import { readCredentialRevision } from "../../helpers/refresh-fixtures.ts";
 import { describe, it, expect, beforeEach, afterEach, spyOn } from "bun:test";
 import { eq } from "drizzle-orm";
 import { decryptCredentialsToStringMap } from "@appstrate/connect";
@@ -24,10 +25,7 @@ import { seedPackage } from "../../helpers/seed.ts";
 import { ApiError } from "../../../src/lib/errors.ts";
 import { initSystemIntegrations } from "../../../src/services/integration-client-registry.ts";
 import * as connections from "../../../src/services/integration-connections.ts";
-import {
-  createIntegrationOAuthClient,
-  readCredentialRevision,
-} from "../../../src/services/integration-connections.ts";
+import { createIntegrationOAuthClient } from "../../../src/services/integration-connections.ts";
 import type { AfpsManifestAuth } from "../../../src/services/integration-manifest-helpers.ts";
 import { refreshConnectionCredential } from "../../../src/services/integration-token-refresh.ts";
 import { OAuth2Strategy } from "../../../src/services/connect/oauth2-strategy.ts";
@@ -512,6 +510,8 @@ describe("OAuth2Strategy — connect.login acquisition", () => {
     const outcome = await refreshConnectionCredential({
       connection: {
         id: row.id,
+        orgId: row.orgId,
+        spaceId: row.spaceId,
         authKey: "primary",
         credentialsEncrypted: row.credentialsEncrypted,
         clientRef: row.clientRef,
@@ -522,9 +522,11 @@ describe("OAuth2Strategy — connect.login acquisition", () => {
       integrationId: INTEGRATION,
       manifest: manifest(upstream.base) as unknown as IntegrationManifest,
       authDef: (manifest(upstream.base).auths as Record<string, AfpsManifestAuth>).primary!,
-      scope: connectCtx.scope,
-      actor,
-      trigger: { kind: "rejected", revision: null },
+      trigger: {
+        kind: "rejected",
+        revision: null,
+        reach: { spaceId: connectCtx.scope.spaceId, actor },
+      },
     });
 
     expect(outcome.status).toBe("refreshed");

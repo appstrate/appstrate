@@ -9,6 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`onCredentialNeedsReconnection`** (`@appstrate/core/module`, `ModuleEvents`) and its
+  `CredentialNeedsReconnectionParams` payload, discriminated by `kind`
+  (`integration_connection` | `model_provider_credential`). One best-effort announcement per
+  `needs_reconnection` false to true flip; carries the `CredentialDeathCause`
+  (`CREDENTIAL_DEATH_CAUSES`, `@appstrate/core/sidecar-types`).
 - **`spaceActs`, `SpaceAct`** (`@appstrate/core/mcp-spaces`).
   The acts a caller holds in one space (`invoke_operations`, `run_agents`, `inline_runs`,
   `call_integration_tools`, `create_packages`), in one vocabulary for the MCP `get_me` tool's

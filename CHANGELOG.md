@@ -6,6 +6,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Upgrade and client changes
+
+- A background sweep now keeps the refresh tokens of idle OAuth2 credentials alive, for integration connections and OAuth model-provider credentials alike (#2411). It runs on every install and needs no setting; mechanics in `docs/architecture/INTEGRATIONS_RUNTIME.md`.
+- `OAUTH_REFRESH_WORKER_ENABLED` is removed, together with the optional model-provider refresh worker it switched on. An `.env` that still sets it is ignored; remove the line.
+- The default of `INTEGRATION_REFRESH_GRACE_SECONDS` goes from 3600 to 259200 (3 days); see `docs/ENV.md`. An explicitly configured value is kept.
+- The credential proxy now refreshes an expiring token before sending the request, so the first call outside a run after an expiry no longer fails with a `401`. The OAuth client used for any refresh is now resolved from the connection's own organization and space, not from the caller's space.
+- A credential that flips to needing reconnection now emits the module event `onCredentialNeedsReconnection`, the `credential.needs_reconnection` webhook event (payload and routing: `docs/site/features/webhooks.mdx`) and, for an integration connection, a `credential_needs_reconnection` bell notification to its owner.
+- Migration 0114 (`refresh_checked_at` columns, refresh-due index, notification type) applies at boot. Then run `scripts/migration/0058-model-credential-needs-reconnection-mirror.ts` (recommended; see `scripts/migration/README.md`).
+- Installs that ran with `OAUTH_REFRESH_WORKER_ENABLED=true` and Redis keep an inert `oauth-model-refresh-scan` scheduler: `redis-cli --scan --pattern 'bull:oauth-model-refresh-scan:*' | xargs redis-cli del`.
+- The first sweeps after deploy visit every expired OAuth2 credential (none has a visit stamp yet), so connections that died long ago are flagged and announced (bell and webhook) then, up to 500 per source per hour.
+
 ## [1.0.0-beta.71] - 2026-11-24
 
 ### Module authors
