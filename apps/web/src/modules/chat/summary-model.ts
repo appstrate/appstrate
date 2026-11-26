@@ -67,16 +67,20 @@ export interface SummaryModel<Run, File> {
 /**
  * The calls that failed, latest first, a failed lookup included. A call whose run is among the
  * failed runs read (`failedRunIds`) is left to that run: its failure is the run's, listed once with
- * the runs. One whose run did not fail (a wait cut short while the run goes on) stays.
+ * the runs. One whose run did not fail (a wait cut short while the run goes on) stays. When the
+ * failed runs read are only a page of more (`allFailedRunsRead` false), a call carrying a run id
+ * is left to the runs the server counts: its run is taken to be one of them, already in the total.
  */
 export function failedCalls(
   calls: readonly ConversationToolCall[],
   failedRunIds: ReadonlySet<string>,
+  allFailedRunsRead = true,
 ): ConversationToolCall[] {
   return calls
     .filter(
       (call) =>
-        call.status === "error" && !(call.runId !== undefined && failedRunIds.has(call.runId)),
+        call.status === "error" &&
+        !(call.runId !== undefined && (!allFailedRunsRead || failedRunIds.has(call.runId))),
     )
     .reverse();
 }
@@ -94,7 +98,12 @@ export function summaryModel<Run extends { id: string }, File>({
   failedRuns,
   files,
 }: SummaryInput<Run, File>): SummaryModel<Run, File> {
-  const failed = failedCalls(calls, new Set((failedRuns?.rows ?? []).map((run) => run.id)));
+  const failedRunRows = failedRuns?.rows ?? [];
+  const failed = failedCalls(
+    calls,
+    new Set(failedRunRows.map((run) => run.id)),
+    failedRuns === undefined || failedRuns.total <= failedRunRows.length,
+  );
   // The failed runs the server counts, then the failed calls no failed run already holds.
   const failedRunCount = failedRuns?.total ?? 0;
   const attentionCount = failedRunCount + failed.length;

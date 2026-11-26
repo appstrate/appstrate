@@ -7,12 +7,13 @@
  * touched, one click from the cards. Writes are never folded: every call that may
  * change something keeps its own card in the transcript.
  *
- * What counts as a lookup is `isLookupCall` (`activity-group.ts`), the rule the context
- * panel counts by: the engine stamps the call of a tool the platform declares a lookup
- * before it runs (`providerMetadata.appstrate.lookup`, `pi-chat/ui-stream-mapper.ts`), so such
- * a lookup joins its group as it starts; a call whose presentation names a read (`GET`, `HEAD`)
- * joins it when its result lands, and one that fails or is denied leaves it then, its card
- * showing the error among the actions. Reasoning between lookups folds with them: the run of
+ * What folds is `activityGroupOf` (`activity-group.ts`): the engine stamps the call of a tool
+ * the platform declares a lookup before it runs (`providerMetadata.appstrate.lookup`,
+ * `pi-chat/ui-stream-mapper.ts`), so such a lookup joins its group as it starts, and one that
+ * fails or is denied leaves it then, its card showing the error among the actions. A call whose
+ * presentation names a read (`GET`, `HEAD`) is known only once its result lands: the context
+ * panel counts it a lookup (`isLookupCall`), the thread keeps its card where it was drawn, among
+ * the actions. Reasoning between lookups folds with them: the run of
  * activity before an answer is one group. A group holding fewer than two lookups draws no header
  * and folds nothing, with the same tree, so the second one folds it without remounting the cards.
  *

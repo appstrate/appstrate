@@ -170,19 +170,18 @@ function threadPart(part: Extract<UIMessage["parts"][number], { toolCallId: stri
 }
 
 describe("a turn's tool calls, from the engine's chunks", () => {
-  it("is folded by the thread and counted by the panel off the same stamp and presentation", async () => {
+  it("is folded by the thread off the stamp, counted by the panel off the stamp and presentation", async () => {
     const message = await streamedMessage();
     const parts = message.parts.filter(isToolUIPart);
     expect(parts.map((part) => part.toolCallId)).toEqual(["s1", "s2", "g1", "m1"]);
 
-    // The thread reads the presentation off the stored part, as the card does.
-    const folded = parts.map(
-      (part) => activityGroupOf(threadPart(part), callPresentation(part)) !== null,
-    );
+    const folded = parts.map((part) => activityGroupOf(threadPart(part)) !== null);
     const lookups = conversationTools([message]).calls.map((c) => c.lookup);
-    // The stamped search and the Gmail GET fold; the failed search and the failed write do not.
-    expect(folded).toEqual([true, false, false, true]);
-    expect(lookups).toEqual(folded);
+    // The stamped search folds; the failed search and the failed write do not, nor the Gmail GET,
+    // whose method lands with its result: its card stays where it was drawn.
+    expect(folded).toEqual([true, false, false, false]);
+    // The panel counts the GET a lookup.
+    expect(lookups).toEqual([true, false, false, true]);
   });
 
   it("brings the presentation of a success and of a failure to the panel and the card", async () => {

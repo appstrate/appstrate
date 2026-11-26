@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * What counts as a lookup, for the thread and the context panel alike ({@link isLookupCall}), and
- * which assistant parts fold together (`activity-group-view.tsx` draws the group): reasoning, and the
- * lookups.
+ * What counts as a lookup for the context panel ({@link isLookupCall}), and which assistant parts
+ * fold together in the thread (`activity-group-view.tsx` draws the group): reasoning, and the
+ * lookups known before they run.
  */
 
 import type { ToolPresentation } from "@appstrate/core/mcp-presentation";
@@ -15,25 +15,34 @@ type CallStanding = "pending" | "running" | "success" | "error" | "denied";
 /** The methods that only read (RFC 9110 §9.2.1 safe methods a client issues to look). */
 const READ_METHODS = new Set(["GET", "HEAD"]);
 
+/** A failed or denied call shows with the actions, whatever it looked up. */
+function failed(standing: CallStanding): boolean {
+  return standing === "error" || standing === "denied";
+}
+
 /**
- * A lookup, unless it failed or was denied, which shows it with the actions:
- * - a call the engine stamped one before it ran (`appstrate.lookup` in the call's provider
- *   metadata, `pi-chat/ui-stream-mapper.ts`), the call of a tool that only looks things up;
- * - a call whose presentation names a read (`GET` or `HEAD`): an operation or a single proxied
- *   request, known once its result lands.
- *
- * `metadata` is the call's provider metadata: `providerMetadata` of an assistant-ui part,
- * `callProviderMetadata` of the stored part it is converted from. `presentation` is read off the
- * stored part (`callPresentation`), the source the call's card reads.
+ * The call of a tool that only looks things up, as the engine stamped it before it ran
+ * (`appstrate.lookup` in the call's provider metadata, `pi-chat/ui-stream-mapper.ts`). `metadata`
+ * is `providerMetadata` of an assistant-ui part, `callProviderMetadata` of the stored part it is
+ * converted from.
+ */
+function stampedLookup(metadata: unknown): boolean {
+  return (metadata as { appstrate?: { lookup?: unknown } } | undefined)?.appstrate?.lookup === true;
+}
+
+/**
+ * A lookup, as the context panel counts it, unless it failed or was denied: a stamped call
+ * ({@link stampedLookup}), or a call whose presentation names a read (`GET` or `HEAD`), an
+ * operation or a single proxied request, known once its result lands. `presentation` is read off
+ * the stored part (`callPresentation`).
  */
 export function isLookupCall(
   metadata: unknown,
   presentation: ToolPresentation | undefined,
   standing: CallStanding,
 ): boolean {
-  if (standing === "error" || standing === "denied") return false;
-  const stamp = (metadata as { appstrate?: { lookup?: unknown } } | undefined)?.appstrate?.lookup;
-  if (stamp === true) return true;
+  if (failed(standing)) return false;
+  if (stampedLookup(metadata)) return true;
   const method = presentation?.method?.toUpperCase();
   return method !== undefined && READ_METHODS.has(method);
 }
@@ -49,17 +58,19 @@ export interface GroupablePart {
 }
 
 /**
- * Group paths of the assistant parts: reasoning and lookups fold into one activity group.
- * `presentation` is the part's call's, when it is one.
+ * Group paths of the assistant parts: reasoning and the stamped lookups fold into one activity
+ * group. Only what is known as a call starts groups it, so a card never moves when its result
+ * lands; a lookup that fails or is denied leaves the group, its card showing the error among the
+ * actions.
  */
 export function activityGroupOf(
   part: GroupablePart,
-  presentation: ToolPresentation | undefined,
 ): readonly ("group-activity" | "group-reasoning")[] | null {
   if (part.type === "reasoning") return ["group-activity", "group-reasoning"];
   if (
     part.type === "tool-call" &&
-    isLookupCall(part.providerMetadata, presentation, deriveToolPhase(part))
+    stampedLookup(part.providerMetadata) &&
+    !failed(deriveToolPhase(part))
   ) {
     return ["group-activity"];
   }

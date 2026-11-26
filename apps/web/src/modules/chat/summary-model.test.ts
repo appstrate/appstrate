@@ -37,6 +37,12 @@ describe("failedCalls", () => {
     expect(failedCalls([launch], new Set(["run_1"]))).toEqual([]);
     expect(failedCalls([launch], new Set())).toEqual([launch]);
   });
+
+  it("leaves every failed launch to the counted runs when the failed runs read are a page of more", () => {
+    const launch = call({ status: "error", toolName: "run_and_wait", runId: "run_9" });
+    const plain = call({ status: "error" });
+    expect(failedCalls([launch, plain], new Set(["run_1"]), false)).toEqual([plain]);
+  });
 });
 
 describe("summaryModel", () => {
@@ -85,6 +91,18 @@ describe("summaryModel", () => {
       moreRuns: true,
       moreCalls: false,
     });
+  });
+
+  it("counts a failed call once when its run is past the page of failed runs read", () => {
+    const page = ["run_3", "run_2"].map(run);
+    const launchPastPage = call({ status: "error", runId: "run_1" });
+    const model = summaryModel({
+      calls: [launchPastPage],
+      runs: counted(page),
+      failedRuns: counted(page, 3),
+    });
+    expect(model.attention?.count).toBe(3);
+    expect(model.attention?.calls).toEqual([]);
   });
 
   it("counts every failed call on its own while the failed runs cannot be read", () => {

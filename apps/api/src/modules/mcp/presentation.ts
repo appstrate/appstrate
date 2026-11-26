@@ -156,7 +156,7 @@ export function presentTools(tools: AppstrateToolDefinition[]): AppstrateToolDef
         if (extra.signal?.aborted) throw err;
         logger.error("mcp: tool handler threw", {
           tool: tool.descriptor.name,
-          error: err instanceof Error ? err.name : typeof err,
+          error: err instanceof Error ? (err.stack ?? err.message) : String(err),
         });
         result = thrownResult(err);
       }

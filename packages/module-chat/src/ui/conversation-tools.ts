@@ -87,6 +87,73 @@ function answeringIntegration(part: ToolPart): PresentationSubject | undefined {
     : undefined;
 }
 
+/** The calls of one assistant message, and the integrations that answered them, in order. */
+interface MessageTools {
+  calls: ConversationToolCall[];
+  integrations: PresentationSubject[];
+}
+
+/**
+ * Each message's calls, kept while the message object is: a turn streams by replacing its last
+ * message only, so a finished message is derived once and its calls keep their identity.
+ */
+const byMessage = new WeakMap<
+  UIMessage,
+  { turn: number; turnRuns: boolean; tools: MessageTools }
+>();
+
+/** Each messages array's calls: the panel's readers of one frame share one derivation. */
+const byMessages = new WeakMap<
+  readonly UIMessage[],
+  { running: boolean; tools: ConversationTools }
+>();
+
+function messageTools(message: UIMessage, turn: number, turnRuns: boolean): MessageTools {
+  const cached = byMessage.get(message);
+  if (cached && cached.turn === turn && cached.turnRuns === turnRuns) return cached.tools;
+  const calls: ConversationToolCall[] = [];
+  const integrations: PresentationSubject[] = [];
+  for (const part of message.parts) {
+    if (!isToolUIPart(part)) continue;
+    const toolName = getToolName(part);
+    const output = "output" in part ? unwrapMcpResult(part.output) : undefined;
+    const status = statusOf(part, output, turnRuns);
+    const error =
+      status !== "error"
+        ? undefined
+        : extractErrorMessage(part.state === "output-error" ? part.errorText : output);
+    const presentation = callPresentation(part);
+    const durationMs = callOutcome(part)?.durationMs;
+    const runId = "output" in part ? extractRunId(part.output) : undefined;
+    const spaceId = callSpaceOf({
+      providerMetadata: part.callProviderMetadata,
+      result: "output" in part ? part.output : undefined,
+      resultProviderMetadata:
+        "resultProviderMetadata" in part ? part.resultProviderMetadata : undefined,
+    });
+    calls.push({
+      toolCallId: part.toolCallId,
+      messageId: message.id,
+      turn,
+      toolName,
+      input: part.input,
+      output,
+      ...(presentation ? { presentation } : {}),
+      status,
+      ...(error ? { error } : {}),
+      ...(typeof durationMs === "number" ? { durationMs } : {}),
+      lookup: isLookupCall(part.callProviderMetadata, presentation, status),
+      ...(spaceId ? { spaceId } : {}),
+      ...(runId ? { runId } : {}),
+    });
+    const answered = answeringIntegration(part);
+    if (answered) integrations.push(answered);
+  }
+  const tools = { calls, integrations };
+  byMessage.set(message, { turn, turnRuns, tools });
+  return tools;
+}
+
 /**
  * The calls of `messages`, in order, and the integrations that answered them. `running`: the
  * last message is the turn in flight.
@@ -95,48 +162,21 @@ export function conversationTools(
   messages: readonly UIMessage[],
   { running = false }: { running?: boolean } = {},
 ): ConversationTools {
+  const cached = byMessages.get(messages);
+  if (cached && cached.running === running) return cached.tools;
   const calls: ConversationToolCall[] = [];
   const integrations = new Map<string, PresentationSubject>();
   let turn = 0;
-
   for (const [index, message] of messages.entries()) {
     if (message.role !== "assistant") continue;
     turn += 1;
-    const turnRuns = running && index === messages.length - 1;
-    for (const part of message.parts) {
-      if (!isToolUIPart(part)) continue;
-      const toolName = getToolName(part);
-      const output = "output" in part ? unwrapMcpResult(part.output) : undefined;
-      const status = statusOf(part, output, turnRuns);
-      const error =
-        status !== "error"
-          ? undefined
-          : extractErrorMessage(part.state === "output-error" ? part.errorText : output);
-      const presentation = callPresentation(part);
-      const durationMs = callOutcome(part)?.durationMs;
-      const runId = "output" in part ? extractRunId(part.output) : undefined;
-      const spaceId = callSpaceOf({
-        providerMetadata: part.callProviderMetadata,
-        result: "output" in part ? part.output : undefined,
-      });
-      calls.push({
-        toolCallId: part.toolCallId,
-        messageId: message.id,
-        turn,
-        toolName,
-        input: part.input,
-        output,
-        ...(presentation ? { presentation } : {}),
-        status,
-        ...(error ? { error } : {}),
-        ...(typeof durationMs === "number" ? { durationMs } : {}),
-        lookup: isLookupCall(part.callProviderMetadata, presentation, status),
-        ...(spaceId ? { spaceId } : {}),
-        ...(runId ? { runId } : {}),
-      });
-      const answered = answeringIntegration(part);
-      if (answered && !integrations.has(answered.id)) integrations.set(answered.id, answered);
+    const tools = messageTools(message, turn, running && index === messages.length - 1);
+    calls.push(...tools.calls);
+    for (const answered of tools.integrations) {
+      if (!integrations.has(answered.id)) integrations.set(answered.id, answered);
     }
   }
-  return { calls, integrations: [...integrations.values()] };
+  const tools = { calls, integrations: [...integrations.values()] };
+  byMessages.set(messages, { running, tools });
+  return tools;
 }

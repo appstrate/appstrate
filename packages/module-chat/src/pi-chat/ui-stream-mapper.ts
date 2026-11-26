@@ -351,8 +351,10 @@ export class PiChatUiStreamMapper {
     durationMs?: number;
   }): UIMessageChunk[] {
     const { output, outcome } = splitOutcome(persistedToolOutput(ev.result));
+    const acted = ev.isError ? actedSpacesOf(output) : undefined;
     const appstrate: ToolOutcomeMetadata = {
       ...outcome,
+      ...(acted && { actedSpaceIds: acted }),
       ...(ev.durationMs !== undefined && { durationMs: ev.durationMs }),
     };
     const meta = Object.keys(appstrate).length > 0 && {
@@ -512,13 +514,22 @@ function persistedToolOutput(result: unknown): unknown {
  * What a call's outcome tells the UI, as `providerMetadata.appstrate` of its result chunk:
  * - `presentation`: how the platform presents the call (`mcp-tools.ts`);
  * - `answered`: the integration behind a `call_integration_tool` answered at least once;
- * - `durationMs`: how long the tool ran, as Pi measured it.
+ * - `durationMs`: how long the tool ran, as Pi measured it;
+ * - `actedSpaceIds`: on a failure, the spaces the call acted in (`mcp-tools.ts`), which a success
+ *   carries in its output and a failure, reduced to its error text, keeps here.
  */
 type ToolOutcomeMetadata = {
   presentation?: unknown;
   answered?: true;
   durationMs?: number;
+  actedSpaceIds?: readonly unknown[];
 };
+
+/** The spaces a tool's result says the call acted in. */
+function actedSpacesOf(output: unknown): readonly unknown[] | undefined {
+  const acted = (output as { actedSpaceIds?: unknown } | null | undefined)?.actedSpaceIds;
+  return Array.isArray(acted) ? acted : undefined;
+}
 
 /** The output without what the UI reads as metadata ({@link ToolOutcomeMetadata}), kept apart. */
 function splitOutcome(output: unknown): { output: unknown; outcome: ToolOutcomeMetadata } {

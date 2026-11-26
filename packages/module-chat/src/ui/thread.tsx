@@ -43,7 +43,7 @@ import { MarkdownText, ReasoningText } from "./markdown-text.tsx";
 import { ReasoningGroup, ThinkingStatus } from "./reasoning.tsx";
 import { ToolFallback } from "./tool-fallback.tsx";
 import { ActivityGroup } from "./activity-group-view.tsx";
-import { activityGroupOf, type GroupablePart } from "./activity-group.ts";
+import { activityGroupOf } from "./activity-group.ts";
 import { useCallPresentations } from "./use-call-presentation.ts";
 import {
   ImportPackageFileTool,
@@ -969,20 +969,14 @@ const TOOL_CARDS: Partial<Record<string, ToolCallMessagePartComponent>> = {
 
 /**
  * Reasoning and lookups fold into one activity group (`activity-group-view.tsx`); reasoning keeps
- * its own disclosure inside it. The grouping reads each call's presentation where its card does
- * (`use-call-presentation.ts`): a call whose result names a read joins the group as it lands.
- * assistant-ui memoizes the group tree on the `groupBy` identity, which changes only with the
- * presentations.
+ * its own disclosure inside it. The grouping reads only what a call carries as it starts
+ * (`activityGroupOf`), so assistant-ui's group tree, memoized on the `groupBy` identity, keeps one;
+ * the group reads the calls' presentations for the glyphs of what they touched.
  */
 function AssistantParts() {
   const presentations = useCallPresentations();
-  const groupBy = React.useCallback(
-    (part: GroupablePart) =>
-      activityGroupOf(part, part.toolCallId ? presentations.get(part.toolCallId) : undefined),
-    [presentations],
-  );
   return (
-    <MessagePrimitive.GroupedParts groupBy={groupBy}>
+    <MessagePrimitive.GroupedParts groupBy={activityGroupOf}>
       {({ part, children }) => {
         switch (part.type) {
           case "group-activity":

@@ -123,14 +123,13 @@ function CallRowSkeleton({ width }: { width: string }) {
   );
 }
 
-/** The Tools tab while its calls are read: the lookups' switch, a turn's heading, its rows. */
+/**
+ * The Tools tab while its calls are read: a turn's heading, its rows. No lookups' switch: the list
+ * draws it only when the calls hold a lookup.
+ */
 function ToolsListSkeleton() {
   return (
     <Waiting>
-      <div className={SWITCH_LINE_CLASS}>
-        <SkeletonLine className="w-40 text-xs" />
-        <Skeleton className="h-6 w-11 rounded-full" />
-      </div>
       <div className={TURN_HEAD_CLASS}>
         <SkeletonLine className="w-12" />
       </div>

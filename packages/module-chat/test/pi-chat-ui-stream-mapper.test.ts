@@ -554,6 +554,33 @@ describe("a call's presentation", () => {
       },
     ]);
   });
+
+  it("keeps a failure's acted spaces beside its presentation, a success's in its output", () => {
+    const acted = (isError: boolean): AgentSessionEvent => {
+      const event = end(isError) as Extract<AgentSessionEvent, { type: "tool_execution_end" }>;
+      return { ...event, result: { ...event.result, actedSpaceIds: ["spc_target"] } };
+    };
+    expect(run([acted(true)]).chunks).toEqual([
+      {
+        type: "tool-output-error",
+        toolCallId: "gh-1",
+        errorText: "403 Resource not accessible",
+        providerMetadata: { appstrate: { presentation, actedSpaceIds: ["spc_target"] } },
+      },
+    ]);
+    expect(run([acted(false)]).chunks).toEqual([
+      {
+        type: "tool-output-available",
+        toolCallId: "gh-1",
+        output: {
+          content: [{ type: "text", text: "403 Resource not accessible" }],
+          relayed: true,
+          actedSpaceIds: ["spc_target"],
+        },
+        providerMetadata: { appstrate: { presentation } },
+      },
+    ]);
+  });
 });
 
 describe("a call of a lookup tool", () => {

@@ -320,6 +320,42 @@ describe("conversationTools", () => {
     expect(calls[0]?.spaceId).toBe("spc_team");
   });
 
+  it("reads the space a failed call acted in off its outcome", () => {
+    const { calls } = conversationTools([
+      assistant("a1", [
+        call("c1", "invoke_operation", {
+          state: "output-error",
+          input: { operation_id: "deleteAgent" },
+          errorText: "forbidden",
+          callProviderMetadata: { appstrate: { spaceId: "spc_caller" } },
+          resultProviderMetadata: { appstrate: { actedSpaceIds: ["spc_target"] } },
+        }),
+      ]),
+    ]);
+    expect(calls[0]?.spaceId).toBe("spc_target");
+  });
+
+  it("derives a finished message once, whatever array or reader asks", () => {
+    const finished = assistant("a1", [
+      call("c1", "get_me", { state: "output-available", input: {}, output: mcp({ ok: 1 }) }),
+    ]);
+    const streaming = (text: string) =>
+      assistant("a2", [
+        { type: "text", text },
+        call("c2", "search", { state: "input-available", input: {} }),
+      ]);
+    const frame1 = [user("u1"), finished, user("u2"), streaming("a")];
+    const first = conversationTools(frame1, { running: true });
+    expect(conversationTools(frame1, { running: true })).toBe(first);
+    const second = conversationTools([user("u1"), finished, user("u2"), streaming("ab")], {
+      running: true,
+    });
+    expect(second).not.toBe(first);
+    expect(second.calls[0]).toBe(first.calls[0]!);
+    expect(second.calls[1]).not.toBe(first.calls[1]!);
+    expect(second.calls[1]?.status).toBe("running");
+  });
+
   it("names the run a call launched, bare or in its envelope, and no id of another family", () => {
     const { calls } = conversationTools([
       assistant("a1", [

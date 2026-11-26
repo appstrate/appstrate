@@ -288,47 +288,32 @@ describe("isLookupCall", () => {
 describe("activityGroupOf", () => {
   const read = { type: "tool-call", providerMetadata: { appstrate: { lookup: true } } };
 
-  it("folds reasoning, stamped lookups and calls presented as reads into the activity group", () => {
-    expect(activityGroupOf({ type: "reasoning" }, undefined)).toEqual([
-      "group-activity",
-      "group-reasoning",
-    ]);
-    expect(activityGroupOf(read, undefined)).toEqual(["group-activity"]);
-    expect(
-      activityGroupOf(
-        { type: "tool-call", status: { type: "complete" }, result: { content: [] } },
-        { title: "x", method: "GET" },
-      ),
-    ).toEqual(["group-activity"]);
+  it("folds reasoning and stamped lookups into the activity group", () => {
+    expect(activityGroupOf({ type: "reasoning" })).toEqual(["group-activity", "group-reasoning"]);
+    expect(activityGroupOf(read)).toEqual(["group-activity"]);
   });
 
-  it("never folds a write, an unstamped call or text", () => {
-    expect(activityGroupOf({ type: "tool-call" }, undefined)).toBeNull();
-    expect(activityGroupOf({ type: "tool-call" }, { title: "x", method: "POST" })).toBeNull();
-    expect(activityGroupOf({ type: "text" }, undefined)).toBeNull();
+  it("never folds an unstamped call, a read whose method lands with its result included", () => {
+    expect(activityGroupOf({ type: "tool-call" })).toBeNull();
+    expect(
+      activityGroupOf({ type: "tool-call", status: { type: "complete" }, result: { content: [] } }),
+    ).toBeNull();
+    expect(activityGroupOf({ type: "text" })).toBeNull();
   });
 
   it("keeps a failed lookup out of the group, by its flag or its payload", () => {
+    expect(activityGroupOf({ ...read, status: { type: "complete" }, isError: true })).toBeNull();
     expect(
-      activityGroupOf({ ...read, status: { type: "complete" }, isError: true }, undefined),
-    ).toBeNull();
-    expect(
-      activityGroupOf(
-        {
-          ...read,
-          status: { type: "complete" },
-          result: {
-            content: [{ type: "text", text: JSON.stringify({ status: 404, error: "nope" }) }],
-          },
+      activityGroupOf({
+        ...read,
+        status: { type: "complete" },
+        result: {
+          content: [{ type: "text", text: JSON.stringify({ status: 404, error: "nope" }) }],
         },
-        undefined,
-      ),
+      }),
     ).toBeNull();
     expect(
-      activityGroupOf(
-        { ...read, status: { type: "complete" }, result: { content: [] } },
-        undefined,
-      ),
+      activityGroupOf({ ...read, status: { type: "complete" }, result: { content: [] } }),
     ).toEqual(["group-activity"]);
   });
 });
