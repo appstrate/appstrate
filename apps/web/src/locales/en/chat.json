@@ -20,7 +20,6 @@
   "context.label": "Conversation context",
   "context.collapse": "Collapse conversation context",
   "context.unsaved": "Send a first message to create this conversation.",
-  "context.tabs.info": "Info",
   "context.file.untitled": "File",
   "context.runs.empty": "No run has been launched from this conversation yet.",
   "context.files.empty": "No file is linked to this conversation yet.",
@@ -288,5 +287,12 @@
   "context.tools.backToList": "Back to tools",
   "context.tools.showInThread": "See in the thread",
   "context.tools.notInThread": "This call is not shown in the thread.",
-  "context.tools.gone": "This call is no longer part of the conversation."
+  "context.tools.gone": "This call is no longer part of the conversation.",
+  "context.tabs.summary": "Summary",
+  "context.summary.seeAll": "See all",
+  "context.summary.attention": "Needs attention",
+  "context.summary.integrations": "Integrations used",
+  "context.summary.noRun": "No run yet.",
+  "context.summary.noFile": "No file yet.",
+  "context.summary.noAction": "No action yet."
 }

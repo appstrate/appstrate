@@ -1,39 +1,23 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { useRef, useState, type Dispatch, type ReactNode } from "react";
-import { ActivityIcon, FilesIcon, PanelRightCloseIcon, PanelRightIcon, XIcon } from "lucide-react";
+import { PanelRightCloseIcon, PanelRightIcon, XIcon } from "lucide-react";
 import { useTranslation } from "react-i18next";
-import { useNowTick } from "@appstrate/ui/use-now-tick";
-import { useSessionDetail } from "@appstrate/module-chat/unread";
-import { conversationStats } from "@appstrate/module-chat/conversation-stats";
 import { cn } from "@appstrate/ui/cn";
-import { Fact, FactGrid } from "@appstrate/ui/components/fact-grid";
-import { formatCompactTokens, formatTokenFigure } from "@appstrate/ui/context-window";
 import { Button } from "@appstrate/ui/components/button";
 import { Sheet, SheetContent, SheetTitle } from "@appstrate/ui/components/sheet";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@appstrate/ui/components/tabs";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@appstrate/ui/components/tooltip";
-import { MimeIcon } from "@appstrate/ui/components/mime-icon";
-import { CopyButton } from "@appstrate/ui/components/copy-button";
-import { $api } from "../../api/client";
 import { AgentDetailPaneHeader } from "../../components/agent-detail/agent-detail-split";
-import { EmptyState, ErrorState } from "../../components/page-states";
 import { FileArtifact } from "../../components/file-artifact";
-import { RowSpaceName, RunRow } from "../../components/run-row";
-import { TextSkeleton, Waiting } from "../../components/loading-skeletons";
-import { SkeletonLine } from "../../components/skeleton-line";
-import { useAgents } from "../../hooks/use-packages";
-import { useFile, useFiles } from "../../hooks/use-files";
+import { useFile } from "../../hooks/use-files";
 import { useCurrentOrgId } from "../../hooks/use-org";
 import { useCurrentSpaceId } from "../../hooks/use-current-space";
-import { useAdmittingSpaces } from "../../hooks/use-overview-mode";
 import { useConversationTabs } from "./use-conversation-tabs";
-import { useRunAgentName } from "../../hooks/use-run-agent-name";
-import { useListScope } from "../../hooks/use-org-scope";
 import { otherSpaceFileContext } from "../../lib/file-link";
 import { localViewableFile } from "../../lib/files";
-import { formatBytes } from "../../lib/format-bytes";
-import { formatDateField, formatRelativeTime } from "../../lib/format-date";
+import { ConversationFiles, ConversationRuns } from "./conversation-lists";
+import { ConversationSummary } from "./conversation-summary";
 import { ConversationToolsList, ShownToolCall } from "./conversation-tools-tab";
 import {
   shownFile,
@@ -45,7 +29,6 @@ import {
   type SidebarFile,
   type StoredSidebarFile,
 } from "./conversation-sidebar-state";
-import { ChatAccessSummary } from "./chat-access-summary";
 import { PanelResizeHandle } from "./panel-resize";
 import { usePanelWidth, type PanelView } from "./use-panel-width";
 import { LG_AND_UP, useMediaQuery } from "../../hooks/use-media-query";
@@ -167,348 +150,6 @@ function ShownLocalFile({
   );
 }
 
-export function ConversationRuns({
-  conversationId,
-  active,
-}: {
-  conversationId: string | null;
-  active: boolean;
-}) {
-  const { t } = useTranslation("chat");
-  const admitting = useAdmittingSpaces("runs");
-  const canRead = admitting.length > 0;
-  // Spanning: the conversation's runs are every space's, polled (the SSE stream carries one space).
-  const scope = useListScope(true, canRead);
-  // Their agents are every space's too: read from the index spanning spaces, while shown.
-  const shown = active && !!conversationId;
-  const { data: agents } = useAgents({ spanning: true, enabled: shown });
-  const agentById = new Map((agents ?? []).map((agent) => [agent.id, agent] as const));
-  const agentName = useRunAgentName({ spanning: true, enabled: shown });
-  const filters = { chat_session_id: conversationId ?? undefined, limit: 100 };
-  // A conversation belongs to the organization: the runs it launched, in every space.
-  const query = $api.useQuery(
-    "get",
-    "/api/orgs/{orgId}/runs",
-    { params: { path: { orgId: scope.orgId ?? "" }, query: filters } },
-    {
-      enabled: scope.enabled && canRead && active && !!conversationId,
-      refetchInterval: scope.refetchInterval,
-    },
-  );
-
-  if (!conversationId) {
-    return <EmptyState message={t("context.unsaved")} icon={ActivityIcon} compact />;
-  }
-  if (query.isLoading) {
-    return <TextSkeleton className="p-4" />;
-  }
-  if (query.error) return <ErrorState error={query.error} compact />;
-  const runs = query.data?.data ?? [];
-  if (runs.length === 0) {
-    return <EmptyState message={t("context.runs.empty")} icon={ActivityIcon} compact />;
-  }
-
-  return (
-    <div className="divide-y">
-      {runs.map((run) => (
-        <RunRow
-          key={run.id}
-          run={run}
-          agentName={agentName(run)}
-          agent={run.packageId ? agentById.get(run.packageId) : undefined}
-          dense
-          // The list spans the spaces the reader reads runs in: each row names its own once
-          // there are several.
-          spanning={admitting.length > 1}
-          className="px-3"
-        />
-      ))}
-    </div>
-  );
-}
-
-export function ConversationFiles({
-  conversationId,
-  active,
-  onSelect,
-}: {
-  conversationId: string | null;
-  active: boolean;
-  onSelect: (file: StoredSidebarFile) => void;
-}) {
-  const { t } = useTranslation("chat");
-  // The list spans the spaces the reader reads files in: each row names its own once there are several.
-  const named = useAdmittingSpaces("files").length > 1;
-  const query = useFiles({
-    spanning: true,
-    contextChatSessionId: conversationId ?? undefined,
-    limit: 100,
-    enabled: active && !!conversationId,
-  });
-
-  if (!conversationId) {
-    return <EmptyState message={t("context.unsaved")} icon={FilesIcon} compact />;
-  }
-  if (query.isLoading) {
-    return <TextSkeleton className="p-4" />;
-  }
-  if (query.error) return <ErrorState error={query.error} compact />;
-  const files = query.data?.data ?? [];
-  if (files.length === 0) {
-    return <EmptyState message={t("context.files.empty")} icon={FilesIcon} compact />;
-  }
-
-  return (
-    <div className="divide-y">
-      {files.map((file) => (
-        <button
-          key={file.id}
-          type="button"
-          className="hover:bg-muted/50 flex min-h-16 w-full items-center gap-3 px-4 py-3 text-left transition-colors"
-          onClick={() => onSelect({ id: file.id, name: file.name, spaceId: file.spaceId })}
-        >
-          <span className="bg-muted flex size-8 shrink-0 items-center justify-center rounded-lg">
-            <MimeIcon mime={file.mime} name={file.name} className="text-muted-foreground size-4" />
-          </span>
-          <span className="min-w-0 flex-1">
-            <span className="block truncate text-sm font-medium">{file.name}</span>
-            <span className="text-muted-foreground block truncate text-xs">
-              {[
-                file.purpose === "user_upload"
-                  ? t("context.files.attachment")
-                  : t("context.files.output"),
-                formatBytes(file.size),
-                formatDateField(file.createdAt, "date"),
-              ].join(" · ")}
-            </span>
-          </span>
-          {named && <RowSpaceName spaceId={file.spaceId} />}
-        </button>
-      ))}
-    </div>
-  );
-}
-
-function InfoDate({ iso }: { iso: string }) {
-  const now = useNowTick();
-  return (
-    <>
-      <span>{formatRelativeTime(iso, now, "long")}</span>
-      <span className="text-muted-foreground block text-xs">{formatDateField(iso)}</span>
-    </>
-  );
-}
-
-function ConversationId({ id }: { id: string }) {
-  const { t } = useTranslation(["chat", "common"]);
-  return (
-    <div className="text-muted-foreground flex items-center gap-1 text-xs">
-      <code className="min-w-0 flex-1 truncate font-mono">{id}</code>
-      <CopyButton
-        value={id}
-        className="desktop-pointer:size-6 shrink-0"
-        aria-label={`${t("common:btn.copy")} (${t("chat:context.info.id")})`}
-      />
-    </div>
-  );
-}
-
-/** The details while they load, row for row; a date row is two lines (age, then date). */
-function ConversationDetailsSkeleton() {
-  const row = (key: string, width: string, lines = 1) => (
-    <div key={key}>
-      <SkeletonLine className="w-20 text-xs" />
-      <div className="mt-1">
-        {Array.from({ length: lines }, (_, i) => (
-          <SkeletonLine key={i} className={i ? "w-16 text-xs" : cn("text-sm", width)} />
-        ))}
-      </div>
-    </div>
-  );
-  return (
-    <Waiting className="divide-y">
-      <div className="flex flex-col gap-4 p-4">
-        <SkeletonLine className="w-2/3 text-base font-semibold" />
-        <div className="flex flex-col gap-3">
-          {row("created", "w-24", 2)}
-          {row("activity", "w-24", 2)}
-          {row("messages", "w-8")}
-          {row("status", "w-16")}
-        </div>
-      </div>
-      <div className="flex flex-col gap-2 p-4">
-        <SkeletonLine className="w-32 text-sm font-medium" />
-        <div className="flex flex-col gap-3">
-          {row("context", "w-28")}
-          {row("models", "w-40")}
-          {row("tokens", "w-36")}
-        </div>
-        <SkeletonLine className="w-3/4 text-xs" />
-      </div>
-    </Waiting>
-  );
-}
-
-/**
- * The models that closed the conversation's turns and the context it carries, from the turns' own
- * metadata, beside the tokens every metered call consumed, from the server's ledger sum.
- */
-export function ConversationUsage({
-  session,
-}: {
-  session: NonNullable<ReturnType<typeof useSessionDetail>["data"]>;
-}) {
-  const { t, i18n } = useTranslation("chat");
-  const { models, context } = conversationStats(session.messages);
-  const { usage } = session;
-  const read =
-    (usage.input_tokens ?? 0) +
-    (usage.cache_read_input_tokens ?? 0) +
-    (usage.cache_creation_input_tokens ?? 0);
-  const generated = usage.output_tokens ?? 0;
-  const metered = read + generated > 0;
-
-  return (
-    <section className="flex flex-col gap-2">
-      <h3 className="text-sm font-medium">{t("context.info.usageTitle")}</h3>
-      {models.length === 0 && !context && !metered ? (
-        <p className="text-muted-foreground text-sm">{t("context.info.noTurn")}</p>
-      ) : (
-        <>
-          <FactGrid columns={1}>
-            {context ? (
-              <Fact label={t("context.info.currentContext")}>
-                <span className="whitespace-nowrap tabular-nums">
-                  {t("contextUsage.counts", {
-                    used: formatCompactTokens(context.tokens, i18n.language),
-                    max: formatTokenFigure(
-                      context.window,
-                      context.windowAssumed === true,
-                      i18n.language,
-                    ),
-                  })}
-                </span>
-                {context.windowAssumed === true ? (
-                  <span className="text-muted-foreground block text-xs">
-                    {t("contextUsage.windowAssumed", {
-                      window: formatCompactTokens(context.window, i18n.language),
-                    })}
-                  </span>
-                ) : null}
-              </Fact>
-            ) : null}
-            {models.length > 0 ? (
-              <Fact label={t("context.info.models", { count: models.length })}>
-                <ul className="flex flex-col gap-0.5">
-                  {models.map((model) => (
-                    <li key={model.modelId}>
-                      {model.failed > 0
-                        ? t("context.info.modelTurnsFailed", {
-                            model: model.label,
-                            count: model.turns,
-                            failed: model.failed,
-                          })
-                        : t("context.info.modelTurns", { model: model.label, count: model.turns })}
-                    </li>
-                  ))}
-                </ul>
-              </Fact>
-            ) : null}
-            {metered ? (
-              <Fact label={t("context.info.tokens")}>
-                {t("context.info.tokensReadGenerated", {
-                  read: formatCompactTokens(read, i18n.language),
-                  generated: formatCompactTokens(generated, i18n.language),
-                })}
-              </Fact>
-            ) : null}
-          </FactGrid>
-          {metered ? (
-            <p className="text-muted-foreground text-xs">{t("context.info.tokensScope")}</p>
-          ) : null}
-        </>
-      )}
-    </section>
-  );
-}
-
-function ConversationDetails({
-  conversationId,
-  active,
-}: {
-  conversationId: string | null;
-  active: boolean;
-}) {
-  const { t } = useTranslation("chat");
-  const query = useSessionDetail(active ? conversationId : null);
-
-  if (!conversationId) {
-    return <p className="text-muted-foreground p-4 text-sm">{t("context.unsaved")}</p>;
-  }
-  if (query.isLoading) return <ConversationDetailsSkeleton />;
-  if (query.error || !query.data) return <ErrorState error={query.error} compact />;
-
-  const session = query.data;
-  const rows: [string, ReactNode][] = [
-    [t("context.info.created"), <InfoDate key="created" iso={session.createdAt} />],
-    [t("context.info.lastActivity"), <InfoDate key="activity" iso={session.updatedAt} />],
-    [t("context.info.messages"), String(session.messages.length)],
-    [
-      t("context.info.status"),
-      session.generating ? t("context.info.generating") : t("context.info.idle"),
-    ],
-  ];
-
-  return (
-    <>
-      <div className="flex flex-col gap-4 p-4">
-        <h3 className="text-base font-semibold break-words">
-          {session.title || t("context.info.untitled")}
-        </h3>
-        <FactGrid columns={1}>
-          {rows.map(([label, value]) => (
-            <Fact key={label} label={label}>
-              {value}
-            </Fact>
-          ))}
-        </FactGrid>
-      </div>
-      <div className="p-4">
-        <ConversationUsage session={session} />
-      </div>
-    </>
-  );
-}
-
-function ConversationInfo({
-  conversationId,
-  active,
-}: {
-  conversationId: string | null;
-  active: boolean;
-}) {
-  // The same query as the details': the access judges the conversation's own scope.
-  const detail = useSessionDetail(active ? conversationId : null);
-  const conversation = !conversationId
-    ? null
-    : detail.isLoading
-      ? undefined
-      : (detail.data ?? null);
-  return (
-    <div className="divide-y">
-      <ConversationDetails conversationId={conversationId} active={active} />
-      <div className="p-4">
-        <ChatAccessSummary conversation={conversation} />
-      </div>
-      {conversationId ? (
-        <div className="px-4 py-2">
-          <ConversationId id={conversationId} />
-        </div>
-      ) : null}
-    </div>
-  );
-}
-
 /**
  * The panel's content, in the desktop column or in the phone's sheet: one block, the tabs in its
  * header band (Radix wires the tab/tabpanel ARIA) over the selected tab's content. The block is as
@@ -615,8 +256,12 @@ function ConversationContext({
                 />
               )
             ) : null}
-            {id === "info" ? (
-              <ConversationInfo conversationId={conversationId} active={active} />
+            {id === "summary" ? (
+              <ConversationSummary
+                conversationId={conversationId}
+                active={active}
+                dispatch={dispatch}
+              />
             ) : null}
           </TabsContent>
         ))}
@@ -645,7 +290,7 @@ export function ConversationSidebar({
   // A tool call's detail reads like the details: input and output take a little more than a list.
   const view: PanelView = shownFile(state)
     ? "file"
-    : activeTab.id === "info" || shownToolCallId(state)
+    : activeTab.id === "summary" || shownToolCallId(state)
       ? "info"
       : "list";
   const size = usePanelWidth(panelRef, view);

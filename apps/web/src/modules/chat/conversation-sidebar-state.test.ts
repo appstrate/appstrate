@@ -138,7 +138,7 @@ describe("conversation sidebar state", () => {
       file: file("file_a"),
     });
     expect(shownFile(withFile)).toEqual(file("file_a"));
-    expect(shownFile({ ...withFile, activeTab: "info" })).toBeNull();
+    expect(shownFile({ ...withFile, activeTab: "summary" })).toBeNull();
     expect(shownFile(conversationSidebarReducer(withFile, { type: "close-file" }))).toBeNull();
   });
 });

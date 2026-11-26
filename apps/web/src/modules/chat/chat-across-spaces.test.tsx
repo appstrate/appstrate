@@ -24,8 +24,8 @@ const { SpaceTilesOf } = await import("../../components/space-name.tsx");
 const { renderSpaces } = await import("./render-spaces.tsx");
 const { ConversationSpacesControl } = await import("./conversation-spaces.tsx");
 const { ChatSidebar } = await import("./chat-sidebar.tsx");
-const { ConversationFiles, ConversationRuns, ShownFile } =
-  await import("./conversation-sidebar.tsx");
+const { ShownFile } = await import("./conversation-sidebar.tsx");
+const { ConversationFiles, ConversationRuns } = await import("./conversation-lists.tsx");
 const { useConversationTabs } = await import("./use-conversation-tabs.ts");
 const { useChatCan, useChatTransport } = await import("./use-chat-runtime.ts");
 const { usePermissions } = await import("../../hooks/use-permissions.ts");
@@ -145,12 +145,12 @@ describe("the conversation panel", () => {
     );
   }
 
-  it("lists the runs and files tabs where some space admits them, beside Tools and Info", () => {
-    expect(renderOverview(<Tabs />, spaces).html).toContain("<p>runs,tools,info</p>");
+  it("lists the runs and files tabs where some space admits them, beside Summary and Tools", () => {
+    expect(renderOverview(<Tabs />, spaces).html).toContain("<p>summary,runs,tools</p>");
     const files = [space("spc_a", ["chat:read"]), space("spc_b", ["chat:read", "files:read"])];
-    expect(renderOverview(<Tabs />, files).html).toContain("<p>files,tools,info</p>");
+    expect(renderOverview(<Tabs />, files).html).toContain("<p>summary,files,tools</p>");
     expect(renderOverview(<Tabs />, [space("spc_a", ["chat:read"])]).html).toContain(
-      "<p>tools,info</p>",
+      "<p>summary,tools</p>",
     );
   });
 });

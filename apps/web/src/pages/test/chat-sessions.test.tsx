@@ -18,7 +18,7 @@ import {
 import { FileAttachment } from "../../../../../packages/module-chat/src/ui/file-attachment.tsx";
 import { ChatRunProgressCard } from "../../../../../packages/module-chat/src/ui/chat-run-progress-card.tsx";
 import { render } from "../../test/render.tsx";
-import { ConversationUsage } from "../../modules/chat/conversation-sidebar.tsx";
+import { ConversationUsage } from "../../modules/chat/conversation-summary.tsx";
 import { mergeTurnMetadata } from "@appstrate/core/chat-turn-metadata";
 import chatFr from "../../locales/fr/chat.json";
 import i18n, { i18nReady } from "../../i18n.ts";

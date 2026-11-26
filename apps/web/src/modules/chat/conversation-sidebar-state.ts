@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-export type ConversationSidebarTab = "runs" | "files" | "tools" | "info";
+export type ConversationSidebarTab = "summary" | "runs" | "files" | "tools";
 
 export interface StoredSidebarFile {
   id: string;
@@ -39,7 +39,7 @@ export type ConversationSidebarAction =
 
 export const INITIAL_CONVERSATION_SIDEBAR_STATE: ConversationSidebarState = {
   expanded: false,
-  activeTab: "files",
+  activeTab: "summary",
   selectedFile: null,
   fileFromList: false,
   selectedToolCallId: null,
