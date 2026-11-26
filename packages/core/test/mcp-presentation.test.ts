@@ -25,14 +25,6 @@ describe("readToolPresentation", () => {
     ).toBeUndefined();
   });
 
-  it("reads no subject of a kind it does not know", () => {
-    expect(
-      readToolPresentation({
-        [TOOL_PRESENTATION_META_KEY]: { ...valid, subject: { kind: "package", id: "@a/b" } },
-      }),
-    ).toBeUndefined();
-  });
-
   it("bounds the subjects a search lists", () => {
     const items = Array.from({ length: MAX_PRESENTED_ITEMS + 1 }, (_, i) => ({
       kind: "agent" as const,

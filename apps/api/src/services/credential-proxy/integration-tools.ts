@@ -289,7 +289,7 @@ function apiCallTools(entry: ListedIntegration): ApiCallTool[] {
   const configs = getApiCallConfigs(manifest);
   const described = typeof manifest.description === "string" ? manifest.description.trim() : "";
   // A sentence follows it: a description left open is closed.
-  const about = `${manifest.display_name ?? manifest.name}.${
+  const about = `${manifest.display_name || manifest.name}.${
     described ? ` ${/[.!?…]$/.test(described) ? described : `${described}.`}` : ""
   }`;
   return configs.flatMap((config): ApiCallTool[] => {
@@ -429,7 +429,7 @@ async function remoteTools(
       },
     };
   }
-  const about = manifest.display_name ?? manifest.name;
+  const about = manifest.display_name || manifest.name;
   const remoteTool = (
     name: string,
     upstream: RemoteToolCatalog["tools"][number],
@@ -572,9 +572,10 @@ export async function listIntegrationTools(
   const identitiesOf = (tools: IntegrationTool[]): ListedIntegrationIdentity[] =>
     [...new Set(tools.map((tool) => tool.integration_package_id))].map((id) => {
       const manifest = manifests.get(id)!;
+      // AFPS allows an empty `display_name`: it names nothing, the package name does.
       return {
         integration_package_id: id,
-        display_name: manifest.display_name ?? manifest.name,
+        display_name: manifest.display_name || manifest.name,
         ...(typeof manifest.icon === "string" && manifest.icon ? { icon: manifest.icon } : {}),
       };
     });

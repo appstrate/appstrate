@@ -424,15 +424,27 @@ function integrationSubjects(
     return {
       kind: "integration",
       id,
-      ...(identity ? { display_name: identity.display_name } : {}),
+      ...(identity?.display_name ? { display_name: identity.display_name } : {}),
       ...(identity?.icon ? { icon: identity.icon } : {}),
     };
   });
 }
 
 /**
+ * The method of an `api_call` holding one request (`{ requests: [{ method }] }`), upper-cased; none
+ * for a batch of several, or where the arguments hold no such method (a refusal of unparsed
+ * arguments is read the same way, nothing guessed).
+ */
+function singleRequestMethod(args: unknown): string | undefined {
+  const requests = asRecord(args)?.requests;
+  if (!Array.isArray(requests) || requests.length !== 1) return undefined;
+  const method = asRecord(requests[0])?.method;
+  return typeof method === "string" && method ? method.toUpperCase() : undefined;
+}
+
+/**
  * How a call of `tool` is shown, with its integration as subject: a typed tool by its server's
- * title (else its name there), an `api_call` as `API call` with the request's method.
+ * title (else its name there), an `api_call` as `API call` with the method of its one request.
  */
 function toolCallPresentation(
   read: CallableListing,
@@ -441,15 +453,10 @@ function toolCallPresentation(
 ): ToolPresentation {
   const [subject] = integrationSubjects(read.integrations, [tool.integration_package_id]);
   if (tool.kind === "remote") {
-    return { title: tool.title ?? tool.remote_name, ...(subject ? { subject } : {}) };
+    return { title: tool.title || tool.remote_name, ...(subject ? { subject } : {}) };
   }
-  // A batch (`requests`) names no single method.
-  const method = asRecord(args)?.requests === undefined ? asRecord(args)?.method : undefined;
-  return {
-    title: "API call",
-    ...(typeof method === "string" ? { method: method.toUpperCase() } : {}),
-    ...(subject ? { subject } : {}),
-  };
+  const method = singleRequestMethod(args);
+  return { title: "API call", ...(method ? { method } : {}), ...(subject ? { subject } : {}) };
 }
 
 /**

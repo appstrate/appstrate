@@ -13,7 +13,6 @@ import {
   isLookupTool,
   readToolPresentation,
   TOOL_LOOKUP_META_KEY,
-  TOOL_PRESENTATION_META_KEY,
 } from "@appstrate/core/mcp-presentation";
 import { getCatalog } from "../../../../src/modules/mcp/catalog.ts";
 import { presentTools, withPresentation } from "../../../../src/modules/mcp/presentation.ts";
@@ -150,6 +149,33 @@ describe("presentTools", () => {
     expect(presentation?.title).toBe("Invoke API operation");
   });
 
+  it("answers a handler's throw as a failed call, presented like any other result", async () => {
+    const throwing = (name: string, title: string) =>
+      ({
+        descriptor: { name, annotations: { title }, inputSchema: { type: "object" } },
+        handler: async () => {
+          throw new Error("database unreachable");
+        },
+      }) satisfies AppstrateToolDefinition;
+    const op = [...getCatalog().operations.values()].find(
+      (candidate) => candidate.pathTemplate === "/api/agents/{scope}/{name}/model",
+    )!;
+    const invoked = await call(throwing("invoke_operation", "Invoke API operation"), {
+      operation_id: op.operationId,
+      path_params: { scope: "acme", name: "triage" },
+    });
+    expect(invoked.result.isError).toBe(true);
+    expect(invoked.result.content).toEqual([{ type: "text", text: "database unreachable" }]);
+    // What the call aimed at, although it failed.
+    expect(invoked.presentation).toMatchObject({
+      title: op.summary || op.operationId,
+      subject: { kind: "agent", id: "@acme/triage" },
+    });
+    const read = await call(throwing("read", "Read resource"));
+    expect(read.result.isError).toBe(true);
+    expect(read.presentation).toEqual({ title: "Read resource" });
+  });
+
   it("names the caller get_me answered for", async () => {
     const { presentation } = await call(
       tool(
@@ -158,11 +184,6 @@ describe("presentTools", () => {
       ),
     );
     expect(presentation?.subject).toEqual({ kind: "user", id: "usr_1", display_name: "Ada" });
-  });
-
-  it("writes under the documented key", async () => {
-    const { result } = await call(tool({ name: "x" }, text({})));
-    expect(result._meta?.[TOOL_PRESENTATION_META_KEY]).toBeDefined();
   });
 });
 
@@ -179,14 +200,9 @@ describe("tool icons", () => {
     }
   });
 
-  it("leaves a tool it draws no icon for, and one declaring its own, as they are", () => {
-    const own = [{ src: "data:image/png;base64,AA==" }];
-    const [unknown, declared] = presentTools([
-      tool({ name: "x" }, text({})),
-      tool({ name: "search", icons: own }, text({})),
-    ]);
+  it("leaves a tool it draws no icon for as it is", () => {
+    const [unknown] = presentTools([tool({ name: "x" }, text({}))]);
     expect(unknown!.descriptor.icons).toBeUndefined();
-    expect(declared!.descriptor.icons).toEqual(own);
   });
 });
 

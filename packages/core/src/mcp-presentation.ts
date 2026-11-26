@@ -35,10 +35,18 @@ export const toolPresentationSchema = z.object({
   title: z.string().min(1),
   /** `invoke_operation`: the operation's first OpenAPI tag. */
   tag: z.string().min(1).optional(),
-  /** The HTTP method: an operation's, or an integration `api_call` request's (none for a batch). */
+  /**
+   * The HTTP method: an operation's, or that of an integration `api_call` holding one request
+   * (none for a batch of several).
+   */
   method: z.string().min(1).optional(),
   subject: presentationSubjectSchema.optional(),
-  /** `search`: how many items it found, and the distinct subjects its first shown items name. */
+  /**
+   * `search`: the sum of its sections' `total`, what each kind matched before `limit`: an agent
+   * or an integration tool once, an operation once when the caller may invoke it (one denied is
+   * not counted), a skill once per space it is listed in. `items`: the distinct subjects (kind and
+   * id) its shown items name, in order, at most {@link MAX_PRESENTED_ITEMS}.
+   */
   count: z.number().int().nonnegative().optional(),
   items: z.array(presentationSubjectSchema).max(MAX_PRESENTED_ITEMS).optional(),
 });

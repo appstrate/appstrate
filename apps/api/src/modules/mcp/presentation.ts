@@ -7,7 +7,9 @@
  * {@link presentTools} stamps every tool's results once, at the edge of the tool list: a tool that
  * knows more than its descriptor states it here, from its arguments and result, or in its handler
  * (`search` and `call_integration_tool`, which alone hold the integrations they read). Whatever a
- * handler stamps wins, and a result nothing describes gets its descriptor's title.
+ * handler stamps wins, and a result nothing describes gets its descriptor's title. A handler that
+ * throws, its call not cancelled, answers the result MCP gives a failed call (`isError`, the
+ * error's message), stamped the same way, rather than a JSON-RPC error carrying no presentation.
  */
 
 import type { CallToolResult, Tool } from "@modelcontextprotocol/sdk/types.js";
@@ -19,6 +21,7 @@ import {
 } from "@appstrate/core/mcp-presentation";
 import { asRecord } from "@appstrate/core/safe-json";
 import { unwrapMcpResult } from "@appstrate/core/mcp-result";
+import { logger } from "../../lib/logger.ts";
 import { getCatalog } from "./catalog.ts";
 import { toolIcons } from "./tool-icons.ts";
 import type { McpToolName } from "./tools.ts";
@@ -37,11 +40,17 @@ function descriptorPresentation(descriptor: Tool): ToolPresentation {
 }
 
 /**
- * The first package an operation path names: its kind's segment (`agents`, `skills`,
- * `integrations`, `org-integrations`) and the parameters right after it, one package id
- * (`{packageId}`, `{integrationPackageId}`) or `{scope}/{name}`. A run's or a schedule's
- * operation under `/api/agents/{scope}/{name}/…` names its agent this way; a path naming no
- * package by kind (`/api/runs/{id}`, `/api/packages/{scope}/{name}`) has no subject.
+ * The package an operation path names: at the first segment that is exactly a kind's (`agents`,
+ * `skills` or `integrations`, or one of them prefixed `org-`) AND is followed by a parameter,
+ * wherever it sits in the path. One parameter there is the package id, whatever its name
+ * (`{packageId}`, `{integrationPackageId}`); a second right after it makes the pair
+ * `{scope}/{name}`. A run's or a schedule's operation under `/api/agents/{scope}/{name}/…` names
+ * its agent;
+ * `/api/me/integration-pins/{agentPackageId}/integrations/{integrationPackageId}` names the
+ * integration, `integration-pins` being no kind's segment; a path with no such segment
+ * (`/api/runs/{id}`, `/api/packages/{scope}/{name}`) has no subject. Read from the operation and
+ * its arguments alone, the subject is what the call aimed at: it is stamped whether the operation
+ * succeeds or fails.
  */
 const PACKAGE_IN_PATH = /\/(?:org-)?(agents|skills|integrations)\/\{([^}/]+)\}(?:\/\{([^}/]+)\})?/;
 const SUBJECT_KIND = { agents: "agent", skills: "skill", integrations: "integration" } as const;
@@ -90,7 +99,7 @@ function presentOperation(args: Record<string, unknown>): ToolPresentation | und
 /** `get_me`: the caller it answered for (`/api/me/context`, relayed as `{ status, body }`). */
 function presentCaller(descriptor: Tool, result: CallToolResult): ToolPresentation | undefined {
   const user = asRecord(asRecord(asRecord(unwrapMcpResult(result))?.body)?.user);
-  if (!user || typeof user.id !== "string") return undefined;
+  if (!user || typeof user.id !== "string" || !user.id) return undefined;
   const name = typeof user.name === "string" && user.name ? user.name : undefined;
   return {
     ...descriptorPresentation(descriptor),
@@ -98,10 +107,18 @@ function presentCaller(descriptor: Tool, result: CallToolResult): ToolPresentati
   };
 }
 
-/** `descriptor` with its icons, unless it declares its own. */
+/** `descriptor` with its icons, when it is a platform tool's. */
 function withIcons(descriptor: Tool): Tool {
-  const icons = descriptor.icons ? undefined : toolIcons(descriptor.name);
+  const icons = toolIcons(descriptor.name);
   return icons ? { ...descriptor, icons } : descriptor;
+}
+
+/** A handler's throw as the result MCP gives a failed call: `isError`, the error's message. */
+function thrownResult(err: unknown): CallToolResult {
+  return {
+    content: [{ type: "text", text: err instanceof Error ? err.message : String(err) }],
+    isError: true,
+  };
 }
 
 type Presenter = (
@@ -122,13 +139,27 @@ const PRESENTERS = {
 const presenterOf = (name: string): Presenter | undefined =>
   Object.hasOwn(PRESENTERS, name) ? PRESENTERS[name as keyof typeof PRESENTERS] : undefined;
 
-/** Every tool's results stamped with their presentation, and its descriptor given its icons. */
+/**
+ * Every tool's results stamped with their presentation, a throw included, and its descriptor given
+ * its icons.
+ */
 export function presentTools(tools: AppstrateToolDefinition[]): AppstrateToolDefinition[] {
   return tools.map((tool) => ({
     ...tool,
     descriptor: withIcons(tool.descriptor),
     handler: async (args, extra) => {
-      const result = await tool.handler(args, extra);
+      let result: CallToolResult;
+      try {
+        result = await tool.handler(args, extra);
+      } catch (err) {
+        // A cancelled call has no one to answer: its throw stays the cancellation.
+        if (extra.signal?.aborted) throw err;
+        logger.error("mcp: tool handler threw", {
+          tool: tool.descriptor.name,
+          error: err instanceof Error ? err.name : typeof err,
+        });
+        result = thrownResult(err);
+      }
       if (result._meta?.[TOOL_PRESENTATION_META_KEY] !== undefined) return result;
       const presentation =
         presenterOf(tool.descriptor.name)?.(tool.descriptor, args, result) ??

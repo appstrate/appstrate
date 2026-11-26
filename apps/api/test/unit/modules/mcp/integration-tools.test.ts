@@ -13,6 +13,7 @@
 import { describe, it, expect, afterEach } from "bun:test";
 import type { AppstrateRequestExtra } from "@appstrate/mcp-transport";
 import { withImpliedPermissions } from "@appstrate/core/permissions";
+import { readToolPresentation } from "@appstrate/core/mcp-presentation";
 import {
   FORWARDED_AUTH_HEADERS,
   type Dispatch,
@@ -1213,6 +1214,61 @@ describe("call_integration_tool — result", () => {
   });
 });
 
+describe("call_integration_tool — an api_call's presentation", () => {
+  const presented = async (args: Record<string, unknown>) =>
+    readToolPresentation((await apiCall(args)).result._meta);
+  const subject = { kind: "integration" as const, id: INTEGRATION, display_name: INTEGRATION };
+
+  it("names the method of its one request", async () => {
+    expect(await presented({ requests: [get({ method: "DELETE" })] })).toEqual({
+      title: "API call",
+      method: "DELETE",
+      subject,
+    });
+  });
+
+  it("names no method for a batch of several", async () => {
+    expect(await presented({ requests: [get(), get({ method: "POST" })] })).toEqual({
+      title: "API call",
+      subject,
+    });
+  });
+
+  it("reads refused arguments the same way, guessing nothing", async () => {
+    // One request refused for a field it does not declare: its method is still the call's.
+    expect(await presented({ requests: [get({ method: "PUT", bogus: 1 })] })).toEqual({
+      title: "API call",
+      method: "PUT",
+      subject,
+    });
+    // A refused batch, and a method outside `requests`, name none.
+    for (const args of [{ requests: [get(), { method: 7 }] }, { method: "GET", target: TARGET }]) {
+      expect(await presented(args)).toEqual({ title: "API call", subject });
+    }
+  });
+
+  it("keeps the presentation of an integration whose display name is blank, naming it by id", async () => {
+    const blank: Fixture = {
+      listing: async () => {
+        const body = (await listingOf([apiCallTool()])().json()) as Record<string, unknown>;
+        return Response.json({
+          ...body,
+          integrations: [{ integration_package_id: INTEGRATION, display_name: "", icon: "" }],
+        });
+      },
+    };
+    const made = makeTools(CALL_OWN, () => relayedJson({ ok: true }), true, blank);
+    const result = await made.byName
+      .get("call_integration_tool")!
+      .handler({ tool: TOOL, arguments: { requests: [get()] } }, noExtra);
+    expect(readToolPresentation(result._meta)).toEqual({
+      title: "API call",
+      method: "GET",
+      subject: { kind: "integration", id: INTEGRATION },
+    });
+  });
+});
+
 describe("typed tools of a remote MCP integration", () => {
   const REMOTE = "@acme/docs";
   const inputSchema = {
@@ -1749,6 +1805,24 @@ describe("call_integration_tool — a result past the budget", () => {
     expect(jsonBytes(result)).toBeLessThanOrEqual(MAX_RESULT_BYTES);
     const [cut] = (result.content as Array<{ text: string }>).map((block) => block.text);
     expect(cut).toContain("\n[cut: ");
+  });
+
+  it("relays a result whose marked and stamped JSON is the budget exactly, and bounds one a byte over", async () => {
+    const relayedMeta = { "dev.appstrate/relayed": true, ...SEARCH_STAMP };
+    // What leaves for a text of `n` bytes: the result, its relayed mark and its presentation.
+    const leaving = (n: number) => ({
+      content: [{ type: "text" as const, text: "a".repeat(n) }],
+      _meta: relayedMeta,
+    });
+    const exact = MAX_RESULT_BYTES - jsonBytes(leaving(0));
+    expect(jsonBytes(leaving(exact))).toBe(MAX_RESULT_BYTES);
+
+    const fits = await relayedResult({ content: leaving(exact).content });
+    expect(fits).toEqual(leaving(exact));
+
+    const over = await relayedResult({ content: leaving(exact + 1).content });
+    expect(over._meta).toEqual({ "dev.appstrate/truncated": true, ...relayedMeta });
+    expect(jsonBytes(over)).toBeLessThanOrEqual(MAX_RESULT_BYTES);
   });
 
   it("cuts a text block to its text alone, dropping the fields that made it too large", async () => {

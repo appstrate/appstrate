@@ -461,7 +461,11 @@ role. Runs keep their connections there:
   `authorized_uris` or egress refusal, or the server refusing the connection's
   credential: `upstream_credential_rejected`), each with that `refusal`: their typed tools are
   missing until it is cleared, and calling one returns that refusal. Tools,
-  `not_ready` and `unlisted` all come from `GET /api/credential-proxy/tools`.
+  `not_ready` and `unlisted` all come from `GET /api/credential-proxy/tools`,
+  which also lists the tools' integrations once each (`integrations`:
+  `integration_package_id`, `display_name`, and `icon` when the manifest
+  declares one) and a remote tool's sanitised `title`; its full shape is in
+  `docs/architecture/INTEGRATIONS_RUNTIME.md`.
   `connections` lists what a call would accept: per connection, the
   `connection_id` to pass, `label`, `auth_key`, `scopes_granted`, `owned_by_actor`
   (`false` for another member's), the `authorized_uris` a target must match,
@@ -579,7 +583,7 @@ role. Runs keep their connections there:
   the connection's credential `upstream_credential_rejected` (`upstream_status`,
   and `credential.status` `needs_reconnection` when the connection is now
   flagged for its owner to reconnect), any other server fault `bad_gateway`. Of
-  the server's tool annotations only its display name is relayed: `title`, else
+  the server's descriptor, only its display name is relayed: `title`, else
   `annotations.title`, with hidden Unicode and control characters stripped and
   cut at 512 bytes, as the listing's `title` and a call's presentation title
   (see "Showing a call" below). Its behaviour hints (`readOnlyHint`,
@@ -701,18 +705,25 @@ result's `content`; the schema is `toolPresentationSchema` in
   `_meta["dev.appstrate/lookup"]: true` instead: their calls only look things
   up. `isLookupTool` reads either.
 - **Presentation.** Every result carries
-  `_meta["dev.appstrate/presentation"]`:
+  `_meta["dev.appstrate/presentation"]`, a failed call's included (a tool that
+  fails unexpectedly answers `isError` with the error's message, not a JSON-RPC
+  error):
   - `title`: a fixed label, never the call's arguments: the tool's title, an
     operation's OpenAPI `summary` (`invoke_operation`), a remote server's title
     for its tool, else its name, or `API call` for an `{ns}__api_call`
     (`call_integration_tool`);
   - `tag`: an operation's first OpenAPI tag; `method`: its HTTP method, or the
-    method of an `{ns}__api_call` request (none for a batch);
+    method of an `{ns}__api_call` holding one request (none for a batch of
+    several);
   - `subject` (`{ kind, id, display_name?, icon? }`, `kind` one of `agent`,
     `skill`, `integration`, `user`): the package an operation's path names by
     its `agents`, `skills` or `integrations` segment (so a run or schedule
-    operation under `/api/agents/{scope}/{name}` names that agent), the
+    operation under `/api/agents/{scope}/{name}` names that agent), whether
+    the operation succeeds or fails: it is what the call aimed at; the
     integration `call_integration_tool` reached, its refusal of the arguments
-    included, the caller `get_me` answered for;
-  - `count` and `items` (`search`): how many items it found, and at most 8
-    distinct agents, skills and integrations its first items name.
+    included; the caller `get_me` answered for;
+  - `count` and `items` (`search`): `count` is the sum of its sections'
+    `total`, what each kind matched before `limit` (an agent or an integration
+    tool once, an operation you may invoke once, a skill once per space it is
+    listed in); `items` the distinct agents, skills and integrations its shown
+    items name, at most 8.

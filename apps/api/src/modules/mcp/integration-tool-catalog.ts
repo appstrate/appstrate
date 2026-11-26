@@ -262,11 +262,16 @@ async function executeRemoteTool(
     return { result: jsonResult(body ?? { status: response.status }, true), shownCount: 0 };
   }
   // The server's own result, marked relayed (`boundedResult` marks its own): the platform's
-  // answers above are not.
-  if (new TextEncoder().encode(text).byteLength + reservedBytes > MAX_RESULT_BYTES) {
+  // answers above are not. The budget is measured on what leaves: the marked result, and the
+  // stamp the caller adds to it.
+  const relayed = markRelayedResult(result as CallToolResult);
+  if (
+    new TextEncoder().encode(JSON.stringify(relayed)).byteLength + reservedBytes >
+    MAX_RESULT_BYTES
+  ) {
     return { result: boundedResult(result as CallToolResult, reservedBytes), shownCount: 1 };
   }
-  return { result: markRelayedResult(result as CallToolResult), shownCount: 1 };
+  return { result: relayed, shownCount: 1 };
 }
 
 /** A listed tool with how the MCP tool calls it. */
