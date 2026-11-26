@@ -42,6 +42,7 @@ import {
   credentialUnusableMessage,
   credentialUrlPolicy,
   fetchApiCall,
+  mayHaveReachedUpstream,
   prepareApiCallRequest,
   redactionFields,
   redactCredentialHost,
@@ -57,6 +58,7 @@ import { getErrorMessage } from "@appstrate/core/errors";
 import { targetsMcpEndpoint, type McpEndpoint } from "@appstrate/core/mcp-endpoint";
 import { logger } from "./logger.ts";
 import { filterSensitiveHeaders } from "./redact.ts";
+import type { CallJournal } from "./call-reporter.ts";
 
 /**
  * Body modes the proxy core accepts. The MCP handler produces "none"
@@ -186,8 +188,11 @@ export interface ApiCallDeps extends ApiCallBaseDeps {
     integrationId: string,
     rejected: CredentialsResponse,
   ) => Promise<CredentialsResponse | null>;
-  /** A 2xx on the injected credential — ends a pending rejection streak on the connection. */
-  reportUpstreamSuccess?: (answered: CredentialsResponse) => void;
+  /**
+   * Journals each call that may have reached the upstream, once: the final attempt's status (a
+   * 401 replay included), or the failure code of an exchange that failed after dispatch.
+   */
+  journal: CallJournal;
 }
 
 /** `value` with `render` applied to its string leaves: `JSON.stringify` then escapes each. */
@@ -320,6 +325,21 @@ export async function executeApiCall(args: ApiCallArgs, deps: ApiCallDeps): Prom
   // Reassigned when a 401 retry runs with refreshed credentials.
   let redactFields = redactionFields(policy, creds.credentials);
   const targetHost = templateHost(targetUrl);
+  // Journaled on the template's host: a `{{field}}` stays as written, never its value.
+  const journalStarted = performance.now();
+  const journalCall = (outcome: string, answeredBy: CredentialsResponse | null) =>
+    deps.journal({
+      method,
+      host: targetHost,
+      outcome,
+      durationMs: performance.now() - journalStarted,
+      credential: answeredBy ? { revision: answeredBy.credentialRevision } : null,
+    });
+  const failedCall = (err: unknown): ApiCallFailure => {
+    const { failure, dispatched } = wrapRequestError(err, integrationId, targetHost);
+    if (dispatched) journalCall(failure.code, null);
+    return failure;
+  };
 
   // 4b. This call's view of the run-wide jar (docs/architecture/SIDECAR.md), keyed by the
   //     connection's credential scope. Siblings are gated per URL, whatever gated the initial target.
@@ -365,7 +385,6 @@ export async function executeApiCall(args: ApiCallArgs, deps: ApiCallDeps): Prom
     /** Whether this attempt used the platform credential or an allowed caller override. */
     credentialInjection: "inject" | "caller_override" | "none";
   }> => {
-    args.signal?.throwIfAborted();
     const { headers: resolvedHeaders, credentialHeaders } = caller;
     // Server-side credential injection (Authorization, X-Api-Key, …).
     const credentialInjection = applyInjectedCredentialHeader(resolvedHeaders, activeCreds);
@@ -447,6 +466,9 @@ export async function executeApiCall(args: ApiCallArgs, deps: ApiCallDeps): Prom
   let credentialInjection: "inject" | "caller_override" | "none";
   // The credentials the terminal response answered; null when no hop carried them to it.
   let answered: CredentialsResponse | null;
+  // An abort from here on may follow a dispatched request: the call is journaled before the abort
+  // is rethrown. Before this point nothing was sent, and nothing is journaled.
+  args.signal?.throwIfAborted();
   try {
     const r = await doUpstreamRequest(creds, prepared.request);
     upstream = r.response;
@@ -456,8 +478,9 @@ export async function executeApiCall(args: ApiCallArgs, deps: ApiCallDeps): Prom
     credentialInjection = r.credentialInjection;
     answered = r.credentialInjection === "inject" && r.credentialsForwarded ? creds : null;
   } catch (err) {
+    const failure = failedCall(err);
     args.signal?.throwIfAborted();
-    return wrapRequestError(err, integrationId, targetHost);
+    return failure;
   }
 
   // 5b. Retry on 401 — force a refresh and re-issue the call. The platform
@@ -465,7 +488,10 @@ export async function executeApiCall(args: ApiCallArgs, deps: ApiCallDeps): Prom
   //     is terminally dead (revoked / unrefreshable / a non-oauth2 auth that
   //     401'd), so a `null` result means "do not retry". A non-null result is
   //     a genuine token rotation; replay once.
-  args.signal?.throwIfAborted();
+  if (args.signal?.aborted) {
+    journalCall(String(upstream.status), answered);
+    args.signal.throwIfAborted();
+  }
   if (
     upstream.status === 401 &&
     refreshCredentials &&
@@ -487,6 +513,11 @@ export async function executeApiCall(args: ApiCallArgs, deps: ApiCallDeps): Prom
     }
     if (fresh && again?.ok) {
       redactFields = redactionFields(policy, fresh.credentials);
+      // Aborted during the refresh: the 401 is the call's answer.
+      if (args.signal?.aborted) {
+        journalCall(String(upstream.status), answered);
+        args.signal.throwIfAborted();
+      }
       try {
         const r = await doUpstreamRequest(fresh, again.request);
         upstream = r.response;
@@ -496,8 +527,9 @@ export async function executeApiCall(args: ApiCallArgs, deps: ApiCallDeps): Prom
         credentialInjection = r.credentialInjection;
         answered = r.credentialInjection === "inject" && r.credentialsForwarded ? fresh : null;
       } catch (err) {
+        const failure = failedCall(err);
         args.signal?.throwIfAborted();
-        return wrapRequestError(err, integrationId, targetHost);
+        return failure;
       }
     }
   }
@@ -514,7 +546,7 @@ export async function executeApiCall(args: ApiCallArgs, deps: ApiCallDeps): Prom
     });
   }
 
-  if (upstream.ok && answered) deps.reportUpstreamSuccess?.(answered);
+  journalCall(String(upstream.status), answered);
 
   // 7. Success-path diagnostic envelope. One structured line per
   //    completed call — resolved auth mode, hop count, status, duration,
@@ -549,9 +581,15 @@ export async function executeApiCall(args: ApiCallArgs, deps: ApiCallDeps): Prom
 /**
  * Outbound refusals and faults as structured failures, under the engine's shared code. Hosts
  * only, as the target template names them: a redirect target may encode capabilities.
+ * `dispatched`: the exchange failed after a request may have reached the upstream.
  */
-function wrapRequestError(err: unknown, integrationId: string, host: string): ApiCallFailure {
+function wrapRequestError(
+  err: unknown,
+  integrationId: string,
+  host: string,
+): { failure: ApiCallFailure & { code: ApiCallFailureCode }; dispatched: boolean } {
   const failure = classifyApiCallFailure(err);
+  const dispatched = mayHaveReachedUpstream(failure);
   let error: string;
   switch (failure.code) {
     case "unauthorized_target":
@@ -573,5 +611,5 @@ function wrapRequestError(err: unknown, integrationId: string, host: string): Ap
       error = `Upstream request failed${failure.systemCode ? `: ${failure.systemCode}` : ""} (${host})`;
       break;
   }
-  return { ok: false, code: failure.code, error };
+  return { failure: { ok: false, code: failure.code, error }, dispatched };
 }

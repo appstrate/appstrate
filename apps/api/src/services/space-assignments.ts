@@ -8,6 +8,7 @@ import type { AssignableOrgRole } from "@appstrate/shared-types";
 import { invalidRequest, notFound } from "../lib/errors.ts";
 import { logger } from "../lib/logger.ts";
 import { lockOrgMember } from "./space-members.ts";
+import { lockOrgSpaceRole } from "../lib/space-role.ts";
 import type { DbOrTx } from "../lib/db-helpers.ts";
 
 /**
@@ -71,14 +72,9 @@ export async function assertSpaceAssignmentsValid(
   // id is still legible and fixable by whoever wrote it. A role deleted
   // BETWEEN authoring and acceptance is the other case, and it is handled at
   // the door by `applySpaceAssignments`: skipped for an invitation, refused
-  // for an SSO signup.
-  const liveRoles = await tx
-    .select({ id: spaceRoles.id })
-    .from(spaceRoles)
-    .where(and(eq(spaceRoles.orgId, orgId), inArray(spaceRoles.id, roleIds)));
-  const foundRoles = new Set(liveRoles.map((row) => row.id));
-  const missingRole = roleIds.find((id) => !foundRoles.has(id));
-  if (missingRole) throw notFound(`Space role '${missingRole}' not found in this organization`);
+  // for an SSO signup. `FOR KEY SHARE`: a caller that writes the grants in the
+  // same `tx` holds the role against `deleteSpaceRole` until it commits.
+  for (const roleId of roleIds) await lockOrgSpaceRole(tx, orgId, roleId);
 }
 
 /**

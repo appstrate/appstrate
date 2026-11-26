@@ -18,6 +18,7 @@
  */
 
 import { describe, it, expect } from "bun:test";
+import { recordingCallReporter } from "./helpers/call-journal.ts";
 import * as path from "node:path";
 import { readFileSync } from "node:fs";
 import { zipArtifact } from "@appstrate/core/zip";
@@ -96,10 +97,12 @@ describe("@appstrate/bun-toolkit — complex bun integration (e2e)", () => {
     const runnerExec = await installPassthroughRunnerExec();
 
     let boot: Awaited<ReturnType<typeof bootIntegrations>> | null = null;
+    const { reporter, records } = recordingCallReporter();
     try {
       boot = await bootIntegrations([spec()], {
         platformApiUrl: "http://platform.local",
         runToken: "run-tok-toolkit",
+        callReporter: reporter,
         fetchFn: makePlatformFetch(),
       });
 
@@ -144,6 +147,19 @@ describe("@appstrate/bun-toolkit — complex bun integration (e2e)", () => {
 
       const uuids = (await call(boot, "uuid", { count: 3 })).uuids as string[];
       expect(uuids).toHaveLength(3);
+
+      // No MITM in front of this runner: one journal row per tools/call, none for the
+      // handshake or the listing, with no host (the runner's upstream is not seen).
+      expect(records).toHaveLength(8);
+      for (const row of records) {
+        expect(row).toMatchObject({
+          integration_id: INTEG_ID,
+          connection_id: CONN_A.id,
+          method: "POST",
+          host: null,
+          outcome: "200",
+        });
+      }
     } finally {
       if (boot) await boot.shutdown();
       await runnerExec.restore();

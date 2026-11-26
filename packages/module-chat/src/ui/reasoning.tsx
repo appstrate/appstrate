@@ -23,6 +23,7 @@ import {
   CollapsibleTrigger,
 } from "@appstrate/ui/components/collapsible";
 import { useChatHost } from "./runtime-context.ts";
+import { DISCLOSURE_TRIGGER_CLASS } from "./touch-targets.ts";
 
 /**
  * The turn's one status region (the e2e/bench hook reads its test id). h-6 =
@@ -60,11 +61,7 @@ export const ReasoningGroup: ReasoningGroupComponent = ({ endIndex, children }) 
     <Collapsible open={open} onOpenChange={setReaderOpen} className="my-2">
       <div className="flex items-center gap-2">
         <CollapsibleTrigger asChild>
-          <Button
-            variant="ghost"
-            size="sm"
-            className="text-muted-foreground hover:text-foreground group -ml-2 gap-1.5 px-2"
-          >
+          <Button variant="ghost" size="sm" className={DISCLOSURE_TRIGGER_CLASS}>
             <BrainIcon />
             {streaming ? t("reasoning.running") : t("reasoning.done")}
             <ChevronRightIcon className="duration-fast ease-surface transition-transform group-data-[state=open]:rotate-90" />

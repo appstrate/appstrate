@@ -810,8 +810,22 @@
     {
       "idx": 115,
       "version": "7",
-      "when": 1795725133614,
-      "tag": "0115_integration_tool_policy",
+      "when": 1795723802142,
+      "tag": "0115_role_studio_and_personal_default",
+      "breakpoints": true
+    },
+    {
+      "idx": 116,
+      "version": "7",
+      "when": 1795726657999,
+      "tag": "0116_connection_calls_chat_session",
+      "breakpoints": true
+    },
+    {
+      "idx": 117,
+      "version": "7",
+      "when": 1795727818644,
+      "tag": "0117_integration_tool_policy",
       "breakpoints": true
     }
   ]

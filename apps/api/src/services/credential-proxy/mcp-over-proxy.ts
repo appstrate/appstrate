@@ -11,6 +11,7 @@
 import type { Tool } from "@modelcontextprotocol/sdk/types.js";
 import {
   httpStatusOf,
+  isMcpOperationExchange,
   isRequestTimeout,
   jsonRpcErrorOf,
   type AppstrateMcpClient,
@@ -18,6 +19,7 @@ import {
 import { getErrorMessage } from "@appstrate/core/errors";
 import { SsrfBlockedError } from "@appstrate/core/ssrf";
 import { requiredScopesFromChallenge } from "@appstrate/core/www-authenticate";
+import { templateHost } from "@appstrate/afps-runtime/resolvers";
 import type { Actor } from "../../lib/actor.ts";
 import { credentialMember, type CredentialStatus } from "../../lib/credential-status-header.ts";
 import { findCause } from "@appstrate/core/error-cause";
@@ -34,10 +36,8 @@ import { trackAudit } from "../audit.ts";
 import type { ProxyReach } from "../integration-connections.ts";
 import type { ResolvedIntegrationVersion } from "../integration-service.ts";
 import { getCredentialProxyLimits } from "../proxy-limits.ts";
-import { recordConnectionCall, type ConnectionCall } from "./call-journal.ts";
+import { recordConnectionCalls, type ProxyCaller } from "./call-journal.ts";
 import { bodyReadError, proxyCall, ProxyCallError } from "./core.ts";
-
-export type ProxyCaller = Pick<ConnectionCall, "apiKeyId" | "authMethod" | "requestId">;
 
 interface McpOperationInput {
   scope: SpaceScope;
@@ -126,7 +126,7 @@ export async function listToolPages(
 interface JournaledExchange {
   connectionId: string | null;
   method: string;
-  target: string;
+  host: string;
   outcome: string;
   durationMs: number;
 }
@@ -134,24 +134,6 @@ interface JournaledExchange {
 interface JournalEntry {
   reached(connectionId: string | null, outcome: string): void;
   ended(): void;
-}
-
-/** The methods whose exchange is the operation itself, not its session's handshake or upkeep. */
-const OPERATION_METHODS: ReadonlySet<unknown> = new Set(["tools/call", "tools/list"]);
-
-/** Whether a request body is a JSON-RPC request of {@link OPERATION_METHODS}. */
-function isOperationExchange(body: RequestInit["body"]): boolean {
-  if (typeof body !== "string") return false;
-  try {
-    const message: unknown = JSON.parse(body);
-    return (
-      typeof message === "object" &&
-      message !== null &&
-      OPERATION_METHODS.has((message as { method?: unknown }).method)
-    );
-  } catch {
-    return false;
-  }
 }
 
 /**
@@ -172,15 +154,17 @@ function operationJournal(input: McpOperationInput) {
       entries.findLast((entry) => entry.reached)
     )?.reached;
     if (!row) return;
-    await recordConnectionCall({
-      ...input.caller,
-      ...row,
-      orgId: input.scope.orgId,
-      spaceId: input.scope.spaceId,
-      integrationId: input.integrationId,
-      actor: input.actor,
-      runId: null,
-    });
+    await recordConnectionCalls([
+      {
+        ...input.caller,
+        ...row,
+        orgId: input.scope.orgId,
+        spaceId: input.scope.spaceId,
+        integrationId: input.integrationId,
+        actor: input.actor,
+        runId: null,
+      },
+    ]);
   };
   return {
     /** `null` once settled: an exchange then (the session's close) is none of the operation's. */
@@ -202,7 +186,7 @@ function operationJournal(input: McpOperationInput) {
           entry.reached = {
             connectionId,
             method,
-            target,
+            host: templateHost(target),
             outcome,
             durationMs: Date.now() - started,
           };
@@ -267,7 +251,7 @@ function mcpOperation(
     const method = init?.method ?? "POST";
     const href = target instanceof Request ? target.url : String(target);
     // Nothing between the entry's registration and the `finally` that ends it can throw.
-    const entry = journal.dispatch(method, href, isOperationExchange(init?.body));
+    const entry = journal.dispatch(method, href, isMcpOperationExchange(init?.body));
     try {
       const res = await transport({
         method,

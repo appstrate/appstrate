@@ -5,10 +5,11 @@ import {
   APPEARANCE_PROPERTIES,
   EMOJI_ICON_WRITE_RULE,
   ORG_SETTINGS_PROPERTIES,
+  SPACE_ROLE_ID_PATTERN,
 } from "../schemas.ts";
 
 import { ASSIGNABLE_ORG_ROLES } from "@appstrate/shared-types";
-import { ORG_ROLES } from "@appstrate/core/permissions";
+import { ORG_ROLES, SPACE_ROLE_PRESETS } from "@appstrate/core/permissions";
 import {
   APPEARANCE_COLORS,
   ICON_IMAGE_MAX_BYTES,
@@ -185,6 +186,8 @@ export const organizationsPaths = {
                         role: { kind: "preset", key: "admin", name: "admin" },
                       },
                     ],
+                    personal_space_role: null,
+                    personal_space_default_role: { kind: "preset", key: "admin", name: "admin" },
                   },
                   {
                     userId: "usr_def456",
@@ -200,6 +203,8 @@ export const organizationsPaths = {
                         role: { kind: "preset", key: "operator", name: "operator" },
                       },
                     ],
+                    personal_space_role: { preset_role: "builder" },
+                    personal_space_default_role: { kind: "preset", key: "admin", name: "admin" },
                   },
                 ],
                 invitations: [],
@@ -370,7 +375,7 @@ export const organizationsPaths = {
       tags: ["Organizations"],
       summary: "Change member role",
       description:
-        "Change a member's role. Owners can manage every other member, owners included, and are the only ones who may assign `owner` or change an owner's role; admins can manage guests and members and assign `guest`, `member` or `admin`. Nobody changes their own role. The caller is judged on their current role in the organization. Granting `owner` or changing an owner's role requires a dashboard session — any token (API key, OAuth/MCP client, CLI) is refused with 403 even when its user is an owner.",
+        "Change a member's role. Owners can manage every other member, owners included, and are the only ones who may assign `owner` or change an owner's role; admins can manage guests and members and assign `guest`, `member` or `admin`. Nobody changes their own role. The caller is judged on their current role in the organization. Granting `owner` or changing an owner's role requires a dashboard session — any token (API key, OAuth/MCP client, CLI) is refused with 403 even when its user is an owner. The member's own role in their personal space (`setMemberPersonalSpaceRole`) is dropped by a promotion to owner or admin (audited as `personalSpaceRoleCleared`) and kept otherwise.",
       parameters: [
         { name: "orgId", in: "path", required: true, schema: { type: "string" } },
         { name: "userId", in: "path", required: true, schema: { type: "string" } },
@@ -411,6 +416,8 @@ export const organizationsPaths = {
                     role: { kind: "preset", key: "admin", name: "admin" },
                   },
                 ],
+                personal_space_role: null,
+                personal_space_default_role: { kind: "preset", key: "admin", name: "admin" },
               },
             },
           },
@@ -440,6 +447,148 @@ export const organizationsPaths = {
         "401": { $ref: "#/components/responses/Unauthorized" },
         "403": { $ref: "#/components/responses/Forbidden" },
         "404": { $ref: "#/components/responses/NotFound" },
+      },
+    },
+  },
+  "/api/orgs/{orgId}/members/{userId}/personal-space-role": {
+    put: {
+      operationId: "setMemberPersonalSpaceRole",
+      "x-appstrate-space": { kind: "organization" },
+      tags: ["Organizations"],
+      summary: "Set a member's role in their personal space",
+      description:
+        "Give one member or guest their own role in their personal space, overriding the organization's `personal_space_role` default Body: exactly one of `preset_role` / `custom_role_id`; a `custom_role_id` must name a role of this organization (404 otherwise). A member holds the chosen role plus, short of `admin`, `agents:delete`, `skills:delete`, `integrations:delete` and `schedules:delete` there. A guest holds it capped to `operator` (the permissions the chosen role shares with `operator`, plus the deletes), whatever role is set. The personal space is provisioned if the member has none yet. Owners and admins always hold `admin` in their own personal space: targeting one is `409 redundant_space_role`. A change of the member's org role keeps the override, a guest's capped as above, except a promotion to owner or admin, which drops it. A dropped override is recorded in the `org.member_role_updated` audit entry (`personalSpaceRoleCleared`). Leaving or being removed drops it too; nothing restores a dropped override. A custom role named by an override cannot be deleted (`409 role_in_use`). Same guard as `changeMemberRole` (`members:change-role`).",
+      parameters: [
+        { name: "orgId", in: "path", required: true, schema: { type: "string" } },
+        { name: "userId", in: "path", required: true, schema: { type: "string" } },
+      ],
+      requestBody: {
+        required: true,
+        content: {
+          "application/json": {
+            schema: {
+              type: "object",
+              description: "Exactly one of `preset_role` / `custom_role_id`.",
+              allOf: [{ oneOf: [{ required: ["preset_role"] }, { required: ["custom_role_id"] }] }],
+              properties: {
+                preset_role: { type: "string", enum: [...SPACE_ROLE_PRESETS] },
+                custom_role_id: { type: "string", pattern: SPACE_ROLE_ID_PATTERN },
+              },
+              additionalProperties: false,
+            },
+          },
+        },
+      },
+      responses: {
+        "200": {
+          description: "Updated member — same shape as the members list in GET /api/orgs/{orgId}",
+          headers: STD_RESPONSE_HEADERS,
+          content: {
+            "application/json": {
+              schema: { $ref: "#/components/schemas/OrgMember" },
+            },
+          },
+        },
+        "400": { $ref: "#/components/responses/ValidationError" },
+        "401": { $ref: "#/components/responses/Unauthorized" },
+        "403": { $ref: "#/components/responses/Forbidden" },
+        "404": { $ref: "#/components/responses/NotFound" },
+        "409": {
+          description:
+            "The target is an owner or admin, who always hold `admin` in their personal space (`redundant_space_role`)",
+          content: {
+            "application/problem+json": {
+              schema: { $ref: "#/components/schemas/ProblemDetail" },
+            },
+          },
+        },
+      },
+    },
+    delete: {
+      operationId: "clearMemberPersonalSpaceRole",
+      "x-appstrate-space": { kind: "organization" },
+      tags: ["Organizations"],
+      summary: "Return a member to the organization default in their personal space",
+      description:
+        "Drop the member's own role in their personal space, so they hold the organization's `personal_space_role` again (for a guest, capped to `operator`). Idempotent: 204 whether or not an override was set. 404 when the user is not a member of the organization. Same guard as `changeMemberRole` (`members:change-role`).",
+      parameters: [
+        { name: "orgId", in: "path", required: true, schema: { type: "string" } },
+        { name: "userId", in: "path", required: true, schema: { type: "string" } },
+      ],
+      responses: {
+        "204": {
+          description: "Override cleared, or there was none",
+          headers: STD_RESPONSE_HEADERS,
+        },
+        "401": { $ref: "#/components/responses/Unauthorized" },
+        "403": { $ref: "#/components/responses/Forbidden" },
+        "404": { $ref: "#/components/responses/NotFound" },
+      },
+    },
+  },
+  "/api/orgs/{orgId}/personal-space-role/impact": {
+    get: {
+      operationId: "getPersonalSpaceRoleImpact",
+      "x-appstrate-space": { kind: "organization" },
+      tags: ["Organizations"],
+      summary: "Preview what a personal-space default would stop",
+      description:
+        "What setting the organization's `personal_space_role` to `role` would stop, without writing anything. `schedules` counts the ENABLED schedules in live personal spaces whose actor is the space's owner, a member or guest who follows the default (no override of their own, see `setMemberPersonalSpaceRole`) and would hold, under `role`, a resolved role without `agents:run` (guest cap and delete floor applied, as the resolver applies them). Each such schedule disables itself at its next fire (`disabled_reason: actor_invalid`), and restoring the role does not re-enable it. `members` counts the distinct owners of those schedules. Owners and admins always hold `admin` in their own personal space and are never counted; a `role` that grants `agents:run` answers `{ schedules: 0, members: 0 }`. A snapshot, which a later change can make stale. It discloses only counts, to a caller who may already rewrite the setting: same guard as `updateOrgSettings` (`org:settings`).",
+      parameters: [
+        { name: "orgId", in: "path", required: true, schema: { type: "string" } },
+        {
+          name: "role",
+          in: "query",
+          required: true,
+          description:
+            "The candidate default, as `updateOrgSettings` takes `personal_space_role`: a preset key or the id of one of this organization's custom space roles.",
+          schema: {
+            oneOf: [
+              { type: "string", enum: [...SPACE_ROLE_PRESETS] },
+              { type: "string", pattern: SPACE_ROLE_ID_PATTERN },
+            ],
+          },
+        },
+      ],
+      responses: {
+        "200": {
+          description: "What the candidate default would stop",
+          headers: STD_RESPONSE_HEADERS,
+          content: {
+            "application/json": {
+              schema: {
+                type: "object",
+                required: ["schedules", "members"],
+                properties: {
+                  schedules: {
+                    type: "integer",
+                    minimum: 0,
+                    description:
+                      "Enabled schedules that would disable themselves at their next fire.",
+                  },
+                  members: {
+                    type: "integer",
+                    minimum: 0,
+                    description: "Distinct members and guests owning those schedules.",
+                  },
+                },
+                additionalProperties: false,
+              },
+              example: { schedules: 3, members: 2 },
+            },
+          },
+        },
+        "400": { $ref: "#/components/responses/ValidationError" },
+        "401": { $ref: "#/components/responses/Unauthorized" },
+        "403": { $ref: "#/components/responses/Forbidden" },
+        "404": {
+          description: "`role` names a custom role id that is not a role of this organization",
+          content: {
+            "application/problem+json": {
+              schema: { $ref: "#/components/schemas/ProblemDetail" },
+            },
+          },
+        },
       },
     },
   },
@@ -712,6 +861,15 @@ export const organizationsPaths = {
         "400": { $ref: "#/components/responses/ValidationError" },
         "401": { $ref: "#/components/responses/Unauthorized" },
         "403": { $ref: "#/components/responses/Forbidden" },
+        "404": {
+          description:
+            "`personal_space_role` names a custom role id that is not a role of this organization",
+          content: {
+            "application/problem+json": {
+              schema: { $ref: "#/components/schemas/ProblemDetail" },
+            },
+          },
+        },
       },
     },
   },

@@ -44,6 +44,8 @@ export const createSpaceRoleSchema = z
     name: z.string().min(1, "name is required").max(100, "name must be 100 characters or less"),
     description: z.string().max(500).nullable().optional(),
     permissions: z.array(z.string().min(1)),
+    // Whether holders see the Studio (`studio:read`, never listed in `permissions`). Default: yes.
+    shows_studio: z.boolean().optional(),
   })
   .strict();
 
@@ -53,6 +55,7 @@ export const updateSpaceRoleSchema = z
     name: z.string().min(1).max(100).optional(),
     description: z.string().max(500).nullable().optional(),
     permissions: z.array(z.string().min(1)).optional(),
+    shows_studio: z.boolean().optional(),
   })
   .strict();
 
@@ -86,7 +89,12 @@ export function createRolesRouter() {
       action: "role.created",
       resourceType: "space_role",
       resourceId: role.id!,
-      after: { key: role.key, name: role.name, permissions: role.permissions },
+      after: {
+        key: role.key,
+        name: role.name,
+        permissions: role.permissions,
+        showsStudio: role.shows_studio,
+      },
     });
     return c.json(role, 201);
   });
@@ -99,7 +107,12 @@ export function createRolesRouter() {
       action: "role.updated",
       resourceType: "space_role",
       resourceId: id,
-      after: { key: role.key, name: role.name, permissions: role.permissions },
+      after: {
+        key: role.key,
+        name: role.name,
+        permissions: role.permissions,
+        showsStudio: role.shows_studio,
+      },
     });
     return c.json(role);
   });
@@ -112,7 +125,12 @@ export function createRolesRouter() {
       action: "role.deleted",
       resourceType: "space_role",
       resourceId: id,
-      before: { key: role.key, name: role.name, permissions: role.permissions },
+      before: {
+        key: role.key,
+        name: role.name,
+        permissions: role.permissions,
+        showsStudio: role.shows_studio,
+      },
     });
     return c.body(null, 204);
   });

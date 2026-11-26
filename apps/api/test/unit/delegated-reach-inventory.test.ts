@@ -211,7 +211,7 @@ const UNDECLARED_OPERATIONS: Readonly<Record<string, Classification>> = {
   },
   refreshOAuthModelProviderToken: { category: "internal", reason: "verifyRunToken" },
   reportIntegrationToolsObserved: { category: "internal", reason: "verifyRunToken" },
-  reportIntegrationUpstreamSuccess: { category: "internal", reason: "verifyRunToken" },
+  reportIntegrationCalls: { category: "internal", reason: "verifyRunToken" },
   runLlmProxyAnthropicMessages: { category: "internal", reason: "verifyRunToken" },
   runLlmProxyMistralChatCompletions: { category: "internal", reason: "verifyRunToken" },
   runLlmProxyOpenaiChatCompletions: { category: "internal", reason: "verifyRunToken" },

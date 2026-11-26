@@ -13,6 +13,7 @@ import {
 } from "@appstrate/mcp-transport/testing";
 import type { IntegrationCredentialsSource } from "../integration-credentials-source.ts";
 import type { IntegrationCredentialsWire } from "@appstrate/connect";
+import { noJournal, recordingJournal } from "./helpers/call-journal.ts";
 
 const CONN_A = { id: "conn-a", label: "work", accountId: null };
 
@@ -38,6 +39,14 @@ const UNTRUSTED_SERVER_URL = "https://internal-mcp.invalid/mcp/v1";
 
 /** Public (unblocked) address the injected resolver returns for fixtures. */
 const PUBLIC_IP = "93.184.216.34";
+
+/** A request body the journal counts as an operation. */
+const TOOLS_CALL = JSON.stringify({
+  jsonrpc: "2.0",
+  id: 1,
+  method: "tools/call",
+  params: { name: "echo" },
+});
 
 function spec(url: string = SERVER_URL): IntegrationSpawnSpec {
   return {
@@ -97,15 +106,12 @@ function makeDeps(
 ) {
   let captured: typeof fetch | undefined;
   let refreshCalls = 0;
-  let successReports = 0;
+  const { journal, calls: journaled } = recordingJournal();
   const source = {
     snapshot: () => initial,
     refreshOnUnauthorized: async (_authKey: string) => {
       refreshCalls += 1;
       return refresh();
-    },
-    reportUpstreamSuccess: () => {
-      successReports += 1;
     },
   } as unknown as IntegrationCredentialsSource;
   const deps: ConnectRemoteHttpDeps = {
@@ -120,7 +126,8 @@ function makeDeps(
     source,
     getFetch: () => captured!,
     getRefreshCalls: () => refreshCalls,
-    getSuccessReports: () => successReports,
+    journal,
+    journaled,
   };
 }
 
@@ -158,7 +165,6 @@ describe("connectRemoteHttpIntegration — rejected handshake", () => {
         return false;
       },
       needsReconnection: () => reconnect,
-      reportUpstreamSuccess: () => {},
     } as unknown as IntegrationCredentialsSource;
     let captured: typeof fetch | undefined;
     const deps: ConnectRemoteHttpDeps = {
@@ -174,7 +180,16 @@ describe("connectRemoteHttpIntegration — rejected handshake", () => {
     const integrationSpec = connectLoginAuthKey
       ? ({ ...base, connectLogin: { authKey: connectLoginAuthKey } } as IntegrationSpawnSpec)
       : base;
-    return { source, deps, integrationSpec, rejectedRequests, getFetch: () => captured! };
+    const { journal, calls: journaled } = recordingJournal();
+    return {
+      source,
+      deps,
+      integrationSpec,
+      rejectedRequests,
+      journal,
+      journaled,
+      getFetch: () => captured!,
+    };
   }
 
   const unauthenticated = (async () =>
@@ -183,7 +198,7 @@ describe("connectRemoteHttpIntegration — rejected handshake", () => {
   it("reports a 401 on the handshake as such and fails with the reconnect step once flagged", async () => {
     const { source, deps, integrationSpec, rejectedRequests } = handshakeHarness(true);
     const err = await withGlobalFetch(unauthenticated, () =>
-      connectRemoteHttpIntegration(integrationSpec, source, deps).then(
+      connectRemoteHttpIntegration(integrationSpec, source, noJournal, deps).then(
         () => undefined,
         (e: unknown) => e,
       ),
@@ -199,7 +214,7 @@ describe("connectRemoteHttpIntegration — rejected handshake", () => {
   it("keeps the remote failure when the platform did not flag the connection", async () => {
     const { source, deps, integrationSpec, rejectedRequests } = handshakeHarness(false);
     const err = await withGlobalFetch(unauthenticated, () =>
-      connectRemoteHttpIntegration(integrationSpec, source, deps).then(
+      connectRemoteHttpIntegration(integrationSpec, source, noJournal, deps).then(
         () => undefined,
         (e: unknown) => e,
       ),
@@ -212,7 +227,7 @@ describe("connectRemoteHttpIntegration — rejected handshake", () => {
     const { source, deps, integrationSpec, rejectedRequests, getFetch } = handshakeHarness(true);
     await withGlobalFetch(
       (async () => new Response("{}", { status: 200 })) as unknown as typeof fetch,
-      () => connectRemoteHttpIntegration(integrationSpec, source, deps),
+      () => connectRemoteHttpIntegration(integrationSpec, source, noJournal, deps),
     );
     await withGlobalFetch(unauthenticated, async () => {
       expect((await getFetch()(SERVER_URL, { method: "POST" })).status).toBe(401);
@@ -220,10 +235,28 @@ describe("connectRemoteHttpIntegration — rejected handshake", () => {
     expect(rejectedRequests).toEqual([undefined]);
   });
 
+  it("journals a handshake that never connected as one row, and a connected one as none", async () => {
+    for (const flagged of [true, false]) {
+      const { source, deps, integrationSpec, journal, journaled } = handshakeHarness(flagged);
+      await withGlobalFetch(unauthenticated, () =>
+        connectRemoteHttpIntegration(integrationSpec, source, journal, deps).catch(() => undefined),
+      );
+      expect(journaled.map((c) => [c.host, c.outcome, c.credential])).toEqual([
+        ["mcp.example.com", "401", { revision: undefined }],
+      ]);
+    }
+    const { source, deps, integrationSpec, journal, journaled } = handshakeHarness(false);
+    await withGlobalFetch(
+      (async () => new Response("{}", { status: 200 })) as unknown as typeof fetch,
+      () => connectRemoteHttpIntegration(integrationSpec, source, journal, deps),
+    );
+    expect(journaled).toEqual([]);
+  });
+
   it("reports a connect.tool auth's handshake 401 as a call", async () => {
     const { source, deps, integrationSpec, rejectedRequests } = handshakeHarness(false, "apikey");
     await withGlobalFetch(unauthenticated, () =>
-      connectRemoteHttpIntegration(integrationSpec, source, deps).catch(() => undefined),
+      connectRemoteHttpIntegration(integrationSpec, source, noJournal, deps).catch(() => undefined),
     );
     expect(rejectedRequests).toEqual([undefined]);
   });
@@ -243,7 +276,7 @@ describe("connectRemoteHttpIntegration — credential injection", () => {
     );
     const { deps, source, getFetch } = makeDeps(initial, async () => true);
 
-    const { authKey } = await connectRemoteHttpIntegration(spec(), source, deps);
+    const { authKey } = await connectRemoteHttpIntegration(spec(), source, noJournal, deps);
     expect(authKey).toBe("oauth"); // oauth2 wins over api_key
 
     let seen: string | null = null;
@@ -261,7 +294,7 @@ describe("connectRemoteHttpIntegration — credential injection", () => {
     expect(seen as string | null).toBe("Bearer TOKEN");
   });
 
-  it("reports a 2xx on the injected credential, never one on a caller override", async () => {
+  it("journals an operation with the injected credential, never one on a caller override", async () => {
     const initial = wire([{ authKey: "apikey", authType: "api_key" }], {
       apikey: {
         headerName: "X-Api-Key",
@@ -270,25 +303,32 @@ describe("connectRemoteHttpIntegration — credential injection", () => {
         allowServerOverride: true,
       },
     });
-    const { deps, source, getFetch, getSuccessReports } = makeDeps(initial, async () => false);
-    await connectRemoteHttpIntegration(spec(), source, deps);
+    const { deps, source, getFetch, journal, journaled } = makeDeps(initial, async () => false);
+    await connectRemoteHttpIntegration(spec(), source, journal, deps);
 
     await withGlobalFetch(
       (async () => new Response("{}", { status: 200 })) as unknown as typeof fetch,
       async () => {
-        await getFetch()(SERVER_URL, { method: "POST" });
-        await getFetch()(SERVER_URL, { method: "POST", headers: { "x-api-key": "CALLER" } });
+        await getFetch()(SERVER_URL, { method: "POST", body: TOOLS_CALL });
+        await getFetch()(SERVER_URL, {
+          method: "POST",
+          body: TOOLS_CALL,
+          headers: { "x-api-key": "CALLER" },
+        });
       },
     );
-    expect(getSuccessReports()).toBe(1);
+    expect(journaled.map((c) => [c.method, c.host, c.outcome, c.credential])).toEqual([
+      ["POST", "mcp.example.com", "200", { revision: undefined }],
+      ["POST", "mcp.example.com", "200", null],
+    ]);
   });
 
-  it("reports a 2xx only from the origin the credential was sent to, not past a cross-origin redirect", async () => {
+  it("credits a 2xx to the credential only from the origin it was sent to, not past a cross-origin redirect", async () => {
     const initial = wire([{ authKey: "apikey", authType: "api_key" }], {
       apikey: { headerName: "X-Api-Key", headerPrefix: "", value: "K" },
     });
-    const { deps, source, getFetch, getSuccessReports } = makeDeps(initial, async () => false);
-    await connectRemoteHttpIntegration(spec(), source, deps);
+    const { deps, source, getFetch, journal, journaled } = makeDeps(initial, async () => false);
+    await connectRemoteHttpIntegration(spec(), source, journal, deps);
 
     const redirectingTo = (location: string) =>
       (async (input: string) =>
@@ -297,25 +337,29 @@ describe("connectRemoteHttpIntegration — credential injection", () => {
           : new Response("{}", { status: 200 })) as unknown as typeof fetch;
 
     await withGlobalFetch(redirectingTo("https://elsewhere.example.org/landing"), async () => {
-      expect((await getFetch()(SERVER_URL, { method: "POST" })).status).toBe(200);
+      const res = await getFetch()(SERVER_URL, { method: "POST", body: TOOLS_CALL });
+      expect(res.status).toBe(200);
     });
-    expect(getSuccessReports()).toBe(0);
-
     await withGlobalFetch(redirectingTo("/mcp/v2"), async () => {
-      expect((await getFetch()(SERVER_URL, { method: "POST" })).status).toBe(200);
+      const res = await getFetch()(SERVER_URL, { method: "POST", body: TOOLS_CALL });
+      expect(res.status).toBe(200);
     });
-    expect(getSuccessReports()).toBe(1);
+    // The host is the target's, as the request named it, whichever hop answered.
+    expect(journaled.map((c) => [c.host, c.outcome, c.credential])).toEqual([
+      ["mcp.example.com", "200", null],
+      ["mcp.example.com", "200", { revision: undefined }],
+    ]);
   });
 
   it("judges nothing once a hop stripped the credential, even back on its origin", async () => {
     const initial = wire([{ authKey: "apikey", authType: "api_key" }], {
       apikey: { headerName: "X-Api-Key", headerPrefix: "", value: "K" },
     });
-    const { deps, source, getFetch, getRefreshCalls, getSuccessReports } = makeDeps(
+    const { deps, source, getFetch, getRefreshCalls, journal, journaled } = makeDeps(
       initial,
       async () => true,
     );
-    await connectRemoteHttpIntegration(spec(), source, deps);
+    await connectRemoteHttpIntegration(spec(), source, journal, deps);
 
     // A → B (strip) → A/terminal.
     const roundTrip = (terminalStatus: number) =>
@@ -334,13 +378,18 @@ describe("connectRemoteHttpIntegration — credential injection", () => {
       }) as unknown as typeof fetch;
 
     await withGlobalFetch(roundTrip(401), async () => {
-      expect((await getFetch()(SERVER_URL, { method: "POST" })).status).toBe(401);
+      const res = await getFetch()(SERVER_URL, { method: "POST", body: TOOLS_CALL });
+      expect(res.status).toBe(401);
     });
     await withGlobalFetch(roundTrip(200), async () => {
-      expect((await getFetch()(SERVER_URL, { method: "POST" })).status).toBe(200);
+      const res = await getFetch()(SERVER_URL, { method: "POST", body: TOOLS_CALL });
+      expect(res.status).toBe(200);
     });
     expect(getRefreshCalls()).toBe(0);
-    expect(getSuccessReports()).toBe(0);
+    expect(journaled.map((c) => [c.outcome, c.credential])).toEqual([
+      ["401", null],
+      ["200", null],
+    ]);
   });
 
   it("preserves an allowed caller override and does not refresh it on 401", async () => {
@@ -353,7 +402,7 @@ describe("connectRemoteHttpIntegration — credential injection", () => {
       },
     });
     const { deps, source, getFetch, getRefreshCalls } = makeDeps(initial, async () => true);
-    await connectRemoteHttpIntegration(spec(), source, deps);
+    await connectRemoteHttpIntegration(spec(), source, noJournal, deps);
 
     let seen: string | null = null;
     const status = await withGlobalFetch(
@@ -380,7 +429,7 @@ describe("connectRemoteHttpIntegration — credential injection", () => {
       oauth: { headerName: "Authorization", headerPrefix: "Bearer ", value: "TOKEN" },
     });
     const { deps, source, getFetch, getRefreshCalls } = makeDeps(initial, async () => true);
-    await connectRemoteHttpIntegration(spec(), source, deps);
+    await connectRemoteHttpIntegration(spec(), source, noJournal, deps);
 
     let calls = 0;
     const status = await withGlobalFetch(
@@ -401,7 +450,7 @@ describe("connectRemoteHttpIntegration — credential injection", () => {
       oauth: { headerName: "Authorization", headerPrefix: "Bearer ", value: "TOKEN" },
     });
     const { deps, source, getFetch, getRefreshCalls } = makeDeps(initial, async () => false);
-    await connectRemoteHttpIntegration(spec(), source, deps);
+    await connectRemoteHttpIntegration(spec(), source, noJournal, deps);
 
     let calls = 0;
     const status = await withGlobalFetch(
@@ -424,7 +473,7 @@ describe("connectRemoteHttpIntegration — credential injection", () => {
       ["https://other.example.com/**"],
     );
     const { deps, source, getFetch } = makeDeps(initial, async () => true);
-    await connectRemoteHttpIntegration(spec(), source, deps);
+    await connectRemoteHttpIntegration(spec(), source, noJournal, deps);
 
     let fetchCalls = 0;
     await withGlobalFetch(
@@ -448,7 +497,7 @@ describe("connectRemoteHttpIntegration — credential injection", () => {
       ["https://other.example.com/**"],
     );
     const { deps, source, getFetch } = makeDeps(initial, async () => true);
-    await connectRemoteHttpIntegration(spec(), source, deps);
+    await connectRemoteHttpIntegration(spec(), source, noJournal, deps);
 
     let message = "";
     await withGlobalFetch(
@@ -473,7 +522,7 @@ describe("connectRemoteHttpIntegration — credential injection", () => {
       oauth: { headerName: "Authorization", headerPrefix: "Bearer ", value: secret },
     });
     const { deps, source, getFetch } = makeDeps(initial, async () => true);
-    await connectRemoteHttpIntegration(spec(), source, deps);
+    await connectRemoteHttpIntegration(spec(), source, noJournal, deps);
 
     let fetchCalls = 0;
     let message = "";
@@ -503,7 +552,7 @@ describe("connectRemoteHttpIntegration — credential injection", () => {
       ["https://mcp.example.com/mcp/**"],
     );
     const { deps, source, getFetch } = makeDeps(initial, async () => true);
-    await connectRemoteHttpIntegration(spec(), source, deps);
+    await connectRemoteHttpIntegration(spec(), source, noJournal, deps);
 
     const fetched: string[] = [];
     await withGlobalFetch(
@@ -535,7 +584,7 @@ describe("connectRemoteHttpIntegration — credential injection", () => {
       Object.assign(initial, reconnected);
       return true;
     });
-    await connectRemoteHttpIntegration(spec(), source, deps);
+    await connectRemoteHttpIntegration(spec(), source, noJournal, deps);
 
     const seen: Array<string | null> = [];
     await withGlobalFetch(
@@ -565,7 +614,7 @@ describe("connectRemoteHttpIntegration — credential injection", () => {
       async () => true,
       async () => ["10.0.0.5"],
     );
-    await connectRemoteHttpIntegration(spec(UNTRUSTED_SERVER_URL), source, deps);
+    await connectRemoteHttpIntegration(spec(UNTRUSTED_SERVER_URL), source, noJournal, deps);
 
     let fetchCalls = 0;
     await withGlobalFetch(
@@ -613,7 +662,7 @@ describe("connectRemoteHttpIntegration — credential injection", () => {
       expect(isOperatorTrustedEgressHost("mcp.example.com")).toBe(true);
 
       const { deps, source, getFetch } = makeDeps(bearerWire(), async () => true, resolvesPrivate);
-      await connectRemoteHttpIntegration(spec(), source, deps);
+      await connectRemoteHttpIntegration(spec(), source, noJournal, deps);
 
       let fetchCalls = 0;
       const status = await withGlobalFetch(
@@ -632,7 +681,7 @@ describe("connectRemoteHttpIntegration — credential injection", () => {
       expect(isOperatorTrustedEgressHost("internal-mcp.invalid")).toBe(false);
 
       const { deps, source, getFetch } = makeDeps(bearerWire(), async () => true, resolvesPrivate);
-      await connectRemoteHttpIntegration(spec(UNTRUSTED_SERVER_URL), source, deps);
+      await connectRemoteHttpIntegration(spec(UNTRUSTED_SERVER_URL), source, noJournal, deps);
 
       await withGlobalFetch(
         (async () => new Response("{}", { status: 200 })) as unknown as typeof fetch,
@@ -648,7 +697,7 @@ describe("connectRemoteHttpIntegration — credential injection", () => {
   it("throws when no auth has a resolvable delivery plan", async () => {
     const initial = wire([{ authKey: "oauth", authType: "oauth2" }], {}); // no plans
     const { deps, source } = makeDeps(initial, async () => true);
-    await expect(connectRemoteHttpIntegration(spec(), source, deps)).rejects.toThrow(
+    await expect(connectRemoteHttpIntegration(spec(), source, noJournal, deps)).rejects.toThrow(
       /no auth with a resolvable delivery\.http plan/,
     );
   });
@@ -657,7 +706,7 @@ describe("connectRemoteHttpIntegration — credential injection", () => {
   it("connects without a credentials source: nothing injected, a 401 relayed", async () => {
     const { deps, getFetch } = makeDeps(wire([], {}), async () => true);
     const unauthenticated = { ...spec(), connection: undefined };
-    const { authKey } = await connectRemoteHttpIntegration(unauthenticated, null, deps);
+    const { authKey } = await connectRemoteHttpIntegration(unauthenticated, null, noJournal, deps);
     expect(authKey).toBeNull();
     const seen: Array<string | null> = [];
     await withGlobalFetch(
@@ -679,7 +728,7 @@ describe("connectRemoteHttpIntegration — credential injection", () => {
       async () => ["10.0.0.5"],
     );
     const unauthenticated = { ...spec(UNTRUSTED_SERVER_URL), connection: undefined };
-    await connectRemoteHttpIntegration(unauthenticated, null, deps);
+    await connectRemoteHttpIntegration(unauthenticated, null, noJournal, deps);
     await expect(getFetch()(UNTRUSTED_SERVER_URL, { method: "POST" })).rejects.toThrow(
       /SSRF guard blocked outbound request/,
     );
@@ -698,7 +747,7 @@ describe("connectRemoteHttpIntegration — credential injection", () => {
       oauth: { headerName: "Authorization", headerPrefix: "Bearer ", value: "T" },
     });
     const { deps, source } = makeDeps(initial, async () => true);
-    await expect(connectRemoteHttpIntegration(noUrl, source, deps)).rejects.toThrow(
+    await expect(connectRemoteHttpIntegration(noUrl, source, noJournal, deps)).rejects.toThrow(
       /no server\.url/,
     );
   });
@@ -728,7 +777,7 @@ describe("connectRemoteHttpIntegration — credential injection", () => {
       oauth: { headerName: "Authorization", headerPrefix: "Bearer ", value: "T" },
     });
     const { deps, source } = makeDeps(initial, async () => true);
-    await expect(connectRemoteHttpIntegration(bad, source, deps)).rejects.toThrow(
+    await expect(connectRemoteHttpIntegration(bad, source, noJournal, deps)).rejects.toThrow(
       /unsupported source\.remote\.transport.*allowed: "streamable-http" \| "sse"/,
     );
   });
@@ -739,6 +788,62 @@ describe("connectRemoteHttpIntegration — credential injection", () => {
  * protocol era (#2082): the sidecar speaks to a 2026-07-28 server statelessly, falls back to
  * `initialize` for a legacy one, and the closure (credential, egress guard) sees every request.
  */
+describe("connectRemoteHttpIntegration — call journal", () => {
+  const apiKey = () =>
+    wire([{ authKey: "apikey", authType: "api_key" }], {
+      apikey: { headerName: "X-Api-Key", headerPrefix: "", value: "K" },
+    });
+
+  it("journals a refreshed and replayed operation once, from its final attempt", async () => {
+    const { deps, source, getFetch, journal, journaled } = makeDeps(apiKey(), async () => true);
+    await connectRemoteHttpIntegration(spec(), source, journal, deps);
+    const statuses = [401, 200];
+    await withGlobalFetch(
+      (async () => new Response("{}", { status: statuses.shift()! })) as unknown as typeof fetch,
+      async () => {
+        expect((await getFetch()(SERVER_URL, { method: "POST", body: TOOLS_CALL })).status).toBe(
+          200,
+        );
+      },
+    );
+    expect(journaled.map((c) => c.outcome)).toEqual(["200"]);
+  });
+
+  it("journals no exchange that is not an operation once connected", async () => {
+    const { deps, source, getFetch, journal, journaled } = makeDeps(apiKey(), async () => false);
+    await connectRemoteHttpIntegration(spec(), source, journal, deps);
+    await withGlobalFetch(
+      (async () => new Response("{}", { status: 200 })) as unknown as typeof fetch,
+      async () => {
+        await getFetch()(SERVER_URL, { method: "POST", body: '{"jsonrpc":"2.0","method":"ping"}' });
+        await getFetch()(SERVER_URL, { method: "DELETE" });
+      },
+    );
+    expect(journaled).toEqual([]);
+  });
+
+  it("journals a dispatched failure under its code, and nothing for a target refused before dispatch", async () => {
+    const { deps, source, getFetch, journal, journaled } = makeDeps(apiKey(), async () => false);
+    await connectRemoteHttpIntegration(spec(), source, journal, deps);
+    await withGlobalFetch(
+      (async () => {
+        throw new TypeError("fetch failed");
+      }) as unknown as typeof fetch,
+      async () => {
+        await expect(
+          getFetch()(SERVER_URL, { method: "POST", body: TOOLS_CALL }),
+        ).rejects.toThrow();
+        await expect(
+          getFetch()("https://outside.example.org/mcp", { method: "POST", body: TOOLS_CALL }),
+        ).rejects.toThrow();
+      },
+    );
+    expect(journaled.map((c) => [c.host, c.outcome, c.credential])).toEqual([
+      ["mcp.example.com", "upstream_unreachable", null],
+    ]);
+  });
+});
+
 describe("connectRemoteHttpIntegration — protocol eras", () => {
   const echo: AppstrateToolDefinition = {
     descriptor: { name: "echo", inputSchema: { type: "object" } },
@@ -767,9 +872,9 @@ describe("connectRemoteHttpIntegration — protocol eras", () => {
       const source = {
         snapshot: () => initial,
         refreshOnUnauthorized: async () => false,
-        reportUpstreamSuccess: () => {},
       } as unknown as IntegrationCredentialsSource;
       const seen: { method: string | undefined; auth: string | null }[] = [];
+      const { journal, calls: journaled } = recordingJournal();
       const serve = handlerFetch(handler);
       await withGlobalFetch(
         (async (input: Parameters<typeof fetch>[0], init?: RequestInit) => {
@@ -782,7 +887,7 @@ describe("connectRemoteHttpIntegration — protocol eras", () => {
           return serve(request);
         }) as typeof fetch,
         async () => {
-          const { client } = await connectRemoteHttpIntegration(spec(url), source, {
+          const { client } = await connectRemoteHttpIntegration(spec(url), source, journal, {
             resolveHost: async () => [PUBLIC_IP],
           });
           try {
@@ -798,6 +903,11 @@ describe("connectRemoteHttpIntegration — protocol eras", () => {
       );
       expect(seen.every((s) => s.auth === "Bearer T")).toBe(true);
       expect(seen.some((s) => s.method === "initialize")).toBe(era === "legacy");
+      // One row per operation (the listing, the call); the handshake that connected writes none.
+      expect(journaled.map((c) => [c.method, c.host, c.outcome, c.credential])).toEqual([
+        ["POST", `mcp-${label}.example.com`, "200", { revision: undefined }],
+        ["POST", `mcp-${label}.example.com`, "200", { revision: undefined }],
+      ]);
     },
   );
 });
@@ -825,14 +935,13 @@ describe("connectRemoteHttpIntegration — a modern call that outlasts its bound
     const source = {
       snapshot: () => initial,
       refreshOnUnauthorized: async () => false,
-      reportUpstreamSuccess: () => {},
     } as unknown as IntegrationCredentialsSource;
     const serve = handlerFetch(modernMcpHandler({ tools: [slow] }));
     await withGlobalFetch(
       ((input: Parameters<typeof fetch>[0], init?: RequestInit) =>
         serve(new Request(String(input), init))) as typeof fetch,
       async () => {
-        const { client } = await connectRemoteHttpIntegration(spec(url), source, {
+        const { client } = await connectRemoteHttpIntegration(spec(url), source, noJournal, {
           resolveHost: async () => [PUBLIC_IP],
         });
         try {
@@ -911,7 +1020,7 @@ it("reads two resources over the same legacy SSE integration stream", async () =
       return new Response(null, { status: 202 });
     }),
     async () => {
-      const { client } = await connectRemoteHttpIntegration(sseSpec, null, {
+      const { client } = await connectRemoteHttpIntegration(sseSpec, null, noJournal, {
         resolveHost: async () => [PUBLIC_IP],
       });
       try {

@@ -25,7 +25,8 @@ import {
   streamableRemote,
   withMcpSession,
 } from "./credential-proxy/remote-tools.ts";
-import { mcpServerFailure, type ProxyCaller } from "./credential-proxy/mcp-over-proxy.ts";
+import { mcpServerFailure } from "./credential-proxy/mcp-over-proxy.ts";
+import type { ProxyCaller } from "./credential-proxy/call-journal.ts";
 import type { ProxyReach } from "./integration-connections.ts";
 import {
   readIntegrationManifestForRun,

@@ -15,6 +15,8 @@
  */
 
 import { describe, expect, it } from "bun:test";
+import { noCallReporter, recordingCallReporter } from "./helpers/call-journal.ts";
+import type { CallReporter } from "../call-reporter.ts";
 import type { IntegrationSpawnSpec } from "@appstrate/core/sidecar-types";
 import type { ApiCallToolDeps } from "../mcp.ts";
 import { BlobStore } from "../blob-store.ts";
@@ -116,7 +118,11 @@ async function boot(...specs: IntegrationSpawnSpec[]) {
   return await bootWith(apiCallDeps, specs);
 }
 
-async function bootWith(deps: ApiCallToolDeps, specs: IntegrationSpawnSpec[]) {
+async function bootWith(
+  deps: ApiCallToolDeps,
+  specs: IntegrationSpawnSpec[],
+  callReporter: CallReporter = noCallReporter,
+) {
   const previousAdapter = process.env.INTEGRATION_RUNTIME_ADAPTER;
   process.env.INTEGRATION_RUNTIME_ADAPTER = HERMETIC_PROCESS_ADAPTER_ID;
   try {
@@ -125,6 +131,7 @@ async function bootWith(deps: ApiCallToolDeps, specs: IntegrationSpawnSpec[]) {
       {
         platformApiUrl: "http://platform.local",
         runToken: "run-token",
+        callReporter,
         fetchFn: platformFetch(specs.flatMap((s) => (s.apiCalls ?? []).map((c) => c.authKey))),
       },
       deps,
@@ -421,6 +428,61 @@ describe("bootIntegrations — synthetic api_call surface", () => {
       expect(authorizations).toEqual([
         "Bearer primary-conn-b-token",
         "Bearer primary-conn-a-token",
+      ]);
+    } finally {
+      await result.shutdown();
+    }
+  });
+
+  it("journals each call on the connection it went through", async () => {
+    const deps: ApiCallToolDeps = {
+      ...apiCallDeps,
+      proxyDeps: {
+        ...apiCallDeps.proxyDeps,
+        cookieJar: new Map(),
+        reportedAuthFailures: new Set(),
+        fetchFn: (async () => new Response("ok", { status: 200 })) as unknown as typeof fetch,
+        resolveHost: async () => ["203.0.113.7"],
+      },
+    };
+    const apiCalls = [
+      {
+        authKey: "primary",
+        toolName: "api_call",
+        authorizedUris: ["https://www.googleapis.com/**"],
+      },
+    ];
+    const { reporter, records } = recordingCallReporter();
+    const result = await bootWith(
+      deps,
+      [
+        serverlessSpec(apiCalls, undefined, "drive", CONN_A),
+        serverlessSpec(apiCalls, undefined, "drive", CONN_B),
+      ],
+      reporter,
+    );
+    try {
+      for (const connection of ["perso", "work"]) {
+        await result.tools[0]!.handler(
+          { target: "https://www.googleapis.com/drive/v3/files", method: "GET", connection },
+          {} as never,
+        );
+      }
+      expect(records.map(({ duration_ms: _, ...record }) => record)).toEqual([
+        {
+          integration_id: INTEGRATION_ID,
+          connection_id: "conn-b",
+          method: "GET",
+          host: "www.googleapis.com",
+          outcome: "200",
+        },
+        {
+          integration_id: INTEGRATION_ID,
+          connection_id: "conn-a",
+          method: "GET",
+          host: "www.googleapis.com",
+          outcome: "200",
+        },
       ]);
     } finally {
       await result.shutdown();

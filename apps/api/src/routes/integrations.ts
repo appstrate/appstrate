@@ -132,6 +132,7 @@ import {
   loadStreamableRemote,
 } from "../services/credential-proxy/remote-tools.ts";
 import { remoteToolsCaller } from "../lib/remote-tools-caller.ts";
+import { proxyCaller } from "../services/credential-proxy/call-journal.ts";
 import {
   reachOutsideRun,
   reachOutsideRunIfPermitted,
@@ -1136,11 +1137,7 @@ export function createIntegrationsRouter() {
         assertPermission(c, "credential-proxy", "call-own");
         return reachOutsideRun(callerPermissions(c), c.get("space")!);
       },
-      caller: {
-        apiKeyId: c.get("apiKeyId") || null,
-        authMethod: c.get("authMethod"),
-        requestId: c.get("requestId"),
-      },
+      caller: proxyCaller(c, null),
       signal: c.req.raw.signal,
     });
     return c.json({

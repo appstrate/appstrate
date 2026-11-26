@@ -21,6 +21,7 @@ import { handlerFetch, modernMcpHandler } from "@appstrate/mcp-transport/testing
 import { bootIntegrations } from "../integrations-boot.ts";
 import { HERMETIC_PROCESS_ADAPTER_ID } from "./helpers/hermetic-process-adapter.ts";
 import { installPassthroughRunnerExec } from "./helpers/runner-exec.ts";
+import { noCallReporter } from "./helpers/call-journal.ts";
 
 const SERVER_URL = "https://mcp.example.com/mcp";
 
@@ -70,6 +71,7 @@ async function bootWith(
     const result = await bootIntegrations([spec], {
       platformApiUrl: "http://platform.local",
       runToken: "run-token",
+      callReporter: noCallReporter,
       fetchFn,
       retryDelayMs: noDelay,
     });

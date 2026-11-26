@@ -113,6 +113,7 @@ describe("MITM listener — subprocess end-to-end", () => {
       }) as unknown as typeof fetch;
 
       const listener = createIntegrationMitmListener({
+        journal: null,
         caBundle: bundle,
         minter,
         credentials: creds,

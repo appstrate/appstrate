@@ -225,6 +225,7 @@ describe("CoreResources ↔ runtime catalog drift", () => {
       "llm-proxy": true,
       integrations: true,
       "org-integrations": true,
+      studio: true,
     };
     const interfaceNames = Object.keys(allCoreResources);
     for (const name of interfaceNames) {

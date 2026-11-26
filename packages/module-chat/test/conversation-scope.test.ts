@@ -25,6 +25,17 @@ describe("callSpaceOf", () => {
     expect(callSpaceOf({ providerMetadata, result: { actedSpaceIds: [] } })).toBeUndefined();
   });
 
+  it("reads a failure's resolved target off its outcome, the failure keeping no result", () => {
+    const providerMetadata = { appstrate: { spaceId: "spc_caller" } };
+    expect(
+      callSpaceOf({
+        providerMetadata,
+        result: { error: "403" },
+        resultProviderMetadata: { appstrate: { actedSpaceIds: ["spc_caller", "spc_target"] } },
+      }),
+    ).toBe("spc_target");
+  });
+
   it("is undefined without a usable stamp", () => {
     expect(callSpaceOf({})).toBeUndefined();
     expect(callSpaceOf({ providerMetadata: { appstrate: {} } })).toBeUndefined();

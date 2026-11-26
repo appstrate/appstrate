@@ -24,7 +24,9 @@
  * defensively so the client's tool UIs render consistently regardless.
  */
 
-import type { UIMessageChunk } from "ai";
+import type { ProviderMetadata, UIMessageChunk } from "ai";
+import { isTurnBudgetNote } from "@appstrate/core/chat-turn-metadata";
+import type { ToolPresentation } from "@appstrate/core/mcp-presentation";
 import type {
   AgentSessionEvent,
   PiAssistantMessageEvent,
@@ -124,10 +126,16 @@ interface PiChatUiStreamMapperOptions {
 export class PiChatUiStreamMapper {
   private readonly onFirstModelEvent: (() => void) | undefined;
   private readonly turnSpaces: ReadonlySet<string>;
+  private lookupTools: ReadonlySet<string> = new Set();
 
   constructor(options: PiChatUiStreamMapperOptions = {}) {
     this.turnSpaces = options.turnSpaces ?? new Set();
     this.onFirstModelEvent = options.onFirstModelEvent;
+  }
+
+  /** Stamped `lookup` from a call's first chunk, so the UI folds it before its result arrives. */
+  describeLookupTools(tools: ReadonlySet<string>): void {
+    this.lookupTools = tools;
   }
 
   /**
@@ -171,6 +179,7 @@ export class PiChatUiStreamMapper {
       toolCallId?: string;
       result?: unknown;
       isError?: boolean;
+      durationMs?: unknown;
     };
     switch (e.type) {
       case "message_start":
@@ -188,6 +197,7 @@ export class PiChatUiStreamMapper {
           toolCallId: String(e.toolCallId ?? ""),
           result: e.result,
           isError: e.isError === true,
+          ...(typeof e.durationMs === "number" && { durationMs: e.durationMs }),
         });
       case "message_end":
         this.captureMessageEnd(e.message);
@@ -280,7 +290,15 @@ export class PiChatUiStreamMapper {
         const toolName = stripMcpToolPrefix(call?.name ?? "");
         this.lastTool = toolName;
         this.open.set(ev.contentIndex, { kind: "tool", id: toolCallId, toolCallId, toolName });
-        return [{ type: "tool-input-start", toolCallId, toolName }];
+        const lookup = this.lookupTools.has(toolName);
+        return [
+          {
+            type: "tool-input-start",
+            toolCallId,
+            toolName,
+            ...(lookup && { providerMetadata: { appstrate: { lookup } } }),
+          },
+        ];
       }
       case "toolcall_delta": {
         const block = this.open.get(ev.contentIndex);
@@ -298,13 +316,15 @@ export class PiChatUiStreamMapper {
         const input = ev.toolCall.arguments ?? {};
         const named = dispatchSpace(input);
         const spaceId = named !== undefined && this.turnSpaces.has(named) ? named : undefined;
+        const lookup = this.lookupTools.has(toolName);
+        const appstrate = { ...(spaceId && { spaceId }), ...(lookup && { lookup }) };
         return [
           {
             type: "tool-input-available",
             toolCallId,
             toolName,
             input,
-            ...(spaceId && { providerMetadata: { appstrate: { spaceId } } }),
+            ...(Object.keys(appstrate).length > 0 && { providerMetadata: { appstrate } }),
           },
         ];
       }
@@ -313,27 +333,37 @@ export class PiChatUiStreamMapper {
     }
   }
 
+  /**
+   * What the UI reads of an outcome rides `providerMetadata.appstrate`: the AI SDK stores it
+   * (`resultProviderMetadata`) on a failure too, whose chunk carries no output.
+   */
   private mapToolExecutionEnd(ev: {
     toolCallId: string;
     result: unknown;
     isError: boolean;
+    durationMs?: number;
   }): UIMessageChunk[] {
+    const { output, presentation } = persistedToolOutput(ev.result);
+    const acted = ev.isError ? actedSpacesOf(output) : undefined;
+    const appstrate: ToolOutcomeMetadata = {
+      ...(presentation && { presentation }),
+      ...(acted && { actedSpaceIds: acted }),
+      ...(ev.durationMs !== undefined && { durationMs: ev.durationMs }),
+    };
+    const meta = Object.keys(appstrate).length > 0 && {
+      providerMetadata: { appstrate } as ProviderMetadata,
+    };
     if (ev.isError) {
       return [
         {
           type: "tool-output-error",
           toolCallId: ev.toolCallId,
-          errorText: stringifyToolResult(persistedToolOutput(ev.result)),
+          errorText: stringifyToolResult(output),
+          ...meta,
         },
       ];
     }
-    return [
-      {
-        type: "tool-output-available",
-        toolCallId: ev.toolCallId,
-        output: persistedToolOutput(ev.result),
-      },
-    ];
+    return [{ type: "tool-output-available", toolCallId: ev.toolCallId, output, ...meta }];
   }
 
   private captureMessageEnd(message: unknown): void {
@@ -465,12 +495,35 @@ function toolCallAt(partial: unknown, index: number): PiToolCallBlock | undefine
  * whatever else the result carries, minus `details`. The in-memory Pi result
  * itself is untouched (`mcp-tools.ts` builds it with `details`).
  */
-function persistedToolOutput(result: unknown): unknown {
-  if (result == null) return null;
-  if (typeof result !== "object" || Array.isArray(result)) return result;
-  if (!("details" in result)) return result;
-  const { details: _details, persistedContent, ...rest } = result as Record<string, unknown>;
-  return Array.isArray(persistedContent) ? { ...rest, content: persistedContent } : rest;
+function persistedToolOutput(result: unknown): {
+  output: unknown;
+  presentation?: ToolPresentation;
+} {
+  if (result == null) return { output: null };
+  if (typeof result !== "object" || Array.isArray(result)) return { output: result };
+  const {
+    details: _details,
+    persistedContent,
+    presentation,
+    ...rest
+  } = result as Record<string, unknown> & { presentation?: ToolPresentation };
+  return {
+    output: Array.isArray(persistedContent) ? { ...rest, content: persistedContent } : rest,
+    ...(presentation && { presentation }),
+  };
+}
+
+/** `actedSpaceIds`: a failure's, which keeps no output to carry them. */
+type ToolOutcomeMetadata = {
+  presentation?: ToolPresentation;
+  durationMs?: number;
+  actedSpaceIds?: readonly unknown[];
+};
+
+/** The spaces a tool's result says the call acted in. */
+function actedSpacesOf(output: unknown): readonly unknown[] | undefined {
+  const acted = (output as { actedSpaceIds?: unknown } | null | undefined)?.actedSpaceIds;
+  return Array.isArray(acted) ? acted : undefined;
 }
 
 /** Flatten a Pi tool result (`AgentToolResult` content blocks) to text for error output. */
@@ -479,11 +532,12 @@ function stringifyToolResult(result: unknown): string {
   if (result && typeof result === "object") {
     const content = (result as { content?: unknown }).content;
     if (Array.isArray(content)) {
-      return content
-        .map((c) =>
-          c && typeof c === "object" && "text" in c ? String((c as { text: unknown }).text) : "",
-        )
-        .join("");
+      const texts = content.map((c) =>
+        c && typeof c === "object" && "text" in c ? String((c as { text: unknown }).text) : "",
+      );
+      // The model's turn-budget note, always the last block: a block earlier is a server's text.
+      if (isTurnBudgetNote(texts.at(-1) ?? "")) texts.pop();
+      return texts.join("");
     }
     return JSON.stringify(result);
   }

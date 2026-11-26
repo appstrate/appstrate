@@ -13,6 +13,7 @@
 import { describe, it, expect, afterEach } from "bun:test";
 import type { AppstrateRequestExtra } from "@appstrate/mcp-transport";
 import { withImpliedPermissions } from "@appstrate/core/permissions";
+import { readToolPresentation } from "@appstrate/core/mcp-presentation";
 import {
   FORWARDED_AUTH_HEADERS,
   type Dispatch,
@@ -88,6 +89,14 @@ const CONNECTION_ID = "8a6f2f0e-1c1b-4c58-9a36-0d7b7a1f3c11";
 /** The tool `@acme/items` exposes. */
 const TOOL = "acme_items__api_call";
 
+/** The presentation `call_integration_tool` stamps on a call to `@acme/docs`' `search`. */
+const SEARCH_STAMP = {
+  "dev.appstrate/presentation": {
+    title: "search",
+    subject: { kind: "integration", id: "@acme/docs", display_name: "@acme/docs" },
+  },
+};
+
 /** A connection of a listed tool, as `GET /api/credential-proxy/tools` gives it. */
 function connection(overrides: Record<string, unknown> = {}): Record<string, unknown> {
   return {
@@ -149,6 +158,10 @@ const listingOf =
           ),
         ).values(),
       ],
+      // Each listed integration once, under its own name.
+      integrations: [...new Set(tools.map((tool) => tool.integration_package_id as string))].map(
+        (id) => ({ integration_package_id: id, display_name: id }),
+      ),
       not_ready: rest.not_ready ?? [],
       unlisted: rest.unlisted ?? [],
       truncated_catalogs: rest.truncated_catalogs ?? [],
@@ -1200,6 +1213,35 @@ describe("call_integration_tool — result", () => {
   });
 });
 
+describe("call_integration_tool — an api_call's presentation", () => {
+  const presented = async (args: Record<string, unknown>) =>
+    readToolPresentation((await apiCall(args)).result._meta);
+  const subject = { kind: "integration" as const, id: INTEGRATION, display_name: INTEGRATION };
+
+  it("names the method of its one request", async () => {
+    expect(await presented({ requests: [get({ method: "DELETE" })] })).toEqual({
+      method: "DELETE",
+      subject,
+    });
+  });
+
+  it("names no method for a batch of several", async () => {
+    expect(await presented({ requests: [get(), get({ method: "POST" })] })).toEqual({ subject });
+  });
+
+  it("reads refused arguments the same way, guessing nothing", async () => {
+    // One request refused for a field it does not declare: its method is still the call's.
+    expect(await presented({ requests: [get({ method: "PUT", bogus: 1 })] })).toEqual({
+      method: "PUT",
+      subject,
+    });
+    // A refused batch, and a method outside `requests`, name none.
+    for (const args of [{ requests: [get(), { method: 7 }] }, { method: "GET", target: TARGET }]) {
+      expect(await presented(args)).toEqual({ subject });
+    }
+  });
+});
+
 describe("typed tools of a remote MCP integration", () => {
   const REMOTE = "@acme/docs";
   const inputSchema = {
@@ -1367,7 +1409,7 @@ describe("typed tools of a remote MCP integration", () => {
     // Relayed as the server answered, marked relayed whatever it claimed.
     expect(result).toEqual({
       ...upstream,
-      _meta: { "acme.example/page": 2, "dev.appstrate/relayed": true },
+      _meta: { "acme.example/page": 2, "dev.appstrate/relayed": true, ...SEARCH_STAMP },
     });
     const call = callTool(made.calls)!;
     expect(await call.json()).toEqual({
@@ -1463,7 +1505,10 @@ describe("typed tools of a remote MCP integration", () => {
       .get("call_integration_tool")!
       .handler({ tool: "acme_docs__search", arguments: { q: "x" } }, noExtra);
     // As is, marked relayed: a third party wrote it whole.
-    expect(result).toEqual({ ...upstream, _meta: { "dev.appstrate/relayed": true } });
+    expect(result).toEqual({
+      ...upstream,
+      _meta: { "dev.appstrate/relayed": true, ...SEARCH_STAMP },
+    });
   });
 
   it("explains missing_scopes in a typed tool's usage only", async () => {
@@ -1705,8 +1750,9 @@ describe("call_integration_tool — a result past the budget", () => {
     expect(result._meta).toEqual({
       "dev.appstrate/truncated": true,
       "dev.appstrate/relayed": true,
+      ...SEARCH_STAMP,
     });
-    expect(jsonBytes(result)).toBeLessThanOrEqual(256 * 1024);
+    expect(jsonBytes(result)).toBeLessThanOrEqual(BUDGET);
   });
 
   /** What `call_integration_tool` relays for a tool answering `upstream`. */
@@ -1715,12 +1761,14 @@ describe("call_integration_tool — a result past the budget", () => {
       .byName.get("call_integration_tool")!
       .handler({ tool: "acme_docs__search", arguments: {} }, noExtra);
   const jsonBytes = (value: unknown) => new TextEncoder().encode(JSON.stringify(value)).byteLength;
+  // The budget bounds the server's result: the presentation stamp rides beside it.
+  const BUDGET = 256 * 1024 + jsonBytes(SEARCH_STAMP);
 
   it("cuts a text block to its text alone, dropping the fields that made it too large", async () => {
     const result = await relayedResult({
       content: [{ type: "text", text: "x", _meta: { pad: "p".repeat(1536 * 1024) } }],
     });
-    expect(jsonBytes(result)).toBeLessThanOrEqual(256 * 1024);
+    expect(jsonBytes(result)).toBeLessThanOrEqual(BUDGET);
     const [cut] = result.content as Array<Record<string, unknown>>;
     expect(Object.keys(cut!).sort()).toEqual(["text", "type"]);
     expect(cut!.text).toStartWith("x\n[cut: 1 of 1 bytes kept");
@@ -1730,7 +1778,7 @@ describe("call_integration_tool — a result past the budget", () => {
     const result = await relayedResult({
       content: [{ type: "text", text: "\u0001".repeat(600 * 1024) }],
     });
-    expect(jsonBytes(result)).toBeLessThanOrEqual(256 * 1024);
+    expect(jsonBytes(result)).toBeLessThanOrEqual(BUDGET);
     const [cut] = (result.content as Array<{ text: string }>).map((block) => block.text);
     // Each control character weighs six bytes as JSON.
     expect(cut!.split("\n[cut: ")[0]!.length).toBeGreaterThan(40 * 1024);
@@ -1741,7 +1789,7 @@ describe("call_integration_tool — a result past the budget", () => {
       content: Array.from({ length: 2000 }, (_, i) => ({ type: "text", text: `${i}`.repeat(80) })),
       structuredContent: { rows: "r".repeat(300 * 1024) },
     });
-    expect(jsonBytes(result)).toBeLessThanOrEqual(256 * 1024);
+    expect(jsonBytes(result)).toBeLessThanOrEqual(BUDGET);
     expect(result.structuredContent).toBeUndefined();
     const texts = (result.content as Array<{ text: string }>).map((block) => block.text);
     expect(texts.at(-1)).toContain("and its structuredContent dropped");
@@ -1755,7 +1803,7 @@ describe("call_integration_tool — a result past the budget", () => {
       ],
       structuredContent: { count: 1 },
     });
-    expect(jsonBytes(result)).toBeLessThanOrEqual(256 * 1024);
+    expect(jsonBytes(result)).toBeLessThanOrEqual(BUDGET);
     expect(result.structuredContent).toEqual({ count: 1 });
   });
 

@@ -5,8 +5,8 @@
  *
  * The table says which spaces; the question it cannot hold in a cell is "as
  * what", and changing that meant opening each space's Members page in turn.
- * Both live here: the org role at the top, then one row per space with its own
- * role control (`useAssignSpaceRole` does the write).
+ * Both live here: the org role at the top, the role in their own personal space, then
+ * one row per space with its own role control (`useAssignSpaceRole` does the write).
  */
 import { useTranslation } from "react-i18next";
 import { AppWindow } from "lucide-react";
@@ -22,6 +22,7 @@ import { useSpaceRoleOptions } from "../../hooks/use-roles";
 import { useAssignSpaceRole } from "../../hooks/use-space-members";
 import { formatDateField } from "../../lib/format-date";
 import { memberLabel } from "../../lib/members";
+import { PersonalSpaceRoleField } from "./member-personal-space-role-field";
 import { useUserSpaceColumns } from "./user-space-columns";
 
 type OrgMember = components["schemas"]["OrgMember"];
@@ -100,13 +101,15 @@ export function UserDetailModal({
                 onValueChange={onChangeOrgRole}
                 disabled={isChangingOrgRole}
                 aria-labelledby={labelId}
-                className="w-56"
+                className="w-full sm:w-56"
               />
             ) : (
               <span className="text-sm">{t(roleI18nKey(member.role))}</span>
             )
           }
         </SettingRow>
+
+        <PersonalSpaceRoleField member={member} />
 
         {showSpaces && (
           <section>

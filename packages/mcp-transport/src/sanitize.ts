@@ -354,6 +354,12 @@ export function sanitiseToolDescriptor(tool: Tool): {
   if (typeof tool.title === "string") {
     out.title = sanitiseTextField(tool.title, MAX_PARAMETER_DESCRIPTION_BYTES);
   }
+  if (typeof tool.annotations?.title === "string") {
+    out.annotations = {
+      ...tool.annotations,
+      title: sanitiseTextField(tool.annotations.title, MAX_PARAMETER_DESCRIPTION_BYTES),
+    };
+  }
   return { tool: out, reduced };
 }
 

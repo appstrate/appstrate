@@ -14,7 +14,7 @@ import { getOrgMember } from "../services/organizations.ts";
 import { ceilingAllows, effectivePermissions, toScopeCeiling } from "../lib/permissions.ts";
 import {
   resolveSpaceRole,
-  type PersonalSpaceRole,
+  type PersonalSpaceDefaultColumns,
   type SpaceMemberRow,
 } from "../lib/space-role.ts";
 import { loadSpaceAccess, type SpaceContextRow } from "../lib/space-lookup.ts";
@@ -129,14 +129,14 @@ async function resolveSpaceGrants(
   space: SpaceContextRow,
   memberRow: SpaceMemberRow | null,
   callerId: string | null,
-  personalSpaceRole: PersonalSpaceRole,
+  personalDefault: PersonalSpaceDefaultColumns | null,
 ): Promise<ReadonlySet<string> | null> {
   const ref = resolveSpaceRole(
     personaFor(c, orgId)?.orgRole ?? realRole,
     space,
     memberRow,
     callerId,
-    personalSpaceRole,
+    personalDefault,
   );
   if (!ref) return null;
   return effectiveInSpace(
@@ -209,7 +209,7 @@ async function validateSSEAuth(c: Context<AppEnv>): Promise<SSEAuthResult | null
       // (RBAC spec §3.6). Passed as `null` rather than left to a context key
       // this pipeline-exempt route does not set.
       null,
-      access.personalSpaceRole,
+      access.personalDefault,
     );
     if (!grants) {
       throw forbidden("The key's creator is not a member of the key's space");
@@ -292,7 +292,7 @@ async function validateSSEAuth(c: Context<AppEnv>): Promise<SSEAuthResult | null
     // streamable through a persona that has none (RBAC spec §3.6). The context
     // keys it reads — `user`, `principalKind`, `viewAs` — are all set above.
     callerPersonalOwnerId(c, orgId),
-    access.personalSpaceRole,
+    access.personalDefault,
   );
   if (!grants) {
     // Same 403 / 404 split as `applySpacePermissions`, not a 401 for an authenticated session.

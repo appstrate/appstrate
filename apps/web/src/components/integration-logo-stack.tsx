@@ -22,7 +22,7 @@ export function IntegrationLogoStack({
   integrations,
   inactive,
 }: {
-  integrations: readonly AgentListIntegration[];
+  integrations: readonly Pick<AgentListIntegration, "id" | "name" | "icon">[];
   inactive?: readonly string[];
 }) {
   const { t } = useTranslation("common");
