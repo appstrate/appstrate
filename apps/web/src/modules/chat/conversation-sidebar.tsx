@@ -318,8 +318,11 @@ export function ConversationSidebar({
       className="relative flex min-h-0 min-w-0 flex-1"
       style={{ ["--chat-context-inset" as string]: inset }}
     >
-      {/* While the panel is resized, the thread's padding follows the pointer, not its transition. */}
-      <div className={cn("min-w-0 flex-1", dragging && "[&_*]:transition-none")}>{children}</div>
+      {/* While the panel is resized, the thread's padding follows the pointer, not its transition.
+          `isolate` keeps the thread's raised layers (a card's space name is `z-10`) under the panel. */}
+      <div className={cn("isolate min-w-0 flex-1", dragging && "[&_*]:transition-none")}>
+        {children}
+      </div>
       {desktop ? (
         <aside
           ref={panelRef}
