@@ -137,7 +137,7 @@ describe("spaces — personal-space constraints", () => {
   });
 });
 
-describe("organizations — personal-space default constraints (migration 0114)", () => {
+describe("organizations — personal-space default constraints (migration 0115)", () => {
   it("refuses a custom default of another organization and a stored key that is no preset", async () => {
     await truncateAll();
     const ctx = await createTestContext({ orgSlug: "default-owner" });

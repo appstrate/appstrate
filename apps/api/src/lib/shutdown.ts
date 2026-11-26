@@ -13,7 +13,7 @@ import {
 import { shutdownScheduleWorker } from "../services/scheduler.ts";
 import { shutdownInlineCompactionWorker } from "../services/inline-compaction.ts";
 import { shutdownPersonalSpaceSweeperWorker } from "../services/personal-space-sweeper.ts";
-import { shutdownOAuthModelRefreshWorker } from "../services/model-providers/refresh-worker.ts";
+import { shutdownCredentialRefreshSweep } from "../services/credential-refresh-sweep.ts";
 import { shutdownPairingCleanupWorker } from "../services/model-providers/pairing-cleanup-worker.ts";
 import { stopModelCatalogSync } from "../services/model-catalog-sync.ts";
 import { shutdownLlmUsageRetryWorker } from "../services/llm-usage-retry.ts";
@@ -121,8 +121,8 @@ export function createShutdownHandler(setShuttingDown: () => void): () => Promis
     logger.info("Shutting down personal-space sweeper...");
     await shutdownPersonalSpaceSweeperWorker();
 
-    logger.info("Shutting down OAuth model refresh worker...");
-    await shutdownOAuthModelRefreshWorker();
+    logger.info("Shutting down credential refresh sweep...");
+    await shutdownCredentialRefreshSweep();
 
     logger.info("Shutting down OAuth model pairing cleanup worker...");
     await shutdownPairingCleanupWorker();

@@ -377,7 +377,8 @@ to accept only their own half, so the wrong-mode call does not compile.
   free-tier policy and OIDC's per-client org policy are independent), so
   dispatching them first-match-wins would silently disable all but the first.
 - **Events** (`emitEvent`, broadcast-to-all): `onRunStatusChange`,
-  `onRunConnectionMissing`, `onOrgCreate`, `onOrgDelete`, `onOrgMemberRemove`.
+  `onRunConnectionMissing`, `onCredentialNeedsReconnection`, `onOrgCreate`, `onOrgDelete`,
+  `onOrgMemberRemove`.
   Handlers run for side effects only; errors in one handler are **isolated** and
   do not block others — that isolation is the difference from a broadcast hook.
 

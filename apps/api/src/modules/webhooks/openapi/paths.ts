@@ -8,6 +8,8 @@ const sharedCreateProps = {
   events: {
     type: "array",
     minItems: 1,
+    description:
+      "`credential.needs_reconnection` is announced once, best effort, when a stored credential dies. Payload and routing: docs/site/features/webhooks.mdx.",
     items: {
       type: "string",
       enum: [
@@ -17,6 +19,7 @@ const sharedCreateProps = {
         "run.timeout",
         "run.cancelled",
         "run.connection_missing",
+        "credential.needs_reconnection",
       ],
     },
   },
@@ -319,6 +322,7 @@ export const webhooksPaths = {
                       "run.timeout",
                       "run.cancelled",
                       "run.connection_missing",
+                      "credential.needs_reconnection",
                     ],
                   },
                 },

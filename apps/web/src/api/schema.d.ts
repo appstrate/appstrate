@@ -19686,6 +19686,39 @@ export interface operations {
                             read_at: string | null;
                             /** Format: date-time */
                             createdAt: string;
+                        } | {
+                            /**
+                             * Format: uuid
+                             * @description Notification id
+                             */
+                            id: string;
+                            /** @description The space it was written in: its run, and its own read (`GET /api/notifications/{id}`), are that space's. */
+                            spaceId: string;
+                            /** @constant */
+                            type: "credential_needs_reconnection";
+                            /** @description Originating run id, when the notification references one */
+                            runId: string | null;
+                            /** @description Render-without-join data. */
+                            payload: {
+                                /** @description The connection's integration (`@scope/name`). */
+                                packageId: string;
+                                /** @description The integration's display name as stamped when the notice was written. */
+                                integration_name: string;
+                                /** @description The connection's label. */
+                                label: string;
+                                /**
+                                 * @description Why the credential is dead.
+                                 * @enum {string}
+                                 */
+                                cause: "refresh_token_revoked" | "refresh_token_missing" | "refresh_failures_exhausted" | "unrefreshable" | "credentials_undecryptable";
+                            } | null;
+                            /**
+                             * Format: date-time
+                             * @description When the recipient marked it read; null if unread
+                             */
+                            read_at: string | null;
+                            /** Format: date-time */
+                            createdAt: string;
                         })[];
                         /** @description True when another page follows — page via the Link header cursor */
                         hasMore: boolean;
@@ -19887,6 +19920,39 @@ export interface operations {
                             title: string;
                             /** @description Body the agent wrote (`notify` tool). */
                             message: string;
+                        } | null;
+                        /**
+                         * Format: date-time
+                         * @description When the recipient marked it read; null if unread
+                         */
+                        read_at: string | null;
+                        /** Format: date-time */
+                        createdAt: string;
+                    } | {
+                        /**
+                         * Format: uuid
+                         * @description Notification id
+                         */
+                        id: string;
+                        /** @description The space it was written in: its run, and its own read (`GET /api/notifications/{id}`), are that space's. */
+                        spaceId: string;
+                        /** @constant */
+                        type: "credential_needs_reconnection";
+                        /** @description Originating run id, when the notification references one */
+                        runId: string | null;
+                        /** @description Render-without-join data. */
+                        payload: {
+                            /** @description The connection's integration (`@scope/name`). */
+                            packageId: string;
+                            /** @description The integration's display name as stamped when the notice was written. */
+                            integration_name: string;
+                            /** @description The connection's label. */
+                            label: string;
+                            /**
+                             * @description Why the credential is dead.
+                             * @enum {string}
+                             */
+                            cause: "refresh_token_revoked" | "refresh_token_missing" | "refresh_failures_exhausted" | "unrefreshable" | "credentials_undecryptable";
                         } | null;
                         /**
                          * Format: date-time
@@ -22347,6 +22413,39 @@ export interface operations {
                             read_at: string | null;
                             /** Format: date-time */
                             createdAt: string;
+                        } | {
+                            /**
+                             * Format: uuid
+                             * @description Notification id
+                             */
+                            id: string;
+                            /** @description The space it was written in: its run, and its own read (`GET /api/notifications/{id}`), are that space's. */
+                            spaceId: string;
+                            /** @constant */
+                            type: "credential_needs_reconnection";
+                            /** @description Originating run id, when the notification references one */
+                            runId: string | null;
+                            /** @description Render-without-join data. */
+                            payload: {
+                                /** @description The connection's integration (`@scope/name`). */
+                                packageId: string;
+                                /** @description The integration's display name as stamped when the notice was written. */
+                                integration_name: string;
+                                /** @description The connection's label. */
+                                label: string;
+                                /**
+                                 * @description Why the credential is dead.
+                                 * @enum {string}
+                                 */
+                                cause: "refresh_token_revoked" | "refresh_token_missing" | "refresh_failures_exhausted" | "unrefreshable" | "credentials_undecryptable";
+                            } | null;
+                            /**
+                             * Format: date-time
+                             * @description When the recipient marked it read; null if unread
+                             */
+                            read_at: string | null;
+                            /** Format: date-time */
+                            createdAt: string;
                         })[];
                         /** @description True when another page follows — page via the Link header cursor */
                         hasMore: boolean;
@@ -22508,6 +22607,39 @@ export interface operations {
                             title: string;
                             /** @description Body the agent wrote (`notify` tool). */
                             message: string;
+                        } | null;
+                        /**
+                         * Format: date-time
+                         * @description When the recipient marked it read; null if unread
+                         */
+                        read_at: string | null;
+                        /** Format: date-time */
+                        createdAt: string;
+                    } | {
+                        /**
+                         * Format: uuid
+                         * @description Notification id
+                         */
+                        id: string;
+                        /** @description The space it was written in: its run, and its own read (`GET /api/notifications/{id}`), are that space's. */
+                        spaceId: string;
+                        /** @constant */
+                        type: "credential_needs_reconnection";
+                        /** @description Originating run id, when the notification references one */
+                        runId: string | null;
+                        /** @description Render-without-join data. */
+                        payload: {
+                            /** @description The connection's integration (`@scope/name`). */
+                            packageId: string;
+                            /** @description The integration's display name as stamped when the notice was written. */
+                            integration_name: string;
+                            /** @description The connection's label. */
+                            label: string;
+                            /**
+                             * @description Why the credential is dead.
+                             * @enum {string}
+                             */
+                            cause: "refresh_token_revoked" | "refresh_token_missing" | "refresh_failures_exhausted" | "unrefreshable" | "credentials_undecryptable";
                         } | null;
                         /**
                          * Format: date-time
@@ -29752,7 +29884,8 @@ export interface operations {
                     level: "org";
                     /** Format: uri */
                     url: string;
-                    events: ("run.started" | "run.success" | "run.failed" | "run.timeout" | "run.cancelled" | "run.connection_missing")[];
+                    /** @description `credential.needs_reconnection` is announced once, best effort, when a stored credential dies. Payload and routing: docs/site/features/webhooks.mdx. */
+                    events: ("run.started" | "run.success" | "run.failed" | "run.timeout" | "run.cancelled" | "run.connection_missing" | "credential.needs_reconnection")[];
                     packageId?: string | null;
                     /**
                      * @default full
@@ -29768,7 +29901,8 @@ export interface operations {
                     spaceId: string;
                     /** Format: uri */
                     url: string;
-                    events: ("run.started" | "run.success" | "run.failed" | "run.timeout" | "run.cancelled" | "run.connection_missing")[];
+                    /** @description `credential.needs_reconnection` is announced once, best effort, when a stored credential dies. Payload and routing: docs/site/features/webhooks.mdx. */
+                    events: ("run.started" | "run.success" | "run.failed" | "run.timeout" | "run.cancelled" | "run.connection_missing" | "credential.needs_reconnection")[];
                     packageId?: string | null;
                     /**
                      * @default full
@@ -29927,7 +30061,7 @@ export interface operations {
                 "application/json": {
                     /** Format: uri */
                     url?: string;
-                    events?: ("run.started" | "run.success" | "run.failed" | "run.timeout" | "run.cancelled" | "run.connection_missing")[];
+                    events?: ("run.started" | "run.success" | "run.failed" | "run.timeout" | "run.cancelled" | "run.connection_missing" | "credential.needs_reconnection")[];
                     packageId?: string | null;
                     /** @enum {string} */
                     payloadMode?: "full" | "summary";

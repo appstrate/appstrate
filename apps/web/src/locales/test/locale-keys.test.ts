@@ -26,6 +26,7 @@ import { describe, it, expect } from "bun:test";
 import { readFileSync, readdirSync, statSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join, relative } from "node:path";
+import { CREDENTIAL_DEATH_CAUSES } from "@appstrate/core/sidecar-types";
 import type { ScheduleWireDto } from "@appstrate/shared-types";
 
 /**
@@ -270,6 +271,7 @@ const DYNAMIC_KEY_PREFIXES = [
   "log.level.", // components/log-viewer.tsx — t(`log.level.${value}`)
   "log.type.", // components/log-viewer.tsx — t(`log.type.${value}`)
   "models.generation.levels.", // packages/ui — model-generation-labels.ts buildGenerationLabels()
+  "notifications.credentialCause.", // lib/notification-row.ts — one per credential_needs_reconnection cause
   "oauthClients.scopeLabels.", // modules/oidc/components/oauth-client-form-modal.tsx
   "oauthClients.signupRoleOption.", // modules/oidc/components/oauth-client-form-modal.tsx
   "orgRolesGuide.access.", // pages/org-settings/org-roles.tsx — space reach per org role
@@ -381,5 +383,16 @@ describe("schedule disabled reasons", () => {
     expect(reasons.filter((reason) => !allKeys.has(`schedule.disabledReason.${reason}`))).toEqual(
       [],
     );
+  });
+});
+
+describe("credential death causes", () => {
+  it("each have a sentence in en and fr", () => {
+    for (const bundle of [en, fr]) {
+      const common = bundle.get("common")!;
+      for (const cause of CREDENTIAL_DEATH_CAUSES) {
+        expect(common[`notifications.credentialCause.${cause}`]).toBeTruthy();
+      }
+    }
   });
 });

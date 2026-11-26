@@ -154,6 +154,7 @@ column integration_connections.needs_reconnection boolean not null default false
 column integration_connections.oauth_resource text
 column integration_connections.org_id uuid not null
 column integration_connections.origin_space_id text
+column integration_connections.refresh_checked_at timestamp with time zone
 column integration_connections.refresh_failure_count integer not null default 0
 column integration_connections.scopes_granted text[] not null default '{}'::text[]
 column integration_connections.share_all_spaces boolean not null default false
@@ -228,9 +229,11 @@ column model_provider_credentials.credentials_encrypted text not null
 column model_provider_credentials.expires_at timestamp with time zone
 column model_provider_credentials.id uuid not null default gen_random_uuid()
 column model_provider_credentials.label text not null
+column model_provider_credentials.needs_reconnection boolean not null default false
 column model_provider_credentials.org_id uuid not null
 column model_provider_credentials.owner_user_id text
 column model_provider_credentials.provider_id text not null
+column model_provider_credentials.refresh_checked_at timestamp with time zone
 column model_provider_credentials.refresh_failure_count integer not null default 0
 column model_provider_credentials.updated_at timestamp with time zone not null default now()
 column model_provider_pairings.consumed_at timestamp with time zone
@@ -835,7 +838,7 @@ constraint notifications notifications_pkey PRIMARY KEY (id)
 constraint notifications notifications_recipient_type_valid CHECK ((recipient_type = ANY (ARRAY['user'::text, 'end_user'::text])))
 constraint notifications notifications_run_id_runs_id_fk FOREIGN KEY (run_id) REFERENCES runs(id) ON DELETE CASCADE
 constraint notifications notifications_space_id_spaces_id_fk FOREIGN KEY (space_id) REFERENCES spaces(id) ON DELETE CASCADE
-constraint notifications notifications_type_valid CHECK ((type = ANY (ARRAY['run_failed'::text, 'package_shared'::text, 'agent_message'::text])))
+constraint notifications notifications_type_valid CHECK ((type = ANY (ARRAY['run_failed'::text, 'package_shared'::text, 'agent_message'::text, 'credential_needs_reconnection'::text])))
 constraint oauth_access_tokens oauth_access_tokens_client_id_oauth_clients_client_id_fk FOREIGN KEY (client_id) REFERENCES oauth_clients(client_id) ON DELETE CASCADE
 constraint oauth_access_tokens oauth_access_tokens_pkey PRIMARY KEY (id)
 constraint oauth_access_tokens oauth_access_tokens_refresh_id_oauth_refresh_tokens_id_fk FOREIGN KEY (refresh_id) REFERENCES oauth_refresh_tokens(id) ON DELETE CASCADE
@@ -1061,6 +1064,7 @@ index CREATE INDEX idx_integration_conn_end_user ON public.integration_connectio
 index CREATE INDEX idx_integration_conn_lookup ON public.integration_connections USING btree (integration_package_id, space_id, auth_key)
 index CREATE INDEX idx_integration_conn_org ON public.integration_connections USING btree (org_id, integration_package_id, auth_key)
 index CREATE INDEX idx_integration_conn_origin ON public.integration_connections USING btree (origin_space_id) WHERE (origin_space_id IS NOT NULL)
+index CREATE INDEX idx_integration_conn_refresh_due ON public.integration_connections USING btree (expires_at) WHERE ((client_ref IS NOT NULL) AND (NOT needs_reconnection) AND (expires_at IS NOT NULL))
 index CREATE INDEX idx_integration_conn_space ON public.integration_connections USING btree (space_id) WHERE (space_id IS NOT NULL)
 index CREATE INDEX idx_integration_conn_user ON public.integration_connections USING btree (user_id) WHERE (user_id IS NOT NULL)
 index CREATE INDEX idx_integration_oauth_clients_lookup ON public.integration_oauth_clients USING btree (space_id, integration_package_id, auth_key)

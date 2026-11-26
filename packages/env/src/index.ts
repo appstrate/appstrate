@@ -388,16 +388,6 @@ export const envSchema = z
     // margin while still bounding a wedged provisioner.
     RUN_BOOT_DEADLINE_SECONDS: z.coerce.number().int().positive().default(300),
 
-    // OAuth Model Provider refresh worker — proactively refreshes credentials
-    // whose access_token is within the lead window so the next agent run
-    // doesn't pay a 401-retry on the hot path. Off by default: the sidecar's
-    // on-demand token-resolver + 401 retry path covers correctness on its
-    // own. Operators who care about (a) keeping refresh_tokens alive across
-    // long dormant windows and (b) shifting refresh latency off the hot path
-    // can opt in. Disabling drops 280+ lines of BullMQ scan/refresh worker
-    // wiring from a running instance.
-    OAUTH_REFRESH_WORKER_ENABLED: boolEnv("false"),
-
     // Integration connection refresh-failure escalation. When an OAuth token
     // refresh fails *transiently* (not `invalid_grant`) this many times in a
     // row AND the token is already expired past the grace window below, the
@@ -408,8 +398,10 @@ export const envSchema = z
     // connection — escalation requires the token to be genuinely dead. An auth
     // that cannot refresh counts upstream 401s against the same limit, with no
     // expiry gate and no reset short of a reconnect (cumulative, not a streak).
+    // Grace is 3 days: the sweep retries an idle credential once a day (docs/ENV.md).
+    // Model-provider credentials read the same two variables.
     INTEGRATION_REFRESH_MAX_FAILURES: z.coerce.number().int().positive().default(5),
-    INTEGRATION_REFRESH_GRACE_SECONDS: z.coerce.number().int().nonnegative().default(3600),
+    INTEGRATION_REFRESH_GRACE_SECONDS: z.coerce.number().int().nonnegative().default(259200),
 
     // How an auto-provisioned integration OAuth client (remote MCP, public
     // client) is acquired from an authorization server advertising

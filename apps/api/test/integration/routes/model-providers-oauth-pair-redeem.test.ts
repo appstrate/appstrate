@@ -118,7 +118,7 @@ describe("POST /api/model-providers-oauth/pair/redeem — canonical route", () =
       expiresAt: Date.now() - 60_000,
       email: "same-account@example.test",
     });
-    await markCredentialNeedsReconnection(ctx.orgId, originalCredentialId);
+    await markCredentialNeedsReconnection(ctx.orgId, originalCredentialId, "refresh_token_revoked");
 
     const pairing = await mintPairing(ctx, "test-oauth", { credentialId: originalCredentialId });
     const reconnect = await app.request("/api/model-providers-oauth/pair/redeem", {
