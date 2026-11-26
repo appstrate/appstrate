@@ -2377,10 +2377,10 @@ export async function persistCredentialBundle(
   if (input.scopesGranted !== undefined) {
     set.scopesGranted = input.scopesGranted;
     // What the grant now holds is no longer a demand.
-    set.requestedScopes = sql`coalesce(array(select s from unnest(${integrationConnections.requestedScopes}) as s where s <> all(${sql`ARRAY[${sql.join(
+    set.requestedScopes = sql`array(select s from unnest(${integrationConnections.requestedScopes}) as s where s <> all(${sql`ARRAY[${sql.join(
       input.scopesGranted.map((g) => sql`${g}`),
       sql`, `,
-    )}]::text[]`})), '{}'::text[])`;
+    )}]::text[]`}))`;
   }
   // A reconnect re-stamps the minting client; the refresh write-back omits it.
   if (input.clientRef !== undefined) set.clientRef = input.clientRef;

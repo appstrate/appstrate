@@ -20,7 +20,7 @@ await i18nModule.default.changeLanguage("fr");
 
 const ACTION = "Reconnecter avec ces droits";
 
-function warnings(owned: boolean): string {
+function warnings(owned: boolean, standing: string[] = ["mail.send", "mail.read"]): string {
   const run = makeRun({
     metadata: {
       scope_requests: [
@@ -46,6 +46,7 @@ function warnings(owned: boolean): string {
                 label: "Travail",
                 auth_key: "oauth",
                 reconnect_space_id: "spc_a",
+                requested_scopes: standing,
                 org: { id: "org_1" },
               },
             ],
@@ -66,6 +67,12 @@ describe("the run's « Droits supplémentaires demandés » card", () => {
     expect(html).toContain("mail.send, mail.read");
     expect(html).toContain("Travail");
     expect(html).toContain(ACTION);
+  });
+
+  it("offers nothing once the connection holds the scopes: the run's record is history", () => {
+    const html = warnings(true, []);
+    expect(html).toContain("mail.send, mail.read");
+    expect(html).not.toContain(ACTION);
   });
 
   it("offers nothing to a viewer who does not own the connection", () => {

@@ -75,7 +75,11 @@ function DegradedIntegrationItem({ integrationId }: { integrationId: string }) {
   );
 }
 
-/** The reconnect that grants the scopes is the connection owner's: only their own list holds it. */
+/**
+ * The reconnect that grants the scopes is the connection owner's: only their own list holds it.
+ * The run's record is history; the action follows the connection's standing demand, so a grant
+ * made since leaves nothing to offer.
+ */
 function ScopeRequestItem({ request }: { request: ScopeRequest }) {
   const { t } = useTranslation(["agents", "settings"]);
   const displayName = useIntegrationName(request.integrationId);
@@ -85,19 +89,20 @@ function ScopeRequestItem({ request }: { request: ScopeRequest }) {
     ?.flatMap((g) => g.connections)
     .find((c) => c.connection_id === request.connectionId);
   const spaceId = owned?.reconnect_space_id;
+  const standing = owned?.requested_scopes ?? [];
   return (
     <HealthCardItem
       title={displayName}
       description={`${owned ? `${owned.label} · ` : ""}${request.scopes.join(", ")}`}
       actions={
-        owned && spaceId ? (
+        owned && spaceId && standing.length > 0 ? (
           <HealthAction
             onClick={() =>
               void openPopup({
                 packageId: request.integrationId,
                 authKey: owned.auth_key,
                 connectionId: request.connectionId,
-                scopes: request.scopes,
+                scopes: standing,
                 space: { orgId: owned.org.id, spaceId },
               })
             }
