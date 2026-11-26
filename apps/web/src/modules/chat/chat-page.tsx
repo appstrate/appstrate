@@ -26,8 +26,7 @@ import { bindChatPreferencesUser } from "@appstrate/module-chat/preferences";
 import { useAuth } from "../../hooks/use-auth";
 import { useFirstName } from "../../hooks/use-first-name";
 import { useFileImageSrc } from "../../hooks/use-files";
-import { useSpaceLink } from "../../hooks/use-current-space";
-import { useCanReachInSpace } from "../../hooks/use-can-reach";
+import { useReachableSpaceLink } from "../../hooks/use-can-reach";
 import { useRowSpaceGrants } from "../../hooks/use-permissions";
 import { ChatConversationSkeleton, ChatPanelSkeleton } from "../../components/loading-skeletons";
 import { formatBytes } from "../../lib/format-bytes";
@@ -158,13 +157,7 @@ export function ChatModulePage() {
   }, []);
   // A run a conversation launched opens in its space, entering it when it is not this one, and
   // only where the route gate would open it (a role without the Studio gets no link into it).
-  const spaceLink = useSpaceLink();
-  const canReachInSpace = useCanReachInSpace();
-  const linkInSpace = useCallback(
-    (path: string, spaceId: string | undefined) =>
-      canReachInSpace(path, spaceId) ? spaceLink(path, spaceId) : undefined,
-    [canReachInSpace, spaceLink],
-  );
+  const linkInSpace = useReachableSpaceLink();
   // The very same uploader every SchemaForm file field uses — including its
   // refresh of the org storage gauge — into the space the chat names for each file.
   const uploadFile = useUploadInSpace();

@@ -214,13 +214,9 @@ export function orgSwitchLanding(pagePath: string): "/" | "/chat" {
  */
 export function useLandAfterOrgSwitch(): () => void {
   const background = useBackgroundLocation();
-  const exit = useContext(OverlayExitContext);
   const { pathname } = useLocation();
-  const navigate = useNavigate();
-  return () => {
-    if (background && exit) exit.replaceBackground(orgSwitchLanding(background.pathname));
-    else navigate(orgSwitchLanding(pathname), { replace: true });
-  };
+  const replacePage = useReplacePage();
+  return () => replacePage(orgSwitchLanding(background?.pathname ?? pathname), "");
 }
 
 /** The history state of an overlay opened right after an organization switch: it floats over the landing of the page it was opened from, which has no entry of its own. */

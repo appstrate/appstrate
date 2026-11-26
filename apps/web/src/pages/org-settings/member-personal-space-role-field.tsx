@@ -4,8 +4,7 @@ import { useTranslation } from "react-i18next";
 import type { components } from "../../api/client";
 import { SettingRow } from "../../components/settings/setting-row";
 import { SpaceRoleSelect } from "../../components/space-role-select";
-import { useOrg, useSetMemberPersonalSpaceRole } from "../../hooks/use-org";
-import { useOrgSettings } from "../../hooks/use-org-settings";
+import { useSetMemberPersonalSpaceRole } from "../../hooks/use-org";
 import { usePermissions } from "../../hooks/use-permissions";
 import { useSpaceRoleOptions, type SpaceRoleOption } from "../../hooks/use-roles";
 import {
@@ -44,24 +43,13 @@ export function PersonalSpaceRoleField({ member }: { member: OrgMember }) {
 
 function EditableField({ member, label }: { member: OrgMember; label: string }) {
   const { t } = useTranslation("settings");
-  const { currentOrg } = useOrg();
-  const { data: orgSettings, isLoading } = useOrgSettings();
-  const { options, roles, isLoading: rolesLoading } = useSpaceRoleOptions();
+  const { options, isLoading: rolesLoading } = useSpaceRoleOptions();
   const write = useSetMemberPersonalSpaceRole();
-  if (!currentOrg) return null;
 
   const selectOptions: SpaceRoleOption[] = [
     {
       value: FOLLOW_ORG_DEFAULT,
-      label: t("userDetail.personalSpaceRoleFollowOrg", {
-        role: followLabel(
-          member,
-          options,
-          orgSettings?.personal_space_role,
-          t("orgSettings.personalSpaceRoleUnknown"),
-          roles,
-        ),
-      }),
+      label: t("userDetail.personalSpaceRoleFollowOrg", { role: followLabel(member, t) }),
     },
     ...options,
   ];
@@ -76,7 +64,7 @@ function EditableField({ member, label }: { member: OrgMember; label: string }) 
           value={memberOverrideToSelectValue(member.personal_space_role)}
           options={selectOptions}
           fallbackLabel={t("orgSettings.personalSpaceRoleUnknown")}
-          loading={isLoading || rolesLoading}
+          loading={rolesLoading}
           disabled={write.isPending}
           onValueChange={(value) => write.apply(member.userId, value)}
         />

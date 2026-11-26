@@ -36,7 +36,6 @@ import { isSpaceId, isSpaceRoleId } from "./ids.ts";
 import { SPACE_ID_RE } from "@appstrate/db/ids";
 import { effectivePermissions, orgPermissions, type Permission } from "./permissions.ts";
 import {
-  ADMIN_ROLE_REF,
   resolveSpaceRole,
   spacePermissions,
   toSpaceRoleWire,
@@ -244,11 +243,8 @@ async function validatePersonaSpace(
   // the role to someone else. Owners and admins carry no `space_members` row, so `null` IS it.
   const real = effectivePermissions({
     orgPermissions: orgPermissions(realOrgRole),
-    // `null` caller and `ADMIN_ROLE_REF` as `personalSpaceDefault`: the space is not personal
-    // (refused above), so neither parameter can change the answer.
-    spacePermissions: spacePermissions(
-      resolveSpaceRole(realOrgRole, space, null, null, ADMIN_ROLE_REF),
-    ),
+    // The space is not personal (refused above), so no personal-space default is read.
+    spacePermissions: spacePermissions(resolveSpaceRole(realOrgRole, space, null, null)),
   });
   if (!canGrantSpaceRole(real, role)) {
     onDenial(`view_as:${requested.role.kind}`);
@@ -458,14 +454,15 @@ export function personaSpaceMember(persona: ViewAsPersona, spaceId: string): Spa
 }
 
 /** What `resolveSpaceRole` reads about the caller in one space: the snapshot without the org role. */
-type CallerSpaceAccess = Pick<SpaceAccessSnapshot, "space" | "member" | "personalSpaceDefault">;
+type CallerSpaceAccess = Pick<SpaceAccessSnapshot, "space" | "member"> &
+  Partial<Pick<SpaceAccessSnapshot, "personalDefault">>;
 
 function toCallerAccess({
   space,
   member,
-  personalSpaceDefault,
+  personalDefault,
 }: SpaceAccessSnapshot): CallerSpaceAccess {
-  return { space, member, personalSpaceDefault };
+  return { space, member, personalDefault };
 }
 
 /**
@@ -477,14 +474,8 @@ export async function callerSpaceAccess(
   space: SpaceContextRow,
 ): Promise<CallerSpaceAccess | null> {
   const persona = personaFor(c, space.orgId);
-  // A persona reaches no personal space, so the personal-space default it passes is never read.
-  if (persona) {
-    return {
-      space,
-      member: personaSpaceMember(persona, space.id),
-      personalSpaceDefault: ADMIN_ROLE_REF,
-    };
-  }
+  // A persona reaches no personal space, so it carries no personal-space default.
+  if (persona) return { space, member: personaSpaceMember(persona, space.id) };
   const snapshot = await loadSpaceAccess(space.id, space.orgId, c.get("user").id);
   return snapshot && toCallerAccess(snapshot);
 }
@@ -501,14 +492,7 @@ export async function callerSpaceAccessById(
   const persona = personaFor(c, orgId);
   if (persona) {
     const space = await validateSpaceInOrg(spaceId, orgId);
-    return (
-      space && {
-        space,
-        member: personaSpaceMember(persona, space.id),
-        // Never read: a persona reaches no personal space.
-        personalSpaceDefault: ADMIN_ROLE_REF,
-      }
-    );
+    return space && { space, member: personaSpaceMember(persona, space.id) };
   }
   const snapshot = await loadSpaceAccess(spaceId, orgId, c.get("user").id);
   return snapshot && toCallerAccess(snapshot);
@@ -558,7 +542,7 @@ export async function callerPermissionsInSpace(
     snapshot.space,
     persona ? personaSpaceMember(persona, spaceId) : snapshot.member,
     callerPersonalOwnerId(c, orgId),
-    snapshot.personalSpaceDefault,
+    snapshot.personalDefault,
   );
   return effectiveInSpace(c, ref, orgHalfFor(c, orgId, snapshot.orgRole).orgPermissions);
 }

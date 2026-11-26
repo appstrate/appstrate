@@ -46,7 +46,12 @@ afterAll(async () => {
 
 describe("scripts/migration/0058 — custom roles keep the Studio", () => {
   it("appends studio:read to every custom role, then refuses a second run without writing", async () => {
-    await pg.exec(await Bun.file(SCRIPT).text());
+    const results = await pg.exec(await Bun.file(SCRIPT).text());
+    // The verification query closing the script reports no custom role left without it.
+    const verification = results.filter((r) =>
+      r.fields.some((f) => f.name === "custom_roles_without_studio_read"),
+    );
+    expect(String(verification[0]!.rows[0]!.custom_roles_without_studio_read)).toBe("0");
     expect(await permissionsOf(READER)).toEqual(["agents:read", "runs:read", "studio:read"]);
     expect(await permissionsOf(RUNNER)).toEqual(["agents:run", "studio:read"]);
 

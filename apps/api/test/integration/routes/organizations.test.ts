@@ -1168,6 +1168,7 @@ describe("Organizations API", () => {
         "displayName",
         "email",
         "joinedAt",
+        "personal_space_default_role",
         "personal_space_role",
         "role",
         "spaces",

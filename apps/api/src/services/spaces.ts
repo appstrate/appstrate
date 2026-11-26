@@ -40,7 +40,8 @@ import {
   memberFromJoin,
   membershipOn,
   PERSONAL_SPACE_DEFAULT_COLUMNS,
-  personalSpaceDefaultRef,
+  personalSpaceDefaultOn,
+  psr,
   resolveSpaceRole,
   type SpaceMemberRow,
   type SpaceRoleRef,
@@ -87,13 +88,7 @@ export async function listSpacesForPrincipal(
   for (const row of rows) {
     const { space } = row;
     const member = overlay ? (overlay.get(space.id) ?? null) : memberFromJoin(row);
-    const role = resolveSpaceRole(
-      orgRole,
-      space,
-      member,
-      personalOwnerId,
-      personalSpaceDefaultRef(row),
-    );
+    const role = resolveSpaceRole(orgRole, space, member, personalOwnerId, row);
     if (!isSpaceVisibleTo(orgRole, space, role)) continue;
     out.push({ space, role });
   }
@@ -204,6 +199,7 @@ async function listVisibleSpaces(
     })
     .from(spaces)
     .innerJoin(organizations, eq(organizations.id, spaces.orgId))
+    .leftJoin(psr, personalSpaceDefaultOn)
     .leftJoin(spaceMembers, membershipOn(userId))
     .leftJoin(spaceRoles, customRoleOn)
     .where(

@@ -54,8 +54,7 @@ import { useOrg } from "./hooks/use-org";
 import { useGlobalRunSync } from "./hooks/use-global-run-sync";
 import { useSpaceResolver } from "./hooks/use-current-space";
 import { useOverviewRules } from "./hooks/use-overview-mode";
-import { useCanReach, useStudioReach } from "./hooks/use-can-reach";
-import { usePermissions } from "./hooks/use-permissions";
+import { useHome } from "./hooks/use-can-reach";
 import { NotFoundPage, RouteGate } from "./components/route-gate";
 import { useChatSidebarStore, useSidebarStore } from "./stores/sidebar-store";
 import { Spinner } from "@appstrate/ui/components/spinner";
@@ -462,12 +461,10 @@ function MainLayout({ search }: { search: string }) {
   const chatSidebar = useChatSidebarStore();
   const { pathname } = useLocation();
   const product = isUnder(pathname, "/chat") ? "chat" : "studio";
+  const home = useHome();
   // Without the Studio, a page outside the chat (a file, a notification, a refusal) keeps the
   // chat's navigation, the only one the reader has.
-  const studio = useStudioReach();
-  const { ready } = usePermissions();
-  const chatReachable = useCanReach()("/chat");
-  const navProduct = product === "chat" || (ready && !studio && chatReachable) ? "chat" : "studio";
+  const navProduct = product === "chat" || home === "chat" ? "chat" : "studio";
   const sidebar = navProduct === "chat" ? chatSidebar : studioSidebar;
   useSpaceResolver(search);
   useOverviewRules();

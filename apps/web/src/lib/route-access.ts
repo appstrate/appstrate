@@ -215,6 +215,10 @@ export const OVERLAY_NOT_FOUND_PATHS = OVERLAY_PREFIXES.map((prefix) => `${prefi
 /** Opens the Studio's screens; a role without it keeps the chat and every other product. */
 export const STUDIO_PERMISSION = "studio:read";
 
+/** Whether a set of grants opens the Studio: the one place `studio:read` is asked. */
+export const holdsStudio = (can: (permission: Permission) => boolean): boolean =>
+  can(STUDIO_PERMISSION);
+
 /**
  * The Studio's screens: every route a permission opens, outside the chat and the overlays. An
  * `open` route (a file, a notification) states its own rule; an overlay (the settings, the
@@ -228,7 +232,7 @@ function requiresStudio(path: RoutePath): boolean {
 export function grantsRoute(path: RoutePath, can: (permission: Permission) => boolean): boolean {
   const access: RouteAccess = ROUTE_ACCESS[path];
   if (!("anyOf" in access)) return false;
-  return access.anyOf.some(can) && (!requiresStudio(path) || can(STUDIO_PERMISSION));
+  return access.anyOf.some(can) && (!requiresStudio(path) || holdsStudio(can));
 }
 
 /** `absent`: the route does not exist here (module not loaded, or team-space route in a personal space). */

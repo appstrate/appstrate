@@ -5,10 +5,7 @@ import type { AgentListItem, EnrichedRun } from "@appstrate/shared-types";
 import { cn } from "@appstrate/ui/cn";
 import { RunStatusBadge } from "./status-badge";
 import { RunIdentity } from "./run-identity";
-import { runDetailPath } from "../lib/package-paths";
-import { useSpaceLink } from "../hooks/use-current-space";
-import { useCanReach, useCanReachInSpace } from "../hooks/use-can-reach";
-import { useOverviewMode } from "../hooks/use-overview-mode";
+import { useRunPageHref } from "../hooks/use-can-reach";
 import { SpaceNameOf } from "./space-name";
 
 /**
@@ -17,8 +14,8 @@ import { SpaceNameOf } from "./space-name";
  * table's « Run » column), then the run's space in a list spanning spaces (the runs table's
  * « Espace » cell), then its status.
  * The row is the run's link when the run still has an agent to live under and its page opens
- * for the reader: in its own space (one withholding the Studio lists the run, unlinked), or in
- * « Tous les espaces » where some space admits the run's page.
+ * for the reader (`useRunPageHref`: in its own space, one withholding the Studio lists the run
+ * unlinked; in « Tous les espaces », where some space admits it).
  */
 export function RunRow({
   run,
@@ -38,11 +35,7 @@ export function RunRow({
   spanning?: boolean;
   className?: string;
 }) {
-  const linkInSpace = useSpaceLink();
-  const canReach = useCanReach();
-  const canReachInSpace = useCanReachInSpace();
-  // « Tous les espaces » keeps the mode on a run's page, which opens where some space admits it.
-  const { on } = useOverviewMode();
+  const href = useRunPageHref(run);
   const content = (
     <>
       <RunIdentity run={run} agent={{ name: agentName, identity: agent }} />
@@ -54,11 +47,9 @@ export function RunRow({
   // Its own container: a compact status follows the row's width, not the screen's.
   const rowClass = cn("@container flex min-h-16 items-center gap-3 px-4 py-3", className);
 
-  const path = run.packageId ? runDetailPath(run.packageId, run.id) : undefined;
-  const opens = path && (on ? canReach(path) : canReachInSpace(path, run.spaceId));
-  return opens ? (
+  return href ? (
     <Link
-      to={linkInSpace(path, run.spaceId)}
+      to={href}
       state={{ runNumber: run.runNumber }}
       className={cn(rowClass, "hover:bg-muted/50 transition-colors")}
     >

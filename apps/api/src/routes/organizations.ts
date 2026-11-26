@@ -13,6 +13,8 @@ import {
   spaceRoleAssignmentShape,
   toAssignment,
 } from "../lib/space-role-assignment.ts";
+import { defaultPersonalSpaceRole, toSpaceRoleWire } from "../lib/space-role.ts";
+import type { OrgRole } from "@appstrate/core/permissions";
 import { listCallerOrganizations } from "../lib/principal-permissions.ts";
 import { callerReachableSpaces } from "../lib/reachable-spaces.ts";
 import { isUserPrincipal } from "../lib/principal.ts";
@@ -31,6 +33,7 @@ import {
   updateMemberRole,
   setPersonalSpaceRoleOverride,
   listPersonalSpaceRoleOverrides,
+  getOrgPersonalSpaceDefault,
   getOrgSettings,
   updateOrgSettings,
   orgSettingsPatchSchema,
@@ -64,7 +67,11 @@ import { emitEvent } from "../lib/modules/module-loader.ts";
 import { logger } from "../lib/logger.ts";
 import { recordAuditFromContext } from "../services/audit.ts";
 import { recordSharesRemoved } from "../services/connection-shares.ts";
-import { ASSIGNABLE_ORG_ROLES, type OrganizationMemberSpace } from "@appstrate/shared-types";
+import {
+  ASSIGNABLE_ORG_ROLES,
+  type OrganizationMemberSpace,
+  type SpaceRoleAssignment,
+} from "@appstrate/shared-types";
 import { ORG_ROLES } from "@appstrate/core/permissions";
 import { appearanceColorSchema, appearanceIconSchema } from "@appstrate/core/appearance";
 
@@ -247,20 +254,37 @@ async function memberSpacesForCaller(
   return listSpacesOfMembers(orgId, readable);
 }
 
+/**
+ * A member's personal-space role as the member DTO shows it: their own override and the role the
+ * org default alone would give them (guest cap applied). Only a caller who may change it sees
+ * either; both are `null` otherwise.
+ */
+async function personalSpaceView(orgId: string, mayChange: boolean, userIds?: readonly string[]) {
+  const [overrides, orgDefault] = mayChange
+    ? await Promise.all([
+        listPersonalSpaceRoleOverrides(orgId, userIds),
+        getOrgPersonalSpaceDefault(orgId),
+      ])
+    : [new Map<string, SpaceRoleAssignment>(), null];
+  return (userId: string, orgRole: OrgRole) => ({
+    personal_space_role: overrides.get(userId) ?? null,
+    personal_space_default_role: mayChange
+      ? toSpaceRoleWire(defaultPersonalSpaceRole(orgRole, orgDefault))
+      : null,
+  });
+}
+
 // OrgDetail serializer — shared by GET /:orgId and PATCH /:orgId so the update
 // response is the exact same resource shape as the detail read.
 async function buildOrgDetail(c: Context<AppEnv>, orgId: string) {
   const permissions = c.get("permissions");
   const readsMembers = permissions?.has("members:read") ?? false;
-  const [org, members, invitations, memberSpaces, overrides] = await Promise.all([
+  const [org, members, invitations, memberSpaces, personalSpaceOf] = await Promise.all([
     getOrgById(orgId),
     readsMembers ? getOrgMembers(orgId) : Promise.resolve([]),
     permissions?.has("members:invite") ? getOrgInvitations(orgId) : Promise.resolve([]),
     readsMembers ? memberSpacesForCaller(c, orgId) : Promise.resolve(new Map()),
-    // Only a caller who may change it sees a member's personal-space override; `null` otherwise.
-    permissions?.has("members:change-role")
-      ? listPersonalSpaceRoleOverrides(orgId)
-      : Promise.resolve(new Map()),
+    personalSpaceView(orgId, permissions?.has("members:change-role") ?? false),
   ]);
   if (!org) {
     throw notFound("Organization not found");
@@ -296,7 +320,7 @@ async function buildOrgDetail(c: Context<AppEnv>, orgId: string) {
       displayName: m.displayName,
       email: m.email,
       spaces: memberSpaces.get(m.userId) ?? [],
-      personal_space_role: overrides.get(m.userId) ?? null,
+      ...personalSpaceOf(m.userId, m.role),
     })),
     invitations: invitations.map((inv) => ({
       id: inv.id,
@@ -593,12 +617,8 @@ router.put("/:orgId/members/:userId", requirePermission("members", "change-role"
 
   // Promoting to owner/admin drops the member's explicit space grants; the audit
   // is the only record of what a later demotion will NOT restore.
-  const { previousRole, revoked, unsharedShares } = await updateMemberRole(
-    orgId,
-    targetUserId,
-    data.role,
-    memberActor(c),
-  );
+  const { previousRole, revoked, unsharedShares, personalSpaceRoleCleared } =
+    await updateMemberRole(orgId, targetUserId, data.role, memberActor(c));
   await recordAuditFromContext(c, {
     action: "org.member_role_updated",
     resourceType: "member",
@@ -611,7 +631,8 @@ router.put("/:orgId/members/:userId", requirePermission("members", "change-role"
         customRoleId: row.customRoleId,
       })),
     },
-    after: { role: data.role },
+    // The member's own personal-space role the change made inadmissible, dropped with it.
+    after: { role: data.role, personalSpaceRoleCleared },
     orgIdOverride: orgId,
   });
   await recordSharesRemoved(c, orgId, unsharedShares, "access_lost");
@@ -621,12 +642,11 @@ router.put("/:orgId/members/:userId", requirePermission("members", "change-role"
 
 /** One member as the members list in GET /orgs/:orgId serializes it — a write's bare response. */
 async function memberDto(c: Context<AppEnv>, orgId: string, userId: string) {
-  const [member, memberSpaces, overrides] = await Promise.all([
+  // Both callers sit behind `requirePermission("members", "change-role")`.
+  const [member, memberSpaces, personalSpaceOf] = await Promise.all([
     getOrgMemberWithProfile(orgId, userId),
     memberSpacesForCaller(c, orgId),
-    c.get("permissions")?.has("members:change-role")
-      ? listPersonalSpaceRoleOverrides(orgId, [userId])
-      : Promise.resolve(new Map<string, never>()),
+    personalSpaceView(orgId, true, [userId]),
   ]);
   if (!member) throw notFound("Member not found");
   return {
@@ -636,7 +656,7 @@ async function memberDto(c: Context<AppEnv>, orgId: string, userId: string) {
     displayName: member.displayName,
     email: member.email,
     spaces: memberSpaces.get(userId) ?? [],
-    personal_space_role: overrides.get(userId) ?? null,
+    ...personalSpaceOf(userId, member.role),
   };
 }
 

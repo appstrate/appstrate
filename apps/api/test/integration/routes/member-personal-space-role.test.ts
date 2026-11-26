@@ -9,17 +9,13 @@
 
 import { beforeEach, describe, expect, it } from "bun:test";
 import { and, eq, isNull } from "drizzle-orm";
-import { auditEvents, spaceMembers, spaces } from "@appstrate/db/schema";
+import { auditEvents, spaceMembers, spaceRoles, spaces } from "@appstrate/db/schema";
 import { getTestApp } from "../../helpers/app.ts";
 import { db, truncateAll } from "../../helpers/db.ts";
 import { expectProblem } from "../../helpers/assertions.ts";
-import {
-  createTestContext,
-  memberContext,
-  orgOnlyHeaders,
-  type TestContext,
-} from "../../helpers/auth.ts";
+import { createTestContext, memberContext, type TestContext } from "../../helpers/auth.ts";
 import { loopbackHeaders } from "../../helpers/loopback.ts";
+import { DELETES, personalOf, type ListedSpace } from "../../helpers/personal-space.ts";
 import { seedSpaceRole } from "../../helpers/seed.ts";
 import { listSpaceMembers } from "../../../src/services/space-members.ts";
 import { knownSpaceLevelPermissions, orgPermissions } from "../../../src/lib/permissions.ts";
@@ -27,18 +23,11 @@ import { knownSpaceLevelPermissions, orgPermissions } from "../../../src/lib/per
 const app = getTestApp();
 
 const json = { "Content-Type": "application/json" };
-const DELETES = ["agents:delete", "skills:delete", "integrations:delete", "schedules:delete"];
-
-interface ListedSpace {
-  id: string;
-  personal: boolean;
-  role: { kind: string; key: string; name: string } | null;
-  permissions: string[];
-}
 
 interface MemberDto {
   userId: string;
   personal_space_role: { preset_role: string } | { custom_role_id: string } | null;
+  personal_space_default_role: { kind: string; key: string; name: string } | null;
 }
 
 const overrideUrl = (ctx: TestContext, userId: string) =>
@@ -59,14 +48,6 @@ function clearOverride(actor: TestContext, userId: string) {
   });
 }
 
-async function personalOf(ctx: TestContext): Promise<ListedSpace> {
-  const res = await app.request("/api/spaces", { headers: orgOnlyHeaders(ctx) });
-  expect(res.status, await res.clone().text()).toBe(200);
-  const own = ((await res.json()) as { data: ListedSpace[] }).data.filter((s) => s.personal);
-  expect(own).toHaveLength(1);
-  return own[0]!;
-}
-
 async function memberInList(owner: TestContext, userId: string): Promise<MemberDto> {
   const res = await app.request(`/api/orgs/${owner.orgId}`, { headers: { Cookie: owner.cookie } });
   expect(res.status).toBe(200);
@@ -77,7 +58,7 @@ async function memberInList(owner: TestContext, userId: string): Promise<MemberD
   return found!;
 }
 
-/** The override rows the user holds on their own personal spaces, live or orphaned. */
+/** The override rows the user holds on their own personal spaces. */
 async function overrideRows(orgId: string, userId: string) {
   return db
     .select({ presetRole: spaceMembers.presetRole, customRoleId: spaceMembers.customRoleId })
@@ -180,11 +161,36 @@ describe("member personal-space role override", () => {
     ]);
   });
 
-  it("PUT gives a guest their override instead of plain operator", async () => {
-    expect((await putOverride(owner, guest.user.id, { preset_role: "builder" })).status).toBe(200);
+  it("PUT gives a guest a role inside operator as it is, with the floor", async () => {
+    expect((await putOverride(owner, guest.user.id, { preset_role: "viewer" })).status).toBe(200);
     const own = await personalOf(guest);
-    expect(own.role).toMatchObject({ key: "builder" });
+    expect(own.role).toMatchObject({ key: "viewer" });
+    expect(own.permissions).not.toContain("agents:run");
     for (const permission of DELETES) expect(own.permissions).toContain(permission);
+  });
+
+  it("PUT refuses a guest a role holding more than operator: 409 guest_role_too_broad, nothing written", async () => {
+    for (const body of [{ preset_role: "builder" }, { preset_role: "admin" }]) {
+      await expectProblem(await putOverride(owner, guest.user.id, body), 409, {
+        code: "guest_role_too_broad",
+      });
+    }
+    const author = await seedSpaceRole({
+      orgId: owner.orgId,
+      key: "author",
+      name: "Author",
+      permissions: ["agents:read", "agents:write"],
+    });
+    await expectProblem(
+      await putOverride(owner, guest.user.id, { custom_role_id: author.id }),
+      409,
+      {
+        code: "guest_role_too_broad",
+      },
+    );
+    expect(await overrideRows(owner.orgId, guest.user.id)).toEqual([]);
+    // The same roles are fine for a member.
+    expect((await putOverride(owner, member.user.id, { preset_role: "builder" })).status).toBe(200);
   });
 
   it("PUT provisions the personal space when the member has none yet", async () => {
@@ -328,7 +334,7 @@ describe("member personal-space role override", () => {
     expect((await memberInList(owner, member.user.id)).personal_space_role).toBeNull();
   });
 
-  it("a demotion to guest drops the override: the guest holds the guest default", async () => {
+  it("a demotion to guest drops an override broader than operator, and the audit traces it", async () => {
     expect((await putOverride(owner, member.user.id, { preset_role: "builder" })).status).toBe(200);
     const demoted = await app.request(`/api/orgs/${owner.orgId}/members/${member.user.id}`, {
       method: "PUT",
@@ -339,12 +345,168 @@ describe("member personal-space role override", () => {
     expect(((await demoted.json()) as MemberDto).personal_space_role).toBeNull();
     expect(await overrideRows(owner.orgId, member.user.id)).toEqual([]);
 
-    // The org default is absent (admin), which a guest holds as plain operator.
+    // The org default is absent (admin), which a guest holds as operator plus the floor.
     const own = await personalOf(member);
     expect(own.role).toMatchObject({ kind: "preset", key: "operator" });
     expect(own.permissions).not.toContain("agents:write");
-    for (const permission of DELETES) expect(own.permissions).not.toContain(permission);
+    for (const permission of DELETES) expect(own.permissions).toContain(permission);
     expect((await memberInList(owner, member.user.id)).personal_space_role).toBeNull();
+
+    const [audit] = await db
+      .select({ before: auditEvents.before, after: auditEvents.after })
+      .from(auditEvents)
+      .where(eq(auditEvents.action, "org.member_role_updated"));
+    expect(audit?.after).toEqual({
+      role: "guest",
+      personalSpaceRoleCleared: { presetRole: "builder", customRoleId: null },
+    });
+  });
+
+  it("a change of org role that keeps no override clears nothing and says so in the audit", async () => {
+    const res = await app.request(`/api/orgs/${owner.orgId}/members/${member.user.id}`, {
+      method: "PUT",
+      headers: { Cookie: owner.cookie, ...json },
+      body: JSON.stringify({ role: "guest" }),
+    });
+    expect(res.status, await res.clone().text()).toBe(200);
+    const [audit] = await db
+      .select({ after: auditEvents.after })
+      .from(auditEvents)
+      .where(eq(auditEvents.action, "org.member_role_updated"));
+    expect(audit?.after).toEqual({ role: "guest", personalSpaceRoleCleared: null });
+  });
+
+  it("a promotion to admin traces the override it dropped", async () => {
+    expect((await putOverride(owner, member.user.id, { preset_role: "viewer" })).status).toBe(200);
+    const res = await app.request(`/api/orgs/${owner.orgId}/members/${member.user.id}`, {
+      method: "PUT",
+      headers: { Cookie: owner.cookie, ...json },
+      body: JSON.stringify({ role: "admin" }),
+    });
+    expect(res.status, await res.clone().text()).toBe(200);
+    const [audit] = await db
+      .select({ after: auditEvents.after })
+      .from(auditEvents)
+      .where(eq(auditEvents.action, "org.member_role_updated"));
+    expect(audit?.after).toEqual({
+      role: "admin",
+      personalSpaceRoleCleared: { presetRole: "viewer", customRoleId: null },
+    });
+  });
+
+  it("an override of a custom role inside operator survives a demotion to guest; a broader one goes", async () => {
+    const reader = await seedSpaceRole({
+      orgId: owner.orgId,
+      key: "reader",
+      name: "Reader",
+      permissions: ["agents:read", "runs:read"],
+    });
+    const author = await seedSpaceRole({
+      orgId: owner.orgId,
+      key: "author",
+      name: "Author",
+      permissions: ["agents:read", "agents:write"],
+    });
+    const demote = () =>
+      app.request(`/api/orgs/${owner.orgId}/members/${member.user.id}`, {
+        method: "PUT",
+        headers: { Cookie: owner.cookie, ...json },
+        body: JSON.stringify({ role: "guest" }),
+      });
+    expect((await putOverride(owner, member.user.id, { custom_role_id: reader.id })).status).toBe(
+      200,
+    );
+    expect((await demote()).status).toBe(200);
+    expect(await overrideRows(owner.orgId, member.user.id)).toEqual([
+      { presetRole: null, customRoleId: reader.id },
+    ]);
+
+    const back = await app.request(`/api/orgs/${owner.orgId}/members/${member.user.id}`, {
+      method: "PUT",
+      headers: { Cookie: owner.cookie, ...json },
+      body: JSON.stringify({ role: "member" }),
+    });
+    expect(back.status).toBe(200);
+    expect((await putOverride(owner, member.user.id, { custom_role_id: author.id })).status).toBe(
+      200,
+    );
+    expect((await demote()).status).toBe(200);
+    expect(await overrideRows(owner.orgId, member.user.id)).toEqual([]);
+  });
+
+  it("exposes the role the org default alone gives each member as personal_space_default_role", async () => {
+    // Absent default = admin: owner, admin and member hold admin; the guest is capped to operator.
+    const byUser = async () =>
+      new Map(
+        (
+          (await (
+            await app.request(`/api/orgs/${owner.orgId}`, { headers: { Cookie: owner.cookie } })
+          ).json()) as { members: MemberDto[] }
+        ).members.map((m) => [m.userId, m.personal_space_default_role]),
+      );
+    const admin_ = { kind: "preset", key: "admin", name: "admin" };
+    const before = await byUser();
+    expect(before.get(owner.user.id)).toEqual(admin_);
+    expect(before.get(admin.user.id)).toEqual(admin_);
+    expect(before.get(member.user.id)).toEqual(admin_);
+    expect(before.get(guest.user.id)).toEqual({
+      kind: "preset",
+      key: "operator",
+      name: "operator",
+    });
+
+    // The override does not move it: it is what the DEFAULT gives, whatever they chose.
+    expect((await putOverride(owner, member.user.id, { preset_role: "viewer" })).status).toBe(200);
+    expect((await byUser()).get(member.user.id)).toEqual(admin_);
+
+    const patch = (value: string) =>
+      app.request(`/api/orgs/${owner.orgId}/settings`, {
+        method: "PATCH",
+        headers: { Cookie: owner.cookie, ...json },
+        body: JSON.stringify({ personal_space_role: value }),
+      });
+    expect((await patch("viewer")).status).toBe(200);
+    const viewerDefault = await byUser();
+    expect(viewerDefault.get(member.user.id)).toEqual({
+      kind: "preset",
+      key: "viewer",
+      name: "viewer",
+    });
+    expect(viewerDefault.get(guest.user.id)).toEqual({
+      kind: "preset",
+      key: "viewer",
+      name: "viewer",
+    });
+    expect(viewerDefault.get(admin.user.id)).toEqual(admin_);
+
+    // A write answers with the same field.
+    const put = await putOverride(owner, guest.user.id, { preset_role: "runner" });
+    expect(((await put.json()) as MemberDto).personal_space_default_role).toEqual({
+      kind: "preset",
+      key: "viewer",
+      name: "viewer",
+    });
+  });
+
+  it("reads personal_space_default_role as null when the default names no role of the org", async () => {
+    const role = await seedSpaceRole({ orgId: owner.orgId, permissions: ["agents:read"] });
+    expect(
+      (
+        await app.request(`/api/orgs/${owner.orgId}/settings`, {
+          method: "PATCH",
+          headers: { Cookie: owner.cookie, ...json },
+          body: JSON.stringify({ personal_space_role: role.id }),
+        })
+      ).status,
+    ).toBe(200);
+    // Bypass the delete guard, as a write outside the platform would.
+    await db.delete(spaceRoles).where(eq(spaceRoles.id, role.id));
+    const dto = await memberInList(owner, member.user.id);
+    expect(dto.personal_space_default_role).toBeNull();
+    // An owner or admin still holds admin.
+    expect((await memberInList(owner, admin.user.id)).personal_space_default_role).toMatchObject({
+      key: "admin",
+    });
   });
 
   it("a change of org role keeps a narrower override: a viewer stays viewer as a guest and back", async () => {
@@ -406,7 +568,10 @@ describe("member personal-space role override", () => {
     expect(res.status).toBe(200);
     const members = ((await res.json()) as { members: MemberDto[] }).members;
     expect(members.length).toBeGreaterThan(0);
-    for (const m of members) expect(m.personal_space_role).toBeNull();
+    for (const m of members) {
+      expect(m.personal_space_role).toBeNull();
+      expect(m.personal_space_default_role).toBeNull();
+    }
   });
 
   it("leaving the organization drops the override", async () => {

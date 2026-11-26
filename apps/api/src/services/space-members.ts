@@ -23,29 +23,32 @@ import {
   user as userTable,
 } from "@appstrate/db/schema";
 import type { SpaceRolePreset } from "@appstrate/core/permissions";
-import type { OrganizationMemberSpace, SpaceMember } from "@appstrate/shared-types";
+import type {
+  OrganizationMemberSpace,
+  SpaceMember,
+  SpaceRoleAssignment,
+} from "@appstrate/shared-types";
 import { ApiError, conflict, notFound } from "../lib/errors.ts";
 import {
   customRoleOn,
   loadSpaceMember,
+  lockOrgSpaceRole,
   MEMBERSHIP_COLUMNS,
-  ADMIN_ROLE_REF,
   memberFromJoin,
   PERSONAL_SPACE_DEFAULT_COLUMNS,
-  personalSpaceDefaultRef,
+  personalSpaceDefaultOn,
+  psr,
   resolveSpaceRole,
   toSpaceRoleWire,
   type SpaceAccessRow,
   type SpaceRoleRef,
 } from "../lib/space-role.ts";
+import type { SpaceRoleColumns } from "../lib/space-role-assignment.ts";
 import { assertCanGrantSpaceRole, assertCanManageSpaceMember } from "../lib/space-role-policy.ts";
 import type { DbOrTx, Tx } from "../lib/db-helpers.ts";
 import { actorFromIds } from "../lib/actor.ts";
 import { disableForeignSchedules } from "./schedules-naming-connection.ts";
 import { sharedInto } from "./connection-reach.ts";
-
-/** Assignment as the write routes accept it: one preset, or one custom role id. */
-export type SpaceRoleAssignment = { preset_role: SpaceRolePreset } | { custom_role_id: string };
 
 /** Resolve a known email without exposing the organization's member directory. */
 export async function resolveOrgMemberEmail(orgId: string, email: string): Promise<string> {
@@ -129,6 +132,7 @@ async function listMembersOfSpaces(
     })
     .from(spaces)
     .innerJoin(organizations, eq(organizations.id, spaces.orgId))
+    .leftJoin(psr, personalSpaceDefaultOn)
     .innerJoin(organizationMembers, eq(organizationMembers.orgId, spaces.orgId))
     .innerJoin(userTable, eq(userTable.id, organizationMembers.userId))
     .leftJoin(profiles, eq(profiles.id, organizationMembers.userId))
@@ -159,13 +163,7 @@ async function listMembersOfSpaces(
     // caller: the question asked of the resolver is "what would this person
     // hold here". On a personal space that answers the owner's own role for
     // them and `null` for everyone else, so the list is the owner alone (decision 10).
-    const effective = resolveSpaceRole(
-      row.orgRole,
-      row.space,
-      member,
-      row.userId,
-      personalSpaceDefaultRef(row),
-    );
+    const effective = resolveSpaceRole(row.orgRole, row.space, member, row.userId, row);
     if (!effective) continue;
     out.push({
       space: { id: row.space.id, name: row.space.name },
@@ -297,12 +295,6 @@ function existingSpaceMember() {
   );
 }
 
-/** Columns the two nullable role references occupy — exactly one is set. */
-interface RoleColumns {
-  presetRole: SpaceRolePreset | null;
-  customRoleId: string | null;
-}
-
 /** What a removal did, and the standing the target is left with. */
 export interface SpaceMemberRemoval {
   /** False when there was no explicit row — the caller renders that as 404. */
@@ -366,11 +358,9 @@ export async function removeSpaceMember(params: {
     const target = await lockOrgMember(tx, orgId, userId);
     await lockSpaceRow(tx, space.id);
     // The standing is the TARGET's, so the caller id is theirs. No member row: the
-    // removal is about to delete the only one there could be. A team space, so the
-    // personal-space default is never read.
-    const accessAfter = target
-      ? resolveSpaceRole(target.role, space, null, userId, ADMIN_ROLE_REF)
-      : null;
+    // removal is about to delete the only one there could be. A team space (a
+    // personal one threw above), so there is no personal-space default to pass.
+    const accessAfter = target ? resolveSpaceRole(target.role, space, null, userId) : null;
     assertCanGrantSpaceRole(params.actorPermissions, accessAfter);
     const existing = await loadSpaceMember(space.id, userId, tx);
     if (!existing) return removal(false, accessAfter, nothingUnshared());
@@ -667,9 +657,12 @@ async function sharesOfOwnersWithoutAccess(
         ownerUserId: spaces.ownerUserId,
       },
       ...MEMBERSHIP_COLUMNS,
+      ...PERSONAL_SPACE_DEFAULT_COLUMNS,
     })
     .from(integrationConnections)
     .innerJoin(spaces, and(on, eq(spaces.orgId, integrationConnections.orgId)))
+    .innerJoin(organizations, eq(organizations.id, spaces.orgId))
+    .leftJoin(psr, personalSpaceDefaultOn)
     .leftJoin(
       organizationMembers,
       and(
@@ -692,14 +685,9 @@ async function sharesOfOwnersWithoutAccess(
       (row) =>
         row.orgRole === null ||
         row.userId === departedUserId ||
-        // Only null-ness is read, and the personal-space default never turns a role into null or back.
-        resolveSpaceRole(
-          row.orgRole,
-          row.space,
-          memberFromJoin(row),
-          row.userId,
-          ADMIN_ROLE_REF,
-        ) === null,
+        // The owner may be judged in their own personal space, where a default naming no role
+        // of the org resolves to no role: the true default is read, in the same statement.
+        resolveSpaceRole(row.orgRole, row.space, memberFromJoin(row), row.userId, row) === null,
     )
     .map((row) => ({ connectionId: row.id, spaceId: row.space.id }));
 }
@@ -719,25 +707,14 @@ async function assignmentColumns(
   assignment: SpaceRoleAssignment,
   actorPermissions: ReadonlySet<string> | undefined,
   tx: DbOrTx,
-): Promise<RoleColumns> {
+): Promise<SpaceRoleColumns> {
   if ("preset_role" in assignment) {
     assertCanGrantSpaceRole(actorPermissions, { kind: "preset", preset: assignment.preset_role });
     return { presetRole: assignment.preset_role, customRoleId: null };
   }
-  const [role] = await tx
-    .select({
-      id: spaceRoles.id,
-      key: spaceRoles.key,
-      name: spaceRoles.name,
-      permissions: spaceRoles.permissions,
-    })
-    .from(spaceRoles)
-    .where(and(eq(spaceRoles.id, assignment.custom_role_id), eq(spaceRoles.orgId, orgId)))
-    .limit(1)
-    // Held to the caller's commit: a concurrent `deleteSpaceRole` either counts this row (409)
-    // or wins first and this read finds nothing (404), never an FK violation on the write.
-    .for("key share");
-  if (!role) throw notFound("Space role not found");
+  // Held to the caller's commit: a concurrent `deleteSpaceRole` either counts this row (409)
+  // or wins first and this read finds nothing (404), never an FK violation on the write.
+  const role = await lockOrgSpaceRole(tx, orgId, assignment.custom_role_id);
   assertCanGrantSpaceRole(actorPermissions, { kind: "custom", role });
   return { presetRole: null, customRoleId: role.id };
 }

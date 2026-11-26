@@ -31,18 +31,20 @@ import {
 } from "@appstrate/db/schema";
 import { and, eq, ne, inArray, isNull, notInArray, count, sql, asc, type SQL } from "drizzle-orm";
 import type { OrgRole } from "../types/index.ts";
-import type { SpaceRolePreset } from "@appstrate/core/permissions";
-import type { PersonalSpaceRoleOverride } from "@appstrate/shared-types";
+import type { SpaceRoleAssignment } from "@appstrate/shared-types";
 import {
   customRoleOn,
+  lockOrgSpaceRole,
   MEMBERSHIP_COLUMNS,
   memberFromJoin,
-  overrideSurvivesRoleChange,
+  overrideAdmissible,
   PERSONAL_SPACE_DEFAULT_COLUMNS,
+  personalSpaceDefaultOn,
   personalSpaceDefaultRef,
-  type PersonalSpaceDefault,
+  psr,
   type SpaceRoleRef,
 } from "../lib/space-role.ts";
+import type { SpaceRoleColumns } from "../lib/space-role-assignment.ts";
 import {
   isUuid,
   lockOrganizationRow,
@@ -72,11 +74,7 @@ import { batchLoadScheduleEndUserNames, batchLoadUserNames } from "../lib/user-h
 import { actorFromIds } from "../lib/actor.ts";
 import { orphanPersonalSpaces } from "./spaces.ts";
 import { ensurePersonalSpace, isPlatformAccount, provisionOrg } from "@appstrate/db/provision-org";
-import type {
-  ConnectionShare,
-  RevokedSpaceAssignment,
-  SpaceRoleAssignment,
-} from "./space-members.ts";
+import type { ConnectionShare, RevokedSpaceAssignment } from "./space-members.ts";
 import { assignableRolesForMember, canRemoveMember } from "@appstrate/shared-types";
 import { endOAuthAccessInOrg } from "./oauth-token-revocation.ts";
 import { emitEvent } from "../lib/modules/module-loader.ts";
@@ -311,20 +309,7 @@ export async function updateOrgSettings(
       : null;
   const row = await db.transaction(async (tx) => {
     if (customRoleId !== null) {
-      const [role] = await tx
-        .select({ id: spaceRoles.id })
-        .from(spaceRoles)
-        .where(and(eq(spaceRoles.id, customRoleId), eq(spaceRoles.orgId, orgId)))
-        .for("key share");
-      if (!role) {
-        throw new ApiError({
-          status: 404,
-          code: "not_found",
-          title: "Not Found",
-          detail: `Role '${customRoleId}' not found in this organization`,
-          param: "personal_space_role",
-        });
-      }
+      await lockOrgSpaceRole(tx, orgId, customRoleId, "personal_space_role");
     }
     // Merge server-side via JSONB concatenation so concurrent admins toggling
     // different keys don't clobber each other (read-modify-write would race).
@@ -837,6 +822,8 @@ export async function updateMemberRole(
   previousRole: OrgRole;
   revoked: RevokedSpaceAssignment[];
   unsharedShares: ConnectionShare[];
+  /** The member's own personal-space role the change made inadmissible and dropped, if any. */
+  personalSpaceRoleCleared: SpaceRoleColumns | null;
 }> {
   const { disabledScheduleIds, ...result } = await db.transaction(async (tx) => {
     await lockOrganizationRow(tx, orgId);
@@ -861,19 +848,18 @@ export async function updateMemberRole(
           extra: [eq(organizationMembers.userId, targetUserId)],
         }),
       );
-    // A role change keeps the member's own role in their personal space only when it grants
-    // nothing the new role would not hold there without it (`overrideSurvivesRoleChange`): a
-    // restriction an admin chose survives, a `builder` override does not survive a demotion to
-    // guest, and an owner or admin never reads one. Deleted FIRST, so the promotion's `revoked`
-    // below never lists the personal space — its id is hidden from admins (RBAC spec §3.6), and
-    // the override is not a space assignment the audit reports.
+    // A role change keeps the member's own role in their personal space only when it is still
+    // admissible for the new org role (`overrideAdmissible`, the predicate the write applies): a
+    // `viewer` override survives a demotion to guest, a `builder` one does not, and an owner or
+    // admin never reads one. Dropped FIRST, so the promotion's `revoked` below never lists the
+    // personal space — its id is hidden from admins (RBAC spec §3.6) — and returned for the
+    // audit, since nobody asked for that deletion.
+    let personalSpaceRoleCleared: SpaceRoleColumns | null = null;
     if (role !== target.role) {
       const current = await readPersonalSpaceOverride(tx, orgId, targetUserId);
-      const keep =
-        current !== null &&
-        overrideSurvivesRoleChange(current.override, role, current.personalSpaceDefault);
-      // Without a live override this still clears a row left on an orphaned personal space.
-      if (!keep) await deletePersonalSpaceOverride(tx, orgId, targetUserId);
+      if (current && !overrideAdmissible(role, current)) {
+        personalSpaceRoleCleared = await deletePersonalSpaceOverride(tx, orgId, targetUserId);
+      }
     }
     // An admin/owner's explicit space rows are unreadable (the org role answers
     // first) and would silently restore on a later demotion (RBAC spec §3.2).
@@ -894,6 +880,7 @@ export async function updateMemberRole(
       previousRole: target.role,
       revoked,
       unsharedShares: unshared.shares,
+      personalSpaceRoleCleared,
       disabledScheduleIds: unshared.disabledScheduleIds,
     };
   });
@@ -901,47 +888,52 @@ export async function updateMemberRole(
   return result;
 }
 
-/** The role columns of a `space_members` row, as the audit records them. */
-type PersonalSpaceRoleColumns = {
-  presetRole: SpaceRolePreset | null;
-  customRoleId: string | null;
-};
-
 /**
- * `userId`'s own row on their live personal space of the org (the override of the org's
- * `personal_space_role`), with that setting read in the SAME statement (RBAC spec §4.4);
- * `null` when there is no override.
+ * `userId`'s own row on their personal space of the org (the override of the org's
+ * `personal_space_role`); `null` when there is no override. An orphaned space never holds one:
+ * the exit deletes the row before orphaning, and a return un-orphans before anything writes.
  */
 async function readPersonalSpaceOverride(
   tx: Pick<typeof db, "select">,
   orgId: string,
   userId: string,
-): Promise<{ override: SpaceRoleRef; personalSpaceDefault: PersonalSpaceDefault } | null> {
+): Promise<SpaceRoleRef | null> {
   const [row] = await tx
-    .select({ ...MEMBERSHIP_COLUMNS, ...PERSONAL_SPACE_DEFAULT_COLUMNS })
+    .select(MEMBERSHIP_COLUMNS)
     .from(spaceMembers)
     .innerJoin(
       spaces,
       and(eq(spaces.id, spaceMembers.spaceId), eq(spaces.ownerUserId, spaceMembers.userId)),
     )
-    .innerJoin(organizations, eq(organizations.id, spaces.orgId))
     .leftJoin(spaceRoles, customRoleOn)
-    .where(and(eq(spaces.orgId, orgId), eq(spaceMembers.userId, userId), isNull(spaces.orphanedAt)))
+    .where(and(eq(spaces.orgId, orgId), eq(spaceMembers.userId, userId)))
     .limit(1);
-  const member = row ? memberFromJoin(row) : null;
-  if (!row || !member) return null;
-  return { override: member.ref, personalSpaceDefault: personalSpaceDefaultRef(row) };
+  return row ? (memberFromJoin(row)?.ref ?? null) : null;
 }
 
 /**
- * Delete `userId`'s own row on their personal spaces of the org (the override of the org's
- * `personal_space_role`), live or orphaned. Returns the deleted role, `null` when there was none.
+ * The org's `personal_space_role` as read, decoded once: what a member would hold in their own
+ * personal space by the default alone, before the floor and the guest cap. `null` names no role.
+ */
+export async function getOrgPersonalSpaceDefault(orgId: string): Promise<SpaceRoleRef | null> {
+  const [row] = await db
+    .select(PERSONAL_SPACE_DEFAULT_COLUMNS)
+    .from(organizations)
+    .leftJoin(psr, personalSpaceDefaultOn)
+    .where(eq(organizations.id, orgId))
+    .limit(1);
+  return row ? personalSpaceDefaultRef(row) : null;
+}
+
+/**
+ * Delete `userId`'s own row on their personal space of the org (the override of the org's
+ * `personal_space_role`). Returns the deleted role, `null` when there was none.
  */
 async function deletePersonalSpaceOverride(
   tx: Pick<typeof db, "select" | "delete">,
   orgId: string,
   userId: string,
-): Promise<PersonalSpaceRoleColumns | null> {
+): Promise<SpaceRoleColumns | null> {
   const deleted = await tx
     .delete(spaceMembers)
     .where(
@@ -972,7 +964,8 @@ async function deletePersonalSpaceOverride(
  *
  * @throws 404 when the target is not a member or guest of the org, or the custom role is not
  *   one of its roles; 409 `redundant_space_role` when a set targets an owner or admin, who
- *   always hold `admin` there.
+ *   always hold `admin` there; 409 `guest_role_too_broad` when it gives a guest a role holding
+ *   more than `operator` ({@link overrideAdmissible}).
  * @returns the row's role before the write (`null`: there was none), for the audit.
  */
 export async function setPersonalSpaceRoleOverride(
@@ -980,7 +973,7 @@ export async function setPersonalSpaceRoleOverride(
   targetUserId: string,
   assignment: SpaceRoleAssignment | null,
   addedBy: string,
-): Promise<{ previous: PersonalSpaceRoleColumns | null }> {
+): Promise<{ previous: SpaceRoleColumns | null }> {
   return db.transaction(async (tx) => {
     const target = await lockOrgMember(tx, orgId, targetUserId);
     if (!target) throw notFound("Member not found");
@@ -998,19 +991,24 @@ export async function setPersonalSpaceRoleOverride(
         `${target.role}s always hold admin in their own personal space; an override would grant nothing`,
       );
     }
-    let values: PersonalSpaceRoleColumns;
+    let values: SpaceRoleColumns;
+    let ref: SpaceRoleRef;
     if ("preset_role" in assignment) {
       values = { presetRole: assignment.preset_role, customRoleId: null };
+      ref = { kind: "preset", preset: assignment.preset_role };
     } else {
-      const [role] = await tx
-        .select({ id: spaceRoles.id })
-        .from(spaceRoles)
-        .where(and(eq(spaceRoles.id, assignment.custom_role_id), eq(spaceRoles.orgId, orgId)))
-        .for("key share");
       // Held to commit: `deleteSpaceRole` locks the row `FOR UPDATE` before counting holders,
       // so a concurrent delete either waits and counts this row (409) or wins first (404 here).
-      if (!role) throw notFound("Space role not found");
+      const role = await lockOrgSpaceRole(tx, orgId, assignment.custom_role_id);
       values = { presetRole: null, customRoleId: role.id };
+      ref = { kind: "custom", role };
+    }
+    if (!overrideAdmissible(target.role, ref)) {
+      throw conflict(
+        "guest_role_too_broad",
+        "A guest never holds more than operator in their own personal space; " +
+          "this role grants permissions operator does not",
+      );
     }
     const space = await ensurePersonalSpace(tx, orgId, targetUserId);
     if (!space) throw notFound("Member not found");
@@ -1031,7 +1029,7 @@ export async function setPersonalSpaceRoleOverride(
 export async function listPersonalSpaceRoleOverrides(
   orgId: string,
   userIds?: readonly string[],
-): Promise<Map<string, PersonalSpaceRoleOverride>> {
+): Promise<Map<string, SpaceRoleAssignment>> {
   if (userIds?.length === 0) return new Map();
   const rows = await db
     .select({
@@ -1047,7 +1045,6 @@ export async function listPersonalSpaceRoleOverrides(
     .where(
       and(
         eq(spaces.orgId, orgId),
-        isNull(spaces.orphanedAt),
         userIds === undefined ? undefined : inArray(spaceMembers.userId, [...userIds]),
       ),
     );

@@ -54,12 +54,7 @@ import {
   personaFor,
   personaMemberships,
 } from "../lib/view-as.ts";
-import {
-  ADMIN_ROLE_REF,
-  resolveSpaceRole,
-  toSpaceRoleWire,
-  type SpaceRoleRef,
-} from "../lib/space-role.ts";
+import { resolveSpaceRole, toSpaceRoleWire, type SpaceRoleRef } from "../lib/space-role.ts";
 import { enterSpaceById } from "../middleware/space-context.ts";
 import { isUserPrincipal } from "../lib/principal.ts";
 import {
@@ -452,14 +447,8 @@ export function createSpacesRouter() {
       // The creator holds org-level `spaces:write`, i.e. owner or admin, so
       // the resolver answers preset `admin` without any row — and no row is
       // written, per RBAC spec §6.3.
-      // A new team space is never personal, so the personal-space default is never read.
-      const role = resolveSpaceRole(
-        callerOrgRole(c),
-        space,
-        null,
-        callerPersonalOwnerId(c),
-        ADMIN_ROLE_REF,
-      );
+      // A new team space is never personal: no personal-space default to pass.
+      const role = resolveSpaceRole(callerOrgRole(c), space, null, callerPersonalOwnerId(c));
       return c.json(spaceWireForCaller(c, space, role), 201);
     } catch (err) {
       if (err instanceof ApiError) throw err;
@@ -489,7 +478,7 @@ export function createSpacesRouter() {
         access.space,
         access.member,
         callerPersonalOwnerId(c),
-        access.personalSpaceDefault,
+        access.personalDefault,
       );
       if (!isSpaceVisibleTo(orgRole, access.space, role)) {
         throw notFound(`Space '${spaceId}' not found in this organization`);
@@ -626,15 +615,9 @@ export function createSpacesRouter() {
       resourceId: space.id,
     });
     // The caller now holds `admin` here through their org role, so the
-    // projection is the ordinary one. A converted space is a team space: the
-    // personal-space default is never read.
-    const role = resolveSpaceRole(
-      callerOrgRole(c),
-      space,
-      null,
-      callerPersonalOwnerId(c),
-      ADMIN_ROLE_REF,
-    );
+    // projection is the ordinary one. A converted space is a team space: no
+    // personal-space default to pass.
+    const role = resolveSpaceRole(callerOrgRole(c), space, null, callerPersonalOwnerId(c));
     return c.json(spaceWireForCaller(c, space, role));
   });
 

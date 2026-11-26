@@ -13,7 +13,9 @@ import { describe, it, expect, beforeEach } from "bun:test";
 import { eq } from "drizzle-orm";
 import { organizations, spaceMembers, spaceRoles } from "@appstrate/db/schema";
 import { getTestApp } from "../../helpers/app.ts";
+import { isEmbeddedDb } from "@appstrate/db/client";
 import { db, truncateAll } from "../../helpers/db.ts";
+import { backendPid, waitsOn } from "../../helpers/pg-locks.ts";
 import { expectProblem } from "../../helpers/assertions.ts";
 import { SPACE_ROLE_PRESETS } from "@appstrate/core/permissions";
 import {
@@ -28,9 +30,12 @@ import {
 import {
   seedSpacePackage,
   seedPackage,
+  seedSpace,
   seedSpaceMember,
   seedSpaceRole,
 } from "../../helpers/seed.ts";
+import { createClient, updateClient } from "../../../src/modules/oidc/services/oauth-admin.ts";
+import { loadClientSignupPolicy } from "../../../src/modules/oidc/services/orgmember-mapping.ts";
 
 const app = getTestApp();
 
@@ -473,75 +478,140 @@ describe("custom space roles", () => {
     });
   });
 
-  // One of two orders, never a third: the writer commits first and the delete 409s, or the
-  // delete commits first and the writer 404s. Afterwards nothing names a role that is gone.
-  describe("DELETE racing a writer that names the role", () => {
-    const roleExists = async (id: string) =>
-      (await db.select({ id: spaceRoles.id }).from(spaceRoles).where(eq(spaceRoles.id, id)))
-        .length === 1;
-
-    async function race(write: () => Response | Promise<Response>, id: string) {
-      const [written, deleted] = await Promise.all([write(), del(id)]);
-      const statuses = [written.status, deleted.status];
-      const body = `${await written.clone().text()} | ${await deleted.clone().text()}`;
-      for (const status of statuses) expect(status, body).toBeLessThan(500);
-      const writerFirst = statuses[0] === 200 || statuses[0] === 201;
-      expect(statuses, body).toEqual(writerFirst ? [statuses[0]!, 409] : [404, 204]);
-      expect(await roleExists(id)).toBe(writerFirst);
-      return writerFirst;
+  // Every writer naming a custom role reads it `FOR KEY SHARE` in its own write transaction, and
+  // `deleteSpaceRole` locks it `FOR UPDATE` before counting its holders. PGlite serializes
+  // everything, so these only discriminate on a real PostgreSQL: a transaction holds the
+  // delete's lock (and deletes the role, as a delete with no holder does), the writer starts,
+  // `pg_locks` proves it is WAITING on it, and once the delete commits the writer must answer
+  // 404 and leave nothing naming the role. Without the share lock it would not wait, and it
+  // would write a reference to a role about to be deleted.
+  describe("a writer naming a role waits for a delete that holds it", () => {
+    /** Hold the role's `FOR UPDATE` lock, deleting the role, until `release()`. */
+    async function holdRoleDeletion(id: string) {
+      const locked = Promise.withResolvers<number>();
+      const released = Promise.withResolvers<void>();
+      const held = db.transaction(async (tx) => {
+        await tx
+          .select({ id: spaceRoles.id })
+          .from(spaceRoles)
+          .where(eq(spaceRoles.id, id))
+          .for("update");
+        await tx.delete(spaceRoles).where(eq(spaceRoles.id, id));
+        locked.resolve(await backendPid(tx));
+        await released.promise;
+      });
+      const pid = await locked.promise;
+      return {
+        pid,
+        release: async () => {
+          released.resolve();
+          await held;
+        },
+      };
     }
 
-    it("PATCH settings personal_space_role", async () => {
-      const role = await createRole({ key: "race-setting" });
-      const writerFirst = await race(
-        () => req("PATCH", `/api/orgs/${owner.orgId}/settings`, { personal_space_role: role.id }),
-        role.id,
+    /** Start `write`, prove it waits on the delete, release the delete, return the write's outcome. */
+    async function writeBehindDelete<T>(roleId: string, write: () => T | Promise<T>): Promise<T> {
+      const deletion = await holdRoleDeletion(roleId);
+      const writing = Promise.resolve(write());
+      // The write may fail once released; settle it before the wait can throw.
+      const settled = writing.then(
+        (value) => ({ value }),
+        (error: unknown) => ({ error }),
       );
-      const [org] = await db
-        .select({ settings: organizations.orgSettings })
-        .from(organizations)
-        .where(eq(organizations.id, owner.orgId));
-      const stored = (org?.settings as { personal_space_role?: string } | null)
-        ?.personal_space_role;
-      expect(stored === role.id).toBe(writerFirst);
-    });
+      try {
+        await waitsOn(deletion.pid);
+      } finally {
+        await deletion.release();
+      }
+      const outcome = await settled;
+      if ("error" in outcome) throw outcome.error;
+      return outcome.value;
+    }
 
-    it("PUT a member's personal-space override", async () => {
-      const role = await createRole({ key: "race-override" });
-      const user = await createTestUser();
-      await addOrgMember(owner.orgId, user.id, "member");
-      const writerFirst = await race(
-        () =>
+    const referencesTo = async (roleId: string) =>
+      (
+        await db
+          .select({ id: spaceMembers.userId })
+          .from(spaceMembers)
+          .where(eq(spaceMembers.customRoleId, roleId))
+      ).length;
+
+    it.skipIf(isEmbeddedDb)(
+      "PATCH settings personal_space_role answers 404 and stores nothing",
+      async () => {
+        const role = await createRole({ key: "wait-setting" });
+        const res = await writeBehindDelete(role.id, () =>
+          req("PATCH", `/api/orgs/${owner.orgId}/settings`, { personal_space_role: role.id }),
+        );
+        await expectProblem(res, 404);
+        const [org] = await db
+          .select({ settings: organizations.orgSettings })
+          .from(organizations)
+          .where(eq(organizations.id, owner.orgId));
+        expect(
+          (org?.settings as { personal_space_role?: string } | null)?.personal_space_role,
+        ).toBeUndefined();
+      },
+    );
+
+    it.skipIf(isEmbeddedDb)(
+      "PUT a personal-space override answers 404 and writes no row",
+      async () => {
+        const role = await createRole({ key: "wait-override" });
+        const user = await createTestUser();
+        await addOrgMember(owner.orgId, user.id, "member");
+        const res = await writeBehindDelete(role.id, () =>
           req("PUT", `/api/orgs/${owner.orgId}/members/${user.id}/personal-space-role`, {
             custom_role_id: role.id,
           }),
-        role.id,
-      );
-      const rows = await db
-        .select({ customRoleId: spaceMembers.customRoleId })
-        .from(spaceMembers)
-        .where(eq(spaceMembers.userId, user.id));
-      expect(rows.some((row) => row.customRoleId === role.id)).toBe(writerFirst);
-    });
+        );
+        await expectProblem(res, 404);
+        expect(await referencesTo(role.id)).toBe(0);
+      },
+    );
 
-    it("POST a space member", async () => {
-      const role = await createRole({ key: "race-member" });
+    it.skipIf(isEmbeddedDb)("POST a space member answers 404 and writes no row", async () => {
+      const role = await createRole({ key: "wait-member" });
       const user = await createTestUser();
       await addOrgMember(owner.orgId, user.id, "member");
-      const writerFirst = await race(
-        () =>
-          req("POST", `/api/spaces/${owner.defaultSpaceId}/members`, {
-            userId: user.id,
-            custom_role_id: role.id,
-          }),
-        role.id,
+      const res = await writeBehindDelete(role.id, () =>
+        req("POST", `/api/spaces/${owner.defaultSpaceId}/members`, {
+          userId: user.id,
+          custom_role_id: role.id,
+        }),
       );
-      const rows = await db
-        .select({ customRoleId: spaceMembers.customRoleId })
-        .from(spaceMembers)
-        .where(eq(spaceMembers.userId, user.id));
-      expect(rows.some((row) => row.customRoleId === role.id)).toBe(writerFirst);
+      await expectProblem(res, 404);
+      expect(await referencesTo(role.id)).toBe(0);
     });
+
+    it.skipIf(isEmbeddedDb)(
+      "an OIDC sign-up policy naming the role is refused with 404 and not stored",
+      async () => {
+        const role = await createRole({ key: "wait-signup" });
+        const other = await seedSpace({ orgId: owner.orgId });
+        const client = await createClient({
+          level: "org",
+          name: "Signup",
+          referencedOrgId: owner.orgId,
+          redirectUris: ["https://example.com/callback"],
+          signupRole: "guest",
+          signupSpaceAssignments: [{ spaceId: other.id, preset_role: "viewer" }],
+        });
+        const refused = await writeBehindDelete(role.id, () =>
+          updateClient(client.clientId, {
+            signupSpaceAssignments: [{ spaceId: other.id, custom_role_id: role.id }],
+          }).then(
+            () => null,
+            (error: unknown) => error,
+          ),
+        );
+        expect(refused).toMatchObject({ status: 404 });
+        expect((await loadClientSignupPolicy(client.clientId))?.signupSpaceAssignments).toEqual([
+          { spaceId: other.id, preset_role: "viewer" },
+        ]);
+      },
+    );
   });
 
   describe("a custom role is assignable and grants exactly its permissions", () => {

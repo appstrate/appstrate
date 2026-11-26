@@ -4,9 +4,8 @@ import { isSpaceRolePreset } from "@appstrate/core/permissions";
 import type { components } from "../api/client";
 import {
   spaceRoleAssignment,
+  spaceRoleLabel,
   spaceRoleValue,
-  type RoleObject,
-  type SpaceRoleOption,
   type SpaceRolePreset,
 } from "../hooks/use-roles";
 
@@ -19,45 +18,23 @@ export const FOLLOW_ORG_DEFAULT = "org-default";
 const DEFAULT_STORED_ROLE = "admin";
 
 /** A stored org setting is a preset key or a custom role id (`srl_…`); a select carries `preset:<key>` / `custom:<id>`. */
-export function storedRoleToSelectValue(stored: unknown): string {
-  const key = typeof stored === "string" && stored ? stored : DEFAULT_STORED_ROLE;
+export function storedRoleToSelectValue(stored: string | undefined): string {
+  const key = stored || DEFAULT_STORED_ROLE;
   return isSpaceRolePreset(key)
     ? spaceRoleValue({ preset_role: key })
     : spaceRoleValue({ custom_role_id: key });
 }
 
 /**
- * What « selon l'organisation » resolves to: the org setting — for a guest too, unless it lets
- * them author agents (`agents:write`), in which case a guest holds `operator`. Judged on the
- * catalogue entry's permissions; before the catalogue answers, on the authoring presets. A stored
- * custom role the loaded catalogue lacks resolves to `viewer`, as the server resolves it.
+ * What « selon l'organisation » resolves to for a member: the role the server reports
+ * (`personal_space_default_role`, guest cap applied), named as the role selects name it. `null`
+ * when the org default names no role of the organization: the setting is invalid, said so.
  */
-export function followLabel(
-  member: OrgMember,
-  options: SpaceRoleOption[],
-  stored: unknown,
-  unknown: string,
-  roles?: readonly Pick<RoleObject, "kind" | "key" | "id" | "permissions">[],
-): string {
-  const valueOf = (role: Pick<RoleObject, "kind" | "key" | "id">) =>
-    spaceRoleValue({
-      preset_role: role.kind === "preset" ? role.key : null,
-      custom_role_id: role.id,
-    });
-  const storedValue = storedRoleToSelectValue(stored);
-  const gone =
-    !!roles &&
-    spaceRoleAssignment(storedValue).custom_role_id !== undefined &&
-    !roles.some((role) => valueOf(role) === storedValue);
-  const value = gone ? spaceRoleValue({ preset_role: "viewer" }) : storedValue;
-  const entry = roles?.find((role) => valueOf(role) === value);
-  const authors = entry
-    ? entry.permissions.includes("agents:write")
-    : value === spaceRoleValue({ preset_role: "admin" }) ||
-      value === spaceRoleValue({ preset_role: "builder" });
-  const shown =
-    member.role === "guest" && authors ? spaceRoleValue({ preset_role: "operator" }) : value;
-  return options.find((option) => option.value === shown)?.label ?? unknown;
+export function followLabel(member: OrgMember, t: (key: string) => string): string {
+  return (
+    spaceRoleLabel(member.personal_space_default_role, t) ??
+    t("settings:userDetail.personalSpaceRoleNoDefault")
+  );
 }
 
 /** The org setting's PATCH body for a picked select value. */

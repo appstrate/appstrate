@@ -9,18 +9,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- `studio:read`, a space-level core permission (`CoreResources.studio`): it opens the Studio's
-  screens in the dashboard and gates no API route.
-- `personalSpaceRoleSchema`, `SPACE_ROLE_ID_REGEX` and `isSpaceRolePreset` in `@appstrate/core/permissions`.
+- `SPACE_ROLE_ID_REGEX` and `isSpaceRolePreset` in `@appstrate/core/permissions`.
 
 ### Changed
 
-- **`orgSettingsReadSchema.personal_space_role`** — BREAKING. The output type widens from
-  `"admin" | "operator"` to a space-role preset key (`admin`, `builder`, `operator`, `runner`,
-  `viewer`) or a custom space role id (`srl_` + canonical UUID). `orgSettingsSchema` accepts the
-  same values on input. The read default stays `admin`; stored `admin` and `operator` remain valid.
-- **New core resource `studio`** (`CoreResource`) — BREAKING. A module that declares a `studio`
-  permission resource is refused at load (`cannot redefine core resource`).
+- **New core resource `studio`, permission `studio:read`** — BREAKING. The `CoreResource` and
+  `Permission` unions widen (`CoreResources.studio`; the `Permission` type gains `studio:read`), and
+  a module that declares a `studio` permission resource is refused at load
+  (`cannot redefine core resource`). The permission is space-level, opens the Studio's screens in the dashboard and gates
+  no API route.
+- **`orgSettingsReadSchema.personal_space_role`** — BREAKING. The output type (`OrgSettings`)
+  widens from `"admin" | "operator"` to a space-role preset key (`admin`, `builder`, `operator`,
+  `runner`, `viewer`) or a custom space role id (`srl_` + canonical UUID). `orgSettingsSchema`
+  accepts the same values on input. The read default stays `admin`; stored `admin` and `operator`
+  remain valid.
 
 ### Removed
 

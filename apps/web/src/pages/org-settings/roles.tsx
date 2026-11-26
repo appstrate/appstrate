@@ -52,6 +52,7 @@ import {
 } from "../../lib/permission-labels";
 import { rolesPageDeeds } from "./rbac-deeds";
 import { errorMessage } from "../../lib/mutation-error";
+import { roleInUseMessage } from "../../lib/role-in-use";
 import type { ViewAsPreset } from "../../lib/view-as-preset";
 
 const ROLE_TABS = ["org", "space"] as const;
@@ -114,21 +115,8 @@ export function OrgSettingsRolesPage() {
       {
         onSuccess: () => setConfirmDelete(null),
         onError: (err) => {
-          // 409 `role_in_use` reports two holders — live memberships and
-          // PENDING invitations that assign the role. Reporting only the first
-          // makes the refusal look wrong when the blocker is an invitation.
           if (err instanceof ApiError && err.code === "role_in_use") {
-            const members = Number(err.details?.member_count ?? 0);
-            const invitations = Number(err.details?.pending_invitation_count ?? 0);
-            setDeleteError(
-              [
-                err.details?.org_default === true ? t("roles.inUseOrgDefault") : null,
-                members > 0 ? t("roles.inUse", { count: members }) : null,
-                invitations > 0 ? t("roles.inUseInvitations", { count: invitations }) : null,
-              ]
-                .filter(Boolean)
-                .join(" ") || t("roles.inUse", { count: 0 }),
-            );
+            setDeleteError(roleInUseMessage(err.details, t));
             return;
           }
           setDeleteError(errorMessage(err));

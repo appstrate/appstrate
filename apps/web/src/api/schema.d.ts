@@ -3396,7 +3396,7 @@ export interface paths {
         get?: never;
         /**
          * Change member role
-         * @description Change a member's role. Owners can manage every other member, owners included, and are the only ones who may assign `owner` or change an owner's role; admins can manage guests and members and assign `guest`, `member` or `admin`. Nobody changes their own role. The caller is judged on their current role in the organization. Granting `owner` or changing an owner's role requires a dashboard session — any token (API key, OAuth/MCP client, CLI) is refused with 403 even when its user is an owner.
+         * @description Change a member's role. Owners can manage every other member, owners included, and are the only ones who may assign `owner` or change an owner's role; admins can manage guests and members and assign `guest`, `member` or `admin`. Nobody changes their own role. The caller is judged on their current role in the organization. Granting `owner` or changing an owner's role requires a dashboard session — any token (API key, OAuth/MCP client, CLI) is refused with 403 even when its user is an owner. The member's own role in their personal space (`setMemberPersonalSpaceRole`) is kept only when it is still admissible for the new role, and dropped otherwise (audited as `personalSpaceRoleCleared`).
          */
         put: operations["changeMemberRole"];
         post?: never;
@@ -3440,13 +3440,13 @@ export interface paths {
         get?: never;
         /**
          * Set a member's role in their personal space
-         * @description Give one member or guest their own role in their personal space, overriding the organization's `personal_space_role` default (and, for a guest, the `operator` they hold otherwise when the default lets them author agents). Body: exactly one of `preset_role` / `custom_role_id`; a `custom_role_id` must name a role of this organization (404 otherwise). Any role short of `admin` also grants `agents:delete`, `skills:delete`, `integrations:delete` and `schedules:delete` there. The personal space is provisioned if the member has none yet. Owners and admins always hold `admin` in their own personal space: targeting one is `409 redundant_space_role`. A change of the member's org role keeps the override only when it grants nothing the new role would hold there without it: a narrower override survives a demotion to guest or a return to member, a broader one is dropped, and so is any override on a promotion to owner or admin. Leaving or being removed drops it too; nothing restores a dropped override. A custom role named by an override cannot be deleted (`409 role_in_use`). Same guard as `changeMemberRole` (`members:change-role`).
+         * @description Give one member or guest their own role in their personal space, overriding the organization's `personal_space_role` default Body: exactly one of `preset_role` / `custom_role_id`; a `custom_role_id` must name a role of this organization (404 otherwise). A member holds the chosen role plus, short of `admin`, `agents:delete`, `skills:delete`, `integrations:delete` and `schedules:delete` there. A guest holds it capped to `operator` (the permissions the chosen role shares with `operator`, plus the deletes), so a role granting more than `operator` is refused for a guest: `409 guest_role_too_broad`. The personal space is provisioned if the member has none yet. Owners and admins always hold `admin` in their own personal space: targeting one is `409 redundant_space_role`. A change of the member's org role keeps the override only when it is still admissible for the new role, by the same rule as this write: any override survives a move to member, one within `operator` (`viewer`, `runner`, `operator`, or such a custom role) survives a demotion to guest, a broader one (`builder`, `admin`) is dropped, and so is any override on a promotion to owner or admin. A dropped override is recorded in the `org.member_role_updated` audit entry (`personalSpaceRoleCleared`). Leaving or being removed drops it too; nothing restores a dropped override. A custom role named by an override cannot be deleted (`409 role_in_use`). Same guard as `changeMemberRole` (`members:change-role`).
          */
         put: operations["setMemberPersonalSpaceRole"];
         post?: never;
         /**
          * Return a member to the organization default in their personal space
-         * @description Drop the member's own role in their personal space, so they hold the organization's `personal_space_role` again (for a guest, `operator` when that default lets them author agents). Idempotent: 204 whether or not an override was set. 404 when the user is not a member of the organization. Same guard as `changeMemberRole` (`members:change-role`).
+         * @description Drop the member's own role in their personal space, so they hold the organization's `personal_space_role` again (for a guest, capped to `operator`). Idempotent: 204 whether or not an override was set. 404 when the user is not a member of the organization. Same guard as `changeMemberRole` (`members:change-role`).
          */
         delete: operations["clearMemberPersonalSpaceRole"];
         options?: never;
@@ -6953,6 +6953,13 @@ export interface components {
             } | {
                 custom_role_id: string;
             };
+            /** @description The role this member would hold in their own personal space by the organization's `personal_space_role` default alone, without any override of their own and with the guest cap applied: `admin` for an owner or admin, `operator` for a guest under a default broader than `operator`. `null` when the default names no role of the organization, and for every member when the caller lacks `members:change-role`: only a caller who may change the member's role reads it, alongside `personal_space_role`. The platform's delete permissions held on top of the role are not part of it. */
+            personal_space_default_role: {
+                /** @enum {string} */
+                kind: "preset" | "custom";
+                key: string;
+                name: string;
+            } | null;
         };
         OrgMemberSpace: {
             id: string;
@@ -7144,7 +7151,7 @@ export interface components {
             dashboard_sso_enabled?: boolean;
             /** @description Whether members may bring personal model credentials. Defaults to true. When false, adding one (`owner_type: user` on `POST /api/model-provider-credentials` or on `POST /api/model-providers-oauth/pairing`) answers `403 personal_model_credentials_disabled`, and the personal credentials that already exist serve nothing: a model the organization leaves unbound is refused (`409 model_credential_required`), and a run on one is refused at its next call. Always present on read; optional on PATCH. */
             personal_model_credentials: boolean;
-            /** @description The role an organization member or guest holds by default in their own personal space: a preset key (`admin`, `builder`, `operator`, `runner`, `viewer`) or the id of one of this organization's custom space roles (`srl_…`). Defaults to `admin`. On write, a custom id that is not a role of this organization answers `404 not_found`; while a custom role is named here it cannot be deleted (`409 role_in_use` with `org_default: true`). Any role short of `admin` also grants `agents:delete`, `skills:delete`, `integrations:delete` and `schedules:delete` there, so the member can still remove what they already have. Below `admin` the member loses what the role withholds — e.g. without `agents:write` no create, edit or inline run (`403 inline_run_not_allowed_in_space`); a plain launch runs the published version (`404 no_published_version` without one) and an explicit draft launch requires write access in the package's home space (`403 draft_not_writable`). Existing schedules keep their previously authorized draft selectors. Owners and admins always hold `admin` in their own personal space. A guest takes this default too, with the deletes above, unless the default lets them author agents (it grants `agents:write`: `admin`, `builder`, or such a custom role), in which case a guest holds plain `operator` (so with the default absent a guest holds `operator`). A member's or guest's own override (`PUT /api/orgs/{orgId}/members/{userId}/personal-space-role`) wins over this default. A custom role that no longer exists resolves to `viewer` plus the deletes above, never to `admin`. Computed on every request: changing it takes effect with no other write. Always present on read; optional on PATCH. */
+            /** @description The role an organization member or guest holds by default in their own personal space: a preset key (`admin`, `builder`, `operator`, `runner`, `viewer`) or the id of one of this organization's custom space roles (`srl_…`). Defaults to `admin`. On write, a custom id that is not a role of this organization answers `404 not_found`; while a custom role is named here it cannot be deleted (`409 role_in_use` with `org_default: true`). A member holds the role chosen (this default, or their own override) plus `agents:delete`, `skills:delete`, `integrations:delete` and `schedules:delete` short of `admin`, so the member can still remove what they already have. Below `admin` the member loses what the role withholds — e.g. without `agents:write` no create, edit or inline run (`403 inline_run_not_allowed_in_space`); a plain launch runs the published version (`404 no_published_version` without one) and an explicit draft launch requires write access in the package's home space (`403 draft_not_writable`). Existing schedules keep their previously authorized draft selectors. Owners and admins always hold `admin` in their own personal space. A guest takes this default too, always capped to `operator`: the permissions of the chosen role that `operator` also grants, plus the deletes above. A default broader than `operator` (`admin`, `builder`) gives a guest `operator`; a narrower one (`viewer`, `runner`) gives the guest that role as it is; a custom role gives the guest that role restricted to what `operator` grants. Restricting the default never gives a guest more. A member's or guest's own override (`PUT /api/orgs/{orgId}/members/{userId}/personal-space-role`) wins over this default. A custom role that no longer exists resolves to NO role (the member without an override holds nothing in their own space and does not see it listed, and an error is logged), never to `admin` and never to a narrower preset. Computed on every request: changing it takes effect with no other write. Always present on read; optional on PATCH. */
             personal_space_role: string & (("admin" | "builder" | "operator" | "runner" | "viewer") | string);
         };
         Organization: {
@@ -20794,7 +20801,12 @@ export interface operations {
                      *               }
                      *             }
                      *           ],
-                     *           "personal_space_role": null
+                     *           "personal_space_role": null,
+                     *           "personal_space_default_role": {
+                     *             "kind": "preset",
+                     *             "key": "admin",
+                     *             "name": "admin"
+                     *           }
                      *         },
                      *         {
                      *           "userId": "usr_def456",
@@ -20816,6 +20828,11 @@ export interface operations {
                      *           ],
                      *           "personal_space_role": {
                      *             "preset_role": "builder"
+                     *           },
+                     *           "personal_space_default_role": {
+                     *             "kind": "preset",
+                     *             "key": "admin",
+                     *             "name": "admin"
                      *           }
                      *         }
                      *       ],
@@ -21962,7 +21979,12 @@ export interface operations {
                      *           }
                      *         }
                      *       ],
-                     *       "personal_space_role": null
+                     *       "personal_space_role": null,
+                     *       "personal_space_default_role": {
+                     *         "kind": "preset",
+                     *         "key": "admin",
+                     *         "name": "admin"
+                     *       }
                      *     }
                      */
                     "application/json": components["schemas"]["OrgMember"];
@@ -22118,7 +22140,7 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
-            /** @description The target is an owner or admin, who always hold `admin` in their personal space (`redundant_space_role`) */
+            /** @description The target is an owner or admin, who always hold `admin` in their personal space (`redundant_space_role`), or a guest and the role grants more than `operator` (`guest_role_too_broad`) */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -22852,7 +22874,7 @@ export interface operations {
                     dashboard_sso_enabled?: boolean;
                     /** @description Whether members may bring personal model credentials. Defaults to true. When false, adding one (`owner_type: user` on `POST /api/model-provider-credentials` or on `POST /api/model-providers-oauth/pairing`) answers `403 personal_model_credentials_disabled`, and the personal credentials that already exist serve nothing: a model the organization leaves unbound is refused (`409 model_credential_required`), and a run on one is refused at its next call. Always present on read; optional on PATCH. */
                     personal_model_credentials?: boolean;
-                    /** @description The role an organization member or guest holds by default in their own personal space: a preset key (`admin`, `builder`, `operator`, `runner`, `viewer`) or the id of one of this organization's custom space roles (`srl_…`). Defaults to `admin`. On write, a custom id that is not a role of this organization answers `404 not_found`; while a custom role is named here it cannot be deleted (`409 role_in_use` with `org_default: true`). Any role short of `admin` also grants `agents:delete`, `skills:delete`, `integrations:delete` and `schedules:delete` there, so the member can still remove what they already have. Below `admin` the member loses what the role withholds — e.g. without `agents:write` no create, edit or inline run (`403 inline_run_not_allowed_in_space`); a plain launch runs the published version (`404 no_published_version` without one) and an explicit draft launch requires write access in the package's home space (`403 draft_not_writable`). Existing schedules keep their previously authorized draft selectors. Owners and admins always hold `admin` in their own personal space. A guest takes this default too, with the deletes above, unless the default lets them author agents (it grants `agents:write`: `admin`, `builder`, or such a custom role), in which case a guest holds plain `operator` (so with the default absent a guest holds `operator`). A member's or guest's own override (`PUT /api/orgs/{orgId}/members/{userId}/personal-space-role`) wins over this default. A custom role that no longer exists resolves to `viewer` plus the deletes above, never to `admin`. Computed on every request: changing it takes effect with no other write. Always present on read; optional on PATCH. */
+                    /** @description The role an organization member or guest holds by default in their own personal space: a preset key (`admin`, `builder`, `operator`, `runner`, `viewer`) or the id of one of this organization's custom space roles (`srl_…`). Defaults to `admin`. On write, a custom id that is not a role of this organization answers `404 not_found`; while a custom role is named here it cannot be deleted (`409 role_in_use` with `org_default: true`). A member holds the role chosen (this default, or their own override) plus `agents:delete`, `skills:delete`, `integrations:delete` and `schedules:delete` short of `admin`, so the member can still remove what they already have. Below `admin` the member loses what the role withholds — e.g. without `agents:write` no create, edit or inline run (`403 inline_run_not_allowed_in_space`); a plain launch runs the published version (`404 no_published_version` without one) and an explicit draft launch requires write access in the package's home space (`403 draft_not_writable`). Existing schedules keep their previously authorized draft selectors. Owners and admins always hold `admin` in their own personal space. A guest takes this default too, always capped to `operator`: the permissions of the chosen role that `operator` also grants, plus the deletes above. A default broader than `operator` (`admin`, `builder`) gives a guest `operator`; a narrower one (`viewer`, `runner`) gives the guest that role as it is; a custom role gives the guest that role restricted to what `operator` grants. Restricting the default never gives a guest more. A member's or guest's own override (`PUT /api/orgs/{orgId}/members/{userId}/personal-space-role`) wins over this default. A custom role that no longer exists resolves to NO role (the member without an override holds nothing in their own space and does not see it listed, and an error is logged), never to `admin` and never to a narrower preset. Computed on every request: changing it takes effect with no other write. Always present on read; optional on PATCH. */
                     personal_space_role?: string & (("admin" | "builder" | "operator" | "runner" | "viewer") | string);
                 };
             };

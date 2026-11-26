@@ -7,14 +7,7 @@
 
 import { chatActsIn } from "@appstrate/core/chat-contract";
 import { CORE_RESOURCE_LEVELS } from "@appstrate/core/permissions";
-import {
-  grantsRoute,
-  isUnder,
-  ROUTE_ACCESS,
-  SETTINGS_INDEX,
-  STUDIO_PERMISSION,
-  type RoutePath,
-} from "./route-access";
+import { grantsRoute, isUnder, ROUTE_ACCESS, SETTINGS_INDEX, type RoutePath } from "./route-access";
 
 /** Only `member` access enters: scoping to a listed `access: "none"` space 403s every request. */
 export function isSpaceEnterable(space: { access: string }): boolean {
@@ -63,10 +56,8 @@ export const listAdmits =
 /** The product a list is shown in: the Studio's screens also ask the Studio of each space. */
 export type ListSurface = "studio" | "chat";
 
-export const listAdmitsOn =
-  (list: SpaceList, surface: ListSurface) =>
-  (can: SpaceGate): boolean =>
-    listAdmits(list)(can) && (surface === "chat" || can(STUDIO_PERMISSION));
+export const listAdmitsOn = (list: SpaceList, surface: ListSurface) =>
+  surface === "chat" ? listAdmits(list) : routeAdmits(LIST_ROUTE[list]);
 
 interface ListedSpace {
   id: string;

@@ -12,42 +12,40 @@ installFakeStorage({ __APP_CONFIG__: { features: {}, trustedOrigins: [] } });
 
 const { PersonalSpaceRoleField } =
   await import("../org-settings/member-personal-space-role-field.tsx");
-const { FOLLOW_ORG_DEFAULT, followLabel, memberOverrideToSelectValue } =
-  await import("../../lib/personal-space-role.ts");
+const { followLabel } = await import("../../lib/personal-space-role.ts");
 const { orgStore } = await import("../../stores/org-store.ts");
 const { render } = await import("../../test/render.tsx");
+const { CUSTOM_ROLE_ID, ORG_ID, seedOrgAndRoles } =
+  await import("../../test/personal-space-role-fixtures.ts");
 const i18nModule = await import("../../i18n.ts");
 
 await i18nModule.i18nReady;
 await i18nModule.default.changeLanguage("fr");
 
 type OrgMember = components["schemas"]["OrgMember"];
-const ORG_ID = "org_a";
-const CUSTOM_ID = "srl_triage";
 
-function member(role: OrgMember["role"], override: OrgMember["personal_space_role"]): OrgMember {
+function member(
+  role: OrgMember["role"],
+  override: OrgMember["personal_space_role"],
+  defaultRole: OrgMember["personal_space_default_role"] = {
+    kind: "preset",
+    key: "admin",
+    name: "admin",
+  },
+): OrgMember {
   return {
     userId: "usr_1",
     role,
     joinedAt: "2026-07-01T10:00:00.000Z",
     spaces: [],
     personal_space_role: override,
+    personal_space_default_role: defaultRole,
   };
 }
 
 function renderField(m: OrgMember, permissions: string[]): string {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retryOnMount: false } } });
-  queryClient.setQueryData(
-    ["orgs"],
-    [{ id: ORG_ID, name: "Acme", slug: "acme", role: "admin", permissions, createdAt: "x" }],
-  );
-  queryClient.setQueryData(["get", "/api/roles", { params: { header: { "X-Org-Id": ORG_ID } } }], {
-    data: [
-      { id: null, kind: "preset", key: "admin", name: "admin", permissions: ["agents:write"] },
-      { id: null, kind: "preset", key: "operator", name: "operator", permissions: ["agents:run"] },
-      { id: CUSTOM_ID, kind: "custom", key: "triage", name: "Triage", permissions: [] },
-    ],
-  });
+  seedOrgAndRoles(queryClient, permissions);
   queryClient.setQueryData(
     ["get", "/api/orgs/{orgId}/settings", { params: { path: { orgId: ORG_ID } } }],
     { personal_model_credentials: true, personal_space_role: "operator" },
@@ -72,7 +70,7 @@ describe("the personal space role field of the user sheet", () => {
   it("draws the control for a member with an override and for one following the default", () => {
     for (const override of [
       { preset_role: "admin" as const },
-      { custom_role_id: CUSTOM_ID },
+      { custom_role_id: CUSTOM_ROLE_ID },
       null,
     ]) {
       const html = renderField(member("member", override), ["members:change-role"]);
@@ -81,53 +79,21 @@ describe("the personal space role field of the user sheet", () => {
     }
   });
 
-  it("reads each override back to its select value", () => {
-    expect(memberOverrideToSelectValue({ preset_role: "admin" })).toBe("preset:admin");
-    expect(memberOverrideToSelectValue({ custom_role_id: CUSTOM_ID })).toBe(`custom:${CUSTOM_ID}`);
-    expect(memberOverrideToSelectValue(null)).toBe(FOLLOW_ORG_DEFAULT);
+  it("names the default the server reports, as the role selects name it", () => {
+    const t = (key: string) => i18nModule.default.t(key);
+    const preset = { kind: "preset" as const, key: "operator", name: "operator" };
+    const custom = { kind: "custom" as const, key: "triage", name: "Triage" };
+    expect(followLabel(member("member", null, preset), t)).toBe(
+      settingsFr["roles.preset.operator"],
+    );
+    expect(followLabel(member("guest", null, preset), t)).toBe(settingsFr["roles.preset.operator"]);
+    expect(followLabel(member("member", null, custom), t)).toBe("Triage");
   });
 
-  it("names the org default a member or guest follows; a guest holds operator when it authors", () => {
-    const options = [
-      { value: "preset:operator", label: "Opérateur" },
-      { value: "preset:admin", label: "Admin" },
-      { value: "preset:viewer", label: "Lecteur" },
-      { value: `custom:${CUSTOM_ID}`, label: "Triage" },
-    ];
-    expect(followLabel(member("member", null), options, "operator", "?")).toBe("Opérateur");
-    expect(followLabel(member("member", null), options, CUSTOM_ID, "?")).toBe("Triage");
-    expect(followLabel(member("member", null), options, undefined, "?")).toBe("Admin");
-    expect(followLabel(member("guest", null), options, "viewer", "?")).toBe("Lecteur");
-    // Without the catalogue: the authoring presets only.
-    expect(followLabel(member("guest", null), options, CUSTOM_ID, "?")).toBe("Triage");
-    for (const stored of [undefined, "admin", "builder"]) {
-      expect(followLabel(member("guest", null), options, stored, "?")).toBe("Opérateur");
-    }
-    // With it: the stored role's permissions decide, custom roles included.
-    const catalog = (customPermissions: string[]) => [
-      {
-        kind: "preset" as const,
-        key: "admin",
-        id: null,
-        permissions: ["agents:read", "agents:write"],
-      },
-      { kind: "preset" as const, key: "viewer", id: null, permissions: ["agents:read"] },
-      { kind: "custom" as const, key: "triage", id: CUSTOM_ID, permissions: customPermissions },
-    ];
-    const guest = member("guest", null);
-    expect(followLabel(guest, options, CUSTOM_ID, "?", catalog(["agents:write"]))).toBe(
-      "Opérateur",
-    );
-    expect(followLabel(guest, options, CUSTOM_ID, "?", catalog(["agents:read"]))).toBe("Triage");
-    expect(followLabel(guest, options, "admin", "?", catalog([]))).toBe("Opérateur");
-    expect(followLabel(guest, options, "viewer", "?", catalog([]))).toBe("Lecteur");
-    // A custom role gone from the loaded catalogue resolves to viewer, as the server does;
-    // before the catalogue answers, the fallback.
-    expect(followLabel(member("member", null), options, "srl_gone", "?", catalog([]))).toBe(
-      "Lecteur",
-    );
-    expect(followLabel(member("member", null), options, "srl_gone", "Rôle personnalisé")).toBe(
-      "Rôle personnalisé",
+  it("says so when the org default names no role", () => {
+    const t = (key: string) => i18nModule.default.t(key);
+    expect(followLabel(member("member", null, null), t)).toBe(
+      settingsFr["userDetail.personalSpaceRoleNoDefault"],
     );
   });
 

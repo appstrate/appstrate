@@ -551,7 +551,7 @@ export const SPACE_ROLE_ID_REGEX =
   /^srl_[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 
 /** `org_settings.personal_space_role`: a preset key or a custom space role id. */
-export const personalSpaceRoleSchema = z.union([
+const personalSpaceRoleSchema = z.union([
   z.enum(SPACE_ROLE_PRESETS),
   z.string().regex(SPACE_ROLE_ID_REGEX, {
     message: "Expected a preset key or a custom space role id (`srl_` + canonical UUID).",

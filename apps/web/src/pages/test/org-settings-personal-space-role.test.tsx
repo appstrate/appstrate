@@ -27,30 +27,16 @@ const { useUpdateOrgSettings } = await import("../../hooks/use-org-settings.ts")
 const { ApiError } = await import("../../api/errors.ts");
 const { orgStore } = await import("../../stores/org-store.ts");
 const { render } = await import("../../test/render.tsx");
+const { CUSTOM_ROLE_ID, ORG_ID, seedOrgAndRoles } =
+  await import("../../test/personal-space-role-fixtures.ts");
 const i18nModule = await import("../../i18n.ts");
 
 await i18nModule.i18nReady;
 await i18nModule.default.changeLanguage("fr");
 
-const ORG_ID = "org_a";
-const CREATED = "2026-07-01T10:00:00.000Z";
-
-const CUSTOM_ID = "srl_triage";
-const ROLES = [
-  { id: null, kind: "preset", key: "admin", name: "admin" },
-  { id: null, kind: "preset", key: "operator", name: "operator" },
-  { id: CUSTOM_ID, kind: "custom", key: "triage", name: "Triage" },
-];
-
 function renderSetting(permissions: string[], role: string | null): string {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retryOnMount: false } } });
-  queryClient.setQueryData(
-    ["orgs"],
-    [{ id: ORG_ID, name: "Acme", slug: "acme", role: "admin", permissions, createdAt: CREATED }],
-  );
-  queryClient.setQueryData(["get", "/api/roles", { params: { header: { "X-Org-Id": ORG_ID } } }], {
-    data: ROLES,
-  });
+  seedOrgAndRoles(queryClient, permissions);
   if (role) {
     queryClient.setQueryData(
       ["get", "/api/orgs/{orgId}/settings", { params: { path: { orgId: ORG_ID } } }],
@@ -76,22 +62,7 @@ describe("the personal space role picker", () => {
   // catalogue and the label of a stored value are read from the same hook and mapping it uses.
   function optionLabels(stored: string): { labels: string[]; shown: string | undefined } {
     const qc = new QueryClient();
-    qc.setQueryData(
-      ["orgs"],
-      [
-        {
-          id: ORG_ID,
-          name: "Acme",
-          slug: "acme",
-          role: "admin",
-          permissions: ["roles:read"],
-          createdAt: CREATED,
-        },
-      ],
-    );
-    qc.setQueryData(["get", "/api/roles", { params: { header: { "X-Org-Id": ORG_ID } } }], {
-      data: ROLES,
-    });
+    seedOrgAndRoles(qc, ["roles:read"]);
     let result = { labels: [] as string[], shown: undefined as string | undefined };
     function Probe() {
       const { options } = useSpaceRoleOptions();
@@ -123,11 +94,11 @@ describe("the personal space role picker", () => {
 
   it("shows the stored preset, and the name of a stored custom role", () => {
     expect(optionLabels("operator").shown).toBe(settingsFr["roles.preset.operator"]);
-    expect(optionLabels(CUSTOM_ID).shown).toBe("Triage");
+    expect(optionLabels(CUSTOM_ROLE_ID).shown).toBe("Triage");
   });
 
   it("draws the title, the explanation and the picker", () => {
-    const html = renderSetting(["org:settings"], CUSTOM_ID);
+    const html = renderSetting(["org:settings"], CUSTOM_ROLE_ID);
     expect(html).toContain(settingsFr["orgSettings.personalSpaceRoleTitle"]);
     expect(pickerOf(html)).toBeDefined();
   });
@@ -138,13 +109,6 @@ describe("the personal space role picker", () => {
 
   it("is disabled without org:settings", () => {
     expect(pickerOf(renderSetting([], "admin"))).toContain("disabled");
-  });
-
-  it("writes a preset key or a custom role id", () => {
-    expect(orgPersonalSpaceRoleBody("preset:builder")).toEqual({ personal_space_role: "builder" });
-    expect(orgPersonalSpaceRoleBody(`custom:${CUSTOM_ID}`)).toEqual({
-      personal_space_role: CUSTOM_ID,
-    });
   });
 
   it("keeps writing a boolean for the boolean settings", () => {

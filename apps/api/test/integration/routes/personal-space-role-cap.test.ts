@@ -39,20 +39,12 @@ import {
   seedDefaultOrgModel,
   waitForRunPipelineSettled,
 } from "../../helpers/run-connection-fixtures.ts";
+import { DELETES, listSpaces, personalOf } from "../../helpers/personal-space.ts";
 import { _setOrchestratorForTesting } from "../../../src/services/orchestrator/index.ts";
 
 import { triggerScheduledRun } from "../../../src/services/scheduler.ts";
 
 const app = getTestApp();
-
-interface ListedSpace {
-  id: string;
-  personal: boolean;
-  role: { kind: string; key: string } | null;
-  permissions: string[];
-}
-
-const DELETES = ["agents:delete", "skills:delete", "integrations:delete", "schedules:delete"];
 
 const headersFor = (ctx: TestContext, spaceId: string) => ({
   Cookie: ctx.cookie,
@@ -70,19 +62,6 @@ async function setCap(owner: TestContext, value: string | null): Promise<void> {
     body: JSON.stringify(value === null ? {} : { personal_space_role: value }),
   });
   expect(res.status, await res.clone().text()).toBe(200);
-}
-
-/** `GET /api/spaces` — the route that also provisions the caller's own space. */
-async function listSpaces(ctx: TestContext): Promise<ListedSpace[]> {
-  const res = await app.request("/api/spaces", { headers: orgOnlyHeaders(ctx) });
-  expect(res.status, await res.clone().text()).toBe(200);
-  return ((await res.json()) as { data: ListedSpace[] }).data;
-}
-
-async function personalOf(ctx: TestContext): Promise<ListedSpace> {
-  const own = (await listSpaces(ctx)).filter((s) => s.personal);
-  expect(own).toHaveLength(1);
-  return own[0]!;
 }
 
 function validateInline(ctx: TestContext, spaceId: string) {
@@ -428,12 +407,12 @@ describe("personal_space_role: operator", () => {
       expect(statuses.createAgent).toBe(403);
     });
 
-    it("caps a guest to plain operator under an authoring default, and gives them a narrower one", async () => {
+    it("caps a guest to operator plus the floor under an authoring default, and gives them a narrower one", async () => {
       await setCap(owner, "builder");
       const asBuilder = await personalOf(guest);
       expect(asBuilder.role).toMatchObject({ kind: "preset", key: "operator" });
       expect(asBuilder.permissions).not.toContain("agents:write");
-      for (const permission of DELETES) expect(asBuilder.permissions).not.toContain(permission);
+      for (const permission of DELETES) expect(asBuilder.permissions).toContain(permission);
 
       // A custom default granting `agents:write` caps a guest the same way.
       const author = await seedSpaceRole({
@@ -444,8 +423,11 @@ describe("personal_space_role: operator", () => {
       });
       await setCap(owner, author.id);
       const asAuthor = await personalOf(guest);
-      expect(asAuthor.role).toMatchObject({ kind: "preset", key: "operator" });
-      for (const permission of DELETES) expect(asAuthor.permissions).not.toContain(permission);
+      // Restricted to what `operator` grants: the chosen role, named as such, without its write half.
+      expect(asAuthor.role).toMatchObject({ kind: "custom", key: "author" });
+      expect(asAuthor.permissions).toContain("agents:read");
+      expect(asAuthor.permissions).not.toContain("agents:write");
+      for (const permission of DELETES) expect(asAuthor.permissions).toContain(permission);
       expect((await personalOf(member)).role).toMatchObject({ kind: "custom", key: "author" });
 
       // A guest never outranks a member: under `viewer` both hold viewer plus the floor.

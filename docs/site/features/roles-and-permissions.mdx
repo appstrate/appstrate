@@ -45,7 +45,7 @@ An organization can have several owners and always keeps at least one. See [Orga
 | `runner`   | Launch, nothing else | Run agents and see only your own runs, their files and memory. A runner cannot read an agent's content, skills, schedules or end-users.                                                                                                                                             |
 | `viewer`   | Look                 | The read permissions of `operator`.                                                                                                                                                                                                                                                 |
 
-`runner` and `viewer` are not ordered: a runner launches what it cannot read, a viewer reads what it cannot launch. `chat:read` and `mcp:read` go to all five presets, `chat:write` and `mcp:invoke` to all but `viewer` (see [Chat](/using-appstrate/chat) and [MCP server](/using-appstrate/mcp-clients)). `webhooks:*` goes to `admin` and `builder` (see [Webhooks](/features/webhooks)).
+`runner` and `viewer` are not ordered: a runner launches what it cannot read, a viewer reads what it cannot launch. `chat:read` and `mcp:read` go to all five presets, `chat:write` and `mcp:invoke` to all but `viewer` (see [Chat](/using-appstrate/chat) and [MCP server](/using-appstrate/mcp-clients)). `webhooks:*` goes to `admin` and `builder` (see [Webhooks](/features/webhooks)). `studio:read` goes to all five presets.
 
 ## The permission catalog
 
@@ -80,6 +80,7 @@ Modules add more: `org-webhooks`, `oauth-clients` and `access-grants` (owners an
 | `space-settings`   | `write`                                                                                          |
 | `space-members`    | `read`, `invite`, `remove`, `change-role`                                                        |
 | `credential-proxy` | `call`, `call-own`                                                                               |
+| `studio`           | `read`                                                                                           |
 
 Notes on the less obvious ones:
 
@@ -89,6 +90,7 @@ Notes on the less obvious ones:
 - `credential-proxy:call` reaches every connection usable in the space and a run's own connections. `credential-proxy:call-own` is the narrower grant, limited to the caller's own connections outside a run, and `call` implies it. A `viewer` holds neither.
 - `model-provider-credentials:connect` lets a member attach a personal model credential, `write` manages the organization's.
 - `agents:run` alone gives a summary view of an agent (identity, input form, integrations), without its prompt or skills.
+- `studio:read` opens the Studio's screens in the interface (display only, not an API barrier): without it the REST API and MCP clients answer the same grants, and the chat keeps working. A custom role holds it only if its author picks it.
 - Editing a package is governed by its **home space**, not by the space you are browsing from. See [Library and sharing](/features/library).
 
 ## Custom roles

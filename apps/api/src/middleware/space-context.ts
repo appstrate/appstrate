@@ -113,7 +113,8 @@ function spaceNotFound(spaceId: string): ApiError {
 async function admitSpace(
   c: Context<AppEnv>,
   space: SpaceContextRow,
-  preloaded?: Pick<SpaceAccessSnapshot, "space" | "member" | "personalSpaceDefault">,
+  preloaded?: Pick<SpaceAccessSnapshot, "space" | "member"> &
+    Partial<Pick<SpaceAccessSnapshot, "personalDefault">>,
 ): Promise<SpaceContextRow> {
   // An end-user belongs to a space, never to a person (RBAC spec §3.6): a
   // personal space is a 404 for it whatever else it carries.
@@ -143,7 +144,7 @@ async function admitSpace(
     access.space,
     access.member,
     callerPersonalOwnerId(c, space.orgId),
-    access.personalSpaceDefault,
+    access.personalDefault,
   );
   if (!ref) {
     if (access.space.visibility === "private") throw spaceNotFound(space.id);

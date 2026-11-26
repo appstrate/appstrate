@@ -266,13 +266,9 @@ interface RoleHolders {
  * an org OIDC client whose JSONB `signup_space_assignments` name it, and the org's
  * `personal_space_role` setting. The last three have no FK, so deleting under them would
  * strand the invitee with an assignment that never applies, refuse every SSO signup of the
- * client, or put every member's personal space on the fail-closed `viewer` fallback.
+ * client, or put every member's personal space on the fail-closed no-role fallback.
  */
-async function countRoleHolders(
-  orgId: string,
-  id: string,
-  executor: DbOrTx = db,
-): Promise<RoleHolders> {
+async function countRoleHolders(orgId: string, id: string, executor: DbOrTx): Promise<RoleHolders> {
   const assigned = await executor
     .select({ count: sql<number>`count(*)::int` })
     .from(spaceMembers)

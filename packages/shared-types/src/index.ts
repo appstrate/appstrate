@@ -464,12 +464,17 @@ export interface OrganizationMember {
   /** The spaces this member reaches, among those whose member list the caller may read. */
   spaces: OrganizationMemberSpace[];
   /** Their own role in their personal space, overriding the org default; `null` = follows it. */
-  personal_space_role: PersonalSpaceRoleOverride | null;
+  personal_space_role: SpaceRoleAssignment | null;
+  /**
+   * The role this member would hold in their own personal space by the org default alone, guest
+   * cap applied; `null` when the default names no role. Read with `personal_space_role`: only a
+   * caller who may change the role sees either, and both are `null` for everyone else.
+   */
+  personal_space_default_role: SpaceMember["role"];
 }
 
-/** A per-member override of `org_settings.personal_space_role`: one preset, or one custom role. */
-export type PersonalSpaceRoleOverride =
-  { preset_role: SpaceRolePreset } | { custom_role_id: string };
+/** A role given to someone: one preset, or one custom role. Also a member's personal-space override. */
+export type SpaceRoleAssignment = { preset_role: SpaceRolePreset } | { custom_role_id: string };
 
 /** One space an org member reaches — the per-member projection of `GET /api/spaces/:id/members`. */
 export interface OrganizationMemberSpace {
