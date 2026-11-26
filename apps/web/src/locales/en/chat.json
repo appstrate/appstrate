@@ -315,7 +315,6 @@
   "context.tools.showLookups_other": "Show lookups ({{count}})",
   "context.tools.turn": "Turn {{turn}}",
   "context.tools.lookup": "Lookup",
-  "context.tools.noTarget": "No target",
   "context.tools.status.running": "Running",
   "context.tools.status.success": "Succeeded",
   "context.tools.status.error": "Failed",

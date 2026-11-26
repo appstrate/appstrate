@@ -315,7 +315,6 @@
   "context.tools.showLookups_other": "Afficher les consultations ({{count}})",
   "context.tools.turn": "Tour {{turn}}",
   "context.tools.lookup": "Consultation",
-  "context.tools.noTarget": "Sans cible",
   "context.tools.status.running": "En cours",
   "context.tools.status.success": "Réussi",
   "context.tools.status.error": "Échec",

@@ -80,12 +80,13 @@ function ToolCallRow({
 }) {
   const { t } = useTranslation("chat");
   const { label, idText } = shown;
-  const outcome =
+  const status =
     call.status === "success"
       ? call.lookup
         ? t("context.tools.lookup")
         : null
       : t(STATUS_KEY[call.status]);
+  const detail = [idText, status].filter(Boolean).join(" · ");
   return (
     <button
       type="button"
@@ -95,9 +96,8 @@ function ToolCallRow({
       <ToolGlyph call={call} shown={shown} />
       <span className="min-w-0 flex-1">
         <span className="block truncate text-sm font-medium">{label}</span>
-        <span className="text-muted-foreground block truncate text-xs">
-          {[idText, outcome].filter(Boolean).join(" · ") || t("context.tools.noTarget")}
-        </span>
+        {/* An integration call's label already names its tool: nothing more to say. */}
+        {detail && <span className="text-muted-foreground block truncate text-xs">{detail}</span>}
       </span>
       {spanning && <RowSpaceName spaceId={call.spaceId} />}
     </button>
