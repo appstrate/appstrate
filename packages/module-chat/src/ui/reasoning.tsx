@@ -4,12 +4,12 @@
  * The model's reasoning, shown. The engine already streams it
  * (`reasoning-delta`, `pi-chat/ui-stream-mapper.ts`); assistant-ui's default
  * renderer for a reasoning part is `() => null`, and it hides `Empty` (the
- * thinking dots) as soon as the last part is reasoning, so without this the
+ * thinking loader) as soon as the last part is reasoning, so without this the
  * bubble would stay blank for the whole reasoning phase.
  *
  * One disclosure per run of consecutive reasoning parts (`ReasoningGroup`),
  * open while that run is the part still streaming, so it takes the place the
- * thinking dots held, then folded to one line once the answer moves on. The
+ * thinking loader held, then folded to one line once the answer moves on. The
  * first click hands the open state to the reader for good.
  */
 
@@ -25,22 +25,31 @@ import {
 import { useChatHost } from "./runtime-context.ts";
 import { DISCLOSURE_TRIGGER_CLASS } from "./touch-targets.ts";
 
+/** One full loop of the spark (each diagonal swaps twice), in ms (`.spark` in styles.css). */
+const SPARK_LOOP_MS = 2400;
+
 /**
- * The turn's one status region (the e2e/bench hook reads its test id). h-6 =
- * one prose-sm line: whatever replaces it shifts 0px.
+ * The turn's one status region (the e2e/bench hook reads its test id): the
+ * spark loader. h-6 = one prose-sm line: whatever replaces it shifts 0px.
  */
 export function ThinkingStatus() {
   const { t } = useChatHost();
+  // Every mount joins one clock, so the loader moving between the loading line
+  // and a reasoning header mid-turn does not restart.
+  const [phase] = React.useState(() => `${-(performance.now() % SPARK_LOOP_MS)}ms`);
   return (
     <div
-      className="flex h-6 items-center gap-1"
+      className="flex h-6 items-center"
       role="status"
       aria-label={t("thinking.status")}
       data-testid="chat-thinking-status"
     >
-      <span className="bg-muted-foreground/70 size-1.5 animate-bounce rounded-full [animation-delay:-0.3s] motion-reduce:animate-pulse" />
-      <span className="bg-muted-foreground/70 size-1.5 animate-bounce rounded-full [animation-delay:-0.15s] motion-reduce:animate-pulse" />
-      <span className="bg-muted-foreground/70 size-1.5 animate-bounce rounded-full motion-reduce:animate-pulse" />
+      <span className="spark" style={{ "--spark-phase": phase } as React.CSSProperties}>
+        <i />
+        <i />
+        <i />
+        <i />
+      </span>
     </div>
   );
 }
