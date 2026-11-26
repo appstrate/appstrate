@@ -71,6 +71,7 @@ function role(kind: "preset" | "custom", key: string, id: string | null = null):
     name: key,
     description: null,
     permissions: [],
+    shows_studio: true,
     unavailable_permissions: [],
     createdAt: null,
     updatedAt: null,

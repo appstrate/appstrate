@@ -188,7 +188,11 @@ describe("the Connecter action", () => {
   }
 
   it("is offered when the viewer reaches the agent's page and sees its Connexions tab", async () => {
-    expect(await actionFor(["agents:read", "integrations:read"])).toBeDefined();
+    expect(await actionFor(["studio:read", "agents:read", "integrations:read"])).toBeDefined();
+  });
+
+  it("is withheld from a role without the Studio, where the agent's page is", async () => {
+    expect(await actionFor(["agents:read", "integrations:read"])).toBeUndefined();
   });
 
   it("is withheld when the page shows the viewer no Connexions tab", async () => {

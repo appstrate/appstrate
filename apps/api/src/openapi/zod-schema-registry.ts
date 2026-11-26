@@ -46,6 +46,7 @@ import {
   addMemberSchema,
   updateInvitationSchema,
   updateRoleSchema,
+  personalSpaceRoleOverrideSchema,
 } from "../routes/organizations.ts";
 
 // --- Org settings schema (services/organizations.ts) ---
@@ -303,6 +304,12 @@ const coreSchemas: OpenApiSchemaEntry[] = [
     path: "/api/orgs/{orgId}/members/{userId}",
     jsonSchema: toJsonSchema(updateRoleSchema),
     description: "Update member role",
+  },
+  {
+    method: "PUT",
+    path: "/api/orgs/{orgId}/members/{userId}/personal-space-role",
+    jsonSchema: toJsonSchema(personalSpaceRoleOverrideSchema),
+    description: "Set a member's role in their personal space",
   },
   {
     method: "PATCH",

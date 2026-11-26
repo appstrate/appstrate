@@ -12,8 +12,8 @@ import type { ConversationSidebarTab } from "./conversation-sidebar-state";
 export function useConversationTabs(selected: ConversationSidebarTab) {
   const { t } = useTranslation("chat");
   // Any space's grants: a conversation lists the runs and files of every space it acted in.
-  const runs = useAdmittingSpaces("runs").length > 0;
-  const files = useAdmittingSpaces("files").length > 0;
+  const runs = useAdmittingSpaces("runs", "chat").length > 0;
+  const files = useAdmittingSpaces("files", "chat").length > 0;
   const readable: Record<ConversationSidebarTab, boolean> = { runs, files, info: true };
   const tabs = (
     [

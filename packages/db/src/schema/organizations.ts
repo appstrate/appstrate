@@ -14,11 +14,12 @@ import {
   primaryKey,
   check,
   foreignKey,
+  type PgTableExtraConfigValue,
 } from "drizzle-orm/pg-core";
 import { sql } from "drizzle-orm";
 import { orgRoleEnum, invitationStatusEnum } from "./enums.ts";
 import { user } from "./auth.ts";
-import { spaces } from "./spaces.ts";
+import { spaceRoles, spaces } from "./spaces.ts";
 import type { SpaceAssignment } from "@appstrate/core/permissions";
 import type { ModelCost, ModelInputModality } from "@appstrate/core/module";
 
@@ -37,6 +38,9 @@ export const organizations = pgTable(
     // colour needs no migration. Null derives the colour from the id.
     color: text("color"),
     orgSettings: jsonb("org_settings").notNull().default({}),
+    // The org's personal-space default when it is a custom role (RBAC spec §3.6); a preset one is
+    // `org_settings.personal_space_role`, never both, neither = `admin`.
+    personalSpaceRoleId: text("personal_space_role_id"),
     // The org's default model — a flat model id that may name a system model
     // (SYSTEM_PROVIDER_KEYS) OR an `org_models.id` (UUID). A pointer rather than
     // an `is_default` boolean on `org_models` so the default can point at a
@@ -80,11 +84,27 @@ export const organizations = pgTable(
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
   },
-  (table) => [
+  // Annotated: the composite FK below references `space_roles`, which references this table.
+  (table): PgTableExtraConfigValue[] => [
     // Referencing-side index for the `user` SET NULL action (0048).
     // Postgres indexes only the REFERENCED side of a foreign key; without
     // this, deleting one user seq-scans this table under the deletion's lock.
     index("idx_organizations_created_by").on(table.createdBy),
+    // RESTRICT like `space_members.custom_role_id`; composite so the role is one of this org's.
+    foreignKey({
+      name: "organizations_personal_space_role_fk",
+      columns: [table.personalSpaceRoleId, table.id],
+      foreignColumns: [spaceRoles.id, spaceRoles.orgId],
+    }).onDelete("restrict"),
+    index("idx_organizations_personal_space_role_id").on(table.personalSpaceRoleId),
+    check(
+      "organizations_personal_space_role_one_shape",
+      sql`personal_space_role_id IS NULL OR NOT (org_settings ? 'personal_space_role')`,
+    ),
+    check(
+      "organizations_personal_space_role_preset",
+      sql`NOT (org_settings ? 'personal_space_role') OR COALESCE(org_settings ->> 'personal_space_role' IN ('admin', 'builder', 'operator', 'runner', 'viewer'), false)`,
+    ),
     // Backstop behind the application's icon validation: the largest image icon
     // (`data:image/webp;base64,` + 12 000 bytes encoded) is 16 023 bytes, its PNG
     // twin one byte shorter.

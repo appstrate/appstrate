@@ -10,8 +10,12 @@
  */
 
 import { describe, it, expect, beforeEach } from "bun:test";
+import { eq } from "drizzle-orm";
+import { organizations, spaceMembers, spaceRoles } from "@appstrate/db/schema";
 import { getTestApp } from "../../helpers/app.ts";
-import { truncateAll } from "../../helpers/db.ts";
+import { isEmbeddedDb } from "@appstrate/db/client";
+import { db, truncateAll } from "../../helpers/db.ts";
+import { backendPid, waitsOn } from "../../helpers/pg-locks.ts";
 import { expectProblem } from "../../helpers/assertions.ts";
 import { SPACE_ROLE_PRESETS } from "@appstrate/core/permissions";
 import {
@@ -26,9 +30,12 @@ import {
 import {
   seedSpacePackage,
   seedPackage,
+  seedSpace,
   seedSpaceMember,
   seedSpaceRole,
 } from "../../helpers/seed.ts";
+import { createClient, updateClient } from "../../../src/modules/oidc/services/oauth-admin.ts";
+import { loadClientSignupPolicy } from "../../../src/modules/oidc/services/orgmember-mapping.ts";
 
 const app = getTestApp();
 
@@ -41,6 +48,7 @@ interface RoleWire {
   description: string | null;
   permissions: string[];
   unavailable_permissions: string[];
+  shows_studio: boolean;
 }
 
 describe("custom space roles", () => {
@@ -209,6 +217,8 @@ describe("custom space roles", () => {
       expect(offered).toContain("agents:write");
       expect(offered).not.toContain("members:invite");
       expect(offered).not.toContain("roles:write");
+      // `studio:read` is resolved from `shows_studio`, never stored, so it is not offered.
+      expect(offered).not.toContain("studio:read");
 
       // Grantability is the API-key allowlist, not a second hand-kept table:
       // `integrations:configure` is deliberately session-only.
@@ -224,6 +234,68 @@ describe("custom space roles", () => {
 
       // And every offered string is accepted by the create route.
       expect((await post(validBody({ permissions: offered }))).status).toBe(201);
+    });
+  });
+
+  describe("shows_studio", () => {
+    const listed = async (id: string) => {
+      const { data } = (await (await req("GET", "/api/roles")).json()) as { data: RoleWire[] };
+      return data.find((r) => r.id === id)!;
+    };
+
+    it("defaults to true on create, is stored when false, and a preset always shows it", async () => {
+      const shown = await createRole({ key: "shown" });
+      expect(shown.shows_studio).toBe(true);
+      expect(shown.permissions).not.toContain("studio:read");
+
+      const hidden = await createRole({ key: "hidden", shows_studio: false });
+      expect(hidden.shows_studio).toBe(false);
+      expect((await listed(hidden.id)).shows_studio).toBe(false);
+      expect((await listed(shown.id)).shows_studio).toBe(true);
+
+      const { data } = (await (await req("GET", "/api/roles")).json()) as { data: RoleWire[] };
+      for (const preset of data.filter((r) => r.kind === "preset")) {
+        expect(preset.shows_studio, preset.key).toBe(true);
+        expect(preset.permissions, preset.key).not.toContain("studio:read");
+      }
+    });
+
+    it("PATCH toggles it, and a PATCH without it leaves it as stored", async () => {
+      const role = await createRole({ key: "toggled" });
+      const off = await patch(role.id, { shows_studio: false });
+      expect(off.status).toBe(200);
+      expect(((await off.json()) as RoleWire).shows_studio).toBe(false);
+
+      const renamed = await patch(role.id, { name: "Renamed" });
+      expect(renamed.status).toBe(200);
+      expect(((await renamed.json()) as RoleWire).shows_studio).toBe(false);
+      expect((await listed(role.id)).shows_studio).toBe(false);
+
+      const on = await patch(role.id, { shows_studio: true });
+      expect(((await on.json()) as RoleWire).shows_studio).toBe(true);
+      expect((await listed(role.id)).shows_studio).toBe(true);
+    });
+
+    it("refuses studio:read inside permissions on create and on update", async () => {
+      const created = await post(
+        validBody({ key: "studio-in-list", permissions: ["agents:read", "studio:read"] }),
+      );
+      const problem = await expectProblem(created, 400, { param: "permissions" });
+      expect(problem.detail).toContain("studio:read");
+      expect(problem.detail).toContain("shows_studio");
+
+      const role = await createRole({ key: "studio-patched" });
+      await expectProblem(
+        await patch(role.id, { permissions: ["agents:read", "studio:read"] }),
+        400,
+        { param: "permissions" },
+      );
+      // The refused write changed nothing.
+      expect((await listed(role.id)).permissions).toEqual(["agents:read", "runs:read"]);
+    });
+
+    it("refuses a non-boolean shows_studio", async () => {
+      expect((await post(validBody({ key: "bad-flag", shows_studio: "yes" }))).status).toBe(400);
     });
   });
 
@@ -430,6 +502,185 @@ describe("custom space roles", () => {
       const other = await createRole({ key: "unpromised" });
       expect((await del(other.id)).status).toBe(204);
     });
+
+    it("409s while the org's personal_space_role names it, and deletes once it does not", async () => {
+      const role = await createRole({ key: "personal-default" });
+      const patch = (value: string) =>
+        app.request(`/api/orgs/${owner.orgId}/settings`, {
+          method: "PATCH",
+          headers: { Cookie: owner.cookie, "Content-Type": "application/json" },
+          body: JSON.stringify({ personal_space_role: value }),
+        });
+      expect((await patch(role.id)).status).toBe(200);
+
+      const problem = await expectProblem(await del(role.id), 409, { code: "role_in_use" });
+      expect(problem.org_default).toBe(true);
+      expect(problem.member_count).toBe(0);
+      expect(problem.pending_invitation_count).toBe(0);
+      expect(problem.detail).toContain("default role in personal spaces");
+
+      expect((await patch("operator")).status).toBe(200);
+      expect((await del(role.id)).status).toBe(204);
+    });
+
+    it("409s while a member's personal-space override names it", async () => {
+      const role = await createRole({ key: "override-held" });
+      const user = await createTestUser();
+      await addOrgMember(owner.orgId, user.id, "member");
+      const res = await app.request(
+        `/api/orgs/${owner.orgId}/members/${user.id}/personal-space-role`,
+        {
+          method: "PUT",
+          headers: { Cookie: owner.cookie, "Content-Type": "application/json" },
+          body: JSON.stringify({ custom_role_id: role.id }),
+        },
+      );
+      expect(res.status, await res.clone().text()).toBe(200);
+
+      const problem = await expectProblem(await del(role.id), 409, { code: "role_in_use" });
+      expect(problem.member_count).toBe(1);
+      expect(problem.org_default).toBe(false);
+    });
+  });
+
+  // Every writer naming a custom role reads it `FOR KEY SHARE` in its own write transaction, and
+  // `deleteSpaceRole` locks it `FOR UPDATE` before counting its holders. PGlite serializes
+  // everything, so these only discriminate on a real PostgreSQL: a transaction holds the
+  // delete's lock (and deletes the role, as a delete with no holder does), the writer starts,
+  // `pg_locks` proves it is WAITING on it, and once the delete commits the writer must answer
+  // 404 and leave nothing naming the role. Without the share lock it would not wait, and it
+  // would write a reference to a role about to be deleted.
+  describe("a writer naming a role waits for a delete that holds it", () => {
+    /** Hold the role's `FOR UPDATE` lock, deleting the role, until `release()`. */
+    async function holdRoleDeletion(id: string) {
+      const locked = Promise.withResolvers<number>();
+      const released = Promise.withResolvers<void>();
+      const held = db.transaction(async (tx) => {
+        await tx
+          .select({ id: spaceRoles.id })
+          .from(spaceRoles)
+          .where(eq(spaceRoles.id, id))
+          .for("update");
+        await tx.delete(spaceRoles).where(eq(spaceRoles.id, id));
+        locked.resolve(await backendPid(tx));
+        await released.promise;
+      });
+      const pid = await locked.promise;
+      return {
+        pid,
+        release: async () => {
+          released.resolve();
+          await held;
+        },
+      };
+    }
+
+    /** Start `write`, prove it waits on the delete, release the delete, return the write's outcome. */
+    async function writeBehindDelete<T>(roleId: string, write: () => T | Promise<T>): Promise<T> {
+      const deletion = await holdRoleDeletion(roleId);
+      const writing = Promise.resolve(write());
+      // The write may fail once released; settle it before the wait can throw.
+      const settled = writing.then(
+        (value) => ({ value }),
+        (error: unknown) => ({ error }),
+      );
+      try {
+        await waitsOn(deletion.pid);
+      } finally {
+        await deletion.release();
+      }
+      const outcome = await settled;
+      if ("error" in outcome) throw outcome.error;
+      return outcome.value;
+    }
+
+    const referencesTo = async (roleId: string) =>
+      (
+        await db
+          .select({ id: spaceMembers.userId })
+          .from(spaceMembers)
+          .where(eq(spaceMembers.customRoleId, roleId))
+      ).length;
+
+    it.skipIf(isEmbeddedDb)(
+      "PATCH settings personal_space_role answers 404 and stores nothing",
+      async () => {
+        const role = await createRole({ key: "wait-setting" });
+        const res = await writeBehindDelete(role.id, () =>
+          req("PATCH", `/api/orgs/${owner.orgId}/settings`, { personal_space_role: role.id }),
+        );
+        await expectProblem(res, 404);
+        const [org] = await db
+          .select({
+            settings: organizations.orgSettings,
+            personalSpaceRoleId: organizations.personalSpaceRoleId,
+          })
+          .from(organizations)
+          .where(eq(organizations.id, owner.orgId));
+        expect(org?.personalSpaceRoleId).toBeNull();
+        expect(
+          (org?.settings as { personal_space_role?: string } | null)?.personal_space_role,
+        ).toBeUndefined();
+      },
+    );
+
+    it.skipIf(isEmbeddedDb)(
+      "PUT a personal-space override answers 404 and writes no row",
+      async () => {
+        const role = await createRole({ key: "wait-override" });
+        const user = await createTestUser();
+        await addOrgMember(owner.orgId, user.id, "member");
+        const res = await writeBehindDelete(role.id, () =>
+          req("PUT", `/api/orgs/${owner.orgId}/members/${user.id}/personal-space-role`, {
+            custom_role_id: role.id,
+          }),
+        );
+        await expectProblem(res, 404);
+        expect(await referencesTo(role.id)).toBe(0);
+      },
+    );
+
+    it.skipIf(isEmbeddedDb)("POST a space member answers 404 and writes no row", async () => {
+      const role = await createRole({ key: "wait-member" });
+      const user = await createTestUser();
+      await addOrgMember(owner.orgId, user.id, "member");
+      const res = await writeBehindDelete(role.id, () =>
+        req("POST", `/api/spaces/${owner.defaultSpaceId}/members`, {
+          userId: user.id,
+          custom_role_id: role.id,
+        }),
+      );
+      await expectProblem(res, 404);
+      expect(await referencesTo(role.id)).toBe(0);
+    });
+
+    it.skipIf(isEmbeddedDb)(
+      "an OIDC sign-up policy naming the role is refused with 404 and not stored",
+      async () => {
+        const role = await createRole({ key: "wait-signup" });
+        const other = await seedSpace({ orgId: owner.orgId });
+        const client = await createClient({
+          level: "org",
+          name: "Signup",
+          referencedOrgId: owner.orgId,
+          redirectUris: ["https://example.com/callback"],
+          signupRole: "guest",
+          signupSpaceAssignments: [{ spaceId: other.id, preset_role: "viewer" }],
+        });
+        const refused = await writeBehindDelete(role.id, () =>
+          updateClient(client.clientId, {
+            signupSpaceAssignments: [{ spaceId: other.id, custom_role_id: role.id }],
+          }).then(
+            () => null,
+            (error: unknown) => error,
+          ),
+        );
+        expect(refused).toMatchObject({ status: 404 });
+        expect((await loadClientSignupPolicy(client.clientId))?.signupSpaceAssignments).toEqual([
+          { spaceId: other.id, preset_role: "viewer" },
+        ]);
+      },
+    );
   });
 
   describe("a custom role is assignable and grants exactly its permissions", () => {

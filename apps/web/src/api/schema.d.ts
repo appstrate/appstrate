@@ -3396,7 +3396,7 @@ export interface paths {
         get?: never;
         /**
          * Change member role
-         * @description Change a member's role. Owners can manage every other member, owners included, and are the only ones who may assign `owner` or change an owner's role; admins can manage guests and members and assign `guest`, `member` or `admin`. Nobody changes their own role. The caller is judged on their current role in the organization. Granting `owner` or changing an owner's role requires a dashboard session — any token (API key, OAuth/MCP client, CLI) is refused with 403 even when its user is an owner.
+         * @description Change a member's role. Owners can manage every other member, owners included, and are the only ones who may assign `owner` or change an owner's role; admins can manage guests and members and assign `guest`, `member` or `admin`. Nobody changes their own role. The caller is judged on their current role in the organization. Granting `owner` or changing an owner's role requires a dashboard session — any token (API key, OAuth/MCP client, CLI) is refused with 403 even when its user is an owner. The member's own role in their personal space (`setMemberPersonalSpaceRole`) is dropped by a promotion to owner or admin (audited as `personalSpaceRoleCleared`) and kept otherwise.
          */
         put: operations["changeMemberRole"];
         post?: never;
@@ -3425,6 +3425,30 @@ export interface paths {
         put?: never;
         post?: never;
         delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/orgs/{orgId}/members/{userId}/personal-space-role": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Set a member's role in their personal space
+         * @description Give one member or guest their own role in their personal space, overriding the organization's `personal_space_role` default Body: exactly one of `preset_role` / `custom_role_id`; a `custom_role_id` must name a role of this organization (404 otherwise). A member holds the chosen role plus, short of `admin`, `agents:delete`, `skills:delete`, `integrations:delete` and `schedules:delete` there. A guest holds it capped to `operator` (the permissions the chosen role shares with `operator`, plus the deletes), whatever role is set. The personal space is provisioned if the member has none yet. Owners and admins always hold `admin` in their own personal space: targeting one is `409 redundant_space_role`. A change of the member's org role keeps the override, a guest's capped as above, except a promotion to owner or admin, which drops it. A dropped override is recorded in the `org.member_role_updated` audit entry (`personalSpaceRoleCleared`). Leaving or being removed drops it too; nothing restores a dropped override. A custom role named by an override cannot be deleted (`409 role_in_use`). Same guard as `changeMemberRole` (`members:change-role`).
+         */
+        put: operations["setMemberPersonalSpaceRole"];
+        post?: never;
+        /**
+         * Return a member to the organization default in their personal space
+         * @description Drop the member's own role in their personal space, so they hold the organization's `personal_space_role` again (for a guest, capped to `operator`). Idempotent: 204 whether or not an override was set. 404 when the user is not a member of the organization. Same guard as `changeMemberRole` (`members:change-role`).
+         */
+        delete: operations["clearMemberPersonalSpaceRole"];
         options?: never;
         head?: never;
         patch?: never;
@@ -3522,6 +3546,26 @@ export interface paths {
          * @description Read-only index of the skills of every space of the organization where the caller holds `skills:read`: the rows of `GET /api/packages/skills`, one row per package ACTIVE in at least one of those spaces, in the order of the single-space index (newest first, then by id). `space_ids` names those spaces (map them to names with `GET /api/spaces`), the package's home first when it is one of them, then in the order of `GET /api/spaces`. `home_space_id` and the `home_*` flags follow the caller's role in the package's home, as on the single-space index. A caller who reads this type in no space gets an empty list. An unknown query parameter is rejected with `400`. A space the caller holds no role in (a `closed` space not joined, a `private` space they are not a member of) contributes nothing, and a credential pinned to a space (a space API key, a space-bound MCP token) reaches that space only. No `X-Space-Id`: the organization is the path's. An end-user is refused with `403`.
          */
         get: operations["listOrgSkills"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/orgs/{orgId}/personal-space-role/impact": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Preview what a personal-space default would stop
+         * @description What setting the organization's `personal_space_role` to `role` would stop, without writing anything. `schedules` counts the ENABLED schedules in live personal spaces whose actor is the space's owner, a member or guest who follows the default (no override of their own, see `setMemberPersonalSpaceRole`) and would hold, under `role`, a resolved role without `agents:run` (guest cap and delete floor applied, as the resolver applies them). Each such schedule disables itself at its next fire (`disabled_reason: actor_invalid`), and restoring the role does not re-enable it. `members` counts the distinct owners of those schedules. Owners and admins always hold `admin` in their own personal space and are never counted; a `role` that grants `agents:run` answers `{ schedules: 0, members: 0 }`. A snapshot, which a later change can make stale. It discloses only counts, to a caller who may already rewrite the setting: same guard as `updateOrgSettings` (`org:settings`).
+         */
+        get: operations["getPersonalSpaceRoleImpact"];
         put?: never;
         post?: never;
         delete?: never;
@@ -4561,7 +4605,7 @@ export interface paths {
         put?: never;
         /**
          * Create a custom space role
-         * @description Define an organization-scoped bundle of space-level permissions. Requires `roles:write` (owner/admin) and nothing else — custom roles ship with the open-source platform. Every permission is validated against `GET /api/roles/vocabulary`; an unknown string is a 400 naming it, never a silent drop. The set must also be coherent: a permission whose vocabulary entry has a non-empty `requires_one_of` comes with one of those reads, and a set missing one is a 400 naming each missing read. `requires_one_of` is the authority on which permissions need a read and which reads satisfy it. The read is never added for you.
+         * @description Define an organization-scoped bundle of space-level permissions. Requires `roles:write` (owner/admin) and nothing else — custom roles ship with the open-source platform. Every permission is validated against `GET /api/roles/vocabulary`; an unknown string is a 400 naming it, never a silent drop, and so is `studio:read`, which a custom role holds through `shows_studio` instead. The set must also be coherent: a permission whose vocabulary entry has a non-empty `requires_one_of` comes with one of those reads, and a set missing one is a 400 naming each missing read. `requires_one_of` is the authority on which permissions need a read and which reads satisfy it. The read is never added for you.
          */
         post: operations["createRole"];
         delete?: never;
@@ -4579,7 +4623,7 @@ export interface paths {
         };
         /**
          * List the permissions a custom role may hold
-         * @description The space-level permission strings a custom role can be built from, grouped by resource. `api_key_grantable` mirrors `GET /api/api-keys/available-scopes`; `requires_one_of` names the reads a role holding the permission must also hold.
+         * @description The space-level permission strings a custom role can be built from, grouped by resource. `api_key_grantable` mirrors `GET /api/api-keys/available-scopes`; `requires_one_of` names the reads a role holding the permission must also hold. `studio:read` is not listed: a custom role holds it through `shows_studio`.
          */
         get: operations["listRoleVocabulary"];
         put?: never;
@@ -4602,14 +4646,14 @@ export interface paths {
         post?: never;
         /**
          * Delete a custom space role
-         * @description Remove a bundle. Requires `roles:delete` (owner/admin). Refused with 409 `role_in_use` while any space member holds the role or any PENDING invitation assigns it — the problem body carries `member_count` and `pending_invitation_count`. Reassign them first.
+         * @description Remove a bundle. Requires `roles:delete` (owner/admin). Refused with 409 `role_in_use` while any space member holds the role (a member's own override in their personal space included), any PENDING invitation assigns it, an OIDC client's sign-up policy (`signup_space_assignments`) assigns it, or the organization's `personal_space_role` setting names it — the problem body carries `member_count`, `pending_invitation_count`, `signup_assignment_count` and `org_default`. Reassign them, edit the sign-up policies, or change that setting, first.
          */
         delete: operations["deleteRole"];
         options?: never;
         head?: never;
         /**
          * Update a custom space role
-         * @description Rename, re-describe or re-scope a bundle. Requires `roles:write`. The `srl_` id never changes, so assignments follow the edit. A `permissions` array is validated as on create: an unknown string is a 400 naming it, and a set holding a permission without one of the reads its vocabulary entry's `requires_one_of` names is a 400 naming each missing read. A request without `permissions` is not re-judged.
+         * @description Rename, re-describe or re-scope a bundle. Requires `roles:write`. The `srl_` id never changes, so assignments follow the edit. A `permissions` array is validated as on create: an unknown string is a 400 naming it, and a set holding a permission without one of the reads its vocabulary entry's `requires_one_of` names is a 400 naming each missing read. A request without `permissions` is not re-judged. `shows_studio` alone changes whether holders see the Studio.
          */
         patch: operations["updateRole"];
         trace?: never;
@@ -5170,7 +5214,7 @@ export interface paths {
         post?: never;
         /**
          * Remove a space member
-         * @description Drop the explicit role. `access_after` says whether the member keeps implicit access (an `open` space) or loses the space entirely. Refused with 403 if the member's current role is one the caller could not have granted, or if removing the row would grant implicit permissions the caller does not hold.
+         * @description Drop the explicit role. `access_after` says whether the member keeps implicit access (an `open` space) or loses the space entirely. Refused with 403 if the member's current role is one the caller could not have granted, or if removing the row would grant implicit permissions the caller does not hold. A personal space is refused with 409 `personal_space_has_no_members`: its owner's own role there is cleared with `DELETE /api/orgs/{orgId}/members/{userId}/personal-space-role`.
          */
         delete: operations["removeSpaceMember"];
         options?: never;
@@ -6922,6 +6966,20 @@ export interface components {
             joinedAt: string;
             /** @description The spaces this member reaches, among those whose member list the caller may read (`GET /api/spaces/{id}/members`'s own rule, per space: `space-members:read` there for explicit members, plus `members:read` for implicit ones). A credential pinned to a space reads that space only. Ordered as `GET /api/spaces` lists them. */
             spaces: components["schemas"]["OrgMemberSpace"][];
+            /** @description The member's own role in their personal space, overriding the organization's `personal_space_role` (set with `PUT /api/orgs/{orgId}/members/{userId}/personal-space-role`). `null`: they follow the organization default. Always `null` for an owner or admin, who hold `admin` there, and for every member when the caller lacks `members:change-role`: only a caller who may change it reads it. */
+            personal_space_role: null | {
+                /** @enum {string} */
+                preset_role: "admin" | "builder" | "operator" | "runner" | "viewer";
+            } | {
+                custom_role_id: string;
+            };
+            /** @description The role this member would hold in their own personal space by the organization's `personal_space_role` default alone, without any override of their own and with the guest cap applied: `admin` for an owner or admin, `operator` for a guest under a default broader than `operator`. `null` for every member when the caller lacks `members:change-role`: only a caller who may change the member's role reads it, alongside `personal_space_role`. The platform's delete permissions held on top of the role are not part of it. */
+            personal_space_default_role: {
+                /** @enum {string} */
+                kind: "preset" | "custom";
+                key: string;
+                name: string;
+            } | null;
         };
         OrgMemberSpace: {
             id: string;
@@ -7113,11 +7171,8 @@ export interface components {
             dashboard_sso_enabled?: boolean;
             /** @description Whether members may bring personal model credentials. Defaults to true. When false, adding one (`owner_type: user` on `POST /api/model-provider-credentials` or on `POST /api/model-providers-oauth/pairing`) answers `403 personal_model_credentials_disabled`, and the personal credentials that already exist serve nothing: a model the organization leaves unbound is refused (`409 model_credential_required`), and a run on one is refused at its next call. Always present on read; optional on PATCH. */
             personal_model_credentials: boolean;
-            /**
-             * @description The role an organization MEMBER holds in their own personal space. Defaults to `admin`. `operator` caps it: the member runs published, active agents (a plain launch without a published version returns `404 no_published_version`). An explicit draft launch requires write access in the package’s home space (`403 draft_not_writable` otherwise). Existing schedules keep their previously authorized draft selectors. The member activates and deactivates packages, connects integrations, and can still delete the agents, skills, integrations and schedules they already have there (`agents:delete`, `skills:delete`, `integrations:delete`, `schedules:delete`), but can no longer create, edit, publish, share, configure or compose an inline run, nor rename the space. Owners and admins keep `admin` in their own personal space and a guest stays `operator`. Computed on every request: switching it back restores `admin` with no other write. Always present on read; optional on PATCH.
-             * @enum {string}
-             */
-            personal_space_role: "admin" | "operator";
+            /** @description The role an organization member or guest holds by default in their own personal space: a preset key (`admin`, `builder`, `operator`, `runner`, `viewer`) or the id of one of this organization's custom space roles (`srl_…`). Defaults to `admin`. On write, a custom id that is not a role of this organization answers `404 not_found`; while a custom role is named here it cannot be deleted (`409 role_in_use` with `org_default: true`). A member holds the role chosen (this default, or their own override) plus `agents:delete`, `skills:delete`, `integrations:delete` and `schedules:delete` short of `admin`, so the member can still remove what they already have. Below `admin` the member loses what the role withholds — e.g. without `agents:write` no create, edit or inline run (`403 inline_run_not_allowed_in_space`); a plain launch runs the published version (`404 no_published_version` without one) and an explicit draft launch requires write access in the package's home space (`403 draft_not_writable`). Existing schedules keep their previously authorized draft selectors. Owners and admins always hold `admin` in their own personal space. A guest takes this default too, always capped to `operator`: the permissions of the chosen role that `operator` also grants, plus the deletes above. A default broader than `operator` (`admin`, `builder`) gives a guest `operator`; a narrower one (`viewer`, `runner`) gives the guest that role as it is; a custom role gives the guest that role restricted to what `operator` grants. Restricting the default never gives a guest more. A member's or guest's own override (`PUT /api/orgs/{orgId}/members/{userId}/personal-space-role`) wins over this default. Computed on every request: changing it takes effect with no other write. Always present on read; optional on PATCH. */
+            personal_space_role: string & (("admin" | "builder" | "operator" | "runner" | "viewer") | string);
         };
         Organization: {
             id: string;
@@ -7419,8 +7474,10 @@ export interface components {
             key: string;
             name: string;
             description: string | null;
-            /** @description Space-level permission strings the role grants on this deployment, sorted. A custom bundle is projected through the same vocabulary enforcement uses, so this array is always one a `PATCH` accepts back. */
+            /** @description Space-level permission strings the role grants on this deployment, sorted. A custom bundle is projected through the same vocabulary enforcement uses, so this array is always one a `PATCH` accepts back: never `studio:read`, which `shows_studio` carries. */
             permissions: string[];
+            /** @description Whether holders of the role see the Studio (they resolve `studio:read`). A display setting, not a boundary: the REST API and an MCP client answer the role's other permissions either way. Always `true` for a preset. */
+            shows_studio: boolean;
             /** @description Entries stored on the bundle that this deployment cannot name — their module is no longer loaded — sorted. They grant nothing and are never part of `permissions`; sending a `permissions` array without them is what drops them from the row. Always empty for a preset. */
             unavailable_permissions: string[];
             /** Format: date-time */
@@ -20842,7 +20899,13 @@ export interface operations {
                      *                 "name": "admin"
                      *               }
                      *             }
-                     *           ]
+                     *           ],
+                     *           "personal_space_role": null,
+                     *           "personal_space_default_role": {
+                     *             "kind": "preset",
+                     *             "key": "admin",
+                     *             "name": "admin"
+                     *           }
                      *         },
                      *         {
                      *           "userId": "usr_def456",
@@ -20861,7 +20924,15 @@ export interface operations {
                      *                 "name": "operator"
                      *               }
                      *             }
-                     *           ]
+                     *           ],
+                     *           "personal_space_role": {
+                     *             "preset_role": "builder"
+                     *           },
+                     *           "personal_space_default_role": {
+                     *             "kind": "preset",
+                     *             "key": "admin",
+                     *             "name": "admin"
+                     *           }
                      *         }
                      *       ],
                      *       "invitations": []
@@ -22008,7 +22079,13 @@ export interface operations {
                      *             "name": "admin"
                      *           }
                      *         }
-                     *       ]
+                     *       ],
+                     *       "personal_space_role": null,
+                     *       "personal_space_default_role": {
+                     *         "kind": "preset",
+                     *         "key": "admin",
+                     *         "name": "admin"
+                     *       }
                      *     }
                      */
                     "application/json": components["schemas"]["OrgMember"];
@@ -22123,6 +22200,78 @@ export interface operations {
                         hasMore: boolean;
                     };
                 };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    setMemberPersonalSpaceRole: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                orgId: string;
+                userId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** @enum {string} */
+                    preset_role?: "admin" | "builder" | "operator" | "runner" | "viewer";
+                    custom_role_id?: string;
+                } & (unknown | unknown);
+            };
+        };
+        responses: {
+            /** @description Updated member — same shape as the members list in GET /api/orgs/{orgId} */
+            200: {
+                headers: {
+                    "Request-Id": components["headers"]["RequestId"];
+                    "Appstrate-Version": components["headers"]["AppstrateVersion"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OrgMember"];
+                };
+            };
+            400: components["responses"]["ValidationError"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            /** @description The target is an owner or admin, who always hold `admin` in their personal space (`redundant_space_role`) */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+        };
+    };
+    clearMemberPersonalSpaceRole: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                orgId: string;
+                userId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Override cleared, or there was none */
+            204: {
+                headers: {
+                    "Request-Id": components["headers"]["RequestId"];
+                    "Appstrate-Version": components["headers"]["AppstrateVersion"];
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
@@ -22607,6 +22756,56 @@ export interface operations {
             403: components["responses"]["Forbidden"];
         };
     };
+    getPersonalSpaceRoleImpact: {
+        parameters: {
+            query: {
+                /** @description The candidate default, as `updateOrgSettings` takes `personal_space_role`: a preset key or the id of one of this organization's custom space roles. */
+                role: ("admin" | "builder" | "operator" | "runner" | "viewer") | string;
+            };
+            header?: never;
+            path: {
+                orgId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description What the candidate default would stop */
+            200: {
+                headers: {
+                    "Request-Id": components["headers"]["RequestId"];
+                    "Appstrate-Version": components["headers"]["AppstrateVersion"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "schedules": 3,
+                     *       "members": 2
+                     *     }
+                     */
+                    "application/json": {
+                        /** @description Enabled schedules that would disable themselves at their next fire. */
+                        schedules: number;
+                        /** @description Distinct members and guests owning those schedules. */
+                        members: number;
+                    };
+                };
+            };
+            400: components["responses"]["ValidationError"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            /** @description `role` names a custom role id that is not a role of this organization */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+        };
+    };
     listOrgRuns: {
         parameters: {
             query?: {
@@ -22892,11 +23091,8 @@ export interface operations {
                     dashboard_sso_enabled?: boolean;
                     /** @description Whether members may bring personal model credentials. Defaults to true. When false, adding one (`owner_type: user` on `POST /api/model-provider-credentials` or on `POST /api/model-providers-oauth/pairing`) answers `403 personal_model_credentials_disabled`, and the personal credentials that already exist serve nothing: a model the organization leaves unbound is refused (`409 model_credential_required`), and a run on one is refused at its next call. Always present on read; optional on PATCH. */
                     personal_model_credentials?: boolean;
-                    /**
-                     * @description The role an organization MEMBER holds in their own personal space. Defaults to `admin`. `operator` caps it: the member runs published, active agents (a plain launch without a published version returns `404 no_published_version`). An explicit draft launch requires write access in the package’s home space (`403 draft_not_writable` otherwise). Existing schedules keep their previously authorized draft selectors. The member activates and deactivates packages, connects integrations, and can still delete the agents, skills, integrations and schedules they already have there (`agents:delete`, `skills:delete`, `integrations:delete`, `schedules:delete`), but can no longer create, edit, publish, share, configure or compose an inline run, nor rename the space. Owners and admins keep `admin` in their own personal space and a guest stays `operator`. Computed on every request: switching it back restores `admin` with no other write. Always present on read; optional on PATCH.
-                     * @enum {string}
-                     */
-                    personal_space_role?: "admin" | "operator";
+                    /** @description The role an organization member or guest holds by default in their own personal space: a preset key (`admin`, `builder`, `operator`, `runner`, `viewer`) or the id of one of this organization's custom space roles (`srl_…`). Defaults to `admin`. On write, a custom id that is not a role of this organization answers `404 not_found`; while a custom role is named here it cannot be deleted (`409 role_in_use` with `org_default: true`). A member holds the role chosen (this default, or their own override) plus `agents:delete`, `skills:delete`, `integrations:delete` and `schedules:delete` short of `admin`, so the member can still remove what they already have. Below `admin` the member loses what the role withholds — e.g. without `agents:write` no create, edit or inline run (`403 inline_run_not_allowed_in_space`); a plain launch runs the published version (`404 no_published_version` without one) and an explicit draft launch requires write access in the package's home space (`403 draft_not_writable`). Existing schedules keep their previously authorized draft selectors. Owners and admins always hold `admin` in their own personal space. A guest takes this default too, always capped to `operator`: the permissions of the chosen role that `operator` also grants, plus the deletes above. A default broader than `operator` (`admin`, `builder`) gives a guest `operator`; a narrower one (`viewer`, `runner`) gives the guest that role as it is; a custom role gives the guest that role restricted to what `operator` grants. Restricting the default never gives a guest more. A member's or guest's own override (`PUT /api/orgs/{orgId}/members/{userId}/personal-space-role`) wins over this default. Computed on every request: changing it takes effect with no other write. Always present on read; optional on PATCH. */
+                    personal_space_role?: string & (("admin" | "builder" | "operator" | "runner" | "viewer") | string);
                 };
             };
         };
@@ -22915,6 +23111,15 @@ export interface operations {
             400: components["responses"]["ValidationError"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
+            /** @description `personal_space_role` names a custom role id that is not a role of this organization */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
         };
     };
     listAgentPackages: {
@@ -26012,8 +26217,13 @@ export interface operations {
                     key: string;
                     name: string;
                     description?: string | null;
-                    /** @description Space-level permission strings the role grants (at least one). */
+                    /** @description Space-level permission strings the role grants (at least one). Never `studio:read`: a 400, the role resolves it from `shows_studio`. */
                     permissions: string[];
+                    /**
+                     * @description Whether holders see the Studio (they resolve `studio:read`). Default `true`. A display setting, not a boundary: the API answers the role's other permissions either way.
+                     * @default true
+                     */
+                    shows_studio?: boolean;
                 };
             };
         };
@@ -26114,6 +26324,10 @@ export interface operations {
                         member_count: number;
                         /** @description Pending invitations whose `space_assignments` name this role. */
                         pending_invitation_count: number;
+                        /** @description The organization's OIDC clients whose `signup_space_assignments` assign this role. */
+                        signup_assignment_count: number;
+                        /** @description Whether the organization's `personal_space_role` setting names this role. */
+                        org_default: boolean;
                     };
                 };
             };
@@ -26139,6 +26353,8 @@ export interface operations {
                     name?: string;
                     description?: string | null;
                     permissions?: string[];
+                    /** @description Whether holders see the Studio (they resolve `studio:read`). Absent = unchanged. */
+                    shows_studio?: boolean;
                 };
             };
         };
@@ -28787,6 +29003,15 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
+            /** @description The space is a personal space (`personal_space_has_no_members`) */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
         };
     };
     updateSpaceMember: {

@@ -135,6 +135,9 @@ export interface CoreResources {
   // Org-wide integration OAuth clients (+ the org-tier default), inherited by every
   // space; the org half of `integrations:configure`, session-only for the same reason.
   "org-integrations": "configure";
+  // The Studio's dashboard screens. No route reads it: a role without it keeps every other grant
+  // (chat, REST, MCP), so it opens screens and is no boundary.
+  studio: "read";
 }
 
 /** Core resource names. */
@@ -325,6 +328,7 @@ export const CORE_RESOURCE_ACTIONS = {
     "share",
   ],
   "org-integrations": ["configure"],
+  studio: ["read"],
 } as const satisfies { readonly [R in CoreResource]: readonly CoreResources[R][] };
 
 /** Read by the module loader at boot to refuse a module re-declaring a core resource name. */
@@ -366,6 +370,7 @@ export const CORE_RESOURCE_LEVELS = {
   "api-keys": "space",
   "credential-proxy": "space",
   integrations: "space",
+  studio: "space",
 } as const satisfies Record<CoreResource, PermissionLevel>;
 
 /** Core permission strings granted by org roles. */
@@ -469,6 +474,13 @@ export const SPACE_ROLE_PRESETS = ["admin", "builder", "operator", "runner", "vi
 /** Space-role preset union — `"admin" | "builder" | "operator" | "runner" | "viewer"`. */
 export type SpaceRolePreset = (typeof SPACE_ROLE_PRESETS)[number];
 
+const SPACE_ROLE_PRESET_SET: ReadonlySet<string> = new Set<string>(SPACE_ROLE_PRESETS);
+
+/** Whether `value` is a preset key — the one test, wherever a stored role may also be a custom id. */
+export function isSpaceRolePreset(value: unknown): value is SpaceRolePreset {
+  return typeof value === "string" && SPACE_ROLE_PRESET_SET.has(value);
+}
+
 /** Org roles holding every org-level permission in every space, without a `space_members` row. */
 export const ORG_ROLES_WITH_FULL_ACCESS = ["owner", "admin"] as const;
 
@@ -532,7 +544,19 @@ export const VIEW_AS_REFUSAL_CODES: ReadonlySet<string> = new Set([
   "view_as_not_found",
 ]);
 
-/** Zod validator for the per-org `settings` JSONB shape. */
+/** A custom space role id: `srl_` followed by a canonical lowercase dashed UUID. */
+export const SPACE_ROLE_ID_REGEX =
+  /^srl_[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+
+/** `personal_space_role` on the settings API: a preset key, or the id of an org custom space role. */
+export const personalSpaceRoleSettingSchema = z.union([
+  z.enum(SPACE_ROLE_PRESETS),
+  z.string().regex(SPACE_ROLE_ID_REGEX, {
+    message: "Expected a preset key or a custom space role id (`srl_` + canonical UUID).",
+  }),
+]);
+
+/** Zod validator for the per-org `settings` JSONB shape, as stored. */
 export const orgSettingsSchema = z.object({
   api_version: z.string().optional(),
   dashboard_sso_enabled: z.boolean().optional(),
@@ -547,17 +571,23 @@ export const orgSettingsSchema = z.object({
   restrict_package_copy: z.boolean().optional(),
   // Absent = allowed. `false` refuses new personal model credentials, and the chain ignores existing ones.
   personal_model_credentials: z.boolean().optional(),
-  // Absent = `admin`. `operator` caps the role an org member holds in their own personal space.
-  personal_space_role: z.enum(["admin", "operator"]).optional(),
+  // A member's default role in their personal space when a PRESET (a custom one is
+  // `organizations.personal_space_role_id`); absent = `admin`. Below `admin`: a delete floor.
+  personal_space_role: z.enum(SPACE_ROLE_PRESETS).optional(),
 });
 
-/** The org settings as served: each defaulted policy read as its effective value; other stored keys kept. */
+/** The stored settings as read: each defaulted policy read as its effective value; other stored keys kept. */
 export const orgSettingsReadSchema = orgSettingsSchema
   .extend({
     personal_model_credentials: z.boolean().default(true),
-    personal_space_role: z.enum(["admin", "operator"]).default("admin"),
+    personal_space_role: z.enum(SPACE_ROLE_PRESETS).default("admin"),
   })
   .loose();
+
+/** The org settings as served: `personal_space_role` may name the custom default. */
+export const orgSettingsWireSchema = orgSettingsReadSchema.extend({
+  personal_space_role: personalSpaceRoleSettingSchema.default("admin"),
+});
 
 // ---------------------------------------------------------------------------
 // Module permission aggregator — runtime registry shared by apps/api and

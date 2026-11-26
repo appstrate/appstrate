@@ -3,6 +3,7 @@
 import type { ReactElement } from "react";
 import { QueryClient } from "@tanstack/react-query";
 import { render } from "./render.tsx";
+import { STUDIO_PERMISSION } from "../lib/route-access.ts";
 import { spyOn } from "bun:test";
 import { authStore } from "../stores/auth-store.ts";
 import { orgStore } from "../stores/org-store.ts";
@@ -55,12 +56,18 @@ export function renderInSpace(
 
 const NAMES: Record<string, string> = { spc_a: "Atelier", spc_b: "Studio", spc_c: "Coffre" };
 
-export const testSpace = (id: string, permissions: string[], name = NAMES[id] ?? id) => ({
+/** Every preset opens the Studio, so a fixture space does too unless `studio: false` (a chat-only role). */
+export const testSpace = (
+  id: string,
+  permissions: string[],
+  name = NAMES[id] ?? id,
+  { studio = true }: { studio?: boolean } = {},
+) => ({
   id,
   object: "space",
   orgId: "org_1",
   access: "member",
-  permissions,
+  permissions: studio ? [STUDIO_PERMISSION, ...permissions] : permissions,
   personal: false,
   isDefault: id === "spc_a",
   name,

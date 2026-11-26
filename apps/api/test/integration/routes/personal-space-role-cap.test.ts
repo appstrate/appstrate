@@ -1,12 +1,13 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * `personal_space_role: "operator"` over HTTP (RBAC spec §3.6).
+ * `personal_space_role` over HTTP (RBAC spec §3.6): `operator` first, then the other
+ * presets and a custom role of the org as the default.
  *
  * The cap holds an org MEMBER in their own personal space to `operator` plus the
  * four delete permissions. The claims, in order: what it refuses (compose, author,
  * publish, rename), what it leaves (run, activate, connect, delete what is already
- * there), who it does not touch (owner, admin, guest), and that it is computed —
+ * there), who it does not touch (owner, admin), how a guest takes it, and that it is computed —
  * flipping the setting restores `admin` on the next request with no other write.
  */
 
@@ -31,26 +32,19 @@ import {
   seedSpace,
   seedSpaceMember,
   seedSpacePackage,
+  seedSpaceRole,
 } from "../../helpers/seed.ts";
 import {
   createFakeOrchestrator,
   seedDefaultOrgModel,
   waitForRunPipelineSettled,
 } from "../../helpers/run-connection-fixtures.ts";
+import { DELETES, personalOf } from "../../helpers/personal-space.ts";
 import { _setOrchestratorForTesting } from "../../../src/services/orchestrator/index.ts";
 
 import { triggerScheduledRun } from "../../../src/services/scheduler.ts";
 
 const app = getTestApp();
-
-interface ListedSpace {
-  id: string;
-  personal: boolean;
-  role: { kind: string; key: string } | null;
-  permissions: string[];
-}
-
-const DELETES = ["agents:delete", "skills:delete", "integrations:delete", "schedules:delete"];
 
 const headersFor = (ctx: TestContext, spaceId: string) => ({
   Cookie: ctx.cookie,
@@ -60,7 +54,7 @@ const headersFor = (ctx: TestContext, spaceId: string) => ({
 
 const json = { "Content-Type": "application/json" };
 
-async function setCap(owner: TestContext, value: "operator" | "admin" | null): Promise<void> {
+async function setCap(owner: TestContext, value: string | null): Promise<void> {
   const res = await app.request(`/api/orgs/${owner.orgId}/settings`, {
     method: "PATCH",
     headers: { Cookie: owner.cookie, ...json },
@@ -68,19 +62,6 @@ async function setCap(owner: TestContext, value: "operator" | "admin" | null): P
     body: JSON.stringify(value === null ? {} : { personal_space_role: value }),
   });
   expect(res.status, await res.clone().text()).toBe(200);
-}
-
-/** `GET /api/spaces` — the route that also provisions the caller's own space. */
-async function listSpaces(ctx: TestContext): Promise<ListedSpace[]> {
-  const res = await app.request("/api/spaces", { headers: orgOnlyHeaders(ctx) });
-  expect(res.status, await res.clone().text()).toBe(200);
-  return ((await res.json()) as { data: ListedSpace[] }).data;
-}
-
-async function personalOf(ctx: TestContext): Promise<ListedSpace> {
-  const own = (await listSpaces(ctx)).filter((s) => s.personal);
-  expect(own).toHaveLength(1);
-  return own[0]!;
 }
 
 function validateInline(ctx: TestContext, spaceId: string) {
@@ -363,10 +344,10 @@ describe("personal_space_role: operator", () => {
       expect(res.status, await res.clone().text()).not.toBe(403);
     });
 
-    it("leaves a guest's own personal space at plain operator, deletes excluded", async () => {
+    it("gives a guest the operator default too, deletes included", async () => {
       const own = await personalOf(guest);
       expect(own.role).toMatchObject({ key: "operator" });
-      for (const permission of DELETES) expect(own.permissions).not.toContain(permission);
+      for (const permission of DELETES) expect(own.permissions).toContain(permission);
       await expectProblem(await validateInline(guest, own.id), 403, {
         code: "inline_run_not_allowed_in_space",
       });
@@ -403,6 +384,102 @@ describe("personal_space_role: operator", () => {
       const own = await personalOf(guest);
       await expectProblem(await validateInline(guest, own.id), 403, {
         code: "inline_run_not_allowed_in_space",
+      });
+    });
+  });
+
+  describe("another preset or a custom role as the default", () => {
+    it("gives a member builder or viewer plus the delete floor", async () => {
+      await setCap(owner, "builder");
+      const asBuilder = await personalOf(member);
+      expect(asBuilder.role).toMatchObject({ kind: "preset", key: "builder" });
+      expect(asBuilder.permissions).toContain("agents:write");
+      for (const permission of DELETES) expect(asBuilder.permissions).toContain(permission);
+
+      await setCap(owner, "viewer");
+      const asViewer = await personalOf(member);
+      expect(asViewer.role).toMatchObject({ kind: "preset", key: "viewer" });
+      for (const permission of DELETES) expect(asViewer.permissions).toContain(permission);
+      for (const permission of ["agents:write", "agents:run"]) {
+        expect(asViewer.permissions).not.toContain(permission);
+      }
+      const statuses = await authoringStatuses(member, personalId, agentId);
+      expect(statuses.createAgent).toBe(403);
+    });
+
+    it("caps a guest to operator plus the floor under an authoring default, and gives them a narrower one", async () => {
+      await setCap(owner, "builder");
+      const asBuilder = await personalOf(guest);
+      expect(asBuilder.role).toMatchObject({ kind: "preset", key: "operator" });
+      expect(asBuilder.permissions).not.toContain("agents:write");
+      for (const permission of DELETES) expect(asBuilder.permissions).toContain(permission);
+
+      // A custom default granting `agents:write` caps a guest the same way.
+      const author = await seedSpaceRole({
+        orgId: owner.orgId,
+        key: "author",
+        name: "Author",
+        permissions: ["agents:read", "agents:write"],
+      });
+      await setCap(owner, author.id);
+      const asAuthor = await personalOf(guest);
+      // Restricted to what `operator` grants: the chosen role, named as such, without its write half.
+      expect(asAuthor.role).toMatchObject({ kind: "custom", key: "author" });
+      expect(asAuthor.permissions).toContain("agents:read");
+      expect(asAuthor.permissions).not.toContain("agents:write");
+      for (const permission of DELETES) expect(asAuthor.permissions).toContain(permission);
+      expect((await personalOf(member)).role).toMatchObject({ kind: "custom", key: "author" });
+
+      // A guest never outranks a member: under `viewer` both hold viewer plus the floor.
+      await setCap(owner, "viewer");
+      const asViewer = await personalOf(guest);
+      expect(asViewer.role).toMatchObject({ kind: "preset", key: "viewer" });
+      expect(asViewer.permissions).not.toContain("agents:run");
+      for (const permission of DELETES) expect(asViewer.permissions).toContain(permission);
+    });
+
+    describe("a custom role as the default", () => {
+      beforeEach(async () => {
+        // `shows_studio: false`: the Studio is what this role withholds.
+        const role = await seedSpaceRole({
+          orgId: owner.orgId,
+          key: "runner-lite",
+          name: "Runner lite",
+          permissions: ["agents:read", "agents:run", "runs:read"],
+          showsStudio: false,
+        });
+        await setCap(owner, role.id);
+      });
+
+      it("gives a member its permissions plus the floor on GET /api/spaces", async () => {
+        const own = await personalOf(member);
+        expect(own.role).toMatchObject({ kind: "custom", key: "runner-lite" });
+        expect(own.permissions).not.toContain("studio:read");
+        expect(own.permissions).not.toContain("agents:write");
+        for (const permission of ["agents:read", "agents:run", "runs:read", ...DELETES]) {
+          expect(own.permissions).toContain(permission);
+        }
+      });
+
+      it("names it on the space detail", async () => {
+        const detail = await app.request(`/api/spaces/${personalId}`, {
+          headers: orgOnlyHeaders(member),
+        });
+        expect(detail.status, await detail.clone().text()).toBe(200);
+        expect(await detail.json()).toMatchObject({
+          role: { kind: "custom", key: "runner-lite", name: "Runner lite" },
+        });
+      });
+
+      it("leaves an org admin at admin", async () => {
+        expect((await personalOf(admin)).role).toMatchObject({ key: "admin" });
+      });
+
+      it("gives a guest the same role, never above a member", async () => {
+        const guestOwn = await personalOf(guest);
+        expect(guestOwn.role).toMatchObject({ kind: "custom", key: "runner-lite" });
+        expect(guestOwn.permissions).not.toContain("agents:write");
+        for (const permission of DELETES) expect(guestOwn.permissions).toContain(permission);
       });
     });
   });

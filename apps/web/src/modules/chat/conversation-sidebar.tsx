@@ -173,7 +173,7 @@ export function ConversationRuns({
   active: boolean;
 }) {
   const { t } = useTranslation("chat");
-  const admitting = useAdmittingSpaces("runs");
+  const admitting = useAdmittingSpaces("runs", "chat");
   const canRead = admitting.length > 0;
   // Spanning: the conversation's runs are every space's, polled (the SSE stream carries one space).
   const scope = useListScope(true, canRead);
@@ -236,7 +236,7 @@ export function ConversationFiles({
 }) {
   const { t } = useTranslation("chat");
   // The list spans the spaces the reader reads files in: each row names its own once there are several.
-  const named = useAdmittingSpaces("files").length > 1;
+  const named = useAdmittingSpaces("files", "chat").length > 1;
   const query = useFiles({
     spanning: true,
     contextChatSessionId: conversationId ?? undefined,

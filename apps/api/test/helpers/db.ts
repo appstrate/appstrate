@@ -107,6 +107,8 @@ const CORE_TABLES = [
   "org_invitations",
   // Space membership: rows first, then the custom bundles they may reference
   // (`custom_role_id` is ON DELETE RESTRICT, so the order is load-bearing).
+  // `organizations.personal_space_role_id` also references a bundle with ON DELETE RESTRICT,
+  // and organizations are deleted after it: TRUNCATE_PREAMBLE clears that reference first.
   "space_members",
   "space_roles",
   // Mid-level tables
@@ -141,11 +143,18 @@ export function registerTruncationTables(tables: readonly string[]): void {
 /** Cached DO-block SQL — rebuilt lazily after registerTruncationTables(). */
 let cachedTruncateSql: string | null = null;
 
+/**
+ * Run before the DELETEs: an org's custom personal-space default points from `organizations`
+ * (deleted last) to `space_roles` (deleted earlier) under ON DELETE RESTRICT.
+ */
+const TRUNCATE_PREAMBLE =
+  "UPDATE organizations SET personal_space_role_id = NULL WHERE personal_space_role_id IS NOT NULL;";
+
 function buildTruncateSql(): string {
   const deletes = [...extraTables, ...CORE_TABLES]
     .map((table) => `DELETE FROM ${table};`)
     .join("\n");
-  return `DO $$ BEGIN\n${deletes}\nEND $$;`;
+  return `DO $$ BEGIN\n${TRUNCATE_PREAMBLE}\n${deletes}\nEND $$;`;
 }
 
 /**

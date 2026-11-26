@@ -806,6 +806,13 @@
       "when": 1795477000000,
       "tag": "0114_credential_refresh_and_reconnection",
       "breakpoints": true
+    },
+    {
+      "idx": 115,
+      "version": "7",
+      "when": 1795723802142,
+      "tag": "0115_role_studio_and_personal_default",
+      "breakpoints": true
     }
   ]
 }

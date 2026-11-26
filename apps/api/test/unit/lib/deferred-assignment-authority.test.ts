@@ -36,7 +36,7 @@ describe("deferred space assignments — who can author one", () => {
           { id: "spc_x", visibility: "private", defaultRole: "viewer", ownerUserId: null },
           null,
           "usr_x",
-          "admin",
+          null,
         ),
         `${role} must reach every space as preset admin, or the deferred path's guarantee fails`,
       ).toEqual({ kind: "preset", preset: "admin" });
