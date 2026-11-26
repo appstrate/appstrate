@@ -155,7 +155,8 @@ describe("NotificationContent", () => {
       },
     ]);
 
-    expect(html).toContain("La connexion pierre@acme.test (Gmail) doit être reconnectée");
+    expect(html).toContain("Gmail : la connexion pierre@acme.test doit être reconnectée");
+    expect(html).toContain("Le fournisseur a révoqué l’accès");
     expect(html).toContain('href="/notifications/n12"');
   });
 
