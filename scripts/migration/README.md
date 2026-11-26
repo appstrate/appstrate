@@ -132,9 +132,7 @@ docker exec -i <pg> psql -U appstrate -d appstrate -v ON_ERROR_STOP=1 \
 ```
 
 Exceptions: `0020` is a dry run unless given `-v apply=on` (see its header);
-`0032` refuses to run without `-v ran_0033=1`, which `0033 --apply` prints; `0058` breaks rule 1:
-its `UPDATE` has no `WHERE`, so a re-run is not a no-op, and a guard refuses it while any custom role
-holds `studio:read` (a re-run once no role holds it would grant it again: run it once).
+`0032` refuses to run without `-v ran_0033=1`, which `0033 --apply` prints.
 
 ## Detail — RBAC rollout (drizzle `0056` + `0059`, scripts `0008` + `0009` + `0012` + `0017`)
 
@@ -1531,37 +1529,6 @@ If the candidate's `before-schema` check finds notifications outside their run's
 
 The last query lists identifiers of unresolved notifications. Check their recipients against the run and the historical membership or delivery records. A system run can have multiple recipients. Determine the intended tenant and recipient before an individual correction. Keep traffic closed until the preflight returns zero, including independently checked read markers and grants on later installations. Record the affected counts in the deployment log.
 
-## 0058 — The Studio permission on existing custom roles
-
-The release adds the space permission `studio:read`, which only opens the Studio's screens in the
-interface (no API guard). The presets hold it; a custom role stored before the release does not, so
-its holders would lose the Studio at the deploy. Run
-`psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f scripts/migration/0058-grant-studio-read.sql` in the
-window, with the previous release stopped and before the new release takes traffic (on PGlite,
-execute the SQL with the app stopped). The previous release refuses an unknown permission when a
-custom role is saved, so do not run it while that release serves traffic. It appends `studio:read`
-to every custom role, prints the roles it changed, then prints `custom_roles_without_studio_read`,
-which must be `0`. Record the printed rows in the deployment log.
-
-**Run it once, never again.** It is not idempotent: its `UPDATE` has no `WHERE`. A guard aborts it,
-writing nothing, while any custom role holds `studio:read`, which no role can before the release
-(the previous release refuses the permission). That guard only sees the current state: if no role
-holds `studio:read` any more (an admin removed it everywhere, or only roles created after the release
-exist and lack it), a re-run passes the guard and grants the Studio again to roles narrowed on purpose.
-
-Nothing at boot detects a forgotten run: `PENDING_DATA_SCRIPTS` cannot carry it, since a role without
-`studio:read` is also a legitimate state. If the script was forgotten and the new release has already
-saved roles, do not run the file; grant by hand to the roles that predate the deploy:
-
-```sql
--- <deploy time> = when the new release first served traffic
-UPDATE space_roles SET permissions = array_append(permissions, 'studio:read'), updated_at = now()
-WHERE created_at < '<deploy time>' AND NOT ('studio:read' = ANY (permissions));
-```
-
-A role created before the deploy that an admin narrowed since is granted it back too; review the
-list first.
-
 ## Historical chat messages — `before-traffic`
 
 `verify-beta68-upgrade.ts before-traffic` lists, under `chat · messages incompatible with history replay`, each stored message that `historicalChatMessageSchema` refuses, as `session_id=… seq=…`. The next turn in such a conversation is refused with a 400, so the check keeps chat closed. It prints identifiers only, never message content.
@@ -1652,4 +1619,3 @@ Rollback: not possible without restoring the backup, and not needed: the deleted
 | 0055 | not yet             | chat `read_file` / `read_resource` calls on an `appfile://` persisted before #2280 (the file's text, or its bytes as a base64 resource) rewritten as the receipt the chat now persists (`{ uri, mimeType?, size?, note }`, no content); receipts, platform metadata and `skill://` reads untouched — model replay keeps only the file reference — **run in the release window with the app stopped**: until it has run, loading an old thread can return its stored file contents to the browser                                                                                                                                                                                             | dry run prints the messages and file reads to rewrite; `--apply` rewrites them in one transaction, exits 1 unless none is left; a second run finds nothing                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
 | 0056 | not yet             | refresh tokens marked by an administrative revocation (`revoked IS NOT NULL AND rotated_at IS NULL`: member exit, password change, `0019`, `/oauth2/revoke`, sign-out of non-`offline_access` tokens) deleted, access tokens through the `refresh_id` cascade, rotated-out rows kept (#2325) — **run once after the release that deletes instead of marking; the app may keep running**                                                                                                                                                                                                                                                                                                      | prints marked_to_delete / rotated_kept / live_kept, deleted, and left (must be 0); a second run deletes 0                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
 | 0057 | not yet             | Repair a run notification’s space where its organization, run and recipient agree, before copying recipient read state.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      | On an isolated beta.68 restore with one deliberately incorrect space, the preflight went from 1 to 0 and the recipient read marker survived 0113 and 0052 on PostgreSQL 16.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
-| 0058 | not yet             | `studio:read` appended to every custom space role, so existing custom roles keep the Studio's screens (display only, no API guard) — **run once in the window, previous release stopped, before the new release takes traffic**; refuses a re-run while any role holds `studio:read`, but not once none does                                                                                                                                                                                                                                                                                                                                                                                 |

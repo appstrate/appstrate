@@ -392,6 +392,25 @@ export function knownSpaceLevelPermissions(): ReadonlySet<string> {
 }
 
 /**
+ * Space-level grants a role RESOLVES but never stores: every preset holds them, and a custom role
+ * holds each through a column of its own row, never through `space_roles.permissions`
+ * (`studio:read` ⇐ `space_roles.shows_studio`, RBAC spec §3.3). So they are not assignable: a
+ * bundle naming one is refused at write, and a stored entry naming one is never granted from it.
+ */
+export const RESOLVED_SPACE_PERMISSIONS: ReadonlySet<string> = new Set<Permission>(["studio:read"]);
+
+/**
+ * What a custom `space_roles.permissions` array may hold: {@link knownSpaceLevelPermissions}
+ * minus {@link RESOLVED_SPACE_PERMISSIONS}. The validator, the picker's vocabulary and the
+ * stored-bundle narrowing all read this one set.
+ */
+export function assignableSpaceLevelPermissions(): ReadonlySet<string> {
+  const assignable = new Set<string>(knownSpaceLevelPermissions());
+  for (const permission of RESOLVED_SPACE_PERMISSIONS) assignable.delete(permission);
+  return assignable;
+}
+
+/**
  * The reads any one of which `permission` requires, canonical first; empty when none.
  * The module loader passes its own `known`: it runs before the module snapshot is registered.
  */
@@ -458,7 +477,9 @@ export function partitionSpacePermissions(stored: readonly string[]): {
   granted: Set<Permission>;
   unavailable: string[];
 } {
-  const known = knownSpaceLevelPermissions();
+  // A resolved grant spelled in a stored array is not granted from it either: it comes from its
+  // own column ({@link RESOLVED_SPACE_PERMISSIONS}), so it is reported, never held.
+  const known = assignableSpaceLevelPermissions();
   const granted = new Set<Permission>();
   const unavailable: string[] = [];
   for (const permission of stored) {
@@ -486,12 +507,12 @@ export interface SpaceVocabularyGroup {
 
 /**
  * Custom-role vocabulary grouped for a picker (`GET /api/roles/vocabulary`,
- * RBAC spec §6.2). Same source as {@link knownSpaceLevelPermissions}, so what
- * the picker offers and what the validator accepts cannot drift.
+ * RBAC spec §6.2). Same source as the validator ({@link assignableSpaceLevelPermissions}), so
+ * what the picker offers and what the validator accepts cannot drift.
  */
 export function spaceLevelVocabulary(): SpaceVocabularyGroup[] {
   const apiKeyAllowed = getApiKeyAllowedScopes();
-  const known = knownSpaceLevelPermissions();
+  const known = assignableSpaceLevelPermissions();
   const byResource = new Map<string, SpacePermissionEntry[]>();
   for (const permission of [...known].sort()) {
     const colon = permission.indexOf(":");

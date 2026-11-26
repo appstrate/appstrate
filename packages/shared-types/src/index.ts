@@ -438,9 +438,9 @@ export type { OrgRole };
  */
 export type { SpaceAssignment };
 
-import type { orgSettingsReadSchema } from "@appstrate/core/permissions";
-export type OrgSettings = z.output<typeof orgSettingsReadSchema>;
-
+import type { orgSettingsWireSchema } from "@appstrate/core/permissions";
+/** The org settings as the API serves them (`GET /api/orgs/{orgId}/settings`). */
+export type OrgSettings = z.output<typeof orgSettingsWireSchema>;
 /**
  * Mirrored by an OpenAPI response schema, and reached only by name.
  *

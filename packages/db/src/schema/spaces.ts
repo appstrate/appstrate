@@ -135,6 +135,10 @@ export const spaceRoles = pgTable(
       .array()
       .notNull()
       .default(sql`'{}'::text[]`),
+    // Whether a holder sees the Studio (`studio:read`, RBAC spec §3.3). A display grant the role
+    // resolves, never one `permissions` stores: true = shown, as every preset does. A constant
+    // default, so every row predating the column reads true, which is what it held before.
+    showsStudio: boolean("shows_studio").notNull().default(true),
     createdBy: text("created_by").references(() => user.id, { onDelete: "set null" }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),

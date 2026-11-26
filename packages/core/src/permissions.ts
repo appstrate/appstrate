@@ -550,15 +550,20 @@ export const VIEW_AS_REFUSAL_CODES: ReadonlySet<string> = new Set([
 export const SPACE_ROLE_ID_REGEX =
   /^srl_[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 
-/** `org_settings.personal_space_role`: a preset key or a custom space role id. */
-const personalSpaceRoleSchema = z.union([
+/**
+ * `personal_space_role` as the settings API reads and writes it: a preset key, or the id of one
+ * of the org's custom space roles. Stored in two shapes, never both (a DB CHECK holds it): a
+ * preset under `org_settings.personal_space_role` ({@link orgSettingsSchema}), a custom role
+ * under the FK column `organizations.personal_space_role_id`.
+ */
+export const personalSpaceRoleSettingSchema = z.union([
   z.enum(SPACE_ROLE_PRESETS),
   z.string().regex(SPACE_ROLE_ID_REGEX, {
     message: "Expected a preset key or a custom space role id (`srl_` + canonical UUID).",
   }),
 ]);
 
-/** Zod validator for the per-org `settings` JSONB shape. */
+/** Zod validator for the per-org `settings` JSONB shape, as stored. */
 export const orgSettingsSchema = z.object({
   api_version: z.string().optional(),
   dashboard_sso_enabled: z.boolean().optional(),
@@ -573,20 +578,28 @@ export const orgSettingsSchema = z.object({
   restrict_package_copy: z.boolean().optional(),
   // Absent = allowed. `false` refuses new personal model credentials, and the chain ignores existing ones.
   personal_model_credentials: z.boolean().optional(),
-  // Absent = `admin`. The role an org member holds by default in their own personal space:
-  // a preset key, or the id of one of the org's custom space roles (whether it IS one of
-  // them is the platform's check, at write). Below `admin` it carries a delete floor; a guest
-  // takes it too, unless it lets them author agents (`agents:write`): then `operator`.
-  personal_space_role: personalSpaceRoleSchema.optional(),
+  // The role an org member holds by default in their own personal space, when it is a PRESET.
+  // Absent = `admin`, unless the org's default is a custom role, which this key then never
+  // holds ({@link personalSpaceRoleSettingSchema}). Below `admin` it carries a delete floor; a
+  // guest takes it capped to `operator`.
+  personal_space_role: z.enum(SPACE_ROLE_PRESETS).optional(),
 });
 
-/** The org settings as served: each defaulted policy read as its effective value; other stored keys kept. */
+/** The stored settings as read: each defaulted policy read as its effective value; other stored keys kept. */
 export const orgSettingsReadSchema = orgSettingsSchema
   .extend({
     personal_model_credentials: z.boolean().default(true),
-    personal_space_role: personalSpaceRoleSchema.default("admin"),
+    personal_space_role: z.enum(SPACE_ROLE_PRESETS).default("admin"),
   })
   .loose();
+
+/**
+ * The org settings as the API serves them: the stored settings read, with `personal_space_role`
+ * naming the custom default when the org has one ({@link personalSpaceRoleSettingSchema}).
+ */
+export const orgSettingsWireSchema = orgSettingsReadSchema.extend({
+  personal_space_role: personalSpaceRoleSettingSchema.default("admin"),
+});
 
 // ---------------------------------------------------------------------------
 // Module permission aggregator — runtime registry shared by apps/api and

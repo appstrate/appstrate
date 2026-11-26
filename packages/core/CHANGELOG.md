@@ -10,6 +10,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - `SPACE_ROLE_ID_REGEX` and `isSpaceRolePreset` in `@appstrate/core/permissions`.
+- `personalSpaceRoleSettingSchema` (a preset key or a custom space role id: the wire value of
+  `personal_space_role`) and `orgSettingsWireSchema` (`orgSettingsReadSchema` with
+  `personal_space_role` read through it) in `@appstrate/core/permissions`.
 
 ### Changed
 
@@ -18,11 +21,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   a module that declares a `studio` permission resource is refused at load
   (`cannot redefine core resource`). The permission is space-level, opens the Studio's screens in the dashboard and gates
   no API route.
-- **`orgSettingsReadSchema.personal_space_role`** — BREAKING. The output type (`OrgSettings`)
-  widens from `"admin" | "operator"` to a space-role preset key (`admin`, `builder`, `operator`,
-  `runner`, `viewer`) or a custom space role id (`srl_` + canonical UUID). `orgSettingsSchema`
-  accepts the same values on input. The read default stays `admin`; stored `admin` and `operator`
-  remain valid.
+- **`orgSettingsReadSchema.personal_space_role`** — BREAKING. The output type widens from
+  `"admin" | "operator"` to a space-role preset key (`admin`, `builder`, `operator`, `runner`,
+  `viewer`), and `orgSettingsSchema` accepts the same values on input. The stored key holds a
+  preset only: a custom default lives in a column of the organization, outside the JSON. The read
+  default stays `admin`; stored `admin` and `operator` remain valid. The org settings as served
+  (`OrgSettings` in `@appstrate/shared-types`) follow `orgSettingsWireSchema`, which also accepts a
+  custom space role id.
 
 ### Removed
 

@@ -48,6 +48,7 @@ interface RoleWire {
   description: string | null;
   permissions: string[];
   unavailable_permissions: string[];
+  shows_studio: boolean;
 }
 
 describe("custom space roles", () => {
@@ -216,6 +217,8 @@ describe("custom space roles", () => {
       expect(offered).toContain("agents:write");
       expect(offered).not.toContain("members:invite");
       expect(offered).not.toContain("roles:write");
+      // `studio:read` is resolved from `shows_studio`, never stored, so it is not offered.
+      expect(offered).not.toContain("studio:read");
 
       // Grantability is the API-key allowlist, not a second hand-kept table:
       // `integrations:configure` is deliberately session-only.
@@ -231,6 +234,68 @@ describe("custom space roles", () => {
 
       // And every offered string is accepted by the create route.
       expect((await post(validBody({ permissions: offered }))).status).toBe(201);
+    });
+  });
+
+  describe("shows_studio", () => {
+    const listed = async (id: string) => {
+      const { data } = (await (await req("GET", "/api/roles")).json()) as { data: RoleWire[] };
+      return data.find((r) => r.id === id)!;
+    };
+
+    it("defaults to true on create, is stored when false, and a preset always shows it", async () => {
+      const shown = await createRole({ key: "shown" });
+      expect(shown.shows_studio).toBe(true);
+      expect(shown.permissions).not.toContain("studio:read");
+
+      const hidden = await createRole({ key: "hidden", shows_studio: false });
+      expect(hidden.shows_studio).toBe(false);
+      expect((await listed(hidden.id)).shows_studio).toBe(false);
+      expect((await listed(shown.id)).shows_studio).toBe(true);
+
+      const { data } = (await (await req("GET", "/api/roles")).json()) as { data: RoleWire[] };
+      for (const preset of data.filter((r) => r.kind === "preset")) {
+        expect(preset.shows_studio, preset.key).toBe(true);
+        expect(preset.permissions, preset.key).toContain("studio:read");
+      }
+    });
+
+    it("PATCH toggles it, and a PATCH without it leaves it as stored", async () => {
+      const role = await createRole({ key: "toggled" });
+      const off = await patch(role.id, { shows_studio: false });
+      expect(off.status).toBe(200);
+      expect(((await off.json()) as RoleWire).shows_studio).toBe(false);
+
+      const renamed = await patch(role.id, { name: "Renamed" });
+      expect(renamed.status).toBe(200);
+      expect(((await renamed.json()) as RoleWire).shows_studio).toBe(false);
+      expect((await listed(role.id)).shows_studio).toBe(false);
+
+      const on = await patch(role.id, { shows_studio: true });
+      expect(((await on.json()) as RoleWire).shows_studio).toBe(true);
+      expect((await listed(role.id)).shows_studio).toBe(true);
+    });
+
+    it("refuses studio:read inside permissions on create and on update", async () => {
+      const created = await post(
+        validBody({ key: "studio-in-list", permissions: ["agents:read", "studio:read"] }),
+      );
+      const problem = await expectProblem(created, 400, { param: "permissions" });
+      expect(problem.detail).toContain("studio:read");
+      expect(problem.detail).toContain("shows_studio");
+
+      const role = await createRole({ key: "studio-patched" });
+      await expectProblem(
+        await patch(role.id, { permissions: ["agents:read", "studio:read"] }),
+        400,
+        { param: "permissions" },
+      );
+      // The refused write changed nothing.
+      expect((await listed(role.id)).permissions).toEqual(["agents:read", "runs:read"]);
+    });
+
+    it("refuses a non-boolean shows_studio", async () => {
+      expect((await post(validBody({ key: "bad-flag", shows_studio: "yes" }))).status).toBe(400);
     });
   });
 
@@ -546,9 +611,13 @@ describe("custom space roles", () => {
         );
         await expectProblem(res, 404);
         const [org] = await db
-          .select({ settings: organizations.orgSettings })
+          .select({
+            settings: organizations.orgSettings,
+            personalSpaceRoleId: organizations.personalSpaceRoleId,
+          })
           .from(organizations)
           .where(eq(organizations.id, owner.orgId));
+        expect(org?.personalSpaceRoleId).toBeNull();
         expect(
           (org?.settings as { personal_space_role?: string } | null)?.personal_space_role,
         ).toBeUndefined();

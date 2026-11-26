@@ -674,7 +674,7 @@ export function createSpacesRouter() {
                 })
               : canGrantSpaceRole(permissions, {
                   kind: "custom",
-                  role: { ...role, id: role.id! },
+                  role: { ...role, id: role.id!, showsStudio: role.shows_studio },
                 }),
           ),
         ),

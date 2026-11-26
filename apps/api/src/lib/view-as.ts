@@ -107,6 +107,7 @@ const personaSchema: z.ZodType<ViewAsPersona> = z.object({
             key: z.string(),
             name: z.string(),
             permissions: z.array(z.string()),
+            showsStudio: z.boolean(),
           }),
         }),
       ]),
@@ -273,7 +274,13 @@ async function resolvePersonaSpaceRole(
   if (!row) throw viewAsNotFound(`Role '${ref.roleId}' not found in this organization`);
   return {
     kind: "custom",
-    role: { id: row.id, key: row.key, name: row.name, permissions: row.permissions },
+    role: {
+      id: row.id,
+      key: row.key,
+      name: row.name,
+      permissions: row.permissions,
+      showsStudio: row.showsStudio,
+    },
   };
 }
 

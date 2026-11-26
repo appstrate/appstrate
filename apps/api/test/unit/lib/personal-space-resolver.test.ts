@@ -52,6 +52,20 @@ const CUSTOM: SpaceRoleRef = {
     key: "reader",
     name: "Reader",
     permissions: ["agents:read", "runs:read"],
+    // Hides the Studio, so what it resolves is exactly its bundle.
+    showsStudio: false,
+  },
+};
+
+/** The same bundle on a role that shows the Studio, as every role created without a choice does. */
+const CUSTOM_STUDIO: SpaceRoleRef = {
+  kind: "custom",
+  role: {
+    id: "srl_44444444-4444-4444-8444-444444444444",
+    key: "reader-studio",
+    name: "Reader with the Studio",
+    permissions: ["agents:read", "runs:read"],
+    showsStudio: true,
   },
 };
 
@@ -62,23 +76,31 @@ const FLOOR: Permission[] = [
   "schedules:delete",
 ];
 
-/** The org default as the snapshot carries it: the raw columns, never a decoded role. */
+/**
+ * The org default as the snapshot carries it: the raw columns, never a decoded role. `stored` is
+ * the jsonb key; `custom` is the role `personal_space_role_id` names, which the `psr` join finds
+ * unless `joined` is false (a role of another organization).
+ */
 function cols(
   stored: string | null,
   custom: SpaceRoleRef | null = null,
+  joined = true,
 ): PersonalSpaceDefaultColumns {
   const role = custom?.kind === "custom" ? custom.role : null;
+  const found = joined ? role : null;
   return {
     storedPersonalSpaceRole: stored,
-    personalDefaultRoleId: role?.id ?? null,
-    personalDefaultKey: role?.key ?? null,
-    personalDefaultName: role?.name ?? null,
-    personalDefaultPermissions: role ? [...role.permissions] : null,
+    storedPersonalSpaceRoleId: role?.id ?? null,
+    personalDefaultRoleId: found?.id ?? null,
+    personalDefaultKey: found?.key ?? null,
+    personalDefaultName: found?.name ?? null,
+    personalDefaultPermissions: found ? [...found.permissions] : null,
+    personalDefaultShowsStudio: found?.showsStudio ?? null,
   };
 }
 const ADMIN_DEFAULT = cols(null);
 const presetDefault = (name: string) => cols(name);
-const customDefault = (ref: SpaceRoleRef) => cols(ref.kind === "custom" ? ref.role.id : null, ref);
+const customDefault = (ref: SpaceRoleRef) => cols(null, ref);
 
 describe("resolveSpaceRole on a personal space", () => {
   it("gives its owner preset admin when they are an owner, admin or member", () => {
@@ -235,6 +257,7 @@ describe("resolveSpaceRole for a GUEST owner: never more than operator, never mo
         "runs:read",
         "integrations:connect",
       ],
+      showsStudio: false,
     },
   };
 
@@ -370,17 +393,20 @@ describe("personalSpaceDefaultRef", () => {
     }
   });
 
-  it("reads a custom id as the role the same statement resolved", () => {
-    if (CUSTOM.kind !== "custom") throw new Error("unreachable");
+  it("reads the custom column as the role the same statement resolved, Studio flag included", () => {
     expect(personalSpaceDefaultRef(customDefault(CUSTOM))).toEqual(CUSTOM);
+    expect(personalSpaceDefaultRef(customDefault(CUSTOM_STUDIO))).toEqual(CUSTOM_STUDIO);
   });
 
-  it("fails closed to no role on a dangling id or a stray value, never a preset", () => {
-    if (CUSTOM.kind !== "custom") throw new Error("unreachable");
-    // A custom id the join found no role for.
-    const dangling = cols(CUSTOM.role.id);
-    expect(personalSpaceDefaultRef(dangling)).toBeNull();
+  it("fails closed to no role on what the schema cannot exclude, never a preset", () => {
+    // The column naming a role the org-scoped join does not find: another org's.
+    const foreign = cols(null, CUSTOM, false);
+    expect(personalSpaceDefaultRef(foreign)).toBeNull();
+    // A jsonb value that is not a preset (an id there included: the column holds customs).
     expect(personalSpaceDefaultRef(cols("superuser"))).toBeNull();
+    if (CUSTOM.kind !== "custom") throw new Error("unreachable");
+    expect(personalSpaceDefaultRef(cols(CUSTOM.role.id))).toBeNull();
+    const dangling = foreign;
     // An owner without an override then holds nothing in their own space, a member or a guest…
     for (const orgRole of ["member", "guest"] as const) {
       expect(resolveSpaceRole(orgRole, personal, null, OWNER, dangling)).toBeNull();
@@ -392,6 +418,49 @@ describe("personalSpaceDefaultRef", () => {
     expect(resolveSpaceRole("admin", personal, null, OWNER, cols("superuser"))).toEqual(
       ADMIN_ROLE_REF,
     );
+  });
+});
+
+describe("studio:read on a custom role: resolved from shows_studio, never from the bundle", () => {
+  it("resolves it when the role shows the Studio, not otherwise", () => {
+    expect(spacePermissions(CUSTOM_STUDIO).has("studio:read")).toBe(true);
+    expect(spacePermissions(CUSTOM).has("studio:read")).toBe(false);
+  });
+
+  it("never grants it from a stored array that spells it", () => {
+    if (CUSTOM.kind !== "custom") throw new Error("unreachable");
+    const spelled: SpaceRoleRef = {
+      kind: "custom",
+      role: { ...CUSTOM.role, permissions: [...CUSTOM.role.permissions, "studio:read"] },
+    };
+    expect(spacePermissions(spelled).has("studio:read")).toBe(false);
+  });
+
+  it("follows the role as the org default and as an override, for a member", () => {
+    for (const [ref, studio] of [
+      [CUSTOM_STUDIO, true],
+      [CUSTOM, false],
+    ] as const) {
+      const byDefault = resolveSpaceRole("member", personal, null, OWNER, customDefault(ref));
+      const byOverride = resolveSpaceRole("member", personal, { ref }, OWNER, ADMIN_DEFAULT);
+      expect(spacePermissions(byDefault).has("studio:read")).toBe(studio);
+      expect(spacePermissions(byOverride).has("studio:read")).toBe(studio);
+    }
+  });
+
+  it("keeps it under the guest cap when the role shows the Studio, and keeps it hidden otherwise", () => {
+    // `operator` holds `studio:read`, so a role showing the Studio stays inside it.
+    expect(overrideAdmissible("guest", CUSTOM_STUDIO)).toBe(true);
+    expect(resolveSpaceRole("guest", personal, null, OWNER, customDefault(CUSTOM_STUDIO))).toEqual({
+      ...CUSTOM_STUDIO,
+      plus: FLOOR,
+    });
+    for (const ref of [CUSTOM_STUDIO, CUSTOM]) {
+      const guest = spacePermissions(
+        resolveSpaceRole("guest", personal, { ref }, OWNER, ADMIN_DEFAULT),
+      );
+      expect(guest.has("studio:read")).toBe(ref === CUSTOM_STUDIO);
+    }
   });
 });
 

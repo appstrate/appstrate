@@ -27,11 +27,12 @@ import { isUniqueViolation, type DbOrTx } from "../lib/db-helpers.ts";
 import { conflict, invalidRequest, notFound } from "../lib/errors.ts";
 import { prefixedId } from "@appstrate/db/ids";
 import {
+  assignableSpaceLevelPermissions,
   describeMissingRead,
-  knownSpaceLevelPermissions,
   missingReadGrants,
   partitionSpacePermissions,
   presetPermissions,
+  RESOLVED_SPACE_PERMISSIONS,
 } from "../lib/permissions.ts";
 
 /** One entry of `GET /api/roles`; `id` is null for a preset (it has no row). */
@@ -43,6 +44,11 @@ export interface SpaceRoleWire {
   name: string;
   description: string | null;
   permissions: string[];
+  /**
+   * Whether the role resolves `studio:read` (`space_roles.shows_studio`): always `true` for a
+   * preset. Never one of `permissions`, which is what a write accepts back.
+   */
+  shows_studio: boolean;
   /**
    * Stored entries this deployment cannot name — always empty for a preset.
    * Never part of `permissions`: the two are what the role grants and what it
@@ -59,6 +65,8 @@ export interface SpaceRoleInput {
   name: string;
   description?: string | null;
   permissions: string[];
+  /** Absent on create = `true`; absent on update = unchanged. */
+  shows_studio?: boolean;
 }
 
 type SpaceRoleRow = typeof spaceRoles.$inferSelect;
@@ -81,6 +89,7 @@ function toWire(row: SpaceRoleRow): SpaceRoleWire {
     name: row.name,
     description: row.description,
     permissions: [...granted].sort(),
+    shows_studio: row.showsStudio,
     unavailable_permissions: unavailable.sort(),
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString(),
@@ -96,6 +105,7 @@ function presetWire(preset: SpaceRolePreset): SpaceRoleWire {
     name: preset,
     description: null,
     permissions: [...presetPermissions(preset)].sort(),
+    shows_studio: true,
     // A preset is code, not a row: nothing can be stored on it that the
     // deployment does not name.
     unavailable_permissions: [],
@@ -129,9 +139,12 @@ export async function listSpaceRoles(orgId: string): Promise<SpaceRoleWire[]> {
  *
  * The set must read what it acts on (`missingReadGrants`). A missing read is
  * named, never added: that would grant what the author did not pick.
+ *
+ * A resolved grant (`RESOLVED_SPACE_PERMISSIONS` — `studio:read`) is refused like an unknown
+ * one: the role carries it in a column of its own (`shows_studio`), never in this array.
  */
 function normalizePermissions(permissions: string[]): string[] {
-  const known = knownSpaceLevelPermissions();
+  const known = assignableSpaceLevelPermissions();
   if (permissions.length > known.size) {
     throw invalidRequest(
       `A role can hold at most ${known.size} permissions — the whole vocabulary — ` +
@@ -144,8 +157,11 @@ function normalizePermissions(permissions: string[]): string[] {
   for (const permission of permissions) {
     if (!known.has(permission)) {
       throw invalidRequest(
-        `Unknown space-level permission '${permission}'. ` +
-          `See GET /api/roles/vocabulary for the permissions a role can hold.`,
+        RESOLVED_SPACE_PERMISSIONS.has(permission)
+          ? `'${permission}' is not stored in a role's permissions: it follows the role's ` +
+              `shows_studio. See GET /api/roles/vocabulary for the permissions a role can hold.`
+          : `Unknown space-level permission '${permission}'. ` +
+              `See GET /api/roles/vocabulary for the permissions a role can hold.`,
         "permissions",
       );
     }
@@ -214,6 +230,7 @@ export async function createSpaceRole(params: {
       name: input.name,
       description: input.description ?? null,
       permissions,
+      showsStudio: input.shows_studio ?? true,
       createdBy,
     })
     .returning()
@@ -242,6 +259,7 @@ export async function updateSpaceRole(params: {
       ...(patch.name !== undefined ? { name: patch.name } : {}),
       ...(patch.description !== undefined ? { description: patch.description } : {}),
       ...(permissions !== undefined ? { permissions } : {}),
+      ...(patch.shows_studio !== undefined ? { showsStudio: patch.shows_studio } : {}),
       updatedAt: new Date(),
     })
     .where(and(eq(spaceRoles.id, id), eq(spaceRoles.orgId, orgId)))
@@ -256,7 +274,7 @@ interface RoleHolders {
   pendingInvitationCount: number;
   /** The org's OIDC clients whose `signup_space_assignments` name this role. */
   signupAssignmentCount: number;
-  /** The org's `personal_space_role` names this role: every member's personal-space default. */
+  /** `organizations.personal_space_role_id` names this role: every member's personal-space default. */
   orgDefault: boolean;
 }
 
@@ -264,9 +282,10 @@ interface RoleHolders {
  * Four things hold a bundle: a `space_members` row (a member's own override in their
  * personal space included), a PENDING invitation whose JSONB `space_assignments` name it,
  * an org OIDC client whose JSONB `signup_space_assignments` name it, and the org's
- * `personal_space_role` setting. The last three have no FK, so deleting under them would
- * strand the invitee with an assignment that never applies, refuse every SSO signup of the
- * client, or put every member's personal space on the fail-closed no-role fallback.
+ * personal-space default (`organizations.personal_space_role_id`). The two JSONB holders have
+ * no FK, so deleting under them would strand the invitee with an assignment that never
+ * applies or refuse every SSO signup of the client; the other two have a RESTRICT FK, and
+ * counting them first is what turns its violation into a 409 that names them.
  */
 async function countRoleHolders(orgId: string, id: string, executor: DbOrTx): Promise<RoleHolders> {
   const assigned = await executor
@@ -297,12 +316,7 @@ async function countRoleHolders(orgId: string, id: string, executor: DbOrTx): Pr
   const [org] = await executor
     .select({ id: organizations.id })
     .from(organizations)
-    .where(
-      and(
-        eq(organizations.id, orgId),
-        sql`${organizations.orgSettings}->>'personal_space_role' = ${id}`,
-      ),
-    )
+    .where(and(eq(organizations.id, orgId), eq(organizations.personalSpaceRoleId, id)))
     .limit(1);
   return {
     memberCount: assigned[0]?.count ?? 0,

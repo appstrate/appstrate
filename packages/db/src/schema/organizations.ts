@@ -14,11 +14,12 @@ import {
   primaryKey,
   check,
   foreignKey,
+  type AnyPgColumn,
 } from "drizzle-orm/pg-core";
 import { sql } from "drizzle-orm";
 import { orgRoleEnum, invitationStatusEnum } from "./enums.ts";
 import { user } from "./auth.ts";
-import { spaces } from "./spaces.ts";
+import { spaceRoles, spaces } from "./spaces.ts";
 import type { SpaceAssignment } from "@appstrate/core/permissions";
 import type { ModelCost, ModelInputModality } from "@appstrate/core/module";
 
@@ -37,6 +38,17 @@ export const organizations = pgTable(
     // colour needs no migration. Null derives the colour from the id.
     color: text("color"),
     orgSettings: jsonb("org_settings").notNull().default({}),
+    // The org's default role in its members' personal spaces when it is a CUSTOM role (RBAC
+    // spec §3.6). A preset default is `org_settings.personal_space_role`, under the preset enum;
+    // the CHECK below keeps the two from both being set, and neither = `admin`. RESTRICT, like
+    // `space_members.custom_role_id`: deleting the role is a 409 naming the org default first
+    // (`deleteSpaceRole`), the FK the backstop.
+    // `AnyPgColumn`: `space_roles` references this table back (`org_id`), and the annotation is
+    // what breaks the inference cycle between the two modules.
+    personalSpaceRoleId: text("personal_space_role_id").references(
+      (): AnyPgColumn => spaceRoles.id,
+      { onDelete: "restrict" },
+    ),
     // The org's default model — a flat model id that may name a system model
     // (SYSTEM_PROVIDER_KEYS) OR an `org_models.id` (UUID). A pointer rather than
     // an `is_default` boolean on `org_models` so the default can point at a
@@ -85,6 +97,13 @@ export const organizations = pgTable(
     // Postgres indexes only the REFERENCED side of a foreign key; without
     // this, deleting one user seq-scans this table under the deletion's lock.
     index("idx_organizations_created_by").on(table.createdBy),
+    // Referencing-side index for the `space_roles` RESTRICT action, like
+    // `idx_space_members_custom_role_id`.
+    index("idx_organizations_personal_space_role_id").on(table.personalSpaceRoleId),
+    check(
+      "organizations_personal_space_role_one_shape",
+      sql`personal_space_role_id IS NULL OR NOT (org_settings ? 'personal_space_role')`,
+    ),
     // Backstop behind the application's icon validation: the largest image icon
     // (`data:image/webp;base64,` + 12 000 bytes encoded) is 16 023 bytes, its PNG
     // twin one byte shorter.

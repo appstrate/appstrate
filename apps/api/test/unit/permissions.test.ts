@@ -442,7 +442,13 @@ describe("implied permissions across a delegation", () => {
       orgPermissions: orgPermissions("member"),
       spacePermissions: spacePermissions({
         kind: "custom",
-        role: { id: "srl_test", key: "custom", name: "Custom", permissions: granted },
+        role: {
+          id: "srl_test",
+          key: "custom",
+          name: "Custom",
+          permissions: granted,
+          showsStudio: false,
+        },
       }),
     });
 
@@ -483,7 +489,13 @@ describe("implied permissions across a delegation", () => {
   it("lets a holder of the wider grant hand out a role naming the narrower one", () => {
     const bundle = (permission: string) => ({
       kind: "custom" as const,
-      role: { id: "srl_test", key: "bundle", name: "Bundle", permissions: [permission] },
+      role: {
+        id: "srl_test",
+        key: "bundle",
+        name: "Bundle",
+        permissions: [permission],
+        showsStudio: false,
+      },
     });
     expect(
       canGrantSpaceRole(customRole("credential-proxy:call"), bundle("credential-proxy:call-own")),

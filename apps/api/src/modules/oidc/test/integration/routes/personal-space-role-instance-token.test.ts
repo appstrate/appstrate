@@ -90,12 +90,13 @@ describe("personal-space override through an MCP instance token", () => {
   });
 
   it("reports the override and the floor, and withholds what the bundle does not grant", async () => {
-    // A bundle, not `viewer`: the `viewer` preset grants `studio:read`.
+    // A bundle, not `viewer`: every preset grants `studio:read`, a custom role can hide it.
     const role = await seedSpaceRole({
       orgId: owner.orgId,
       key: "reader",
       name: "Reader",
       permissions: ["agents:read"],
+      showsStudio: false,
     });
     const put = await app.request(
       `/api/orgs/${owner.orgId}/members/${member.user.id}/personal-space-role`,

@@ -4585,7 +4585,7 @@ export interface paths {
         put?: never;
         /**
          * Create a custom space role
-         * @description Define an organization-scoped bundle of space-level permissions. Requires `roles:write` (owner/admin) and nothing else — custom roles ship with the open-source platform. Every permission is validated against `GET /api/roles/vocabulary`; an unknown string is a 400 naming it, never a silent drop. The set must also be coherent: a permission whose vocabulary entry has a non-empty `requires_one_of` comes with one of those reads, and a set missing one is a 400 naming each missing read. `requires_one_of` is the authority on which permissions need a read and which reads satisfy it. The read is never added for you.
+         * @description Define an organization-scoped bundle of space-level permissions. Requires `roles:write` (owner/admin) and nothing else — custom roles ship with the open-source platform. Every permission is validated against `GET /api/roles/vocabulary`; an unknown string is a 400 naming it, never a silent drop, and so is `studio:read`, which a custom role holds through `shows_studio` instead. The set must also be coherent: a permission whose vocabulary entry has a non-empty `requires_one_of` comes with one of those reads, and a set missing one is a 400 naming each missing read. `requires_one_of` is the authority on which permissions need a read and which reads satisfy it. The read is never added for you.
          */
         post: operations["createRole"];
         delete?: never;
@@ -4603,7 +4603,7 @@ export interface paths {
         };
         /**
          * List the permissions a custom role may hold
-         * @description The space-level permission strings a custom role can be built from, grouped by resource. `api_key_grantable` mirrors `GET /api/api-keys/available-scopes`; `requires_one_of` names the reads a role holding the permission must also hold.
+         * @description The space-level permission strings a custom role can be built from, grouped by resource. `api_key_grantable` mirrors `GET /api/api-keys/available-scopes`; `requires_one_of` names the reads a role holding the permission must also hold. `studio:read` is not listed: a custom role holds it through `shows_studio`.
          */
         get: operations["listRoleVocabulary"];
         put?: never;
@@ -4633,7 +4633,7 @@ export interface paths {
         head?: never;
         /**
          * Update a custom space role
-         * @description Rename, re-describe or re-scope a bundle. Requires `roles:write`. The `srl_` id never changes, so assignments follow the edit. A `permissions` array is validated as on create: an unknown string is a 400 naming it, and a set holding a permission without one of the reads its vocabulary entry's `requires_one_of` names is a 400 naming each missing read. A request without `permissions` is not re-judged.
+         * @description Rename, re-describe or re-scope a bundle. Requires `roles:write`. The `srl_` id never changes, so assignments follow the edit. A `permissions` array is validated as on create: an unknown string is a 400 naming it, and a set holding a permission without one of the reads its vocabulary entry's `requires_one_of` names is a 400 naming each missing read. A request without `permissions` is not re-judged. `shows_studio` alone changes whether holders see the Studio.
          */
         patch: operations["updateRole"];
         trace?: never;
@@ -7151,7 +7151,7 @@ export interface components {
             dashboard_sso_enabled?: boolean;
             /** @description Whether members may bring personal model credentials. Defaults to true. When false, adding one (`owner_type: user` on `POST /api/model-provider-credentials` or on `POST /api/model-providers-oauth/pairing`) answers `403 personal_model_credentials_disabled`, and the personal credentials that already exist serve nothing: a model the organization leaves unbound is refused (`409 model_credential_required`), and a run on one is refused at its next call. Always present on read; optional on PATCH. */
             personal_model_credentials: boolean;
-            /** @description The role an organization member or guest holds by default in their own personal space: a preset key (`admin`, `builder`, `operator`, `runner`, `viewer`) or the id of one of this organization's custom space roles (`srl_…`). Defaults to `admin`. On write, a custom id that is not a role of this organization answers `404 not_found`; while a custom role is named here it cannot be deleted (`409 role_in_use` with `org_default: true`). A member holds the role chosen (this default, or their own override) plus `agents:delete`, `skills:delete`, `integrations:delete` and `schedules:delete` short of `admin`, so the member can still remove what they already have. Below `admin` the member loses what the role withholds — e.g. without `agents:write` no create, edit or inline run (`403 inline_run_not_allowed_in_space`); a plain launch runs the published version (`404 no_published_version` without one) and an explicit draft launch requires write access in the package's home space (`403 draft_not_writable`). Existing schedules keep their previously authorized draft selectors. Owners and admins always hold `admin` in their own personal space. A guest takes this default too, always capped to `operator`: the permissions of the chosen role that `operator` also grants, plus the deletes above. A default broader than `operator` (`admin`, `builder`) gives a guest `operator`; a narrower one (`viewer`, `runner`) gives the guest that role as it is; a custom role gives the guest that role restricted to what `operator` grants. Restricting the default never gives a guest more. A member's or guest's own override (`PUT /api/orgs/{orgId}/members/{userId}/personal-space-role`) wins over this default. A custom role that no longer exists resolves to NO role (the member without an override holds nothing in their own space and does not see it listed, and an error is logged), never to `admin` and never to a narrower preset. Computed on every request: changing it takes effect with no other write. Always present on read; optional on PATCH. */
+            /** @description The role an organization member or guest holds by default in their own personal space: a preset key (`admin`, `builder`, `operator`, `runner`, `viewer`) or the id of one of this organization's custom space roles (`srl_…`). Defaults to `admin`. On write, a custom id that is not a role of this organization answers `404 not_found`; while a custom role is named here it cannot be deleted (`409 role_in_use` with `org_default: true`). A member holds the role chosen (this default, or their own override) plus `agents:delete`, `skills:delete`, `integrations:delete` and `schedules:delete` short of `admin`, so the member can still remove what they already have. Below `admin` the member loses what the role withholds — e.g. without `agents:write` no create, edit or inline run (`403 inline_run_not_allowed_in_space`); a plain launch runs the published version (`404 no_published_version` without one) and an explicit draft launch requires write access in the package's home space (`403 draft_not_writable`). Existing schedules keep their previously authorized draft selectors. Owners and admins always hold `admin` in their own personal space. A guest takes this default too, always capped to `operator`: the permissions of the chosen role that `operator` also grants, plus the deletes above. A default broader than `operator` (`admin`, `builder`) gives a guest `operator`; a narrower one (`viewer`, `runner`) gives the guest that role as it is; a custom role gives the guest that role restricted to what `operator` grants. Restricting the default never gives a guest more. A member's or guest's own override (`PUT /api/orgs/{orgId}/members/{userId}/personal-space-role`) wins over this default. Computed on every request: changing it takes effect with no other write. Always present on read; optional on PATCH. */
             personal_space_role: string & (("admin" | "builder" | "operator" | "runner" | "viewer") | string);
         };
         Organization: {
@@ -7454,8 +7454,10 @@ export interface components {
             key: string;
             name: string;
             description: string | null;
-            /** @description Space-level permission strings the role grants on this deployment, sorted. A custom bundle is projected through the same vocabulary enforcement uses, so this array is always one a `PATCH` accepts back. */
+            /** @description Space-level permission strings the role grants on this deployment, sorted. A custom bundle is projected through the same vocabulary enforcement uses, so this array is always one a `PATCH` accepts back. A preset lists `studio:read`; a custom bundle never does, and resolves it from `shows_studio` instead. */
             permissions: string[];
+            /** @description Whether holders of the role see the Studio (they resolve `studio:read`). A display setting, not a boundary: the REST API and an MCP client answer the role's other permissions either way. Always `true` for a preset. */
+            shows_studio: boolean;
             /** @description Entries stored on the bundle that this deployment cannot name — their module is no longer loaded — sorted. They grant nothing and are never part of `permissions`; sending a `permissions` array without them is what drops them from the row. Always empty for a preset. */
             unavailable_permissions: string[];
             /** Format: date-time */
@@ -22874,7 +22876,7 @@ export interface operations {
                     dashboard_sso_enabled?: boolean;
                     /** @description Whether members may bring personal model credentials. Defaults to true. When false, adding one (`owner_type: user` on `POST /api/model-provider-credentials` or on `POST /api/model-providers-oauth/pairing`) answers `403 personal_model_credentials_disabled`, and the personal credentials that already exist serve nothing: a model the organization leaves unbound is refused (`409 model_credential_required`), and a run on one is refused at its next call. Always present on read; optional on PATCH. */
                     personal_model_credentials?: boolean;
-                    /** @description The role an organization member or guest holds by default in their own personal space: a preset key (`admin`, `builder`, `operator`, `runner`, `viewer`) or the id of one of this organization's custom space roles (`srl_…`). Defaults to `admin`. On write, a custom id that is not a role of this organization answers `404 not_found`; while a custom role is named here it cannot be deleted (`409 role_in_use` with `org_default: true`). A member holds the role chosen (this default, or their own override) plus `agents:delete`, `skills:delete`, `integrations:delete` and `schedules:delete` short of `admin`, so the member can still remove what they already have. Below `admin` the member loses what the role withholds — e.g. without `agents:write` no create, edit or inline run (`403 inline_run_not_allowed_in_space`); a plain launch runs the published version (`404 no_published_version` without one) and an explicit draft launch requires write access in the package's home space (`403 draft_not_writable`). Existing schedules keep their previously authorized draft selectors. Owners and admins always hold `admin` in their own personal space. A guest takes this default too, always capped to `operator`: the permissions of the chosen role that `operator` also grants, plus the deletes above. A default broader than `operator` (`admin`, `builder`) gives a guest `operator`; a narrower one (`viewer`, `runner`) gives the guest that role as it is; a custom role gives the guest that role restricted to what `operator` grants. Restricting the default never gives a guest more. A member's or guest's own override (`PUT /api/orgs/{orgId}/members/{userId}/personal-space-role`) wins over this default. A custom role that no longer exists resolves to NO role (the member without an override holds nothing in their own space and does not see it listed, and an error is logged), never to `admin` and never to a narrower preset. Computed on every request: changing it takes effect with no other write. Always present on read; optional on PATCH. */
+                    /** @description The role an organization member or guest holds by default in their own personal space: a preset key (`admin`, `builder`, `operator`, `runner`, `viewer`) or the id of one of this organization's custom space roles (`srl_…`). Defaults to `admin`. On write, a custom id that is not a role of this organization answers `404 not_found`; while a custom role is named here it cannot be deleted (`409 role_in_use` with `org_default: true`). A member holds the role chosen (this default, or their own override) plus `agents:delete`, `skills:delete`, `integrations:delete` and `schedules:delete` short of `admin`, so the member can still remove what they already have. Below `admin` the member loses what the role withholds — e.g. without `agents:write` no create, edit or inline run (`403 inline_run_not_allowed_in_space`); a plain launch runs the published version (`404 no_published_version` without one) and an explicit draft launch requires write access in the package's home space (`403 draft_not_writable`). Existing schedules keep their previously authorized draft selectors. Owners and admins always hold `admin` in their own personal space. A guest takes this default too, always capped to `operator`: the permissions of the chosen role that `operator` also grants, plus the deletes above. A default broader than `operator` (`admin`, `builder`) gives a guest `operator`; a narrower one (`viewer`, `runner`) gives the guest that role as it is; a custom role gives the guest that role restricted to what `operator` grants. Restricting the default never gives a guest more. A member's or guest's own override (`PUT /api/orgs/{orgId}/members/{userId}/personal-space-role`) wins over this default. Computed on every request: changing it takes effect with no other write. Always present on read; optional on PATCH. */
                     personal_space_role?: string & (("admin" | "builder" | "operator" | "runner" | "viewer") | string);
                 };
             };
@@ -26000,8 +26002,13 @@ export interface operations {
                     key: string;
                     name: string;
                     description?: string | null;
-                    /** @description Space-level permission strings the role grants (at least one). */
+                    /** @description Space-level permission strings the role grants (at least one). Never `studio:read`: a 400, the role resolves it from `shows_studio`. */
                     permissions: string[];
+                    /**
+                     * @description Whether holders see the Studio (they resolve `studio:read`). Default `true`. A display setting, not a boundary: the API answers the role's other permissions either way.
+                     * @default true
+                     */
+                    shows_studio?: boolean;
                 };
             };
         };
@@ -26131,6 +26138,8 @@ export interface operations {
                     name?: string;
                     description?: string | null;
                     permissions?: string[];
+                    /** @description Whether holders see the Studio (they resolve `studio:read`). Absent = unchanged. */
+                    shows_studio?: boolean;
                 };
             };
         };

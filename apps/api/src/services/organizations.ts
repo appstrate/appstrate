@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
+import type { z } from "zod";
 import { isUniqueViolation } from "../lib/db-helpers.ts";
 import { nextScheduleVersion } from "../lib/schedule-version.ts";
 import { db } from "@appstrate/db/client";
@@ -217,6 +218,7 @@ import {
   orgSettingsReadSchema,
   orgSettingsSchema as orgSettingsBaseSchema,
   isSpaceRolePreset,
+  personalSpaceRoleSettingSchema,
 } from "@appstrate/core/permissions";
 
 /**
@@ -235,9 +237,28 @@ import {
  * runtime). The read side is `orgSettingsReadSchema` (the same base with its
  * defaults applied, unknown keys kept), which `getOrgSettings` parses every
  * stored row through. `test/integration/services/organizations.test.ts` pins both halves.
+ *
+ * One key differs from the stored document: `personal_space_role` takes a preset OR a custom
+ * role id on the wire, and only a preset is stored in the document ({@link updateOrgSettings}).
  */
-export const orgSettingsPatchSchema = orgSettingsBaseSchema.partial().strict();
+export const orgSettingsPatchSchema = orgSettingsBaseSchema
+  .extend({ personal_space_role: personalSpaceRoleSettingSchema })
+  .partial()
+  .strict();
 import type { OrgSettings } from "@appstrate/shared-types";
+
+/**
+ * The settings as served, from the row's two columns: the stored document read, and
+ * `personal_space_role` naming the custom default when `personal_space_role_id` is set (the CHECK
+ * keeps the document's key absent then). Absent both = `admin`, the read default.
+ */
+function toOrgSettings(
+  row: { orgSettings: unknown; personalSpaceRoleId: string | null } | undefined,
+): OrgSettings {
+  const stored = orgSettingsReadSchema.parse(row?.orgSettings ?? {});
+  const customDefault = row?.personalSpaceRoleId ?? null;
+  return customDefault === null ? stored : { ...stored, personal_space_role: customDefault };
+}
 
 /**
  * Uncached, deliberately: the oidc `dashboard_sso_enabled` gate reads through
@@ -246,12 +267,15 @@ import type { OrgSettings } from "@appstrate/shared-types";
  */
 export async function getOrgSettings(orgId: string): Promise<OrgSettings> {
   const [row] = await db
-    .select({ orgSettings: organizations.orgSettings })
+    .select({
+      orgSettings: organizations.orgSettings,
+      personalSpaceRoleId: organizations.personalSpaceRoleId,
+    })
     .from(organizations)
     .where(eq(organizations.id, orgId))
     .limit(1);
 
-  return orgSettingsReadSchema.parse(row?.orgSettings ?? {});
+  return toOrgSettings(row);
 }
 
 /**
@@ -294,33 +318,44 @@ export async function listOrgsWithUnsupportedApiVersion(
 }
 
 /**
- * A `personal_space_role` naming a custom role is checked AND written under a share lock on
- * that role's row (`FOR KEY SHARE`), in one transaction: the setting has no FK, and
- * `deleteSpaceRole` locks the same row `FOR UPDATE` before counting the setting among the
- * role's holders, so a delete and this write serialize. 404 when the id is no role of the org.
+ * `personal_space_role` is written in the shape it is stored in (RBAC spec §3.6), in the same
+ * statement as the rest of the merge: a preset sets the document's key and clears
+ * `personal_space_role_id`; a custom role id sets the column and removes the key, so the CHECK
+ * holds after every write. The custom role is checked AND written under a share lock on its row
+ * (`FOR KEY SHARE`), in one transaction: `deleteSpaceRole` locks the same row `FOR UPDATE` before
+ * counting the org default among the role's holders, so a delete and this write serialize and the
+ * delete answers its 409 rather than the FK's violation. 404 when the id is no role of the org.
  */
 export async function updateOrgSettings(
   orgId: string,
-  updates: Partial<OrgSettings>,
+  updates: z.infer<typeof orgSettingsPatchSchema>,
 ): Promise<OrgSettings> {
-  const customRoleId =
-    updates.personal_space_role !== undefined && !isSpaceRolePreset(updates.personal_space_role)
-      ? updates.personal_space_role
-      : null;
+  const { personal_space_role: personalSpaceRole, ...documentUpdates } = updates;
   const row = await db.transaction(async (tx) => {
-    if (customRoleId !== null) {
-      await lockOrgSpaceRole(tx, orgId, customRoleId, "personal_space_role");
-    }
     // Merge server-side via JSONB concatenation so concurrent admins toggling
     // different keys don't clobber each other (read-modify-write would race).
+    const merged = sql`COALESCE(${organizations.orgSettings}, '{}'::jsonb) || ${JSON.stringify(documentUpdates)}::jsonb`;
+    let defaultRole: { orgSettings: SQL; personalSpaceRoleId: string | null } | null = null;
+    if (personalSpaceRole !== undefined && isSpaceRolePreset(personalSpaceRole)) {
+      defaultRole = {
+        orgSettings: sql`${merged} || ${JSON.stringify({ personal_space_role: personalSpaceRole })}::jsonb`,
+        personalSpaceRoleId: null,
+      };
+    } else if (personalSpaceRole !== undefined) {
+      const role = await lockOrgSpaceRole(tx, orgId, personalSpaceRole, "personal_space_role");
+      defaultRole = {
+        orgSettings: sql`(${merged}) - 'personal_space_role'`,
+        personalSpaceRoleId: role.id,
+      };
+    }
     const [updated] = await tx
       .update(organizations)
-      .set({
-        orgSettings: sql`COALESCE(${organizations.orgSettings}, '{}'::jsonb) || ${JSON.stringify(updates)}::jsonb`,
-        updatedAt: new Date(),
-      })
+      .set({ ...(defaultRole ?? { orgSettings: merged }), updatedAt: new Date() })
       .where(eq(organizations.id, orgId))
-      .returning({ orgSettings: organizations.orgSettings });
+      .returning({
+        orgSettings: organizations.orgSettings,
+        personalSpaceRoleId: organizations.personalSpaceRoleId,
+      });
     return updated;
   });
 
@@ -330,7 +365,7 @@ export async function updateOrgSettings(
   // Resolved models carry the payer's personal credentials only while the policy allows them.
   if (updates.personal_model_credentials !== undefined) clearResolvedModelCache();
 
-  return orgSettingsReadSchema.parse(row?.orgSettings ?? {});
+  return toOrgSettings(row);
 }
 
 export async function getOrgMembers(orgId: string) {
@@ -912,8 +947,9 @@ async function readPersonalSpaceOverride(
 }
 
 /**
- * The org's `personal_space_role` as read, decoded once: what a member would hold in their own
- * personal space by the default alone, before the floor and the guest cap. `null` names no role.
+ * The org's `personal_space_role` as read (`personal_space_role_id`, else the preset key, else
+ * `admin`), decoded once: what a member would hold in their own personal space by the default
+ * alone, before the floor and the guest cap. `null` names no role.
  */
 export async function getOrgPersonalSpaceDefault(orgId: string): Promise<SpaceRoleRef | null> {
   const [row] = await db

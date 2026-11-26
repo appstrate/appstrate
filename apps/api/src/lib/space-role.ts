@@ -36,7 +36,10 @@ export interface CustomSpaceRole {
   id: string;
   key: string;
   name: string;
+  /** The stored bundle; never holds a resolved grant (`RESOLVED_SPACE_PERMISSIONS`). */
   permissions: readonly string[];
+  /** `space_roles.shows_studio`: the role resolves `studio:read` (RBAC spec §3.3). */
+  showsStudio: boolean;
 }
 
 /**
@@ -116,60 +119,77 @@ export function overrideAdmissible(orgRole: OrgRole, ref: SpaceRoleRef): boolean
 }
 
 /**
- * The org's `personal_space_role` setting, read from the SAME statement as the space (RBAC
- * spec §4.4): joined on `organizations`, never cached. The stored value is a preset key or the
- * id of one of the org's custom roles; the custom role is the left join of `psr`, an alias of
- * `space_roles` scoped to `organizations.id`, so it never binds to a `space_roles` the outer
- * query joins for the membership. Readers select {@link PERSONAL_SPACE_DEFAULT_COLUMNS} and join
- * {@link personalSpaceDefaultOn}; the raw columns travel, and only the owner branch of
- * {@link resolveSpaceRole} decodes them.
+ * The org's default role in personal spaces, read from the SAME statement as the space (RBAC
+ * spec §4.4): joined on `organizations`, never cached. Two shapes, like a membership: a preset
+ * in `org_settings.personal_space_role`, a custom role in `organizations.personal_space_role_id`
+ * (FK, and a CHECK refuses both at once). The custom role is the left join of `psr`, an alias of
+ * `space_roles` also scoped to `organizations.id`, so it never binds to a `space_roles` the outer
+ * query joins for the membership, nor to a role of another org. Readers select
+ * {@link PERSONAL_SPACE_DEFAULT_COLUMNS} and join {@link personalSpaceDefaultOn}; the raw columns
+ * travel, and only the owner branch of {@link resolveSpaceRole} decodes them.
  */
 export const psr = alias(spaceRoles, "psr");
 
 export const PERSONAL_SPACE_DEFAULT_COLUMNS = {
   storedPersonalSpaceRole: sql<string | null>`${organizations.orgSettings}->>'personal_space_role'`,
+  storedPersonalSpaceRoleId: organizations.personalSpaceRoleId,
   personalDefaultRoleId: psr.id,
   personalDefaultKey: psr.key,
   personalDefaultName: psr.name,
   personalDefaultPermissions: psr.permissions,
+  personalDefaultShowsStudio: psr.showsStudio,
 } as const;
 
 export const personalSpaceDefaultOn = and(
-  eq(psr.id, sql`${organizations.orgSettings}->>'personal_space_role'`),
+  eq(psr.id, organizations.personalSpaceRoleId),
   eq(psr.orgId, organizations.id),
 );
 
 /** The raw columns of the org default, as {@link PERSONAL_SPACE_DEFAULT_COLUMNS} selects them. */
 export interface PersonalSpaceDefaultColumns {
+  /** The jsonb key: a preset when it is set. */
   storedPersonalSpaceRole: string | null;
+  /** `organizations.personal_space_role_id`: the custom default, when set. */
+  storedPersonalSpaceRoleId: string | null;
+  /** The `psr` join: set only when the column names a role of THIS org. */
   personalDefaultRoleId: string | null;
   personalDefaultKey: string | null;
   personalDefaultName: string | null;
   personalDefaultPermissions: string[] | null;
+  personalDefaultShowsStudio: boolean | null;
 }
 
 /**
- * The org default for a member's own personal space, before the floor: a role, or `null` when the
- * stored value names no role of the org (only a write outside the platform can leave it so — the
- * setting is validated at write and its role cannot be deleted), which grants nothing and is
- * logged. Absent = `admin`. Never a narrow preset in its place: every preset opens the Studio,
- * which the setting may exist to withhold.
+ * The org default for a member's own personal space, before the floor: the custom role of the
+ * column, else the preset of the jsonb key, else `admin`. The FK and the CHECK exclude a deleted
+ * role and both shapes at once; `null` (no role, logged) is left for the two cases the schema
+ * cannot exclude — a jsonb value that is not a preset, and a column naming a role of another
+ * organization, both writable only outside the platform. Never a narrow preset in their place:
+ * every preset opens the Studio, which the setting may exist to withhold.
  */
 export function personalSpaceDefaultRef(row: PersonalSpaceDefaultColumns): SpaceRoleRef | null {
+  if (row.storedPersonalSpaceRoleId !== null) {
+    if (row.personalDefaultRoleId !== null) {
+      return toRef({
+        presetRole: null,
+        customRoleId: row.personalDefaultRoleId,
+        customKey: row.personalDefaultKey,
+        customName: row.personalDefaultName,
+        customPermissions: row.personalDefaultPermissions,
+        customShowsStudio: row.personalDefaultShowsStudio,
+      });
+    }
+    logger.error(
+      "organizations.personal_space_role_id names a role of another organization; personal spaces without an override grant nothing",
+      { personalSpaceRoleId: row.storedPersonalSpaceRoleId },
+    );
+    return null;
+  }
   const stored = row.storedPersonalSpaceRole;
   if (stored === null) return ADMIN_ROLE_REF;
   if (isSpaceRolePreset(stored)) return { kind: "preset", preset: stored };
-  if (row.personalDefaultRoleId !== null) {
-    return toRef({
-      presetRole: null,
-      customRoleId: row.personalDefaultRoleId,
-      customKey: row.personalDefaultKey,
-      customName: row.personalDefaultName,
-      customPermissions: row.personalDefaultPermissions,
-    });
-  }
   logger.error(
-    "org setting personal_space_role names no role of the organization; personal spaces without an override grant nothing",
+    "org setting personal_space_role is not a preset; personal spaces without an override grant nothing",
     { personalSpaceRole: stored },
   );
   return null;
@@ -275,10 +295,15 @@ export function spacePermissions(ref: SpaceRoleRef | null): Set<Permission> {
   if (!ref) return new Set<Permission>();
   // `within` and `plus` are applied AFTER the custom bundle is partitioned, in that order:
   // (base ∩ within) ∪ plus. They are the platform's own, never strings a stored bundle carries.
-  let granted =
-    ref.kind === "preset"
-      ? presetPermissions(ref.preset)
-      : partitionSpacePermissions(ref.role.permissions).granted;
+  // A custom role resolves `studio:read` from its own column, never from the stored array
+  // (`RESOLVED_SPACE_PERMISSIONS`); every preset holds it.
+  let granted: Set<Permission>;
+  if (ref.kind === "preset") {
+    granted = presetPermissions(ref.preset);
+  } else {
+    granted = partitionSpacePermissions(ref.role.permissions).granted;
+    if (ref.role.showsStudio) granted.add("studio:read");
+  }
   if (ref.within) {
     const within = new Set(ref.within);
     granted = new Set([...granted].filter((permission) => within.has(permission)));
@@ -288,11 +313,11 @@ export function spacePermissions(ref: SpaceRoleRef | null): Set<Permission> {
 }
 
 /**
- * One custom role of the org, held `FOR KEY SHARE` until the caller's transaction commits: a
- * `personal_space_role` setting, an override, a space member or a deferred grant naming it has
- * no FK, and `deleteSpaceRole` locks the same row `FOR UPDATE` before counting its holders, so
- * a delete and the write naming the role serialize. 404 when the id is no role of the org
- * (`param` names the offending body field).
+ * One custom role of the org, held `FOR KEY SHARE` until the caller's transaction commits:
+ * `deleteSpaceRole` locks the same row `FOR UPDATE` before counting its holders, so a delete and
+ * the write naming the role serialize, and the delete answers the 409 naming them instead of an
+ * FK violation (the org default and an override have one, a pending invitation or a deferred
+ * grant has none). 404 when the id is no role of the org (`param` names the offending body field).
  */
 export async function lockOrgSpaceRole(
   tx: DbOrTx,
@@ -306,6 +331,7 @@ export async function lockOrgSpaceRole(
       key: spaceRoles.key,
       name: spaceRoles.name,
       permissions: spaceRoles.permissions,
+      showsStudio: spaceRoles.showsStudio,
     })
     .from(spaceRoles)
     .where(and(eq(spaceRoles.id, roleId), eq(spaceRoles.orgId, orgId)))
@@ -330,6 +356,7 @@ export const MEMBERSHIP_COLUMNS = {
   customKey: spaceRoles.key,
   customName: spaceRoles.name,
   customPermissions: spaceRoles.permissions,
+  customShowsStudio: spaceRoles.showsStudio,
 } as const;
 
 /** `spaces LEFT JOIN space_members ON` this — `null` joins nothing (a principal with no rows). */
@@ -370,6 +397,7 @@ export interface MembershipColumns {
   customKey: string | null;
   customName: string | null;
   customPermissions: string[] | null;
+  customShowsStudio: boolean | null;
 }
 
 /** The `num_nonnulls` CHECK and the FK are what the assertions rest on. */
@@ -382,6 +410,7 @@ function toRef(row: MembershipColumns): SpaceRoleRef {
       key: row.customKey!,
       name: row.customName!,
       permissions: row.customPermissions!,
+      showsStudio: row.customShowsStudio!,
     },
   };
 }

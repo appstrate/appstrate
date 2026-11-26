@@ -9,7 +9,7 @@
 
 import { beforeEach, describe, expect, it } from "bun:test";
 import { and, eq, isNull } from "drizzle-orm";
-import { auditEvents, spaceMembers, spaceRoles, spaces } from "@appstrate/db/schema";
+import { auditEvents, organizations, spaceMembers, spaces } from "@appstrate/db/schema";
 import { getTestApp } from "../../helpers/app.ts";
 import { db, truncateAll } from "../../helpers/db.ts";
 import { expectProblem } from "../../helpers/assertions.ts";
@@ -142,10 +142,11 @@ describe("member personal-space role override", () => {
     });
     const own = await personalOf(member);
     expect(own.role).toMatchObject({ kind: "custom", key: "reader", name: "Reader" });
-    for (const permission of ["agents:read", ...DELETES]) {
+    // Created without a choice, the role shows the Studio: `studio:read` is resolved, not stored.
+    for (const permission of ["agents:read", "studio:read", ...DELETES]) {
       expect(own.permissions).toContain(permission);
     }
-    for (const permission of ["agents:run", "agents:write", "studio:read", "runs:read"]) {
+    for (const permission of ["agents:run", "agents:write", "runs:read"]) {
       expect(own.permissions).not.toContain(permission);
     }
 
@@ -259,14 +260,15 @@ describe("member personal-space role override", () => {
     expect(allowed.status, await allowed.clone().text()).toBe(200);
   });
 
-  // A custom override, not `viewer`: the `viewer` preset grants `studio:read` (every `:read`
-  // of `operator`), so only a bundle can show the Studio withheld.
+  // A custom override, not `viewer`: every preset grants `studio:read`, so only a custom role
+  // (`shows_studio: false`) can show the Studio withheld.
   it("an override withholding studio:read reads the same through the chat's loopback bearer", async () => {
     const role = await seedSpaceRole({
       orgId: owner.orgId,
       key: "reader",
       name: "Reader",
       permissions: ["agents:read"],
+      showsStudio: false,
     });
     const put = await putOverride(owner, member.user.id, { custom_role_id: role.id });
     expect(put.status, await put.clone().text()).toBe(200);
@@ -489,18 +491,14 @@ describe("member personal-space role override", () => {
   });
 
   it("reads personal_space_default_role as null when the default names no role of the org", async () => {
-    const role = await seedSpaceRole({ orgId: owner.orgId, permissions: ["agents:read"] });
-    expect(
-      (
-        await app.request(`/api/orgs/${owner.orgId}/settings`, {
-          method: "PATCH",
-          headers: { Cookie: owner.cookie, ...json },
-          body: JSON.stringify({ personal_space_role: role.id }),
-        })
-      ).status,
-    ).toBe(200);
-    // Bypass the delete guard, as a write outside the platform would.
-    await db.delete(spaceRoles).where(eq(spaceRoles.id, role.id));
+    // The FK keeps the named role in existence; a role of ANOTHER org is what it cannot exclude,
+    // written outside the platform (the settings route refuses it).
+    const other = await createTestContext({ orgSlug: "default-foreign" });
+    const role = await seedSpaceRole({ orgId: other.orgId, permissions: ["agents:read"] });
+    await db
+      .update(organizations)
+      .set({ personalSpaceRoleId: role.id })
+      .where(eq(organizations.id, owner.orgId));
     const dto = await memberInList(owner, member.user.id);
     expect(dto.personal_space_default_role).toBeNull();
     // An owner or admin still holds admin.

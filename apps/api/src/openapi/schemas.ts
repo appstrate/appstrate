@@ -213,7 +213,7 @@ export const ORG_SETTINGS_PROPERTIES = {
       { type: "string", pattern: SPACE_ROLE_ID_PATTERN },
     ],
     description:
-      "The role an organization member or guest holds by default in their own personal space: a preset key (`admin`, `builder`, `operator`, `runner`, `viewer`) or the id of one of this organization's custom space roles (`srl_…`). Defaults to `admin`. On write, a custom id that is not a role of this organization answers `404 not_found`; while a custom role is named here it cannot be deleted (`409 role_in_use` with `org_default: true`). A member holds the role chosen (this default, or their own override) plus `agents:delete`, `skills:delete`, `integrations:delete` and `schedules:delete` short of `admin`, so the member can still remove what they already have. Below `admin` the member loses what the role withholds — e.g. without `agents:write` no create, edit or inline run (`403 inline_run_not_allowed_in_space`); a plain launch runs the published version (`404 no_published_version` without one) and an explicit draft launch requires write access in the package's home space (`403 draft_not_writable`). Existing schedules keep their previously authorized draft selectors. Owners and admins always hold `admin` in their own personal space. A guest takes this default too, always capped to `operator`: the permissions of the chosen role that `operator` also grants, plus the deletes above. A default broader than `operator` (`admin`, `builder`) gives a guest `operator`; a narrower one (`viewer`, `runner`) gives the guest that role as it is; a custom role gives the guest that role restricted to what `operator` grants. Restricting the default never gives a guest more. A member's or guest's own override (`PUT /api/orgs/{orgId}/members/{userId}/personal-space-role`) wins over this default. A custom role that no longer exists resolves to NO role (the member without an override holds nothing in their own space and does not see it listed, and an error is logged), never to `admin` and never to a narrower preset. Computed on every request: changing it takes effect with no other write. Always present on read; optional on PATCH.",
+      "The role an organization member or guest holds by default in their own personal space: a preset key (`admin`, `builder`, `operator`, `runner`, `viewer`) or the id of one of this organization's custom space roles (`srl_…`). Defaults to `admin`. On write, a custom id that is not a role of this organization answers `404 not_found`; while a custom role is named here it cannot be deleted (`409 role_in_use` with `org_default: true`). A member holds the role chosen (this default, or their own override) plus `agents:delete`, `skills:delete`, `integrations:delete` and `schedules:delete` short of `admin`, so the member can still remove what they already have. Below `admin` the member loses what the role withholds — e.g. without `agents:write` no create, edit or inline run (`403 inline_run_not_allowed_in_space`); a plain launch runs the published version (`404 no_published_version` without one) and an explicit draft launch requires write access in the package's home space (`403 draft_not_writable`). Existing schedules keep their previously authorized draft selectors. Owners and admins always hold `admin` in their own personal space. A guest takes this default too, always capped to `operator`: the permissions of the chosen role that `operator` also grants, plus the deletes above. A default broader than `operator` (`admin`, `builder`) gives a guest `operator`; a narrower one (`viewer`, `runner`) gives the guest that role as it is; a custom role gives the guest that role restricted to what `operator` grants. Restricting the default never gives a guest more. A member's or guest's own override (`PUT /api/orgs/{orgId}/members/{userId}/personal-space-role`) wins over this default. Computed on every request: changing it takes effect with no other write. Always present on read; optional on PATCH.",
   },
 };
 
@@ -3117,6 +3117,7 @@ export const schemas = {
       "name",
       "description",
       "permissions",
+      "shows_studio",
       "unavailable_permissions",
       "createdAt",
       "updatedAt",
@@ -3139,7 +3140,15 @@ export const schemas = {
         description:
           "Space-level permission strings the role grants on this deployment, sorted. " +
           "A custom bundle is projected through the same vocabulary enforcement uses, so " +
-          "this array is always one a `PATCH` accepts back.",
+          "this array is always one a `PATCH` accepts back. A preset lists `studio:read`; a " +
+          "custom bundle never does, and resolves it from `shows_studio` instead.",
+      },
+      shows_studio: {
+        type: "boolean",
+        description:
+          "Whether holders of the role see the Studio (they resolve `studio:read`). A display " +
+          "setting, not a boundary: the REST API and an MCP client answer the role's other " +
+          "permissions either way. Always `true` for a preset.",
       },
       unavailable_permissions: {
         type: "array",

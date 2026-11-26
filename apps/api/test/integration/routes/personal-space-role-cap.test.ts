@@ -13,7 +13,7 @@
 
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "bun:test";
 import { eq } from "drizzle-orm";
-import { runs, schedules, spaceRoles } from "@appstrate/db/schema";
+import { organizations, runs, schedules } from "@appstrate/db/schema";
 import { getTestApp } from "../../helpers/app.ts";
 import { db, truncateAll } from "../../helpers/db.ts";
 import { expectProblem } from "../../helpers/assertions.ts";
@@ -440,12 +440,13 @@ describe("personal_space_role: operator", () => {
 
     describe("a custom role as the default", () => {
       beforeEach(async () => {
-        // No `studio:read`: the Studio is what this role withholds.
+        // `shows_studio: false`: the Studio is what this role withholds.
         const role = await seedSpaceRole({
           orgId: owner.orgId,
           key: "runner-lite",
           name: "Runner lite",
           permissions: ["agents:read", "agents:run", "runs:read"],
+          showsStudio: false,
         });
         await setCap(owner, role.id);
       });
@@ -482,11 +483,15 @@ describe("personal_space_role: operator", () => {
       });
     });
 
-    it("fails closed to no role when the named role is gone, never a preset opening the Studio", async () => {
-      const role = await seedSpaceRole({ orgId: owner.orgId, permissions: ["agents:read"] });
-      await setCap(owner, role.id);
-      // Bypass the delete guard, as a write outside the platform would: the setting still names the id.
-      await db.delete(spaceRoles).where(eq(spaceRoles.id, role.id));
+    it("fails closed to no role when the default names another org's role, never a preset opening the Studio", async () => {
+      // The FK keeps the named role in existence; what it cannot exclude is a role of ANOTHER
+      // organization, written outside the platform (the API refuses it through lockOrgSpaceRole).
+      const other = await createTestContext({ orgSlug: "otherorg" });
+      const foreign = await seedSpaceRole({ orgId: other.orgId, permissions: ["agents:read"] });
+      await db
+        .update(organizations)
+        .set({ personalSpaceRoleId: foreign.id })
+        .where(eq(organizations.id, owner.orgId));
 
       // A member and a guest hold nothing in their own space, so it is not listed to them…
       for (const ctx of [member, guest]) {
