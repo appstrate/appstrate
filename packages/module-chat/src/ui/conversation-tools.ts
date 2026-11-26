@@ -168,6 +168,11 @@ export function revealToolCall(
     thread.querySelector<HTMLElement>(`[data-message-id="${CSS.escape(call.messageId)}"]`);
   if (!target) return false;
   target.scrollIntoView({ behavior: "smooth", block: "center" });
+  // A focus moved by script draws no ring: a short outline marks where the eye should land.
+  target.animate([{ boxShadow: "0 0 0 2px var(--ring)" }, { boxShadow: "0 0 0 2px transparent" }], {
+    duration: 1600,
+    easing: "ease-out",
+  });
   // The card's own control takes the focus: a keyboard reader lands where the eye does.
   (target.querySelector<HTMLElement>("button, a[href]") ?? target).focus({ preventScroll: true });
   return true;

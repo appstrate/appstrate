@@ -7,6 +7,7 @@
 
 import {
   BookOpenIcon,
+  FileTextIcon,
   PencilIcon,
   PlayIcon,
   PlugIcon,
@@ -108,6 +109,8 @@ export function toolPresentation(toolName: string, input: unknown): ToolPresenta
       return { Icon: SearchIcon, labelKey: "tool.search", target: stringField(input, "query") };
     case "describe":
       return { Icon: BookOpenIcon, labelKey: "tool.describe", target: stringField(input, "id") };
+    case "read":
+      return { Icon: FileTextIcon, labelKey: "tool.read", target: stringField(input, "uri") };
     default:
       return { Icon: WrenchIcon, label: toolName };
   }

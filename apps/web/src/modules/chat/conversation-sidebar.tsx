@@ -202,12 +202,21 @@ function ConversationContext({
           FLOATING_FRAME,
         )}
       >
-        <AgentDetailPaneHeader className="justify-end gap-2">
+        {/* A narrow panel cannot fit four labelled tabs: the others keep their icon and name it
+            to assistive tech and on hover, the active one keeps its label. */}
+        <AgentDetailPaneHeader className="@container justify-end gap-2">
           <TabsList className="h-9 min-w-0" aria-label={t("context.label")}>
             {tabs.map(({ id, Icon, label }) => (
-              <TabsTrigger key={id} value={id} className="gap-1.5">
+              <TabsTrigger
+                key={id}
+                value={id}
+                title={label}
+                className="min-w-0 gap-1.5 px-2.5 @sm:px-3"
+              >
                 <Icon className="size-4 shrink-0" />
-                <span className="truncate">{label}</span>
+                <span className={cn("truncate", id !== activeTab.id && "sr-only @sm:not-sr-only")}>
+                  {label}
+                </span>
               </TabsTrigger>
             ))}
           </TabsList>

@@ -72,6 +72,7 @@
   "tool.integrationTool": "Integration tool",
   "tool.importPackageFile": "Package import",
   "tool.packageCreated.open": "Open the created package",
+  "tool.read": "Read",
   "tool.search": "Search",
   "tool.describe": "Description",
   "tool.detail.input": "Input",
