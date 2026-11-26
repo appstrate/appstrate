@@ -163,7 +163,7 @@ l'espace bloque les connexions des membres n'y figure que sous `integrations:con
 | --- | ------------------------------------------------------------ | ----------------------------------------------------------------------------------- |
 | D1  | Injecter le détail de l'espace personnel l'enregistre-t-il ? | Non : données de l'auteur, il ne peut pas en perdre l'accès. Exception à documenter |
 | D2  | Forme de `can` sur le fil                                    | Tableau de noms d'actes en snake_case ; absent = interdit                           |
-| D3  | Valeur du plafond du niveau 2                                | 8 000 car. par calcul (lot 0 non mené), verrouillée par un test                     |
+| D3  | Valeur du plafond du niveau 2                                | 8 000 car., confirmée par la mesure du lot 0, verrouillée par un test               |
 | D4  | `connectable_integrations` dans `/api/me/context`            | Oui, ids seuls, plafonné                                                            |
 | D5  | Construire le niveau 3                                       | Oui, en préférence d'utilisateur (aucune migration)                                 |
 
@@ -179,8 +179,21 @@ Un lot = une PR, depuis une branche neuve sur `origin/main`.
 - Mesurer la taille d'un `get_me` par espace (caractères) sur une organisation réelle à
   plusieurs espaces : c'est l'entrée de D3.
 - Livrable : les chiffres dans ce document. Aucun code livré.
-- Non mené : le budget a été fixé par calcul. Mesure E2E locale (#2408) : 2 puis 5 `get_me`
-  parallèles en 28 ms au plus.
+- Mené après coup (2026-11-26, #2408), au rendu réel de `formatSpaceDetails` sur des
+  `GET /api/me/context` lus tels quels :
+
+  | Données                                                             | Niveau 1   | Niveau 2 (origine + perso) | Niveau 3 (tous) |
+  | ------------------------------------------------------------------- | ---------- | -------------------------- | --------------- |
+  | Instance de test (5 espaces, 3 agents, 1 intégration)               | —          | 504 car.                   | 553 car.        |
+  | Organisation de production (10 espaces, 26 intégrations, 13 agents) | 1 630 car. | 4 927 car.                 | 7 650 car.      |
+
+  Le rendu par ressource tient : passer de 2 à 10 espaces ajoute 55 % (4 927 → 7 650), pas ×5.
+  Répartition du niveau 3 : agents 37 %, connexions 22 %, listes « switched off in » 15 %.
+  La production ne sert pas encore `connectable_integrations` : sur cette branche, ses lignes
+  s'ajoutent : 350 caractères de plus (4 à 5 lignes) font dépasser le budget (derniers espaces
+  nommés « Not detailed here »). Tokens non comptés (aucun tokenizer local) : à 3–4 caractères
+  par token, niveau 2 ≈ 1,2–1,6 k, niveau 3 ≈ 1,9–2,6 k. Latence : 2 puis 5 `get_me`
+  parallèles en 28 ms au plus, en local.
 
 ### Lot A — niveau 1
 
