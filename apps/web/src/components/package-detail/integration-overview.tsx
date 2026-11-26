@@ -18,6 +18,7 @@ import { isOauthAuthConnectable } from "../integration-connect/connectable-auth-
 import { DetailSectionCard } from "../detail-section-card";
 import { SkeletonLine } from "../skeleton-line";
 import { OperationalStat } from "../operational-stat";
+import { isUsableToolStatus } from "../agent-editor/tool-selection";
 import { AvailabilityCard, AvailabilityCardSkeleton } from "./availability-card";
 
 export function IntegrationOverview({
@@ -77,7 +78,9 @@ export function IntegrationOverview({
     )?.filter((connection) => connection.needs_reconnection).length ?? 0;
   const figure = (value: number | undefined) =>
     value === undefined ? <SkeletonLine className="w-10" /> : value;
-  const available = detail.tool_catalog?.length ?? 0;
+  const catalog = detail.tool_catalog ?? [];
+  const available = catalog.filter((tool) => isUsableToolStatus(tool.status)).length;
+  const pending = catalog.filter((tool) => tool.status === "pending").length;
   const connectionsTo = { pathname: location.pathname, hash: "#connections" };
   const toolsTo = integrationSettingsHref(location.pathname, "tools");
   const labelFor = (auth: IntegrationAuthStatus) =>
@@ -213,8 +216,15 @@ export function IntegrationOverview({
             <OperationalStat
               label={t("integration.summary.availableTools")}
               value={available}
-              target={available ? { to: toolsTo } : undefined}
+              target={catalog.length > 0 ? { to: toolsTo } : undefined}
             />
+            {pending > 0 && (
+              <OperationalStat
+                label={t("integration.summary.toolsToReview")}
+                value={pending}
+                target={{ to: toolsTo }}
+              />
+            )}
           </dl>
         </DetailSectionCard>
       </div>

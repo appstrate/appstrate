@@ -245,7 +245,13 @@ export interface ToolSpacePolicy {
 
 /** One stored listing of the server (one per connection). */
 export interface ToolSnapshotView {
-  tools: readonly { name: string; fingerprint: string; changed_at: string | null }[];
+  tools: readonly {
+    name: string;
+    fingerprint: string;
+    changed_at: string | null;
+    /** What the server listed; absent past the snapshot's size cap. */
+    definition?: { description?: unknown } | null;
+  }[];
   truncated: boolean;
 }
 
@@ -281,7 +287,7 @@ export function resolveEffectiveToolCatalog(
     approvals.set(a.tool_name, set);
   }
 
-  const listings = new Map<string, { fingerprint: string; changed_at: string | null }[]>();
+  const listings = new Map<string, ToolSnapshotView["tools"][number][]>();
   for (const snapshot of snapshots) {
     for (const tool of snapshot.tools) {
       const list = listings.get(tool.name) ?? [];
@@ -325,8 +331,24 @@ export function resolveEffectiveToolCatalog(
 
   return [
     ...declared.map((entry) => judge(entry, "declared")),
-    ...undeclared.map((name) => judge({ name }, approvals.has(name) ? "approved" : "listed")),
+    ...undeclared.map((name) =>
+      judge(
+        { name, ...listedDescription(listings.get(name)) },
+        approvals.has(name) ? "approved" : "listed",
+      ),
+    ),
   ];
+}
+
+/** An undeclared tool's description is the server's: the first listing that carries one. */
+function listedDescription(listed: readonly ToolSnapshotView["tools"][number][] | undefined): {
+  description?: string;
+} {
+  for (const tool of listed ?? []) {
+    const description = tool.definition?.description;
+    if (typeof description === "string" && description.trim() !== "") return { description };
+  }
+  return {};
 }
 
 /** The effective catalog of `manifest` judged against a policy and the snapshots read. */

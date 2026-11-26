@@ -5,6 +5,7 @@
   "integration.summary.agentsCount": "Agents utilisant l’intégration",
   "integration.summary.agentPreview": "Agent utilisateur (aperçu)",
   "integration.summary.availableTools": "Outils disponibles",
+  "integration.summary.toolsToReview": "Outils à examiner",
   "integration.admin.creation.title": "Utilisateurs autorisés à créer une connexion",
   "integration.admin.usage.title": "Utilisation des connexions",
   "integration.structure.access": "Type d’accès",
