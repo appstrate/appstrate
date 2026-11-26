@@ -619,6 +619,37 @@ describe("executeApiCall — 401 retry path", () => {
     expect(reportUpstreamSuccess).toHaveBeenCalledTimes(1);
   });
 
+  it("reports the scopes a 403 insufficient_scope challenge names, and only that", async () => {
+    const answers = [
+      new Response("{}", {
+        status: 403,
+        headers: { "www-authenticate": 'Bearer error="insufficient_scope", scope="mail.send a"' },
+      }),
+      new Response("{}", { status: 403 }),
+    ];
+    const reportScopesRequested = mock(() => {});
+    const deps = makeDeps({
+      fetchFn: (async () => answers.shift()!) as unknown as typeof fetch,
+      reportScopesRequested,
+    });
+    const call = () =>
+      executeApiCall(
+        {
+          integrationId: "gmail",
+          connectionId: "conn-1",
+          targetUrl: "https://api.example.com/x",
+          method: "GET",
+          callerHeaders: {},
+          body: { kind: "none" },
+        },
+        deps,
+      );
+    await call();
+    await call();
+    expect(reportScopesRequested).toHaveBeenCalledTimes(1);
+    expect(reportScopesRequested).toHaveBeenCalledWith(["mail.send", "a"]);
+  });
+
   it("judges nothing once a redirect hop stripped the credential, even back on its origin", async () => {
     let terminalStatus = 401;
     // An allowlisted https → http downgrade strips the credential; the chain then returns to https.

@@ -156,6 +156,7 @@ column integration_connections.org_id uuid not null
 column integration_connections.origin_space_id text
 column integration_connections.refresh_checked_at timestamp with time zone
 column integration_connections.refresh_failure_count integer not null default 0
+column integration_connections.requested_scopes text[] not null default '{}'::text[]
 column integration_connections.scopes_granted text[] not null default '{}'::text[]
 column integration_connections.share_all_spaces boolean not null default false
 column integration_connections.shared_space_ids text[] not null default '{}'::text[]

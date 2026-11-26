@@ -1,0 +1,2 @@
+-- The scopes a server asked for that the connection does not hold (step-up demand). Empty = none: no backfill.
+ALTER TABLE "integration_connections" ADD COLUMN "requested_scopes" text[] DEFAULT '{}'::text[] NOT NULL;

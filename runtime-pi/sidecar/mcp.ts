@@ -778,6 +778,7 @@ export function createApiCallToolDefs(
         fetchCredentials: integ.fetchCredentials,
         refreshCredentials: integ.refreshCredentials,
         reportUpstreamSuccess: integ.reportUpstreamSuccess,
+        reportScopesRequested: integ.reportScopesRequested,
       },
       integrationId: integ.integrationId,
       connectionId: integ.connectionId,
@@ -1320,6 +1321,8 @@ export interface ApiCallIntegrationConfig {
   refreshCredentials: NonNullable<ApiCallDeps["refreshCredentials"]>;
   /** See {@link ApiCallDeps.reportUpstreamSuccess}. */
   reportUpstreamSuccess?: ApiCallDeps["reportUpstreamSuccess"];
+  /** See {@link ApiCallDeps.reportScopesRequested}. */
+  reportScopesRequested?: ApiCallDeps["reportScopesRequested"];
   /**
    * Resumable-upload protocols this integration auth declared under
    * `_meta["dev.appstrate/api"].auths.{key}.upload_protocols`. When non-empty the sidecar

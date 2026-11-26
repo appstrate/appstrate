@@ -578,6 +578,28 @@ describe("createIntegrationCredentialsSource — upstream success report", () =>
     expect(successCalls().length).toBe(1);
   });
 
+  it("posts the scopes a server asked for to the scopes-requested route", async () => {
+    let posted: { url: string; body: unknown } | undefined;
+    const source = createIntegrationCredentialsSource({
+      connectionId: "conn-a",
+      integrationId: "@test/integ",
+      platformApiUrl: "http://api",
+      runToken: "run-tok",
+      initialPayload: held(makePayload("tok")),
+      fetchFn: (async (url: string, init: RequestInit) => {
+        posted = { url, body: JSON.parse(String(init.body)) };
+        return new Response(null, { status: 204 });
+      }) as unknown as typeof fetch,
+      minRefreshIntervalMs: 0,
+    });
+    source.reportScopesRequested(["mail.send"]);
+    await Bun.sleep(0);
+    expect(posted).toEqual({
+      url: "http://api/internal/integration-credentials/@test/integ/scopes-requested?connection_id=conn-a",
+      body: { scopes: ["mail.send"] },
+    });
+  });
+
   it("reports nothing when no streak is pending", () => {
     const { source, successCalls } = sourceWith(held(makePayload("tok")));
     source.reportUpstreamSuccess("rev-a");

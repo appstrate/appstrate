@@ -346,6 +346,52 @@ export const internalPaths = {
       },
     },
   },
+  "/internal/integration-credentials/{scope}/{name}/scopes-requested": {
+    post: {
+      operationId: "reportIntegrationScopesRequested",
+      "x-appstrate-space": { kind: "organization" },
+      tags: ["Internal"],
+      summary: "Report the scopes a server asked for that a connection does not hold",
+      description:
+        "Sidecar-only. Same Bearer run token, agent-dependency and activation checks and bound-connection check as `upstream-success` (`connection_id` is required). Called fire-and-forget when a call through the connection was refused with HTTP 403 `insufficient_scope` naming `scopes` (RFC 6750 §3.1). The platform keeps the valid scope tokens the connection does not already hold, at most 20, as the connection's `requested_scopes`, and stamps the run's `metadata.scope_requests[]` (`integration_id`, `connection_id`, `scopes`: the connection's whole standing demand). Nothing is recorded when the run has no actor or its actor can no longer reach the connection. A reconnect that grants the scopes clears them. Idempotent. An ephemeral CONNECT run's token is refused with `409 connect_run_no_refresh`.",
+      security: [{ bearerExecToken: [] }],
+      parameters: [
+        { $ref: "#/components/parameters/PackageScope" },
+        { $ref: "#/components/parameters/PackageName" },
+        boundConnectionIdParam,
+      ],
+      requestBody: {
+        required: true,
+        content: {
+          "application/json": {
+            schema: {
+              type: "object",
+              additionalProperties: false,
+              required: ["scopes"],
+              properties: {
+                scopes: {
+                  type: "array",
+                  minItems: 1,
+                  maxItems: 20,
+                  items: { type: "string", maxLength: 256 },
+                  description: "The scopes the server's challenge named.",
+                },
+              },
+            },
+          },
+        },
+      },
+      responses: {
+        "204": { description: "Report recorded." },
+        "400": connectionSelector400,
+        "401": { $ref: "#/components/responses/Unauthorized" },
+        "403": { $ref: "#/components/responses/Forbidden" },
+        "404": { $ref: "#/components/responses/NotFound" },
+        "409": integrationCredentialsConflict409,
+        "500": { $ref: "#/components/responses/InternalServerError" },
+      },
+    },
+  },
   "/internal/integration-credentials/{scope}/{name}/tools-observed": {
     post: {
       operationId: "reportIntegrationToolsObserved",

@@ -27,6 +27,7 @@
  *     the platform owns the TTL.
  */
 
+import { requiredScopesFromChallenge } from "@appstrate/core/www-authenticate";
 import {
   applyInjectedCredentialHeader,
   credentialCarryingHeader,
@@ -188,6 +189,8 @@ export interface ApiCallDeps extends ApiCallBaseDeps {
   ) => Promise<CredentialsResponse | null>;
   /** A 2xx on the injected credential — ends a pending rejection streak on the connection. */
   reportUpstreamSuccess?: (answered: CredentialsResponse) => void;
+  /** A 403 `insufficient_scope` naming scopes: the connection's demand, reported to the platform. */
+  reportScopesRequested?: (scopes: string[]) => void;
 }
 
 /** `value` with `render` applied to its string leaves: `JSON.stringify` then escapes each. */
@@ -515,6 +518,10 @@ export async function executeApiCall(args: ApiCallArgs, deps: ApiCallDeps): Prom
   }
 
   if (upstream.ok && answered) deps.reportUpstreamSuccess?.(answered);
+  if (upstream.status === 403) {
+    const asked = requiredScopesFromChallenge(403, upstream.headers.get("www-authenticate"));
+    if (asked) deps.reportScopesRequested?.(asked);
+  }
 
   // 7. Success-path diagnostic envelope. One structured line per
   //    completed call — resolved auth mode, hop count, status, duration,

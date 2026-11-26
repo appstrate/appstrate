@@ -994,6 +994,45 @@ export async function recordRunDegradedIntegration(
   }
 }
 
+/**
+ * Stamp `metadata.scope_requests[]` with the scopes a server asked for that a connection of the run
+ * does not hold, `{ integration_id, connection_id, scopes }`: one entry per connection, replaced by
+ * a later report (`scopes` is then the connection's whole standing demand). Best-effort, never throws.
+ */
+export async function recordRunScopeRequest(
+  orgId: string,
+  runId: string,
+  request: { integrationId: string; connectionId: string; scopes: readonly string[] },
+): Promise<void> {
+  if (request.scopes.length === 0) return;
+  const entry = JSON.stringify({
+    integration_id: request.integrationId,
+    connection_id: request.connectionId,
+    scopes: request.scopes,
+  });
+  try {
+    await db.execute(sql`
+      UPDATE ${runs}
+      SET metadata = jsonb_set(
+        COALESCE(${runs.metadata}, '{}'::jsonb),
+        '{scope_requests}',
+        COALESCE((
+          SELECT jsonb_agg(kept)
+          FROM jsonb_array_elements(COALESCE(${runs.metadata} -> 'scope_requests', '[]'::jsonb)) AS kept
+          WHERE kept ->> 'connection_id' <> ${request.connectionId}
+        ), '[]'::jsonb) || ${entry}::jsonb
+      )
+      WHERE ${runs.id} = ${runId}
+        AND ${runs.orgId} = ${orgId}
+    `);
+  } catch (err) {
+    logger.warn("Failed to record scope request on run metadata", {
+      runId,
+      error: getErrorMessage(err),
+    });
+  }
+}
+
 /** Unavailable tools kept per integration on a run: a report past it is cut, not refused. */
 const MAX_UNAVAILABLE_TOOLS_PER_INTEGRATION = 50;
 

@@ -441,7 +441,7 @@ describe("the typed tools of a remote MCP integration", () => {
       },
       async (other) => {
         await seedProxyIntegration(ctx, on(other, { tools_policy: { search: {} } }));
-        await seedProxyConnection(ctx, ID, "api_key", { token: TOKEN });
+        const connectionId = await seedProxyConnection(ctx, ID, "api_key", { token: TOKEN });
 
         const res = await post("call", { integration_package_id: ID, name: "search" });
         expect(res.status).toBe(502);
@@ -453,6 +453,16 @@ describe("the typed tools of a remote MCP integration", () => {
         expect(problem.code).toBe("upstream_credential_rejected");
         expect(problem.required_scopes).toEqual(["a", "b"]);
         expect(problem.detail).toContain("a b");
+        // The demand is recorded on the connection, minus what it holds: a fire-and-forget write.
+        const requested = async () =>
+          (
+            await db
+              .select({ requested: integrationConnections.requestedScopes })
+              .from(integrationConnections)
+              .where(eq(integrationConnections.id, connectionId))
+          )[0]!.requested;
+        for (let i = 0; i < 50 && (await requested()).length === 0; i++) await Bun.sleep(20);
+        expect(await requested()).toEqual(["a", "b"]);
       },
     );
   });

@@ -24,6 +24,7 @@ import {
   type SQL,
 } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
+import { sanitiseRequiredScopes } from "@appstrate/core/www-authenticate";
 import {
   spacePackages,
   integrationConnections,
@@ -2359,7 +2360,9 @@ export async function persistCredentialBundle(
 
   // UPDATE — shared column set; WHERE differs by target.
   const clearsReconnection = !(input.needsReconnection ?? false);
-  const set: Partial<typeof integrationConnections.$inferInsert> = {
+  const set: Partial<Omit<typeof integrationConnections.$inferInsert, "requestedScopes">> & {
+    requestedScopes?: SQL;
+  } = {
     credentialsEncrypted: ciphertext,
     expiresAt: input.expiresAt ?? null,
     needsReconnection: input.needsReconnection ?? false,
@@ -2371,7 +2374,14 @@ export async function persistCredentialBundle(
   };
   if (input.accountId !== undefined) set.accountId = input.accountId;
   if (input.identityClaims !== undefined) set.identityClaims = input.identityClaims;
-  if (input.scopesGranted !== undefined) set.scopesGranted = input.scopesGranted;
+  if (input.scopesGranted !== undefined) {
+    set.scopesGranted = input.scopesGranted;
+    // What the grant now holds is no longer a demand.
+    set.requestedScopes = sql`coalesce(array(select s from unnest(${integrationConnections.requestedScopes}) as s where s <> all(${sql`ARRAY[${sql.join(
+      input.scopesGranted.map((g) => sql`${g}`),
+      sql`, `,
+    )}]::text[]`})), '{}'::text[])`;
+  }
   // A reconnect re-stamps the minting client; the refresh write-back omits it.
   if (input.clientRef !== undefined) set.clientRef = input.clientRef;
   if (input.variables !== undefined) set.variables = input.variables;
@@ -2691,6 +2701,45 @@ export function clearReachableUpstreamRejections(
       eq(credentialRevision, revision),
     )!,
   );
+}
+
+/** The most scopes kept as a connection's demand: a server controls what it asks for. */
+const MAX_REQUESTED_SCOPES = 20;
+
+/**
+ * Record the scopes a server asked for (`insufficient_scope`) that a connection does not hold, for
+ * a caller whose `reach` reaches it. The ONE writer of `requested_scopes`, whatever the door (the
+ * credential proxy outside a run, a run's report); {@link persistCredentialBundle} is the one
+ * that clears it. Only valid scope tokens are kept, at most {@link MAX_REQUESTED_SCOPES}.
+ */
+export async function recordRequestedScopes(
+  connectionId: string,
+  integrationId: string,
+  reach: { spaceId: string; actor: Actor },
+  scopes: readonly string[],
+): Promise<string[] | null> {
+  const [row] = await db
+    .select({
+      granted: integrationConnections.scopesGranted,
+      requested: integrationConnections.requestedScopes,
+    })
+    .from(integrationConnections)
+    .where(reachableConnection(connectionId, integrationId, reach))
+    .limit(1);
+  if (!row) return null;
+  const granted = new Set(row.granted);
+  const next = [
+    ...new Set(
+      [...row.requested, ...sanitiseRequiredScopes(scopes)].filter((s) => !granted.has(s)),
+    ),
+  ].slice(0, MAX_REQUESTED_SCOPES);
+  if (next.length === row.requested.length && next.every((s, i) => s === row.requested[i]))
+    return next;
+  await db
+    .update(integrationConnections)
+    .set({ requestedScopes: next })
+    .where(reachableConnection(connectionId, integrationId, reach));
+  return next;
 }
 
 /** The rejection streak a connection carries into a call: its count, for a non-OAuth2 auth only. */

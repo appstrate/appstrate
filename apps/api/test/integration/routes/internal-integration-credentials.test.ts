@@ -1165,6 +1165,99 @@ describe("POST /internal/integration-credentials/:scope/:name/refresh", () => {
     expect(await streakOf(connectionId)).toBe(2);
   });
 
+  describe("scopes-requested", () => {
+    const report = (connectionId: string, scopes: string[], runToken = token) =>
+      app.request(
+        `/internal/integration-credentials/${INTEGRATION}/scopes-requested?connection_id=${connectionId}`,
+        {
+          method: "POST",
+          headers: { Authorization: `Bearer ${runToken}`, "Content-Type": "application/json" },
+          body: JSON.stringify({ scopes }),
+        },
+      );
+    const stored = async (connectionId: string) =>
+      (
+        await db
+          .select({ requested: integrationConnections.requestedScopes })
+          .from(integrationConnections)
+          .where(eq(integrationConnections.id, connectionId))
+      )[0]!.requested;
+
+    it("records the demand on the connection and stamps the run's metadata", async () => {
+      await seedIntegration(INTEGRATION, true);
+      const connectionId = await seedConnection(INTEGRATION);
+      await bindConnectionsToRun(runId, { [INTEGRATION]: [connectionId] });
+
+      expect((await report(connectionId, ["mail.send", "not a scope"])).status).toBe(204);
+      expect(await stored(connectionId)).toEqual(["mail.send"]);
+      const [run] = await db
+        .select({ metadata: runs.metadata })
+        .from(runs)
+        .where(eq(runs.id, runId));
+      expect(run!.metadata).toMatchObject({
+        scope_requests: [
+          { integration_id: INTEGRATION, connection_id: connectionId, scopes: ["mail.send"] },
+        ],
+      });
+
+      // A later report replaces the connection's entry: one per connection.
+      await report(connectionId, ["mail.read"]);
+      const [again] = await db
+        .select({ metadata: runs.metadata })
+        .from(runs)
+        .where(eq(runs.id, runId));
+      expect(again!.metadata).toMatchObject({
+        scope_requests: [{ connection_id: connectionId, scopes: ["mail.send", "mail.read"] }],
+      });
+    });
+
+    it("DENY: a connection the run did not bind is a 400, and records nothing", async () => {
+      await seedIntegration(INTEGRATION, true);
+      const bound = await seedConnection(INTEGRATION);
+      const colleague = await memberContext(ctx, "member");
+      const foreign = await seedConnection(INTEGRATION, {
+        userId: colleague.user.id,
+        shared: false,
+      });
+      await bindConnectionsToRun(runId, { [INTEGRATION]: [bound] });
+
+      expect((await report(foreign, ["mail.send"])).status).toBe(400);
+      expect(await stored(foreign)).toEqual([]);
+    });
+
+    it("records nothing once the run's actor can no longer reach the connection", async () => {
+      await seedIntegration(INTEGRATION, true);
+      const colleague = await memberContext(ctx, "member");
+      const connectionId = await seedConnection(INTEGRATION, {
+        userId: colleague.user.id,
+        shared: true,
+      });
+      await bindConnectionsToRun(runId, { [INTEGRATION]: [connectionId] });
+      await db
+        .delete(integrationConnectionShares)
+        .where(eq(integrationConnectionShares.connectionId, connectionId));
+
+      expect((await report(connectionId, ["mail.send"])).status).toBe(204);
+      expect(await stored(connectionId)).toEqual([]);
+    });
+
+    it("DENY: an empty or oversized scope list is a 400", async () => {
+      await seedIntegration(INTEGRATION, true);
+      const connectionId = await seedConnection(INTEGRATION);
+      await bindConnectionsToRun(runId, { [INTEGRATION]: [connectionId] });
+
+      expect((await report(connectionId, [])).status).toBe(400);
+      expect(
+        (
+          await report(
+            connectionId,
+            Array.from({ length: 21 }, (_, i) => `s${i}`),
+          )
+        ).status,
+      ).toBe(400);
+    });
+  });
+
   it("a 401 on a credential the connection no longer holds is not counted: 200 with the current one", async () => {
     await seedIntegration(INTEGRATION, true);
     const connectionId = await seedConnection(INTEGRATION);

@@ -606,6 +606,15 @@ describe("/internal/* — connect-run grant authorization", () => {
       expect(((await res.json()) as { code: string }).code).toBe("connect_run_no_refresh");
     });
 
+    it("POST /scopes-requested is refused for a connect token too", async () => {
+      const res = await app.request(
+        `/internal/integration-credentials/${INTEGRATION}/scopes-requested`,
+        { method: "POST", headers: { Authorization: `Bearer ${connectToken}` } },
+      );
+      expect(res.status).toBe(409);
+      expect(((await res.json()) as { code: string }).code).toBe("connect_run_no_refresh");
+    });
+
     it("POST /refresh still works for a real run token", async () => {
       // Regression control for the refresh branch: an api_key auth is
       // unrefreshable, so the resolver counts the rejection and answers 502

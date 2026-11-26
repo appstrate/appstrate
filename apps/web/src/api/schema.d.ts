@@ -5742,6 +5742,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/internal/integration-credentials/{scope}/{name}/scopes-requested": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Report the scopes a server asked for that a connection does not hold
+         * @description Sidecar-only. Same Bearer run token, agent-dependency and activation checks and bound-connection check as `upstream-success` (`connection_id` is required). Called fire-and-forget when a call through the connection was refused with HTTP 403 `insufficient_scope` naming `scopes` (RFC 6750 §3.1). The platform keeps the valid scope tokens the connection does not already hold, at most 20, as the connection's `requested_scopes`, and stamps the run's `metadata.scope_requests[]` (`integration_id`, `connection_id`, `scopes`: the connection's whole standing demand). Nothing is recorded when the run has no actor or its actor can no longer reach the connection. A reconnect that grants the scopes clears them. Idempotent. An ephemeral CONNECT run's token is refused with `409 connect_run_no_refresh`.
+         */
+        post: operations["reportIntegrationScopesRequested"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/internal/integration-credentials/{scope}/{name}/tools-observed": {
         parameters: {
             query?: never;
@@ -31110,6 +31130,61 @@ export interface operations {
                 };
             };
             503: components["responses"]["EncryptionKeyUnavailable"];
+        };
+    };
+    reportIntegrationScopesRequested: {
+        parameters: {
+            query: {
+                /** @description The connection this run bound to the integration: a member of `runs.resolved_connections[<integration id>]`. An id the run did not bind is a `400 connection_not_in_run`. */
+                connection_id: string;
+            };
+            header?: never;
+            path: {
+                /** @description Package scope (e.g. @myorg) */
+                scope: components["parameters"]["PackageScope"];
+                /** @description Package name */
+                name: components["parameters"]["PackageName"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** @description The scopes the server's challenge named. */
+                    scopes: string[];
+                };
+            };
+        };
+        responses: {
+            /** @description Report recorded. */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The `connection_id` selector is missing, malformed, or names a connection this run did not bind. `invalid_request` — absent or not a uuid; the platform never picks a connection on the caller's behalf. `connection_not_in_run` — a well-formed id that is not in `runs.resolved_connections` for this integration; the run token authorises this run's bound set only. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            /** @description The definition this run executes is no longer readable, so the run token's authorization set cannot be decided. Two distinct causes, told apart by the problem `code`: `run_definition_gone` — the `package_versions` snapshot pinned by `runs.version_ref` was deleted while the run was in flight (the agent row is still there; re-publishing that version restores it); `run_agent_deleted` — the agent package itself was deleted mid-run (`runs.package_id` is `ON DELETE SET NULL`, so the run survives for observability) and nothing will restore that definition. There is deliberately no draft fallback in either case: the run's authorization set may never be re-derived from the mutable draft. Both are `409`, not `410`, which on this endpoint means the credential was revoked upstream, and not `404`, which here means the integration is not a dependency of the running agent or not active in the space. A third cause shares the status on this endpoint: `integration_auth_undeclared` — the integration manifest VERSION frozen for this run (`runs.resolved_integration_versions`) does not declare the `auth_key` the run's connection was created against (the auth was renamed or removed after the connection was made). Nothing can be injected without that declaration, and the credential is deliberately NOT flagged `needsReconnection`: it is intact and may still be valid under another manifest version, so `410` would both mislabel it and destroy a working connection over a manifest edit. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            500: components["responses"]["InternalServerError"];
         };
     };
     reportIntegrationToolsObserved: {

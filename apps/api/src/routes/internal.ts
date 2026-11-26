@@ -29,7 +29,11 @@ import { verifyRunToken } from "../lib/verify-run-token.ts";
 import { requireRunBoundMember } from "../lib/run-bound-connection.ts";
 import { serveRunMcp } from "../services/run-tools-mcp.ts";
 import { RUN_ROUTE_RATE_PER_MIN, rateLimitByBearer } from "../middleware/rate-limit.ts";
-import { recordRunDegradedIntegration, recordRunUnavailableTools } from "../services/state/runs.ts";
+import {
+  recordRunDegradedIntegration,
+  recordRunScopeRequest,
+  recordRunUnavailableTools,
+} from "../services/state/runs.ts";
 import { recordToolSnapshot } from "../services/integration-tool-snapshots.ts";
 import {
   OBSERVED_TOOLS_MAX_BYTES,
@@ -74,6 +78,7 @@ import {
 } from "../services/integration-service.ts";
 import {
   clearReachableUpstreamRejections,
+  recordRequestedScopes,
   isIntegrationActive,
 } from "../services/integration-connections.ts";
 import { SCOPED_PACKAGE_ROUTE } from "./scoped-package-route.ts";
@@ -235,6 +240,11 @@ const EMPTY_CREDENTIALS_WIRE = {
  * which the margin covers with room for JSON escaping.
  */
 const TOOLS_OBSERVED_MAX_BODY_BYTES = OBSERVED_TOOLS_MAX_BYTES + 256 * 1024;
+
+export const scopesRequestedSchema = z.strictObject({
+  /** What the server's `insufficient_scope` challenge named; the platform keeps the valid tokens. */
+  scopes: z.array(z.string().max(256)).min(1).max(20),
+});
 
 export const toolsObservedSchema = z
   .strictObject({
@@ -580,6 +590,36 @@ export function createInternalRouter(ratePerMin = RUN_ROUTE_RATE_PER_MIN) {
         { spaceId: run.spaceId, actor },
         revision,
       );
+    }
+    return c.body(null, 204);
+  });
+
+  // POST /internal/integration-credentials/:scope/:name/scopes-requested
+  // Sidecar-only: a call through a bound connection was refused `insufficient_scope` naming
+  // `scopes`. Same run checks as `upstream-success`, and the run's actor must still reach the
+  // connection. Records the connection's standing demand and stamps the run's metadata with it.
+  router.post(`/integration-credentials/${SCOPED_PACKAGE_ROUTE}/scopes-requested`, async (c) => {
+    const packageId = `${c.req.param("scope")}/${c.req.param("name")}`;
+    await refuseConnectRun(c, packageId);
+    const { runId, run } = await verifyRunToken(c);
+    await assertAgentDeclaresIntegration(packageId, run, runId);
+    const bound = requireBoundConnection(c, packageId, run, runId);
+    const body = await readJsonBody(c, scopesRequestedSchema);
+    const actor = actorFromIds(run.userId, run.endUserId);
+    if (actor) {
+      const standing = await recordRequestedScopes(
+        bound.connectionId,
+        packageId,
+        { spaceId: run.spaceId, actor },
+        body.scopes,
+      );
+      if (standing?.length) {
+        await recordRunScopeRequest(run.orgId, runId, {
+          integrationId: packageId,
+          connectionId: bound.connectionId,
+          scopes: standing,
+        });
+      }
     }
     return c.body(null, 204);
   });

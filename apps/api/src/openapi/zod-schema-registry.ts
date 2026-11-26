@@ -38,7 +38,7 @@ import {
 // --- API Key schemas (routes/api-keys.ts) ---
 import { createApiKeySchema } from "../routes/api-keys.ts";
 import { callRemoteToolSchema } from "../routes/credential-proxy.ts";
-import { toolsObservedSchema } from "../routes/internal.ts";
+import { scopesRequestedSchema, toolsObservedSchema } from "../routes/internal.ts";
 
 // --- Organization schemas (routes/organizations.ts) ---
 import {
@@ -567,6 +567,12 @@ const coreSchemas: OpenApiSchemaEntry[] = [
   // ─── Package draft file tree ────────────────────────────────────────────
 
   // ─── Sidecar reports ────────────────────────────────────────────────────
+  {
+    method: "POST",
+    path: "/internal/integration-credentials/{scope}/{name}/scopes-requested",
+    jsonSchema: toJsonSchema(scopesRequestedSchema),
+    description: "Report the scopes a server asked for that a connection does not hold",
+  },
   {
     method: "POST",
     path: "/internal/integration-credentials/{scope}/{name}/tools-observed",

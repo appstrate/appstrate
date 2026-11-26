@@ -62,7 +62,12 @@ import {
 } from "./integration-resolver.ts";
 import type { CredentialStatus } from "../../lib/credential-status-header.ts";
 import { remoteMcpEndpointNotProxied } from "../integration-tool-catalog.ts";
-import { clearUpstreamRejections, type ConnectionNaming } from "../integration-connections.ts";
+import {
+  clearUpstreamRejections,
+  recordRequestedScopes,
+  type ConnectionNaming,
+} from "../integration-connections.ts";
+import { requiredScopesFromChallenge } from "@appstrate/core/www-authenticate";
 
 /**
  * Minimal async cookie-jar shape consumed by {@link proxyCall}. The full
@@ -507,6 +512,20 @@ export async function proxyCall(input: ProxyCallInput): Promise<ProxyCallResult>
         error: getErrorMessage(err),
       }),
     );
+  }
+
+  // A 403 `insufficient_scope` naming scopes: the connection's demand, offered to its owner.
+  if (res.status === 403 && credentialInjection.kind === "inject" && credentialForwarded) {
+    const asked = requiredScopesFromChallenge(403, res.headers.get("www-authenticate"));
+    if (asked) {
+      recordRequestedScopes(connectionId, input.integrationId, selection, asked).catch(
+        (err: unknown) =>
+          logger.warn("credential-proxy: could not record the scopes the server asked for", {
+            connectionId,
+            error: getErrorMessage(err),
+          }),
+      );
+    }
   }
 
   // Streaming body on 401: credentials may be stale. Force-refresh them
