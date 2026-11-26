@@ -47,6 +47,7 @@ import {
   connectionParam,
   listReachableConnections,
   proxyConnectionVerdicts,
+  readCredentialRevision,
   selectAccessibleConnection,
   upstreamRejectionStreak,
   type ConnectionNaming,
@@ -174,15 +175,59 @@ export async function resolveIntegrationProxyCredentials(
     );
   }
 
-  const connection = await resolveConnection(input, manifest);
+  let connection = await resolveConnection(input, manifest);
   if (!connection) throw new IntegrationCredentialNotFoundError(noConnectionMessage(input));
 
-  const payload = buildPayload(input.integrationId, manifest, connection);
+  // A credential about to expire is refreshed before it is sent, not after its first 401.
+  let payload: ProxyCredentialsPayload | null = null;
+  let credentialRevision = connection.credentialRevision;
+  const authDef = manifest.auths?.[connection.authKey];
+  const outcome = authDef
+    ? await refreshConnectionCredential({
+        connection,
+        integrationId: input.integrationId,
+        manifest,
+        authDef,
+        trigger: { kind: "expiring" },
+      })
+    : null;
+  switch (outcome?.status) {
+    case "refreshed": {
+      // The 401 path names the credential the call carried: the one just written.
+      const revision = await readCredentialRevision(connection.id);
+      if (revision === null) {
+        throw new IntegrationCredentialNotFoundError(noConnectionMessage(input));
+      }
+      credentialRevision = revision;
+      payload = buildPayloadFromFields(
+        manifest,
+        connection.authKey,
+        outcome.fields,
+        connection.variables,
+      );
+      if (!payload) {
+        throw new IntegrationCredentialNotFoundError(
+          `Integration '${input.integrationId}' auth '${connection.authKey}' has no resolvable credentials`,
+        );
+      }
+      break;
+    }
+    case "dead": {
+      // Flagged just now: the selection answers as it does for a connection flagged before the call.
+      const reselected = await resolveConnection(input, manifest);
+      if (!reselected) throw new IntegrationCredentialNotFoundError(noConnectionMessage(input));
+      connection = reselected;
+      credentialRevision = connection.credentialRevision;
+      break;
+    }
+    // `kept`: nothing to do. `retry`: the stored credential is served, the upstream decides.
+  }
+
   return {
-    payload,
+    payload: payload ?? buildPayload(input.integrationId, manifest, connection),
     declaredUris: declaredUrisOf(manifest, connection.authKey),
     connectionId: connection.id,
-    credentialRevision: connection.credentialRevision,
+    credentialRevision,
     authKey: connection.authKey,
     rejectionStreak: upstreamRejectionStreak(connection),
   };

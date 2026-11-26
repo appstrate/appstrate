@@ -13,6 +13,7 @@
 
 import { describe, it, expect, beforeEach, afterEach, afterAll, spyOn } from "bun:test";
 import { logger } from "../../../src/lib/logger.ts";
+import { ApiError } from "../../../src/lib/errors.ts";
 import { truncateAll, db } from "../../helpers/db.ts";
 import { createTestContext, type TestContext } from "../../helpers/auth.ts";
 import { seedPackage, seedRun, seedPublishedVersion } from "../../helpers/seed.ts";
@@ -73,6 +74,8 @@ async function setup(
   packageId: string,
   fields: Record<string, string>,
   delivery = BEARER_DELIVERY,
+  /** Valid by default: the 401 path is what the tests below exercise, not the pre-check. */
+  expiresInMs = 60 * 60_000,
 ): Promise<void> {
   await seedPackage({
     id: packageId,
@@ -116,7 +119,7 @@ async function setup(
     // oauth2 connections always pin their minting client by id; here the org's
     // custom per-space client registered just above.
     clientRef: customClient!.id,
-    expiresAt: new Date(Date.now() - 60_000),
+    expiresAt: new Date(Date.now() + expiresInMs),
   });
 }
 
@@ -159,7 +162,7 @@ async function setupSystemPinned(
     credentialsEncrypted: encryptCredentialEnvelope({ outputs: fields }),
     scopesGranted: ["openid", "email"],
     clientRef: systemId,
-    expiresAt: new Date(Date.now() - 60_000),
+    expiresAt: new Date(Date.now() + 60 * 60_000),
   });
   initSystemIntegrations([
     {
@@ -846,5 +849,118 @@ describe("proxyCall — an api_key connection's rejection streak", () => {
     expect(await clearedWithin(sentinel, 1000)).toBe(true);
 
     expect(await failures()).toBe(3);
+  });
+});
+
+describe("proxyCall — the pre-check refreshes an expiring credential before it is sent", () => {
+  const packageId = "@cprefreshorg/gmail-precheck";
+  let ctx: TestContext;
+
+  beforeEach(async () => {
+    await truncateAll();
+    mockServer.clearRequests();
+    mockServer.setTokenStatus(200);
+    mockServer.setTokenResponse({
+      access_token: "fresh_token",
+      token_type: "Bearer",
+      expires_in: 3600,
+    });
+    ctx = await createTestContext({ orgSlug: "cprefreshorg" });
+  });
+
+  function wire() {
+    const sent: Array<string | null> = [];
+    const fakeFetch = (async (url: string, init: RequestInit) => {
+      if (String(url).startsWith(mockServer.url)) return fetch(url, init);
+      sent.push(new Headers(init.headers).get("authorization"));
+      return new Response("{}", { status: 200 });
+    }) as unknown as typeof fetch;
+    return { sent, fakeFetch };
+  }
+
+  const call = (fakeFetch: typeof fetch) =>
+    proxyCall({
+      orgId: ctx.orgId,
+      spaceId: ctx.defaultSpaceId,
+      actor: { type: "user", id: ctx.user.id },
+      reach: "own",
+      integrationId: packageId,
+      method: "GET",
+      target: "https://gmail.googleapis.com/gmail/v1/x",
+      headers: {},
+      fetch: fakeFetch,
+    });
+
+  const tokenRequests = () =>
+    mockServer.requests.filter((r) => r.method === "POST" && r.path === "/token");
+
+  it("sends the refreshed token on the first call after expiry, with one exchange", async () => {
+    await setup(
+      ctx,
+      packageId,
+      { access_token: "stale_token", refresh_token: "rt_valid" },
+      BEARER_DELIVERY,
+      -60_000,
+    );
+    const { sent, fakeFetch } = wire();
+
+    const res = await call(fakeFetch);
+
+    expect(res.status).toBe(200);
+    expect(sent).toEqual(["Bearer fresh_token"]);
+    expect(tokenRequests()).toHaveLength(1);
+  });
+
+  it("sends the stored token untouched while it is valid beyond the lead", async () => {
+    await setup(ctx, packageId, { access_token: "live_token", refresh_token: "rt_valid" });
+    const { sent, fakeFetch } = wire();
+
+    await call(fakeFetch);
+
+    expect(sent).toEqual(["Bearer live_token"]);
+    expect(tokenRequests()).toHaveLength(0);
+  });
+
+  it("answers the flagged-connection 409 when the pre-check finds the refresh token revoked", async () => {
+    await setup(
+      ctx,
+      packageId,
+      { access_token: "stale_token", refresh_token: "rt_valid" },
+      BEARER_DELIVERY,
+      -60_000,
+    );
+    mockServer.setTokenStatus(400);
+    mockServer.setTokenResponse({ error: "invalid_grant" });
+    const { sent, fakeFetch } = wire();
+
+    const err = await call(fakeFetch).then(
+      () => null,
+      (e: unknown) => e,
+    );
+
+    expect(err).toBeInstanceOf(ApiError);
+    expect((err as ApiError).status).toBe(409);
+    expect((err as ApiError).code).toBe("needs_reconnection");
+    expect(sent).toEqual([]);
+    const [row] = await db.select().from(integrationConnections);
+    expect(row!.needsReconnection).toBe(true);
+  });
+
+  it("serves the stored credential when the exchange fails transiently", async () => {
+    await setup(
+      ctx,
+      packageId,
+      { access_token: "stale_token", refresh_token: "rt_valid" },
+      BEARER_DELIVERY,
+      -60_000,
+    );
+    mockServer.setTokenStatus(503);
+    mockServer.setTokenResponse({ error: "temporarily_unavailable" });
+    const { sent, fakeFetch } = wire();
+
+    const res = await call(fakeFetch);
+
+    expect(res.status).toBe(200);
+    expect(sent).toEqual(["Bearer stale_token"]);
   });
 });
