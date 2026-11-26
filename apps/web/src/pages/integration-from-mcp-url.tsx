@@ -2,13 +2,13 @@
 
 /**
  * Adding an integration from an MCP server URL, guided: analyse the address, review the proposal,
- * create the draft (activated here, nothing published), connect an account, choose the server's
- * tools, then publish once — the draft's own version (1.0.0) — with them. The only state carried
+ * create the draft (activated here, nothing published), connect an account, choose how the
+ * server's tools reach agents, then publish once — the draft's own version (1.0.0). No tool is
+ * declared: they are read into the tool snapshot, which each space reviews. The only state carried
  * across a reload is `?package=<id>` once the package exists: every later step is read from the
- * package (published version, usable connection, declared tools).
+ * package (published version, usable connection).
  */
 
-import { getDeclaredToolNames } from "@appstrate/core/integration";
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Link, Navigate, useSearchParams } from "react-router-dom";
@@ -40,7 +40,6 @@ import { encodeIconDataUri } from "../lib/icon-image";
 import { agentCreationWithIntegrationPath } from "../lib/creation-handoff";
 import { packageDetailPath } from "../lib/package-paths";
 import {
-  defaultToolCount,
   integrationCreationManifest,
   integrationWizardStep,
   isRemoteSource,
@@ -211,8 +210,6 @@ function ExistingPackageWizard({ packageId }: { packageId: string }) {
     connection: detail.proxy_connection.status,
     connected:
       detail.auths.length === 0 || detail.auths.some((auth) => auth.connections.length > 0),
-    // The detail reads the published version, else the draft.
-    toolsDeclared: getDeclaredToolNames(manifest).length > 0,
   });
   const version = toolsPublishVersion({
     published,
@@ -251,7 +248,6 @@ function ExistingPackageWizard({ packageId }: { packageId: string }) {
           <ToolsStep
             packageId={packageId}
             draft={draft.data}
-            detail={detail}
             version={version}
             published={published}
           />
@@ -314,7 +310,6 @@ function ReadyStep({
 }) {
   const { t } = useTranslation("agents");
   const { can } = usePermissions();
-  const manifest = detail.manifest as Record<string, unknown>;
   return (
     <WizardSection
       title={t("integrationWizard.ready.title")}
@@ -326,8 +321,11 @@ function ReadyStep({
       )}
     >
       <p className="text-sm">
-        {t("integrationWizard.tools.declared", { count: getDeclaredToolNames(manifest).length })}{" "}
-        {t("integrationWizard.tools.selectedCount", { count: defaultToolCount(manifest) })}
+        {t(
+          detail.allow_undeclared_tools
+            ? "integrationWizard.ready.trusted"
+            : "integrationWizard.ready.reviewed",
+        )}
       </p>
       {detail.proxy_connection.status === "must_choose" && (
         <p className="text-muted-foreground text-sm">{t("integrationWizard.ready.mustChoose")}</p>
