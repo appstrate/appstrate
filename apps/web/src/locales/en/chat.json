@@ -114,6 +114,7 @@
   "tool.tag.Invitations": "Invitations",
   "tool.tag.Me": "Me",
   "tool.tag.Admin": "Admin",
+  "tool.tag.Billing": "Billing",
   "tool.tag.Auth": "Authentication",
   "tool.tag.Device Authorization": "Device authorization",
   "tool.tag.Health": "Health",

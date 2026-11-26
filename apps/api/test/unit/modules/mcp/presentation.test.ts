@@ -15,6 +15,7 @@ import {
   TOOL_LOOKUP_META_KEY,
 } from "@appstrate/core/mcp-presentation";
 import { getCatalog } from "../../../../src/modules/mcp/catalog.ts";
+import { collectModuleOpenApi } from "../../../../../../scripts/lib/module-openapi.ts";
 import { presentTools, withPresentation } from "../../../../src/modules/mcp/presentation.ts";
 import { registerTestPlatformApp } from "../../../helpers/platform-app.ts";
 
@@ -215,9 +216,23 @@ describe("isLookupTool", () => {
   });
 });
 
+/** The first tag of every operation in `paths` (an OpenAPI Paths Object). */
+function firstTags(paths: Record<string, unknown>): string[] {
+  return Object.values(paths).flatMap((item) =>
+    Object.values(item as Record<string, { tags?: string[] }>).flatMap(
+      (op) => op?.tags?.slice(0, 1) ?? [],
+    ),
+  );
+}
+
+const moduleTags = firstTags((await collectModuleOpenApi()).paths);
+
 describe("operation tags ↔ chat locales", () => {
-  // A card shows an operation's first tag translated (`tool.tag.<tag>`, the chat namespace).
+  // A card shows an operation's first tag translated (`tool.tag.<tag>`, the chat namespace). The
+  // catalog serves the modules this tier loads; a module it skips (one needing PostgreSQL) still
+  // ships, so a tag of any in-tree module is not gone.
   const tags = new Set([...getCatalog().operations.values()].flatMap((op) => op.tags.slice(0, 1)));
+  const inTree = new Set([...tags, ...moduleTags]);
   for (const lang of ["fr", "en"]) {
     it(`gives every tag a sentence in ${lang}, and no tag that is gone`, async () => {
       const locale = (await Bun.file(
@@ -227,7 +242,7 @@ describe("operation tags ↔ chat locales", () => {
         .filter((key) => key.startsWith("tool.tag."))
         .map((key) => key.slice("tool.tag.".length));
       expect([...tags].filter((tag) => !keyed.includes(tag)).sort()).toEqual([]);
-      expect(keyed.filter((tag) => !tags.has(tag)).sort()).toEqual([]);
+      expect(keyed.filter((tag) => !inTree.has(tag)).sort()).toEqual([]);
     });
   }
 });
