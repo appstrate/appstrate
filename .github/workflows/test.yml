@@ -409,13 +409,11 @@ jobs:
     #   3. Run-scoped secrets out of reach of the agent uid
     #      (`runtime-secrets-container.e2e.test.ts`): the launcher/entrypoint
     #      split and `/proc` access of the built image, invisible in-process.
-    #   4. A `binary` local integration spawning in the real runner image
-    #      (`binary-runner-container.e2e.test.ts`, #2383): a native entry
-    #      bundled 0644 must be executable once `docker cp`'d into the runner.
+    #   4. A `binary` integration's 0644 native entry must run in the real
+    #      runner image (`binary-runner-container.e2e.test.ts`, #2383).
     #
-    # Hence the pi + sidecar pair is built here from the same checkout (a pair
-    # is only comparable when both halves come from the code under test), plus
-    # the binary runner image the docker integration adapter spawns. Same
+    # Hence all images are built here, from the same checkout: a pair is only
+    # comparable when both halves come from the code under test. Same
     # label-OR-main policy as the other heavy jobs (opt-in pre-merge via the
     # `e2e` label, always post-merge on main).
     if: contains(github.event.pull_request.labels.*.name, 'e2e') || github.ref == 'refs/heads/main'
@@ -453,8 +451,6 @@ jobs:
       - name: Build appstrate-sidecar image
         run: docker build -t appstrate-sidecar:latest -f runtime-pi/sidecar/Dockerfile .
 
-      # The binary runner the docker integration adapter spawns for a
-      # `server.type: "binary"` integration; `:latest` is its default ref.
       - name: Build appstrate-mcp-runner-binary image
         run: docker build -t appstrate-mcp-runner-binary:latest -f runtime-pi/runners/binary/Dockerfile runtime-pi/runners/binary
 
