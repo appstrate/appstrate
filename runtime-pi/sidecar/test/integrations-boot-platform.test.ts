@@ -199,8 +199,7 @@ describe("bootIntegrations — platform endpoint tools-observed report", () => {
         fetchFn,
         retryDelayMs: () => 0,
       });
-      // `shutdown()` drains the best-effort report: no sleeping.
-      await result.shutdown();
+      // The boot awaited the report: it has landed.
       expect(reports).toHaveLength(1);
       expect(reports[0]).toMatchObject({ unavailable: [{ name: "gone", reason: "not_listed" }] });
     } finally {

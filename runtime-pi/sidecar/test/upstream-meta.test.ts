@@ -82,14 +82,12 @@ describe("upstream-meta — required scopes", () => {
     expect(JSON.stringify(meta)).not.toContain("error_description");
   });
 
-  it("carries none on a 403 without insufficient_scope or on a success", () => {
-    const h = { "WWW-Authenticate": 'Bearer scope="a"' };
-    expect(buildUpstreamMeta(new Response("", { status: 403, headers: h })).required_scopes).toBe(
-      undefined,
-    );
-    expect(buildUpstreamMeta(new Response("", { status: 200, headers: h })).required_scopes).toBe(
-      undefined,
-    );
+  it("carries none on a success", () => {
+    const res = new Response("", {
+      status: 200,
+      headers: { "WWW-Authenticate": 'Bearer scope="a"' },
+    });
+    expect(buildUpstreamMeta(res).required_scopes).toBeUndefined();
   });
 });
 

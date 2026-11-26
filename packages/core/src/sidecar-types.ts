@@ -519,7 +519,7 @@ export interface IntegrationSpawnSpec {
 
 /** Bounds of the tools-observed report body: the sidecar caps to them, the platform refuses past them. */
 export const OBSERVED_TOOLS_MAX_COUNT = 500;
-export const OBSERVED_TOOL_NAME_MAX_LENGTH = 256;
+const OBSERVED_TOOL_NAME_MAX_LENGTH = 256;
 /** Largest tools-observed report body, in bytes. */
 export const OBSERVED_TOOLS_MAX_BYTES = 1024 * 1024;
 

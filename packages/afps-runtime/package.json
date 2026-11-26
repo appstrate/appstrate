@@ -51,7 +51,6 @@
     "./sinks": "./src/sinks/index.ts",
     "./transport": "./src/transport/trace-context.ts",
     "./bundle": "./src/bundle/index.ts",
-    "./canonical-json": "./src/bundle/canonical-json.ts",
     "./runner": "./src/runner/index.ts",
     "./resolvers": "./src/resolvers/index.ts",
     "./conformance": "./src/conformance/index.ts"

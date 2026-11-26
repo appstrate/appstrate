@@ -28,10 +28,7 @@ import {
   postIntegrationToolsObserved,
   type IntegrationCredentialsWire,
 } from "../integration-credentials-source.ts";
-import {
-  OBSERVED_TOOLS_MAX_COUNT,
-  OBSERVED_TOOL_NAME_MAX_LENGTH,
-} from "@appstrate/core/sidecar-types";
+import { OBSERVED_TOOLS_MAX_COUNT } from "@appstrate/core/sidecar-types";
 import { logger } from "../logger.ts";
 
 function makePayload(token: string): IntegrationCredentialsWire {
@@ -908,15 +905,7 @@ describe("capObservedTools", () => {
 });
 
 describe("capObservedUnavailable", () => {
-  it("drops names the platform would refuse and caps the count", () => {
-    const ok = { name: "a", reason: "not_listed" as const };
-    expect(
-      capObservedUnavailable([
-        ok,
-        { name: "", reason: "not_listed" as const },
-        { name: "x".repeat(OBSERVED_TOOL_NAME_MAX_LENGTH + 1), reason: "not_listed" as const },
-      ]),
-    ).toEqual([ok]);
+  it("keeps at most the platform's tool count", () => {
     const many = Array.from({ length: OBSERVED_TOOLS_MAX_COUNT + 5 }, (_, i) => ({
       name: `t${i}`,
       reason: "not_listed" as const,

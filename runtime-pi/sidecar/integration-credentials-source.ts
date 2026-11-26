@@ -46,7 +46,6 @@ import { computeBackoffDelayMs, isRetryableHttpStatus } from "@appstrate/afps-sh
 import {
   OBSERVED_TOOLS_MAX_BYTES,
   OBSERVED_TOOLS_MAX_COUNT,
-  observedToolNameSchema,
   type UnavailableToolReason,
 } from "@appstrate/core/sidecar-types";
 import { logger } from "./logger.ts";
@@ -716,11 +715,9 @@ export function capObservedTools<T>(
   return { tools: kept, truncated: false };
 }
 
-/** The unavailable tools the platform would accept: a bounded name, at most its count. */
+/** At most the count the platform accepts. */
 export function capObservedUnavailable<T extends { name: string }>(unavailable: readonly T[]): T[] {
-  return unavailable
-    .filter(({ name }) => observedToolNameSchema.safeParse(name).success)
-    .slice(0, OBSERVED_TOOLS_MAX_COUNT);
+  return unavailable.slice(0, OBSERVED_TOOLS_MAX_COUNT);
 }
 
 /** Per-attempt budget of a tools-observed report. */
@@ -729,12 +726,6 @@ const TOOLS_OBSERVED_TIMEOUT_MS = 10_000;
 const TOOLS_OBSERVED_RETRIES = 2;
 /** Backoff of a retry (`computeBackoffDelayMs`: 500 ms, then 1 s, capped). */
 const TOOLS_OBSERVED_BACKOFF = { baseMs: 500, capMs: 2_000 } as const;
-/** Worst-case time of one report: every attempt's timeout plus every pause. */
-export const TOOLS_OBSERVED_MAX_TOTAL_MS =
-  (TOOLS_OBSERVED_RETRIES + 1) * TOOLS_OBSERVED_TIMEOUT_MS +
-  Array.from({ length: TOOLS_OBSERVED_RETRIES }, (_, i) =>
-    computeBackoffDelayMs(i + 1, TOOLS_OBSERVED_BACKOFF),
-  ).reduce((a, b) => a + b, 0);
 
 /**
  * What a run's remote upstream listed, reported so the platform can snapshot it. Each attempt is

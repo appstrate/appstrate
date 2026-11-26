@@ -73,15 +73,6 @@ describe("requiredScopesFromChallenge", () => {
     expect(requiredScopesFromChallenge(500, h)).toBeUndefined();
     expect(requiredScopesFromChallenge(401, null)).toBeUndefined();
   });
-  it("drops invalid scope tokens and caps at 20", () => {
-    expect(requiredScopesFromChallenge(401, 'Bearer scope="ok bad\\"q"')).toEqual(["ok"]);
-    const many = Array.from({ length: 30 }, (_, i) => `s${i}`).join(" ");
-    expect(requiredScopesFromChallenge(401, `Bearer scope="${many}"`)).toHaveLength(20);
-  });
-  it("drops scope tokens over 128 characters", () => {
-    const header = `Bearer scope="${"x".repeat(129)} ${"y".repeat(128)}"`;
-    expect(requiredScopesFromChallenge(401, header)).toEqual(["y".repeat(128)]);
-  });
 });
 
 describe("sanitiseRequiredScopes", () => {

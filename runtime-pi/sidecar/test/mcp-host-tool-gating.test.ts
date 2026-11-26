@@ -5,7 +5,7 @@
  * definition, and reports what the agent selected but cannot call.
  */
 
-import { describe, it, expect } from "bun:test";
+import { afterEach, describe, it, expect } from "bun:test";
 import {
   createInProcessPair,
   toolDefinitionFingerprint,
@@ -23,6 +23,11 @@ function tool(name: string, description: string): AppstrateToolDefinition {
     handler: async () => ({ content: [{ type: "text", text: name }] }),
   };
 }
+
+const closers: Array<() => Promise<void>> = [];
+afterEach(async () => {
+  await Promise.all(closers.splice(0).map((close) => close()));
+});
 
 async function register(
   tools: AppstrateToolDefinition[],
@@ -42,7 +47,8 @@ async function register(
     client: wrapClient(pair.client, { close: () => Promise.resolve() }),
     ...extra,
   });
-  return { host, registration, close: () => pair.close() };
+  closers.push(() => pair.close());
+  return { host, registration };
 }
 
 const exposed = (host: McpHost) =>
@@ -52,33 +58,18 @@ const exposed = (host: McpHost) =>
     .sort();
 
 describe("McpHost — approvedToolFingerprints", () => {
-  it("does not expose an undeclared tool whose fingerprint is not approved, and reports it", async () => {
-    const live = tool("dangerous", "now does something else");
-    const { host, registration, close } = await register([live, tool("safe", "ok")], {
-      approvedToolFingerprints: { dangerous: ["0".repeat(64)] },
-    });
-    try {
-      expect(exposed(host)).toEqual(["gh__safe"]);
-      expect(registration.unavailable).toEqual([
-        { name: "dangerous", reason: "definition_not_approved" },
-      ]);
-    } finally {
-      await close();
-    }
-  });
-
-  it("does not expose an undeclared tool nobody approved (empty list)", async () => {
-    const { host, registration, close } = await register([tool("new_tool", "x")], {
-      approvedToolFingerprints: { new_tool: [] },
-    });
-    try {
-      expect(exposed(host)).toEqual([]);
-      expect(registration.unavailable).toEqual([
-        { name: "new_tool", reason: "definition_not_approved" },
-      ]);
-    } finally {
-      await close();
-    }
+  it.each([
+    ["a fingerprint that is not approved", ["0".repeat(64)]],
+    ["no approval at all (empty list)", []],
+  ])("does not expose an undeclared tool with %s, and reports it", async (_label, approved) => {
+    const { host, registration } = await register(
+      [tool("dangerous", "now does something else"), tool("safe", "ok")],
+      { approvedToolFingerprints: { dangerous: approved } },
+    );
+    expect(exposed(host)).toEqual(["gh__safe"]);
+    expect(registration.unavailable).toEqual([
+      { name: "dangerous", reason: "definition_not_approved" },
+    ]);
   });
 
   it("exposes an undeclared tool whose raw fingerprint is approved", async () => {
@@ -86,27 +77,19 @@ describe("McpHost — approvedToolFingerprints", () => {
     const pair = await createInProcessPair([def]);
     const raw = (await pair.client.listTools()).tools[0]!;
     await pair.close();
-    const { host, registration, close } = await register([def], {
+    const { host, registration } = await register([def], {
       approvedToolFingerprints: { extra: ["1".repeat(64), toolDefinitionFingerprint(raw)] },
     });
-    try {
-      expect(exposed(host)).toEqual(["gh__extra"]);
-      expect(registration.unavailable).toEqual([]);
-    } finally {
-      await close();
-    }
+    expect(exposed(host)).toEqual(["gh__extra"]);
+    expect(registration.unavailable).toEqual([]);
   });
 
   it("never gates a declared tool: no map entry, changed definition still exposed", async () => {
-    const { host, registration, close } = await register([tool("declared", "changed")], {
+    const { host, registration } = await register([tool("declared", "changed")], {
       approvedToolFingerprints: { other_tool: [] },
     });
-    try {
-      expect(exposed(host)).toEqual(["gh__declared"]);
-      expect(registration.unavailable).toEqual([]);
-    } finally {
-      await close();
-    }
+    expect(exposed(host)).toEqual(["gh__declared"]);
+    expect(registration.unavailable).toEqual([]);
   });
 });
 
@@ -114,15 +97,18 @@ describe("McpHost — approvedToolFingerprints keys are own properties only", ()
   // Names that resolve on Object.prototype: a plain lookup would return a function or the prototype
   // itself and `.includes` would throw.
   for (const name of ["constructor", "__proto__", "toString"]) {
-    it(`exposes a tool named ${name} that has no entry, without throwing`, async () => {
-      const { host, registration, close } = await register([tool(name, "x"), tool("safe", "ok")], {
+    it(`${name === "__proto__" ? "refuses" : "exposes"} a tool named ${name} that has no entry, without throwing`, async () => {
+      const { host, registration } = await register([tool(name, "x"), tool("safe", "ok")], {
         approvedToolFingerprints: { other_tool: [] },
       });
-      try {
+      // Zod's record parse drops an own `__proto__` key, so a missing entry there proves nothing:
+      // fail closed rather than read it as a declared tool.
+      if (name === "__proto__") {
+        expect(exposed(host)).toEqual(["gh__safe"]);
+        expect(registration.unavailable).toEqual([{ name, reason: "definition_not_approved" }]);
+      } else {
         expect(exposed(host)).toEqual([`gh__${name}`, "gh__safe"].sort());
         expect(registration.unavailable).toEqual([]);
-      } finally {
-        await close();
       }
     });
 
@@ -134,62 +120,43 @@ describe("McpHost — approvedToolFingerprints keys are own properties only", ()
         configurable: true,
         writable: true,
       });
-      const { host, registration, close } = await register([tool(name, "x"), tool("safe", "ok")], {
+      const { host, registration } = await register([tool(name, "x"), tool("safe", "ok")], {
         approvedToolFingerprints: approved,
       });
-      try {
-        expect(exposed(host)).toEqual(["gh__safe"]);
-        expect(registration.unavailable).toEqual([{ name, reason: "definition_not_approved" }]);
-      } finally {
-        await close();
-      }
+      expect(exposed(host)).toEqual(["gh__safe"]);
+      expect(registration.unavailable).toEqual([{ name, reason: "definition_not_approved" }]);
     });
   }
 });
 
 describe("McpHost — unavailable report", () => {
   it("reports an allowlisted tool the listing did not return as not_listed", async () => {
-    const { host, registration, close } = await register([tool("a", "a")], {
+    const { host, registration } = await register([tool("a", "a")], {
       allowedTools: ["a", "gone"],
     });
-    try {
-      expect(exposed(host)).toEqual(["gh__a"]);
-      expect(registration.unavailable).toEqual([{ name: "gone", reason: "not_listed" }]);
-      expect(registration.listed.map((t) => t.name)).toEqual(["a"]);
-    } finally {
-      await close();
-    }
+    expect(exposed(host)).toEqual(["gh__a"]);
+    expect(registration.unavailable).toEqual([{ name: "gone", reason: "not_listed" }]);
+    expect(registration.listed.map((t) => t.name)).toEqual(["a"]);
   });
 
   it("reports hidden_tools only for a tool the agent selected", async () => {
-    const { registration, close } = await register(
-      [tool("a", "a"), tool("b", "b"), tool("c", "c")],
-      {
-        allowedTools: ["a", "b"],
-        hiddenTools: ["b", "c"],
-      },
-    );
-    try {
-      expect(registration.unavailable).toEqual([{ name: "b", reason: "hidden_tools" }]);
-    } finally {
-      await close();
-    }
+    const { registration } = await register([tool("a", "a"), tool("b", "b"), tool("c", "c")], {
+      allowedTools: ["a", "b"],
+      hiddenTools: ["b", "c"],
+    });
+    expect(registration.unavailable).toEqual([{ name: "b", reason: "hidden_tools" }]);
   });
 
   it("excludes blocked tools and reports blocked_in_space only for a selected one", async () => {
-    const { host, registration, close } = await register(
+    const { host, registration } = await register(
       [tool("a", "a"), tool("b", "b"), tool("c", "c"), tool("d", "d")],
       { allowedTools: ["a", "b", "d"], hiddenTools: ["d"], blockedTools: ["b", "c", "d"] },
     );
-    try {
-      expect(exposed(host)).toEqual(["gh__a"]);
-      expect(registration.unavailable).toEqual([
-        { name: "b", reason: "blocked_in_space" },
-        { name: "d", reason: "hidden_tools" },
-      ]);
-    } finally {
-      await close();
-    }
+    expect(exposed(host)).toEqual(["gh__a"]);
+    expect(registration.unavailable).toEqual([
+      { name: "b", reason: "blocked_in_space" },
+      { name: "d", reason: "hidden_tools" },
+    ]);
   });
 
   it("reports every allowlisted name as not_listed when the server does not advertise tools", async () => {
@@ -230,23 +197,15 @@ describe("McpHost — unavailable report", () => {
     const listing = () => [...squatters, "a.b"].map((name) => tool(name, name));
 
     it("reports a selected tool left without a free name", async () => {
-      const { registration, close } = await register(listing(), {
+      const { registration } = await register(listing(), {
         allowedTools: [...squatters, "a.b"],
       });
-      try {
-        expect(registration.unavailable).toEqual([{ name: "a.b", reason: "name_collision" }]);
-      } finally {
-        await close();
-      }
+      expect(registration.unavailable).toEqual([{ name: "a.b", reason: "name_collision" }]);
     });
 
     it("reports nothing when the selection is open: nobody selected the tool", async () => {
-      const { registration, close } = await register(listing(), {});
-      try {
-        expect(registration.unavailable).toEqual([]);
-      } finally {
-        await close();
-      }
+      const { registration } = await register(listing(), {});
+      expect(registration.unavailable).toEqual([]);
     });
   });
 });

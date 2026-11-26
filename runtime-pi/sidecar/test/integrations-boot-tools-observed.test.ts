@@ -4,7 +4,8 @@
  * The tools-observed report is best-effort: a platform that refuses it (400) or cannot be
  * reached leaves the integration registered and the boot report intact. Driven through
  * `bootIntegrations` against a fake remote MCP server behind a stubbed `fetchFn`; retry pauses
- * are 0 ms and the pending reports are drained by `shutdown()`, so nothing sleeps or polls.
+ * are 0 ms. The boot awaits its reports, so they have landed when it returns. Retry counts are
+ * pinned in integration-credentials-source.test.ts.
  *
  * Also pins that the space policy (`blockedTools`, `approvedToolFingerprints`) reaches
  * `host.register`, on the remote and the local path: a gated tool is absent from the booted tools.
@@ -42,13 +43,15 @@ const tool = (name: string): AppstrateToolDefinition => ({
 
 const noDelay = () => 0;
 
-/** Boots, snapshots what the agent would see, then shuts down: that drains the reports. */
+const remoteServer = (upstreamTools: AppstrateToolDefinition[]) =>
+  handlerFetch(modernMcpHandler({ tools: upstreamTools }));
+
+/** Boots with `serve` answering everything but the report, which `observed` answers. */
 async function bootWith(
   spec: IntegrationSpawnSpec,
-  upstreamTools: AppstrateToolDefinition[],
+  serve: (request: Request) => Response | Promise<Response>,
   observed: () => Response | Promise<Response> = () => new Response(null, { status: 204 }),
 ) {
-  const serve = handlerFetch(modernMcpHandler({ tools: upstreamTools }));
   const reports: unknown[] = [];
   const fetchFn = (async (input: Parameters<typeof fetch>[0], init?: RequestInit) => {
     const request = new Request(String(input), init);
@@ -67,14 +70,12 @@ async function bootWith(
     const result = await bootIntegrations([spec], {
       platformApiUrl: "http://platform.local",
       runToken: "run-token",
+      fetchFn,
       retryDelayMs: noDelay,
     });
-    const snapshot = {
-      toolNames: result.tools.map((t) => t.descriptor.name),
-      report: result.report,
-    };
+    const toolNames = result.tools.map((t) => t.descriptor.name);
     await result.shutdown();
-    return { ...snapshot, reports };
+    return { toolNames, report: result.report, reports };
   } finally {
     globalThis.fetch = originalFetch;
     if (previous === undefined) delete process.env.INTEGRATION_RUNTIME_ADAPTER;
@@ -83,14 +84,16 @@ async function bootWith(
 }
 
 describe("bootIntegrations — tools-observed report", () => {
-  for (const [label, answer, attempts] of [
-    // A network failure is retried twice; a 4xx is not.
-    ["rejects", () => Promise.reject(new Error("network down")), 3],
-    ["answers 400", () => new Response("{}", { status: 400 }), 1],
+  for (const [label, answer] of [
+    ["rejects", () => Promise.reject(new Error("network down"))],
+    ["answers 400", () => new Response("{}", { status: 400 })],
   ] as const) {
     it(`keeps the integration registered when the report ${label}`, async () => {
-      const { reports, report, toolNames } = await bootWith(baseSpec, [tool("echo")], answer);
-      expect(reports).toHaveLength(attempts);
+      const { reports, report, toolNames } = await bootWith(
+        baseSpec,
+        remoteServer([tool("echo")]),
+        answer,
+      );
       expect(reports[0]).toMatchObject({
         truncated: false,
         unavailable: [{ name: "gone", reason: "not_listed" }],
@@ -114,11 +117,10 @@ describe("bootIntegrations — the space policy reaches the host", () => {
       blockedTools: ["blocked"],
       approvedToolFingerprints: { secret: ["not-the-fingerprint"] },
     } as unknown as IntegrationSpawnSpec;
-    const { toolNames, reports } = await bootWith(spec, [
-      tool("echo"),
-      tool("blocked"),
-      tool("secret"),
-    ]);
+    const { toolNames, reports } = await bootWith(
+      spec,
+      remoteServer([tool("echo"), tool("blocked"), tool("secret")]),
+    );
     expect(toolNames.filter((name) => name.startsWith("remote__"))).toEqual(["remote__echo"]);
     expect(reports[0]).toMatchObject({
       unavailable: expect.arrayContaining([
@@ -134,18 +136,10 @@ describe("bootIntegrations — the space policy reaches the host", () => {
       "manifest.json": new Uint8Array(readFileSync(path.join(fixtureDir, "manifest.json"))),
       "server.ts": new Uint8Array(readFileSync(path.join(fixtureDir, "server.ts"))),
     });
-    const reports: Record<string, unknown>[] = [];
-    const fetchFn = (async (input: Parameters<typeof fetch>[0], init?: RequestInit) => {
-      const request = new Request(String(input), init);
-      if (request.url.includes("/tools-observed")) {
-        reports.push((await request.json()) as Record<string, unknown>);
-        return new Response(null, { status: 204 });
-      }
-      if (request.url.includes("/internal/integration-bundle/")) {
-        return new Response(bundle, { status: 200 });
-      }
-      return new Response("{}", { status: 404 });
-    }) as typeof fetch;
+    const serve = (request: Request) =>
+      request.url.includes("/internal/integration-bundle/")
+        ? new Response(bundle, { status: 200 })
+        : new Response("{}", { status: 404 });
     const spec = {
       integrationId: "@appstrate/bun-toolkit",
       namespace: "buntoolkit",
@@ -160,26 +154,14 @@ describe("bootIntegrations — the space policy reaches the host", () => {
       toolAllowlist: ["uuid", "hash"],
       blockedTools: ["hash"],
     } as unknown as IntegrationSpawnSpec;
-    const previous = process.env.INTEGRATION_RUNTIME_ADAPTER;
-    process.env.INTEGRATION_RUNTIME_ADAPTER = HERMETIC_PROCESS_ADAPTER_ID;
     const runnerExec = await installPassthroughRunnerExec();
     try {
-      const result = await bootIntegrations([spec], {
-        platformApiUrl: "http://platform.local",
-        runToken: "run-token",
-        fetchFn,
-        retryDelayMs: noDelay,
-      });
-      const names = result.tools.map((t) => t.descriptor.name);
-      await result.shutdown();
-      expect(names).toContain("buntoolkit__uuid");
-      expect(names).not.toContain("buntoolkit__hash");
-      expect(reports).toHaveLength(1);
-      expect(reports[0]).toEqual({ unavailable: [{ name: "hash", reason: "blocked_in_space" }] });
+      const { toolNames, reports } = await bootWith(spec, serve);
+      expect(toolNames).toContain("buntoolkit__uuid");
+      expect(toolNames).not.toContain("buntoolkit__hash");
+      expect(reports).toEqual([{ unavailable: [{ name: "hash", reason: "blocked_in_space" }] }]);
     } finally {
       await runnerExec.restore();
-      if (previous === undefined) delete process.env.INTEGRATION_RUNTIME_ADAPTER;
-      else process.env.INTEGRATION_RUNTIME_ADAPTER = previous;
     }
   });
 });

@@ -41,7 +41,7 @@ import {
 import { guardedFetchChain, SsrfBlockedError } from "@appstrate/afps-shared/guarded-fetch";
 import { compileRunnerEgressPolicy, isOperatorTrustedEgressHost } from "./ssrf.ts";
 import { unzipBounded } from "@appstrate/core/zip";
-import { isListedToolName } from "@appstrate/core/naming";
+import { getErrorMessage } from "@appstrate/core/errors";
 import { mapWithConcurrency } from "@appstrate/core/map-with-concurrency";
 
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
@@ -56,6 +56,7 @@ import {
   isRequestTimeout,
   mcpFetch,
   wrapClient,
+  isMcpToolName,
   type AppstrateMcpClient,
   type AppstrateToolDefinition,
 } from "@appstrate/mcp-transport";
@@ -69,7 +70,6 @@ import {
   integrationSpawnSpecSchema,
   integrationSpawnSpecsSchema,
   type IntegrationSpawnSpec,
-  type UnavailableToolReason,
 } from "@appstrate/core/sidecar-types";
 import { SidecarEnvError } from "./env.ts";
 
@@ -94,7 +94,6 @@ import {
   isCredentialRejectedResult,
   postIntegrationCredentialsRefresh,
   postIntegrationToolsObserved,
-  TOOLS_OBSERVED_MAX_TOTAL_MS,
   type IntegrationCredentialsSource,
 } from "./integration-credentials-source.ts";
 import { createApiCallCredentialAdapter } from "./api-call-credentials.ts";
@@ -222,10 +221,7 @@ interface BootIntegrationsResult {
    * `ok` flag that tells the agent whether to fail the run.
    */
   report: IntegrationBootReport;
-  /**
-   * Idempotent teardown — closes every upstream MCP client + runtime adapter, after giving the
-   * best-effort tools-observed reports still in flight a bounded time to land.
-   */
+  /** Idempotent teardown — closes every upstream MCP client + runtime adapter. */
   shutdown: () => Promise<void>;
 }
 
@@ -1291,7 +1287,7 @@ async function registerLocalIntegration(
     connection: spec.connection,
     ...(filters.allowedTools !== undefined ? { allowedTools: filters.allowedTools } : {}),
     ...((filters.hiddenTools?.length ?? 0) > 0 ? { hiddenTools: filters.hiddenTools } : {}),
-    ...((filters.blockedTools?.length ?? 0) > 0 ? { blockedTools: filters.blockedTools } : {}),
+    blockedTools: filters.blockedTools,
   });
   return { allocatedNs, toolCount: host.routeCount() - sizeBefore, unavailable };
 }
@@ -1414,7 +1410,7 @@ export function pushUnavailableToolBreadcrumb(
     ...unavailable.map(({ name }) => name),
   ]).size;
   // Server-controlled names reach the run log: only plain tokens are quoted.
-  const quotable = unavailable.filter(({ name }) => isListedToolName(name));
+  const quotable = unavailable.filter(({ name }) => isMcpToolName(name));
   const shown = quotable.slice(0, UNAVAILABLE_TOOLS_NAMED_MAX);
   const named = shown.map(({ name, reason }) => `${name} (${reason})`).join(", ");
   // Unquotable names are counted in the rest.
@@ -1438,51 +1434,44 @@ export function pushUnavailableToolBreadcrumb(
 const UNAVAILABLE_TOOLS_NAMED_MAX = 20;
 
 /**
- * What the host could not expose, minus the synthetic `api_call`/`api_upload` names: they sit in
- * the allowlist but are registered by the in-process api_call server, never listed by the
- * integration's own server.
+ * The allowlist the integration's own server is asked for: the synthetic `api_call`/`api_upload`
+ * names sit in the selection but are registered by the in-process api_call server, never listed
+ * by the upstream, so they would only read as unavailable.
  */
-function selectedUnavailableTools(
-  unavailable: readonly UnavailableTool[],
-): Array<{ name: string; reason: UnavailableToolReason }> {
-  return unavailable.filter(({ name }) => !isSyntheticApiToolName(name));
+function nativeToolAllowlist(spec: IntegrationSpawnSpec): readonly string[] | undefined {
+  return spec.toolAllowlist?.filter((name) => !isSyntheticApiToolName(name));
 }
 
 /**
  * Tell the platform what a run's upstream could not expose, plus (remote only) what it listed so
- * the platform can snapshot the definitions. Best-effort: never awaited by the boot and never
- * fatal, a refused or failed report costs the run nothing. The promise is tracked in `pending`
- * so `shutdown()` can drain it, bounded.
+ * the platform can snapshot the definitions. Never throws: a refused or failed report costs the
+ * run nothing but its degraded marking, and the boot awaits it so a short run cannot end first.
  */
-function reportToolsObserved(
+async function reportToolsObserved(
   spec: IntegrationSpawnSpec,
   listed: readonly unknown[] | undefined,
   unavailable: readonly UnavailableTool[],
   opts: BundleFetchOptions,
-  pending: Set<Promise<void>>,
-): void {
+): Promise<void> {
   const observed = listed
     ? { ...capObservedTools(listed), unavailable: capObservedUnavailable(unavailable) }
     : { unavailable: capObservedUnavailable(unavailable) };
   const ctx = { integrationId: spec.integrationId, connectionId: spec.connection?.id };
-  const report: Promise<void> = postIntegrationToolsObserved(
-    spec.integrationId,
-    spec.connection?.id,
-    observed,
-    opts,
-  ).then(
-    (res) => {
-      if (!res.ok)
-        logger.warn("integration tools-observed report refused", { ...ctx, status: res.status });
-    },
-    (err: unknown) =>
-      logger.warn("integration tools-observed report failed", {
-        ...ctx,
-        error: err instanceof Error ? err.message : String(err),
-      }),
-  );
-  pending.add(report);
-  void report.finally(() => pending.delete(report));
+  try {
+    const res = await postIntegrationToolsObserved(
+      spec.integrationId,
+      spec.connection?.id,
+      observed,
+      opts,
+    );
+    if (!res.ok)
+      logger.warn("integration tools-observed report refused", { ...ctx, status: res.status });
+  } catch (err) {
+    logger.warn("integration tools-observed report failed", {
+      ...ctx,
+      error: getErrorMessage(err),
+    });
+  }
 }
 
 /**
@@ -1646,7 +1635,7 @@ export async function bootIntegrations(
   const breadcrumbs: IntegrationBootBreadcrumb[] = [];
   const clients: AppstrateMcpClient[] = [];
   const mitmListeners: MitmListenerHandle[] = [];
-  const pendingReports = new Set<Promise<void>>();
+  const reports: Promise<void>[] = [];
 
   // RUN_ID labels docker runner containers for the orphan reaper; a process-mode sidecar lacks
   // it. NEVER derive it from RUN_TOKEN: labels are readable by anyone who can reach the daemon.
@@ -2057,28 +2046,24 @@ export async function bootIntegrations(
           connection,
           // The tool allowlist applies here too — McpHost filters
           // tools/list before exposing them to the agent.
-          allowedTools: spec.toolAllowlist,
+          allowedTools: nativeToolAllowlist(spec),
           // R8a defensive — `manifest.hidden_tools` is enforced at
           // runtime as well as at install-time, so a manifest-hidden
           // tool can never reach the agent via the remote MCP path.
           ...(nativeHiddenTools ? { hiddenTools: nativeHiddenTools } : {}),
-          ...(spec.blockedTools?.length ? { blockedTools: spec.blockedTools } : {}),
+          blockedTools: spec.blockedTools,
           ...(spec.approvedToolFingerprints
             ? { approvedToolFingerprints: spec.approvedToolFingerprints }
             : {}),
         });
         const allocatedNs = registration.namespace;
         const added = host.routeCount() - sizeBefore;
-        const unavailableTools = selectedUnavailableTools(registration.unavailable);
+        const unavailableTools = registration.unavailable;
         pushUnavailableToolBreadcrumb(spec, unavailableTools, breadcrumbs);
         // Always reported, the platform's own endpoint included: the unavailable tools are the
         // only channel to the run's degraded marking (the platform records no snapshot for it).
-        reportToolsObserved(
-          spec,
-          registration.listed,
-          unavailableTools,
-          bundleFetchOpts,
-          pendingReports,
+        reports.push(
+          reportToolsObserved(spec, registration.listed, unavailableTools, bundleFetchOpts),
         );
         // Attach the in-process api_call tool alongside the remote MCP's tools.
         const { count: apiCallAdded } = await attachApiCall(spec, connection, source, allocatedNs);
@@ -2127,7 +2112,7 @@ export async function bootIntegrations(
       const {
         allocatedNs,
         toolCount: added,
-        unavailable,
+        unavailable: unavailableTools,
       } = await registerLocalIntegration(
         host,
         spec,
@@ -2136,19 +2121,18 @@ export async function bootIntegrations(
           ? refuseLoginPlaceholders(runnerClient, Object.keys(spec.connectLogin.inputs))
           : runnerClient,
         {
-          allowedTools: spec.toolAllowlist,
+          allowedTools: nativeToolAllowlist(spec),
           // R8a — propagate `hidden_tools` so the host filters them out at
           // runtime, regardless of whether install-time validation removed them.
           ...(nativeHiddenTools ? { hiddenTools: nativeHiddenTools } : {}),
           blockedTools: spec.blockedTools,
         },
       );
-      const unavailableTools = selectedUnavailableTools(unavailable);
       pushUnavailableToolBreadcrumb(spec, unavailableTools, breadcrumbs);
       // Local sources have no snapshot: the report carries only `unavailable` (no `tools`), the
       // channel by which a run losing a selected tool is marked degraded.
       if (unavailableTools.length > 0) {
-        reportToolsObserved(spec, undefined, unavailableTools, bundleFetchOpts, pendingReports);
+        reports.push(reportToolsObserved(spec, undefined, unavailableTools, bundleFetchOpts));
       }
 
       // ─── P2 — connect.tool `runAt: "run-start"` session acquisition ───
@@ -2247,6 +2231,10 @@ export async function bootIntegrations(
     }
   }
 
+  // Each report is bounded by its own retry budget and never rejects; the boot report is only
+  // served once they landed, so the platform has them before a short run can end.
+  await Promise.all(reports);
+
   const tools = host.buildTools();
   // Every spec exits the loop via exactly one path: success (→ spawned) or the
   // catch (→ failed), so `spawned.length + failed.length === specs.length`. The
@@ -2267,17 +2255,6 @@ export async function bootIntegrations(
     failed,
     report,
     shutdown: async () => {
-      // Best-effort: the reports are idempotent and bounded by the retry budget; past it, drop them.
-      if (pendingReports.size > 0) {
-        let timer: ReturnType<typeof setTimeout> | undefined;
-        await Promise.race([
-          Promise.allSettled([...pendingReports]),
-          new Promise((resolve) => {
-            timer = setTimeout(resolve, TOOLS_OBSERVED_MAX_TOTAL_MS);
-          }),
-        ]);
-        clearTimeout(timer);
-      }
       await host.dispose().catch((err) => {
         logger.debug("integration host dispose failed", {
           error: err instanceof Error ? err.message : String(err),

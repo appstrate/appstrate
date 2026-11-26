@@ -13,7 +13,6 @@
     "test": "bun test test/"
   },
   "dependencies": {
-    "@appstrate/afps-runtime": "workspace:*",
     "@appstrate/core": "workspace:*",
     "@modelcontextprotocol/client": "^2.4.0",
     "@modelcontextprotocol/sdk": "^1.32.2"

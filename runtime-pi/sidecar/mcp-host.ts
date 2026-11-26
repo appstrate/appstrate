@@ -461,7 +461,13 @@ export class McpHost {
           fingerprints && Object.hasOwn(fingerprints, tool.name)
             ? fingerprints[tool.name]
             : undefined;
-        if (approved === undefined || approved.includes(toolDefinitionFingerprint(tool))) {
+        // Zod's record parse drops an own `__proto__` key, so that name can never carry an entry:
+        // with a map in play it is never admitted rather than read as "declared, ungated".
+        const unrepresentable = fingerprints !== undefined && tool.name === "__proto__";
+        if (
+          !unrepresentable &&
+          (approved === undefined || approved.includes(toolDefinitionFingerprint(tool)))
+        ) {
           return true;
         }
         this.options.onLog?.({

@@ -5,9 +5,6 @@
  * what the model reads or a caller acts on no longer matches the definition someone approved.
  */
 
-// The leaf, not the bundle barrel: the barrel pulls in the whole bundle machinery, which this
-// module has no use for.
-import { canonicalJsonStringify } from "@appstrate/afps-runtime/canonical-json";
 import type { Tool } from "@modelcontextprotocol/sdk/types.js";
 
 /**
@@ -17,10 +14,23 @@ import type { Tool } from "@modelcontextprotocol/sdk/types.js";
  */
 export function toolDefinitionFingerprint(tool: Tool): string {
   const { name, title, description, inputSchema, outputSchema, annotations } = tool;
-  // The JSON round-trip drops `undefined` members and turns the odd value a server can send
-  // (undefined array slot, NaN) into null, where canonicalJsonStringify would throw.
+  // The round-trip drops `undefined` members and turns NaN / array holes into null, leaving
+  // plain JSON for the key-sorted stringify below.
   const payload = JSON.parse(
     JSON.stringify({ name, title, description, inputSchema, outputSchema, annotations }),
   );
-  return new Bun.CryptoHasher("sha256").update(canonicalJsonStringify(payload)).digest("hex");
+  return new Bun.CryptoHasher("sha256").update(sortedJson(payload)).digest("hex");
+}
+
+/** Key order must not move the digest: a server may reorder its schema between listings. */
+function sortedJson(value: unknown): string {
+  if (Array.isArray(value)) return `[${value.map(sortedJson).join(",")}]`;
+  if (value !== null && typeof value === "object") {
+    const obj = value as Record<string, unknown>;
+    const members = Object.keys(obj)
+      .sort()
+      .map((key) => `${JSON.stringify(key)}:${sortedJson(obj[key])}`);
+    return `{${members.join(",")}}`;
+  }
+  return JSON.stringify(value);
 }

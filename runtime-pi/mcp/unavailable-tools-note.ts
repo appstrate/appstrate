@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { isListedToolName, parseScopedName } from "@appstrate/core/naming";
+import { isMcpToolName } from "@appstrate/mcp-transport";
 import type { IntegrationBootReport, UnavailableToolReason } from "@appstrate/core/sidecar-types";
 
 /** A block is a decision of the space administrators, not a fault: say so, so the model does not retry. */
@@ -15,20 +15,12 @@ export function unavailableToolsNote(spawned: IntegrationBootReport["spawned"]):
   // Server-controlled names reach the system prompt: only plain tokens are quoted. Identical
   // lines (several connections of one integration, one tool) collapse.
   const lines = new Set(
-    spawned
-      .filter((entry) => parseScopedName(entry.integrationId) !== null)
-      .flatMap((entry) => {
-        const label =
-          entry.connectionLabel && isListedToolName(entry.connectionLabel)
-            ? ` [${entry.connectionLabel}]`
-            : "";
-        return (entry.unavailableTools ?? [])
-          .filter(({ name }) => isListedToolName(name))
-          .map(
-            // The upstream name, always: a namespaced `ns__name` could be a live sibling tool.
-            ({ name, reason }) => `${entry.integrationId}: ${name}${label} (${reasonText(reason)})`,
-          );
-      }),
+    spawned.flatMap((entry) =>
+      (entry.unavailableTools ?? [])
+        .filter(({ name }) => isMcpToolName(name))
+        // The upstream name, always: a namespaced `ns__name` could be a live sibling tool.
+        .map(({ name, reason }) => `${entry.integrationId}: ${name} (${reasonText(reason)})`),
+    ),
   );
   if (lines.size === 0) return "";
   return `\n\n<unavailable_tools>\n${[...lines].join("\n")}\n</unavailable_tools>`;

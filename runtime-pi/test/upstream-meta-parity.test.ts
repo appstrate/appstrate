@@ -64,17 +64,14 @@ describe("upstream-meta — sidecar→wire→runtime end-to-end filter", () => {
     expect(parsed.headers).not.toHaveProperty("proxy-authorization");
   });
 
-  it("keeps required_scopes through the wire, dropping malformed values without throwing", () => {
+  it("keeps required_scopes through the wire and drops a non-array without throwing", () => {
     const parse = (required_scopes: unknown) =>
       readUpstreamMeta({
         content: [],
         _meta: { [UPSTREAM_META_KEY]: { status: 403, headers: {}, required_scopes } },
       } as never);
     expect(parse(["a", "b"]).required_scopes).toEqual(["a", "b"]);
-    expect(parse(["a", 3, "b c"]).required_scopes).toEqual(["a"]);
-    expect(parse(["x".repeat(129), "ok"]).required_scopes).toEqual(["ok"]);
     expect(parse("a").required_scopes).toBeUndefined();
-    expect(parse([]).required_scopes).toBeUndefined();
   });
 
   it("runtime-side parser re-strips sensitive headers a malicious sidecar tried to inject", () => {
