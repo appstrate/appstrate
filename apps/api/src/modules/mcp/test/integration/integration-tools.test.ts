@@ -36,7 +36,11 @@ import { files, integrationConnections, oauthResource, runs, spaces } from "@app
 import { getTestApp } from "../../../../../test/helpers/app.ts";
 import { db, truncateAll } from "../../../../../test/helpers/db.ts";
 import { flushRedis } from "../../../../../test/helpers/redis.ts";
-import { readToolPresentation } from "@appstrate/core/mcp-presentation";
+import {
+  isLookupTool,
+  readToolPresentation,
+  TOOL_LOOKUP_META_KEY,
+} from "@appstrate/core/mcp-presentation";
 import {
   createTestContext,
   memberContext,
@@ -206,7 +210,8 @@ async function mcp(
 interface ListedTool {
   name: string;
   description: string;
-  annotations?: Record<string, unknown>;
+  annotations?: { readOnlyHint?: boolean; [hint: string]: unknown };
+  _meta?: Record<string, unknown>;
   inputSchema: {
     required?: string[];
     properties?: Record<string, { items?: { enum?: string[] } }>;
@@ -509,24 +514,26 @@ describe("mcp integration tools", () => {
       expect(upstreamCalls).toHaveLength(0);
     });
 
-    it("annotates search and describe as reaching third-party servers when they declare the kind", async () => {
-      const annotations = async (caller: Caller) => {
+    it("annotates search and describe as reaching third-party servers, and stamps them lookups, when they declare the kind", async () => {
+      const discovery = async (caller: Caller) => {
         const tools = await listTools(caller);
-        return ["search", "describe"].map(
-          (name) => tools.find((tool) => tool.name === name)!.annotations,
-        );
+        return ["search", "describe"].map((name) => tools.find((tool) => tool.name === name)!);
       };
-      for (const hints of await annotations(await instanceCaller(owner))) {
-        expect(hints).toMatchObject({
+      for (const listed of await discovery(await instanceCaller(owner))) {
+        expect(listed.annotations).toMatchObject({
           readOnlyHint: false,
           destructiveHint: false,
           idempotentHint: false,
           openWorldHint: true,
         });
+        expect(listed._meta?.[TOOL_LOOKUP_META_KEY]).toBe(true);
+        expect(isLookupTool(listed)).toBe(true);
       }
       const runner = await instanceCaller(await memberContext(owner, "member", "runner"));
-      for (const hints of await annotations(runner)) {
-        expect(hints).toMatchObject({ readOnlyHint: true, openWorldHint: false });
+      for (const listed of await discovery(runner)) {
+        expect(listed.annotations).toMatchObject({ readOnlyHint: true, openWorldHint: false });
+        expect(listed._meta).toBeUndefined();
+        expect(isLookupTool(listed)).toBe(true);
       }
     });
 
@@ -1129,7 +1136,6 @@ describe("mcp integration tools", () => {
         arguments: { ...where, kinds: ["integration_tool"], query: "search" },
       });
       expect(readToolPresentation(searchedEnvelope.result?._meta)).toMatchObject({
-        read_only: true,
         count: 1,
         items: [{ kind: "integration", id: REMOTE_ID }],
       });
@@ -1184,11 +1190,9 @@ describe("mcp integration tools", () => {
       // platform's (the chat builds no connect card from it).
       expect(result.content).toEqual([{ type: "text", text: JSON.stringify({ q: "invoices" }) }]);
       expect(result._meta?.["dev.appstrate/relayed"]).toBe(true);
-      // Its card: the integration it reached and the server's title and hint for the tool.
+      // Its card: the integration it reached and the server's title for the tool.
       expect(readToolPresentation(result._meta)).toEqual({
         title: "Search documents",
-        read_only: true,
-        destructive: false,
         subject: { kind: "integration", id: REMOTE_ID, display_name: expect.any(String) },
       });
       // The platform's own answer is never marked.

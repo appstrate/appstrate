@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * The icon of each platform tool in `tools/list` (MCP `Tool.icons`, SEP-973), so a client draws
- * the same glyph the dashboard's chat draws for it. Inline `data:` SVG: a client fetches nothing,
- * and the server reveals no URL. One per theme, the stroke contrasting with its background.
+ * The icon of each platform tool in `tools/list` (MCP `Tool.icons`, SEP-973), for a client that
+ * draws one. Inline `data:` SVG: a client fetches nothing, and the server reveals no URL. One per
+ * theme, the stroke contrasting with its background.
  *
  * The shapes are Lucide's (ISC licence, https://lucide.dev), the set the dashboard uses.
  */

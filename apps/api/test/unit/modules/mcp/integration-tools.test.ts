@@ -92,8 +92,6 @@ const TOOL = "acme_items__api_call";
 const SEARCH_STAMP = {
   "dev.appstrate/presentation": {
     title: "search",
-    read_only: false,
-    destructive: false,
     subject: { kind: "integration", id: "@acme/docs", display_name: "@acme/docs" },
   },
 };

@@ -26,8 +26,6 @@ const GMAIL = {
 /** The presentation the platform stamps on a Gmail tool call. */
 const gmailTool = (title: string) => ({
   title,
-  read_only: false,
-  destructive: false,
   subject: GMAIL,
 });
 
@@ -214,8 +212,6 @@ describe("showCall", () => {
           { status: 204 },
           {
             title: "Delete agent",
-            read_only: false,
-            destructive: true,
             method: "DELETE",
             tag: "Agents",
           },
@@ -224,7 +220,8 @@ describe("showCall", () => {
       t,
     );
     expect(shown.label).toBe("tool.verb.DELETE|DELETE · tool.tag.Agents|Agents");
-    expect(shown.idText).toBe("Delete agent");
+    // The operation's id, never its English summary.
+    expect(shown.idText).toBe("deleteAgent");
   });
 
   it("ignores a presentation the schema refuses", () => {

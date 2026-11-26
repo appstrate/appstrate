@@ -7,8 +7,8 @@
  * Once the result lands, the call is drawn from the presentation the platform stamps on it
  * (`@appstrate/core/mcp-presentation`, relayed by the engine as `result.presentation`): the
  * integration, agent or user it acted on, and for an operation its HTTP method and OpenAPI tag.
- * Nothing is guessed from an operation id. Before the result lands, and for a reply persisted
- * before the stamp existed, the call keeps its own name and what its arguments name.
+ * Nothing is guessed from an operation id. Until a result carries a presentation, the call keeps
+ * its own name and what its arguments name.
  */
 
 import {
@@ -144,24 +144,15 @@ export function presentCall(
   fallbackLabel: string,
 ): PresentedCall {
   const subject = p.subject;
-  // `call_integration_tool`: « GitHub · Search issues ».
-  if (p.subject?.kind === "integration") {
-    return { label: `${subjectName(p.subject)} · ${p.title}`, subject };
-  }
+  const idText = subject ? { idText: subjectName(subject) } : {};
+  // An operation or a proxied request: « Lecture · Agents », « Écriture ».
   const op = operationLabel(p, t);
-  if (op) {
-    return {
-      label: op,
-      subject,
-      Icon: methodIcon(p.method) ?? ZapIcon,
-      idText: p.subject ? subjectName(p.subject) : p.title,
-    };
+  if (op) return { label: op, subject, Icon: methodIcon(p.method) ?? ZapIcon, ...idText };
+  // A remote integration tool: « GitHub · Search issues ».
+  if (subject?.kind === "integration") {
+    return { label: `${subjectName(subject)} · ${p.title}`, subject };
   }
-  return {
-    label: fallbackLabel,
-    subject,
-    ...(p.subject ? { idText: subjectName(p.subject) } : {}),
-  };
+  return { label: fallbackLabel, subject, ...idText };
 }
 
 /** One call as its card and its panel row show it. */

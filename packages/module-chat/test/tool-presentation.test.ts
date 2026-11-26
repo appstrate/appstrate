@@ -19,7 +19,7 @@ const t = (key: string, params?: Record<string, string | number>) =>
       ? "Agents"
       : String(params?.defaultValue ?? key);
 
-const base: ToolPresentation = { title: "List agents", read_only: true, destructive: false };
+const base: ToolPresentation = { title: "List agents" };
 
 describe("presentationOf", () => {
   it("reads the presentation the engine relayed", () => {
@@ -52,7 +52,24 @@ describe("presentCall", () => {
     const call = presentCall({ ...base, method: "GET", tag: "Agents" }, t, "Opération");
     expect(call.label).toBe("Lecture · Agents");
     expect(call.Icon).toBe(EyeIcon);
-    expect(call.idText).toBe("List agents");
+    // The source's English summary is never shown: the card falls back to the tool's id.
+    expect(call.idText).toBeUndefined();
+  });
+
+  it("names a proxied request by its method, with the integration it reached", () => {
+    const call = presentCall(
+      {
+        title: "API call",
+        method: "DELETE",
+        subject: { kind: "integration", id: "@acme/github", display_name: "GitHub" },
+      },
+      t,
+      "Outil",
+    );
+    expect(call.label).toBe("DELETE");
+    expect(call.Icon).toBe(Trash2Icon);
+    expect(call.subject?.id).toBe("@acme/github");
+    expect(call.idText).toBe("GitHub");
   });
 
   it("shows the subject an operation acted on as its id", () => {

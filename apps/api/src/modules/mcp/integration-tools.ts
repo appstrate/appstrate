@@ -26,7 +26,6 @@ import type { CallToolResult, Tool } from "@modelcontextprotocol/sdk/types.js";
 import type { AppstrateRequestExtra, AppstrateToolDefinition } from "@appstrate/mcp-transport";
 import { renderFieldPath } from "@appstrate/core/api-errors";
 import {
-  isReadOnlyMethod,
   TOOL_PRESENTATION_META_KEY,
   type PresentationSubject,
   type ToolPresentation,
@@ -430,7 +429,7 @@ function integrationSubjects(
   });
 }
 
-/** How a call of `tool` is shown: its integration, the server's title for it, and whether it wrote. */
+/** How a call of `tool` is shown: its integration, and the server's title for it or the request's method. */
 function toolCallPresentation(
   read: CallableListing,
   tool: CallableTool,
@@ -438,24 +437,13 @@ function toolCallPresentation(
 ): ToolPresentation {
   const [subject] = integrationSubjects(read.integrations, [tool.integration_package_id]);
   if (tool.kind === "remote") {
-    return {
-      title: tool.title ?? tool.remote_name,
-      read_only: tool.read_only_hint === true,
-      destructive: tool.destructive_hint === true,
-      ...(subject ? { subject } : {}),
-    };
+    return { title: tool.title ?? tool.remote_name, ...(subject ? { subject } : {}) };
   }
-  // An `api_call` batch reads only when each of its requests does.
-  const requests = asRecord(args)?.requests;
-  const methods = (Array.isArray(requests) ? requests : [args]).map((request) => {
-    const method = asRecord(request)?.method;
-    return typeof method === "string" ? method.toUpperCase() : "GET";
-  });
+  // A batch (`requests`) names no single method.
+  const method = asRecord(args)?.requests === undefined ? asRecord(args)?.method : undefined;
   return {
     title: "API call",
-    read_only: methods.every(isReadOnlyMethod),
-    destructive: methods.includes("DELETE"),
-    ...(methods.length === 1 ? { method: methods[0] } : {}),
+    ...(typeof method === "string" ? { method: method.toUpperCase() } : {}),
     ...(subject ? { subject } : {}),
   };
 }

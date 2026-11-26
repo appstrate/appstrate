@@ -688,20 +688,6 @@ const integrationToolSchema = {
         "`remote` only, when the server gives one: the tool's display name (`title`, else " +
         "`annotations.title`), sanitised. Server text, for display only.",
     },
-    read_only_hint: {
-      type: "boolean",
-      enum: [true],
-      description:
-        "`remote` only: the server declares the tool reads only (`annotations.readOnlyHint`). " +
-        "An untrusted hint, for display only: nothing is gated on it.",
-    },
-    destructive_hint: {
-      type: "boolean",
-      enum: [true],
-      description:
-        "`remote` only: the server declares the tool may destroy (`annotations.destructiveHint`). " +
-        "An untrusted hint, for display only.",
-    },
     input_schema: {
       type: "object",
       additionalProperties: true,

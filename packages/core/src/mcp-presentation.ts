@@ -1,42 +1,34 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * How a client shows one MCP tool call: what it did, to what, and whether it wrote. The platform
- * stamps it on every tool result under `_meta["dev.appstrate/presentation"]`, from what only the
- * server knows (the operation's OpenAPI method and tag, the integration behind a proxied tool and
- * the hints its server declares), so a client never guesses from a tool name or an id. `_meta`
- * never reaches the model: it reads `content` alone.
+ * How a client shows one MCP tool call: what it did and to what. The platform stamps it on every
+ * tool result under `_meta["dev.appstrate/presentation"]`, from what only the server knows (the
+ * operation's OpenAPI method and tag, the integration behind a proxied tool), so a client never
+ * guesses from a tool name or an id.
  */
 
 import { z } from "zod";
 
 export const TOOL_PRESENTATION_META_KEY = "dev.appstrate/presentation";
 
-/** The entity a call acted on, or one a search listed. */
-export const presentationSubjectSchema = z.object({
-  kind: z.enum(["integration", "agent", "skill", "package", "user"]),
+const presentationSubjectSchema = z.object({
+  kind: z.enum(["integration", "agent", "skill", "user"]),
   /** Package id (`@scope/name`), or the user's id. */
   id: z.string().min(1),
   display_name: z.string().min(1).optional(),
-  /** An integration's manifest icon: an Iconify id or an image URL. */
+  /** An integration's manifest icon. */
   icon: z.string().min(1).optional(),
 });
 
+/** The entity a call acted on, or one a search listed. */
 export type PresentationSubject = z.infer<typeof presentationSubjectSchema>;
 
 /** Subjects a search lists in its presentation, at most. */
 export const MAX_PRESENTED_ITEMS = 8;
 
 export const toolPresentationSchema = z.object({
-  /**
-   * What the call does, as its source names it: the operation's OpenAPI `summary`, the title the
-   * integration's server gives its tool, else the tool's own title. English, as the source is.
-   */
+  /** What the call does, as its source names it (OpenAPI `summary`, the server's tool title). */
   title: z.string().min(1),
-  /** The call reads only (MCP `readOnlyHint`, an HTTP `GET`/`HEAD`). */
-  read_only: z.boolean(),
-  /** The call may delete or overwrite (an HTTP `DELETE`, a server's explicit `destructiveHint`). */
-  destructive: z.boolean(),
   /** `invoke_operation`: the operation's first OpenAPI tag and its HTTP method. */
   tag: z.string().min(1).optional(),
   method: z.string().min(1).optional(),
@@ -58,10 +50,9 @@ export function readToolPresentation(meta: unknown): ToolPresentation | undefine
 }
 
 /**
- * On a tool DESCRIPTOR: a call of this tool only looks things up, for the person reading the
- * conversation, even where MCP's `readOnlyHint` is withheld because the call has side effects
- * outside the user's data (a catalog read that reaches a third-party server and may refresh a
- * connection's token). A client folds such calls together; known before the call runs.
+ * On a tool descriptor: its calls only look things up for the person reading them, although
+ * `readOnlyHint` is withheld for a side effect outside the caller's data (a third-party catalog
+ * read that may refresh a token). Known before a call runs, so a client can fold such calls.
  */
 export const TOOL_LOOKUP_META_KEY = "dev.appstrate/lookup";
 
@@ -74,10 +65,4 @@ export function isLookupTool(descriptor: {
     descriptor.annotations?.readOnlyHint === true ||
     descriptor._meta?.[TOOL_LOOKUP_META_KEY] === true
   );
-}
-
-/** HTTP methods that only read. */
-export function isReadOnlyMethod(method: string): boolean {
-  const upper = method.toUpperCase();
-  return upper === "GET" || upper === "HEAD";
 }
