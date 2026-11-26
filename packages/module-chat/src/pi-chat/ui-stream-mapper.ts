@@ -25,6 +25,7 @@
  */
 
 import type { UIMessageChunk } from "ai";
+import { isTurnBudgetNote } from "@appstrate/core/chat-turn-metadata";
 import type {
   AgentSessionEvent,
   PiAssistantMessageEvent,
@@ -479,10 +480,12 @@ function stringifyToolResult(result: unknown): string {
   if (result && typeof result === "object") {
     const content = (result as { content?: unknown }).content;
     if (Array.isArray(content)) {
+      // The turn-budget line is the model's, not part of the error the reader sees.
       return content
         .map((c) =>
           c && typeof c === "object" && "text" in c ? String((c as { text: unknown }).text) : "",
         )
+        .filter((text) => !isTurnBudgetNote(text))
         .join("");
     }
     return JSON.stringify(result);

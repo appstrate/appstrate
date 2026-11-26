@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { z } from "zod";
+import { isTurnBudgetNote } from "./chat-turn-metadata.ts";
 
 /** Bound a single MCP resources/read response before materializing any of its files. */
 export const MCP_RESOURCE_MAX_BYTES = 32 * 1024 * 1024;
@@ -76,7 +77,8 @@ function isTextPart(value: unknown): value is { type: "text"; text: string } {
  * `{"id":"run_…"}[turn budget] …` is not JSON. Hence the rule for an array: the
  * first text part that parses on its own wins — producers put the payload in
  * one block, anything after it is prose. When no part parses, the joined text
- * is returned, so a plain-text result still reads verbatim. Without this the
+ * is returned, so a plain-text result still reads verbatim — the budget line
+ * left out, or a plain-text error would end with it. Without this the
  * payload reads as a string, and every consumer reading a record out of it (run
  * id/status, error shapes) silently degrades — a failed call would read as a success.
  */
@@ -98,8 +100,10 @@ export function unwrapMcpResult(value: unknown, depth = 0): unknown {
   if (Array.isArray(value)) {
     // MCP content array of text parts → the first part that is a payload on its
     // own, else the joined text (no payload here, just prose).
-    const texts = value.filter(isTextPart).map((p) => p.text);
-    if (texts.length > 0) {
+    const parts = value.filter(isTextPart);
+    if (parts.length > 0) {
+      // The chat's turn-budget note is the model's: a reader never sees it, joined or not.
+      const texts = parts.map((p) => p.text).filter((text) => !isTurnBudgetNote(text));
       for (const text of texts) {
         const part = unwrapMcpResult(text, depth + 1);
         if (typeof part === "object" && part !== null) return part;

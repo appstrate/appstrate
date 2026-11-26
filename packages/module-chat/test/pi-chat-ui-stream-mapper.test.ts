@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { describe, expect, it } from "bun:test";
+import { formatTurnBudgetNote } from "@appstrate/core/chat-turn-metadata";
 import {
   dispatchSpace,
   PiChatUiStreamMapper,
@@ -176,6 +177,28 @@ describe("PiChatUiStreamMapper", () => {
     ]);
     expect(run([{ ...end, isError: true }]).chunks).toEqual([
       { type: "tool-output-error", toolCallId: "file-1", errorText: receipt.text },
+    ]);
+  });
+
+  it("leaves the model's turn-budget line out of a tool error's text", () => {
+    const budget = formatTurnBudgetNote({ remainingMs: 558_000, stepsUsed: 7 });
+    const chunks = run([
+      {
+        type: "tool_execution_end",
+        toolCallId: "gh-1",
+        toolName: "call_integration_tool",
+        result: {
+          content: [
+            { type: "text", text: "403 Resource not accessible" },
+            { type: "text", text: budget },
+          ],
+          details: {},
+        },
+        isError: true,
+      },
+    ]).chunks;
+    expect(chunks).toEqual([
+      { type: "tool-output-error", toolCallId: "gh-1", errorText: "403 Resource not accessible" },
     ]);
   });
 
