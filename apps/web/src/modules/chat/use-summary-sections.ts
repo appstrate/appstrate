@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 
 /** The summary's folding sections. */
-export type SummarySectionId = "runs" | "files" | "tools" | "usage" | "access" | "details";
+export type SummarySectionId = "usage" | "access" | "details";
 
 const STORAGE_KEY = "appstrate:chat-summary-open";
 

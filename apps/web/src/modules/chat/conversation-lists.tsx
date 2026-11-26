@@ -11,18 +11,13 @@ import { formatDateField } from "../../lib/format-date";
 import type { StoredSidebarFile } from "./conversation-sidebar-state";
 import { useConversationFiles, useConversationRuns } from "./use-conversation-lists";
 
-/**
- * The runs a conversation launched, newest first. `max`: the summary's preview, its first rows
- * only; the summary words the empty state itself.
- */
+/** The runs a conversation launched, newest first. */
 export function ConversationRuns({
   conversationId,
   active,
-  max,
 }: {
   conversationId: string | null;
   active: boolean;
-  max?: number;
 }) {
   const { t } = useTranslation("chat");
   const { query, runs, agentName, agentById, spanning } = useConversationRuns(
@@ -43,7 +38,7 @@ export function ConversationRuns({
 
   return (
     <div className="divide-y">
-      {runs.slice(0, max).map((run) => (
+      {runs.map((run) => (
         <RunRow
           key={run.id}
           run={run}
@@ -58,16 +53,14 @@ export function ConversationRuns({
   );
 }
 
-/** The files of a conversation, newest first; `max` as for {@link ConversationRuns}. */
+/** The files of a conversation, newest first. */
 export function ConversationFiles({
   conversationId,
   active,
-  max,
   onSelect,
 }: {
   conversationId: string | null;
   active: boolean;
-  max?: number;
   onSelect: (file: StoredSidebarFile) => void;
 }) {
   const { t } = useTranslation("chat");
@@ -86,7 +79,7 @@ export function ConversationFiles({
 
   return (
     <div className="divide-y">
-      {files.slice(0, max).map((file) => (
+      {files.map((file) => (
         <button
           key={file.id}
           type="button"

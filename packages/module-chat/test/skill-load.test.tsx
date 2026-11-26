@@ -177,7 +177,7 @@ describe("ResourceReadTool", () => {
     expect(html).not.toContain("skill-load-pin");
   });
 
-  it("draws a skill loaded through the forwarded `read` the same way; any other read keeps the generic row", () => {
+  it("draws a skill loaded through the forwarded `read` the same way; any other read keeps the generic card, named as a read", () => {
     const skill = render({
       toolName: "read",
       args: { uri: SKILL_MD, space_id: "spc_a" },
@@ -193,7 +193,8 @@ describe("ResourceReadTool", () => {
       status: { type: "complete" },
     });
     expect(file).not.toContain("directive-chip");
-    expect(file).toContain(">read<");
+    expect(file).toContain(">tool.read<");
+    expect(file).toContain("appfile://spc_a/fil_1");
     const guide = render({
       args: { uri: "skill://spc_a/acme/tone/brand-tone/refs/guide.md" },
       result: { content: [{ type: "text", text: "guide" }] },

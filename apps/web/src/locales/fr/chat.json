@@ -290,10 +290,9 @@
   "context.summary.messages_one": "{{count}} message",
   "context.summary.messages_other": "{{count}} messages",
   "context.summary.details": "Détails",
+  "context.summary.activity": "Activité",
+  "context.summary.noActivity": "Aucune activité pour l’instant.",
+  "context.summary.calls": "Appels",
   "context.summary.seeAll": "Tout voir",
-  "context.summary.attention": "À traiter",
-  "context.summary.integrations": "Intégrations utilisées",
-  "context.summary.noRun": "Aucun run pour l’instant.",
-  "context.summary.noFile": "Aucun fichier pour l’instant.",
-  "context.summary.noAction": "Aucune action pour l’instant."
+  "context.summary.integrations": "Intégrations utilisées"
 }

@@ -32,16 +32,27 @@ const STATUS_TONE: Record<ConversationToolStatus, string> = {
   denied: "text-warning",
 };
 
-/** The call's lead glyph: its tool's icon in the status' tone, a spinner while it runs. */
-function ToolGlyph({ call }: { call: ConversationToolCall }) {
+/** The call's tool icon in its status' tone, a spinner while it runs. */
+export function ToolCallIcon({
+  call,
+  className,
+}: {
+  call: ConversationToolCall;
+  className?: string;
+}) {
   const { Icon } = toolPresentation(call.toolName, call.input);
+  return call.status === "running" ? (
+    <Spinner className={cn("text-muted-foreground", className)} />
+  ) : (
+    <Icon aria-hidden="true" className={cn(STATUS_TONE[call.status], className)} />
+  );
+}
+
+/** The call's lead glyph: its icon on a tile. */
+function ToolGlyph({ call }: { call: ConversationToolCall }) {
   return (
     <span className="bg-muted flex size-8 shrink-0 items-center justify-center rounded-lg">
-      {call.status === "running" ? (
-        <Spinner className="text-muted-foreground size-4" />
-      ) : (
-        <Icon className={cn("size-4", STATUS_TONE[call.status])} />
-      )}
+      <ToolCallIcon call={call} className="size-4" />
     </span>
   );
 }
