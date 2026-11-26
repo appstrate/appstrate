@@ -631,8 +631,10 @@ describe("the persona and the caller context", () => {
 
   it("finds runnable agents in the context first, then with get_me for another space", () => {
     expect(FULL).toContain(
-      "are the agents the user can run in the spaces it covers, each with the spaces it is active in, whether it is a draft only and whether it takes input; for a space it does not cover, `get_me` with that `space_id` lists them, each with `published`, `home_writable` and `takes_input`",
+      "are the agents the user can run in the spaces it covers, each with the spaces it is active in, whether it is a draft only and whether it takes input; where it only counts a space's agents, `search` with that `space_id` finds them; for a space it does not cover, `get_me` with that `space_id` lists them, each with `published`, `home_writable` and `takes_input`",
     );
+    // The section's order ranks nothing, and the persona says so.
+    expect(FULL).toContain("a list there is whole and sorted by id, an order that ranks nothing");
     expect(FULL).toContain("`published: false` and `home_writable: false`");
     // Truncation is the get_me description's: `search` finds the rest.
     expect(FULL).not.toContain("agents_truncated");

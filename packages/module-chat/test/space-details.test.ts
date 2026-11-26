@@ -2,7 +2,7 @@
 
 /**
  * What the engaged spaces hold, as the caller-context block renders it: by resource, each line
- * naming the spaces where it stands, deterministic, within its budget.
+ * naming the spaces where it stands, deterministic, within its budget, ranking nothing.
  */
 
 import { describe, expect, it } from "bun:test";
@@ -30,15 +30,15 @@ const agent = (id: string, over: Partial<NonNullable<SpaceDetail["agents"]>[numb
   ...over,
 });
 
-const detail = (space: DetailSpace, over: Partial<SpaceDetail> = {}): SpaceDetail => ({
-  space,
-  integrations: [],
-  connectable: [],
-  connectableTruncated: false,
-  agents: [],
-  agentsTotal: 0,
-  ...over,
-});
+/** A space as read, its totals those of its lists unless `over` says `get_me` capped one. */
+const detail = (space: DetailSpace, over: Partial<SpaceDetail> = {}): SpaceDetail => {
+  const read = { space, integrations: [], connectable: [], agents: [], ...over };
+  return {
+    connectableTotal: read.connectable.length,
+    agentsTotal: read.agents?.length ?? 0,
+    ...read,
+  };
+};
 
 describe("formatSpaceDetails", () => {
   it("renders one line per integration and per agent, naming every space where it stands", () => {
@@ -101,46 +101,95 @@ describe("formatSpaceDetails", () => {
     expect(again).toEqual(once);
   });
 
-  it("says where a list was capped and what the role does not read", () => {
-    const { text } = formatSpaceDetails([
-      detail(PERSO, { agents: [agent("@acme/a")], agentsTotal: 40, connectableTruncated: true }),
+  it("counts a list get_me capped instead of listing its first entries, and says what the role does not read", () => {
+    const { text, shown } = formatSpaceDetails([
+      detail(PERSO, {
+        agents: [agent("@acme/a")],
+        agentsTotal: 40,
+        connectable: ["@appstrate/slack"],
+        connectableTotal: 30,
+      }),
       detail({ ...VENTES, integrations: false }, { integrations: null }),
     ]);
+    expect(shown).toEqual(["spc_p"]);
+    // The entries get_me happened to list first are not put before the others.
+    expect(text).not.toContain("@acme/a");
+    expect(text).not.toContain("@appstrate/slack");
     expect(text).toContain(
-      "Only the first agents are listed for Perso (1 of 40): `search` finds the others.",
+      "Integrations to connect are only counted where they outnumber what `get_me` lists: Perso (30); `search` with the space's `space_id` finds them.",
     );
-    expect(text).toContain("More integrations to connect in Perso: `search` lists them.");
+    expect(text).toContain(
+      "Agents are only counted where they outnumber what `get_me` lists: Perso (40); `search` with the space's `space_id` finds them.",
+    );
     expect(text).toContain("Your role does not read the integrations of Ventes.");
+    expect(text).not.toContain("- none");
     // An empty list is said, never left for the model to guess.
-    expect(text).toContain("- none connected or to connect");
+    expect(formatSpaceDetails([detail(PERSO)]).text).toContain("- none connected or to connect");
   });
 
-  it("keeps the first spaces that fit the budget and names the others as left to get_me", () => {
+  it("is the same text whatever order the spaces came in, sorted by name", () => {
+    const one = detail(VENTES, { agents: [agent("@acme/b")] });
+    const two = detail(PERSO, { agents: [agent("@acme/a")] });
+    const { text } = formatSpaceDetails([one, two]);
+    expect(formatSpaceDetails([two, one]).text).toBe(text);
+    expect(text).toContain("for Perso, Ventes.");
+  });
+
+  describe("at a scale the budget cannot hold in full", () => {
+    const LAB: DetailSpace = { id: "spc_l", name: "Lab", integrations: true, agents: true };
     const many = (space: DetailSpace) =>
       detail(space, {
+        integrations: Array.from({ length: 10 }, (_, i) => ({
+          id: `@${space.id}/int-${i}`,
+          name: `Int ${i}`,
+          active: true,
+          needsReconnection: false,
+          connections: [{ id: `${space.id}-c${i}`, label: "y".repeat(60), owned: true }],
+        })),
         agents: Array.from({ length: 15 }, (_, i) =>
           agent(`@${space.id}/agent-${i}`, { description: "x".repeat(400) }),
         ),
-        agentsTotal: 15,
       });
-    const LAB: DetailSpace = { id: "spc_l", name: "Lab", integrations: true, agents: true };
-    // Two spaces listing the 15 agents get_me caps at fit; a third does not.
-    const three = [many(PERSO), many(VENTES), many(LAB)];
-    const { text, shown } = formatSpaceDetails(three);
-    expect(text.length).toBeLessThanOrEqual(CHAT_CONTEXT_DETAILS_BUDGET_CHARS);
-    expect(shown).toEqual(["spc_p", "spc_v"]);
-    expect(text).toContain("for Perso, Ventes.");
-    expect(text).toContain("Not detailed here, for room: Lab; `get_me` with its `space_id`.");
-    expect(text).not.toContain("spc_l");
-    // No space fits: each is named, none shown.
-    const named = formatSpaceDetails(three, 200);
-    expect(named.shown).toEqual([]);
-    expect(named.text.split("\n")).toEqual([
-      SPACE_DETAILS_HEADING,
-      "Not detailed here, for room: Perso, Ventes, Lab; `get_me` with its `space_id`.",
-    ]);
-    // Not even the names fit: nothing is rendered.
-    expect(formatSpaceDetails(three, 10)).toEqual({ text: "", shown: [] });
+    const three = [many(VENTES), many(LAB), many(PERSO)];
+
+    it("leaves the same detail out of every space, never a space or an entry", () => {
+      const { text, shown } = formatSpaceDetails(three);
+      expect(text.length).toBeLessThanOrEqual(CHAT_CONTEXT_DETAILS_BUDGET_CHARS);
+      expect(shown).toEqual(["spc_l", "spc_p", "spc_v"]);
+      expect(text).toContain("for Lab, Perso, Ventes.");
+      expect(text).toContain(
+        "Descriptions and connection labels are left out for room: `get_me` with a space's `space_id` gives them.",
+      );
+      expect(text).not.toContain("xxxxxxxxxx");
+      expect(text).not.toContain("yyyyyyyyyy");
+      for (const space of three) {
+        for (const entry of [...space.integrations!, ...space.agents!]) {
+          expect(text).toContain(`\`${entry.id}\``);
+        }
+      }
+    });
+
+    it("counts every space alike when even the names do not fit", () => {
+      const { text, shown } = formatSpaceDetails(three, 1_000);
+      expect(shown).toEqual(["spc_l", "spc_p", "spc_v"]);
+      expect(text.split("\n")).toEqual([
+        SPACE_DETAILS_HEADING,
+        "As read at the start of this turn, only counted for room: `get_me` with a space's `space_id` lists them.",
+        "- Lab: 10 integrations with a connection, 0 to connect; 15 agents",
+        "- Perso: 10 integrations with a connection, 0 to connect; 15 agents",
+        "- Ventes: 10 integrations with a connection, 0 to connect; 15 agents",
+      ]);
+    });
+
+    it("details no space when not even the counts fit", () => {
+      const named = formatSpaceDetails(three, 200);
+      expect(named.shown).toEqual([]);
+      expect(named.text.split("\n")).toEqual([
+        SPACE_DETAILS_HEADING,
+        "Not detailed here, for room: `get_me` with a space's `space_id` lists what it holds.",
+      ]);
+      expect(formatSpaceDetails(three, 10)).toEqual({ text: "", shown: [] });
+    });
   });
 });
 
@@ -209,7 +258,7 @@ describe("readSpaceDetails", () => {
           },
         ],
         connectable: ["@appstrate/slack"],
-        connectableTruncated: false,
+        connectableTotal: 1,
         agents: [agent("@acme/a", { name: "A" })],
         agentsTotal: 1,
       },

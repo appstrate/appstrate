@@ -129,10 +129,14 @@ Agents:
   `withCallerClient` que les skills (une connexion pour tout le préambule).
 - **Rendu par ressource** : la taille suit le nombre d'intégrations et d'agents distincts, pas
   espaces × ressources ; la ligne répond directement à « où est-ce utilisable ».
-- **Ordre déterministe** : origine, personnel, puis touchés par date ; entrées triées par id.
-- **Plafond** : `CHAT_CONTEXT_DETAILS_BUDGET_CHARS` = 8 000 caractères (deux espaces listant
-  chacun les 15 agents que `get_me` plafonne). Au-delà, les espaces restants sont nommés
-  « Not detailed here, for room », renvoyés à `get_me`.
+- **Rien n'est priorisé** : entrées triées par id, espaces par nom, et une liste est rendue
+  entière ou pas du tout. Une liste que `get_me` plafonne (15 agents, 15 intégrations à
+  connecter, ordonnées système d'abord) n'est que comptée, renvoyée à `search` : ses premières
+  entrées passeraient sinon devant les autres. Le prompt dit au modèle que l'ordre ne classe rien.
+- **Plafond** : `CHAT_CONTEXT_DETAILS_BUDGET_CHARS` = 8 000 caractères, tenu par un niveau de
+  détail commun à tous les espaces, le plus fin qui tient : complet, puis sans descriptions ni
+  libellés de connexion, puis un décompte par espace. Aucun espace n'est coupé ; si même le
+  décompte déborde, la section ne détaille aucun espace et renvoie à `get_me`.
 - **Exclus** : `recent_runs`, `skills` (déjà sous `## Skills`).
 - **Échec** : un espace dont la lecture échoue ou dépasse le délai est absent du détail ; le
   tour continue.
@@ -190,8 +194,8 @@ Un lot = une PR, depuis une branche neuve sur `origin/main`.
   Le rendu par ressource tient : passer de 2 à 10 espaces ajoute 55 % (4 927 → 7 650), pas ×5.
   Répartition du niveau 3 : agents 37 %, connexions 22 %, listes « switched off in » 15 %.
   La production ne sert pas encore `connectable_integrations` : sur cette branche, ses lignes
-  s'ajoutent : 350 caractères de plus (4 à 5 lignes) font dépasser le budget (derniers espaces
-  nommés « Not detailed here »). Tokens non comptés (aucun tokenizer local) : à 3–4 caractères
+  s'ajoutent : 350 caractères de plus (4 à 5 lignes) font passer tous les espaces au niveau
+  sans descriptions ni libellés. Tokens non comptés (aucun tokenizer local) : à 3–4 caractères
   par token, niveau 2 ≈ 1,2–1,6 k, niveau 3 ≈ 1,9–2,6 k. Latence : 2 puis 5 `get_me`
   parallèles en 28 ms au plus, en local.
 
