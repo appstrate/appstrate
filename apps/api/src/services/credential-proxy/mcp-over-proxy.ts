@@ -82,6 +82,8 @@ class McpCredentialRejectedError extends Error {
     readonly credential: CredentialStatus | undefined,
     /** The scopes the server's `WWW-Authenticate` challenge asks for. */
     readonly requiredScopes: string[] | undefined,
+    /** The connection whose credential was refused: what a reconnect with those scopes targets. */
+    readonly connectionId: string,
   ) {
     super(`the MCP server refused the connection's credential (HTTP ${status})`);
     this.name = "McpCredentialRejectedError";
@@ -337,6 +339,7 @@ export function proxiedMcpOperation(input: ProxiedMcpOperationInput): McpOperati
           result.status,
           result.credential,
           requiredScopesFromChallenge(result.status, result.headers.get("www-authenticate")),
+          result.connectionId,
         ),
       );
     }
@@ -642,6 +645,7 @@ export function mcpServerFailure(
     const credential = err instanceof McpCredentialRejectedError ? err.credential : undefined;
     const requiredScopes =
       err instanceof McpCredentialRejectedError ? err.requiredScopes : undefined;
+    const connectionId = err instanceof McpCredentialRejectedError ? err.connectionId : undefined;
     return new ApiError({
       status: 502,
       code: "upstream_credential_rejected",
@@ -655,6 +659,7 @@ export function mcpServerFailure(
       extensions: {
         upstream_status: status,
         ...(requiredScopes ? { required_scopes: requiredScopes } : {}),
+        ...(connectionId ? { connection_id: connectionId } : {}),
         ...(credential ? { credential: credentialMember(credential) } : {}),
       },
       headers: upstreamProxyStatus({ receivedStatus: status }),

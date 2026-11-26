@@ -12833,6 +12833,11 @@ export interface operations {
                                 upstream_status?: 401 | 403;
                                 /** @description `upstream_credential_rejected`, when the server's `WWW-Authenticate` challenge (401, or 403 `insufficient_scope`) names the OAuth scopes it asks for: the scopes to reconnect with. */
                                 required_scopes?: string[];
+                                /**
+                                 * Format: uuid
+                                 * @description `upstream_credential_rejected`: the connection whose credential the server refused. With `required_scopes`, what a reconnect in place targets (`initiateIntegrationConnect` with this `connection_id` and those `scopes`).
+                                 */
+                                connection_id?: string;
                                 /** @description `upstream_credential_rejected`, when the proxy's forced refresh judged the rejection (`X-Appstrate-Credential-Status` on `/proxy`): `needs_reconnection` — the connection is now flagged and its owner must reconnect it; `in_use` — it stays in use, `failures` counting this rejection toward the flag when it was counted. */
                                 credential?: {
                                     /** @enum {string} */
@@ -12998,6 +13003,11 @@ export interface operations {
                         upstream_status?: 401 | 403;
                         /** @description `upstream_credential_rejected`, when the server's `WWW-Authenticate` challenge (401, or 403 `insufficient_scope`) names the OAuth scopes it asks for: the scopes to reconnect with. */
                         required_scopes?: string[];
+                        /**
+                         * Format: uuid
+                         * @description `upstream_credential_rejected`: the connection whose credential the server refused. With `required_scopes`, what a reconnect in place targets (`initiateIntegrationConnect` with this `connection_id` and those `scopes`).
+                         */
+                        connection_id?: string;
                         /** @description `upstream_credential_rejected`, when the proxy's forced refresh judged the rejection (`X-Appstrate-Credential-Status` on `/proxy`): `needs_reconnection` — the connection is now flagged and its owner must reconnect it; `in_use` — it stays in use, `failures` counting this rejection toward the flag when it was counted. */
                         credential?: {
                             /** @enum {string} */
@@ -13034,6 +13044,11 @@ export interface operations {
                         upstream_status?: 401 | 403;
                         /** @description `upstream_credential_rejected`, when the server's `WWW-Authenticate` challenge (401, or 403 `insufficient_scope`) names the OAuth scopes it asks for: the scopes to reconnect with. */
                         required_scopes?: string[];
+                        /**
+                         * Format: uuid
+                         * @description `upstream_credential_rejected`: the connection whose credential the server refused. With `required_scopes`, what a reconnect in place targets (`initiateIntegrationConnect` with this `connection_id` and those `scopes`).
+                         */
+                        connection_id?: string;
                         /** @description `upstream_credential_rejected`, when the proxy's forced refresh judged the rejection (`X-Appstrate-Credential-Status` on `/proxy`): `needs_reconnection` — the connection is now flagged and its owner must reconnect it; `in_use` — it stays in use, `failures` counting this rejection toward the flag when it was counted. */
                         credential?: {
                             /** @enum {string} */

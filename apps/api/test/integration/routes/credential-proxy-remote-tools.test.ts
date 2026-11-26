@@ -449,9 +449,11 @@ describe("the typed tools of a remote MCP integration", () => {
           code: string;
           detail: string;
           required_scopes?: string[];
+          connection_id?: string;
         };
         expect(problem.code).toBe("upstream_credential_rejected");
         expect(problem.required_scopes).toEqual(["a", "b"]);
+        expect(problem.connection_id).toBe(connectionId);
         expect(problem.detail).toContain("a b");
         // The demand is recorded on the connection, minus what it holds: a fire-and-forget write.
         const requested = async () =>

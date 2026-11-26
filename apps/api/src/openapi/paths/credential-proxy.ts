@@ -605,6 +605,14 @@ const upstreamMcpProblemSchema = {
             "(401, or 403 `insufficient_scope`) names the OAuth scopes it asks for: the scopes " +
             "to reconnect with.",
         },
+        connection_id: {
+          type: "string",
+          format: "uuid",
+          description:
+            "`upstream_credential_rejected`: the connection whose credential the server refused. " +
+            "With `required_scopes`, what a reconnect in place targets (`initiateIntegrationConnect` " +
+            "with this `connection_id` and those `scopes`).",
+        },
         credential: {
           type: "object",
           required: ["status", "cause", "detail"],
