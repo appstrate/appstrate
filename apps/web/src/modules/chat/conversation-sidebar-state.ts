@@ -26,6 +26,8 @@ export interface ConversationSidebarState {
   fileFromList: boolean;
   /** The tool call shown over the Tools tab, null when the tab shows its list. */
   selectedToolCallId: string | null;
+  /** The tool call whose card "See in the thread" last looked for and did not find. */
+  missedRevealId: string | null;
 }
 
 export type ConversationSidebarAction =
@@ -35,6 +37,8 @@ export type ConversationSidebarAction =
   | { type: "close-file" }
   | { type: "show-tool-call"; toolCallId: string }
   | { type: "close-tool-call" }
+  /** What "See in the thread" found: missed, the panel opens again on the call to say so. */
+  | { type: "revealed"; toolCallId: string; found: boolean }
   | { type: "conversation-change" };
 
 export const INITIAL_CONVERSATION_SIDEBAR_STATE: ConversationSidebarState = {
@@ -43,6 +47,7 @@ export const INITIAL_CONVERSATION_SIDEBAR_STATE: ConversationSidebarState = {
   selectedFile: null,
   fileFromList: false,
   selectedToolCallId: null,
+  missedRevealId: null,
 };
 
 /**
@@ -54,6 +59,9 @@ export const INITIAL_CONVERSATION_SIDEBAR_STATE: ConversationSidebarState = {
  * Opening the panel always shows its tabs: a file is shown by a "show-file",
  * never restored. Collapsing keeps it, so it stays drawn while the panel slides
  * out, and the next opening drops it.
+ *
+ * "See in the thread" may close the panel first (the phone's sheet covers the thread): when the
+ * card is not there, the panel opens again on the call, which says so.
  */
 export function conversationSidebarReducer(
   state: ConversationSidebarState,
@@ -63,7 +71,13 @@ export function conversationSidebarReducer(
     case "toggle":
       return state.expanded
         ? { ...state, expanded: false }
-        : { ...state, expanded: true, selectedFile: null, selectedToolCallId: null };
+        : {
+            ...state,
+            expanded: true,
+            selectedFile: null,
+            selectedToolCallId: null,
+            missedRevealId: null,
+          };
     case "select-tab":
       return {
         ...state,
@@ -71,6 +85,7 @@ export function conversationSidebarReducer(
         activeTab: action.tab,
         selectedFile: null,
         selectedToolCallId: null,
+        missedRevealId: null,
       };
     case "show-file":
       return {
@@ -90,11 +105,22 @@ export function conversationSidebarReducer(
         expanded: true,
         activeTab: "tools",
         selectedToolCallId: action.toolCallId,
+        missedRevealId: null,
       };
     case "close-tool-call":
-      return { ...state, selectedToolCallId: null };
+      return { ...state, selectedToolCallId: null, missedRevealId: null };
+    case "revealed":
+      return action.found
+        ? { ...state, missedRevealId: null }
+        : {
+            ...state,
+            expanded: true,
+            activeTab: "tools",
+            selectedToolCallId: action.toolCallId,
+            missedRevealId: action.toolCallId,
+          };
     case "conversation-change":
-      return { ...state, selectedFile: null, selectedToolCallId: null };
+      return { ...state, selectedFile: null, selectedToolCallId: null, missedRevealId: null };
   }
 }
 
@@ -106,6 +132,12 @@ export function shownFile(state: ConversationSidebarState): SidebarFile | null {
 /** The tool call the panel shows over the Tools tab, null while it shows a tab's content. */
 export function shownToolCallId(state: ConversationSidebarState): string | null {
   return state.activeTab === "tools" ? state.selectedToolCallId : null;
+}
+
+/** Whether "See in the thread" missed the card of the call the panel shows. */
+export function revealMissed(state: ConversationSidebarState): boolean {
+  const shown = shownToolCallId(state);
+  return shown !== null && state.missedRevealId === shown;
 }
 
 /**

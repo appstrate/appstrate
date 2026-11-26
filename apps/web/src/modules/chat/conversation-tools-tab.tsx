@@ -3,11 +3,7 @@
 import { useId, useState } from "react";
 import { ArrowLeftIcon, MessageSquareIcon, WrenchIcon } from "lucide-react";
 import { useTranslation } from "react-i18next";
-import type {
-  ConversationToolCall,
-  ConversationToolStatus,
-} from "@appstrate/module-chat/conversation-tools";
-import { revealToolCall } from "@appstrate/module-chat/reveal-tool-call";
+import type { ConversationToolCall } from "@appstrate/module-chat/conversation-tools";
 import type { ShownCall } from "@appstrate/module-chat/tool-presentation";
 import { cn } from "@appstrate/ui/cn";
 import { Button } from "@appstrate/ui/components/button";
@@ -17,18 +13,16 @@ import { EmptyState, ErrorState } from "../../components/page-states";
 import { JsonView } from "../../components/json-view";
 import { TextSkeleton } from "../../components/loading-skeletons";
 import { RowSpaceName } from "../../components/run-row";
-import { spansSpaces, useConversationTools, useToolLabel } from "./use-conversation-tools";
+import {
+  TOOL_STATUS_LABEL,
+  TOOL_STATUS_TONE,
+  spansSpaces,
+  useConversationTools,
+  useToolLabel,
+} from "./use-conversation-tools";
 
-const STATUS_KEY: Record<Exclude<ConversationToolStatus, "success">, string> = {
-  error: "context.tools.status.error",
-  denied: "context.tools.status.denied",
-};
-
-const STATUS_TONE: Record<ConversationToolStatus, string> = {
-  success: "text-muted-foreground",
-  error: "text-destructive",
-  denied: "text-warning",
-};
+/** A text button of the panel: 40 px on touch, its own size under a mouse. */
+const PANEL_BUTTON = "desktop-pointer:h-9 h-10";
 
 /**
  * The call's icon: the logo of the integration it acted on, as its card draws it, else its icon
@@ -47,7 +41,7 @@ export function ToolCallIcon({
     return <IntegrationIcon src={shown.subject.icon} className={cn("rounded-sm", className)} />;
   }
   const { Icon } = shown;
-  return <Icon aria-hidden="true" className={cn(STATUS_TONE[call.status], className)} />;
+  return <Icon aria-hidden="true" className={cn(TOOL_STATUS_TONE[call.status], className)} />;
 }
 
 /** The call's lead glyph: its icon on a tile. */
@@ -79,7 +73,7 @@ function ToolCallRow({
       ? call.lookup
         ? t("context.tools.lookup")
         : null
-      : t(STATUS_KEY[call.status]);
+      : t(TOOL_STATUS_LABEL[call.status]);
   const detail = [idText, status].filter(Boolean).join(" · ");
   return (
     <button
@@ -111,14 +105,17 @@ export function ConversationToolsList({
   const { t } = useTranslation("chat");
   const switchId = useId();
   const [showLookups, setShowLookups] = useState(false);
-  const { tools, isLoading, error } = useConversationTools(conversationId, active);
+  const { tools, error } = useConversationTools(conversationId, active);
   const show = useToolLabel();
 
   if (!conversationId) {
     return <EmptyState message={t("context.unsaved")} icon={WrenchIcon} compact />;
   }
-  if (isLoading) return <TextSkeleton className="p-4" />;
-  if (error || !tools) return <ErrorState error={error} compact />;
+  if (error) return <ErrorState error={error} compact />;
+  // Not read yet, or held while the panel is closed.
+  if (tools === undefined) return <TextSkeleton className="p-4" />;
+  // The server holds no such conversation.
+  if (tools === null) return <ErrorState compact />;
   if (tools.calls.length === 0) {
     return <EmptyState message={t("context.tools.empty")} icon={WrenchIcon} compact />;
   }
@@ -131,8 +128,12 @@ export function ConversationToolsList({
   return (
     <div>
       {lookups > 0 ? (
-        <div className="flex items-center justify-between gap-3 border-b px-4 py-2">
-          <label htmlFor={switchId} className="text-muted-foreground text-xs">
+        <div className="flex items-center justify-between gap-3 border-b px-4">
+          {/* The whole line is the switch's label: a 40 px target, the switch itself is smaller. */}
+          <label
+            htmlFor={switchId}
+            className="text-muted-foreground flex min-h-10 flex-1 items-center text-xs"
+          >
             {t("context.tools.showLookups", { count: lookups })}
           </label>
           <Switch id={switchId} checked={showLookups} onCheckedChange={setShowLookups} />
@@ -182,36 +183,37 @@ function DetailBlock({ title, value }: { title: string; value: unknown }) {
 }
 
 /**
- * One call over the Tools list: its outcome, input and output. "See in the thread" brings its card
- * into view, after `onReveal` made room for it (the phone's sheet covers the thread).
+ * One call over the Tools list: its outcome, input and output. "See in the thread" asks the panel
+ * to bring its card into view (`onShowInThread`); `missing` says the last ask found no card.
  */
 export function ShownToolCall({
   conversationId,
   toolCallId,
   active,
+  missing,
   onBack,
-  onReveal,
+  onShowInThread,
 }: {
   conversationId: string | null;
   toolCallId: string;
   active: boolean;
+  missing: boolean;
   onBack: () => void;
-  onReveal: () => void;
+  onShowInThread: (call: ConversationToolCall) => void;
 }) {
   const { t } = useTranslation("chat");
-  const [missing, setMissing] = useState(false);
-  const { tools, isLoading, error } = useConversationTools(conversationId, active);
+  const { tools, error } = useConversationTools(conversationId, active);
   const show = useToolLabel();
   const call = tools?.calls.find((candidate) => candidate.toolCallId === toolCallId);
 
   const back = (
-    <Button variant="ghost" size="sm" className="self-start" onClick={onBack}>
+    <Button variant="ghost" size="sm" className={cn("self-start", PANEL_BUTTON)} onClick={onBack}>
       <ArrowLeftIcon />
       {t("context.tools.backToList")}
     </Button>
   );
-  if (isLoading) return <TextSkeleton className="p-4" />;
   if (error) return <ErrorState error={error} compact />;
+  if (tools === undefined) return <TextSkeleton className="p-4" />;
   if (!call) {
     return (
       <div className="flex flex-col gap-2 p-3">
@@ -233,10 +235,8 @@ export function ShownToolCall({
           {idText ? (
             <code className="text-muted-foreground block text-xs break-all">{idText}</code>
           ) : null}
-          <p className={cn("mt-1 text-xs", STATUS_TONE[call.status])}>
-            {call.status === "success"
-              ? t("context.tools.status.success")
-              : t(STATUS_KEY[call.status])}
+          <p className={cn("mt-1 text-xs", TOOL_STATUS_TONE[call.status])}>
+            {t(TOOL_STATUS_LABEL[call.status])}
             {" · "}
             {t("context.tools.turn", { turn: call.turn })}
           </p>
@@ -251,12 +251,8 @@ export function ShownToolCall({
         <Button
           variant="outline"
           size="sm"
-          className="self-start"
-          onClick={() => {
-            onReveal();
-            // The thread is drawn under the panel: reveal once the panel made room for it.
-            requestAnimationFrame(() => setMissing(!revealToolCall(call)));
-          }}
+          className={cn("self-start", PANEL_BUTTON)}
+          onClick={() => onShowInThread(call)}
         >
           <MessageSquareIcon />
           {t("context.tools.showInThread")}

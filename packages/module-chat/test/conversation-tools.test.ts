@@ -228,4 +228,28 @@ describe("conversationTools", () => {
     ]);
     expect(calls[0]?.spaceId).toBe("spc_team");
   });
+
+  it("names the run a call launched, bare or in its envelope, and no id of another family", () => {
+    const { calls } = conversationTools([
+      assistant("a1", [
+        call("c1", "run_and_wait", {
+          state: "output-available",
+          input: {},
+          output: mcp({ id: "run_1", status: "success" }),
+        }),
+        call("c2", "invoke_operation", {
+          state: "output-available",
+          input: { operation_id: "runAgent" },
+          output: mcp({ status: 201, body: { id: "run_2", status: "pending" } }),
+        }),
+        call("c3", "invoke_operation", {
+          state: "output-available",
+          input: { operation_id: "getConnection" },
+          output: mcp({ status: 200, body: { id: "conn_1" } }),
+        }),
+      ]),
+    ]);
+    expect(calls.map((c) => c.runId)).toEqual(["run_1", "run_2", undefined]);
+    expect("runId" in calls[2]!).toBe(false);
+  });
 });

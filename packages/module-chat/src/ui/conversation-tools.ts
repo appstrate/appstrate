@@ -18,6 +18,7 @@ import { deriveToolPhase, extractErrorMessage } from "./tool-result.ts";
 import { callPresentation } from "./tool-presentation.ts";
 import { isLookupCall } from "./activity-group.ts";
 import { callSpaceOf } from "./conversation-scope.ts";
+import { extractRunId } from "./run-events.ts";
 
 export type ConversationToolStatus = "success" | "error" | "denied";
 
@@ -40,6 +41,8 @@ export interface ConversationToolCall {
   lookup: boolean;
   /** The space the call acted in, stamped on it by the chat. */
   spaceId?: string;
+  /** The run the call launched, read off its result (`extractRunId`). */
+  runId?: string;
 }
 
 export interface ConversationTools {
@@ -111,6 +114,7 @@ export function conversationTools(messages: readonly UIMessage[]): ConversationT
           ? undefined
           : (("errorText" in part ? part.errorText : undefined) ?? extractErrorMessage(output));
       const presentation = callPresentation(part);
+      const runId = "output" in part ? extractRunId(part.output) : undefined;
       const spaceId = callSpaceOf({
         providerMetadata: part.callProviderMetadata,
         result: "output" in part ? part.output : undefined,
@@ -127,6 +131,7 @@ export function conversationTools(messages: readonly UIMessage[]): ConversationT
         ...(error ? { error } : {}),
         lookup: isLookupCall(part.callProviderMetadata, status),
         ...(spaceId ? { spaceId } : {}),
+        ...(runId ? { runId } : {}),
       });
       const reached = reachedIntegration(part, toolName, status, presentation);
       if (reached && !integrations.has(reached.id)) integrations.set(reached.id, reached);

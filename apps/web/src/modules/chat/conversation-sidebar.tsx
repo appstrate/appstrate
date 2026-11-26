@@ -3,6 +3,8 @@
 import { useRef, useState, type Dispatch, type ReactNode } from "react";
 import { PanelRightCloseIcon, PanelRightIcon, XIcon } from "lucide-react";
 import { useTranslation } from "react-i18next";
+import type { ConversationToolCall } from "@appstrate/module-chat/conversation-tools";
+import { revealToolCall } from "@appstrate/module-chat/reveal-tool-call";
 import { cn } from "@appstrate/ui/cn";
 import { Button } from "@appstrate/ui/components/button";
 import { Sheet, SheetContent, SheetTitle } from "@appstrate/ui/components/sheet";
@@ -20,6 +22,7 @@ import { ConversationFiles, ConversationRuns } from "./conversation-lists";
 import { ConversationSummary } from "./conversation-summary";
 import { ConversationToolsList, ShownToolCall } from "./conversation-tools-tab";
 import {
+  revealMissed,
   shownFile,
   shownToolCallId,
   type ConversationSidebarAction,
@@ -169,7 +172,7 @@ function ConversationContext({
   closable: boolean;
 }) {
   // The desktop column stays mounted while closed (for its transition): its
-  // reads wait until it is open.
+  // reads wait until it is open. The phone's sheet unmounts its content when closed.
   const active = state.expanded;
   const { t } = useTranslation("chat");
   const { tabs, activeTab } = useConversationTabs(state.activeTab);
@@ -177,6 +180,16 @@ function ConversationContext({
   // even for a caller whose Files tab is not drawn.
   const previewedFile = shownFile(state);
   const shownCall = shownToolCallId(state);
+
+  const showInThread = (call: ConversationToolCall) => {
+    // The phone's sheet covers the thread: it closes to show the card.
+    if (closable) dispatch({ type: "toggle" });
+    // The thread is drawn under the panel: reveal once the panel made room for it. Missed, the
+    // panel opens again on the call to say so.
+    requestAnimationFrame(() =>
+      dispatch({ type: "revealed", toolCallId: call.toolCallId, found: revealToolCall(call) }),
+    );
+  };
 
   if (previewedFile) {
     return (
@@ -251,9 +264,9 @@ function ConversationContext({
                   conversationId={conversationId}
                   toolCallId={shownCall}
                   active={active}
+                  missing={revealMissed(state)}
                   onBack={() => dispatch({ type: "close-tool-call" })}
-                  // The phone's sheet covers the thread: it closes to show the card.
-                  onReveal={() => closable && dispatch({ type: "toggle" })}
+                  onShowInThread={showInThread}
                 />
               ) : (
                 <ConversationToolsList
@@ -296,11 +309,11 @@ export function ConversationSidebar({
   const panelRef = useRef<HTMLElement>(null);
   const [dragging, setDragging] = useState(false);
   const { activeTab } = useConversationTabs(state.activeTab);
-  // A tool call's detail reads like the details: input and output take a little more than a list.
+  // The summary and a tool call's detail take a little more than a list.
   const view: PanelView = shownFile(state)
     ? "file"
     : activeTab.id === "summary" || shownToolCallId(state)
-      ? "info"
+      ? "detail"
       : "list";
   const size = usePanelWidth(panelRef, view);
 

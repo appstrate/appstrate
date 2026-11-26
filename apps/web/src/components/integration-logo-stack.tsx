@@ -22,7 +22,8 @@ export function IntegrationLogoStack({
   integrations,
   inactive,
 }: {
-  integrations: readonly AgentListIntegration[];
+  /** What the stack draws of each: an agent's integrations, or those a conversation reached. */
+  integrations: readonly Pick<AgentListIntegration, "id" | "name" | "icon">[];
   inactive?: readonly string[];
 }) {
   const { t } = useTranslation("common");

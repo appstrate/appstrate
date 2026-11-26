@@ -94,14 +94,26 @@ export function useSessions(transport?: ChatTransport, q = "") {
 /**
  * One conversation by id, whatever the list's filter (`null`: none): the same cache entry as the
  * chat page's history, so the shell's title, spaces and info read what the thread holds.
+ * `enabled: false` holds the read under the same key: what the cache already holds still shows.
  */
-export function useSessionDetail(id: string | null) {
-  return useSessionDetailQuery(useChatTransport(), id);
+export function useSessionDetail(
+  id: string | null,
+  { enabled = true }: { enabled?: boolean } = {},
+) {
+  return useSessionDetailQuery(useChatTransport(), id, enabled);
 }
 
-function useSessionDetailQuery(transport: ChatTransport | undefined | null, id: string | null) {
+function useSessionDetailQuery(
+  transport: ChatTransport | undefined | null,
+  id: string | null,
+  enabled = true,
+) {
   const project = usePendingSessionLimits(transport?.orgId);
-  return useQuery({ ...sessionQuery(transport, id), select: (row) => row && project(row) });
+  return useQuery({
+    ...sessionQuery(transport, id),
+    enabled,
+    select: (row) => row && project(row),
+  });
 }
 
 /**

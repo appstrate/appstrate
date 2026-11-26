@@ -5,6 +5,7 @@ import {
   INITIAL_CONVERSATION_SIDEBAR_STATE,
   conversationSidebarReducer,
   heldLocalUrl,
+  revealMissed,
   shownFile,
   shownToolCallId,
   type ConversationSidebarState,
@@ -78,6 +79,7 @@ describe("conversation sidebar state", () => {
       selectedFile: file("file_a"),
       fileFromList: false,
       selectedToolCallId: null,
+      missedRevealId: null,
     };
 
     expect(conversationSidebarReducer(state, { type: "conversation-change" })).toEqual({
@@ -86,6 +88,7 @@ describe("conversation sidebar state", () => {
       selectedFile: null,
       fileFromList: false,
       selectedToolCallId: null,
+      missedRevealId: null,
     });
   });
 
@@ -171,5 +174,53 @@ describe("conversation sidebar tool calls", () => {
 
     const changed = conversationSidebarReducer(shown, { type: "conversation-change" });
     expect(shownToolCallId(changed)).toBeNull();
+  });
+
+  it("leaves the panel as it is when the thread holds the call's card", () => {
+    const shown = conversationSidebarReducer(INITIAL_CONVERSATION_SIDEBAR_STATE, {
+      type: "show-tool-call",
+      toolCallId: "call_1",
+    });
+    // The phone's sheet closed to show the card, and the card was there.
+    const closed = conversationSidebarReducer(shown, { type: "toggle" });
+    const found = conversationSidebarReducer(closed, {
+      type: "revealed",
+      toolCallId: "call_1",
+      found: true,
+    });
+    expect(found.expanded).toBe(false);
+    expect(revealMissed(found)).toBe(false);
+  });
+
+  it("opens again on the call, saying so, when the thread does not hold its card", () => {
+    const shown = conversationSidebarReducer(INITIAL_CONVERSATION_SIDEBAR_STATE, {
+      type: "show-tool-call",
+      toolCallId: "call_1",
+    });
+    const closed = conversationSidebarReducer(shown, { type: "toggle" });
+    const missed = conversationSidebarReducer(closed, {
+      type: "revealed",
+      toolCallId: "call_1",
+      found: false,
+    });
+    expect(missed).toMatchObject({ expanded: true, activeTab: "tools" });
+    expect(shownToolCallId(missed)).toBe("call_1");
+    expect(revealMissed(missed)).toBe(true);
+
+    // Another call, the list or a later success no longer carry the miss.
+    const other = conversationSidebarReducer(missed, {
+      type: "show-tool-call",
+      toolCallId: "call_2",
+    });
+    expect(revealMissed(other)).toBe(false);
+    expect(revealMissed(conversationSidebarReducer(missed, { type: "close-tool-call" }))).toBe(
+      false,
+    );
+    const found = conversationSidebarReducer(missed, {
+      type: "revealed",
+      toolCallId: "call_1",
+      found: true,
+    });
+    expect(revealMissed(found)).toBe(false);
   });
 });
