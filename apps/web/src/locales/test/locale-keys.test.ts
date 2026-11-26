@@ -270,6 +270,7 @@ const DYNAMIC_KEY_PREFIXES = [
   "log.level.", // components/log-viewer.tsx — t(`log.level.${value}`)
   "log.type.", // components/log-viewer.tsx — t(`log.type.${value}`)
   "models.generation.levels.", // packages/ui — model-generation-labels.ts buildGenerationLabels()
+  "notifications.credentialCause.", // lib/notification-row.ts — one per credential_needs_reconnection cause
   "oauthClients.scopeLabels.", // modules/oidc/components/oauth-client-form-modal.tsx
   "oauthClients.signupRoleOption.", // modules/oidc/components/oauth-client-form-modal.tsx
   "orgRolesGuide.access.", // pages/org-settings/org-roles.tsx — space reach per org role

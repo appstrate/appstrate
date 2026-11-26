@@ -1059,7 +1059,7 @@ index CREATE INDEX idx_integration_conn_end_user ON public.integration_connectio
 index CREATE INDEX idx_integration_conn_lookup ON public.integration_connections USING btree (integration_package_id, space_id, auth_key)
 index CREATE INDEX idx_integration_conn_org ON public.integration_connections USING btree (org_id, integration_package_id, auth_key)
 index CREATE INDEX idx_integration_conn_origin ON public.integration_connections USING btree (origin_space_id) WHERE (origin_space_id IS NOT NULL)
-index CREATE INDEX idx_integration_conn_refresh_due ON public.integration_connections USING btree (expires_at) WHERE (((client_ref IS NOT NULL) AND (NOT needs_reconnection)) AND (expires_at IS NOT NULL))
+index CREATE INDEX idx_integration_conn_refresh_due ON public.integration_connections USING btree (expires_at) WHERE ((client_ref IS NOT NULL) AND (NOT needs_reconnection) AND (expires_at IS NOT NULL))
 index CREATE INDEX idx_integration_conn_space ON public.integration_connections USING btree (space_id) WHERE (space_id IS NOT NULL)
 index CREATE INDEX idx_integration_conn_user ON public.integration_connections USING btree (user_id) WHERE (user_id IS NOT NULL)
 index CREATE INDEX idx_integration_oauth_clients_lookup ON public.integration_oauth_clients USING btree (space_id, integration_package_id, auth_key)
