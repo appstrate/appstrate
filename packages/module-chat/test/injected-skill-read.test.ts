@@ -19,6 +19,8 @@ import {
   type TestContext,
 } from "../../../apps/api/test/helpers/auth.ts";
 import {
+  seedPackage,
+  seedSpacePackage,
   seedPublishedVersion,
   seedSpaceMember,
   seedSpaceRole,
@@ -27,6 +29,10 @@ import { mcpRpc, inSpace } from "../../../apps/api/test/helpers/mcp.ts";
 import { registerTestPlatformApp } from "../../../apps/api/test/helpers/platform-app.ts";
 import { buildPlatformMcpTools, connectPlatformMcp } from "../src/pi-chat/mcp-tools.ts";
 import type { ExtensionAPI } from "@appstrate/runner-pi";
+import { db } from "@appstrate/db/client";
+import { chatSessionSpaces } from "@appstrate/db/schema";
+import { readSpaceDetails, formatSpaceDetails } from "../src/space-details.ts";
+import { withCallerClient } from "../src/platform-mcp.ts";
 import { platformMcpUrl } from "../src/platform-mcp.ts";
 import { buildCallerContextBlock } from "../src/prompt.ts";
 import { turnCapabilities } from "../src/capabilities.ts";
@@ -354,5 +360,59 @@ describe("`read_resource` in a discovery turn, over the turn's own bearer", () =
     } finally {
       await reading.turn.close();
     }
+  });
+});
+
+describe("what a space holds, read with `get_me` over the caller's own connection", () => {
+  it("parses a seeded agent into a rendered entry and records no space on any conversation", async () => {
+    const agentId = "@injectedread/digest";
+    await seedPackage({
+      id: agentId,
+      orgId: owner.orgId,
+      createdBy: owner.user.id,
+      draftManifest: {
+        name: agentId,
+        version: "1.0.0",
+        type: "agent",
+        display_name: "Digest",
+        description: "Daily digest.",
+      },
+    });
+    await seedPublishedVersion(agentId, "1.0.0");
+    await seedSpacePackage(owner.defaultSpaceId, agentId, { enabled: true });
+    const granted = ["chat:read", "chat:write", "mcp:read", "mcp:invoke", "agents:run"];
+    const space = {
+      id: owner.defaultSpaceId,
+      name: "Default",
+      integrations: false,
+      agents: true,
+    };
+    const details = await withCallerClient(
+      () =>
+        connectPlatformMcp({
+          url: platformMcpUrl("http://localhost", owner.orgId),
+          headers: {
+            Authorization: `Bearer ${mintMcpLoopbackToken({
+              userId: owner.user.id,
+              email: owner.user.email,
+              name: owner.user.name,
+              orgId: owner.orgId,
+              orgRole: "owner",
+              permissions: granted,
+            })}`,
+            "x-org-id": owner.orgId,
+          },
+          fetch: ((input: RequestInfo | URL, init?: RequestInit) =>
+            app.request(new Request(input, init))) as typeof fetch,
+        }),
+      (client, signal) => readSpaceDetails(client, signal, [space]),
+    );
+    expect(details).toHaveLength(1);
+    expect(details[0]!.agents?.map((agent) => agent.id)).toEqual([agentId]);
+    const { text, shown } = formatSpaceDetails(details);
+    expect(shown).toEqual([owner.defaultSpaceId]);
+    expect(text).toContain(`- \`${agentId}\``);
+    // Reading over the caller's connection carries no session: it records nothing.
+    expect(await db.select().from(chatSessionSpaces)).toEqual([]);
   });
 });

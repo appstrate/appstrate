@@ -292,19 +292,19 @@ export async function readPublishedIntegrationManifests(
 }
 
 /**
- * The auths `id` declares, off a {@link readPublishedIntegrationManifests} read: the published
- * manifest's, the draft's only while no version is published, none when versions exist but none
+ * The manifest that governs `id`, off a {@link readPublishedIntegrationManifests} read: the
+ * published one, the draft only while no version is published, none when versions exist but none
  * resolves (the sheet's 404).
  */
-export function declaredAuths(
+export function governingIntegrationManifest(
   id: string,
   read: Awaited<ReturnType<typeof readPublishedIntegrationManifests>>,
   draftManifest: unknown,
-): IntegrationManifest["auths"] {
+): IntegrationManifest | undefined {
   const published = read.manifests.get(id);
-  if (published) return published.auths;
+  if (published) return published;
   return read.unpublished.has(id)
-    ? (draftManifest as IntegrationManifest | null)?.auths
+    ? ((draftManifest as IntegrationManifest | null) ?? undefined)
     : undefined;
 }
 

@@ -32,8 +32,8 @@ pour la vue par espace (N = 1) et la vue multi-espaces (N > 1). Les clients MCP 
 profitent de la même donnée par `get_me`.
 
 Hors périmètre : `recent_runs` dans le prompt (casse le cache), la disponibilité des
-intégrations requises d'un agent (reste au pré-vol de `run_and_wait`), un réglage global du
-chat.
+intégrations requises d'un agent (reste au pré-vol de `run_and_wait`), un réglage d'organisation ou d'instance (le seul réglage est la préférence
+d'utilisateur du niveau 3).
 
 ## Faits vérifiés sur `origin/main`
 
@@ -99,13 +99,18 @@ Section `## Spaces` du bloc de contexte, une ligne par espace du tour :
 
 - **Source** : `spaces` du tour, sans requête. Capacités par `turnCapabilities` appliqué à
   chaque espace sous le plafond du tour (`ceiling`).
-- **Formulation** : `spaceActs` (vocabulaire commun) et `describeSpaceActs`, qui suit
-  `describeSpace` des actes (`@appstrate/core/mcp-spaces`). Le chat et le serveur MCP nomment
+- **Formulation** : `spaceActs` (vocabulaire commun) et `describeSpaceActs` (`space-acts.ts`), qui suit
+  `describeSpace` (`@appstrate/core/mcp-spaces`). Le chat et le serveur MCP nomment
   les mêmes actes.
 - **MCP** : `get_me` ajoute `can` à chaque entrée de `spaces[]`, lu de `space.surface`. Un acte
   absent de la liste n'est pas permis (même principe que `McpSurface` : enseigné par l'absence).
 - **Doctrine** : faits sur l'appelant, aucun espace enregistré. `get_me` sans espace rend déjà
   les rôles.
+- **Plafond** : `CHAT_CONTEXT_SPACES_BUDGET_CHARS` = 4 000 caractères (`space-acts.ts`), tenu par un
+  niveau de détail commun à tous les espaces, le plus fin qui tient : une ligne par espace ;
+  sinon une ligne par ensemble d'actes identique, qui nomme tous les espaces concernés, triés ;
+  sinon le nombre d'espaces et un renvoi à `get_me`, qui les liste avec leur `can`. Aucun
+  espace n'est coupé ni mis avant un autre.
 - **Cache** : stable tant que les rôles ne changent pas.
 
 ### Niveau 2 — détail des espaces engagés (toujours actif)
@@ -140,7 +145,7 @@ Agents:
 - **Exclus** : `recent_runs`, `skills` (déjà sous `## Skills`).
 - **Échec** : un espace dont la lecture échoue ou dépasse le délai est absent du détail ; le
   tour continue.
-- **Doctrine** : origine et touchés sont déjà enregistrés. Espace personnel : décision D1.
+- **Doctrine** : origine et touchés sont déjà enregistrés. Espace personnel : détaillé sans être enregistré (données de l'auteur, dont il ne peut pas perdre l'accès).
 - **Cache** : invalidé une fois quand l'ensemble touché grandit, ou quand une connexion ou un
   agent change.
 
@@ -148,7 +153,7 @@ Ajout au payload par espace, utile aussi aux clients MCP : `connectable_integrat
 des intégrations actives qui déclarent une authentification (manifeste publié d'abord) sans
 connexion utilisable, pour un appelant qui détient `integrations:connect` ; une intégration dont
 l'espace bloque les connexions des membres n'y figure que sous `integrations:configure`
-(plafonné). Décision D4.
+(plafonné).
 
 ### Niveau 3 — tous les espaces (préférence de l'utilisateur, désactivée par défaut)
 
@@ -161,15 +166,20 @@ l'espace bloque les connexions des membres n'y figure que sous `integrations:con
   que `search` : une absence n'est pas une donnée, #2349).
 - Sans effet sur une conversation limitée (un seul espace) ; la ligne n'y est pas proposée.
 
-## Décisions à prendre
+## Décisions prises
 
-| #   | Décision                                                     | Recommandation                                                                      |
-| --- | ------------------------------------------------------------ | ----------------------------------------------------------------------------------- |
-| D1  | Injecter le détail de l'espace personnel l'enregistre-t-il ? | Non : données de l'auteur, il ne peut pas en perdre l'accès. Exception à documenter |
-| D2  | Forme de `can` sur le fil                                    | Tableau de noms d'actes en snake_case ; absent = interdit                           |
-| D3  | Valeur du plafond du niveau 2                                | 8 000 car., confirmée par la mesure du lot 0, verrouillée par un test               |
-| D4  | `connectable_integrations` dans `/api/me/context`            | Oui, ids seuls, plafonné                                                            |
-| D5  | Construire le niveau 3                                       | Oui, en préférence d'utilisateur (aucune migration)                                 |
+| #   | Décision                                                     | Choix                                                                             |
+| --- | ------------------------------------------------------------ | --------------------------------------------------------------------------------- |
+| D1  | Injecter le détail de l'espace personnel l'enregistre-t-il ? | Non : données de l'auteur, il ne peut pas en perdre l'accès. Exception documentée |
+| D2  | Forme de `can` sur le fil                                    | Tableau de noms d'actes en snake_case ; absent = interdit                         |
+| D3  | Valeur du plafond du niveau 2                                | 8 000 car., confirmée par la mesure du lot 0, verrouillée par un test             |
+| D4  | `connectable_integrations` dans `/api/me/context`            | Oui, ids seuls, plafonné                                                          |
+| D5  | Construire le niveau 3                                       | Oui, en préférence d'utilisateur (aucune migration)                               |
+| D6  | Plafond du niveau 1                                          | 4 000 car., dégradation neutre : lignes, groupes par actes, décompte              |
+
+Une organisation ordinaire qui active l'interrupteur du niveau 3 peut atteindre le plafond du
+niveau 2 : tous les espaces, ceux déjà engagés compris, perdent alors descriptions et libellés
+de connexion. C'est voulu : la neutralité prime, aucun espace n'est mieux détaillé qu'un autre.
 
 ## Lots
 
@@ -203,7 +213,7 @@ Un lot = une PR, depuis une branche neuve sur `origin/main`.
 
 | Fichier                                    | Changement                                                                                              |
 | ------------------------------------------ | ------------------------------------------------------------------------------------------------------- |
-| `packages/core/src/mcp-spaces.ts`          | `spaceActs`, `describeSpaceActs`, `SpaceAct` ; entrée CHANGELOG `[Unreleased]`                          |
+| `packages/core/src/mcp-spaces.ts`          | `spaceActs`, `SpaceAct` ; entrée CHANGELOG `[Unreleased]`                                               |
 | `apps/api/src/modules/mcp/tools.ts`        | `buildGetMeTool` : `can` sur `spaces[]` depuis `space.surface` ; description de l'outil                 |
 | `apps/api/src/modules/mcp/spaces.ts`       | projection `McpSurface` → liste d'actes, à un seul endroit                                              |
 | `packages/module-chat/src/capabilities.ts` | capacités d'un espace sous le plafond du tour (réutilise `turnCapabilities`)                            |
@@ -299,7 +309,7 @@ Puis refaire le comptage du lot 0.
 
 ## À la release
 
-- `@appstrate/core` : `spaceActs` et `describeSpaceActs` sont des ajouts (mineure), mais `[Unreleased]` porte déjà
+- `@appstrate/core` : `spaceActs` et `SpaceAct` sont des ajouts (mineure), mais `[Unreleased]` porte déjà
   deux retraits de #2397 : la prochaine version de core est majeure de toute façon. Rafraîchir
   `published-export-baseline.json` après publication.
 - Aucune migration.

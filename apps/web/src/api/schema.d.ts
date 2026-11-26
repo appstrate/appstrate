@@ -17869,11 +17869,11 @@ export interface operations {
                             /** @description Whether this space is one member's personal space (always `private`, no other members) rather than a team space. */
                             personal: boolean;
                         };
-                        /** @description Ids of the integrations active in the current space that declare an auth, for which the caller has no usable connection and may create one (capped): a connect flow is what would make them usable here. Empty unless the caller holds `integrations:read` and `integrations:connect`; one whose member connections the space blocks is listed only under `integrations:configure`. */
+                        /** @description Ids of the integrations active in the current space that the caller has not connected and for which a connect flow can start (an `oauth2` auth needs a usable client), sorted by id. One whose only connection needs reconnection is not listed: it stays in `connections`, flagged `needs_reconnection`. Whole or withheld: more than 15 and the list is empty (`connectable_integrations_truncated` true), never a prefix. Empty unless the caller holds `integrations:read` and `integrations:connect`; one whose member connections the space blocks is listed only under `integrations:configure`. */
                         connectable_integrations?: string[];
-                        /** @description True when `connectable_integrations` was capped. */
+                        /** @description True when `connectable_integrations` was withheld for exceeding 15. */
                         connectable_integrations_truncated?: boolean;
-                        /** @description How many connectable integrations there are before the cap. */
+                        /** @description How many connectable integrations there are, listed or withheld. */
                         connectable_integrations_total?: number;
                         /** @description The caller's own most recent runs (actor-scoped), newest first — lets an agent reference a recent or failed run without a discovery round-trip. */
                         recent_runs?: {

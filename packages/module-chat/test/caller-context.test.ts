@@ -747,6 +747,55 @@ describe("buildCallerContextBlock", () => {
     expect((await build()).text).toBe(text);
   });
 
+  it("reads the pinned skills while many slow details are read, a few at a time", async () => {
+    const grants = [...BUILDER, "integrations:read", "chat:read", "chat:write"];
+    const many = Array.from({ length: 24 }, (_, i) =>
+      reachableSpace({ id: `spc_${i}`, name: `Equipe ${i}`, permissions: grants }),
+    );
+    const A = "skill://spc_0/acme/a/a/SKILL.md";
+    const caller = fakeSkillsClient({
+      published: [skillEntry(A, "1.0.0")],
+      texts: { [A]: "a body" },
+      getMe: Object.fromEntries(
+        many.map((space) => [
+          space.id,
+          { space: { id: space.id }, connections: [], connectable_integrations: [], agents: [] },
+        ]),
+      ),
+    });
+    let inFlight = 0;
+    let peak = 0;
+    const open = async (signal: AbortSignal) => {
+      const client = await caller.open(signal);
+      return {
+        ...client,
+        callTool: async (...args: Parameters<typeof client.callTool>) => {
+          inFlight++;
+          peak = Math.max(peak, inFlight);
+          await new Promise((resolve) => setTimeout(resolve, 20));
+          inFlight--;
+          return client.callTool(...args);
+        },
+      };
+    };
+    const { text, injected } = await buildCallerContextBlock(fakeContext({ orgRole: "member" }), {
+      spaces: many,
+      detailSpaces: many,
+      restricted: false,
+      user,
+      capabilities: caps(grants),
+      permissions: grants,
+      skills: { skillDiscovery: false, pinnedSkills: ["@acme/a"] },
+      cited: [],
+      drafts: false,
+      openCaller: open,
+    });
+    expect(Object.keys(injected.skills)).toEqual(["@acme/a"]);
+    expect(text).toContain("a body");
+    expect(peak).toBeLessThanOrEqual(4);
+    expect(caller.calls.filter((call) => call.startsWith("get_me"))).toHaveLength(24);
+  });
+
   it("opens no connection when there are neither skills nor details to read", async () => {
     const { text } = await buildCallerContextBlock(fakeContext({ orgRole: "member" }), {
       spaces: REACH,

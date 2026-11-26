@@ -58,6 +58,7 @@ import {
   persistAssistantMessage,
   storedHistory,
   touchSessionSpace,
+  touchSessionSpaces,
 } from "./persistence.ts";
 import { registerStopController, unregisterStopController } from "./stop-registry.ts";
 import { setActiveStream, clearActiveStream, type TurnScope } from "./resumable.ts";
@@ -458,15 +459,14 @@ export async function handleChatStream(
         return fileId ? fileSpaceId(orgId, fileId, { chatSessionId, personalSpaceId }) : undefined;
       },
     };
-    // Detailed without recording: origin and touched spaces are recorded already, the personal
-    // space is the caller's own (D1). With every space asked for, the others follow in reach order.
+    // Detailed without recording: the origin and touched spaces are recorded already, and the
+    // personal space holds the caller's own data, which they cannot lose access to. Every other
+    // space is detailed only when the user asked for them all, and recorded before inference.
     const engaged = new Set(
       [conv.spaceId, personalSpaceId, ...conv.touched].filter((id) => id !== null),
     );
-    const detailSpaces = [
-      ...[...engaged].flatMap((id) => spaces.filter((space) => space.id === id)),
-      ...(body.context_all_spaces === true ? spaces.filter((space) => !engaged.has(space.id)) : []),
-    ];
+    const detailSpaces =
+      body.context_all_spaces === true ? spaces : spaces.filter((space) => engaged.has(space.id));
     return {
       skills: conv.selection,
       detailSpaces,
@@ -654,8 +654,9 @@ export async function handleChatStream(
   // prompt through the MCP server's `instructions`, which this route does not
   // fetch; the engine appends them and applies the policy itself
   // (`pi-chat/engine.ts`). Re-applying it to this prompt would match nothing — and
-  // could only misfire, since the context block below carries org-authored names
-  // (spaces, skills) and would be truncated at any that happened to spell the heading.
+  // could only misfire, since the context block below carries org-authored text
+  // (names of spaces, skills, integrations and agents, agent descriptions) and would be
+  // truncated at any that happened to spell the heading.
   // The block always opens with its own heading, so it is never empty.
   const system = `${buildSystemPrompt(capabilities)}\n\n${contextBlock}`;
 
@@ -720,15 +721,28 @@ export async function handleChatStream(
     claimTurnMs = Date.now() - claimStart;
   }
 
+  // A refused turn leaves no half-written state: the slot and the stream marker are given back.
+  const abandonClaim = async () => {
+    slot.release();
+    if (claimedSessionId) await clearActiveStream(claimedSessionId, streamId).catch(() => {});
+  };
+
   // The spaces the block showed an entry of beyond those engaged: recorded after the claim (a
   // refused turn widens nothing) and before inference, like an attachment's space.
   const recordedDetails = detailedSpaceIds.filter((id) => !engaged.has(id));
-  if (recordedDetails.length > 0) {
+  if (recordedDetails.length > 0 && chatSessionId) {
     try {
-      for (const id of recordedDetails) await organization.touch(id);
+      await touchSessionSpaces(
+        {
+          id: chatSessionId,
+          orgId,
+          userId: user.id,
+          originSpaceId: organization.originSpaceId ?? null,
+        },
+        recordedDetails,
+      );
     } catch (err) {
-      slot.release();
-      if (claimedSessionId) await clearActiveStream(claimedSessionId, streamId).catch(() => {});
+      await abandonClaim();
       throw err;
     }
   }
@@ -766,8 +780,7 @@ export async function handleChatStream(
         });
       });
     } catch (err) {
-      slot.release();
-      if (claimedSessionId) await clearActiveStream(claimedSessionId, streamId).catch(() => {});
+      await abandonClaim();
       throw err;
     }
     messages[messages.length - 1] = lastMessage;

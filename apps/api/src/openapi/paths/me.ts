@@ -897,19 +897,24 @@ export const mePaths = {
                     type: "array",
                     items: { type: "string" },
                     description:
-                      "Ids of the integrations active in the current space that declare an auth, " +
-                      "for which the caller has no usable connection and may create one (capped): " +
-                      "a connect flow is what would make them usable here. Empty unless the caller " +
-                      "holds `integrations:read` and `integrations:connect`; one whose member " +
-                      "connections the space blocks is listed only under `integrations:configure`.",
+                      "Ids of the integrations active in the current space that the caller has not " +
+                      "connected and for which a connect flow can start (an `oauth2` auth needs a " +
+                      "usable client), sorted by id. One whose only connection needs " +
+                      "reconnection is not listed: it stays in `connections`, flagged " +
+                      "`needs_reconnection`. Whole or withheld: more than 15 and the list is " +
+                      "empty (`connectable_integrations_truncated` true), never a prefix. Empty " +
+                      "unless the caller holds `integrations:read` and `integrations:connect`; " +
+                      "one whose member connections the space blocks is listed only under " +
+                      "`integrations:configure`.",
                   },
                   connectable_integrations_truncated: {
                     type: "boolean",
-                    description: "True when `connectable_integrations` was capped.",
+                    description:
+                      "True when `connectable_integrations` was withheld for exceeding 15.",
                   },
                   connectable_integrations_total: {
                     type: "integer",
-                    description: "How many connectable integrations there are before the cap.",
+                    description: "How many connectable integrations there are, listed or withheld.",
                   },
                   recent_runs: {
                     type: "array",

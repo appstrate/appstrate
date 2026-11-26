@@ -102,23 +102,30 @@ export async function touchedSpaceIds(
 }
 
 /**
- * Record that a conversation acted in `spaceId`, BEFORE the act is dispatched: it is then
- * listed and opened only while its author reaches that space too. Its origin space is touched
- * by definition and recorded nowhere else. The session list is told when the record grew, so
- * its space line refreshes.
+ * Record that a conversation acted in each of `spaceIds`, BEFORE the act is dispatched: it is then
+ * listed and opened only while its author reaches those spaces too. Its origin space is touched
+ * by definition and recorded nowhere else. One insert for all of them; the session list is told
+ * once, when the record grew, so its space line refreshes.
  */
-export async function touchSessionSpace(
+export async function touchSessionSpaces(
   session: { id: string; orgId: string; userId: string; originSpaceId: string | null },
-  spaceId: string,
+  spaceIds: readonly string[],
 ): Promise<void> {
-  if (spaceId === session.originSpaceId) return;
+  const ids = [...new Set(spaceIds)].filter((id) => id !== session.originSpaceId);
+  if (ids.length === 0) return;
   const inserted = await db
     .insert(chatSessionSpaces)
-    .values({ sessionId: session.id, spaceId, orgId: session.orgId })
+    .values(ids.map((spaceId) => ({ sessionId: session.id, spaceId, orgId: session.orgId })))
     .onConflictDoNothing()
     .returning({ spaceId: chatSessionSpaces.spaceId });
   if (inserted.length > 0) notifySessionUpdate(session.id, session.orgId, session.userId);
 }
+
+/** {@link touchSessionSpaces} for one space. */
+export const touchSessionSpace = (
+  session: Parameters<typeof touchSessionSpaces>[0],
+  spaceId: string,
+): Promise<void> => touchSessionSpaces(session, [spaceId]);
 
 /**
  * Runs a write that sets a conversation's origin space, checked in the acting set before it:

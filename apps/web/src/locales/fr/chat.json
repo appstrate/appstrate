@@ -198,7 +198,7 @@
   "composer.inlineRunModelChip": "Runs sur ce modèle",
   "composer.inlineRunModelChip.undo": "Revenir au modèle par défaut pour les runs",
   "composer.contextAllSpaces": "Contexte de tous les espaces",
-  "composer.contextAllSpaces.hint": "L’assistant connaît d’emblée les intégrations et les agents de chaque espace. Chaque espace qui en a est alors lié à la conversation : si vous perdez l’accès à l’un d’eux, elle vous est masquée.",
+  "composer.contextAllSpaces.hint": "L’assistant connaît d’emblée les intégrations et les agents de chaque espace, ou seulement leur nombre quand ils sont trop nombreux pour être listés. Chaque espace qui en a est alors lié à la conversation : si vous perdez l’accès à l’un d’eux, elle vous est masquée.",
   "composer.contextAllSpacesChip": "Contexte élargi",
   "composer.contextAllSpacesChip.undo": "Ne plus détailler tous les espaces",
   "composer.limit": "Limiter à {{name}}",

@@ -83,12 +83,6 @@ export function spaceActs(held: Readonly<Record<SpaceAct, boolean>>): SpaceAct[]
   return SPACE_ACTS.filter((act) => held[act]);
 }
 
-/** {@link describeSpace} followed by what the caller may do there. */
-export function describeSpaceActs(space: NamedSpace & { can: readonly SpaceAct[] }): string {
-  const can = space.can.length > 0 ? space.can.join(", ") : "nothing but looking things up";
-  return `${describeSpace(space)} — can: ${can}`;
-}
-
 /** The refusal of a `space_id` argument that is missing or names no reachable space. */
 interface SpaceIdRefusal {
   code: "missing_argument" | "unknown_space";

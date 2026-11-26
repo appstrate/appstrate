@@ -2473,10 +2473,11 @@ function buildGetMeTool(ctx: McpToolContext, surface: McpSurface): AppstrateTool
             "outside a run. Agents you run still use them. "
           : "") +
       "`connectable_integrations` names the integrations active in " +
-      "THIS space that need a connection the caller has none of and may create: connecting one " +
-      "makes it usable here. " +
-      "`agents`, `skills` and `connectable_integrations` are capped (`agents_truncated`, " +
-      "`skills_truncated`, `connectable_integrations_truncated`): `search` finds " +
+      "THIS space that the caller has not connected and for which a connect flow can start: " +
+      "connecting one makes it usable here. It is whole or withheld: more than 15 and it is " +
+      "empty with `connectable_integrations_truncated` true and the count in " +
+      "`connectable_integrations_total`; `search` finds them by keyword. " +
+      "`agents` and `skills` are capped (`agents_truncated`, `skills_truncated`): `search` finds " +
       "the rest by keyword.",
     annotations: {
       title: "Get caller context",

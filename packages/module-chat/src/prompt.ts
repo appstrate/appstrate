@@ -20,7 +20,6 @@ import {
 import { parseSkillUri, parseSkillUriPackage } from "@appstrate/core/skill-address";
 import type { AppstrateMcpClient, ListedSkillEntry } from "@appstrate/mcp-transport";
 import type { PrincipalKind, ReachableSpaceGrant } from "@appstrate/core/module";
-import { describeSpaceActs, type NamedSpace, type SpaceAct } from "@appstrate/core/mcp-spaces";
 import type { InjectedSkills } from "@appstrate/core/chat-contract";
 import { platformToolName } from "@appstrate/core/integration";
 import { logger } from "./logger.ts";
@@ -33,6 +32,7 @@ import {
   type SpaceDetail,
   type SpaceDetailsClient,
 } from "./space-details.ts";
+import { formatSpaces, type ContextSpace } from "./space-acts.ts";
 import { reaches, spaceActsInTurn, type TurnCapabilities } from "./capabilities.ts";
 import {
   injectedSkills,
@@ -223,7 +223,7 @@ Files the user attaches to the conversation are shown to you as \`[Attached file
 
 ${runs(`Files a run writes under \`outputs/\` render as downloadable chips in this chat. Content returned only through the \`output\` tool is plain data for YOU: it never becomes a file the user can open.${inline(` When the user asks for a file or downloadable deliverable (a report, a CSV, an image, a PDF…), have the sub-agent write it to \`outputs/\` AND return a short \`output\` payload for your own summary. Name it in kebab-case, in the user's language, with enough subject or scope to stand alone (for example, \`analyse-concurrents-restaurants-lyon.md\`). Without a named format, default to markdown; reach for another format only when the user asks.`)}
 
-`)}Your context block below is DATA — the user's identity and role, the current date, the space the conversation was opened in, when it has one, the spaces you can act in with what your role allows in each (\`can\`: an act it does not list is refused in that space, so never send one there)${skills(", the skills available")} and the permissions this turn holds.${
+`)}Your context block below is DATA — the user's identity and role, the current date, the space the conversation was opened in, when it has one, the spaces you can act in with what your role allows in each (\`can\`: an act it does not list is refused in that space, so never send one there; in an organization with very many spaces they are only counted, and \`get_me\` lists them with their \`can\`)${skills(", the skills available")} and the permissions this turn holds.${
     getMeReturns.length === 0
       ? ""
       : ` A \`${SPACE_DETAILS_HEADING}\` section, when present, shows what the spaces it names hold, as read at the start of this turn: a list there is whole and sorted by id, an order that ranks nothing, so pick from it on the request alone. For any other space, or once a connection or an activation changed one during the turn, \`get_me\` returns ${new Intl.ListFormat("en").format(getMeReturns)} for the space it names.`
@@ -241,9 +241,6 @@ ${idVerbatimBullet}${skills(`- The skills under \`${SKILLS_HEADING}\` are guides
 `)}
 The context lists the permissions this turn holds, in the same \`resource:action\` vocabulary as an operation's \`required_permissions\`. An operation that needs one outside that list is refused by the platform: say which permission is missing${invoke(" instead of attempting it")}, and never claim an ability the list does not carry.`;
 }
-
-/** A space of the turn as the context block names it: its line, then what the turn may do there. */
-type ContextSpace = NamedSpace & { can: readonly SpaceAct[] };
 
 /** The caller's identity, as the context block renders it. */
 interface CallerIdentity {
@@ -355,7 +352,7 @@ type CallerContextOpts = {
   origin?: { id: string; name: string };
   /** Limited to the origin space, which is then the only space the turn reaches. */
   restricted: boolean;
-  /** The spaces of the turn, each with the acts the turn holds there, in reach order. */
+  /** The spaces of the turn, each with the acts the turn holds there. */
   spaces?: readonly ContextSpace[];
   /** The TURN's set (post-`turnPermissions`): the authoring toggle narrows it. */
   permissions: readonly string[];
@@ -441,14 +438,10 @@ export function formatCallerContext(
     `Reply in the user's language (${normalizeChatLocale(opts.locale)}) unless they switch.`,
   );
   // Facts about the caller, not data of a space: naming them records no space on the conversation.
-  if (opts.spaces?.length) {
-    lines.push(
-      "",
-      "## Spaces you can act in",
-      ...opts.spaces.map((space) => `- ${describeSpaceActs(space)}`),
-    );
-  }
-  // Spaces the conversation already depends on (`buildCallerContextBlock`): recorded, or the caller's own.
+  const spaces = formatSpaces(opts.spaces ?? []);
+  if (spaces) lines.push("", spaces);
+  // What the spaces it depends on hold (`buildCallerContextBlock`): the conversation's recorded spaces,
+  // the caller's personal space, and every space once the user asked for them all.
   if (opts.spaceDetails) lines.push("", opts.spaceDetails);
   // Rendered whatever the authoring grant: the chat uses skills for itself.
   if (skillSection) lines.push("", skillSection);
@@ -703,7 +696,7 @@ export async function buildCallerContextBlock(
     cited: readonly string[];
     /** See `turnUsesDrafts`. */
     drafts: boolean;
-    /** The spaces of `spaces` whose details are read, in rendering order (`handleChatStream`). */
+    /** The spaces of `spaces` whose details are read (`handleChatStream`). */
     detailSpaces: readonly ReachableSpaceGrant[];
     /** Opened only when the turn has skills or details to read, under `signal`; closed once read. */
     openCaller: (signal: AbortSignal) => Promise<ChatCallerClient>;
@@ -711,7 +704,7 @@ export async function buildCallerContextBlock(
 ): Promise<
   Omit<RenderedContext, "injected"> & {
     injected: InjectedSkills;
-    /** The spaces whose details the block shows at least one entry of, in rendering order. */
+    /** The spaces whose details the block shows at least one entry of. */
     detailedSpaceIds: string[];
   }
 > {

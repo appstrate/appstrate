@@ -417,10 +417,12 @@ describe("buildServerInstructions grounding", () => {
   it("points every client at get_me, the chat included: the tool is declared for all", () => {
     expect(instructionsFor(permissions, false)).toContain("Start by calling get_me");
     // The chat's own prompt states the caller, their role and what its spaces hold: get_me is
-    // for another space's connections and agents.
+    // for the connections and agents of a space its context does not name.
     const chat = instructionsFor(permissions, true);
     expect(chat).not.toContain("Start by calling get_me");
-    expect(chat).toContain("for another space, get_me lists its connected integrations");
+    expect(chat).toContain(
+      "for a space that section does not name, get_me lists its connected integrations",
+    );
   });
 });
 

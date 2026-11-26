@@ -49,10 +49,12 @@ import {
   auditEvents,
   integrationConnectionShares,
   integrationConnections,
+  integrationOauthClients,
   integrationPins,
   organizations,
 } from "@appstrate/db/schema";
 import { eq } from "drizzle-orm";
+import { encryptCredentials } from "@appstrate/connect";
 
 import { ensurePersonalSpaceFor } from "../../../src/services/spaces.ts";
 
@@ -909,6 +911,88 @@ describe("Me API (/api/me)", () => {
       const memberList = await read(authHeaders(member));
       expect(memberList).toContain("@ctx/pub-auth");
       expect(memberList).not.toContain("@ctx/locked");
+    });
+
+    describe("connectable_integrations", () => {
+      const seedActive = async (id: string, draftManifest: Record<string, unknown>) => {
+        await seedPackage({
+          id,
+          orgId: ctx.orgId,
+          type: "integration",
+          source: "local",
+          draftManifest: { name: id, version: "0.1.0", type: "integration", ...draftManifest },
+        });
+        await seedSpacePackage(ctx.defaultSpaceId, id);
+      };
+      const read = async () => {
+        const res = await app.request("/api/me/context", { headers: authHeaders(ctx) });
+        expect(res.status).toBe(200);
+        return (await res.json()) as {
+          connectable_integrations: string[];
+          connectable_integrations_truncated: boolean;
+          connectable_integrations_total: number;
+        };
+      };
+
+      it("keeps only integrations a connect flow can start for", async () => {
+        // Runtime-bound: the platform wires it, nobody connects it.
+        await seedActive("@ctx/bound", {
+          auths: { key: { type: "api_key" } },
+          _meta: { "dev.appstrate/platform": {} },
+        });
+        // oauth2 with no client of any kind: the connect would be refused.
+        await seedActive("@ctx/no-client", { auths: { o: { type: "oauth2" } } });
+        // oauth2 with a client registered for the org: connectable.
+        await seedActive("@ctx/registered", { auths: { o: { type: "oauth2" } } });
+        await db.insert(integrationOauthClients).values({
+          orgId: ctx.orgId,
+          spaceId: null,
+          integrationId: "@ctx/registered",
+          authKey: "o",
+          clientId: "client",
+          clientSecretEncrypted: encryptCredentials({ client_secret: "s" }),
+          isDefault: true,
+        });
+        // A non-oauth2 auth needs no client.
+        await seedActive("@ctx/api-key", { auths: { k: { type: "api_key" } } });
+        // Its only connection needs reconnection: listed under `connections`, not here.
+        const broken = await seedConnectionFor({
+          orgId: ctx.orgId,
+          spaceId: ctx.defaultSpaceId,
+          integrationId: "@ctx/broken",
+          userId: ctx.user.id,
+        });
+        await seedSpacePackage(ctx.defaultSpaceId, "@ctx/broken");
+        await db
+          .update(integrationConnections)
+          .set({ needsReconnection: true })
+          .where(eq(integrationConnections.id, broken));
+
+        const body = await read();
+        expect(body.connectable_integrations).toEqual(["@ctx/api-key", "@ctx/registered"]);
+        expect(body.connectable_integrations_total).toBe(2);
+        expect(body.connectable_integrations_truncated).toBe(false);
+      });
+
+      it("lists in id order, whatever the seeding order", async () => {
+        for (const id of ["@ctx/c", "@ctx/a", "@ctx/b"]) {
+          await seedActive(id, { auths: { k: { type: "api_key" } } });
+        }
+        expect((await read()).connectable_integrations).toEqual(["@ctx/a", "@ctx/b", "@ctx/c"]);
+      });
+
+      it("withholds the whole list past the cap, never a prefix", async () => {
+        for (let i = 0; i < 16; i++) {
+          await seedActive(`@ctx/n${String(i).padStart(2, "0")}`, {
+            auths: { k: { type: "api_key" } },
+          });
+        }
+        expect(await read()).toMatchObject({
+          connectable_integrations: [],
+          connectable_integrations_truncated: true,
+          connectable_integrations_total: 16,
+        });
+      });
     });
 
     it("returns 401 without authentication", async () => {

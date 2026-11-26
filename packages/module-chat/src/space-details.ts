@@ -15,6 +15,9 @@ import { logger } from "./logger.ts";
 /** About 2k tokens. */
 export const CHAT_CONTEXT_DETAILS_BUDGET_CHARS = 8_000;
 
+/** How many `get_me` run at once: a huge organization must not flood the connection the skills share. */
+const READ_CONCURRENCY = 4;
+
 export const SPACE_DETAILS_HEADING = "## What these spaces hold";
 
 const DESCRIPTION_MAX_CHARS = 160;
@@ -124,34 +127,42 @@ function parseDetail(space: DetailSpace, result: unknown): SpaceDetail | undefin
 }
 
 /**
- * `get_me` in each of `spaces`, in parallel, over `client`. A space whose read fails, is refused
- * or answers malformed is left out: the turn goes on and the model reads it with its tools.
+ * `get_me` in each of `spaces`, a few at a time, over `client`, in the order of `spaces`. A space
+ * whose read fails, is refused or answers malformed is left out: the turn goes on and the model
+ * reads it with its tools.
  */
 export async function readSpaceDetails(
   client: SpaceDetailsClient,
   signal: AbortSignal,
   spaces: readonly DetailSpace[],
 ): Promise<SpaceDetail[]> {
-  const read = await Promise.all(
-    spaces.map((space) =>
-      client.callTool({ name: "get_me", arguments: { space_id: space.id } }, { signal }).then(
-        (result) => {
-          const detail = parseDetail(space, result);
-          if (!detail)
-            logger.warn("get_me of a space answered no context — left out", { spaceId: space.id });
-          return detail;
-        },
-        (err: unknown) => {
-          logger.warn("get_me of a space failed — left out", {
-            spaceId: space.id,
-            err: String(err),
-          });
-          return undefined;
-        },
-      ),
-    ),
+  const read = (space: DetailSpace): Promise<SpaceDetail | undefined> =>
+    client.callTool({ name: "get_me", arguments: { space_id: space.id } }, { signal }).then(
+      (result) => {
+        const detail = parseDetail(space, result);
+        if (!detail)
+          logger.warn("get_me of a space answered no context — left out", { spaceId: space.id });
+        return detail;
+      },
+      (err: unknown) => {
+        logger.warn("get_me of a space failed — left out", {
+          spaceId: space.id,
+          err: String(err),
+        });
+        return undefined;
+      },
+    );
+  const details = new Array<SpaceDetail | undefined>(spaces.length);
+  let next = 0;
+  await Promise.all(
+    Array.from({ length: Math.min(READ_CONCURRENCY, spaces.length) }, async () => {
+      while (next < spaces.length) {
+        const at = next++;
+        details[at] = await read(spaces[at]!);
+      }
+    }),
   );
-  return read.filter((detail): detail is SpaceDetail => detail !== undefined);
+  return details.filter((detail): detail is SpaceDetail => detail !== undefined);
 }
 
 const oneLine = (value: string, max: number): string => {
@@ -275,13 +286,20 @@ function agentLines(details: readonly SpaceDetail[], level: Level): string[] {
   });
 }
 
-/** The line naming the spaces where `get_me` capped a list, which is counted, never cut. */
-const countedLine = (what: string, counted: { space: DetailSpace; total: number }[]): string[] =>
+/**
+ * The line naming the spaces where `get_me` capped a list, which is counted, never cut. Such a
+ * space is left out of every entry above, so `elsewhere` says an entry may stand there too.
+ */
+const countedLine = (
+  what: string,
+  elsewhere: string,
+  counted: { space: DetailSpace; total: number }[],
+): string[] =>
   counted.length
     ? [
         `${what} are only counted where they outnumber what \`get_me\` lists: ${counted
           .map(({ space, total }) => `${label(space.name)} (${total})`)
-          .join(", ")}; \`search\` with the space's \`space_id\` finds them.`,
+          .join(", ")}; \`search\` with the space's \`space_id\` finds them, and ${elsewhere}.`,
       ]
     : [];
 
@@ -305,7 +323,11 @@ function renderLists(details: readonly SpaceDetail[], level: "full" | "names"): 
       ...(integrations.length || counted.length
         ? integrations
         : ["- none connected or to connect"]),
-      ...countedLine("Integrations to connect", counted),
+      ...countedLine(
+        "Integrations to connect",
+        "an integration listed above may also be to connect there",
+        counted,
+      ),
     );
   }
   const readsAgents = details.filter((detail) => detail.agents !== null);
@@ -318,7 +340,7 @@ function renderLists(details: readonly SpaceDetail[], level: "full" | "names"): 
       "",
       "Agents:",
       ...(agents.length || counted.length ? agents : ["- none active"]),
-      ...countedLine("Agents", counted),
+      ...countedLine("Agents", "an agent listed above may also be active there", counted),
     );
   }
   for (const detail of details) {
@@ -338,7 +360,13 @@ function renderCounts(details: readonly SpaceDetail[]): string[] {
       const parts = [
         detail.integrations === null
           ? "your role does not read its integrations"
-          : `${count(detail.integrations.length, "integration", "integrations")} with a connection, ${detail.connectableTotal} to connect`,
+          : `${count(
+              detail.integrations.filter(
+                (integration) => integration.active && !integration.needsReconnection,
+              ).length,
+              "usable integration",
+              "usable integrations",
+            )}, ${detail.connectableTotal} to connect`,
         detail.agents === null
           ? "your role does not run its agents"
           : count(detail.agentsTotal, "agent", "agents"),

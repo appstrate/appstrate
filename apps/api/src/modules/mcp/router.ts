@@ -195,10 +195,10 @@ export function buildServerInstructions(
   const runningAgents = runs ? "configuring or running" : "configuring";
   const agentUse = authors ? "building or configuring" : runningAgents;
   // The chat states who the caller is, their role and what the spaces it works in hold in its own
-  // prompt, so it is sent to get_me only for another space; an external client learns all of it
-  // from get_me.
+  // prompt, so it is sent to get_me only for a space that section does not name; an external
+  // client learns all of it from get_me.
   const grounding = rendersCards
-    ? `Your context says who you act for, your role and what the spaces this conversation works in hold; for another space, get_me lists its connected integrations (prefer those when ${agentUse} an agent) and its agents.`
+    ? `Your context says who you act for, your role and what the spaces this conversation works in hold; for a space that section does not name, get_me lists its connected integrations (prefer those when ${agentUse} an agent) and its agents.`
     : `Start by calling get_me to learn who you are acting for, your role in this organization, and which integrations are already connected (prefer those when ${agentUse} an agent).`;
   // Both halves of the connect bullet below end the same way: the connect offer
   // is already in the tool result, and only its DELIVERY differs by client. The

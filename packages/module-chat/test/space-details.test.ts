@@ -116,10 +116,10 @@ describe("formatSpaceDetails", () => {
     expect(text).not.toContain("@acme/a");
     expect(text).not.toContain("@appstrate/slack");
     expect(text).toContain(
-      "Integrations to connect are only counted where they outnumber what `get_me` lists: Perso (30); `search` with the space's `space_id` finds them.",
+      "Integrations to connect are only counted where they outnumber what `get_me` lists: Perso (30); `search` with the space's `space_id` finds them, and an integration listed above may also be to connect there.",
     );
     expect(text).toContain(
-      "Agents are only counted where they outnumber what `get_me` lists: Perso (40); `search` with the space's `space_id` finds them.",
+      "Agents are only counted where they outnumber what `get_me` lists: Perso (40); `search` with the space's `space_id` finds them, and an agent listed above may also be active there.",
     );
     expect(text).toContain("Your role does not read the integrations of Ventes.");
     expect(text).not.toContain("- none");
@@ -175,10 +175,33 @@ describe("formatSpaceDetails", () => {
       expect(text.split("\n")).toEqual([
         SPACE_DETAILS_HEADING,
         "As read at the start of this turn, only counted for room: `get_me` with a space's `space_id` lists them.",
-        "- Lab: 10 integrations with a connection, 0 to connect; 15 agents",
-        "- Perso: 10 integrations with a connection, 0 to connect; 15 agents",
-        "- Ventes: 10 integrations with a connection, 0 to connect; 15 agents",
+        "- Lab: 10 usable integrations, 0 to connect; 15 agents",
+        "- Perso: 10 usable integrations, 0 to connect; 15 agents",
+        "- Ventes: 10 usable integrations, 0 to connect; 15 agents",
       ]);
+    });
+
+    it("counts the usable integrations alone: a switched-off one or one to reconnect is not usable", () => {
+      const integration = (id: string, active: boolean, needsReconnection: boolean) => ({
+        id,
+        name: id,
+        active,
+        needsReconnection,
+        connections: [],
+      });
+      const { text } = formatSpaceDetails(
+        [
+          detail(PERSO, {
+            integrations: [
+              integration("@a/ok", true, false),
+              integration("@a/off", false, false),
+              integration("@a/stale", true, true),
+            ],
+          }),
+        ],
+        200,
+      );
+      expect(text).toContain("- Perso: 1 usable integration, 0 to connect; 0 agents");
     });
 
     it("details no space when not even the counts fit", () => {
@@ -263,6 +286,31 @@ describe("readSpaceDetails", () => {
         agentsTotal: 1,
       },
     ]);
+  });
+
+  it("reads a few spaces at a time and keeps the order of the spaces", async () => {
+    const spaces = Array.from({ length: 12 }, (_, i) => ({
+      id: `spc_${i}`,
+      name: `S${i}`,
+      integrations: false,
+      agents: true,
+    }));
+    let inFlight = 0;
+    let peak = 0;
+    const slow: SpaceDetailsClient = {
+      callTool: async (args) => {
+        inFlight++;
+        peak = Math.max(peak, inFlight);
+        // The first spaces answer last: the order of the result is the order of `spaces`.
+        const id = String(args.arguments?.space_id);
+        await new Promise((resolve) => setTimeout(resolve, 30 - Number(id.slice(4))));
+        inFlight--;
+        return ok({ space: { id }, agents: [] }) as never;
+      },
+    };
+    const read = await readSpaceDetails(slow, AbortSignal.timeout(5000), spaces);
+    expect(read.map((detail) => detail.space.id)).toEqual(spaces.map((space) => space.id));
+    expect(peak).toBe(4);
   });
 
   it("reads no list the turn may not read there, whatever get_me answers", async () => {
