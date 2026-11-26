@@ -3,7 +3,7 @@
 /**
  * The package indexes: one row per package ACTIVE in one of the listed spaces (the activation
  * rule of `services/package-activation.ts`), each carrying `space_ids` (its home first). The
- * single-space index is the one-space case. Order: system packages first, then the index's own.
+ * single-space index is the one-space case. Ordered by package id, whatever the source.
  */
 
 import { inArray } from "drizzle-orm";

@@ -994,11 +994,11 @@ export const mePaths = {
                   agents: {
                     type: "array",
                     description:
-                      "Agents ACTIVE in the current space (capped), each with the required " +
+                      "Agents ACTIVE in the current space, ordered by id, each with the required " +
                       "integrations that keep it from launching here. Only " +
                       "present when the caller holds the `agents:run` permission; empty otherwise. " +
-                      "When `agents_truncated` is true, the full list is reachable via the " +
-                      "`listAgents` operation.",
+                      "Listed whole or not at all: empty when `agents_truncated` is true, the " +
+                      "agents then reachable via `search` or the `listAgents` operation.",
                     items: {
                       type: "object",
                       required: [
@@ -1046,20 +1046,22 @@ export const mePaths = {
                   agents_truncated: {
                     type: "boolean",
                     description:
-                      "True when the agent list was capped (full list via `listAgents`).",
+                      "True when more agents are active than the cap; `agents` is then empty " +
+                      "(full list via `listAgents`).",
                   },
                   agents_total: {
                     type: "integer",
-                    description: "Total active agents before the cap.",
+                    description: "Total active agents, listed or not.",
                   },
                   skills: {
                     type: "array",
                     description:
-                      "Skills the caller could attach to an agent in the current space " +
-                      "(capped). A catalogue read, not a runnable hint: only present when the " +
+                      "Skills the caller could attach to an agent in the current space, " +
+                      "ordered by id. A catalogue read, not a runnable hint: only present when the " +
                       "caller holds the `skills:read` permission; empty otherwise. Skills are not run directly — declare them under an agent " +
-                      "manifest's `dependencies.skills`. When `skills_truncated` is true, the " +
-                      "full list is reachable via the `listSkills` operation.",
+                      "manifest's `dependencies.skills`. Listed whole or not at all: empty when " +
+                      "`skills_truncated` is true, the skills then reachable via `search` or the " +
+                      "`listSkills` operation.",
                     items: {
                       type: "object",
                       required: [
@@ -1105,11 +1107,12 @@ export const mePaths = {
                   skills_truncated: {
                     type: "boolean",
                     description:
-                      "True when the skill list was capped (full list via `listSkills`).",
+                      "True when more skills are active than the cap; `skills` is then empty " +
+                      "(full list via `listSkills`).",
                   },
                   skills_total: {
                     type: "integer",
-                    description: "Total active skills before the cap.",
+                    description: "Total active skills, listed or not.",
                   },
                 },
               },

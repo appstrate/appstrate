@@ -2463,8 +2463,9 @@ function buildGetMeTool(ctx: McpToolContext, surface: McpSurface): AppstrateTool
           ? "You cannot call them directly here: an admin closed this space's credential proxy " +
             "outside a run. Agents you run still use them. "
           : "") +
-      "`agents` and `skills` are capped (`agents_truncated`, `skills_truncated`): `search` finds " +
-      "the rest by keyword.",
+      "`agents` and `skills` are listed whole, by id, or not at all: past the cap a list is " +
+      "empty, with `agents_truncated` / `skills_truncated` true and `agents_total` / " +
+      "`skills_total` counting it, and `search` finds its entries by keyword.",
     annotations: {
       title: "Get caller context",
       readOnlyHint: true,

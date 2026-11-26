@@ -17907,7 +17907,7 @@ export interface operations {
                             /** @description AFPS §4.4 — tool(s) an agent inherits when it declares this integration without an `integrations_configuration.<id>.tools` selection. Absent or `[]` means an agent that declares this integration without its own selection ends up with nothing callable, which publish/import reject and the run aborts on — such an agent must select a tool explicitly. To use any other tool, inspect the full `tool_catalog` via GET /api/integrations/{packageId}. */
                             default_tools?: string[] | "*";
                         }[];
-                        /** @description Agents ACTIVE in the current space (capped), each with the required integrations that keep it from launching here. Only present when the caller holds the `agents:run` permission; empty otherwise. When `agents_truncated` is true, the full list is reachable via the `listAgents` operation. */
+                        /** @description Agents ACTIVE in the current space, ordered by id, each with the required integrations that keep it from launching here. Only present when the caller holds the `agents:run` permission; empty otherwise. Listed whole or not at all: empty when `agents_truncated` is true, the agents then reachable via `search` or the `listAgents` operation. */
                         agents?: {
                             /** @description Invokable identifier, e.g. "@appstrate/triage". */
                             packageId: string;
@@ -17924,11 +17924,11 @@ export interface operations {
                             /** @enum {string} */
                             source: "local" | "system";
                         }[];
-                        /** @description True when the agent list was capped (full list via `listAgents`). */
+                        /** @description True when more agents are active than the cap; `agents` is then empty (full list via `listAgents`). */
                         agents_truncated?: boolean;
-                        /** @description Total active agents before the cap. */
+                        /** @description Total active agents, listed or not. */
                         agents_total?: number;
-                        /** @description Skills the caller could attach to an agent in the current space (capped). A catalogue read, not a runnable hint: only present when the caller holds the `skills:read` permission; empty otherwise. Skills are not run directly — declare them under an agent manifest's `dependencies.skills`. When `skills_truncated` is true, the full list is reachable via the `listSkills` operation. */
+                        /** @description Skills the caller could attach to an agent in the current space, ordered by id. A catalogue read, not a runnable hint: only present when the caller holds the `skills:read` permission; empty otherwise. Skills are not run directly — declare them under an agent manifest's `dependencies.skills`. Listed whole or not at all: empty when `skills_truncated` is true, the skills then reachable via `search` or the `listSkills` operation. */
                         skills?: {
                             /** @description Attachable identifier, e.g. "@appstrate/web-research". Declare under dependencies.skills. */
                             packageId: string;
@@ -17943,9 +17943,9 @@ export interface operations {
                             /** @enum {string} */
                             source: "local" | "system";
                         }[];
-                        /** @description True when the skill list was capped (full list via `listSkills`). */
+                        /** @description True when more skills are active than the cap; `skills` is then empty (full list via `listSkills`). */
                         skills_truncated?: boolean;
-                        /** @description Total active skills before the cap. */
+                        /** @description Total active skills, listed or not. */
                         skills_total?: number;
                     };
                 };
