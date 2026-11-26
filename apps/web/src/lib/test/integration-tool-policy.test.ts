@@ -9,6 +9,7 @@ import {
   declareTools,
   latestApprovals,
   reviewItems,
+  toolHints,
   type ToolPolicy,
 } from "../integration-tool-policy";
 
@@ -51,8 +52,45 @@ describe("reviewItems", () => {
   it("keeps a tool whose definition was too large, and skips non-pending tools", () => {
     const items = reviewItems([{ name: "export", status: "pending" }], policy);
     expect(items).toEqual([
-      { name: "export", fingerprint: "fp-e", definition: null, description: null, approved: null },
+      {
+        name: "export",
+        fingerprint: "fp-e",
+        definition: null,
+        description: null,
+        hints: { readOnly: false, destructive: false },
+        approved: null,
+      },
     ]);
+  });
+});
+
+describe("toolHints", () => {
+  it("reads only literal true hints from the server's annotations", () => {
+    expect(toolHints({ annotations: { readOnlyHint: true, destructiveHint: false } })).toEqual({
+      readOnly: true,
+      destructive: false,
+    });
+    expect(toolHints({ annotations: { destructiveHint: true } })).toEqual({
+      readOnly: false,
+      destructive: true,
+    });
+    for (const definition of [null, {}, { annotations: null }, { annotations: "x" }]) {
+      expect(toolHints(definition)).toEqual({ readOnly: false, destructive: false });
+    }
+    expect(toolHints({ annotations: { readOnlyHint: "true", destructiveHint: 1 } })).toEqual({
+      readOnly: false,
+      destructive: false,
+    });
+  });
+
+  it("rides each review item", () => {
+    const [item] = reviewItems([{ name: "s", status: "pending" }], {
+      listed: [
+        { name: "s", fingerprint: "f", definition: { annotations: { readOnlyHint: true } } },
+      ],
+      approvals: [],
+    });
+    expect(item?.hints).toEqual({ readOnly: true, destructive: false });
   });
 });
 
@@ -84,7 +122,14 @@ describe("a pending tool no listing carries", () => {
     expect(
       reviewItems([{ name: "ghost", status: "pending" }], { listed: [], approvals: [] }),
     ).toEqual([
-      { name: "ghost", fingerprint: null, definition: null, description: null, approved: null },
+      {
+        name: "ghost",
+        fingerprint: null,
+        definition: null,
+        description: null,
+        hints: { readOnly: false, destructive: false },
+        approved: null,
+      },
     ]);
   });
 });

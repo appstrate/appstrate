@@ -22,6 +22,22 @@ export type CatalogRow = Pick<ToolCatalogEntry, "name"> &
 
 type ToolDefinition = ToolPolicy["listed"][number]["definition"];
 
+/** What a server says of a tool through its MCP `annotations`; an aid to a decision, not a fact. */
+export interface ToolHints {
+  readOnly: boolean;
+  destructive: boolean;
+}
+
+/** Only a literal `true` counts: anything else a server sends in `annotations` is ignored. */
+export function toolHints(definition: ToolDefinition): ToolHints {
+  const annotations = definition?.annotations;
+  const hints = annotations !== null && typeof annotations === "object" ? annotations : {};
+  return {
+    readOnly: (hints as Record<string, unknown>).readOnlyHint === true,
+    destructive: (hints as Record<string, unknown>).destructiveHint === true,
+  };
+}
+
 /** One tool awaiting a verdict. */
 export interface ReviewItem {
   name: string;
@@ -30,6 +46,8 @@ export interface ReviewItem {
   /** `null`: not listed, or past the snapshot's size cap and not kept. */
   definition: ToolDefinition;
   description: string | null;
+  /** The server's own `annotations` of the tool: hints it declares about itself, never verified. */
+  hints: ToolHints;
   /** The definition approved before, when this one replaces it. */
   approved: { fingerprint: string; definition: ToolDefinition } | null;
 }
@@ -72,6 +90,7 @@ export function reviewItems(
           fingerprint: null,
           definition: null,
           description: null,
+          hints: toolHints(null),
           approved: approvedOf(name),
         },
       ];
@@ -85,6 +104,7 @@ export function reviewItems(
           fingerprint: listed.fingerprint,
           definition: listed.definition,
           description: typeof description === "string" ? description : null,
+          hints: toolHints(listed.definition),
           approved: approvedOf(name),
         };
       });

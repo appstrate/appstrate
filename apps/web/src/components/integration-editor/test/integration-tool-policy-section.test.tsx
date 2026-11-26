@@ -93,6 +93,7 @@ describe("ToolPolicyView review", () => {
       fingerprint: "a",
       definition: { description: "Search v1", marker: "UniqueField" },
       description: "Search v1",
+      hints: { readOnly: false, destructive: false },
       approved: null,
     };
     const { html } = view({ listed: [item], approvals: [], blocks: [] }, [
@@ -104,6 +105,37 @@ describe("ToolPolicyView review", () => {
     expect(render(<DefinitionCompare item={item} defaultOpen={false} />)).not.toContain(
       "UniqueField",
     );
+  });
+
+  it("labels the hints a server declares about a tool as its own, and shows none it did not", () => {
+    const { html } = view(
+      {
+        listed: [
+          {
+            name: "read",
+            fingerprint: "r",
+            definition: { annotations: { readOnlyHint: true, destructiveHint: false } },
+          },
+          {
+            name: "wipe",
+            fingerprint: "w",
+            definition: { annotations: { destructiveHint: true } },
+          },
+          { name: "plain", fingerprint: "p", definition: { annotations: { readOnlyHint: "yes" } } },
+        ],
+        approvals: [],
+        blocks: [],
+      },
+      ["read", "wipe", "plain"].map((name) => ({ name, status: "pending" as const })),
+    );
+    const card = (name: string) => {
+      const from = html.indexOf(`data-testid="tool-review-${name}"`);
+      return html.slice(from, html.indexOf("</li>", from));
+    };
+    expect(card("read")).toContain("Lecture seule selon le serveur");
+    expect(card("read")).not.toContain("Destructif selon le serveur");
+    expect(card("wipe")).toContain("Destructif selon le serveur");
+    expect(card("plain")).not.toContain("selon le serveur");
   });
 
   it("lists a pending tool no listing carries, with the way to read the server and nothing to approve", () => {
