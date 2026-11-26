@@ -14,6 +14,7 @@ import { useId, useRef, type ReactNode, type Ref } from "react";
 import { ComposerPrimitive } from "@assistant-ui/react";
 import {
   CpuIcon,
+  LayersIcon,
   MapPinIcon,
   PackageIcon,
   PaperclipIcon,
@@ -43,6 +44,7 @@ import { useConversationSkillsContext } from "./use-conversation-skills.ts";
 import { useConversationScope, useSpaceName } from "./conversation-scope.ts";
 import { setPackageAuthoringEnabled } from "./package-authoring-store.ts";
 import { setInlineRunModelEnabled } from "./inline-run-model-store.ts";
+import { setContextAllSpacesEnabled } from "./context-all-spaces-store.ts";
 import { useChatHost } from "./runtime-context.ts";
 import { RemovableChip } from "./removable-chip.tsx";
 import { sentenceWithNode } from "./sentence-with-name.tsx";
@@ -169,6 +171,21 @@ function DepartureChip({
         onRemove={() => setInlineRunModelEnabled(false)}
       >
         {t("composer.inlineRunModelChip")}
+      </RemovableChip>
+    );
+  if (departure === "contextAllSpaces")
+    return (
+      <RemovableChip
+        icon={<LayersIcon />}
+        open={{
+          onClick: onOpen,
+          label: t("composer.contextAllSpacesChip"),
+          testId: "composer-context-all-spaces-chip",
+        }}
+        removeLabel={t("composer.contextAllSpacesChip.undo")}
+        onRemove={() => setContextAllSpacesEnabled(false)}
+      >
+        {t("composer.contextAllSpacesChip")}
       </RemovableChip>
     );
   if (departure === "limit")

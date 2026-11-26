@@ -162,6 +162,7 @@ import type { DispatchContext } from "./api-call-batch.ts";
 import {
   grantedIn,
   grantedSpaces,
+  mcpSpaceActs,
   spaceIdsWhere,
   spaceArgumentRefusal,
   recordOperationSpaces,
@@ -2477,16 +2478,24 @@ export function buildFileResourceProvider(ctx: McpToolContext): AppstrateResourc
   };
 }
 
+/** The acts a `can` may name: those of the union surface an org-wide `get_me` is built with. */
+function actVocabulary(surface: McpSurface): string {
+  const acts = mcpSpaceActs(surface);
+  return acts.length > 0 ? ` (${acts.map((act) => `\`${act}\``).join(", ")})` : "";
+}
+
 function buildGetMeTool(ctx: McpToolContext, surface: McpSurface): AppstrateToolDefinition {
   const descriptor: Tool = {
     name: "get_me",
     description:
       "Return the caller's working context in the space of the call: `user`, `org` (with the " +
-      "organization `role`), `space`, `connections`, `agents`, `skills` and `recent_runs`" +
+      "organization `role`), `space`, `connections`, `connectable_integrations`, `agents`, `skills` " +
+      "and `recent_runs`" +
       (ctx.orgSpaces
         ? ", and `spaces`: your role in each space you reach, which, not the organization role, " +
-          "decides each call. With no space designated, it returns `user`, `org` and `spaces` " +
-          "alone: call it first without `space_id` to see which spaces you reach"
+          `decides each call, and \`can\`, the acts that role allows there${actVocabulary(surface)}: an act not ` +
+          "listed is refused in that space. With no space designated, it returns `user`, `org` " +
+          "and `spaces` alone: call it first without `space_id` to see which spaces you reach"
         : "") +
       ". `connections` holds one entry per " +
       "integration with a connection the caller may bind in THIS space, its own or shared into it " +
@@ -2510,6 +2519,11 @@ function buildGetMeTool(ctx: McpToolContext, surface: McpSurface): AppstrateTool
           ? "You cannot call them directly here: an admin closed this space's credential proxy " +
             "outside a run. Agents you run still use them. "
           : "") +
+      "`connectable_integrations` names the integrations active in " +
+      "THIS space that the caller has not connected and for which a connect flow can start: " +
+      "connecting one makes it usable here. It is whole or withheld: more than 15 and it is " +
+      "empty with `connectable_integrations_truncated` true and the count in " +
+      "`connectable_integrations_total`; `search` finds them by keyword. " +
       "`agents` and `skills` are capped (`agents_truncated`, `skills_truncated`): `search` finds " +
       "the rest by keyword.",
     annotations: {
@@ -2548,6 +2562,7 @@ function buildGetMeTool(ctx: McpToolContext, surface: McpSurface): AppstrateTool
       name: s.name,
       role: s.role,
       personal: s.personal,
+      can: mcpSpaceActs(s.surface),
     }));
     return readResponse(response, spaces ? { spaces } : undefined);
   };

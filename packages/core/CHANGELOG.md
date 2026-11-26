@@ -17,6 +17,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   whose calls only look things up although `readOnlyHint` is withheld; `isLookupTool` reads either.
 - **`isTurnBudgetNote`** (`@appstrate/core/chat-turn-metadata`): whether a tool result's text part
   is the chat's model-facing turn-budget line (`formatTurnBudgetNote`).
+- **`spaceActs`, `SpaceAct`** (`@appstrate/core/mcp-spaces`).
+  The acts a caller holds in one space (`invoke_operations`, `run_agents`, `inline_runs`,
+  `call_integration_tools`, `create_packages`), in one vocabulary for the MCP `get_me` tool's
+  `spaces[].can` and the chat's context block.
 
 ### Changed
 
