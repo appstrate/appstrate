@@ -14,6 +14,7 @@ import { describe, expect, it } from "bun:test";
 import type { ExtensionAPI } from "@appstrate/runner-pi";
 
 import { ACTIVE_SPACES_META_KEY, OPERATION_SPACES_META_KEY } from "@appstrate/core/mcp-spaces";
+import { TOOL_PRESENTATION_META_KEY } from "@appstrate/core/mcp-presentation";
 import { platformMcpUrl } from "../src/platform-mcp.ts";
 import { buildPlatformMcpTools, type TurnSpaces } from "../src/pi-chat/mcp-tools.ts";
 
@@ -280,6 +281,36 @@ describe("a forwarded tool", () => {
     content: [{ type: "text", text: "platform response" }],
     _meta: meta,
     isError,
+  });
+
+  it("hands the card the platform's presentation, and the model none of it", async () => {
+    const transport = transcript();
+    const { built, tool } = await tools(transport);
+    try {
+      const presentation = { title: "List models", read_only: true, destructive: false };
+      transport.answers.remote = remote({
+        [OPERATION_SPACES_META_KEY]: [],
+        [TOOL_PRESENTATION_META_KEY]: presentation,
+      });
+      const result = (await tool("invoke_operation").execute("c1", {
+        operation_id: "listModels",
+        space_id: "spc_beta",
+      })) as { presentation?: unknown; content: Array<{ text: string }> };
+      expect(result.presentation).toEqual(presentation);
+      expect(JSON.stringify(result.content)).not.toContain("List models");
+      // A malformed stamp is no presentation.
+      transport.answers.remote = remote({
+        [OPERATION_SPACES_META_KEY]: [],
+        [TOOL_PRESENTATION_META_KEY]: { title: "" },
+      });
+      const malformed = (await tool("invoke_operation").execute("c2", {
+        operation_id: "listModels",
+        space_id: "spc_beta",
+      })) as { presentation?: unknown };
+      expect("presentation" in malformed).toBe(false);
+    } finally {
+      await built.close();
+    }
   });
 
   it("uses the platform's resolved space receipt even when an org-level call named a space", async () => {

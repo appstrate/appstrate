@@ -73,6 +73,10 @@ interface RemoteTool extends ToolBase {
   kind: "remote";
   /** The name the server lists it by: `tools/call` takes it. */
   remote_name: string;
+  /** The server's display name for it, and the hints it declares (untrusted, for display only). */
+  title?: string;
+  read_only_hint?: true;
+  destructive_hint?: true;
   input_schema: Record<string, unknown>;
   output_schema?: Record<string, unknown>;
   /** The schema shown is partial: the budget steps applied to the server's descriptor, in order. */
@@ -84,6 +88,14 @@ interface RemoteTool extends ToolBase {
 }
 
 export type IntegrationTool = ApiCallTool | RemoteTool;
+
+/** How an integration whose tools a listing shows is named and drawn. */
+interface ListedIntegrationIdentity {
+  integration_package_id: string;
+  display_name: string;
+  /** Its manifest icon (an Iconify id or an image URL), when it declares one. */
+  icon?: string;
+}
 
 interface UnlistedIntegration {
   integration_package_id: string;
@@ -97,6 +109,8 @@ interface TruncatedCatalog {
 
 export interface IntegrationToolListing {
   tools: IntegrationTool[];
+  /** The integrations of `tools`, once each. */
+  integrations: ListedIntegrationIdentity[];
   connections: ConnectionOutsideRun[];
   /** The integrations active here that the caller has no usable connection of. */
   not_ready: IntegrationOutsideRun[];
@@ -441,6 +455,9 @@ async function remoteTools(
       integration_package_id: integrationId,
       description: upstream.description ? `${about}. ${upstream.description}` : `${about}.`,
       remote_name: upstream.name,
+      ...(upstream.title ? { title: upstream.title } : {}),
+      ...(upstream.read_only_hint ? { read_only_hint: true as const } : {}),
+      ...(upstream.destructive_hint ? { destructive_hint: true as const } : {}),
       input_schema: upstream.input_schema,
       ...(upstream.output_schema ? { output_schema: upstream.output_schema } : {}),
       ...(upstream.schema_reduced ? { schema_reduced: upstream.schema_reduced } : {}),
@@ -556,10 +573,20 @@ export async function listIntegrationTools(
     const ids = new Set(tools.map((tool) => tool.integration_package_id));
     return reachable.filter((c) => ids.has(c.integration_package_id));
   };
+  const identitiesOf = (tools: IntegrationTool[]): ListedIntegrationIdentity[] =>
+    [...new Set(tools.map((tool) => tool.integration_package_id))].map((id) => {
+      const manifest = manifests.get(id)!;
+      return {
+        integration_package_id: id,
+        display_name: manifest.display_name ?? manifest.name,
+        ...(typeof manifest.icon === "string" && manifest.icon ? { icon: manifest.icon } : {}),
+      };
+    });
   const httpMatch = named([...httpTools.values()].flat());
   if (query.name !== undefined && httpMatch.length > 0) {
     return {
       tools: httpMatch,
+      integrations: identitiesOf(httpMatch),
       connections: connectionsOf(httpMatch),
       not_ready: [],
       unlisted: [],
@@ -624,6 +651,7 @@ export async function listIntegrationTools(
   const shown = named(tools);
   return {
     tools: shown,
+    integrations: identitiesOf(shown),
     connections: connectionsOf(shown),
     not_ready: notReady,
     unlisted,

@@ -36,6 +36,7 @@ import { files, integrationConnections, oauthResource, runs, spaces } from "@app
 import { getTestApp } from "../../../../../test/helpers/app.ts";
 import { db, truncateAll } from "../../../../../test/helpers/db.ts";
 import { flushRedis } from "../../../../../test/helpers/redis.ts";
+import { readToolPresentation } from "@appstrate/core/mcp-presentation";
 import {
   createTestContext,
   memberContext,
@@ -781,6 +782,21 @@ describe("mcp integration tools", () => {
       expect(await listFiles()).toEqual(original);
     });
 
+    it("names the tool it refuses the arguments of", async () => {
+      await connect(owner, "mine");
+      const { result } = await mcp(caller, "tools/call", {
+        name: "call_integration_tool",
+        arguments: { tool: TOOL, arguments: { requests: "not a list" } },
+      });
+      expect(result?.isError).toBe(true);
+      expect(upstreamCalls).toHaveLength(0);
+      // The card of a refused call shows which integration it was for, not a bare tool name.
+      expect(readToolPresentation(result?._meta)).toMatchObject({
+        title: "API call",
+        subject: { kind: "integration", id: INTEGRATION_ID },
+      });
+    });
+
     it("reports the refresh verdict of a 401 the platform could not recover as `credential`", async () => {
       await connect(owner, "mine");
       mockUpstream(() => json({ message: "Bad credentials" }, 401));
@@ -1028,7 +1044,14 @@ describe("mcp integration tools", () => {
     beforeAll(() => {
       restoreEgress = allowLoopbackOAuthEgress();
       server = startFakeMcpServer({
-        tools: [{ name: "search", description: "Full-text search." }],
+        tools: [
+          {
+            name: "search",
+            title: "Search documents",
+            description: "Full-text search.",
+            annotations: { readOnlyHint: true },
+          },
+        ],
         bearer: REMOTE_TOKEN,
       });
     });
@@ -1101,6 +1124,15 @@ describe("mcp integration tools", () => {
         query: "search",
       });
       expect(searched.isError).toBe(false);
+      const searchedEnvelope = await mcp(caller, "tools/call", {
+        name: "search",
+        arguments: { ...where, kinds: ["integration_tool"], query: "search" },
+      });
+      expect(readToolPresentation(searchedEnvelope.result?._meta)).toMatchObject({
+        read_only: true,
+        count: 1,
+        items: [{ kind: "integration", id: REMOTE_ID }],
+      });
       const described = await callTool(caller, "describe", {
         ...where,
         kind: "integration_tool",
@@ -1152,6 +1184,13 @@ describe("mcp integration tools", () => {
       // platform's (the chat builds no connect card from it).
       expect(result.content).toEqual([{ type: "text", text: JSON.stringify({ q: "invoices" }) }]);
       expect(result._meta?.["dev.appstrate/relayed"]).toBe(true);
+      // Its card: the integration it reached and the server's title and hint for the tool.
+      expect(readToolPresentation(result._meta)).toEqual({
+        title: "Search documents",
+        read_only: true,
+        destructive: false,
+        subject: { kind: "integration", id: REMOTE_ID, display_name: expect.any(String) },
+      });
       // The platform's own answer is never marked.
       const refused = await mcp(caller, "tools/call", {
         name: "call_integration_tool",

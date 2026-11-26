@@ -25,6 +25,12 @@ import { z } from "zod";
 import type { CallToolResult, Tool } from "@modelcontextprotocol/sdk/types.js";
 import type { AppstrateRequestExtra, AppstrateToolDefinition } from "@appstrate/mcp-transport";
 import { renderFieldPath } from "@appstrate/core/api-errors";
+import {
+  isReadOnlyMethod,
+  TOOL_PRESENTATION_META_KEY,
+  type PresentationSubject,
+  type ToolPresentation,
+} from "@appstrate/core/mcp-presentation";
 import type { DispatchContext } from "./api-call-batch.ts";
 import { INTEGRATION_TOOLS_PATH } from "./catalog.ts";
 import { readSpaces, spacesShown, unsearched } from "./discovery.ts";
@@ -34,6 +40,7 @@ import {
   type CallableListing,
   type CallableTool,
 } from "./integration-tool-catalog.ts";
+import { withPresentation } from "./presentation.ts";
 import { MAX_SEARCH_LIMIT, rankByKeywords, searchScore } from "./search.ts";
 import {
   asRecord,
@@ -220,6 +227,7 @@ async function readAcrossSpaces(
   if (answered.length === 0 && refused[0]) return { refused: refused[0].refused };
 
   const tools = new Map<string, Merged<CallableTool>>();
+  const identities = new Map<string, CallableListing["integrations"][number]>();
   const truncatedCatalogs: Merged<CallableListing["truncated_catalogs"][number]>[] = [];
   const entries = {
     connections: new Map<string, Merged<CallableListing["connections"][number]>>(),
@@ -252,6 +260,9 @@ async function readAcrossSpaces(
       }
       tools.set(key, merged);
     }
+    for (const identity of read.integrations) {
+      identities.set(identity.integration_package_id, identity);
+    }
     for (const connection of read.connections) add(entries.connections, connection, space);
     for (const entry of read.not_ready) add(entries.not_ready, entry, space);
     for (const entry of read.unlisted) add(entries.unlisted, entry, space);
@@ -263,6 +274,7 @@ async function readAcrossSpaces(
   }
   return {
     tools: [...tools.values()],
+    integrations: [...identities.values()],
     connections: [...entries.connections.values()],
     not_ready: [...entries.not_ready.values()],
     unlisted: [...entries.unlisted.values()],
@@ -292,7 +304,10 @@ export async function searchIntegrationTools(
   contextIn: (space: McpSpace | undefined) => IntegrationToolContext,
   query: { tokens: readonly string[]; integration?: string; limit: number; cachedOnly: boolean },
   signal: AbortSignal | undefined,
-): Promise<{ section: Record<string, unknown>; searched: string[] } | { refused: RouteRefusal }> {
+): Promise<
+  | { section: Record<string, unknown>; searched: string[]; subjects: PresentationSubject[] }
+  | { refused: RouteRefusal }
+> {
   const { tokens, integration, limit, cachedOnly } = query;
   const read = await readAcrossSpaces(spaces, contextIn, { integration, cachedOnly }, signal);
   if (read.refused) return { refused: read.refused };
@@ -391,6 +406,57 @@ export async function searchIntegrationTools(
       truncatedShown,
       uncachedShown,
     ),
+    subjects: integrationSubjects(
+      read.integrations,
+      shown.map((tool) => tool.integration_package_id),
+    ),
+  };
+}
+
+/** The integrations of `ids` (in order, each once) as a presentation names and draws them. */
+function integrationSubjects(
+  identities: CallableListing["integrations"],
+  ids: readonly string[],
+): PresentationSubject[] {
+  const byId = new Map(identities.map((entry) => [entry.integration_package_id, entry]));
+  return [...new Set(ids)].map((id) => {
+    const identity = byId.get(id);
+    return {
+      kind: "integration",
+      id,
+      ...(identity ? { display_name: identity.display_name } : {}),
+      ...(identity?.icon ? { icon: identity.icon } : {}),
+    };
+  });
+}
+
+/** How a call of `tool` is shown: its integration, the server's title for it, and whether it wrote. */
+function toolCallPresentation(
+  read: CallableListing,
+  tool: CallableTool,
+  args: unknown,
+): ToolPresentation {
+  const [subject] = integrationSubjects(read.integrations, [tool.integration_package_id]);
+  if (tool.kind === "remote") {
+    return {
+      title: tool.title ?? tool.remote_name,
+      read_only: tool.read_only_hint === true,
+      destructive: tool.destructive_hint === true,
+      ...(subject ? { subject } : {}),
+    };
+  }
+  // An `api_call` batch reads only when each of its requests does.
+  const requests = asRecord(args)?.requests;
+  const methods = (Array.isArray(requests) ? requests : [args]).map((request) => {
+    const method = asRecord(request)?.method;
+    return typeof method === "string" ? method.toUpperCase() : "GET";
+  });
+  return {
+    title: "API call",
+    read_only: methods.every(isReadOnlyMethod),
+    destructive: methods.includes("DELETE"),
+    ...(methods.length === 1 ? { method: methods[0] } : {}),
+    ...(subject ? { subject } : {}),
   };
 }
 
@@ -555,12 +621,15 @@ export function buildCallIntegrationToolTool(ctx: IntegrationToolContext): Appst
     }
     if ("refusal" in found) return refuse(found.refusal);
     const { tool } = found;
+    // Once the tool is known, a refusal of its arguments names it too.
+    const refuseCall = (refusal: Refusal): CallToolResult =>
+      withPresentation(refuse(refusal), toolCallPresentation(read, tool, call.data.arguments));
 
     let toolArguments: unknown = call.data.arguments;
     if (tool.schema) {
       const parsed = tool.schema.safeParse(call.data.arguments);
       if (!parsed.success) {
-        return refuse(argumentsRefusal(parsed.error, call.data.arguments, ["arguments"]));
+        return refuseCall(argumentsRefusal(parsed.error, call.data.arguments, ["arguments"]));
       }
       toolArguments = parsed.data;
     } else {
@@ -579,7 +648,7 @@ export function buildCallIntegrationToolTool(ctx: IntegrationToolContext): Appst
           (key) => !Object.hasOwn(properties, key),
         );
         if (unknown.length > 0) {
-          return refuse(unknownArgumentsRefusal(unknown.map((key) => `arguments.${key}`)));
+          return refuseCall(unknownArgumentsRefusal(unknown.map((key) => `arguments.${key}`)));
         }
       }
       const required = Array.isArray(tool.input_schema.required) ? tool.input_schema.required : [];
@@ -588,22 +657,32 @@ export function buildCallIntegrationToolTool(ctx: IntegrationToolContext): Appst
           typeof name === "string" && call.data.arguments[name] === undefined,
       );
       if (missing.length > 0) {
-        return refuse({
+        return refuseCall({
           code: "missing_argument",
           error: missing.map((name) => `arguments.${name} is required.`).join(" "),
           arguments: missing.map((name) => `arguments.${name}`),
         });
       }
     }
-    const outcome = await tool.execute(toolArguments, extra, call.data.connection_id);
-    if ("code" in outcome) return refuse(outcome);
+    const presentation = toolCallPresentation(read, tool, toolArguments);
+    // The stamp's JSON and the comma before it, counted against the relayed result's budget.
+    const reservedBytes =
+      new TextEncoder().encode(JSON.stringify({ [TOOL_PRESENTATION_META_KEY]: presentation }))
+        .byteLength - 1;
+    const outcome = await tool.execute(
+      toolArguments,
+      extra,
+      call.data.connection_id,
+      reservedBytes,
+    );
+    if ("code" in outcome) return withPresentation(refuse(outcome), presentation);
     ctx.observe({
       tool: "call_integration_tool",
       durationMs: performance.now() - start,
       shownCount: outcome.shownCount,
       outcome: "invoked",
     });
-    return outcome.result;
+    return withPresentation(outcome.result, presentation);
   };
 
   return { descriptor, handler };

@@ -88,6 +88,16 @@ const CONNECTION_ID = "8a6f2f0e-1c1b-4c58-9a36-0d7b7a1f3c11";
 /** The tool `@acme/items` exposes. */
 const TOOL = "acme_items__api_call";
 
+/** The presentation `call_integration_tool` stamps on a call to `@acme/docs`' `search`. */
+const SEARCH_STAMP = {
+  "dev.appstrate/presentation": {
+    title: "search",
+    read_only: false,
+    destructive: false,
+    subject: { kind: "integration", id: "@acme/docs", display_name: "@acme/docs" },
+  },
+};
+
 /** A connection of a listed tool, as `GET /api/credential-proxy/tools` gives it. */
 function connection(overrides: Record<string, unknown> = {}): Record<string, unknown> {
   return {
@@ -149,6 +159,10 @@ const listingOf =
           ),
         ).values(),
       ],
+      // Each listed integration once, under its own name.
+      integrations: [...new Set(tools.map((tool) => tool.integration_package_id as string))].map(
+        (id) => ({ integration_package_id: id, display_name: id }),
+      ),
       not_ready: rest.not_ready ?? [],
       unlisted: rest.unlisted ?? [],
       truncated_catalogs: rest.truncated_catalogs ?? [],
@@ -1367,7 +1381,7 @@ describe("typed tools of a remote MCP integration", () => {
     // Relayed as the server answered, marked relayed whatever it claimed.
     expect(result).toEqual({
       ...upstream,
-      _meta: { "acme.example/page": 2, "dev.appstrate/relayed": true },
+      _meta: { "acme.example/page": 2, "dev.appstrate/relayed": true, ...SEARCH_STAMP },
     });
     const call = callTool(made.calls)!;
     expect(await call.json()).toEqual({
@@ -1463,7 +1477,10 @@ describe("typed tools of a remote MCP integration", () => {
       .get("call_integration_tool")!
       .handler({ tool: "acme_docs__search", arguments: { q: "x" } }, noExtra);
     // As is, marked relayed: a third party wrote it whole.
-    expect(result).toEqual({ ...upstream, _meta: { "dev.appstrate/relayed": true } });
+    expect(result).toEqual({
+      ...upstream,
+      _meta: { "dev.appstrate/relayed": true, ...SEARCH_STAMP },
+    });
   });
 
   it("explains missing_scopes in a typed tool's usage only", async () => {
@@ -1705,6 +1722,7 @@ describe("call_integration_tool — a result past the budget", () => {
     expect(result._meta).toEqual({
       "dev.appstrate/truncated": true,
       "dev.appstrate/relayed": true,
+      ...SEARCH_STAMP,
     });
     expect(jsonBytes(result)).toBeLessThanOrEqual(256 * 1024);
   });

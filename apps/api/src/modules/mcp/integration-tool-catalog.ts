@@ -53,11 +53,16 @@ export type CallableTool = IntegrationTool & {
    * absent for a typed tool, whose server validates them.
    */
   schema?: z.ZodType;
-  /** Runs a call whose arguments `schema` accepted, with the connection the caller named. */
+  /**
+   * Runs a call whose arguments `schema` accepted, with the connection the caller named.
+   * `reservedBytes` is what the caller adds to the result afterwards (its presentation stamp),
+   * kept out of a relayed result's budget.
+   */
   execute(
     args: unknown,
     extra: AppstrateRequestExtra,
     connectionId: string | undefined,
+    reservedBytes: number,
   ): Promise<ToolCallOutcome | Refusal>;
 };
 
@@ -147,7 +152,7 @@ const BOUNDED_META = markRelayedResult({ _meta: { "dev.appstrate/truncated": tru
  * closing note counting what was cut or dropped. The call has run: nothing of what fits is
  * dropped.
  */
-function boundedResult(result: CallToolResult): CallToolResult {
+function boundedResult(result: CallToolResult, reservedBytes: number): CallToolResult {
   const encoder = new TextEncoder();
   const size = (value: unknown) => encoder.encode(JSON.stringify(value)).byteLength;
   const blocks = Array.isArray(result.content) ? result.content : [];
@@ -159,7 +164,7 @@ function boundedResult(result: CallToolResult): CallToolResult {
     _meta: BOUNDED_META,
   });
   // Each block added to the array costs its JSON and a comma.
-  let budget = MAX_RESULT_BYTES - frame;
+  let budget = MAX_RESULT_BYTES - frame - reservedBytes;
   const take = (bytes: number) => {
     if (bytes + 1 > budget) return false;
     budget -= bytes + 1;
@@ -229,6 +234,7 @@ async function executeRemoteTool(
   args: Record<string, unknown>,
   extra: AppstrateRequestExtra,
   connectionId: string | undefined,
+  reservedBytes: number,
 ): Promise<ToolCallOutcome> {
   const response = await ctx.dispatch(
     new Request(new URL(REMOTE_TOOLS_CALL_PATH, ctx.origin).toString(), {
@@ -257,8 +263,8 @@ async function executeRemoteTool(
   }
   // The server's own result, marked relayed (`boundedResult` marks its own): the platform's
   // answers above are not.
-  if (new TextEncoder().encode(text).byteLength > MAX_RESULT_BYTES) {
-    return { result: boundedResult(result as CallToolResult), shownCount: 1 };
+  if (new TextEncoder().encode(text).byteLength + reservedBytes > MAX_RESULT_BYTES) {
+    return { result: boundedResult(result as CallToolResult, reservedBytes), shownCount: 1 };
   }
   return { result: markRelayedResult(result as CallToolResult), shownCount: 1 };
 }
@@ -279,7 +285,7 @@ function callable(ctx: DispatchContext, tool: IntegrationTool): CallableTool {
   return {
     ...tool,
     usage: REMOTE_TOOL_USAGE,
-    execute: (args, extra, named) =>
+    execute: (args, extra, named, reservedBytes) =>
       executeRemoteTool(
         ctx,
         tool.integration_package_id,
@@ -287,6 +293,7 @@ function callable(ctx: DispatchContext, tool: IntegrationTool): CallableTool {
         args as Record<string, unknown>,
         extra,
         named,
+        reservedBytes,
       ),
   };
 }
@@ -312,6 +319,9 @@ const integrationListingSchema = z.looseObject({
         ...toolFields,
         kind: z.literal("remote"),
         remote_name: z.string(),
+        title: z.string().optional(),
+        read_only_hint: z.literal(true).optional(),
+        destructive_hint: z.literal(true).optional(),
         input_schema: schemaObject,
         output_schema: schemaObject.optional(),
         schema_reduced: z.array(z.enum(TOOL_DESCRIPTOR_REDUCTIONS)).optional(),
@@ -319,6 +329,13 @@ const integrationListingSchema = z.looseObject({
         missing_scopes: z.record(z.string(), stringList).optional(),
       }),
     ]),
+  ),
+  integrations: z.array(
+    z.looseObject({
+      integration_package_id: z.string(),
+      display_name: z.string(),
+      icon: z.string().optional(),
+    }),
   ),
   connections: z.array(
     z.looseObject({

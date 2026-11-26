@@ -2,16 +2,38 @@
 
 /**
  * `src/ui/conversation-tools.ts` — a conversation's tool calls from its stored messages, and
- * `src/ui/tool-presentation.ts`, how each one is named.
+ * `showCall` (`src/ui/tool-presentation.ts`), how each one is named.
  */
 
 import { describe, expect, it } from "bun:test";
 import type { UIMessage } from "ai";
 import { conversationTools } from "../src/ui/conversation-tools.ts";
-import { isLookupCall, toolPresentation } from "../src/ui/tool-presentation.ts";
+import { showCall } from "../src/ui/tool-presentation.ts";
 
 /** An MCP text result, as the chat stores it. */
-const mcp = (payload: unknown) => ({ content: [{ type: "text", text: JSON.stringify(payload) }] });
+const mcp = (payload: unknown, presentation?: unknown) => ({
+  content: [{ type: "text", text: JSON.stringify(payload) }],
+  ...(presentation ? { presentation } : {}),
+});
+
+const GMAIL = {
+  kind: "integration",
+  id: "@appstrate/gmail",
+  display_name: "Gmail",
+  icon: "https://example.test/gmail.svg",
+} as const;
+
+/** The presentation the platform stamps on a Gmail tool call. */
+const gmailTool = (title: string) => ({
+  title,
+  read_only: false,
+  destructive: false,
+  subject: GMAIL,
+});
+
+/** Keys back, with their params when given: enough to see which one a label used. */
+const t = (key: string, params?: Record<string, unknown>) =>
+  typeof params?.defaultValue === "string" ? `${key}|${params.defaultValue}` : key;
 
 const user = (id: string) =>
   ({ id, role: "user", parts: [{ type: "text", text: "hi" }] }) as UIMessage;
@@ -82,34 +104,20 @@ describe("conversationTools", () => {
     ]);
   });
 
-  it("names the integration a call reached from the conversation's own search", () => {
+  it("names the integration a call reached from its presentation", () => {
     const { calls, integrations } = conversationTools([
       assistant("a1", [
-        call("s1", "search", {
-          state: "output-available",
-          input: { query: "mail" },
-          output: mcp({
-            results: [
-              {
-                kind: "integration_tool",
-                tools: [
-                  { id: "appstrate_gmail__send", integration_package_id: "@appstrate/gmail" },
-                  { id: "appstrate_gmail__list", integration_package_id: "@appstrate/gmail" },
-                ],
-              },
-            ],
-          }),
-        }),
         call("i1", "call_integration_tool", {
           state: "output-available",
           input: { tool: "appstrate_gmail__send", arguments: {} },
-          output: mcp({ ok: true }),
+          output: mcp({ ok: true }, gmailTool("Send")),
         }),
         call("i2", "call_integration_tool", {
           state: "output-available",
           input: { tool: "appstrate_gmail__list", arguments: {} },
-          output: mcp({ ok: true }),
+          output: mcp({ ok: true }, gmailTool("List")),
         }),
+        // Persisted before the platform stamped presentations: no integration is guessed.
         call("i3", "call_integration_tool", {
           state: "output-available",
           input: { tool: "unlisted__tool", arguments: {} },
@@ -117,13 +125,31 @@ describe("conversationTools", () => {
         }),
       ]),
     ]);
-    expect(calls.map((c) => c.integrationPackageId)).toEqual([
-      undefined,
+    expect(calls.map((c) => c.integration?.id)).toEqual([
       "@appstrate/gmail",
       "@appstrate/gmail",
       undefined,
     ]);
-    expect(integrations).toEqual([{ packageId: "@appstrate/gmail", calls: 2 }]);
+    expect(integrations).toEqual([{ integration: GMAIL, calls: 2 }]);
+  });
+
+  it("counts a call as a lookup only by the engine's stamp", () => {
+    const { calls } = conversationTools([
+      assistant("a1", [
+        call("l1", "search", {
+          state: "output-available",
+          input: { query: "x" },
+          output: mcp({ results: [] }),
+          callProviderMetadata: { appstrate: { lookup: true } },
+        }),
+        call("l2", "invoke_operation", {
+          state: "output-available",
+          input: { operation_id: "listRuns" },
+          output: mcp({ status: 200 }),
+        }),
+      ]),
+    ]);
+    expect(calls.map((c) => c.lookup)).toEqual([true, false]);
   });
 
   it("reads the space a call acted in from its stamp", () => {
@@ -141,34 +167,69 @@ describe("conversationTools", () => {
   });
 });
 
-describe("isLookupCall", () => {
-  it("keeps read-only tools and reading operations apart from actions", () => {
-    expect(isLookupCall("search", {})).toBe(true);
-    expect(isLookupCall("get_me", {})).toBe(true);
-    expect(isLookupCall("invoke_operation", { operation_id: "listRuns" })).toBe(true);
-    expect(isLookupCall("invoke_operation", { operation_id: "createAgent" })).toBe(false);
-    expect(isLookupCall("call_integration_tool", { tool: "x__y" })).toBe(false);
-    expect(isLookupCall("run_and_wait", {})).toBe(false);
-  });
-});
-
-describe("toolPresentation", () => {
-  it("names a call by its tool and what it acted on", () => {
-    expect(toolPresentation("invoke_operation", { operation_id: "deleteAgent" })).toMatchObject({
-      labelKey: "tool.op.delete",
-      target: "deleteAgent",
-    });
-    expect(toolPresentation("run_and_wait", { scope: "@acme", name: "triage" })).toMatchObject({
-      labelKey: "tool.op.launch",
-      target: "@acme/triage",
-    });
+describe("showCall", () => {
+  it("names a call by its own tool and arguments until a presentation lands", () => {
+    expect(
+      showCall({ toolName: "invoke_operation", args: { operation_id: "deleteAgent" } }, t),
+    ).toMatchObject({ label: "tool.op.other", idText: "deleteAgent" });
+    expect(
+      showCall({ toolName: "run_and_wait", args: { scope: "@acme", name: "triage" } }, t),
+    ).toMatchObject({ label: "tool.name.run_and_wait|run_and_wait", idText: "@acme/triage" });
     // The tool's own name: the namespace (never holding `__`) is a lossy cut of the package id.
     expect(
-      toolPresentation("call_integration_tool", { tool: "acme_crm__find__by_email" }),
-    ).toMatchObject({ labelKey: "tool.integrationTool", target: "find__by_email" });
-    expect(toolPresentation("call_integration_tool", { tool: "find" })).toMatchObject({
-      target: "find",
+      showCall(
+        { toolName: "call_integration_tool", args: { tool: "acme_crm__find__by_email" } },
+        t,
+      ),
+    ).toMatchObject({ idText: "find__by_email" });
+    expect(
+      showCall({ toolName: "call_integration_tool", args: { tool: "find" } }, t),
+    ).toMatchObject({
+      idText: "find",
     });
-    expect(toolPresentation("get_me", {})).toMatchObject({ label: "get_me" });
+    expect(showCall({ toolName: "get_me", args: {} }, t)).toMatchObject({
+      label: "tool.name.get_me|get_me",
+    });
+  });
+
+  it("draws an integration call under its integration, the label naming the tool", () => {
+    const shown = showCall(
+      {
+        toolName: "call_integration_tool",
+        args: { tool: "appstrate_gmail__send" },
+        result: mcp({ ok: true }, gmailTool("Send")),
+      },
+      t,
+    );
+    expect(shown).toMatchObject({ label: "Gmail · Send", subject: GMAIL });
+    expect(shown.idText).toBeUndefined();
+  });
+
+  it("draws an operation by its method and tag", () => {
+    const shown = showCall(
+      {
+        toolName: "invoke_operation",
+        args: { operation_id: "deleteAgent" },
+        result: mcp(
+          { status: 204 },
+          {
+            title: "Delete agent",
+            read_only: false,
+            destructive: true,
+            method: "DELETE",
+            tag: "Agents",
+          },
+        ),
+      },
+      t,
+    );
+    expect(shown.label).toBe("tool.verb.DELETE|DELETE · tool.tag.Agents|Agents");
+    expect(shown.idText).toBe("Delete agent");
+  });
+
+  it("ignores a presentation the schema refuses", () => {
+    expect(
+      showCall({ toolName: "get_me", args: {}, result: mcp({}, { title: 42 }) }, t),
+    ).toMatchObject({ label: "tool.name.get_me|get_me" });
   });
 });

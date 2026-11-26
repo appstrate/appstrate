@@ -515,6 +515,57 @@ describe("the space a tool call is stamped with", () => {
   });
 });
 
+describe("a call of a lookup tool", () => {
+  const call = (name: string): AgentSessionEvent[] => [
+    { type: "message_start", message: {} },
+    {
+      type: "message_update",
+      message: {},
+      assistantMessageEvent: {
+        type: "toolcall_start",
+        contentIndex: 0,
+        partial: { content: [{ type: "toolCall", id: "call_1", name }] },
+      },
+    } as AgentSessionEvent,
+    {
+      type: "message_update",
+      message: {},
+      assistantMessageEvent: {
+        type: "toolcall_end",
+        contentIndex: 0,
+        toolCall: { id: "call_1", name, arguments: { space_id: "spc_o" } },
+        partial: {},
+      },
+    } as AgentSessionEvent,
+  ];
+  const stamps = (name: string) => {
+    const mapper = new PiChatUiStreamMapper({ turnSpaces: new Set(["spc_o"]) });
+    mapper.describeLookupTools(new Set(["search"]));
+    const chunks = call(name).flatMap((e) => mapper.map(e)) as Array<{
+      type: string;
+      providerMetadata?: unknown;
+    }>;
+    return {
+      start: chunks.find((c) => c.type === "tool-input-start")?.providerMetadata,
+      available: chunks.find((c) => c.type === "tool-input-available")?.providerMetadata,
+    };
+  };
+
+  it("is stamped a lookup from its first chunk, beside the space it acted in", () => {
+    expect(stamps("mcp__platform__search")).toEqual({
+      start: { appstrate: { lookup: true } },
+      available: { appstrate: { spaceId: "spc_o", lookup: true } },
+    });
+  });
+
+  it("stamps nothing of the kind on a tool that writes", () => {
+    expect(stamps("mcp__platform__invoke_operation")).toEqual({
+      start: undefined,
+      available: { appstrate: { spaceId: "spc_o" } },
+    });
+  });
+});
+
 describe("PiChatUiStreamMapper — the last settled call", () => {
   const usage = (input: number, output: number, cacheRead = 0) => ({
     input,

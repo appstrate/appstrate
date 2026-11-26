@@ -54,7 +54,9 @@ import {
   type CreatedPackage,
 } from "./package-created.ts";
 import { unwrapMcpResult } from "@appstrate/core/mcp-result";
-import { operationPresentation, presented } from "./tool-presentation.ts";
+import { presentationOf, showCall } from "./tool-presentation.ts";
+import { SubjectGlyph, SubjectStack } from "./subject-glyph.tsx";
+import type { PresentationSubject } from "@appstrate/core/mcp-presentation";
 import {
   definedEntries,
   deriveToolPhase,
@@ -112,15 +114,25 @@ function Meta({
 }
 
 /**
- * Single leading icon per row: the operation's verb icon, tinted by phase
+ * Single leading icon per row: what the call acted on (`lead`: an integration's
+ * logo, an agent's tile) when the platform named it, else the verb icon, tinted by phase
  * (neutral / destructive). While running it is replaced by a spinner. Status is
  * otherwise carried by the HTTP badge, the red border, and the inline error —
  * no separate status icon, so the row shows one coherent glyph.
  */
-function LeadIcon({ phase, Icon }: { phase: ToolPhase; Icon: LucideIcon }) {
+function LeadIcon({
+  phase,
+  Icon,
+  lead,
+}: {
+  phase: ToolPhase;
+  Icon: LucideIcon;
+  lead?: React.ReactNode;
+}) {
   if (phase === "running") {
     return <Spinner className="text-muted-foreground size-4 shrink-0" />;
   }
+  if (lead) return lead;
   const tone = phase === "error" ? "text-destructive" : "text-muted-foreground";
   return <Icon className={`size-4 shrink-0 ${tone}`} />;
 }
@@ -154,9 +166,11 @@ function DetailSection({ titleKey, value }: { titleKey: string; value: unknown }
 export function ToolCallCard({
   phase,
   Icon,
+  subject,
   label,
   labelKey,
   idText,
+  aside,
   args,
   result,
   isError,
@@ -167,10 +181,14 @@ export function ToolCallCard({
 }: {
   phase: ToolPhase;
   Icon: LucideIcon;
+  /** What the call acted on (`tool-presentation.ts`): its glyph is drawn instead of `Icon`. */
+  subject?: PresentationSubject;
   /** Shown verbatim (a tool name); `labelKey` is translated instead. */
   label?: string;
   labelKey?: string;
   idText?: string;
+  /** Before the meta, e.g. a search's result count and the glyphs of what it found. */
+  aside?: React.ReactNode;
   args: unknown;
   result: unknown;
   isError?: boolean;
@@ -182,6 +200,7 @@ export function ToolCallCard({
   footer?: React.ReactNode;
 }) {
   const { t } = useChatHost();
+  const lead = subject ? <SubjectGlyph subject={subject} /> : undefined;
   const title = labelKey ? t(labelKey) : (label ?? "");
   const [open, setOpen] = React.useState(false);
   // `unwrapMcpResult` JSON-parses the tool payload. Unmemoized it re-parsed on
@@ -213,11 +232,12 @@ export function ToolCallCard({
         className="hover:bg-muted/50 flex h-9 w-full items-center gap-2 rounded-lg px-3 text-left text-sm"
         onClick={() => setOpen(true)}
       >
-        <LeadIcon phase={phase} Icon={Icon} />
+        <LeadIcon phase={phase} Icon={Icon} lead={lead} />
         <span className="flex min-w-0 flex-1 items-center gap-2 truncate">
           <span className="font-medium">{title}</span>
           {idText ? <code className="text-muted-foreground truncate text-xs">{idText}</code> : null}
         </span>
+        {aside}
         <CallSpace spaceId={spaceId} />
         <Meta phase={phase} status={status} durationMs={durationMs} />
       </button>
@@ -229,7 +249,7 @@ export function ToolCallCard({
         <Modal
           title={
             <span className="flex items-center gap-2">
-              <Icon className="size-4 shrink-0" />
+              {lead ?? <Icon className="size-4 shrink-0" />}
               {title}
               {idText ? <code className="text-muted-foreground text-xs">{idText}</code> : null}
             </span>
@@ -346,7 +366,8 @@ export const InvokeOperationToolUI = makeAssistantToolUI<
   unknown
 >({
   toolName: "invoke_operation",
-  render: (props) => {
+  render: function InvokeOperation(props) {
+    const { t } = useChatHost();
     const { args, result } = props;
     const opId = args?.operation_id ?? "";
     const phase = deriveToolPhase(props);
@@ -387,16 +408,14 @@ export const InvokeOperationToolUI = makeAssistantToolUI<
       return <RunLaunchCard {...props} />;
     }
 
-    const rule = operationPresentation(opId);
+    const shown = showCall({ toolName: "invoke_operation", args, result }, t);
     const spaceId = callSpaceOf(props);
     const created =
       phase === "success" ? packageCreatedByOperation(opId, unwrapMcpResult(result)) : null;
     return (
       <ToolCallCard
         phase={phase}
-        Icon={rule.Icon}
-        labelKey={rule.labelKey}
-        idText={opId}
+        {...shown}
         args={args}
         result={result}
         isError={props.isError}
@@ -449,7 +468,8 @@ function CreatedPackageLink({
 
 export const ImportPackageFileToolUI = makeAssistantToolUI<Record<string, unknown>, unknown>({
   toolName: "import_package_file",
-  render: (props: AnyToolProps) => {
+  render: function ImportPackageFile(props: AnyToolProps) {
+    const { t } = useChatHost();
     const phase = deriveToolPhase(props);
     const spaceId = callSpaceOf(props);
     const created =
@@ -457,7 +477,7 @@ export const ImportPackageFileToolUI = makeAssistantToolUI<Record<string, unknow
     return (
       <ToolCallCard
         phase={phase}
-        {...presented(props)}
+        {...showCall(props, t)}
         args={props.args}
         result={props.result}
         isError={props.isError}
@@ -476,34 +496,49 @@ export const ImportPackageFileToolUI = makeAssistantToolUI<Record<string, unknow
 
 export const SearchToolUI = makeAssistantToolUI<Record<string, unknown>, unknown>({
   toolName: "search",
-  render: (props: AnyToolProps) => (
-    <ToolCallCard
-      phase={deriveToolPhase(props)}
-      {...presented(props)}
-      args={props.args}
-      result={props.result}
-      isError={props.isError}
-      toolCallId={props.toolCallId}
-      timing={props.timing}
-      spaceId={callSpaceOf(props)}
-    />
-  ),
+  render: function Search(props: AnyToolProps) {
+    const { t } = useChatHost();
+    const presentation = presentationOf(props.result);
+    return (
+      <ToolCallCard
+        phase={deriveToolPhase(props)}
+        {...showCall(props, t)}
+        aside={
+          presentation?.count !== undefined ? (
+            <span className="text-muted-foreground flex shrink-0 items-center gap-1.5 text-xs">
+              <SubjectStack subjects={presentation.items ?? []} />
+              {t("tool.search.count", { count: presentation.count })}
+            </span>
+          ) : null
+        }
+        args={props.args}
+        result={props.result}
+        isError={props.isError}
+        toolCallId={props.toolCallId}
+        timing={props.timing}
+        spaceId={callSpaceOf(props)}
+      />
+    );
+  },
 });
 
 export const DescribeToolUI = makeAssistantToolUI<Record<string, unknown>, unknown>({
   toolName: "describe",
-  render: (props: AnyToolProps) => (
-    <ToolCallCard
-      phase={deriveToolPhase(props)}
-      {...presented(props)}
-      args={props.args}
-      result={props.result}
-      isError={props.isError}
-      toolCallId={props.toolCallId}
-      timing={props.timing}
-      spaceId={callSpaceOf(props)}
-    />
-  ),
+  render: function Describe(props: AnyToolProps) {
+    const { t } = useChatHost();
+    return (
+      <ToolCallCard
+        phase={deriveToolPhase(props)}
+        {...showCall(props, t)}
+        args={props.args}
+        result={props.result}
+        isError={props.isError}
+        toolCallId={props.toolCallId}
+        timing={props.timing}
+        spaceId={callSpaceOf(props)}
+      />
+    );
+  },
 });
 
 // `run_and_wait` is its own MCP tool (not invoke_operation), so it needs its own

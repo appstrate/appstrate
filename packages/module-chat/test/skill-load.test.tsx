@@ -193,7 +193,7 @@ describe("ResourceReadTool", () => {
       status: { type: "complete" },
     });
     expect(file).not.toContain("directive-chip");
-    expect(file).toContain(">tool.read<");
+    expect(file).toContain(">tool.name.read<");
     expect(file).toContain("appfile://spc_a/fil_1");
     const guide = render({
       args: { uri: "skill://spc_a/acme/tone/brand-tone/refs/guide.md" },

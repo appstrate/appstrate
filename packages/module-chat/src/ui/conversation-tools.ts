@@ -12,7 +12,8 @@ import { getToolName, isToolUIPart, type UIMessage } from "ai";
 import { asRecordOrNull } from "@appstrate/core/safe-json";
 import { unwrapMcpResult } from "@appstrate/core/mcp-result";
 import { deriveToolPhase, extractErrorMessage } from "./tool-result.ts";
-import { isLookupCall } from "./tool-presentation.ts";
+import { presentationOf } from "./tool-presentation.ts";
+import type { PresentationSubject } from "@appstrate/core/mcp-presentation";
 import { callSpaceOf } from "./conversation-scope.ts";
 
 export type ConversationToolStatus = "running" | "success" | "error" | "denied";
@@ -27,19 +28,24 @@ export interface ConversationToolCall {
   input: unknown;
   /** The unwrapped result, absent while the call runs or when it failed without one. */
   output: unknown;
+  /** The result as persisted, with the platform's presentation beside it (`showCall`). */
+  result: unknown;
   status: ConversationToolStatus;
   /** What a failed call says, from its error text or its failure payload. */
   error?: string;
-  /** Read-only: counted, kept apart from the actions. */
+  /**
+   * A lookup, as the engine stamped it before the call ran (`providerMetadata.appstrate.lookup`,
+   * the stamp the thread folds reads by): counted, kept apart from the actions.
+   */
   lookup: boolean;
-  /** The integration a `call_integration_tool` reached, when a `search` of the conversation named it. */
-  integrationPackageId?: string;
+  /** The integration the call reached, as the platform presented it. */
+  integration?: PresentationSubject;
   /** The space the call acted in, stamped on it by the chat. */
   spaceId?: string;
 }
 
 export interface ConversationIntegrationUse {
-  packageId: string;
+  integration: PresentationSubject;
   calls: number;
 }
 
@@ -50,25 +56,12 @@ export interface ConversationTools {
   integrations: ConversationIntegrationUse[];
 }
 
-type ToolPart = Extract<UIMessage["parts"][number], { toolCallId: string }>;
-
-/**
- * Every integration tool a `search` or `describe` listed: its `id` (what `call_integration_tool`
- * takes as `tool`) to the integration it belongs to. The id is a lossy namespace
- * (`scope_name__tool`), so the listing is the only exact source of the package.
- */
-function collectIntegrationToolIds(value: unknown, into: Map<string, string>, depth = 0): void {
-  if (depth > 6 || value === null || typeof value !== "object") return;
-  if (Array.isArray(value)) {
-    for (const item of value) collectIntegrationToolIds(item, into, depth + 1);
-    return;
-  }
-  const record = value as Record<string, unknown>;
-  if (typeof record.id === "string" && typeof record.integration_package_id === "string") {
-    into.set(record.id, record.integration_package_id);
-  }
-  for (const child of Object.values(record)) collectIntegrationToolIds(child, into, depth + 1);
+/** The engine's lookup stamp on a call (`pi-chat/ui-stream-mapper.ts`). */
+function isLookupStamped(metadata: unknown): boolean {
+  return asRecordOrNull(asRecordOrNull(metadata)?.appstrate)?.lookup === true;
 }
+
+type ToolPart = Extract<UIMessage["parts"][number], { toolCallId: string }>;
 
 function statusOf(part: ToolPart, output: unknown, running: boolean): ConversationToolStatus {
   switch (part.state) {
@@ -95,7 +88,6 @@ export function conversationTools(
   messages: readonly UIMessage[],
   generating = false,
 ): ConversationTools {
-  const listed = new Map<string, string>();
   const calls: ConversationToolCall[] = [];
   let lastAssistant = -1;
   messages.forEach((message, index) => {
@@ -111,20 +103,15 @@ export function conversationTools(
       if (!isToolUIPart(part)) continue;
       const toolName = getToolName(part);
       const output = "output" in part ? unwrapMcpResult(part.output) : undefined;
-      if (toolName === "search" || toolName === "describe") {
-        collectIntegrationToolIds(output, listed);
-      }
       const status = statusOf(part, output, running);
       const error =
         status !== "error"
           ? undefined
           : (("errorText" in part ? part.errorText : undefined) ?? extractErrorMessage(output));
-      const tool = toolName === "call_integration_tool" ? asRecordOrNull(part.input)?.tool : null;
-      const integrationPackageId = typeof tool === "string" ? listed.get(tool) : undefined;
-      const spaceId = callSpaceOf({
-        providerMetadata: part.callProviderMetadata,
-        result: "output" in part ? part.output : undefined,
-      });
+      const result = "output" in part ? part.output : undefined;
+      const subject = presentationOf(result)?.subject;
+      const integration = subject?.kind === "integration" ? subject : undefined;
+      const spaceId = callSpaceOf({ providerMetadata: part.callProviderMetadata, result });
       calls.push({
         toolCallId: part.toolCallId,
         messageId: message.id,
@@ -132,10 +119,11 @@ export function conversationTools(
         toolName,
         input: part.input,
         output,
+        result,
         status,
         ...(error ? { error } : {}),
-        lookup: isLookupCall(toolName, part.input),
-        ...(integrationPackageId ? { integrationPackageId } : {}),
+        lookup: isLookupStamped(part.callProviderMetadata),
+        ...(integration ? { integration } : {}),
         ...(spaceId ? { spaceId } : {}),
       });
     }
@@ -143,13 +131,13 @@ export function conversationTools(
 
   const integrations = new Map<string, ConversationIntegrationUse>();
   for (const call of calls) {
-    if (!call.integrationPackageId) continue;
-    const use = integrations.get(call.integrationPackageId) ?? {
-      packageId: call.integrationPackageId,
+    if (!call.integration) continue;
+    const use = integrations.get(call.integration.id) ?? {
+      integration: call.integration,
       calls: 0,
     };
     use.calls += 1;
-    integrations.set(call.integrationPackageId, use);
+    integrations.set(call.integration.id, use);
   }
   return { calls, integrations: [...integrations.values()] };
 }

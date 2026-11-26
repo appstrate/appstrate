@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import type { Dispatch, ReactNode } from "react";
-import { useMemo } from "react";
 import { Link } from "react-router-dom";
 import { ActivityIcon, ChevronRightIcon } from "lucide-react";
 import { useTranslation } from "react-i18next";
@@ -29,7 +28,6 @@ import { RunStatusBadge } from "../../components/status-badge";
 import { Waiting } from "../../components/loading-skeletons";
 import { SkeletonLine } from "../../components/skeleton-line";
 import { useSpaceLink } from "../../hooks/use-current-space";
-import { useIntegrationsById } from "../../hooks/use-integrations";
 import { formatBytes } from "../../lib/format-bytes";
 import { runDetailPath } from "../../lib/package-paths";
 import { formatDateField, formatRelativeTime } from "../../lib/format-date";
@@ -309,7 +307,7 @@ function ConversationActivity({
 }) {
   const { t } = useTranslation("chat");
   const linkInSpace = useSpaceLink();
-  const label = useToolLabel(tools);
+  const show = useToolLabel();
   const runs = useConversationRuns(conversationId, showsRuns);
   const files = useConversationFiles(conversationId, showsFiles);
   const actions = (tools?.calls ?? []).filter((call) => !call.lookup);
@@ -401,7 +399,7 @@ function ConversationActivity({
             .slice(-ACTIVITY_ROWS)
             .reverse()
             .map((call) => {
-              const { title, target, logo } = label(call);
+              const shown = show(call);
               return (
                 <button
                   key={call.toolCallId}
@@ -410,9 +408,9 @@ function ConversationActivity({
                   onClick={() => dispatch({ type: "show-tool-call", toolCallId: call.toolCallId })}
                 >
                   <ActivityLine
-                    icon={<ToolCallIcon call={call} logo={logo} />}
-                    label={title}
-                    detail={target}
+                    icon={<ToolCallIcon call={call} shown={shown} />}
+                    label={shown.label}
+                    detail={shown.idText}
                     trailing={
                       call.status === "success" ? null : (
                         <span className={cn("text-xs", CALL_TONE[call.status])}>
@@ -457,21 +455,15 @@ function ActivitySkeleton() {
 /** The integrations the conversation's calls reached, on one line. Nothing when none did. */
 function IntegrationsUsed({ tools }: { tools: ConversationTools | null }) {
   const { t } = useTranslation("chat");
-  const ids = useMemo(() => (tools?.integrations ?? []).map((use) => use.packageId), [tools]);
-  // One integration not readable here (another space's, no `integrations:read`) keeps its id.
-  const { data } = useIntegrationsById(ids);
-  if (ids.length === 0) return null;
-  const rows = new Map((data ?? []).map((row) => [row.id, row] as const));
-  const integrations = ids.map((id) => {
-    const row = rows.get(id);
-    return {
-      id,
-      name: row?.manifest.display_name ?? id,
-      icon: row?.manifest.icon ?? null,
-      required: false,
-      authenticated: true,
-    };
-  });
+  // As the platform presented each call: no read of its own.
+  const integrations = (tools?.integrations ?? []).map(({ integration }) => ({
+    id: integration.id,
+    name: integration.display_name ?? integration.id,
+    icon: integration.icon ?? null,
+    required: false,
+    authenticated: true,
+  }));
+  if (integrations.length === 0) return null;
   return (
     <section className="flex min-h-10 items-center gap-2 px-4 py-2">
       <h3 className="shrink-0 text-sm font-medium">{t("context.summary.integrations")}</h3>

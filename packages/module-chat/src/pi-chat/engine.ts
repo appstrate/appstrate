@@ -441,6 +441,7 @@ export function runPiChat(input: PiChatInput): Response {
         if (sdkResult.status === "rejected") throw sdkResult.reason;
         const sdk = sdkResult.value;
         const tools = toolsResult.value;
+        mapper.describeLookupTools(tools.lookupTools);
 
         const {
           createAgentSession,

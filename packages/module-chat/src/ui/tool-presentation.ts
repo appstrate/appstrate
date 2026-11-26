@@ -1,12 +1,19 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * How a tool call is named, wherever it is shown: its card in the thread and its row in the
- * conversation's context panel read the same icon, label and target from here.
+ * How a tool call is shown, wherever it is shown: its card in the thread and its row in the
+ * conversation's context panel both read {@link showCall}.
+ *
+ * Once the result lands, the call is drawn from the presentation the platform stamps on it
+ * (`@appstrate/core/mcp-presentation`, relayed by the engine as `result.presentation`): the
+ * integration, agent or user it acted on, and for an operation its HTTP method and OpenAPI tag.
+ * Nothing is guessed from an operation id. Before the result lands, and for a reply persisted
+ * before the stamp existed, the call keeps its own name and what its arguments name.
  */
 
 import {
   BookOpenIcon,
+  EyeIcon,
   FileTextIcon,
   PencilIcon,
   PlayIcon,
@@ -19,90 +26,47 @@ import {
   ZapIcon,
   type LucideIcon,
 } from "lucide-react";
+import {
+  toolPresentationSchema,
+  type PresentationSubject,
+  type ToolPresentation,
+} from "@appstrate/core/mcp-presentation";
+import { asRecordOrNull } from "@appstrate/core/safe-json";
+import type { ChatTranslate } from "./runtime-context.ts";
 
-export interface ToolPresentation {
+/** A call's own name, from its tool and arguments alone. */
+interface OwnName {
   Icon: LucideIcon;
-  /** Translated with the chat's `t`; absent, `label` is shown verbatim (a tool's own name). */
+  /** Translated; absent, the tool's `tool.name.<tool>`, else its presented title or name. */
   labelKey?: string;
-  label?: string;
-  /** What the call acted on: an operation, an integration tool, a query, a file. */
+  /** What the arguments name: an operation, an integration tool, a query, a file. */
   target?: string;
 }
 
-// Readable label + icon for an Appstrate API operation, by verb prefix — a
-// heuristic, not an exhaustive operationId map (which would rot). The first
-// match wins; unmatched ops fall back to the neutral `tool.op.other`.
-const OP_RULES: { re: RegExp; labelKey: string; Icon: LucideIcon; lookup?: true }[] = [
-  { re: /^(run|trigger|execute|start)/i, labelKey: "tool.op.launch", Icon: PlayIcon },
-  { re: /^(create|post|add|import|upload)/i, labelKey: "tool.op.create", Icon: PlusIcon },
-  { re: /^(update|patch|put|set|rename|configure)/i, labelKey: "tool.op.update", Icon: PencilIcon },
-  { re: /^(delete|remove|cancel|archive)/i, labelKey: "tool.op.delete", Icon: Trash2Icon },
-  { re: /^(list|get|search|find|read)/i, labelKey: "tool.op.read", Icon: SearchIcon, lookup: true },
-];
-
-const OTHER_OP = { Icon: ZapIcon, labelKey: "tool.op.other" };
-
-/** The presentation of an `invoke_operation` call, by its operation id. */
-export function operationPresentation(operationId: string): { Icon: LucideIcon; labelKey: string } {
-  return OP_RULES.find((rule) => rule.re.test(operationId)) ?? OTHER_OP;
-}
-
-/**
- * The platform tools that only read: the ones the MCP server declares `readOnlyHint` (`search` and
- * `describe` included, whose live catalog reads leave the platform unchanged), and the chat's own
- * resource read.
- */
-const LOOKUP_TOOLS: ReadonlySet<string> = new Set([
-  "search",
-  "describe",
-  "get_me",
-  "read",
-  "list_files",
-  "validate_package_file",
-  "get_runtime_capabilities",
-  "read_resource",
-]);
-
-/** A call that only reads: counted, but kept apart from the actions the assistant took. */
-export function isLookupCall(toolName: string, input: unknown): boolean {
-  if (LOOKUP_TOOLS.has(toolName)) return true;
-  if (toolName !== "invoke_operation") return false;
-  const operationId = stringField(input, "operation_id") ?? "";
-  return OP_RULES.find((rule) => rule.re.test(operationId))?.lookup === true;
-}
-
 function stringField(input: unknown, key: string): string | undefined {
-  if (!input || typeof input !== "object") return undefined;
-  const value = (input as Record<string, unknown>)[key];
+  const value = asRecordOrNull(input)?.[key];
   return typeof value === "string" && value ? value : undefined;
 }
 
-/** The icon, label and target of a call, from its tool name and input alone. */
-export function toolPresentation(toolName: string, input: unknown): ToolPresentation {
+function ownName(toolName: string, input: unknown): OwnName {
   switch (toolName) {
-    case "invoke_operation": {
-      const operationId = stringField(input, "operation_id");
-      return { ...operationPresentation(operationId ?? ""), target: operationId };
-    }
+    case "invoke_operation":
+      return {
+        Icon: ZapIcon,
+        labelKey: "tool.op.other",
+        target: stringField(input, "operation_id"),
+      };
     case "run_and_wait": {
       const scope = stringField(input, "scope");
       const name = stringField(input, "name");
-      return {
-        Icon: PlayIcon,
-        labelKey: "tool.op.launch",
-        target: scope && name ? `${scope}/${name}` : undefined,
-      };
+      return { Icon: PlayIcon, target: scope && name ? `${scope}/${name}` : undefined };
     }
     case "call_integration_tool": {
       // `{namespace}__{tool}`: no namespace holds `__`, and it is a lossy cut of the package id,
       // so only the tool's own name is worth reading.
       const id = stringField(input, "tool");
       const cut = id?.indexOf("__") ?? -1;
-      return {
-        Icon: PlugIcon,
-        labelKey: "tool.integrationTool",
-        target: id && cut > 0 ? id.slice(cut + 2) : id,
-      };
+      return { Icon: PlugIcon, target: id && cut > 0 ? id.slice(cut + 2) : id };
     }
     case "import_package_file":
       return {
@@ -115,14 +79,119 @@ export function toolPresentation(toolName: string, input: unknown): ToolPresenta
     case "describe":
       return { Icon: BookOpenIcon, labelKey: "tool.describe", target: stringField(input, "id") };
     case "read":
-      return { Icon: FileTextIcon, labelKey: "tool.read", target: stringField(input, "uri") };
+      return { Icon: FileTextIcon, target: stringField(input, "uri") };
     default:
-      return { Icon: WrenchIcon, label: toolName };
+      return { Icon: WrenchIcon };
   }
 }
 
-/** A card's icon, label and target (`idText`), as the context panel names the same call. */
-export function presented(call: { toolName: string; args: unknown }) {
-  const { Icon, labelKey, label, target } = toolPresentation(call.toolName, call.args);
-  return { Icon, labelKey, label, idText: target };
+/** The presentation a tool part's result carries; `undefined` while running or when absent. */
+export function presentationOf(result: unknown): ToolPresentation | undefined {
+  const raw = asRecordOrNull(result)?.presentation;
+  if (raw === undefined) return undefined;
+  const parsed = toolPresentationSchema.safeParse(raw);
+  return parsed.success ? parsed.data : undefined;
+}
+
+/** The verb icon of an HTTP method; `undefined` for a method that names none. */
+export function methodIcon(method: string | undefined): LucideIcon | undefined {
+  switch (method?.toUpperCase()) {
+    case "GET":
+    case "HEAD":
+      return EyeIcon;
+    case "POST":
+      return PlusIcon;
+    case "PUT":
+    case "PATCH":
+      return PencilIcon;
+    case "DELETE":
+      return Trash2Icon;
+    default:
+      return undefined;
+  }
+}
+
+/** « Lecture · Agents »: the method's verb and the operation's tag, both translated. */
+export function operationLabel(p: ToolPresentation, t: ChatTranslate): string | undefined {
+  if (!p.method) return undefined;
+  const verb = t(`tool.verb.${p.method.toUpperCase()}`, { defaultValue: p.method.toUpperCase() });
+  return p.tag ? `${verb} · ${t(`tool.tag.${p.tag}`, { defaultValue: p.tag })}` : verb;
+}
+
+/** The name a subject is shown under. */
+export function subjectName(subject: PresentationSubject): string {
+  return subject.display_name ?? subject.id;
+}
+
+/** Label, subject and id a card shows for one call, from its presentation. */
+export interface PresentedCall {
+  /** Shown verbatim; already translated. */
+  label: string;
+  /** What the call acted on: its glyph replaces the card's icon (`SubjectGlyph`). */
+  subject?: PresentationSubject;
+  /** Replaces the card's own icon when the call names its method but no subject. */
+  Icon?: LucideIcon;
+  idText?: string;
+}
+
+/**
+ * The card of a call the platform presented. `fallbackLabel` is the tool's own name
+ * (translated), used for a tool the platform gives no richer label.
+ */
+export function presentCall(
+  p: ToolPresentation,
+  t: ChatTranslate,
+  fallbackLabel: string,
+): PresentedCall {
+  const subject = p.subject;
+  // `call_integration_tool`: « GitHub · Search issues ».
+  if (p.subject?.kind === "integration") {
+    return { label: `${subjectName(p.subject)} · ${p.title}`, subject };
+  }
+  const op = operationLabel(p, t);
+  if (op) {
+    return {
+      label: op,
+      subject,
+      Icon: methodIcon(p.method) ?? ZapIcon,
+      idText: p.subject ? subjectName(p.subject) : p.title,
+    };
+  }
+  return {
+    label: fallbackLabel,
+    subject,
+    ...(p.subject ? { idText: subjectName(p.subject) } : {}),
+  };
+}
+
+/** One call as its card and its panel row show it. */
+export interface ShownCall {
+  /** Drawn unless `subject` is: its glyph wins. */
+  Icon: LucideIcon;
+  /** Already translated. */
+  label: string;
+  idText?: string;
+  subject?: PresentationSubject;
+}
+
+/** How a call is shown: from the platform's presentation once it landed, else its own name. */
+export function showCall(
+  call: { toolName: string; args: unknown; result?: unknown },
+  t: ChatTranslate,
+): ShownCall {
+  const own = ownName(call.toolName, call.args);
+  const presentation = presentationOf(call.result);
+  const ownLabel = own.labelKey
+    ? t(own.labelKey)
+    : t(`tool.name.${call.toolName}`, { defaultValue: presentation?.title ?? call.toolName });
+  if (!presentation) return { Icon: own.Icon, label: ownLabel, idText: own.target };
+  const presented = presentCall(presentation, t, ownLabel);
+  return {
+    Icon: presented.Icon ?? own.Icon,
+    label: presented.label,
+    // An integration call's label already names its tool.
+    idText:
+      presented.idText ?? (presented.subject?.kind === "integration" ? undefined : own.target),
+    ...(presented.subject ? { subject: presented.subject } : {}),
+  };
 }
