@@ -2,14 +2,15 @@
 
 /**
  * `src/ui/tool-presentation.ts` (how a call is named, in the thread and the context panel),
- * and what counts as a lookup (`conversation-tools.ts`): `isLookupCall`, `activityGroupOf`.
+ * and what counts as a lookup (`conversation-tools.ts`): `isLookupCall`, `activityGroupOf`,
+ * `endsFolded`.
  */
 
 import { describe, it, expect } from "bun:test";
 import { EyeIcon, FileTextIcon, PlugIcon, Trash2Icon, ZapIcon } from "lucide-react";
 import type { ToolPresentation } from "@appstrate/core/mcp-presentation";
 import { callPresentation, showCall } from "../src/ui/tool-presentation.ts";
-import { activityGroupOf, isLookupCall } from "../src/ui/conversation-tools.ts";
+import { activityGroupOf, endsFolded, isLookupCall } from "../src/ui/conversation-tools.ts";
 
 /** The FR bundle's verbs and tags; a key it lacks shows its default value, else the key. */
 const FR: Record<string, string> = {
@@ -305,5 +306,30 @@ describe("activityGroupOf", () => {
     expect(activityGroupOf({ ...read, status: { type: "complete" }, isError: true })).toEqual([
       "group-activity",
     ]);
+  });
+});
+
+describe("endsFolded", () => {
+  const read = (toolCallId: string) => ({
+    type: "tool-call",
+    toolCallId,
+    providerMetadata: { appstrate: { lookup: true } },
+  });
+  const reasoning = { type: "reasoning" };
+
+  it("is true when the trailing activity parts hold two lookups, reasoning between them or not", () => {
+    expect(endsFolded([read("a"), read("b")])).toBe(true);
+    expect(endsFolded([read("a"), reasoning, read("b"), reasoning])).toBe(true);
+  });
+
+  it("is false for one lookup, an empty message, or a tail outside the group", () => {
+    expect(endsFolded([])).toBe(false);
+    expect(endsFolded([reasoning, read("a"), reasoning])).toBe(false);
+    expect(endsFolded([read("a"), read("b"), { type: "tool-call", toolCallId: "w" }])).toBe(false);
+    expect(endsFolded([read("a"), read("b"), { type: "text" }])).toBe(false);
+  });
+
+  it("counts only the group that ends the message", () => {
+    expect(endsFolded([read("a"), { type: "text" }, read("b")])).toBe(false);
   });
 });

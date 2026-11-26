@@ -74,6 +74,34 @@ export function activityGroupOf(
   return null;
 }
 
+/** A group holding this many lookups folds into one line (`activity-group.tsx`). */
+export const FOLD_AT = 2;
+
+/** The lookups among `parts` at `indices`: the tool calls an activity group counts. */
+export function lookupsAt<P extends GroupablePart>(
+  parts: readonly P[],
+  indices: readonly number[],
+): P[] {
+  return indices.flatMap((i) => {
+    const part = parts[i];
+    return part?.type === "tool-call" && part.toolCallId ? [part] : [];
+  });
+}
+
+/**
+ * The message ends in a folded activity group: the trailing parts {@link activityGroupOf} groups
+ * hold {@link FOLD_AT} lookups or more. That group's header then carries the turn's status region.
+ */
+export function endsFolded(parts: readonly GroupablePart[]): boolean {
+  let lookups = 0;
+  for (let i = parts.length - 1; i >= 0; i--) {
+    const part = parts[i];
+    if (!part || activityGroupOf(part) === null) break;
+    if (part.type === "tool-call" && part.toolCallId) lookups += 1;
+  }
+  return lookups >= FOLD_AT;
+}
+
 /** A lookup, unless it failed: a stamped one, or presented as a read once its result landed. */
 export function isLookupCall(
   callMetadata: unknown,
