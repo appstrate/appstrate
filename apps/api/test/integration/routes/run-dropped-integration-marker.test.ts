@@ -25,8 +25,9 @@ import { and, eq } from "drizzle-orm";
 import { getTestApp } from "../../helpers/app.ts";
 import { db, truncateAll } from "../../helpers/db.ts";
 import { createTestContext, authHeaders, type TestContext } from "../../helpers/auth.ts";
-import { runLogs, runs, spaceIntegrationToolBlocks } from "@appstrate/db/schema";
+import { runLogs, runs } from "@appstrate/db/schema";
 import { seedPackage, seedPublishedVersion } from "../../helpers/seed.ts";
+import { insertToolBlocks } from "../../helpers/tool-policy.ts";
 import { apiIntegrationManifest, httpHeaderDelivery } from "../../helpers/integration-manifests.ts";
 import {
   createFakeOrchestrator,
@@ -190,12 +191,7 @@ describe("run launch — dropped-integration marker in run_logs", () => {
     await activatePackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, API);
     await seedIntegrationConnection(ctx, API);
     await seedDefaultOrgModel(ctx);
-    await db.insert(spaceIntegrationToolBlocks).values({
-      spaceId: ctx.defaultSpaceId,
-      orgId: ctx.orgId,
-      packageId: API,
-      toolName: "api_call",
-    });
+    await insertToolBlocks({ ...ctx, spaceId: ctx.defaultSpaceId, packageId: API }, ["api_call"]);
 
     const res = await launch({
       manifest: {

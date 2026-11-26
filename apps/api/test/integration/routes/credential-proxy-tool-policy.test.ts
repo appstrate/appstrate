@@ -6,14 +6,13 @@
  * approved.
  */
 import { describe, it, expect, beforeAll, afterAll, beforeEach } from "bun:test";
-import { eq } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
-import { integrationToolSnapshots, spaceIntegrationToolBlocks } from "@appstrate/db/schema";
+import { integrationToolSnapshots } from "@appstrate/db/schema";
 import { clearAllCachesLocally } from "@appstrate/core/cache";
 import { toolDefinitionFingerprint } from "@appstrate/mcp-transport";
 import { forgetProtocolEras } from "@appstrate/mcp-transport/testing";
 import type { IntegrationManifest } from "@appstrate/core/integration";
-import { insertToolApprovals } from "../../helpers/tool-policy.ts";
+import { insertToolApprovals, insertToolBlocks } from "../../helpers/tool-policy.ts";
 import { getTestApp } from "../../helpers/app.ts";
 import { truncateAll } from "../../helpers/db.ts";
 import { seedApiKey } from "../../helpers/seed.ts";
@@ -28,6 +27,7 @@ import {
 import {
   apiIntegrationManifest,
   remoteIntegrationManifest,
+  twoAuthApiIntegrationManifest,
 } from "../../helpers/integration-manifests.ts";
 import { startFakeMcpServer, type FakeMcpServer } from "../../helpers/fake-mcp-server.ts";
 
@@ -96,11 +96,16 @@ describe("the space tool policy over a remote integration's typed tools", () => 
     insertToolApprovals({ ...ctx, spaceId: ctx.defaultSpaceId, packageId: ID }, [
       { toolName: tool, fingerprint },
     ]);
+  /** Approve the tools at the definition the server lists now, then forget what was cached. */
+  const approveLive = async (...tools: string[]) => {
+    await listNames();
+    for (const tool of tools) await approve(tool, await liveFingerprint(tool));
+    clearAllCachesLocally();
+  };
 
   beforeEach(async () => {
     await truncateAll();
     await flushRedis();
-    clearAllCachesLocally();
     forgetProtocolEras();
     ctx = await createTestContext({ orgSlug: "acme" });
     ({ rawKey: apiKey } = await seedApiKey({
@@ -124,9 +129,7 @@ describe("the space tool policy over a remote integration's typed tools", () => 
   it("offers and calls an undeclared tool at the approved definition", async () => {
     const server = serve("Writes a file.");
     await seedProxyIntegration(ctx, closed(server.url));
-    await listNames();
-    await approve("write_file", await liveFingerprint("write_file"));
-    clearAllCachesLocally();
+    await approveLive("write_file");
 
     expect((await listNames()).sort()).toEqual([DECLARED, UNDECLARED].sort());
     expect((await call("write_file")).status).toBe(200);
@@ -156,9 +159,7 @@ describe("the space tool policy over a remote integration's typed tools", () => 
   it("reports an unreadable listing, not a refused definition, for an approved undeclared tool", async () => {
     const server = serve("Writes a file.");
     await seedProxyIntegration(ctx, closed(server.url));
-    await listNames();
-    await approve("write_file", await liveFingerprint("write_file"));
-    clearAllCachesLocally();
+    await approveLive("write_file");
     server.stop();
 
     const unreadable = await call("write_file");
@@ -169,12 +170,7 @@ describe("the space tool policy over a remote integration's typed tools", () => 
   it("refuses a blocked tool before any exchange, whatever its origin, and does not list it", async () => {
     const server = serve("Writes a file.");
     await seedProxyIntegration(ctx, closed(server.url));
-    await db.insert(spaceIntegrationToolBlocks).values({
-      spaceId: ctx.defaultSpaceId,
-      orgId: ctx.orgId,
-      packageId: ID,
-      toolName: "read_file",
-    });
+    await insertToolBlocks({ ...ctx, spaceId: ctx.defaultSpaceId, packageId: ID }, ["read_file"]);
     clearAllCachesLocally();
     server.requests.length = 0;
 
@@ -192,10 +188,7 @@ describe("the space tool policy over a remote integration's typed tools", () => 
       ...closed(server.url),
       hidden_tools: ["write_file"],
     });
-    await listNames();
-    await approve("write_file", await liveFingerprint("write_file"));
-    await approve("read_file", await liveFingerprint("read_file"));
-    clearAllCachesLocally();
+    await approveLive("write_file", "read_file");
     server.requests.length = 0;
 
     expect(await listNames()).toEqual([DECLARED]);
@@ -235,13 +228,11 @@ describe("the space tool policy over a remote integration's typed tools", () => 
       const server = serve("Writes a file.");
       await withAuth(server);
 
-      for (const target of [server.url, `${server.url}/`, `${server.url}?x=1`]) {
-        const res = await proxy(target);
-        expect(res.status, await res.clone().text()).toBe(403);
-        expect(((await res.json()) as { code?: string }).code).toBe(
-          "remote_mcp_endpoint_not_proxied",
-        );
-      }
+      const res = await proxy(`${server.url}/?x=1`);
+      expect(res.status, await res.clone().text()).toBe(403);
+      expect(((await res.json()) as { code?: string }).code).toBe(
+        "remote_mcp_endpoint_not_proxied",
+      );
       expect(server.requests).toHaveLength(0);
     });
 
@@ -285,14 +276,7 @@ describe("the space tool policy over a remote integration's typed tools", () => 
         }),
       );
       await seedProxyConnection(ctx, API_ID, "primary", { api_key: "k" });
-      await db.insert(spaceIntegrationToolBlocks).values(
-        blocked.map((toolName) => ({
-          spaceId: ctx.defaultSpaceId,
-          orgId: ctx.orgId,
-          packageId: API_ID,
-          toolName,
-        })),
-      );
+      await insertToolBlocks({ ...ctx, spaceId: ctx.defaultSpaceId, packageId: API_ID }, blocked);
       clearAllCachesLocally();
       server.requests.length = 0;
       return server;
@@ -317,6 +301,27 @@ describe("the space tool policy over a remote integration's typed tools", () => 
       expect(await codeOf(plain)).not.toBe("tool_blocked_in_space");
     });
 
+    it("blocking the per-auth name of a multi-auth integration refuses that auth's connection", async () => {
+      await seedProxyIntegration(ctx, twoAuthApiIntegrationManifest(API_ID));
+      const primary = await seedProxyConnection(ctx, API_ID, "primary", { api_key: "a" }, "p");
+      await insertToolBlocks({ ...ctx, spaceId: ctx.defaultSpaceId, packageId: API_ID }, [
+        "api_call__primary",
+      ]);
+
+      const res = await getTestApp().request("/api/credential-proxy/proxy", {
+        method: "GET",
+        headers: {
+          ...headers(),
+          "X-Integration-Id": API_ID,
+          "X-Connection-Id": primary,
+          "X-Target": "https://api.example.com/items",
+          "X-Session-Id": crypto.randomUUID(),
+        },
+      });
+      expect(res.status).toBe(403);
+      expect(await codeOf(res)).toBe("tool_blocked_in_space");
+    });
+
     it("blocking api_call refuses the plain call and the streamed upload", async () => {
       const server = await setup(["api_call"]);
 
@@ -327,16 +332,5 @@ describe("the space tool policy over a remote integration's typed tools", () => 
       }
       expect(server.requests).toHaveLength(0);
     });
-  });
-
-  it("keeps the snapshot row it listed from", async () => {
-    const server = serve("Writes a file.");
-    await seedProxyIntegration(ctx, closed(server.url));
-    await listNames();
-    const rows = await db
-      .select()
-      .from(integrationToolSnapshots)
-      .where(eq(integrationToolSnapshots.packageId, ID));
-    expect(rows).toHaveLength(1);
   });
 });

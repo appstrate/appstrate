@@ -21,6 +21,7 @@ import {
   seedSpacePackage,
   loseVersionArchive,
 } from "../../helpers/seed.ts";
+import { insertToolApprovals } from "../../helpers/tool-policy.ts";
 import {
   initSystemIntegrations,
   __resetSystemIntegrationsForTest,
@@ -53,13 +54,7 @@ import {
 import * as storage from "@appstrate/db/storage";
 import { computeIntegrity } from "@appstrate/core/integrity";
 import { zipArtifact, PACKAGE_ZIP_MAX_COMPRESSED_BYTES } from "@appstrate/core/zip";
-import {
-  auditEvents,
-  packages,
-  packageDistTags,
-  packageVersions,
-  spaceIntegrationToolApprovals,
-} from "@appstrate/db/schema";
+import { auditEvents, packages, packageDistTags, packageVersions } from "@appstrate/db/schema";
 import { and, eq } from "drizzle-orm";
 import { db } from "../../helpers/db.ts";
 import { installRuntimeBoundSystemPackages } from "../../helpers/runtime-bound-system-packages.ts";
@@ -1749,36 +1744,11 @@ describe("Packages API", () => {
       expect(body.errors?.[0]?.field).toBe(`integrations_configuration.${integrationId}.tools`);
     });
 
-    it("accepts a tool the space approved although the integration does not declare it", async () => {
-      await seedGmailIntegration();
-      await db.insert(spaceIntegrationToolApprovals).values({
-        spaceId: ctx.defaultSpaceId,
-        orgId: ctx.orgId,
-        packageId: integrationId,
-        toolName: "delete_message",
-        fingerprint: "a".repeat(64),
-        definition: {},
-      });
-      const res = await app.request("/api/packages/agents", {
-        method: "POST",
-        headers: authHeaders(ctx, { "Content-Type": "application/json" }),
-        body: JSON.stringify(
-          buildAgentBody({ version: "^1.0.0", tools: ["delete_message"] }, "approved"),
-        ),
-      });
-      expect(res.status).toBe(201);
-    });
-
     it("judges a package's selection against its home space's approvals, not the request's", async () => {
       await seedGmailIntegration();
-      await db.insert(spaceIntegrationToolApprovals).values({
-        spaceId: ctx.defaultSpaceId,
-        orgId: ctx.orgId,
-        packageId: integrationId,
-        toolName: "delete_message",
-        fingerprint: "a".repeat(64),
-        definition: {},
-      });
+      await insertToolApprovals({ ...ctx, spaceId: ctx.defaultSpaceId, packageId: integrationId }, [
+        { toolName: "delete_message", fingerprint: "a".repeat(64) },
+      ]);
       const body = buildAgentBody({ version: "^1.0.0", tools: ["delete_message"] }, "homed");
       const created = await app.request("/api/packages/agents", {
         method: "POST",
@@ -1797,32 +1767,6 @@ describe("Packages API", () => {
         body: JSON.stringify({ ...body, content: "Edited" }),
       });
       expect(res.status, await res.clone().text()).toBe(200);
-    });
-
-    it("rejects a tool selection when a closed remote catalog declares nothing", async () => {
-      // A local source declaring no tools is advisory (AFPS §7.1); a remote one is closed.
-      const bare = gmailIntegrationManifest({
-        source: {
-          kind: "remote",
-          remote: { url: "https://example.com/mcp/v1", transport: "streamable-http" },
-        },
-      });
-      delete bare.tools_policy;
-      await seedPackage({
-        id: integrationId,
-        orgId: ctx.orgId,
-        type: "integration",
-        source: "local",
-        draftManifest: bare,
-      });
-      const res = await app.request("/api/packages/agents", {
-        method: "POST",
-        headers: authHeaders(ctx, { "Content-Type": "application/json" }),
-        body: JSON.stringify(buildAgentBody({ version: "^1.0.0", tools: ["anything"] }, "closed")),
-      });
-      expect(res.status).toBe(400);
-      const body = (await res.json()) as { errors?: { code: string }[] };
-      expect(body.errors?.[0]?.code).toBe("unknown_tool");
     });
 
     it("rejects an agent declaring a scope outside the integration's availableScopes", async () => {

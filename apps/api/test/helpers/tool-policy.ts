@@ -4,7 +4,7 @@
 
 import type { Tool } from "@modelcontextprotocol/sdk/types.js";
 import { toolDefinitionFingerprint } from "@appstrate/mcp-transport";
-import { spaceIntegrationToolApprovals } from "@appstrate/db/schema";
+import { spaceIntegrationToolApprovals, spaceIntegrationToolBlocks } from "@appstrate/db/schema";
 import { db } from "./db.ts";
 
 /** An MCP tool descriptor with no parameters; the description defaults to one derived from the name. */
@@ -42,5 +42,16 @@ export const insertToolApprovals = (target: ToolPolicyTarget, rows: readonly App
       fingerprint: row.fingerprint,
       definition: {},
       ...(row.approvedAt ? { approvedAt: row.approvedAt } : {}),
+    })),
+  );
+
+/** Insert block rows straight into the table, bypassing the policy route. */
+export const insertToolBlocks = (target: ToolPolicyTarget, toolNames: readonly string[]) =>
+  db.insert(spaceIntegrationToolBlocks).values(
+    toolNames.map((toolName) => ({
+      spaceId: target.spaceId,
+      orgId: target.orgId,
+      packageId: target.packageId,
+      toolName,
     })),
   );

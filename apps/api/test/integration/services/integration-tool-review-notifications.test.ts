@@ -72,10 +72,10 @@ describe("tool review notifications", () => {
   it("asks each configure holder of the active spaces, and nobody else", async () => {
     await seed();
     const holder = await memberHolding(ctx, ["integrations:configure"]);
-    const viewer = await memberContext(ctx, "member", "viewer");
+    await memberContext(ctx, "member", "viewer");
     const active = await seedSpace({ orgId: ctx.orgId, visibility: "private" });
     await seedSpacePackage(active.id, ID);
-    const inactive = await seedSpace({ orgId: ctx.orgId, visibility: "private" });
+    await seedSpace({ orgId: ctx.orgId, visibility: "private" });
 
     await list([tool("read_file"), tool("write_file")]);
 
@@ -86,8 +86,6 @@ describe("tool review notifications", () => {
         `${active.id}:${ctx.user.id}`,
       ].sort(),
     );
-    expect(await notices()).not.toContain(`${ctx.defaultSpaceId}:${viewer.user.id}`);
-    expect((await notices()).some((n) => n.startsWith(inactive.id))).toBe(false);
     const [row] = await db.select().from(notifications).limit(1);
     expect(row?.payload).toEqual({ packageId: ID, display_name: "Files" });
   });

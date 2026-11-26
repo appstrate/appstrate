@@ -13,10 +13,8 @@ import { db, truncateAll } from "../../helpers/db.ts";
 import { createTestContext, type TestContext } from "../../helpers/auth.ts";
 import { tool } from "../../helpers/tool-policy.ts";
 import { seedAgent } from "../../helpers/seed.ts";
-import {
-  readToolSnapshots,
-  recordToolSnapshot,
-} from "../../../src/services/integration-tool-snapshots.ts";
+import { recordToolSnapshot } from "../../../src/services/integration-tool-snapshots.ts";
+import { readToolSnapshots } from "../../../src/services/integration-tool-snapshot-reads.ts";
 
 describe("integration tool snapshots", () => {
   let ctx: TestContext;

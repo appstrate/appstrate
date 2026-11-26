@@ -2076,15 +2076,18 @@ describe("the typed tools of a remote MCP integration", () => {
         ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
       });
 
-    beforeEach(async () => {
-      apiKey = (
+    const key = async (scopes: string[]) =>
+      (
         await seedApiKey({
           orgId: ctx.orgId,
           spaceId: ctx.defaultSpaceId,
           createdBy: ctx.user.id,
-          scopes: ["credential-proxy:call-own", "integrations:read"],
+          scopes,
         })
       ).rawKey;
+
+    beforeEach(async () => {
+      apiKey = await key(["credential-proxy:call-own", "integrations:read"]);
     });
 
     it("is recorded by a listing that reaches the server, not by one served from the cache", async () => {
@@ -2164,8 +2167,8 @@ describe("the typed tools of a remote MCP integration", () => {
       const theirs = await seedProxyConnection(colleague, ID, "api_key", { token: TOKEN });
 
       const res = await refresh({ connection_id: theirs });
-      expect(res.status).toBeGreaterThanOrEqual(400);
-      expect(res.status).toBeLessThan(500);
+      expect(res.status).toBe(404);
+      expect(((await res.json()) as { code: string }).code).toBe("credential_not_found");
       expect(server.requests).toEqual([]);
       expect(await snapshots()).toEqual([]);
     });
@@ -2177,14 +2180,7 @@ describe("the typed tools of a remote MCP integration", () => {
           ctx,
           remoteIntegrationManifest({ name: ID, url: open.url, tools_policy: { search: {} } }),
         );
-        const readOnly = (
-          await seedApiKey({
-            orgId: ctx.orgId,
-            spaceId: ctx.defaultSpaceId,
-            createdBy: ctx.user.id,
-            scopes: ["integrations:read"],
-          })
-        ).rawKey;
+        const readOnly = await key(["integrations:read"]);
 
         expect((await refresh(undefined, readOnly)).status).toBe(403);
         expect(open.requests).toEqual([]);
@@ -2192,22 +2188,6 @@ describe("the typed tools of a remote MCP integration", () => {
       } finally {
         open.stop();
       }
-    });
-
-    it("refresh is refused to a caller without the credential proxy permission", async () => {
-      await seedProxyIntegration(ctx, remote());
-      await seedProxyConnection(ctx, ID, "api_key", { token: TOKEN });
-      const key = (
-        await seedApiKey({
-          orgId: ctx.orgId,
-          spaceId: ctx.defaultSpaceId,
-          createdBy: ctx.user.id,
-          scopes: ["integrations:read"],
-        })
-      ).rawKey;
-
-      expect((await refresh(undefined, key)).status).toBe(403);
-      expect(server.requests).toEqual([]);
     });
   });
 });

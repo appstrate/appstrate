@@ -9,15 +9,12 @@
 
 import { describe, it, expect, beforeEach } from "bun:test";
 import { MAX_APPROVED_FINGERPRINTS_PER_TOOL } from "@appstrate/core/sidecar-types";
-import { db } from "@appstrate/db/client";
-import { spaceIntegrationToolBlocks } from "@appstrate/db/schema";
 import { resolveIntegrationSpawns } from "../../helpers/spawn-resolver.ts";
 import { truncateAll } from "../../helpers/db.ts";
-import { insertToolApprovals } from "../../helpers/tool-policy.ts";
+import { insertToolApprovals, insertToolBlocks } from "../../helpers/tool-policy.ts";
 import { createTestContext, type TestContext } from "../../helpers/auth.ts";
 import { seedPackage, seedSpacePackage } from "../../helpers/seed.ts";
-import { integrationConnections } from "@appstrate/db/schema";
-import { encryptCredentialEnvelope } from "@appstrate/connect";
+import { seedProxyConnection } from "../../helpers/credential-proxy-fixtures.ts";
 import { apiIntegrationManifest } from "../../helpers/integration-manifests.ts";
 import { bindAllConnections } from "../../helpers/bound-connections.ts";
 
@@ -85,45 +82,68 @@ describe("resolveIntegrationSpawns — space tool policy", () => {
 
   it("names the tools the space blocked apart from the ones the manifest hides", async () => {
     await seed();
-    await db.insert(spaceIntegrationToolBlocks).values({
-      spaceId: ctx.defaultSpaceId,
-      orgId: ctx.orgId,
-      packageId: INTEG,
-      toolName: "search",
-    });
+    await insertToolBlocks({ ...ctx, spaceId: ctx.defaultSpaceId, packageId: INTEG }, ["search"]);
     const spec = await spawn(["search"]);
     expect(spec.blockedTools).toEqual(["search"]);
     expect(spec.hiddenTools).toBeUndefined();
   });
 
-  it("names the approved fingerprints of each undeclared tool, and none for a declared one", async () => {
-    await seed();
-    await approve("write");
-    const spec = await spawn(["search", "write", "delete"]);
-    expect(spec.approvedToolFingerprints).toEqual({ write: [FINGERPRINT], delete: [] });
-  });
-
-  it("sends no fingerprint map when every selected tool is declared", async () => {
-    await seed();
-    const spec = await spawn(["search"]);
-    expect(spec.approvedToolFingerprints).toBeUndefined();
-  });
-
-  it("expands a wildcard on a closed catalog to the declared and approved tools", async () => {
-    await seed();
-    await approve("write");
-    const spec = await spawn("*" as unknown as string[]);
-    expect(spec.toolAllowlist).toEqual(["search", "write"]);
-    expect(spec.approvedToolFingerprints).toEqual({ write: [FINGERPRINT] });
-  });
-
-  it("leaves a wildcard on an open catalog unrestricted", async () => {
-    await seed(true);
-    await approve("write");
-    const spec = await spawn("*" as unknown as string[]);
-    expect(spec.toolAllowlist).toBeUndefined();
-    expect(spec.approvedToolFingerprints).toBeUndefined();
-  });
+  const WILDCARD = "*" as unknown as string[];
+  const cases: {
+    title: string;
+    open: boolean;
+    approved: string[];
+    tools: string[];
+    fingerprints: Record<string, string[]> | undefined;
+    allowlist?: string[] | undefined;
+  }[] = [
+    {
+      title: "names the approved fingerprints of each undeclared tool, and none for a declared one",
+      open: false,
+      approved: ["write"],
+      tools: ["search", "write", "delete"],
+      fingerprints: { write: [FINGERPRINT], delete: [] },
+    },
+    {
+      title: "sends no fingerprint map when every selected tool is declared",
+      open: false,
+      approved: [],
+      tools: ["search"],
+      fingerprints: undefined,
+    },
+    {
+      title: "does not gate an open catalog",
+      open: true,
+      approved: [],
+      tools: ["search", "write"],
+      fingerprints: undefined,
+    },
+    {
+      title: "expands a wildcard on a closed catalog to the declared and approved tools",
+      open: false,
+      approved: ["write"],
+      tools: WILDCARD,
+      fingerprints: { write: [FINGERPRINT] },
+      allowlist: ["search", "write"],
+    },
+    {
+      title: "leaves a wildcard on an open catalog unrestricted",
+      open: true,
+      approved: ["write"],
+      tools: WILDCARD,
+      fingerprints: undefined,
+      allowlist: undefined,
+    },
+  ];
+  for (const c of cases) {
+    it(c.title, async () => {
+      await seed(c.open);
+      for (const name of c.approved) await approve(name);
+      const spec = await spawn(c.tools);
+      expect(spec.approvedToolFingerprints).toEqual(c.fingerprints);
+      if ("allowlist" in c) expect(spec.toolAllowlist).toEqual(c.allowlist);
+    });
+  }
 
   it("caps a tool's fingerprints to the spec limit, the newest approvals first", async () => {
     await seed();
@@ -139,24 +159,6 @@ describe("resolveIntegrationSpawns — space tool policy", () => {
     const sent = (await spawn(["write"])).approvedToolFingerprints!.write!;
     expect(sent).toHaveLength(MAX_APPROVED_FINGERPRINTS_PER_TOOL);
     expect(sent[0]).toBe((total - 1).toString(16).padStart(64, "0"));
-  });
-
-  it("does not gate an open catalog", async () => {
-    await seed(true);
-    const spec = await spawn(["search", "write"]);
-    expect(spec.approvedToolFingerprints).toBeUndefined();
-  });
-
-  it("sends every approved fingerprint of a tool, whatever their number: the approval door bounds it", async () => {
-    await seed();
-    await insertToolApprovals(
-      { ...ctx, spaceId: ctx.defaultSpaceId, packageId: INTEG },
-      Array.from({ length: 5 }, (_, i) => ({
-        toolName: "write",
-        fingerprint: i.toString(16).padStart(64, "0"),
-      })),
-    );
-    expect((await spawn(["write"])).approvedToolFingerprints!.write).toHaveLength(5);
   });
 });
 
@@ -187,31 +189,8 @@ describe("resolveIntegrationSpawns — a blocked api_call", () => {
       }),
     });
     await seedSpacePackage(ctx.defaultSpaceId, API);
-    await db.insert(integrationConnections).values({
-      integrationId: API,
-      authKey: "primary",
-      accountId: "default",
-      label: "default",
-      orgId: ctx.orgId,
-      spaceId: ctx.defaultSpaceId,
-      userId: ctx.user.id,
-      endUserId: null,
-      credentialsEncrypted: encryptCredentialEnvelope({ outputs: { api_key: "k-1" } }),
-      identityClaims: {},
-      scopesGranted: [],
-      needsReconnection: false,
-      expiresAt: null,
-      createdAt: new Date(),
-      updatedAt: new Date(),
-    });
-    for (const toolName of blocks) {
-      await db.insert(spaceIntegrationToolBlocks).values({
-        spaceId: ctx.defaultSpaceId,
-        orgId: ctx.orgId,
-        packageId: API,
-        toolName,
-      });
-    }
+    await seedProxyConnection(ctx, API, "primary", { api_key: "k-1" });
+    await insertToolBlocks({ ...ctx, spaceId: ctx.defaultSpaceId, packageId: API }, blocks);
     const result = await resolveIntegrationSpawns({
       spaceId: ctx.defaultSpaceId,
       actor: { type: "user", id: ctx.user.id },

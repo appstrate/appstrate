@@ -13,7 +13,6 @@ import { db } from "@appstrate/db/client";
 import {
   integrationConnections,
   integrationOrgDefaults,
-  spaceIntegrationToolBlocks,
   spacePackages,
   spaces,
 } from "@appstrate/db/schema";
@@ -22,6 +21,7 @@ import { fnv1a64Hex } from "@appstrate/afps-shared/mcp-naming";
 import { getTestApp } from "../../helpers/app.ts";
 import { truncateAll } from "../../helpers/db.ts";
 import { seedApiKey } from "../../helpers/seed.ts";
+import { insertToolBlocks } from "../../helpers/tool-policy.ts";
 import { flushRedis } from "../../helpers/redis.ts";
 import { authHeaders, createTestContext, type TestContext } from "../../helpers/auth.ts";
 import {
@@ -328,36 +328,18 @@ describe("GET /api/credential-proxy/tools", () => {
   });
 
   describe("api_call tools", () => {
-    it("leaves out an api_call the space blocked, and refuses its calls with tool_blocked_in_space", async () => {
+    it("leaves out an api_call the space blocked", async () => {
       const id = "@acme/items";
       await seedProxyIntegration(ctx, twoAuthApiIntegrationManifest(id));
-      const primary = await seedProxyConnection(ctx, id, "primary", { api_key: "a" }, "p");
+      await seedProxyConnection(ctx, id, "primary", { api_key: "a" }, "p");
       await seedProxyConnection(ctx, id, "backup", { api_key: "b" }, "b1");
-      await db.insert(spaceIntegrationToolBlocks).values({
-        spaceId: ctx.defaultSpaceId,
-        orgId: ctx.orgId,
-        packageId: id,
-        toolName: "api_call__primary",
-      });
+      await insertToolBlocks({ ...ctx, spaceId: ctx.defaultSpaceId, packageId: id }, [
+        "api_call__primary",
+      ]);
 
       expect((await list()).body.tools.map((tool) => tool.name)).toEqual([
         "acme_items__api_call__backup",
       ]);
-
-      const res = await getTestApp().request("/api/credential-proxy/proxy", {
-        method: "GET",
-        headers: {
-          Authorization: `Bearer ${apiKey}`,
-          "X-Org-Id": ctx.orgId,
-          "X-Space-Id": ctx.defaultSpaceId,
-          "X-Integration-Id": id,
-          "X-Connection-Id": primary,
-          "X-Target": "https://api.example.com/items",
-          "X-Session-Id": crypto.randomUUID(),
-        },
-      });
-      expect(res.status).toBe(403);
-      expect(((await res.json()) as { code: string }).code).toBe("tool_blocked_in_space");
     });
 
     it("names one tool per auth exposing api_call, each with its own connections", async () => {

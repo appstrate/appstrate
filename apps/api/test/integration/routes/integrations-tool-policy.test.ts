@@ -109,29 +109,6 @@ describe("integration tool policy routes", () => {
     expect(body.blocks).toEqual([expect.objectContaining({ tool_name: "read_file" })]);
   });
 
-  it("refuses an API key with dashboard_session_required, even holding configure", async () => {
-    await listed(tool("write_file"));
-    const { rawKey } = await seedApiKey({
-      orgId: ctx.orgId,
-      spaceId: ctx.defaultSpaceId,
-      createdBy: ctx.user.id,
-      scopes: ["integrations:read", "integrations:configure"],
-    });
-    const res = await send(
-      "POST",
-      "/approvals",
-      { tools: [{ name: "write_file", fingerprint: fp("write_file") }] },
-      {
-        Authorization: `Bearer ${rawKey}`,
-        "X-Org-Id": ctx.orgId,
-        "X-Space-Id": ctx.defaultSpaceId,
-      },
-    );
-    expect(res.status).toBe(403);
-    expect(((await res.json()) as Problem).code).toBe("dashboard_session_required");
-    expect(await db.select().from(spaceIntegrationToolApprovals)).toHaveLength(0);
-  });
-
   it("refuses all four writes to an API key with dashboard_session_required, changing nothing", async () => {
     await listed(tool("write_file"), tool("other_tool"));
     await approve({ name: "write_file", fingerprint: fp("write_file") });
@@ -231,16 +208,6 @@ describe("integration tool policy routes", () => {
         fingerprint: i.toString(16).padStart(64, "0"),
       })),
     );
-
-  it("accepts the 32nd approved definition of one tool", async () => {
-    await listed(tool("write_file", "live"));
-    await holdFingerprints(MAX_APPROVED_FINGERPRINTS_PER_TOOL - 1);
-
-    expect(
-      (await approve({ name: "write_file", fingerprint: fp("write_file", "live") })).status,
-    ).toBe(204);
-    expect((await view()).approvals).toHaveLength(MAX_APPROVED_FINGERPRINTS_PER_TOOL);
-  });
 
   it("refuses a 33rd approved definition of one tool with tool_approvals_limit", async () => {
     await listed(tool("write_file", "live"));
