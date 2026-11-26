@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * The context panel. Closed, its reads wait (`active` false). Open, each group of the summary
+ * The context panel. Closed, its reads wait (`active` false), and nothing it draws in the meantime
+ * is an error or an empty list made up from a read that never ran. Open, each group of the summary
  * stands on its own read. The Tools tab lists the calls by turn, lookups behind a switch, and a
  * call's detail.
  */
@@ -153,7 +154,54 @@ function toolPart(
   };
 }
 
+/** A stored part as a call without outcome stamp: still running, or cut before it resolved. */
+function unstamped(part: ReturnType<typeof toolPart>) {
+  const { resultProviderMetadata: _stamp, ...rest } = part;
+  return rest;
+}
+
 describe("the context panel, closed", () => {
+  const panes: [string, React.ReactElement<{ active: boolean }>][] = [
+    ["Résumé", <ConversationSummary conversationId="chs_1" active={false} dispatch={noop} />],
+    ["Runs", <ConversationRuns conversationId="chs_1" active={false} />],
+    ["Fichiers", <ConversationFiles conversationId="chs_1" active={false} onSelect={noop} />],
+    [
+      "Outils",
+      <ConversationToolsList
+        conversationId="chs_1"
+        active={false}
+        showLookups={false}
+        onShowLookupsChange={noop}
+        onSelect={noop}
+      />,
+    ],
+    [
+      "un appel",
+      <ShownToolCall
+        conversationId="chs_1"
+        toolCallId="call_1"
+        active={false}
+        missing={false}
+        from="list"
+        onBack={noop}
+        onShowInThread={noop}
+      />,
+    ],
+  ];
+
+  for (const [name, pane] of panes) {
+    it(`holds ${name} in its loading shape, never an error or an empty list`, () => {
+      const html = render(pane);
+      expect(html).not.toContain(i18n.t("common:error.generic"));
+      expect(html).not.toContain(i18n.t("chat:context.runs.empty"));
+      expect(html).not.toContain(i18n.t("chat:context.files.empty"));
+      expect(html).not.toContain(i18n.t("chat:context.tools.empty"));
+      expect(html).not.toContain(i18n.t("chat:context.tools.gone"));
+      // One `status` for the pane that waits.
+      expect(html.split('role="status"').length - 1).toBe(1);
+    });
+  }
+
   it("builds every read of its views disabled while closed, and enables them once open", () => {
     const views = (active: boolean) => (
       <ChatTransportProvider value={TRANSPORT}>
@@ -224,6 +272,19 @@ describe("the summary, open", () => {
     expect(html).toContain(i18n.t("chat:context.summary.integrations"));
     // One line per integration call (Gmail's glyph, no icon: the puzzle), none for the platform's own.
     expect(html.split("lucide-puzzle").length - 1).toBe(2);
+  });
+
+  it("draws an integration call with no stamp yet: in flight, or cut before it resolved", () => {
+    const html = summary(
+      [
+        unstamped(toolPart("call_r", { integration: true, state: "input-available" })),
+        unstamped(toolPart("call_x", { integration: true, state: "output-error" })),
+      ],
+      [],
+    );
+    expect(html).toContain(i18n.t("chat:context.summary.integrations"));
+    // Its own icon, the plug, with no subject to draw.
+    expect(html.split("lucide-plug").length - 1).toBe(2);
   });
 
   it("leads each group holding more to its tab, counted where the server counts", () => {
@@ -329,6 +390,19 @@ describe("the Tools tab, open", () => {
     expect(rowsOf(html.slice(second))).toBe(2);
   });
 
+  it("draws a call on an agent outside the chat host", () => {
+    const agent = { kind: "agent", id: "@acme/bot", display_name: "Bot" };
+    const html = tools([
+      [
+        toolPart("call_a", {
+          presentation: { title: "Run", tag: "Agents", method: "POST", subject: agent },
+        }),
+      ],
+    ]);
+    expect(rowsOf(html)).toBe(1);
+    expect(html).toContain("Bot");
+  });
+
   it("says how long a call ran on its row", () => {
     const html = tools([[toolPart("call_a", { durationMs: 1200 })]]);
     expect(html).toContain(formatDuration(1200));
@@ -361,6 +435,38 @@ describe("the Tools tab, open", () => {
     } finally {
       withdrawLiveConversation("chs_1");
     }
+  });
+});
+
+describe("the Runs and Files tabs, open", () => {
+  it("keep the rows they hold when a refetch fails", () => {
+    const queryClient = memberSpaceClient(spaces);
+    failRead(queryClient, runsKey, list([makeRun({ runNumber: 12 })]));
+    failRead(
+      queryClient,
+      filesKey,
+      list([
+        {
+          id: "fil_1",
+          name: "rapport.pdf",
+          mime: "application/pdf",
+          size: 10,
+          purpose: "user_upload",
+          createdAt: "2026-11-26T10:00:00.000Z",
+          spaceId: "spc_a",
+        },
+      ]),
+    );
+    const html = render(
+      <>
+        <ConversationRuns conversationId="chs_1" active />
+        <ConversationFiles conversationId="chs_1" active onSelect={noop} />
+      </>,
+      queryClient,
+    );
+    expect(html).toContain("#12");
+    expect(html).toContain("rapport.pdf");
+    expect(html).not.toContain(i18n.t("common:error.generic"));
   });
 });
 

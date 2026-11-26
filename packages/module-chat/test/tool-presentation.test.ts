@@ -131,6 +131,18 @@ describe("showCall — an operation", () => {
     expect(shown).toMatchObject({ label: "Intégrations · Lecture", idText: "@acme/crm" });
     expect(shown.Icon).toBe(EyeIcon);
   });
+
+  it("keeps an untranslated tag as the source names it", () => {
+    const shown = showCall(
+      {
+        toolName: "invoke_operation",
+        args: {},
+        presentation: { title: "x", method: "GET", tag: "Brand New" },
+      },
+      t,
+    );
+    expect(shown.label).toBe("Brand New · Lecture");
+  });
 });
 
 describe("showCall — a call that reached an integration", () => {

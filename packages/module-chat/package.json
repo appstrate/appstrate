@@ -18,7 +18,6 @@
     "./tool-call-detail": "./src/ui/tool-call-detail.tsx",
     "./tool-presentation": "./src/ui/tool-presentation.ts",
     "./reveal-tool-call": "./src/ui/reveal-tool-call.ts",
-    "./subject-glyph": "./src/ui/subject-glyph.tsx",
     "./package-authoring": "./src/ui/package-authoring-store.ts",
     "./preferences": "./src/ui/preferences.ts",
     "./capabilities": "./src/capabilities.ts"

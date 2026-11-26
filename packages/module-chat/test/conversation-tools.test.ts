@@ -198,6 +198,21 @@ describe("conversationTools", () => {
     expect(calls[0]?.spaceId).toBe("spc_team");
   });
 
+  it("reads the space a failed call acted in off its outcome", () => {
+    const { calls } = conversationTools([
+      assistant("a1", [
+        call("c1", "invoke_operation", {
+          state: "output-error",
+          input: { operation_id: "deleteAgent" },
+          errorText: "forbidden",
+          callProviderMetadata: { appstrate: { spaceId: "spc_caller" } },
+          resultProviderMetadata: { appstrate: { actedSpaceIds: ["spc_target"] } },
+        }),
+      ]),
+    ]);
+    expect(calls[0]?.spaceId).toBe("spc_target");
+  });
+
   it("derives a finished message once, whatever array or reader asks", () => {
     const finished = assistant("a1", [
       call("c1", "get_me", { state: "output-available", input: {}, output: mcp({ ok: 1 }) }),

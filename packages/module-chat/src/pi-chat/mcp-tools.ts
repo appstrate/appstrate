@@ -354,7 +354,13 @@ export function withTurnBudgetNote(result: PiToolResult, budget: PiTurnBudget): 
     remainingMs: budget.deadlineAt - now,
     stepsUsed: budget.stepCount(),
   });
-  return { ...result, content: [...result.content, { type: "text", text }] };
+  const note = { type: "text" as const, text };
+  return {
+    ...result,
+    content: [...result.content, note],
+    // What is stored ends with the note too: readers drop the LAST block alone as the note.
+    ...(result.persistedContent && { persistedContent: [...result.persistedContent, note] }),
+  };
 }
 
 /**

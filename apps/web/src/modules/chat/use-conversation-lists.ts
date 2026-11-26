@@ -7,6 +7,15 @@ import { useAdmittingSpaces } from "../../hooks/use-overview-mode";
 import { useRunAgentName } from "../../hooks/use-run-agent-name";
 import { useListScope } from "../../hooks/use-org-scope";
 
+/**
+ * What a panel read shows: its answer once it has one, kept through a refetch that fails; its
+ * error only while it holds nothing; else its wait (on its way, or held while the panel is closed).
+ */
+export function readShown(query: { data: unknown; error: unknown }): "ready" | "error" | "pending" {
+  if (query.data !== undefined) return "ready";
+  return query.error ? "error" : "pending";
+}
+
 /** The runs a conversation launched, in every space the reader reads runs in, newest first. */
 export function useConversationRuns(conversationId: string | null, active: boolean) {
   const admitting = useAdmittingSpaces("runs");

@@ -37,7 +37,7 @@ import type {
   ConversationSidebarTab,
 } from "./conversation-sidebar-state";
 import { ToolCallIcon } from "./conversation-tools-tab";
-import { useConversationFiles, useConversationRuns } from "./use-conversation-lists";
+import { readShown, useConversationFiles, useConversationRuns } from "./use-conversation-lists";
 import {
   TOOL_STATUS_LABEL,
   TOOL_STATUS_TONE,
@@ -75,20 +75,11 @@ function ConversationId({ id }: { id: string }) {
 const SUMMARY_ROWS = 3;
 
 /**
- * What a read shows: its answer once it has one, kept through a refetch that fails; its error
- * only while it holds nothing; else its wait (on its way, or held while the panel is closed).
+ * Whether a call reached a connected integration, read off its tool: a call still running, one
+ * refused before it resolved, or one stored before presentations existed carries no subject.
  */
-function readShown(query: { data: unknown; error: unknown }): "ready" | "error" | "pending" {
-  if (query.data !== undefined) return "ready";
-  return query.error ? "error" : "pending";
-}
-
-/**
- * Whether a call reached a connected integration, as its card draws it (`showCall`): an operation
- * on an integration package carries the integration as subject too, but under its OpenAPI tag.
- */
-function reachedIntegration({ presentation }: ConversationToolCall): boolean {
-  return presentation?.subject?.kind === "integration" && !presentation.tag;
+function reachedIntegration({ toolName }: ConversationToolCall): boolean {
+  return toolName === "call_integration_tool";
 }
 
 /** A line of the summary's activity: 40 px, a touch target like every chat control. */

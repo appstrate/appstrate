@@ -6,9 +6,9 @@ import { useTranslation } from "react-i18next";
 import type { ConversationToolCall } from "@appstrate/module-chat/conversation-tools";
 import type { ShownCall } from "@appstrate/module-chat/tool-presentation";
 import { ToolCallDetail } from "@appstrate/module-chat/tool-call-detail";
-import { SubjectGlyph } from "@appstrate/module-chat/subject-glyph";
 import { cn } from "@appstrate/ui/cn";
 import { Button } from "@appstrate/ui/components/button";
+import { IntegrationIcon } from "@appstrate/ui/components/integration-icon";
 import { Skeleton } from "@appstrate/ui/components/skeleton";
 import { Switch } from "@appstrate/ui/components/switch";
 import { EmptyState, ErrorState } from "../../components/page-states";
@@ -41,11 +41,14 @@ const CALL_ROW_CLASS = "flex min-h-14 w-full items-center gap-3 px-4 py-2.5";
 const GLYPH_CLASS = "flex size-8 shrink-0 items-center justify-center rounded-lg";
 
 /**
- * The call's icon: the glyph of what it acted on, as its card draws it, else its icon (`showCall`)
- * in its status' tone.
+ * The call's icon: the logo of the integration it acted on, as its card draws it, else its icon
+ * (`showCall`) in its status' tone. An agent's tile is not drawn: it reads the chat host, which
+ * the panel is rendered outside of.
  */
 export function ToolCallIcon({ call, shown }: { call: ConversationToolCall; shown: ShownCall }) {
-  if (shown.subject) return <SubjectGlyph subject={shown.subject} />;
+  if (shown.subject?.kind === "integration") {
+    return <IntegrationIcon src={shown.subject.icon} className="size-4 rounded-sm" />;
+  }
   const { Icon } = shown;
   return <Icon aria-hidden="true" className={cn("size-4", TOOL_STATUS_TONE[call.status])} />;
 }

@@ -157,7 +157,7 @@ export function showCall(
     const idText = subject ? subjectName(subject) : own.target;
     return {
       Icon,
-      label: `${t(`tool.tag.${p.tag}`)} · ${verbOf(method, t)}`,
+      label: `${t(`tool.tag.${p.tag}`, { defaultValue: p.tag })} · ${verbOf(method, t)}`,
       ...(idText ? { idText } : {}),
       ...(subject ? { subject } : {}),
     };

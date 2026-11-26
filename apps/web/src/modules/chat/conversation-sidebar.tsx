@@ -24,7 +24,7 @@ import { otherSpaceFileContext } from "../../lib/file-link";
 import { localViewableFile } from "../../lib/files";
 import { formatBytes } from "../../lib/format-bytes";
 import { formatDateField } from "../../lib/format-date";
-import { useConversationFiles, useConversationRuns } from "./use-conversation-lists";
+import { readShown, useConversationFiles, useConversationRuns } from "./use-conversation-lists";
 import { ConversationSummary } from "./conversation-summary";
 import { ConversationToolsList, ShownToolCall } from "./conversation-tools-tab";
 import {
@@ -180,10 +180,10 @@ export function ConversationRuns({
   if (!conversationId) {
     return <EmptyState message={t("context.unsaved")} icon={ActivityIcon} compact />;
   }
-  if (query.isLoading) {
-    return <TextSkeleton className="p-4" />;
-  }
-  if (query.error) return <ErrorState error={query.error} compact />;
+  const read = readShown(query);
+  if (read === "error") return <ErrorState error={query.error} compact />;
+  // Pending covers a read not yet answered and one held while the panel is closed.
+  if (read === "pending") return <TextSkeleton className="p-4" />;
   if (runs.length === 0) {
     return <EmptyState message={t("context.runs.empty")} icon={ActivityIcon} compact />;
   }
@@ -220,10 +220,10 @@ export function ConversationFiles({
   if (!conversationId) {
     return <EmptyState message={t("context.unsaved")} icon={FilesIcon} compact />;
   }
-  if (query.isLoading) {
-    return <TextSkeleton className="p-4" />;
-  }
-  if (query.error) return <ErrorState error={query.error} compact />;
+  const read = readShown(query);
+  if (read === "error") return <ErrorState error={query.error} compact />;
+  // Pending covers a read not yet answered and one held while the panel is closed.
+  if (read === "pending") return <TextSkeleton className="p-4" />;
   if (files.length === 0) {
     return <EmptyState message={t("context.files.empty")} icon={FilesIcon} compact />;
   }
