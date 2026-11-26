@@ -5,9 +5,7 @@
  *
  * Periodically deletes rows from `model_provider_pairings` whose
  * `expires_at` is more than a grace window in the past (see
- * `cleanupExpiredPairings`). Pure table-bloat janitor — unrelated to
- * token refresh, hence its own worker decoupled from
- * `OAUTH_REFRESH_WORKER_ENABLED`.
+ * `cleanupExpiredPairings`). Pure table-bloat janitor, unrelated to token refresh.
  *
  * The queue/scheduler names below are frozen: every install has registered a BullMQ repeatable under them, and
  * renaming would strand those schedulers in Redis with nothing to remove them.

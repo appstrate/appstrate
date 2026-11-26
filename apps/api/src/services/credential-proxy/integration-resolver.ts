@@ -35,6 +35,7 @@ import {
 } from "../integration-manifest-helpers.ts";
 import { actorOwns, type Actor } from "../../lib/actor.ts";
 import { connectionVariablesOf } from "../../lib/connection-identity.ts";
+import { getErrorMessage } from "@appstrate/core/errors";
 import { logger } from "../../lib/logger.ts";
 import { decryptStoredCredential } from "../../lib/stored-credential.ts";
 import { notFound, type ResolutionFieldError } from "../../lib/errors.ts";
@@ -174,15 +175,54 @@ export async function resolveIntegrationProxyCredentials(
     );
   }
 
-  const connection = await resolveConnection(input, manifest);
+  let connection = await resolveConnection(input, manifest);
   if (!connection) throw new IntegrationCredentialNotFoundError(noConnectionMessage(input));
 
-  const payload = buildPayload(input.integrationId, manifest, connection);
+  // A credential about to expire is refreshed before it is sent, not after its first 401.
+  let payload: ProxyCredentialsPayload | null = null;
+  let credentialRevision = connection.credentialRevision;
+  const authDef = manifest.auths?.[connection.authKey];
+  let outcome: Awaited<ReturnType<typeof refreshConnectionCredential>> | null = null;
+  if (authDef) {
+    try {
+      outcome = await refreshConnectionCredential({
+        connection,
+        integrationId: input.integrationId,
+        manifest,
+        authDef,
+        trigger: { kind: "expiring" },
+      });
+    } catch (err) {
+      // The stored token may still be valid: a failed pre-check must not fail the call.
+      logger.warn("credential-proxy: pre-send refresh failed — serving the stored credential", {
+        integrationId: input.integrationId,
+        connectionId: connection.id,
+        error: getErrorMessage(err),
+      });
+    }
+  }
+  switch (outcome?.status) {
+    case "refreshed":
+      // The 401 path names the credential the call carried: the one just written.
+      credentialRevision = outcome.credentialRevision;
+      payload = payloadOrThrow(input.integrationId, manifest, connection, outcome.fields);
+      break;
+    case "dead": {
+      // Flagged just now: the selection answers as it does for a connection flagged before the call.
+      const reselected = await resolveConnection(input, manifest);
+      if (!reselected) throw new IntegrationCredentialNotFoundError(noConnectionMessage(input));
+      connection = reselected;
+      credentialRevision = connection.credentialRevision;
+      break;
+    }
+    // `kept`: nothing to do. `retry`: the stored credential is served, the upstream decides.
+  }
+
   return {
-    payload,
+    payload: payload ?? buildPayload(input.integrationId, manifest, connection),
     declaredUris: declaredUrisOf(manifest, connection.authKey),
     connectionId: connection.id,
-    credentialRevision: connection.credentialRevision,
+    credentialRevision,
     authKey: connection.authKey,
     rejectionStreak: upstreamRejectionStreak(connection),
   };
@@ -211,9 +251,11 @@ export async function forceRefreshIntegrationProxyCredentials(
     integrationId: input.integrationId,
     manifest,
     authDef,
-    scope: { orgId: input.orgId, spaceId: input.spaceId },
-    actor: input.actor,
-    trigger: { kind: "rejected", revision: rejectedRevision },
+    trigger: {
+      kind: "rejected",
+      revision: rejectedRevision,
+      reach: { spaceId: input.spaceId, actor: input.actor },
+    },
   });
   let fields: Record<string, string> | null;
   switch (outcome.status) {
@@ -507,6 +549,15 @@ function buildPayload(
       `Failed to decrypt credentials for integration '${integrationId}'`,
     );
   }
+  return payloadOrThrow(integrationId, manifest, connection, fields);
+}
+
+function payloadOrThrow(
+  integrationId: string,
+  manifest: IntegrationManifest,
+  connection: ResolvedConnectionRow,
+  fields: Record<string, string>,
+): ProxyCredentialsPayload {
   const payload = buildPayloadFromFields(
     manifest,
     connection.authKey,

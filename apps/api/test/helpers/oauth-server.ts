@@ -38,6 +38,8 @@ export interface MockOAuthServer {
   setTokenResponse: (response: object) => void;
   /** Override the HTTP status code returned by POST /token. */
   setTokenStatus: (status: number) => void;
+  /** The recorded `POST /token` requests. */
+  tokenRequests: () => RecordedRequest[];
   /** Clear recorded requests. */
   clearRequests: () => void;
 }
@@ -103,6 +105,7 @@ export function createMockOAuthServer(): MockOAuthServer {
     setTokenStatus: (status: number) => {
       tokenStatus = status;
     },
+    tokenRequests: () => requests.filter((r) => r.method === "POST" && r.path === "/token"),
     clearRequests: () => {
       requests.length = 0;
     },

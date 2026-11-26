@@ -18,7 +18,7 @@ import type { Logger } from "./logger.ts";
 import type { ModuleResource, ModuleResources, OrgRole, SpaceRolePreset } from "./permissions.ts";
 import type { ModulePrincipalPermissions } from "./principal-permissions.ts";
 import type { ModelPayer } from "./model-payer.ts";
-import type { ModelApiShape } from "./sidecar-types.ts";
+import type { CredentialDeathCause, ModelApiShape } from "./sidecar-types.ts";
 import type {
   ChatAttachmentRequest,
   ChatAttachmentContent,
@@ -540,6 +540,15 @@ export interface ModuleEvents {
    * agents to downstream dashboards without polling for 4xx responses.
    */
   onRunConnectionMissing: (params: RunConnectionMissingParams) => void | Promise<void>;
+  /**
+   * A stored credential died: one best-effort announcement (fire-and-forget after commit) per
+   * `needs_reconnection` false to true flip, never while the credential stays flagged, whichever
+   * path flagged it. Covers integration connections and model-provider credentials. Lets a module
+   * tell the owner (webhook, notification, e-mail) before the next run discovers it.
+   */
+  onCredentialNeedsReconnection: (
+    params: CredentialNeedsReconnectionParams,
+  ) => void | Promise<void>;
   /** Org created — broadcast after a new organization is created. */
   onOrgCreate: (orgId: string, userEmail: string) => void | Promise<void>;
   /**
@@ -564,7 +573,7 @@ export interface ModuleEvents {
 // knows how to talk to. Modules contribute providers via
 // `AppstrateModule.modelProviders()`; the platform aggregates them into a
 // runtime registry consulted by the LLM proxy, OAuth flow, token resolver,
-// and refresh worker.
+// and credential refresh sweep.
 //
 // Behavior that varies per provider but stays declarative (apiShape,
 // forceStream, base URL, OAuth endpoints, model catalog, sidecar wire-
@@ -1243,6 +1252,32 @@ export interface RunStatusChangeParams {
   /** Additional data for webhook payloads (result, error, etc.). */
   extra?: Record<string, unknown>;
 }
+
+/**
+ * Parameters passed to the `onCredentialNeedsReconnection` event, discriminated by `kind`: an
+ * integration connection (space-scoped or org-level, owned by a member or an end-user) or a
+ * model-provider credential (org-level, no owner or space).
+ */
+export type CredentialNeedsReconnectionParams =
+  | {
+      kind: "integration_connection";
+      orgId: string;
+      /** `null` for an org-level connection serving every space of the organization. */
+      spaceId: string | null;
+      connectionId: string;
+      /** The integration's package id (`@scope/name`). */
+      packageId: string;
+      authKey: string;
+      owner: { type: "user" | "end_user"; id: string };
+      cause: CredentialDeathCause;
+    }
+  | {
+      kind: "model_provider_credential";
+      orgId: string;
+      credentialId: string;
+      providerId: string;
+      cause: CredentialDeathCause;
+    };
 
 /** Parameters passed to the `onRunConnectionMissing` event. */
 export interface RunConnectionMissingParams {

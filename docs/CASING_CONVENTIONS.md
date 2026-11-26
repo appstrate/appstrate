@@ -255,6 +255,8 @@ The profile/member family stays camelCase as a fixed set of names:
 | `spaces.settings`                                                                                                                               | `allowedRedirectDomains` (4n); `branding.{name, logo_url, primary_color, accent_color, support_email, from_name}`                                                                                              | the spaces routes                                                      |
 | `integration_connections.identity_claims`                                                                                                       | the manifest's `identity_claims` keys — snake_case, refused otherwise on every package write (`findNonSnakeCaseIdentityClaimKeys`, see the manifest section); a stored manifest predating the rule still reads | connection DTOs                                                        |
 
+`notifications.payload` of a `credential_needs_reconnection` row: `packageId` (4b), `integration_name`, `label`, `cause`.
+
 **The one exception — `run_logs.data`** (`GET /api/runs/{id}/logs`, `run_log` SSE, returned verbatim) is the event payload in its producer's vocabulary: runtime/sidecar CloudEvents camelCase (4i, e.g. `integrationId`, `durationMs`, `toolCallId`); platform-written markers reuse that vocabulary (`integrationId` on `integration_dropped`, `exitCode` on `firecracker_console`); the platform's `file` row is `{file_id, uri, name, mime, size, sha256}`.
 
 **Opaque, producer-defined** (client- or agent-supplied, returned verbatim): `runs.input`, `runs.result`, `runs.checkpoint`, `package_schedules.input`, `runs.context_snapshot` (caller-supplied environment metadata), `end_users.metadata`, `package_persistence.content`. Manifests (`packages.draft_manifest`, `package_versions.manifest`) are AFPS, hence snake_case by Zone 1. `chat_messages.content` is an AI SDK `UIMessage` (third-party vocabulary), with Appstrate's own `metadata` under 4o.
@@ -305,9 +307,8 @@ The runner→platform ingestion routes (`/api/runs/{id}/events*`) carry this voc
 | `DeliveryJobData`                                         | `apps/api/src/modules/webhooks/service.ts`                        |
 | `CompactionJobData` (`retentionDays`)                     | `apps/api/src/services/inline-compaction.ts`                      |
 | `LlmUsageRetryJob` (`entry: LlmUsageEntry`, `onConflict`) | `apps/api/src/services/llm-usage-retry.ts`, `llm-usage-ledger.ts` |
-| `RefreshJobData` (`credentialId`, `providerId`)           | `apps/api/src/services/model-providers/refresh-worker.ts`         |
 
-The model-provider refresh scan, the pairing cleanup and the personal-space sweeper queues carry an empty payload.
+The credential refresh scan, the pairing cleanup and the personal-space sweeper queues carry an empty payload.
 
 #### Carve-out 4l — Logger fields (pino convention)
 

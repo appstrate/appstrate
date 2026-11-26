@@ -35,7 +35,10 @@ import {
 import { toISORequired } from "../../lib/date-helpers.ts";
 import { buildUpdateSet, scopedWhere } from "../../lib/db-helpers.ts";
 import type { SpaceScope, OrgScope } from "../../lib/scope.ts";
-import type { RunStatusChangeParams } from "@appstrate/core/module";
+import type {
+  CredentialNeedsReconnectionParams,
+  RunStatusChangeParams,
+} from "@appstrate/core/module";
 import { createQueue, PermanentJobError } from "../../infra/queue/index.ts";
 import type { JobQueue, QueueJob } from "../../infra/queue/index.ts";
 import { isDevEnvironment, LOCALHOST_HOSTS } from "../../services/redirect-validation.ts";
@@ -55,6 +58,8 @@ export const webhookEventSchema = z.enum([
   // the actor is missing or under-scoped on one or more integration
   // connections. No run row exists when this fires.
   "run.connection_missing",
+  // Fired by `onCredentialNeedsReconnection` when a stored credential dies. No run row.
+  "credential.needs_reconnection",
 ]);
 
 type WebhookEventType = z.infer<typeof webhookEventSchema>;
@@ -608,10 +613,12 @@ async function getDeliveryQueue(): Promise<JobQueue<DeliveryJobData>> {
  * Called from the run pipeline after status transitions.
  *
  * Fires both **org-level** webhooks (pinned to the org, `space_id IS NULL`)
- * and **space-level** webhooks pinned to the run's space.
+ * and **space-level** webhooks pinned to the run's space. A `null` `spaceId` (an event with no
+ * space) reaches org-level webhooks only. A webhook's package filter is matched against
+ * `run.packageId`; absent, only webhooks without a filter receive the event.
  */
 export async function dispatchWebhookEvents(
-  scope: SpaceScope,
+  scope: { orgId: string; spaceId: string | null },
   eventType: WebhookEventType,
   run: Record<string, unknown>,
 ): Promise<void> {
@@ -628,7 +635,9 @@ export async function dispatchWebhookEvents(
         orgId: scope.orgId,
         extra: [
           eq(webhooks.enabled, true),
-          or(isNull(webhooks.spaceId), eq(webhooks.spaceId, scope.spaceId)),
+          scope.spaceId === null
+            ? isNull(webhooks.spaceId)
+            : or(isNull(webhooks.spaceId), eq(webhooks.spaceId, scope.spaceId)),
         ],
       }),
     );
@@ -941,6 +950,30 @@ export function dispatchRunConnectionMissingWebhook(
   }).catch((err) => {
     logger.warn("run.connection_missing webhook dispatch failed", {
       packageId,
+      error: getErrorMessage(err),
+    });
+  });
+}
+
+/** A credential's death as the `credential.needs_reconnection` delivery's inner object. */
+export function credentialWebhookObject(
+  params: CredentialNeedsReconnectionParams,
+): Record<string, unknown> {
+  const { orgId: _orgId, ...rest } = params;
+  return { object: "credential", ...rest };
+}
+
+/** Fire-and-forget; routing and payload: `docs/site/features/webhooks.mdx`. */
+export function dispatchCredentialNeedsReconnectionWebhook(
+  params: CredentialNeedsReconnectionParams,
+): void {
+  dispatchWebhookEvents(
+    { orgId: params.orgId, spaceId: "spaceId" in params ? params.spaceId : null },
+    "credential.needs_reconnection",
+    credentialWebhookObject(params),
+  ).catch((err) => {
+    logger.warn("credential.needs_reconnection webhook dispatch failed", {
+      kind: params.kind,
       error: getErrorMessage(err),
     });
   });

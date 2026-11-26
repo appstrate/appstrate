@@ -52,7 +52,7 @@ import { synthesiseFinalize } from "../services/run-event-ingestion.ts";
 import { initScheduleWorker } from "../services/scheduler.ts";
 import { initInlineCompactionWorker } from "../services/inline-compaction.ts";
 import { initPersonalSpaceSweeperWorker } from "../services/personal-space-sweeper.ts";
-import { initOAuthModelRefreshWorker } from "../services/model-providers/refresh-worker.ts";
+import { initCredentialRefreshSweep } from "../services/credential-refresh-sweep.ts";
 import { initPairingCleanupWorker } from "../services/model-providers/pairing-cleanup-worker.ts";
 import { startModelCatalogSync } from "../services/model-catalog-sync.ts";
 import { initLlmUsageRetryWorker } from "../services/llm-usage-retry.ts";
@@ -493,7 +493,6 @@ export async function bootRunCapacity(): Promise<void> {
  * on them. A rejection is fatal, as for {@link bootServing}.
  */
 export async function bootHousekeeping(): Promise<void> {
-  const env = (await import("@appstrate/env")).getEnv();
   await Promise.all([
     bootStep("housekeeping", "personal-space-sweeper-worker", () =>
       initPersonalSpaceSweeperWorker().catch((err) => {
@@ -502,25 +501,14 @@ export async function bootHousekeeping(): Promise<void> {
         });
       }),
     ),
-    // OAuth refresh worker is opt-in (OAUTH_REFRESH_WORKER_ENABLED). The
-    // sidecar's reactive 401-retry path and the on-demand token resolver
-    // cover correctness without it; the worker only matters for credentials
-    // that go dormant long enough that their refresh_token would expire
-    // upstream.
-    ...(env.OAUTH_REFRESH_WORKER_ENABLED
-      ? [
-          bootStep("housekeeping", "oauth-model-refresh-worker", () =>
-            initOAuthModelRefreshWorker().catch((err) => {
-              logger.warn("Could not initialize OAuth model refresh worker", {
-                error: getErrorMessage(err),
-              });
-            }),
-          ),
-        ]
-      : []),
-    // Pairing-table cleanup runs unconditionally — pure table-bloat
-    // janitor for `model_provider_pairings`, unrelated to the refresh
-    // hot path.
+    bootStep("housekeeping", "credential-refresh-sweep", () =>
+      initCredentialRefreshSweep().catch((err) => {
+        logger.warn("Could not initialize credential refresh sweep", {
+          error: getErrorMessage(err),
+        });
+      }),
+    ),
+    // Pure table-bloat janitor for `model_provider_pairings`.
     bootStep("housekeeping", "pairing-cleanup-worker", () =>
       initPairingCleanupWorker().catch((err) => {
         logger.warn("Could not initialize OAuth model pairing cleanup worker", {

@@ -9,6 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`onCredentialNeedsReconnection`** (`@appstrate/core/module`, `ModuleEvents`) and its
+  `CredentialNeedsReconnectionParams` payload, discriminated by `kind`
+  (`integration_connection` | `model_provider_credential`). One best-effort announcement per
+  `needs_reconnection` false to true flip; carries the `CredentialDeathCause`
+  (`CREDENTIAL_DEATH_CAUSES`, `@appstrate/core/sidecar-types`).
 - **`@appstrate/core/mcp-presentation`**: how a client shows one MCP tool call.
   `TOOL_PRESENTATION_META_KEY` (`dev.appstrate/presentation`) names the `_meta` entry the platform
   stamps on a tool result, `toolPresentationSchema` describes it (types `ToolPresentation`,
