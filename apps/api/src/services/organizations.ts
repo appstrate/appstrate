@@ -30,11 +30,24 @@ import {
   integrationConnections,
   type ScheduleDisabledReason,
 } from "@appstrate/db/schema";
-import { and, eq, ne, inArray, isNull, notInArray, count, sql, asc, type SQL } from "drizzle-orm";
+import {
+  and,
+  eq,
+  ne,
+  inArray,
+  isNull,
+  notInArray,
+  count,
+  countDistinct,
+  sql,
+  asc,
+  type SQL,
+} from "drizzle-orm";
 import type { OrgRole } from "../types/index.ts";
 import type { SpaceRoleAssignment } from "@appstrate/shared-types";
 import {
   customRoleOn,
+  defaultPersonalSpaceRole,
   lockOrgSpaceRole,
   MEMBERSHIP_COLUMNS,
   memberFromJoin,
@@ -43,6 +56,7 @@ import {
   personalSpaceDefaultOn,
   personalSpaceDefaultRef,
   psr,
+  spacePermissions,
   type SpaceRoleRef,
 } from "../lib/space-role.ts";
 import type { SpaceRoleColumns } from "../lib/space-role-assignment.ts";
@@ -1092,6 +1106,90 @@ export async function listPersonalSpaceRoleOverrides(
         : { custom_role_id: row.customRoleId! },
     ]),
   );
+}
+
+/**
+ * What `candidate` as the org's `personal_space_role` would stop (RBAC spec §3.6): the enabled
+ * schedules that members and guests following the default run as themselves in their own live
+ * personal space, under a resolved role without `agents:run`. Each would disable itself at its
+ * next fire (`actor_invalid`), and restoring the role does not re-arm it. An owner or admin holds
+ * `admin` there and an override answers before the default, so neither is counted.
+ *
+ * The rule is the resolver's own ({@link defaultPersonalSpaceRole}, {@link spacePermissions}),
+ * evaluated once per org role rather than per member: the role only varies with it. Two queries
+ * at most, read without a lock: a snapshot, which a later write can make stale.
+ *
+ * @throws 404 (`param: "role"`) when a custom id names no role of this organization.
+ */
+export async function personalSpaceRoleImpact(
+  orgId: string,
+  candidate: z.infer<typeof personalSpaceRoleSettingSchema>,
+): Promise<{ schedules: number; members: number }> {
+  let ref: SpaceRoleRef;
+  if (isSpaceRolePreset(candidate)) {
+    ref = { kind: "preset", preset: candidate };
+  } else {
+    const [role] = await db
+      .select({
+        id: spaceRoles.id,
+        key: spaceRoles.key,
+        name: spaceRoles.name,
+        permissions: spaceRoles.permissions,
+        showsStudio: spaceRoles.showsStudio,
+      })
+      .from(spaceRoles)
+      .where(and(eq(spaceRoles.id, candidate), eq(spaceRoles.orgId, orgId)))
+      .limit(1);
+    if (!role) {
+      throw new ApiError({
+        status: 404,
+        code: "not_found",
+        title: "Not Found",
+        detail: `Space role '${candidate}' not found in this organization`,
+        param: "role",
+      });
+    }
+    ref = { kind: "custom", role };
+  }
+
+  const stoppedRoles = (["member", "guest"] as const).filter(
+    (orgRole) => !spacePermissions(defaultPersonalSpaceRole(orgRole, ref)).has("agents:run"),
+  );
+  if (stoppedRoles.length === 0) return { schedules: 0, members: 0 };
+
+  const [row] = await db
+    .select({ schedules: count(schedules.id), members: countDistinct(spaces.ownerUserId) })
+    .from(schedules)
+    .innerJoin(
+      spaces,
+      and(
+        eq(spaces.id, schedules.spaceId),
+        eq(spaces.ownerUserId, schedules.userId),
+        isNull(spaces.orphanedAt),
+      ),
+    )
+    .innerJoin(
+      organizationMembers,
+      and(
+        eq(organizationMembers.orgId, spaces.orgId),
+        eq(organizationMembers.userId, spaces.ownerUserId),
+      ),
+    )
+    // The owner's own row on their personal space is the override: absent = the default applies.
+    .leftJoin(
+      spaceMembers,
+      and(eq(spaceMembers.spaceId, spaces.id), eq(spaceMembers.userId, spaces.ownerUserId)),
+    )
+    .where(
+      and(
+        eq(schedules.orgId, orgId),
+        eq(spaces.orgId, orgId),
+        eq(schedules.enabled, true),
+        inArray(organizationMembers.role, stoppedRoles),
+        isNull(spaceMembers.userId),
+      ),
+    );
+  return { schedules: row?.schedules ?? 0, members: row?.members ?? 0 };
 }
 
 /** An expected refusal: no `cause`, so the error handler writes no error line. */

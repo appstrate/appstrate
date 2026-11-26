@@ -16478,6 +16478,102 @@
         }
       }
     },
+    "/api/orgs/{orgId}/personal-space-role/impact": {
+      "get": {
+        "operationId": "getPersonalSpaceRoleImpact",
+        "x-appstrate-space": {
+          "kind": "organization"
+        },
+        "tags": ["Organizations"],
+        "summary": "Preview what a personal-space default would stop",
+        "description": "What setting the organization's `personal_space_role` to `role` would stop, without writing anything. `schedules` counts the ENABLED schedules in live personal spaces whose actor is the space's owner, a member or guest who follows the default (no override of their own, see `setMemberPersonalSpaceRole`) and would hold, under `role`, a resolved role without `agents:run` (guest cap and delete floor applied, as the resolver applies them). Each such schedule disables itself at its next fire (`disabled_reason: actor_invalid`), and restoring the role does not re-enable it. `members` counts the distinct owners of those schedules. Owners and admins always hold `admin` in their own personal space and are never counted; a `role` that grants `agents:run` answers `{ schedules: 0, members: 0 }`. A snapshot, which a later change can make stale. It discloses only counts, to a caller who may already rewrite the setting: same guard as `updateOrgSettings` (`org:settings`).",
+        "parameters": [
+          {
+            "name": "orgId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "role",
+            "in": "query",
+            "required": true,
+            "description": "The candidate default, as `updateOrgSettings` takes `personal_space_role`: a preset key or the id of one of this organization's custom space roles.",
+            "schema": {
+              "oneOf": [
+                {
+                  "type": "string",
+                  "enum": ["admin", "builder", "operator", "runner", "viewer"]
+                },
+                {
+                  "type": "string",
+                  "pattern": "^srl_"
+                }
+              ]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "What the candidate default would stop",
+            "headers": {
+              "Request-Id": {
+                "$ref": "#/components/headers/RequestId"
+              },
+              "Appstrate-Version": {
+                "$ref": "#/components/headers/AppstrateVersion"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["schedules", "members"],
+                  "properties": {
+                    "schedules": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "description": "Enabled schedules that would disable themselves at their next fire."
+                    },
+                    "members": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "description": "Distinct members and guests owning those schedules."
+                    }
+                  },
+                  "additionalProperties": false
+                },
+                "example": {
+                  "schedules": 3,
+                  "members": 2
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/ValidationError"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "description": "`role` names a custom role id that is not a role of this organization",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/orgs/{orgId}/members/{userId}/departure-impact": {
       "get": {
         "operationId": "getMemberDepartureImpact",

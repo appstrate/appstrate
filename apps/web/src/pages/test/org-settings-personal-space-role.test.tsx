@@ -19,11 +19,16 @@ installFakeStorage({
 const { PersonalSpaceRoleSetting } =
   await import("../../components/settings/personal-space-role-setting.tsx");
 const { toggleBody } = await import("../../lib/org-setting-toggle-body.ts");
-const { orgPersonalSpaceRoleBody, storedRoleToSelectValue } =
-  await import("../../lib/personal-space-role.ts");
+const {
+  orgPersonalSpaceRoleBody,
+  personalSpaceRoleImpactDescription,
+  pickPersonalSpaceRole,
+  storedRoleToSelectValue,
+} = await import("../../lib/personal-space-role.ts");
 const { useSpaceRoleOptions } = await import("../../hooks/use-roles.ts");
 const { client, $api } = await import("../../api/client.ts");
-const { useUpdateOrgSettings } = await import("../../hooks/use-org-settings.ts");
+const { usePersonalSpaceRoleImpact, useUpdateOrgSettings } =
+  await import("../../hooks/use-org-settings.ts");
 const { ApiError } = await import("../../api/errors.ts");
 const { orgStore } = await import("../../stores/org-store.ts");
 const { render } = await import("../../test/render.tsx");
@@ -143,4 +148,170 @@ it("keeps the cached toggle after a refused PATCH and refreshes it after a succe
   } finally {
     patch.mockRestore();
   }
+});
+
+describe("picking a default that would stop schedules", () => {
+  const impactPath = "/api/orgs/{orgId}/personal-space-role/impact";
+  const settingsPath = "/api/orgs/{orgId}/settings";
+
+  const impactResponse = (data: { schedules: number; members: number }) =>
+    ({ data, response: new Response(JSON.stringify(data), { status: 200 }) }) as never;
+
+  /** The impact reader and the settings write the setting wires, from one render. */
+  function wiring() {
+    const qc = new QueryClient();
+    let hooks: {
+      impactOf: ReturnType<typeof usePersonalSpaceRoleImpact>;
+      update: ReturnType<typeof useUpdateOrgSettings>;
+    } | null = null;
+    function Probe() {
+      hooks = { impactOf: usePersonalSpaceRoleImpact(), update: useUpdateOrgSettings() };
+      return null;
+    }
+    const snapshot = spyOn(orgStore, "getInitialState").mockReturnValue({
+      ...orgStore.getInitialState(),
+      id: ORG_ID,
+    });
+    try {
+      render(<Probe />, { queryClient: qc });
+    } finally {
+      snapshot.mockRestore();
+    }
+    const { impactOf, update } = hooks!;
+    const writes: Promise<unknown>[] = [];
+    const write = (next: string) => {
+      writes.push(
+        update.mutateAsync({
+          params: { path: { orgId: ORG_ID } },
+          body: orgPersonalSpaceRoleBody(next),
+        }),
+      );
+    };
+    return { impactOf, write, writes };
+  }
+
+  it("asks with the counts, and writes only on confirm", async () => {
+    const get = spyOn(client, "GET").mockResolvedValue(
+      impactResponse({ schedules: 3, members: 2 }),
+    );
+    const patch = spyOn(client, "PATCH").mockResolvedValue({
+      data: { personal_space_role: "viewer" },
+    });
+    try {
+      const { impactOf, write, writes } = wiring();
+      const asked: { selectValue: string; impact: { schedules: number; members: number } }[] = [];
+      await pickPersonalSpaceRole("preset:viewer", {
+        impactOf,
+        write,
+        askConfirmation: (pending) => asked.push(pending),
+      });
+      expect(get).toHaveBeenCalledWith(impactPath, {
+        params: { path: { orgId: ORG_ID }, query: { role: "viewer" } },
+        signal: expect.anything(),
+      });
+      expect(asked).toEqual([
+        { selectValue: "preset:viewer", impact: { schedules: 3, members: 2 } },
+      ]);
+      expect(patch).not.toHaveBeenCalled();
+
+      const description = personalSpaceRoleImpactDescription(
+        i18nModule.default.t.bind(i18nModule.default),
+        asked[0]!.impact,
+      );
+      expect(description).toContain("3 planifications actives de 2 membres seront désactivées");
+      expect(description).toContain("ne se réactiveront pas si vous revenez en arrière");
+
+      // What « Appliquer quand même » does: the held pick is written.
+      write(asked[0]!.selectValue);
+      await Promise.all(writes);
+      expect(patch).toHaveBeenCalledWith(settingsPath, {
+        params: { path: { orgId: ORG_ID } },
+        body: { personal_space_role: "viewer" },
+      });
+    } finally {
+      get.mockRestore();
+      patch.mockRestore();
+    }
+  });
+
+  it("says one schedule of one member in the singular", () => {
+    expect(
+      personalSpaceRoleImpactDescription(i18nModule.default.t.bind(i18nModule.default), {
+        schedules: 1,
+        members: 1,
+      }),
+    ).toContain("1 planification active de 1 membre sera désactivée à son prochain déclenchement");
+  });
+
+  it("writes at once, with no confirmation, when nothing would stop", async () => {
+    const get = spyOn(client, "GET").mockResolvedValue(
+      impactResponse({ schedules: 0, members: 0 }),
+    );
+    const patch = spyOn(client, "PATCH").mockResolvedValue({
+      data: { personal_space_role: CUSTOM_ROLE_ID },
+    });
+    try {
+      const { impactOf, write, writes } = wiring();
+      let asked = false;
+      await pickPersonalSpaceRole(`custom:${CUSTOM_ROLE_ID}`, {
+        impactOf,
+        write,
+        askConfirmation: () => (asked = true),
+      });
+      await Promise.all(writes);
+      expect(asked).toBe(false);
+      expect(get.mock.calls[0]?.[1]).toMatchObject({ params: { query: { role: CUSTOM_ROLE_ID } } });
+      expect(patch).toHaveBeenCalledWith(settingsPath, {
+        params: { path: { orgId: ORG_ID } },
+        body: { personal_space_role: CUSTOM_ROLE_ID },
+      });
+    } finally {
+      get.mockRestore();
+      patch.mockRestore();
+    }
+  });
+
+  it("writes nothing when the pick is cancelled", async () => {
+    const get = spyOn(client, "GET").mockResolvedValue(
+      impactResponse({ schedules: 1, members: 1 }),
+    );
+    const patch = spyOn(client, "PATCH");
+    try {
+      const { impactOf, write } = wiring();
+      let held: string | null = null;
+      await pickPersonalSpaceRole("preset:viewer", {
+        impactOf,
+        write,
+        askConfirmation: (pending) => (held = pending.selectValue),
+      });
+      expect(held).not.toBeNull();
+      // What « Annuler » does: the held pick is dropped.
+      held = null;
+      expect(patch).not.toHaveBeenCalled();
+    } finally {
+      get.mockRestore();
+      patch.mockRestore();
+    }
+  });
+
+  it("writes nothing, and rejects, when the impact cannot be read", async () => {
+    const get = spyOn(client, "GET").mockRejectedValue(new ApiError("internal", "Boom", 500));
+    const patch = spyOn(client, "PATCH");
+    try {
+      const { impactOf, write } = wiring();
+      let asked = false;
+      await expect(
+        pickPersonalSpaceRole("preset:viewer", {
+          impactOf,
+          write,
+          askConfirmation: () => (asked = true),
+        }),
+      ).rejects.toMatchObject({ status: 500 });
+      expect(asked).toBe(false);
+      expect(patch).not.toHaveBeenCalled();
+    } finally {
+      get.mockRestore();
+      patch.mockRestore();
+    }
+  });
 });

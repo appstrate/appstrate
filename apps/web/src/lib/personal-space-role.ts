@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
+import type { TFunction } from "i18next";
 import { isSpaceRolePreset } from "@appstrate/core/permissions";
 import type { components } from "../api/client";
 import {
@@ -68,4 +69,48 @@ export function memberPersonalSpaceRoleRequest(
     method: "PUT",
     body: preset_role ? { preset_role } : { custom_role_id: custom_role_id as string },
   };
+}
+
+/** What a candidate org default would stop: `GET /api/orgs/{orgId}/personal-space-role/impact`. */
+export interface PersonalSpaceRoleImpact {
+  schedules: number;
+  members: number;
+}
+
+/** A pick of the org default held until the admin confirms it. */
+export interface PendingPersonalSpaceRole {
+  selectValue: string;
+  impact: PersonalSpaceRoleImpact;
+}
+
+/**
+ * A pick of the org's personal-space default: its impact is read first. A pick that would disable
+ * schedules is held for confirmation (`askConfirmation`); any other is written at once. A failed
+ * read writes nothing and rejects with its error.
+ */
+export async function pickPersonalSpaceRole(
+  selectValue: string,
+  steps: {
+    impactOf: (role: string) => Promise<PersonalSpaceRoleImpact>;
+    write: (selectValue: string) => void;
+    askConfirmation: (pending: PendingPersonalSpaceRole) => void;
+  },
+): Promise<void> {
+  const impact = await steps.impactOf(orgPersonalSpaceRoleBody(selectValue).personal_space_role);
+  if (impact.schedules > 0) steps.askConfirmation({ selectValue, impact });
+  else steps.write(selectValue);
+}
+
+/** The confirmation's sentence: how many schedules of how many members stop, and that it is not undone. */
+export function personalSpaceRoleImpactDescription(
+  t: TFunction,
+  impact: PersonalSpaceRoleImpact,
+): string {
+  return t("settings:orgSettings.personalSpaceRoleImpactDesc", {
+    count: impact.schedules,
+    schedules: t("settings:orgSettings.personalSpaceRoleImpactSchedules", {
+      count: impact.schedules,
+    }),
+    members: t("settings:orgSettings.personalSpaceRoleImpactMembers", { count: impact.members }),
+  });
 }

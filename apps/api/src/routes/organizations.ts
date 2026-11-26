@@ -37,10 +37,11 @@ import {
   getOrgSettings,
   updateOrgSettings,
   orgSettingsPatchSchema,
+  personalSpaceRoleImpact,
 } from "../services/organizations.ts";
 import { getErrorMessage } from "@appstrate/core/errors";
 import { toSlug, SLUG_REGEX, isReservedScope } from "@appstrate/core/naming";
-import { ApiError, forbidden, invalidRequest, notFound } from "../lib/errors.ts";
+import { ApiError, forbidden, invalidRequest, notFound, parseBody } from "../lib/errors.ts";
 import {
   CURRENT_API_VERSION,
   isVersionSupported,
@@ -72,7 +73,7 @@ import {
   type OrganizationMemberSpace,
   type SpaceRoleAssignment,
 } from "@appstrate/shared-types";
-import { ORG_ROLES } from "@appstrate/core/permissions";
+import { ORG_ROLES, personalSpaceRoleSettingSchema } from "@appstrate/core/permissions";
 import { appearanceColorSchema, appearanceIconSchema } from "@appstrate/core/appearance";
 
 export const createOrgSchema = z
@@ -742,6 +743,21 @@ router.post("/:orgId/leave", async (c) => {
   await recordSharesRemoved(c, orgId, unsharedShares, "access_lost");
   return c.body(null, 204);
 });
+
+/** Query of `GET …/personal-space-role/impact`: the candidate default, as the settings PATCH takes it. */
+const personalSpaceRoleImpactQuerySchema = z.object({ role: personalSpaceRoleSettingSchema });
+
+// GET /api/orgs/:orgId/personal-space-role/impact?role=… — what the candidate default would stop
+// (RBAC spec §3.6). Read-only, counts only, under the guard of the write it previews.
+router.get(
+  "/:orgId/personal-space-role/impact",
+  requirePermission("org", "settings"),
+  async (c) => {
+    const orgId = c.req.param("orgId")!;
+    const { role } = parseBody(personalSpaceRoleImpactQuerySchema, c.req.query());
+    return c.json(await personalSpaceRoleImpact(orgId, role));
+  },
+);
 
 // GET /api/orgs/:orgId/settings — get org settings (any member)
 router.get("/:orgId/settings", async (c) => {
