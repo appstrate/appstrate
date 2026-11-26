@@ -168,14 +168,15 @@ l'espace bloque les connexions des membres n'y figure que sous `integrations:con
 
 ## Décisions prises
 
-| #   | Décision                                                     | Choix                                                                             |
-| --- | ------------------------------------------------------------ | --------------------------------------------------------------------------------- |
-| D1  | Injecter le détail de l'espace personnel l'enregistre-t-il ? | Non : données de l'auteur, il ne peut pas en perdre l'accès. Exception documentée |
-| D2  | Forme de `can` sur le fil                                    | Tableau de noms d'actes en snake_case ; absent = interdit                         |
-| D3  | Valeur du plafond du niveau 2                                | 8 000 car., confirmée par la mesure du lot 0, verrouillée par un test             |
-| D4  | `connectable_integrations` dans `/api/me/context`            | Oui, ids seuls, plafonné                                                          |
-| D5  | Construire le niveau 3                                       | Oui, en préférence d'utilisateur (aucune migration)                               |
-| D6  | Plafond du niveau 1                                          | 4 000 car., dégradation neutre : lignes, groupes par actes, décompte              |
+| #   | Décision                                                     | Choix                                                                                     |
+| --- | ------------------------------------------------------------ | ----------------------------------------------------------------------------------------- |
+| D1  | Injecter le détail de l'espace personnel l'enregistre-t-il ? | Non : données de l'auteur, il ne peut pas en perdre l'accès. Exception documentée         |
+| D2  | Forme de `can` sur le fil                                    | Tableau de noms d'actes en snake_case ; absent = interdit                                 |
+| D3  | Valeur du plafond du niveau 2                                | 8 000 car., confirmée par la mesure du lot 0, verrouillée par un test                     |
+| D4  | `connectable_integrations` dans `/api/me/context`            | Oui, ids seuls, plafonné                                                                  |
+| D5  | Construire le niveau 3                                       | Oui, en préférence d'utilisateur (aucune migration)                                       |
+| D6  | Plafond du niveau 1                                          | 4 000 car., dégradation neutre : lignes, groupes par actes, décompte                      |
+| D7  | Plafond des skills listés                                    | 8 000 car. (`prompt.ts`), même dégradation : avec descriptions, sans, décompte + `search` |
 
 Une organisation ordinaire qui active l'interrupteur du niveau 3 peut atteindre le plafond du
 niveau 2 : tous les espaces, ceux déjà engagés compris, perdent alors descriptions et libellés

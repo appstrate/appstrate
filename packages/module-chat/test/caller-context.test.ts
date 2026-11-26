@@ -208,6 +208,23 @@ describe("formatCallerContext", () => {
     expect(out).not.toContain('<skill id="@acme/huge"');
   });
 
+  it("keeps the listed skills in their budget at one level for all, never a first few", () => {
+    const raw = { user: { name: "Ada" }, org: { role: "member" } };
+    const many = (count: number, description: string) =>
+      Array.from({ length: count }, (_, i) =>
+        listedSkill(`@acme/skill-${String(i).padStart(3, "0")}`, description, "1.0.0"),
+      );
+    const bare = contextText(raw, { ...BASE_OPTS, skillCatalogue: many(60, "d".repeat(200)) });
+    expect(bare).toContain("Descriptions are left out for room");
+    expect(bare).toContain("- `@acme/skill-000` (v1.0.0)");
+    expect(bare).toContain("- `@acme/skill-059` (v1.0.0)");
+    expect(bare).not.toContain("ddd");
+
+    const counted = contextText(raw, { ...BASE_OPTS, skillCatalogue: many(400, "Short.") });
+    expect(counted).toContain("400 skills are available, not listed here for room");
+    expect(counted).not.toContain("@acme/skill-");
+  });
+
   it("lists the turn's skills with discovery on, and none when the turn cannot load one", () => {
     const raw = { user: { name: "Ada" }, org: { role: "member" } };
     const skillCatalogue = [listedSkill("@acme/pdf", "Reads PDFs.", "1.0.0")];

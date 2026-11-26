@@ -272,13 +272,35 @@ interface CatalogueSkill {
 }
 
 /** `` - `@scope/name` (v1.2.0) `skill://…/SKILL.md` — desc ``, minus the parts that say nothing. */
-function skillLine(skill: CatalogueSkill): string {
-  const description = skill.description.trim();
+function skillLine(skill: CatalogueSkill, described: boolean): string {
+  const description = described ? skill.description.trim() : "";
   const head =
     `- \`${skill.packageId}\`` +
     (skill.version ? ` (v${skill.version})` : "") +
     ` \`${skill.uri}\``;
   return description ? `${head} — ${description}` : head;
+}
+
+/** What the listed skills may take of the context block, in characters. */
+const CHAT_SKILLS_LISTING_BUDGET_CHARS = 8_000;
+
+/**
+ * The listed skills at the most detailed level that fits the budget, the same for every skill: with
+ * descriptions, without, then counted. Whole or withheld, never the first of them.
+ */
+function listedSkillLines(listed: readonly CatalogueSkill[]): string[] {
+  const fits = (lines: string[]) => lines.join("\n").length <= CHAT_SKILLS_LISTING_BUDGET_CHARS;
+  const described = [SKILLS_LISTED_LEAD, ...listed.map((skill) => skillLine(skill, true))];
+  if (fits(described)) return described;
+  const bare = [
+    SKILLS_LISTED_LEAD,
+    'Descriptions are left out for room: `search` with `kinds: ["skill"]` gives them.',
+    ...listed.map((skill) => skillLine(skill, false)),
+  ];
+  if (fits(bare)) return bare;
+  return [
+    `${listed.length} skills are available, not listed here for room: find one with \`search\` and \`kinds: ["skill"]\`, then load it by reading the \`id\` it returns, a SKILL.md URI, with \`read_resource\` or \`read\`.`,
+  ];
 }
 
 /** The whole `SKILL.md`, front matter included, tagged with its id, URI and version. */
@@ -323,7 +345,7 @@ function formatSkillsSection(opts: {
   const groups: string[][] = [];
   if (!opts.selection.skillDiscovery) groups.push([SKILLS_DISCOVERY_OFF_NOTE]);
   if (listed.length) {
-    groups.push([SKILLS_LISTED_LEAD, ...listed.map(skillLine)]);
+    groups.push(listedSkillLines(listed));
   }
   if (skills.injected.length) {
     groups.push([
