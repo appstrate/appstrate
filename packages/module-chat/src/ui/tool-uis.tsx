@@ -212,9 +212,12 @@ export function ToolCallCard({
         onClick={() => setOpen(true)}
       >
         <LeadIcon phase={phase} Icon={Icon} subject={subject} />
-        <span className="flex min-w-0 flex-1 items-center gap-2 truncate">
-          <span className="font-medium">{label}</span>
-          {idText ? <code className="text-muted-foreground truncate text-xs">{idText}</code> : null}
+        {/* The id takes only the room left (basis 0): the name truncates once it has none. */}
+        <span className="flex min-w-0 flex-1 items-center gap-2">
+          <span className="min-w-0 truncate font-medium">{label}</span>
+          {idText ? (
+            <code className="text-muted-foreground min-w-0 flex-1 truncate text-xs">{idText}</code>
+          ) : null}
         </span>
         {aside}
         <CallSpace spaceId={spaceId} />

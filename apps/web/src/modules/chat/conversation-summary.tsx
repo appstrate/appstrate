@@ -309,10 +309,11 @@ function ActivityLine({
       <span className="text-muted-foreground flex size-4 shrink-0 items-center justify-center [&_svg]:size-4">
         {icon}
       </span>
+      {/* The detail takes only the room left (basis 0): the name truncates once it has none, never over the outcome. */}
       <span className="flex min-w-0 flex-1 items-baseline gap-2">
-        <span className="shrink-0 truncate font-medium">{label}</span>
+        <span className="min-w-0 truncate font-medium">{label}</span>
         {detail ? (
-          <span className="text-muted-foreground min-w-0 truncate text-xs">{detail}</span>
+          <span className="text-muted-foreground min-w-0 flex-1 truncate text-xs">{detail}</span>
         ) : null}
       </span>
       {space}
