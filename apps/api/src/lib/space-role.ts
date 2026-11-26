@@ -18,6 +18,7 @@ import {
   type SpaceRolePreset,
   type SpaceVisibility,
 } from "@appstrate/core/permissions";
+import { logger } from "./logger.ts";
 import { partitionSpacePermissions, presetPermissions, type Permission } from "./permissions.ts";
 
 export interface SpaceAccessRow {
@@ -91,17 +92,66 @@ function toCustomSpaceRole(value: unknown): CustomSpaceRole | null {
 }
 
 /**
- * The org default for a member's own personal space, before the floor. Absent = `admin`. A value
- * naming no role of the org (a custom role deleted in a race, a stray stored string) is
- * fail-closed: `viewer`, the narrowest preset, never `admin`.
+ * The org's `personal_space_role` as read: a role, or `null` when the stored value names no role
+ * of the org. Only a write outside the platform can leave it so — the setting is validated at
+ * write and the role it names cannot be deleted (`409 role_in_use`) — so it grants nothing.
  */
-export function personalSpaceDefaultRef(row: PersonalSpaceDefaultColumns): SpaceRoleRef {
+export type PersonalSpaceDefault = SpaceRoleRef | null;
+
+/**
+ * The org default for a member's own personal space, before the floor. Absent = `admin`. A value
+ * naming no role of the org fails closed and loudly: `null`, so an owner without an override
+ * holds no role in their own personal space, and an error is logged. Never a narrow preset in
+ * its place: every preset opens the Studio, which the setting may exist to withhold.
+ */
+export function personalSpaceDefaultRef(row: PersonalSpaceDefaultColumns): PersonalSpaceDefault {
   const stored = row.storedPersonalSpaceRole;
   if (stored === null) return ADMIN_ROLE_REF;
   if (isSpaceRolePreset(stored)) return { kind: "preset", preset: stored };
   const custom = toCustomSpaceRole(row.personalSpaceCustomRole);
   if (custom) return { kind: "custom", role: custom };
-  return { kind: "preset", preset: "viewer" };
+  logger.error(
+    "org setting personal_space_role names no role of the organization; personal spaces without an override grant nothing",
+    { personalSpaceRole: stored },
+  );
+  return null;
+}
+
+/**
+ * What a member or guest holds in their own personal space with no override, floor included
+ * (RBAC spec §3.6): the default with the delete floor, except a guest under a default that lets
+ * them author agents (`agents:write`), who holds plain `operator`. `null`: no role.
+ */
+function personalSpaceDefaultFor(
+  orgRole: "member" | "guest",
+  personalSpaceDefault: PersonalSpaceDefault,
+): SpaceRoleRef | null {
+  if (!personalSpaceDefault) return null;
+  if (orgRole === "guest" && spacePermissions(personalSpaceDefault).has("agents:write")) {
+    return { kind: "preset", preset: "operator" };
+  }
+  return withPersonalSpaceFloor(personalSpaceDefault);
+}
+
+/**
+ * Whether an override survives a change of org role to `nextRole`: only when the role it names
+ * grants nothing the new role would not hold there without it. The floor is left out of the
+ * comparison: it is the platform's grant, not the override's. A restriction stays (a `viewer`
+ * override on a member demoted to guest); an override that would widen the new role goes (a
+ * `builder` override on the same demotion), and so does every override of a promotion to owner
+ * or admin, who always hold `admin` and never read it.
+ */
+export function overrideSurvivesRoleChange(
+  override: SpaceRoleRef,
+  nextRole: OrgRole,
+  personalSpaceDefault: PersonalSpaceDefault,
+): boolean {
+  if (nextRole === "owner" || nextRole === "admin") return false;
+  const withoutOverride = spacePermissions(personalSpaceDefaultFor(nextRole, personalSpaceDefault));
+  for (const permission of spacePermissions(override)) {
+    if (!withoutOverride.has(permission)) return false;
+  }
+  return true;
 }
 
 export interface SpaceMemberRow {
@@ -128,7 +178,7 @@ export function resolveSpaceRole(
   space: SpaceAccessRow,
   memberRow: SpaceMemberRow | null,
   callerId: string | null,
-  personalSpaceDefault: SpaceRoleRef,
+  personalSpaceDefault: PersonalSpaceDefault,
 ): SpaceRoleRef | null {
   // FIRST LINE, before the org role: a personal space belongs to one member and
   // to nobody else (RBAC spec §3.6). An organization owner or admin gets
@@ -150,10 +200,7 @@ export function resolveSpaceRole(
     if (space.ownerUserId !== callerId) return null;
     if (orgRole === "owner" || orgRole === "admin") return ADMIN_ROLE_REF;
     if (memberRow) return withPersonalSpaceFloor(memberRow.ref);
-    if (orgRole === "guest" && spacePermissions(personalSpaceDefault).has("agents:write")) {
-      return { kind: "preset", preset: "operator" };
-    }
-    return withPersonalSpaceFloor(personalSpaceDefault);
+    return personalSpaceDefaultFor(orgRole, personalSpaceDefault);
   }
   // By org role, which is why an explicit row for them is refused at write.
   if (orgRole === "owner" || orgRole === "admin") return ADMIN_ROLE_REF;

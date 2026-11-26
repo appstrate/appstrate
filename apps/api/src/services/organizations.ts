@@ -34,6 +34,16 @@ import type { OrgRole } from "../types/index.ts";
 import type { SpaceRolePreset } from "@appstrate/core/permissions";
 import type { PersonalSpaceRoleOverride } from "@appstrate/shared-types";
 import {
+  customRoleOn,
+  MEMBERSHIP_COLUMNS,
+  memberFromJoin,
+  overrideSurvivesRoleChange,
+  PERSONAL_SPACE_DEFAULT_COLUMNS,
+  personalSpaceDefaultRef,
+  type PersonalSpaceDefault,
+  type SpaceRoleRef,
+} from "../lib/space-role.ts";
+import {
   isUuid,
   lockOrganizationRow,
   scopedWhere,
@@ -851,12 +861,20 @@ export async function updateMemberRole(
           extra: [eq(organizationMembers.userId, targetUserId)],
         }),
       );
-    // Any effective role change drops the member's own role in their personal space: it was
-    // set for the role they held (a `builder` override must not survive a demotion to guest),
-    // and an owner or admin never reads it. Deleted FIRST, so the promotion's `revoked` below
-    // never lists the personal space — its id is hidden from admins (RBAC spec §3.6), and the
-    // override is not a space assignment the audit reports.
-    if (role !== target.role) await deletePersonalSpaceOverride(tx, orgId, targetUserId);
+    // A role change keeps the member's own role in their personal space only when it grants
+    // nothing the new role would not hold there without it (`overrideSurvivesRoleChange`): a
+    // restriction an admin chose survives, a `builder` override does not survive a demotion to
+    // guest, and an owner or admin never reads one. Deleted FIRST, so the promotion's `revoked`
+    // below never lists the personal space — its id is hidden from admins (RBAC spec §3.6), and
+    // the override is not a space assignment the audit reports.
+    if (role !== target.role) {
+      const current = await readPersonalSpaceOverride(tx, orgId, targetUserId);
+      const keep =
+        current !== null &&
+        overrideSurvivesRoleChange(current.override, role, current.personalSpaceDefault);
+      // Without a live override this still clears a row left on an orphaned personal space.
+      if (!keep) await deletePersonalSpaceOverride(tx, orgId, targetUserId);
+    }
     // An admin/owner's explicit space rows are unreadable (the org role answers
     // first) and would silently restore on a later demotion (RBAC spec §3.2).
     const revoked =
@@ -888,6 +906,32 @@ type PersonalSpaceRoleColumns = {
   presetRole: SpaceRolePreset | null;
   customRoleId: string | null;
 };
+
+/**
+ * `userId`'s own row on their live personal space of the org (the override of the org's
+ * `personal_space_role`), with that setting read in the SAME statement (RBAC spec §4.4);
+ * `null` when there is no override.
+ */
+async function readPersonalSpaceOverride(
+  tx: Pick<typeof db, "select">,
+  orgId: string,
+  userId: string,
+): Promise<{ override: SpaceRoleRef; personalSpaceDefault: PersonalSpaceDefault } | null> {
+  const [row] = await tx
+    .select({ ...MEMBERSHIP_COLUMNS, ...PERSONAL_SPACE_DEFAULT_COLUMNS })
+    .from(spaceMembers)
+    .innerJoin(
+      spaces,
+      and(eq(spaces.id, spaceMembers.spaceId), eq(spaces.ownerUserId, spaceMembers.userId)),
+    )
+    .innerJoin(organizations, eq(organizations.id, spaces.orgId))
+    .leftJoin(spaceRoles, customRoleOn)
+    .where(and(eq(spaces.orgId, orgId), eq(spaceMembers.userId, userId), isNull(spaces.orphanedAt)))
+    .limit(1);
+  const member = row ? memberFromJoin(row) : null;
+  if (!row || !member) return null;
+  return { override: member.ref, personalSpaceDefault: personalSpaceDefaultRef(row) };
+}
 
 /**
  * Delete `userId`'s own row on their personal spaces of the org (the override of the org's

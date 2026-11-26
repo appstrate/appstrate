@@ -12,7 +12,11 @@ import { ApiError, forbidden, notFound, unauthorized } from "../lib/errors.ts";
 import { API_KEY_PREFIX, validateApiKey } from "../services/api-keys.ts";
 import { getOrgMember } from "../services/organizations.ts";
 import { ceilingAllows, effectivePermissions, toScopeCeiling } from "../lib/permissions.ts";
-import { resolveSpaceRole, type SpaceRoleRef, type SpaceMemberRow } from "../lib/space-role.ts";
+import {
+  resolveSpaceRole,
+  type PersonalSpaceDefault,
+  type SpaceMemberRow,
+} from "../lib/space-role.ts";
 import { loadSpaceAccess, type SpaceContextRow } from "../lib/space-lookup.ts";
 import {
   callerPersonalOwnerId,
@@ -125,7 +129,7 @@ async function resolveSpaceGrants(
   space: SpaceContextRow,
   memberRow: SpaceMemberRow | null,
   callerId: string | null,
-  personalSpaceDefault: SpaceRoleRef,
+  personalSpaceDefault: PersonalSpaceDefault,
 ): Promise<ReadonlySet<string> | null> {
   const ref = resolveSpaceRole(
     personaFor(c, orgId)?.orgRole ?? realRole,

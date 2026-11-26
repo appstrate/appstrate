@@ -347,6 +347,32 @@ describe("member personal-space role override", () => {
     expect((await memberInList(owner, member.user.id)).personal_space_role).toBeNull();
   });
 
+  it("a change of org role keeps a narrower override: a viewer stays viewer as a guest and back", async () => {
+    expect((await putOverride(owner, member.user.id, { preset_role: "viewer" })).status).toBe(200);
+    const changeRole = (role: string) =>
+      app.request(`/api/orgs/${owner.orgId}/members/${member.user.id}`, {
+        method: "PUT",
+        headers: { Cookie: owner.cookie, ...json },
+        body: JSON.stringify({ role }),
+      });
+
+    // viewer grants nothing a guest's plain `operator` lacks: the restriction is not lifted.
+    expect((await changeRole("guest")).status).toBe(200);
+    expect(await overrideRows(owner.orgId, member.user.id)).toEqual([
+      { presetRole: "viewer", customRoleId: null },
+    ]);
+    const asGuest = await personalOf(member);
+    expect(asGuest.role).toMatchObject({ kind: "preset", key: "viewer" });
+    expect(asGuest.permissions).not.toContain("agents:run");
+    expect((await memberInList(owner, member.user.id)).personal_space_role).toEqual({
+      preset_role: "viewer",
+    });
+
+    // …nor by the way back to member, under the admin default.
+    expect((await changeRole("member")).status).toBe(200);
+    expect((await personalOf(member)).role).toMatchObject({ kind: "preset", key: "viewer" });
+  });
+
   it("a promotion's audit never lists the personal space among the revoked assignments", async () => {
     expect((await putOverride(owner, member.user.id, { preset_role: "viewer" })).status).toBe(200);
     const [personal] = await db

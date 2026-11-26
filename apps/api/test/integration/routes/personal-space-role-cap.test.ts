@@ -500,17 +500,18 @@ describe("personal_space_role: operator", () => {
       });
     });
 
-    it("fails closed to viewer plus the floor when the named role is gone", async () => {
+    it("fails closed to no role when the named role is gone, never a preset opening the Studio", async () => {
       const role = await seedSpaceRole({ orgId: owner.orgId, permissions: ["agents:read"] });
       await setCap(owner, role.id);
-      // Bypass the delete guard, as a race would: the setting still names the id.
+      // Bypass the delete guard, as a write outside the platform would: the setting still names the id.
       await db.delete(spaceRoles).where(eq(spaceRoles.id, role.id));
 
-      const own = await personalOf(member);
-      expect(own.role).toMatchObject({ kind: "preset", key: "viewer" });
-      for (const permission of DELETES) expect(own.permissions).toContain(permission);
-      expect(own.permissions).not.toContain("agents:write");
-      expect(own.permissions).not.toContain("agents:run");
+      // A member and a guest hold nothing in their own space, so it is not listed to them…
+      for (const ctx of [member, guest]) {
+        expect((await listSpaces(ctx)).filter((s) => s.personal)).toEqual([]);
+      }
+      // …while an org admin keeps admin there.
+      expect((await personalOf(admin)).role).toMatchObject({ key: "admin" });
     });
   });
 });

@@ -13,6 +13,7 @@ import { describe, it, expect } from "bun:test";
 import { presetPermissions, type Permission } from "../../../src/lib/permissions.ts";
 import {
   ADMIN_ROLE_REF,
+  overrideSurvivesRoleChange,
   PERSONAL_CAP_DELETE_PERMISSIONS,
   personalSpaceDefaultRef,
   resolveSpaceRole,
@@ -276,15 +277,51 @@ describe("personalSpaceDefaultRef", () => {
     expect(stored(CUSTOM.role.id, CUSTOM.role)).toEqual(CUSTOM);
   });
 
-  it("fails closed to viewer on a dangling id or a stray value, never admin", () => {
+  it("fails closed to no role on a dangling id or a stray value, never a preset", () => {
     if (CUSTOM.kind !== "custom") throw new Error("unreachable");
-    expect(stored(CUSTOM.role.id, null)).toEqual(preset("viewer"));
-    expect(stored("superuser")).toEqual(preset("viewer"));
-    // …and the resolver adds the floor on top, as for any non-admin default.
-    expect(resolveSpaceRole("member", personal, null, OWNER, stored(CUSTOM.role.id))).toEqual({
-      kind: "preset",
-      preset: "viewer",
-      plus: FLOOR,
-    });
+    expect(stored(CUSTOM.role.id, null)).toBeNull();
+    expect(stored("superuser")).toBeNull();
+    // No preset in its place: every preset holds `studio:read`, which the setting may withhold.
+    expect(presetPermissions("viewer").has("studio:read")).toBe(true);
+    // An owner without an override then holds nothing in their own space, a member or a guest…
+    for (const orgRole of ["member", "guest"] as const) {
+      expect(resolveSpaceRole(orgRole, personal, null, OWNER, stored(CUSTOM.role.id))).toBeNull();
+    }
+    // …while an override still answers first, and an owner or admin still holds admin.
+    expect(
+      resolveSpaceRole("member", personal, { ref: preset("runner") }, OWNER, stored("superuser")),
+    ).toEqual({ kind: "preset", preset: "runner", plus: FLOOR });
+    expect(resolveSpaceRole("admin", personal, null, OWNER, stored("superuser"))).toEqual(
+      ADMIN_ROLE_REF,
+    );
+  });
+});
+
+describe("overrideSurvivesRoleChange", () => {
+  it("keeps a restriction across member ↔ guest", () => {
+    // Guest under the admin default: plain operator; viewer reads less, so it stays.
+    expect(overrideSurvivesRoleChange(preset("viewer"), "guest", ADMIN_ROLE_REF)).toBe(true);
+    expect(overrideSurvivesRoleChange(preset("operator"), "guest", ADMIN_ROLE_REF)).toBe(true);
+    expect(overrideSurvivesRoleChange(CUSTOM, "guest", ADMIN_ROLE_REF)).toBe(true);
+    expect(overrideSurvivesRoleChange(preset("viewer"), "member", ADMIN_ROLE_REF)).toBe(true);
+    expect(overrideSurvivesRoleChange(preset("runner"), "member", preset("operator"))).toBe(true);
+  });
+
+  it("drops an override that would widen the new role", () => {
+    // A guest never authors agents in their own space by default: builder goes.
+    expect(overrideSurvivesRoleChange(preset("builder"), "guest", ADMIN_ROLE_REF)).toBe(false);
+    expect(overrideSurvivesRoleChange(preset("admin"), "guest", preset("viewer"))).toBe(false);
+    // A member under a narrow default: an override broader than it goes.
+    expect(overrideSurvivesRoleChange(preset("operator"), "member", preset("viewer"))).toBe(false);
+  });
+
+  it("drops every override on a promotion to owner or admin", () => {
+    for (const role of ["owner", "admin"] as const) {
+      expect(overrideSurvivesRoleChange(preset("viewer"), role, ADMIN_ROLE_REF)).toBe(false);
+    }
+  });
+
+  it("drops it when the default names no role: nothing is known to hold it", () => {
+    expect(overrideSurvivesRoleChange(preset("viewer"), "member", null)).toBe(false);
   });
 });

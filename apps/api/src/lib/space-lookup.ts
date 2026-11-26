@@ -25,8 +25,8 @@ import {
   membershipOn,
   PERSONAL_SPACE_DEFAULT_COLUMNS,
   personalSpaceDefaultRef,
+  type PersonalSpaceDefault,
   type SpaceMemberRow,
-  type SpaceRoleRef,
 } from "./space-role.ts";
 
 /** Space row exposed as `c.get("space")`. Keep the field set tight so services can destructure it. */
@@ -82,7 +82,7 @@ export interface SpaceAccessSnapshot {
   /** `null` when `userId` is not a member of the organization. */
   orgRole: OrgRole | null;
   /** The org's `personal_space_role`, resolved from the same statement (RBAC spec §4.4). */
-  personalSpaceDefault: SpaceRoleRef;
+  personalSpaceDefault: PersonalSpaceDefault;
 }
 
 /**

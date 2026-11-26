@@ -1537,9 +1537,11 @@ the deploy. Run `psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f scripts/migration/00
 in the window, with the previous release stopped and before the new release takes traffic (on PGlite,
 execute the SQL with the app stopped). The previous release refuses an unknown permission when a
 custom role is saved, so do not run it while that release serves traffic. It appends `studio:read`
-to every custom role lacking it and prints the roles it changed. Run it once and never again: a
-re-run would grant the Studio back to roles an admin narrowed on purpose. Record the printed count
-in the deployment log.
+to every custom role and prints the roles it changed. It runs once: it aborts, writing nothing, when
+any custom role already holds `studio:read`, which no role can before it (the previous release
+refuses the permission), so a holder means it already ran or the new release already saved a role.
+A re-run would otherwise grant the Studio back to roles an admin narrowed on purpose. Record the
+printed count in the deployment log.
 
 ## Historical chat messages — `before-traffic`
 
