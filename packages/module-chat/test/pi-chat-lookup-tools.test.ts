@@ -50,7 +50,7 @@ const mcpFetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
 }) as typeof fetch;
 
 describe("buildPlatformMcpTools", () => {
-  it("names the tools the platform declares lookups, and no other", async () => {
+  it("names the tools the platform declares lookups, the chat's resource read, and no other", async () => {
     const built = await buildPlatformMcpTools({
       url: mcpUrl(),
       headers: {},
@@ -62,7 +62,8 @@ describe("buildPlatformMcpTools", () => {
       turnBudget: { deadlineAt: Date.now() + 60_000, stepCount: () => 0 },
     });
     try {
-      expect([...built.lookupTools].sort()).toEqual(["describe", "search"]);
+      // `read_resource` is the chat's own resource read, a lookup whatever the surface.
+      expect([...built.lookupTools].sort()).toEqual(["describe", "read_resource", "search"]);
     } finally {
       await built.close();
     }

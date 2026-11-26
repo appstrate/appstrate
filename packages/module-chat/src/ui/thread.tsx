@@ -42,8 +42,9 @@ import { cn } from "@appstrate/ui/cn";
 import { MarkdownText, ReasoningText } from "./markdown-text.tsx";
 import { ReasoningGroup, ThinkingStatus } from "./reasoning.tsx";
 import { ToolFallback } from "./tool-fallback.tsx";
-import { ActivityGroup } from "./reads-group.tsx";
-import { activityGroupOf } from "./activity-group.ts";
+import { ActivityGroup } from "./activity-group-view.tsx";
+import { activityGroupOf, type GroupablePart } from "./activity-group.ts";
+import { useCallPresentations } from "./use-call-presentation.ts";
 import {
   ImportPackageFileTool,
   InvokeOperationTool,
@@ -855,12 +856,6 @@ export function UserMessage() {
 // branches that aren't persisted — corrupting history on reload — so they're
 // intentionally absent.
 
-/** Gated on running: a dead message with no visible parts must not animate "thinking" forever. */
-function ThinkingIndicator() {
-  const running = useAuiState((s) => s.message.status?.type === "running");
-  return running ? <ThinkingStatus /> : null;
-}
-
 /** Always shown, not on hover, so a mid-conversation model switch is visible. */
 function TurnModelBadge() {
   const { t } = useChatHost();
@@ -973,17 +968,29 @@ const TOOL_CARDS: Partial<Record<string, ToolCallMessagePartComponent>> = {
 };
 
 /**
- * Reasoning and lookups fold into one activity group (`reads-group.tsx`); reasoning keeps its own
- * disclosure inside it. `activityGroupOf` is module-level: assistant-ui memoizes the group tree
- * on its identity.
+ * Reasoning and lookups fold into one activity group (`activity-group-view.tsx`); reasoning keeps
+ * its own disclosure inside it. The grouping reads each call's presentation where its card does
+ * (`use-call-presentation.ts`): a call whose result names a read joins the group as it lands.
+ * assistant-ui memoizes the group tree on the `groupBy` identity, which changes only with the
+ * presentations.
  */
 function AssistantParts() {
+  const presentations = useCallPresentations();
+  const groupBy = React.useCallback(
+    (part: GroupablePart) =>
+      activityGroupOf(part, part.toolCallId ? presentations.get(part.toolCallId) : undefined),
+    [presentations],
+  );
   return (
-    <MessagePrimitive.GroupedParts groupBy={activityGroupOf}>
+    <MessagePrimitive.GroupedParts groupBy={groupBy}>
       {({ part, children }) => {
         switch (part.type) {
           case "group-activity":
-            return <ActivityGroup indices={part.indices}>{children}</ActivityGroup>;
+            return (
+              <ActivityGroup indices={part.indices} presentations={presentations}>
+                {children}
+              </ActivityGroup>
+            );
           case "group-reasoning":
             return (
               <ReasoningGroup
@@ -1001,8 +1008,9 @@ function AssistantParts() {
             const Card = TOOL_CARDS[part.toolName] ?? ToolFallback;
             return <Card {...part} />;
           }
+          // GroupedParts draws the indicator only while the message runs.
           case "indicator":
-            return <ThinkingIndicator />;
+            return <ThinkingStatus />;
           default:
             return null;
         }

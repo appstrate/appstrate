@@ -13,7 +13,7 @@ import { callSpaceOf } from "./conversation-scope.ts";
 import { deriveToolPhase } from "./tool-result.ts";
 import { useChatHost } from "./runtime-context.ts";
 import { showCall } from "./tool-presentation.ts";
-import { useCallPresentation } from "./call-presentation.ts";
+import { useCallPresentation } from "./use-call-presentation.ts";
 
 export const ToolFallback: ToolCallMessagePartComponent = (props) => {
   const { t } = useChatHost();

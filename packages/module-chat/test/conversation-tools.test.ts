@@ -16,10 +16,17 @@ const mcp = (payload: unknown, extra: Record<string, unknown> = {}) => ({
   ...extra,
 });
 
-/** The provider metadata the engine stamps a presentation in (`ui-stream-mapper.ts`). */
-const presented = (presentation: ToolPresentation) => ({
-  resultProviderMetadata: { appstrate: { presentation } },
+/**
+ * The provider metadata the engine stamps a call's outcome in (`ui-stream-mapper.ts`): its
+ * presentation, and whether its integration answered (`answered`, `pi-chat/mcp-tools.ts`).
+ */
+const presented = (
+  presentation: ToolPresentation,
+  outcome: { answered?: true; durationMs?: number } = {},
+) => ({
+  resultProviderMetadata: { appstrate: { presentation, ...outcome } },
 });
+const ANSWERED = { answered: true } as const;
 
 const GMAIL = {
   kind: "integration",
@@ -85,14 +92,77 @@ describe("conversationTools", () => {
     ]);
   });
 
-  it("holds a stored call with no outcome as cut short, in the last turn too", () => {
-    // The assistant message is stored when its turn ends: a call kept without an outcome is one
-    // the turn's end cut, never one still running.
+  it("holds a call with no outcome as cut short once its turn ended", () => {
     const { calls } = conversationTools([
       user("u1"),
       assistant("a1", [call("p1", "invoke_operation", { state: "input-available", input: {} })]),
     ]);
     expect(calls.map((c) => c.status)).toEqual(["error"]);
+  });
+
+  it("holds a call with no outcome, or a preliminary one, as running while its turn runs", () => {
+    const messages = [
+      assistant("a1", [call("old", "invoke_operation", { state: "input-available", input: {} })]),
+      user("u2"),
+      assistant("a2", [
+        call("p1", "invoke_operation", { state: "input-streaming", input: {} }),
+        call("p2", "run_and_wait", {
+          state: "output-available",
+          input: {},
+          output: mcp({ id: "run_1", status: "running" }),
+          preliminary: true,
+        }),
+      ]),
+    ];
+    // Only the last turn is in flight: the earlier call was cut when its own turn ended.
+    expect(conversationTools(messages, { running: true }).calls.map((c) => c.status)).toEqual([
+      "error",
+      "running",
+      "running",
+    ]);
+    expect(conversationTools(messages).calls.map((c) => c.status)).toEqual([
+      "error",
+      "error",
+      "error",
+    ]);
+  });
+
+  it("reads how long a call ran off its outcome, absent while it runs", () => {
+    const { calls } = conversationTools(
+      [
+        assistant("a1", [
+          call("done", "get_me", {
+            state: "output-available",
+            input: {},
+            output: mcp({ ok: 1 }),
+            resultProviderMetadata: { appstrate: { durationMs: 42 } },
+          }),
+          call("failed", "call_integration_tool", {
+            state: "output-error",
+            input: {},
+            errorText: "boom",
+            ...presented({ title: "x", subject: GMAIL }, { durationMs: 7 }),
+          }),
+          call("live", "get_me", { state: "input-available", input: {} }),
+        ]),
+      ],
+      { running: true },
+    );
+    expect(calls.map((c) => c.durationMs)).toEqual([42, 7, undefined]);
+    expect("durationMs" in calls[2]!).toBe(false);
+  });
+
+  it("reads a refusal's message off its error text, never its JSON", () => {
+    const { calls } = conversationTools([
+      assistant("a1", [
+        call("r", "call_integration_tool", {
+          state: "output-error",
+          input: {},
+          errorText: JSON.stringify({ code: "missing_argument", error: "method is required." }),
+        }),
+      ]),
+    ]);
+    expect(calls[0]?.error).toBe("method is required.");
   });
 
   it("keeps the presentation of a call, failed or not", () => {
@@ -118,34 +188,34 @@ describe("conversationTools", () => {
     ]);
   });
 
-  it("counts an integration the calls reached, success or failure upstream, once each", () => {
+  it("counts an integration that answered a call, success or failure upstream, once each", () => {
     const { integrations } = conversationTools([
       assistant("a1", [
         call("i1", "call_integration_tool", {
           state: "output-available",
           input: { tool: "appstrate_gmail__api_call" },
           output: mcp({ results: [{ status: 200 }] }),
-          ...presented({ title: "API call", method: "GET", subject: GMAIL }),
+          ...presented({ title: "API call", method: "GET", subject: GMAIL }, ANSWERED),
         }),
         // The integration's own failure, relayed.
         call("i2", "call_integration_tool", {
           state: "output-error",
           input: { tool: "acme_github__create_issue" },
           errorText: "403 Resource not accessible",
-          ...presented({ title: "Create issue", subject: GITHUB }),
+          ...presented({ title: "Create issue", subject: GITHUB }, ANSWERED),
         }),
-        // A relayed result whose own payload carries a `code` is still the integration's.
+        // Whatever its payload carries, a call the engine stamped answered is the integration's.
         call("i3", "call_integration_tool", {
           state: "output-available",
           input: { tool: "acme_github__get_issue" },
           output: mcp({ code: "not_found" }, { relayed: true }),
-          ...presented({ title: "Get issue", subject: GITHUB }),
+          ...presented({ title: "Get issue", subject: GITHUB }, ANSWERED),
         }),
         call("i4", "call_integration_tool", {
           state: "output-available",
           input: { tool: "appstrate_gmail__api_call" },
           output: mcp({ results: [{ status: 200 }] }),
-          ...presented({ title: "API call", method: "DELETE", subject: GMAIL }),
+          ...presented({ title: "API call", method: "DELETE", subject: GMAIL }, ANSWERED),
         }),
       ]),
     ]);
@@ -155,11 +225,18 @@ describe("conversationTools", () => {
   it("counts no integration for a refusal, a denial, an operation or an unpresented call", () => {
     const { integrations } = conversationTools([
       assistant("a1", [
-        // The platform refused the arguments: nothing was sent.
+        // The platform refused the arguments: nothing was sent, nothing stamped it answered.
         call("r1", "call_integration_tool", {
+          state: "output-error",
+          input: { tool: "appstrate_gmail__api_call" },
+          errorText: JSON.stringify({ code: "missing_argument", error: "method is required." }),
+          ...presented({ title: "API call", subject: GMAIL }),
+        }),
+        // A success the engine did not stamp answered is not counted either.
+        call("r5", "call_integration_tool", {
           state: "output-available",
           input: { tool: "appstrate_gmail__api_call" },
-          output: mcp({ code: "missing_argument", error: "arguments.method is required." }),
+          output: mcp({ results: [{ status: 200 }] }),
           ...presented({ title: "API call", subject: GMAIL }),
         }),
         call("r2", "call_integration_tool", {
@@ -183,7 +260,7 @@ describe("conversationTools", () => {
     expect(integrations).toEqual([]);
   });
 
-  it("counts a lookup by the engine's stamp, and never a failed one", () => {
+  it("counts a lookup by the engine's stamp or a read presentation, and never a failed one", () => {
     const lookup = { callProviderMetadata: { appstrate: { lookup: true } } };
     const { calls } = conversationTools([
       assistant("a1", [
@@ -205,12 +282,26 @@ describe("conversationTools", () => {
           ...lookup,
         }),
         call("l4", "search", { state: "output-error", input: {}, errorText: "boom", ...lookup }),
+        call("l5", "invoke_operation", {
+          state: "output-available",
+          input: { operation_id: "listRuns" },
+          output: mcp({ status: 200 }),
+          ...presented({ title: "List runs", method: "GET", tag: "Runs" }),
+        }),
+        call("l6", "invoke_operation", {
+          state: "output-error",
+          input: { operation_id: "listRuns" },
+          errorText: "boom",
+          ...presented({ title: "List runs", method: "GET", tag: "Runs" }),
+        }),
       ]),
     ]);
     expect(calls.map((c) => [c.status, c.lookup])).toEqual([
       ["success", true],
       ["success", false],
       ["error", false],
+      ["error", false],
+      ["success", true],
       ["error", false],
     ]);
   });

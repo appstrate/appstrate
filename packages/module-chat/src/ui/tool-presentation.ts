@@ -79,6 +79,7 @@ function ownTarget(toolName: string, input: unknown): { Icon: LucideIcon; target
     case "describe":
       return { Icon: BookOpenIcon, target: stringField(input, "id") };
     case "read":
+    case "read_resource":
       return { Icon: FileTextIcon, target: stringField(input, "uri") };
     default:
       return { Icon: WrenchIcon };
@@ -86,14 +87,22 @@ function ownTarget(toolName: string, input: unknown): { Icon: LucideIcon; target
 }
 
 /**
- * The presentation stamped on a call's result: `resultProviderMetadata.appstrate.presentation` of
- * its stored tool part, present on a success and on a failure. `undefined` while the call runs, or
- * for a malformed stamp.
+ * What the engine stamped on a call's outcome (`pi-chat/ui-stream-mapper.ts`):
+ * `resultProviderMetadata.appstrate` of its stored tool part, present on a success and on a
+ * failure alike; `null` while the call runs.
  */
-export function callPresentation(part: object | undefined): ToolPresentation | undefined {
+export function callOutcome(part: object | undefined): Record<string, unknown> | null {
   const metadata =
     part && "resultProviderMetadata" in part ? part.resultProviderMetadata : undefined;
-  const raw = asRecordOrNull(asRecordOrNull(metadata)?.appstrate)?.presentation;
+  return asRecordOrNull(asRecordOrNull(metadata)?.appstrate);
+}
+
+/**
+ * The presentation stamped on a call's result ({@link callOutcome}). `undefined` while the call
+ * runs, or for a malformed stamp.
+ */
+export function callPresentation(part: object | undefined): ToolPresentation | undefined {
+  const raw = callOutcome(part)?.presentation;
   if (raw === undefined) return undefined;
   const parsed = toolPresentationSchema.safeParse(raw);
   return parsed.success ? parsed.data : undefined;
@@ -120,7 +129,7 @@ function methodIcon(method: string): LucideIcon | undefined {
   }
 }
 
-/** « Lecture », « Action »: the method's verb, translated. */
+/** « Lecture », « Action », « Mise à jour »: the method's verb, translated. */
 function verbOf(method: string, t: ChatTranslate): string {
   return t(`tool.verb.${method}`, { defaultValue: method });
 }
@@ -130,25 +139,44 @@ export function subjectName(subject: PresentationSubject): string {
   return subject.display_name ?? subject.id;
 }
 
-/**
- * How many requests a proxied batch sends (`arguments.requests` of an integration's `api_*` tool,
- * `{ns}__api_call`); `undefined` for any other call, a remote tool's own `requests` argument
- * included.
- */
-function batchSize(input: unknown): number | undefined {
-  if (!integrationToolName(input)?.startsWith("api_")) return undefined;
+/** An integration's `api_*` tool (`{ns}__api_call`, its upload twin): a proxied request. */
+function isProxiedRequest(input: unknown): boolean {
+  return integrationToolName(input)?.startsWith("api_") === true;
+}
+
+/** The requests a proxied call sends (`arguments.requests`); `undefined` for any other call. */
+function proxiedRequests(input: unknown): unknown[] | undefined {
+  if (!isProxiedRequest(input)) return undefined;
   const requests = asRecordOrNull(asRecordOrNull(input)?.arguments)?.requests;
-  return Array.isArray(requests) ? requests.length : undefined;
+  return Array.isArray(requests) ? requests : undefined;
 }
 
 /**
- * How a call is shown: from the platform's presentation once it landed, else its own name.
+ * The path a proxied request targets (`requests[0].target`), without its origin, query string or
+ * fragment: what the request reads or writes, short enough for a row.
+ */
+function targetPath(request: unknown): string | undefined {
+  const target = stringField(request, "target");
+  if (!target) return undefined;
+  try {
+    return new URL(target).pathname;
+  } catch {
+    // A relative target: the path is what precedes its query or fragment.
+    return target.split(/[?#]/, 1)[0] || undefined;
+  }
+}
+
+/**
+ * How a call is shown: from the platform's presentation once it landed, else its own name. A
+ * label reads « domain · what », wherever the call is drawn.
  *
- * - An operation (an OpenAPI tag and method): « Lecture · Agents », identified by its subject,
+ * - An operation (an OpenAPI tag and method): « Agents · Lecture », identified by its subject,
  *   else its operation id.
- * - A call that reached an integration: « Gmail · Lecture » for a proxied request,
- *   « Gmail · 3 requêtes » for a batch, « GitHub · Search issues » for a remote tool (the title its
- *   server gives it), drawn with the integration's logo.
+ * - A call that reached an integration, drawn with its logo: « Gmail · Lecture » for a proxied
+ *   request, identified by the path it targets, « Gmail · 3 requêtes » for a batch,
+ *   « GitHub · Search issues » for a remote tool (the title its server gives it). A proxied call
+ *   whose request cannot be read, or a call whose tool cannot, says « Gmail · Outil
+ *   d'intégration »: the server's own label for a proxied request is English, never shown.
  * - Any other tool: its own name (`tool.name.<tool>`), identified by its subject or its arguments.
  */
 export function showCall(
@@ -167,20 +195,28 @@ export function showCall(
     const idText = subject ? subjectName(subject) : own.target;
     return {
       Icon,
-      label: `${verbOf(method, t)} · ${t(`tool.tag.${p.tag}`, { defaultValue: p.tag })}`,
+      label: `${t(`tool.tag.${p.tag}`, { defaultValue: p.tag })} · ${verbOf(method, t)}`,
       ...(idText ? { idText } : {}),
       ...(subject ? { subject } : {}),
     };
   }
   if (subject?.kind === "integration") {
+    const requests = proxiedRequests(call.args);
+    const path = method && requests?.length === 1 ? targetPath(requests[0]) : undefined;
     // A proxied request names its method, a batch its requests; a remote tool keeps its title.
-    const count = method ? undefined : batchSize(call.args);
     const what = method
       ? verbOf(method, t)
-      : count !== undefined
-        ? t("tool.requests", { count })
-        : p.title;
-    return { Icon, label: `${subjectName(subject)} · ${what}`, subject };
+      : requests !== undefined && requests.length > 1
+        ? t("tool.requests", { count: requests.length })
+        : integrationToolName(call.args) !== undefined && !isProxiedRequest(call.args)
+          ? p.title
+          : t("tool.name.call_integration_tool");
+    return {
+      Icon,
+      label: `${subjectName(subject)} · ${what}`,
+      ...(path ? { idText: path } : {}),
+      subject,
+    };
   }
   const idText = subject ? subjectName(subject) : own.target;
   return {

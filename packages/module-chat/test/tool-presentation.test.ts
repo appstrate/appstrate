@@ -6,7 +6,7 @@
  */
 
 import { describe, it, expect } from "bun:test";
-import { EyeIcon, PlugIcon, Trash2Icon, ZapIcon } from "lucide-react";
+import { EyeIcon, FileTextIcon, PlugIcon, Trash2Icon, ZapIcon } from "lucide-react";
 import type { ToolPresentation } from "@appstrate/core/mcp-presentation";
 import { callPresentation, showCall } from "../src/ui/tool-presentation.ts";
 import { activityGroupOf, isLookupCall } from "../src/ui/activity-group.ts";
@@ -15,12 +15,15 @@ import { activityGroupOf, isLookupCall } from "../src/ui/activity-group.ts";
 const FR: Record<string, string> = {
   "tool.verb.GET": "Lecture",
   "tool.verb.POST": "Action",
+  "tool.verb.PUT": "Mise à jour",
+  "tool.verb.PATCH": "Modification",
   "tool.verb.DELETE": "Suppression",
   "tool.tag.Agents": "Agents",
   "tool.tag.Integrations": "Intégrations",
   "tool.name.invoke_operation": "Opération",
   "tool.name.get_me": "Identité",
   "tool.name.call_integration_tool": "Outil d’intégration",
+  "tool.name.read_resource": "Lecture de ressource",
 };
 const t = (key: string, params?: Record<string, string | number>) =>
   key === "tool.requests"
@@ -69,7 +72,7 @@ describe("callPresentation", () => {
 });
 
 describe("showCall — an operation", () => {
-  it("names it by its method's verb and its translated tag, identified by its id", () => {
+  it("names it « domain · verb », identified by its id", () => {
     const shown = showCall(
       {
         toolName: "invoke_operation",
@@ -78,7 +81,7 @@ describe("showCall — an operation", () => {
       },
       t,
     );
-    expect(shown).toMatchObject({ label: "Suppression · Agents", idText: "deleteAgent" });
+    expect(shown).toMatchObject({ label: "Agents · Suppression", idText: "deleteAgent" });
     expect(shown.Icon).toBe(Trash2Icon);
   });
 
@@ -92,9 +95,23 @@ describe("showCall — an operation", () => {
         },
         t,
       );
-      expect(shown.label).toBe("Action · Agents");
+      expect(shown.label).toBe("Agents · Action");
       expect(shown.Icon).toBe(ZapIcon);
     }
+  });
+
+  it("tells a PUT from a PATCH", () => {
+    const label = (method: string) =>
+      showCall(
+        {
+          toolName: "invoke_operation",
+          args: {},
+          presentation: { title: "x", method, tag: "Agents" },
+        },
+        t,
+      ).label;
+    expect(label("PUT")).toBe("Agents · Mise à jour");
+    expect(label("PATCH")).toBe("Agents · Modification");
   });
 
   it("is identified by the subject it acted on, an integration without name or logo included", () => {
@@ -111,7 +128,7 @@ describe("showCall — an operation", () => {
       },
       t,
     );
-    expect(shown).toMatchObject({ label: "Lecture · Intégrations", idText: "@acme/crm" });
+    expect(shown).toMatchObject({ label: "Intégrations · Lecture", idText: "@acme/crm" });
     expect(shown.Icon).toBe(EyeIcon);
   });
 
@@ -124,7 +141,7 @@ describe("showCall — an operation", () => {
       },
       t,
     );
-    expect(shown.label).toBe("Lecture · Brand New");
+    expect(shown.label).toBe("Brand New · Lecture");
   });
 });
 
@@ -140,6 +157,16 @@ describe("showCall — a call that reached an integration", () => {
     expect(integrationCall({ method: "POST" }, apiCall("POST")).label).toBe("Gmail · Action");
   });
 
+  it("is identified by the path of the one request it sends, without origin or query", () => {
+    const one = (target: string) =>
+      integrationCall({ requests: [{ method: "GET", target }] }, apiCall("GET")).idText;
+    expect(one("https://gmail.googleapis.com/gmail/v1/users/me/messages?q=is:unread")).toBe(
+      "/gmail/v1/users/me/messages",
+    );
+    expect(one("/users/me/labels?maxResults=5#top")).toBe("/users/me/labels");
+    expect(integrationCall({ requests: [{}] }, apiCall("GET")).idText).toBeUndefined();
+  });
+
   it("names a batch by the number of requests its arguments send", () => {
     const shown = integrationCall({ requests: [{}, {}, {}] }, apiCall());
     expect(shown.label).toBe("Gmail · 3 requêtes");
@@ -150,9 +177,14 @@ describe("showCall — a call that reached an integration", () => {
     for (const shown of [
       integrationCall({ method: "GET" }, apiCall("GET")),
       integrationCall({ requests: [{}] }, apiCall()),
+      // Neither a method nor readable requests: the tool's own label, never the server's text.
+      integrationCall({}, apiCall()),
+      integrationCall({ requests: "garbled" }, apiCall()),
+      showCall({ toolName: "call_integration_tool", args: {}, presentation: apiCall() }, t),
     ]) {
       expect(shown.label).not.toContain("API call");
     }
+    expect(integrationCall({}, apiCall()).label).toBe("Gmail · Outil d’intégration");
   });
 
   it("names a remote tool by its integration and its server's title", () => {
@@ -190,6 +222,16 @@ describe("showCall — any other tool", () => {
     ).toMatchObject({ label: "Outil d’intégration", idText: "find__by_email", Icon: PlugIcon });
   });
 
+  it("names a resource read by its own tool, identified by its uri", () => {
+    expect(
+      showCall({ toolName: "read_resource", args: { uri: "appstrate://agents/@acme/triage" } }, t),
+    ).toMatchObject({
+      label: "Lecture de ressource",
+      idText: "appstrate://agents/@acme/triage",
+      Icon: FileTextIcon,
+    });
+  });
+
   it("keeps its own name, identified by the subject it acted on", () => {
     expect(
       showCall(
@@ -216,48 +258,77 @@ describe("showCall — any other tool", () => {
 
 describe("isLookupCall", () => {
   const stamped = { appstrate: { lookup: true } };
+  const presented = (method: string): ToolPresentation => ({ title: "x", method });
 
   it("is a call stamped a lookup that has not failed", () => {
     for (const standing of ["pending", "running", "success"] as const) {
-      expect(isLookupCall(stamped, standing)).toBe(true);
+      expect(isLookupCall(stamped, undefined, standing)).toBe(true);
     }
-    expect(isLookupCall(stamped, "error")).toBe(false);
-    expect(isLookupCall(stamped, "denied")).toBe(false);
+    expect(isLookupCall(stamped, undefined, "error")).toBe(false);
+    expect(isLookupCall(stamped, undefined, "denied")).toBe(false);
   });
 
-  it("is never an unstamped call", () => {
-    expect(isLookupCall(undefined, "success")).toBe(false);
-    expect(isLookupCall({ appstrate: { lookup: false } }, "success")).toBe(false);
-    expect(isLookupCall({ appstrate: { spaceId: "spc_a" } }, "success")).toBe(false);
+  it("is a call presented as a read (GET, HEAD), unless it failed or was denied", () => {
+    expect(isLookupCall(undefined, presented("GET"), "success")).toBe(true);
+    expect(isLookupCall(undefined, presented("head"), "success")).toBe(true);
+    expect(isLookupCall(undefined, presented("GET"), "error")).toBe(false);
+    expect(isLookupCall(undefined, presented("GET"), "denied")).toBe(false);
+    for (const method of ["POST", "PUT", "PATCH", "DELETE"]) {
+      expect(isLookupCall(undefined, presented(method), "success")).toBe(false);
+    }
+  });
+
+  it("is never an unstamped call presented without a read", () => {
+    expect(isLookupCall(undefined, undefined, "success")).toBe(false);
+    expect(isLookupCall({ appstrate: { lookup: false } }, { title: "x" }, "success")).toBe(false);
+    expect(isLookupCall({ appstrate: { spaceId: "spc_a" } }, undefined, "success")).toBe(false);
   });
 });
 
 describe("activityGroupOf", () => {
   const read = { type: "tool-call", providerMetadata: { appstrate: { lookup: true } } };
 
-  it("folds reasoning and stamped lookups into the activity group", () => {
-    expect(activityGroupOf({ type: "reasoning" })).toEqual(["group-activity", "group-reasoning"]);
-    expect(activityGroupOf(read)).toEqual(["group-activity"]);
+  it("folds reasoning, stamped lookups and calls presented as reads into the activity group", () => {
+    expect(activityGroupOf({ type: "reasoning" }, undefined)).toEqual([
+      "group-activity",
+      "group-reasoning",
+    ]);
+    expect(activityGroupOf(read, undefined)).toEqual(["group-activity"]);
+    expect(
+      activityGroupOf(
+        { type: "tool-call", status: { type: "complete" }, result: { content: [] } },
+        { title: "x", method: "GET" },
+      ),
+    ).toEqual(["group-activity"]);
   });
 
   it("never folds a write, an unstamped call or text", () => {
-    expect(activityGroupOf({ type: "tool-call" })).toBeNull();
-    expect(activityGroupOf({ type: "text" })).toBeNull();
+    expect(activityGroupOf({ type: "tool-call" }, undefined)).toBeNull();
+    expect(activityGroupOf({ type: "tool-call" }, { title: "x", method: "POST" })).toBeNull();
+    expect(activityGroupOf({ type: "text" }, undefined)).toBeNull();
   });
 
   it("keeps a failed lookup out of the group, by its flag or its payload", () => {
-    expect(activityGroupOf({ ...read, status: { type: "complete" }, isError: true })).toBeNull();
     expect(
-      activityGroupOf({
-        ...read,
-        status: { type: "complete" },
-        result: {
-          content: [{ type: "text", text: JSON.stringify({ status: 404, error: "nope" }) }],
-        },
-      }),
+      activityGroupOf({ ...read, status: { type: "complete" }, isError: true }, undefined),
     ).toBeNull();
     expect(
-      activityGroupOf({ ...read, status: { type: "complete" }, result: { content: [] } }),
+      activityGroupOf(
+        {
+          ...read,
+          status: { type: "complete" },
+          result: {
+            content: [{ type: "text", text: JSON.stringify({ status: 404, error: "nope" }) }],
+          },
+        },
+        undefined,
+      ),
+    ).toBeNull();
+    expect(
+      activityGroupOf(
+        { ...read, status: { type: "complete" }, result: { content: [] } },
+        undefined,
+      ),
     ).toEqual(["group-activity"]);
   });
 });

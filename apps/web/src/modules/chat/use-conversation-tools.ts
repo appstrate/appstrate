@@ -3,6 +3,7 @@
 import { useMemo } from "react";
 import { useTranslation } from "react-i18next";
 import { useSessionDetail } from "@appstrate/module-chat/unread";
+import { useLiveConversation } from "@appstrate/module-chat/live-conversation";
 import {
   conversationTools,
   type ConversationToolCall,
@@ -11,18 +12,20 @@ import {
 import { showCall, type ShownCall } from "@appstrate/module-chat/tool-presentation";
 
 /**
- * The calls of the conversation `conversationId`, read from its stored messages while shown:
+ * The calls of the conversation `conversationId` while shown: as the open chat holds them
+ * (`useLiveConversation`), the turn in flight included, else as the server stores them.
  * `undefined` until the conversation is read (held while the panel is closed), `null` when the
  * server holds no such conversation.
  */
 export function useConversationTools(conversationId: string | null, active: boolean) {
-  const query = useSessionDetail(conversationId, { enabled: active });
+  const live = useLiveConversation(conversationId, active);
+  const query = useSessionDetail(conversationId, { enabled: active && live === undefined });
   const session = query.data;
-  const tools = useMemo(
-    () => (session === undefined ? undefined : session && conversationTools(session.messages)),
-    [session],
-  );
-  return { tools, error: query.error };
+  const tools = useMemo(() => {
+    if (live) return conversationTools(live.messages, { running: live.running });
+    return session === undefined ? undefined : session && conversationTools(session.messages);
+  }, [live, session]);
+  return { tools, error: live ? null : query.error };
 }
 
 /** The call as its card in the thread shows it (`showCall`): label, target, what it acted on. */
@@ -42,6 +45,7 @@ export function spansSpaces(calls: readonly ConversationToolCall[]): boolean {
 
 /** A call's outcome in words, wherever the panel names it. */
 export const TOOL_STATUS_LABEL: Record<ConversationToolStatus, string> = {
+  running: "common:status.running",
   success: "context.tools.status.success",
   error: "context.tools.status.error",
   denied: "context.tools.status.denied",
@@ -52,6 +56,7 @@ export const TOOL_STATUS_LABEL: Record<ConversationToolStatus, string> = {
  * (`tool-uis.tsx`, no `denied` phase there), the panel only colours a word or a glyph.
  */
 export const TOOL_STATUS_TONE: Record<ConversationToolStatus, string> = {
+  running: "text-muted-foreground",
   success: "text-muted-foreground",
   error: "text-destructive",
   denied: "text-warning",

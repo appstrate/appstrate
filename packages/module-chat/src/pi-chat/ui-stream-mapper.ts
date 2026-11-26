@@ -182,6 +182,7 @@ export class PiChatUiStreamMapper {
       toolCallId?: string;
       result?: unknown;
       isError?: boolean;
+      durationMs?: unknown;
     };
     switch (e.type) {
       case "message_start":
@@ -199,6 +200,7 @@ export class PiChatUiStreamMapper {
           toolCallId: String(e.toolCallId ?? ""),
           result: e.result,
           isError: e.isError === true,
+          ...(typeof e.durationMs === "number" && { durationMs: e.durationMs }),
         });
       case "message_end":
         this.captureMessageEnd(e.message);
@@ -335,19 +337,26 @@ export class PiChatUiStreamMapper {
   }
 
   /**
-   * A tool's outcome. The platform's presentation of the call (`mcp-tools.ts`) rides the result's
-   * `providerMetadata.appstrate.presentation`, the one field the AI SDK keeps for a result on a
-   * success and on a failure alike (`resultProviderMetadata` on the stored part): an error chunk
-   * carries no output, and a failed call keeps its name and integration.
+   * A tool's outcome, failed exactly when Pi says so (`isError`: the tool's MCP result was an error,
+   * or it threw). What the UI reads of the outcome rides the result's `providerMetadata.appstrate`
+   * ({@link ToolOutcomeMetadata}), because `@assistant-ui/ai-sdk` hands a card the part's
+   * `callProviderMetadata` only and turns a failure into `{ error: errorText }`: the card and the
+   * context panel read it off the stored part (`resultProviderMetadata`), which the AI SDK keeps
+   * on a success and on a failure alike, where an error chunk carries no output.
    */
   private mapToolExecutionEnd(ev: {
     toolCallId: string;
     result: unknown;
     isError: boolean;
+    durationMs?: number;
   }): UIMessageChunk[] {
-    const { output, presentation } = splitPresentation(persistedToolOutput(ev.result));
-    const meta = presentation !== undefined && {
-      providerMetadata: { appstrate: { presentation } } as ProviderMetadata,
+    const { output, outcome } = splitOutcome(persistedToolOutput(ev.result));
+    const appstrate: ToolOutcomeMetadata = {
+      ...outcome,
+      ...(ev.durationMs !== undefined && { durationMs: ev.durationMs }),
+    };
+    const meta = Object.keys(appstrate).length > 0 && {
+      providerMetadata: { appstrate } as ProviderMetadata,
     };
     if (ev.isError) {
       return [
@@ -499,11 +508,31 @@ function persistedToolOutput(result: unknown): unknown {
   return Array.isArray(persistedContent) ? { ...rest, content: persistedContent } : rest;
 }
 
-/** The output without the platform's presentation, and the presentation, kept apart. */
-function splitPresentation(output: unknown): { output: unknown; presentation?: unknown } {
-  if (!output || typeof output !== "object" || !("presentation" in output)) return { output };
-  const { presentation, ...rest } = output as Record<string, unknown>;
-  return { output: rest, presentation };
+/**
+ * What a call's outcome tells the UI, as `providerMetadata.appstrate` of its result chunk:
+ * - `presentation`: how the platform presents the call (`mcp-tools.ts`);
+ * - `answered`: the integration behind a `call_integration_tool` answered at least once;
+ * - `durationMs`: how long the tool ran, as Pi measured it.
+ */
+type ToolOutcomeMetadata = {
+  presentation?: unknown;
+  answered?: true;
+  durationMs?: number;
+};
+
+/** The output without what the UI reads as metadata ({@link ToolOutcomeMetadata}), kept apart. */
+function splitOutcome(output: unknown): { output: unknown; outcome: ToolOutcomeMetadata } {
+  if (!output || typeof output !== "object" || Array.isArray(output))
+    return { output, outcome: {} };
+  if (!("presentation" in output) && !("answered" in output)) return { output, outcome: {} };
+  const { presentation, answered, ...rest } = output as Record<string, unknown>;
+  return {
+    output: rest,
+    outcome: {
+      ...(presentation !== undefined && { presentation }),
+      ...(answered === true && { answered: true as const }),
+    },
+  };
 }
 
 /** Flatten a Pi tool result (`AgentToolResult` content blocks) to text for error output. */

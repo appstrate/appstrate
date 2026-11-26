@@ -69,6 +69,8 @@ export type AgentSessionEvent =
       toolName: string;
       result: unknown;
       isError: boolean;
+      /** How long the tool ran, measured by Pi around `execute` (pi-agent-core 1.5.2). */
+      durationMs?: number;
     }
   | { type: string; [k: string]: unknown };
 

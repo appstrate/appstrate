@@ -117,6 +117,7 @@ import { ComposerTools } from "./composer-tools.tsx";
 import { canAuthorPackages, canPinSkills } from "../capabilities.ts";
 import { createChatAttachmentAdapter } from "./attachment-adapter.ts";
 import { shouldReconcileHistory } from "./history-reconcile.ts";
+import { publishLiveConversation, withdrawLiveConversation } from "./live-conversation.ts";
 import { sendWithDirectives } from "./directive-send.ts";
 import {
   ConversationSkillsProvider,
@@ -793,6 +794,11 @@ function ConversationInner({
   // re-armed by that very value and corrects it within seconds. External-store
   // sync in an effect (no setState) — same pattern as the mark-read effect.
   const generating = chat.status === "submitted" || chat.status === "streaming";
+  // The host's context panel reads the conversation as this runtime holds it.
+  useEffect(() => {
+    publishLiveConversation(id, { messages: chatMessages, running: generating });
+  }, [id, chatMessages, generating]);
+  useEffect(() => () => withdrawLiveConversation(id), [id]);
   const wasGenerating = useRef(false);
   useEffect(() => {
     if (generating) {

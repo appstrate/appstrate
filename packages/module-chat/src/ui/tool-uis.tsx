@@ -29,7 +29,8 @@ import { StructuredOutput } from "@appstrate/ui/components/structured-output";
 import { Modal } from "./modal.tsx";
 import { callSpaceOf } from "./conversation-scope.ts";
 import { useChatHost } from "./runtime-context.ts";
-import { JsonView } from "./json-view.tsx";
+import { ToolCallDetail } from "./tool-call-detail.tsx";
+import { REVEAL_RING_CLASS, useRevealAnchor } from "./reveal-tool-call.ts";
 import { OAuthConnectCard } from "./oauth-connect-card.tsx";
 import { ChatRunProgressCard } from "./chat-run-progress-card.tsx";
 import { CallSpace } from "./call-space.tsx";
@@ -56,7 +57,7 @@ import {
 } from "./package-created.ts";
 import { unwrapMcpResult } from "@appstrate/core/mcp-result";
 import { showCall } from "./tool-presentation.ts";
-import { useCallPresentation } from "./call-presentation.ts";
+import { useCallPresentation } from "./use-call-presentation.ts";
 import { SubjectGlyph, SubjectStack } from "./subject-glyph.tsx";
 import type { PresentationSubject } from "@appstrate/core/mcp-presentation";
 import {
@@ -139,27 +140,6 @@ function LeadIcon({
   return <Icon className={`size-4 shrink-0 ${tone}`} />;
 }
 
-function hasContent(value: unknown): boolean {
-  if (value === undefined || value === null || value === "") return false;
-  const rec = asRecordOrNull(value);
-  if (rec) return Object.keys(rec).length > 0;
-  if (Array.isArray(value)) return value.length > 0;
-  return true;
-}
-
-function DetailSection({ titleKey, value }: { titleKey: string; value: unknown }) {
-  const { t } = useChatHost();
-  if (!hasContent(value)) return null;
-  return (
-    <div className="flex flex-col gap-1">
-      <div className="text-muted-foreground text-[0.65rem] font-semibold tracking-wide uppercase">
-        {t(titleKey)}
-      </div>
-      <JsonView value={value} />
-    </div>
-  );
-}
-
 /**
  * Compact clickable tool row. Inline: phase icon, verb icon, label, id, and
  * HTTP/duration meta (+ an inline error banner on failure). Click opens a modal
@@ -199,6 +179,8 @@ export function ToolCallCard({
   /** Under the header, e.g. the link to the package the call created. */
   footer?: React.ReactNode;
 }) {
+  const { t } = useChatHost();
+  const anchor = useRevealAnchor(toolCallId);
   const [open, setOpen] = React.useState(false);
   // `unwrapMcpResult` JSON-parses the tool payload. Unmemoized it re-parsed on
   // every render of this card — and during a stream the thread re-renders per
@@ -217,8 +199,8 @@ export function ToolCallCard({
   const border = phase === "error" ? "border-destructive/40" : "";
   return (
     <div
-      data-tool-call-id={toolCallId}
-      className={`bg-card text-card-foreground my-3 w-full rounded-lg border ${border}`}
+      {...anchor}
+      className={`bg-card text-card-foreground my-3 w-full rounded-lg border ${border} ${REVEAL_RING_CLASS}`}
     >
       {/* Fixed h-9 header row: the HTTP badge (taller than the text line) and
           the duration appear when the result lands — a py-based row would grow
@@ -253,11 +235,7 @@ export function ToolCallCard({
           }
           onClose={() => setOpen(false)}
         >
-          <div className="flex flex-col gap-4">
-            <DetailSection titleKey="tool.detail.input" value={args} />
-            <DetailSection titleKey="tool.detail.output" value={unwrapped} />
-            <DetailSection titleKey="tool.detail.metadata" value={meta} />
-          </div>
+          <ToolCallDetail t={t} input={args} output={unwrapped} metadata={meta} />
         </Modal>
       ) : null}
     </div>
@@ -307,6 +285,7 @@ function RunOutputDetails({
  * branch conditionally, so the `useMemo` cannot live in its body.
  */
 function RunLaunchCard(props: AnyToolProps): React.ReactNode {
+  const { t } = useChatHost();
   const runId = extractRunId(props.result);
   const initialFiles = React.useMemo(() => extractRunFiles(props.result), [props.result]);
   // Same reason as `ToolCallCard` — see the note there.
@@ -326,13 +305,7 @@ function RunLaunchCard(props: AnyToolProps): React.ReactNode {
     </span>
   );
   const output = React.useMemo(() => extractRunOutput(props.result), [props.result]);
-  const rawDetails = (
-    <div className="flex flex-col gap-4">
-      <DetailSection titleKey="tool.detail.input" value={props.args} />
-      <DetailSection titleKey="tool.detail.output" value={unwrapped} />
-      <DetailSection titleKey="tool.detail.metadata" value={meta} />
-    </div>
-  );
+  const rawDetails = <ToolCallDetail t={t} input={props.args} output={unwrapped} metadata={meta} />;
   const details = output ? <RunOutputDetails output={output} raw={rawDetails} /> : rawDetails;
   // Run-page link needs package id. The result normally carries it; for agent
   // runs the label is also the package id (`@scope/name`), so it is a safe fallback.

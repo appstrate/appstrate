@@ -7,15 +7,12 @@
  */
 
 import { CopyButton } from "@appstrate/ui/components/copy-button";
-import { useChatHost } from "./runtime-context.ts";
 
-export function JsonView({ value }: { value: unknown }) {
+export function JsonView({ value, copyLabel }: { value: unknown; copyLabel: string }) {
   const text = typeof value === "string" ? value : JSON.stringify(value, null, 2);
-  const { t } = useChatHost();
-
   return (
     <div className="relative">
-      <CopyButton value={text} label={t("common:btn.copy")} className="absolute top-1 right-1" />
+      <CopyButton value={text} label={copyLabel} className="absolute top-1 right-1" />
       <pre className="overflow-x-auto rounded bg-black/5 p-3 pr-9 text-xs whitespace-pre-wrap dark:bg-white/5">
         {text}
       </pre>

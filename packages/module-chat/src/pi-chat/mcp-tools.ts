@@ -103,6 +103,11 @@ interface PiToolResult {
    * (`ui-stream-mapper.ts`), not in the stored output.
    */
   presentation?: ToolPresentation;
+  /**
+   * A `call_integration_tool` the integration answered at least once ({@link integrationAnswered}).
+   * Carried like {@link presentation}: the result's provider metadata, on a success and a failure.
+   */
+  answered?: true;
 }
 
 /**
@@ -132,6 +137,7 @@ export function mcpResultToPi(
   result: {
     content: Array<Record<string, unknown>>;
     structuredContent?: unknown;
+    isError?: boolean;
     _meta?: unknown;
   },
   scope: OfferScope,
@@ -182,9 +188,34 @@ export function mcpResultToPi(
   return {
     content,
     details,
+    // The MCP result's `isError` is the one signal of a failed call. Pi keeps a returned
+    // `isError` (`executePreparedToolCall`, pi-agent-core 1.5.2) and the rest of the result with
+    // it, so the failure reaches `tool_execution_end` with its presentation and its content.
+    ...(result.isError === true ? { isError: true as const } : {}),
     ...(offers.length > 0 ? { connectOffers: offers } : {}),
     ...(isRelayedResult(result) ? { relayed: true as const } : {}),
   };
+}
+
+/**
+ * Whether the integration behind a `call_integration_tool` answered at least once: a remote
+ * tool's result the platform relayed (`markRelayedResult`), or an `api_call` batch holding an
+ * upstream response (`results[]` entry with a `status`, whatever it is: a relayed 401 is an
+ * answer). The platform's refusals before sending (`{ status, code, detail }`, an entry's
+ * `error`) are not.
+ */
+function integrationAnswered(result: RemoteToolResult): boolean {
+  if (isRelayedResult(result)) return true;
+  const results = (result.structuredContent as { results?: unknown } | undefined)?.results;
+  return (
+    Array.isArray(results) &&
+    results.some(
+      (entry) =>
+        typeof entry === "object" &&
+        entry !== null &&
+        typeof (entry as { status?: unknown }).status === "number",
+    )
+  );
 }
 
 type RemoteToolResult = Awaited<ReturnType<AppstrateMcpClient["callTool"]>>;
@@ -220,7 +251,6 @@ async function relayedToolResult(
 ): Promise<PiToolResult> {
   const blocks = result.content;
   const projected = mcpResultToPi(result, scope);
-  if (result.isError) projected.isError = true;
   if (!blocks.some((block) => block.type === "image")) return projected;
   const content = [...projected.content];
   for (const [index, block] of blocks.entries()) {
@@ -486,11 +516,13 @@ export async function buildPlatformMcpTools(
     extensionFactories,
     ...(surface.instructions ? { instructions: surface.instructions } : {}),
     // The tools whose calls only look things up (`isLookupTool`): their calls fold together.
-    lookupTools: new Set(
-      surface.tools
+    // `read_resource` is the chat's own, and only reads.
+    lookupTools: new Set([
+      ...surface.tools
         .filter((tool) => isLookupTool(tool))
         .map((tool) => stripMcpToolPrefix(tool.name)),
-    ),
+      READ_RESOURCE_TOOL,
+    ]),
     surfaceCached: cached !== undefined,
     close,
   };
@@ -559,14 +591,17 @@ async function recordResultSpaces(
       };
 }
 
-/** A refusal rendered as a tool result, as the platform renders its own (`refusalResult`). */
+/** A refusal rendered as a tool result, as the platform renders its own (`refusalResult`): failed. */
 function refusalToolResult(
   refusal: Record<string, unknown>,
   scope: OfferScope,
   turnBudget: PiTurnBudget,
 ) {
   return withTurnBudgetNote(
-    mcpResultToPi({ content: [{ type: "text", text: JSON.stringify(refusal, null, 2) }] }, scope),
+    mcpResultToPi(
+      { content: [{ type: "text", text: JSON.stringify(refusal, null, 2) }], isError: true },
+      scope,
+    ),
     turnBudget,
   );
 }
@@ -599,114 +634,118 @@ function makeForwardExtension(
       async execute(toolCallId: string, params: unknown, execSignal?: AbortSignal) {
         const callSignal = execSignal ?? signal;
         const args = (params as Record<string, unknown>) ?? {};
-        const spaceId = dispatchSpace(args);
         const client = await untilAborted(getClient(), callSignal);
         const received = await client.callTool(
           { name: tool.name, arguments: args },
           { signal: callSignal },
         );
-        // What the platform says of the call, for its card: stamped on every result of it.
+        // What the platform says of the call, for its card, and whether the integration answered:
+        // stamped on every result of it, whichever branch below builds it.
         const presentation = readToolPresentation(received._meta);
-        const presented = (out: PiToolResult): PiToolResult =>
-          presentation ? { ...out, presentation } : out;
-        const scope = offerScopeOf(toolName, {
-          arguments: params,
-          relayed: isRelayedResult(received),
-        });
-        // The platform records each operation's resolved execution space before dispatch,
-        // through the signed bearer's beforeMcpSpaceAct callback. Other disclosed spaces (a
-        // search, or the alternatives on a refusal) can only be known from the result.
-        const serverSpaces = received._meta?.[OPERATION_SPACES_META_KEY];
-        const actedSpaceIds =
-          Array.isArray(serverSpaces) &&
-          serverSpaces.every(
-            (id): id is string =>
-              typeof id === "string" && organization.spaces.some((space) => space.id === id),
-          )
-            ? serverSpaces
-            : undefined;
-        if (serverSpaces !== undefined && !actedSpaceIds) {
-          return presented(
-            refusalToolResult(
-              {
-                code: "spaces_not_recorded",
-                error: "The operation returned a space outside this conversation.",
-              },
-              scope,
-              turnBudget,
-            ),
-          );
-        }
-        const readSpaces =
-          toolName === "invoke_operation" && received.isError
-            ? received._meta?.[ACTIVE_SPACES_META_KEY]
-            : spaceId === undefined && omitsOptionalSpace(tool.inputSchema, args)
-              ? received.structuredContent?.searched_spaces
-              : undefined;
-        const unrecorded = await recordResultSpaces(organization, readSpaces);
-        if (unrecorded) return presented(refusalToolResult(unrecorded, scope, turnBudget));
-        const result = assistantVisibleMcpResult(received);
-        if (toolName === "call_integration_tool" && isRelayedResult(result)) {
-          return presented(
-            withTurnBudgetNote(
-              {
-                ...(await relayedToolResult(result, scope, opts.fileDelivery.image)),
-                ...(actedSpaceIds && { actedSpaceIds }),
-              },
-              turnBudget,
-            ),
-          );
-        }
-        // Only platform file reads may interpret embedded resources as governed files.
-        const arg = args.arguments;
-        if (
-          toolName === "read" ||
-          (toolName === "call_integration_tool" &&
-            arg &&
-            typeof arg === "object" &&
-            "read_as_file" in arg &&
-            arg.read_as_file === true)
-        ) {
-          const resources = result.content.flatMap((block) =>
-            block.type === "resource" ? [block.resource] : [],
-          );
-          if (resources.length) {
-            const meta = mcpResultToPi(
-              { ...result, content: result.content.filter((block) => block.type !== "resource") },
-              scope,
-            );
-            const file = await liveResources(resources, opts, toolCallId);
-            return presented(
-              withTurnBudgetNote(
-                {
-                  ...meta,
-                  ...(actedSpaceIds && { actedSpaceIds }),
-                  content: [...meta.content, ...file.content],
-                  ...(keepsSkillText(args.uri, resources)
-                    ? {}
-                    : {
-                        persistedContent: [
-                          ...meta.content.flatMap((block) =>
-                            block.type === "text" ? [block] : [],
-                          ),
-                          ...file.receipts,
-                        ],
-                      }),
-                },
-                turnBudget,
-              ),
-            );
-          }
-        }
-        return presented(
-          withTurnBudgetNote(
-            { ...mcpResultToPi(result, scope), ...(actedSpaceIds && { actedSpaceIds }) },
-            turnBudget,
-          ),
-        );
+        const answered = toolName === "call_integration_tool" && integrationAnswered(received);
+        const out = await forwardedResult(toolCallId, args, received);
+        return {
+          ...out,
+          ...(presentation && { presentation }),
+          ...(answered && { answered: true as const }),
+        };
       },
     });
   };
+
+  /** The Pi result of the call's MCP result `received`, before its presentation is stamped. */
+  async function forwardedResult(
+    toolCallId: string,
+    args: Record<string, unknown>,
+    received: RemoteToolResult,
+  ): Promise<PiToolResult> {
+    const spaceId = dispatchSpace(args);
+    const scope = offerScopeOf(toolName, {
+      arguments: args,
+      relayed: isRelayedResult(received),
+    });
+    // The platform records each operation's resolved execution space before dispatch,
+    // through the signed bearer's beforeMcpSpaceAct callback. Other disclosed spaces (a
+    // search, or the alternatives on a refusal) can only be known from the result.
+    const serverSpaces = received._meta?.[OPERATION_SPACES_META_KEY];
+    const actedSpaceIds =
+      Array.isArray(serverSpaces) &&
+      serverSpaces.every(
+        (id): id is string =>
+          typeof id === "string" && organization.spaces.some((space) => space.id === id),
+      )
+        ? serverSpaces
+        : undefined;
+    if (serverSpaces !== undefined && !actedSpaceIds) {
+      return refusalToolResult(
+        {
+          code: "spaces_not_recorded",
+          error: "The operation returned a space outside this conversation.",
+        },
+        scope,
+        turnBudget,
+      );
+    }
+    const readSpaces =
+      toolName === "invoke_operation" && received.isError
+        ? received._meta?.[ACTIVE_SPACES_META_KEY]
+        : spaceId === undefined && omitsOptionalSpace(tool.inputSchema, args)
+          ? received.structuredContent?.searched_spaces
+          : undefined;
+    const unrecorded = await recordResultSpaces(organization, readSpaces);
+    if (unrecorded) return refusalToolResult(unrecorded, scope, turnBudget);
+    const result = assistantVisibleMcpResult(received);
+    if (toolName === "call_integration_tool" && isRelayedResult(result)) {
+      return withTurnBudgetNote(
+        {
+          ...(await relayedToolResult(result, scope, opts.fileDelivery.image)),
+          ...(actedSpaceIds && { actedSpaceIds }),
+        },
+        turnBudget,
+      );
+    }
+    // Only platform file reads may interpret embedded resources as governed files.
+    const arg = args.arguments;
+    if (
+      toolName === "read" ||
+      (toolName === "call_integration_tool" &&
+        arg &&
+        typeof arg === "object" &&
+        "read_as_file" in arg &&
+        arg.read_as_file === true)
+    ) {
+      const resources = result.content.flatMap((block) =>
+        block.type === "resource" ? [block.resource] : [],
+      );
+      if (resources.length) {
+        const meta = mcpResultToPi(
+          { ...result, content: result.content.filter((block) => block.type !== "resource") },
+          scope,
+        );
+        const file = await liveResources(resources, opts, toolCallId);
+        return withTurnBudgetNote(
+          {
+            ...meta,
+            ...(actedSpaceIds && { actedSpaceIds }),
+            content: [...meta.content, ...file.content],
+            ...(keepsSkillText(args.uri, resources)
+              ? {}
+              : {
+                  persistedContent: [
+                    ...meta.content.flatMap((block) => (block.type === "text" ? [block] : [])),
+                    ...file.receipts,
+                  ],
+                }),
+          },
+          turnBudget,
+        );
+      }
+    }
+    return withTurnBudgetNote(
+      { ...mcpResultToPi(result, scope), ...(actedSpaceIds && { actedSpaceIds }) },
+      turnBudget,
+    );
+  }
 }
 
 /**

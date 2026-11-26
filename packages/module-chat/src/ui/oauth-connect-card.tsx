@@ -36,6 +36,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useAui } from "@assistant-ui/react";
+import { REVEAL_RING_CLASS, useRevealAnchor } from "./reveal-tool-call.ts";
 import { AlertTriangleIcon, CheckIcon } from "lucide-react";
 import { encodePackageIdPath } from "@appstrate/core/naming";
 import { realtimeRunsUrl } from "@appstrate/core/realtime-url";
@@ -146,6 +147,7 @@ export function OAuthConnectCard({
   /** The space the call acted in (the call names one): the card reads there. */
   spaceId?: string;
 }) {
+  const anchor = useRevealAnchor(toolCallId);
   const aui = useAui();
   const transport = useChatTransport();
   // The scoping headers alone: the host keeps this function across a list-filter change, which
@@ -330,8 +332,8 @@ export function OAuthConnectCard({
   // pending → connected/error — are 0px layout changes.
   return (
     <div
-      data-tool-call-id={toolCallId}
-      className="bg-card text-card-foreground my-3 flex w-full flex-col gap-2 rounded-lg border px-3 py-3 text-sm"
+      {...anchor}
+      className={`bg-card text-card-foreground my-3 flex w-full flex-col gap-2 rounded-lg border px-3 py-3 text-sm ${REVEAL_RING_CLASS}`}
     >
       <div className="flex h-5 items-center gap-2">
         <IntegrationIcon src={meta?.icon} className="size-4 shrink-0" />

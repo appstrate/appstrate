@@ -23,6 +23,7 @@ import {
 } from "./chat-skills.ts";
 import { DirectiveChip } from "./directive-chip.tsx";
 import { useChatHost } from "./runtime-context.ts";
+import { REVEAL_RING_CLASS, useRevealAnchor } from "./reveal-tool-call.ts";
 import { ToolFallback } from "./tool-fallback.tsx";
 import { deriveToolPhase } from "./tool-result.ts";
 import { useChatCommands } from "./use-chat-commands.ts";
@@ -87,10 +88,17 @@ function SkillLoad({
   props: ResourceReadProps;
 }) {
   const { t } = useChatHost();
+  const anchor = useRevealAnchor(props.toolCallId);
   const phase = deriveToolPhase(props);
   const state = skillLoadState(phase);
   return (
-    <div data-testid="skill-load" data-phase={phase} data-state={state} className="my-1.5 text-sm">
+    <div
+      {...anchor}
+      data-testid="skill-load"
+      data-phase={phase}
+      data-state={state}
+      className={`my-1.5 rounded-md text-sm ${REVEAL_RING_CLASS}`}
+    >
       <span className="flex flex-wrap items-center gap-1.5">
         <DirectiveChip
           directiveType={SKILL_DIRECTIVE}

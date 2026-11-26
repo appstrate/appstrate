@@ -255,8 +255,8 @@ const DYNAMIC_KEY_PREFIXES = [
   "chat:skills.load.live.", // packages/module-chat/src/ui/skill-load.tsx — one live line per load state
   "chat:skills.state.refused.", // packages/module-chat/src/ui/skills-picker.tsx — one per refusal
   "chat:tool.name.", // packages/module-chat/src/ui/tool-presentation.ts — showCall(), one per MCP tool
-  "chat:tool.tag.", // packages/module-chat/src/ui/tool-presentation.ts — operationLabel(), one per OpenAPI tag (tied to the catalog by apps/api mcp presentation.test.ts)
-  "chat:tool.verb.", // packages/module-chat/src/ui/tool-presentation.ts — operationLabel(), one per HTTP method
+  "chat:tool.tag.", // packages/module-chat/src/ui/tool-presentation.ts — showCall(), one per OpenAPI tag (tied to the catalog by apps/api mcp presentation.test.ts)
+  "chat:tool.verb.", // packages/module-chat/src/ui/tool-presentation.ts — showCall(), one per HTTP method
   "common:status.", // components/status-badge.tsx — t(`status.${status}`)
   "settings:creation.chat.draft.", // lib/creation-handoff.ts — buildChatCreationDraft(), one per package type
   "settings:creation.title.", // components/creation-handoff-modal.tsx — one per package type

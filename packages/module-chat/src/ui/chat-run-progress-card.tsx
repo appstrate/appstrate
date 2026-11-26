@@ -36,6 +36,7 @@ import { useLogTicker } from "./use-log-ticker.ts";
 import { formatDuration } from "@appstrate/core/format";
 import { useChatHost, type ChatHost } from "./runtime-context.ts";
 import { CallSpace } from "./call-space.tsx";
+import { REVEAL_RING_CLASS, useRevealAnchor } from "./reveal-tool-call.ts";
 import {
   autoPresentFile,
   buildRunPageHref,
@@ -134,6 +135,7 @@ export function ChatRunProgressCard({
   modalTitle: React.ReactNode;
   details: React.ReactNode;
 }) {
+  const anchor = useRevealAnchor(toolCallId);
   const {
     logs,
     status,
@@ -229,8 +231,8 @@ export function ChatRunProgressCard({
   // over the sticky composer when the card scrolls behind it.
   return (
     <div
-      data-tool-call-id={toolCallId}
-      className="bg-card text-card-foreground relative isolate my-3 w-full rounded-lg border"
+      {...anchor}
+      className={`bg-card text-card-foreground relative isolate my-3 w-full rounded-lg border ${REVEAL_RING_CLASS}`}
     >
       {/* Full-card click target (opens the detail modal). Behind the content so
           the run-page link can re-enable pointer events for itself — avoids

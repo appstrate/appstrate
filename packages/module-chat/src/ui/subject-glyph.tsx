@@ -6,7 +6,7 @@
  */
 
 import * as React from "react";
-import { CircleUserIcon, SparklesIcon } from "lucide-react";
+import { BookOpenIcon, CircleUserIcon } from "lucide-react";
 import type { PresentationSubject } from "@appstrate/core/mcp-presentation";
 import { IntegrationIcon } from "@appstrate/ui/components/integration-icon";
 import { KnownAgentGlyph } from "./agent-glyph.tsx";
@@ -32,7 +32,7 @@ export function SubjectGlyph({
         />
       );
     case "skill":
-      return <SparklesIcon className={`text-muted-foreground ${className} shrink-0`} />;
+      return <BookOpenIcon className={`text-muted-foreground ${className} shrink-0`} />;
     case "user":
       return <CircleUserIcon className={`text-muted-foreground ${className} shrink-0`} />;
   }
