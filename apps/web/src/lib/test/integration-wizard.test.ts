@@ -9,6 +9,7 @@ import {
   integrationWizardStep,
   isRemoteSource,
   needsWizardFinish,
+  docsChoice,
   toolsPublishBody,
   toolsPublishVersion,
   wizardAuthKind,
@@ -312,10 +313,64 @@ describe("toolsPublishBody", () => {
     expect(manifest).not.toHaveProperty("allow_undeclared_tools");
   });
 
-  it("writes no file", () => {
+  it("writes no file unless the server's instructions are kept", () => {
     expect(toolsPublishBody(draft, { trustAll: true, version: "1.1.0" })).not.toHaveProperty(
       "operations",
     );
+    const body = toolsPublishBody(draft, {
+      trustAll: false,
+      version: "1.0.0",
+      instructions: "# Acme",
+    });
+    expect(body.operations).toEqual([{ op: "write", path: "INTEGRATION.md", text: "# Acme" }]);
+    expect(
+      toolsPublishBody(draft, { trustAll: false, version: "1.0.0", removeDocs: true }).operations,
+    ).toEqual([{ op: "delete", path: "INTEGRATION.md" }]);
+  });
+
+  it("fills only the identity the draft left empty, and never tools", () => {
+    const { manifest } = toolsPublishBody(
+      { ...draft, display_name: "Mine", description: "" },
+      {
+        trustAll: false,
+        version: "1.0.0",
+        proposed: { display_name: "Server", description: "From server", tools_policy: { x: {} } },
+      },
+    );
+    expect(manifest.display_name).toBe("Mine");
+    expect(manifest.description).toBe("From server");
+    expect(manifest.tools_policy).toEqual({ kept: {} });
+  });
+});
+
+describe("docsChoice", () => {
+  it("writes the instructions while included", () => {
+    expect(docsChoice({ include: true, instructions: "# Doc", written: false })).toEqual({
+      instructions: "# Doc",
+      removeDocs: false,
+      written: true,
+    });
+  });
+
+  it("deletes the file only when this session wrote it and the user declined it since", () => {
+    expect(docsChoice({ include: false, instructions: "# Doc", written: true })).toEqual({
+      instructions: null,
+      removeDocs: true,
+      written: false,
+    });
+    expect(docsChoice({ include: false, instructions: "# Doc", written: false })).toEqual({
+      instructions: null,
+      removeDocs: false,
+      written: false,
+    });
+  });
+
+  it("touches nothing when the server sent no instructions", () => {
+    expect(docsChoice({ include: true, instructions: null, written: false })).toEqual({
+      instructions: null,
+      removeDocs: false,
+      written: false,
+    });
   });
 });
 

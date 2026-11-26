@@ -1085,5 +1085,7 @@
   "integrationWizard.tools.mode.trust.label": "Trust every tool of this server",
   "integrationWizard.tools.mode.trust.description": "Every tool the server lists, those it adds or changes later included, is available without review. Keep this for a server you control.",
   "integrationWizard.ready.reviewed": "Each tool of the server is reviewed in each space before an agent can call it: approve them from the integration's Tools tab.",
-  "integrationWizard.ready.trusted": "Every tool of the server is available without review."
+  "integrationWizard.ready.trusted": "Every tool of the server is available without review.",
+  "integrationWizard.tools.docs": "Add the server's instructions as documentation (INTEGRATION.md)",
+  "integrationWizard.tools.docsPreview": "Preview the instructions"
 }

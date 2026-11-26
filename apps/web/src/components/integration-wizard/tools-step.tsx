@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
-import { useQueryClient } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
 import type { OrgPackageItemDetail } from "@appstrate/shared-types";
 import { Alert, AlertDescription } from "@appstrate/ui/components/alert";
@@ -16,9 +16,21 @@ import {
 } from "@appstrate/ui/components/field";
 import { RadioGroup, RadioGroupItem } from "@appstrate/ui/components/radio-group";
 import { PendingButton } from "@/components/app-ui/pending-button";
-import { $api } from "../../api/client";
+import { ChevronDown } from "lucide-react";
+import { isUnauthenticatedIntegration } from "@appstrate/core/integration";
+import { Button } from "@appstrate/ui/components/button";
+import {
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
+} from "@appstrate/ui/components/collapsible";
+import { CheckboxField } from "@/components/app-ui/checkbox-field";
+import { $api, client } from "../../api/client";
 import { ApiError } from "../../api/errors";
 import { RoleLimitNotice } from "../role-limit-notice";
+import { DiscoveryWarnings } from "../integration-editor/discovery-warnings";
+import { useCurrentOrgId } from "../../hooks/use-org";
+import { useCurrentSpaceId } from "../../hooks/use-current-space";
 import { getAllowUndeclaredTools } from "../integration-editor/utils";
 import { usePermissions } from "../../hooks/use-permissions";
 import { invalidateIntegrationQueries } from "../../hooks/use-integrations";
@@ -26,7 +38,7 @@ import { useUpdatePackage } from "../../hooks/use-mutations";
 import { useCreateVersion, type Versioned } from "../../hooks/use-packages";
 import { errorMessage } from "../../lib/mutation-error";
 import { packageDetailPath } from "../../lib/package-paths";
-import { toolsPublishBody } from "../../lib/integration-wizard";
+import { docsChoice, toolsPublishBody } from "../../lib/integration-wizard";
 import { WizardSection } from "./wizard-section";
 
 /**
@@ -82,6 +94,30 @@ function PublishChoice({
 }) {
   const qc = useQueryClient();
   const { can } = usePermissions();
+  const orgId = useCurrentOrgId();
+  const spaceId = useCurrentSpaceId();
+  const mayRead =
+    isUnauthenticatedIntegration(draft.manifest ?? {}) || can("credential-proxy:call-own");
+  // The server's identity and instructions, best effort: a refusal or a failure only means
+  // nothing is proposed, never that the publish is blocked. Each attempt is a call the journal
+  // records, so it is not retried behind the user's back.
+  const identity = useQuery({
+    queryKey: ["integration-server-identity", orgId, spaceId, packageId],
+    queryFn: async () => {
+      const { data } = await client.POST("/api/integrations/{packageId}/discover", {
+        params: { path: { packageId } },
+        body: {},
+      });
+      return data!;
+    },
+    enabled: mayRead,
+    staleTime: Infinity,
+    retry: false,
+  });
+  const proposal = identity.data;
+  const [includeDocs, setIncludeDocs] = useState(true);
+  // Whether a save of THIS session wrote `INTEGRATION.md`: only that file is ever deleted.
+  const [docsWritten, setDocsWritten] = useState(false);
   const [trustAll, setTrustAll] = useState(getAllowUndeclaredTools(draft.manifest ?? {}));
   // Set once the draft is saved: a failed publish is retried alone, on that save.
   const [saved, setSaved] = useState<{ etag: string | null }>();
@@ -97,8 +133,7 @@ function PublishChoice({
     meta: { errorHandledByCaller: true },
   });
   // A changed choice is no longer the save a failed publish would retry: the next submit saves it.
-  const choose = (next: boolean) => {
-    setTrustAll(next);
+  const unsave = () => {
     setSaved(undefined);
     setDraftMoved(false);
     publish.reset();
@@ -108,12 +143,24 @@ function PublishChoice({
     try {
       let etag = saved?.etag;
       if (!saved) {
+        const docs = docsChoice({
+          include: includeDocs,
+          instructions: proposal?.instructions ?? null,
+          written: docsWritten,
+        });
         const result = await update.mutateAsync({
           etag: draft.etag ?? "",
-          body: toolsPublishBody(draft.manifest ?? {}, { trustAll, version }),
+          body: toolsPublishBody(draft.manifest ?? {}, {
+            trustAll,
+            version,
+            ...(proposal ? { proposed: proposal.manifest } : {}),
+            instructions: docs.instructions,
+            removeDocs: docs.removeDocs,
+          }),
         });
         etag = result.etag;
         setSaved({ etag });
+        setDocsWritten(docs.written);
         setDraftMoved(false);
       }
       try {
@@ -141,7 +188,16 @@ function PublishChoice({
   return (
     <ToolsChoice
       trustAll={trustAll}
-      onTrustAllChange={choose}
+      onTrustAllChange={(next) => {
+        setTrustAll(next);
+        unsave();
+      }}
+      proposal={proposal ?? null}
+      includeDocs={includeDocs}
+      onIncludeDocsChange={(next) => {
+        setIncludeDocs(next);
+        unsave();
+      }}
       // Changes held at mount may be files the step cannot see, or an earlier save of its own: the
       // whole draft is published, so the step warns.
       otherDraftChanges={published && unarchivedAtMount}
@@ -160,6 +216,9 @@ function PublishChoice({
 export function ToolsChoice({
   trustAll,
   onTrustAllChange,
+  proposal = null,
+  includeDocs = true,
+  onIncludeDocsChange,
   version,
   onSubmit,
   pending,
@@ -171,6 +230,10 @@ export function ToolsChoice({
 }: {
   trustAll: boolean;
   onTrustAllChange: (trustAll: boolean) => void;
+  /** The server's identity read, when it answered: its instructions and warnings. */
+  proposal?: { instructions: string | null; warnings: { code: string; message: string }[] } | null;
+  includeDocs?: boolean;
+  onIncludeDocsChange?: (include: boolean) => void;
   version: string;
   onSubmit: () => void;
   pending: boolean;
@@ -222,6 +285,31 @@ export function ToolsChoice({
           ))}
         </RadioGroup>
       </FieldSet>
+      {proposal && <DiscoveryWarnings warnings={proposal.warnings} />}
+      {proposal?.instructions && (
+        <div className="flex flex-col gap-2">
+          <CheckboxField
+            id="integration-wizard-docs"
+            disabled={pending}
+            checked={includeDocs}
+            onCheckedChange={(checked) => onIncludeDocsChange?.(checked === true)}
+            label={t("integrationWizard.tools.docs")}
+          />
+          <Collapsible>
+            <CollapsibleTrigger asChild>
+              <Button type="button" variant="ghost" size="sm" className="group">
+                <ChevronDown className="transition-transform group-data-[state=open]:rotate-180" />
+                {t("integrationWizard.tools.docsPreview")}
+              </Button>
+            </CollapsibleTrigger>
+            <CollapsibleContent>
+              <pre className="bg-muted mt-2 max-h-80 overflow-auto rounded-md p-3 text-xs">
+                <span className="whitespace-pre-wrap">{proposal.instructions}</span>
+              </pre>
+            </CollapsibleContent>
+          </Collapsible>
+        </div>
+      )}
       <div className="border-border flex flex-col gap-3 border-t pt-4">
         {otherDraftChanges && (
           <Alert variant="warning" data-testid="integration-wizard-draft-changes">

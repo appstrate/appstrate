@@ -208,6 +208,30 @@ describe("the tools step", () => {
     expect(html).toContain("Publier la version 1.1.0");
   });
 
+  it("offers the server's instructions as INTEGRATION.md, with the truncation warning", () => {
+    const html = render(
+      <ToolsChoice
+        trustAll={false}
+        onTrustAllChange={noop}
+        proposal={{
+          instructions: "# Acme\nCall search first.",
+          warnings: [{ code: "instructions_truncated", message: "cut" }],
+        }}
+        version="1.1.0"
+        onSubmit={noop}
+        pending={false}
+        saveError={null}
+        publishError={null}
+        otherDraftChanges={false}
+        detailPath="/integrations/@org/acme"
+      />,
+    );
+    expect(html).toContain(agentsFr["integrationWizard.tools.docs"]);
+    expect(html).toContain(agentsFr["integrationWizard.tools.docsPreview"]);
+    expect(html).toContain(agentsFr["integrationEditor.discover.warning.instructions_truncated"]);
+    expect(choice(false)).not.toContain(agentsFr["integrationWizard.tools.docs"]);
+  });
+
   it("freezes the choice while saving", () => {
     expect(radio(choice(false), "trust")).not.toContain(" disabled=");
     expect(radio(choice(false, { pending: true }), "trust")).toContain(" disabled=");

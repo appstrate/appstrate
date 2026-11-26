@@ -6,7 +6,8 @@
 import { bumpVersion, compareVersionsDesc, isValidVersion } from "@appstrate/core/semver";
 import { getSource, setAllowUndeclaredTools } from "../components/integration-editor/utils";
 import type { paths } from "../api/schema";
-import { packageUpdateBody } from "./package-file-drafts";
+import { fileTextOperation, packageUpdateBody } from "./package-file-drafts";
+import { INTEGRATION_DOC, mergeServerIdentity } from "./integration-server-sync";
 
 export type DiscoveryResult =
   paths["/api/integrations/discover"]["post"]["responses"][200]["content"]["application/json"];
@@ -166,16 +167,45 @@ export function wizardCreateBody(manifest: Record<string, unknown>, way: "guided
 }
 
 /**
- * The draft save before the publish: the version, and the tools choice. Trusting every tool
- * declares `allow_undeclared_tools`; the default declares nothing, so each tool the server lists
- * is reviewed in each space before an agent runs it. Declaring a tool trusts it by name for good,
- * which is why the wizard declares none.
+ * A documentation the wizard did not write is never touched: the file is deleted only when THIS
+ * session wrote it and the user has since declined it. `written` is the next save's input.
+ */
+export function docsChoice(state: {
+  include: boolean;
+  instructions: string | null;
+  written: boolean;
+}): { instructions: string | null; removeDocs: boolean; written: boolean } {
+  const instructions = state.include ? state.instructions : null;
+  if (instructions) return { instructions, removeDocs: false, written: true };
+  const removeDocs = state.written && !state.include;
+  return { instructions: null, removeDocs, written: state.written && !removeDocs };
+}
+
+/**
+ * The draft save before the publish: the version, the tools choice, the identity the server
+ * proposes where the draft's is empty, and the server's instructions as `INTEGRATION.md`. Trusting
+ * every tool declares `allow_undeclared_tools`; the default declares nothing, so each tool the
+ * server lists is reviewed in each space before an agent runs it. Declaring a tool trusts it by
+ * name for good, which is why the wizard declares none.
  */
 export function toolsPublishBody(
   draft: Record<string, unknown>,
-  choice: { trustAll: boolean; version: string },
+  choice: {
+    trustAll: boolean;
+    version: string;
+    /** The identity read's manifest; absent when it could not be read. */
+    proposed?: Record<string, unknown>;
+    instructions?: string | null;
+    removeDocs?: boolean;
+  },
 ) {
+  const identified = choice.proposed ? mergeServerIdentity(draft, choice.proposed).manifest : draft;
   return packageUpdateBody({
-    manifest: { ...setAllowUndeclaredTools(draft, choice.trustAll), version: choice.version },
+    manifest: { ...setAllowUndeclaredTools(identified, choice.trustAll), version: choice.version },
+    operations: choice.instructions
+      ? [fileTextOperation(INTEGRATION_DOC, choice.instructions)]
+      : choice.removeDocs
+        ? [{ op: "delete", path: INTEGRATION_DOC }]
+        : undefined,
   });
 }

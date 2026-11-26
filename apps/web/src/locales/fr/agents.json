@@ -1085,5 +1085,7 @@
   "integrationWizard.tools.mode.trust.label": "Faire confiance à tous les outils de ce serveur",
   "integrationWizard.tools.mode.trust.description": "Tous les outils que le serveur liste, ceux qu’il ajoutera ou modifiera plus tard compris, sont disponibles sans examen. À réserver à un serveur que vous maîtrisez.",
   "integrationWizard.ready.reviewed": "Chaque outil du serveur est examiné dans chaque espace avant qu’un agent puisse l’appeler : approuvez-les depuis l’onglet Outils de l’intégration.",
-  "integrationWizard.ready.trusted": "Tous les outils du serveur sont disponibles sans examen."
+  "integrationWizard.ready.trusted": "Tous les outils du serveur sont disponibles sans examen.",
+  "integrationWizard.tools.docs": "Ajouter les instructions du serveur comme documentation (INTEGRATION.md)",
+  "integrationWizard.tools.docsPreview": "Aperçu des instructions"
 }

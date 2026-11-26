@@ -8,6 +8,9 @@ import type { components, paths } from "../api/schema";
 
 type Manifest = Record<string, unknown>;
 
+/** Where the server's instructions are proposed; an existing file is never replaced. */
+export const INTEGRATION_DOC = "INTEGRATION.md";
+
 const isEmpty = (v: unknown) =>
   v === undefined ||
   v === "" ||
