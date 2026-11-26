@@ -7,7 +7,7 @@
 
 import { describe, expect, it } from "bun:test";
 import { formatDuration } from "@appstrate/core/format";
-import { reasoningTitle, showStep, turnClock } from "../src/ui/turn-status.ts";
+import { reasoningTitle, showStep, turnClock, turnStartOf } from "../src/ui/turn-status.ts";
 import { testHost } from "./test-host.ts";
 
 const { t } = testHost();
@@ -23,6 +23,22 @@ describe("turnClock", () => {
     expect(turnClock(1000, "en")).toMatch(/^1\ssec$/);
     expect(turnClock(12_900, "fr")).toMatch(/^12\ss$/);
     expect(turnClock(75_400, "fr")).toBe(formatDuration(75_000, "fr"));
+  });
+});
+
+describe("turnStartOf", () => {
+  const asked = { role: "user", createdAt: new Date("2026-11-26T10:00:00.000Z") };
+  const answer = { role: "assistant", createdAt: new Date("2026-11-26T10:00:04.000Z") };
+
+  it("counts from the user message before the assistant one, which a streamed swap keeps", () => {
+    expect(turnStartOf([asked, answer], 1)).toBe("2026-11-26T10:00:00.000Z");
+    const swapped = { role: "assistant", createdAt: new Date("2026-11-26T10:00:05.000Z") };
+    expect(turnStartOf([asked, swapped], 1)).toBe("2026-11-26T10:00:00.000Z");
+  });
+
+  it("falls back to the message's own creation without a user message before it", () => {
+    expect(turnStartOf([answer], 0)).toBe("2026-11-26T10:00:04.000Z");
+    expect(turnStartOf([answer, answer], 1)).toBe("2026-11-26T10:00:04.000Z");
   });
 });
 

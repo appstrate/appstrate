@@ -25,6 +25,18 @@ export function turnClock(elapsedMs: number | undefined, lang: string): string |
   }).format(seconds);
 }
 
+/**
+ * When the turn of the message at `index` started, as ISO (a string for `useAuiState`): its user
+ * message's creation, the message just before it; the message's own without one.
+ */
+export function turnStartOf(
+  messages: readonly { readonly role: string; readonly createdAt?: Date }[],
+  index: number,
+): string | undefined {
+  const asked = messages[index - 1];
+  return (asked?.role === "user" ? asked : messages[index])?.createdAt?.toISOString();
+}
+
 /** The step a part is: a tool call named by {@link showCall}, anything else the model thinking. */
 export function showStep(
   part: { readonly type: string; readonly toolName?: string; readonly args?: unknown },
@@ -43,7 +55,8 @@ const EMPHASIS = /\*\*|__|~~|[*`]|(?<![\w])_|_(?![\w])/g;
 
 /** The first line of a reasoning text that reads as words, without its markdown; "" when none. */
 export function reasoningTitle(text: string): string {
-  for (const line of text.split("\n")) {
+  // Lazily, line by line: a long reasoning is not split past its title.
+  for (const [line] of text.matchAll(/^.*$/gm)) {
     const title = line
       .trim()
       .replace(LEADING_MARKS, "")

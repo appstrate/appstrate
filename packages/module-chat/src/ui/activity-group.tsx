@@ -13,7 +13,8 @@
  *
  * Folded and ending the running message, its header reads like a coding agent's status line: the
  * spark (the turn's status region, beside the trigger), the step in progress, the lookup count, the
- * turn's clock. Settled: the count, the failed count, what the lookups touched.
+ * failed count, the turn's clock. Settled: an eye where the spark was, the count, the failed count,
+ * what the lookups touched.
  */
 
 import * as React from "react";
@@ -41,6 +42,12 @@ import { DISCLOSURE_TRIGGER_CLASS } from "./touch-targets.ts";
 /** A thread part as the header reads it: a call's name and arguments for {@link showStep}. */
 type StepPart = GroupablePart & { readonly toolName?: string; readonly args?: unknown };
 
+/** The message as {@link ActivityGroup}'s step selectors read it. */
+interface StepMessage {
+  readonly status?: { readonly type: string };
+  readonly parts: readonly unknown[];
+}
+
 export function ActivityGroup({
   indices,
   stored,
@@ -64,14 +71,16 @@ export function ActivityGroup({
       ).length,
   );
   const lastIndex = indices[indices.length - 1];
-  // The step in progress while this group ends the running message, as JSON: a string selector.
-  const stepJson = useAuiState((s) => {
-    if (s.message.status?.type !== "running" || s.message.parts.length - 1 !== lastIndex) return "";
-    const part = s.message.parts[lastIndex] as StepPart | undefined;
-    if (!part) return "";
+  // The step in progress while this group ends the running message.
+  const stepOf = (message: StepMessage) => {
+    if (message.status?.type !== "running" || message.parts.length - 1 !== lastIndex) return;
+    const part = message.parts[lastIndex] as StepPart | undefined;
+    if (!part) return;
     const presentation = part.toolCallId ? stored.get(part.toolCallId)?.presentation : undefined;
-    return JSON.stringify(showStep(part, presentation, t));
-  });
+    return showStep(part, presentation, t);
+  };
+  const stepLabel = useAuiState((s) => stepOf(s.message)?.label ?? "");
+  const stepIdText = useAuiState((s) => stepOf(s.message)?.idText ?? "");
   const callIds = React.useMemo(() => (joinedIds ? joinedIds.split("\n") : []), [joinedIds]);
   const subjects = React.useMemo(
     () =>
@@ -86,9 +95,8 @@ export function ActivityGroup({
   const reads = callIds.length;
   const [readerOpen, setReaderOpen] = React.useState(false);
   const folded = reads >= FOLD_AT;
-  const running = folded && stepJson !== "";
+  const running = folded && stepLabel !== "";
   const clock = useTurnClock(running);
-  const step = running ? (JSON.parse(stepJson) as ReturnType<typeof showStep>) : undefined;
   const onOpenChange = (open: boolean) => {
     setReaderOpen(open);
     if (!open) forgetRevealedToolCalls(callIds);
@@ -98,30 +106,28 @@ export function ActivityGroup({
     <Collapsible open={folded ? readerOpen || revealed : true} onOpenChange={onOpenChange}>
       {folded ? (
         <div className="my-1 flex min-w-0 items-center gap-2">
-          {/* A sibling of the trigger: a live region inside a button is not exposed. */}
-          {running ? <ThinkingStatus /> : null}
+          {/* One leading slot in both states, so the trigger does not shift when the turn ends.
+              The spark is a sibling of the trigger: a live region inside a button is not exposed. */}
+          <span className="text-muted-foreground flex h-6 w-4 shrink-0 items-center justify-center">
+            {running ? <ThinkingStatus /> : <EyeIcon aria-hidden className="size-4" />}
+          </span>
           <CollapsibleTrigger asChild>
             <Button variant="ghost" size="sm" className={`min-w-0 ${DISCLOSURE_TRIGGER_CLASS}`}>
-              {step ? (
+              {running ? (
                 <>
-                  <span className="text-foreground min-w-0 truncate">{step.label}</span>
-                  {step.idText ? <span className="min-w-0 truncate">{step.idText}</span> : null}
-                  <span className="shrink-0">{t("tool.reads.done", { count: reads })}</span>
-                  {clock ? <span className="shrink-0 tabular-nums">{clock}</span> : null}
+                  <span className="text-foreground min-w-0 truncate">{stepLabel}</span>
+                  {stepIdText ? <span className="min-w-0 truncate">{stepIdText}</span> : null}
                 </>
-              ) : (
+              ) : null}
+              <span className="shrink-0">{t("tool.reads.done", { count: reads })}</span>
+              {failed > 0 ? (
                 <>
-                  <EyeIcon />
-                  {t("tool.reads.done", { count: reads })}
-                  {failed > 0 ? (
-                    <>
-                      <FailedGlyph />
-                      <span>{t("tool.reads.failed", { count: failed })}</span>
-                    </>
-                  ) : null}
-                  <SubjectStack subjects={subjects} />
+                  <FailedGlyph />
+                  <span className="shrink-0">{t("tool.reads.failed", { count: failed })}</span>
                 </>
-              )}
+              ) : null}
+              {running && clock ? <span className="shrink-0 tabular-nums">{clock}</span> : null}
+              {running ? null : <SubjectStack subjects={subjects} />}
               <ChevronRightIcon className="duration-fast ease-surface transition-transform group-data-[state=open]:rotate-90" />
             </Button>
           </CollapsibleTrigger>

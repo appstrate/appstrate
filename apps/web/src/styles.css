@@ -472,8 +472,9 @@
 /* The chat's working indicator (`ThinkingStatus`), the Appstrate spark: four
    coral balls in a square. The two balls of one diagonal swap places, then
    the two of the other diagonal, and so on: one pair moves while the other
-   rests, each swap surging and easing out, so the motion never stops. The
-   shading makes each ball read as a sphere; the motion stays flat. The loop
+   rests, each swap surging and easing out, so the motion never stops, except
+   under reduced motion, where the balls hold still. The shading makes each
+   ball read as a sphere; the motion stays flat. The loop
    (2.4s) is two swaps of each pair; the second diagonal runs a quarter loop
    later. `--spark-phase` (a negative delay) keeps the phase across remounts. */
 .spark {

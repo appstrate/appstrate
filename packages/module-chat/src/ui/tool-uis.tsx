@@ -85,14 +85,15 @@ function readDurationMs(timing: unknown): number | undefined {
 }
 
 /**
- * The small red cross of a failed call, the only red its row keeps. Its accessible name says the
- * failure and, when known, the HTTP status, which the call's detail also lists.
+ * The small red cross of a failed call, the only red its row keeps. Given a `label` it is an image
+ * named by it; without one it is decorative, beside a text that already says the failure.
  */
-export function FailedGlyph({ status }: { status?: number }) {
-  const { t } = useChatHost();
-  const label = status === undefined ? t("tool.failed") : t("tool.failedHttp", { status });
+export function FailedGlyph({ label }: { label?: string }) {
   return (
-    <span role="img" aria-label={label} className="text-destructive shrink-0">
+    <span
+      {...(label ? { role: "img", "aria-label": label } : { "aria-hidden": true })}
+      className="text-destructive shrink-0"
+    >
       <XIcon className="size-3.5" />
     </span>
   );
@@ -202,7 +203,11 @@ export function ToolCallCard({
         {durationMs !== undefined ? (
           <span className="text-muted-foreground text-xs">{formatDuration(durationMs, lang)}</span>
         ) : null}
-        {phase === "error" ? <FailedGlyph status={status} /> : null}
+        {phase === "error" ? (
+          <FailedGlyph
+            label={status === undefined ? t("tool.failed") : t("tool.failedHttp", { status })}
+          />
+        ) : null}
       </button>
       {errorMsg ? (
         <div className="text-muted-foreground border-t px-3 py-2 text-xs break-words">

@@ -3,9 +3,9 @@
 /**
  * The model's reasoning, shown. The engine already streams it
  * (`reasoning-delta`, `pi-chat/ui-stream-mapper.ts`); assistant-ui's default
- * renderer for a reasoning part is `() => null`, and it hides `Empty` (the
- * thinking loader) as soon as the last part is reasoning, so without this the
- * bubble would stay blank for the whole reasoning phase.
+ * renderer for a reasoning part is `() => null`, and `GroupedParts` emits no
+ * `indicator` part (the loading line) once the last part is reasoning, so
+ * without this the bubble would stay blank for the whole reasoning phase.
  *
  * One disclosure per run of consecutive reasoning parts (`ReasoningGroup`),
  * open while that run is the part still streaming, so it takes the place the
@@ -103,8 +103,15 @@ export const ReasoningGroup: ReasoningGroupComponent = ({ startIndex, endIndex, 
   const ownsStatus = useAuiState(
     (s) => streaming && !endsFolded(s.message.parts as readonly GroupablePart[]),
   );
+  // Read once settled: a streaming row shows no title.
   const title = useAuiState((s) =>
-    titleOf(s.message.parts as readonly { type: string; text?: string }[], startIndex, endIndex),
+    streaming
+      ? ""
+      : titleOf(
+          s.message.parts as readonly { type: string; text?: string }[],
+          startIndex,
+          endIndex,
+        ),
   );
   const [readerOpen, setReaderOpen] = React.useState<boolean | null>(null);
   const open = readerOpen ?? streaming;

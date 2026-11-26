@@ -2,9 +2,9 @@
 
 /**
  * The reasoning phase of an assistant turn (#1601), through the real
- * assistant-ui runtime. assistant-ui hides `Empty` (the thinking loader) as soon
- * as the last part is `reasoning`, and its default `Reasoning` renders nothing,
- * so without our own components the bubble stayed blank for the whole
+ * assistant-ui runtime. `GroupedParts` emits no `indicator` part (the loading
+ * line) once the last part is `reasoning`, and its default `Reasoning` renders
+ * nothing, so without our own components the bubble stayed blank for the whole
  * reasoning phase.
  *
  * The whole `Thread` renders, as the chat page mounts it: the seam is the
@@ -15,7 +15,7 @@
  * the reader's own toggle is a click, which this DOM-less harness cannot drive.
  */
 
-import { describe, expect, it } from "bun:test";
+import { afterEach, describe, expect, it } from "bun:test";
 import { renderToString } from "react-dom/server";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { AssistantRuntimeProvider } from "@assistant-ui/react";
@@ -25,6 +25,7 @@ import { ChatHostProvider } from "../src/ui/runtime-context.ts";
 import { testHost } from "./test-host.ts";
 import { Thread } from "../src/ui/thread.tsx";
 import { createMessageQueue } from "../src/ui/message-queue.ts";
+import { forgetRevealedToolCalls, revealToolCall } from "../src/ui/reveal-tool-call.ts";
 
 type ChatHelpers = Parameters<typeof useAISDKRuntime>[0];
 type Parts = ChatHelpers["messages"][number]["parts"];
@@ -290,6 +291,37 @@ describe("a running turn's one status region, whatever its tail", () => {
     expect(html.indexOf("tool.reads.done")).toBeLessThan(html.indexOf("reasoning.running"));
   });
 
+  describe("with the folded group opened by the context panel", () => {
+    const globals = globalThis as { document?: unknown; CSS?: unknown };
+    /** The panel reveals a call: its group opens; this page draws no card, so none takes focus. */
+    const reveal = (toolCallId: string) => {
+      globals.document = {
+        querySelector: (selector: string) =>
+          selector === "[data-chat-thread]" ? { querySelector: () => null } : null,
+      };
+      globals.CSS = { escape: (value: string) => value };
+      revealToolCall({ toolCallId });
+    };
+    afterEach(() => {
+      forgetRevealedToolCalls(["s1"]);
+      delete globals.document;
+      delete globals.CSS;
+    });
+
+    it("is still the header alone while the model thinks inside it", () => {
+      reveal("s1");
+      const html = render([
+        lookup("s1", "issues"),
+        lookup("s2", "agents"),
+        reasoning(REASONING, "streaming"),
+      ]);
+      // Open: the reasoning row inside is mounted (and open), and draws no region of its own.
+      expect(openRows(html)).toBe(2);
+      expect(count(html, "lucide-brain")).toBe(1);
+      expect(statusRegions(html)).toBe(1);
+    });
+  });
+
   it("is gone once the turn ends, the folded header back to its count", () => {
     const html = render(
       [
@@ -347,8 +379,22 @@ describe("a failed tool call, softened and never hidden", () => {
       "ready",
     );
     const trigger = foldedTrigger(html);
-    expect(trigger).toContain('aria-label="tool.failed"');
+    // The cross is decorative beside the count that says the failure: said once.
+    expect(trigger).toContain('aria-hidden="true" class="text-destructive shrink-0"');
+    expect(trigger).not.toContain('aria-label="tool.failed');
     expect(trigger).toContain("tool.reads.failed");
     expect(trigger).not.toMatch(/class="text-destructive"[^>]*>tool\.reads\.failed/);
+  });
+
+  it("shows the failure in a folded group while the turn still runs", () => {
+    const html = render([
+      lookup("s1", "issues"),
+      { ...lookup("s2", "agents"), output: { status: 500, error: "boom" } },
+      lookup("s3", "runs", false),
+    ]);
+    const trigger = foldedTrigger(html);
+    expect(trigger).toContain("tool.name.search");
+    expect(trigger).toContain('class="text-destructive shrink-0"');
+    expect(trigger).toContain("tool.reads.failed");
   });
 });
