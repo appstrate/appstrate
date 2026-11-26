@@ -14223,6 +14223,8 @@ export interface operations {
                                 [key: string]: unknown;
                             } | null;
                             scopes_granted: string[];
+                            /** @description The scopes a server asked for (HTTP 403 `insufficient_scope`) that the connection does not hold: the step-up the owner can grant by reconnecting with them (`initiateIntegrationConnect` with `connection_id` and `scopes`). Empty when none; cleared once a reconnect grants them. The owner's only. */
+                            requested_scopes?: string[];
                             needs_reconnection: boolean;
                             /** Format: date-time */
                             expiresAt: string | null;
@@ -14535,6 +14537,8 @@ export interface operations {
                                     [key: string]: unknown;
                                 } | null;
                                 scopes_granted: string[];
+                                /** @description The scopes a server asked for (HTTP 403 `insufficient_scope`) that the connection does not hold: the step-up the owner can grant by reconnecting with them (`initiateIntegrationConnect` with `connection_id` and `scopes`). Empty when none; cleared once a reconnect grants them. The owner's only. */
+                                requested_scopes?: string[];
                                 needs_reconnection: boolean;
                                 /** Format: date-time */
                                 expiresAt: string | null;
@@ -14773,6 +14777,8 @@ export interface operations {
                             [key: string]: unknown;
                         } | null;
                         scopes_granted: string[];
+                        /** @description The scopes a server asked for (HTTP 403 `insufficient_scope`) that the connection does not hold: the step-up the owner can grant by reconnecting with them (`initiateIntegrationConnect` with `connection_id` and `scopes`). Empty when none; cleared once a reconnect grants them. The owner's only. */
+                        requested_scopes?: string[];
                         needs_reconnection: boolean;
                         /** Format: date-time */
                         expiresAt: string | null;
@@ -15193,6 +15199,8 @@ export interface operations {
                                 [key: string]: unknown;
                             } | null;
                             scopes_granted: string[];
+                            /** @description The scopes a server asked for (HTTP 403 `insufficient_scope`) that the connection does not hold: the step-up the owner can grant by reconnecting with them (`initiateIntegrationConnect` with `connection_id` and `scopes`). Empty when none; cleared once a reconnect grants them. The owner's only. */
+                            requested_scopes?: string[];
                             needs_reconnection: boolean;
                             /** Format: date-time */
                             expiresAt: string | null;
@@ -15292,6 +15300,8 @@ export interface operations {
                             [key: string]: unknown;
                         } | null;
                         scopes_granted: string[];
+                        /** @description The scopes a server asked for (HTTP 403 `insufficient_scope`) that the connection does not hold: the step-up the owner can grant by reconnecting with them (`initiateIntegrationConnect` with `connection_id` and `scopes`). Empty when none; cleared once a reconnect grants them. The owner's only. */
+                        requested_scopes?: string[];
                         needs_reconnection: boolean;
                         /** Format: date-time */
                         expiresAt: string | null;
@@ -16209,6 +16219,8 @@ export interface operations {
                                     [key: string]: unknown;
                                 } | null;
                                 scopes_granted: string[];
+                                /** @description The scopes a server asked for (HTTP 403 `insufficient_scope`) that the connection does not hold: the step-up the owner can grant by reconnecting with them (`initiateIntegrationConnect` with `connection_id` and `scopes`). Empty when none; cleared once a reconnect grants them. The owner's only. */
+                                requested_scopes?: string[];
                                 needs_reconnection: boolean;
                                 /** Format: date-time */
                                 expiresAt: string | null;
@@ -17846,6 +17858,8 @@ export interface operations {
                                 kind: "integration";
                                 label: string;
                                 scopes_granted: string[];
+                                /** @description The scopes a server asked for (HTTP 403 `insufficient_scope`) that the connection does not hold; empty when none. Granted by reconnecting with them (`initiateIntegrationConnect` with `connection_id` and `scopes`). */
+                                requested_scopes: string[];
                                 /** Format: date-time */
                                 connected_at: string;
                                 needs_reconnection: boolean;
@@ -17974,6 +17988,8 @@ export interface operations {
                             [key: string]: unknown;
                         } | null;
                         scopes_granted: string[];
+                        /** @description The scopes a server asked for (HTTP 403 `insufficient_scope`) that the connection does not hold: the step-up the owner can grant by reconnecting with them (`initiateIntegrationConnect` with `connection_id` and `scopes`). Empty when none; cleared once a reconnect grants them. The owner's only. */
+                        requested_scopes?: string[];
                         needs_reconnection: boolean;
                         /** Format: date-time */
                         expiresAt: string | null;

@@ -3471,6 +3471,7 @@ export function serializeIntegrationConnection(
       ? ((row.identityClaims as Record<string, unknown> | null) ?? null)
       : null,
     scopes_granted: row.scopesGranted,
+    ...(view.owner ? { requested_scopes: row.requestedScopes } : {}),
     needs_reconnection: row.needsReconnection,
     expiresAt: row.expiresAt ? row.expiresAt.toISOString() : null,
     owner_type: row.userId ? "user" : "end_user",

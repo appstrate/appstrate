@@ -358,6 +358,12 @@ export const integrationConnectionSchema = {
     account_id: { type: "string" },
     identity_claims: { type: ["object", "null"], additionalProperties: true },
     scopes_granted: { type: "array", items: { type: "string" } },
+    requested_scopes: {
+      type: "array",
+      items: { type: "string" },
+      description:
+        "The scopes a server asked for (HTTP 403 `insufficient_scope`) that the connection does not hold: the step-up the owner can grant by reconnecting with them (`initiateIntegrationConnect` with `connection_id` and `scopes`). Empty when none; cleared once a reconnect grants them. The owner's only.",
+    },
     needs_reconnection: { type: "boolean" },
     expiresAt: { type: ["string", "null"], format: "date-time" },
     owner_type: { type: "string", enum: ["user", "end_user"] },

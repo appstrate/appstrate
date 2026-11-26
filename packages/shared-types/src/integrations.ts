@@ -78,6 +78,8 @@ export interface IntegrationConnection extends ConnectionReach {
   /** Identity claims extracted via `extractTokenIdentity` (e.g. `sub`, `email`). */
   identity_claims: Record<string, unknown> | null;
   scopes_granted: string[];
+  /** The owner's only: scopes a server asked for that this connection does not hold. */
+  requested_scopes?: string[];
   needs_reconnection: boolean;
   expiresAt: string | null;
   owner_type: "user" | "end_user";
