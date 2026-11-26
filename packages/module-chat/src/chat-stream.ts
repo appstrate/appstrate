@@ -35,7 +35,6 @@ import { platformMcpSurfaceKey } from "./pi-chat/mcp-surface-cache.ts";
 import { selfOrigin } from "./self.ts";
 import type { ChatUsageRecord } from "@appstrate/core/chat-contract";
 import type { ChatSkillStatusEntry } from "@appstrate/db/schema";
-import { SPACE_CHOICE_PART, spaceChoiceSchema } from "./space-choice.ts";
 import { mintLoopbackToken, mintMcpLoopbackToken } from "./loopback-auth.ts";
 import {
   materializeUserAttachments,
@@ -310,17 +309,6 @@ export async function handleChatStream(
   // conversation's id below takes this one, so a turn reaches what it attached.
   const chatSessionId = sessionId && lastMessage?.id ? sessionId : null;
 
-  const choiceParts =
-    lastMessage?.role === "user"
-      ? lastMessage.parts.flatMap((part) =>
-          part.type === SPACE_CHOICE_PART && "data" in part ? [part.data] : [],
-        )
-      : [];
-  const chosenSpace =
-    choiceParts.length === 1 ? spaceChoiceSchema.safeParse(choiceParts[0]) : undefined;
-  if (choiceParts.length && !chosenSpace?.success) {
-    throw invalidRequest("Expected one space choice on the user message.", "messages");
-  }
   const turnStart = Date.now();
 
   // Persist the session ROW up front, BEFORE the (potentially multi-second)
@@ -435,9 +423,6 @@ export async function handleChatStream(
       );
     }
     const spaces = conv.restricted && originSpace ? [originSpace] : acting;
-    if (chosenSpace?.success && !spaces.some((space) => space.id === chosenSpace.data.spaceId)) {
-      throw forbidden("The selected space is outside the conversation's acting spaces.");
-    }
     const callerPermissions = callerGrants(spaces, conv.restricted, c.get("reachableOrgHalf"));
     const permissions = turnPermissions(callerPermissions, {
       authoring: body.package_authoring !== false,
@@ -458,7 +443,6 @@ export async function handleChatStream(
         permissions: space.permissions.filter((permission) => ceiling.has(permission)),
       })),
       originSpaceId: originSpace?.id,
-      spaceChoice: chosenSpace?.success ? chosenSpace.data : undefined,
       touch: async (touchedSpaceId) => {
         if (!chatSessionId) return;
         await touchSessionSpace(
@@ -850,7 +834,6 @@ export async function handleChatStream(
       spaceIds: spaces.map((space) => space.id),
       restricted: scope.restricted,
       originSpaceId: organization.originSpaceId,
-      spaceChoice: organization.spaceChoice,
       // The conversation issuing its requests: a run it launches may take its own files.
       chatSessionId,
     },

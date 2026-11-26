@@ -758,6 +758,32 @@ describe("Me API (/api/me)", () => {
       expect(body.skills_truncated).toBe(false);
     });
 
+    it("answers with identity and org role alone when the request names no space", async () => {
+      const res = await app.request("/api/me/context", {
+        headers: { Cookie: ctx.cookie, "X-Org-Id": ctx.orgId },
+      });
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as Record<string, unknown>;
+      expect(Object.keys(body).sort()).toEqual(["org", "user"]);
+      expect(body.user).toMatchObject({ id: ctx.user.id });
+      expect(body.org).toMatchObject({ id: ctx.orgId, role: "owner" });
+    });
+
+    it("names the organization for an API key, which resolves past org context", async () => {
+      const apiKey = await seedApiKey({
+        createdBy: ctx.user.id,
+        orgId: ctx.orgId,
+        spaceId: ctx.defaultSpaceId,
+        scopes: [],
+      });
+      const res = await app.request("/api/me/context", {
+        headers: { Authorization: `Bearer ${apiKey.rawKey}` },
+      });
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as { org: { name: string; slug: string } };
+      expect(body.org).toMatchObject({ name: ctx.org.name, slug: ctx.org.slug });
+    });
+
     it("returns 401 without authentication", async () => {
       const res = await app.request("/api/me/context");
       expect(res.status).toBe(401);

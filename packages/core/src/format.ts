@@ -148,19 +148,3 @@ export function formatRelativeTime(
     numeric: count === 0 ? "auto" : "always",
   }).format(count, unit);
 }
-
-/**
- * How old `at` is as of `now`, both epoch milliseconds, as a bare quantity for
- * a narrow column (« 5 min », « 3 h », « 2 j »), « maintenant » under a minute.
- * Same units, locale and "" for a non-finite `at` as {@link formatRelativeTime},
- * without its « il y a ».
- */
-export function formatAge(at: number, now: number, locale?: string): string {
-  if (!Number.isFinite(at)) return "";
-  const [count, unit] = relativeSpan(at, now);
-  const tag = canonicalLocale(locale) ?? "en";
-  if (count === 0) return new Intl.RelativeTimeFormat(tag, { numeric: "auto" }).format(0, unit);
-  return new Intl.NumberFormat(tag, { style: "unit", unit, unitDisplay: "short" }).format(
-    Math.abs(count),
-  );
-}

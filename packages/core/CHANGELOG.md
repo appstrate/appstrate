@@ -11,10 +11,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **`@appstrate/core/mcp-presentation`**: how a client shows one MCP tool call.
   `TOOL_PRESENTATION_META_KEY` (`dev.appstrate/presentation`) names the `_meta` entry the platform
-  stamps on every tool result, `toolPresentationSchema` / `presentationSubjectSchema` describe it,
+  stamps on every tool result, `toolPresentationSchema` / `presentationSubjectSchema` describe it
+  (types `ToolPresentation`, `PresentationSubject`; a search lists at most `MAX_PRESENTED_ITEMS`),
   `readToolPresentation` reads it, and `isReadOnlyMethod` says whether an HTTP method only reads.
   `TOOL_LOOKUP_META_KEY` (`dev.appstrate/lookup`) marks, on a tool descriptor, a tool whose calls
   only look things up although `readOnlyHint` is withheld; `isLookupTool` reads either.
+
+### Removed
+
+- **`SPACE_CHOICE_META_KEY`** — BREAKING (`@appstrate/core/mcp-spaces`). An MCP call that needs a
+  space and names none is refused with the eligible spaces in the refusal alone (`accepted`, and
+  by name in `error`): the chat no longer renders a picker from result metadata, its model asks
+  the user.
+- **`AuthResolution.orgSlug`** — BREAKING (`@appstrate/core/module`). No strategy supplied it, so a
+  bearer resolved inline reached routes without an organization slug or name; the platform now
+  reads both from the organization `orgId` names, for every inline resolution.
+- **`formatAge`** — BREAKING (`@appstrate/core/format`). Its one reader, the chat's conversation
+  list, no longer shows an age per row: the day groups (« Aujourd'hui », …) carry it. Use
+  `formatRelativeTime` for a relative date.
 
 ## [18.0.0] — 2026-11-24
 

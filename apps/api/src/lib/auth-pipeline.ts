@@ -20,7 +20,10 @@ import type { Context, Hono } from "hono";
 import type { AuthStrategy } from "@appstrate/core/module";
 import { PRINCIPAL_KINDS } from "@appstrate/core/module";
 import { parseBearer } from "@appstrate/core/bearer";
+import { eq } from "drizzle-orm";
 import { getAuth } from "@appstrate/db/auth";
+import { db } from "@appstrate/db/client";
+import { organizations } from "@appstrate/db/schema";
 import { API_KEY_PREFIX, validateApiKey } from "../services/api-keys.ts";
 import { requireOrgContext } from "../middleware/org-context.ts";
 import { requirePlatformRealm } from "../middleware/realm-guard.ts";
@@ -185,8 +188,11 @@ export function applyAuthPipeline(app: Hono<AppEnv>, opts: AuthPipelineOptions):
         }
         c.set("principalKind", resolution.principalKind);
         c.set("user", resolution.user);
-        if (resolution.orgId !== undefined) c.set("orgId", resolution.orgId);
-        if (resolution.orgSlug !== undefined) c.set("orgSlug", resolution.orgSlug);
+        if (resolution.orgId !== undefined) {
+          c.set("orgId", resolution.orgId);
+          // A deferred resolution gets the organization's identity from org context.
+          if (!resolution.deferOrgResolution) await setOrgIdentity(c, resolution.orgId);
+        }
         if (resolution.orgRole !== undefined) c.set("orgRole", resolution.orgRole);
         // Before the permission write: `applyOrgPermissions` reads the persona.
         adoptViewAs(c, resolution.orgId, resolution.extra);
@@ -256,6 +262,7 @@ export function applyAuthPipeline(app: Hono<AppEnv>, opts: AuthPipelineOptions):
       c.set("user", { id: keyInfo.userId, email: keyInfo.email, name: keyInfo.name });
       c.set("orgId", keyInfo.orgId);
       c.set("orgSlug", keyInfo.orgSlug);
+      c.set("orgName", keyInfo.orgName);
       c.set("orgRole", keyInfo.creatorRole);
       // The key's scopes are the ceiling; the grant is the creator's live
       // authority narrowed by them. The space half arrives in
@@ -558,4 +565,19 @@ function skipOrgContext(path: string): boolean {
   // until it is added here with a guard of its own.
   if (/^\/api\/admin\/storage-deletion-jobs(\/|$)/.test(path)) return true;
   return false;
+}
+
+/**
+ * The organization's slug and name, for a principal resolved inline: org context, which sets
+ * them for a session or a deferred resolution, does not run for it.
+ */
+async function setOrgIdentity(c: Context<AppEnv>, orgId: string): Promise<void> {
+  const [org] = await db
+    .select({ slug: organizations.slug, name: organizations.name })
+    .from(organizations)
+    .where(eq(organizations.id, orgId))
+    .limit(1);
+  if (!org) throw unauthorized("The credential's organization no longer exists");
+  c.set("orgSlug", org.slug);
+  c.set("orgName", org.name);
 }

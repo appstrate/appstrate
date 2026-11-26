@@ -33,7 +33,9 @@ import { useChat } from "@ai-sdk/react";
 import type { UIMessage } from "ai";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Button } from "@appstrate/ui/components/button";
+import { cn } from "@appstrate/ui/cn";
 import { ConversationSkeleton } from "./conversation-skeleton.tsx";
+import { THREAD_SIDE_PADDING_CLASS } from "./phone-text.ts";
 import { useLatest } from "./use-latest.ts";
 import { recordUploadResolutions } from "./upload.ts";
 import { Thread } from "./thread.tsx";
@@ -584,7 +586,10 @@ function ConversationNotFound({
     <div
       role="status"
       data-testid="chat-conversation-not-found"
-      className="flex h-full flex-col items-center justify-center gap-3 px-4 text-center"
+      className={cn(
+        "flex h-full flex-col items-center justify-center gap-3 text-center",
+        THREAD_SIDE_PADDING_CLASS,
+      )}
     >
       <p className="text-sm font-medium">{t("conversation.notFound.title")}</p>
       <p className="text-muted-foreground max-w-sm text-sm">{t("conversation.notFound.hint")}</p>

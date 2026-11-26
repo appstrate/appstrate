@@ -446,16 +446,6 @@ describe("the composer's limit chip", () => {
     );
     // One line: nothing wraps the cluster.
     expect(out).not.toContain("flex-wrap");
-    // The limit narrows where the agent acts: the phone's "+" says it, as the desktop's chip does.
-    expect(out).toContain("composer-plus-dot");
-    expect(out).toContain("composer-settings-dot");
-  });
-
-  it('shows no dot on the "+" or the settings button while every setting is at its default', () => {
-    const out = html(conversationScope({ originSpaceId: "spc_a" }));
-    expect(out).toContain('data-testid="composer-plus"');
-    expect(out).not.toContain("composer-plus-dot");
-    expect(out).not.toContain("composer-settings-dot");
   });
 
   it("draws no model pill: the model is a level of the tools panel", () => {

@@ -40,7 +40,6 @@ import { Button } from "@appstrate/ui/components/button";
 import { cn } from "@appstrate/ui/cn";
 import { MarkdownText, ReasoningText } from "./markdown-text.tsx";
 import { ReasoningGroup, ThinkingStatus } from "./reasoning.tsx";
-import { TurnSpaceChoice } from "./space-choice.tsx";
 import { ToolFallback } from "./tool-fallback.tsx";
 import { ActivityGroup } from "./reads-group.tsx";
 import { activityGroupOf } from "./activity-group.ts";
@@ -101,6 +100,7 @@ import {
   NOTE_TEXT_CLASS,
   READING_TEXT_CLASS,
   THREAD_FOOTER_CLASS,
+  THREAD_SIDE_PADDING_CLASS,
   THREAD_VIEWPORT_CLASS,
   USER_MESSAGE_CLASS,
 } from "./phone-text.ts";
@@ -266,7 +266,12 @@ function ThreadWelcome({
   const outsideActingSet =
     canWrite && !!spaceId && actingSpaceIds !== null && !actsIn(actingSpaceIds, spaceId);
   return (
-    <div className="flex min-h-0 flex-1 flex-col items-center overflow-y-auto px-4 md:justify-center-safe">
+    <div
+      className={cn(
+        "flex min-h-0 flex-1 flex-col items-center overflow-y-auto md:justify-center-safe",
+        THREAD_SIDE_PADDING_CLASS,
+      )}
+    >
       <div className="duration-base ease-surface motion-safe:animate-in motion-safe:fade-in motion-safe:slide-in-from-bottom-1 flex w-full max-w-(--thread-max-width) flex-1 flex-col items-stretch gap-6 max-md:pb-4 md:flex-none">
         {/* A phone keeps the composer at the bottom, where the thumb is, as every messenger does;
             the greeting takes the room above. From `md` up both sit mid-screen. */}
@@ -1009,7 +1014,6 @@ function AssistantMessage() {
     <MessagePrimitive.Root className="group flex w-full max-w-(--thread-max-width) flex-col py-2">
       <div className={ASSISTANT_MESSAGE_CLASS}>
         <AssistantParts />
-        <TurnSpaceChoice />
         <TurnLimitNotice />
         <MessageError />
       </div>

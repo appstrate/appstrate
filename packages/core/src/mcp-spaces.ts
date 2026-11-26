@@ -8,9 +8,8 @@
 
 import { asRecord } from "./safe-json.ts";
 
-/** Actual operation spaces and choices, stamped by the platform for its chat client. */
+/** Actual operation spaces, stamped by the platform for its chat client. */
 export const OPERATION_SPACES_META_KEY = "dev.appstrate/operation-space-ids";
-export const SPACE_CHOICE_META_KEY = "dev.appstrate/space-choice-ids";
 
 /** First-party result metadata: the spaces whose activation state the result disclosed. */
 export const ACTIVE_SPACES_META_KEY = "dev.appstrate/active-space-ids";
