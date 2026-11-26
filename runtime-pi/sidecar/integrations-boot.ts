@@ -108,6 +108,7 @@ import {
   type ApiCallToolDeps,
 } from "./mcp.ts";
 import {
+  makeBundleEntryExecutable,
   selectIntegrationRuntimeAdapter,
   type IntegrationRuntimeAdapter,
   type RuntimeAdapterRunContext,
@@ -1215,6 +1216,10 @@ async function startLocalIntegration(params: {
     bundleFetchOpts,
   );
   const root = await extractBundle(bytes, spec.namespace);
+  const server = spec.manifest.server;
+  if (server?.type === "binary" && server.entry_point) {
+    await makeBundleEntryExecutable(root, server.entry_point);
+  }
 
   const spawnStart = performance.now();
   const spawnedIntegration = await adapter.spawn({

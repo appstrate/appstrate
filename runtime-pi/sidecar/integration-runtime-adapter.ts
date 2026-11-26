@@ -16,6 +16,7 @@
  * call; nothing in `integrations-boot.ts` needs to change.
  */
 
+import { chmod, lstat } from "node:fs/promises";
 import { normalize, join, posix } from "node:path";
 
 import type { SubprocessTransport } from "@appstrate/mcp-transport";
@@ -208,6 +209,26 @@ export function resolveBundleEntry(bundleRoot: string, entryPoint: string): stri
     throw new Error("integration entryPoint escapes bundle root");
   }
   return abs;
+}
+
+/**
+ * Make a `binary` entry point executable: archive modes are never trusted, and the adapters
+ * exec the entry directly as a non-owner uid, so it needs o+rx. Only that regular file.
+ */
+export async function makeBundleEntryExecutable(
+  bundleRoot: string,
+  entryPoint: string,
+): Promise<void> {
+  const abs = resolveBundleEntry(bundleRoot, entryPoint);
+  const st = await lstat(abs).catch((err: unknown) => {
+    const code = (err as NodeJS.ErrnoException | null)?.code;
+    if (code === "ENOENT" || code === "ENOTDIR") return null;
+    throw err;
+  });
+  if (!st?.isFile()) {
+    throw new Error(`integration entryPoint "${entryPoint}" is not a regular file in the bundle`);
+  }
+  await chmod(abs, 0o755);
 }
 
 /**
