@@ -17,7 +17,7 @@ import { logger } from "../lib/logger.ts";
 import { ApiError } from "../lib/errors.ts";
 import type { AfpsManifestAuth } from "./integration-manifest-helpers.ts";
 import { credentialRevision } from "./integration-connections.ts";
-import { readIntegrationManifestForProxy } from "./integration-service.ts";
+import { readIntegrationManifestForConnect } from "./integration-service.ts";
 import { refreshConnectionCredential } from "./integration-token-refresh.ts";
 import { listModelProviders } from "./model-providers/registry.ts";
 import { resolveOAuthTokenForSidecar } from "./model-providers/token-resolver.ts";
@@ -103,13 +103,13 @@ async function refreshIntegrationConnection(id: string): Promise<void> {
   const { integrationId, authKey } = row;
   const fields = { connectionId: id, integrationId, authKey };
 
-  // The latest published version, as the proxy reads it outside a run.
-  const read = await readIntegrationManifestForProxy(integrationId, row.orgId, null);
+  // The manifest a connect reads: the latest published version, the draft while none is published.
+  const read = await readIntegrationManifestForConnect({ orgId: row.orgId }, integrationId);
   const authDef = read.ok ? (read.manifest.auths?.[authKey] as AfpsManifestAuth | undefined) : null;
   if (!read.ok || !authDef) {
     logger.info("credential_refresh_integration_skipped", {
       ...fields,
-      reason: read.ok ? "auth_not_declared" : read.failure.kind,
+      reason: read.ok ? "auth_not_declared" : read.reason,
     });
     return;
   }

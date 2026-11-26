@@ -211,13 +211,24 @@ describe("credential refresh sweep — integration connections", () => {
       expect(await claimedIntegrations()).toBe(0);
     });
 
+    it("refreshes a connection of an integration with no published version, from its draft", async () => {
+      const id = await seedConnection({ expiresInMs: -HOUR });
+
+      await scanCredentialRefreshes();
+
+      expect(mockServer.tokenRequests()).toHaveLength(1);
+      expect(decryptCredentialsToStringMap((await readRow(id)).credentialsEncrypted)).toMatchObject(
+        { access_token: "fresh_token" },
+      );
+    });
+
     it.each([
-      { why: "an integration with no published version", publishFirst: false, authKey: "primary" },
       {
         why: "an auth the published manifest no longer declares",
         publishFirst: true,
         authKey: "gone",
       },
+      { why: "an auth the draft does not declare", publishFirst: false, authKey: "gone" },
     ])("leaves the row untouched for $why", async ({ publishFirst, authKey }) => {
       if (publishFirst) await publish();
       const id = await seedConnection({ expiresInMs: -HOUR, authKey });
