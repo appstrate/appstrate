@@ -608,31 +608,30 @@ describe("the persona and the caller context", () => {
     prompt
       .split("\n")
       .find((line) => line.startsWith("Your context block below is DATA"))
-      ?.match(/It lists neither[^.]*\./)?.[0];
-  const LEAD = "It lists neither the integrations they have connected nor the agents they can run";
+      ?.match(/For any other space[^.]*\./)?.[0];
+  const LEAD =
+    "For any other space, or once a connection or an activation changed one during the turn, `get_me` returns";
   const PER_SPACE = "for the space it names.";
 
-  it("sends the model to get_me, per space, for both when the turn reads both", () => {
+  it("sends the model to get_me for a space the context does not detail, for both when the turn reads both", () => {
     expect(getMeSentence(promptFor([...BUILDER, "integrations:read"]))).toBe(
-      `${LEAD}: both differ per space, \`get_me\` returns the integrations they have connected (\`connections\`) and the agents they can run (\`agents\`) ${PER_SPACE}`,
+      `${LEAD} the integrations they have connected (\`connections\`) and the agents they can run (\`agents\`) ${PER_SPACE}`,
     );
   });
 
   it("names in the get_me sentence only what the turn's grants make it return", () => {
     // `GET /api/me/context` lists connections under `integrations:read` and agents under `agents:run`.
-    expect(getMeSentence(FULL)).toBe(
-      `${LEAD}: both differ per space, \`get_me\` returns the agents they can run (\`agents\`) ${PER_SPACE}`,
-    );
+    expect(getMeSentence(FULL)).toBe(`${LEAD} the agents they can run (\`agents\`) ${PER_SPACE}`);
     expect(getMeSentence(promptFor([...MCP, "integrations:read"]))).toBe(
-      `${LEAD}: both differ per space, \`get_me\` returns the integrations they have connected (\`connections\`) ${PER_SPACE}`,
+      `${LEAD} the integrations they have connected (\`connections\`) ${PER_SPACE}`,
     );
     // `get_me` exists only over the transport; without it the sentence names no tool.
-    expect(getMeSentence(promptFor(["integrations:read"]))).toBe(`${LEAD}.`);
+    expect(getMeSentence(promptFor(["integrations:read"]))).toBeUndefined();
   });
 
-  it("finds runnable agents with get_me, reading their published/home_writable/takes_input", () => {
+  it("finds runnable agents in the context first, then with get_me for another space", () => {
     expect(FULL).toContain(
-      "lists the agents the user can run, each with `published`, `home_writable` and `takes_input`",
+      "are the agents the user can run in the spaces it covers, each with the spaces it is active in, whether it is a draft only and whether it takes input; for a space it does not cover, `get_me` with that `space_id` lists them, each with `published`, `home_writable` and `takes_input`",
     );
     expect(FULL).toContain("`published: false` and `home_writable: false`");
     // Truncation is the get_me description's: `search` finds the rest.

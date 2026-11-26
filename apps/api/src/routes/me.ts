@@ -93,7 +93,11 @@ import { handoffStepsFor } from "../services/connect/provisioning.ts";
 import { removeScheduleJobs } from "../services/scheduler.ts";
 import { connectionIdSetSchema } from "../lib/connection-set.ts";
 import { logger } from "../lib/logger.ts";
-import { listActiveAgentHints, listActiveSkills } from "../services/space-packages.ts";
+import {
+  listActiveAgentHints,
+  listActiveSkills,
+  listConnectableIntegrations,
+} from "../services/space-packages.ts";
 import { homeWireForCaller, packageAccessSpaces } from "../lib/package-access.ts";
 import { listRecentForActor } from "../services/state/runs.ts";
 import { VIEW_AS_HEADER, canReadRuns } from "@appstrate/core/permissions";
@@ -525,22 +529,35 @@ router.get("/context", optionalSpaceContext(), async (c) => {
     return (pkg: Parameters<typeof homeWireForCaller>[0]) =>
       homeWireForCaller(pkg, accessible).home_writable;
   };
-  const [connections, runnable, activeSkills, recentRuns] = await Promise.all([
-    mayReadIntegrations
-      ? listUsableIntegrationsForActor(scope, actor)
-      : Promise.resolve([] as Awaited<ReturnType<typeof listUsableIntegrationsForActor>>),
-    canRun
-      ? withHomeWritable().then((homeWritable) => listActiveAgentHints(scope, { homeWritable }))
-      : Promise.resolve({ agents: [], truncated: false, total: 0 }),
-    canReadSkills
-      ? withHomeWritable().then((homeWritable) => listActiveSkills(scope, { homeWritable }))
-      : Promise.resolve({ skills: [], truncated: false, total: 0 }),
-    // Actor-scoped, but still a runs read: the same permission `GET /api/runs`
-    // asks for (`runs:read` ∨ `runs:read-all`, `canReadRuns`).
-    mayReadRuns
-      ? listRecentForActor(scope, actor)
-      : Promise.resolve([] as Awaited<ReturnType<typeof listRecentForActor>>),
-  ]);
+  // What a connect flow would make usable here, beside what already is: the same
+  // `integrations:read` disclosure as `connections`, ids only.
+  const integrationsRead = mayReadIntegrations
+    ? listUsableIntegrationsForActor(scope, actor).then(async (usable) => ({
+        usable,
+        connectable: await listConnectableIntegrations(
+          scope,
+          new Set(usable.map((entry) => entry.integration_package_id)),
+        ),
+      }))
+    : Promise.resolve({
+        usable: [] as Awaited<ReturnType<typeof listUsableIntegrationsForActor>>,
+        connectable: { integrations: [] as string[], truncated: false, total: 0 },
+      });
+  const [{ usable: connections, connectable }, runnable, activeSkills, recentRuns] =
+    await Promise.all([
+      integrationsRead,
+      canRun
+        ? withHomeWritable().then((homeWritable) => listActiveAgentHints(scope, { homeWritable }))
+        : Promise.resolve({ agents: [], truncated: false, total: 0 }),
+      canReadSkills
+        ? withHomeWritable().then((homeWritable) => listActiveSkills(scope, { homeWritable }))
+        : Promise.resolve({ skills: [], truncated: false, total: 0 }),
+      // Actor-scoped, but still a runs read: the same permission `GET /api/runs`
+      // asks for (`runs:read` ∨ `runs:read-all`, `canReadRuns`).
+      mayReadRuns
+        ? listRecentForActor(scope, actor)
+        : Promise.resolve([] as Awaited<ReturnType<typeof listRecentForActor>>),
+    ]);
 
   return c.json({
     user: identity,
@@ -548,6 +565,9 @@ router.get("/context", optionalSpaceContext(), async (c) => {
     // `personal` as the spaces routes derive it (`spaceWireForCaller`).
     space: { id: space.id, name: space.name, personal: space.ownerUserId !== null },
     connections,
+    connectable_integrations: connectable.integrations,
+    connectable_integrations_truncated: connectable.truncated,
+    connectable_integrations_total: connectable.total,
     recent_runs: recentRuns,
     agents: runnable.agents,
     agents_truncated: runnable.truncated,

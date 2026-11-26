@@ -784,6 +784,81 @@ describe("Me API (/api/me)", () => {
       expect(body.org).toMatchObject({ name: ctx.org.name, slug: ctx.org.slug });
     });
 
+    it("lists the active integrations that need a connection the caller lacks, and only those", async () => {
+      const seedIntegration = async (id: string, auths: Record<string, unknown>) =>
+        seedPackage({
+          id,
+          orgId: ctx.orgId,
+          type: "integration",
+          source: "local",
+          draftManifest: {
+            name: id,
+            version: "0.1.0",
+            type: "integration",
+            description: "",
+            auths,
+          },
+        });
+      // Connected and active: usable, so `connections`, never `connectable_integrations`.
+      await seedConnectionFor({
+        orgId: ctx.orgId,
+        spaceId: ctx.defaultSpaceId,
+        integrationId: "@ctx/gmail",
+        userId: ctx.user.id,
+      });
+      await seedSpacePackage(ctx.defaultSpaceId, "@ctx/gmail");
+      // Active, declares an auth, no connection: connectable.
+      await seedIntegration("@ctx/slack", { oauth: {} });
+      await seedSpacePackage(ctx.defaultSpaceId, "@ctx/slack");
+      // Active but needs no connection.
+      await seedIntegration("@ctx/open", {});
+      await seedSpacePackage(ctx.defaultSpaceId, "@ctx/open");
+      // Declares an auth but switched off here.
+      await seedIntegration("@ctx/off", { oauth: {} });
+      await seedSpacePackage(ctx.defaultSpaceId, "@ctx/off", { enabled: false });
+      // Active in another space only.
+      const otherSpace = await seedSpace({ orgId: ctx.orgId });
+      await seedIntegration("@ctx/elsewhere", { oauth: {} });
+      await seedSpacePackage(otherSpace.id, "@ctx/elsewhere");
+
+      const read = async (headers: Record<string, string>) => {
+        const res = await app.request("/api/me/context", { headers });
+        expect(res.status).toBe(200);
+        return (await res.json()) as {
+          connectable_integrations: string[];
+          connectable_integrations_truncated: boolean;
+          connectable_integrations_total: number;
+        };
+      };
+      const expected = (body: Awaited<ReturnType<typeof read>>) => {
+        expect(body.connectable_integrations).toContain("@ctx/slack");
+        for (const id of ["@ctx/gmail", "@ctx/open", "@ctx/off", "@ctx/elsewhere"]) {
+          expect(body.connectable_integrations).not.toContain(id);
+        }
+        expect(body.connectable_integrations_truncated).toBe(false);
+        expect(body.connectable_integrations_total).toBe(body.connectable_integrations.length);
+      };
+      expected(await read(authHeaders(ctx)));
+      // A space API key reads the same, under the same `integrations:read`.
+      const key = await seedApiKey({
+        createdBy: ctx.user.id,
+        orgId: ctx.orgId,
+        spaceId: ctx.defaultSpaceId,
+        scopes: ["integrations:read"],
+      });
+      expected(await read({ Authorization: `Bearer ${key.rawKey}` }));
+      // Without `integrations:read` the list is empty, like `connections`.
+      const blind = await seedApiKey({
+        createdBy: ctx.user.id,
+        orgId: ctx.orgId,
+        spaceId: ctx.defaultSpaceId,
+        scopes: ["agents:run"],
+      });
+      const none = await read({ Authorization: `Bearer ${blind.rawKey}` });
+      expect(none.connectable_integrations).toEqual([]);
+      expect(none.connectable_integrations_total).toBe(0);
+    });
+
     it("returns 401 without authentication", async () => {
       const res = await app.request("/api/me/context");
       expect(res.status).toBe(401);

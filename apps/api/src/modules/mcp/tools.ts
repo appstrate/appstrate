@@ -156,6 +156,7 @@ import type { DispatchContext } from "./api-call-batch.ts";
 import {
   grantedIn,
   grantedSpaces,
+  mcpActsAnywhere,
   mcpSpaceActs,
   spaceIdsWhere,
   spaceArgumentRefusal,
@@ -2431,16 +2432,22 @@ export function buildFileResourceProvider(ctx: McpToolContext): AppstrateResourc
   };
 }
 
+/** The acts a `can` of `spaces` may name, as `get_me`'s description lists them. */
+function actVocabulary(spaces: readonly McpSpace[]): string {
+  const acts = mcpActsAnywhere(spaces);
+  return acts.length > 0 ? ` (${acts.map((act) => `\`${act}\``).join(", ")})` : "";
+}
+
 function buildGetMeTool(ctx: McpToolContext, surface: McpSurface): AppstrateToolDefinition {
   const descriptor: Tool = {
     name: "get_me",
     description:
       "Return the caller's working context in the space of the call: `user`, `org` (with the " +
-      "organization `role`), `space`, `connections`, `agents`, `skills` and `recent_runs`" +
+      "organization `role`), `space`, `connections`, `connectable_integrations`, `agents`, `skills` " +
+      "and `recent_runs`" +
       (ctx.orgSpaces
         ? ", and `spaces`: your role in each space you reach, which, not the organization role, " +
-          "decides each call, and `can`, the acts that role allows there (`invoke_operations`, " +
-          "`run_agents`, `inline_runs`, `call_integration_tools`, `create_packages`): an act not " +
+          `decides each call, and \`can\`, the acts that role allows there${actVocabulary(ctx.orgSpaces.reachable)}: an act not ` +
           "listed is refused in that space. With no space designated, it returns `user`, `org` " +
           "and `spaces` alone: call it first without `space_id` to see which spaces you reach"
         : "") +
@@ -2466,7 +2473,11 @@ function buildGetMeTool(ctx: McpToolContext, surface: McpSurface): AppstrateTool
           ? "You cannot call them directly here: an admin closed this space's credential proxy " +
             "outside a run. Agents you run still use them. "
           : "") +
-      "`agents` and `skills` are capped (`agents_truncated`, `skills_truncated`): `search` finds " +
+      "`connectable_integrations` names the integrations active in " +
+      "THIS space that need a connection the caller has none of: connecting one makes it usable " +
+      "here. " +
+      "`agents`, `skills` and `connectable_integrations` are capped (`agents_truncated`, " +
+      "`skills_truncated`, `connectable_integrations_truncated`): `search` finds " +
       "the rest by keyword.",
     annotations: {
       title: "Get caller context",

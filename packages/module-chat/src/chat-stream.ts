@@ -343,6 +343,7 @@ export async function handleChatStream(
       selection: { ...DEFAULT_SKILL_SELECTION, ...bodySkills },
       spaceId: created?.spaceId ?? null,
       restricted: created?.restricted ?? false,
+      touched: [],
     };
   };
   const conversation: Promise<TurnConversation> =
@@ -455,8 +456,15 @@ export async function handleChatStream(
         return fileId ? fileSpaceId(orgId, fileId, { chatSessionId, personalSpaceId }) : undefined;
       },
     };
+    // The spaces the conversation already depends on, whose details the block renders: its origin,
+    // the caller's personal space (their own data, never recorded: they cannot lose it), then the
+    // spaces it touched, each while it is a space of the turn.
+    const detailSpaces = [
+      ...new Set([conv.spaceId, personalSpaceId, ...conv.touched].filter((id) => id !== null)),
+    ].flatMap((id) => spaces.filter((space) => space.id === id));
     return {
       skills: conv.selection,
+      detailSpaces,
       // See `turnUsesDrafts`.
       skillDrafts: turnUsesDrafts(callerPermissions, body.package_authoring !== false),
       // The caller's own connection over the turn's spaces (see `callerMcpOpener`): the turn's
@@ -514,12 +522,14 @@ export async function handleChatStream(
         permissions,
         capabilities,
         spaces,
+        detailSpaces,
         originSpace,
         restricted,
         openCaller,
       }) =>
         buildCallerContextBlock(c, {
           spaces,
+          detailSpaces,
           origin: originSpace,
           restricted,
           user,
@@ -531,8 +541,8 @@ export async function handleChatStream(
           cited,
           drafts: skillDrafts,
           // Read before the turn's claim exists: over the caller's own connection, opened only
-          // when the turn lists or injects skills.
-          openSkillsClient: openCaller,
+          // when the turn has skills or space details to read.
+          openCaller,
         }).finally(() => {
           phaseBMs = Date.now() - phaseBStart;
         }),

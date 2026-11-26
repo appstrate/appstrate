@@ -17803,6 +17803,11 @@ export interface operations {
                      *           ]
                      *         }
                      *       ],
+                     *       "connectable_integrations": [
+                     *         "@appstrate/slack"
+                     *       ],
+                     *       "connectable_integrations_truncated": false,
+                     *       "connectable_integrations_total": 1,
                      *       "recent_runs": [
                      *         {
                      *           "packageId": "@appstrate/triage",
@@ -17864,6 +17869,12 @@ export interface operations {
                             /** @description Whether this space is one member's personal space (always `private`, no other members) rather than a team space. */
                             personal: boolean;
                         };
+                        /** @description Ids of the integrations active in the current space that declare an auth and for which the caller has no usable connection (capped): a connect flow is what would make them usable here. Only present when the caller holds the `integrations:read` permission; empty otherwise. */
+                        connectable_integrations?: string[];
+                        /** @description True when `connectable_integrations` was capped. */
+                        connectable_integrations_truncated?: boolean;
+                        /** @description How many connectable integrations there are before the cap. */
+                        connectable_integrations_total?: number;
                         /** @description The caller's own most recent runs (actor-scoped), newest first — lets an agent reference a recent or failed run without a discovery round-trip. */
                         recent_runs?: {
                             packageId: string;

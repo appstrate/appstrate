@@ -1094,3 +1094,39 @@ export async function updateSpacePackage(
   };
   return opts?.tx ? work(opts.tx) : db.transaction(work);
 }
+
+/** The active integrations an actor has no usable connection for, as a get_me hint. */
+interface ConnectableIntegrationsResult {
+  /** Their ids, in {@link packageListingOrder}. */
+  integrations: string[];
+  /** True when the list was capped by `limit`. */
+  truncated: boolean;
+  /** How many there are before the cap. */
+  total: number;
+}
+
+/**
+ * The integrations active in this space that declare an auth (a connection is what makes them
+ * usable) and that none of `connected` names: what a connect flow would make usable here. Ids
+ * only, capped like the other hints; a declared-auth-free integration needs no connection and is
+ * never listed. The caller gates it on `integrations:read` and passes the integrations it found
+ * a usable connection for (`listUsableIntegrationsForActor`).
+ */
+export async function listConnectableIntegrations(
+  scope: SpaceScope,
+  connected: ReadonlySet<string>,
+  opts?: { limit?: number },
+): Promise<ConnectableIntegrationsResult> {
+  const limit = opts?.limit ?? DEFAULT_PACKAGE_HINT_LIMIT;
+  const rows = await db
+    .select({ id: packages.id, draftManifest: packages.draftManifest })
+    .from(packages)
+    .leftJoin(spacePackages, placementRowJoin(packages.id, scope.spaceId))
+    .where(activePackagesFilter(scope, "integration", scope.spaceId))
+    .orderBy(...packageListingOrder());
+  const ids = rows
+    .filter((row) => Object.keys(asRecord(asRecord(row.draftManifest).auths)).length > 0)
+    .map((row) => row.id)
+    .filter((id) => !connected.has(id));
+  return { integrations: ids.slice(0, limit), truncated: ids.length > limit, total: ids.length };
+}

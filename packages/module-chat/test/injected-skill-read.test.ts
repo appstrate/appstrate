@@ -86,7 +86,7 @@ async function discoveryOffTurn(
       cited: [],
       // The caller's own permissions, no claim: what `chat-stream.ts` opens.
       drafts: true,
-      openSkillsClient: () =>
+      openCaller: () =>
         connectPlatformMcp({
           url: platformMcpUrl("http://localhost", owner.orgId),
           headers: {

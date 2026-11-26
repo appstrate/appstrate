@@ -47,6 +47,22 @@ export function mcpSpaceActs(surface: McpSurface): SpaceAct[] {
   });
 }
 
+/**
+ * The acts held in at least one of `spaces`, in the vocabulary's order: what a `can` of theirs may
+ * name. An act no space carries is never named, as a tool never declared is never described.
+ */
+export function mcpActsAnywhere(spaces: readonly { surface: McpSurface }[]): SpaceAct[] {
+  const any = (held: (surface: McpSurface) => boolean) =>
+    spaces.some((space) => held(space.surface));
+  return spaceActs({
+    invokes: any((surface) => surface.invokes),
+    runs: any((surface) => surface.runs),
+    composes: any((surface) => surface.composes),
+    callsIntegrationTools: any((surface) => surface.proxies),
+    createsPackages: any((surface) => surface.creates),
+  });
+}
+
 /** The spaces of an org-wide connection, and the one this request entered. */
 export interface OrgWideSpaces {
   reachable: readonly McpSpace[];

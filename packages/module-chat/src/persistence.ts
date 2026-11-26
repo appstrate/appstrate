@@ -183,6 +183,8 @@ export interface TurnConversation {
   selection: ChatSkillSelection;
   spaceId: string | null;
   restricted: boolean;
+  /** The spaces it touched besides its origin, by touch time (see {@link touchedSpaceIds}). */
+  touched: string[];
 }
 
 /** The origin space and limit a conversation is created with; throws the 400 for an invalid one. */
@@ -249,6 +251,10 @@ export async function ensureSession(
         pinnedSkills: chatSessions.pinnedSkills,
         spaceId: chatSessions.spaceId,
         restricted: chatSessions.restricted,
+        // Read in the same round trip: the turn renders what these spaces hold.
+        touched: sql<string[]>`ARRAY(SELECT ${chatSessionSpaces.spaceId} FROM ${chatSessionSpaces}
+          WHERE ${chatSessionSpaces.sessionId} = ${chatSessions.id}
+          ORDER BY ${chatSessionSpaces.createdAt}, ${chatSessionSpaces.spaceId})`,
         // `xmax` is 0 on a freshly inserted tuple and set on one the conflict arm rewrote.
         created: sql<boolean>`(xmax = 0)`,
       });
@@ -271,6 +277,7 @@ export async function ensureSession(
     selection: { skillDiscovery: row.skillDiscovery, pinnedSkills: row.pinnedSkills },
     spaceId: row.spaceId,
     restricted: row.restricted,
+    touched: row.touched ?? [],
   };
 }
 

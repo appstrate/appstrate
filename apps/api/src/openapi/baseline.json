@@ -18440,7 +18440,7 @@
         "operationId": "getMyContext",
         "tags": ["Profile"],
         "summary": "The caller's working context for an AI agent",
-        "description": "Returns the caller's identity, their role in the pinned org, and the integrations they could attach when building an agent in the current space (their own, or shared into it). One payload powering the MCP `get_me` tool and direct API/MCP callers — so an agent can prefer already-connected integrations and respect the caller's role (operations beyond it 403 at invoke time). The space is the one the credential (API key, token) is bound to — an `X-Space-Id` naming another is refused — else the one `X-Space-Id` names; with neither the request is a 400.",
+        "description": "Returns the caller's identity, their role in the pinned org, and the integrations they could attach when building an agent in the current space (their own, or shared into it). One payload powering the MCP `get_me` tool and direct API/MCP callers — so an agent can prefer already-connected integrations and respect the caller's role (operations beyond it 403 at invoke time). The space is the one the credential (API key, token) is bound to — an `X-Space-Id` naming another is refused — else the one `X-Space-Id` names. With neither, the answer holds `user` and `org` alone: every other field belongs to one space.",
         "parameters": [
           {
             "$ref": "#/components/parameters/XOrgId"
@@ -18464,19 +18464,22 @@
               "application/json": {
                 "schema": {
                   "type": "object",
-                  "required": [
-                    "user",
-                    "org",
-                    "space",
-                    "connections",
-                    "recent_runs",
-                    "agents",
-                    "agents_truncated",
-                    "agents_total",
-                    "skills",
-                    "skills_truncated",
-                    "skills_total"
-                  ],
+                  "required": ["user", "org"],
+                  "dependentRequired": {
+                    "space": [
+                      "connections",
+                      "connectable_integrations",
+                      "connectable_integrations_truncated",
+                      "connectable_integrations_total",
+                      "recent_runs",
+                      "agents",
+                      "agents_truncated",
+                      "agents_total",
+                      "skills",
+                      "skills_truncated",
+                      "skills_total"
+                    ]
+                  },
                   "properties": {
                     "user": {
                       "type": "object",
@@ -18495,7 +18498,7 @@
                     },
                     "org": {
                       "type": "object",
-                      "required": ["id", "role"],
+                      "required": ["id", "role", "name", "slug"],
                       "properties": {
                         "id": {
                           "type": "string"
@@ -18505,18 +18508,18 @@
                           "enum": ["owner", "admin", "member", "guest", "end_user"]
                         },
                         "name": {
-                          "type": ["string", "null"],
+                          "type": "string",
                           "description": "Human-readable organization name."
                         },
                         "slug": {
-                          "type": ["string", "null"],
+                          "type": "string",
                           "description": "Organization slug."
                         }
                       }
                     },
                     "space": {
                       "type": "object",
-                      "description": "The space this request resolved to. Every list in this payload is scoped to it. An empty list means nothing of that kind is available to this caller in this space, this is not the space you meant, or the caller's permissions do not cover that list.",
+                      "description": "The space this request resolved to, absent when it named none (as is every list). Every list in this payload is scoped to it. An empty list means nothing of that kind is available to this caller in this space, this is not the space you meant, or the caller's permissions do not cover that list.",
                       "required": ["id", "name", "personal"],
                       "properties": {
                         "id": {
@@ -18531,6 +18534,21 @@
                           "description": "Whether this space is one member's personal space (always `private`, no other members) rather than a team space."
                         }
                       }
+                    },
+                    "connectable_integrations": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      },
+                      "description": "Ids of the integrations active in the current space that declare an auth and for which the caller has no usable connection (capped): a connect flow is what would make them usable here. Only present when the caller holds the `integrations:read` permission; empty otherwise."
+                    },
+                    "connectable_integrations_truncated": {
+                      "type": "boolean",
+                      "description": "True when `connectable_integrations` was capped."
+                    },
+                    "connectable_integrations_total": {
+                      "type": "integer",
+                      "description": "How many connectable integrations there are before the cap."
                     },
                     "recent_runs": {
                       "type": "array",
@@ -18817,6 +18835,9 @@
                       ]
                     }
                   ],
+                  "connectable_integrations": ["@appstrate/slack"],
+                  "connectable_integrations_truncated": false,
+                  "connectable_integrations_total": 1,
                   "recent_runs": [
                     {
                       "packageId": "@appstrate/triage",

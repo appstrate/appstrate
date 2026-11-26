@@ -838,6 +838,9 @@ export const mePaths = {
                 dependentRequired: {
                   space: [
                     "connections",
+                    "connectable_integrations",
+                    "connectable_integrations_truncated",
+                    "connectable_integrations_total",
                     "recent_runs",
                     "agents",
                     "agents_truncated",
@@ -889,6 +892,23 @@ export const mePaths = {
                           "`private`, no other members) rather than a team space.",
                       },
                     },
+                  },
+                  connectable_integrations: {
+                    type: "array",
+                    items: { type: "string" },
+                    description:
+                      "Ids of the integrations active in the current space that declare an auth and " +
+                      "for which the caller has no usable connection (capped): a connect flow is " +
+                      "what would make them usable here. Only present when the caller holds the " +
+                      "`integrations:read` permission; empty otherwise.",
+                  },
+                  connectable_integrations_truncated: {
+                    type: "boolean",
+                    description: "True when `connectable_integrations` was capped.",
+                  },
+                  connectable_integrations_total: {
+                    type: "integer",
+                    description: "How many connectable integrations there are before the cap.",
                   },
                   recent_runs: {
                     type: "array",
@@ -1155,6 +1175,9 @@ export const mePaths = {
                     ],
                   },
                 ],
+                connectable_integrations: ["@appstrate/slack"],
+                connectable_integrations_truncated: false,
+                connectable_integrations_total: 1,
                 recent_runs: [
                   {
                     packageId: "@appstrate/triage",

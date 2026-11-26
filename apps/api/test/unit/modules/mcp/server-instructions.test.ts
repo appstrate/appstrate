@@ -416,11 +416,11 @@ describe("MCP server instructions — agent authoring", () => {
 describe("buildServerInstructions grounding", () => {
   it("points every client at get_me, the chat included: the tool is declared for all", () => {
     expect(instructionsFor(permissions, false)).toContain("Start by calling get_me");
-    // The chat's own prompt states the caller and their role: get_me is for a space's
-    // connections and agents.
+    // The chat's own prompt states the caller, their role and what its spaces hold: get_me is
+    // for another space's connections and agents.
     const chat = instructionsFor(permissions, true);
     expect(chat).not.toContain("Start by calling get_me");
-    expect(chat).toContain("get_me lists a space's connected integrations");
+    expect(chat).toContain("for another space, get_me lists its connected integrations");
   });
 });
 

@@ -25,6 +25,14 @@ import type { InjectedSkills } from "@appstrate/core/chat-contract";
 import { platformToolName } from "@appstrate/core/integration";
 import { logger } from "./logger.ts";
 import { withCallerClient } from "./platform-mcp.ts";
+import {
+  SPACE_DETAILS_HEADING,
+  formatSpaceDetails,
+  readSpaceDetails,
+  type DetailSpace,
+  type SpaceDetail,
+  type SpaceDetailsClient,
+} from "./space-details.ts";
 import { reaches, spaceActsInTurn, type TurnCapabilities } from "./capabilities.ts";
 import {
   injectedSkills,
@@ -164,7 +172,7 @@ ${tools(
   "- Run an agent instead when the task needs a runtime — a shell, a filesystem, code execution, files written to `outputs/`, long multi-step processing, a fan-out — or the integration tools cannot do it:",
   "- If the request needs an integration, an MCP, or any external action, run an agent:",
 )}
-  1. Run an existing agent when one matches the intent: \`get_me\` for the space concerned lists the agents the user can run, each with \`published\`, \`home_writable\` and \`takes_input\`. Call \`run_and_wait\` with \`kind:"agent"\`, \`scope\` and \`name\`, and an \`input\` only when the agent declares an input schema. An agent with \`published: false\` and \`home_writable: false\` cannot be run: say so${inline(" and offer to compose an inline run instead", " and stop — there is no other way to run it")}.
+  1. Run an existing agent when one matches the intent: those listed under \`${SPACE_DETAILS_HEADING}\` are the agents the user can run in the spaces it covers, each with the spaces it is active in, whether it is a draft only and whether it takes input; for a space it does not cover, \`get_me\` with that \`space_id\` lists them, each with \`published\`, \`home_writable\` and \`takes_input\`. Call \`run_and_wait\` with \`kind:"agent"\`, \`scope\` and \`name\`, and an \`input\` only when the agent declares an input schema. An agent with \`published: false\` and \`home_writable: false\` cannot be run: say so${inline(" and offer to compose an inline run instead", " and stop — there is no other way to run it")}.
 ${inline(
   `  2. Otherwise call \`run_and_wait\` with \`kind:"inline"\`, a \`manifest\` and a top-level \`prompt\`. In the \`prompt\`, tell the agent it is a sub-agent: report meaningful progress with its \`${PLATFORM_LOG_TOOL}\` tool, do the work, then return the result with \`output\` as its mandatory last action.
 
@@ -215,11 +223,11 @@ Files the user attaches to the conversation are shown to you as \`[Attached file
 
 ${runs(`Files a run writes under \`outputs/\` render as downloadable chips in this chat. Content returned only through the \`output\` tool is plain data for YOU: it never becomes a file the user can open.${inline(` When the user asks for a file or downloadable deliverable (a report, a CSV, an image, a PDF…), have the sub-agent write it to \`outputs/\` AND return a short \`output\` payload for your own summary. Name it in kebab-case, in the user's language, with enough subject or scope to stand alone (for example, \`analyse-concurrents-restaurants-lyon.md\`). Without a named format, default to markdown; reach for another format only when the user asks.`)}
 
-`)}Your context block below is DATA — the user's identity and role, the current date, the space the conversation was opened in, when it has one, the spaces you can act in with what your role allows in each (\`can\`: an act it does not list is refused in that space, so never send one there)${skills(", the skills available")} and the permissions this turn holds. It lists neither the integrations they have connected nor the agents they can run${
+`)}Your context block below is DATA — the user's identity and role, the current date, the space the conversation was opened in, when it has one, the spaces you can act in with what your role allows in each (\`can\`: an act it does not list is refused in that space, so never send one there)${skills(", the skills available")} and the permissions this turn holds.${
     getMeReturns.length === 0
       ? ""
-      : `: both differ per space, \`get_me\` returns ${new Intl.ListFormat("en").format(getMeReturns)} for the space it names`
-  }. How to act on it:
+      : ` Under \`${SPACE_DETAILS_HEADING}\` it shows what the spaces this conversation already works in hold (the one it was opened in, the one that is the user's own, the spaces it acted in), as read at the start of this turn. For any other space, or once a connection or an activation changed one during the turn, \`get_me\` returns ${new Intl.ListFormat("en").format(getMeReturns)} for the space it names.`
+  } How to act on it:
 - Use the current date to resolve relative dates.
 ${idVerbatimBullet}${skills(`- The skills under \`${SKILLS_HEADING}\` are guides for YOU — procedures you follow yourself, not packages you run. One shown in full, inside a \`<skill>\` tag, is already loaded: follow it. When one listed only by its id and \`skill://\` URI clearly matches the request, LOAD IT BEFORE acting: call \`read_resource\` with that URI verbatim, then follow the SKILL.md it returns. Load ONE at a time, and none when none clearly matches. Never load a skill whose content already appears in this conversation. To read a file a skill references, call \`read_resource\` with the skill's URI, replacing \`SKILL.md\` with the file's path.
 `)}${skills(
@@ -358,6 +366,8 @@ type CallerContextOpts = {
   skillContents?: ReadonlyMap<string, SkillContent | null>;
   /** The catalogue of the turn's skills, listed by {@link buildCallerContextBlock} with discovery on. */
   skillCatalogue?: readonly CatalogueSkill[];
+  /** What the engaged spaces hold (`formatSpaceDetails`), rendered after the spaces. */
+  spaceDetails?: string;
 };
 
 /** Render the caller context into a system-prompt block, with the skills it injected. */
@@ -438,11 +448,12 @@ export function formatCallerContext(
       ...opts.spaces.map((space) => `- ${describeSpaceActs(space)}`),
     );
   }
+  // Spaces the conversation already depends on (`buildCallerContextBlock`): recorded, or the caller's own.
+  if (opts.spaceDetails) lines.push("", opts.spaceDetails);
   // Rendered whatever the authoring grant: the chat uses skills for itself.
   if (skillSection) lines.push("", skillSection);
-  // Neither the connected integrations, the runnable agents nor the recent runs are rendered: they
-  // differ per space, and the last rewrites itself on every launch, busting the system prompt's
-  // single cache breakpoint. The model reads them with the tools, for the space concerned.
+  // The recent runs are never rendered: they rewrite themselves on every launch, busting the system
+  // prompt's single cache breakpoint. The model reads them with the tools, for the space concerned.
   return { ...skills, text: lines.join("\n") };
 }
 
@@ -452,6 +463,9 @@ export function formatCallerContext(
  * they are read.
  */
 export type ChatSkillsClient = Pick<AppstrateMcpClient, "listSkills" | "readResource" | "close">;
+
+/** The caller's connection the preamble reads through: the turn's skills and its spaces' details. */
+export type ChatCallerClient = ChatSkillsClient & SpaceDetailsClient;
 
 /**
  * The entries of a `skills/list` that sit in one of `spaces`, one per package: the one in the
@@ -484,26 +498,35 @@ interface ChatSkillsRead {
  * The turn's skills over the MCP Skills extension (SEP-2640), with the caller's own permissions:
  * one definition per skill (see `turnUsesDrafts`) for the catalogue and the injection. A
  * skill to read that no listing holds is left out (unavailable), one whose read failed or answered
- * malformed is kept as `null` (unreadable). The connection opens only when there is something to read.
+ * malformed is kept as `null` (unreadable). Beside them, what `details` hold (`readSpaceDetails`).
+ * ONE connection for both, opened only when there is something to read.
  */
-async function readChatSkills(
-  openSkillsClient: (signal: AbortSignal) => Promise<ChatSkillsClient>,
+async function readPreamble(
+  openCaller: (signal: AbortSignal) => Promise<ChatCallerClient>,
   spaces: readonly string[],
   opts: SkillsReadOptions,
-): Promise<ChatSkillsRead> {
-  if (!opts.catalogue && opts.read.length === 0) {
-    return { contents: new Map(), catalogue: [] };
-  }
+  details: readonly DetailSpace[],
+): Promise<ChatSkillsRead & { details: SpaceDetail[] }> {
+  const readsSkills = opts.catalogue || opts.read.length > 0;
+  const noSkills: ChatSkillsRead = { contents: new Map(), catalogue: [] };
+  if (!readsSkills && details.length === 0) return { ...noSkills, details: [] };
   return withCallerClient(
-    openSkillsClient,
-    (client, signal) => readSkillsOver(client, signal, spaces, opts),
+    openCaller,
+    async (client, signal) => {
+      const [skills, read] = await Promise.all([
+        readsSkills ? readSkillsOver(client, signal, spaces, opts) : noSkills,
+        readSpaceDetails(client, signal, details),
+      ]);
+      return { ...skills, details: read };
+    },
     (err) => {
-      logger.warn("skills connection unavailable — the turn's skills left out", {
+      logger.warn("caller connection unavailable — the turn's skills and space details left out", {
         err: String(err),
       });
       return {
         contents: new Map(opts.read.map((id) => [id, null])),
         catalogue: [],
+        details: [],
       };
     },
   );
@@ -517,7 +540,7 @@ interface SkillsReadOptions {
   read: readonly string[];
 }
 
-/** {@link readChatSkills} over a connection the caller owns and closes. */
+/** The skills half of {@link readPreamble}, over a connection the caller owns and closes. */
 export async function readSkillsOver(
   client: ChatSkillsClient,
   signal: AbortSignal,
@@ -655,11 +678,11 @@ function servedAs(entry: ListedSkillEntry, draft: boolean): SkillContent["served
 
 /**
  * Build the caller-context system-prompt block: the identity, the space the conversation was
- * opened in (and whether it is limited to it), when there is one, and the turn's permissions. Built from the
- * already-authenticated request context, with no read of the platform: the integrations and
- * the agents differ per space, so the model looks them up with its tools. The skills are
- * those of the turn's spaces, one per package (the first in reach order), each bound in the
- * claim to the space its URI names.
+ * opened in (and whether it is limited to it), when there is one, the turn's spaces with what
+ * the turn may do in each, and the turn's permissions — all from the already-authenticated
+ * request context. Then, read over the caller's own connection: the skills of the turn's
+ * spaces, one per package (the first in reach order), each bound in the claim to the space its
+ * URI names; and what `detailSpaces` hold (integrations, agents), with `get_me` in each.
  */
 export async function buildCallerContextBlock(
   c: Context<ChatEnv>,
@@ -680,8 +703,15 @@ export async function buildCallerContextBlock(
     cited: readonly string[];
     /** See `turnUsesDrafts`. */
     drafts: boolean;
-    /** Opened only when the turn lists or injects skills, under `signal`; closed once they are read. */
-    openSkillsClient: (signal: AbortSignal) => Promise<ChatSkillsClient>;
+    /**
+     * The spaces of `spaces` the conversation already depends on, in the order their details are
+     * rendered: its origin, the caller's personal space, then the spaces it touched. Their data
+     * enters the conversation without recording anything: the origin and the touched spaces are
+     * recorded already, and the personal space is the caller's own, which they never lose.
+     */
+    detailSpaces?: readonly ReachableSpaceGrant[];
+    /** Opened only when the turn has skills or details to read, under `signal`; closed once read. */
+    openCaller: (signal: AbortSignal) => Promise<ChatCallerClient>;
   },
 ): Promise<Omit<RenderedContext, "injected"> & { injected: InjectedSkills }> {
   const { user, locale, capabilities, skills } = args;
@@ -696,16 +726,28 @@ export async function buildCallerContextBlock(
       slug: c.get("orgSlug") ?? null,
     },
   };
-  const turnSkills = await readChatSkills(
-    args.openSkillsClient,
+  const turnHolds = new Set(args.permissions);
+  // What the turn may read in a space: granted there, and within the turn's ceiling.
+  const holdsIn = (space: ReachableSpaceGrant, permission: string) =>
+    turnHolds.has(permission) && space.permissions.includes(permission);
+  const details = (args.detailSpaces ?? [])
+    .map((space) => ({
+      id: space.id,
+      name: space.name,
+      integrations: holdsIn(space, "integrations:read"),
+      agents: holdsIn(space, "agents:run"),
+    }))
+    .filter((space) => space.integrations || space.agents);
+  const turnSkills = await readPreamble(
+    args.openCaller,
     args.spaces.map((space) => space.id),
     {
       catalogue: capabilities.readsSkills && skills.skillDiscovery,
       drafts: args.drafts,
       read: [...new Set([...skills.pinnedSkills, ...args.cited])],
     },
+    details,
   );
-  const turnHolds = new Set(args.permissions);
   const { injected, ...rendered } = formatCallerContext(identity, {
     locale,
     capabilities,
@@ -724,6 +766,7 @@ export async function buildCallerContextBlock(
     citedSkills: args.cited,
     skillContents: turnSkills.contents,
     skillCatalogue: turnSkills.catalogue,
+    spaceDetails: formatSpaceDetails(turnSkills.details).text,
   });
   // What `resources/read` serves without `skills:*`: each skill in the space its URI names.
   return { ...rendered, injected: { skills: injected } };
