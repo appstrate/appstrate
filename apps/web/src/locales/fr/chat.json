@@ -199,7 +199,7 @@
   "composer.inlineRunModelChip.undo": "Revenir au modèle par défaut pour les runs",
   "composer.contextAllSpaces": "Contexte de tous les espaces",
   "composer.contextAllSpaces.hint": "L’assistant connaît d’emblée les intégrations et les agents de chaque espace. La conversation dépend alors de chaque espace qui en montre.",
-  "composer.contextAllSpacesChip": "Tous les espaces en contexte",
+  "composer.contextAllSpacesChip": "Contexte élargi",
   "composer.contextAllSpacesChip.undo": "Ne plus détailler tous les espaces",
   "composer.limit": "Limiter à {{name}}",
   "composer.limit.generic": "Limiter à un espace",
