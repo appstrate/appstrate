@@ -6,9 +6,11 @@
 import {
   agentCapabilities,
   PACKAGE_WRITE_PERMISSIONS,
+  reaches,
   type RunLevel,
 } from "@appstrate/core/permissions";
 import type { ReachableSpaceGrant } from "@appstrate/core/module";
+import { spaceActs, type SpaceAct } from "@appstrate/core/mcp-spaces";
 
 export { limitedConversationPermissions } from "./turn-permissions.ts";
 export { reaches, type RunLevel } from "@appstrate/core/permissions";
@@ -68,6 +70,26 @@ export function turnCapabilities(
         return space.credentialProxyOpen && holds("mcp:invoke") && PROXY_PERMISSIONS.some(holds);
       }),
   };
+}
+
+/**
+ * What the turn may do in one of its spaces: {@link turnCapabilities} over the permissions held
+ * both by the turn (`has`) and in that space, in the vocabulary `get_me` names them with (its
+ * `spaces[].can`, which apps/api `catalog-requirements.test.ts` pins to this).
+ */
+export function spaceActsInTurn(
+  has: (permission: string) => boolean,
+  space: Pick<ReachableSpaceGrant, "permissions" | "credentialProxyOpen">,
+): SpaceAct[] {
+  const holds = (permission: string) => has(permission) && space.permissions.includes(permission);
+  const capabilities = turnCapabilities(holds, [space]);
+  return spaceActs({
+    invoke_operations: capabilities.invokes,
+    run_agents: reaches(capabilities.runLevel, "run"),
+    inline_runs: reaches(capabilities.runLevel, "compose"),
+    call_integration_tools: capabilities.callsIntegrationTools,
+    create_packages: capabilities.authorsPackages,
+  });
 }
 
 /** Creating packages from the chat: the composer's authoring switch and the shell's access row. */

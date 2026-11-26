@@ -111,6 +111,8 @@ import {
   setSelectedModel,
 } from "./model-store.ts";
 import { getPackageAuthoringEnabled } from "./package-authoring-store.ts";
+import { getContextAllSpacesEnabled } from "./context-all-spaces-store.ts";
+import { useOffersContextAllSpaces } from "./composer-panel.ts";
 import { getInlineRunModelEnabled } from "./inline-run-model-store.ts";
 import { latestTurnModelId } from "./turn-model.ts";
 import { ComposerTools } from "./composer-tools.tsx";
@@ -643,6 +645,8 @@ function ConversationInner({
   const filterSpaceId = transport?.spaceId ?? null;
   // Read when the turn starts (the row it creates), not a reason to re-run the effect below.
   const getScope = useLatest(scope);
+  // Sent only while the switch is offered: a hidden switch left on must not widen the turn.
+  const getOffersContextAllSpaces = useLatest(useOffersContextAllSpaces());
   // The transport read at request time for the same reason: `useChat` keeps the first one it saw.
   const getTransport = useLatest(transport);
   // The seed, frozen: `useChat` reads it once.
@@ -685,12 +689,13 @@ function ConversationInner({
             generation: getCompatibleGenerationSettings(),
             packageAuthoring: getPackageAuthoringEnabled(),
             inlineRunsUseChatModel: getInlineRunModelEnabled(),
+            contextAllSpaces: getOffersContextAllSpaces() && getContextAllSpacesEnabled(),
             skills: takeForTurn(),
             creation: getCreation(),
           });
         },
       }),
-    [buildHeaders, takeForTurn, getCreation, getTransport],
+    [buildHeaders, takeForTurn, getCreation, getTransport, getOffersContextAllSpaces],
   );
 
   const chat = useChat({

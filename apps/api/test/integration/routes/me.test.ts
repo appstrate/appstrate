@@ -49,10 +49,12 @@ import {
   auditEvents,
   integrationConnectionShares,
   integrationConnections,
+  integrationOauthClients,
   integrationPins,
   organizations,
 } from "@appstrate/db/schema";
 import { eq } from "drizzle-orm";
+import { encryptCredentials } from "@appstrate/connect";
 
 import { ensurePersonalSpaceFor } from "../../../src/services/spaces.ts";
 
@@ -815,6 +817,215 @@ describe("Me API (/api/me)", () => {
       expect(res.status).toBe(200);
       const body = (await res.json()) as { org: { name: string; slug: string } };
       expect(body.org).toMatchObject({ name: ctx.org.name, slug: ctx.org.slug });
+    });
+
+    it("lists the active integrations that need a connection the caller lacks, and only those", async () => {
+      const seedIntegration = async (id: string, auths: Record<string, unknown>) =>
+        seedPackage({
+          id,
+          orgId: ctx.orgId,
+          type: "integration",
+          source: "local",
+          draftManifest: {
+            name: id,
+            version: "0.1.0",
+            type: "integration",
+            description: "",
+            auths,
+          },
+        });
+      // Connected and active: usable, so `connections`, never `connectable_integrations`.
+      await seedConnectionFor({
+        orgId: ctx.orgId,
+        spaceId: ctx.defaultSpaceId,
+        integrationId: "@ctx/gmail",
+        userId: ctx.user.id,
+      });
+      await seedSpacePackage(ctx.defaultSpaceId, "@ctx/gmail");
+      // Active, declares an auth, no connection: connectable.
+      await seedIntegration("@ctx/slack", { oauth: {} });
+      await seedSpacePackage(ctx.defaultSpaceId, "@ctx/slack");
+      // Active but needs no connection.
+      await seedIntegration("@ctx/open", {});
+      await seedSpacePackage(ctx.defaultSpaceId, "@ctx/open");
+      // Declares an auth but switched off here.
+      await seedIntegration("@ctx/off", { oauth: {} });
+      await seedSpacePackage(ctx.defaultSpaceId, "@ctx/off", { enabled: false });
+      // Active in another space only.
+      const otherSpace = await seedSpace({ orgId: ctx.orgId });
+      await seedIntegration("@ctx/elsewhere", { oauth: {} });
+      await seedSpacePackage(otherSpace.id, "@ctx/elsewhere");
+
+      const read = async (headers: Record<string, string>) => {
+        const res = await app.request("/api/me/context", { headers });
+        expect(res.status).toBe(200);
+        return (await res.json()) as {
+          connectable_integrations: string[];
+          connectable_integrations_truncated: boolean;
+          connectable_integrations_total: number;
+        };
+      };
+      const expected = (body: Awaited<ReturnType<typeof read>>) => {
+        expect(body.connectable_integrations).toContain("@ctx/slack");
+        for (const id of ["@ctx/gmail", "@ctx/open", "@ctx/off", "@ctx/elsewhere"]) {
+          expect(body.connectable_integrations).not.toContain(id);
+        }
+        expect(body.connectable_integrations_truncated).toBe(false);
+        expect(body.connectable_integrations_total).toBe(body.connectable_integrations.length);
+      };
+      expected(await read(authHeaders(ctx)));
+      // A space API key reads the same, under the same pair of grants.
+      const key = await seedApiKey({
+        createdBy: ctx.user.id,
+        orgId: ctx.orgId,
+        spaceId: ctx.defaultSpaceId,
+        scopes: ["integrations:read", "integrations:connect"],
+      });
+      expected(await read({ Authorization: `Bearer ${key.rawKey}` }));
+      // Without `integrations:read` (nothing disclosed) or `integrations:connect` (no connect
+      // flow to offer) the list is empty.
+      for (const scopes of [["agents:run"], ["integrations:read"]]) {
+        const blind = await seedApiKey({
+          createdBy: ctx.user.id,
+          orgId: ctx.orgId,
+          spaceId: ctx.defaultSpaceId,
+          scopes,
+        });
+        const none = await read({ Authorization: `Bearer ${blind.rawKey}` });
+        expect(none.connectable_integrations).toEqual([]);
+        expect(none.connectable_integrations_total).toBe(0);
+      }
+    });
+
+    it("judges connectable integrations on the published manifest and the space's lock", async () => {
+      const auths = {
+        api: {
+          type: "api_key" as const,
+          authorizedUris: ["https://api.example.com/**"],
+          delivery: httpHeaderDelivery({ name: "X-Api-Key", field: "api_key" }),
+        },
+      };
+      const seedIntegration = async (id: string, draftAuths: Record<string, unknown>) => {
+        await seedPackage({
+          id,
+          orgId: ctx.orgId,
+          type: "integration",
+          source: "local",
+          draftManifest: { name: id, version: "0.1.0", type: "integration", auths: draftAuths },
+        });
+        await seedSpacePackage(ctx.defaultSpaceId, id);
+      };
+      // The published version declares the auth its draft dropped: what runs here needs one.
+      await seedIntegration("@ctx/pub-auth", {});
+      await seedPublishedVersion("@ctx/pub-auth", "1.0.0", {
+        manifest: localIntegrationManifest({ name: "@ctx/pub-auth", auths }) as never,
+      });
+      // The draft adds an auth the published version lacks: nothing would bind it here.
+      await seedIntegration("@ctx/draft-auth", { oauth: {} });
+      await seedPublishedVersion("@ctx/draft-auth", "1.0.0", {
+        manifest: localIntegrationManifest({ name: "@ctx/draft-auth", auths: {} }) as never,
+      });
+      // The space locks members' own connections to it.
+      await seedIntegration("@ctx/locked", { oauth: {} });
+      await seedSpacePackage(ctx.defaultSpaceId, "@ctx/locked", { blockUserConnections: true });
+
+      const read = async (headers: Record<string, string>) => {
+        const res = await app.request("/api/me/context", { headers });
+        expect(res.status).toBe(200);
+        return ((await res.json()) as { connectable_integrations: string[] })
+          .connectable_integrations;
+      };
+      // The owner governs the space's integrations: the lock does not stop them connecting.
+      expect(await read(authHeaders(ctx))).toEqual(
+        expect.arrayContaining(["@ctx/pub-auth", "@ctx/locked"]),
+      );
+      expect(await read(authHeaders(ctx))).not.toContain("@ctx/draft-auth");
+      const member = await memberContext(ctx, "member", "operator");
+      const memberList = await read(authHeaders(member));
+      expect(memberList).toContain("@ctx/pub-auth");
+      expect(memberList).not.toContain("@ctx/locked");
+    });
+
+    describe("connectable_integrations", () => {
+      const seedActive = async (id: string, draftManifest: Record<string, unknown>) => {
+        await seedPackage({
+          id,
+          orgId: ctx.orgId,
+          type: "integration",
+          source: "local",
+          draftManifest: { name: id, version: "0.1.0", type: "integration", ...draftManifest },
+        });
+        await seedSpacePackage(ctx.defaultSpaceId, id);
+      };
+      const read = async () => {
+        const res = await app.request("/api/me/context", { headers: authHeaders(ctx) });
+        expect(res.status).toBe(200);
+        return (await res.json()) as {
+          connectable_integrations: string[];
+          connectable_integrations_truncated: boolean;
+          connectable_integrations_total: number;
+        };
+      };
+
+      it("keeps only integrations a connect flow can start for", async () => {
+        // Runtime-bound: the platform wires it, nobody connects it.
+        await seedActive("@ctx/bound", {
+          auths: { key: { type: "api_key" } },
+          _meta: { "dev.appstrate/platform": {} },
+        });
+        // oauth2 with no client of any kind: the connect would be refused.
+        await seedActive("@ctx/no-client", { auths: { o: { type: "oauth2" } } });
+        // oauth2 with a client registered for the org: connectable.
+        await seedActive("@ctx/registered", { auths: { o: { type: "oauth2" } } });
+        await db.insert(integrationOauthClients).values({
+          orgId: ctx.orgId,
+          spaceId: null,
+          integrationId: "@ctx/registered",
+          authKey: "o",
+          clientId: "client",
+          clientSecretEncrypted: encryptCredentials({ client_secret: "s" }),
+          isDefault: true,
+        });
+        // A non-oauth2 auth needs no client.
+        await seedActive("@ctx/api-key", { auths: { k: { type: "api_key" } } });
+        // Its only connection needs reconnection: listed under `connections`, not here.
+        const broken = await seedConnectionFor({
+          orgId: ctx.orgId,
+          spaceId: ctx.defaultSpaceId,
+          integrationId: "@ctx/broken",
+          userId: ctx.user.id,
+        });
+        await seedSpacePackage(ctx.defaultSpaceId, "@ctx/broken");
+        await db
+          .update(integrationConnections)
+          .set({ needsReconnection: true })
+          .where(eq(integrationConnections.id, broken));
+
+        const body = await read();
+        expect(body.connectable_integrations).toEqual(["@ctx/api-key", "@ctx/registered"]);
+        expect(body.connectable_integrations_total).toBe(2);
+        expect(body.connectable_integrations_truncated).toBe(false);
+      });
+
+      it("lists in id order, whatever the seeding order", async () => {
+        for (const id of ["@ctx/c", "@ctx/a", "@ctx/b"]) {
+          await seedActive(id, { auths: { k: { type: "api_key" } } });
+        }
+        expect((await read()).connectable_integrations).toEqual(["@ctx/a", "@ctx/b", "@ctx/c"]);
+      });
+
+      it("withholds the whole list past the cap, never a prefix", async () => {
+        for (let i = 0; i < 16; i++) {
+          await seedActive(`@ctx/n${String(i).padStart(2, "0")}`, {
+            auths: { k: { type: "api_key" } },
+          });
+        }
+        expect(await read()).toMatchObject({
+          connectable_integrations: [],
+          connectable_integrations_truncated: true,
+          connectable_integrations_total: 16,
+        });
+      });
     });
 
     it("returns 401 without authentication", async () => {

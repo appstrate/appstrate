@@ -838,6 +838,9 @@ export const mePaths = {
                 dependentRequired: {
                   space: [
                     "connections",
+                    "connectable_integrations",
+                    "connectable_integrations_truncated",
+                    "connectable_integrations_total",
                     "recent_runs",
                     "agents",
                     "agents_truncated",
@@ -889,6 +892,29 @@ export const mePaths = {
                           "`private`, no other members) rather than a team space.",
                       },
                     },
+                  },
+                  connectable_integrations: {
+                    type: "array",
+                    items: { type: "string" },
+                    description:
+                      "Ids of the integrations active in the current space that the caller has not " +
+                      "connected and for which a connect flow can start (an `oauth2` auth needs a " +
+                      "usable client), sorted by id. One whose only connection needs " +
+                      "reconnection is not listed: it stays in `connections`, flagged " +
+                      "`needs_reconnection`. Whole or withheld: more than 15 and the list is " +
+                      "empty (`connectable_integrations_truncated` true), never a prefix. Empty " +
+                      "unless the caller holds `integrations:read` and `integrations:connect`; " +
+                      "one whose member connections the space blocks is listed only under " +
+                      "`integrations:configure`.",
+                  },
+                  connectable_integrations_truncated: {
+                    type: "boolean",
+                    description:
+                      "True when `connectable_integrations` was withheld for exceeding 15.",
+                  },
+                  connectable_integrations_total: {
+                    type: "integer",
+                    description: "How many connectable integrations there are, listed or withheld.",
                   },
                   recent_runs: {
                     type: "array",
@@ -1159,6 +1185,9 @@ export const mePaths = {
                     ],
                   },
                 ],
+                connectable_integrations: ["@appstrate/slack"],
+                connectable_integrations_truncated: false,
+                connectable_integrations_total: 1,
                 recent_runs: [
                   {
                     packageId: "@appstrate/triage",
