@@ -1,44 +1,27 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * What the spaces a conversation already works in hold — the integrations the caller can use or
- * connect there and the agents active there — read with `get_me` at the start of a turn and
- * rendered into the caller-context block BY RESOURCE: one line per integration and per agent,
- * naming the spaces where it stands, so the block grows with the distinct resources, not with
- * spaces × resources.
- *
- * Only the spaces the conversation has already engaged are read (its origin, the caller's
- * personal space, the spaces it touched): describing another space would put that space's data
- * into a conversation that does not depend on it yet (`touchSessionSpace`). The read goes over the
- * caller's own connection, which carries no session and records no space.
- *
- * The block sits in the system prompt under its single cache breakpoint, so the rendering is a
- * pure function of what was read: entries sorted by id, spaces in the order they are given.
+ * What the spaces a conversation works in hold (integrations, agents), read with `get_me` at the
+ * start of a turn and rendered BY RESOURCE: one line per integration or agent naming the spaces
+ * where it stands. The rendering sits under the system prompt's single cache breakpoint, so it is a
+ * pure function of what was read: entries sorted by id, spaces in the order given.
  */
 
 import type { AppstrateMcpClient } from "@appstrate/mcp-transport";
 import { logger } from "./logger.ts";
 
-/**
- * Ceiling of the rendered details, in characters. Spaces are kept in order while the rendering
- * fits; the first that would overflow it and every later one are left to `get_me`. About 2k tokens:
- * room for two spaces each listing the 15 agents `get_me` caps its list at.
- */
+/** About 2k tokens: two spaces each listing the 15 agents `get_me` caps its list at. */
 export const CHAT_CONTEXT_DETAILS_BUDGET_CHARS = 8_000;
 
-/** The heading of the rendered details, which the persona names. */
 export const SPACE_DETAILS_HEADING = "## What these spaces hold";
 
-/** Longest agent description rendered, in characters. */
 const DESCRIPTION_MAX_CHARS = 160;
 
-/** A space to read, with what the turn may read there. */
+/** A space to read, with what the turn may read there (`integrations:read`, `agents:run`). */
 export interface DetailSpace {
   id: string;
   name: string;
-  /** `integrations:read` holds there: its connections and connectable integrations are read. */
   integrations: boolean;
-  /** `agents:run` holds there: its active agents are read. */
   agents: boolean;
 }
 
@@ -78,6 +61,7 @@ const record = (value: unknown): Record<string, unknown> =>
     : {};
 const list = (value: unknown): unknown[] => (Array.isArray(value) ? value : []);
 const text = (value: unknown): string => (typeof value === "string" ? value : "");
+const withId = <T extends { id: string }>(entries: T[]): T[] => entries.filter((entry) => entry.id);
 
 /** The `get_me` payload of one space, or `undefined` when it is not a 200 answer. */
 function parseDetail(space: DetailSpace, result: unknown): SpaceDetail | undefined {
@@ -88,35 +72,43 @@ function parseDetail(space: DetailSpace, result: unknown): SpaceDetail | undefin
   return {
     space,
     integrations: space.integrations
-      ? list(body.connections).map((item) => {
-          const entry = record(item);
-          return {
-            id: text(entry.integration_package_id),
-            name: text(entry.name),
-            active: entry.active === true,
-            needsReconnection: entry.needs_reconnection === true,
-            connections: list(entry.connections).map((connection) => {
-              const c = record(connection);
-              return { id: text(c.id), label: text(c.label), owned: c.owned_by_actor === true };
-            }),
-          };
-        })
+      ? withId(
+          list(body.connections).map((item) => {
+            const entry = record(item);
+            return {
+              id: text(entry.integration_package_id),
+              name: text(entry.name),
+              active: entry.active === true,
+              needsReconnection: entry.needs_reconnection === true,
+              connections: withId(
+                list(entry.connections).map((connection) => {
+                  const c = record(connection);
+                  return { id: text(c.id), label: text(c.label), owned: c.owned_by_actor === true };
+                }),
+              ),
+            };
+          }),
+        )
       : null,
-    connectable: space.integrations ? list(body.connectable_integrations).map(text) : [],
+    connectable: space.integrations
+      ? list(body.connectable_integrations).map(text).filter(Boolean)
+      : [],
     connectableTruncated: space.integrations && body.connectable_integrations_truncated === true,
     agents: space.agents
-      ? list(body.agents).map((item) => {
-          const entry = record(item);
-          return {
-            id: text(entry.packageId),
-            name: text(entry.display_name),
-            description: text(entry.description),
-            published: entry.published === true,
-            homeWritable: entry.home_writable === true,
-            takesInput: entry.takes_input === true,
-            inactiveRequired: list(entry.inactive_required_integrations).map(text),
-          };
-        })
+      ? withId(
+          list(body.agents).map((item) => {
+            const entry = record(item);
+            return {
+              id: text(entry.packageId),
+              name: text(entry.display_name),
+              description: text(entry.description),
+              published: entry.published === true,
+              homeWritable: entry.home_writable === true,
+              takesInput: entry.takes_input === true,
+              inactiveRequired: list(entry.inactive_required_integrations).map(text),
+            };
+          }),
+        )
       : null,
     agentsTotal: typeof body.agents_total === "number" ? body.agents_total : 0,
   };
@@ -157,13 +149,13 @@ const oneLine = (value: string, max: number): string => {
   const flat = value.replace(/\s+/g, " ").trim();
   return flat.length > max ? `${flat.slice(0, max - 1)}…` : flat;
 };
-const quoted = (value: string): string => JSON.stringify(oneLine(value, 80));
+const label = (value: string): string => oneLine(value, 80);
 const head = (id: string, name: string): string => {
-  const shown = oneLine(name, 80);
+  const shown = label(name);
   return shown && shown !== id ? `\`${id}\` (${shown})` : `\`${id}\``;
 };
 const names = (spaces: readonly DetailSpace[]): string =>
-  spaces.map((space) => oneLine(space.name, 80)).join(", ");
+  spaces.map((space) => label(space.name)).join(", ");
 
 /** The integrations the details name, one line each, sorted by id. */
 function integrationLines(details: readonly SpaceDetail[]): string[] {
@@ -189,7 +181,6 @@ function integrationLines(details: readonly SpaceDetail[]): string[] {
   };
   for (const detail of details) {
     for (const integration of detail.integrations ?? []) {
-      if (!integration.id) continue;
       const entry = at(integration.id, integration.name);
       (!integration.active
         ? entry.off
@@ -198,12 +189,10 @@ function integrationLines(details: readonly SpaceDetail[]): string[] {
           : entry.usable
       ).push(detail.space);
       for (const connection of integration.connections) {
-        if (connection.id && !entry.connections.has(connection.id)) {
-          entry.connections.set(connection.id, connection);
-        }
+        if (!entry.connections.has(connection.id)) entry.connections.set(connection.id, connection);
       }
     }
-    for (const id of detail.connectable) if (id) at(id).unconnected.push(detail.space);
+    for (const id of detail.connectable) at(id).unconnected.push(detail.space);
   }
   return [...byId.keys()].sort().map((id) => {
     const entry = byId.get(id)!;
@@ -217,7 +206,7 @@ function integrationLines(details: readonly SpaceDetail[]): string[] {
     ].filter(Boolean);
     const connections = [...entry.connections.values()].map(
       (connection) =>
-        `${quoted(connection.label)} (${connection.owned ? "yours" : "a colleague's"})`,
+        `${JSON.stringify(label(connection.label))} (${connection.owned ? "yours" : "a colleague's"})`,
     );
     return `- ${head(id, entry.name)} — ${where.join("; ")}${
       connections.length ? `. Connections: ${connections.join(", ")}` : ""
@@ -233,7 +222,6 @@ function agentLines(details: readonly SpaceDetail[]): string[] {
   >();
   for (const detail of details) {
     for (const agent of detail.agents ?? []) {
-      if (!agent.id) continue;
       const entry = byId.get(agent.id) ?? { agent, in: [] };
       entry.in.push({ space: detail.space, agent });
       byId.set(agent.id, entry);
@@ -249,10 +237,10 @@ function agentLines(details: readonly SpaceDetail[]): string[] {
             ? "draft only: launch it with version=draft"
             : "draft only: not launchable by you",
         here.inactiveRequired.length
-          ? `refused until ${here.inactiveRequired.map((integration) => `\`${integration}\``).join(", ")} is switched on`
+          ? `refused until ${here.inactiveRequired.map((integration) => `\`${integration}\``).join(", ")} ${here.inactiveRequired.length > 1 ? "are" : "is"} switched on`
           : "",
       ].filter(Boolean);
-      return `${oneLine(space.name, 80)}${notes.length ? ` (${notes.join("; ")})` : ""}`;
+      return `${label(space.name)}${notes.length ? ` (${notes.join("; ")})` : ""}`;
     });
     const description = oneLine(agent.description, DESCRIPTION_MAX_CHARS);
     return `- ${head(id, agent.name)} — in ${where.join(", ")}${agent.takesInput ? "; takes input" : ""}${
@@ -261,14 +249,16 @@ function agentLines(details: readonly SpaceDetail[]): string[] {
   });
 }
 
-/** The rendering of `details`, all of them, or `""` when there is none. */
-function renderAll(details: readonly SpaceDetail[]): string {
-  if (details.length === 0) return "";
-  const spaces = details.map((detail) => detail.space);
-  const lines = [
-    SPACE_DETAILS_HEADING,
-    `As read at the start of this turn, for ${names(spaces)}. For another space, call \`get_me\` with its \`space_id\`; after a connection or an activation during the turn, call it again.`,
-  ];
+/** The rendering of `details`, naming the `omitted` spaces left to `get_me`; `""` for neither. */
+function renderAll(details: readonly SpaceDetail[], omitted: readonly DetailSpace[]): string {
+  if (details.length === 0 && omitted.length === 0) return "";
+  const lines = [SPACE_DETAILS_HEADING];
+  if (details.length > 0) {
+    lines.push(`As read at the start of this turn, for ${names(details.map((d) => d.space))}.`);
+  }
+  if (omitted.length > 0) {
+    lines.push(`Not detailed here, for room: ${names(omitted)}; \`get_me\` with its \`space_id\`.`);
+  }
   const readsIntegrations = details.filter((detail) => detail.integrations !== null);
   if (readsIntegrations.length > 0) {
     const integrations = integrationLines(readsIntegrations);
@@ -287,7 +277,7 @@ function renderAll(details: readonly SpaceDetail[]): string {
   const readsAgents = details.filter((detail) => detail.agents !== null);
   if (readsAgents.length > 0) {
     const agents = agentLines(readsAgents);
-    lines.push("", "Agents you can run:", ...(agents.length ? agents : ["- none active"]));
+    lines.push("", "Agents:", ...(agents.length ? agents : ["- none active"]));
     const capped = readsAgents.filter(
       (detail) => detail.agentsTotal > (detail.agents?.length ?? 0),
     );
@@ -296,7 +286,7 @@ function renderAll(details: readonly SpaceDetail[]): string {
         `Only the first agents are listed for ${capped
           .map(
             (detail) =>
-              `${oneLine(detail.space.name, 80)} (${detail.agents!.length} of ${detail.agentsTotal})`,
+              `${label(detail.space.name)} (${detail.agents!.length} of ${detail.agentsTotal})`,
           )
           .join(", ")}: \`search\` finds the others.`,
       );
@@ -306,7 +296,7 @@ function renderAll(details: readonly SpaceDetail[]): string {
     (detail) => detail.integrations === null || detail.agents === null,
   );
   for (const detail of skipped) {
-    const name = oneLine(detail.space.name, 80);
+    const name = label(detail.space.name);
     lines.push(
       detail.integrations === null
         ? `Your role does not read the integrations of ${name}.`
@@ -326,23 +316,22 @@ function showsEntries(detail: SpaceDetail): boolean {
 }
 
 /**
- * The details of the first spaces of `details` whose rendering fits `budget`: the text, the spaces
- * it covers, and those of them it shows at least one entry of. `""` when none fits.
+ * The first spaces of `details` whose rendering fits `budget`, the rest named as left to `get_me`,
+ * and the spaces it shows an entry of.
  */
 export function formatSpaceDetails(
   details: readonly SpaceDetail[],
   budget = CHAT_CONTEXT_DETAILS_BUDGET_CHARS,
-): { text: string; covered: string[]; shown: string[] } {
-  for (let kept = details.length; kept > 0; kept--) {
+): { text: string; shown: string[] } {
+  for (let kept = details.length; kept >= 0; kept--) {
     const included = details.slice(0, kept);
-    const text = renderAll(included);
+    const text = renderAll(
+      included,
+      details.slice(kept).map((detail) => detail.space),
+    );
     if (text.length <= budget) {
-      return {
-        text,
-        covered: included.map((detail) => detail.space.id),
-        shown: included.filter(showsEntries).map((detail) => detail.space.id),
-      };
+      return { text, shown: included.filter(showsEntries).map((detail) => detail.space.id) };
     }
   }
-  return { text: "", covered: [], shown: [] };
+  return { text: "", shown: [] };
 }

@@ -291,6 +291,23 @@ export async function readPublishedIntegrationManifests(
   return { manifests, unpublished };
 }
 
+/**
+ * The auths `id` declares, off a {@link readPublishedIntegrationManifests} read: the published
+ * manifest's, the draft's only while no version is published, none when versions exist but none
+ * resolves (the sheet's 404).
+ */
+export function declaredAuths(
+  id: string,
+  read: Awaited<ReturnType<typeof readPublishedIntegrationManifests>>,
+  draftManifest: unknown,
+): IntegrationManifest["auths"] {
+  const published = read.manifests.get(id);
+  if (published) return published.auths;
+  return read.unpublished.has(id)
+    ? (draftManifest as IntegrationManifest | null)?.auths
+    : undefined;
+}
+
 /** Load version metadata once for all requested packages. Only selected manifests need loading. */
 async function integrationVersionCatalog(ids: string[], orgId: string, executor: DbOrTx = db) {
   const [versions, tags] = await Promise.all([

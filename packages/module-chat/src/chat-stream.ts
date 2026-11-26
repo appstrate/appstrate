@@ -156,10 +156,7 @@ export const chatStreamSchema = z
     package_authoring: z.boolean().optional(),
     /** Runs the inline runs this turn launches on its model and generation; absent = off. */
     inline_runs_use_chat_model: z.boolean().optional(),
-    /**
-     * Details every space of the turn in its context, recording each that contributes an entry;
-     * absent = off: only the spaces the conversation already depends on.
-     */
+    /** Details every space of the turn, recording each that shows an entry; absent = off. */
     context_all_spaces: z.boolean().optional(),
     /**
      * The skill settings of a conversation this turn creates (or of an ephemeral turn): ignored
@@ -461,14 +458,11 @@ export async function handleChatStream(
         return fileId ? fileSpaceId(orgId, fileId, { chatSessionId, personalSpaceId }) : undefined;
       },
     };
-    // The spaces the conversation already depends on, whose details the block renders: its origin,
-    // the caller's personal space (their own data, never recorded: they cannot lose it), then the
-    // spaces it touched, each while it is a space of the turn.
+    // Detailed without recording: origin and touched spaces are recorded already, the personal
+    // space is the caller's own (D1). With every space asked for, the others follow in reach order.
     const engaged = new Set(
       [conv.spaceId, personalSpaceId, ...conv.touched].filter((id) => id !== null),
     );
-    // With every space asked for, the others follow in reach order, each recorded once it
-    // contributes (`recordedDetails` below).
     const detailSpaces = [
       ...[...engaged].flatMap((id) => spaces.filter((space) => space.id === id)),
       ...(body.context_all_spaces === true ? spaces.filter((space) => !engaged.has(space.id)) : []),
@@ -726,20 +720,8 @@ export async function handleChatStream(
     claimTurnMs = Date.now() - claimStart;
   }
 
-  // Materialize the new turn's composer attachments into durable, session-scoped
-  // files and rewrite each `upload://` (or already-`appfile://`) file part
-  // to its stable `appfile://` URI, before the turn is persisted (persistence
-  // stores only `appfile://`) and before it reaches the engine (the model is
-  // shown the attachment as a text line, never a raw file URL). After the claim,
-  // because resolving an attachment touches its space on the conversation, which a
-  // refused turn must not widen. Only the last message can carry fresh uploads:
-  // earlier turns took their files from their stored rows (`withStoredHistoryFiles`).
-  // A file resolves in the turn's spaces; the conversation's own uploads in the caller's personal
-  // space, which a limited turn does not act in.
-  // The spaces whose entries the context block shows and the conversation did not depend on yet
-  // (the turn asked for every space): recorded after the claim, like an attachment's, so a refused
-  // turn widens nothing, and before the model reads them. A space that showed no entry disclosed
-  // nothing and stays unrecorded.
+  // The spaces the block showed an entry of beyond those engaged: recorded after the claim (a
+  // refused turn widens nothing) and before inference, like an attachment's space.
   const recordedDetails = detailedSpaceIds.filter((id) => !engaged.has(id));
   if (recordedDetails.length > 0) {
     try {
@@ -750,6 +732,17 @@ export async function handleChatStream(
       throw err;
     }
   }
+
+  // Materialize the new turn's composer attachments into durable, session-scoped
+  // files and rewrite each `upload://` (or already-`appfile://`) file part
+  // to its stable `appfile://` URI, before the turn is persisted (persistence
+  // stores only `appfile://`) and before it reaches the engine (the model is
+  // shown the attachment as a text line, never a raw file URL). After the claim,
+  // because resolving an attachment touches its space on the conversation, which a
+  // refused turn must not widen. Only the last message can carry fresh uploads:
+  // earlier turns took their files from their stored rows (`withStoredHistoryFiles`).
+  // A file resolves in the turn's spaces; the conversation's own uploads in the caller's personal
+  // space, which a limited turn does not act in.
   const attachmentSpaces = spaces.map((space) => ({
     id: space.id,
     permissions: new Set(space.permissions),

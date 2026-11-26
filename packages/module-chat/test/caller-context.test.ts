@@ -641,6 +641,7 @@ describe("buildCallerContextBlock", () => {
     buildCallerContextBlock(fakeContext(vars), {
       spaces: REACH,
       restricted: false,
+      detailSpaces: [],
       user,
       capabilities,
       permissions,
@@ -669,6 +670,7 @@ describe("buildCallerContextBlock", () => {
       await buildCallerContextBlock(fakeContext({ orgRole: "member" }), {
         spaces: [personal, viewer],
         restricted: false,
+        detailSpaces: [],
         user,
         capabilities: caps(BUILDER),
         // The turn's set bounds every space: authoring off removes package creation everywhere.

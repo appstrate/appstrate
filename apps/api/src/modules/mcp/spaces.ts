@@ -39,27 +39,11 @@ export interface McpSpace {
 /** The acts `surface` carries, in the vocabulary `get_me` and the chat's context block share. */
 export function mcpSpaceActs(surface: McpSurface): SpaceAct[] {
   return spaceActs({
-    invokes: surface.invokes,
-    runs: surface.runs,
-    composes: surface.composes,
-    callsIntegrationTools: surface.proxies,
-    createsPackages: surface.creates,
-  });
-}
-
-/**
- * The acts held in at least one of `spaces`, in the vocabulary's order: what a `can` of theirs may
- * name. An act no space carries is never named, as a tool never declared is never described.
- */
-export function mcpActsAnywhere(spaces: readonly { surface: McpSurface }[]): SpaceAct[] {
-  const any = (held: (surface: McpSurface) => boolean) =>
-    spaces.some((space) => held(space.surface));
-  return spaceActs({
-    invokes: any((surface) => surface.invokes),
-    runs: any((surface) => surface.runs),
-    composes: any((surface) => surface.composes),
-    callsIntegrationTools: any((surface) => surface.proxies),
-    createsPackages: any((surface) => surface.creates),
+    invoke_operations: surface.invokes,
+    run_agents: surface.runs,
+    inline_runs: surface.composes,
+    call_integration_tools: surface.proxies,
+    create_packages: surface.creates,
   });
 }
 

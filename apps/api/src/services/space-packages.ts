@@ -32,12 +32,14 @@ import { inputSettingsSchema } from "../lib/jsonb-schemas.ts";
 import { orgOrSystemFilter, notEphemeralFilter } from "../lib/package-helpers.ts";
 import type { DbOrTx, Tx } from "../lib/db-helpers.ts";
 import { asRecord } from "@appstrate/core/safe-json";
+import { isRuntimeBoundIntegration } from "@appstrate/core/integration";
 import type { PackageType } from "@appstrate/core/validation";
 import type { ResolvedRunConfig } from "@appstrate/shared-types";
 import type { OrgScope, SpaceScope } from "../lib/scope.ts";
 import { assertSpaceInScope, spaceListingOrder } from "./spaces.ts";
 import { listOrgOffers, placementReadFilter, placementRowJoin } from "./package-placement.ts";
 import { getLatestVersionId } from "./package-versions.ts";
+import { declaredAuths, readPublishedIntegrationManifests } from "./integration-service.ts";
 import {
   inactiveDeclaredIntegrations,
   inactiveRequiredIntegrationIds,
@@ -1095,38 +1097,47 @@ export async function updateSpacePackage(
   return opts?.tx ? work(opts.tx) : db.transaction(work);
 }
 
-/** The active integrations an actor has no usable connection for, as a get_me hint. */
-interface ConnectableIntegrationsResult {
-  /** Their ids, in {@link packageListingOrder}. */
-  integrations: string[];
-  /** True when the list was capped by `limit`. */
-  truncated: boolean;
-  /** How many there are before the cap. */
-  total: number;
-}
-
 /**
- * The integrations active in this space that declare an auth (a connection is what makes them
- * usable) and that none of `connected` names: what a connect flow would make usable here. Ids
- * only, capped like the other hints; a declared-auth-free integration needs no connection and is
- * never listed. The caller gates it on `integrations:read` and passes the integrations it found
- * a usable connection for (`listUsableIntegrationsForActor`).
+ * The integrations active here, outside the runtime-bound ones, that declare an auth
+ * ({@link declaredAuths}) and that `connected` does not name: what a connect flow would make
+ * usable. One whose members' connections the space blocks is left out unless the caller
+ * `canConfigure`, as connection creation refuses it. Capped like the other hints.
  */
 export async function listConnectableIntegrations(
   scope: SpaceScope,
   connected: ReadonlySet<string>,
-  opts?: { limit?: number },
-): Promise<ConnectableIntegrationsResult> {
-  const limit = opts?.limit ?? DEFAULT_PACKAGE_HINT_LIMIT;
-  const rows = await db
-    .select({ id: packages.id, draftManifest: packages.draftManifest })
-    .from(packages)
-    .leftJoin(spacePackages, placementRowJoin(packages.id, scope.spaceId))
-    .where(activePackagesFilter(scope, "integration", scope.spaceId))
-    .orderBy(...packageListingOrder());
-  const ids = rows
-    .filter((row) => Object.keys(asRecord(asRecord(row.draftManifest).auths)).length > 0)
-    .map((row) => row.id)
-    .filter((id) => !connected.has(id));
+  opts: { canConfigure: boolean; limit?: number },
+): Promise<{ integrations: string[]; truncated: boolean; total: number }> {
+  const limit = opts.limit ?? DEFAULT_PACKAGE_HINT_LIMIT;
+  const [active, blocked] = await Promise.all([
+    listActivePackages(scope.orgId, [scope.spaceId], "integration"),
+    opts.canConfigure
+      ? []
+      : db
+          .select({ id: spacePackages.packageId })
+          .from(spacePackages)
+          .where(
+            and(
+              eq(spacePackages.spaceId, scope.spaceId),
+              eq(spacePackages.blockUserConnections, true),
+            ),
+          ),
+  ]);
+  const blockedIds = new Set(blocked.map((row) => row.id));
+  const candidates = active.filter(
+    (row) =>
+      !connected.has(row.id) &&
+      !blockedIds.has(row.id) &&
+      !isRuntimeBoundIntegration(row.draftManifest),
+  );
+  const published = await readPublishedIntegrationManifests(
+    candidates.map((row) => row.id),
+    scope.orgId,
+  );
+  const ids = candidates
+    .filter(
+      (row) => Object.keys(declaredAuths(row.id, published, row.draftManifest) ?? {}).length > 0,
+    )
+    .map((row) => row.id);
   return { integrations: ids.slice(0, limit), truncated: ids.length > limit, total: ids.length };
 }

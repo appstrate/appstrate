@@ -84,11 +84,11 @@ export function spaceActsInTurn(
   const holds = (permission: string) => has(permission) && space.permissions.includes(permission);
   const capabilities = turnCapabilities(holds, [space]);
   return spaceActs({
-    invokes: capabilities.invokes,
-    runs: reaches(capabilities.runLevel, "run"),
-    composes: reaches(capabilities.runLevel, "compose"),
-    callsIntegrationTools: capabilities.callsIntegrationTools,
-    createsPackages: capabilities.authorsPackages,
+    invoke_operations: capabilities.invokes,
+    run_agents: reaches(capabilities.runLevel, "run"),
+    inline_runs: reaches(capabilities.runLevel, "compose"),
+    call_integration_tools: capabilities.callsIntegrationTools,
+    create_packages: capabilities.authorsPackages,
   });
 }
 

@@ -183,7 +183,7 @@ export interface TurnConversation {
   selection: ChatSkillSelection;
   spaceId: string | null;
   restricted: boolean;
-  /** The spaces it touched besides its origin, by touch time (see {@link touchedSpaceIds}). */
+  /** Its touched set: origin first, then by touch time (see {@link touchedSpaceIds}). */
   touched: string[];
 }
 
@@ -252,9 +252,8 @@ export async function ensureSession(
         spaceId: chatSessions.spaceId,
         restricted: chatSessions.restricted,
         // Read in the same round trip: the turn renders what these spaces hold.
-        touched: sql<string[]>`ARRAY(SELECT ${chatSessionSpaces.spaceId} FROM ${chatSessionSpaces}
-          WHERE ${chatSessionSpaces.sessionId} = ${chatSessions.id}
-          ORDER BY ${chatSessionSpaces.createdAt}, ${chatSessionSpaces.spaceId})`,
+        touched: sql<string[]>`ARRAY(SELECT touched.space_id FROM ${touchedSpaces} AS touched
+          ORDER BY touched.touched_at, touched.space_id)`,
         // `xmax` is 0 on a freshly inserted tuple and set on one the conflict arm rewrote.
         created: sql<boolean>`(xmax = 0)`,
       });
@@ -277,7 +276,7 @@ export async function ensureSession(
     selection: { skillDiscovery: row.skillDiscovery, pinnedSkills: row.pinnedSkills },
     spaceId: row.spaceId,
     restricted: row.restricted,
-    touched: row.touched ?? [],
+    touched: row.touched,
   };
 }
 

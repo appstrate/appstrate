@@ -71,6 +71,7 @@ async function discoveryOffTurn(
     { get: (key: string) => ({ orgRole })[key as "orgRole"] } as never,
     {
       restricted: false,
+      detailSpaces: [],
       spaces: [
         reachableSpace({
           id: owner.defaultSpaceId,

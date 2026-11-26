@@ -198,7 +198,7 @@
   "composer.inlineRunModelChip": "Runs on this model",
   "composer.inlineRunModelChip.undo": "Go back to the default model for runs",
   "composer.contextAllSpaces": "Context of every space",
-  "composer.contextAllSpaces.hint": "The assistant knows each space’s integrations and agents from the start. The conversation then depends on every space that shows some.",
+  "composer.contextAllSpaces.hint": "The assistant knows each space’s integrations and agents from the start. Each space that has some is then tied to the conversation: if you lose access to one of them, it is hidden from you.",
   "composer.contextAllSpacesChip": "Wider context",
   "composer.contextAllSpacesChip.undo": "Stop detailing every space",
   "composer.limit": "Limit to {{name}}",

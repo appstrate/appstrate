@@ -529,19 +529,22 @@ router.get("/context", optionalSpaceContext(), async (c) => {
     return (pkg: Parameters<typeof homeWireForCaller>[0]) =>
       homeWireForCaller(pkg, accessible).home_writable;
   };
-  // What a connect flow would make usable here, beside what already is: the same
-  // `integrations:read` disclosure as `connections`, ids only.
+  // What a connect flow would make usable here: only for a caller who may run one.
+  const noneConnectable = { integrations: [] as string[], truncated: false, total: 0 };
   const integrationsRead = mayReadIntegrations
     ? listUsableIntegrationsForActor(scope, actor).then(async (usable) => ({
         usable,
-        connectable: await listConnectableIntegrations(
-          scope,
-          new Set(usable.map((entry) => entry.integration_package_id)),
-        ),
+        connectable: permissions.has("integrations:connect")
+          ? await listConnectableIntegrations(
+              scope,
+              new Set(usable.map((entry) => entry.integration_package_id)),
+              { canConfigure: permissions.has("integrations:configure") },
+            )
+          : noneConnectable,
       }))
     : Promise.resolve({
         usable: [] as Awaited<ReturnType<typeof listUsableIntegrationsForActor>>,
-        connectable: { integrations: [] as string[], truncated: false, total: 0 },
+        connectable: noneConnectable,
       });
   const [{ usable: connections, connectable }, runnable, activeSkills, recentRuns] =
     await Promise.all([

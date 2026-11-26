@@ -1,7 +1,8 @@
 # Chat : le contexte des espaces avant le premier appel d'outil
 
 Plan d'implémentation. Établi par lecture de `origin/main` (`d75d5a647`, 2026-11-26).
-Statut : **proposé**, rien n'est implémenté.
+Statut : **implémenté** (#2408, issue #2407). Écart à l'issue : le niveau 3 est une préférence
+d'utilisateur, pas une option par conversation (voir Niveau 3).
 
 ## Constat
 
@@ -98,8 +99,9 @@ Section `## Spaces` du bloc de contexte, une ligne par espace du tour :
 
 - **Source** : `spaces` du tour, sans requête. Capacités par `turnCapabilities` appliqué à
   chaque espace sous le plafond du tour (`ceiling`).
-- **Formulation** : `describeSpace` gagne un champ optionnel d'actes (`NamedSpace.can`). Le
-  chat et le serveur MCP rendent la même ligne.
+- **Formulation** : `spaceActs` (vocabulaire commun) et `describeSpaceActs`, qui suit
+  `describeSpace` des actes (`@appstrate/core/mcp-spaces`). Le chat et le serveur MCP nomment
+  les mêmes actes.
 - **MCP** : `get_me` ajoute `can` à chaque entrée de `spaces[]`, lu de `space.surface`. Un acte
   absent de la liste n'est pas permis (même principe que `McpSurface` : enseigné par l'absence).
 - **Doctrine** : faits sur l'appelant, aucun espace enregistré. `get_me` sans espace rend déjà
@@ -112,14 +114,15 @@ Pour les espaces `(origine ∪ personnel ∪ touchés) ∩ espaces du tour`, les
 agents, rendus **par ressource** :
 
 ```
-## Integrations
-- `@appstrate/gmail`@1.2.0 — "Pro" (yours): usable in Perso, Équipe Ventes; active in Équipe Ventes only
-- `@appstrate/slack` — active in Équipe Ventes, not connected
+## What these spaces hold
+As read at the start of this turn, for Perso, Équipe Ventes.
 
-## Agents you can run
-- `@acme/digest` — Digest: in Équipe Ventes (published, takes input)
+Integrations:
+- `@appstrate/gmail` (Gmail) — usable in Perso; switched off in Équipe Ventes. Connections: "Pro" (yours)
+- `@appstrate/slack` — not connected in Équipe Ventes
 
-Details above cover: Perso, Équipe Ventes. For another space: `get_me` with its `space_id`.
+Agents:
+- `@acme/digest` (Digest) — in Équipe Ventes; takes input. Daily digest.
 ```
 
 - **Source** : un `get_me` par espace concerné, par la connexion de l'appelant, dans le même
@@ -127,18 +130,21 @@ Details above cover: Perso, Équipe Ventes. For another space: `get_me` with its
 - **Rendu par ressource** : la taille suit le nombre d'intégrations et d'agents distincts, pas
   espaces × ressources ; la ligne répond directement à « où est-ce utilisable ».
 - **Ordre déterministe** : origine, personnel, puis touchés par date ; entrées triées par id.
-- **Plafond** : `CHAT_CONTEXT_DIGEST_BUDGET_CHARS` (valeur à fixer par la mesure du lot 0).
-  Au-delà, les espaces restants sortent de « Details above cover ».
+- **Plafond** : `CHAT_CONTEXT_DETAILS_BUDGET_CHARS` = 8 000 caractères (deux espaces listant
+  chacun les 15 agents que `get_me` plafonne). Au-delà, les espaces restants sont nommés
+  « Not detailed here, for room », renvoyés à `get_me`.
 - **Exclus** : `recent_runs`, `skills` (déjà sous `## Skills`).
-- **Échec** : un espace dont la lecture échoue ou dépasse le délai sort de « Details above
-  cover » ; le tour continue.
+- **Échec** : un espace dont la lecture échoue ou dépasse le délai est absent du détail ; le
+  tour continue.
 - **Doctrine** : origine et touchés sont déjà enregistrés. Espace personnel : décision D1.
 - **Cache** : invalidé une fois quand l'ensemble touché grandit, ou quand une connexion ou un
   agent change.
 
 Ajout au payload par espace, utile aussi aux clients MCP : `connectable_integrations`, les ids
-des intégrations actives sans connexion utilisable (plafonné, `listActiveIntegrationIds` moins
-les connectées). Décision D4.
+des intégrations actives qui déclarent une authentification (manifeste publié d'abord) sans
+connexion utilisable, pour un appelant qui détient `integrations:connect` ; une intégration dont
+l'espace bloque les connexions des membres n'y figure que sous `integrations:configure`
+(plafonné). Décision D4.
 
 ### Niveau 3 — tous les espaces (préférence de l'utilisateur, désactivée par défaut)
 
@@ -157,7 +163,7 @@ les connectées). Décision D4.
 | --- | ------------------------------------------------------------ | ----------------------------------------------------------------------------------- |
 | D1  | Injecter le détail de l'espace personnel l'enregistre-t-il ? | Non : données de l'auteur, il ne peut pas en perdre l'accès. Exception à documenter |
 | D2  | Forme de `can` sur le fil                                    | Tableau de noms d'actes en snake_case ; absent = interdit                           |
-| D3  | Valeur du plafond du niveau 2                                | Fixée par le lot 0, verrouillée par un test                                         |
+| D3  | Valeur du plafond du niveau 2                                | 8 000 car. par calcul (lot 0 non mené), verrouillée par un test                     |
 | D4  | `connectable_integrations` dans `/api/me/context`            | Oui, ids seuls, plafonné                                                            |
 | D5  | Construire le niveau 3                                       | Oui, en préférence d'utilisateur (aucune migration)                                 |
 
@@ -173,12 +179,14 @@ Un lot = une PR, depuis une branche neuve sur `origin/main`.
 - Mesurer la taille d'un `get_me` par espace (caractères) sur une organisation réelle à
   plusieurs espaces : c'est l'entrée de D3.
 - Livrable : les chiffres dans ce document. Aucun code livré.
+- Non mené : le budget a été fixé par calcul. Mesure E2E locale (#2408) : 2 puis 5 `get_me`
+  parallèles en 28 ms au plus.
 
 ### Lot A — niveau 1
 
 | Fichier                                    | Changement                                                                                              |
 | ------------------------------------------ | ------------------------------------------------------------------------------------------------------- |
-| `packages/core/src/mcp-spaces.ts`          | `NamedSpace.can?`, `describeSpace` le rend ; entrée CHANGELOG `[Unreleased]`                            |
+| `packages/core/src/mcp-spaces.ts`          | `spaceActs`, `describeSpaceActs`, `SpaceAct` ; entrée CHANGELOG `[Unreleased]`                          |
 | `apps/api/src/modules/mcp/tools.ts`        | `buildGetMeTool` : `can` sur `spaces[]` depuis `space.surface` ; description de l'outil                 |
 | `apps/api/src/modules/mcp/spaces.ts`       | projection `McpSurface` → liste d'actes, à un seul endroit                                              |
 | `packages/module-chat/src/capabilities.ts` | capacités d'un espace sous le plafond du tour (réutilise `turnCapabilities`)                            |
@@ -261,7 +269,7 @@ Puis refaire le comptage du lot 0.
 ## Risques
 
 - **Divergence chat / MCP sur les capacités** : couverte par `catalog-requirements.test.ts`
-  et par `describeSpace` unique.
+  et par le vocabulaire unique `spaceActs`.
 - **Fuite hors de la règle des espaces touchés** : le niveau 2 ne lit que des espaces
   enregistrés, plus l'espace personnel (D1) ; test dédié.
 - **Latence du préambule** : 2 à quelques `get_me` en parallèle, bornés par
@@ -274,7 +282,7 @@ Puis refaire le comptage du lot 0.
 
 ## À la release
 
-- `@appstrate/core` : `NamedSpace.can` est un ajout (mineure), mais `[Unreleased]` porte déjà
+- `@appstrate/core` : `spaceActs` et `describeSpaceActs` sont des ajouts (mineure), mais `[Unreleased]` porte déjà
   deux retraits de #2397 : la prochaine version de core est majeure de toute façon. Rafraîchir
   `published-export-baseline.json` après publication.
 - Aucune migration.

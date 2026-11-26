@@ -67,11 +67,7 @@ export function describeSpace(space: NamedSpace): string {
   return `${space.name} (\`${space.id}\`, role ${space.role}${personal})`;
 }
 
-/**
- * What a caller may do in one space, named by the platform MCP tools that carry it, in the order a
- * model reads them. One vocabulary for `get_me`'s `spaces[]` and the chat's context block: a
- * space's `can` lists the acts its role grants there, and an act left out is refused there.
- */
+/** What a caller may do in one space, in reading order: `get_me`'s `spaces[].can` and the chat's. */
 const SPACE_ACTS = [
   "invoke_operations",
   "run_agents",
@@ -82,29 +78,8 @@ const SPACE_ACTS = [
 
 export type SpaceAct = (typeof SPACE_ACTS)[number];
 
-/** The surface each act stands for, as each side derives it from the caller's grants in the space. */
-export interface SpaceActFlags {
-  /** `invoke_operation`. */
-  invokes: boolean;
-  /** `run_and_wait` with an existing agent. */
-  runs: boolean;
-  /** `run_and_wait` with an inline manifest. */
-  composes: boolean;
-  /** `call_integration_tool`. */
-  callsIntegrationTools: boolean;
-  /** A create operation of at least one package type. */
-  createsPackages: boolean;
-}
-
-/** The acts `flags` grant, in {@link SPACE_ACTS} order. */
-export function spaceActs(flags: SpaceActFlags): SpaceAct[] {
-  const held: Record<SpaceAct, boolean> = {
-    invoke_operations: flags.invokes,
-    run_agents: flags.runs,
-    inline_runs: flags.composes,
-    call_integration_tools: flags.callsIntegrationTools,
-    create_packages: flags.createsPackages,
-  };
+/** The acts `held` grants, in {@link SPACE_ACTS} order; an act left out is refused there. */
+export function spaceActs(held: Readonly<Record<SpaceAct, boolean>>): SpaceAct[] {
   return SPACE_ACTS.filter((act) => held[act]);
 }
 

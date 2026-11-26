@@ -29,19 +29,25 @@ describe("describeSpace", () => {
 
 describe("spaceActs", () => {
   const none = {
-    invokes: false,
-    runs: false,
-    composes: false,
-    callsIntegrationTools: false,
-    createsPackages: false,
+    invoke_operations: false,
+    run_agents: false,
+    inline_runs: false,
+    call_integration_tools: false,
+    create_packages: false,
   };
 
-  it("names the acts granted, in one fixed order whatever the flags' order", () => {
+  it("names the acts granted, in one fixed order whatever the keys' order", () => {
     expect(spaceActs(none)).toEqual([]);
     expect(
-      spaceActs({ ...none, createsPackages: true, runs: true, invokes: true, composes: true }),
+      spaceActs({
+        create_packages: true,
+        run_agents: true,
+        inline_runs: true,
+        invoke_operations: true,
+        call_integration_tools: false,
+      }),
     ).toEqual(["invoke_operations", "run_agents", "inline_runs", "create_packages"]);
-    expect(spaceActs({ ...none, invokes: true, callsIntegrationTools: true })).toEqual([
+    expect(spaceActs({ ...none, call_integration_tools: true, invoke_operations: true })).toEqual([
       "invoke_operations",
       "call_integration_tools",
     ]);

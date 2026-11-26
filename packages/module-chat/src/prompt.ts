@@ -226,7 +226,7 @@ ${runs(`Files a run writes under \`outputs/\` render as downloadable chips in th
 `)}Your context block below is DATA — the user's identity and role, the current date, the space the conversation was opened in, when it has one, the spaces you can act in with what your role allows in each (\`can\`: an act it does not list is refused in that space, so never send one there)${skills(", the skills available")} and the permissions this turn holds.${
     getMeReturns.length === 0
       ? ""
-      : ` Under \`${SPACE_DETAILS_HEADING}\` it shows what the spaces it names hold, as read at the start of this turn. For any other space, or once a connection or an activation changed one during the turn, \`get_me\` returns ${new Intl.ListFormat("en").format(getMeReturns)} for the space it names.`
+      : ` A \`${SPACE_DETAILS_HEADING}\` section, when present, shows what the spaces it names hold, as read at the start of this turn. For any other space, or once a connection or an activation changed one during the turn, \`get_me\` returns ${new Intl.ListFormat("en").format(getMeReturns)} for the space it names.`
   } How to act on it:
 - Use the current date to resolve relative dates.
 ${idVerbatimBullet}${skills(`- The skills under \`${SKILLS_HEADING}\` are guides for YOU — procedures you follow yourself, not packages you run. One shown in full, inside a \`<skill>\` tag, is already loaded: follow it. When one listed only by its id and \`skill://\` URI clearly matches the request, LOAD IT BEFORE acting: call \`read_resource\` with that URI verbatim, then follow the SKILL.md it returns. Load ONE at a time, and none when none clearly matches. Never load a skill whose content already appears in this conversation. To read a file a skill references, call \`read_resource\` with the skill's URI, replacing \`SKILL.md\` with the file's path.
@@ -703,13 +703,8 @@ export async function buildCallerContextBlock(
     cited: readonly string[];
     /** See `turnUsesDrafts`. */
     drafts: boolean;
-    /**
-     * The spaces of `spaces` the conversation already depends on, in the order their details are
-     * rendered: its origin, the caller's personal space, then the spaces it touched. Their data
-     * enters the conversation without recording anything: the origin and the touched spaces are
-     * recorded already, and the personal space is the caller's own, which they never lose.
-     */
-    detailSpaces?: readonly ReachableSpaceGrant[];
+    /** The spaces of `spaces` whose details are read, in rendering order (`handleChatStream`). */
+    detailSpaces: readonly ReachableSpaceGrant[];
     /** Opened only when the turn has skills or details to read, under `signal`; closed once read. */
     openCaller: (signal: AbortSignal) => Promise<ChatCallerClient>;
   },
@@ -736,7 +731,7 @@ export async function buildCallerContextBlock(
   // What the turn may read in a space: granted there, and within the turn's ceiling.
   const holdsIn = (space: ReachableSpaceGrant, permission: string) =>
     turnHolds.has(permission) && space.permissions.includes(permission);
-  const detailSpaces = (args.detailSpaces ?? [])
+  const detailSpaces = args.detailSpaces
     .map((space) => ({
       id: space.id,
       name: space.name,

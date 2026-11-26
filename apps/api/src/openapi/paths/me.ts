@@ -897,10 +897,11 @@ export const mePaths = {
                     type: "array",
                     items: { type: "string" },
                     description:
-                      "Ids of the integrations active in the current space that declare an auth and " +
-                      "for which the caller has no usable connection (capped): a connect flow is " +
-                      "what would make them usable here. Only present when the caller holds the " +
-                      "`integrations:read` permission; empty otherwise.",
+                      "Ids of the integrations active in the current space that declare an auth, " +
+                      "for which the caller has no usable connection and may create one (capped): " +
+                      "a connect flow is what would make them usable here. Empty unless the caller " +
+                      "holds `integrations:read` and `integrations:connect`; one whose member " +
+                      "connections the space blocks is listed only under `integrations:configure`.",
                   },
                   connectable_integrations_truncated: {
                     type: "boolean",

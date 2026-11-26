@@ -49,7 +49,7 @@ describe("formatSpaceDetails", () => {
       needsReconnection: false,
       connections: [{ id: connectionId, label, owned }],
     });
-    const { text, covered } = formatSpaceDetails([
+    const { text, shown } = formatSpaceDetails([
       detail(PERSO, {
         integrations: [gmail("c1", "Pro", true)],
         agents: [agent("@acme/digest", { description: "Daily\n  digest." })],
@@ -62,32 +62,33 @@ describe("formatSpaceDetails", () => {
           agent("@acme/digest", { takesInput: true }),
           agent("@acme/brief", { published: false, homeWritable: true }),
           agent("@acme/post", { inactiveRequired: ["@appstrate/slack"] }),
+          agent("@acme/sync", { inactiveRequired: ["@appstrate/gmail", "@appstrate/slack"] }),
         ],
-        agentsTotal: 3,
+        agentsTotal: 4,
       }),
     ]);
-    expect(covered).toEqual(["spc_p", "spc_v"]);
+    expect(shown).toEqual(["spc_p", "spc_v"]);
     expect(text.split("\n")).toEqual([
       SPACE_DETAILS_HEADING,
-      "As read at the start of this turn, for Perso, Ventes. For another space, call `get_me` with its `space_id`; after a connection or an activation during the turn, call it again.",
+      "As read at the start of this turn, for Perso, Ventes.",
       "",
       "Integrations:",
       '- `@appstrate/gmail` (Gmail) — usable in Perso; switched off in Ventes. Connections: "Pro" (yours), "Équipe" (a colleague\'s)',
       "- `@appstrate/slack` — not connected in Ventes",
       "",
-      "Agents you can run:",
+      "Agents:",
       "- `@acme/brief` (brief) — in Ventes (draft only: launch it with version=draft)",
       "- `@acme/digest` (digest) — in Perso, Ventes. Daily digest.",
       "- `@acme/post` (post) — in Ventes (refused until `@appstrate/slack` is switched on)",
+      "- `@acme/sync` (sync) — in Ventes (refused until `@appstrate/gmail`, `@appstrate/slack` are switched on)",
     ]);
   });
 
   it("shows the entries of a space that has some, and an empty one shows none", () => {
-    const { covered, shown } = formatSpaceDetails([
+    const { shown } = formatSpaceDetails([
       detail(PERSO, { connectable: ["@appstrate/slack"] }),
       detail(VENTES),
     ]);
-    expect(covered).toEqual(["spc_p", "spc_v"]);
     // An absence discloses nothing of Ventes: only Perso puts data into the conversation.
     expect(shown).toEqual(["spc_p"]);
   });
@@ -114,7 +115,7 @@ describe("formatSpaceDetails", () => {
     expect(text).toContain("- none connected or to connect");
   });
 
-  it("keeps the first spaces that fit the budget and covers only those", () => {
+  it("keeps the first spaces that fit the budget and names the others as left to get_me", () => {
     const many = (space: DetailSpace) =>
       detail(space, {
         agents: Array.from({ length: 15 }, (_, i) =>
@@ -125,13 +126,21 @@ describe("formatSpaceDetails", () => {
     const LAB: DetailSpace = { id: "spc_l", name: "Lab", integrations: true, agents: true };
     // Two spaces listing the 15 agents get_me caps at fit; a third does not.
     const three = [many(PERSO), many(VENTES), many(LAB)];
-    const { text, covered } = formatSpaceDetails(three);
+    const { text, shown } = formatSpaceDetails(three);
     expect(text.length).toBeLessThanOrEqual(CHAT_CONTEXT_DETAILS_BUDGET_CHARS);
-    expect(covered).toEqual(["spc_p", "spc_v"]);
+    expect(shown).toEqual(["spc_p", "spc_v"]);
     expect(text).toContain("for Perso, Ventes.");
+    expect(text).toContain("Not detailed here, for room: Lab; `get_me` with its `space_id`.");
     expect(text).not.toContain("spc_l");
-    // Nothing fits: nothing is rendered.
-    expect(formatSpaceDetails(three, 10)).toEqual({ text: "", covered: [], shown: [] });
+    // No space fits: each is named, none shown.
+    const named = formatSpaceDetails(three, 200);
+    expect(named.shown).toEqual([]);
+    expect(named.text.split("\n")).toEqual([
+      SPACE_DETAILS_HEADING,
+      "Not detailed here, for room: Perso, Ventes, Lab; `get_me` with its `space_id`.",
+    ]);
+    // Not even the names fit: nothing is rendered.
+    expect(formatSpaceDetails(three, 10)).toEqual({ text: "", shown: [] });
   });
 });
 

@@ -172,6 +172,7 @@ import type { IntegrationAuthStatus } from "@appstrate/shared-types";
 import {
   readIntegrationManifestForConnect,
   readIntegrationManifestForProxy,
+  declaredAuths,
   readPublishedIntegrationManifests,
 } from "./integration-service.ts";
 import { assertSpaceInScope } from "./spaces.ts";
@@ -2772,25 +2773,19 @@ export async function listUsableIntegrationsForActor(
   if (rows.length === 0) return [];
 
   const listedIds = [...new Set(rows.map((row) => row.integrationId))];
-  const [pkgRows, { manifests: published, unpublished }] = await Promise.all([
+  const [pkgRows, published] = await Promise.all([
     db
       .select({ id: packages.id, draftManifest: packages.draftManifest })
       .from(packages)
       .where(inArray(packages.id, listedIds)),
     readPublishedIntegrationManifests(listedIds, scope.orgId),
   ]);
-  const draftAuths = new Map(
-    pkgRows.map((p) => [p.id, (p.draftManifest as IntegrationManifest | null)?.auths] as const),
-  );
-  const declaresAuth = (row: { integrationId: string; authKey: string }) => {
-    const manifest = published.get(row.integrationId);
-    const auths = manifest
-      ? manifest.auths
-      : unpublished.has(row.integrationId)
-        ? draftAuths.get(row.integrationId)
-        : undefined;
-    return Object.hasOwn(auths ?? {}, row.authKey);
-  };
+  const drafts = new Map(pkgRows.map((p) => [p.id, p.draftManifest] as const));
+  const declaresAuth = (row: { integrationId: string; authKey: string }) =>
+    Object.hasOwn(
+      declaredAuths(row.integrationId, published, drafts.get(row.integrationId)) ?? {},
+      row.authKey,
+    );
 
   const acc = new Map<
     string,

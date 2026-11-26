@@ -2252,25 +2252,67 @@ describe("handleChatStream", () => {
         expect(await touched(sessionId)).toEqual([]);
       });
 
-      it("details every space when the turn asks, recording each that showed an entry", async () => {
+      it("details every space when the turn asks, recording each that showed an entry before the model reads it", async () => {
         const sessionId = mintSessionId();
         const asked: string[] = [];
-        const { res, calls } = await turn(
-          sessionId,
-          {
-            dispatch: holding({ [spaceB]: "@acme/beta" }, asked),
-            body: { spaceId: ctx.defaultSpaceId, context_all_spaces: true },
-          },
-          runningInBoth(),
-        );
+        const { engine: scripted, calls } = scriptedEngine();
+        // Queued when inference starts: a touch written later would land after this read.
+        let touchedAtInference: Promise<string[]> | undefined;
+        const engine: ChatEngine = (input) => {
+          touchedAtInference = touched(sessionId);
+          return scripted(input);
+        };
+        const res = await postChat(sessionId, undefined, engine, {
+          dispatch: holding({ [spaceB]: "@acme/beta" }, asked),
+          body: { spaceId: ctx.defaultSpaceId, context_all_spaces: true },
+          reachable: runningInBoth(),
+        });
         expect(res.status).toBe(200);
         await collectUiChunks(res);
         await waitForAssistantPersist(sessionId);
         // Gamma is outside the acting set: never read.
         expect(asked.sort()).toEqual([ctx.defaultSpaceId, spaceB].sort());
         expect(calls[0]!.system).toContain("- `@acme/beta` — in Beta");
-        // Beta put an agent into the conversation; Alpha is its origin.
-        expect(await touched(sessionId)).toEqual([spaceB]);
+        // Beta put an agent into the conversation, recorded before inference; Alpha is its origin.
+        expect(await touchedAtInference).toEqual([spaceB]);
+      });
+
+      it("records nothing for every space when its claim refuses the turn", async () => {
+        const sessionId = mintSessionId();
+        await ensureSession(sessionId, ctx.orgId, ctx.user.id, [ctx.defaultSpaceId, spaceB]);
+        const { engine, calls } = scriptedEngine();
+        const res = await postChat(sessionId, undefined, engine, {
+          dispatch: holding({ [spaceB]: "@acme/beta" }, []),
+          body: { context_all_spaces: true },
+          reachable: runningInBoth(),
+          resolveChatModel: async () => {
+            await db
+              .update(chatSessions)
+              .set({ activeStreamId: "strm_live" })
+              .where(eq(chatSessions.id, sessionId));
+            return { subscription: false };
+          },
+        });
+        expect(res.status).toBe(409);
+        expect(calls).toEqual([]);
+        expect(await touched(sessionId)).toEqual([]);
+      });
+
+      it("details a space the conversation touched earlier without being asked", async () => {
+        const sessionId = mintSessionId();
+        await ensureSession(sessionId, ctx.orgId, ctx.user.id, [ctx.defaultSpaceId, spaceB]);
+        await db.insert(chatSessionSpaces).values({ sessionId, spaceId: spaceB, orgId: ctx.orgId });
+        const asked: string[] = [];
+        const { res, calls } = await turn(
+          sessionId,
+          { dispatch: holding({ [spaceB]: "@acme/beta" }, asked) },
+          runningInBoth(),
+        );
+        expect(res.status).toBe(200);
+        await collectUiChunks(res);
+        await waitForAssistantPersist(sessionId);
+        expect(asked).toEqual([spaceB]);
+        expect(calls[0]!.system).toContain("- `@acme/beta` — in Beta");
       });
 
       it("records no space whose details showed no entry", async () => {

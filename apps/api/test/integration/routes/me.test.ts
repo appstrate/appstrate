@@ -839,24 +839,76 @@ describe("Me API (/api/me)", () => {
         expect(body.connectable_integrations_total).toBe(body.connectable_integrations.length);
       };
       expected(await read(authHeaders(ctx)));
-      // A space API key reads the same, under the same `integrations:read`.
+      // A space API key reads the same, under the same pair of grants.
       const key = await seedApiKey({
         createdBy: ctx.user.id,
         orgId: ctx.orgId,
         spaceId: ctx.defaultSpaceId,
-        scopes: ["integrations:read"],
+        scopes: ["integrations:read", "integrations:connect"],
       });
       expected(await read({ Authorization: `Bearer ${key.rawKey}` }));
-      // Without `integrations:read` the list is empty, like `connections`.
-      const blind = await seedApiKey({
-        createdBy: ctx.user.id,
-        orgId: ctx.orgId,
-        spaceId: ctx.defaultSpaceId,
-        scopes: ["agents:run"],
+      // Without `integrations:read` (nothing disclosed) or `integrations:connect` (no connect
+      // flow to offer) the list is empty.
+      for (const scopes of [["agents:run"], ["integrations:read"]]) {
+        const blind = await seedApiKey({
+          createdBy: ctx.user.id,
+          orgId: ctx.orgId,
+          spaceId: ctx.defaultSpaceId,
+          scopes,
+        });
+        const none = await read({ Authorization: `Bearer ${blind.rawKey}` });
+        expect(none.connectable_integrations).toEqual([]);
+        expect(none.connectable_integrations_total).toBe(0);
+      }
+    });
+
+    it("judges connectable integrations on the published manifest and the space's lock", async () => {
+      const auths = {
+        api: {
+          type: "api_key" as const,
+          authorizedUris: ["https://api.example.com/**"],
+          delivery: httpHeaderDelivery({ name: "X-Api-Key", field: "api_key" }),
+        },
+      };
+      const seedIntegration = async (id: string, draftAuths: Record<string, unknown>) => {
+        await seedPackage({
+          id,
+          orgId: ctx.orgId,
+          type: "integration",
+          source: "local",
+          draftManifest: { name: id, version: "0.1.0", type: "integration", auths: draftAuths },
+        });
+        await seedSpacePackage(ctx.defaultSpaceId, id);
+      };
+      // The published version declares the auth its draft dropped: what runs here needs one.
+      await seedIntegration("@ctx/pub-auth", {});
+      await seedPublishedVersion("@ctx/pub-auth", "1.0.0", {
+        manifest: localIntegrationManifest({ name: "@ctx/pub-auth", auths }) as never,
       });
-      const none = await read({ Authorization: `Bearer ${blind.rawKey}` });
-      expect(none.connectable_integrations).toEqual([]);
-      expect(none.connectable_integrations_total).toBe(0);
+      // The draft adds an auth the published version lacks: nothing would bind it here.
+      await seedIntegration("@ctx/draft-auth", { oauth: {} });
+      await seedPublishedVersion("@ctx/draft-auth", "1.0.0", {
+        manifest: localIntegrationManifest({ name: "@ctx/draft-auth", auths: {} }) as never,
+      });
+      // The space locks members' own connections to it.
+      await seedIntegration("@ctx/locked", { oauth: {} });
+      await seedSpacePackage(ctx.defaultSpaceId, "@ctx/locked", { blockUserConnections: true });
+
+      const read = async (headers: Record<string, string>) => {
+        const res = await app.request("/api/me/context", { headers });
+        expect(res.status).toBe(200);
+        return ((await res.json()) as { connectable_integrations: string[] })
+          .connectable_integrations;
+      };
+      // The owner governs the space's integrations: the lock does not stop them connecting.
+      expect(await read(authHeaders(ctx))).toEqual(
+        expect.arrayContaining(["@ctx/pub-auth", "@ctx/locked"]),
+      );
+      expect(await read(authHeaders(ctx))).not.toContain("@ctx/draft-auth");
+      const member = await memberContext(ctx, "member", "operator");
+      const memberList = await read(authHeaders(member));
+      expect(memberList).toContain("@ctx/pub-auth");
+      expect(memberList).not.toContain("@ctx/locked");
     });
 
     it("returns 401 without authentication", async () => {

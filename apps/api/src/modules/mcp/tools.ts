@@ -156,7 +156,6 @@ import type { DispatchContext } from "./api-call-batch.ts";
 import {
   grantedIn,
   grantedSpaces,
-  mcpActsAnywhere,
   mcpSpaceActs,
   spaceIdsWhere,
   spaceArgumentRefusal,
@@ -2432,9 +2431,9 @@ export function buildFileResourceProvider(ctx: McpToolContext): AppstrateResourc
   };
 }
 
-/** The acts a `can` of `spaces` may name, as `get_me`'s description lists them. */
-function actVocabulary(spaces: readonly McpSpace[]): string {
-  const acts = mcpActsAnywhere(spaces);
+/** The acts a `can` may name: those of the union surface an org-wide `get_me` is built with. */
+function actVocabulary(surface: McpSurface): string {
+  const acts = mcpSpaceActs(surface);
   return acts.length > 0 ? ` (${acts.map((act) => `\`${act}\``).join(", ")})` : "";
 }
 
@@ -2447,7 +2446,7 @@ function buildGetMeTool(ctx: McpToolContext, surface: McpSurface): AppstrateTool
       "and `recent_runs`" +
       (ctx.orgSpaces
         ? ", and `spaces`: your role in each space you reach, which, not the organization role, " +
-          `decides each call, and \`can\`, the acts that role allows there${actVocabulary(ctx.orgSpaces.reachable)}: an act not ` +
+          `decides each call, and \`can\`, the acts that role allows there${actVocabulary(surface)}: an act not ` +
           "listed is refused in that space. With no space designated, it returns `user`, `org` " +
           "and `spaces` alone: call it first without `space_id` to see which spaces you reach"
         : "") +
@@ -2474,8 +2473,8 @@ function buildGetMeTool(ctx: McpToolContext, surface: McpSurface): AppstrateTool
             "outside a run. Agents you run still use them. "
           : "") +
       "`connectable_integrations` names the integrations active in " +
-      "THIS space that need a connection the caller has none of: connecting one makes it usable " +
-      "here. " +
+      "THIS space that need a connection the caller has none of and may create: connecting one " +
+      "makes it usable here. " +
       "`agents`, `skills` and `connectable_integrations` are capped (`agents_truncated`, " +
       "`skills_truncated`, `connectable_integrations_truncated`): `search` finds " +
       "the rest by keyword.",
