@@ -24,6 +24,10 @@ import { CopyButton } from "@appstrate/ui/components/copy-button";
 import { Fact, FactGrid } from "@appstrate/ui/components/fact-grid";
 import { MimeIcon } from "@appstrate/ui/components/mime-icon";
 import { formatCompactTokens, formatTokenFigure } from "@appstrate/ui/context-window";
+import {
+  IntegrationLogoStack,
+  IntegrationLogoStackSkeleton,
+} from "../../components/integration-logo-stack";
 import { ErrorState } from "../../components/page-states";
 import { RowSpaceName, RunLink } from "../../components/run-row";
 import { RunStatusBadge } from "../../components/status-badge";
@@ -37,7 +41,12 @@ import type {
   ConversationSidebarTab,
 } from "./conversation-sidebar-state";
 import { ToolCallIcon } from "./conversation-tools-tab";
-import { readShown, useConversationFiles, useConversationRuns } from "./use-conversation-lists";
+import {
+  readShown,
+  useConversationFiles,
+  useConversationIntegrations,
+  useConversationRuns,
+} from "./use-conversation-lists";
 import {
   TOOL_STATUS_LABEL,
   TOOL_STATUS_TONE,
@@ -430,14 +439,17 @@ function FileLine({
  */
 function ActivityGroup({
   title,
+  aside,
   total,
   onSeeAll,
   children,
 }: {
   title: string;
+  /** Beside the heading: what the whole group stands for. */
+  aside?: ReactNode;
   total?: number;
   onSeeAll?: () => void;
-  children: ReactNode;
+  children?: ReactNode;
 }) {
   const { t } = useTranslation("chat");
   const headingId = useId();
@@ -447,6 +459,7 @@ function ActivityGroup({
         <h3 id={headingId} className="text-muted-foreground text-xs font-medium">
           {title}
         </h3>
+        {aside}
         {onSeeAll ? (
           <Button
             variant="ghost"
@@ -467,7 +480,8 @@ function ActivityGroup({
 
 /**
  * What the conversation did, in one view: its runs, its files and its integration calls (lookups
- * included), the latest of each on one line. A group with nothing in it is left out; a group whose
+ * included), the latest of each on one line; the integrations it reached, its runs' included (the
+ * call journal), stack their logos beside the « Intégrations » heading. A group with nothing in it is left out; a group whose
  * tab the reader cannot see too. Each group stands on its own read: the calls, held by the
  * conversation, show at once; a group whose read is on its way waits in its shape, one whose read
  * failed with nothing held says so in its place. The zone says it waits once, whatever waits.
@@ -492,15 +506,20 @@ function SummaryActivity({
   const { t } = useTranslation(["chat", "common"]);
   const runs = useConversationRuns(conversationId, active && showsRuns);
   const files = useConversationFiles(conversationId, active && showsFiles);
+  const reached = useConversationIntegrations(conversationId, active);
   const runsRead = showsRuns ? readShown(runs.query) : null;
   const filesRead = showsFiles ? readShown(files.query) : null;
+  const reachedRead = readShown(reached.query);
   const runRows = runsRead === "ready" ? runs.runs.slice(0, SUMMARY_ROWS) : [];
   const fileRows = filesRead === "ready" ? files.files.slice(0, SUMMARY_ROWS) : [];
   const calls = tools.calls.filter(reachedIntegration).reverse();
   const callRows = calls.slice(0, SUMMARY_ROWS);
-  const waiting = runsRead === "pending" || filesRead === "pending";
+  const waiting = runsRead === "pending" || filesRead === "pending" || reachedRead === "pending";
+  const showsIntegrations =
+    callRows.length > 0 || reached.integrations.length > 0 || reachedRead === "error";
   const nothing =
-    runRows.length + fileRows.length + callRows.length === 0 &&
+    runRows.length + fileRows.length === 0 &&
+    !showsIntegrations &&
     !waiting &&
     runsRead !== "error" &&
     filesRead !== "error";
@@ -556,11 +575,26 @@ function SummaryActivity({
               ))}
             </ActivityGroup>
           ) : null}
-          {callRows.length > 0 ? (
+          {reachedRead === "pending" && callRows.length === 0 ? <GroupSkeleton /> : null}
+          {showsIntegrations ? (
             <ActivityGroup
               title={t("context.summary.integrations")}
+              aside={
+                reachedRead === "pending" ? (
+                  <IntegrationLogoStackSkeleton />
+                ) : (
+                  <IntegrationLogoStack
+                    integrations={reached.integrations.map((integration) => ({
+                      id: integration.id,
+                      name: integration.display_name,
+                      icon: integration.icon,
+                    }))}
+                  />
+                )
+              }
               onSeeAll={calls.length > SUMMARY_ROWS ? seeAll("tools") : undefined}
             >
+              {reachedRead === "error" ? <ErrorState error={reached.query.error} compact /> : null}
               {callRows.map((call) => (
                 <CallLine key={call.toolCallId} call={call} dispatch={dispatch} />
               ))}

@@ -75,6 +75,11 @@ const filesKey: QueryKey = [
     params: { path: { orgId: "org_1" }, query: { context_chat_session_id: "chs_1", limit: 100 } },
   },
 ];
+const integrationsKey: QueryKey = [
+  "get",
+  "/api/orgs/{orgId}/chat/sessions/{id}/integrations",
+  { params: { path: { orgId: "org_1", id: "chs_1" } } },
+];
 
 const list = (data: unknown[], total = data.length) => ({
   object: "list",
@@ -248,6 +253,7 @@ describe("the summary, open", () => {
     seedConversation(queryClient, [parts]);
     queryClient.setQueryData(runsKey, Array.isArray(runs) ? list(runs) : runs);
     queryClient.setQueryData(filesKey, { object: "list", data: [], hasMore: false });
+    queryClient.setQueryData(integrationsKey, { object: "list", data: [], hasMore: false });
     prepare?.(queryClient);
     return render(
       <ConversationSummary conversationId="chs_1" active={active} dispatch={noop} />,
@@ -339,6 +345,59 @@ describe("the summary, open", () => {
     expect(html).toContain(i18n.t("common:error.generic"));
     expect(html).toContain(i18n.t("chat:context.summary.integrations"));
     expect(html).toContain("Rapport");
+  });
+
+  it("stacks the integrations it reached beside « Intégrations », named for assistive tech", () => {
+    const html = summary([], [], {
+      prepare: (qc) =>
+        qc.setQueryData(integrationsKey, {
+          object: "list",
+          data: [
+            { id: "@acme/gmail", display_name: "Gmail", icon: null },
+            { id: "@acme/clickup", display_name: "ClickUp", icon: null },
+          ],
+          hasMore: false,
+        }),
+    });
+    expect(html).toContain(i18n.t("chat:context.summary.integrations"));
+    expect(html).toContain('data-testid="integration-logo-stack"');
+    expect(html).toContain(
+      `aria-label="${i18n.t("common:integrationStack.label", { names: "Gmail, ClickUp" })}"`,
+    );
+    // Reached by its runs alone, an integration is still activity.
+    expect(html).not.toContain(i18n.t("chat:context.summary.noActivity"));
+  });
+
+  it("waits for the integrations reached in their place, the calls shown meanwhile", () => {
+    const pending = (parts: unknown[]) =>
+      summary(parts, [], {
+        prepare: (qc) => qc.removeQueries({ queryKey: integrationsKey, exact: true }),
+      });
+
+    const alone = pending([]);
+    expect(alone).not.toContain(i18n.t("chat:context.summary.integrations"));
+    expect(alone).not.toContain(i18n.t("chat:context.summary.noActivity"));
+    expect(alone.split('role="status"').length - 1).toBe(1);
+
+    const withCalls = pending([toolPart("call_a", { integration: true })]);
+    expect(withCalls).toContain(i18n.t("chat:context.summary.integrations"));
+    expect(withCalls.split("lucide-puzzle").length - 1).toBe(1);
+    expect(withCalls).not.toContain('data-testid="integration-logo-stack"');
+    expect(withCalls.split('role="status"').length - 1).toBe(1);
+  });
+
+  it("says a failed read of the integrations reached in « Intégrations »", () => {
+    // Held closed: open, the read would be tried again on mount.
+    const html = summary([], [], {
+      active: false,
+      prepare: (qc) => {
+        qc.removeQueries({ queryKey: integrationsKey, exact: true });
+        failRead(qc, integrationsKey);
+      },
+    });
+    expect(html).toContain(i18n.t("chat:context.summary.integrations"));
+    expect(html).toContain(i18n.t("common:error.generic"));
+    expect(html).not.toContain(i18n.t("chat:context.summary.noActivity"));
   });
 
   it("keeps the runs it holds when their refetch fails", () => {

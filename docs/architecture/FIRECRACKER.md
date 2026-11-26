@@ -447,15 +447,18 @@ host↔guest isolation.
    `APPSTRATE_RUNNER_UIDS`. One uid per runner lets the sidecar attribute
    every loopback connection to one runner and keeps each runner's HOME,
    files and `/proc/<pid>/environ` out of its siblings' and the agent's reach.
-5. Agent exits → supervisor kills sidecar, prints
+5. Agent exits → supervisor sends the sidecar `SIGTERM` (it drains its call
+   journal) and `SIGKILL` after 4 s, prints
    `APPSTRATE_EXIT:<nonce>:<code>` on the console, powers off (`reboot=k` →
    VMM exit). The nonce is a per-run random value from the config drive —
    the console is shared with workload stdout, so an un-nonced marker is a
    potential forgery and is ignored. `waitForExit` returns the authenticated
    marker code; a missing/forged marker = crash (1) or kill (137).
 
-Timeout/cancel flow through `stopWorkload`/`stopByRunId` (graceful
-`SendCtrlAltDel` attempt, then SIGKILL). A cancel landing during the boot
+Timeout/cancel flow through `stopWorkload`/`stopByRunId` (a `SendCtrlAltDel`
+attempt, then SIGKILL). The guest handles no CtrlAltDel, so no workload is
+signalled on this path: the sidecar's call journal loses what it still holds
+(the limit is stated in `SIDECAR.md`, Call journal). A cancel landing during the boot
 window latches (`vm.stopping`) and the just-spawned VMM is killed on the
 post-spawn recheck — a cancel cannot race the boot into a running
 VM. The platform stall watchdog calls `stopByRunId` when it finalizes a

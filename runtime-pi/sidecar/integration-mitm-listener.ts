@@ -105,7 +105,9 @@ import {
 } from "@appstrate/afps-shared/authorized-uris";
 import { guardedFetch, SsrfBlockedError } from "@appstrate/afps-shared/guarded-fetch";
 import { isHttpFieldValue } from "@appstrate/afps-shared/delivery-http";
+import { findCause } from "@appstrate/core/error-cause";
 import type { CertMinter } from "./integration-cert-minter.ts";
+import type { CallJournal, DispatchedCall } from "./call-reporter.ts";
 
 // ─────────────────────────────────────────────
 // Public types
@@ -139,14 +141,9 @@ export interface MitmCredentialSource {
    * request once). The platform `/refresh` it calls flags the connection
    * needsReconnection on a terminal failure, so a false result just means
    * "don't retry" — the dead-credential bookkeeping is platform-side.
+   * `credentialRevision` is the one {@link current} carried when the call was built.
    */
   refreshOnUnauthorized?(authKey: string, credentialRevision: string | undefined): Promise<boolean>;
-  /**
-   * A call carrying the injected credential got a 2xx: tells the platform, when a rejection streak
-   * is pending on the connection, that the credential works (fire-and-forget).
-   * `credentialRevision` (here and above) is the one {@link current} carried when the call was built.
-   */
-  reportUpstreamSuccess?(credentialRevision: string | undefined): void;
   /**
    * connect.tool mid-run re-login (P3) — when this returns true for
    * `(authKey, status)`, the listener treats `status` as a re-acquire trigger:
@@ -201,6 +198,8 @@ interface CreateMitmListenerOptions {
   egressPolicy: RunnerEgressPolicy;
   /** Only the owning runner may connect. */
   isPeerAllowed: PeerCheck;
+  /** Where each forwarded request is journaled; `null` in a connect run, which has no run row. */
+  journal: CallJournal | null;
 }
 
 export type MitmListenerEvent =
@@ -326,6 +325,7 @@ export function createIntegrationMitmListener(
             maxRequestBytes,
             emit,
             options.egressPolicy,
+            options.journal,
           ),
       });
       return { socketPath, stop: () => server.stop() };
@@ -827,6 +827,7 @@ export async function handleInnerRequest(
   maxRequestBytes: number,
   emit: (event: MitmListenerEvent) => void,
   egressPolicy: Pick<EgressPolicy, "allowsUrl">,
+  journal: CallJournal | null,
 ): Promise<Response> {
   try {
     return await forwardInnerRequest(
@@ -837,6 +838,7 @@ export async function handleInnerRequest(
       maxRequestBytes,
       emit,
       egressPolicy,
+      journal,
     );
   } catch (err) {
     emit({ kind: "internal-error", url: eventUrl(req, authority), error: errorClass(err) });
@@ -857,6 +859,7 @@ async function forwardInnerRequest(
   maxRequestBytes: number,
   emit: (event: MitmListenerEvent) => void,
   egressPolicy: Pick<EgressPolicy, "allowsUrl">,
+  journal: CallJournal | null,
 ): Promise<Response> {
   // Re-build the upstream URL from the tunnel's authority + request path. Bun
   // gives us an absolute URL whose origin names our inner listener, not the
@@ -1014,15 +1017,32 @@ async function forwardInnerRequest(
       signal: AbortSignal.timeout(API_CALL_TIMEOUT_MS),
     });
 
+  // One row per forwarded request, its host as the runner addressed it (the tunnel's authority,
+  // before any login substitution): the final attempt's outcome, a replay included.
+  const started = performance.now();
+  const journalCall = (outcome: string, credential: DispatchedCall["credential"]) =>
+    journal?.({
+      method: req.method,
+      host: new URL(url).hostname,
+      outcome,
+      durationMs: performance.now() - started,
+      credential,
+    });
+
   let response: Response;
   try {
     response = await send(outboundHeaders);
   } catch (err) {
     // The SNI host was checked at CONNECT; the guard re-checks the final URL (the connect-login
-    // substitution can rewrite it) and the address it resolves to now.
+    // substitution can rewrite it) and the address it resolves to now. Its refusal, a failed
+    // resolution included, sends nothing; any other failure may follow a sent request.
     if (err instanceof SsrfBlockedError && err.reason !== "resolution-failed") {
       emit({ kind: "request-refused", url, reason: "target blocked by SSRF policy" });
       return new Response("MITM listener: target blocked by SSRF policy", { status: 403 });
+    }
+    if (!(err instanceof SsrfBlockedError)) {
+      const timedOut = findCause(err, (e) => e.name === "TimeoutError") !== undefined;
+      journalCall(timedOut ? "upstream_timeout" : "upstream_unreachable", null);
     }
     emit({ kind: "upstream-error", url, error: errorClass(err) });
     return new Response("MITM listener: upstream request failed", { status: 502 });
@@ -1110,9 +1130,10 @@ async function forwardInnerRequest(
     }
   }
 
-  if (response.ok && lastAction.injectedHeader !== null) {
-    credentials.reportUpstreamSuccess?.(lastAction.credentialRevision);
-  }
+  journalCall(
+    String(response.status),
+    lastAction.injectedHeader !== null ? { revision: lastAction.credentialRevision } : null,
+  );
   emit({
     kind: "request-forwarded",
     url,

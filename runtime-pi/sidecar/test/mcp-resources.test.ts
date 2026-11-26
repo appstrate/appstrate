@@ -17,6 +17,7 @@ import { buildSidecarRuntimeDeps, type AppDeps } from "../app.ts";
 import { createTestApp } from "./helpers/authed-app.ts";
 import { buildApiCallHost } from "./helpers/api-call-host.ts";
 import { type CredentialsResponse } from "../helpers.ts";
+import { noJournal } from "./helpers/call-journal.ts";
 
 function makeDeps(overrides: Partial<AppDeps> = {}): AppDeps {
   return {
@@ -54,6 +55,7 @@ async function makeResourcesApp(overrides: Partial<AppDeps> = {}) {
         namespace: "test",
         integrationId: "@test/integ",
         connectionId: "conn-1",
+        journal: noJournal,
         declaredUris: ["https://api.example.com/**"],
         fetchCredentials: integResCreds,
         refreshCredentials: integResCreds,

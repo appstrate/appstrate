@@ -31,8 +31,8 @@ import {
   proxiedMcpOperation,
   untrustedFields,
   untrustedText,
-  type ProxyCaller,
 } from "./credential-proxy/mcp-over-proxy.ts";
+import type { ProxyCaller } from "./credential-proxy/call-journal.ts";
 import type { ProxyReach } from "./integration-connections.ts";
 import {
   readIntegrationManifestForRun,

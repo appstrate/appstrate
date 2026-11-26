@@ -38,6 +38,7 @@ import {
 // --- API Key schemas (routes/api-keys.ts) ---
 import { createApiKeySchema } from "../routes/api-keys.ts";
 import { callRemoteToolSchema } from "../routes/credential-proxy.ts";
+import { integrationCallsBodySchema } from "../routes/internal.ts";
 
 // --- Organization schemas (routes/organizations.ts) ---
 import {
@@ -576,6 +577,14 @@ const coreSchemas: OpenApiSchemaEntry[] = [
     path: "/api/credential-proxy/tools/call",
     jsonSchema: toJsonSchema(callRemoteToolSchema),
     description: "Call a typed tool of a remote MCP integration",
+  },
+
+  // ─── Internal (sidecar) ─────────────────────────────────────────────────
+  {
+    method: "POST",
+    path: "/internal/integration-calls",
+    jsonSchema: toJsonSchema(integrationCallsBodySchema),
+    description: "Journal the upstream calls a run's sidecar dispatched",
   },
 
   // ─── Integrations ───────────────────────────────────────────────────────

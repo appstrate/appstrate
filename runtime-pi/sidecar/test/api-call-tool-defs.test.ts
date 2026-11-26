@@ -26,6 +26,7 @@ import {
   type ApiCallIntegrationConfig,
   type ApiCallToolDeps,
 } from "../mcp.ts";
+import { noJournal } from "./helpers/call-journal.ts";
 
 // The handlers are never invoked here — only the descriptors are inspected.
 const unreachable = () => {
@@ -41,6 +42,7 @@ function integ(overrides: Partial<ApiCallIntegrationConfig> = {}): ApiCallIntegr
     declaredUris: [],
     fetchCredentials: unreachable as unknown as ApiCallIntegrationConfig["fetchCredentials"],
     refreshCredentials: unreachable as unknown as ApiCallIntegrationConfig["refreshCredentials"],
+    journal: noJournal,
     ...overrides,
   };
 }
