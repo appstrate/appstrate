@@ -13,6 +13,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `personalSpaceRoleSettingSchema` (a preset key or a custom space role id: the wire value of
   `personal_space_role`) and `orgSettingsWireSchema` (`orgSettingsReadSchema` with
   `personal_space_role` read through it) in `@appstrate/core/permissions`.
+- **`spaceActs`, `SpaceAct`** (`@appstrate/core/mcp-spaces`).
+  The acts a caller holds in one space (`invoke_operations`, `run_agents`, `inline_runs`,
+  `call_integration_tools`, `create_packages`), in one vocabulary for the MCP `get_me` tool's
+  `spaces[].can` and the chat's context block.
 
 ### Changed
 

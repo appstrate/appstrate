@@ -292,7 +292,7 @@ function integrationIndexFields(manifest: IntegrationManifest) {
  * List the items of a type any of `spaceIds` RUNS — the activation rule, per
  * type — one row per package carrying the spaces it is active in
  * (`activeSpaceIds`), in ONE statement whatever the number of spaces. Ordered
- * system first, then newest first, then by package id.
+ * newest first, then by package id: no provenance ranks first.
  */
 export async function listOrgItems(
   orgId: string,
@@ -322,7 +322,6 @@ export async function listOrgItems(
     .from(packages)
     .$dynamic();
   const dataQuery = activeInSpaces(query, orgId, spaceIds, cfg.type).orderBy(
-    sql`CASE WHEN ${packages.source} = 'system' THEN 0 ELSE 1 END`,
     desc(packages.createdAt),
     packages.id,
   );

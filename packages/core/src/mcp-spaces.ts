@@ -67,6 +67,22 @@ export function describeSpace(space: NamedSpace): string {
   return `${space.name} (\`${space.id}\`, role ${space.role}${personal})`;
 }
 
+/** What a caller may do in one space, in reading order: `get_me`'s `spaces[].can` and the chat's. */
+const SPACE_ACTS = [
+  "invoke_operations",
+  "run_agents",
+  "inline_runs",
+  "call_integration_tools",
+  "create_packages",
+] as const;
+
+export type SpaceAct = (typeof SPACE_ACTS)[number];
+
+/** The acts `held` grants, in {@link SPACE_ACTS} order; an act left out is refused there. */
+export function spaceActs(held: Readonly<Record<SpaceAct, boolean>>): SpaceAct[] {
+  return SPACE_ACTS.filter((act) => held[act]);
+}
+
 /** The refusal of a `space_id` argument that is missing or names no reachable space. */
 interface SpaceIdRefusal {
   code: "missing_argument" | "unknown_space";

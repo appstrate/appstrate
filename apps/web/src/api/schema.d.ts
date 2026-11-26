@@ -3105,7 +3105,7 @@ export interface paths {
         };
         /**
          * List agents across the organization's spaces
-         * @description Read-only agent index of every space of the organization where the caller holds `agents:read` or `agents:run`: one row per agent ACTIVE in at least one of those spaces, in the order of the single-space index (system agents first, then by id). `space_ids` names those spaces (map them to names with `GET /api/spaces`), the agent's home first when it is one of them, then in the order of `GET /api/spaces`. `dependencies.skills` is withheld unless one of them grants `agents:read` (`agents:run` alone is a summary read); `running_runs` / `unread_count` add up the agent's runs in every space read, each space counting every run there under `runs:read-all`, the caller's own runs otherwise. A caller who reads agents in no space gets an empty list. An unknown query parameter is rejected with `400`. A space the caller holds no role in (a `closed` space not joined, a `private` space they are not a member of) contributes nothing, and a credential pinned to a space (a space API key, a space-bound MCP token) reaches that space only. No `X-Space-Id`: the organization is the path's. An end-user is refused with `403`.
+         * @description Read-only agent index of every space of the organization where the caller holds `agents:read` or `agents:run`: one row per agent ACTIVE in at least one of those spaces, in the order of the single-space index (by id). `space_ids` names those spaces (map them to names with `GET /api/spaces`), the agent's home first when it is one of them, then in the order of `GET /api/spaces`. `dependencies.skills` is withheld unless one of them grants `agents:read` (`agents:run` alone is a summary read); `running_runs` / `unread_count` add up the agent's runs in every space read, each space counting every run there under `runs:read-all`, the caller's own runs otherwise. A caller who reads agents in no space gets an empty list. An unknown query parameter is rejected with `400`. A space the caller holds no role in (a `closed` space not joined, a `private` space they are not a member of) contributes nothing, and a credential pinned to a space (a space API key, a space-bound MCP token) reaches that space only. No `X-Space-Id`: the organization is the path's. An end-user is refused with `403`.
          */
         get: operations["listOrgAgents"];
         put?: never;
@@ -3523,7 +3523,7 @@ export interface paths {
         };
         /**
          * List integration packages across the organization's spaces
-         * @description Read-only index of the integration packages of every space of the organization where the caller holds `integrations:read`: the rows of `GET /api/packages/integrations`, one row per package ACTIVE in at least one of those spaces, in the order of the single-space index (system packages first, then newest first). `space_ids` names those spaces (map them to names with `GET /api/spaces`), the package's home first when it is one of them, then in the order of `GET /api/spaces`. `home_space_id` and the `home_*` flags follow the caller's role in the package's home, as on the single-space index. A caller who reads this type in no space gets an empty list. An unknown query parameter is rejected with `400`. A space the caller holds no role in (a `closed` space not joined, a `private` space they are not a member of) contributes nothing, and a credential pinned to a space (a space API key, a space-bound MCP token) reaches that space only. No `X-Space-Id`: the organization is the path's. An end-user is refused with `403`.
+         * @description Read-only index of the integration packages of every space of the organization where the caller holds `integrations:read`: the rows of `GET /api/packages/integrations`, one row per package ACTIVE in at least one of those spaces, in the order of the single-space index (newest first, then by id). `space_ids` names those spaces (map them to names with `GET /api/spaces`), the package's home first when it is one of them, then in the order of `GET /api/spaces`. `home_space_id` and the `home_*` flags follow the caller's role in the package's home, as on the single-space index. A caller who reads this type in no space gets an empty list. An unknown query parameter is rejected with `400`. A space the caller holds no role in (a `closed` space not joined, a `private` space they are not a member of) contributes nothing, and a credential pinned to a space (a space API key, a space-bound MCP token) reaches that space only. No `X-Space-Id`: the organization is the path's. An end-user is refused with `403`.
          */
         get: operations["listOrgIntegrationPackages"];
         put?: never;
@@ -3543,7 +3543,7 @@ export interface paths {
         };
         /**
          * List skills across the organization's spaces
-         * @description Read-only index of the skills of every space of the organization where the caller holds `skills:read`: the rows of `GET /api/packages/skills`, one row per package ACTIVE in at least one of those spaces, in the order of the single-space index (system packages first, then newest first). `space_ids` names those spaces (map them to names with `GET /api/spaces`), the package's home first when it is one of them, then in the order of `GET /api/spaces`. `home_space_id` and the `home_*` flags follow the caller's role in the package's home, as on the single-space index. A caller who reads this type in no space gets an empty list. An unknown query parameter is rejected with `400`. A space the caller holds no role in (a `closed` space not joined, a `private` space they are not a member of) contributes nothing, and a credential pinned to a space (a space API key, a space-bound MCP token) reaches that space only. No `X-Space-Id`: the organization is the path's. An end-user is refused with `403`.
+         * @description Read-only index of the skills of every space of the organization where the caller holds `skills:read`: the rows of `GET /api/packages/skills`, one row per package ACTIVE in at least one of those spaces, in the order of the single-space index (newest first, then by id). `space_ids` names those spaces (map them to names with `GET /api/spaces`), the package's home first when it is one of them, then in the order of `GET /api/spaces`. `home_space_id` and the `home_*` flags follow the caller's role in the package's home, as on the single-space index. A caller who reads this type in no space gets an empty list. An unknown query parameter is rejected with `400`. A space the caller holds no role in (a `closed` space not joined, a `private` space they are not a member of) contributes nothing, and a credential pinned to a space (a space API key, a space-bound MCP token) reaches that space only. No `X-Space-Id`: the organization is the path's. An end-user is refused with `403`.
          */
         get: operations["listOrgSkills"];
         put?: never;
@@ -17860,6 +17860,11 @@ export interface operations {
                      *           ]
                      *         }
                      *       ],
+                     *       "connectable_integrations": [
+                     *         "@appstrate/slack"
+                     *       ],
+                     *       "connectable_integrations_truncated": false,
+                     *       "connectable_integrations_total": 1,
                      *       "recent_runs": [
                      *         {
                      *           "packageId": "@appstrate/triage",
@@ -17921,6 +17926,12 @@ export interface operations {
                             /** @description Whether this space is one member's personal space (always `private`, no other members) rather than a team space. */
                             personal: boolean;
                         };
+                        /** @description Ids of the integrations active in the current space that the caller has not connected and for which a connect flow can start (an `oauth2` auth needs a usable client), sorted by id. One whose only connection needs reconnection is not listed: it stays in `connections`, flagged `needs_reconnection`. Whole or withheld: more than 15 and the list is empty (`connectable_integrations_truncated` true), never a prefix. Empty unless the caller holds `integrations:read` and `integrations:connect`; one whose member connections the space blocks is listed only under `integrations:configure`. */
+                        connectable_integrations?: string[];
+                        /** @description True when `connectable_integrations` was withheld for exceeding 15. */
+                        connectable_integrations_truncated?: boolean;
+                        /** @description How many connectable integrations there are, listed or withheld. */
+                        connectable_integrations_total?: number;
                         /** @description The caller's own most recent runs (actor-scoped), newest first — lets an agent reference a recent or failed run without a discovery round-trip. */
                         recent_runs?: {
                             packageId: string;
@@ -17964,7 +17975,7 @@ export interface operations {
                             /** @description AFPS §4.4 — tool(s) an agent inherits when it declares this integration without an `integrations_configuration.<id>.tools` selection. Absent or `[]` means an agent that declares this integration without its own selection ends up with nothing callable, which publish/import reject and the run aborts on — such an agent must select a tool explicitly. To use any other tool, inspect the full `tool_catalog` via GET /api/integrations/{packageId}. */
                             default_tools?: string[] | "*";
                         }[];
-                        /** @description Agents ACTIVE in the current space (capped), each with the required integrations that keep it from launching here. Only present when the caller holds the `agents:run` permission; empty otherwise. When `agents_truncated` is true, the full list is reachable via the `listAgents` operation. */
+                        /** @description Agents ACTIVE in the current space, ordered by id, each with the required integrations that keep it from launching here. Only present when the caller holds the `agents:run` permission; empty otherwise. Listed whole or not at all: past 15 agents the list is empty, `agents_truncated` is true, and the agents are reachable via the `listAgents` operation (the MCP `search` tool finds them by keyword). */
                         agents?: {
                             /** @description Invokable identifier, e.g. "@appstrate/triage". */
                             packageId: string;
@@ -17981,11 +17992,11 @@ export interface operations {
                             /** @enum {string} */
                             source: "local" | "system";
                         }[];
-                        /** @description True when the agent list was capped (full list via `listAgents`). */
+                        /** @description True when more agents are active than the cap; `agents` is then empty (full list via `listAgents`). */
                         agents_truncated?: boolean;
-                        /** @description Total active agents before the cap. */
+                        /** @description Total active agents, listed or not. */
                         agents_total?: number;
-                        /** @description Skills the caller could attach to an agent in the current space (capped). A catalogue read, not a runnable hint: only present when the caller holds the `skills:read` permission; empty otherwise. Skills are not run directly — declare them under an agent manifest's `dependencies.skills`. When `skills_truncated` is true, the full list is reachable via the `listSkills` operation. */
+                        /** @description Skills the caller could attach to an agent in the current space, ordered by id. A catalogue read, not a runnable hint: only present when the caller holds the `skills:read` permission; empty otherwise. Skills are not run directly — declare them under an agent manifest's `dependencies.skills`. Listed whole or not at all: past 15 skills the list is empty, `skills_truncated` is true, and the skills are reachable via the `listSkills` operation (the MCP `search` tool finds them by keyword). */
                         skills?: {
                             /** @description Attachable identifier, e.g. "@appstrate/web-research". Declare under dependencies.skills. */
                             packageId: string;
@@ -18000,9 +18011,9 @@ export interface operations {
                             /** @enum {string} */
                             source: "local" | "system";
                         }[];
-                        /** @description True when the skill list was capped (full list via `listSkills`). */
+                        /** @description True when more skills are active than the cap; `skills` is then empty (full list via `listSkills`). */
                         skills_truncated?: boolean;
-                        /** @description Total active skills before the cap. */
+                        /** @description Total active skills, listed or not. */
                         skills_total?: number;
                     };
                 };
@@ -21250,6 +21261,8 @@ export interface operations {
                     package_authoring?: boolean;
                     /** @description Launches the inline runs of this turn on the turn's model and generation settings (`modelId` and `generation` of `POST /api/runs/inline`, judged like any explicit model); absent = off, they run on the default model. A saved agent's run keeps its own model. */
                     inline_runs_use_chat_model?: boolean;
+                    /** @description Details in the assistant's context the integrations and agents of every space of the turn, not only those the conversation already depends on (its origin, the caller's personal space, the spaces it acted in); absent = off. Each space whose details show at least one entry is then recorded on the conversation, which is listed and opened only while its author reaches every space it recorded. */
+                    context_all_spaces?: boolean;
                     /** @description The pins of a conversation this turn creates (see ChatSession `pins`), written with its row; also honoured by an ephemeral turn (no `id`). Ignored for an existing conversation, whose pins change through PATCH /api/orgs/{orgId}/chat/sessions/{id}/skills. */
                     pins?: string[];
                     /** @description The discovery switch of a conversation this turn creates (see ChatSession `skill_discovery`); absent = on. Same rule as `pins`: ignored for an existing conversation. */

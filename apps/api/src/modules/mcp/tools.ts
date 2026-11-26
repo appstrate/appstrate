@@ -156,6 +156,7 @@ import type { DispatchContext } from "./api-call-batch.ts";
 import {
   grantedIn,
   grantedSpaces,
+  mcpSpaceActs,
   spaceIdsWhere,
   spaceArgumentRefusal,
   recordOperationSpaces,
@@ -606,7 +607,8 @@ function buildSearchTool(
     description:
       `Search what you can act on, by keyword: ${kinds.map((k) => KINDS[k].section).join(", ")}. ` +
       "Returns one section per kind searched, each with its `total` and its `items`, capped at " +
-      "`limit`; every item carries the `id` describe takes. " +
+      "`limit`, best match first and equal matches by name, an order that ranks no space; every " +
+      "item carries the `id` describe takes. " +
       (uses ? `Each kind is used by its own tool: ${uses}. ` : "") +
       "Without keywords, a section lists its kind (`tag` narrows operations). Operations your " +
       "role may not invoke are listed apart under `denied`, with the permissions they need: " +
@@ -733,14 +735,10 @@ function readingIn(ctx: McpToolContext, space: McpSpace | undefined): DispatchCo
 async function searchOperations({ ctx, spaces, tokens, tag, limit }: SearchCall) {
   let matches = [...getCatalog().operations.values()];
   if (tag) matches = matches.filter((op) => op.tags.some((t) => t.toLowerCase() === tag));
-  const scored = rankByKeywords(
-    matches.sort((a, b) => a.operationId.localeCompare(b.operationId)),
-    tokens,
-    (op) => ({
-      name: op.operationId,
-      text: `${op.summary} ${op.description} ${op.pathTemplate} ${op.tags.join(" ")}`,
-    }),
-  );
+  const scored = rankByKeywords(matches, tokens, (op) => ({
+    name: op.operationId,
+    text: `${op.summary} ${op.description} ${op.pathTemplate} ${op.tags.join(" ")}`,
+  }));
   const grantedHere = (op: CatalogOperation) => (space: McpSpace) =>
     operationGranted(op, space.permissions, ctx.ceiling);
 
@@ -2430,16 +2428,24 @@ export function buildFileResourceProvider(ctx: McpToolContext): AppstrateResourc
   };
 }
 
+/** The acts a `can` may name: those of the union surface an org-wide `get_me` is built with. */
+function actVocabulary(surface: McpSurface): string {
+  const acts = mcpSpaceActs(surface);
+  return acts.length > 0 ? ` (${acts.map((act) => `\`${act}\``).join(", ")})` : "";
+}
+
 function buildGetMeTool(ctx: McpToolContext, surface: McpSurface): AppstrateToolDefinition {
   const descriptor: Tool = {
     name: "get_me",
     description:
       "Return the caller's working context in the space of the call: `user`, `org` (with the " +
-      "organization `role`), `space`, `connections`, `agents`, `skills` and `recent_runs`" +
+      "organization `role`), `space`, `connections`, `connectable_integrations`, `agents`, `skills` " +
+      "and `recent_runs`" +
       (ctx.orgSpaces
         ? ", and `spaces`: your role in each space you reach, which, not the organization role, " +
-          "decides each call. With no space designated, it returns `user`, `org` and `spaces` " +
-          "alone: call it first without `space_id` to see which spaces you reach"
+          `decides each call, and \`can\`, the acts that role allows there${actVocabulary(surface)}: an act not ` +
+          "listed is refused in that space. With no space designated, it returns `user`, `org` " +
+          "and `spaces` alone: call it first without `space_id` to see which spaces you reach"
         : "") +
       ". `connections` holds one entry per " +
       "integration with a connection the caller may bind in THIS space, its own or shared into it " +
@@ -2463,8 +2469,14 @@ function buildGetMeTool(ctx: McpToolContext, surface: McpSurface): AppstrateTool
           ? "You cannot call them directly here: an admin closed this space's credential proxy " +
             "outside a run. Agents you run still use them. "
           : "") +
-      "`agents` and `skills` are capped (`agents_truncated`, `skills_truncated`): `search` finds " +
-      "the rest by keyword.",
+      "`connectable_integrations` names the integrations active in " +
+      "THIS space that the caller has not connected and for which a connect flow can start: " +
+      "connecting one makes it usable here. It is whole or withheld: more than 15 and it is " +
+      "empty with `connectable_integrations_truncated` true and the count in " +
+      "`connectable_integrations_total`; `search` finds them by keyword. " +
+      "`agents` and `skills` are listed whole, by id, or not at all: past 15 entries a list is " +
+      "empty, with `agents_truncated` / `skills_truncated` true and `agents_total` / " +
+      "`skills_total` counting it, and `search` finds its entries by keyword.",
     annotations: {
       title: "Get caller context",
       readOnlyHint: true,
@@ -2501,6 +2513,7 @@ function buildGetMeTool(ctx: McpToolContext, surface: McpSurface): AppstrateTool
       name: s.name,
       role: s.role,
       personal: s.personal,
+      can: mcpSpaceActs(s.surface),
     }));
     return readResponse(response, spaces ? { spaces } : undefined);
   };

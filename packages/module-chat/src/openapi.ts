@@ -694,6 +694,11 @@ export const chatPaths = {
                   description:
                     "Launches the inline runs of this turn on the turn's model and generation settings (`modelId` and `generation` of `POST /api/runs/inline`, judged like any explicit model); absent = off, they run on the default model. A saved agent's run keeps its own model.",
                 },
+                context_all_spaces: {
+                  type: "boolean",
+                  description:
+                    "Details in the assistant's context the integrations and agents of every space of the turn, not only those the conversation already depends on (its origin, the caller's personal space, the spaces it acted in); absent = off. Each space whose details show at least one entry is then recorded on the conversation, which is listed and opened only while its author reaches every space it recorded.",
+                },
                 pins: {
                   ...skillIds,
                   description:

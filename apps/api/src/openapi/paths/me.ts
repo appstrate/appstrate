@@ -838,6 +838,9 @@ export const mePaths = {
                 dependentRequired: {
                   space: [
                     "connections",
+                    "connectable_integrations",
+                    "connectable_integrations_truncated",
+                    "connectable_integrations_total",
                     "recent_runs",
                     "agents",
                     "agents_truncated",
@@ -889,6 +892,29 @@ export const mePaths = {
                           "`private`, no other members) rather than a team space.",
                       },
                     },
+                  },
+                  connectable_integrations: {
+                    type: "array",
+                    items: { type: "string" },
+                    description:
+                      "Ids of the integrations active in the current space that the caller has not " +
+                      "connected and for which a connect flow can start (an `oauth2` auth needs a " +
+                      "usable client), sorted by id. One whose only connection needs " +
+                      "reconnection is not listed: it stays in `connections`, flagged " +
+                      "`needs_reconnection`. Whole or withheld: more than 15 and the list is " +
+                      "empty (`connectable_integrations_truncated` true), never a prefix. Empty " +
+                      "unless the caller holds `integrations:read` and `integrations:connect`; " +
+                      "one whose member connections the space blocks is listed only under " +
+                      "`integrations:configure`.",
+                  },
+                  connectable_integrations_truncated: {
+                    type: "boolean",
+                    description:
+                      "True when `connectable_integrations` was withheld for exceeding 15.",
+                  },
+                  connectable_integrations_total: {
+                    type: "integer",
+                    description: "How many connectable integrations there are, listed or withheld.",
                   },
                   recent_runs: {
                     type: "array",
@@ -994,11 +1020,12 @@ export const mePaths = {
                   agents: {
                     type: "array",
                     description:
-                      "Agents ACTIVE in the current space (capped), each with the required " +
+                      "Agents ACTIVE in the current space, ordered by id, each with the required " +
                       "integrations that keep it from launching here. Only " +
                       "present when the caller holds the `agents:run` permission; empty otherwise. " +
-                      "When `agents_truncated` is true, the full list is reachable via the " +
-                      "`listAgents` operation.",
+                      "Listed whole or not at all: past 15 agents the list is empty, " +
+                      "`agents_truncated` is true, and the agents are reachable via the " +
+                      "`listAgents` operation (the MCP `search` tool finds them by keyword).",
                     items: {
                       type: "object",
                       required: [
@@ -1046,20 +1073,22 @@ export const mePaths = {
                   agents_truncated: {
                     type: "boolean",
                     description:
-                      "True when the agent list was capped (full list via `listAgents`).",
+                      "True when more agents are active than the cap; `agents` is then empty " +
+                      "(full list via `listAgents`).",
                   },
                   agents_total: {
                     type: "integer",
-                    description: "Total active agents before the cap.",
+                    description: "Total active agents, listed or not.",
                   },
                   skills: {
                     type: "array",
                     description:
-                      "Skills the caller could attach to an agent in the current space " +
-                      "(capped). A catalogue read, not a runnable hint: only present when the " +
+                      "Skills the caller could attach to an agent in the current space, " +
+                      "ordered by id. A catalogue read, not a runnable hint: only present when the " +
                       "caller holds the `skills:read` permission; empty otherwise. Skills are not run directly — declare them under an agent " +
-                      "manifest's `dependencies.skills`. When `skills_truncated` is true, the " +
-                      "full list is reachable via the `listSkills` operation.",
+                      "manifest's `dependencies.skills`. Listed whole or not at all: past 15 skills the " +
+                      "list is empty, `skills_truncated` is true, and the skills are reachable via the " +
+                      "`listSkills` operation (the MCP `search` tool finds them by keyword).",
                     items: {
                       type: "object",
                       required: [
@@ -1105,11 +1134,12 @@ export const mePaths = {
                   skills_truncated: {
                     type: "boolean",
                     description:
-                      "True when the skill list was capped (full list via `listSkills`).",
+                      "True when more skills are active than the cap; `skills` is then empty " +
+                      "(full list via `listSkills`).",
                   },
                   skills_total: {
                     type: "integer",
-                    description: "Total active skills before the cap.",
+                    description: "Total active skills, listed or not.",
                   },
                 },
               },
@@ -1155,6 +1185,9 @@ export const mePaths = {
                     ],
                   },
                 ],
+                connectable_integrations: ["@appstrate/slack"],
+                connectable_integrations_truncated: false,
+                connectable_integrations_total: 1,
                 recent_runs: [
                   {
                     packageId: "@appstrate/triage",

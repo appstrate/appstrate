@@ -5,6 +5,7 @@ import {
   ACTIVE_IN_SPACES_HINT,
   describeSpace,
   projectActiveInSpaces,
+  spaceActs,
   spaceIdRefusal,
 } from "../src/mcp-spaces.ts";
 
@@ -22,6 +23,33 @@ describe("describeSpace", () => {
     expect(describeSpace({ id: "spc_p", name: "Perso", role: "admin", personal: true })).toBe(
       "Perso (`spc_p`, role admin, your personal space)",
     );
+  });
+});
+
+describe("spaceActs", () => {
+  const none = {
+    invoke_operations: false,
+    run_agents: false,
+    inline_runs: false,
+    call_integration_tools: false,
+    create_packages: false,
+  };
+
+  it("names the acts granted, in one fixed order whatever the keys' order", () => {
+    expect(spaceActs(none)).toEqual([]);
+    expect(
+      spaceActs({
+        create_packages: true,
+        run_agents: true,
+        inline_runs: true,
+        invoke_operations: true,
+        call_integration_tools: false,
+      }),
+    ).toEqual(["invoke_operations", "run_agents", "inline_runs", "create_packages"]);
+    expect(spaceActs({ ...none, call_integration_tools: true, invoke_operations: true })).toEqual([
+      "invoke_operations",
+      "call_integration_tools",
+    ]);
   });
 });
 
