@@ -23,12 +23,13 @@ import { describeKnownModel, lookupCatalogModel } from "../../src/services/model
 import { seedTestModelProviders } from "../helpers/model-providers.ts";
 
 /**
- * OpenCode Go serves `kimi-k3.1-pro` under another response cap than the first
- * Pi record of it (Pi 1.5.2: moonshotai's cap fills the window, OpenCode Go's
- * is 131072). `kimi-k2.7-code` no longer discriminates: both caps fill it.
+ * Together AI serves `thinkingmachines/Inkling` under another response cap than
+ * the first Pi record of it (Pi 1.6.0: Together's is 131072, the other record
+ * declares none). OpenCode Go no longer discriminates: since Pi 1.6.0 every id
+ * it shares carries the same cap in both records.
  */
-const PROVIDER = "opencode-go";
-const SHARED_ID = "kimi-k3.1-pro";
+const PROVIDER = "together-ai";
+const SHARED_ID = "thinkingmachines/Inkling";
 /** Deliberately never registered — exercises the cross-provider fallback. */
 const UNKNOWN_PROVIDER = "test-describe-unregistered";
 

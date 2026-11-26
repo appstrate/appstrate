@@ -156,7 +156,7 @@ describe("Pi chat model binding", () => {
       id: "preset_chat",
       provider: "opencode-go",
       reasoning: true,
-      compat: { thinkingFormat: "deepseek", supportsDeveloperRole: false },
+      compat: { thinkingFormat: "deepseek", requiresReasoningContentOnAssistantMessages: true },
     });
     expect(JSON.stringify(bind({ pi_dialect }))).not.toContain("deepseek-v4.1-flash");
     // The chat reads no registry: a recorded id listed without a dialect gets none.
