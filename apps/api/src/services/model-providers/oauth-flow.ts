@@ -10,7 +10,7 @@
  * Persisted shape: a single row in `model_provider_credentials` with the
  * encrypted blob carrying `kind: "oauth"` (access + refresh tokens, scopes,
  * accountId, email, …). The same row is the lookup target for the sidecar's
- * `/internal/oauth-token/:id` polling and the BullMQ refresh worker scan.
+ * `/internal/oauth-token/:id` polling and the background credential refresh sweep.
  *
  * Why no `/initiate` + `/callback` here: the public CLI client_ids only
  * allowlist `http://localhost:PORT/...` redirect_uris baked into the

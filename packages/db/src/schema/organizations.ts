@@ -279,8 +279,8 @@ export const modelProviderCredentials = pgTable(
     baseUrlOverride: text("base_url_override"),
     /**
      * Denormalized OAuth token expiry — duplicates `blob.expiresAt` from the
-     * encrypted blob to enable an efficient SQL filter in the refresh worker
-     * scan (avoids decrypting every row to test a single timestamp).
+     * encrypted blob to enable an efficient SQL filter in the background
+     * refresh sweep (avoids decrypting every row to test a single timestamp).
      *
      * The blob remains the source of truth; this column is a cache, written
      * by `updateOAuthCredentialTokens` / `createOAuthCredential`. NULL for

@@ -6,6 +6,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Upgrade and client changes
+
+- A background sweep now keeps the refresh tokens of idle OAuth2 credentials alive, for integration connections and OAuth model-provider credentials alike (#2411). It runs on every install and needs no setting. Once an hour it picks up credentials whose token has expired or is about to, and tries each one at most once a day. A token that is still valid is never exchanged, and a credential in use is left to its own on-demand refresh. A credential whose refresh keeps failing stays in the sweep until it is flagged as needing reconnection.
+- `OAUTH_REFRESH_WORKER_ENABLED` is removed, together with the optional model-provider refresh worker it switched on. An `.env` that still sets it is ignored; remove the line.
+- The default of `INTEGRATION_REFRESH_GRACE_SECONDS` goes from 3600 to 259200 (3 days), so a provider outage does not flag connections before the daily retries have had several chances. An explicitly configured value is kept.
+- The credential proxy now refreshes an expiring token before sending the request, so the first call outside a run after an expiry no longer fails with a `401`. The OAuth client used for any refresh is now resolved from the connection's own organization and space, not from the caller's space.
+- A credential that flips to needing reconnection now emits the module event `onCredentialNeedsReconnection` (`integration_connection` or `model_provider_credential`) and the `credential.needs_reconnection` webhook event, once per transition whichever path detected it. The owner of an integration connection also receives a bell notification of type `credential_needs_reconnection`; model credentials have no owner notification yet.
+- Migrations 0114 (`refresh_checked_at` columns and index) and 0115 (notification type) apply at boot.
+- Installs that ran with `OAUTH_REFRESH_WORKER_ENABLED=true` and Redis keep a repeatable scheduler named `oauth-model-refresh-scan` on the queue of the same name. It has no worker any more and is inert, but it stays in Redis. To remove it, delete the `bull:oauth-model-refresh-scan:*` keys (for example `redis-cli --scan --pattern 'bull:oauth-model-refresh-scan:*'` piped to `xargs redis-cli del`) or remove the job scheduler `oauth-model-refresh-scan` from that queue with BullMQ.
+
 ## [1.0.0-beta.71] - 2026-11-24
 
 ### Module authors
