@@ -7,17 +7,26 @@
 
 /**
  * Lower-cased path with each valid `%XX` triplet decoded on its own (a malformed escape elsewhere
- * in the path stays as written), `;params` dropped from every segment, and repeated and trailing
- * slashes collapsed.
+ * in the path stays as written), `\` read as `/`, `;params` dropped from every segment, dot
+ * segments resolved, and repeated and trailing slashes collapsed. Decoding comes first because a
+ * proxy that decodes `%2F`, `%5C` or `%2E` before routing would otherwise route `/x/..%2Fmcp` to
+ * `/mcp` while the raw path never matched it.
  */
 function normalisedPath(url: URL): string {
-  return url.pathname
+  const decoded = url.pathname
     .replace(/%[0-9a-f]{2}/gi, (escape) => String.fromCharCode(parseInt(escape.slice(1), 16)))
-    .split("/")
-    .map((segment) => {
-      const params = segment.indexOf(";");
-      return params === -1 ? segment : segment.slice(0, params);
-    })
+    .replace(/\\/g, "/");
+  const resolved: string[] = [];
+  for (const raw of decoded.split("/")) {
+    const params = raw.indexOf(";");
+    const segment = params === -1 ? raw : raw.slice(0, params);
+    if (segment === ".") continue;
+    // `..` never climbs above the root (RFC 3986 §5.2.4): the leading empty segment stays.
+    if (segment === "..") {
+      if (resolved.length > 1) resolved.pop();
+    } else resolved.push(segment);
+  }
+  return resolved
     .join("/")
     .toLowerCase()
     .replace(/\/{2,}/g, "/")
@@ -36,8 +45,7 @@ export interface McpEndpoint {
  *   - over SSE, any path: the server announces the endpoint its messages are POSTed to, at a path
  *     of its choosing on that origin (often outside `server.url`'s), so the whole origin is it;
  *   - otherwise, a path equal to the endpoint's or under it (`<path>/…`), compared
- *     case-insensitively after percent-decoding each valid `%XX`, with `;params` dropped from
- *     every segment and repeated and trailing slashes collapsed; query and fragment ignored. An
+ *     case-insensitively once normalised as `normalisedPath` does; query and fragment ignored. An
  *     endpoint at the origin root matches the root path only, so the other paths of that host
  *     stay reachable.
  */

@@ -37,6 +37,16 @@ describe("targetsMcpEndpoint", () => {
       ["https://mcp.example.com/v1/mcp%3Bx", true],
       ["https://mcp.example.com/v1/mcp-other", false],
       ["https://mcp.example.com/v1/mcpx;y", false],
+      // Dot segments and backslashes a decoding proxy resolves before routing.
+      ["https://mcp.example.com/other/..%2Fv1/mcp", true],
+      ["https://mcp.example.com/..%2F..%2Fv1/mcp", true],
+      ["https://mcp.example.com/other/%2e%2e/v1/mcp", true],
+      ["https://mcp.example.com/other%5C..%5Cv1/mcp", true],
+      ["https://mcp.example.com/v1/x/%2e%2e/mcp", true],
+      ["https://mcp.example.com/v1/%2e/mcp", true],
+      ["https://mcp.example.com/v1/mcp/x/..%2fother", true],
+      ["https://mcp.example.com/v1%5Cmcp", true],
+      ["https://mcp.example.com/v1/mcp/..%2Fother", false],
       ["https://mcp.example.com:444/v1/mcp", false],
       ["not a url", false],
     ];
