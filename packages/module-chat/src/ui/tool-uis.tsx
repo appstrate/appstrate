@@ -428,9 +428,11 @@ function CreatedPackageLink({
     announcedPackageWrites.add(toolCallId);
     onPackagesChanged();
   }, [toolCallId, onPackagesChanged]);
+  const href = linkInSpace(packagePageHref(created), spaceId);
+  if (!href) return null;
   return (
     <a
-      href={linkInSpace(packagePageHref(created), spaceId)}
+      href={href}
       className="text-primary hover:bg-muted/50 flex items-center gap-1.5 border-t px-3 py-2 text-xs font-medium"
     >
       <ArrowUpRightIcon className="size-3.5 shrink-0" />

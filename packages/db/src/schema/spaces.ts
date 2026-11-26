@@ -135,12 +135,16 @@ export const spaceRoles = pgTable(
       .array()
       .notNull()
       .default(sql`'{}'::text[]`),
+    // Resolves `studio:read` (RBAC spec §3.3), never stored in `permissions`.
+    showsStudio: boolean("shows_studio").notNull().default(true),
     createdBy: text("created_by").references(() => user.id, { onDelete: "set null" }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (table) => [
     uniqueIndex("idx_space_roles_org_key").on(table.orgId, table.key),
+    // Target of the org-scoped `organizations_personal_space_role_fk`.
+    uniqueIndex("uq_space_roles_id_org_id").on(table.id, table.orgId),
     // Referencing-side index for the `user` SET NULL action.
     index("idx_space_roles_created_by").on(table.createdBy),
     check(

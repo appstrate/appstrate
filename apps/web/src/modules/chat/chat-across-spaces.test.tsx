@@ -153,6 +153,27 @@ describe("the conversation panel", () => {
       "<p>summary,tools</p>",
     );
   });
+
+  it("lists the runs and files tabs for a role without the Studio: the chat keeps its data", () => {
+    const chatOnly = [
+      testSpace("spc_a", ["chat:read", "runs:read", "files:read"], "spc_a", { studio: false }),
+    ];
+    expect(renderOverview(<Tabs />, chatOnly).html).toContain("<p>summary,runs,files,tools</p>");
+  });
+
+  it("lists a run of a space without the Studio, unlinked: its page is a Studio screen", () => {
+    const runs = [makeRun({ id: "run_a", spaceId: "spc_a", packageId: "@acme/reporter" })];
+    const html = (studio: boolean) =>
+      listed(
+        <ConversationRuns conversationId="chs_1" active />,
+        [testSpace("spc_a", ["chat:read", "runs:read"], "spc_a", { studio })],
+        "/api/orgs/{orgId}/runs",
+        runs,
+      );
+    expect(html(false)).toContain("#42");
+    expect(html(false)).not.toContain("/runs/run_a");
+    expect(html(true)).toContain("/runs/run_a");
+  });
 });
 
 describe("the grants the chat module reads", () => {

@@ -18,7 +18,7 @@ export function readShown(query: { data: unknown; error: unknown }): "ready" | "
 
 /** The runs a conversation launched, in every space the reader reads runs in, newest first. */
 export function useConversationRuns(conversationId: string | null, active: boolean) {
-  const admitting = useAdmittingSpaces("runs");
+  const admitting = useAdmittingSpaces("runs", "chat");
   const canRead = admitting.length > 0;
   // Spanning: the conversation's runs are every space's, polled (the SSE stream carries one space).
   const scope = useListScope(true, canRead);
@@ -51,7 +51,7 @@ export function useConversationRuns(conversationId: string | null, active: boole
 
 /** The files of a conversation, in every space the reader reads files in, newest first. */
 export function useConversationFiles(conversationId: string | null, active: boolean) {
-  const admitting = useAdmittingSpaces("files");
+  const admitting = useAdmittingSpaces("files", "chat");
   const query = useFiles({
     spanning: true,
     contextChatSessionId: conversationId ?? undefined,

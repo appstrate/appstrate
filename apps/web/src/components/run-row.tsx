@@ -7,7 +7,7 @@ import { cn } from "@appstrate/ui/cn";
 import { RunStatusBadge } from "./status-badge";
 import { RunIdentity } from "./run-identity";
 import { runDetailPath } from "../lib/package-paths";
-import { useSpaceLink } from "../hooks/use-current-space";
+import { useReachableSpaceLink } from "../hooks/use-can-reach";
 import { SpaceNameOf } from "./space-name";
 
 /**
@@ -15,7 +15,8 @@ import { SpaceNameOf } from "./space-name";
  * dashboard, the chat's context panel): its identity (`RunIdentity`, the runs
  * table's « Run » column), then the run's space in a list spanning spaces (the runs table's
  * « Espace » cell), then its status.
- * The row is the run's link when the run still has an agent to live under.
+ * The row is the run's link when the run still has an agent to live under and its page opens
+ * for the reader.
  */
 export function RunRow({
   run,
@@ -56,7 +57,7 @@ export function RunRow({
 
 /**
  * A run's row, whatever it draws of the run: the run's link, hovering like a list row, when the run
- * still has an agent to live under, else a plain row. {@link RunRow}, and the chat summary's
+ * still has an agent to live under and its page opens for the reader, else a plain row. {@link RunRow}, and the chat summary's
  * one-line runs.
  */
 export function RunLink({
@@ -68,10 +69,11 @@ export function RunLink({
   className: string;
   children: ReactNode;
 }) {
-  const linkInSpace = useSpaceLink();
-  return run.packageId ? (
+  const linkInSpace = useReachableSpaceLink();
+  const href = run.packageId && linkInSpace(runDetailPath(run.packageId, run.id), run.spaceId);
+  return href ? (
     <Link
-      to={linkInSpace(runDetailPath(run.packageId, run.id), run.spaceId)}
+      to={href}
       state={{ runNumber: run.runNumber }}
       className={cn(className, "hover:bg-muted/50 transition-colors")}
     >

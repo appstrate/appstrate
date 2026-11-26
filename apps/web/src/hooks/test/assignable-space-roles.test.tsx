@@ -17,6 +17,7 @@ const custom: RoleObject = {
   name: "Delegated reader",
   description: null,
   permissions: ["agents:read"],
+  shows_studio: true,
   unavailable_permissions: [],
   createdAt: null,
   updatedAt: null,

@@ -23,28 +23,32 @@ import {
   user as userTable,
 } from "@appstrate/db/schema";
 import type { SpaceRolePreset } from "@appstrate/core/permissions";
-import type { OrganizationMemberSpace, SpaceMember } from "@appstrate/shared-types";
+import type {
+  OrganizationMemberSpace,
+  SpaceMember,
+  SpaceRoleAssignment,
+} from "@appstrate/shared-types";
 import { ApiError, conflict, notFound } from "../lib/errors.ts";
 import {
   customRoleOn,
   loadSpaceMember,
+  lockOrgSpaceRole,
   MEMBERSHIP_COLUMNS,
   memberFromJoin,
-  PERSONAL_SPACE_ROLE_COLUMN,
+  PERSONAL_SPACE_DEFAULT_COLUMNS,
+  personalSpaceDefaultOn,
+  psr,
   resolveSpaceRole,
-  toPersonalSpaceRole,
   toSpaceRoleWire,
   type SpaceAccessRow,
   type SpaceRoleRef,
 } from "../lib/space-role.ts";
+import type { SpaceRoleColumns } from "../lib/space-role-assignment.ts";
 import { assertCanGrantSpaceRole, assertCanManageSpaceMember } from "../lib/space-role-policy.ts";
 import type { DbOrTx, Tx } from "../lib/db-helpers.ts";
 import { actorFromIds } from "../lib/actor.ts";
 import { disableForeignSchedules } from "./schedules-naming-connection.ts";
 import { sharedInto } from "./connection-reach.ts";
-
-/** Assignment as the write routes accept it: one preset, or one custom role id. */
-export type SpaceRoleAssignment = { preset_role: SpaceRolePreset } | { custom_role_id: string };
 
 /** Resolve a known email without exposing the organization's member directory. */
 export async function resolveOrgMemberEmail(orgId: string, email: string): Promise<string> {
@@ -119,7 +123,7 @@ async function listMembersOfSpaces(
       },
       userId: organizationMembers.userId,
       orgRole: organizationMembers.role,
-      storedPersonalSpaceRole: PERSONAL_SPACE_ROLE_COLUMN,
+      ...PERSONAL_SPACE_DEFAULT_COLUMNS,
       name: userTable.name,
       email: userTable.email,
       displayName: profiles.displayName,
@@ -128,6 +132,7 @@ async function listMembersOfSpaces(
     })
     .from(spaces)
     .innerJoin(organizations, eq(organizations.id, spaces.orgId))
+    .leftJoin(psr, personalSpaceDefaultOn)
     .innerJoin(organizationMembers, eq(organizationMembers.orgId, spaces.orgId))
     .innerJoin(userTable, eq(userTable.id, organizationMembers.userId))
     .leftJoin(profiles, eq(profiles.id, organizationMembers.userId))
@@ -156,15 +161,9 @@ async function listMembersOfSpaces(
     const member = memberFromJoin(row);
     // The fourth argument is the user THIS row is about, not the request's
     // caller: the question asked of the resolver is "what would this person
-    // hold here". On a personal space that answers `admin` for its owner and
-    // `null` for everyone else, so the list is the owner alone (decision 10).
-    const effective = resolveSpaceRole(
-      row.orgRole,
-      row.space,
-      member,
-      row.userId,
-      toPersonalSpaceRole(row.storedPersonalSpaceRole),
-    );
+    // hold here". On a personal space that answers the owner's own role for
+    // them and `null` for everyone else, so the list is the owner alone (decision 10).
+    const effective = resolveSpaceRole(row.orgRole, row.space, member, row.userId, row);
     if (!effective) continue;
     out.push({
       space: { id: row.space.id, name: row.space.name },
@@ -259,10 +258,11 @@ export async function saveSpaceMember(params: {
 }
 
 /**
- * A personal space has exactly one member — its owner — and no row for them
+ * A personal space has exactly one member — its owner — and no row for them here
  * (RBAC spec §3.6, decision 10). "Personal" has to mean one thing: collaboration
  * goes through a team space, distribution through sharing. Converting the space
- * (`POST /api/spaces/{id}/convert-to-team`) is what makes it grantable.
+ * (`POST /api/spaces/{id}/convert-to-team`) is what makes it grantable. The owner's
+ * override of the org default has its own door on the org members API.
  */
 async function assertSpaceTakesMembers(tx: DbOrTx, spaceId: string): Promise<void> {
   const [space] = await tx
@@ -270,13 +270,15 @@ async function assertSpaceTakesMembers(tx: DbOrTx, spaceId: string): Promise<voi
     .from(spaces)
     .where(eq(spaces.id, spaceId))
     .limit(1);
-  if (space?.ownerUserId) {
-    throw conflict(
-      "personal_space_has_no_members",
-      "A personal space belongs to one member and takes no others. " +
-        "Convert it to a team space first.",
-    );
-  }
+  if (space?.ownerUserId) throw personalSpaceHasNoMembers();
+}
+
+function personalSpaceHasNoMembers(): ApiError {
+  return conflict(
+    "personal_space_has_no_members",
+    "A personal space belongs to one member and takes no others. " +
+      "Convert it to a team space first.",
+  );
 }
 
 function existingSpaceMember() {
@@ -284,12 +286,6 @@ function existingSpaceMember() {
     "space_member_exists",
     "This user already has an explicit space role; use PATCH to change it",
   );
-}
-
-/** Columns the two nullable role references occupy — exactly one is set. */
-interface RoleColumns {
-  presetRole: SpaceRolePreset | null;
-  customRoleId: string | null;
 }
 
 /** What a removal did, and the standing the target is left with. */
@@ -349,13 +345,12 @@ export async function removeSpaceMember(params: {
 }): Promise<SpaceMemberRemoval> {
   const { orgId, space, userId } = params;
   return db.transaction(async (tx) => {
+    // Its owner's override: only `/api/orgs/{orgId}/members/{userId}/personal-space-role`.
+    if (space.ownerUserId !== null) throw personalSpaceHasNoMembers();
     const target = await lockOrgMember(tx, orgId, userId);
     await lockSpaceRow(tx, space.id);
-    // The standing is the TARGET's, so the caller id is theirs — a personal
-    // space resolves `admin` for its owner and nothing for anyone else. No
-    // member row: the removal is about to delete the only one there could be. The cap is
-    // `admin`: only an `admin` of a personal space (its uncapped owner) reaches this route.
-    const accessAfter = target ? resolveSpaceRole(target.role, space, null, userId, "admin") : null;
+    // The standing is the TARGET's, in a team space, without the row about to be deleted.
+    const accessAfter = target ? resolveSpaceRole(target.role, space, null, userId, null) : null;
     assertCanGrantSpaceRole(params.actorPermissions, accessAfter);
     const existing = await loadSpaceMember(space.id, userId, tx);
     if (!existing) return removal(false, accessAfter, nothingUnshared());
@@ -405,10 +400,8 @@ export async function deleteSpaceMembershipsInOrg(
   orgId: string,
   userId: string,
 ): Promise<RevokedSpaceAssignment[]> {
-  // Every space of the org, personal ones included, and that is not a leak:
-  // a personal space holds no `space_members` row at all
-  // ({@link assertSpaceTakesMembers}), so a promotion has nothing to revoke
-  // there and cannot reach inside one.
+  // Every space of the org, personal ones included: an exit must not leave the
+  // personal-space override to revive on a re-invite.
   const orgSpaces = await tx.select({ id: spaces.id }).from(spaces).where(eq(spaces.orgId, orgId));
   if (orgSpaces.length === 0) return [];
   return tx
@@ -652,9 +645,12 @@ async function sharesOfOwnersWithoutAccess(
         ownerUserId: spaces.ownerUserId,
       },
       ...MEMBERSHIP_COLUMNS,
+      ...PERSONAL_SPACE_DEFAULT_COLUMNS,
     })
     .from(integrationConnections)
     .innerJoin(spaces, and(on, eq(spaces.orgId, integrationConnections.orgId)))
+    .innerJoin(organizations, eq(organizations.id, spaces.orgId))
+    .leftJoin(psr, personalSpaceDefaultOn)
     .leftJoin(
       organizationMembers,
       and(
@@ -677,8 +673,8 @@ async function sharesOfOwnersWithoutAccess(
       (row) =>
         row.orgRole === null ||
         row.userId === departedUserId ||
-        // Only null-ness is read, and the cap never turns a role into null or back.
-        resolveSpaceRole(row.orgRole, row.space, memberFromJoin(row), row.userId, "admin") === null,
+        // The owner may be judged in their own personal space: its default, same statement.
+        resolveSpaceRole(row.orgRole, row.space, memberFromJoin(row), row.userId, row) === null,
     )
     .map((row) => ({ connectionId: row.id, spaceId: row.space.id }));
 }
@@ -698,22 +694,13 @@ async function assignmentColumns(
   assignment: SpaceRoleAssignment,
   actorPermissions: ReadonlySet<string> | undefined,
   tx: DbOrTx,
-): Promise<RoleColumns> {
+): Promise<SpaceRoleColumns> {
   if ("preset_role" in assignment) {
     assertCanGrantSpaceRole(actorPermissions, { kind: "preset", preset: assignment.preset_role });
     return { presetRole: assignment.preset_role, customRoleId: null };
   }
-  const [role] = await tx
-    .select({
-      id: spaceRoles.id,
-      key: spaceRoles.key,
-      name: spaceRoles.name,
-      permissions: spaceRoles.permissions,
-    })
-    .from(spaceRoles)
-    .where(and(eq(spaceRoles.id, assignment.custom_role_id), eq(spaceRoles.orgId, orgId)))
-    .limit(1);
-  if (!role) throw notFound("Space role not found");
+  // Share-locked: a concurrent `deleteSpaceRole` answers 409 or this 404, never an FK violation.
+  const role = await lockOrgSpaceRole(tx, orgId, assignment.custom_role_id);
   assertCanGrantSpaceRole(actorPermissions, { kind: "custom", role });
   return { presetRole: null, customRoleId: role.id };
 }

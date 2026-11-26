@@ -22,6 +22,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   whose calls only look things up although `readOnlyHint` is withheld; `isLookupTool` reads either.
 - **`isTurnBudgetNote`** (`@appstrate/core/chat-turn-metadata`): whether a tool result's text part
   is the chat's model-facing turn-budget line (`formatTurnBudgetNote`).
+- `SPACE_ROLE_ID_REGEX` and `isSpaceRolePreset` in `@appstrate/core/permissions`.
+- `personalSpaceRoleSettingSchema` (a preset key or a custom space role id: the wire value of
+  `personal_space_role`) and `orgSettingsWireSchema` (`orgSettingsReadSchema` with
+  `personal_space_role` read through it) in `@appstrate/core/permissions`.
 - **`spaceActs`, `SpaceAct`** (`@appstrate/core/mcp-spaces`).
   The acts a caller holds in one space (`invoke_operations`, `run_agents`, `inline_runs`,
   `call_integration_tools`, `create_packages`), in one vocabulary for the MCP `get_me` tool's
@@ -31,6 +35,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **`unwrapMcpResult`** (`@appstrate/core/mcp-result`) leaves the turn-budget line, the last
   block, out of a plain-text result: a failed call's message no longer ends with the model's `[turn budget] …`.
+- **New core resource `studio`, permission `studio:read`** — BREAKING. The `CoreResource` and
+  `Permission` unions widen (`CoreResources.studio`; the `Permission` type gains `studio:read`), and
+  a module that declares a `studio` permission resource is refused at load
+  (`cannot redefine core resource`). The permission is space-level, opens the Studio's screens in the dashboard and gates
+  no API route.
+- **`orgSettingsReadSchema.personal_space_role`** — BREAKING. The output type widens from
+  `"admin" | "operator"` to a space-role preset key (`admin`, `builder`, `operator`, `runner`,
+  `viewer`), and `orgSettingsSchema` accepts the same values on input. The stored key holds a
+  preset only: a custom default lives in a column of the organization, outside the JSON. The read
+  default stays `admin`; stored `admin` and `operator` remain valid. The org settings as served
+  (`OrgSettings` in `@appstrate/shared-types`) follow `orgSettingsWireSchema`, which also accepts a
+  custom space role id.
 
 ### Removed
 
