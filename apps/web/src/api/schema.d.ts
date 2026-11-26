@@ -31288,7 +31288,7 @@ export interface operations {
                         duration_ms: number;
                         /** @description Set on a 2xx answered with the injected credential when it ends a rejection streak the sidecar knows of: the `credential_revision` of that credential. Only with a non-null `connection_id` and a 2xx `outcome`. */
                         credential_revision?: string;
-                        /** @description Set on a `403` answered through a connection whose `WWW-Authenticate` challenge is `insufficient_scope` and names scopes: the valid scope tokens it named. The platform records them as the connection's step-up demand (`requested_scopes`, minus what it holds) when the run's actor still reaches it, and stamps the run's `metadata.scope_requests[]` with the connection's whole standing demand. Only with a non-null `connection_id` and a `403` `outcome`. */
+                        /** @description Set on a `403` answered through a connection whose `WWW-Authenticate` challenge is `insufficient_scope` and names scopes: the valid scope tokens it named. The platform records them as the connection's step-up demand (`requested_scopes`, minus what it holds) when it is an OAuth2 connection the run's actor still reaches, and stamps the run's `metadata.scope_requests[]` with the connection's whole standing demand. Only with a non-null `connection_id` and a `403` `outcome`. */
                         required_scopes?: string[];
                     }[];
                 };

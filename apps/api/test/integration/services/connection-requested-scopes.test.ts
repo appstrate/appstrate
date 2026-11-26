@@ -2,7 +2,7 @@
 
 /**
  * A connection's step-up demand: the scopes a server asked for that it does not hold. One writer
- * (`recordRequestedScopes`, behind its reach), cleared by the credential write that grants them.
+ * (`recordRequestedScopes`, behind its reach, OAuth2 only), cleared by the credential write that grants them.
  */
 
 import { describe, it, expect, beforeEach } from "bun:test";
@@ -43,6 +43,7 @@ describe("connection requested scopes", () => {
       credentials: { access_token: "tok" },
       identityClaims: { email: "alice@example.com" },
       scopesGranted,
+      clientRef: "test-client",
       actor,
       connectionId,
     });
@@ -61,6 +62,7 @@ describe("connection requested scopes", () => {
       credentials: { access_token: "tok" },
       identityClaims: { email: "alice@example.com" },
       scopesGranted: ["read"],
+      clientRef: "test-client",
       actor,
     });
     connectionId = created.id;
@@ -95,6 +97,22 @@ describe("connection requested scopes", () => {
     );
     expect(unreached).toBeNull();
     expect(await requested()).toEqual([]);
+  });
+
+  it("records nothing on a connection no consent grants scopes to (no minting client)", async () => {
+    const keyed = await saveIntegrationConnection(scope, {
+      packageId: INTEGRATION,
+      authKey: "key",
+      accountId: "key-account",
+      credentials: { api_key: "k" },
+      actor,
+    });
+    expect(await recordRequestedScopes(keyed.id, INTEGRATION, reach, ["write"])).toBeNull();
+    const [row] = await db
+      .select({ requested: integrationConnections.requestedScopes })
+      .from(integrationConnections)
+      .where(eq(integrationConnections.id, keyed.id));
+    expect(row!.requested).toEqual([]);
   });
 
   it("is cleared by the reconnect that grants the scopes, and only by it", async () => {

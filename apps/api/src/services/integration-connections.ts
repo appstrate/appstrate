@@ -2710,7 +2710,9 @@ const MAX_REQUESTED_SCOPES = 20;
  * Record the scopes a server asked for (`insufficient_scope`) that a connection does not hold, for
  * a caller whose `reach` reaches it. The ONE writer of `requested_scopes`, whatever the door (the
  * credential proxy outside a run, a run's report); {@link persistCredentialBundle} is the one
- * that clears it. Only valid scope tokens are kept, at most {@link MAX_REQUESTED_SCOPES}.
+ * that clears it. Only valid scope tokens are kept, at most {@link MAX_REQUESTED_SCOPES}. Only an
+ * OAuth2 connection (one with a minting client) takes a demand: a consent is what grants scopes,
+ * and only its grant ever clears them.
  */
 export async function recordRequestedScopes(
   connectionId: string,
@@ -2724,7 +2726,12 @@ export async function recordRequestedScopes(
       requested: integrationConnections.requestedScopes,
     })
     .from(integrationConnections)
-    .where(reachableConnection(connectionId, integrationId, reach))
+    .where(
+      and(
+        reachableConnection(connectionId, integrationId, reach),
+        isNotNull(integrationConnections.clientRef),
+      ),
+    )
     .limit(1);
   if (!row) return null;
   const granted = new Set(row.granted);
