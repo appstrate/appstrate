@@ -72,6 +72,7 @@ describe("MITM listener — inner-request body cap", () => {
       CAP,
       (e) => events.push(e),
       allowAll,
+      null,
     );
 
     expect(res.status).toBe(413);
@@ -105,6 +106,7 @@ describe("MITM listener — inner-request body cap", () => {
       CAP,
       (e) => events.push(e),
       allowAll,
+      null,
     );
 
     expect(res.status).toBe(413);
@@ -137,6 +139,7 @@ describe("MITM listener — inner-request body cap", () => {
       CAP,
       (e) => events.push(e),
       allowAll,
+      null,
     );
 
     // Whatever the planner decides for an unauthenticated host, the body itself
@@ -167,6 +170,7 @@ describe("MITM listener — inner-request egress allowlist (#1458)", () => {
           return url.startsWith("https://api.test.local/v1/");
         },
       },
+      null,
     );
 
     expect(res.status).toBe(403);

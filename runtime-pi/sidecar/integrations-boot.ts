@@ -42,15 +42,17 @@ import { guardedFetchChain, SsrfBlockedError } from "@appstrate/afps-shared/guar
 import { compileRunnerEgressPolicy, isOperatorTrustedEgressHost } from "./ssrf.ts";
 import { unzipBounded } from "@appstrate/core/zip";
 import { mapWithConcurrency } from "@appstrate/core/map-with-concurrency";
+import { findCause } from "@appstrate/core/error-cause";
 
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { SSEClientTransport } from "@modelcontextprotocol/sdk/client/sse.js";
-import { ListRootsRequestSchema } from "@modelcontextprotocol/sdk/types.js";
+import { ErrorCode, ListRootsRequestSchema, McpError } from "@modelcontextprotocol/sdk/types.js";
 import {
   createInProcessPair,
   boundResourceResponse,
   createMcpHttpClient,
   httpStatusOf,
+  isMcpOperationExchange,
   isMcpProtocolError,
   isRequestTimeout,
   mcpFetch,
@@ -92,6 +94,12 @@ import {
   type IntegrationCredentialsSource,
 } from "./integration-credentials-source.ts";
 import { createApiCallCredentialAdapter } from "./api-call-credentials.ts";
+import {
+  connectionCallJournal,
+  type CallJournal,
+  type CallReporter,
+  type DispatchedCall,
+} from "./call-reporter.ts";
 import { runConnectLogin } from "./connect-login.ts";
 import {
   createApiCallToolDefs,
@@ -470,6 +478,32 @@ const REMOTE_PROVISION_TIMEOUT_MS = 30_000;
 /** A refusal the credential closure of a remote MCP server authored itself: safe to relay. */
 class RemoteCredentialRefusal extends Error {
   override readonly name = "RemoteCredentialRefusal";
+  constructor(
+    message: string,
+    /** Refused on a redirect hop: the request before it reached the server. */
+    readonly afterDispatch = false,
+  ) {
+    super(message);
+  }
+}
+
+/**
+ * The journal outcome of a remote MCP exchange that threw, or `null` when no request can have
+ * reached the server (a refusal of the initial target, a value refused before it was set): the
+ * platform's own classification of a direct MCP exchange (`mcp-over-proxy.ts`).
+ */
+function remoteExchangeFailureOutcome(err: unknown): string | null {
+  if (err instanceof RemoteCredentialRefusal) {
+    return err.afterDispatch ? "unauthorized_target" : null;
+  }
+  if (err instanceof InvalidHeaderValueError) return null;
+  if (err instanceof SsrfBlockedError && err.reason !== "too-many-redirects") {
+    if (err.hop === 0) return null;
+    return err.reason === "resolution-failed" ? "upstream_unresolvable" : "blocked_target";
+  }
+  return findCause(err, (e) => e.name === "TimeoutError") !== undefined
+    ? "upstream_timeout"
+    : "upstream_unreachable";
 }
 
 /** Why a remote MCP exchange failed, named without any text the server or the transport wrote. */
@@ -593,6 +627,7 @@ async function settleRemoteClient(
 export async function connectRemoteHttpIntegration(
   spec: IntegrationSpawnSpec,
   source: IntegrationCredentialsSource | null,
+  journal: CallJournal,
   deps: ConnectRemoteHttpDeps = {},
 ): Promise<{ client: AppstrateMcpClient; authKey: string | null }> {
   const createSseClient = deps.createSseClient ?? defaultCreateSseClient;
@@ -669,6 +704,7 @@ export async function connectRemoteHttpIntegration(
   // on it is reported as such, and the platform flags an unrefreshable credential at once. A
   // connect.tool auth acquires its session after the handshake and keeps the call path.
   let connected = false;
+  let unconnectedExchange: DispatchedCall | null = null;
   const handshakeRejectable =
     credential !== null && spec.connectLogin?.authKey !== credential.authKey;
 
@@ -684,17 +720,18 @@ export async function connectRemoteHttpIntegration(
       const injection = planInjection(snapshot, [...headers.keys()]);
       // AFPS §8.6: the credential goes only to the URIs rendered for its connection, on every
       // hop that still carries it (same origin as the first; another origin strips it).
-      let validateHop: ((url: URL) => void) | undefined;
+      let validateHop: ((url: URL, hop: number) => void) | undefined;
       if (injection.kind === "inject") {
         const authorizedUris =
           snapshot?.auths.find((a) => a.authKey === credential?.authKey)?.authorizedUris ?? [];
         const origin = new URL(String(target)).origin;
-        validateHop = (url) => {
+        validateHop = (url, hop) => {
           if (url.origin !== origin) return;
           if (!authorizedUris.some((pattern) => matchesAuthorizedUriSpec(pattern, url.href))) {
             throw new RemoteCredentialRefusal(
               // The origin only: the endpoint's path may itself be a capability.
               `integration ${spec.integrationId}: ${url.origin} is outside the authorized URIs of its connection; the credential is not sent`,
+              hop > 0,
             );
           }
         };
@@ -736,7 +773,32 @@ export async function connectRemoteHttpIntegration(
         credentialRevision,
       };
     };
-    let attempt = await send();
+    // One row per operation exchange (`tools/call`, a `tools/list` page): its final attempt, a
+    // refresh replay included. A handshake exchange is kept aside until the client connects, and
+    // journaled only when it never does (the last one that reached the server).
+    const started = performance.now();
+    const operation = isMcpOperationExchange(init?.body);
+    const record = (outcome: string, answered: Awaited<ReturnType<typeof send>> | null) => {
+      const call: DispatchedCall = {
+        method: init?.method ?? "GET",
+        host: new URL(String(target)).hostname,
+        outcome,
+        durationMs: performance.now() - started,
+        credential: answered?.credentialAnswered ? { revision: answered.credentialRevision } : null,
+      };
+      if (operation) journal(call);
+      else if (!connected) unconnectedExchange = call;
+    };
+    const sendRecorded = async () => {
+      try {
+        return await send();
+      } catch (err) {
+        const outcome = remoteExchangeFailureOutcome(err);
+        if (outcome !== null) record(outcome, null);
+        throw err;
+      }
+    };
+    let attempt = await sendRecorded();
     if (credential && attempt.response.status === 401 && attempt.credentialAnswered) {
       const handshake = handshakeRejectable && !connected;
       const refreshed = await credential.source
@@ -746,8 +808,9 @@ export async function connectRemoteHttpIntegration(
           handshake ? "handshake" : undefined,
         )
         .catch(() => false);
-      if (refreshed) attempt = await send();
+      if (refreshed) attempt = await sendRecorded();
       else if (handshake && credential.source.needsReconnection()) {
+        record(String(attempt.response.status), attempt);
         // The connection's name and the reconnect step, rather than the server's 401 body.
         throw new RemoteCredentialRefusal(
           `integration ${spec.integrationId}: ${origin} rejected the connection's credential ` +
@@ -756,9 +819,7 @@ export async function connectRemoteHttpIntegration(
         );
       }
     }
-    if (credential && attempt.response.ok && attempt.credentialAnswered) {
-      credential.source.reportUpstreamSuccess(attempt.credentialRevision);
-    }
+    record(String(attempt.response.status), attempt);
     return attempt.response;
   });
 
@@ -770,17 +831,24 @@ export async function connectRemoteHttpIntegration(
   // branches share the same per-request credential + 401-retry closure
   // (`customFetch` above), so credential injection + refresh semantics
   // are identical across Streamable HTTP and SSE.
-  const client =
-    transport === "sse"
-      ? await settleRemoteClient(
-          createSseClient(serverUrl, {
-            fetch: customFetch,
-            clientInfo,
-            signal: AbortSignal.timeout(deps.connectDeadlineMs ?? REMOTE_PROVISION_TIMEOUT_MS),
-          }),
-          origin,
-        )
-      : await connectStreamableHttp(spec, serverUrl, customFetch, clientInfo, deps);
+  let client: AppstrateMcpClient;
+  try {
+    client =
+      transport === "sse"
+        ? await settleRemoteClient(
+            createSseClient(serverUrl, {
+              fetch: customFetch,
+              clientInfo,
+              signal: AbortSignal.timeout(deps.connectDeadlineMs ?? REMOTE_PROVISION_TIMEOUT_MS),
+            }),
+            origin,
+          )
+        : await connectStreamableHttp(spec, serverUrl, customFetch, clientInfo, deps);
+  } catch (err) {
+    // A connection that never opened is one operation: its last exchange that reached the server.
+    if (unconnectedExchange) journal(unconnectedExchange);
+    throw err;
+  }
   connected = true;
   return { client, authKey: credential?.authKey ?? null };
 }
@@ -1031,6 +1099,8 @@ async function startLocalIntegration(params: {
   logLabel: string;
   /** Credential-rejected signal hook; agent-run only (a connect-run has no run to attribute it to). */
   onCredentialRejected?: () => void;
+  /** The runner's call journal; `null` in a connect run, which has no run row. */
+  journal: CallJournal | null;
   /** Caller-owned teardown collectors — appended to as resources are built. */
   clients: AppstrateMcpClient[];
   mitmListeners: MitmListenerHandle[];
@@ -1076,6 +1146,7 @@ async function startLocalIntegration(params: {
       resolveHostFn: bundleFetchOpts.resolveHostFn,
       egressPolicy: policy,
       isPeerAllowed,
+      journal: params.journal,
       onEvent: (event) => {
         // Surface enough to debug auth-injection bugs without leaking
         // signed query params. URL is reduced to `host + path` (no
@@ -1235,9 +1306,12 @@ async function startLocalIntegration(params: {
   }
   const connectMs = performance.now() - connectStart;
   const base = wrapClient(client, spawnedIntegration.transport, toolTimeoutMsFromEnv());
+  // A MITM-delivered runner's upstream requests are journaled by the listener, one row each; any
+  // other runner's are invisible to the sidecar, so each `tools/call` it answers is one row.
+  const journaled = params.journal && !mitmMounted ? journalToolCalls(base, params.journal) : base;
   const wrapped = params.onCredentialRejected
-    ? reportCredentialRejections(base, params.onCredentialRejected)
-    : base;
+    ? reportCredentialRejections(journaled, params.onCredentialRejected)
+    : journaled;
   params.clients.push(wrapped);
 
   return {
@@ -1331,6 +1405,50 @@ export function refuseLoginPlaceholders(
       return client.callTool(args, options);
     },
   };
+}
+
+/**
+ * One journal row per `tools/call` of a local MCP server whose upstream requests the sidecar does
+ * not see: `host` NULL, method `POST`, and `200` for any answer of the server (a tool or JSON-RPC
+ * error included), as the platform's MCP operation rows record the exchange (`mcp-over-proxy.ts`).
+ */
+export function journalToolCalls(
+  client: AppstrateMcpClient,
+  journal: CallJournal,
+): AppstrateMcpClient {
+  return {
+    ...client,
+    async callTool(args, options) {
+      const started = performance.now();
+      const record = (outcome: string) =>
+        journal({
+          method: "POST",
+          host: null,
+          outcome,
+          durationMs: performance.now() - started,
+          credential: null,
+        });
+      try {
+        const result = await client.callTool(args, options);
+        record("200");
+        return result;
+      } catch (err) {
+        record(localToolCallFailureOutcome(err));
+        throw err;
+      }
+    },
+  };
+}
+
+function localToolCallFailureOutcome(err: unknown): string {
+  if (err instanceof McpError) {
+    if (err.code === ErrorCode.RequestTimeout) return "upstream_timeout";
+    if (err.code === ErrorCode.ConnectionClosed) return "upstream_unreachable";
+    return "200";
+  }
+  return findCause(err, (e) => e.name === "TimeoutError") !== undefined
+    ? "upstream_timeout"
+    : "upstream_unreachable";
 }
 
 /**
@@ -1547,7 +1665,10 @@ type PreparedConnection = {
  */
 export async function bootIntegrations(
   specs: IntegrationSpawnSpec[],
-  bundleFetchOpts: BundleFetchOptions,
+  bundleFetchOpts: BundleFetchOptions & {
+    /** The run's call reporter: every upstream call of every connection is journaled there. */
+    callReporter: CallReporter;
+  },
   /**
    * Credential-proxy core deps for the generic `api_call` tool. Built once
    * per run by `server.ts` and shared with `createApp` (same blob store).
@@ -1574,6 +1695,16 @@ export async function bootIntegrations(
   const breadcrumbs: IntegrationBootBreadcrumb[] = [];
   const clients: AppstrateMcpClient[] = [];
   const mitmListeners: MitmListenerHandle[] = [];
+  // One journal per connection (or none: an unauthenticated integration), over the run's reporter.
+  const journalOf = (
+    spec: IntegrationSpawnSpec,
+    source: IntegrationCredentialsSource | null,
+  ): CallJournal =>
+    connectionCallJournal(bundleFetchOpts.callReporter, {
+      integrationId: spec.integrationId,
+      connectionId: spec.connection?.id ?? null,
+      source,
+    });
 
   // RUN_ID labels docker runner containers for the orphan reaper; a process-mode sidecar lacks
   // it. NEVER derive it from RUN_TOKEN: labels are readable by anyone who can reach the daemon.
@@ -1757,7 +1888,7 @@ export async function bootIntegrations(
         const connectStart = performance.now();
         const { client, authKey } = spec.manifest.server?.platformEndpoint
           ? { client: await connectPlatformIntegration(spec, bundleFetchOpts), authKey: null }
-          : await connectRemoteHttpIntegration(spec, source);
+          : await connectRemoteHttpIntegration(spec, source, journalOf(spec, source));
         // On the caller-owned teardown collector as soon as it is open, so a
         // failed registration still closes the Streamable HTTP client.
         clients.push(client);
@@ -1799,6 +1930,7 @@ export async function bootIntegrations(
         logLabel: "integration",
         onCredentialRejected: () =>
           reportRejectedCredential(spec, bundleFetchOpts, source?.snapshot().credentialRevision),
+        journal: journalOf(spec, source),
         clients,
         mitmListeners,
         stderrTail,
@@ -1882,7 +2014,7 @@ export async function bootIntegrations(
           : {}),
         fetchCredentials: credAdapter.fetchCredentials,
         refreshCredentials: credAdapter.refreshCredentials,
-        reportUpstreamSuccess: credAdapter.reportUpstreamSuccess,
+        journal: journalOf(spec, source),
         // Resumable-upload protocols the manifest declared (plumbed via
         // the spawn resolver). When non-empty the factory also emits an
         // `api_upload` tool; the agent-side resolver drives it.
@@ -2316,6 +2448,7 @@ export async function runConnectOnce(
       // so the plain-egress fallback never applies here.
       wantsMitm: true,
       logLabel: "connect-run",
+      journal: null,
       clients,
       mitmListeners,
     });

@@ -122,6 +122,15 @@ export function classifyApiCallFailure(err: unknown): ApiCallFailureClass {
   };
 }
 
+/** Whether the request may have reached the upstream: only a refusal of the initial target sends nothing. */
+export function mayHaveReachedUpstream(failure: ApiCallFailureClass): boolean {
+  return (
+    failure.redirect ||
+    failure.code === "upstream_timeout" ||
+    failure.code === "upstream_unreachable"
+  );
+}
+
 /** Extract hostname for audit logs, never throwing. */
 function redactHost(url: string): string {
   try {

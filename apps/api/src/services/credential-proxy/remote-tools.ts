@@ -51,8 +51,8 @@ import {
   untilAborted,
   untrustedFields,
   untrustedText,
-  type ProxyCaller,
 } from "./mcp-over-proxy.ts";
+import type { ProxyCaller } from "./call-journal.ts";
 
 /**
  * The deadlines, kept under an MCP client's 60 s request timeout. `call_integration_tool`

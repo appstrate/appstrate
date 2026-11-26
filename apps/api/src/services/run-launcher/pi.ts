@@ -503,7 +503,15 @@ async function runPlatformContainerImpl(
     // Cleanup order: sidecar → agent → network boundary.
     // Removing the network boundary before its members are gone is an
     // error on Docker's side, so the finally chain must be strict.
+    // The sidecar is STOPPED first (SIGTERM + grace, a remove is a SIGKILL): it
+    // sends its call journal while the run is still `running` (SIDECAR.md, Call journal).
     if (sidecarHandle) {
+      await orch.stopWorkload(sidecarHandle).catch((err) => {
+        logger.warn("Failed to stop sidecar", {
+          runId,
+          error: getErrorMessage(err),
+        });
+      });
       await orch.removeWorkload(sidecarHandle).catch((err) => {
         logger.error("Failed to remove sidecar", {
           runId,

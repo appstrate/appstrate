@@ -41,6 +41,7 @@ async function send(authorizedUris: string[], host = "attacker.example") {
     1024,
     (e) => events.push(e),
     allowAll,
+    null,
   );
   return { res, sent, events };
 }
@@ -125,6 +126,7 @@ describe("MITM listener — injected credential needs a host-bounded allowlist",
       1024,
       (e) => events.push(e),
       allowAll,
+      null,
     );
     expect(res.status).toBe(401);
     expect(sent).toHaveLength(1);
@@ -158,6 +160,7 @@ describe("MITM listener — injected credential needs a host-bounded allowlist",
       1024,
       (e) => events.push(e),
       allowAll,
+      null,
     );
     expect(res.status).toBe(403);
     expect(fetched).toBe(0);
@@ -190,6 +193,7 @@ describe("MITM listener — injected credential needs a host-bounded allowlist",
       1024,
       (e) => events.push(e),
       allowAll,
+      null,
     );
     expect(res.status).toBe(403);
     const body = await res.text();
@@ -223,6 +227,7 @@ describe("MITM listener — injected credential needs a host-bounded allowlist",
       1024,
       () => {},
       allowAll,
+      null,
     );
     expect(res.status).toBe(200);
     expect(fetched).toBe(1);
@@ -280,6 +285,7 @@ describe("MITM listener — no value reaches a response or an event", () => {
       1 << 20,
       (e) => events.push(e),
       allowAll,
+      null,
     );
     const body = await res.text();
     expect(body).not.toContain(SECRET);

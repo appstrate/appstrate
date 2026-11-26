@@ -9,7 +9,7 @@
  *   - `GET /api/integrations/calls`: a holder of `integrations:configure` reads every call made in
  *     the request space, and never another space's or another organization's.
  *
- * Both take the same filters and keyset pagination. Their rows come from `recordConnectionCall`,
+ * Both take the same filters and keyset pagination. Their rows come from `recordConnectionCalls`,
  * the journal's single writer: its own cases close the file. A call toward an integration that
  * binds no connection is journaled with `connection_id` NULL: the space door lists it, no owner
  * door can.
@@ -29,7 +29,10 @@ import {
 import { seedApiKey, seedEndUser, seedPackage, seedSpace } from "../../helpers/seed.ts";
 import { walkLinkPages } from "../../helpers/pagination.ts";
 import { seedIntegrationConnection } from "../../helpers/run-connection-fixtures.ts";
-import { recordConnectionCall } from "../../../src/services/credential-proxy/call-journal.ts";
+import {
+  recordConnectionCalls,
+  type ConnectionCall,
+} from "../../../src/services/credential-proxy/call-journal.ts";
 import { type ConnectionCallView } from "../../../src/services/connection-calls.ts";
 
 const app = getTestApp();
@@ -59,12 +62,12 @@ describe("connection call journal routes", () => {
     }
   });
 
-  /** Journal one call made by the owner in the default space, unless `overrides` say otherwise. */
-  async function record(
+  /** One call made by the owner in the default space, unless `overrides` say otherwise. */
+  function call(
     connectionId: string | null,
-    overrides: Partial<Parameters<typeof recordConnectionCall>[0]> = {},
-  ): Promise<void> {
-    await recordConnectionCall({
+    overrides: Partial<ConnectionCall> = {},
+  ): ConnectionCall {
+    return {
       orgId: ctx.orgId,
       spaceId: ctx.defaultSpaceId,
       connectionId,
@@ -73,13 +76,22 @@ describe("connection call journal routes", () => {
       apiKeyId: null,
       authMethod: "session",
       runId: null,
+      chatSessionId: null,
       method: "GET",
-      target: "https://api.example.com/v1/users?page=2",
+      host: "api.example.com",
       outcome: "200",
       durationMs: 12,
       requestId: "req_1",
       ...overrides,
-    });
+    };
+  }
+
+  /** Journal one call, as {@link call} builds it. */
+  async function record(
+    connectionId: string | null,
+    overrides: Partial<ConnectionCall> = {},
+  ): Promise<void> {
+    await recordConnectionCalls([call(connectionId, overrides)]);
   }
 
   async function page(path: string, headers: Record<string, string> = authHeaders(ctx)) {
@@ -123,6 +135,7 @@ describe("connection call journal routes", () => {
         apiKeyId: "key_1",
         auth_method: "api_key",
         runId: "run_1",
+        chat_session_id: null,
         method: "POST",
         host: "api.example.com",
         outcome: "unauthorized_target",
@@ -263,6 +276,22 @@ describe("connection call journal routes", () => {
       ]);
     });
 
+    it("returns the chat conversation that issued a call, on both doors", async () => {
+      const connectionId = await seedIntegrationConnection(ctx, CRM);
+      await record(connectionId, { chatSessionId: "chat_1", requestId: "req_chat" });
+      await record(connectionId, { runId: "run_1", requestId: "req_run" });
+
+      for (const path of [SPACE_DOOR, ownDoor(connectionId)]) {
+        const body = await page(path);
+        expect(
+          body.data.map((call) => [call.request_id, call.runId, call.chat_session_id]),
+        ).toEqual([
+          ["req_run", "run_1", null],
+          ["req_chat", null, "chat_1"],
+        ]);
+      }
+    });
+
     it("lists a call that used no connection, with no owner; the owner door never does", async () => {
       const connectionId = await seedIntegrationConnection(ctx, CRM);
       await record(connectionId, { requestId: "req_connection" });
@@ -379,8 +408,43 @@ describe("connection call journal routes", () => {
 
   // ─── Writer ─────────────────────────────────────────────
 
-  describe("recordConnectionCall", () => {
+  describe("recordConnectionCalls", () => {
     const rows = () => db.select().from(connectionCalls);
+
+    it("writes a batch over several connections in order, each row with its own owner", async () => {
+      const mine = await seedIntegrationConnection(ctx, CRM);
+      const endUser = await seedEndUser({ spaceId: ctx.defaultSpaceId, orgId: ctx.orgId });
+      const theirs = await seedIntegrationConnection(ctx, MAIL, { endUserId: endUser.id });
+      const other = await createTestContext({ orgSlug: "calls-other" });
+      const foreign = await seedIntegrationConnection(other, CRM);
+
+      await recordConnectionCalls([
+        call(mine, { outcome: "200" }),
+        call(theirs, { integrationId: MAIL, outcome: "201" }),
+        call(mine, { outcome: "404" }),
+        call(null, { outcome: "202" }),
+        call(theirs, { integrationId: MAIL, outcome: "500" }),
+        // Named in this organization, owned in another: no owner here.
+        call(foreign, { outcome: "203" }),
+      ]);
+
+      const written = (await rows()).sort((a, b) => Number(a.id) - Number(b.id));
+      expect(
+        written.map((row) => ({
+          connectionId: row.connectionId,
+          outcome: row.outcome,
+          ownerType: row.ownerType,
+          ownerId: row.ownerId,
+        })),
+      ).toEqual([
+        { connectionId: mine, outcome: "200", ownerType: "user", ownerId: ctx.user.id },
+        { connectionId: theirs, outcome: "201", ownerType: "end_user", ownerId: endUser.id },
+        { connectionId: mine, outcome: "404", ownerType: "user", ownerId: ctx.user.id },
+        { connectionId: null, outcome: "202", ownerType: null, ownerId: null },
+        { connectionId: theirs, outcome: "500", ownerType: "end_user", ownerId: endUser.id },
+        { connectionId: foreign, outcome: "203", ownerType: null, ownerId: null },
+      ]);
+    });
 
     it("records a call whose connection is gone, with no owner", async () => {
       await record(crypto.randomUUID());
@@ -402,14 +466,11 @@ describe("connection call journal routes", () => {
       });
     });
 
-    it("caps the host it stores", async () => {
-      const connectionId = await seedIntegrationConnection(ctx, CRM);
-      const labels = ["a", "b", "c", "d", "e"].map((letter) => letter.repeat(60));
-
-      await record(connectionId, { target: `https://${labels.join(".")}` });
+    it("caps the method and the host it stores", async () => {
+      await record(null, { method: "X".repeat(40), host: "h".repeat(300) });
 
       const [row] = await rows();
-      expect(row!.host).toHaveLength(255);
+      expect([row!.method.length, row!.host?.length]).toEqual([16, 255]);
     });
 
     it("never throws: a call the database refuses is dropped", async () => {

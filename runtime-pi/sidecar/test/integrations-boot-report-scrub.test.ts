@@ -18,6 +18,7 @@
  */
 
 import { describe, it, expect } from "bun:test";
+import { noCallReporter } from "./helpers/call-journal.ts";
 import { zipArtifact } from "@appstrate/core/zip";
 import type { IntegrationSpawnSpec } from "@appstrate/core/sidecar-types";
 import { bootIntegrations, scrubStderrLine } from "../integrations-boot.ts";
@@ -56,7 +57,12 @@ async function boot(spec: IntegrationSpawnSpec, fetchFn: typeof fetch) {
   try {
     return await bootIntegrations(
       [spec],
-      { platformApiUrl: "http://platform.local", runToken: "run-token", fetchFn },
+      {
+        platformApiUrl: "http://platform.local",
+        runToken: "run-token",
+        fetchFn,
+        callReporter: noCallReporter,
+      },
       undefined,
     );
   } finally {
@@ -130,6 +136,7 @@ describe("boot report — third-party failure text is scrubbed", () => {
         {
           platformApiUrl: "http://platform.local",
           runToken: "run-token",
+          callReporter: noCallReporter,
           fetchFn: (async () => new Response("{}", { status: 200 })) as unknown as typeof fetch,
         },
         undefined,

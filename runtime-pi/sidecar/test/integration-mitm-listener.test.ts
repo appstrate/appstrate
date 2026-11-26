@@ -33,6 +33,7 @@ import { createOpensslCertGenerator } from "../ca-cert-openssl.ts";
 import { createCertMinter } from "../integration-cert-minter.ts";
 import { compileRunnerEgressPolicy } from "../ssrf.ts";
 import type { HostResolver } from "../helpers.ts";
+import type { DispatchedCall } from "../call-reporter.ts";
 import {
   createIntegrationMitmListener,
   type MitmCredentialSource,
@@ -252,6 +253,7 @@ describe("MITM listener — CONNECT preamble", () => {
       deliveryPlans: () => ({}),
     };
     const listener = createIntegrationMitmListener({
+      journal: null,
       caBundle: bundle,
       minter,
       credentials: creds,
@@ -332,6 +334,7 @@ describe("MITM listener — strip + inject end-to-end", () => {
     }) as unknown as typeof fetch;
 
     const listener = createIntegrationMitmListener({
+      journal: null,
       caBundle: bundle,
       minter,
       credentials: creds,
@@ -394,6 +397,7 @@ describe("MITM listener — strip + inject end-to-end", () => {
     }) as unknown as typeof fetch;
 
     const listener = createIntegrationMitmListener({
+      journal: null,
       caBundle: bundle,
       minter,
       credentials: creds,
@@ -471,6 +475,7 @@ describe("MITM listener — 401 refresh + retry", () => {
     });
 
     const listener = createIntegrationMitmListener({
+      journal: null,
       caBundle: bundle,
       minter,
       credentials: creds,
@@ -536,6 +541,7 @@ describe("MITM listener — 401 refresh + retry", () => {
     });
 
     const listener = createIntegrationMitmListener({
+      journal: null,
       caBundle: bundle,
       minter,
       credentials: creds,
@@ -563,14 +569,14 @@ describe("MITM listener — 401 refresh + retry", () => {
   });
 
   runIfOpenssl(
-    "reports an upstream success on a 2xx with the injected credential only",
+    "journals each final response, with the tunnel's host and the credential it answered",
     async () => {
       const bundle = await makeCaBundle();
       const minter = createCertMinter({
         caCertPem: bundle.pems.caCertPem,
         caKeyPem: bundle.pems.caKeyPem,
       });
-      let successReports = 0;
+      const journaled: DispatchedCall[] = [];
       const dp: Record<string, HttpDeliveryPlan> = {
         vendor: {
           headerName: "X-Api-Key",
@@ -586,15 +592,13 @@ describe("MITM listener — 401 refresh + retry", () => {
         async refreshOnUnauthorized() {
           return false;
         },
-        reportUpstreamSuccess() {
-          successReports += 1;
-        },
       };
       const statuses = [200, 401];
       const recorded = makeRecordingFetch(
         async () => new Response("{}", { status: statuses.shift()! }),
       );
       const listener = createIntegrationMitmListener({
+        journal: (call) => journaled.push(call),
         caBundle: bundle,
         minter,
         credentials: creds,
@@ -615,7 +619,10 @@ describe("MITM listener — 401 refresh + retry", () => {
             headers: {},
           });
         }
-        expect(successReports).toBe(1);
+        expect(journaled.map((c) => [c.method, c.host, c.outcome, c.credential])).toEqual([
+          ["GET", "api.test.local", "200", { revision: undefined }],
+          ["GET", "api.test.local", "401", { revision: undefined }],
+        ]);
       } finally {
         await listener.close();
       }
@@ -623,7 +630,84 @@ describe("MITM listener — 401 refresh + retry", () => {
   );
 
   runIfOpenssl(
-    "names the revision the request carried when the credential changes in flight",
+    "journals a request that got no answer under its code, and none the SSRF guard refused",
+    async () => {
+      const bundle = await makeCaBundle();
+      const minter = createCertMinter({
+        caCertPem: bundle.pems.caCertPem,
+        caKeyPem: bundle.pems.caKeyPem,
+      });
+      const journaled: DispatchedCall[] = [];
+      const dp: Record<string, HttpDeliveryPlan> = {
+        vendor: {
+          headerName: "X-Api-Key",
+          headerPrefix: "",
+          value: "secret",
+          allowServerOverride: false,
+        },
+      };
+      const pl = payload("vendor", "api_key", { api_key: "secret" }, [
+        "https://api.test.local/**",
+        "https://rebind.test.local/**",
+      ]);
+      const creds: MitmCredentialSource = {
+        current: () => pl,
+        deliveryPlans: () => dp,
+        async refreshOnUnauthorized() {
+          return false;
+        },
+      };
+      const failures = [
+        Object.assign(new Error("The operation timed out."), { name: "TimeoutError" }),
+        Object.assign(new Error("connect failed"), { code: "ECONNREFUSED" }),
+      ];
+      const recorded = makeRecordingFetch(async () => {
+        throw failures.shift()!;
+      });
+      // The rebind host passes the check at CONNECT, then resolves to the metadata address when
+      // the request is sent: the guard refuses it before anything leaves.
+      const resolutions = new Map<string, number>();
+      const listener = createIntegrationMitmListener({
+        journal: (call) => journaled.push(call),
+        caBundle: bundle,
+        minter,
+        credentials: creds,
+        ...permissiveEgress,
+        resolveHostFn: async (host: string) => {
+          const n = (resolutions.get(host) ?? 0) + 1;
+          resolutions.set(host, n);
+          return host === "rebind.test.local" && n > 1 ? ["169.254.169.254"] : ["203.0.113.10"];
+        },
+        fetch: recorded.fetch,
+      });
+      await listener.ready;
+      try {
+        const addr = listener.address();
+        const send = (sni: string) =>
+          drivenFetch({
+            listenerPort: addr.port,
+            sni,
+            caCertPem: bundle.pems.caCertPem,
+            method: "POST",
+            path: "/",
+            headers: {},
+          });
+        expect((await send("api.test.local")).status).toBe(502);
+        expect((await send("api.test.local")).status).toBe(502);
+        expect((await send("rebind.test.local")).status).toBe(403);
+        expect(recorded.calls).toHaveLength(2);
+        expect(journaled.map((c) => [c.method, c.host, c.outcome, c.credential])).toEqual([
+          ["POST", "api.test.local", "upstream_timeout", null],
+          ["POST", "api.test.local", "upstream_unreachable", null],
+        ]);
+      } finally {
+        await listener.close();
+      }
+    },
+  );
+
+  runIfOpenssl(
+    "journals the revision the request carried when the credential changes in flight",
     async () => {
       const bundle = await makeCaBundle();
       const minter = createCertMinter({
@@ -649,9 +733,6 @@ describe("MITM listener — 401 refresh + retry", () => {
           refreshed.push(revision);
           return false;
         },
-        reportUpstreamSuccess(revision) {
-          reported.push(revision);
-        },
       };
       const statuses = [401, 200];
       // Each upstream answer arrives after another writer replaced the stored credential.
@@ -660,6 +741,7 @@ describe("MITM listener — 401 refresh + retry", () => {
         return new Response("{}", { status: statuses.shift()! });
       });
       const listener = createIntegrationMitmListener({
+        journal: (call) => reported.push(call.credential?.revision),
         caBundle: bundle,
         minter,
         credentials: creds,
@@ -681,7 +763,7 @@ describe("MITM listener — 401 refresh + retry", () => {
           });
         }
         expect(refreshed).toEqual(["rev-a"]);
-        expect(reported).toEqual(["rev-b"]);
+        expect(reported).toEqual(["rev-a", "rev-b"]);
       } finally {
         await listener.close();
       }
@@ -716,6 +798,7 @@ describe("MITM listener — 401 refresh + retry", () => {
         async () => new Response(`{"err":"forbidden"}`, { status: 403 }),
       );
       const listener = createIntegrationMitmListener({
+        journal: null,
         caBundle: bundle,
         minter,
         credentials: creds,
@@ -792,6 +875,7 @@ describe("MITM listener — connect.tool re-login (P3)", () => {
       });
 
       const listener = createIntegrationMitmListener({
+        journal: null,
         caBundle: bundle,
         minter,
         credentials: creds,
@@ -852,6 +936,7 @@ describe("MITM listener — connect.tool re-login (P3)", () => {
     });
 
     const listener = createIntegrationMitmListener({
+      journal: null,
       caBundle: bundle,
       minter,
       credentials: creds,
@@ -916,6 +1001,7 @@ describe("MITM listener — connect.tool re-login (P3)", () => {
       });
 
       const listener = createIntegrationMitmListener({
+        journal: null,
         caBundle: bundle,
         minter,
         credentials: creds,
@@ -973,6 +1059,7 @@ describe("MITM listener — connect.tool re-login (P3)", () => {
     });
 
     const listener = createIntegrationMitmListener({
+      journal: null,
       caBundle: bundle,
       minter,
       credentials: creds,
@@ -1019,6 +1106,7 @@ describe("MITM listener — telemetry", () => {
     const recorded = makeRecordingFetch(async () => new Response("ok", { status: 200 }));
 
     const listener = createIntegrationMitmListener({
+      journal: null,
       caBundle: bundle,
       minter,
       credentials: creds,
@@ -1066,6 +1154,7 @@ describe("MITM listener — SSRF floor", () => {
       const recorded = makeRecordingFetch(async () => new Response("ok", { status: 200 }));
 
       const listener = createIntegrationMitmListener({
+        journal: null,
         caBundle: bundle,
         minter,
         credentials: creds,
@@ -1122,6 +1211,7 @@ describe("MITM listener — SSRF floor", () => {
       const recorded = makeRecordingFetch(async () => new Response("ok", { status: 200 }));
 
       const listener = createIntegrationMitmListener({
+        journal: null,
         caBundle: bundle,
         minter,
         credentials: creds,
@@ -1169,6 +1259,7 @@ describe("MITM listener — SSRF floor", () => {
     const recorded = makeRecordingFetch(async () => new Response("ok", { status: 200 }));
 
     const listener = createIntegrationMitmListener({
+      journal: null,
       caBundle: bundle,
       minter,
       credentials: creds,
@@ -1220,6 +1311,7 @@ describe("MITM listener — SSRF floor", () => {
       let lookups = 0;
 
       const listener = createIntegrationMitmListener({
+        journal: null,
         caBundle: bundle,
         minter,
         credentials: creds,
@@ -1266,6 +1358,7 @@ describe("MITM listener — SSRF floor", () => {
     let lookups = 0;
 
     const listener = createIntegrationMitmListener({
+      journal: null,
       caBundle: bundle,
       minter,
       credentials: creds,
@@ -1313,6 +1406,7 @@ describe("MITM listener — SSRF floor", () => {
     );
 
     const listener = createIntegrationMitmListener({
+      journal: null,
       caBundle: bundle,
       minter,
       credentials: creds,
@@ -1357,6 +1451,7 @@ describe("MITM listener — SSRF floor", () => {
       globalThis.fetch = recorded.fetch;
 
       const listener = createIntegrationMitmListener({
+        journal: null,
         caBundle: bundle,
         minter,
         credentials: creds,
@@ -1401,6 +1496,7 @@ describe("MITM listener — proxyUrl shape", () => {
       deliveryPlans: () => ({}),
     };
     const listener = createIntegrationMitmListener({
+      journal: null,
       caBundle: bundle,
       minter,
       credentials: creds,
@@ -1427,6 +1523,7 @@ describe("MITM listener — egress allowlist (#1458)", () => {
     const events: MitmListenerEvent[] = [];
     const recorded = makeRecordingFetch(async () => new Response("ok", { status: 200 }));
     const listener = createIntegrationMitmListener({
+      journal: null,
       caBundle: bundle,
       minter,
       credentials: {
@@ -1745,6 +1842,7 @@ describe("MITM listener — per-SNI inner servers are off the loopback", () => {
     options: { host?: string; fetch?: typeof fetch },
   ) {
     return createIntegrationMitmListener({
+      journal: null,
       caBundle: bundle,
       minter: createCertMinter({
         caCertPem: bundle.pems.caCertPem,

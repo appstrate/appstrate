@@ -10,6 +10,7 @@
  */
 
 import { afterEach, describe, expect, it } from "bun:test";
+import { noCallReporter, noJournal } from "./helpers/call-journal.ts";
 import type { IntegrationSpawnSpec } from "@appstrate/core/sidecar-types";
 import type { AppstrateToolDefinition } from "@appstrate/mcp-transport";
 import { handlerFetch, modernMcpHandler } from "@appstrate/mcp-transport/testing";
@@ -64,7 +65,7 @@ const notFound = () =>
   });
 
 async function connectFailure(): Promise<unknown> {
-  return await connectRemoteHttpIntegration(spec(), null, {
+  return await connectRemoteHttpIntegration(spec(), null, noJournal, {
     resolveHost: async () => [PUBLIC_IP],
     connectDeadlineMs: 300,
   }).then(
@@ -120,6 +121,7 @@ describe("bootIntegrations — a failing remote MCP server", () => {
       return await bootIntegrations([spec()], {
         platformApiUrl: "http://platform.local",
         runToken: "run-token",
+        callReporter: noCallReporter,
       });
     } finally {
       if (previous === undefined) delete process.env.INTEGRATION_RUNTIME_ADAPTER;

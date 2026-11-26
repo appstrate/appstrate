@@ -66,6 +66,7 @@ import { stopStream } from "./stop-registry.ts";
 import { clearActiveStream, getResumableContext, STALE_MARKER_MIN_AGE_MS } from "./resumable.ts";
 import { mintSessionId } from "./session-id.ts";
 import { notifySessionUpdate } from "./realtime.ts";
+import { listSessionIntegrations } from "./session-integrations.ts";
 import { logger } from "./logger.ts";
 import {
   createSession,
@@ -338,6 +339,12 @@ export function createChatRouter(deps: ChatPlatformDeps) {
   router.get("/api/orgs/:orgId/chat/sessions", guard("chat:read"), handlers.list);
   router.post("/api/orgs/:orgId/chat/sessions", rateLimited(30), ...actingGuards, handlers.create);
   router.get("/api/orgs/:orgId/chat/sessions/:id", guard("chat:read"), handlers.get);
+  router.get(
+    "/api/orgs/:orgId/chat/sessions/:id/integrations",
+    rateLimited(120),
+    guard("chat:read"),
+    handlers.integrations,
+  );
   router.patch("/api/orgs/:orgId/chat/sessions/:id", guard("chat:write"), handlers.update);
   router.patch(
     "/api/orgs/:orgId/chat/sessions/:id/skills",
@@ -501,6 +508,12 @@ function createSessionHandlers(deps: ChatPlatformDeps) {
         loadSessionUsage(session.id, session.orgId),
       ]);
       return c.json({ ...dto, messages: messages.map(toMessageDto), usage });
+    },
+
+    // GET …/sessions/:id/integrations — the integrations its calls and its runs' calls reached
+    integrations: async (c: Context<ChatEnv>) => {
+      const session = await getOwnedSession(c.req.param("id")!, sessionScope(c));
+      return c.json(listResponse(await listSessionIntegrations(session.id, session.orgId)));
     },
 
     // PATCH …/sessions/:id — rename, limit to the origin space (giving one to a conversation

@@ -13,7 +13,11 @@
  */
 
 import { afterEach, describe, expect, it } from "bun:test";
+import { noCallReporter, recordingCallReporter } from "./helpers/call-journal.ts";
 import { connect } from "node:net";
+import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
+import { createMcpServer, type SubprocessTransport } from "@appstrate/mcp-transport";
+import type { CallReporter } from "../call-reporter.ts";
 import { zipArtifact } from "@appstrate/core/zip";
 import type { IntegrationSpawnSpec } from "@appstrate/core/sidecar-types";
 import { bootIntegrations } from "../integrations-boot.ts";
@@ -41,6 +45,8 @@ let spawnedWith: SpawnIntegrationOptions[] = [];
 let peerOwner: string | null | undefined = OWN_RUNNER;
 /** Every peer the fake adapter was asked to attribute. */
 let askedAbout: Peer[] = [];
+/** When set, the fake adapter serves an in-process MCP server with one `echo` tool. */
+let serveRunner = false;
 
 registerIntegrationRuntimeAdapter({
   id: ADAPTER_ID,
@@ -51,7 +57,16 @@ registerIntegrationRuntimeAdapter({
     },
     async spawn(options) {
       spawnedWith.push(options);
-      throw new Error("spawn stopped by test");
+      if (!serveRunner) throw new Error("spawn stopped by test");
+      const server = createMcpServer([
+        {
+          descriptor: { name: "echo", description: "echo", inputSchema: { type: "object" } },
+          handler: async () => ({ content: [{ type: "text", text: "echoed" }] }),
+        },
+      ]);
+      const [clientEnd, serverEnd] = InMemoryTransport.createLinkedPair();
+      await server.connect(serverEnd);
+      return { transport: clientEnd as unknown as SubprocessTransport, diagnosticId: null };
     },
     peerAttribution: (): PeerAttribution => async (peer) => {
       askedAbout.push(peer);
@@ -65,6 +80,7 @@ afterEach(() => {
   spawnedWith = [];
   peerOwner = OWN_RUNNER;
   askedAbout = [];
+  serveRunner = false;
 });
 
 const bundle = zipArtifact({ "server.ts": new TextEncoder().encode("export {};\n") });
@@ -119,7 +135,11 @@ const MITM_AUTHS = {
   main: { authKey: "main", authType: "api_key", authorizedUris: EGRESS.authorizedUris },
 } as unknown as IntegrationSpawnSpec["httpDeliveryAuths"];
 
-async function boot(s: IntegrationSpawnSpec, resolved: string[]) {
+async function boot(
+  s: IntegrationSpawnSpec,
+  resolved: string[],
+  callReporter: CallReporter = noCallReporter,
+) {
   const previous = process.env.INTEGRATION_RUNTIME_ADAPTER;
   process.env.INTEGRATION_RUNTIME_ADAPTER = ADAPTER_ID;
   try {
@@ -128,6 +148,7 @@ async function boot(s: IntegrationSpawnSpec, resolved: string[]) {
       {
         platformApiUrl: "http://platform.local",
         runToken: "run-token",
+        callReporter,
         fetchFn,
         resolveHostFn: async (host: string) => {
           resolved.push(host);
@@ -280,5 +301,55 @@ describe("bootIntegrations — runner egress wiring (#1458)", () => {
     };
     expect(await declaredAs(rendered)).toBe(true);
     expect(await declaredAs(["https://{$credential.host}/**"])).toBe(false);
+  });
+});
+
+describe("bootIntegrations — the journal of a local runner's tools/call", () => {
+  const callEcho = async (result: Awaited<ReturnType<typeof boot>>) => {
+    const tool = result.tools.find((t) => t.descriptor.name === "egress__echo");
+    expect(tool).toBeDefined();
+    await tool!.handler({}, {} as never);
+  };
+
+  it("journals one row per tools/call of a runner the MITM does not front, with no host", async () => {
+    serveRunner = true;
+    for (const s of [spec(), spec({ egress: EGRESS })]) {
+      const { reporter, records } = recordingCallReporter();
+      const result = await boot(s, [], reporter);
+      try {
+        expect(result.failed).toEqual([]);
+        await callEcho(result);
+        await callEcho(result);
+        expect(records).toEqual([
+          expect.objectContaining({
+            integration_id: INTEGRATION_ID,
+            connection_id: CONNECTION.id,
+            method: "POST",
+            host: null,
+            outcome: "200",
+          }),
+          expect.objectContaining({ host: null, outcome: "200" }),
+        ]);
+      } finally {
+        await result.shutdown();
+      }
+    }
+  });
+
+  it("journals no tools/call row for a MITM-fronted runner: its listener journals the requests", async () => {
+    serveRunner = true;
+    const { reporter, records } = recordingCallReporter();
+    const result = await boot(
+      spec({ egress: EGRESS, httpDeliveryAuths: MITM_AUTHS }),
+      [],
+      reporter,
+    );
+    try {
+      expect(result.failed).toEqual([]);
+      await callEcho(result);
+      expect(records).toEqual([]);
+    } finally {
+      await result.shutdown();
+    }
   });
 });

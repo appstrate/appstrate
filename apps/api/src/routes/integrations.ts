@@ -104,6 +104,7 @@ import { auditDiff, recordAuditAs, recordAuditFromContext } from "./../services/
 import { listIntegrations, listIntegrationsAtRemoteUrl } from "../services/integration-service.ts";
 import { discoverRemoteIntegration } from "../services/integration-discovery.ts";
 import { syncIntegrationFromServer } from "../services/integration-server-sync.ts";
+import { proxyCaller } from "../services/credential-proxy/call-journal.ts";
 import {
   reachOutsideRun,
   reachOutsideRunIfPermitted,
@@ -1092,11 +1093,7 @@ export function createIntegrationsRouter() {
         assertPermission(c, "credential-proxy", "call-own");
         return reachOutsideRun(callerPermissions(c), c.get("space")!);
       },
-      caller: {
-        apiKeyId: c.get("apiKeyId") || null,
-        authMethod: c.get("authMethod"),
-        requestId: c.get("requestId"),
-      },
+      caller: proxyCaller(c, null),
       signal: c.req.raw.signal,
     });
     return c.json({

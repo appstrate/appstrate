@@ -26,7 +26,7 @@
  */
 
 import type { ResolvedConnectionMap } from "@appstrate/core/integration";
-import { describe, it, expect, beforeEach } from "bun:test";
+import { describe, it, expect, beforeEach, afterEach } from "bun:test";
 import { getTestApp } from "../../helpers/app.ts";
 import { db, truncateAll } from "../../helpers/db.ts";
 import { createTestContext, memberContext, type TestContext } from "../../helpers/auth.ts";
@@ -38,7 +38,7 @@ import {
   seedRun,
 } from "../../helpers/seed.ts";
 import { signRunToken } from "../../../src/lib/run-token.ts";
-import { activatePackage } from "../../../src/services/space-packages.ts";
+import { activatePackage, deactivatePackage } from "../../../src/services/space-packages.ts";
 import { leaveOrganization } from "../../../src/services/organizations.ts";
 import {
   localIntegrationManifest,
@@ -55,6 +55,7 @@ import {
 import { eq } from "drizzle-orm";
 import { getEnv } from "@appstrate/env";
 import { seedShares } from "../../helpers/connection-shares.ts";
+import { drainJournal, journaledCalls } from "../../helpers/connection-calls.ts";
 
 const app = getTestApp();
 
@@ -612,11 +613,32 @@ describe("POST /internal/integration-credentials/:scope/:name/refresh", () => {
     return body.credential_revision!;
   }
 
+  /** A call record as the sidecar sends it; the defaults are a 2xx through no connection. */
+  const callRecord = (overrides: Record<string, unknown> = {}) => ({
+    integration_id: INTEGRATION,
+    connection_id: null,
+    method: "GET",
+    host: "api.example.com",
+    outcome: "200",
+    duration_ms: 7,
+    ...overrides,
+  });
+
+  const reportCalls = (calls: unknown[], runToken: string | null = token) =>
+    app.request("/internal/integration-calls", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        ...(runToken === null ? {} : { Authorization: `Bearer ${runToken}` }),
+      },
+      body: JSON.stringify({ calls }),
+    });
+
+  /** A 2xx on `revision` through the connection: the record that ends its streak. */
   const reportSuccess = (connectionId: string, revision: string, runToken = token) =>
-    app.request(
-      `/internal/integration-credentials/${INTEGRATION}/upstream-success` +
-        `?connection_id=${connectionId}&credential_revision=${revision}`,
-      { method: "POST", headers: { Authorization: `Bearer ${runToken}` } },
+    reportCalls(
+      [callRecord({ connection_id: connectionId, credential_revision: revision })],
+      runToken,
     );
 
   async function streakOf(connectionId: string): Promise<number> {
@@ -661,6 +683,8 @@ describe("POST /internal/integration-credentials/:scope/:name/refresh", () => {
       spaceId: ctx.defaultSpaceId,
       userId: ctx.user.id,
       status: "running",
+      // What kickoff freezes for every integration the agent declares.
+      resolvedIntegrationVersions: { [INTEGRATION]: { version: null, source: "draft" } },
     });
     runId = run.id;
     token = signRunToken(runId);
@@ -912,7 +936,7 @@ describe("POST /internal/integration-credentials/:scope/:name/refresh", () => {
     expect(row!.needsReconnection).toBe(false);
   });
 
-  it("upstream-success ends the streak the refreshes counted, which the GET announced", async () => {
+  it("a journaled 2xx with the held revision ends the streak the refreshes counted, which the GET announced", async () => {
     await seedIntegration(INTEGRATION, true);
     const connectionId = await seedConnection(INTEGRATION);
     await bindConnectionsToRun(runId, { [INTEGRATION]: [connectionId] });
@@ -939,7 +963,7 @@ describe("POST /internal/integration-credentials/:scope/:name/refresh", () => {
     expect(await streak()).toBeUndefined();
   });
 
-  it("upstream-success on a credential the connection no longer holds resets nothing", async () => {
+  it("a journaled 2xx on a credential the connection no longer holds resets nothing", async () => {
     await seedIntegration(INTEGRATION, true);
     const connectionId = await seedConnection(INTEGRATION);
     await bindConnectionsToRun(runId, { [INTEGRATION]: [connectionId] });
@@ -951,16 +975,31 @@ describe("POST /internal/integration-credentials/:scope/:name/refresh", () => {
     expect(await streakOf(connectionId)).toBe(2);
   });
 
-  it("DENY: upstream-success without `credential_revision` is a 400", async () => {
+  it("a journaled call without `credential_revision` resets nothing, a 2xx included", async () => {
     await seedIntegration(INTEGRATION, true);
     const connectionId = await seedConnection(INTEGRATION);
     await bindConnectionsToRun(runId, { [INTEGRATION]: [connectionId] });
+    await setStreak(connectionId, 2);
 
-    const res = await app.request(
-      `/internal/integration-credentials/${INTEGRATION}/upstream-success?connection_id=${connectionId}`,
-      { method: "POST", headers: { Authorization: `Bearer ${token}` } },
-    );
-    expect(res.status).toBe(400);
+    expect((await reportCalls([callRecord({ connection_id: connectionId })])).status).toBe(204);
+    expect(await streakOf(connectionId)).toBe(2);
+  });
+
+  it("DENY: a `credential_revision` on a record that cannot end a streak is a 400", async () => {
+    await seedIntegration(INTEGRATION, true);
+    const connectionId = await seedConnection(INTEGRATION);
+    await bindConnectionsToRun(runId, { [INTEGRATION]: [connectionId] });
+    const held = await heldRevision(connectionId);
+    await setStreak(connectionId, 2);
+
+    for (const record of [
+      callRecord({ connection_id: connectionId, outcome: "401", credential_revision: held }),
+      callRecord({ outcome: "200", credential_revision: held }),
+    ]) {
+      expect((await reportCalls([record])).status).toBe(400);
+    }
+    expect(await streakOf(connectionId)).toBe(2);
+    expect(await journaledCalls(ctx, INTEGRATION)).toEqual([]);
   });
 
   it("DENY: a malformed or empty `credential_revision` is a 400 on both routes, counting nothing", async () => {
@@ -979,7 +1018,7 @@ describe("POST /internal/integration-credentials/:scope/:name/refresh", () => {
     expect(await streakOf(connectionId)).toBe(0);
   });
 
-  it("upstream-success resets nothing once the run's actor can no longer reach the connection", async () => {
+  it("a journaled 2xx resets nothing once the run's actor can no longer reach the connection", async () => {
     await seedIntegration(INTEGRATION, true);
     const colleague = await memberContext(ctx, "member");
     const connectionId = await seedConnection(INTEGRATION, {
@@ -1000,7 +1039,7 @@ describe("POST /internal/integration-credentials/:scope/:name/refresh", () => {
     expect(await streakOf(connectionId)).toBe(2);
   });
 
-  it("upstream-success from a run with no actor resets nothing", async () => {
+  it("a run with no actor journals nothing and resets nothing", async () => {
     await seedIntegration(INTEGRATION, true);
     const connectionId = await seedConnection(INTEGRATION);
     await bindConnectionsToRun(runId, { [INTEGRATION]: [connectionId] });
@@ -1017,6 +1056,7 @@ describe("POST /internal/integration-credentials/:scope/:name/refresh", () => {
     const res = await reportSuccess(connectionId, held, signRunToken(actorless.id));
     expect(res.status).toBe(204);
     expect(await streakOf(connectionId)).toBe(2);
+    expect(await journaledCalls(ctx, INTEGRATION)).toEqual([]);
   });
 
   it("a 401 on a credential the connection no longer holds is not counted: 200 with the current one", async () => {
@@ -1047,24 +1087,174 @@ describe("POST /internal/integration-credentials/:scope/:name/refresh", () => {
     expect(await streakOf(connectionId)).toBe(1);
   });
 
-  it("DENY: upstream-success for a connection the run did not bind is a 400", async () => {
+  it("DENY: a record naming a connection the run did not bind refuses the whole batch", async () => {
     await seedIntegration(INTEGRATION, true);
     const connectionId = await seedConnection(INTEGRATION);
-    await db
-      .update(integrationConnections)
-      .set({ refreshFailureCount: 2 })
-      .where(eq(integrationConnections.id, connectionId));
+    await setStreak(connectionId, 2);
 
-    const res = await app.request(
-      `/internal/integration-credentials/${INTEGRATION}/upstream-success?connection_id=${connectionId}`,
-      { method: "POST", headers: { Authorization: `Bearer ${token}` } },
-    );
+    const res = await reportCalls([
+      callRecord(),
+      callRecord({ connection_id: connectionId, credential_revision: "0123456789abcdef" }),
+    ]);
     expect(res.status).toBe(400);
-    const [row] = await db
-      .select({ count: integrationConnections.refreshFailureCount })
-      .from(integrationConnections)
-      .where(eq(integrationConnections.id, connectionId));
-    expect(row!.count).toBe(2);
+    const problem = (await res.json()) as { code: string; param: string };
+    expect(problem.code).toBe("connection_not_in_run");
+    expect(problem.param).toBe("calls[1].connection_id");
+    expect(await streakOf(connectionId)).toBe(2);
+    expect(await journaledCalls(ctx, INTEGRATION)).toEqual([]);
+  });
+
+  describe("POST /internal/integration-calls — the journal", () => {
+    afterEach(drainJournal);
+
+    it("journals every record with what the run names: space, actor, owner, run, run_token", async () => {
+      await seedIntegration(INTEGRATION, true);
+      const connectionId = await seedConnection(INTEGRATION);
+      await bindConnectionsToRun(runId, { [INTEGRATION]: [connectionId] });
+
+      const res = await reportCalls([
+        callRecord({
+          connection_id: connectionId,
+          method: "POST",
+          outcome: "201",
+          duration_ms: 42,
+        }),
+        callRecord({ host: "{{tenant}}.example.com", outcome: "upstream_timeout" }),
+      ]);
+      expect(res.status).toBe(204);
+      const requestId = res.headers.get("Request-Id");
+
+      const rows = await journaledCalls(ctx, INTEGRATION);
+      expect(rows.map(({ id: _, createdAt: __, ...row }) => row)).toEqual([
+        {
+          orgId: ctx.orgId,
+          spaceId: ctx.defaultSpaceId,
+          connectionId,
+          integrationId: INTEGRATION,
+          ownerType: "user",
+          ownerId: ctx.user.id,
+          actorType: "user",
+          actorId: ctx.user.id,
+          apiKeyId: null,
+          authMethod: "run_token",
+          runId,
+          chatSessionId: null,
+          method: "POST",
+          host: "api.example.com",
+          outcome: "201",
+          durationMs: 42,
+          requestId: requestId!,
+        },
+        {
+          orgId: ctx.orgId,
+          spaceId: ctx.defaultSpaceId,
+          connectionId: null,
+          integrationId: INTEGRATION,
+          ownerType: null,
+          ownerId: null,
+          actorType: "user",
+          actorId: ctx.user.id,
+          apiKeyId: null,
+          authMethod: "run_token",
+          runId,
+          chatSessionId: null,
+          method: "GET",
+          host: "{{tenant}}.example.com",
+          outcome: "upstream_timeout",
+          durationMs: 7,
+          requestId: requestId!,
+        },
+      ]);
+    });
+
+    it("DENY: an integration the run did not freeze refuses the whole batch", async () => {
+      await seedIntegration(INTEGRATION, true);
+      await seedIntegration(OTHER_INTEGRATION, true);
+
+      const res = await reportCalls([
+        callRecord(),
+        callRecord({ integration_id: OTHER_INTEGRATION }),
+      ]);
+      expect(res.status).toBe(400);
+      const problem = (await res.json()) as { code: string; param: string };
+      expect(problem.code).toBe("invalid_request");
+      expect(problem.param).toBe("calls[1].integration_id");
+      expect(await journaledCalls(ctx, INTEGRATION)).toEqual([]);
+      expect(await journaledCalls(ctx, OTHER_INTEGRATION)).toEqual([]);
+    });
+
+    it("journals the calls of a run whose integration was switched off and dropped from the draft after launch", async () => {
+      await seedIntegration(INTEGRATION, true);
+      const connectionId = await seedConnection(INTEGRATION);
+      await bindConnectionsToRun(runId, { [INTEGRATION]: [connectionId] });
+      await deactivatePackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, INTEGRATION);
+      await db
+        .update(packages)
+        .set({ draftManifest: buildAgentManifest([]) })
+        .where(eq(packages.id, AGENT));
+
+      const res = await reportCalls([
+        callRecord({ connection_id: connectionId, outcome: "999" }),
+        callRecord({ outcome: "upstream_unreachable" }),
+      ]);
+      expect(res.status).toBe(204);
+      const rows = await journaledCalls(ctx, INTEGRATION);
+      expect(rows.map((row) => [row.connectionId, row.outcome])).toEqual([
+        [connectionId, "999"],
+        [null, "upstream_unreachable"],
+      ]);
+    });
+
+    it("journals a local MCP operation with no host", async () => {
+      await seedIntegration(INTEGRATION, true);
+
+      const res = await reportCalls([callRecord({ method: "POST", host: null })]);
+      expect(res.status).toBe(204);
+      const rows = await journaledCalls(ctx, INTEGRATION);
+      expect(rows.map((row) => [row.method, row.host, row.outcome])).toEqual([
+        ["POST", null, "200"],
+      ]);
+    });
+
+    it("DENY: a body out of bounds is a 400 and journals nothing", async () => {
+      await seedIntegration(INTEGRATION, true);
+
+      const tooMany = Array.from({ length: 101 }, () => callRecord());
+      for (const calls of [
+        tooMany,
+        [],
+        [callRecord({ org_id: ctx.orgId })],
+        [callRecord({ outcome: "upstream_refused" })],
+        [callRecord({ outcome: "20" })],
+        [callRecord({ outcome: "2000" })],
+        [callRecord({ method: "G".repeat(2049) })],
+        [callRecord({ host: "a".repeat(2049) })],
+        [callRecord({ host: "" })],
+        [callRecord({ host: "api.example.com/path with space" })],
+        [callRecord({ method: "GET /" })],
+        [callRecord({ duration_ms: -1 })],
+      ]) {
+        expect((await reportCalls(calls)).status).toBe(400);
+      }
+      expect((await reportCalls(Array.from({ length: 100 }, () => callRecord()))).status).toBe(204);
+      expect(await journaledCalls(ctx, INTEGRATION)).toHaveLength(100);
+    });
+
+    it("DENY: no run token is a 401, a run no longer running is a 403", async () => {
+      await seedIntegration(INTEGRATION, true);
+      expect((await reportCalls([callRecord()], null)).status).toBe(401);
+      expect((await reportCalls([callRecord()], "not-a-run-token")).status).toBe(401);
+
+      const finished = await seedRun({
+        packageId: AGENT,
+        orgId: ctx.orgId,
+        spaceId: ctx.defaultSpaceId,
+        userId: ctx.user.id,
+        status: "success",
+      });
+      expect((await reportCalls([callRecord()], signRunToken(finished.id))).status).toBe(403);
+      expect(await journaledCalls(ctx, INTEGRATION)).toEqual([]);
+    });
   });
 });
 

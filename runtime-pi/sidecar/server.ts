@@ -22,6 +22,7 @@ import type { IntegrationBootReport } from "@appstrate/core/sidecar-types";
 import { scrubSecretMaterial } from "./redact.ts";
 import { parseSidecarEnv, type SidecarEnv } from "./env.ts";
 import { admitsAgentProxyPeer, noRunnerPeers, type PeerAttribution } from "./runner-peers.ts";
+import { createCallReporter } from "./call-reporter.ts";
 
 /**
  * Validate the parsed credential config crossing into the sidecar (the
@@ -217,6 +218,14 @@ const runtimeDeps = buildSidecarRuntimeDeps({
   ...(env.runId && { runId: env.runId }),
 });
 
+// The run's call journal: drained by `POST /calls/flush` before the agent finalizes, and on
+// SIGTERM (`docs/architecture/SIDECAR.md`, Call journal).
+const callReporter = createCallReporter({
+  platformApiUrl: config.platformApiUrl,
+  runToken: config.runToken,
+});
+process.once("SIGTERM", () => void callReporter.drain().finally(() => process.exit(0)));
+
 let integrationTools: AppstrateToolDefinition[] = [];
 let declaredConnections = 0;
 
@@ -241,6 +250,7 @@ const integrationBootPromise = (async () => {
       platformApiUrl: config.platformApiUrl,
       runToken: config.runToken,
       ...(env.runId && { runId: env.runId }),
+      callReporter,
     },
     runtimeDeps,
     (adapter) => {
@@ -286,6 +296,7 @@ const app = createApp({
   mcpToolsProvider: () => integrationTools,
   integrationBootPromise,
   integrationBootReportProvider: () => integrationBootReport,
+  flushCallJournal: () => callReporter.drain(),
 });
 
 logger.info("Sidecar proxy listening", {

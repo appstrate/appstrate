@@ -27,6 +27,7 @@ import { buildApiCallHost } from "./helpers/api-call-host.ts";
 import { MAX_REQUEST_BODY_SIZE } from "../helpers.ts";
 import type { CredentialsResponse } from "../helpers.ts";
 import { API_CALL_BODY_FROM_FILE_RULE } from "@appstrate/afps-runtime/resolvers";
+import { noJournal } from "./helpers/call-journal.ts";
 
 // The multipart body shape is exercised through the generic
 // `{ns}__api_call` integration tool — the credential-injecting MCP tool.
@@ -73,6 +74,7 @@ async function makeMultipartApp(overrides?: Partial<AppDeps>) {
         namespace: "test",
         integrationId: "@appstrate/test",
         connectionId: "conn-1",
+        journal: noJournal,
         declaredUris: ["https://api.example.com/**"],
         fetchCredentials: async () => integrationCreds(),
         refreshCredentials: async () => integrationCreds(),

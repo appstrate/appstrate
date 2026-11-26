@@ -2622,12 +2622,12 @@ export const schemas = {
         type: "integer",
         minimum: 1,
         description:
-          "Consecutive upstream rejections counted against this non-OAuth2 connection; omitted when none. The sidecar reports its next successful call to `POST .../upstream-success`, which ends the streak.",
+          "Consecutive upstream rejections counted against this non-OAuth2 connection; omitted when none. The sidecar journals its next successful call on the credential with that credential's revision (`POST /internal/integration-calls`), which ends the streak.",
       },
       credential_revision: {
         type: "string",
         description:
-          "Opaque revision of the stored credential this payload carries (a short digest of its ciphertext; every credential write changes it). The sidecar sends it back as `credential_revision` on `/refresh` and `/upstream-success`, so a rejection or a success is applied to this credential only. Omitted on a connect run's empty payload.",
+          "Opaque revision of the stored credential this payload carries (a short digest of its ciphertext; every credential write changes it). The sidecar sends it back as `credential_revision` on `/refresh` and on a streak-ending record of `/internal/integration-calls`, so a rejection or a success is applied to this credential only. Omitted on a connect run's empty payload.",
       },
     },
   },

@@ -249,6 +249,23 @@ export const chatComponentSchemas = {
       },
     },
   },
+  ChatSessionIntegration: {
+    type: "object",
+    required: ["id", "display_name", "icon"],
+    properties: {
+      id: { type: "string", description: "`@scope/name` integration package id." },
+      display_name: {
+        type: "string",
+        description:
+          "The integration manifest's `display_name`; the id when it declares none or the package is gone.",
+      },
+      icon: {
+        type: ["string", "null"],
+        description:
+          "The integration manifest's `icon` (an Iconify id or an image URL); null when it declares none or the package is gone.",
+      },
+    },
+  },
   ChatMessage: {
     type: "object",
     required: ["id", "content"],
@@ -486,6 +503,48 @@ export const chatPaths = {
         "204": { description: "Session deleted (messages cascade)" },
         "403": { $ref: "#/components/responses/Forbidden" },
         "404": { $ref: "#/components/responses/NotFound" },
+      },
+    },
+  },
+  "/api/orgs/{orgId}/chat/sessions/{id}/integrations": {
+    get: {
+      operationId: "listChatSessionIntegrations",
+      "x-appstrate-space": { kind: "organization" },
+      tags: ["Chat"],
+      summary: "List the integrations a chat session reached",
+      description:
+        "Each integration the conversation reached, once, in order of its first call, read from the integration call journal: its own calls (through the credential proxy) and those of the runs it launched (reported by each run's sidecar). A call reached an integration when it was sent to it, whatever its outcome, a catalog listing included. Calls made before the journal recorded their conversation are not counted. Empty when it reached none. The conversation's author only (404 otherwise, as `GET …/sessions/{id}`).",
+      parameters: [
+        { $ref: "#/components/parameters/OrgIdPath" },
+        { name: "id", in: "path", required: true, schema: { type: "string" } },
+      ],
+      responses: {
+        "200": {
+          description: "The integrations reached",
+          headers: stdHeaders,
+          content: {
+            "application/json": {
+              schema: {
+                type: "object",
+                required: ["object", "data", "hasMore"],
+                properties: {
+                  object: { type: "string", enum: ["list"] },
+                  data: {
+                    type: "array",
+                    items: { $ref: "#/components/schemas/ChatSessionIntegration" },
+                  },
+                  hasMore: { type: "boolean", description: "Always false: the list is whole." },
+                },
+              },
+            },
+          },
+        },
+        "403": { $ref: "#/components/responses/Forbidden" },
+        "404": { $ref: "#/components/responses/NotFound" },
+        "429": {
+          $ref: "#/components/responses/RateLimited",
+          description: "Rate limited (120/min per caller)",
+        },
       },
     },
   },
