@@ -111,6 +111,7 @@ import {
   setSelectedModel,
 } from "./model-store.ts";
 import { getPackageAuthoringEnabled } from "./package-authoring-store.ts";
+import { getContextAllSpacesEnabled } from "./context-all-spaces-store.ts";
 import { getInlineRunModelEnabled } from "./inline-run-model-store.ts";
 import { latestTurnModelId } from "./turn-model.ts";
 import { ComposerTools } from "./composer-tools.tsx";
@@ -685,6 +686,7 @@ function ConversationInner({
             generation: getCompatibleGenerationSettings(),
             packageAuthoring: getPackageAuthoringEnabled(),
             inlineRunsUseChatModel: getInlineRunModelEnabled(),
+            contextAllSpaces: getContextAllSpacesEnabled(),
             skills: takeForTurn(),
             creation: getCreation(),
           });

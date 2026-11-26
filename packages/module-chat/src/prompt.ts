@@ -226,7 +226,7 @@ ${runs(`Files a run writes under \`outputs/\` render as downloadable chips in th
 `)}Your context block below is DATA — the user's identity and role, the current date, the space the conversation was opened in, when it has one, the spaces you can act in with what your role allows in each (\`can\`: an act it does not list is refused in that space, so never send one there)${skills(", the skills available")} and the permissions this turn holds.${
     getMeReturns.length === 0
       ? ""
-      : ` Under \`${SPACE_DETAILS_HEADING}\` it shows what the spaces this conversation already works in hold (the one it was opened in, the one that is the user's own, the spaces it acted in), as read at the start of this turn. For any other space, or once a connection or an activation changed one during the turn, \`get_me\` returns ${new Intl.ListFormat("en").format(getMeReturns)} for the space it names.`
+      : ` Under \`${SPACE_DETAILS_HEADING}\` it shows what the spaces it names hold, as read at the start of this turn. For any other space, or once a connection or an activation changed one during the turn, \`get_me\` returns ${new Intl.ListFormat("en").format(getMeReturns)} for the space it names.`
   } How to act on it:
 - Use the current date to resolve relative dates.
 ${idVerbatimBullet}${skills(`- The skills under \`${SKILLS_HEADING}\` are guides for YOU — procedures you follow yourself, not packages you run. One shown in full, inside a \`<skill>\` tag, is already loaded: follow it. When one listed only by its id and \`skill://\` URI clearly matches the request, LOAD IT BEFORE acting: call \`read_resource\` with that URI verbatim, then follow the SKILL.md it returns. Load ONE at a time, and none when none clearly matches. Never load a skill whose content already appears in this conversation. To read a file a skill references, call \`read_resource\` with the skill's URI, replacing \`SKILL.md\` with the file's path.
@@ -713,7 +713,13 @@ export async function buildCallerContextBlock(
     /** Opened only when the turn has skills or details to read, under `signal`; closed once read. */
     openCaller: (signal: AbortSignal) => Promise<ChatCallerClient>;
   },
-): Promise<Omit<RenderedContext, "injected"> & { injected: InjectedSkills }> {
+): Promise<
+  Omit<RenderedContext, "injected"> & {
+    injected: InjectedSkills;
+    /** The spaces whose details the block shows at least one entry of, in rendering order. */
+    detailedSpaceIds: string[];
+  }
+> {
   const { user, locale, capabilities, skills } = args;
   // The persona's while previewing: this block tells the model what the caller
   // may do, and every operation it names is checked against the persona.
@@ -730,7 +736,7 @@ export async function buildCallerContextBlock(
   // What the turn may read in a space: granted there, and within the turn's ceiling.
   const holdsIn = (space: ReachableSpaceGrant, permission: string) =>
     turnHolds.has(permission) && space.permissions.includes(permission);
-  const details = (args.detailSpaces ?? [])
+  const detailSpaces = (args.detailSpaces ?? [])
     .map((space) => ({
       id: space.id,
       name: space.name,
@@ -746,8 +752,9 @@ export async function buildCallerContextBlock(
       drafts: args.drafts,
       read: [...new Set([...skills.pinnedSkills, ...args.cited])],
     },
-    details,
+    detailSpaces,
   );
+  const details = formatSpaceDetails(turnSkills.details);
   const { injected, ...rendered } = formatCallerContext(identity, {
     locale,
     capabilities,
@@ -766,8 +773,12 @@ export async function buildCallerContextBlock(
     citedSkills: args.cited,
     skillContents: turnSkills.contents,
     skillCatalogue: turnSkills.catalogue,
-    spaceDetails: formatSpaceDetails(turnSkills.details).text,
+    spaceDetails: details.text,
   });
   // What `resources/read` serves without `skills:*`: each skill in the space its URI names.
-  return { ...rendered, injected: { skills: injected } };
+  return {
+    ...rendered,
+    injected: { skills: injected },
+    detailedSpaceIds: details.shown,
+  };
 }

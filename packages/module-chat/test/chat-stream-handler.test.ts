@@ -2195,6 +2195,101 @@ describe("handleChatStream", () => {
       expect(granted).toContain("agents:run");
     });
 
+    describe("what the spaces hold", () => {
+      const touched = async (sessionId: string) =>
+        (
+          await db
+            .select({ spaceId: chatSessionSpaces.spaceId })
+            .from(chatSessionSpaces)
+            .where(eq(chatSessionSpaces.sessionId, sessionId))
+        ).map((row) => row.spaceId);
+      /** The reach with `agents:run` in Beta too, so its agents are read there. */
+      const runningInBoth = () =>
+        reach.map((space) =>
+          space.id === spaceB
+            ? { ...space, permissions: [...space.permissions, "agents:run"] }
+            : space,
+        );
+      /** get_me per space: one agent in each space `agentIn` names, nothing elsewhere. */
+      const holding = (agentIn: Record<string, string>, asked: string[]) =>
+        fakePlatformMcp(
+          {
+            getMe: (spaceId) => {
+              asked.push(spaceId);
+              const agent = agentIn[spaceId];
+              return {
+                space: { id: spaceId },
+                connections: [],
+                connectable_integrations: [],
+                agents: agent ? [{ packageId: agent, display_name: agent, published: true }] : [],
+                agents_total: agent ? 1 : 0,
+              };
+            },
+          },
+          scriptedDispatch(),
+        );
+
+      it("details the origin space alone and records nothing", async () => {
+        const sessionId = mintSessionId();
+        const asked: string[] = [];
+        const { res, calls } = await turn(
+          sessionId,
+          {
+            dispatch: holding(
+              { [ctx.defaultSpaceId]: "@acme/alpha", [spaceB]: "@acme/beta" },
+              asked,
+            ),
+            body: { spaceId: ctx.defaultSpaceId },
+          },
+          runningInBoth(),
+        );
+        expect(res.status).toBe(200);
+        await collectUiChunks(res);
+        await waitForAssistantPersist(sessionId);
+        expect(asked).toEqual([ctx.defaultSpaceId]);
+        expect(calls[0]!.system).toContain("- `@acme/alpha` — in Alpha");
+        expect(calls[0]!.system).not.toContain("@acme/beta");
+        expect(await touched(sessionId)).toEqual([]);
+      });
+
+      it("details every space when the turn asks, recording each that showed an entry", async () => {
+        const sessionId = mintSessionId();
+        const asked: string[] = [];
+        const { res, calls } = await turn(
+          sessionId,
+          {
+            dispatch: holding({ [spaceB]: "@acme/beta" }, asked),
+            body: { spaceId: ctx.defaultSpaceId, context_all_spaces: true },
+          },
+          runningInBoth(),
+        );
+        expect(res.status).toBe(200);
+        await collectUiChunks(res);
+        await waitForAssistantPersist(sessionId);
+        // Gamma is outside the acting set: never read.
+        expect(asked.sort()).toEqual([ctx.defaultSpaceId, spaceB].sort());
+        expect(calls[0]!.system).toContain("- `@acme/beta` — in Beta");
+        // Beta put an agent into the conversation; Alpha is its origin.
+        expect(await touched(sessionId)).toEqual([spaceB]);
+      });
+
+      it("records no space whose details showed no entry", async () => {
+        const sessionId = mintSessionId();
+        const { res } = await turn(
+          sessionId,
+          {
+            dispatch: holding({}, []),
+            body: { spaceId: ctx.defaultSpaceId, context_all_spaces: true },
+          },
+          runningInBoth(),
+        );
+        expect(res.status).toBe(200);
+        await collectUiChunks(res);
+        await waitForAssistantPersist(sessionId);
+        expect(await touched(sessionId)).toEqual([]);
+      });
+    });
+
     describe("the origin space (`spaceId`)", () => {
       const touchedBy = async (sessionId: string) =>
         (

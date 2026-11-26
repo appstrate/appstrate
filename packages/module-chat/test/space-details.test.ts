@@ -82,6 +82,16 @@ describe("formatSpaceDetails", () => {
     ]);
   });
 
+  it("shows the entries of a space that has some, and an empty one shows none", () => {
+    const { covered, shown } = formatSpaceDetails([
+      detail(PERSO, { connectable: ["@appstrate/slack"] }),
+      detail(VENTES),
+    ]);
+    expect(covered).toEqual(["spc_p", "spc_v"]);
+    // An absence discloses nothing of Ventes: only Perso puts data into the conversation.
+    expect(shown).toEqual(["spc_p"]);
+  });
+
   it("is the same text for the same reads, whatever order the entries came in", () => {
     const a = agent("@acme/a");
     const b = agent("@acme/b");
@@ -121,7 +131,7 @@ describe("formatSpaceDetails", () => {
     expect(text).toContain("for Perso, Ventes.");
     expect(text).not.toContain("spc_l");
     // Nothing fits: nothing is rendered.
-    expect(formatSpaceDetails(three, 10)).toEqual({ text: "", covered: [] });
+    expect(formatSpaceDetails(three, 10)).toEqual({ text: "", covered: [], shown: [] });
   });
 });
 

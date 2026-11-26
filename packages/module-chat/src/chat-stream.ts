@@ -157,6 +157,11 @@ export const chatStreamSchema = z
     /** Runs the inline runs this turn launches on its model and generation; absent = off. */
     inline_runs_use_chat_model: z.boolean().optional(),
     /**
+     * Details every space of the turn in its context, recording each that contributes an entry;
+     * absent = off: only the spaces the conversation already depends on.
+     */
+    context_all_spaces: z.boolean().optional(),
+    /**
      * The skill settings of a conversation this turn creates (or of an ephemeral turn): ignored
      * for an existing one, whose settings the skills PATCH changes.
      */
@@ -459,12 +464,19 @@ export async function handleChatStream(
     // The spaces the conversation already depends on, whose details the block renders: its origin,
     // the caller's personal space (their own data, never recorded: they cannot lose it), then the
     // spaces it touched, each while it is a space of the turn.
+    const engaged = new Set(
+      [conv.spaceId, personalSpaceId, ...conv.touched].filter((id) => id !== null),
+    );
+    // With every space asked for, the others follow in reach order, each recorded once it
+    // contributes (`recordedDetails` below).
     const detailSpaces = [
-      ...new Set([conv.spaceId, personalSpaceId, ...conv.touched].filter((id) => id !== null)),
-    ].flatMap((id) => spaces.filter((space) => space.id === id));
+      ...[...engaged].flatMap((id) => spaces.filter((space) => space.id === id)),
+      ...(body.context_all_spaces === true ? spaces.filter((space) => !engaged.has(space.id)) : []),
+    ];
     return {
       skills: conv.selection,
       detailSpaces,
+      engaged,
       // See `turnUsesDrafts`.
       skillDrafts: turnUsesDrafts(callerPermissions, body.package_authoring !== false),
       // The caller's own connection over the turn's spaces (see `callerMcpOpener`): the turn's
@@ -552,8 +564,11 @@ export async function handleChatStream(
       (error: unknown) => ({ ok: false as const, error }),
     );
 
-  const [models, { permissions, capabilities, spaces, organization, scope, openCaller }, stored] =
-    await Promise.all([listModels(origin, inferenceHeaders, platformFetch), turn, historyStored]);
+  const [
+    models,
+    { permissions, capabilities, spaces, organization, scope, openCaller, engaged },
+    stored,
+  ] = await Promise.all([listModels(origin, inferenceHeaders, platformFetch), turn, historyStored]);
   messages = withStoredAgentPromptTexts(
     withStoredHistoryFiles(messages, stored.files),
     stored.launches,
@@ -631,7 +646,12 @@ export async function handleChatStream(
   // Join phase B. This is the one place its failure is allowed to surface.
   const contextResult = await contextBlockPromise;
   if (!contextResult.ok) throw contextResult.error;
-  const { text: contextBlock, injected: injectedSkills, skillStatus } = contextResult;
+  const {
+    text: contextBlock,
+    injected: injectedSkills,
+    skillStatus,
+    detailedSpaceIds,
+  } = contextResult;
 
   // Assemble the system prompt: the tool-grounding prompt, with no inline MCP
   // instructions — the engine's own MCP handshake delivers them.
@@ -716,6 +736,20 @@ export async function handleChatStream(
   // earlier turns took their files from their stored rows (`withStoredHistoryFiles`).
   // A file resolves in the turn's spaces; the conversation's own uploads in the caller's personal
   // space, which a limited turn does not act in.
+  // The spaces whose entries the context block shows and the conversation did not depend on yet
+  // (the turn asked for every space): recorded after the claim, like an attachment's, so a refused
+  // turn widens nothing, and before the model reads them. A space that showed no entry disclosed
+  // nothing and stays unrecorded.
+  const recordedDetails = detailedSpaceIds.filter((id) => !engaged.has(id));
+  if (recordedDetails.length > 0) {
+    try {
+      for (const id of recordedDetails) await organization.touch(id);
+    } catch (err) {
+      slot.release();
+      if (claimedSessionId) await clearActiveStream(claimedSessionId, streamId).catch(() => {});
+      throw err;
+    }
+  }
   const attachmentSpaces = spaces.map((space) => ({
     id: space.id,
     permissions: new Set(space.permissions),

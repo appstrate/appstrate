@@ -316,19 +316,33 @@ function renderAll(details: readonly SpaceDetail[]): string {
   return lines.join("\n");
 }
 
+/** Whether `detail` puts at least one entry of its space into the rendering: an absence is no data. */
+function showsEntries(detail: SpaceDetail): boolean {
+  return (
+    (detail.integrations?.length ?? 0) > 0 ||
+    detail.connectable.length > 0 ||
+    (detail.agents?.length ?? 0) > 0
+  );
+}
+
 /**
- * The details of the first spaces of `details` whose rendering fits `budget`, and the spaces it
- * covers. `""` when none fits.
+ * The details of the first spaces of `details` whose rendering fits `budget`: the text, the spaces
+ * it covers, and those of them it shows at least one entry of. `""` when none fits.
  */
 export function formatSpaceDetails(
   details: readonly SpaceDetail[],
   budget = CHAT_CONTEXT_DETAILS_BUDGET_CHARS,
-): { text: string; covered: string[] } {
+): { text: string; covered: string[]; shown: string[] } {
   for (let kept = details.length; kept > 0; kept--) {
-    const text = renderAll(details.slice(0, kept));
+    const included = details.slice(0, kept);
+    const text = renderAll(included);
     if (text.length <= budget) {
-      return { text, covered: details.slice(0, kept).map((detail) => detail.space.id) };
+      return {
+        text,
+        covered: included.map((detail) => detail.space.id),
+        shown: included.filter(showsEntries).map((detail) => detail.space.id),
+      };
     }
   }
-  return { text: "", covered: [] };
+  return { text: "", covered: [], shown: [] };
 }

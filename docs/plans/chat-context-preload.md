@@ -140,15 +140,16 @@ Ajout au payload par espace, utile aussi aux clients MCP : `connectable_integrat
 des intégrations actives sans connexion utilisable (plafonné, `listActiveIntegrationIds` moins
 les connectées). Décision D4.
 
-### Niveau 3 — tous les espaces (option par conversation, désactivée par défaut)
+### Niveau 3 — tous les espaces (préférence de l'utilisateur, désactivée par défaut)
 
-- Colonne `chat_sessions.context_all_spaces boolean not null default false`, sur le modèle de
-  `skill_discovery`.
-- Activée : le niveau 2 couvre tous les espaces du tour, et le tour enregistre, avant
-  l'inférence, chaque espace qui a rendu une entrée (même règle que `search` : une absence
-  n'est pas une donnée, #2349).
+- Interrupteur « Contexte de tous les espaces » du panneau du composeur : préférence par
+  utilisateur dans le navigateur (`createUserFlag`, comme le modèle des runs inline), envoyée
+  à chaque tour (`context_all_spaces: true`). Aucune colonne, aucune migration : le choix
+  porte sur ce que l'utilisateur veut voir chargé, pas sur la conversation.
+- Activée : le niveau 2 couvre tous les espaces du tour, et le tour enregistre, après la
+  réservation du tour et avant l'inférence, chaque espace qui a rendu une entrée (même règle
+  que `search` : une absence n'est pas une donnée, #2349).
 - Sans effet sur une conversation limitée (un seul espace) ; la ligne n'y est pas proposée.
-- À ne construire que si la mesure après le niveau 2 le justifie (décision D5).
 
 ## Décisions à prendre
 
@@ -158,7 +159,7 @@ les connectées). Décision D4.
 | D2  | Forme de `can` sur le fil                                    | Tableau de noms d'actes en snake_case ; absent = interdit                           |
 | D3  | Valeur du plafond du niveau 2                                | Fixée par le lot 0, verrouillée par un test                                         |
 | D4  | `connectable_integrations` dans `/api/me/context`            | Oui, ids seuls, plafonné                                                            |
-| D5  | Construire le niveau 3                                       | Après mesure du niveau 2                                                            |
+| D5  | Construire le niveau 3                                       | Oui, en préférence d'utilisateur (aucune migration)                                 |
 
 ## Lots
 
@@ -230,20 +231,17 @@ Tests :
   `connectable_integrations` (session, jeton MCP d'instance, clé d'API d'espace) ;
 - label `integration` sur la PR.
 
-### Lot C — niveau 3 (sous réserve de D5)
+### Lot C — niveau 3
 
-| Fichier                                                | Changement                                                                                |
-| ------------------------------------------------------ | ----------------------------------------------------------------------------------------- |
-| `packages/db/src/schema/chat.ts`, `drizzle/0114_*.sql` | colonne ; journal et snapshot écrits à la main ; `schema-catalog.txt` régénéré            |
-| `packages/module-chat/src/routes.ts`, `openapi.ts`     | PATCH de session : `context_all_spaces`, refusé pendant un tour comme `restricted`        |
-| `packages/module-chat/src/chat-stream.ts`              | champ lu à la création ; `organization.touch` des espaces contributeurs avant l'inférence |
-| `packages/module-chat/src/persistence.ts`              | lecture et écriture de la colonne                                                         |
-| `packages/module-chat/src/ui/composer-tools-panel.tsx` | ligne `SheetMenuSwitchRow`, absente d'une conversation limitée ; skeletons alignés        |
-| `apps/web/src/locales/{fr,en}/chat.json`               | libellés et phrase d'explication (la conversation dépend alors de tous ces espaces)       |
+| Fichier                                                   | Changement                                                                                      |
+| --------------------------------------------------------- | ----------------------------------------------------------------------------------------------- |
+| `packages/module-chat/src/chat-stream.ts`, `openapi.ts`   | corps du tour : `context_all_spaces` ; `organization.touch` des espaces qui montrent une entrée |
+| `packages/module-chat/src/ui/context-all-spaces-store.ts` | préférence par utilisateur, liée avec les autres préférences du composeur                       |
+| `packages/module-chat/src/ui/composer-tools-panel.tsx`    | ligne `SheetMenuSwitchRow`, absente d'une conversation limitée ; puce retirable                 |
+| `apps/web/src/locales/{fr,en}/chat.json`                  | libellés et phrase d'explication (la conversation dépend alors de ces espaces)                  |
 
-Tests : enregistrement des seuls espaces contributeurs ; conversation limitée inchangée ;
-bascule pendant un tour refusée ; spec e2e du panneau (chercher les libellés dans `e2e/`).
-Labels `integration` et `e2e`.
+Tests : enregistrement des seuls espaces contributeurs ; rien d'enregistré sans l'option ;
+préférence par utilisateur ; corps du tour. Labels `integration` et `e2e`.
 
 ### Vérification par scénarios réels (après A, après B)
 
@@ -279,4 +277,4 @@ Puis refaire le comptage du lot 0.
 - `@appstrate/core` : `NamedSpace.can` est un ajout (mineure), mais `[Unreleased]` porte déjà
   deux retraits de #2397 : la prochaine version de core est majeure de toute façon. Rafraîchir
   `published-export-baseline.json` après publication.
-- Lot C seulement : une migration, sans réécriture de données.
+- Aucune migration.
