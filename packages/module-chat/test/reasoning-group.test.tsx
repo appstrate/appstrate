@@ -57,7 +57,10 @@ function chat(parts: Parts, status: ChatHelpers["status"], error?: Error): ChatH
   };
 }
 
-const host = testHost();
+// Keys echoed, with the HTTP status appended when the key is given one.
+const host = testHost({
+  t: (key, options) => (options?.status === undefined ? key : `${key}:${options.status}`),
+});
 
 function Turn({ helpers }: { helpers: ChatHelpers }) {
   const runtime = useAISDKRuntime(helpers);
@@ -299,5 +302,53 @@ describe("a running turn's one status region, whatever its tail", () => {
     expect(statusRegions(html)).toBe(0);
     expect(foldedTrigger(html)).toContain("tool.reads.done");
     expect(foldedTrigger(html)).not.toContain("tool.name.search");
+  });
+});
+
+const failedCall = (output: unknown) =>
+  ({
+    type: "dynamic-tool",
+    toolName: "list_agents",
+    toolCallId: "call_failed",
+    state: "output-available",
+    input: {},
+    output,
+  }) as const;
+
+describe("a failed tool call, softened and never hidden", () => {
+  const failed = render([failedCall({ status: 404, error: "Agent introuvable" })], "ready");
+
+  it("keeps its error visible and muted, without a destructive border", () => {
+    expect(failed).not.toContain("border-destructive");
+    expect(failed).toMatch(/class="text-muted-foreground border-t[^"]*"[^>]*>Agent introuvable</);
+  });
+
+  it("ends the header row with a red cross naming the failure and its HTTP status", () => {
+    expect(failed).toContain('aria-label="tool.failedHttp:404"');
+    expect(failed).not.toContain('title="tool.failed');
+    expect(failed).toContain("text-destructive shrink-0");
+  });
+
+  it("shows no HTTP badge, failed or not", () => {
+    const ok = render([failedCall({ status: 200, results: [] })], "ready");
+    expect(ok).not.toContain("tool.failed");
+    expect(ok).not.toContain("text-destructive");
+    expect(ok).not.toContain(">200<");
+    expect(failed).not.toContain(">404<");
+  });
+
+  it("shows the red cross and a muted count in a folded group with a failure", () => {
+    const html = render(
+      [
+        lookup("s1", "issues"),
+        { ...lookup("s2", "agents"), output: { status: 500, error: "boom" } },
+        { type: "text", text: "Rien trouvé.", state: "done" },
+      ],
+      "ready",
+    );
+    const trigger = foldedTrigger(html);
+    expect(trigger).toContain('aria-label="tool.failed"');
+    expect(trigger).toContain("tool.reads.failed");
+    expect(trigger).not.toMatch(/class="text-destructive"[^>]*>tool\.reads\.failed/);
   });
 });

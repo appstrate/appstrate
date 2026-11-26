@@ -29,6 +29,7 @@ import {
 import { useChatHost } from "./runtime-context.ts";
 import { SubjectStack } from "./subject-glyph.tsx";
 import { FOLD_AT, lookupsAt, type GroupablePart } from "./conversation-tools.ts";
+import { FailedGlyph } from "./tool-uis.tsx";
 import { ThinkingStatus } from "./reasoning.tsx";
 import { useTurnClock } from "./use-turn-clock.ts";
 import { showStep } from "./turn-status.ts";
@@ -113,9 +114,10 @@ export function ActivityGroup({
                   <EyeIcon />
                   {t("tool.reads.done", { count: reads })}
                   {failed > 0 ? (
-                    <span className="text-destructive">
-                      {t("tool.reads.failed", { count: failed })}
-                    </span>
+                    <>
+                      <FailedGlyph />
+                      <span>{t("tool.reads.failed", { count: failed })}</span>
+                    </>
                   ) : null}
                   <SubjectStack subjects={subjects} />
                 </>

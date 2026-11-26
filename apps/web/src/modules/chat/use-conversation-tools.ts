@@ -46,8 +46,8 @@ export const TOOL_STATUS_LABEL: Record<ConversationToolStatus, string> = {
 };
 
 /**
- * A call's outcome in its tone, as text: the thread's card tints a badge by phase
- * (`tool-uis.tsx`, no `denied` phase there), the panel only colours a word or a glyph.
+ * A call's outcome in its tone, as text: the panel colours a word or a glyph (the thread's card
+ * marks a failure with a small red cross only, `tool-uis.tsx`, and has no `denied` phase).
  */
 export const TOOL_STATUS_TONE: Record<ConversationToolStatus, string> = {
   running: "text-muted-foreground",

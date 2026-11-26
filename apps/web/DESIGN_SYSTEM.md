@@ -889,8 +889,8 @@ on assistant-ui). Its lightweight `@appstrate/module-chat/conversation-skeleton`
 is shared by the route fallback and the history wait. The chat sits inside the
 shared shell (its list: `modules/chat/chat-sidebar.tsx`). It
 uses `@appstrate/ui` primitives and the host's `t` (`chat.json`), it cannot
-import from `apps/web`. A tool call is a `ToolCallCard` (`tool-uis.tsx`),
-reasoning a collapsible group (`reasoning.tsx`), the working indicator
+import from `apps/web`. A tool call is a `ToolCallCard` (`tool-uis.tsx`); a failed one is softened, never hidden: no red border or lead icon, its message stays visible under the header in muted text, and a small red cross (`FailedGlyph`, named « Échec · HTTP 404 » for assistive tech) ends the row, the same cross preceding the muted failed count of a folded lookups group; only what ends the turn stays red. The HTTP status is no badge: it is in the call's detail. Reasoning is
+a collapsible group (`reasoning.tsx`), the working indicator
 (`ThinkingStatus`, same file) the spark: four coral balls swapping diagonals, pure
 CSS (`.spark` in `styles.css`), still under reduced motion. A running turn holds one spark,
 on one line: the loading line (« Réflexion en cours… », the turn's clock from 1 s), the reasoning

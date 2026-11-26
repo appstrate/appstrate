@@ -2,15 +2,15 @@
 
 /**
  * Appstrate-specific rich tool cards. Each MCP tool the chat agent calls gets
- * a compact, error-aware row: phase icon + verb icon + label + id, with the
- * HTTP status and duration on the right. The glanceable summary stays inline;
+ * a compact row: icon, label, id, then the duration and, when the call failed, a small red
+ * cross. The glanceable summary stays inline;
  * the full (technical) input/output is shown as raw JSON in a modal opened by
  * clicking the row — parsing arbitrary API payloads into a field table reads
  * worse than monospace JSON, and JSON keeps every field intact.
  *
- * Errors stay inline (banner under the header), never hidden behind the click.
- * Tone is driven by the actual result (`deriveToolPhase`), not the verb — a
- * failed call always renders as an error.
+ * A failure is softened, never hidden: its message stays inline under the header, muted, and a
+ * small red cross ends the row; the HTTP status is in the call's detail. Tone is driven by the
+ * actual result (`deriveToolPhase`), not the verb.
  *
  * One shared `<ToolCallCard>` does the work; the cards below name the call as the context panel
  * does (`showCall`). The thread picks a card by tool name (`thread.tsx`).
@@ -20,7 +20,7 @@
 
 import * as React from "react";
 import type { ToolCallMessagePartProps } from "@assistant-ui/react";
-import { ArrowUpRightIcon, BracesIcon, PlayIcon, type LucideIcon } from "lucide-react";
+import { ArrowUpRightIcon, BracesIcon, PlayIcon, XIcon, type LucideIcon } from "lucide-react";
 import { formatDuration } from "@appstrate/core/format";
 import { Button } from "@appstrate/ui/components/button";
 import { Spinner } from "@appstrate/ui/components/spinner";
@@ -84,32 +84,16 @@ function readDurationMs(timing: unknown): number | undefined {
   return undefined;
 }
 
-const BADGE_TONE: Record<ToolPhase, string> = {
-  success: "bg-primary/10 text-primary",
-  error: "bg-destructive/10 text-destructive",
-  running: "bg-muted text-muted-foreground",
-  pending: "bg-muted text-muted-foreground",
-};
-
-function Meta({
-  phase,
-  status,
-  durationMs,
-}: {
-  phase: ToolPhase;
-  status?: number;
-  durationMs?: number;
-}) {
-  const { lang } = useChatHost();
-  if (status === undefined && durationMs === undefined) return null;
+/**
+ * The small red cross of a failed call, the only red its row keeps. Its accessible name says the
+ * failure and, when known, the HTTP status, which the call's detail also lists.
+ */
+export function FailedGlyph({ status }: { status?: number }) {
+  const { t } = useChatHost();
+  const label = status === undefined ? t("tool.failed") : t("tool.failedHttp", { status });
   return (
-    <span className="flex items-center gap-1.5 text-xs">
-      {status !== undefined ? (
-        <code className={`rounded px-1.5 py-0.5 font-medium ${BADGE_TONE[phase]}`}>{status}</code>
-      ) : null}
-      {durationMs !== undefined ? (
-        <span className="text-muted-foreground">{formatDuration(durationMs, lang)}</span>
-      ) : null}
+    <span role="img" aria-label={label} className="text-destructive shrink-0">
+      <XIcon className="size-3.5" />
     </span>
   );
 }
@@ -117,9 +101,8 @@ function Meta({
 /**
  * Single leading icon per row: the glyph of what the call acted on (an integration's
  * logo, an agent's tile) when the platform named it, else the verb icon, tinted by phase
- * (neutral / error). While running it is replaced by a spinner. Status is
- * otherwise carried by the HTTP badge, the red border, and the inline error —
- * no separate status icon, so the row shows one coherent glyph.
+ * (neutral, failed or not). While running it is replaced by a spinner. A failure is carried by
+ * the muted error under the header and the cross at the row's end, never by the lead glyph.
  */
 function LeadIcon({
   phase,
@@ -134,14 +117,13 @@ function LeadIcon({
     return <Spinner className="text-muted-foreground size-4 shrink-0" />;
   }
   if (subject) return <SubjectGlyph subject={subject} />;
-  const tone = phase === "error" ? "text-destructive" : "text-muted-foreground";
-  return <Icon className={`size-4 shrink-0 ${tone}`} />;
+  return <Icon className="text-muted-foreground size-4 shrink-0" />;
 }
 
 /**
- * Compact clickable tool row. Inline: phase icon, verb icon, label, id, and
- * HTTP/duration meta (+ an inline error banner on failure). Click opens a modal
- * with the raw input / output / metadata JSON.
+ * Compact clickable tool row. Inline: lead icon, label, id, duration, the failure cross
+ * (+ the muted inline error on failure). Click opens a modal with the raw input / output /
+ * metadata JSON.
  */
 export function ToolCallCard({
   phase,
@@ -177,7 +159,7 @@ export function ToolCallCard({
   /** Under the header, e.g. the link to the package the call created. */
   footer?: React.ReactNode;
 }) {
-  const { t } = useChatHost();
+  const { t, lang } = useChatHost();
   const anchor = useRevealAnchor(toolCallId);
   const [open, setOpen] = React.useState(false);
   // `unwrapMcpResult` JSON-parses the tool payload. Unmemoized it re-parsed on
@@ -194,16 +176,14 @@ export function ToolCallCard({
     duration_ms: durationMs,
   });
 
-  const border = phase === "error" ? "border-destructive/40" : "";
   return (
     <div
       {...anchor}
-      className={`bg-card text-card-foreground my-3 w-full rounded-lg border ${border} ${REVEAL_RING_CLASS}`}
+      className={`bg-card text-card-foreground my-3 w-full rounded-lg border ${REVEAL_RING_CLASS}`}
     >
-      {/* Fixed h-9 header row: the HTTP badge (taller than the text line) and
-          the duration appear when the result lands — a py-based row would grow
-          by a few px at that moment. Fixed height makes result arrival a 0px
-          layout change. */}
+      {/* Fixed h-9 header row: the duration and the failure cross appear when the result
+          lands — a py-based row would grow by a few px at that moment. Fixed height makes
+          result arrival a 0px layout change. */}
       <button
         type="button"
         className="hover:bg-muted/50 flex h-9 w-full items-center gap-2 rounded-lg px-3 text-left text-sm"
@@ -219,10 +199,15 @@ export function ToolCallCard({
         </span>
         {aside}
         <CallSpace spaceId={spaceId} />
-        <Meta phase={phase} status={status} durationMs={durationMs} />
+        {durationMs !== undefined ? (
+          <span className="text-muted-foreground text-xs">{formatDuration(durationMs, lang)}</span>
+        ) : null}
+        {phase === "error" ? <FailedGlyph status={status} /> : null}
       </button>
       {errorMsg ? (
-        <div className="text-destructive border-t px-3 py-2 text-xs break-words">{errorMsg}</div>
+        <div className="text-muted-foreground border-t px-3 py-2 text-xs break-words">
+          {errorMsg}
+        </div>
       ) : null}
       {footer}
       {open ? (
