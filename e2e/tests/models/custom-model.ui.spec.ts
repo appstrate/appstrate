@@ -228,7 +228,7 @@ test.describe("Custom endpoint model — UI", () => {
     await submitAddKey(dialog).click();
 
     await expect(dialog).toBeHidden();
-    await expect(page.getByText(SERVED_MODEL).first()).toBeVisible();
+    await expect(page.getByRole("row").filter({ hasText: SERVED_MODEL })).toBeVisible();
 
     const models = await listModels(apiClient);
     expect(models.find((m) => m.modelId === CATALOG_MODEL)).toBeUndefined();
@@ -257,8 +257,8 @@ test.describe("Custom endpoint model — UI", () => {
     await submitAddKey(dialog).click();
 
     await expect(dialog).toBeHidden();
-    await expect(page.getByText(CATALOG_MODEL).first()).toBeVisible();
-    await expect(page.getByText(SERVED_MODEL).first()).toBeVisible();
+    await expect(page.getByRole("row").filter({ hasText: CATALOG_MODEL })).toBeVisible();
+    await expect(page.getByRole("row").filter({ hasText: SERVED_MODEL })).toBeVisible();
   });
 
   test("keeps the dialog open on a refused batch, names the refused model and writes nothing", async ({
