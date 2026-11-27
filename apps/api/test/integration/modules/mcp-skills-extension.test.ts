@@ -807,6 +807,29 @@ describe("search across spaces", () => {
     expect(Object.keys(grantedIn(all.data, "skills"))).toContain(teamUri());
   });
 
+  it("describes skills given as `ids` in the space their URIs name, as one by one", async () => {
+    const describe = async (args: Record<string, unknown>) =>
+      parseSearch(await call(ownerHeaders(), "tools/call", { name: "describe", arguments: args }));
+    // No space_id: the space the URIs name is entered, as for a lone describe of each.
+    expect((await describe({ kind: "skill", ids: [teamUri()] })).data).toMatchObject({
+      kind: "skill",
+      items: [{ id: teamUri(), kind: "skill" }],
+    });
+    // Skills of two spaces: one call is one space, so the call asks which...
+    const ids = [toneUri(), teamUri()];
+    expect((await describe({ kind: "skill", ids })).data).toMatchObject({
+      code: "missing_argument",
+      arguments: ["space_id"],
+    });
+    // ...and in the one named, a skill of the other is refused on its own.
+    const mixed = await describe({ kind: "skill", ids, space_id: owner.defaultSpaceId });
+    expect(mixed.isError).toBe(false);
+    expect(mixed.data.items).toEqual([
+      expect.objectContaining({ id: toneUri(), kind: "skill" }),
+      expect.objectContaining({ id: teamUri(), isError: true, code: "space_mismatch" }),
+    ]);
+  });
+
   it("still refuses a skill of another space than space_id, whatever the search found", async () => {
     const refused = parseSearch(
       await call(ownerHeaders(), "tools/call", {

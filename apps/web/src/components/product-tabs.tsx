@@ -4,6 +4,8 @@
  * The products, as a segmented control rather than a menu (it stops scaling past four).
  * Icons are plain: the only coloured mark in the column is the organization's.
  * Docs & API is not a product: it is a link out, carried by the profile menu.
+ * On a phone a tab leaves the navigation sheet open on the product it picked, the page behind
+ * moving to that product's landing (`lib/drawer-navigation.ts`).
  */
 
 import type { ReactNode } from "react";
@@ -18,6 +20,7 @@ import { usePermissions } from "@/hooks/use-permissions";
 import { useChatUnreadCount, useHasChatSessions } from "@appstrate/module-chat/unread";
 import { useChatCan, useShellChatTransport } from "@/modules/chat/use-chat-runtime";
 import { isChatTabShown } from "@/lib/chat-tab";
+import { KEEP_DRAWER_OPEN } from "@/lib/drawer-navigation";
 import { useViewAsHeader } from "@/stores/view-as-store";
 
 interface Product {
@@ -99,6 +102,7 @@ export function ProductTabs() {
           <Link
             key={p.id}
             to={p.to}
+            state={KEEP_DRAWER_OPEN}
             aria-current={p.active ? "page" : undefined}
             className={cn(
               "desktop-pointer:h-7 flex h-10 min-w-0 flex-1 items-center justify-center gap-1.5 rounded-md px-2 text-sm font-medium transition-colors",

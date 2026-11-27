@@ -8,6 +8,7 @@ import { CountBadge } from "./count-badge";
 import { PendingButton } from "@/components/app-ui/pending-button";
 import { RunStatusBadge } from "./status-badge";
 import { Button } from "@appstrate/ui/components/button";
+import { cn } from "@appstrate/ui/cn";
 import { Popover, PopoverContent, PopoverTrigger } from "@appstrate/ui/components/popover";
 import { Separator } from "@appstrate/ui/components/separator";
 import { Skeleton } from "@appstrate/ui/components/skeleton";
@@ -163,7 +164,11 @@ export function NotificationContent({
   );
 }
 
-export function NotificationBell() {
+/**
+ * The bell and its list. It stands in the header from `md` up and in the drawer's first row
+ * below (`className` hides the other one): both read the same count, one opens at a time.
+ */
+export function NotificationBell({ className }: { className?: string }) {
   const { t } = useTranslation("common");
   // « Tous les espaces »: every space the caller holds a role in, as the org routes read them.
   const { on: spanning } = useOverviewMode();
@@ -194,7 +199,7 @@ export function NotificationBell() {
       type="button"
       variant="ghost"
       size="icon-sm"
-      className="text-muted-foreground relative shrink-0"
+      className={cn("text-muted-foreground relative shrink-0", className)}
       aria-label={t("notifications.ariaLabel")}
     >
       <Bell size={18} />

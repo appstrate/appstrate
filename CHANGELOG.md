@@ -60,6 +60,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### MCP clients
 
+- `describe` takes `ids` (1 to 10 items of one `kind`) in place of `id`: the answer is `{ kind, usage?, items }`, one item per id in order, each what a lone describe returns plus its `id`; a refused item carries `isError: true` without failing the others, and a `usage` every described item shares is given once at the top (#2374). The call enters the space a lone describe of each item would; skills of several spaces need a `space_id`. A chat turn may make 30 model calls (was 16).
 - Platform tools list `icons` (inline SVG, light and dark theme), and a tool result carries `_meta["dev.appstrate/presentation"]` when the server knows more of the call than its descriptor: a `call` field naming the kind of call (`operation`, `proxied_request`, `remote_tool`, `search`, `caller`), then that kind's own fields (the operation's tag and method, the subject acted on with its `icons` as MCP `Icon`s, a proxied request's batch size, a remote tool's title, and for `search` a count and its items) (#2398, #2405). The `search` and `describe` descriptors declare `readOnlyHint: true` (and `openWorldHint: true` when they may read a remote catalog), so a standard client does not ask approval for them. `GET /api/credential-proxy/tools` lists the tools' `integrations` and a remote tool's sanitised `title`. See [Showing a call](docs/guides/connecting-mcp-clients.md#showing-a-call).
 
 ## [1.0.0-beta.71] - 2026-11-24

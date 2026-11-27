@@ -148,8 +148,8 @@ describe("chat turn metadata", () => {
   });
 
   it("reserves exactly one step for the final, tool-less synthesis call", () => {
-    expect(CHAT_MAX_STEPS).toBe(16);
-    expect(CHAT_TOOL_STEP_BUDGET).toBe(15);
+    expect(CHAT_MAX_STEPS).toBe(30);
+    expect(CHAT_TOOL_STEP_BUDGET).toBe(29);
   });
 
   it("keeps a child call's budget strictly inside the turn that hosts it", () => {

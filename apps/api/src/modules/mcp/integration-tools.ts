@@ -537,7 +537,8 @@ export function buildCallIntegrationToolTool(ctx: IntegrationToolContext): Appst
     description:
       "Call an integration tool search returned, by its `id` passed as `tool`, with `arguments` " +
       "following its `input_schema`; its `usage` (from describe) " +
-      "says how to read the result. A missing required argument is " +
+      "says how to read the result. Before calling several tools, read their schemas with ONE " +
+      "describe passing their ids in `ids`, not one describe per tool. A missing required argument is " +
       "refused before anything is sent; an `api_call` tool refuses any other argument it does " +
       "not declare the same way, and so does a typed tool whose `input_schema` closes its " +
       "properties (`additionalProperties: false`); a typed tool's server validates the rest " +

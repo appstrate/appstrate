@@ -2,7 +2,8 @@
 
 /**
  * The shell's header, one for every product and format: while the sidebar is off screen it opens
- * from one control (a burger and the organization's and the space's avatars, no names).
+ * from one control (a burger and the organization's and the space's avatars, no names). Below
+ * `md` the bell is the drawer's, and that control carries its unread dot.
  */
 
 import { afterAll, describe, expect, it } from "bun:test";
@@ -45,19 +46,40 @@ const { ShellFrameProvider } = await import("../shell-header-slots.tsx");
 await i18nReady;
 await i18n.changeLanguage("fr");
 
-function render() {
+/** The header in spc_a, with `unreadNotifications` waiting behind the bell. */
+function render({ unreadNotifications = 0 }: { unreadNotifications?: number } = {}) {
+  const queryClient = memberSpaceClient([testSpace("spc_a", ["runs:read"], "Sales")]);
+  queryClient.setQueryData(
+    [
+      "get",
+      "/api/notifications/unread-count",
+      { params: { header: { "X-Org-Id": "org_1", "X-Space-Id": "spc_a" } } },
+    ],
+    { count: unreadNotifications },
+  );
   return renderInSpace(
     <SidebarProvider>
       <ShellFrameProvider>
         <ShellHeader />
       </ShellFrameProvider>
     </SidebarProvider>,
-    {
-      queryClient: memberSpaceClient([testSpace("spc_a", ["runs:read"], "Sales")]),
-      overview: false,
-    },
+    { queryClient, overview: false },
   );
 }
+
+/** The header as a phone draws it (`useIsMobile` reads the window's width). */
+function renderOnPhone(options?: Parameters<typeof render>[0]) {
+  const win = window as unknown as { innerWidth?: number };
+  win.innerWidth = 390;
+  try {
+    return render(options);
+  } finally {
+    delete win.innerWidth;
+  }
+}
+
+const openerOf = (html: string) =>
+  html.match(/<button[^>]*data-testid="sidebar-opener"[^>]*>[\s\S]*?<\/button>/)?.[0] ?? "";
 
 describe("the shell header", () => {
   it("opens the sidebar from one control on a phone, named with where the user stands", () => {
@@ -73,7 +95,24 @@ describe("the shell header", () => {
     expect(html).toContain("absolute -right-1 -bottom-1 size-4");
   });
 
-  it("keeps the bell in the header on every format", () => {
-    expect(render()).toContain('aria-label="Notifications"');
+  it("keeps the bell in the header from md up only: below, the drawer holds it", () => {
+    const bell = render().match(/<button[^>]*aria-label="Notifications"[^>]*>/)?.[0] ?? "";
+    expect(bell).toMatch(/class="[^"]*max-md:hidden/);
+  });
+
+  it("puts a dot on the burger for unread notifications on a phone, and says how many", () => {
+    const opener = openerOf(renderOnPhone({ unreadNotifications: 2 }));
+    expect(opener).toMatch(/aria-label="[^"]*, 2 notifications non lues"/);
+    expect(opener).toContain("bg-destructive");
+  });
+
+  it("leaves the notifications to the bell where the header shows it", () => {
+    const opener = openerOf(render({ unreadNotifications: 2 }));
+    expect(opener).not.toContain("notification");
+    expect(opener).not.toContain("bg-destructive");
+  });
+
+  it("draws no dot on a phone with nothing unread", () => {
+    expect(openerOf(renderOnPhone())).not.toContain("bg-destructive");
   });
 });

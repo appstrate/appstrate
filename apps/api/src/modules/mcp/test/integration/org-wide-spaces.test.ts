@@ -346,6 +346,31 @@ describe("mcp org-wide connection", () => {
     expect(audit?.after).toMatchObject({ spaceId: null });
   });
 
+  it("describes operations given as `ids` in the space a lone describe of each enters", async () => {
+    // Organization-level only: no space entered, even one named.
+    const orgLevel = await call("describe", {
+      kind: "operation",
+      ids: ["listModels"],
+      space_id: gestion.id,
+    });
+    expect(payload(orgLevel).data.items).toEqual([
+      expect.objectContaining({ id: "listModels", scope: "organization" }),
+    ]);
+    expect(orgLevel.result?._meta).toMatchObject({ [OPERATION_SPACES_META_KEY]: [] });
+
+    // One space operation among them: the named space is entered, as describing it alone would.
+    const mixed = await call("describe", {
+      kind: "operation",
+      ids: ["listModels", "listAgents"],
+      space_id: gestion.id,
+    });
+    expect(payload(mixed).data.items).toEqual([
+      expect.objectContaining({ id: "listModels" }),
+      expect.objectContaining({ id: "listAgents", scope: "request" }),
+    ]);
+    expect(mixed.result?._meta).toMatchObject({ [OPERATION_SPACES_META_KEY]: [gestion.id] });
+  });
+
   it("describes space-dependent operations before asking for a destination, then enforces the actual route", async () => {
     for (const [id, route] of [
       ["getMyContext", "/api/me/context"],

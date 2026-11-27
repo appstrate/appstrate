@@ -532,6 +532,8 @@
   "nav.sidebarDescription": "Affiche le menu latéral sur mobile.",
   "nav.toggleSidebar": "Afficher ou masquer le menu latéral",
   "nav.toggleSidebarIn": "Afficher ou masquer le menu latéral ({{current}})",
+  "nav.toggleSidebarNotifications_one": "{{label}}, {{count}} notification non lue",
+  "nav.toggleSidebarNotifications_other": "{{label}}, {{count}} notifications non lues",
   "nav.toggleSidebarUnread_one": "{{label}}, {{count}} run non lu",
   "nav.toggleSidebarUnread_other": "{{label}}, {{count}} runs non lus",
   "switcher.spaceOnRequest": "Sur demande",
