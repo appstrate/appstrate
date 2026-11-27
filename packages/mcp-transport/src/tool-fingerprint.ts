@@ -6,18 +6,31 @@
  */
 
 import type { Tool } from "@modelcontextprotocol/sdk/types.js";
+import { isToolMarkerMetaKey } from "./sanitize.ts";
 
 /**
- * SHA-256 hex over the parts of a tool definition the model or a caller acts on. Computed on the
- * RAW listed tool, before sanitising: sanitising rules may change between releases, the
+ * SHA-256 hex over the parts of a tool definition the model or a caller acts on, `execution` and
+ * `_meta` included (minus the first-party markers sanitising strips). Computed
+ * on the RAW listed tool, before sanitising: sanitising rules may change between releases, the
  * fingerprint must not.
  */
 export function toolDefinitionFingerprint(tool: Tool): string {
-  const { name, title, description, inputSchema, outputSchema, annotations } = tool;
+  const { name, title, description, inputSchema, outputSchema, annotations, execution } = tool;
+  const kept = Object.entries(tool._meta ?? {}).filter(([key]) => !isToolMarkerMetaKey(key));
+  const _meta = kept.length > 0 ? Object.fromEntries(kept) : undefined;
   // The round-trip drops `undefined` members and turns NaN / array holes into null, leaving
   // plain JSON for the key-sorted stringify below.
   const payload = JSON.parse(
-    JSON.stringify({ name, title, description, inputSchema, outputSchema, annotations }),
+    JSON.stringify({
+      name,
+      title,
+      description,
+      inputSchema,
+      outputSchema,
+      annotations,
+      execution,
+      _meta,
+    }),
   );
   return new Bun.CryptoHasher("sha256").update(sortedJson(payload)).digest("hex");
 }

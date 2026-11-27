@@ -406,22 +406,15 @@ export class McpHost {
       },
     });
 
-    if (capabilities && !capabilities.tools) {
-      // Server explicitly does NOT support tools — no point asking.
-      return {
-        namespace: normalisedNs,
-        unavailable: [...new Set(upstream.allowedTools ?? [])].map((name) => ({
-          name,
-          reason: "not_listed" as const,
-        })),
-        listed: [],
-      };
+    // A server that does not advertise tools has none to list: no point asking.
+    const noTools = !!capabilities && !capabilities.tools;
+    let tools: Tool[] = [];
+    if (!noTools) {
+      upstream.listSignal?.throwIfAborted();
+      ({ tools } = await effectiveUpstream.client.listTools(
+        upstream.listSignal ? { signal: upstream.listSignal } : undefined,
+      ));
     }
-
-    upstream.listSignal?.throwIfAborted();
-    const { tools } = await effectiveUpstream.client.listTools(
-      upstream.listSignal ? { signal: upstream.listSignal } : undefined,
-    );
     // Pre-filter against the agent-declared allowlist
     // before any sanitisation / registration. The check uses the
     // ORIGINAL upstream tool name; namespacing happens downstream and
@@ -444,9 +437,7 @@ export class McpHost {
     const admitted = tools.filter((tool) => {
       if (seenNames.has(tool.name)) return false;
       seenNames.add(tool.name);
-      const exclusion =
-        toolExclusion(tool.name, allowlist, hiddenSet) ??
-        (blockedSet?.has(tool.name) ? "blocked_in_space" : null);
+      const exclusion = toolExclusion(tool.name, allowlist, hiddenSet, blockedSet);
       if (exclusion === null) {
         // Only a tool with an approved entry is fingerprinted (declared and open catalogs have none).
         // Own-property lookup: a tool named `constructor` must not resolve to Object.prototype.

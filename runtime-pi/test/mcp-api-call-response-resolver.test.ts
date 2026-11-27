@@ -200,7 +200,7 @@ describe("shapeApiCallResponse — no toFile (status surfacing)", () => {
     };
     const out = await shapeApiCallResponse(asked, baseOpts(workspace));
     expect((out.content[0] as { text: string }).text).toBe(
-      '[api_call status=403 required_scopes=["a","b]=x,c"]]',
+      '[api_call status=403 required_scopes="a b]=x,c"]',
     );
     const plain = await shapeApiCallResponse(withStatus([], 403), baseOpts(workspace));
     expect((plain.content[0] as { text: string }).text).toBe("[api_call status=403]");

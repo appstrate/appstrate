@@ -79,11 +79,9 @@ On the **Tools** tab of the integration editor, **Declare in the integration** (
 
 An integration created [from an MCP URL](/integrations/custom-integrations#pack-import-publish) declares no tool; the tools the server lists are reviewed through the snapshot, and the server's `readOnlyHint` and `destructiveHint` annotations appear on each review card as unverified hints.
 
-`POST …/discover` reads the draft's identity and instructions only, never tools, and records no snapshot.
-
 ## Block a tool
 
-**Block** (or **Block a tool…** to name one) makes a tool neither offered nor callable in the space, declared or not, on an open or a closed catalog. It applies to the tools of every integration source (remote, local or none) and to `api_call` and `api_upload`; blocking `api_upload` alone applies to runs only. A policy route accepts any name the server listed (1 to 256 characters). A space holds at most 500 blocks per integration; past that, blocking is refused with `409 tool_blocks_limit` until one is lifted. **Unblock** reverses it.
+**Block** (or **Block a tool…** to name one) makes a tool neither offered nor callable in the space, declared or not, on an open or a closed catalog. It applies to the tools of every integration source (remote, local or none) and to `api_call` and `api_upload`; blocking `api_upload` alone applies to runs only. A policy route accepts any name the server listed (1 to 128 characters). A space holds at most 500 blocks per integration; past that, blocking is refused with `409 tool_blocks_limit` until one is lifted. **Unblock** reverses it.
 
 ## Who can change a policy
 
@@ -109,14 +107,14 @@ A run that selects no usable tool at all still fails at boot, as described in [H
 
 ## Limits
 
-- The fingerprint covers a tool's `name`, `title`, `description`, `inputSchema`, `outputSchema` and `annotations`. It does not cover `_meta`, `icons` or `execution`, and it cannot see the code behind a definition: a server can change what a tool does while its definition stays the same, and an approval stays valid.
+- The fingerprint covers a tool's `name`, `title`, `description`, `inputSchema`, `outputSchema`, `annotations` and `execution`, and its `_meta` apart from the keys the platform reserves for itself. It does not cover `icons`, and it cannot see the code behind a definition: a server can change what a tool does while its definition stays the same, and an approval stays valid.
 - A run launched from the CLI on the caller's machine (`runOrigin: "remote"`, for example `appstrate run --local`) does not receive the space's blocks and approvals: the CLI connects itself to the unauthenticated remote MCP integrations and applies only the agent's selection and `hidden_tools`, skips authenticated remote integrations, and the platform records such a run's tool listing as no snapshot. Blocks and approvals are not a security boundary for a run executed on the caller's own machine.
 
 ## Reaching the server directly is refused
 
 An integration's own MCP endpoint cannot be called as plain HTTP through the credential proxy or an in-run `api_call`: the call is refused with `403 remote_mcp_endpoint_not_proxied`. Tools are the way in, because they are where the policy applies.
 
-When a server refuses a call with a Bearer challenge (`401`, or `403 insufficient_scope`), the resulting `upstream_credential_rejected` problem carries `required_scopes`, the scopes the server asked for, and the `connection_id` it refused, and an in-run `api_call` result names the scopes. The connection's owner can grant them in one step: see [When a server asks for more scopes](/integrations/how-integrations-work#when-a-server-asks-for-more-scopes).
+A server's `401` or `403 insufficient_scope` challenge is surfaced with the scopes it asks for: see [When a server asks for more scopes](/integrations/how-integrations-work#when-a-server-asks-for-more-scopes).
 
 ## Exporting an agent
 

@@ -54,8 +54,27 @@ describe("toolDefinitionFingerprint", () => {
     );
   });
 
-  it("ignores _meta and other extra fields", () => {
-    const extra = { ...base, _meta: { ui: 1 }, icons: [{ src: "x" }], execution: {} } as Tool;
+  it("changes with execution and with _meta, but not with the first-party markers", () => {
+    const fp = toolDefinitionFingerprint(base);
+    expect(toolDefinitionFingerprint({ ...base, execution: { taskSupport: "optional" } })).not.toBe(
+      fp,
+    );
+    const withMeta = toolDefinitionFingerprint({ ...base, _meta: { ui: 1 } });
+    expect(withMeta).not.toBe(fp);
+    expect(toolDefinitionFingerprint({ ...base, _meta: { ui: 2 } })).not.toBe(withMeta);
+    expect(
+      toolDefinitionFingerprint({
+        ...base,
+        _meta: { ui: 1, "dev.appstrate/integration": { id: "x" } },
+      }),
+    ).toBe(withMeta);
+    expect(toolDefinitionFingerprint({ ...base, _meta: { "dev.appstrate/api-call": true } })).toBe(
+      fp,
+    );
+  });
+
+  it("ignores icons and other extra fields", () => {
+    const extra = { ...base, icons: [{ src: "x" }] } as Tool;
     expect(toolDefinitionFingerprint(extra)).toBe(toolDefinitionFingerprint(base));
   });
 

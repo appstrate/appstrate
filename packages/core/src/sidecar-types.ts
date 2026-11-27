@@ -521,8 +521,8 @@ export interface IntegrationSpawnSpec {
 export const OBSERVED_TOOLS_MAX_COUNT = 500;
 export const OBSERVED_TOOLS_MAX_BYTES = 1024 * 1024;
 
-/** The name of an observed tool: bounded, non-empty. */
-export const observedToolNameSchema = z.string().min(1).max(256);
+/** The name of an observed tool: bounded (MCP's own 128-character limit), non-empty. */
+export const observedToolNameSchema = z.string().min(1).max(128);
 
 /** One raw MCP descriptor as the platform can fingerprint it. */
 export const observedToolSchema = z.looseObject({

@@ -1543,7 +1543,6 @@ export function pushUnavailableToolBreadcrumb(
       integrationId: spec.integrationId,
       ...connectionLabelOf(spec),
       requested,
-      surviving: Math.max(0, requested - unavailable.length),
       missing: unavailable.length,
     },
   });
@@ -2030,14 +2029,14 @@ export async function bootIntegrations(
     connection: BoundConnection | undefined,
     source: IntegrationCredentialsSource | null,
     intoNamespace?: string,
-  ): Promise<{ count: number; namespace: string }> => {
+  ): Promise<number> => {
     const apiCalls = spec.apiCalls ?? [];
-    if (apiCalls.length === 0) return { count: 0, namespace: intoNamespace ?? spec.namespace };
+    if (apiCalls.length === 0) return 0;
     if (!apiCallDeps) {
       logger.warn("integration declares api_call but sidecar has no proxy deps; skipping", {
         integrationId: spec.integrationId,
       });
-      return { count: 0, namespace: intoNamespace ?? spec.namespace };
+      return 0;
     }
     if (!source || !connection) {
       throw new Error(
@@ -2131,7 +2130,7 @@ export async function bootIntegrations(
         toolCount: count,
       });
     }
-    return { count: total, namespace: sharedNamespace ?? spec.namespace };
+    return total;
   };
 
   const prepared = await mapWithConcurrency(specs, INTEGRATION_BOOT_CONCURRENCY, prepareConnection);
@@ -2149,11 +2148,7 @@ export async function bootIntegrations(
       const nativeHiddenTools = hiddenToolsForNativeUpstream(spec);
 
       if (upstream.kind === "serverless") {
-        const { count: apiCallToolCount, namespace: apiCallNamespace } = await attachApiCall(
-          spec,
-          connection,
-          source,
-        );
+        const apiCallToolCount = await attachApiCall(spec, connection, source);
         const ms = elapsedMs();
         // Contract gate FIRST, breadcrumb second — otherwise a single failure
         // prints the same diagnosis twice, at `warn` here and at `error` from
@@ -2162,7 +2157,7 @@ export async function bootIntegrations(
         pushServerlessReadyBreadcrumb(spec, apiCallToolCount, ms, breadcrumbs);
         spawned.push({
           integrationId: spec.integrationId,
-          namespace: apiCallNamespace,
+          namespace: spec.namespace,
           ...connectionLabelOf(spec),
           toolCount: apiCallToolCount,
         });
@@ -2198,7 +2193,7 @@ export async function bootIntegrations(
         // only channel to the run's degraded marking (the platform records no snapshot for it).
         reports.push(reportToolsObserved(spec, listed, unavailableTools, bundleFetchOpts));
         // Attach the in-process api_call tool alongside the remote MCP's tools.
-        const { count: apiCallAdded } = await attachApiCall(spec, connection, source, allocatedNs);
+        const apiCallAdded = await attachApiCall(spec, connection, source, allocatedNs);
         assertIntegrationExposesTools(spec, added + apiCallAdded);
         spawned.push({
           integrationId: spec.integrationId,
@@ -2283,7 +2278,7 @@ export async function bootIntegrations(
 
       // Attach the in-process api_call tool alongside the spawned server's
       // native tools, under the same (allocated) namespace.
-      const { count: apiCallAdded } = await attachApiCall(spec, connection, source, allocatedNs);
+      const apiCallAdded = await attachApiCall(spec, connection, source, allocatedNs);
 
       assertIntegrationExposesTools(spec, added + apiCallAdded);
       spawned.push({
@@ -2363,7 +2358,7 @@ export async function bootIntegrations(
     }
   }
 
-  // Each report is bounded by its own retry budget and never rejects; the boot report is only
+  // Each report is bounded by its own deadline and never rejects; the boot report is only
   // served once they landed, so the platform has them before a short run can end.
   await Promise.all(reports);
 

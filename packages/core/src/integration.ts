@@ -1351,12 +1351,19 @@ export function judgeToolApprovals<T extends { tool_name: string }>(
   manifest: IntegrationManifest,
   approvals: readonly T[],
 ): T[] {
-  if (allowsUndeclaredTools(manifest)) return [];
-  const declared = new Set(
-    resolveIntegrationToolCatalog({ integration: manifest }).map((e) => e.name),
-  );
+  const counts = approvalCounts(manifest);
+  return approvals.filter((a) => counts(a.tool_name));
+}
+
+/** Whether an approval of the named tool can count: the rule {@link judgeToolApprovals} applies per name. */
+function approvalCounts(
+  manifest: IntegrationManifest,
+  catalog = resolveIntegrationToolCatalog({ integration: manifest }),
+): (name: string) => boolean {
+  if (allowsUndeclaredTools(manifest)) return () => false;
+  const declared = new Set(catalog.map((e) => e.name));
   const hidden = hiddenToolNames(manifest);
-  return approvals.filter((a) => !declared.has(a.tool_name) && !hidden.has(a.tool_name));
+  return (name) => !declared.has(name) && !hidden.has(name);
 }
 
 /** Names the platform withholds from every surface: `hidden_tools`, connect primitives, hidden uploads. */
@@ -1861,11 +1868,11 @@ export function validateAgentIntegrationScopes(
     const catalogIsEmptyAdvisory =
       (sourceKind === "local" || sourceKind === "none") && catalog.length === 0;
     if (!allowsUndeclaredTools(integrationManifest) && !catalogIsEmptyAdvisory) {
-      const approved = judgeToolApprovals(
-        integrationManifest,
-        (options?.approvedTools ?? []).map((tool_name) => ({ tool_name })),
-      );
-      const allowed = new Set([...catalog.map((e) => e.name), ...approved.map((a) => a.tool_name)]);
+      const counts = approvalCounts(integrationManifest, catalog);
+      const allowed = new Set([
+        ...catalog.map((e) => e.name),
+        ...(options?.approvedTools ?? []).filter(counts),
+      ]);
       for (const tool of selection.tools) {
         if (allowed.has(tool)) continue;
         errors.push({

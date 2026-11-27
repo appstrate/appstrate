@@ -44,6 +44,8 @@ describe("targetsMcpEndpoint", () => {
       ["https://mcp.example.com/v1/mcp/x/..%2fother", true],
       ["https://mcp.example.com/v1%5Cmcp", true],
       ["https://mcp.example.com/v1/mcp/..%2Fother", false],
+      // Repeated slashes collapse before dot segments resolve.
+      ["https://mcp.example.com/v1/x/%2F%2E%2E/mcp", true],
       ["https://mcp.example.com:444/v1/mcp", false],
       ["not a url", false],
     ];

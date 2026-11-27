@@ -174,9 +174,10 @@ export function connectionCallJournal(
         : undefined;
     const source = binding.source;
     // A 403 `insufficient_scope` on the injected credential names the connection's step-up demand.
+    const status = Number(call.outcome);
     const requiredScopes =
-      call.credential && binding.connectionId && call.outcome === "403"
-        ? requiredScopesFromChallenge(403, call.challenge ?? null)
+      call.credential && binding.connectionId && status === 403
+        ? requiredScopesFromChallenge(status, call.challenge ?? null)
         : undefined;
     reporter.report(
       {

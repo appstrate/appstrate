@@ -45,6 +45,10 @@ describe("Bearer scopes (RFC 6750 §3)", () => {
     expect(parseBearerChallenge('Basic realm="one, Bearer scope=wrong"')?.scopes).toBeUndefined();
   });
 
+  it("keeps the first value of a repeated parameter", () => {
+    expect(parseBearerChallenge('Bearer scope="read", scope="admin"')?.scopes).toEqual(["read"]);
+  });
+
   it("does not read a parameter merely ending in scope", () => {
     expect(parseBearerChallenge('Bearer x_scope="admin"')?.scopes).toBeUndefined();
   });

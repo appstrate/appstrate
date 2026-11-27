@@ -151,5 +151,7 @@ describe("toolExclusion", () => {
     expect(toolExclusion("b", allowlist, hidden)).toBe("hidden_tools");
     expect(toolExclusion("a", allowlist, hidden)).toBeNull();
     expect(toolExclusion("c", null, null)).toBeNull();
+    expect(toolExclusion("a", allowlist, hidden, new Set(["a"]))).toBe("blocked_in_space");
+    expect(toolExclusion("b", allowlist, hidden, new Set(["b"]))).toBe("hidden_tools");
   });
 });

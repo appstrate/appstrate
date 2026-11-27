@@ -129,15 +129,15 @@ export interface ApiCallErrorMeta {
 
 /**
  * The line that tells the model an `api_call`'s status, its failure code when it has one, and
- * the scopes the upstream asked for, JSON-encoded: a scope token may itself hold `,`, `]` or `=`,
- * so only an encoded list cannot be read as more status text.
+ * the scopes the upstream asked for, as a quoted space-separated list (RFC 6750): a scope token
+ * holds no space, quote or backslash, so the quotes bound the list.
  */
 export function apiCallStatusLine(
   status: number,
   code?: string,
   requiredScopes?: readonly string[],
 ): string {
-  return `[api_call status=${status}${code ? ` code=${code}` : ""}${requiredScopes?.length ? ` required_scopes=${JSON.stringify(requiredScopes)}` : ""}]`;
+  return `[api_call status=${status}${code ? ` code=${code}` : ""}${requiredScopes?.length ? ` required_scopes="${requiredScopes.join(" ")}"` : ""}]`;
 }
 
 /**

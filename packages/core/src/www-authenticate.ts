@@ -8,7 +8,7 @@
 import { scopeTokenSchema } from "./integration.ts";
 
 /** Most scopes surfaced from one challenge: the header is server-controlled. */
-const MAX_REQUIRED_SCOPES = 20;
+export const MAX_REQUIRED_SCOPES = 20;
 
 /** Longest scope token kept: the scopes reach the model, and the header is server-controlled. */
 const MAX_REQUIRED_SCOPE_LENGTH = 128;
@@ -52,7 +52,8 @@ export function parseBearerChallenge(header: string): BearerChallenge | undefine
     if (!bearer) continue;
     const param =
       /^([!#$%&'*+.^_`|~\w-]+)\s*=\s*(?:"((?:\\.|[^"\\])*)"|([!#$%&'*+.^_`|~\w-]+))$/.exec(field);
-    if (param) bearer.set(param[1]!.toLowerCase(), param[2]?.replace(/\\(.)/g, "$1") ?? param[3]!);
+    if (param && !bearer.has(param[1]!.toLowerCase()))
+      bearer.set(param[1]!.toLowerCase(), param[2]?.replace(/\\(.)/g, "$1") ?? param[3]!);
   }
   if (!bearer) return undefined;
   const resourceMetadataUrl = bearer.get("resource_metadata");
@@ -77,12 +78,7 @@ export function sanitiseRequiredScopes(list: readonly unknown[] | undefined): st
     .slice(0, MAX_REQUIRED_SCOPES);
 }
 
-/**
- * The scopes a server asks for when it refuses a call: only on a 401, or a 403
- * `insufficient_scope` (RFC 6750 §3.1). Tokens that are not valid scope tokens
- * and tokens over {@link MAX_REQUIRED_SCOPE_LENGTH} characters are dropped; at most
- * {@link MAX_REQUIRED_SCOPES} are kept.
- */
+/** The scopes a server asks for on a 401 or a 403 `insufficient_scope` (RFC 6750 §3.1), through {@link sanitiseRequiredScopes}. */
 export function requiredScopesFromChallenge(
   status: number,
   header: string | null,

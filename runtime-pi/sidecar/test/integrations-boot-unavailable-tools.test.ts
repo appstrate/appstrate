@@ -51,7 +51,6 @@ describe("pushUnavailableToolBreadcrumb", () => {
     expect(breadcrumbs[0]!.data).toMatchObject({
       integrationId: "@scope/gh",
       requested: 3,
-      surviving: 1,
       missing: 2,
     });
   });
@@ -101,7 +100,7 @@ describe("pushUnavailableToolBreadcrumb", () => {
       breadcrumbs,
     );
     expect(breadcrumbs[0]!.message).toBe("@scope/gh [work]: 1/1 selected tool(s) unavailable");
-    expect(breadcrumbs[0]!.data).toMatchObject({ requested: 1, surviving: 0, missing: 1 });
+    expect(breadcrumbs[0]!.data).toMatchObject({ requested: 1, missing: 1 });
   });
 
   it("is silent when nothing is unavailable", () => {
@@ -120,6 +119,6 @@ describe("pushUnavailableToolBreadcrumb", () => {
     expect(breadcrumbs[0]!.message).toBe(
       "@scope/gh [work]: 1/2 selected tool(s) unavailable: create_issue (not_listed)",
     );
-    expect(breadcrumbs[0]!.data).toMatchObject({ requested: 2, surviving: 1, missing: 1 });
+    expect(breadcrumbs[0]!.data).toMatchObject({ requested: 2, missing: 1 });
   });
 });

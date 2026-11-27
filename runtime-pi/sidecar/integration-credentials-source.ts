@@ -694,7 +694,7 @@ export function capObservedTools<T>(
   return { tools: kept, truncated: false };
 }
 
-/** Per-attempt budget of a tools-observed report. */
+/** Budget of a whole tools-observed report, every attempt and pause included: boot waits for it. */
 const TOOLS_OBSERVED_TIMEOUT_MS = 10_000;
 /** Retries after the first attempt: the route is idempotent, so a network error or 5xx is retried. */
 const TOOLS_OBSERVED_RETRIES = 2;
@@ -702,8 +702,9 @@ const TOOLS_OBSERVED_RETRIES = 2;
 const TOOLS_OBSERVED_BACKOFF = { baseMs: 500, capMs: 2_000 } as const;
 
 /**
- * What a run's remote upstream listed, reported so the platform can snapshot it. Each attempt is
- * bounded; a network error or a 5xx is retried after a short pause, any other answer is final.
+ * What a run's remote upstream listed, reported so the platform can snapshot it. The whole report
+ * shares one deadline; a network error or a 5xx is retried after a short pause within it, any
+ * other answer is final.
  */
 export async function postIntegrationToolsObserved(
   integrationId: string,
@@ -728,6 +729,7 @@ export async function postIntegrationToolsObserved(
     ((attempt: number) => computeBackoffDelayMs(attempt, TOOLS_OBSERVED_BACKOFF));
   const url = `${opts.platformApiUrl}/internal/integration-credentials/${integrationId}/tools-observed${credentialsQuery(connectionId)}`;
   const body = JSON.stringify(observed);
+  const deadline = AbortSignal.timeout(TOOLS_OBSERVED_TIMEOUT_MS);
   for (let attempt = 0; ; attempt++) {
     const last = attempt >= TOOLS_OBSERVED_RETRIES;
     try {
@@ -735,11 +737,11 @@ export async function postIntegrationToolsObserved(
         method: "POST",
         headers: { Authorization: `Bearer ${opts.runToken}`, "Content-Type": "application/json" },
         body,
-        signal: AbortSignal.timeout(TOOLS_OBSERVED_TIMEOUT_MS),
+        signal: deadline,
       });
       if (!isRetryableHttpStatus(res.status) || last) return res;
     } catch (err) {
-      if (last) throw err;
+      if (last || deadline.aborted) throw err;
     }
     await Bun.sleep(delayMs(attempt + 1));
   }

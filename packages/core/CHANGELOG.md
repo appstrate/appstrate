@@ -9,10 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- `@appstrate/core/www-authenticate` exports `parseBearerChallenge`, `BearerChallenge`, `requiredScopesFromChallenge` (the scopes a server asks for on a 401 or a 403 `insufficient_scope`) and `sanitiseRequiredScopes`.
+- `@appstrate/core/www-authenticate` exports `parseBearerChallenge`, `BearerChallenge`, `requiredScopesFromChallenge` (the scopes a server asks for on a 401 or a 403 `insufficient_scope`), `sanitiseRequiredScopes` and `MAX_REQUIRED_SCOPES` (the most scopes kept from one challenge).
 - `@appstrate/core/mcp-endpoint` (new subpath) exports `targetsMcpEndpoint` and `McpEndpoint`: whether a URL falls on an integration's remote MCP endpoint, so the credential proxy can refuse it.
 - `@appstrate/core/sidecar-types` exports the schemas and bounds of the tools-observed report: `OBSERVED_TOOLS_MAX_COUNT`, `OBSERVED_TOOLS_MAX_BYTES`, `observedToolNameSchema`, `observedToolSchema`, and `toolFingerprintSchema` (a SHA-256 tool definition fingerprint, 64 lowercase hex characters).
-- `IntegrationSpawnSpec` gains `approvedToolFingerprints` (the approved definition fingerprints of the undeclared tools an agent selected, at most `MAX_APPROVED_FINGERPRINTS_PER_TOOL` = 32 per tool, exported from `@appstrate/core/sidecar-types`, keyed by tool name) and `blockedTools` (the names a space blocks, which the sidecar excludes and reports as `blocked_in_space`). `IntegrationBootReport.spawned[].unavailableTools` names the selected tools a connection does not expose, with `UnavailableToolReason` derived from `UNAVAILABLE_TOOL_REASONS`.
+- `IntegrationSpawnSpec` gains `approvedToolFingerprints` (the approved definition fingerprints of the undeclared tools an agent selected, at most `MAX_APPROVED_FINGERPRINTS_PER_TOOL` = 32 per tool, exported from `@appstrate/core/sidecar-types`, keyed by tool name) and `blockedTools` (the names a space blocks, which the sidecar excludes and reports as `blocked_in_space`). `IntegrationBootReport.spawned[].unavailableTools` (`UnavailableTool`) names the selected tools a connection does not expose, each with an `UnavailableToolReason`, derived from `UNAVAILABLE_TOOL_REASONS`.
 - `@appstrate/core/integration` exports `hiddenToolNames`: the names the platform withholds from every surface. A hidden tool never appears in the catalog.
 - `judgeToolApprovals(manifest, approvals)` in `@appstrate/core/integration` keeps the approvals that can count for an integration: it drops those of declared tools, of hidden tools, and all of them when the catalog is open (`allow_undeclared_tools`). Generic over the row type; extra fields are kept.
 - `validateAgentIntegrationScopes` takes `options.approvedTools`: names approved in the space count as known tools of a closed catalog, through `judgeToolApprovals` (a hidden name never validates).
@@ -40,6 +40,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- `observedToolNameSchema` now allows at most 128 characters (it was 256), MCP's own tool-name bound.
 - `validateAgentIntegrationScopes` on a catalog with `allow_undeclared_tools` accepts an explicit tool name the source does not declare; it used to refuse it as `unknown_tool`.
 - **BREAKING** — `validateAgentIntegrationScopes` treats a `remote` source that declares no tools as a closed catalog: every explicit tool selection is refused unless the tool is approved in the space (`options.approvedTools`); it used to accept any name. Only a `local` or `none` source declaring no tools keeps the no-check rule of AFPS §7.1.
 - **`unwrapMcpResult`** (`@appstrate/core/mcp-result`) leaves the turn-budget line, the last

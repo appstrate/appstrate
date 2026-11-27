@@ -6,16 +6,16 @@
  */
 
 /**
- * Lower-cased path with each valid `%XX` triplet decoded on its own (a malformed escape elsewhere
- * in the path stays as written), `\` read as `/`, `;params` dropped from every segment, dot
- * segments resolved, and repeated and trailing slashes collapsed. Decoding comes first because a
- * proxy that decodes `%2F`, `%5C` or `%2E` before routing would otherwise route `/x/..%2Fmcp` to
- * `/mcp` while the raw path never matched it.
+ * Lower-cased path, normalised the way a decoding proxy would before routing: each valid `%XX`
+ * decoded on its own (a malformed escape stays as written), `\` read as `/`, repeated slashes
+ * collapsed, `;params` dropped from every segment, dot segments resolved, trailing slash dropped.
+ * Decoding comes first so `/x/..%2Fmcp` is seen as `/mcp`.
  */
 function normalisedPath(url: URL): string {
   const decoded = url.pathname
     .replace(/%[0-9a-f]{2}/gi, (escape) => String.fromCharCode(parseInt(escape.slice(1), 16)))
-    .replace(/\\/g, "/");
+    .replace(/\\/g, "/")
+    .replace(/\/{2,}/g, "/");
   const resolved: string[] = [];
   for (const raw of decoded.split("/")) {
     const params = raw.indexOf(";");
@@ -43,11 +43,10 @@ export interface McpEndpoint {
  * Whether `target` falls on the MCP endpoint: same origin (scheme, host without a trailing dot,
  * port), and
  *   - over SSE, any path: the server announces the endpoint its messages are POSTed to, at a path
- *     of its choosing on that origin (often outside `server.url`'s), so the whole origin is it;
- *   - otherwise, a path equal to the endpoint's or under it (`<path>/…`), compared
- *     case-insensitively once normalised as `normalisedPath` does; query and fragment ignored. An
- *     endpoint at the origin root matches the root path only, so the other paths of that host
- *     stay reachable.
+ *     of its choosing on that origin, so the whole origin is it;
+ *   - otherwise, a path equal to the endpoint's or under it (`<path>/…`); query and fragment
+ *     ignored. An endpoint at the origin root matches the root path only, so the other paths of
+ *     that host stay reachable.
  */
 export function targetsMcpEndpoint(target: string | URL, endpoint: McpEndpoint): boolean {
   if (!URL.canParse(String(target)) || !URL.canParse(endpoint.url)) return false;
