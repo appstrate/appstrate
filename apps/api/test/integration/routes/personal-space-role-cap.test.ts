@@ -26,7 +26,7 @@ import {
 import {
   seedAgent,
   seedPackage,
-  seedPackageShare,
+  seedOrgOffer,
   seedPublishedVersion,
   seedSchedule,
   seedSpace,
@@ -266,23 +266,23 @@ describe("personal_space_role: operator", () => {
     });
 
     it("still activates and deactivates a package in the member's own space", async () => {
-      const shared = `@${owner.org.slug}/team-agent`;
+      const offered = `@${owner.org.slug}/team-agent`;
       await seedPackage({
-        id: shared,
+        id: offered,
         orgId: owner.orgId,
         type: "agent",
         homeSpaceId: owner.defaultSpaceId,
       });
-      await seedPackageShare(personalId, shared);
+      await seedOrgOffer(owner.orgId, offered, "available");
 
       const activated = await app.request(`/api/spaces/${personalId}/packages`, {
         method: "POST",
         headers: { ...orgOnlyHeaders(member), ...json },
-        body: JSON.stringify({ packageId: shared }),
+        body: JSON.stringify({ packageId: offered }),
       });
       expect([200, 201], await activated.clone().text()).toContain(activated.status);
 
-      const deactivated = await app.request(`/api/spaces/${personalId}/packages/${shared}`, {
+      const deactivated = await app.request(`/api/spaces/${personalId}/packages/${offered}`, {
         method: "DELETE",
         headers: orgOnlyHeaders(member),
       });

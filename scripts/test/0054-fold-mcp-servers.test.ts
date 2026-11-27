@@ -731,8 +731,12 @@ describe("0054 — mcp-server packages folded into their integrations", () => {
       db.execute(sql`INSERT INTO notifications (org_id, recipient_id, recipient_type, space_id, type, payload)
         VALUES (${ctx.orgId}, 't0054-user', 'user', ${ctx.defaultSpaceId}, ${type},
           ${JSON.stringify({ packageId: "@t0054/x", package_type: packageType })}::jsonb)`);
+    // `package_shared` is a retired kind its CHECK refuses: lift the CHECK to seed it.
+    await db.execute(sql`ALTER TABLE notifications DROP CONSTRAINT notifications_type_valid`);
     await notify("package_shared", "mcp-server");
     await notify("package_shared", "skill");
+    await db.execute(sql`ALTER TABLE notifications ADD CONSTRAINT notifications_type_valid
+      CHECK (type IN ('run_failed', 'agent_message', 'credential_needs_reconnection')) NOT VALID`);
 
     const fold = await run(true);
     expect(fold.grantsScrubbed).toMatchObject({

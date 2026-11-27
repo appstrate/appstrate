@@ -75,8 +75,9 @@ test("« Ajouter » adds to the working space, and in « Tous les espaces » to 
   try {
     await page.goto("/catalogue/agent");
     const card = catalogueCard(page, displayName);
-    // It runs in Alpha and Beta: the trigger asks the space and counts those.
-    const trigger = card.getByRole("button", { name: /^Ajouter à…/ });
+    // It runs in Alpha and Beta: the trigger asks the space and counts those. Once nothing is left
+    // to add (a personal space takes only what the organization offers), it says where it runs.
+    const trigger = card.getByRole("button", { name: /^(Ajouter à…|Ajouté ·)/ });
     await expect(trigger).toHaveAccessibleName(/\b2 espaces$/);
     await trigger.click();
     const menu = page.getByRole("menu").filter({ hasText: "Ajouter à…" });
@@ -100,8 +101,8 @@ test("« Ajouter » adds to the working space, and in « Tous les espaces » to 
       `/api/spaces/${browserCtx.org.defaultSpaceId}/packages`,
     );
     expect(response.status()).toBe(201);
-    // The count follows: it runs in three spaces now.
-    await expect(trigger).toHaveAccessibleName(/\b3 espaces$/);
+    // The count follows: it runs in three spaces now, and nowhere is left to add it.
+    await expect(trigger).toHaveAccessibleName(/^Ajouté · 3 espaces$/);
     await trigger.click();
     await expect(menu).toBeVisible();
 
