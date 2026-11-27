@@ -40,7 +40,7 @@ import { Button } from "@appstrate/ui/components/button";
 import { cn } from "@appstrate/ui/cn";
 import { MarkdownText, ReasoningText } from "./markdown-text.tsx";
 import { LoadingLine, ReasoningStep } from "./reasoning.tsx";
-import { useActivityMode } from "./activity-line.tsx";
+import { useActivityMode } from "./activity-mode.ts";
 import { ActivityGroup } from "./activity-group.tsx";
 import { activityGroupOf } from "./conversation-tools.ts";
 import { useStoredResults } from "./use-call-presentation.ts";

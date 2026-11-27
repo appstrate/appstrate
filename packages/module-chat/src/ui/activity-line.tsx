@@ -11,30 +11,6 @@ import * as React from "react";
 import { ChevronRightIcon } from "lucide-react";
 import { cn } from "@appstrate/ui/cn";
 
-/**
- * How an activity group draws its parts: as steps under its rail, or as what stays in view
- * whatever the fold. `solo`: the group's one step, opened with it. Outside a group, neither.
- */
-interface ActivityMode {
-  readonly mode: "step" | "breakout";
-  readonly solo: boolean;
-}
-
-const ActivityModeContext = React.createContext<ActivityMode | null>(null);
-
-export function ActivityModeProvider({
-  mode,
-  solo,
-  children,
-}: ActivityMode & { children: React.ReactNode }) {
-  const value = React.useMemo(() => ({ mode, solo }), [mode, solo]);
-  return <ActivityModeContext.Provider value={value}>{children}</ActivityModeContext.Provider>;
-}
-
-export function useActivityMode(): ActivityMode | null {
-  return React.useContext(ActivityModeContext);
-}
-
 /** The room around a line that stands in the message's flow (the loading line, a group). */
 export const ACTIVITY_BLOCK_CLASS = "my-1";
 

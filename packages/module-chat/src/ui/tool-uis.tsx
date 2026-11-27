@@ -1,38 +1,49 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Appstrate-specific rich tool cards. Each MCP tool the chat agent calls gets
- * a compact row: icon, label, id, then the duration and, when the call failed, a small red
- * cross. The glanceable summary stays inline;
- * the full (technical) input/output is shown as raw JSON in a modal opened by
- * clicking the row — parsing arbitrary API payloads into a field table reads
- * worse than monospace JSON, and JSON keeps every field intact.
+ * The chat agent's MCP tool calls in the thread. A call is a step of its activity group
+ * (`ToolStep`): a line with what it acted on, its name, its target, then its duration and, when
+ * it failed, a small red cross. Its full (technical) input / output opens under the line as raw
+ * JSON: parsing arbitrary API payloads into a field table reads worse than monospace JSON, and
+ * JSON keeps every field intact.
  *
- * A failure is softened, never hidden: its message stays inline under the header, muted, and a
- * small red cross ends the row; the HTTP status is in the call's detail. Tone is driven by the
- * actual result (`deriveToolPhase`), not the verb.
+ * A failure is softened, never hidden: its message stays under the line, muted, and the cross
+ * ends the line; the HTTP status is in the call's detail. Tone is driven by the actual result
+ * (`deriveToolPhase`), not the verb.
  *
- * One shared `<ToolCallCard>` does the work; the cards below name the call as the context panel
- * does (`showCall`). The thread picks a card by tool name (`thread.tsx`).
- * `invoke_operation` additionally short-circuits to the interactive
- * `OAuthConnectCard` when it kicks off an integration OAuth flow.
+ * What a call must keep in view whatever its group's fold is drawn under the group's line
+ * (the `…Breakout` components): the interactive `OAuthConnectCard` of a connect kickoff, a
+ * launched run's `ChatRunProgressCard`, the link to a created package. `run_and_wait` is a card
+ * of its own, outside any group.
  */
 
 import * as React from "react";
 import type { ToolCallMessagePartProps } from "@assistant-ui/react";
-import { ArrowUpRightIcon, BracesIcon, PlayIcon, XIcon, type LucideIcon } from "lucide-react";
+import { ArrowUpRightIcon, BracesIcon, PlayIcon, XIcon } from "lucide-react";
 import { formatDuration } from "@appstrate/core/format";
 import { Button } from "@appstrate/ui/components/button";
-import { Spinner } from "@appstrate/ui/components/spinner";
+import {
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
+} from "@appstrate/ui/components/collapsible";
 import { StructuredOutput } from "@appstrate/ui/components/structured-output";
-import { Modal } from "./modal.tsx";
 import { useChatHost } from "./runtime-context.ts";
 import { ToolCallDetail } from "./tool-call-detail.tsx";
 import { REVEAL_RING_CLASS, useRevealAnchor } from "./reveal-tool-call.ts";
 import { OAuthConnectCard } from "./oauth-connect-card.tsx";
 import { ChatRunProgressCard } from "./chat-run-progress-card.tsx";
 import { CallSpace } from "./call-space.tsx";
-import { ActivityId, ActivityLine } from "./activity-line.tsx";
+import {
+  ACTIVITY_CONTENT_CLASS,
+  ACTIVITY_DETAIL_CLASS,
+  ActivityChevron,
+  ActivityId,
+  ActivityLabel,
+  ActivityLine,
+  ActivityTrigger,
+} from "./activity-line.tsx";
+import { useActivityMode } from "./activity-mode.ts";
 import {
   extractAgentLabel,
   extractRunFiles,
@@ -58,13 +69,11 @@ import { unwrapMcpResult } from "@appstrate/core/mcp-result";
 import { showCall } from "./tool-presentation.ts";
 import { cardSpaceOf, type StoredResult } from "./use-call-presentation.ts";
 import { SubjectGlyph, SubjectStack } from "./subject-glyph.tsx";
-import type { PresentationSubject } from "@appstrate/core/mcp-presentation";
 import {
   definedEntries,
   deriveToolPhase,
   extractErrorMessage,
   httpStatusOf,
-  type ToolPhase,
 } from "./tool-result.ts";
 
 /**
@@ -97,136 +106,6 @@ export function FailedGlyph({ label }: { label?: string }) {
     >
       <XIcon className="size-3.5" />
     </span>
-  );
-}
-
-/**
- * Single leading icon per row: the glyph of what the call acted on (an integration's
- * logo, an agent's tile) when the platform named it, else the verb icon, tinted by phase
- * (neutral, failed or not). While running it is replaced by a spinner. A failure is carried by
- * the muted error under the header and the cross at the row's end, never by the lead glyph.
- */
-function LeadIcon({
-  phase,
-  Icon,
-  subject,
-}: {
-  phase: ToolPhase;
-  Icon: LucideIcon;
-  subject?: PresentationSubject;
-}) {
-  if (phase === "running") {
-    return <Spinner className="text-muted-foreground size-4 shrink-0" />;
-  }
-  if (subject) return <SubjectGlyph subject={subject} />;
-  return <Icon className="text-muted-foreground size-4 shrink-0" />;
-}
-
-/**
- * Compact clickable tool row. Inline: lead icon, label, id, duration, the failure cross
- * (+ the muted inline error on failure). Click opens a modal with the raw input / output /
- * metadata JSON.
- */
-function ToolCallCard({
-  phase,
-  Icon,
-  subject,
-  label,
-  idText,
-  aside,
-  args,
-  result,
-  isError,
-  toolCallId,
-  timing,
-  spaceId,
-}: {
-  phase: ToolPhase;
-  Icon: LucideIcon;
-  /** What the call acted on (`tool-presentation.ts`): its glyph is drawn instead of `Icon`. */
-  subject?: PresentationSubject;
-  /** What the call did, as `showCall` names it: shown verbatim, already translated. */
-  label: string;
-  idText?: string;
-  /** Before the meta, e.g. a search's result count and the glyphs of what it found. */
-  aside?: React.ReactNode;
-  args: unknown;
-  result: unknown;
-  isError?: boolean;
-  toolCallId: string;
-  timing?: unknown;
-  /** Where the call acted: the space stamped on it. */
-  spaceId?: string;
-}) {
-  const { t, lang } = useChatHost();
-  const anchor = useRevealAnchor(toolCallId);
-  const [open, setOpen] = React.useState(false);
-  // `unwrapMcpResult` JSON-parses the tool payload. Unmemoized it re-parsed on
-  // every render of this card — and during a stream the thread re-renders per
-  // chunk, so a tool-heavy conversation paid it once per card per frame.
-  const unwrapped = React.useMemo(() => unwrapMcpResult(result), [result]);
-  const status = httpStatusOf(unwrapped);
-  const durationMs = readDurationMs(timing);
-  const errorMsg = phase === "error" ? extractErrorMessage(unwrapped) : undefined;
-  const meta = definedEntries({
-    tool_call_id: toolCallId,
-    is_error: isError,
-    http_status: status,
-    duration_ms: durationMs,
-  });
-
-  return (
-    <div
-      {...anchor}
-      className={`bg-card text-card-foreground my-3 w-full rounded-lg border ${REVEAL_RING_CLASS}`}
-    >
-      {/* Fixed h-9 header row: the duration and the failure cross appear when the result
-          lands — a py-based row would grow by a few px at that moment. Fixed height makes
-          result arrival a 0px layout change. */}
-      <button
-        type="button"
-        className="hover:bg-muted/50 flex h-9 w-full items-center gap-2 rounded-lg px-3 text-left text-sm"
-        onClick={() => setOpen(true)}
-      >
-        <LeadIcon phase={phase} Icon={Icon} subject={subject} />
-        {/* The id takes only the room left (basis 0): the name truncates once it has none. */}
-        <span className="flex min-w-0 flex-1 items-center gap-2">
-          <span className="min-w-0 truncate font-medium">{label}</span>
-          {idText ? (
-            <code className="text-muted-foreground min-w-0 flex-1 truncate text-xs">{idText}</code>
-          ) : null}
-        </span>
-        {aside}
-        <CallSpace spaceId={spaceId} />
-        {durationMs !== undefined ? (
-          <span className="text-muted-foreground text-xs">{formatDuration(durationMs, lang)}</span>
-        ) : null}
-        {phase === "error" ? (
-          <FailedGlyph
-            label={status === undefined ? t("tool.failed") : t("tool.failedHttp", { status })}
-          />
-        ) : null}
-      </button>
-      {errorMsg ? (
-        <div className="text-muted-foreground border-t px-3 py-2 text-xs break-words">
-          {errorMsg}
-        </div>
-      ) : null}
-      {open ? (
-        <Modal
-          title={
-            <span className="flex items-center gap-2">
-              {subject ? <SubjectGlyph subject={subject} /> : <Icon className="size-4 shrink-0" />}
-              {label}
-              {idText ? <code className="text-muted-foreground text-xs">{idText}</code> : null}
-            </span>
-          }
-          onClose={() => setOpen(false)}
-        >
-          <ToolCallDetail t={t} input={args} output={unwrapped} metadata={meta} />
-        </Modal>
-      ) : null}
-    </div>
   );
 }
 
@@ -333,30 +212,78 @@ type InvokeOperationArgs = { operation_id?: string; path_params?: { packageId?: 
 
 /**
  * A tool call as a step of its activity group: named as the context panel names it (`showCall`),
- * with what a search found beside it.
+ * with what a search found beside it. Its label shimmers while it runs; its detail opens under
+ * it, already open when it is its group's one step.
  */
 export function ToolStep(props: ToolCardProps) {
-  const { t } = useChatHost();
+  const { t, lang } = useChatHost();
+  const anchor = useRevealAnchor(props.toolCallId);
+  const solo = useActivityMode()?.solo ?? false;
+  const [readerOpen, setReaderOpen] = React.useState<boolean | null>(null);
   const presentation = props.stored?.presentation;
+  const phase = deriveToolPhase(props);
+  const { Icon, subject, label, idText } = showCall({ ...props, presentation }, t);
+  // `unwrapMcpResult` JSON-parses the tool payload. Unmemoized it re-parsed on every render of
+  // this step, and during a stream the thread re-renders per chunk.
+  const unwrapped = React.useMemo(() => unwrapMcpResult(props.result), [props.result]);
+  const status = httpStatusOf(unwrapped);
+  const durationMs = readDurationMs(props.timing);
+  const errorMsg = phase === "error" ? extractErrorMessage(unwrapped) : undefined;
+
   return (
-    <ToolCallCard
-      phase={deriveToolPhase(props)}
-      {...showCall({ ...props, presentation }, t)}
-      aside={
-        presentation?.count !== undefined ? (
-          <span className="text-muted-foreground flex shrink-0 items-center gap-1.5 text-xs">
+    <Collapsible
+      {...anchor}
+      open={readerOpen ?? solo}
+      onOpenChange={setReaderOpen}
+      className={`rounded-sm ${REVEAL_RING_CLASS}`}
+    >
+      {/* What lands with the result (duration, cross) follows the trigger on a line of fixed
+          height: its arrival moves nothing. */}
+      <ActivityLine lead={subject ? <SubjectGlyph subject={subject} /> : <Icon aria-hidden />}>
+        <CollapsibleTrigger asChild>
+          <ActivityTrigger>
+            <ActivityLabel active={phase === "running"}>{label}</ActivityLabel>
+            {idText ? <ActivityId>{idText}</ActivityId> : null}
+            <ActivityChevron />
+          </ActivityTrigger>
+        </CollapsibleTrigger>
+        {presentation?.count !== undefined ? (
+          <span className="flex shrink-0 items-center gap-1.5 text-xs">
             <SubjectStack subjects={presentation.items ?? []} />
             {t("tool.search.count", { count: presentation.count })}
           </span>
-        ) : null
-      }
-      args={props.args}
-      result={props.result}
-      isError={props.isError}
-      toolCallId={props.toolCallId}
-      timing={props.timing}
-      spaceId={cardSpaceOf(props)}
-    />
+        ) : null}
+        <CallSpace spaceId={cardSpaceOf(props)} />
+        {durationMs !== undefined ? (
+          <span className="shrink-0 text-xs tabular-nums">{formatDuration(durationMs, lang)}</span>
+        ) : null}
+        {phase === "error" ? (
+          <FailedGlyph
+            label={status === undefined ? t("tool.failed") : t("tool.failedHttp", { status })}
+          />
+        ) : null}
+      </ActivityLine>
+      {errorMsg ? (
+        <p className="text-muted-foreground pb-1.5 pl-6 text-xs break-words">{errorMsg}</p>
+      ) : null}
+      <CollapsibleContent className={ACTIVITY_CONTENT_CLASS}>
+        <div className={ACTIVITY_DETAIL_CLASS}>
+          <div className="bg-card rounded-lg border p-3">
+            <ToolCallDetail
+              t={t}
+              input={props.args}
+              output={unwrapped}
+              metadata={definedEntries({
+                tool_call_id: props.toolCallId,
+                is_error: props.isError,
+                http_status: status,
+                duration_ms: durationMs,
+              })}
+            />
+          </div>
+        </div>
+      </CollapsibleContent>
+    </Collapsible>
   );
 }
 

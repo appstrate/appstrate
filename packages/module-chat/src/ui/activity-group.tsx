@@ -13,7 +13,7 @@
  * first line.
  *
  * `children` is drawn twice: as steps under the rail, and as what must stay in view whatever the
- * fold (`ActivityMode` "breakout": a connect card, a launched run, a created package's link).
+ * fold (`activity-mode.ts`, "breakout": a connect card, a launched run, a created package's link).
  */
 
 import * as React from "react";
@@ -43,10 +43,10 @@ import {
   ActivityId,
   ActivityLabel,
   ActivityLine,
-  ActivityModeProvider,
   ActivityRail,
   ActivityTrigger,
 } from "./activity-line.tsx";
+import { ActivityModeContext, type ActivityMode } from "./activity-mode.ts";
 
 /** A thread part as the header reads it. */
 type StepPart = GroupablePart & {
@@ -81,6 +81,8 @@ function reasoningTitleAt(parts: readonly StepPart[], indices: readonly number[]
   }
   return "";
 }
+
+const BREAKOUT_MODE: ActivityMode = { mode: "breakout", solo: false };
 
 export function ActivityGroup({
   indices,
@@ -162,6 +164,8 @@ export function ActivityGroup({
           t,
         )
       : undefined;
+  const solo = calls + reasoningRuns === 1;
+  const stepMode = React.useMemo((): ActivityMode => ({ mode: "step", solo }), [solo]);
   const actions = calls - lookups;
   const counts = [
     lookups > 0 ? t("tool.reads.done", { count: lookups }) : null,
@@ -223,14 +227,10 @@ export function ActivityGroup({
       </ActivityLine>
       <CollapsibleContent className={ACTIVITY_CONTENT_CLASS}>
         <ActivityRail>
-          <ActivityModeProvider mode="step" solo={calls + reasoningRuns === 1}>
-            {children}
-          </ActivityModeProvider>
+          <ActivityModeContext value={stepMode}>{children}</ActivityModeContext>
         </ActivityRail>
       </CollapsibleContent>
-      <ActivityModeProvider mode="breakout" solo={false}>
-        {children}
-      </ActivityModeProvider>
+      <ActivityModeContext value={BREAKOUT_MODE}>{children}</ActivityModeContext>
     </Collapsible>
   );
 }

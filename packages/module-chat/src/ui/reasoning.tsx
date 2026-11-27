@@ -35,8 +35,8 @@ import {
   ActivityLabel,
   ActivityLine,
   ActivityTrigger,
-  useActivityMode,
 } from "./activity-line.tsx";
+import { useActivityMode } from "./activity-mode.ts";
 
 /** One full loop of the spark (each diagonal swaps twice), in ms (`.spark` in styles.css). */
 const SPARK_LOOP_MS = 2400;
