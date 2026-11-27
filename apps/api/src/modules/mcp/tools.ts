@@ -138,11 +138,7 @@ import {
 } from "./discovery.ts";
 import { buildPackageFileTools } from "./package-file-tools.ts";
 import { presentTools, withPresentation } from "./presentation.ts";
-import {
-  MAX_PRESENTED_ITEMS,
-  TOOL_LOOKUP_META_KEY,
-  type PresentationSubject,
-} from "@appstrate/core/mcp-presentation";
+import { MAX_PRESENTED_ITEMS, type PresentationSubject } from "@appstrate/core/mcp-presentation";
 import {
   ACTIVE_SPACES_META_KEY,
   OPERATION_SPACES_META_KEY,
@@ -595,19 +591,10 @@ function invalidFilter(args: Record<string, unknown>): Refusal | undefined {
   return undefined;
 }
 
-/**
- * Read-only, unless the kind of integration tools is declared: reading its catalog reaches
- * third-party servers, so the descriptor is stamped a lookup instead.
- */
-function discoveryHints(
-  title: string,
-  kinds: readonly DiscoveryKind[],
-): Pick<Tool, "annotations" | "_meta"> {
+/** Always read-only; open-world when the kind of integration tools is declared (third-party servers). */
+function discoveryHints(title: string, kinds: readonly DiscoveryKind[]): Pick<Tool, "annotations"> {
   return kinds.includes("integration_tool")
-    ? {
-        annotations: { title, ...INTEGRATION_KIND_ANNOTATIONS },
-        _meta: { [TOOL_LOOKUP_META_KEY]: true },
-      }
+    ? { annotations: { title, ...INTEGRATION_KIND_ANNOTATIONS } }
     : { annotations: { title, readOnlyHint: true, idempotentHint: true, openWorldHint: false } };
 }
 

@@ -631,16 +631,22 @@ describe("integration refresh-failure escalation", () => {
 
   // A reconnect cannot repair a client the token endpoint refuses: never counted, never flagged,
   // even on a token expired past the grace window with a streak one short of the threshold.
-  it.each(["invalid_client", "unauthorized_client"])(
-    "a refused client (%s) answers retry without counting toward the streak",
-    async (error) => {
+  it.each([
+    ["invalid_client", 401],
+    ["unauthorized_client", 401],
+    ["invalid_scope", 400],
+    ["invalid_request", 400],
+    ["unsupported_grant_type", 400],
+  ] as const)(
+    "a refused client or request (%s) answers retry without counting toward the streak",
+    async (error, status) => {
       const { INTEGRATION_REFRESH_MAX_FAILURES: max, INTEGRATION_REFRESH_GRACE_SECONDS: grace } =
         getEnv();
       const connId = await seedConn({
         expiresAt: new Date(Date.now() - (grace + 3600) * 1000),
         refreshFailureCount: max - 1,
       });
-      token.setResponse({ error }, 401);
+      token.setResponse({ error }, status);
 
       expect(await refresh(connId)).toMatchObject({
         status: "retry",

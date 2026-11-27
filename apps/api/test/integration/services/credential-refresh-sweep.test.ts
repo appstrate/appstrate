@@ -194,6 +194,23 @@ describe("credential refresh sweep — integration connections", () => {
       expect(await claimedIntegrations()).toBe(0);
     });
 
+    it.each([
+      ["invalid_scope", 400],
+      ["unsupported_grant_type", 400],
+      ["invalid_client", 401],
+    ])("does not count a %s refusal toward the streak nor flag the row", async (error, status) => {
+      await publish();
+      const id = await seedConnection({ expiresInMs: -HOUR });
+      mockServer.setTokenStatus(status);
+      mockServer.setTokenResponse({ error });
+
+      expect(await claimedIntegrations()).toBe(1);
+
+      const row = await readRow(id);
+      expect(row.refreshFailureCount).toBe(0);
+      expect(row.needsReconnection).toBe(false);
+    });
+
     it("flags the row on invalid_grant and takes it out of the due set", async () => {
       await publish();
       const id = await seedConnection({ expiresInMs: -HOUR });

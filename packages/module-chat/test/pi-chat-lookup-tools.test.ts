@@ -8,7 +8,6 @@
 
 import { describe, expect, it } from "bun:test";
 import type { UIMessage } from "ai";
-import { TOOL_LOOKUP_META_KEY } from "@appstrate/core/mcp-presentation";
 import { createPiOAuthModelBinding } from "../src/pi-chat/model-binding.ts";
 import { runPiChat } from "../src/pi-chat/engine.ts";
 import type { PiChatSession } from "../src/pi-chat/turn-control.ts";
@@ -16,10 +15,10 @@ import { stubPlatformMcp } from "./pi-turn.ts";
 import { inertTurnSpaces } from "./turn-spaces.ts";
 
 const schema = { type: "object" };
-/** The surface: a read-only tool, one stamped a lookup, one that writes. */
+/** The surface: a read-only tool, one open-world read, one that writes. */
 const TOOLS = [
   { name: "describe", inputSchema: schema, annotations: { readOnlyHint: true } },
-  { name: "search", inputSchema: schema, _meta: { [TOOL_LOOKUP_META_KEY]: true } },
+  { name: "search", inputSchema: schema, annotations: { readOnlyHint: true, openWorldHint: true } },
   { name: "invoke_operation", inputSchema: schema, annotations: { readOnlyHint: false } },
 ];
 

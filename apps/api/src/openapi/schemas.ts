@@ -14,7 +14,11 @@ import {
   RUN_AND_WAIT_RESUME_INSTRUCTION,
   RUN_RESULT_INLINE_MAX_BYTES,
 } from "@appstrate/core/run-and-wait-client";
-import { SPACE_ROLE_PRESETS, SPACE_VISIBILITIES } from "@appstrate/core/permissions";
+import {
+  SPACE_ROLE_ID_REGEX,
+  SPACE_ROLE_PRESETS,
+  SPACE_VISIBILITIES,
+} from "@appstrate/core/permissions";
 import { MODEL_INPUT_MODALITIES } from "@appstrate/core/module";
 import {
   MODEL_REASONING_LEVELS,
@@ -55,12 +59,8 @@ import {
 
 const ORG_ROLES = [...orgRoleEnum.enumValues];
 
-/**
- * Prefix a custom space-role id carries. Only the prefix is published: the
- * server's full `srl_`+UUID rule is stricter, and a spec that pinned it would
- * turn a server-side id-shape change into a client-side break.
- */
-export const SPACE_ROLE_ID_PATTERN = "^srl_";
+/** Custom space-role id pattern, the server's own `srl_`+UUID rule. */
+export const SPACE_ROLE_ID_PATTERN = SPACE_ROLE_ID_REGEX.source;
 
 const TOKEN_USAGE_COUNTER_PROPERTIES = Object.fromEntries(
   TOKEN_USAGE_COUNTERS.map((counter) => [counter, { type: "integer", minimum: 0 }]),

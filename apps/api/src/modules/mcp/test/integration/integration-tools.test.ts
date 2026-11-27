@@ -36,11 +36,7 @@ import { files, integrationConnections, oauthResource, runs, spaces } from "@app
 import { getTestApp } from "../../../../../test/helpers/app.ts";
 import { db, truncateAll } from "../../../../../test/helpers/db.ts";
 import { flushRedis } from "../../../../../test/helpers/redis.ts";
-import {
-  isLookupTool,
-  readToolPresentation,
-  TOOL_LOOKUP_META_KEY,
-} from "@appstrate/core/mcp-presentation";
+import { isLookupTool, readToolPresentation } from "@appstrate/core/mcp-presentation";
 import {
   createTestContext,
   memberContext,
@@ -514,19 +510,18 @@ describe("mcp integration tools", () => {
       expect(upstreamCalls).toHaveLength(0);
     });
 
-    it("annotates search and describe as reaching third-party servers, and stamps them lookups, when they declare the kind", async () => {
+    it("annotates search and describe as reaching third-party servers, and read-only, when they declare the kind", async () => {
       const discovery = async (caller: Caller) => {
         const tools = await listTools(caller);
         return ["search", "describe"].map((name) => tools.find((tool) => tool.name === name)!);
       };
       for (const listed of await discovery(await instanceCaller(owner))) {
         expect(listed.annotations).toMatchObject({
-          readOnlyHint: false,
-          destructiveHint: false,
-          idempotentHint: false,
+          readOnlyHint: true,
+          idempotentHint: true,
           openWorldHint: true,
         });
-        expect(listed._meta?.[TOOL_LOOKUP_META_KEY]).toBe(true);
+        expect(listed._meta).toBeUndefined();
         expect(isLookupTool(listed)).toBe(true);
       }
       const runner = await instanceCaller(await memberContext(owner, "member", "runner"));

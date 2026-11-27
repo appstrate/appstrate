@@ -47,19 +47,9 @@ export function readToolPresentation(meta: unknown): ToolPresentation | undefine
   return parsed.success ? parsed.data : undefined;
 }
 
-/**
- * On a descriptor whose `readOnlyHint` is withheld for a side effect outside the caller's data (a
- * third-party catalog read): its calls only look things up.
- */
-export const TOOL_LOOKUP_META_KEY = "dev.appstrate/lookup";
-
-/** A tool whose calls only look things up: declared `readOnlyHint`, or stamped a lookup. */
+/** A tool whose calls only look things up: it declares the standard `readOnlyHint`. */
 export function isLookupTool(descriptor: {
   annotations?: { readOnlyHint?: boolean } | undefined;
-  _meta?: Record<string, unknown> | undefined;
 }): boolean {
-  return (
-    descriptor.annotations?.readOnlyHint === true ||
-    descriptor._meta?.[TOOL_LOOKUP_META_KEY] === true
-  );
+  return descriptor.annotations?.readOnlyHint === true;
 }

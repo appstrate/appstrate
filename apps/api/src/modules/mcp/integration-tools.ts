@@ -168,13 +168,13 @@ function describedTool(tool: Merged<CallableTool>): Record<string, unknown> {
 }
 
 /**
- * What `search` and `describe` do when they declare the kind: they may query third-party servers
- * with a connection's credential, which journals a call and can rotate its OAuth tokens.
+ * What `search` and `describe` do when they declare the kind: they only read, but reach third-party
+ * servers with a connection's credential. Journaling the call and rotating an OAuth token are the
+ * platform's own bookkeeping, not a change to the caller's environment.
  */
 export const INTEGRATION_KIND_ANNOTATIONS = {
-  readOnlyHint: false,
-  destructiveHint: false,
-  idempotentHint: false,
+  readOnlyHint: true,
+  idempotentHint: true,
   openWorldHint: true,
 } as const;
 

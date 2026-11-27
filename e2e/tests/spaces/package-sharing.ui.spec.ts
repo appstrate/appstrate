@@ -119,9 +119,9 @@ test("an admin offers an agent to the organization, a guest adds it to their spa
   // A personal space receives a package only through the offer: `available`
   // places it in every space without switching it on.
   const offered = await apiClient.put(`/packages/${scope}/${name}/org-offer`, {
-    mode: "available",
+    org_offer: "available",
   });
-  expect(offered.status(), await offered.text()).toBe(200);
+  expect(offered.status(), await offered.text()).toBe(201);
 
   // ── The guest finds it and switches it on in their own space ──
   // It is READABLE now, and still not runnable: a placement nobody activated
@@ -261,9 +261,9 @@ test("a placement shared OFF is switched on from the catalogue and lands on an a
   expect(joined.status()).toBe(200);
   const personalId = await personalSpaceOf(request, member.cookie, orgId);
   const shared = await apiClient.put(`/packages/${scope}/${name}/org-offer`, {
-    mode: "available",
+    org_offer: "available",
   });
-  expect(shared.status(), await shared.text()).toBe(200);
+  expect(shared.status(), await shared.text()).toBe(201);
 
   // Placed OFF: the offer writes no row, so the member's space lists nothing yet.
   const memberClient = createApiClient(request, {
@@ -343,9 +343,9 @@ test("a guest finds a placement shared OFF in the catalogue and switches it on",
   expect(accepted.status()).toBe(200);
   const guestSpaceId = await personalSpaceOf(request, guest.cookie, orgId);
   const shared = await apiClient.put(`/packages/${scope}/${name}/org-offer`, {
-    mode: "available",
+    org_offer: "available",
   });
-  expect(shared.status(), await shared.text()).toBe(200);
+  expect(shared.status(), await shared.text()).toBe(201);
 
   const page = await (await createAuthedContext(browser, guest, orgId, guestSpaceId)).newPage();
   try {

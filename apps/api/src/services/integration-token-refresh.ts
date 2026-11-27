@@ -260,6 +260,14 @@ async function exchangeFailureVerdict(
         error: err.message,
       });
       return new RefreshVerdictError("retry", "oauth_client_rejected", { cause: err });
+    case "misconfigured":
+      // A manifest or client defect (RFC 6749 §5.2): a reconnect cannot fix it, so never counted.
+      logger.error("Integration refresh refused — the token endpoint rejected the OAuth request", {
+        ...log,
+        oauthError: err.oauthError,
+        error: err.message,
+      });
+      return new RefreshVerdictError("retry", "oauth_client_rejected", { cause: err });
     case "transient": {
       const env = getEnv();
       const counted = await recordIntegrationRefreshFailure(

@@ -435,7 +435,7 @@ test.describe("MCP over a self-service OAuth client (DCR + PKCE)", () => {
     apiClient,
   }) => {
     const id = "@appstrate/airtable";
-    const offer = await apiClient.put(`/packages/${id}/org-offer`, { mode: "on_by_default" });
+    const offer = await apiClient.put(`/packages/${id}/org-offer`, { org_offer: "on_by_default" });
     expect(offer.ok(), await offer.text()).toBe(true);
     const detail = await apiClient.get(`/integrations/${id}`);
     expect(detail.ok(), await detail.text()).toBe(true);

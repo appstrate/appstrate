@@ -249,6 +249,15 @@ async function doRefresh(credentialId: string, expectedOrgId?: string): Promise<
           error: err.message,
         });
         throw notRefreshed(credentialId, "oauth_client_rejected", err);
+      case "misconfigured":
+        // A client or provider-config defect (RFC 6749 §5.2): a reconnect cannot fix it, never counted.
+        logger.error("oauth model provider: token endpoint rejected the OAuth request", {
+          credentialId,
+          providerId: state.config.providerId,
+          oauthError: err.oauthError,
+          error: err.message,
+        });
+        throw notRefreshed(credentialId, "oauth_client_rejected", err);
       case "transient": {
         // The streak flags the credential only once its token expired past the grace window.
         const env = getEnv();

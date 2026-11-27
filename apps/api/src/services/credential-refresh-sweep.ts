@@ -80,7 +80,27 @@ async function claimIntegrationConnections(limit: number, now: Date): Promise<st
   return rows.map((r) => r.id);
 }
 
-async function refreshIntegrationConnection(id: string): Promise<void> {
+/**
+ * One pass names each refused OAuth client once: its connections all fail the same way, and
+ * nothing a reconnect does changes that, so a per-connection line only floods the log.
+ */
+type RefusedClients = Set<string>;
+
+function warnRefusedClientOnce(
+  seen: RefusedClients,
+  key: string,
+  fields: Record<string, unknown>,
+): void {
+  if (seen.has(key)) return;
+  seen.add(key);
+  logger.warn("credential_refresh_oauth_client_refused", {
+    ...fields,
+    advice:
+      "the token endpoint refused the OAuth client or request; reconnecting will not fix it, fix the client registration or the integration manifest",
+  });
+}
+
+async function refreshIntegrationConnection(id: string, refused: RefusedClients): Promise<void> {
   const t = integrationConnections;
   const [row] = await db
     .select({
@@ -126,6 +146,14 @@ async function refreshIntegrationConnection(id: string): Promise<void> {
     logger.info("credential_refresh_integration_refreshed", fields);
     return;
   }
+  if (outcome.status === "retry" && outcome.cause === "oauth_client_rejected") {
+    warnRefusedClientOnce(refused, `integration:${integrationId}:${row.clientRef}`, {
+      ...fields,
+      clientRef: row.clientRef,
+      detail: outcome.detail,
+    });
+    return;
+  }
   logger[outcome.status === "kept" ? "debug" : "warn"](
     "credential_refresh_integration_not_refreshed",
     {
@@ -164,11 +192,28 @@ async function claimModelCredentials(limit: number, now: Date): Promise<string[]
 }
 
 /** The resolver is non-forced: it honours the lead and throws the 410 on a flagged credential. */
-async function refreshModelCredential(id: string): Promise<void> {
+async function refreshModelCredential(id: string, refused: RefusedClients): Promise<void> {
   try {
     await resolveOAuthTokenForSidecar(id);
     logger.info("credential_refresh_model_ok", { credentialId: id });
   } catch (err) {
+    if (
+      err instanceof ApiError &&
+      err.status === 502 &&
+      err.extensions?.cause === "oauth_client_rejected"
+    ) {
+      const [row] = await db
+        .select({ providerId: modelProviderCredentials.providerId })
+        .from(modelProviderCredentials)
+        .where(eq(modelProviderCredentials.id, id))
+        .limit(1);
+      warnRefusedClientOnce(refused, `model:${row?.providerId ?? id}`, {
+        credentialId: id,
+        providerId: row?.providerId,
+        detail: getErrorMessage(err),
+      });
+      return;
+    }
     // 404: deleted since the claim, or a blob nobody can decrypt. 410: flagged. Anything else is
     // already recorded by the resolver, whose streak escalates to `needsReconnection`.
     if (!(err instanceof ApiError) || (err.status !== 404 && err.status !== 410)) throw err;
@@ -204,14 +249,17 @@ export async function scanCredentialRefreshes(): Promise<{ integrations: number;
   const now = new Date();
   const integrationIds = await claimIntegrationConnections(CLAIM_LIMIT, now);
   const modelIds = await claimModelCredentials(CLAIM_LIMIT, now);
+  const refused: RefusedClients = new Set();
   const jobs = [
     ...integrationIds.map(
       (id) => () =>
-        refreshIsolated("integration_connection", id, () => refreshIntegrationConnection(id)),
+        refreshIsolated("integration_connection", id, () =>
+          refreshIntegrationConnection(id, refused),
+        ),
     ),
     ...modelIds.map(
       (id) => () =>
-        refreshIsolated("model_provider_credential", id, () => refreshModelCredential(id)),
+        refreshIsolated("model_provider_credential", id, () => refreshModelCredential(id, refused)),
     ),
   ];
   await mapWithConcurrency(jobs, REFRESH_CONCURRENCY, (job) => job());

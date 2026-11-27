@@ -99,10 +99,16 @@ describe("parseTokenErrorResponse", () => {
     expect(result.error).toBe("invalid_client");
   });
 
-  it("classifies HTTP 400 + other OAuth error codes as 'transient'", () => {
+  it("classifies HTTP 400 + invalid_scope as 'misconfigured'", () => {
     const result = parseTokenErrorResponse(400, JSON.stringify({ error: "invalid_scope" }));
-    expect(result.kind).toBe("transient");
+    expect(result.kind).toBe("misconfigured");
     expect(result.error).toBe("invalid_scope");
+  });
+
+  it("classifies HTTP 400 + unknown OAuth error codes as 'transient'", () => {
+    const result = parseTokenErrorResponse(400, JSON.stringify({ error: "weird_code" }));
+    expect(result.kind).toBe("transient");
+    expect(result.error).toBe("weird_code");
   });
 
   it("classifies HTTP 400 + non-JSON body as 'transient'", () => {
@@ -166,7 +172,10 @@ describe("classifyTokenErrorBody", () => {
     ["invalid_grant", "revoked"],
     ["invalid_client", "client_rejected"],
     ["unauthorized_client", "client_rejected"],
-    ["invalid_request", "transient"],
+    ["invalid_request", "misconfigured"],
+    ["invalid_scope", "misconfigured"],
+    ["unsupported_grant_type", "misconfigured"],
+    ["unsupported_response_type", "transient"],
     ["temporarily_unavailable", "transient"],
   ])("classifies %s as '%s'", (error, kind) => {
     expect(classifyTokenErrorBody({ error })).toEqual({ kind, error, errorDescription: undefined });

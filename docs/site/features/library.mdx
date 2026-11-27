@@ -53,7 +53,7 @@ curl -X POST https://your-instance/api/packages/@acme/support-triage/shares \
 
 ## Offer to the organization
 
-An organization owner or admin can offer a package to the organization from its catalog entry, in one of two modes: `PUT /api/packages/{scope}/{name}/org-offer` with the required body `{ "mode": "available" | "on_by_default" }`.
+An organization owner or admin can offer a package to the organization from its catalog entry, in one of two modes: `PUT /api/packages/{scope}/{name}/org-offer` with the required body `{ "org_offer": "available" | "on_by_default" }`.
 
 - **`available`**: the package is placed in every space of the organization, personal ones included, and stays off until a space switches it on. It costs nothing until then.
 - **`on_by_default`**: the package is active in every space without a row of its own. A space can switch it off locally.

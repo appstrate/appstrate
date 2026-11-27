@@ -700,10 +700,10 @@ result's `content`; the schema is `toolPresentationSchema` in
 - **Icons.** Every tool in `tools/list` carries `icons` (MCP `Tool.icons`): two
   inline `data:image/svg+xml` icons, `theme: "light"` and `theme: "dark"`.
   Nothing is fetched.
-- **Lookups.** `search` and `describe` declaring the `integration_tool` kind
-  withhold `readOnlyHint` (they may read a third-party catalog) and carry
-  `_meta["dev.appstrate/lookup"]: true` instead: their calls only look things
-  up. `isLookupTool` reads either.
+- **Lookups.** A tool whose calls only look things up declares the standard
+  `readOnlyHint: true`; `search` and `describe` declaring the `integration_tool`
+  kind add `openWorldHint: true` (they may read a third-party catalog).
+  `isLookupTool` reads `readOnlyHint` alone.
 - **Presentation.** A result carries `_meta["dev.appstrate/presentation"]`
   when the server knows more of the call than its tool's descriptor, a failed
   call's included (a tool that fails unexpectedly answers `isError` with the

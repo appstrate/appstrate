@@ -163,7 +163,7 @@ const offerToOrg = (packageId: string, mode: "available" | "on_by_default" = "av
   app.request(`/api/packages/${packageId}/org-offer`, {
     method: "PUT",
     headers: { ...owner(), "Content-Type": "application/json" },
-    body: JSON.stringify({ mode }),
+    body: JSON.stringify({ org_offer: mode }),
   });
 
 /** `DELETE …/org-offer` by the organization owner. */
@@ -565,7 +565,7 @@ describe("authority — `<type>:share` in the home space", () => {
 describe("offered is not activated", () => {
   beforeEach(async () => {
     const offered = await offerToOrg(AGENT);
-    expect(offered.status, await offered.clone().text()).toBe(200);
+    expect(offered.status, await offered.clone().text()).toBe(201);
   });
 
   /**
@@ -968,7 +968,7 @@ describe("a personal space takes only the offer", () => {
   });
 
   it("takes the catalogue integration once the organization offers it", async () => {
-    expect((await offerToOrg(CATALOGUE, "available")).status).toBe(200);
+    expect((await offerToOrg(CATALOGUE, "available")).status).toBe(201);
     expect((await takeUpOffer(recipient.headers(), CATALOGUE)).status).toBe(201);
   });
 
@@ -999,7 +999,7 @@ describe("a personal space takes only the offer", () => {
   });
 
   it("lets the owner switch off what no longer qualifies", async () => {
-    expect((await offerToOrg(AGENT, "on_by_default")).status).toBe(200);
+    expect((await offerToOrg(AGENT, "on_by_default")).status).toBe(201);
     expect(await agentIndexIds(recipient.headers())).toContain(AGENT);
     const off = await app.request(`/api/spaces/${recipient.personalSpaceId}/packages/${AGENT}`, {
       method: "DELETE",
@@ -1055,7 +1055,7 @@ describe("a personal space takes only the offer", () => {
         ?.activation.find((entry) => entry.spaceId === recipient.personalSpaceId)?.activate;
     expect(cell(await library(recipient.headers()), CATALOGUE)).toBe("not_offered");
 
-    expect((await offerToOrg(CATALOGUE, "available")).status).toBe(200);
+    expect((await offerToOrg(CATALOGUE, "available")).status).toBe(201);
     expect(cell(await library(recipient.headers()), CATALOGUE)).toBe("allowed");
   });
 });
@@ -1066,7 +1066,7 @@ describe("an offer whose version disappeared after it was made", () => {
   // The placement then names nothing to run, and the launch must say so rather
   // than fall back to the author's draft.
   it("activates, then answers 404 `no_published_version` at launch — never the draft", async () => {
-    expect((await offerToOrg(AGENT)).status).toBe(200);
+    expect((await offerToOrg(AGENT)).status).toBe(201);
     const activated = await takeUpOffer(recipient.headers(), AGENT);
     expect(activated.status, await activated.clone().text()).toBe(201);
 
@@ -1179,7 +1179,7 @@ describe("activating is the fourth door closed: it needs `share`, or a placement
     // `operator` preset in their own space, which carries no
     // `integrations:uninstall` and no `<type>:write`. Ownership is the
     // authorization, both ways.
-    expect((await offerToOrg(AGENT)).status).toBe(200);
+    expect((await offerToOrg(AGENT)).status).toBe(201);
     expect((await takeUpOffer(guest.headers(), AGENT)).status).toBe(201);
 
     const removed = await app.request(`/api/spaces/${guest.personalSpaceId}/packages/${AGENT}`, {
@@ -1598,7 +1598,7 @@ describe("copy control — `org_settings.restrict_package_copy`", () => {
 
   it("on: a run is unaffected — a bundle is assembled server-side, never copied", async () => {
     await setRestrictCopy(true);
-    expect((await offerToOrg(AGENT)).status).toBe(200);
+    expect((await offerToOrg(AGENT)).status).toBe(201);
     expect((await takeUpOffer(viewer.headers(), AGENT)).status).toBe(201);
     const launched = await app.request(`/api/agents/${AGENT}/run`, {
       method: "POST",

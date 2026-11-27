@@ -303,7 +303,7 @@ export const githubImportSchema = z
   })
   .strict();
 
-export const packageOrgOfferSchema = z.object({ mode: z.enum(orgOfferModeValues) }).strict();
+export const packageOrgOfferSchema = z.object({ org_offer: z.enum(orgOfferModeValues) }).strict();
 
 export const forkSchema = z
   .object({
@@ -2175,7 +2175,7 @@ export function createPackagesRouter() {
     const packageId = getItemId(c);
     const orgId = c.get("orgId");
     const { pkg, authorizeHome } = await assertPackageOfferAccess(c, packageId);
-    const { mode } = await readJsonBody(c, packageOrgOfferSchema);
+    const { org_offer: mode } = await readJsonBody(c, packageOrgOfferSchema);
     const { created, previousMode } = await offerPackageToOrg({
       orgId,
       packageId,
@@ -2199,12 +2199,15 @@ export function createPackagesRouter() {
         after: { orgId, mode },
       });
     }
-    return c.json({
-      object: "package_org_offer",
-      packageId,
-      org_offer: mode,
-      warnings: await offerClosureWarnings(orgId, packageId, pkg.type),
-    });
+    return c.json(
+      {
+        object: "package_org_offer",
+        packageId,
+        org_offer: mode,
+        warnings: await offerClosureWarnings(orgId, packageId, pkg.type),
+      },
+      created ? 201 : 200,
+    );
   });
 
   router.delete(`/${SCOPED_PACKAGE_ROUTE}/org-offer`, async (c) => {

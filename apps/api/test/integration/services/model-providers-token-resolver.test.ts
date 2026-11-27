@@ -674,9 +674,14 @@ describe("OAuth model providers — token-resolver hardening", () => {
 
     // A reconnect cannot repair a client the token endpoint refuses: never counted, never flagged,
     // even on a token expired past the grace window with a streak one short of the threshold.
-    it.each(["invalid_client", "unauthorized_client"])(
-      "a refused client (%s) answers 502 oauth_client_rejected without counting",
-      async (error) => {
+    it.each([
+      ["invalid_client", 401],
+      ["unauthorized_client", 401],
+      ["invalid_scope", 400],
+      ["unsupported_grant_type", 400],
+    ] as const)(
+      "a refused client or request (%s) answers 502 oauth_client_rejected without counting",
+      async (error, status) => {
         const id = await seedOAuthCredential({
           orgId,
           userId,
@@ -691,7 +696,7 @@ describe("OAuth model providers — token-resolver hardening", () => {
         mockFetch(
           async () =>
             new Response(JSON.stringify({ error }), {
-              status: 401,
+              status,
               headers: { "Content-Type": "application/json" },
             }),
         );
