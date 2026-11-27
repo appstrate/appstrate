@@ -204,7 +204,7 @@ describe("the tools step", () => {
         draftMoved={over.draftMoved ?? false}
       />,
     );
-  /** Whether the tool's box renders checked (Radix draws it as a `button`). */
+  /** Whether the tool's box renders checked (drawn as a `button`). */
   const checked = (html: string, name: string) => {
     const tag = new RegExp(`<button[^>]*id="integration-wizard-tool-${name}"[^>]*>`).exec(html);
     return tag?.[0].includes('aria-checked="true"');

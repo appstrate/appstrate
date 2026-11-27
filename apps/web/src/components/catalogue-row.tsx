@@ -47,7 +47,7 @@ export function CatalogueMenuItems({
   return (
     <>
       {open && OpenIcon && (
-        <DropdownMenuItem onSelect={open.onSelect}>
+        <DropdownMenuItem onClick={open.onSelect}>
           <OpenIcon />
           {open.label}
         </DropdownMenuItem>
@@ -58,13 +58,13 @@ export function CatalogueMenuItems({
           are the deeds that act on the package itself. */}
       {open && (deeds.moveHome || deeds.share) && <DropdownMenuSeparator />}
       {deeds.moveHome && (
-        <DropdownMenuItem onSelect={() => onMoveHome(item)}>
+        <DropdownMenuItem onClick={() => onMoveHome(item)}>
           <FolderInput />
           {t("packages.moveHome")}
         </DropdownMenuItem>
       )}
       {deeds.share && (
-        <DropdownMenuItem onSelect={() => onShare(item)}>
+        <DropdownMenuItem onClick={() => onShare(item)}>
           <Share2 />
           {t("packages.share")}
         </DropdownMenuItem>
@@ -78,7 +78,7 @@ export function CatalogueMenuItems({
             <DropdownMenuItem
               key={spaceId}
               variant="destructive"
-              onSelect={() => onRevoke(item, spaceId)}
+              onClick={() => onRevoke(item, spaceId)}
             >
               <X />
               {spaceId === currentSpaceId

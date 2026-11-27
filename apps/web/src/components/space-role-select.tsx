@@ -1,6 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { SelectItem } from "@appstrate/ui/components/select";
 import { OptionSelect } from "./app-ui/option-select";
 import { Skeleton } from "@appstrate/ui/components/skeleton";
 import { cn } from "@appstrate/ui/cn";
@@ -9,7 +8,7 @@ import type { SpaceRoleOption } from "../hooks/use-roles";
 /**
  * A role `<Select>` that always shows the value it holds.
  *
- * Radix renders an empty trigger for a value no `SelectItem` declares, so a
+ * A select draws the raw value for a value no option labels, so a
  * role the catalog no longer offers — deleted, or outside the caller's
  * grantable set — would read as "no role at all". It is listed under
  * `fallbackLabel` as a disabled item instead, which keeps the row honest and
@@ -57,12 +56,9 @@ export function SpaceRoleSelect({
       placeholder={placeholder}
       options={options}
       leading={
-        !!value &&
-        !options.some((option) => option.value === value) && (
-          <SelectItem value={value} disabled>
-            {fallbackLabel}
-          </SelectItem>
-        )
+        value && !options.some((option) => option.value === value)
+          ? [{ value, label: fallbackLabel, disabled: true }]
+          : undefined
       }
     />
   );

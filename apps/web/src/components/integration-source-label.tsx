@@ -57,15 +57,17 @@ export function LocalUnavailableHint({ inline = false }: { inline?: boolean }) {
   }
   return (
     <Tooltip>
-      <TooltipTrigger asChild>
-        {/* Raised above a row's link overlay, or the row swallows the hover. */}
-        <span
-          tabIndex={0}
-          className="text-muted-foreground/70 relative z-10 truncate text-[0.68rem]"
-        >
-          {t("integrations.source.localUnavailable")}
-          <span className="sr-only">{t("integrations.source.localUnavailableHint")}</span>
-        </span>
+      {/* Raised above a row's link overlay, or the row swallows the hover. */}
+      <TooltipTrigger
+        render={
+          <span
+            tabIndex={0}
+            className="text-muted-foreground/70 relative z-10 truncate text-[0.68rem]"
+          />
+        }
+      >
+        {t("integrations.source.localUnavailable")}
+        <span className="sr-only">{t("integrations.source.localUnavailableHint")}</span>
       </TooltipTrigger>
       <TooltipContent className="max-w-xs">
         {t("integrations.source.localUnavailableHint")}

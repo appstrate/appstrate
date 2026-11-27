@@ -223,8 +223,12 @@ function PackageDetailBody({ type }: { type: "agent" | "skill" }) {
         icon={TriangleAlert}
         tone="danger"
       >
-        <Button asChild variant="outline" size="sm">
-          <Link to={packageDetailPath(type, packageId)}>{t("btn.back", { ns: "common" })}</Link>
+        <Button
+          variant="outline"
+          size="sm"
+          render={<Link to={packageDetailPath(type, packageId)} />}
+        >
+          {t("btn.back", { ns: "common" })}
         </Button>
       </EmptyState>
     );

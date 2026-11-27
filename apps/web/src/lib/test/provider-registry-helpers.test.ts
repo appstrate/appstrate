@@ -3,7 +3,7 @@
 /**
  * What the provider picker offers.
  *
- * The rows are asserted here rather than in the rendered markup: a Radix
+ * The rows are asserted here rather than in the rendered markup: a
  * `SelectContent` is a portal and renders nothing without a DOM, so the picker
  * shows up in a static render as its trigger alone.
  *

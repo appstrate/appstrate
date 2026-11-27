@@ -43,7 +43,7 @@ export function RemovableChip({
     </>
   );
   return (
-    // `rest` carries what a Radix trigger (`asChild`) passes: ref, handlers, data-state.
+    // `rest` carries what a trigger rendering it (`render`) passes: ref, handlers, state attributes.
     <span
       {...rest}
       data-removable-chip=""

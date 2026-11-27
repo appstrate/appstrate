@@ -31,10 +31,10 @@ export function PackageSharedFrom({
   }
   return (
     <Tooltip>
-      <TooltipTrigger asChild>
-        <span tabIndex={0} className="text-muted-foreground relative z-10 shrink-0">
-          <FolderInput className="size-3.5" role="img" aria-label={text} />
-        </span>
+      <TooltipTrigger
+        render={<span tabIndex={0} className="text-muted-foreground relative z-10 shrink-0" />}
+      >
+        <FolderInput className="size-3.5" role="img" aria-label={text} />
       </TooltipTrigger>
       <TooltipContent>{text}</TooltipContent>
     </Tooltip>

@@ -268,32 +268,30 @@ function SummaryDisclosure({
   children: ReactNode;
 }) {
   return (
-    <Collapsible open={open} onOpenChange={onOpenChange} asChild>
-      <section>
-        <h3>
-          <CollapsibleTrigger
+    <Collapsible open={open} onOpenChange={onOpenChange} render={<section />}>
+      <h3>
+        <CollapsibleTrigger
+          className={cn(
+            DISCLOSURE_LINE_CLASS,
+            "hover:bg-muted/50 focus-visible:ring-ring text-left transition-colors focus-visible:ring-2 focus-visible:outline-none focus-visible:ring-inset",
+          )}
+        >
+          <ChevronRightIcon
+            aria-hidden="true"
             className={cn(
-              DISCLOSURE_LINE_CLASS,
-              "hover:bg-muted/50 focus-visible:ring-ring text-left transition-colors focus-visible:ring-2 focus-visible:outline-none focus-visible:ring-inset",
+              "text-muted-foreground duration-fast ease-surface size-4 shrink-0 transition-transform",
+              open && "rotate-90",
             )}
-          >
-            <ChevronRightIcon
-              aria-hidden="true"
-              className={cn(
-                "text-muted-foreground duration-fast ease-surface size-4 shrink-0 transition-transform",
-                open && "rotate-90",
-              )}
-            />
-            <span className="shrink-0 text-sm font-medium">{title}</span>
-            {preview ? (
-              <span className="text-muted-foreground ml-auto min-w-0 truncate pl-2 text-xs font-normal">
-                {preview}
-              </span>
-            ) : null}
-          </CollapsibleTrigger>
-        </h3>
-        <CollapsibleContent className="px-4 pt-1 pb-3">{children}</CollapsibleContent>
-      </section>
+          />
+          <span className="shrink-0 text-sm font-medium">{title}</span>
+          {preview ? (
+            <span className="text-muted-foreground ml-auto min-w-0 truncate pl-2 text-xs font-normal">
+              {preview}
+            </span>
+          ) : null}
+        </CollapsibleTrigger>
+      </h3>
+      <CollapsibleContent className="px-4 pt-1 pb-3">{children}</CollapsibleContent>
     </Collapsible>
   );
 }

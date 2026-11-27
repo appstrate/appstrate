@@ -6,10 +6,11 @@
  */
 
 import * as React from "react";
-import * as PopoverPrimitive from "@radix-ui/react-popover";
-import { Slot } from "@radix-ui/react-slot";
+import { Popover as PopoverPrimitive } from "@base-ui/react/popover";
+import { useRender } from "@base-ui/react/use-render";
 
 import { cn } from "../cn.ts";
+import { splitAnchoring, type WithClassName } from "./primitive-props.ts";
 import { useIsMobile } from "../use-mobile.ts";
 import { Sheet, SheetTrigger } from "./sheet.tsx";
 import { SheetMenuContent } from "./sheet-menu.tsx";
@@ -23,97 +24,115 @@ interface PopoverSheet {
 
 const PopoverSheetContext = React.createContext<PopoverSheet | null>(null);
 
-function Popover({
-  open,
-  defaultOpen,
-  onOpenChange,
-  modal,
-  children,
-}: React.ComponentProps<typeof PopoverPrimitive.Root>) {
+/** From `md` up: the element a `PopoverAnchor` drew, which the content lines up with. */
+interface PopoverAnchoring {
+  anchor: Element | null;
+  setAnchor: (element: Element | null) => void;
+}
+
+const PopoverAnchorContext = React.createContext<PopoverAnchoring | null>(null);
+
+interface PopoverProps {
+  open?: boolean;
+  defaultOpen?: boolean;
+  onOpenChange?: (open: boolean, details: PopoverPrimitive.Root.ChangeEventDetails) => void;
+  modal?: PopoverPrimitive.Root.Props["modal"];
+  children?: React.ReactNode;
+}
+
+function Popover({ open, defaultOpen, onOpenChange, modal, children }: PopoverProps) {
   const mobile = useIsMobile();
   const [name, setName] = React.useState("");
+  const [anchor, setAnchor] = React.useState<Element | null>(null);
   if (!mobile) {
     return (
-      <PopoverPrimitive.Root
-        open={open}
-        defaultOpen={defaultOpen}
-        onOpenChange={onOpenChange}
-        modal={modal}
-      >
-        {children}
-      </PopoverPrimitive.Root>
+      <PopoverAnchorContext.Provider value={{ anchor, setAnchor }}>
+        <PopoverPrimitive.Root
+          open={open}
+          defaultOpen={defaultOpen}
+          onOpenChange={onOpenChange}
+          modal={modal}
+        >
+          {children}
+        </PopoverPrimitive.Root>
+      </PopoverAnchorContext.Provider>
     );
   }
   return (
     <PopoverSheetContext.Provider value={{ name, setName }}>
-      <Sheet open={open} defaultOpen={defaultOpen} onOpenChange={onOpenChange}>
+      <Sheet
+        open={open}
+        defaultOpen={defaultOpen}
+        // Every reason a sheet (a dialog) closes for is also a popover reason.
+        onOpenChange={(next, details) =>
+          onOpenChange?.(next, details as unknown as PopoverPrimitive.Root.ChangeEventDetails)
+        }
+      >
         {children}
       </Sheet>
     </PopoverSheetContext.Provider>
   );
 }
 
-const PopoverTrigger = React.forwardRef<
-  React.ElementRef<typeof PopoverPrimitive.Trigger>,
-  React.ComponentPropsWithoutRef<typeof PopoverPrimitive.Trigger>
->(({ onClick, ...props }, ref) => {
+function PopoverTrigger({ onClick, ...props }: PopoverPrimitive.Trigger.Props) {
   const sheet = React.useContext(PopoverSheetContext);
-  if (!sheet) return <PopoverPrimitive.Trigger ref={ref} onClick={onClick} {...props} />;
+  if (!sheet) return <PopoverPrimitive.Trigger onClick={onClick} {...props} />;
   return (
     <SheetTrigger
-      ref={ref}
       onClick={(event) => {
         onClick?.(event);
         sheet.setName(triggerName(event.currentTarget));
       }}
-      {...props}
+      {...(props as React.ComponentProps<typeof SheetTrigger>)}
     />
   );
-});
-PopoverTrigger.displayName = PopoverPrimitive.Trigger.displayName;
+}
 
 /** The element the popover lines up with; a sheet lines up with the screen, so it is just itself. */
-const PopoverAnchor = React.forwardRef<
-  React.ElementRef<typeof PopoverPrimitive.Anchor>,
-  React.ComponentPropsWithoutRef<typeof PopoverPrimitive.Anchor>
->(({ asChild, ...props }, ref) => {
-  const sheet = React.useContext(PopoverSheetContext);
-  if (!sheet) return <PopoverPrimitive.Anchor ref={ref} asChild={asChild} {...props} />;
-  const Comp = asChild ? Slot : "div";
-  return <Comp ref={ref} {...props} />;
-});
-PopoverAnchor.displayName = PopoverPrimitive.Anchor.displayName;
+function PopoverAnchor({ render, ref, ...props }: useRender.ComponentProps<"div">) {
+  const anchoring = React.useContext(PopoverAnchorContext);
+  return useRender({
+    defaultTagName: "div",
+    render,
+    ref: anchoring ? (ref ? [ref, anchoring.setAnchor] : anchoring.setAnchor) : ref,
+    props,
+  });
+}
 
-const PopoverContent = React.forwardRef<
-  React.ElementRef<typeof PopoverPrimitive.Content>,
-  React.ComponentPropsWithoutRef<typeof PopoverPrimitive.Content>
->(({ className, align = "center", sideOffset = 4, ...props }, ref) => {
+type PopoverContentProps = WithClassName<PopoverPrimitive.Popup.Props> &
+  Omit<PopoverPrimitive.Positioner.Props, "className" | "render" | "style" | "children">;
+
+function PopoverContent({ className, sideOffset = 4, ...props }: PopoverContentProps) {
   const sheet = React.useContext(PopoverSheetContext);
+  const anchoring = React.useContext(PopoverAnchorContext);
   if (sheet) {
     return (
       <SheetMenuContent
-        ref={ref}
+        {...(withoutAnchoring(props) as React.ComponentProps<typeof SheetMenuContent>)}
         title={sheet.name}
         className={cn("p-4", className)}
-        {...withoutAnchoring(props)}
       />
     );
   }
+  const [positioning, popup] = splitAnchoring(props);
   return (
     <PopoverPrimitive.Portal>
-      <PopoverPrimitive.Content
-        ref={ref}
-        align={align}
+      <PopoverPrimitive.Positioner
         sideOffset={sideOffset}
-        className={cn(
-          "bg-popover text-popover-foreground data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95 data-[side=bottom]:slide-in-from-top-2 data-[side=left]:slide-in-from-right-2 data-[side=right]:slide-in-from-left-2 data-[side=top]:slide-in-from-bottom-2 z-50 w-72 origin-(--radix-popover-content-transform-origin) rounded-md border p-4 shadow-md outline-none",
-          className,
-        )}
-        {...props}
-      />
+        anchor={anchoring?.anchor ?? undefined}
+        {...positioning}
+        className="z-50"
+      >
+        <PopoverPrimitive.Popup
+          className={cn(
+            "bg-popover text-popover-foreground data-open:animate-in data-closed:animate-out data-closed:fade-out-0 data-open:fade-in-0 data-closed:zoom-out-95 data-open:zoom-in-95 data-[side=bottom]:slide-in-from-top-2 data-[side=left]:slide-in-from-right-2 data-[side=right]:slide-in-from-left-2 data-[side=top]:slide-in-from-bottom-2 w-72 origin-(--transform-origin) rounded-md border p-4 shadow-md outline-none",
+            className,
+          )}
+          {...popup}
+        />
+      </PopoverPrimitive.Positioner>
     </PopoverPrimitive.Portal>
   );
-});
-PopoverContent.displayName = PopoverPrimitive.Content.displayName;
+}
 
 export { Popover, PopoverTrigger, PopoverAnchor, PopoverContent };

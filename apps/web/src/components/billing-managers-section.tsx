@@ -173,11 +173,11 @@ function BillingManagersForm({ saved, members }: { saved: string[]; members: Org
 
       <div>
         <Popover open={pickerOpen} onOpenChange={setPickerOpen}>
-          <PopoverTrigger asChild>
-            <Button variant="outline" size="sm" disabled={replace.isPending}>
-              <Plus />
-              {t("billingManagers.add")}
-            </Button>
+          <PopoverTrigger
+            render={<Button variant="outline" size="sm" disabled={replace.isPending} />}
+          >
+            <Plus />
+            {t("billingManagers.add")}
           </PopoverTrigger>
           <PopoverContent className="w-80 p-0" align="start">
             <Command>

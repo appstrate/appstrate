@@ -37,33 +37,37 @@ export function IntegrationLogoStack({
   const label = t("integrationStack.label", { names: named.map((n) => n.text).join(", ") });
   return (
     <Tooltip>
-      <TooltipTrigger asChild>
-        {/* Raised over a card's or a row's stretched link, or it would swallow the hover. */}
-        <span tabIndex={0} role="img" aria-label={label} className="relative z-10 flex shrink-0">
-          <TileStack
-            items={integrations}
-            keyOf={(integration) => integration.id}
-            render={(integration, className) => (
-              <span
-                data-testid="integration-logo"
-                className={cn("flex shrink-0 overflow-hidden", STACK_TILE, className)}
-              >
-                <PackageIcon
-                  type="integration"
-                  icon={integration.icon}
-                  size="xs"
-                  className={cn(
-                    "rounded-none",
-                    isInactive(integration.id) && "opacity-40 grayscale",
-                  )}
-                />
-              </span>
-            )}
-            tileClass={STACK_TILE}
-            max={MAX_LOGOS}
-            testId="integration-logo-stack"
+      {/* Raised over a card's or a row's stretched link, or it would swallow the hover. */}
+      <TooltipTrigger
+        render={
+          <span
+            tabIndex={0}
+            role="img"
+            aria-label={label}
+            className="relative z-10 flex shrink-0"
           />
-        </span>
+        }
+      >
+        <TileStack
+          items={integrations}
+          keyOf={(integration) => integration.id}
+          render={(integration, className) => (
+            <span
+              data-testid="integration-logo"
+              className={cn("flex shrink-0 overflow-hidden", STACK_TILE, className)}
+            >
+              <PackageIcon
+                type="integration"
+                icon={integration.icon}
+                size="xs"
+                className={cn("rounded-none", isInactive(integration.id) && "opacity-40 grayscale")}
+              />
+            </span>
+          )}
+          tileClass={STACK_TILE}
+          max={MAX_LOGOS}
+          testId="integration-logo-stack"
+        />
       </TooltipTrigger>
       {/* One name a line: an agent may use more integrations than a line holds. */}
       <TooltipContent>

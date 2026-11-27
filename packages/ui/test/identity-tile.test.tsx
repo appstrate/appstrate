@@ -53,7 +53,7 @@ describe("IdentityTile", () => {
   });
 
   it("keeps the initials as the fallback of an image until it has loaded", () => {
-    // Radix draws `AvatarImage` once the browser reports it loaded, never in static markup.
+    // `AvatarImage` draws once the browser reports it loaded, never in static markup.
     const html = render({ seed: SEED, label: "Acme Corp", icon: IMAGE, shape: "round" });
     expect(html).toContain(">AC<");
     expect(html).not.toContain("<img");

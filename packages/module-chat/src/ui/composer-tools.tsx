@@ -68,14 +68,27 @@ export function ComposerTools({ authorsPackages }: ComposerToolsProps) {
   return (
     <Popover
       open={panel.open}
-      onOpenChange={(open) => (open ? panel.openAt("tools") : panel.close())}
+      onOpenChange={(open, details) => {
+        if (open) return panel.openAt("tools");
+        // A level goes up one level on Escape; the top level closes.
+        if (details.reason === "escape-key" && heading.back) {
+          details.cancel();
+          heading.back.onClick();
+          return;
+        }
+        panel.close();
+      }}
     >
       {/* From `md` up; a phone has the "+". The popover anchors to the whole row. */}
-      <PopoverAnchor asChild>
-        {/* A chip's X hands the focus on within this row (`chip-focus.ts`). */}
-        <div className="flex min-w-0 items-center gap-1.5 max-md:hidden" data-chip-row="">
-          <AttachButton />
-          <PopoverTrigger asChild>
+      {/* A chip's X hands the focus on within this row (`chip-focus.ts`). */}
+      <PopoverAnchor
+        render={
+          <div className="flex min-w-0 items-center gap-1.5 max-md:hidden" data-chip-row="" />
+        }
+      >
+        <AttachButton />
+        <PopoverTrigger
+          render={
             <Button
               type="button"
               variant="ghost"
@@ -83,18 +96,18 @@ export function ComposerTools({ authorsPackages }: ComposerToolsProps) {
               className={COMPOSER_TOOL_CLASS}
               aria-label={t("composer.tools")}
               data-testid="composer-settings-trigger"
-            >
-              <SettingsIcon />
-            </Button>
-          </PopoverTrigger>
-          {departures.map((departure) => (
-            <DepartureChip
-              key={departure}
-              departure={departure}
-              onOpen={() => panel.openAt(DEPARTURE_LEVEL[departure])}
             />
-          ))}
-        </div>
+          }
+        >
+          <SettingsIcon />
+        </PopoverTrigger>
+        {departures.map((departure) => (
+          <DepartureChip
+            key={departure}
+            departure={departure}
+            onOpen={() => panel.openAt(DEPARTURE_LEVEL[departure])}
+          />
+        ))}
       </PopoverAnchor>
       <ComposerPlusButton ref={plus} />
       <PopoverContent
@@ -104,20 +117,10 @@ export function ComposerTools({ authorsPackages }: ComposerToolsProps) {
         collisionPadding={12}
         aria-labelledby={titleId}
         data-testid="composer-panel"
-        // A level goes up one level on Escape; the top level closes.
-        onEscapeKeyDown={(event) => {
-          if (!heading.back) return;
-          event.preventDefault();
-          heading.back.onClick();
-        }}
         // Closing returns focus to the opener on screen: the "+" below `md`, where the
         // registered trigger (the settings button) is hidden.
-        onCloseAutoFocus={(event) => {
-          if (!plus.current?.offsetParent) return;
-          event.preventDefault();
-          plus.current.focus();
-        }}
-        className="flex max-h-[min(32rem,var(--radix-popover-content-available-height))] w-[min(22rem,calc(100vw-1.5rem))] flex-col overflow-hidden p-0"
+        finalFocus={() => (plus.current?.offsetParent ? plus.current : true)}
+        className="flex max-h-[min(32rem,var(--available-height))] w-[min(22rem,calc(100vw-1.5rem))] flex-col overflow-hidden p-0"
       >
         <MenuHeading back={heading.back}>
           <p id={titleId} className={MENU_TITLE_CLASS}>
@@ -238,9 +241,11 @@ function AttachButton() {
   if ("spaceId" in attachTarget) {
     return (
       <Tooltip>
-        <TooltipTrigger asChild>
-          <ComposerPrimitive.AddAttachment asChild>{button}</ComposerPrimitive.AddAttachment>
-        </TooltipTrigger>
+        <TooltipTrigger
+          render={
+            <ComposerPrimitive.AddAttachment asChild>{button}</ComposerPrimitive.AddAttachment>
+          }
+        />
         <TooltipContent side="top" className="max-w-64 text-xs">
           {t("composer.attachHint")}
         </TooltipContent>
@@ -250,11 +255,9 @@ function AttachButton() {
   const reason = t(attachUnavailableKey(attachTarget.unavailable));
   return (
     <Tooltip>
-      <TooltipTrigger asChild>
-        <span tabIndex={0} className="inline-flex shrink-0">
-          {button}
-          <span className="sr-only">{reason}</span>
-        </span>
+      <TooltipTrigger render={<span tabIndex={0} className="inline-flex shrink-0" />}>
+        {button}
+        <span className="sr-only">{reason}</span>
       </TooltipTrigger>
       <TooltipContent side="top" className="max-w-64 text-xs">
         {reason}

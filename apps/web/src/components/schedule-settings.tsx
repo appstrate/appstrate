@@ -130,7 +130,7 @@ export function ScheduleActionsMenu({
     <PageActionsMenu>
       {offered.toggle && (
         <DropdownMenuItem
-          onSelect={() =>
+          onClick={() =>
             schedule.etag &&
             toggle.mutate(
               { id: schedule.id, etag: schedule.etag, enabled: !schedule.enabled },
@@ -146,7 +146,7 @@ export function ScheduleActionsMenu({
       {offered.delete && (
         <>
           {offered.toggle && <DropdownMenuSeparator />}
-          <DropdownMenuItem onSelect={onDelete} disabled={deletePending} variant="destructive">
+          <DropdownMenuItem onClick={onDelete} disabled={deletePending} variant="destructive">
             <Trash2 />
             {t("common:btn.delete")}
           </DropdownMenuItem>

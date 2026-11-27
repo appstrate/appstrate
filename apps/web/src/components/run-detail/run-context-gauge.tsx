@@ -71,11 +71,11 @@ export function ContextGaugeReadout({
         </span>
       ) : (
         <Popover>
-          <PopoverTrigger asChild>
-            <button type="button" className="cursor-pointer underline decoration-dotted">
-              {counts}
-              {share}
-            </button>
+          <PopoverTrigger
+            render={<button type="button" className="cursor-pointer underline decoration-dotted" />}
+          >
+            {counts}
+            {share}
           </PopoverTrigger>
           <PopoverContent side="bottom" className="flex w-auto max-w-xs flex-col gap-1 p-3">
             {isActive ? null : <ContextGaugePeakHint />}
@@ -87,7 +87,7 @@ export function ContextGaugeReadout({
   );
 }
 
-/** Exported for tests: Radix keeps tooltip content unmounted until opened. */
+/** Exported for tests: a tooltip keeps its content unmounted until opened. */
 export function ContextGaugePeakHint() {
   const { t } = useTranslation("agents");
   return <span className="block text-xs">{t("run.contextGaugePeakHint")}</span>;

@@ -86,22 +86,24 @@ function PinnedPill({
   const summary = skillsSummary(skills, refused.length, t);
   return (
     <Tooltip>
-      <TooltipTrigger asChild>
-        <RemovableChip
-          icon={discovery ? <BookOpenIcon /> : <LockIcon />}
-          open={{
-            onClick: onOpen,
-            label: t(discovery ? "skills.pinnedPillLabel" : "skills.pinnedLockedPillLabel", {
-              skills: summary,
-            }),
-            testId: "skill-pill-pinned",
-          }}
-          removeLabel={t("skills.reset")}
-          onRemove={onReset}
-        >
-          {skillsSummary(skills, refused.length, t, "skills.pinnedCount")}
-        </RemovableChip>
-      </TooltipTrigger>
+      <TooltipTrigger
+        render={
+          <RemovableChip
+            icon={discovery ? <BookOpenIcon /> : <LockIcon />}
+            open={{
+              onClick: onOpen,
+              label: t(discovery ? "skills.pinnedPillLabel" : "skills.pinnedLockedPillLabel", {
+                skills: summary,
+              }),
+              testId: "skill-pill-pinned",
+            }}
+            removeLabel={t("skills.reset")}
+            onRemove={onReset}
+          >
+            {skillsSummary(skills, refused.length, t, "skills.pinnedCount")}
+          </RemovableChip>
+        }
+      />
       <TooltipContent side="top" className="max-w-72 text-xs">
         <SkillNameList skills={skills} />
         <RefusedSkillList skills={refused} />

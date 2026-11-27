@@ -69,7 +69,7 @@ export function ShellHeaderLead({ children }: { children: ReactNode }) {
 
 /**
  * A page's tab bar, in the header's second row. Portalled, so the bar keeps the
- * page's own context: Radix tabs rendered here still answer the page's `<Tabs>`.
+ * page's own context: tabs rendered here still answer the page's `<Tabs>`.
  */
 export function ShellHeaderTabs({ children }: { children: ReactNode }) {
   return <HeaderPortal slot="tabs">{children}</HeaderPortal>;

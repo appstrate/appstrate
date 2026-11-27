@@ -2,10 +2,9 @@
 
 /**
  * A text setting saved by Save or Enter, cancelled by Cancel or Escape; blur never saves.
- * An empty value cannot be saved. `data-inline-editing` keeps Escape from closing the
- * surrounding dialog (`keepOpenWhileRenaming`).
+ * An empty value cannot be saved. Escape resets the field without closing the dialog around it.
  */
-import { inlineEditingAttributes } from "../../lib/keep-open-while-renaming";
+import { inlineEditingAttributes } from "../../lib/inline-editing";
 import { Input } from "@appstrate/ui/components/input";
 import { useSettingDraft } from "../../hooks/use-setting-draft";
 import { useSaveAction } from "../../hooks/use-save-action";
@@ -52,7 +51,10 @@ export function InlineTextSetting({
             event.preventDefault();
             if (draft.dirty && !saveDisabled) void action.save().catch(() => {});
           }
-          if (event.key === "Escape") draft.reset();
+          if (event.key === "Escape") {
+            event.stopPropagation();
+            draft.reset();
+          }
         }}
       />
       <SaveControls

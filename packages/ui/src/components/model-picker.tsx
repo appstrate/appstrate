@@ -232,36 +232,37 @@ export function ModelPicker({
         : labels.gone;
   return (
     <Popover open={open} onOpenChange={setOpen}>
-      <PopoverTrigger asChild>
-        <Button
-          id={id}
-          type="button"
-          variant="outline"
-          role="combobox"
-          aria-expanded={open}
-          disabled={disabled}
-          className="text-foreground w-full justify-between font-normal"
-        >
-          <span className="flex min-w-0 items-center gap-2">
-            {entry && renderIcon?.(entry.model)}
-            <span className="truncate">{text}</span>
-            {entry?.blocked && (
-              <span className="text-muted-foreground shrink-0 text-xs">
-                {labels.reasons[entry.blocked]}
-              </span>
-            )}
-          </span>
-          <ChevronsUpDown className="text-muted-foreground shrink-0" />
-        </Button>
+      <PopoverTrigger
+        render={
+          <Button
+            id={id}
+            type="button"
+            variant="outline"
+            role="combobox"
+            disabled={disabled}
+            className="text-foreground w-full justify-between font-normal"
+          />
+        }
+      >
+        <span className="flex min-w-0 items-center gap-2">
+          {entry && renderIcon?.(entry.model)}
+          <span className="truncate">{text}</span>
+          {entry?.blocked && (
+            <span className="text-muted-foreground shrink-0 text-xs">
+              {labels.reasons[entry.blocked]}
+            </span>
+          )}
+        </span>
+        <ChevronsUpDown className="text-muted-foreground shrink-0" />
       </PopoverTrigger>
-      <PopoverContent align="start" className="w-(--radix-popover-trigger-width) min-w-72 p-0">
+      <PopoverContent align="start" className="w-(--anchor-width) min-w-72 p-0">
         <ModelPickerList
           groups={groups}
           value={value}
           labels={labels}
           inherit={inherit}
           renderIcon={renderIcon}
-          listClassName="max-h-[min(24rem,var(--radix-popover-content-available-height))]"
+          listClassName="max-h-[min(24rem,var(--available-height))]"
           {...list}
           onSelect={(modelId) => {
             setOpen(false);

@@ -30,7 +30,7 @@ import { ErrorState, EmptyState, EmptyStateAction, NoMatchState } from "../page-
 import type { ResourceEntry } from "./types";
 import { caretRange, isPlatformEntry } from "./utils";
 import { IntegrationToolPicker } from "./integration-tool-picker";
-import { DropdownMenuItem } from "@appstrate/ui/components/dropdown-menu";
+import { DropdownMenuLinkItem } from "@appstrate/ui/components/dropdown-menu";
 import { TableRowActions } from "../table-row-actions";
 import { FormModal } from "../form-modal";
 import { Modal } from "../modal";
@@ -305,16 +305,18 @@ export function ResourceSection({
                           },
                         ]}
                       >
-                        <DropdownMenuItem asChild>
-                          <Link
-                            to={linkInSpace(packageDetailPath(type, entry.id), readSpace(item))}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                          >
-                            <ArrowUpRight />
-                            {t("editor.resourceOpen", { name })}
-                          </Link>
-                        </DropdownMenuItem>
+                        <DropdownMenuLinkItem
+                          render={
+                            <Link
+                              to={linkInSpace(packageDetailPath(type, entry.id), readSpace(item))}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                            />
+                          }
+                        >
+                          <ArrowUpRight />
+                          {t("editor.resourceOpen", { name })}
+                        </DropdownMenuLinkItem>
                       </TableRowActions>
                     </TableCell>
                   </TableRow>

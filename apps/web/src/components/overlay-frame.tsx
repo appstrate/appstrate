@@ -14,7 +14,6 @@ import { useRef } from "react";
 import { Outlet, useLocation } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { Dialog, DialogContent, DialogTitle } from "@appstrate/ui/components/dialog";
-import { keepOpenWhileRenaming } from "../lib/keep-open-while-renaming";
 import { useCloseOverlay } from "../lib/modal-route";
 import { INTEGRATED_TABLE_SURFACE } from "../lib/table-surface";
 import { SETTINGS_SURFACES, settingsSurfaceFromPath } from "../lib/settings-surface";
@@ -33,15 +32,11 @@ export function OverlayFrame() {
     <Dialog open onOpenChange={(open) => !open && close()}>
       <DialogContent
         ref={content}
-        onEscapeKeyDown={keepOpenWhileRenaming}
         // While the panes are skeletons the close control is the only thing to
         // focus, and it would keep the focus (and its ring) after the page
         // lands. The box itself takes it, without a ring around the whole
         // dialog: Tab then reaches the rail.
-        onOpenAutoFocus={(event) => {
-          event.preventDefault();
-          content.current?.focus();
-        }}
+        initialFocus={content}
         className={[
           "flex h-[min(720px,calc(100dvh-6rem))] w-[min(1080px,calc(100vw-4rem))] max-w-none gap-0 overflow-hidden p-0 focus-visible:outline-none",
           // Full screen on a phone: two panes side by side do not survive
