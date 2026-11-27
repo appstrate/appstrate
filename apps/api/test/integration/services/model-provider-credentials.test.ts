@@ -859,7 +859,7 @@ describe("model-provider-credentials service — aggregator + inference loader",
       // 400 invalid_grant from the upstream provider.
       await markCredentialNeedsReconnection(org.id, imported.credentialId, "refresh_token_revoked");
 
-      // The loader returns null when the OAuth blob's needsReconnection flag
+      // The loader returns null when the row's `needs_reconnection` column
       // is set, so callers fall through to their own "credential unusable"
       // handling (route returns 404).
       const creds = await loadInferenceCredentials(org.id, imported.credentialId);

@@ -34,17 +34,70 @@ export const INFRA_ENV_KEYS: Readonly<Record<string, string>> = {
 };
 
 /**
- * Top-level environment namespaces owned by other runtimes. A variable under
- * one of these segments is never reported as an unread platform key, because
- * the platform cannot know which of them a foreign tool reads.
+ * The namespaces the platform owns: a present key under one of them that nothing
+ * reads is reported. Declared, not derived from the keys read today, so removing
+ * the last key of a namespace (`OAUTH_REFRESH_WORKER_ENABLED`) does not silence an
+ * operator who still sets it. A prefix names no old variable, only a family.
+ *
+ * Adding a key whose namespace is not listed fails `env-key-inventory.test.ts`:
+ * declare the namespace here, and never delete one because its keys went away.
  */
-const FOREIGN_ENV_SEGMENTS: Readonly<Record<string, string>> = {
-  NODE: "the Node/Bun runtime (NODE_OPTIONS, NODE_EXTRA_CA_CERTS)",
-  GIT: "git's own environment",
-};
+export const PLATFORM_ENV_NAMESPACES: ReadonlySet<string> = new Set([
+  "AFPS",
+  "API",
+  "APP",
+  "APPSTRATE",
+  "AUTH",
+  "BETTER",
+  "CONNECT",
+  "CONNECTION",
+  "COOKIE",
+  "CREDENTIAL",
+  "DATABASE",
+  "DOCKER",
+  "EGRESS",
+  "FILE",
+  "FS",
+  "GITHUB",
+  "GOOGLE",
+  "INLINE",
+  "INTEGRATION",
+  "LEGAL",
+  "LLM",
+  "LOG",
+  "MIGRATIONS",
+  "MODEL",
+  "MODULE",
+  "MODULES",
+  "OAUTH",
+  "OIDC",
+  "ORG",
+  "PGLITE",
+  "PI",
+  "PLATFORM",
+  "PORT",
+  "PROXY",
+  "REDIS",
+  "REMOTE",
+  "RUN",
+  "RUNNER",
+  "RUNTIME",
+  "S3",
+  "SIDECAR",
+  "SMTP",
+  "STORAGE",
+  "SYSTEM",
+  "TOOL",
+  "TRUST",
+  "TRUSTED",
+  "UPLOAD",
+  "USERCONTENT",
+  "WEBHOOK",
+  "WORKSPACE",
+]);
 
 /** The namespace of a variable: the text before its first `_`, or the whole name. */
-function envSegment(key: string): string {
+export function envNamespace(key: string): string {
   const underscore = key.indexOf("_");
   return underscore === -1 ? key : key.slice(0, underscore);
 }
@@ -54,22 +107,18 @@ function envSegment(key: string): string {
  * and deduplicated.
  *
  * `read` is every key the platform itself consumes (schema keys, sidecar operator
- * keys); their namespaces are the platform's. A present key is reported only when
- * its namespace is one of those and the key is neither read nor in
- * `INFRA_ENV_KEYS`. Infra keys never define a namespace: a deployment that
- * injects one env into every container sets `POSTGRES_DB` or `AWS_REGION` beside
- * them, and those are not the platform's to report.
+ * keys). A present key is reported only when its namespace is in
+ * `PLATFORM_ENV_NAMESPACES` and the key is neither read nor in `INFRA_ENV_KEYS`.
+ * Infra keys never define a namespace: a deployment that injects one env into
+ * every container sets `POSTGRES_DB` or `AWS_REGION` beside them, and those are
+ * not the platform's to report.
  */
 export function findUnreadEnvKeys(present: Iterable<string>, read: ReadonlySet<string>): string[] {
-  const family = new Set<string>();
-  for (const key of read) {
-    const segment = envSegment(key);
-    if (!(segment in FOREIGN_ENV_SEGMENTS)) family.add(segment);
-  }
   const unread = new Set<string>();
   for (const key of present) {
     if (!/^[A-Z][A-Z0-9_]*$/.test(key)) continue;
-    if (read.has(key) || key in INFRA_ENV_KEYS || !family.has(envSegment(key))) continue;
+    if (read.has(key) || key in INFRA_ENV_KEYS || !PLATFORM_ENV_NAMESPACES.has(envNamespace(key)))
+      continue;
     unread.add(key);
   }
   return [...unread].sort();

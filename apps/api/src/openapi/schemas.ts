@@ -11,6 +11,7 @@ import {
 } from "@appstrate/db/schema";
 import { MODEL_BINDINGS, MODEL_CREDENTIAL_OWNERS, MODEL_PAYERS } from "@appstrate/core/model-payer";
 import { runStatusValues } from "@appstrate/core/run-status";
+import { NEEDS_RECONNECTION_RECORD_PROPERTIES } from "./needs-reconnection-record.ts";
 import {
   RUN_AND_WAIT_RESUME_INSTRUCTION,
   RUN_RESULT_INLINE_MAX_BYTES,
@@ -64,7 +65,7 @@ const ORG_ROLES = [...orgRoleEnum.enumValues];
 export const SPACE_ROLE_ID_PATTERN = SPACE_ROLE_ID_REGEX.source;
 
 /** The wire reference to one space role: exactly one of `preset_role` / `custom_role_id`, never a bare string. */
-export const SPACE_ROLE_REFERENCE_ONE_OF = [
+const SPACE_ROLE_REFERENCE_ONE_OF = [
   {
     type: "object",
     required: ["preset_role"],
@@ -2361,6 +2362,7 @@ export const schemas = {
       },
       oauth_email: { type: ["string", "null"] },
       needs_reconnection: { type: "boolean" },
+      ...NEEDS_RECONNECTION_RECORD_PROPERTIES,
       owner_type: {
         type: "string",
         enum: [...MODEL_CREDENTIAL_OWNERS],

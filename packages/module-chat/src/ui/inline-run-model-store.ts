@@ -6,15 +6,15 @@
  * settings instead of the default model (`inline_runs_use_chat_model`).
  *
  * Off by default: the chat fans work out to inline runs, and the conversation's
- * model is often the most expensive one. Per user (`user-flag-store.ts`). The
+ * model is often the most expensive one. Per user (`@appstrate/ui/local-storage`). The
  * server judges the model like any explicit one; a saved agent keeps its own.
  */
 
-import { createUserFlag } from "./user-flag-store.ts";
+import { LOCAL_STORAGE_KEYS, createLocalStore, flagCodec } from "@appstrate/ui/local-storage";
 
-const flag = createUserFlag("appstrate.chat.inlineRunModel:", false);
+const flag = createLocalStore(LOCAL_STORAGE_KEYS.chatInlineRunModel, flagCodec(false));
 
 export const bindInlineRunModelUser = flag.bind;
-export const getInlineRunModelEnabled = flag.get;
-export const setInlineRunModelEnabled = flag.set;
-export const useInlineRunModelEnabled = flag.use;
+export const getInlineRunModelEnabled = () => flag.read();
+export const setInlineRunModelEnabled = (value: boolean) => flag.write(value);
+export const useInlineRunModelEnabled = () => flag.useValue()[0];

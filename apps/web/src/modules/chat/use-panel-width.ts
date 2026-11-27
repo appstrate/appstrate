@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { useCallback, useEffect, useState, type RefObject } from "react";
+import { LOCAL_STORAGE_KEYS, createLocalStore } from "@appstrate/ui/local-storage";
 
 /**
  * What the panel shows decides its width: a list stays narrow beside the
@@ -8,30 +9,20 @@ import { useCallback, useEffect, useState, type RefObject } from "react";
  */
 export type PanelView = "list" | "detail" | "file";
 
-const STORAGE_KEY = "appstrate:chat-context-width";
 const PANEL_MIN_WIDTH = 300;
 const PANEL_DEFAULT_WIDTH: Record<PanelView, number> = { list: 360, detail: 400, file: 560 };
 const PANEL_MAX_RATIO = 0.6;
 
-const storageKey = (view: PanelView) => `${STORAGE_KEY}:${view}`;
+/** One stored width per view; blocked storage only means the width does not outlive the page. */
+const storedWidths = createLocalStore<number | null>(LOCAL_STORAGE_KEYS.chatPanelWidth, {
+  parse: (raw) => {
+    const value = Number(raw);
+    return raw !== null && Number.isFinite(value) && value > 0 ? value : null;
+  },
+  serialize: (width) => (width === null ? null : String(Math.round(width))),
+});
 
-function readStoredWidth(view: PanelView): number | null {
-  try {
-    const value = Number(localStorage.getItem(storageKey(view)));
-    return Number.isFinite(value) && value > 0 ? value : null;
-  } catch {
-    return null;
-  }
-}
-
-function storeWidth(view: PanelView, width: number | null) {
-  try {
-    if (width === null) localStorage.removeItem(storageKey(view));
-    else localStorage.setItem(storageKey(view), String(Math.round(width)));
-  } catch {
-    // Private mode or blocked storage: the width just does not outlive the page.
-  }
-}
+const readStoredWidth = (view: PanelView) => storedWidths.read(view);
 
 /**
  * The context panel's width on desktop, one per view: remembered per browser,
@@ -67,7 +58,7 @@ export function usePanelWidth(panelRef: RefObject<HTMLElement | null>, view: Pan
   const commit = useCallback(
     (width: number | null) => {
       setStored((current) => ({ ...current, [view]: width ?? PANEL_DEFAULT_WIDTH[view] }));
-      storeWidth(view, width);
+      storedWidths.write(width, view);
     },
     [view],
   );

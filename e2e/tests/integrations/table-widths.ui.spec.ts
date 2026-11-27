@@ -22,7 +22,7 @@ test("a resized column survives a language change and resets on double-click", a
   await page.mouse.move(box.x + box.width / 2 + 60, box.y + box.height / 2, { steps: 5 });
   await page.mouse.up();
 
-  const widthKey = "appstrate-column-widths-integrations";
+  const widthKey = "appstrate:web:columnWidths:integrations";
   const savedWidth = () =>
     page.evaluate((key) => {
       const widths = JSON.parse(localStorage.getItem(key) ?? "{}") as Record<string, number>;

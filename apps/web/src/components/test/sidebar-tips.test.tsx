@@ -66,7 +66,7 @@ describe("SidebarTips", () => {
   });
 
   it("leaves out a card the person dismissed", () => {
-    storage.setItem("appstrate-sidebar-tips:u_dismissed", JSON.stringify(["connect"]));
+    storage.setItem("appstrate:web:sidebarTips:u_dismissed", JSON.stringify(["connect"]));
     expect(stack(tips(["spaces:read", "integrations:read"], { userId: "u_dismissed" }))).toEqual([
       "catalogue:0",
     ]);

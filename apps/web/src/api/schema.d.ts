@@ -6835,6 +6835,16 @@ export interface components {
             oauth_email?: string | null;
             needs_reconnection?: boolean;
             /**
+             * @description Why the credential died: set with `needs_reconnection` and cleared with it. `null` while healthy, and on a credential flagged before the cause was recorded.
+             * @enum {string|null}
+             */
+            needs_reconnection_cause?: "refresh_token_revoked" | "refresh_token_missing" | "refresh_failures_exhausted" | "unrefreshable" | "credentials_undecryptable" | null;
+            /**
+             * Format: date-time
+             * @description When the credential died (RFC 3339). `null` under the same conditions as `needs_reconnection_cause`.
+             */
+            needs_reconnection_at?: string | null;
+            /**
              * @description `user` for a personal credential, usable and editable by `owner_id` only; `org` for an organization or built-in credential.
              * @enum {string}
              */
@@ -14165,6 +14175,16 @@ export interface operations {
                             } | null;
                             scopes_granted: string[];
                             needs_reconnection: boolean;
+                            /**
+                             * @description Why the credential died: set with `needs_reconnection` and cleared with it. `null` while healthy, and on a credential flagged before the cause was recorded.
+                             * @enum {string|null}
+                             */
+                            needs_reconnection_cause: "refresh_token_revoked" | "refresh_token_missing" | "refresh_failures_exhausted" | "unrefreshable" | "credentials_undecryptable" | null;
+                            /**
+                             * Format: date-time
+                             * @description When the credential died (RFC 3339). `null` under the same conditions as `needs_reconnection_cause`.
+                             */
+                            needs_reconnection_at: string | null;
                             /** Format: date-time */
                             expiresAt: string | null;
                             /** @enum {string} */
@@ -14477,6 +14497,16 @@ export interface operations {
                                 } | null;
                                 scopes_granted: string[];
                                 needs_reconnection: boolean;
+                                /**
+                                 * @description Why the credential died: set with `needs_reconnection` and cleared with it. `null` while healthy, and on a credential flagged before the cause was recorded.
+                                 * @enum {string|null}
+                                 */
+                                needs_reconnection_cause: "refresh_token_revoked" | "refresh_token_missing" | "refresh_failures_exhausted" | "unrefreshable" | "credentials_undecryptable" | null;
+                                /**
+                                 * Format: date-time
+                                 * @description When the credential died (RFC 3339). `null` under the same conditions as `needs_reconnection_cause`.
+                                 */
+                                needs_reconnection_at: string | null;
                                 /** Format: date-time */
                                 expiresAt: string | null;
                                 /** @enum {string} */
@@ -14689,6 +14719,16 @@ export interface operations {
                         } | null;
                         scopes_granted: string[];
                         needs_reconnection: boolean;
+                        /**
+                         * @description Why the credential died: set with `needs_reconnection` and cleared with it. `null` while healthy, and on a credential flagged before the cause was recorded.
+                         * @enum {string|null}
+                         */
+                        needs_reconnection_cause: "refresh_token_revoked" | "refresh_token_missing" | "refresh_failures_exhausted" | "unrefreshable" | "credentials_undecryptable" | null;
+                        /**
+                         * Format: date-time
+                         * @description When the credential died (RFC 3339). `null` under the same conditions as `needs_reconnection_cause`.
+                         */
+                        needs_reconnection_at: string | null;
                         /** Format: date-time */
                         expiresAt: string | null;
                         /** @enum {string} */
@@ -15109,6 +15149,16 @@ export interface operations {
                             } | null;
                             scopes_granted: string[];
                             needs_reconnection: boolean;
+                            /**
+                             * @description Why the credential died: set with `needs_reconnection` and cleared with it. `null` while healthy, and on a credential flagged before the cause was recorded.
+                             * @enum {string|null}
+                             */
+                            needs_reconnection_cause: "refresh_token_revoked" | "refresh_token_missing" | "refresh_failures_exhausted" | "unrefreshable" | "credentials_undecryptable" | null;
+                            /**
+                             * Format: date-time
+                             * @description When the credential died (RFC 3339). `null` under the same conditions as `needs_reconnection_cause`.
+                             */
+                            needs_reconnection_at: string | null;
                             /** Format: date-time */
                             expiresAt: string | null;
                             /** @enum {string} */
@@ -15208,6 +15258,16 @@ export interface operations {
                         } | null;
                         scopes_granted: string[];
                         needs_reconnection: boolean;
+                        /**
+                         * @description Why the credential died: set with `needs_reconnection` and cleared with it. `null` while healthy, and on a credential flagged before the cause was recorded.
+                         * @enum {string|null}
+                         */
+                        needs_reconnection_cause: "refresh_token_revoked" | "refresh_token_missing" | "refresh_failures_exhausted" | "unrefreshable" | "credentials_undecryptable" | null;
+                        /**
+                         * Format: date-time
+                         * @description When the credential died (RFC 3339). `null` under the same conditions as `needs_reconnection_cause`.
+                         */
+                        needs_reconnection_at: string | null;
                         /** Format: date-time */
                         expiresAt: string | null;
                         /** @enum {string} */
@@ -16125,6 +16185,16 @@ export interface operations {
                                 } | null;
                                 scopes_granted: string[];
                                 needs_reconnection: boolean;
+                                /**
+                                 * @description Why the credential died: set with `needs_reconnection` and cleared with it. `null` while healthy, and on a credential flagged before the cause was recorded.
+                                 * @enum {string|null}
+                                 */
+                                needs_reconnection_cause: "refresh_token_revoked" | "refresh_token_missing" | "refresh_failures_exhausted" | "unrefreshable" | "credentials_undecryptable" | null;
+                                /**
+                                 * Format: date-time
+                                 * @description When the credential died (RFC 3339). `null` under the same conditions as `needs_reconnection_cause`.
+                                 */
+                                needs_reconnection_at: string | null;
                                 /** Format: date-time */
                                 expiresAt: string | null;
                                 /** @enum {string} */
@@ -17328,6 +17398,16 @@ export interface operations {
                                 /** Format: date-time */
                                 connected_at: string;
                                 needs_reconnection: boolean;
+                                /**
+                                 * @description Why the credential died: set with `needs_reconnection` and cleared with it. `null` while healthy, and on a credential flagged before the cause was recorded.
+                                 * @enum {string|null}
+                                 */
+                                needs_reconnection_cause: "refresh_token_revoked" | "refresh_token_missing" | "refresh_failures_exhausted" | "unrefreshable" | "credentials_undecryptable" | null;
+                                /**
+                                 * Format: date-time
+                                 * @description When the credential died (RFC 3339). `null` under the same conditions as `needs_reconnection_cause`.
+                                 */
+                                needs_reconnection_at: string | null;
                                 expiresAt: string | null;
                                 /** @description First identity claim (`account_email`, `email`, `sub`), else the account id, else the label. */
                                 identity: string;
@@ -17454,6 +17534,16 @@ export interface operations {
                         } | null;
                         scopes_granted: string[];
                         needs_reconnection: boolean;
+                        /**
+                         * @description Why the credential died: set with `needs_reconnection` and cleared with it. `null` while healthy, and on a credential flagged before the cause was recorded.
+                         * @enum {string|null}
+                         */
+                        needs_reconnection_cause: "refresh_token_revoked" | "refresh_token_missing" | "refresh_failures_exhausted" | "unrefreshable" | "credentials_undecryptable" | null;
+                        /**
+                         * Format: date-time
+                         * @description When the credential died (RFC 3339). `null` under the same conditions as `needs_reconnection_cause`.
+                         */
+                        needs_reconnection_at: string | null;
                         /** Format: date-time */
                         expiresAt: string | null;
                         /** @enum {string} */

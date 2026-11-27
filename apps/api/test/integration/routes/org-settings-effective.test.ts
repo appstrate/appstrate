@@ -34,6 +34,7 @@ async function storedDefault(ctx: TestContext) {
   const [row] = await db
     .select({
       orgSettings: organizations.orgSettings,
+      personalSpacePresetRole: organizations.personalSpacePresetRole,
       personalSpaceRoleId: organizations.personalSpaceRoleId,
     })
     .from(organizations)
@@ -90,7 +91,7 @@ describe("organization settings — effective values", () => {
     });
   });
 
-  it("stores any preset as personal_space_role and refuses anything but a role reference", async () => {
+  it("stores any preset as the personal_space_role default and refuses anything but a role reference", async () => {
     for (const preset of ["operator", "builder", "runner", "viewer", "admin"]) {
       expect(
         (await patchSettings(ctx, { personal_space_role: { preset_role: preset } })).status,
@@ -136,19 +137,18 @@ describe("organization settings — effective values", () => {
     // The refused write changed nothing.
     const row = await storedDefault(ctx);
     expect(row.personalSpaceRoleId).toBe(own.id);
-    expect(row.orgSettings).not.toHaveProperty("personal_space_role");
   });
 
-  it("stores a custom default in the column and a preset in the key, never both, and reads either the same way", async () => {
+  it("stores a custom default in one column and a preset in the other, never both, and reads either the same way", async () => {
     expect((await patchSettings(ctx, { dashboard_sso_enabled: true })).status).toBe(200);
     expect(
       (await patchSettings(ctx, { personal_space_role: { preset_role: "operator" } })).status,
     ).toBe(200);
     let row = await storedDefault(ctx);
-    expect(row.orgSettings).toHaveProperty("personal_space_role", "operator");
+    expect(row.personalSpacePresetRole).toBe("operator");
     expect(row.personalSpaceRoleId).toBeNull();
 
-    // A custom role: the column takes it and the key goes, other keys untouched.
+    // A custom role: its column takes it and the preset column clears, other keys untouched.
     const own = await seedSpaceRole({ orgId: ctx.orgId });
     const patched = await patchSettings(ctx, { personal_space_role: { custom_role_id: own.id } });
     expect(patched.status).toBe(200);
@@ -157,7 +157,7 @@ describe("organization settings — effective values", () => {
     ).toEqual({ custom_role_id: own.id });
     row = await storedDefault(ctx);
     expect(row.personalSpaceRoleId).toBe(own.id);
-    expect(row.orgSettings).not.toHaveProperty("personal_space_role");
+    expect(row.personalSpacePresetRole).toBeNull();
     expect(row.orgSettings).toHaveProperty("dashboard_sso_enabled", true);
     expect(await readDefault(ctx)).toEqual({ custom_role_id: own.id });
 
@@ -166,12 +166,12 @@ describe("organization settings — effective values", () => {
     expect(await readDefault(ctx)).toEqual({ custom_role_id: own.id });
     expect((await storedDefault(ctx)).personalSpaceRoleId).toBe(own.id);
 
-    // Back to a preset: the key returns and the column clears.
+    // Back to a preset: the preset column returns and the id column clears.
     expect(
       (await patchSettings(ctx, { personal_space_role: { preset_role: "viewer" } })).status,
     ).toBe(200);
     row = await storedDefault(ctx);
-    expect(row.orgSettings).toHaveProperty("personal_space_role", "viewer");
+    expect(row.personalSpacePresetRole).toBe("viewer");
     expect(row.personalSpaceRoleId).toBeNull();
     expect(await readDefault(ctx)).toEqual({ preset_role: "viewer" });
   });
@@ -218,5 +218,21 @@ describe("organization settings — effective values", () => {
       .from(organizations)
       .where(eq(organizations.id, ctx.orgId));
     expect(row!.orgSettings).not.toHaveProperty("personal_space_role");
+    expect((await storedDefault(ctx)).personalSpacePresetRole).toBeNull();
+  });
+
+  it("never stores personal_space_role in the settings document", async () => {
+    expect(
+      (await patchSettings(ctx, { personal_space_role: { preset_role: "operator" } })).status,
+    ).toBe(200);
+    expect((await storedDefault(ctx)).orgSettings).not.toHaveProperty("personal_space_role");
+  });
+
+  it("reads a row still carrying the retired document key without failing, ignoring it", async () => {
+    await db
+      .update(organizations)
+      .set({ orgSettings: { personal_space_role: "viewer" } })
+      .where(eq(organizations.id, ctx.orgId));
+    expect(await readDefault(ctx)).toEqual({ preset_role: "admin" });
   });
 });

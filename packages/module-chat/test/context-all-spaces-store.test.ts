@@ -39,7 +39,7 @@ describe("the every-space context switch", () => {
     bindChatPreferencesUser("u_1");
     expect(getContextAllSpacesEnabled()).toBe(true);
     setContextAllSpacesEnabled(false);
-    expect([...data]).toEqual([["appstrate.chat.contextAllSpaces:u_1", "off"]]);
+    expect([...data]).toEqual([["appstrate:chat:contextAllSpaces:u_1", "off"]]);
     // Another account in the same browser starts from the default.
     bindChatPreferencesUser("u_2");
     expect(getContextAllSpacesEnabled()).toBe(true);
@@ -51,7 +51,7 @@ describe("the every-space context switch", () => {
 
   it("reads a turning on stored under the former default as the default it now is", () => {
     const data = installStorage();
-    data.set("appstrate.chat.contextAllSpaces:u_1", "on");
+    data.set("appstrate:chat:contextAllSpaces:u_1", "on");
     bindChatPreferencesUser("u_1");
     expect(getContextAllSpacesEnabled()).toBe(true);
   });

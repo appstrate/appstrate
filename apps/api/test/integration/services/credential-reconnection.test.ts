@@ -23,11 +23,17 @@ import {
   seedPinnedClient,
   seedRefreshConnection,
 } from "../../helpers/refresh-fixtures.ts";
-import { notifications } from "@appstrate/db/schema";
+import {
+  auditEvents,
+  integrationConnections,
+  modelProviderCredentials,
+  notifications,
+} from "@appstrate/db/schema";
 import {
   markIntegrationConnectionNeedsReconnection,
   recordIntegrationRefreshFailure,
   recordUnrefreshableRejection,
+  saveIntegrationConnection,
 } from "../../../src/services/integration-connections.ts";
 import {
   markCredentialNeedsReconnection,
@@ -177,6 +183,105 @@ describe("integration connection death", () => {
     expect(announced[0]).toMatchObject({ cause: "unrefreshable" });
   });
 
+  describe("the death record", () => {
+    const readDeath = async (id: string) =>
+      (
+        await db
+          .select({
+            flagged: integrationConnections.needsReconnection,
+            cause: integrationConnections.needsReconnectionCause,
+            at: integrationConnections.needsReconnectionAt,
+          })
+          .from(integrationConnections)
+          .where(eq(integrationConnections.id, id))
+      )[0]!;
+    const deathAudits = async (id: string) =>
+      db.select().from(auditEvents).where(eq(auditEvents.resourceId, id));
+
+    it.each(deaths)(
+      "$cause keeps its cause and date, and is audited once by the system",
+      async (death) => {
+        const connId = await seedConnection(death.seed);
+        await death.flip(connId);
+        await death.flip(connId);
+        await until(async () => (await deathAudits(connId)).length >= 1);
+        await settle();
+
+        const row = await readDeath(connId);
+        expect(row.flagged).toBe(true);
+        expect(row.cause).toBe(death.cause);
+        expect(row.at).toBeInstanceOf(Date);
+        const audits = await deathAudits(connId);
+        expect(audits).toHaveLength(1);
+        expect(audits[0]).toMatchObject({
+          orgId: ctx.orgId,
+          spaceId: ctx.defaultSpaceId,
+          actorType: "system",
+          actorId: null,
+          action: "integration.connection.needs_reconnection",
+          resourceType: "integration_connection",
+          after: { cause: death.cause },
+        });
+      },
+    );
+
+    it("the escalation records its cause in the flipping statement, and a later failure keeps it", async () => {
+      const connId = await seedConnection({ expiresAt: new Date(Date.now() - 2 * HOUR_MS) });
+      for (let i = 0; i < 3; i++)
+        await recordIntegrationRefreshFailure(connId, 3, { graceSeconds: 3600 });
+      const first = await readDeath(connId);
+      expect(first.cause).toBe("refresh_failures_exhausted");
+
+      await recordIntegrationRefreshFailure(connId, 3, { graceSeconds: 3600 });
+      expect(await readDeath(connId)).toEqual(first);
+    });
+
+    it("an unrefreshable rejection streak records `unrefreshable`", async () => {
+      const connId = await seedConnection({ clientRef: null });
+      const max = getEnv().INTEGRATION_REFRESH_MAX_FAILURES;
+      const revision = (await readCredentialRevision(connId))!;
+      for (let i = 0; i < max; i++)
+        await recordUnrefreshableRejection(connId, GMAIL_PACKAGE_ID, reach(), revision, max);
+      expect((await readDeath(connId)).cause).toBe("unrefreshable");
+    });
+
+    it("a reconnect clears the flag, the cause and the date in the same write", async () => {
+      const connId = await seedConnection();
+      await markIntegrationConnectionNeedsReconnection(connId, "refresh_token_revoked");
+      expect((await readDeath(connId)).cause).toBe("refresh_token_revoked");
+      const [row] = await db
+        .select({ accountId: integrationConnections.accountId })
+        .from(integrationConnections)
+        .where(eq(integrationConnections.id, connId));
+      const accountId = row!.accountId;
+
+      await saveIntegrationConnection(
+        { orgId: ctx.orgId, spaceId: ctx.defaultSpaceId },
+        {
+          packageId: GMAIL_PACKAGE_ID,
+          authKey: "primary",
+          accountId,
+          credentials: { access_token: "new", refresh_token: "new-rt" },
+          actor: { type: "user", id: ctx.user.id },
+          connectionId: connId,
+          clientRef: clientId,
+        },
+      );
+      expect(await readDeath(connId)).toEqual({ flagged: false, cause: null, at: null });
+    });
+
+    it("the database refuses a cause or a date on a row that is not flagged", async () => {
+      const connId = await seedConnection();
+      const write = async () => {
+        await db
+          .update(integrationConnections)
+          .set({ needsReconnectionCause: "unrefreshable" })
+          .where(eq(integrationConnections.id, connId));
+      };
+      await expect(write()).rejects.toThrow();
+    });
+  });
+
   describe("the bell row", () => {
     it("lands for the owner in the connection's space", async () => {
       const connId = await seedConnection();
@@ -285,6 +390,53 @@ describe("model-provider credential death", () => {
       },
     ]);
     expect(await bellCount()).toBe(0);
+  });
+
+  it("keeps the cause and date in the row and audits the flip once, as the system", async () => {
+    const cred = await seedOrgModelProviderOAuth({ orgId: ctx.orgId });
+    await markCredentialNeedsReconnection(ctx.orgId, cred.id, "refresh_token_revoked");
+    await markCredentialNeedsReconnection(ctx.orgId, cred.id, "unrefreshable");
+    await until(async () => (await db.select().from(auditEvents)).length >= 1);
+    await settle();
+
+    const [row] = await db
+      .select({
+        flagged: modelProviderCredentials.needsReconnection,
+        cause: modelProviderCredentials.needsReconnectionCause,
+        at: modelProviderCredentials.needsReconnectionAt,
+      })
+      .from(modelProviderCredentials)
+      .where(eq(modelProviderCredentials.id, cred.id));
+    expect(row).toMatchObject({ flagged: true, cause: "refresh_token_revoked" });
+    expect(row!.at).toBeInstanceOf(Date);
+    const audits = await db.select().from(auditEvents).where(eq(auditEvents.resourceId, cred.id));
+    expect(audits).toHaveLength(1);
+    expect(audits[0]).toMatchObject({
+      orgId: ctx.orgId,
+      actorType: "system",
+      action: "model_provider_credential.needs_reconnection",
+      resourceType: "model_provider_credential",
+      after: { cause: "refresh_token_revoked" },
+    });
+  });
+
+  it("an api key rejected too often records `unrefreshable` in the row", async () => {
+    const cred = await seedOrgModelProviderKey({
+      orgId: ctx.orgId,
+      providerId: "openai",
+      apiKey: "sk-dead",
+    });
+    const max = getEnv().INTEGRATION_REFRESH_MAX_FAILURES;
+    for (let i = 0; i < max; i++)
+      await recordModelCredentialRejection(ctx.orgId, cred.id, "sk-dead");
+    const [row] = await db
+      .select({
+        flagged: modelProviderCredentials.needsReconnection,
+        cause: modelProviderCredentials.needsReconnectionCause,
+      })
+      .from(modelProviderCredentials)
+      .where(eq(modelProviderCredentials.id, cred.id));
+    expect(row).toEqual({ flagged: true, cause: "unrefreshable" });
   });
 
   it("the transient-failure escalation announces on the flipping failure only", async () => {

@@ -16,7 +16,7 @@ for (const screen of [
     await expect(cards).toBeChecked();
     for (const stored of ['"table"', '"cards"', '"invalid"', "{broken"]) {
       await page.evaluate(
-        ({ key, stored }) => localStorage.setItem(`appstrate-view-${key}`, stored),
+        ({ key, stored }) => localStorage.setItem(`appstrate:web:view:${key}`, stored),
         { key: screen.key, stored },
       );
       await page.reload();

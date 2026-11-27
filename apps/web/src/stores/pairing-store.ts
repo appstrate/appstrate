@@ -9,9 +9,14 @@
 import { createStore } from "zustand/vanilla";
 import { useStore } from "zustand";
 import type { PairingTarget } from "../lib/oauth-pairing";
-import { persistedJson } from "./local-storage";
+import {
+  LOCAL_STORAGE_KEYS,
+  createLocalStore,
+  jsonCodec,
+  storageKey,
+} from "@appstrate/ui/local-storage";
 
-export const STORAGE_KEY = "appstrate_pending_pairings";
+export const STORAGE_KEY = storageKey(LOCAL_STORAGE_KEYS.pendingPairings);
 
 // Bounds the entries no poll ends; it does not complete a pairing. Sized past the server row's
 // lifetime (1 h grace + 15 min sweep), so a polled entry reaches its outcome first.
@@ -63,18 +68,23 @@ function isRetained(p: PendingPairing, now: number): boolean {
 
 // A write failure (quota, private mode) just means the pairing won't survive a reload; the
 // in-memory poll still completes it.
-const persisted = persistedJson(STORAGE_KEY, (value): PendingPairing[] => {
+// An empty list removes the key rather than storing `[]`.
+const pairingsCodec = jsonCodec((value): PendingPairing[] => {
   const now = Date.now();
   return Array.isArray(value)
     ? value.filter((p): p is PendingPairing => isPendingPairing(p) && isRetained(p, now))
     : [];
+});
+const persisted = createLocalStore(LOCAL_STORAGE_KEYS.pendingPairings, {
+  parse: pairingsCodec.parse,
+  serialize: (pairings) => (pairings.length === 0 ? null : pairingsCodec.serialize(pairings)),
 });
 
 /** Read + validate + retention-filter the persisted list. Exported for tests. */
 export const readPersistedPairings = persisted.read;
 
 function persist(pairings: PendingPairing[]): void {
-  persisted.write(pairings.length === 0 ? null : pairings);
+  persisted.write(pairings);
 }
 
 export const pairingStore = createStore<PairingState>()((set) => ({

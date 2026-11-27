@@ -51,6 +51,21 @@ export function projectActiveInSpaces(problem: unknown, eligible: () => readonly
   };
 }
 
+/** Longest name kept in a line of the prompt. */
+const NAME_MAX_CHARS = 100;
+
+/**
+ * A user-authored name as one line: control characters dropped, whitespace runs (newlines
+ * included) one space, trimmed, bounded to `max` characters. A name cannot open a line of its own.
+ */
+export function flattenName(value: string, max = NAME_MAX_CHARS): string {
+  const flat = value
+    .replace(/[\p{Cc}\p{Cf}\u2028\u2029]+/gu, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  return flat.length > max ? `${flat.slice(0, max - 1)}…` : flat;
+}
+
 /** A space an organization-wide MCP connection may act in. */
 export interface NamedSpace {
   id: string;
@@ -64,11 +79,11 @@ export interface NamedSpace {
 /** One line per space, for refusals and instructions. */
 export function describeSpace(space: NamedSpace): string {
   const personal = space.personal ? ", your personal space" : "";
-  return `${space.name} (\`${space.id}\`, role ${space.role}${personal})`;
+  return `${flattenName(space.name)} (\`${space.id}\`, role ${space.role}${personal})`;
 }
 
 /** What a caller may do in one space, in reading order: `get_me`'s `spaces[].can` and the chat's. */
-const SPACE_ACTS = [
+export const SPACE_ACTS = [
   "invoke_operations",
   "run_agents",
   "inline_runs",

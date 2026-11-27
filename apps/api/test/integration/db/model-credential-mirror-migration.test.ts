@@ -7,6 +7,7 @@
 
 import { describe, it, expect, beforeEach } from "bun:test";
 import { eq } from "drizzle-orm";
+import { decryptCredentials, encryptCredentials } from "@appstrate/connect";
 import { db } from "@appstrate/db/client";
 import { modelProviderCredentials } from "@appstrate/db/schema";
 import { truncateAll } from "../../helpers/db.ts";
@@ -25,6 +26,27 @@ const columnOf = async (id: string) =>
       .where(eq(modelProviderCredentials.id, id))
   )[0]!.flagged;
 
+/** The state of a credential that died before the column existed: the flag only in its blob. */
+async function flagBlobOnly(id: string): Promise<void> {
+  const [row] = await db
+    .select({ blob: modelProviderCredentials.credentialsEncrypted })
+    .from(modelProviderCredentials)
+    .where(eq(modelProviderCredentials.id, id));
+  const blob = {
+    ...decryptCredentials<Record<string, unknown>>(row!.blob),
+    needsReconnection: true,
+  };
+  await db
+    .update(modelProviderCredentials)
+    .set({
+      credentialsEncrypted: encryptCredentials(blob),
+      needsReconnection: false,
+      needsReconnectionCause: null,
+      needsReconnectionAt: null,
+    })
+    .where(eq(modelProviderCredentials.id, id));
+}
+
 describe("0058 — model credential needs_reconnection mirror", () => {
   let drifted: string;
   let healthy: string;
@@ -35,18 +57,12 @@ describe("0058 — model credential needs_reconnection mirror", () => {
     await truncateAll();
     const { orgId } = await createTestContext({ orgSlug: "mirror" });
     // Blob flagged, column not: the state of a credential that died before the column existed.
-    drifted = (await seedOrgModelProviderOAuth({ orgId, needsReconnection: true })).id;
-    await db
-      .update(modelProviderCredentials)
-      .set({ needsReconnection: false })
-      .where(eq(modelProviderCredentials.id, drifted));
+    drifted = (await seedOrgModelProviderOAuth({ orgId })).id;
+    await flagBlobOnly(drifted);
     healthy = (await seedOrgModelProviderOAuth({ orgId })).id;
     synced = (await seedOrgModelProviderOAuth({ orgId, needsReconnection: true })).id;
-    unreadable = (await seedOrgModelProviderOAuth({ orgId, needsReconnection: true })).id;
-    await db
-      .update(modelProviderCredentials)
-      .set({ needsReconnection: false })
-      .where(eq(modelProviderCredentials.id, unreadable));
+    unreadable = (await seedOrgModelProviderOAuth({ orgId })).id;
+    await flagBlobOnly(unreadable);
     await corruptCredentialBlob(unreadable);
   });
 

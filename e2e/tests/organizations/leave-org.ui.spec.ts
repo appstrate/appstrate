@@ -5,7 +5,7 @@
  *
  * After the leave, the SPA must step out of the org without a reload: onto
  * another org the user still belongs to, or into onboarding when none is
- * left — and never keep the gone org id in `appstrate_current_org`.
+ * left — and never keep the gone org id in `appstrate:web:currentOrg`.
  *
  * @tags @critical
  */
@@ -52,7 +52,7 @@ async function leaveFromSettings(page: Page, orgId: string): Promise<void> {
 }
 
 const storedOrgId = (page: Page) =>
-  page.evaluate(() => localStorage.getItem("appstrate_current_org"));
+  page.evaluate(() => localStorage.getItem("appstrate:web:currentOrg"));
 
 for (const outcome of ["succeeds", "fails"] as const) {
   test(`removal waits for the offline departure preview until it ${outcome}`, async ({

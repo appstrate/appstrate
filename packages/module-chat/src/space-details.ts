@@ -10,6 +10,8 @@
  */
 
 import type { AppstrateMcpClient } from "@appstrate/mcp-transport";
+import { flattenName } from "@appstrate/core/mcp-spaces";
+import { getMeResultSchema } from "@appstrate/core/me-context";
 import { logger } from "./logger.ts";
 
 /** About 2k tokens. */
@@ -67,59 +69,63 @@ const record = (value: unknown): Record<string, unknown> =>
   typeof value === "object" && value !== null && !Array.isArray(value)
     ? (value as Record<string, unknown>)
     : {};
-const list = (value: unknown): unknown[] => (Array.isArray(value) ? value : []);
-const text = (value: unknown): string => (typeof value === "string" ? value : "");
-const withId = <T extends { id: string }>(entries: T[]): T[] => entries.filter((entry) => entry.id);
 
-/** The `get_me` payload of one space, or `undefined` when it is not a 200 answer. */
+/** The `get_me` payload of one space, or `undefined` when it is not a well-formed 200 answer. */
 function parseDetail(space: DetailSpace, result: unknown): SpaceDetail | undefined {
-  const outcome = record(record(result).structuredContent);
-  if (record(result).isError === true || outcome.status !== 200) return undefined;
-  const body = record(outcome.body);
-  if (record(body.space).id !== space.id) return undefined;
-  const total = (value: unknown, listed: unknown[] | null): number =>
-    listed === null ? 0 : Math.max(typeof value === "number" ? value : 0, listed.length);
-  const connectableEnvelope = record(body.connectable_integrations);
-  const agentsEnvelope = record(body.agents);
-  const connectable = space.integrations
-    ? list(connectableEnvelope.data).map(text).filter(Boolean)
-    : null;
+  const answer = record(result);
+  const outcome = record(answer.structuredContent);
+  if (answer.isError === true || outcome.status !== 200) return undefined;
+  const parsed = getMeResultSchema.safeParse(outcome);
+  if (!parsed.success) {
+    logger.warn("get_me of a space answered a context of an unexpected shape — left out", {
+      spaceId: space.id,
+      issues: parsed.error.issues
+        .slice(0, 5)
+        .map((issue) => `${issue.path.join(".")}: ${issue.message}`),
+    });
+    return undefined;
+  }
+  const { body } = parsed.data;
+  const {
+    connections,
+    connectable_integrations: connectableEnvelope,
+    agents: agentsEnvelope,
+  } = body;
+  if (
+    body.space?.id !== space.id ||
+    connections === undefined ||
+    connectableEnvelope === undefined ||
+    agentsEnvelope === undefined
+  )
+    return undefined;
+  const total = (value: number, listed: unknown[] | null): number =>
+    listed === null ? 0 : Math.max(value, listed.length);
+  const connectable = space.integrations ? connectableEnvelope.data : null;
   const agents = space.agents
-    ? withId(
-        list(agentsEnvelope.data).map((item) => {
-          const entry = record(item);
-          return {
-            id: text(entry.packageId),
-            name: text(entry.display_name),
-            description: text(entry.description),
-            published: entry.published === true,
-            homeWritable: entry.home_writable === true,
-            takesInput: entry.takes_input === true,
-            inactiveRequired: list(entry.inactive_required_integrations).map(text),
-          };
-        }),
-      )
+    ? agentsEnvelope.data.map((entry) => ({
+        id: entry.packageId,
+        name: entry.display_name,
+        description: entry.description,
+        published: entry.published,
+        homeWritable: entry.home_writable,
+        takesInput: entry.takes_input,
+        inactiveRequired: entry.inactive_required_integrations,
+      }))
     : null;
   return {
     space,
     integrations: space.integrations
-      ? withId(
-          list(body.connections).map((item) => {
-            const entry = record(item);
-            return {
-              id: text(entry.integration_package_id),
-              name: text(entry.name),
-              active: entry.active === true,
-              needsReconnection: entry.needs_reconnection === true,
-              connections: withId(
-                list(entry.connections).map((connection) => {
-                  const c = record(connection);
-                  return { id: text(c.id), label: text(c.label), owned: c.owned_by_actor === true };
-                }),
-              ),
-            };
-          }),
-        )
+      ? connections.map((entry) => ({
+          id: entry.integration_package_id,
+          name: entry.name,
+          active: entry.active,
+          needsReconnection: entry.needs_reconnection === true,
+          connections: entry.connections.map((c) => ({
+            id: c.id,
+            label: c.label,
+            owned: c.owned_by_actor,
+          })),
+        }))
       : null,
     connectable: connectable ?? [],
     connectableTotal: total(connectableEnvelope.total, connectable),
@@ -167,10 +173,7 @@ export async function readSpaceDetails(
   return details.filter((detail): detail is SpaceDetail => detail !== undefined);
 }
 
-const oneLine = (value: string, max: number): string => {
-  const flat = value.replace(/\s+/g, " ").trim();
-  return flat.length > max ? `${flat.slice(0, max - 1)}…` : flat;
-};
+const oneLine = flattenName;
 const label = (value: string): string => oneLine(value, 80);
 const head = (id: string, name: string): string => {
   const shown = label(name);

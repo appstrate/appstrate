@@ -34,6 +34,7 @@ import {
 import type { OrgOfferMode } from "@appstrate/db/schema";
 import { and, eq, type InferInsertModel, type InferSelectModel } from "drizzle-orm";
 import { zipArtifact } from "@appstrate/core/zip";
+import type { CredentialDeathCause } from "@appstrate/core/sidecar-types";
 import { computeIntegrity } from "@appstrate/core/integrity";
 import { PACKAGE_CONTENT_ENTRY } from "@appstrate/core/package-files";
 import * as storage from "@appstrate/db/storage";
@@ -577,6 +578,8 @@ interface OAuthCredentialSeed {
   /** Epoch ms. `null` means "no upstream expiry" — passes through to the resolver as-is. */
   expiresAt?: number | null;
   needsReconnection?: boolean;
+  /** Recorded with `needsReconnection: true`; omitted = flagged before causes were recorded. */
+  needsReconnectionCause?: CredentialDeathCause;
   accountId?: string;
   createdBy?: string | null;
   /** Personal credential owner; omitted = organization credential. */
@@ -607,12 +610,18 @@ export async function seedOrgModelProviderOAuth(
         accessToken: overrides.accessToken ?? "test-access-token",
         refreshToken: overrides.refreshToken ?? "test-refresh-token",
         expiresAt,
-        needsReconnection,
         ...(overrides.accountId !== undefined ? { accountId: overrides.accountId } : {}),
       }),
-      // The columns mirror the blob, as production writes them (the refresh sweep reads the columns).
+      // The expiry column mirrors the blob (the refresh sweep reads it); the death flag lives in
+      // its columns alone.
       expiresAt: expiresAt === null ? null : new Date(expiresAt),
       needsReconnection,
+      ...(needsReconnection
+        ? {
+            needsReconnectionCause: overrides.needsReconnectionCause ?? null,
+            needsReconnectionAt: new Date(),
+          }
+        : {}),
       createdBy: overrides.createdBy ?? null,
       ownerUserId: overrides.ownerUserId ?? null,
     })

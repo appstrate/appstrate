@@ -9,7 +9,11 @@ import {
 import type { z } from "zod";
 import type { ModelCost, ModelInputModality } from "@appstrate/core/module";
 import type { TokenUsage } from "@appstrate/core/token-usage";
-import type { ModelApiShape, PiModelDialect } from "@appstrate/core/sidecar-types";
+import type {
+  CredentialDeathCause,
+  ModelApiShape,
+  PiModelDialect,
+} from "@appstrate/core/sidecar-types";
 import type { ModelGenerationCapabilities } from "@appstrate/core/model-generation";
 import type { ModelGenerationSettings } from "@appstrate/core/model-generation";
 import type {
@@ -535,6 +539,10 @@ export interface MeConnectionEntry {
   scopes_granted: string[];
   connected_at: string;
   needs_reconnection: boolean;
+  /** Why the credential died; null while healthy, or when it was flagged before causes were recorded. */
+  needs_reconnection_cause: CredentialDeathCause | null;
+  /** When it died (RFC 3339); null under the same conditions as the cause. */
+  needs_reconnection_at: string | null;
   expiresAt: string | null;
   /** Human-friendly identity (`account_email`, sub claim). */
   identity: string;
@@ -1189,6 +1197,8 @@ export interface ModelProviderCredentialInfo {
   oauth_email?: string | null;
   /** True when the credential is dead (an OAuth `invalid_grant`, or undecryptable). */
   needs_reconnection?: boolean;
+  needs_reconnection_cause?: CredentialDeathCause | null;
+  needs_reconnection_at?: string | null;
   /** `user` for a personal credential (usable and editable by {@link owner_id} only); `org` for an organization or built-in one. */
   owner_type: ModelCredentialOwner;
   /** The owning member's user id for a personal credential; `null` for `org`. */

@@ -5,6 +5,7 @@
  * naming the spaces where it stands, deterministic, within its budget, ranking nothing.
  */
 
+import { fullAgent, meBody } from "./me-context-body.ts";
 import { describe, expect, it } from "bun:test";
 import {
   CHAT_CONTEXT_DETAILS_BUDGET_CHARS,
@@ -231,7 +232,7 @@ describe("readSpaceDetails", () => {
   };
   const ok = (body: Record<string, unknown>) => ({
     content: [],
-    structuredContent: { status: 200, body },
+    structuredContent: { status: 200, body: meBody(body) },
   });
 
   it("reads get_me in each space and leaves out one that fails, refuses or answers another space", async () => {
@@ -244,13 +245,23 @@ describe("readSpaceDetails", () => {
           {
             integration_package_id: "@appstrate/gmail",
             name: "Gmail",
+            source: "own",
             active: true,
-            connections: [{ id: "c1", label: "Pro", owned_by_actor: true }],
+            via: "home",
+            connections: [
+              {
+                id: "c1",
+                label: "Pro",
+                account_id: "a1",
+                owned_by_actor: true,
+                needs_reconnection: false,
+              },
+            ],
           },
         ],
         connectable_integrations: { data: ["@appstrate/slack"], truncated: false, total: 1 },
         agents: {
-          data: [{ packageId: "@acme/a", display_name: "A", published: true }],
+          data: [fullAgent("@acme/a", "A")],
           truncated: false,
           total: 1,
         },
@@ -308,7 +319,7 @@ describe("readSpaceDetails", () => {
         const id = String(args.arguments?.space_id);
         await new Promise((resolve) => setTimeout(resolve, 30 - Number(id.slice(4))));
         inFlight--;
-        return ok({ space: { id }, agents: [] }) as never;
+        return ok({ space: { id } }) as never;
       },
     };
     const read = await readSpaceDetails(slow, AbortSignal.timeout(5000), spaces);
@@ -321,10 +332,17 @@ describe("readSpaceDetails", () => {
       spc_p: ok({
         space: { id: "spc_p" },
         connections: [
-          { integration_package_id: "@appstrate/gmail", active: true, connections: [] },
+          {
+            integration_package_id: "@appstrate/gmail",
+            name: "Gmail",
+            source: "own",
+            active: true,
+            via: "home",
+            connections: [],
+          },
         ],
         connectable_integrations: { data: ["@appstrate/slack"], truncated: false, total: 1 },
-        agents: { data: [{ packageId: "@acme/a" }], truncated: false, total: 1 },
+        agents: { data: [fullAgent("@acme/a", "A")], truncated: false, total: 1 },
       }),
     });
     const [read] = await readSpaceDetails(fake, AbortSignal.timeout(1000), [
@@ -333,5 +351,23 @@ describe("readSpaceDetails", () => {
     expect(read?.integrations).toBeNull();
     expect(read?.connectable).toEqual([]);
     expect(read?.agents).toHaveLength(1);
+  });
+
+  it("leaves out a space whose context does not match the schema", async () => {
+    const fake = client({
+      spc_p: {
+        content: [],
+        structuredContent: {
+          status: 200,
+          body: { ...meBody({ space: { id: "spc_p" } }), agents: [] },
+        },
+      },
+    });
+    expect(await readSpaceDetails(fake, AbortSignal.timeout(1000), [PERSO])).toEqual([]);
+  });
+
+  it("keeps a field the server adds", async () => {
+    const fake = client({ spc_p: ok({ space: { id: "spc_p", added: 1 }, added_list: [] }) });
+    expect(await readSpaceDetails(fake, AbortSignal.timeout(1000), [PERSO])).toHaveLength(1);
   });
 });

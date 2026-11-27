@@ -1,7 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { describe, it, expect } from "bun:test";
-import { findUnreadEnvKeys } from "../src/env-key-inventory.ts";
+import { envSchema } from "../src/index.ts";
+import {
+  PLATFORM_ENV_NAMESPACES,
+  envNamespace,
+  findUnreadEnvKeys,
+} from "../src/env-key-inventory.ts";
 
 const READ = new Set([
   "RUN_TOKEN_SECRET",
@@ -64,5 +69,32 @@ describe("findUnreadEnvKeys", () => {
       "SMTP_BETA",
       "SMTP_ZETA",
     ]);
+  });
+});
+
+describe("PLATFORM_ENV_NAMESPACES", () => {
+  // A removed key leaves its namespace behind: the operator who still sets it is warned.
+  it("still reports a key of a declared namespace that no key reads any more", () => {
+    expect(findUnreadEnvKeys(["OAUTH_REFRESH_WORKER_ENABLED"], READ)).toEqual([
+      "OAUTH_REFRESH_WORKER_ENABLED",
+    ]);
+    expect(READ.has("OAUTH_REFRESH_WORKER_ENABLED")).toBe(false);
+    expect([...READ].some((key) => envNamespace(key) === "OAUTH")).toBe(false);
+  });
+
+  it("declares the namespace of every schema key, so a new family has to be named", () => {
+    // NODE_ENV and GIT_SHA are read, but their namespaces belong to the runtime and to git.
+    const missing = Object.keys(envSchema.shape).filter(
+      (key) =>
+        !PLATFORM_ENV_NAMESPACES.has(envNamespace(key)) &&
+        !["NODE", "GIT"].includes(envNamespace(key)),
+    );
+    expect(missing, "declare the namespace in PLATFORM_ENV_NAMESPACES").toEqual([]);
+  });
+
+  it("holds neither the foreign namespaces nor lowercase names", () => {
+    expect(PLATFORM_ENV_NAMESPACES.has("NODE")).toBe(false);
+    expect(PLATFORM_ENV_NAMESPACES.has("GIT")).toBe(false);
+    for (const namespace of PLATFORM_ENV_NAMESPACES) expect(namespace).toMatch(/^[A-Z][A-Z0-9]*$/);
   });
 });

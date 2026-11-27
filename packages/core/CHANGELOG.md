@@ -41,21 +41,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`spaceActs`, `SpaceAct`** (`@appstrate/core/mcp-spaces`).
   The acts a caller holds in one space (`invoke_operations`, `run_agents`, `inline_runs`,
   `call_integration_tools`, `create_packages`), in one vocabulary for the MCP `get_me` tool's
-  `spaces[].can` and the chat's context block.
-
-### Changed
-
-- **`orgSettingsReadSchema.personal_space_role`** — BREAKING. The output type widens from
-  `"admin" | "operator"` to a space-role preset key (`admin`, `builder`, `operator`, `runner`,
-  `viewer`), and `orgSettingsSchema` accepts the same values on input. The stored key holds a
-  preset only: a custom default lives in a column of the organization, outside the JSON. The read
-  default stays `admin`; stored `admin` and `operator` remain valid. The org settings as served
-  (`OrgSettings` in `@appstrate/shared-types`) follow `orgSettingsWireSchema`, where
-  `personal_space_role` is a role reference object (`{ preset_role }` | `{ custom_role_id }`),
-  never a bare string.
+  `spaces[].can` and the chat's context block. `SPACE_ACTS` lists them.
+- **`@appstrate/core/me-context`**: `meContextSchema` (the body of `GET /api/me/context`, each
+  capped list one `{ data, truncated, total }` envelope), `getMeResultSchema` (the MCP `get_me`
+  result, which declares it as its `outputSchema`), types `MeContext`, `GetMeResult`. Objects are
+  loose: a field the server adds does not fail a reader.
+- **`flattenName`** (`@appstrate/core/mcp-spaces`): a name made one bounded line (control and
+  format characters removed, whitespace runs collapsed). `describeSpace` flattens the space name
+  with it, so a name holding a line break cannot forge a heading in a prompt.
 
 ### Removed
 
+- **`personal_space_role` in `orgSettingsSchema` and `orgSettingsReadSchema`** — BREAKING. The
+  personal-space default role is no longer stored in the settings document but in two columns of
+  the organization; a document still carrying the key reads without it. The org settings as
+  served (`OrgSettings` in `@appstrate/shared-types`) follow `orgSettingsWireSchema`, where
+  `personal_space_role` is a role reference object, never a bare string.
 - **`SPACE_CHOICE_META_KEY`** — BREAKING (`@appstrate/core/mcp-spaces`). An MCP call that needs a
   space and names none is refused with the eligible spaces in the refusal alone (`accepted`, and
   by name in `error`): the chat no longer renders a picker from result metadata, its model asks

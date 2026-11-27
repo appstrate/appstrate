@@ -13,7 +13,7 @@ import { rememberSignedIn } from "./session-read";
  * org/space scope, persona) may ride the next one's requests.
  */
 export function clearSession(): void {
-  rememberSignedIn(localStorage, false);
+  rememberSignedIn(false);
   authStore.setState({ user: null, profile: null, loading: false });
   queryClient.clear();
   orgStore.getState().setId(null);

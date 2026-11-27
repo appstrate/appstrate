@@ -6,6 +6,7 @@
  * caller's identity; `buildCallerContextBlock` reads the skills over a platform connection.
  */
 
+import { fullAgent, meBody } from "./me-context-body.ts";
 import { createHash } from "node:crypto";
 import { describe, expect, it } from "bun:test";
 import {
@@ -722,16 +723,11 @@ describe("buildCallerContextBlock", () => {
       published: [skillEntry(A, "1.0.0")],
       texts: { [A]: "a body" },
       getMe: {
-        spc_p: {
+        spc_p: meBody({
           space: { id: "spc_p" },
-          connections: [],
           connectable_integrations: { data: ["@appstrate/slack"], truncated: false, total: 1 },
-          agents: {
-            data: [{ packageId: "@acme/digest", display_name: "Digest", published: true }],
-            truncated: false,
-            total: 1,
-          },
-        },
+          agents: { data: [fullAgent("@acme/digest", "Digest")], truncated: false, total: 1 },
+        }),
         // `spc_v` is absent: its get_me fails and it is left out.
       },
     });
@@ -777,15 +773,7 @@ describe("buildCallerContextBlock", () => {
       published: [skillEntry(A, "1.0.0")],
       texts: { [A]: "a body" },
       getMe: Object.fromEntries(
-        many.map((space) => [
-          space.id,
-          {
-            space: { id: space.id },
-            connections: [],
-            connectable_integrations: { data: [], truncated: false, total: 0 },
-            agents: { data: [], truncated: false, total: 0 },
-          },
-        ]),
+        many.map((space) => [space.id, meBody({ space: { id: space.id } })]),
       ),
     });
     let inFlight = 0;

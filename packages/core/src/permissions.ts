@@ -573,20 +573,19 @@ export const orgSettingsSchema = z.object({
   restrict_package_copy: z.boolean().optional(),
   // Absent = allowed. `false` refuses new personal model credentials, and the chain ignores existing ones.
   personal_model_credentials: z.boolean().optional(),
-  // A member's default role in their personal space when a PRESET (a custom one is
-  // `organizations.personal_space_role_id`); absent = `admin`. Below `admin`: a delete floor.
-  personal_space_role: z.enum(SPACE_ROLE_PRESETS).optional(),
 });
 
 /** The stored settings as read: each defaulted policy read as its effective value; other stored keys kept. */
 export const orgSettingsReadSchema = orgSettingsSchema
   .extend({
     personal_model_credentials: z.boolean().default(true),
-    personal_space_role: z.enum(SPACE_ROLE_PRESETS).default("admin"),
   })
   .loose();
 
-/** The org settings as served: `personal_space_role` is a role reference, a custom default included. */
+/**
+ * The org settings as served: `personal_space_role` (members' default role in their personal space)
+ * is a role reference projected from the `organizations` columns, not a stored key.
+ */
 export const orgSettingsWireSchema = orgSettingsReadSchema.extend({
   personal_space_role: spaceRoleReferenceSchema.default({ preset_role: "admin" }),
 });

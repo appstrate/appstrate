@@ -137,8 +137,8 @@ describe("spaces — personal-space constraints", () => {
   });
 });
 
-describe("organizations — personal-space default constraints (migration 0115)", () => {
-  it("refuses a custom default of another organization and a stored key that is no preset", async () => {
+describe("organizations — personal-space default constraints (migration 0118)", () => {
+  it("refuses a custom default of another organization, a non-preset role and both columns at once", async () => {
     await truncateAll();
     const ctx = await createTestContext({ orgSlug: "default-owner" });
     const other = await createTestContext({ orgSlug: "default-other" });
@@ -149,11 +149,14 @@ describe("organizations — personal-space default constraints (migration 0115)"
       write({ personalSpaceRoleId: foreign.id }),
       /organizations_personal_space_role_fk/,
     );
-    for (const value of ["superuser", null, 5]) {
-      await expectDbViolation(
-        write({ orgSettings: { personal_space_role: value } }),
-        /organizations_personal_space_role_preset/,
-      );
-    }
+    await expectDbViolation(
+      write({ personalSpacePresetRole: "superuser" as "admin" }),
+      /organizations_personal_space_preset_valid/,
+    );
+    const own = await seedSpaceRole({ orgId: ctx.orgId, permissions: ["agents:read"] });
+    await expectDbViolation(
+      write({ personalSpacePresetRole: "viewer", personalSpaceRoleId: own.id }),
+      /organizations_personal_space_role_one_shape/,
+    );
   });
 });

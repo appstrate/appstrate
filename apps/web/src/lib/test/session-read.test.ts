@@ -77,14 +77,17 @@ describe("readSession", () => {
 
 describe("the signed-in hint", () => {
   it("expects no session from a browser that never held one", () => {
-    expect(sessionExpected(installFakeStorage())).toBe(false);
+    installFakeStorage();
+    expect(sessionExpected()).toBe(false);
   });
 
   it("expects one after a sign-in, and none after the session is torn down", () => {
     const storage = installFakeStorage();
-    rememberSignedIn(storage, true);
-    expect(sessionExpected(storage)).toBe(true);
-    rememberSignedIn(storage, false);
-    expect(sessionExpected(storage)).toBe(false);
+    rememberSignedIn(true);
+    expect(storage.getItem("appstrate:auth:signedIn")).toBe("1");
+    expect(sessionExpected()).toBe(true);
+    rememberSignedIn(false);
+    expect(storage.getItem("appstrate:auth:signedIn")).toBeNull();
+    expect(sessionExpected()).toBe(false);
   });
 });

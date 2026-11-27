@@ -610,16 +610,10 @@ describe("custom space roles", () => {
         );
         await expectProblem(res, 404);
         const [org] = await db
-          .select({
-            settings: organizations.orgSettings,
-            personalSpaceRoleId: organizations.personalSpaceRoleId,
-          })
+          .select({ personalSpaceRoleId: organizations.personalSpaceRoleId })
           .from(organizations)
           .where(eq(organizations.id, owner.orgId));
         expect(org?.personalSpaceRoleId).toBeNull();
-        expect(
-          (org?.settings as { personal_space_role?: string } | null)?.personal_space_role,
-        ).toBeUndefined();
       },
     );
 

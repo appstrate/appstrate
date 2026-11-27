@@ -69,7 +69,7 @@ test("single choices apply at once, and a failed save from the leave dialog keep
   await page.getByRole("combobox", { name: "Thème", exact: true }).click();
   await page.getByRole("option", { name: "Sombre", exact: true }).click();
   await expect
-    .poll(() => page.evaluate(() => localStorage.getItem("appstrate-theme")))
+    .poll(() => page.evaluate(() => localStorage.getItem("appstrate:web:theme")))
     .toContain("dark");
   await expect(page.getByRole("button", { name: "Enregistrer", exact: true })).toHaveCount(0);
 

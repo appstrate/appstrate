@@ -13,7 +13,7 @@
  *
  * Edge cases under test — every refusal is a 410 `oauth_connection_needs_reconnection` or a 502,
  * with its `cause` extension:
- *   - `invalid_grant` from the provider → blob flagged `needsReconnection=true`, `refresh_token_revoked`.
+ *   - `invalid_grant` from the provider → row flagged `needs_reconnection` with cause `refresh_token_revoked`.
  *   - Already-flagged blob → `connection_flagged` short-circuit (no provider call).
  *   - Missing `refreshToken` in stored blob → flagged, `refresh_token_missing`.
  *   - Successful refresh rotates `accessToken`+`refreshToken`+`expiresAt` in DB.
@@ -75,22 +75,19 @@ async function seedOAuthCredential(opts: {
     refreshToken: opts.refreshToken ?? "stale-refresh",
     expiresAt: opts.expiresAtMs === undefined ? null : opts.expiresAtMs,
   });
-  if (opts.needsReconnection || opts.refreshToken === "") {
-    // Force-rewrite the blob to mirror the requested edge-case shape (the
-    // service layer doesn't expose a "create flagged" or "create with empty
-    // refresh" path — write directly here for test setup only).
+  if (opts.needsReconnection) {
+    await db
+      .update(modelProviderCredentials)
+      .set({ needsReconnection: true })
+      .where(eq(modelProviderCredentials.id, id));
+  }
+  if (opts.refreshToken === "") {
+    // The service layer has no "create with empty refresh" path: rewrite the blob for test setup.
     const [row] = await db
       .select({ blob: modelProviderCredentials.credentialsEncrypted })
       .from(modelProviderCredentials)
       .where(eq(modelProviderCredentials.id, id));
-    const decrypted = decryptCredentials<OAuthBlob>(row!.blob);
-    const next: OAuthBlob = {
-      ...decrypted,
-      ...(opts.needsReconnection !== undefined
-        ? { needsReconnection: opts.needsReconnection }
-        : {}),
-      ...(opts.refreshToken === "" ? { refreshToken: "" } : {}),
-    };
+    const next: OAuthBlob = { ...decryptCredentials<OAuthBlob>(row!.blob), refreshToken: "" };
     const { encryptCredentials } = await import("@appstrate/connect");
     await db
       .update(modelProviderCredentials)
@@ -108,6 +105,19 @@ async function readBlob(credentialId: string): Promise<OAuthBlob> {
     .from(modelProviderCredentials)
     .where(eq(modelProviderCredentials.id, credentialId));
   return decryptCredentials<OAuthBlob>(row!.blob);
+}
+
+/** The death record the row's columns hold: the only authority on whether it is dead. */
+async function readDeath(credentialId: string) {
+  const [row] = await db
+    .select({
+      needsReconnection: modelProviderCredentials.needsReconnection,
+      cause: modelProviderCredentials.needsReconnectionCause,
+      at: modelProviderCredentials.needsReconnectionAt,
+    })
+    .from(modelProviderCredentials)
+    .where(eq(modelProviderCredentials.id, credentialId));
+  return row!;
 }
 
 /** The refusal `run` throws: an `ApiError` of `status` carrying `cause`. */
@@ -165,8 +175,10 @@ describe("OAuth model providers — token-resolver hardening", () => {
         extensions: { cause: "refresh_token_revoked" },
       });
 
-      const blob = await readBlob(id);
-      expect(blob.needsReconnection).toBe(true);
+      const death = await readDeath(id);
+      expect(death.needsReconnection).toBe(true);
+      expect(death.cause).toBe("refresh_token_revoked");
+      expect(death.at).toBeInstanceOf(Date);
     });
 
     it("on a 2xx invalid_grant error object: flags needsReconnection and throws refresh_token_revoked, never echoing the body", async () => {
@@ -198,8 +210,9 @@ describe("OAuth model providers — token-resolver hardening", () => {
       expect(caught.message).not.toContain("echoed-secret-rt");
       expect(caught.message).not.toContain("{");
 
-      const blob = await readBlob(id);
-      expect(blob.needsReconnection).toBe(true);
+      const death = await readDeath(id);
+      expect(death.needsReconnection).toBe(true);
+      expect(death.cause).toBe("refresh_token_revoked");
     });
 
     it("on already-flagged credential: short-circuits with connection_flagged (no fetch)", async () => {
@@ -248,8 +261,9 @@ describe("OAuth model providers — token-resolver hardening", () => {
       });
       expect(fetchCalled).toBe(false);
 
-      const blob = await readBlob(id);
-      expect(blob.needsReconnection).toBe(true);
+      const death = await readDeath(id);
+      expect(death.needsReconnection).toBe(true);
+      expect(death.cause).toBe("refresh_token_missing");
     });
 
     it("on success: rotates accessToken + refreshToken + expiresAt in DB", async () => {
@@ -284,7 +298,7 @@ describe("OAuth model providers — token-resolver hardening", () => {
       expect(blob.accessToken).toBe("new-access");
       expect(blob.refreshToken).toBe("new-refresh");
       expect(blob.expiresAt).not.toBeNull();
-      expect(blob.needsReconnection).toBe(false);
+      expect((await readDeath(id)).needsReconnection).toBe(false);
     });
 
     it("preserves the existing refresh_token if the provider didn't return a new one", async () => {
@@ -370,8 +384,7 @@ describe("OAuth model providers — token-resolver hardening", () => {
       const caught = await refusal(() => forceRefreshOAuthModelProviderToken(id));
       expect(caught).toMatchObject({ status: 502, extensions: { cause: "upstream_transient" } });
       expect(caught.message).toContain("ECONNREFUSED");
-      const blob = await readBlob(id);
-      expect(blob.needsReconnection).toBe(false);
+      expect((await readDeath(id)).needsReconnection).toBe(false);
     });
   });
 
@@ -464,7 +477,7 @@ describe("OAuth model providers — token-resolver hardening", () => {
    * Transient-refresh-failure escalation — mirrors the integration_connections
    * escalation (#596). `recordModelCredentialRefreshFailure` increments a
    * per-credential counter on every transient (non-`invalid_grant`) refresh
-   * failure and flips `blob.needsReconnection` ONLY when the streak crosses the
+   * failure and flips `needs_reconnection` ONLY when the streak crosses the
    * threshold AND the token is already expired past the grace window. A
    * successful token write resets the counter (via `updateOAuthCredentialTokens`).
    */
@@ -478,11 +491,11 @@ describe("OAuth model providers — token-resolver hardening", () => {
       const [row] = await db
         .select({
           refreshFailureCount: modelProviderCredentials.refreshFailureCount,
+          needsReconnection: modelProviderCredentials.needsReconnection,
         })
         .from(modelProviderCredentials)
         .where(eq(modelProviderCredentials.id, credentialId));
-      const blob = await readBlob(credentialId);
-      return { ...row!, needsReconnection: blob.needsReconnection };
+      return row!;
     }
 
     it("increments the counter but does NOT escalate while the token is still valid", async () => {

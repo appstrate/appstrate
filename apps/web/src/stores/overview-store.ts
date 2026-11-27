@@ -2,17 +2,18 @@
 
 import { createStore } from "zustand/vanilla";
 import { isPlainObject } from "@appstrate/core/safe-json";
-import { persistedJson } from "./local-storage";
-
-const STORAGE_KEY = "appstrate_overview";
+import { LOCAL_STORAGE_KEYS, createLocalStore, jsonCodec } from "@appstrate/ui/local-storage";
 
 /** Keyed like the remembered space (`rememberedSpaceKey`): per account and org. Only a stored `true` is a choice. */
-const persisted = persistedJson<Record<string, true>>(STORAGE_KEY, (value) =>
-  isPlainObject(value)
-    ? Object.fromEntries(
-        Object.entries(value).flatMap(([key, on]) => (on === true ? [[key, true as const]] : [])),
-      )
-    : {},
+const persisted = createLocalStore(
+  LOCAL_STORAGE_KEYS.overview,
+  jsonCodec((value): Record<string, true> =>
+    isPlainObject(value)
+      ? Object.fromEntries(
+          Object.entries(value).flatMap(([key, on]) => (on === true ? [[key, true as const]] : [])),
+        )
+      : {},
+  ),
 );
 
 interface OverviewState {

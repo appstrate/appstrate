@@ -139,8 +139,8 @@ test.describe("file reader page", () => {
     const switcherBefore = (await sidebar.switcherButton.textContent()) ?? "";
     const stores = () =>
       page.evaluate(() => ({
-        org: localStorage.getItem("appstrate_current_org"),
-        space: localStorage.getItem("appstrate_last_space"),
+        org: localStorage.getItem("appstrate:web:currentOrg"),
+        space: localStorage.getItem("appstrate:web:lastSpace"),
       }));
     const before = await stores();
 

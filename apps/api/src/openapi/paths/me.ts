@@ -4,6 +4,7 @@ import { packageSourceValues } from "@appstrate/db/schema";
 import { MAX_CONNECTIONS_PER_INTEGRATION } from "@appstrate/core/integration";
 import { STD_RESPONSE_HEADERS } from "../headers.ts";
 import { APPEARANCE_PROPERTIES, INACTIVE_REQUIRED_INTEGRATIONS } from "../schemas.ts";
+import { NEEDS_RECONNECTION_RECORD_PROPERTIES } from "../needs-reconnection-record.ts";
 import {
   agentPackageIdParam,
   connectionActionsSchema,
@@ -68,6 +69,8 @@ const meConnectionEntrySchema = {
     "scopes_granted",
     "connected_at",
     "needs_reconnection",
+    "needs_reconnection_cause",
+    "needs_reconnection_at",
     "expiresAt",
     "identity",
     "auth_key",
@@ -89,6 +92,7 @@ const meConnectionEntrySchema = {
     scopes_granted: { type: "array", items: { type: "string" } },
     connected_at: { type: "string", format: "date-time" },
     needs_reconnection: { type: "boolean" },
+    ...NEEDS_RECONNECTION_RECORD_PROPERTIES,
     expiresAt: {
       oneOf: [{ type: "string", format: "date-time" }, { type: "null" }],
     },

@@ -2,7 +2,7 @@
 
 /**
  * « Tous les espaces »: a client mode over a hidden working space, kept per account and org in
- * `localStorage` (`appstrate_overview`), the way the space switcher stores the reader's pick.
+ * `localStorage` (`appstrate:web:overview`), the way the space switcher stores the reader's pick.
  */
 
 import type { Browser, BrowserContext } from "@playwright/test";
@@ -18,7 +18,7 @@ export async function createOverviewContext(
 ): Promise<BrowserContext> {
   const context = await createAuthedContext(browser, auth, orgId, hiddenSpaceId);
   await context.addInitScript(
-    (key) => localStorage.setItem("appstrate_overview", JSON.stringify({ [key]: true })),
+    (key) => localStorage.setItem("appstrate:web:overview", JSON.stringify({ [key]: true })),
     `${auth.userId}:${orgId}`,
   );
   return context;

@@ -8039,6 +8039,8 @@
                                 "identity_claims",
                                 "scopes_granted",
                                 "needs_reconnection",
+                                "needs_reconnection_cause",
+                                "needs_reconnection_at",
                                 "expiresAt",
                                 "owner_type",
                                 "owner_id",
@@ -8077,6 +8079,23 @@
                                 },
                                 "needs_reconnection": {
                                   "type": "boolean"
+                                },
+                                "needs_reconnection_cause": {
+                                  "type": ["string", "null"],
+                                  "enum": [
+                                    "refresh_token_revoked",
+                                    "refresh_token_missing",
+                                    "refresh_failures_exhausted",
+                                    "unrefreshable",
+                                    "credentials_undecryptable",
+                                    null
+                                  ],
+                                  "description": "Why the credential died: set with `needs_reconnection` and cleared with it. `null` while healthy, and on a credential flagged before the cause was recorded."
+                                },
+                                "needs_reconnection_at": {
+                                  "type": ["string", "null"],
+                                  "format": "date-time",
+                                  "description": "When the credential died (RFC 3339). `null` under the same conditions as `needs_reconnection_cause`."
                                 },
                                 "expiresAt": {
                                   "type": ["string", "null"],
@@ -9163,6 +9182,8 @@
                     "identity_claims",
                     "scopes_granted",
                     "needs_reconnection",
+                    "needs_reconnection_cause",
+                    "needs_reconnection_at",
                     "expiresAt",
                     "owner_type",
                     "owner_id",
@@ -9201,6 +9222,23 @@
                     },
                     "needs_reconnection": {
                       "type": "boolean"
+                    },
+                    "needs_reconnection_cause": {
+                      "type": ["string", "null"],
+                      "enum": [
+                        "refresh_token_revoked",
+                        "refresh_token_missing",
+                        "refresh_failures_exhausted",
+                        "unrefreshable",
+                        "credentials_undecryptable",
+                        null
+                      ],
+                      "description": "Why the credential died: set with `needs_reconnection` and cleared with it. `null` while healthy, and on a credential flagged before the cause was recorded."
+                    },
+                    "needs_reconnection_at": {
+                      "type": ["string", "null"],
+                      "format": "date-time",
+                      "description": "When the credential died (RFC 3339). `null` under the same conditions as `needs_reconnection_cause`."
                     },
                     "expiresAt": {
                       "type": ["string", "null"],
@@ -9885,6 +9923,8 @@
                         "identity_claims",
                         "scopes_granted",
                         "needs_reconnection",
+                        "needs_reconnection_cause",
+                        "needs_reconnection_at",
                         "expiresAt",
                         "owner_type",
                         "owner_id",
@@ -9923,6 +9963,23 @@
                         },
                         "needs_reconnection": {
                           "type": "boolean"
+                        },
+                        "needs_reconnection_cause": {
+                          "type": ["string", "null"],
+                          "enum": [
+                            "refresh_token_revoked",
+                            "refresh_token_missing",
+                            "refresh_failures_exhausted",
+                            "unrefreshable",
+                            "credentials_undecryptable",
+                            null
+                          ],
+                          "description": "Why the credential died: set with `needs_reconnection` and cleared with it. `null` while healthy, and on a credential flagged before the cause was recorded."
+                        },
+                        "needs_reconnection_at": {
+                          "type": ["string", "null"],
+                          "format": "date-time",
+                          "description": "When the credential died (RFC 3339). `null` under the same conditions as `needs_reconnection_cause`."
                         },
                         "expiresAt": {
                           "type": ["string", "null"],
@@ -10231,6 +10288,8 @@
                           "identity_claims",
                           "scopes_granted",
                           "needs_reconnection",
+                          "needs_reconnection_cause",
+                          "needs_reconnection_at",
                           "expiresAt",
                           "owner_type",
                           "owner_id",
@@ -10269,6 +10328,23 @@
                           },
                           "needs_reconnection": {
                             "type": "boolean"
+                          },
+                          "needs_reconnection_cause": {
+                            "type": ["string", "null"],
+                            "enum": [
+                              "refresh_token_revoked",
+                              "refresh_token_missing",
+                              "refresh_failures_exhausted",
+                              "unrefreshable",
+                              "credentials_undecryptable",
+                              null
+                            ],
+                            "description": "Why the credential died: set with `needs_reconnection` and cleared with it. `null` while healthy, and on a credential flagged before the cause was recorded."
+                          },
+                          "needs_reconnection_at": {
+                            "type": ["string", "null"],
+                            "format": "date-time",
+                            "description": "When the credential died (RFC 3339). `null` under the same conditions as `needs_reconnection_cause`."
                           },
                           "expiresAt": {
                             "type": ["string", "null"],
@@ -10465,6 +10541,8 @@
                     "identity_claims",
                     "scopes_granted",
                     "needs_reconnection",
+                    "needs_reconnection_cause",
+                    "needs_reconnection_at",
                     "expiresAt",
                     "owner_type",
                     "owner_id",
@@ -10503,6 +10581,23 @@
                     },
                     "needs_reconnection": {
                       "type": "boolean"
+                    },
+                    "needs_reconnection_cause": {
+                      "type": ["string", "null"],
+                      "enum": [
+                        "refresh_token_revoked",
+                        "refresh_token_missing",
+                        "refresh_failures_exhausted",
+                        "unrefreshable",
+                        "credentials_undecryptable",
+                        null
+                      ],
+                      "description": "Why the credential died: set with `needs_reconnection` and cleared with it. `null` while healthy, and on a credential flagged before the cause was recorded."
+                    },
+                    "needs_reconnection_at": {
+                      "type": ["string", "null"],
+                      "format": "date-time",
+                      "description": "When the credential died (RFC 3339). `null` under the same conditions as `needs_reconnection_cause`."
                     },
                     "expiresAt": {
                       "type": ["string", "null"],
@@ -11013,6 +11108,8 @@
                                 "identity_claims",
                                 "scopes_granted",
                                 "needs_reconnection",
+                                "needs_reconnection_cause",
+                                "needs_reconnection_at",
                                 "expiresAt",
                                 "owner_type",
                                 "owner_id",
@@ -11051,6 +11148,23 @@
                                 },
                                 "needs_reconnection": {
                                   "type": "boolean"
+                                },
+                                "needs_reconnection_cause": {
+                                  "type": ["string", "null"],
+                                  "enum": [
+                                    "refresh_token_revoked",
+                                    "refresh_token_missing",
+                                    "refresh_failures_exhausted",
+                                    "unrefreshable",
+                                    "credentials_undecryptable",
+                                    null
+                                  ],
+                                  "description": "Why the credential died: set with `needs_reconnection` and cleared with it. `null` while healthy, and on a credential flagged before the cause was recorded."
+                                },
+                                "needs_reconnection_at": {
+                                  "type": ["string", "null"],
+                                  "format": "date-time",
+                                  "description": "When the credential died (RFC 3339). `null` under the same conditions as `needs_reconnection_cause`."
                                 },
                                 "expiresAt": {
                                   "type": ["string", "null"],
@@ -17587,6 +17701,8 @@
                                 "scopes_granted",
                                 "connected_at",
                                 "needs_reconnection",
+                                "needs_reconnection_cause",
+                                "needs_reconnection_at",
                                 "expiresAt",
                                 "identity",
                                 "auth_key",
@@ -17624,6 +17740,23 @@
                                 },
                                 "needs_reconnection": {
                                   "type": "boolean"
+                                },
+                                "needs_reconnection_cause": {
+                                  "type": ["string", "null"],
+                                  "enum": [
+                                    "refresh_token_revoked",
+                                    "refresh_token_missing",
+                                    "refresh_failures_exhausted",
+                                    "unrefreshable",
+                                    "credentials_undecryptable",
+                                    null
+                                  ],
+                                  "description": "Why the credential died: set with `needs_reconnection` and cleared with it. `null` while healthy, and on a credential flagged before the cause was recorded."
+                                },
+                                "needs_reconnection_at": {
+                                  "type": ["string", "null"],
+                                  "format": "date-time",
+                                  "description": "When the credential died (RFC 3339). `null` under the same conditions as `needs_reconnection_cause`."
                                 },
                                 "expiresAt": {
                                   "oneOf": [
@@ -18452,6 +18585,8 @@
                     "identity_claims",
                     "scopes_granted",
                     "needs_reconnection",
+                    "needs_reconnection_cause",
+                    "needs_reconnection_at",
                     "expiresAt",
                     "owner_type",
                     "owner_id",
@@ -18490,6 +18625,23 @@
                     },
                     "needs_reconnection": {
                       "type": "boolean"
+                    },
+                    "needs_reconnection_cause": {
+                      "type": ["string", "null"],
+                      "enum": [
+                        "refresh_token_revoked",
+                        "refresh_token_missing",
+                        "refresh_failures_exhausted",
+                        "unrefreshable",
+                        "credentials_undecryptable",
+                        null
+                      ],
+                      "description": "Why the credential died: set with `needs_reconnection` and cleared with it. `null` while healthy, and on a credential flagged before the cause was recorded."
+                    },
+                    "needs_reconnection_at": {
+                      "type": ["string", "null"],
+                      "format": "date-time",
+                      "description": "When the credential died (RFC 3339). `null` under the same conditions as `needs_reconnection_cause`."
                     },
                     "expiresAt": {
                       "type": ["string", "null"],
@@ -39430,6 +39582,23 @@
           },
           "needs_reconnection": {
             "type": "boolean"
+          },
+          "needs_reconnection_cause": {
+            "type": ["string", "null"],
+            "enum": [
+              "refresh_token_revoked",
+              "refresh_token_missing",
+              "refresh_failures_exhausted",
+              "unrefreshable",
+              "credentials_undecryptable",
+              null
+            ],
+            "description": "Why the credential died: set with `needs_reconnection` and cleared with it. `null` while healthy, and on a credential flagged before the cause was recorded."
+          },
+          "needs_reconnection_at": {
+            "type": ["string", "null"],
+            "format": "date-time",
+            "description": "When the credential died (RFC 3339). `null` under the same conditions as `needs_reconnection_cause`."
           },
           "owner_type": {
             "type": "string",

@@ -13,7 +13,7 @@ import { createApiClient, createOrgOnlyClient, type ApiClient } from "../helpers
 
 import type { ViewAsOrgRole } from "@appstrate/core/permissions";
 
-export const PREVIEW_STORAGE_KEY = "appstrate_view_as";
+export const PREVIEW_STORAGE_KEY = "appstrate:web:viewAs";
 
 export async function seedRolePreview(
   target: Page | import("@playwright/test").BrowserContext,
@@ -64,9 +64,9 @@ export async function createAuthedContext(
   }
   await context.addInitScript(
     ({ userId, orgId, spaceId }) => {
-      localStorage.setItem("appstrate_current_org", orgId);
+      localStorage.setItem("appstrate:web:currentOrg", orgId);
       localStorage.setItem(
-        "appstrate_last_space",
+        "appstrate:web:lastSpace",
         JSON.stringify({ [`${userId}:${orgId}`]: spaceId }),
       );
     },

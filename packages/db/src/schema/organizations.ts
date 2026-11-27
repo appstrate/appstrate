@@ -17,10 +17,11 @@ import {
   type PgTableExtraConfigValue,
 } from "drizzle-orm/pg-core";
 import { sql } from "drizzle-orm";
+import { CREDENTIAL_DEATH_CAUSES, type CredentialDeathCause } from "@appstrate/core/sidecar-types";
 import { orgRoleEnum, invitationStatusEnum } from "./enums.ts";
 import { user } from "./auth.ts";
 import { spaceRoles, spaces } from "./spaces.ts";
-import type { SpaceAssignment } from "@appstrate/core/permissions";
+import { SPACE_ROLE_PRESETS, type SpaceAssignment } from "@appstrate/core/permissions";
 import type { ModelCost, ModelInputModality } from "@appstrate/core/module";
 
 export const organizations = pgTable(
@@ -38,8 +39,9 @@ export const organizations = pgTable(
     // colour needs no migration. Null derives the colour from the id.
     color: text("color"),
     orgSettings: jsonb("org_settings").notNull().default({}),
-    // The org's personal-space default when it is a custom role (RBAC spec §3.6); a preset one is
-    // `org_settings.personal_space_role`, never both, neither = `admin`.
+    // The org's personal-space default role (RBAC spec §3.6), as `space_members` holds a role:
+    // a preset or a custom role id, never both, neither = `admin`.
+    personalSpacePresetRole: text("personal_space_preset_role", { enum: SPACE_ROLE_PRESETS }),
     personalSpaceRoleId: text("personal_space_role_id"),
     // The org's default model — a flat model id that may name a system model
     // (SYSTEM_PROVIDER_KEYS) OR an `org_models.id` (UUID). A pointer rather than
@@ -99,11 +101,11 @@ export const organizations = pgTable(
     index("idx_organizations_personal_space_role_id").on(table.personalSpaceRoleId),
     check(
       "organizations_personal_space_role_one_shape",
-      sql`personal_space_role_id IS NULL OR NOT (org_settings ? 'personal_space_role')`,
+      sql`num_nonnulls(personal_space_preset_role, personal_space_role_id) <= 1`,
     ),
     check(
-      "organizations_personal_space_role_preset",
-      sql`NOT (org_settings ? 'personal_space_role') OR COALESCE(org_settings ->> 'personal_space_role' IN ('admin', 'builder', 'operator', 'runner', 'viewer'), false)`,
+      "organizations_personal_space_preset_valid",
+      sql`personal_space_preset_role IS NULL OR personal_space_preset_role IN ('admin', 'builder', 'operator', 'runner', 'viewer')`,
     ),
     // Backstop behind the application's icon validation: the largest image icon
     // (`data:image/webp;base64,` + 12 000 bytes encoded) is 16 023 bytes, its PNG
@@ -281,7 +283,7 @@ export const orgProxies = pgTable(
  * The encrypted blob's plaintext is a tagged union:
  *   { kind: "api_key", apiKey: string }
  *   { kind: "oauth",   accessToken, refreshToken, expiresAt, accountId?,
- *                       scopesGranted: string[], needsReconnection: boolean }
+ *                       scopesGranted: string[] }
  *
  * Decryption goes through `services/model-provider-credentials.loadCredentials`,
  * which fans out to the right code path based on the registry's `authMode`.
@@ -310,7 +312,7 @@ export const modelProviderCredentials = pgTable(
      */
     expiresAt: timestamp("expires_at", { withTimezone: true }),
     // Consecutive token-refresh failures classified as *transient* (network /
-    // 5xx / parse — NOT `invalid_grant`, which flips `blob.needsReconnection`
+    // 5xx / parse — NOT `invalid_grant`, which flips `needsReconnection`
     // immediately). A transient failure on a still-valid token is a no-op for
     // the credential's usability (cached token keeps working), but a token that
     // is expired AND has failed refresh repeatedly is effectively dead while
@@ -330,12 +332,14 @@ export const modelProviderCredentials = pgTable(
      */
     refreshCheckedAt: timestamp("refresh_checked_at", { withTimezone: true }),
     /**
-     * Denormalized `blob.needsReconnection`, mirrored by `updateBlob` whenever the next blob's flag
-     * differs and written false by create / reconnect. The blob stays the source of truth. The
-     * background refresh sweep skips a flagged row without decrypting it. A row flagged in its blob
-     * before this column existed is brought in line by `scripts/migration/0058`.
+     * The credential's death flag, the only authority: the blob carries none. Written by the flip
+     * points with `needsReconnectionCause` / `needsReconnectionAt` in the same UPDATE, cleared by
+     * create / reconnect. The background refresh sweep skips a flagged row without decrypting it.
      */
     needsReconnection: boolean("needs_reconnection").notNull().default(false),
+    // NULL on a flagged row = died before they were recorded; NULL whenever not flagged.
+    needsReconnectionCause: text("needs_reconnection_cause").$type<CredentialDeathCause>(),
+    needsReconnectionAt: timestamp("needs_reconnection_at", { withTimezone: true }),
     // NOTE — there is deliberately no `last_refresh_failure_at` here. There was
     // one, written beside `refresh_failure_count` on every transient refresh
     // failure and read by nothing: no route, no DTO, no OpenAPI field, no
@@ -367,6 +371,14 @@ export const modelProviderCredentials = pgTable(
     index("idx_model_provider_credentials_created_by").on(t.createdBy),
     // Target of `org_models_credential_provider_fk`: a model's provider is its credential's.
     uniqueIndex("uq_model_provider_credentials_id_provider_id").on(t.id, t.providerId),
+    check(
+      "model_provider_credentials_needs_reconnection_cause_valid",
+      sql`needs_reconnection_cause IS NULL OR needs_reconnection_cause IN (${sql.raw(CREDENTIAL_DEATH_CAUSES.map((v) => `'${v}'`).join(", "))})`,
+    ),
+    check(
+      "model_provider_credentials_needs_reconnection_record",
+      sql`needs_reconnection OR (needs_reconnection_cause IS NULL AND needs_reconnection_at IS NULL)`,
+    ),
   ],
 );
 

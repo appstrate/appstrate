@@ -7,11 +7,11 @@
  * opt-in (absent = off): an API client that never sends it keeps its turns as they were.
  */
 
-import { createUserFlag } from "./user-flag-store.ts";
+import { LOCAL_STORAGE_KEYS, createLocalStore, flagCodec } from "@appstrate/ui/local-storage";
 
-const flag = createUserFlag("appstrate.chat.contextAllSpaces:", true);
+const flag = createLocalStore(LOCAL_STORAGE_KEYS.chatContextAllSpaces, flagCodec(true));
 
 export const bindContextAllSpacesUser = flag.bind;
-export const getContextAllSpacesEnabled = flag.get;
-export const setContextAllSpacesEnabled = flag.set;
-export const useContextAllSpacesEnabled = flag.use;
+export const getContextAllSpacesEnabled = () => flag.read();
+export const setContextAllSpacesEnabled = (value: boolean) => flag.write(value);
+export const useContextAllSpacesEnabled = () => flag.useValue()[0];

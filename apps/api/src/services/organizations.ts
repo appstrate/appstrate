@@ -227,6 +227,7 @@ import {
   orgSettingsReadSchema,
   orgSettingsSchema as orgSettingsBaseSchema,
   spaceRoleReferenceSchema,
+  type SpaceRolePreset,
 } from "@appstrate/core/permissions";
 
 /**
@@ -254,18 +255,25 @@ export const orgSettingsPatchSchema = orgSettingsBaseSchema
   .strict();
 import type { OrgSettings } from "@appstrate/shared-types";
 
-/** The settings as served: the default role (document preset or `personal_space_role_id`) as a role reference. */
+/** The settings as served: the default role is projected from its two columns as a role reference. */
 function toOrgSettings(
-  row: { orgSettings: unknown; personalSpaceRoleId: string | null } | undefined,
+  row:
+    | {
+        orgSettings: unknown;
+        personalSpacePresetRole: SpaceRolePreset | null;
+        personalSpaceRoleId: string | null;
+      }
+    | undefined,
 ): OrgSettings {
-  const stored = orgSettingsReadSchema.parse(row?.orgSettings ?? {});
-  const customDefault = row?.personalSpaceRoleId ?? null;
+  const { personal_space_role: _unread, ...stored } = orgSettingsReadSchema.parse(
+    row?.orgSettings ?? {},
+  );
   return {
     ...stored,
     personal_space_role:
-      customDefault === null
-        ? { preset_role: stored.personal_space_role }
-        : { custom_role_id: customDefault },
+      row?.personalSpaceRoleId != null
+        ? { custom_role_id: row.personalSpaceRoleId }
+        : { preset_role: row?.personalSpacePresetRole ?? "admin" },
   };
 }
 
@@ -278,6 +286,7 @@ export async function getOrgSettings(orgId: string): Promise<OrgSettings> {
   const [row] = await db
     .select({
       orgSettings: organizations.orgSettings,
+      personalSpacePresetRole: organizations.personalSpacePresetRole,
       personalSpaceRoleId: organizations.personalSpaceRoleId,
     })
     .from(organizations)
@@ -327,8 +336,8 @@ export async function listOrgsWithUnsupportedApiVersion(
 }
 
 /**
- * A preset `personal_space_role` goes in the document, a custom one in `personal_space_role_id`
- * (RBAC spec §3.6). The custom role is share-locked, so `deleteSpaceRole` answers 409, not the FK.
+ * `personal_space_role` goes in `personal_space_preset_role` or `personal_space_role_id`, one set
+ * and the other cleared (RBAC spec §3.6). The custom role is share-locked, so `deleteSpaceRole` answers 409, not the FK.
  */
 export async function updateOrgSettings(
   orgId: string,
@@ -339,10 +348,13 @@ export async function updateOrgSettings(
     // Merge server-side via JSONB concatenation so concurrent admins toggling
     // different keys don't clobber each other (read-modify-write would race).
     const merged = sql`COALESCE(${organizations.orgSettings}, '{}'::jsonb) || ${JSON.stringify(documentUpdates)}::jsonb`;
-    let defaultRole: { orgSettings: SQL; personalSpaceRoleId: string | null } | null = null;
+    let defaultRole: {
+      personalSpacePresetRole: SpaceRolePreset | null;
+      personalSpaceRoleId: string | null;
+    } | null = null;
     if (personalSpaceRole !== undefined && "preset_role" in personalSpaceRole) {
       defaultRole = {
-        orgSettings: sql`${merged} || ${JSON.stringify({ personal_space_role: personalSpaceRole.preset_role })}::jsonb`,
+        personalSpacePresetRole: personalSpaceRole.preset_role,
         personalSpaceRoleId: null,
       };
     } else if (personalSpaceRole !== undefined) {
@@ -352,17 +364,15 @@ export async function updateOrgSettings(
         personalSpaceRole.custom_role_id,
         "personal_space_role.custom_role_id",
       );
-      defaultRole = {
-        orgSettings: sql`(${merged}) - 'personal_space_role'`,
-        personalSpaceRoleId: role.id,
-      };
+      defaultRole = { personalSpacePresetRole: null, personalSpaceRoleId: role.id };
     }
     const [updated] = await tx
       .update(organizations)
-      .set({ ...(defaultRole ?? { orgSettings: merged }), updatedAt: new Date() })
+      .set({ orgSettings: merged, ...defaultRole, updatedAt: new Date() })
       .where(eq(organizations.id, orgId))
       .returning({
         orgSettings: organizations.orgSettings,
+        personalSpacePresetRole: organizations.personalSpacePresetRole,
         personalSpaceRoleId: organizations.personalSpaceRoleId,
       });
     return updated;

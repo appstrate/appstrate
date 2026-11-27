@@ -57,7 +57,9 @@ import type { ResolutionFieldError } from "@appstrate/core/api-errors";
 import type { RunLogEvent } from "@appstrate/shared-types";
 import { FILE_NAME_META_KEY, parseFileUri, fileUri } from "@appstrate/core/file-uri";
 import { parseScopedName } from "@appstrate/core/naming";
+import { z } from "zod";
 import { SKILL_URI_PREFIX } from "@appstrate/core/skill-address";
+import { getMeResultSchema } from "@appstrate/core/me-context";
 import {
   CONNECTION_RESOLUTION_WARNING_CODES,
   MAX_CONNECTIONS_PER_INTEGRATION,
@@ -2465,6 +2467,26 @@ function actVocabulary(surface: McpSurface): string {
   return acts.length > 0 ? ` (${acts.map((act) => `\`${act}\``).join(", ")})` : "";
 }
 
+/**
+ * What `get_me` answers: the 200 relay of `/api/me/context` (the schema the chat reads it with), a
+ * 200 whose body was cut to fit the result, or a refusal (the tool's own or the route's).
+ */
+const getMeOutputSchema = (() => {
+  const { $schema: _dialect, ...schema } = z.toJSONSchema(
+    z.union([
+      getMeResultSchema,
+      z.looseObject({ status: z.literal(200), truncated: z.literal(true), body: z.string() }),
+      z.looseObject({
+        kind: z.literal("tool_refusal"),
+        code: z.string(),
+        error: z.string(),
+      }),
+      z.looseObject({ kind: z.literal("route_refusal"), status: z.int() }),
+    ]),
+  );
+  return { type: "object", ...schema } as NonNullable<Tool["outputSchema"]>;
+})();
+
 function buildGetMeTool(ctx: McpToolContext, surface: McpSurface): AppstrateToolDefinition {
   const descriptor: Tool = {
     name: "get_me",
@@ -2516,6 +2538,7 @@ function buildGetMeTool(ctx: McpToolContext, surface: McpSurface): AppstrateTool
       openWorldHint: false,
     },
     inputSchema: { type: "object", additionalProperties: false, properties: {} },
+    outputSchema: getMeOutputSchema,
   };
 
   const handler = async (args: Record<string, unknown>): Promise<CallToolResult> => {

@@ -22,6 +22,7 @@
  * connection from `platformMcp.url`; the handler only mints the bearer.
  */
 
+import { fullAgent, meBody } from "./me-context-body.ts";
 import { describe, it, expect, beforeEach, afterEach, spyOn } from "bun:test";
 import { Hono } from "hono";
 import { and, asc, eq } from "drizzle-orm";
@@ -2217,16 +2218,14 @@ describe("handleChatStream", () => {
             getMe: (spaceId) => {
               asked.push(spaceId);
               const agent = agentIn[spaceId];
-              return {
+              return meBody({
                 space: { id: spaceId },
-                connections: [],
-                connectable_integrations: { data: [], truncated: false, total: 0 },
                 agents: {
-                  data: agent ? [{ packageId: agent, display_name: agent, published: true }] : [],
+                  data: agent ? [fullAgent(agent, agent)] : [],
                   truncated: false,
                   total: agent ? 1 : 0,
                 },
-              };
+              });
             },
           },
           scriptedDispatch(),

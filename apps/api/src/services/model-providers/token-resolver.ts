@@ -58,6 +58,8 @@ interface CredentialState {
   credentialId: string;
   orgId: string;
   blob: OAuthBlob;
+  /** The row's `needs_reconnection` column. */
+  needsReconnection: boolean;
   config: ModelProviderConfig & { authMode: "oauth2" };
 }
 
@@ -88,6 +90,7 @@ async function loadCredentialState(
     credentialId: loaded.id,
     orgId: loaded.orgId,
     blob: loaded.blob,
+    needsReconnection: loaded.needsReconnection,
     // `ModelProviderDefinition` is not a discriminated union on `authMode`, so
     // the guard above narrows the property but not the object — the assertion
     // is what carries that fact into `CredentialState`.
@@ -129,7 +132,7 @@ export async function resolveOAuthTokenForSidecar(
   expectedOrgId?: string,
 ): Promise<OAuthToken> {
   const state = await loadCredentialState(credentialId, expectedOrgId);
-  if (state.blob.needsReconnection) {
+  if (state.needsReconnection) {
     throw needsReconnection(credentialId, "connection_flagged");
   }
 
@@ -193,7 +196,7 @@ export async function forceRefreshOAuthModelProviderToken(
     force: options.force ?? true,
     reReadFreshness: async ({ force }) => {
       const state = await loadCredentialState(credentialId, expectedOrgId);
-      if (state.blob.needsReconnection) {
+      if (state.needsReconnection) {
         throw needsReconnection(credentialId, "connection_flagged");
       }
       // Forced: the caller has upstream evidence this token is dead, so an
@@ -210,7 +213,7 @@ export async function forceRefreshOAuthModelProviderToken(
 
 async function doRefresh(credentialId: string, expectedOrgId?: string): Promise<OAuthToken> {
   const state = await loadCredentialState(credentialId, expectedOrgId);
-  if (state.blob.needsReconnection) {
+  if (state.needsReconnection) {
     throw needsReconnection(credentialId, "connection_flagged");
   }
   if (!state.blob.refreshToken) {

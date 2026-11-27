@@ -215,7 +215,7 @@ test("the overlay band follows its viewport scroll across navigation, reopening 
 }, testInfo) => {
   for (const width of [1440, 768, 390]) {
     if (width === 390) {
-      await page.evaluate(() => localStorage.setItem("appstrate-theme", "dark"));
+      await page.evaluate(() => localStorage.setItem("appstrate:web:theme", "dark"));
     }
     await page.setViewportSize({ width, height: 480 });
     await page.goto("/org-settings/general");

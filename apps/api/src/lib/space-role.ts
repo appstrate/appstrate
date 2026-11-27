@@ -83,7 +83,7 @@ function guestPersonalRole(chosen: SpaceRoleRef): SpaceRoleRef {
 export const psr = alias(spaceRoles, "psr");
 
 export const PERSONAL_SPACE_DEFAULT_COLUMNS = {
-  storedPersonalSpaceRole: sql<SpaceRolePreset | null>`${organizations.orgSettings}->>'personal_space_role'`,
+  storedPersonalSpaceRole: organizations.personalSpacePresetRole,
   personalDefaultRoleId: psr.id,
   personalDefaultKey: psr.key,
   personalDefaultName: psr.name,
