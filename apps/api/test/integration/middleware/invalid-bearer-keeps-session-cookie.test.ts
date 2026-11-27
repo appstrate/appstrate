@@ -1,17 +1,14 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * An invalid `Authorization: Bearer …` never logs the browser out.
+ * An invalid `Authorization: Bearer …` never signs the browser out.
  *
- * Better Auth's `bearer()` plugin (mounted by the oidc module) turns a bearer
- * WITHOUT a dot into a session cookie by signing it itself, so any string —
- * `Bearer undefined` from a script that read an unset variable — passes its
- * HMAC check and REPLACES the request's real session cookie before the
- * session read. The read then finds no session, and the stale-cookie cleanup
- * of the auth pipeline used to answer the 401 with `Set-Cookie: …; Max-Age=0`
- * and `Clear-Site-Data: "cookies"`: the dashboard tab that sent nothing wrong
- * was signed out. The cookie the browser holds was never the failed credential.
- * Better Auth's own routes (`/api/auth/*`) emitted the same delete themselves.
+ * Better Auth's `bearer()` plugin (oidc module) signs a dotless bearer itself
+ * and substitutes it for the request's session cookie, so any string —
+ * `Bearer undefined` from a script that read an unset variable — resolves to
+ * no session. A request presenting a bearer is judged by it alone: 401, and
+ * neither the auth pipeline nor Better Auth's own routes write a delete of
+ * the cookie the browser holds, which was never the credential judged.
  */
 
 import { describe, it, expect, beforeEach } from "bun:test";
@@ -98,5 +95,20 @@ describe("auth pipeline — invalid bearer beside a valid session cookie", () =>
     });
     expect(res.status).toBe(200);
     expect(((await res.json()) as { user?: { id: string } } | null)?.user?.id).toBe(ctx.user.id);
+  });
+
+  it("forwards the body of a bearer request to Better Auth's own routes", async () => {
+    const token = decodeURIComponent(ctx.cookie.slice(ctx.cookie.indexOf("=") + 1));
+    const res = await app.request("/api/auth/update-user", {
+      method: "POST",
+      headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+      body: JSON.stringify({ name: "Renamed by bearer" }),
+    });
+    expect(res.status).toBe(200);
+
+    const session = await app.request("/api/auth/get-session", { headers: authHeaders(ctx) });
+    expect(((await session.json()) as { user?: { name: string } } | null)?.user?.name).toBe(
+      "Renamed by bearer",
+    );
   });
 });

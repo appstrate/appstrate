@@ -32,56 +32,53 @@ import { user as userTable } from "@appstrate/db/schema";
 import type { AppEnv } from "../types/index.ts";
 
 /**
- * Every session read goes through here. A cookie read forwards Better Auth's
- * Set-Cookie (sliding refresh).
- *
  * A request presenting `Authorization: Bearer …` is judged by that bearer
- * alone (`viaBearer`): the Cookie header is withheld from the read, and the
- * read never writes the browser's cookie jar. Better Auth's `bearer()` plugin
- * (oidc module) signs a dotless bearer itself and substitutes it for the
- * request's session cookie, so `Bearer undefined` from any script on the page
- * used to resolve to no session and answer with a `session_token` delete:
- * the tab that sent nothing wrong was signed out, and the same request with a
- * dotted bearer silently authenticated through the cookie instead.
+ * alone: its Cookie header is withheld from Better Auth and nothing it reads
+ * writes the browser's cookie jar. Better Auth's `bearer()` plugin (oidc
+ * module) signs a dotless bearer itself and substitutes it for the session
+ * cookie, so a forged one (`Bearer undefined`, from any script on the page)
+ * resolves to no session and Better Auth answers with a delete of the cookie
+ * the browser holds, a credential the request was never judged on.
  */
-export async function readSessionWithCookies(c: Context) {
-  const viaBearer = presentsBearer(c.req.raw.headers);
-  const headers = new Headers(c.req.raw.headers);
-  if (viaBearer) headers.delete("Cookie");
-  const { headers: out, response } = await getAuth().api.getSession({
-    headers,
-    returnHeaders: true,
-  });
-  return { session: response, setCookies: viaBearer ? [] : out.getSetCookie(), viaBearer };
+function bearerOnly(headers: Headers): Headers | null {
+  if (parseBearer(headers.get("Authorization")) === null) return null;
+  const stripped = new Headers(headers);
+  stripped.delete("Cookie");
+  return stripped;
 }
 
-function presentsBearer(headers: Headers): boolean {
-  return parseBearer(headers.get("Authorization") ?? undefined) !== null;
+/** Every session read outside Better Auth's handler. A cookie read forwards Better Auth's Set-Cookie (sliding refresh). */
+export async function readSessionWithCookies(c: Context) {
+  const stripped = bearerOnly(c.req.raw.headers);
+  const { headers, response } = await getAuth().api.getSession({
+    headers: stripped ?? c.req.raw.headers,
+    returnHeaders: true,
+  });
+  const viaBearer = stripped !== null;
+  return { session: response, setCookies: viaBearer ? [] : headers.getSetCookie(), viaBearer };
 }
 
 /**
- * The same rule at the Better Auth handler (`/api/auth/*`), whose endpoints
- * read the session themselves: a request presenting a bearer reaches Better
- * Auth without its Cookie header, and the Set-Cookie writes of Better Auth's
- * own cookies are dropped from the answer. A bearer client reads a minted
+ * Better Auth's handler (`/api/auth/*`), whose endpoints read the session
+ * themselves, under the same rule: the Set-Cookie writes of the managed cookies
+ * are dropped from a bearer request's answer. A bearer client reads a minted
  * session from `set-auth-token`, which the `bearer()` plugin still sets.
  */
 export async function handleAuthRequest(req: Request): Promise<Response> {
-  if (!presentsBearer(req.headers)) return getAuth().handler(req);
-  const headers = new Headers(req.headers);
-  headers.delete("Cookie");
-  const stripped = new Request(req, { headers });
-  propagateRequestClientIp(req, stripped);
-  const res = await getAuth().handler(stripped);
+  const stripped = bearerOnly(req.headers);
+  if (!stripped) return getAuth().handler(req);
+  const forwarded = new Request(req, { headers: stripped });
+  propagateRequestClientIp(req, forwarded);
+  const res = await getAuth().handler(forwarded);
   const managed = new Set(managedAuthCookies().map((cookie) => cookie.name));
   const setCookies = res.headers.getSetCookie();
   if (!setCookies.some((cookie) => managed.has(cookieNameOf(cookie)))) return res;
-  const out = new Headers(res.headers);
-  out.delete("Set-Cookie");
+  const headers = new Headers(res.headers);
+  headers.delete("Set-Cookie");
   for (const cookie of setCookies) {
-    if (!managed.has(cookieNameOf(cookie))) out.append("Set-Cookie", cookie);
+    if (!managed.has(cookieNameOf(cookie))) headers.append("Set-Cookie", cookie);
   }
-  return new Response(res.body, { status: res.status, statusText: res.statusText, headers: out });
+  return new Response(res.body, { status: res.status, statusText: res.statusText, headers });
 }
 
 function cookieNameOf(setCookie: string): string {
