@@ -12,7 +12,6 @@ import { API_CALL_TOOL_NAME, API_UPLOAD_TOOL_NAME } from "@appstrate/core/integr
 import {
   isApiCallToolSelectionEnabled,
   replaceNativeToolSelection,
-  isUsableToolStatus,
   selectableNativeToolNames,
   toggleApiCallToolSelection,
 } from "../tool-selection.ts";
@@ -140,16 +139,6 @@ describe("toggleApiCallToolSelection", () => {
     expect(replaceNativeToolSelection(selection, native, visibleSynthetic, false)).toEqual([
       API_CALL_TOOL_NAME,
     ]);
-  });
-});
-
-describe("isUsableToolStatus", () => {
-  it("is true without a verdict or when available, false for the other statuses", () => {
-    expect(isUsableToolStatus(undefined)).toBe(true);
-    expect(isUsableToolStatus("available")).toBe(true);
-    for (const status of ["missing", "pending", "blocked"] as const) {
-      expect(isUsableToolStatus(status)).toBe(false);
-    }
   });
 });
 

@@ -2,7 +2,6 @@
 
 import { describe, expect, it } from "bun:test";
 import { defaultIntegrationManifest } from "../../components/agent-editor/utils.ts";
-import { stableJson } from "../stable-json";
 import {
   connectBlocker,
   integrationCreationManifest,
@@ -406,15 +405,5 @@ describe("needsWizardFinish", () => {
 describe("wizardResumePath", () => {
   it("encodes the package id", () => {
     expect(wizardResumePath("@org/acme")).toBe("/integrations/new/mcp?package=%40org%2Facme");
-  });
-});
-
-describe("settings and wizard JSON comparisons", () => {
-  it("ignores missing JSON values in objects and preserves array order", () => {
-    expect(stableJson({ b: undefined, a: { c: 3, a: 2 } })).toBe(stableJson({ a: { a: 2, c: 3 } }));
-    expect(stableJson([undefined, 2])).toBe(stableJson([null, 2]));
-    expect(stableJson([1, 2])).not.toBe(stableJson([2, 1]));
-    expect(stableJson(undefined)).toBeUndefined();
-    expect(() => stableJson(2n)).toThrow();
   });
 });

@@ -54,6 +54,11 @@ function view(
       review={options.review ?? true}
       declaration={options.declaration}
       pending={options.pending ?? (() => false)}
+      isBusy={(name) =>
+        (["approve", "revoke", "block", "unblock"] as const).some((action) =>
+          (options.pending ?? (() => false))(action, name),
+        )
+      }
       onApprove={options.onApprove ?? noop}
       onBlock={noop}
       onRevoke={noop}

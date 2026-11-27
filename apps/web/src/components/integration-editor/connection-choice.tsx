@@ -2,14 +2,14 @@
 
 import { useTranslation } from "react-i18next";
 import { candidateSelectOption } from "../../lib/connection-choice";
-import { syncConnectionCandidates } from "../../lib/integration-server-sync";
+import { connectionChoiceCandidates } from "../../lib/integration-server-sync";
 import { OptionSelect } from "../app-ui/option-select";
 
 /**
  * The connections a `must_choose_connection` server read (discover, tool listing) refusal offers,
  * as a picker whose choice retries the read with it. Nothing for any other error.
  */
-export function SyncConnectionChoice({
+export function ConnectionChoice({
   error,
   onChoose,
   disabled,
@@ -19,7 +19,7 @@ export function SyncConnectionChoice({
   disabled?: boolean;
 }) {
   const { t } = useTranslation("agents");
-  const candidates = syncConnectionCandidates(error);
+  const candidates = connectionChoiceCandidates(error);
   if (!candidates?.length) return null;
   return (
     <OptionSelect

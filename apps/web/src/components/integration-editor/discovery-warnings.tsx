@@ -3,7 +3,7 @@
 import { useTranslation } from "react-i18next";
 import { Alert, AlertDescription } from "@appstrate/ui/components/alert";
 
-/** The caveats an analysis or a server sync reported, in the user's language. */
+/** The caveats an analysis or a server read reported, in the user's language. */
 export function DiscoveryWarnings({
   warnings,
 }: {

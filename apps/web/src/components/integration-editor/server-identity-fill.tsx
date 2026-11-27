@@ -5,16 +5,24 @@ import { useTranslation } from "react-i18next";
 import { $api } from "../../api/client";
 import { encodeIconDataUri } from "../../lib/icon-image";
 import {
+  INTEGRATION_DOC,
   connectionChoiceBody,
   mergeServerIdentity,
+  stageServerDoc,
   type ServerIdentityKey,
   type ServerReadBlock,
 } from "../../lib/integration-server-sync";
+import type { PackageFileWriteOperation } from "../../lib/package-file-tree";
+import { DiscoveryWarnings } from "./discovery-warnings";
 import { ServerReadControl } from "./server-read-control";
+
+/** What a read fills: an identity field, or the instructions document. */
+type FilledKey = ServerIdentityKey | "doc";
 
 /**
  * Reads the draft's remote server and fills the identity fields the author left empty in the
- * draft (`onChange`); nothing is saved here. A raster the manifest does not accept as is (ICO,
+ * draft (`onChange`), and stages the server's instructions as `INTEGRATION.md` when the draft has
+ * none (`onOperationsChange`); nothing is saved here. A raster the manifest does not accept as is (ICO,
  * large PNG) is re-encoded; one the browser cannot decode is skipped, and the icon lands only if
  * the draft still has none. When several connections could answer, the refusal's candidates are
  * offered and the chosen one retries.
@@ -24,38 +32,54 @@ export function ServerIdentityFill({
   blockedBy,
   manifest,
   onChange,
+  operations,
+  onOperationsChange,
 }: {
   packageId: string;
   /** The draft's manifest. */
   manifest: Record<string, unknown>;
   onChange: (next: Record<string, unknown>) => void;
+  /** The draft's staged file operations. */
+  operations: PackageFileWriteOperation[] | undefined;
+  onOperationsChange: (next: PackageFileWriteOperation[] | undefined) => void;
   /** Why the server cannot be read: the button stays, disabled, with the reason as a tooltip. */
   blockedBy: ServerReadBlock | null;
 }) {
   const { t } = useTranslation("agents");
-  const [filled, setFilled] = useState<ServerIdentityKey[] | null>(null);
+  const [filled, setFilled] = useState<FilledKey[] | null>(null);
+  const [warnings, setWarnings] = useState<ReadonlyArray<{ code: string; message: string }>>([]);
   // The draft as the last render saw it: the icon lands after an await, onto whatever the author
   // typed meanwhile.
   const draft = useRef(manifest);
+  const staged = useRef(operations);
   useEffect(() => {
     draft.current = manifest;
+    staged.current = operations;
   });
   const read = $api.useMutation("post", "/api/integrations/{packageId}/discover", {
     // The error is rendered inline, under the button.
     meta: { errorHandledByCaller: true },
-    onMutate: () => setFilled(null),
+    onMutate: () => {
+      setFilled(null);
+      setWarnings([]);
+    },
     onSuccess: async (proposal) => {
       const proposed = proposal.manifest as Record<string, unknown>;
       const merged = mergeServerIdentity(draft.current, proposed);
       onChange(merged.manifest);
-      setFilled(merged.filled);
+      const withDoc = stageServerDoc(staged.current, proposal.instructions);
+      const docFilled = withDoc !== staged.current;
+      if (docFilled) onOperationsChange(withDoc);
+      const done: FilledKey[] = docFilled ? [...merged.filled, "doc"] : merged.filled;
+      setFilled(done);
+      setWarnings(proposal.warnings);
       if (!proposal.icon_source || proposed.icon) return;
       try {
         const icon = await encodeIconDataUri(proposal.icon_source);
         const current = draft.current;
         if (typeof current.icon === "string" && current.icon !== "") return;
         onChange({ ...current, icon });
-        setFilled([...merged.filled, "icon"]);
+        setFilled([...done, "icon"]);
       } catch {
         // An image the browser cannot decode: the identity stays without an icon.
       }
@@ -66,7 +90,8 @@ export function ServerIdentityFill({
       params: { path: { packageId } },
       body: connectionChoiceBody(connectionId),
     });
-  const labels: Record<ServerIdentityKey, string> = {
+  const labels: Record<FilledKey, string> = {
+    doc: INTEGRATION_DOC,
     display_name: t("editor.metaDisplayName"),
     description: t("editor.fieldDescLabel"),
     homepage: t("manifest.homepage"),
@@ -96,6 +121,7 @@ export function ServerIdentityFill({
             : t("integrationEditor.identityFromServer.nothing")}
         </p>
       )}
+      <DiscoveryWarnings warnings={warnings} />
     </ServerReadControl>
   );
 }

@@ -25,7 +25,7 @@ import {
   CollapsibleTrigger,
 } from "@appstrate/ui/components/collapsible";
 import { CheckboxField } from "@/components/app-ui/checkbox-field";
-import { $api, client } from "../../api/client";
+import { client } from "../../api/client";
 import { ApiError } from "../../api/errors";
 import { RoleLimitNotice } from "../role-limit-notice";
 import { DiscoveryWarnings } from "../integration-editor/discovery-warnings";
@@ -33,7 +33,7 @@ import { useCurrentOrgId } from "../../hooks/use-org";
 import { useCurrentSpaceId } from "../../hooks/use-current-space";
 import { getAllowUndeclaredTools } from "../integration-editor/utils";
 import { usePermissions } from "../../hooks/use-permissions";
-import { invalidateIntegrationQueries } from "../../hooks/use-integrations";
+import { invalidateIntegrationQueries, useToolSnapshotRefresh } from "../../hooks/use-integrations";
 import { useUpdatePackage } from "../../hooks/use-mutations";
 import { useCreateVersion, type Versioned } from "../../hooks/use-packages";
 import { errorMessage } from "../../lib/mutation-error";
@@ -98,7 +98,8 @@ function PublishChoice({
   const spaceId = useCurrentSpaceId();
   const mayRead =
     isUnauthenticatedIntegration(draft.manifest ?? {}) || can("credential-proxy:call-own");
-  // The server's identity and instructions, best effort: a refusal or a failure only means
+  // The server's identity and instructions, best effort (the wizard offers no connection choice,
+  // so a `must_choose_connection` refusal proposes nothing): a refusal or a failure only means
   // nothing is proposed, never that the publish is blocked. Each attempt is a call the journal
   // records, so it is not retried behind the user's back.
   const identity = useQuery({
@@ -129,9 +130,7 @@ function PublishChoice({
   const publish = useCreateVersion("integration", packageId);
   // The first snapshot the tools tab and the spaces' review read; the tab's « Relire le serveur »
   // is the way back when it cannot be taken here.
-  const snapshot = $api.useMutation("post", "/api/integrations/{packageId}/tool-snapshot/refresh", {
-    meta: { errorHandledByCaller: true },
-  });
+  const snapshot = useToolSnapshotRefresh(packageId);
   // A changed choice is no longer the save a failed publish would retry: the next submit saves it.
   const unsave = () => {
     setSaved(undefined);
@@ -173,11 +172,7 @@ function PublishChoice({
         }
         throw err;
       }
-      if (can("credential-proxy:call-own")) {
-        await snapshot
-          .mutateAsync({ params: { path: { packageId } }, body: {} })
-          .catch(() => undefined);
-      }
+      if (mayRead) await snapshot.runAsync().catch(() => undefined);
       // The published version is what the detail reads: once it is there, the step is done.
       await invalidateIntegrationQueries(qc);
     } catch {
@@ -216,8 +211,8 @@ function PublishChoice({
 export function ToolsChoice({
   trustAll,
   onTrustAllChange,
-  proposal = null,
-  includeDocs = true,
+  proposal,
+  includeDocs,
   onIncludeDocsChange,
   version,
   onSubmit,
@@ -231,9 +226,9 @@ export function ToolsChoice({
   trustAll: boolean;
   onTrustAllChange: (trustAll: boolean) => void;
   /** The server's identity read, when it answered: its instructions and warnings. */
-  proposal?: { instructions: string | null; warnings: { code: string; message: string }[] } | null;
-  includeDocs?: boolean;
-  onIncludeDocsChange?: (include: boolean) => void;
+  proposal: { instructions: string | null; warnings: { code: string; message: string }[] } | null;
+  includeDocs: boolean;
+  onIncludeDocsChange: (include: boolean) => void;
   version: string;
   onSubmit: () => void;
   pending: boolean;
@@ -255,8 +250,6 @@ export function ToolsChoice({
         </FieldLegend>
         <RadioGroup
           value={trustAll ? "trust" : "review"}
-          disabled={pending}
-          aria-label={t("integrationWizard.tools.modeLabel")}
           onValueChange={(next) => onTrustAllChange(next === "trust")}
         >
           {(["review", "trust"] as const).map((mode) => (
@@ -285,7 +278,7 @@ export function ToolsChoice({
             id="integration-wizard-docs"
             disabled={pending}
             checked={includeDocs}
-            onCheckedChange={(checked) => onIncludeDocsChange?.(checked === true)}
+            onCheckedChange={(checked) => onIncludeDocsChange(checked === true)}
             label={t("integrationWizard.tools.docs")}
           />
           <Collapsible>

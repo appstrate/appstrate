@@ -26,15 +26,14 @@ import {
   type ToolPolicyAction,
 } from "../../hooks/use-integrations";
 import {
-  canonicalDefinitionJson,
   declarableTools,
-  latestApprovals,
   reviewItems,
   type CatalogRow,
   type ReviewItem,
   type ToolPolicy,
 } from "../../lib/integration-tool-policy";
 import type { MenuAction } from "../../lib/menu-action";
+import { stableJson } from "../../lib/stable-json";
 import { ConfirmModal } from "../confirm-modal";
 import { DraftDiffView } from "../draft-diff-view";
 import { JsonView } from "../json-view";
@@ -83,6 +82,25 @@ type Approval = { name: string; fingerprint: string };
 type Confirm =
   { kind: "block" | "revoke"; name: string } | { kind: "approveAll"; items: Approval[] };
 
+/** The confirmation's locale keys, per kind. */
+const CONFIRM_KEYS = {
+  approveAll: {
+    title: "integrationTools.policy.confirm.approveAll.title",
+    description: "integrationTools.policy.confirm.approveAll.description",
+    label: "integrationTools.policy.approveAll",
+  },
+  revoke: {
+    title: "integrationTools.policy.confirm.revoke.title",
+    description: "integrationTools.policy.confirm.revoke.description",
+    label: "integrationTools.policy.revoke",
+  },
+  block: {
+    title: "integrationTools.policy.confirm.block.title",
+    description: "integrationTools.policy.confirm.block.description",
+    label: "integrationTools.policy.block",
+  },
+} as const satisfies Record<Confirm["kind"], { title: string; description: string; label: string }>;
+
 /**
  * Wraps the tools table: `children` draws it with the controls, the review follows. Without
  * `access` the table stands alone.
@@ -110,6 +128,7 @@ export function IntegrationToolPolicySection({
       declaration={access.declaration}
       banner={access.banner}
       pending={actions.isPending}
+      isBusy={actions.isBusy}
       onApprove={actions.approve}
       onBlock={actions.block}
       onRevoke={actions.revoke}
@@ -129,6 +148,7 @@ export function ToolPolicyView({
   declaration,
   banner,
   pending,
+  isBusy,
   onApprove,
   onBlock,
   onRevoke,
@@ -145,6 +165,8 @@ export function ToolPolicyView({
   banner?: ReactNode;
   /** Whether a write of that kind is in flight for that tool: only its own row waits on it. */
   pending: (action: ToolPolicyAction, name: string) => boolean;
+  /** Whether any write is in flight for that tool: its row is locked, the others stay usable. */
+  isBusy: (name: string) => boolean;
   /** `onDone` runs on success: a confirmation closes then, not on the click. */
   onApprove: (items: Approval[], onDone?: () => void) => void;
   onBlock: (name: string, onDone: () => void) => void;
@@ -163,16 +185,12 @@ export function ToolPolicyView({
     setConfirm(next);
     setConfirmOpen(true);
   };
-  // A tool's row is locked while any write on it is in flight; the others stay usable.
-  const isBusy = (name: string) =>
-    (["approve", "revoke", "block", "unblock"] as const).some((action) => pending(action, name));
-
   const decided = review ? policy : null;
   const items = decided ? reviewItems(tools, decided) : [];
   const approvable = items.flatMap((item) =>
     item.fingerprint === null ? [] : [{ name: item.name, fingerprint: item.fingerprint }],
   );
-  const approved = new Set(decided ? latestApprovals(decided.approvals).keys() : []);
+  const approved = new Set(decided?.approvals.map((approval) => approval.tool_name));
   const blocked = new Set(decided?.blocks.map((block) => block.tool_name));
   const inCatalog = new Set(tools.map((tool) => tool.name));
   const declarable = new Set(declaration ? declarableTools(tools) : []);
@@ -372,27 +390,12 @@ export function ToolPolicyView({
       <ConfirmModal
         open={confirmOpen}
         onClose={() => setConfirmOpen(false)}
-        title={
-          confirm?.kind === "approveAll"
-            ? t("integrationTools.policy.confirm.approveAll.title", { count: confirm.items.length })
-            : confirm?.kind === "revoke"
-              ? t("integrationTools.policy.confirm.revoke.title", { name: confirm.name })
-              : t("integrationTools.policy.confirm.block.title", { name: confirm?.name ?? "" })
-        }
-        description={
-          confirm?.kind === "approveAll"
-            ? t("integrationTools.policy.confirm.approveAll.description")
-            : confirm?.kind === "revoke"
-              ? t("integrationTools.policy.confirm.revoke.description")
-              : t("integrationTools.policy.confirm.block.description")
-        }
-        confirmLabel={t(
-          confirm?.kind === "approveAll"
-            ? "integrationTools.policy.approveAll"
-            : confirm?.kind === "revoke"
-              ? "integrationTools.policy.revoke"
-              : "integrationTools.policy.block",
-        )}
+        title={t(CONFIRM_KEYS[confirm?.kind ?? "block"].title, {
+          count: confirm?.kind === "approveAll" ? confirm.items.length : undefined,
+          name: confirm && confirm.kind !== "approveAll" ? confirm.name : "",
+        })}
+        description={t(CONFIRM_KEYS[confirm?.kind ?? "block"].description)}
+        confirmLabel={t(CONFIRM_KEYS[confirm?.kind ?? "block"].label)}
         isPending={
           confirm?.kind === "approveAll"
             ? confirm.items.some((item) => pending("approve", item.name))
@@ -445,8 +448,8 @@ function DefinitionCompare({
         ) : previous !== null ? (
           <DraftDiffView
             language="json"
-            original={canonicalDefinitionJson(previous)}
-            modified={canonicalDefinitionJson(current)}
+            original={stableJson(previous, 2) ?? ""}
+            modified={stableJson(current, 2) ?? ""}
             originalLabel={t("integrationTools.policy.review.approvedDefinition")}
             modifiedLabel={t("integrationTools.policy.review.currentDefinition")}
           />

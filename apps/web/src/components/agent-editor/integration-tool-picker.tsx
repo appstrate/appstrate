@@ -14,7 +14,7 @@
  */
 
 import { toggleValue } from "../../lib/toggle-value";
-import { hasOAuthAuth, isToolWithoutPermission } from "../../lib/integration-tool-scopes";
+import { hasOAuthAuth, isToolWithoutPermission } from "../../lib/integration-tool-policy";
 import { type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { ChevronRight } from "lucide-react";

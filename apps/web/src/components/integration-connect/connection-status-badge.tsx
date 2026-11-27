@@ -9,8 +9,12 @@ export function ConnectionRequestedScopesBadge({ scopes }: { scopes: readonly st
   if (scopes.length === 0) return null;
   const label = t("integration.connection.requestedScopes", { scopes: scopes.join(", ") });
   return (
-    <Badge variant="warning" className="max-w-full min-w-0" title={label}>
-      <span className="truncate">{label}</span>
+    // The full list stays readable on touch (no hover title): the text wraps instead of truncating.
+    <Badge
+      variant="warning"
+      className="h-auto max-w-full min-w-0 text-left break-words whitespace-normal"
+    >
+      {label}
     </Badge>
   );
 }

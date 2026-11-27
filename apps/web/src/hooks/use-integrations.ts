@@ -23,6 +23,7 @@ import { $api, client, type paths } from "../api/client";
 import { invalidatePaths } from "../lib/query-keys";
 import { spaceHeader } from "../lib/scoping-headers";
 import { splitPackageRef } from "../lib/package-paths";
+import { connectionChoiceBody } from "../lib/integration-server-sync";
 
 // Spec-pinned: the generated response shape verbatim (a rename/removal of any non-`manifest`
 // field breaks compilation), narrowing only the freeform AFPS `manifest` to IntegrationManifestView.
@@ -304,6 +305,18 @@ export function useIntegrationToolPolicyActions(packageId: string) {
     "/api/integrations/{packageId}/tool-policy/blocks/{toolName}",
     { onSuccess },
   );
+  const isPending = (action: ToolPolicyAction, name: string): boolean => {
+    switch (action) {
+      case "approve":
+        return approve.isPending && !!approve.variables?.body.tools.some((t) => t.name === name);
+      case "block":
+        return block.isPending && !!block.variables?.body.tools.includes(name);
+      case "revoke":
+        return revoke.isPending && revoke.variables?.params.path.toolName === name;
+      case "unblock":
+        return unblock.isPending && unblock.variables?.params.path.toolName === name;
+    }
+  };
   return {
     /** `onDone` runs once the write succeeded (a confirmation closes then). */
     approve: (items: Parameters<typeof approve.mutate>[0]["body"]["tools"], onDone?: () => void) =>
@@ -314,18 +327,34 @@ export function useIntegrationToolPolicyActions(packageId: string) {
       block.mutate({ params: { path }, body: { tools: [name] } }, { onSuccess: onDone }),
     unblock: (toolName: string) => unblock.mutate({ params: { path: { ...path, toolName } } }),
     /** Whether `action` is in flight for the tool `name`: a row waits on its own write only. */
-    isPending: (action: ToolPolicyAction, name: string): boolean => {
-      switch (action) {
-        case "approve":
-          return approve.isPending && !!approve.variables?.body.tools.some((t) => t.name === name);
-        case "block":
-          return block.isPending && !!block.variables?.body.tools.includes(name);
-        case "revoke":
-          return revoke.isPending && revoke.variables?.params.path.toolName === name;
-        case "unblock":
-          return unblock.isPending && unblock.variables?.params.path.toolName === name;
-      }
-    },
+    isPending,
+    /** Whether any write is in flight for the tool `name`: its row is locked. */
+    isBusy: (name: string): boolean =>
+      (["approve", "revoke", "block", "unblock"] as const).some((action) =>
+        isPending(action, name),
+      ),
+  };
+}
+
+/**
+ * « Relire le serveur »: lists the remote server again and stores the snapshot. The refusal is
+ * shown by the caller under its button, with the connection choice it may offer.
+ */
+export function useToolSnapshotRefresh(packageId: string) {
+  const qc = useQueryClient();
+  const refresh = $api.useMutation("post", "/api/integrations/{packageId}/tool-snapshot/refresh", {
+    meta: { errorHandledByCaller: true },
+    onSuccess: () => invalidateIntegrationQueries(qc),
+  });
+  const request = (connectionId?: string) => ({
+    params: { path: { packageId } },
+    body: connectionChoiceBody(connectionId),
+  });
+  return {
+    isPending: refresh.isPending,
+    error: refresh.error,
+    run: (connectionId?: string) => refresh.mutate(request(connectionId)),
+    runAsync: (connectionId?: string) => refresh.mutateAsync(request(connectionId)),
   };
 }
 

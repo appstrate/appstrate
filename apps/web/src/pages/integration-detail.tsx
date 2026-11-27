@@ -16,10 +16,7 @@ import { useTabWithHash } from "../hooks/use-tab-with-hash";
 import { IntegrationOverview } from "../components/package-detail/integration-overview";
 import { IntegrationFunctioning } from "../components/package-detail/integration-structure";
 import { IntegrationToolsSection } from "../components/integration-editor/integration-tools-section";
-import type {
-  ToolDeclaration,
-  ToolPolicyAccess,
-} from "../components/integration-editor/integration-tool-policy-section";
+import type { ToolPolicyAccess } from "../components/integration-editor/integration-tool-policy-section";
 
 const INTEGRATION_TABS = ["overview", "connections", "settings"] as const;
 import { useTranslation } from "react-i18next";
@@ -178,51 +175,54 @@ export function IntegrationSettings({
   }, [clientTarget, hasClientTable, closeClient]);
 
   // The identity read calls the server of the DRAFT, published or not: the copy this editor writes.
-  // A reader without the draft reads the saved one: the listing is asked for with its source.
-  const readManifest = definition?.manifest ?? detail.manifest;
-  const serverRead = serverReadAvailability(readIntegrationSource(readManifest.source), {
-    unauthenticated: isUnauthenticatedIntegration(readManifest),
-    mayProxy: can("credential-proxy:call-own"),
-    hasConnection: detail.auths.some((auth) => auth.connections.length > 0),
-  });
-  const snapshot = toolSnapshot(detail, serverRead, published);
+  // A reader without the draft reads the saved one. The tool listing is read from the latest
+  // PUBLISHED version: its availability follows the published manifest.
+  const readAvailability = (
+    manifest: NonNullable<NonNullable<typeof definition>["manifest"] | typeof detail.manifest>,
+  ) =>
+    serverReadAvailability(readIntegrationSource(manifest.source), {
+      unauthenticated: isUnauthenticatedIntegration(manifest),
+      mayProxy: can("credential-proxy:call-own"),
+      hasConnection: detail.auths.some((auth) => auth.connections.length > 0),
+    });
+  const serverRead = readAvailability(definition?.manifest ?? detail.manifest);
+  const snapshot = toolSnapshot(detail, readAvailability(detail.manifest), published);
+  // The space this configuration is set in, and why its decisions may be out of reach.
+  const spaceBanner = (showSpace: boolean, spaceLine: boolean) => (
+    <>
+      {showSpace && (
+        <ConfigurationSpace
+          label={t("detail.configuration.spaceLabel", { ns: "agents" })}
+          choiceLabel={t("detail.configuration.spaceChoice", { ns: "agents" })}
+          spaceIds={spaceIds}
+          enter={configureIn}
+        />
+      )}
+      {spaceLine &&
+        (!detail.active ? (
+          <ActivationHint />
+        ) : (
+          overview &&
+          !can("integrations:configure") &&
+          workingSpace && (
+            <RoleLimitNotice>
+              {t("integration.config.roleLimitIn", { space: workingSpace })}
+            </RoleLimitNotice>
+          )
+        ))}
+    </>
+  );
   // Only a remote integration lists tools a space can review. The review is one space's: it
   // follows the sections set in a space (`isIntegrationSpaceSection`) in « Tous les espaces ».
   // An author of the draft reads it too, to declare the listed tools.
-  const toolPolicy =
+  // The decisions are the working space's; declaring is the integration's, whatever the space.
+  const spaceLine = canConfigure && fromWorkingSpace;
+  const toolPolicy: ToolPolicyAccess | undefined =
     snapshot && (canConfigure || !!definition)
-      ? (declaration?: ToolDeclaration): ToolPolicyAccess => {
-          // The decisions are the working space's; declaring is the integration's, whatever the space.
-          const spaceLine = canConfigure && fromWorkingSpace;
-          return {
-            packageId,
-            review: spaceLine && detail.active && can("integrations:configure"),
-            declaration,
-            banner: (
-              <>
-                {canConfigure && overview && (
-                  <ConfigurationSpace
-                    label={t("detail.configuration.spaceLabel", { ns: "agents" })}
-                    choiceLabel={t("detail.configuration.spaceChoice", { ns: "agents" })}
-                    spaceIds={spaceIds}
-                    enter={configureIn}
-                  />
-                )}
-                {spaceLine &&
-                  (!detail.active ? (
-                    <ActivationHint />
-                  ) : (
-                    overview &&
-                    !can("integrations:configure") &&
-                    workingSpace && (
-                      <RoleLimitNotice>
-                        {t("integration.config.roleLimitIn", { space: workingSpace })}
-                      </RoleLimitNotice>
-                    )
-                  ))}
-              </>
-            ),
-          };
+      ? {
+          packageId,
+          review: spaceLine && detail.active && can("integrations:configure"),
+          banner: spaceBanner(canConfigure && overview, spaceLine),
         }
       : undefined;
   const resolve = (requested: string | null): IntegrationSettingsSection =>
@@ -331,30 +331,15 @@ export function IntegrationSettings({
               tools={detail.tool_catalog ?? []}
               allowUndeclaredTools={detail.allow_undeclared_tools}
               snapshot={snapshot}
-              spacePolicy={toolPolicy?.()}
+              spacePolicy={toolPolicy}
             />
           </div>
         ) : isIntegrationSpaceSection(active) ? (
           // In « Tous les espaces » the space it is set in comes first.
           <div className="p-6">
-            {overview && (
-              <ConfigurationSpace
-                label={t("detail.configuration.spaceLabel", { ns: "agents" })}
-                choiceLabel={t("detail.configuration.spaceChoice", { ns: "agents" })}
-                spaceIds={spaceIds}
-                enter={configureIn}
-              />
-            )}
+            {spaceBanner(overview, fromWorkingSpace)}
             {/* In the mode, the section is the working space's only when the line names it. */}
-            {!fromWorkingSpace ? null : !detail.active ? (
-              <ActivationHint />
-            ) : overview && !can("integrations:configure") ? (
-              workingSpace && (
-                <RoleLimitNotice>
-                  {t("integration.config.roleLimitIn", { space: workingSpace })}
-                </RoleLimitNotice>
-              )
-            ) : (
+            {fromWorkingSpace && detail.active && !(overview && !can("integrations:configure")) && (
               <>
                 <SettingsHeading
                   title={t(SPACE_SECTION_HEADINGS[active].title)}

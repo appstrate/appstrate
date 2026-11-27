@@ -19,14 +19,15 @@
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Pencil, Plus, Trash2 } from "lucide-react";
-import { useQueryClient } from "@tanstack/react-query";
-import { $api } from "../../api/client";
-import { invalidateIntegrationQueries } from "../../hooks/use-integrations";
+import { asRecord } from "@appstrate/core/safe-json";
+import { useToolSnapshotRefresh } from "../../hooks/use-integrations";
 import { formatDateField } from "../../lib/format-date";
-import { isToolWithoutPermission } from "../../lib/integration-tool-scopes";
-import type { ToolCatalogEntry } from "../../lib/integration-tool-policy";
+import {
+  declareTools,
+  isToolWithoutPermission,
+  type ToolCatalogEntry,
+} from "../../lib/integration-tool-policy";
 import type { ToolSnapshot } from "../../lib/integration-tool-snapshot";
-import { connectionChoiceBody } from "../../lib/integration-server-sync";
 import { ServerReadControl } from "./server-read-control";
 import { Alert, AlertDescription, AlertTitle } from "@appstrate/ui/components/alert";
 import { Button } from "@appstrate/ui/components/button";
@@ -95,10 +96,25 @@ export function IntegrationToolsSection({
     ...(policies ?? [])
       .filter((policy) => !tools.some((tool) => tool.name === policy.name))
       .map((policy) => ({ name: policy.name, permissions: policy.requiredScopes })),
-  ];
+  ].map((tool) => ({
+    ...tool,
+    // The agent picker's flag: a tool of an OAuth integration without a declared scope.
+    scopesUnknown: !!snapshot?.oauth && isToolWithoutPermission(tool),
+  }));
 
   const allowUndeclared = edit ? getAllowUndeclaredTools(edit.manifest) : allowUndeclaredTools;
   const commit = (next: ToolPolicyState[]) => edit?.onChange(setToolsPolicy(edit.manifest, next));
+  // Declaring a listed tool edits the draft; saving and publishing stay the author's.
+  const access: ToolPolicyAccess | undefined =
+    spacePolicy && edit
+      ? {
+          ...spacePolicy,
+          declaration: {
+            declared: new Set(Object.keys(asRecord(edit.manifest.tools_policy))),
+            declare: (names) => edit.onChange(declareTools(edit.manifest, names)),
+          },
+        }
+      : spacePolicy;
 
   return (
     <div className="flex flex-col gap-4">
@@ -119,7 +135,7 @@ export function IntegrationToolsSection({
           </Alert>
         )
       )}
-      <IntegrationToolPolicySection access={spacePolicy} tools={tools}>
+      <IntegrationToolPolicySection access={access} tools={tools}>
         {(controls) => (
           <PackageToolCatalog
             tools={[...entries, ...controls.extraRows]}
@@ -142,7 +158,7 @@ export function IntegrationToolsSection({
               />
             }
             rowActions={
-              policies || spacePolicy?.review || spacePolicy?.declaration
+              policies || access?.review || access?.declaration
                 ? (tool) => (
                     <TableRowActions
                       menuLabel={t("editor.rowActions", { name: tool.name })}
@@ -222,17 +238,7 @@ function ToolSnapshotSummary({
   tools: PackageTool[];
 }) {
   const { t } = useTranslation("agents");
-  const qc = useQueryClient();
-  const refresh = $api.useMutation("post", "/api/integrations/{packageId}/tool-snapshot/refresh", {
-    // The refusal is shown under the button, with the connection choice it may offer.
-    meta: { errorHandledByCaller: true },
-    onSuccess: () => invalidateIntegrationQueries(qc),
-  });
-  const run = (connectionId?: string) =>
-    refresh.mutate({
-      params: { path: { packageId } },
-      body: connectionChoiceBody(connectionId),
-    });
+  const refresh = useToolSnapshotRefresh(packageId);
   const withoutScopes = snapshot.oauth ? tools.filter(isToolWithoutPermission).length : 0;
   const { summary, refreshBlock } = snapshot;
   return (
@@ -267,7 +273,7 @@ function ToolSnapshotSummary({
         blockedBy={refreshBlock}
         isPending={refresh.isPending}
         error={refresh.error}
-        onRun={run}
+        onRun={refresh.run}
         buttonTestId="integration-tool-snapshot-refresh"
       >
         {refreshBlock === null && (

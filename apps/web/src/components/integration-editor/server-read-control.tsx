@@ -8,7 +8,7 @@ import { Spinner } from "@appstrate/ui/components/spinner";
 import { errorMessage } from "../../lib/mutation-error";
 import type { SnapshotRefreshBlock } from "../../lib/integration-tool-snapshot";
 import { DisabledReasonTooltip } from "../disabled-reason-tooltip";
-import { SyncConnectionChoice } from "./sync-connection-choice";
+import { ConnectionChoice } from "./connection-choice";
 
 /**
  * The control that reads an integration's remote server: one button, shown disabled with its
@@ -58,7 +58,7 @@ export function ServerReadControl({
           {errorMessage(error)}
         </p>
       )}
-      <SyncConnectionChoice error={error} onChoose={onRun} disabled={isPending} />
+      <ConnectionChoice error={error} onChoose={onRun} disabled={isPending} />
     </div>
   );
 }

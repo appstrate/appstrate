@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
+import type { ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import type { To } from "react-router-dom";
 import type { EnrichedRun } from "@appstrate/shared-types";
@@ -127,22 +128,17 @@ export function ModelFallbackCard({
 }) {
   const { t } = useTranslation("agents");
   return (
-    <div className="mb-6">
-      <HealthCard title={t("run.modelFallback.title")} tone="warning" badge={null}>
-        <p className="text-muted-foreground px-4 pt-3 text-xs">{t("run.modelFallback.message")}</p>
-        <ul className="px-4">
-          <HealthCardItem
-            title={t("run.modelFallback.chosen", { model: chosen })}
-            description={t("run.modelFallback.used", { model: used })}
-            actions={
-              settingsTo ? (
-                <HealthAction to={settingsTo}>{t("run.modelFallback.change")}</HealthAction>
-              ) : null
-            }
-          />
-        </ul>
-      </HealthCard>
-    </div>
+    <RunWarningCard title={t("run.modelFallback.title")} message={t("run.modelFallback.message")}>
+      <HealthCardItem
+        title={t("run.modelFallback.chosen", { model: chosen })}
+        description={t("run.modelFallback.used", { model: used })}
+        actions={
+          settingsTo ? (
+            <HealthAction to={settingsTo}>{t("run.modelFallback.change")}</HealthAction>
+          ) : null
+        }
+      />
+    </RunWarningCard>
   );
 }
 
@@ -163,6 +159,26 @@ function ResolvedModelFallback({
       used={fallback.model}
       settingsTo={reachable ? agentSettingsHref(agentPath, "model") : null}
     />
+  );
+}
+
+/** One warning card of a run: a title, what it means, then one item per finding. */
+function RunWarningCard({
+  title,
+  message,
+  children,
+}: {
+  title: string;
+  message: string;
+  children: ReactNode;
+}) {
+  return (
+    <div className="mb-6">
+      <HealthCard title={title} tone="warning" badge={null}>
+        <p className="text-muted-foreground px-4 pt-3 text-xs">{message}</p>
+        <ul className="px-4">{children}</ul>
+      </HealthCard>
+    </div>
   );
 }
 
@@ -188,68 +204,52 @@ export function RunWarnings({
     <>
       {modelFallback && <ResolvedModelFallback run={run} fallback={modelFallback} />}
       {degraded.length > 0 && (
-        <div className="mb-6">
-          <HealthCard title={t("run.degradedIntegrations.title")} tone="warning" badge={null}>
-            <p className="text-muted-foreground px-4 pt-3 text-xs">
-              {t("run.degradedIntegrations.message")}
-            </p>
-            <ul className="px-4">
-              {degraded.map((id) => (
-                <DegradedIntegrationItem key={id} integrationId={id} />
-              ))}
-            </ul>
-          </HealthCard>
-        </div>
+        <RunWarningCard
+          title={t("run.degradedIntegrations.title")}
+          message={t("run.degradedIntegrations.message")}
+        >
+          {degraded.map((id) => (
+            <DegradedIntegrationItem key={id} integrationId={id} />
+          ))}
+        </RunWarningCard>
       )}
       {scopeRequests.length > 0 && (
-        <div className="mb-6">
-          <HealthCard title={t("run.scopeRequests.title")} tone="warning" badge={null}>
-            <p className="text-muted-foreground px-4 pt-3 text-xs">
-              {t("run.scopeRequests.message")}
-            </p>
-            <ul className="px-4">
-              {scopeRequests.map((request) => (
-                <ScopeRequestItem
-                  key={`${request.integrationId}:${request.connectionId}`}
-                  request={request}
-                />
-              ))}
-            </ul>
-          </HealthCard>
-        </div>
+        <RunWarningCard
+          title={t("run.scopeRequests.title")}
+          message={t("run.scopeRequests.message")}
+        >
+          {scopeRequests.map((request) => (
+            <ScopeRequestItem
+              key={`${request.integrationId}:${request.connectionId}`}
+              request={request}
+            />
+          ))}
+        </RunWarningCard>
       )}
       {unavailable.length > 0 && (
-        <div className="mb-6">
-          <HealthCard title={t("run.unavailableTools.title")} tone="warning" badge={null}>
-            <p className="text-muted-foreground px-4 pt-3 text-xs">
-              {t("run.unavailableTools.message")}
-            </p>
-            <ul className="px-4">
-              {unavailable.map((tool) => (
-                <UnavailableToolItem key={`${tool.integrationId}:${tool.name}`} tool={tool} />
-              ))}
-            </ul>
-          </HealthCard>
-        </div>
+        <RunWarningCard
+          title={t("run.unavailableTools.title")}
+          message={t("run.unavailableTools.message")}
+        >
+          {unavailable.map((tool) => (
+            <UnavailableToolItem key={`${tool.integrationId}:${tool.name}`} tool={tool} />
+          ))}
+        </RunWarningCard>
       )}
       {lost && (
-        <div className="mb-6">
-          <HealthCard title={t("run.artifacts.partial.title")} tone="warning" badge={null}>
-            <p className="text-muted-foreground px-4 pt-3 text-xs">
-              {t("run.artifacts.partial.message")}
-            </p>
-            <ul className="px-4">
-              {lost.map((file) => (
-                <HealthCardItem
-                  key={file.name}
-                  title={<span className="font-mono text-xs break-all">{file.name}</span>}
-                  description={t(artifactFailureCodeKey(file.code))}
-                  actions={null}
-                />
-              ))}
-            </ul>
-          </HealthCard>
-        </div>
+        <RunWarningCard
+          title={t("run.artifacts.partial.title")}
+          message={t("run.artifacts.partial.message")}
+        >
+          {lost.map((file) => (
+            <HealthCardItem
+              key={file.name}
+              title={<span className="font-mono text-xs break-all">{file.name}</span>}
+              description={t(artifactFailureCodeKey(file.code))}
+              actions={null}
+            />
+          ))}
+        </RunWarningCard>
       )}
     </>
   );

@@ -14,6 +14,8 @@ function renderFill(blockedBy: "sse" | "no_permission" | "no_connection" | null)
       blockedBy={blockedBy}
       manifest={{}}
       onChange={() => {}}
+      operations={undefined}
+      onOperationsChange={() => {}}
     />,
   );
 }

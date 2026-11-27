@@ -5,6 +5,8 @@
 
 import { ApiError } from "../api/errors";
 import type { components, paths } from "../api/schema";
+import { fileTextOperation } from "./package-file-drafts";
+import type { PackageFileWriteOperation } from "./package-file-tree";
 
 type Manifest = Record<string, unknown>;
 
@@ -40,8 +42,28 @@ export function mergeServerIdentity(
   return { manifest, filled };
 }
 
+/**
+ * The staged operations with the server's instructions written as `INTEGRATION.md`; the same
+ * array when there are none or a write of that file is already staged (what the author staged
+ * is never replaced). The server itself sends none when the saved draft has the file.
+ */
+export function stageServerDoc(
+  operations: PackageFileWriteOperation[] | undefined,
+  instructions: string | null,
+): PackageFileWriteOperation[] | undefined {
+  if (!instructions) return operations;
+  const staged = (operations ?? []).some(
+    (operation) => operation.op === "write" && operation.path === INTEGRATION_DOC,
+  );
+  return staged
+    ? operations
+    : [...(operations ?? []), fileTextOperation(INTEGRATION_DOC, instructions)];
+}
+
 /** Why a draft's server cannot be read yet; the control is shown disabled with this reason. */
 export type ServerReadBlock = "sse" | "no_permission" | "no_connection";
+
+export type ServerReadAvailability = "available" | ServerReadBlock | null;
 
 /**
  * Whether a draft's server can be read: `null` when there is nothing to read (not a remote
@@ -51,7 +73,7 @@ export type ServerReadBlock = "sse" | "no_permission" | "no_connection";
 export function serverReadAvailability(
   source: { kind: string; transport?: string } | null | undefined,
   access: { unauthenticated: boolean; mayProxy: boolean; hasConnection: boolean },
-): "available" | ServerReadBlock | null {
+): ServerReadAvailability {
   if (source?.kind !== "remote") return null;
   if (source.transport === "sse") return "sse";
   // A draft declaring no auths (AFPS §7.2) is read without the credential proxy nor a connection.
@@ -70,14 +92,15 @@ export function connectionChoiceBody(connectionId?: string): ConnectionChoiceBod
   return connectionId ? { connection_id: connectionId } : {};
 }
 
-export type SyncCandidate = NonNullable<
+export type ConnectionCandidate = NonNullable<
   components["schemas"]["ConnectionResolutionItem"]["candidate_connections"]
 >[number];
 
-/** The connections a `409 must_choose_connection` sync refusal offers; `null` for any other error. */
-export function syncConnectionCandidates(err: unknown): SyncCandidate[] | null {
+/** The connections a `409 must_choose_connection` refusal offers; `null` for any other error. */
+export function connectionChoiceCandidates(err: unknown): ConnectionCandidate[] | null {
   if (!(err instanceof ApiError) || err.code !== "must_choose_connection") return null;
   return (err.errors ?? []).flatMap(
-    (item) => (item as { candidate_connections?: SyncCandidate[] }).candidate_connections ?? [],
+    (item) =>
+      (item as { candidate_connections?: ConnectionCandidate[] }).candidate_connections ?? [],
   );
 }

@@ -2,11 +2,16 @@
 
 import type { UnavailableToolReason } from "@appstrate/core/sidecar-types";
 
+/** The array stamped under `key` of a run's metadata; empty when absent or not an array. */
+function metadataArray(metadata: unknown, key: string): unknown[] {
+  if (metadata == null || typeof metadata !== "object") return [];
+  const raw = (metadata as Record<string, unknown>)[key];
+  return Array.isArray(raw) ? raw : [];
+}
+
 /** Safe-narrows `runs.metadata.degraded_integrations` (integration ids, stamped on a terminal 401 at refresh). */
 export function parseDegradedIntegrations(metadata: unknown): string[] {
-  if (metadata == null || typeof metadata !== "object") return [];
-  const raw = (metadata as Record<string, unknown>).degraded_integrations;
-  if (!Array.isArray(raw)) return [];
+  const raw = metadataArray(metadata, "degraded_integrations");
   return raw.filter((v): v is string => typeof v === "string");
 }
 
@@ -38,9 +43,7 @@ const isUnavailableReason = (value: unknown): value is UnavailableToolReason =>
 
 /** Safe-narrows `runs.metadata.unavailable_tools`: the tools a run's agent asked for that were not served. */
 export function parseUnavailableTools(metadata: unknown): UnavailableTool[] {
-  if (metadata == null || typeof metadata !== "object") return [];
-  const raw = (metadata as Record<string, unknown>).unavailable_tools;
-  if (!Array.isArray(raw)) return [];
+  const raw = metadataArray(metadata, "unavailable_tools");
   return raw.flatMap((item) => {
     if (item == null || typeof item !== "object") return [];
     const { integration_id, name, reason } = item as Record<string, unknown>;
@@ -64,9 +67,7 @@ export interface ScopeRequest {
 
 /** Safe-narrows `runs.metadata.scope_requests`: the scopes a server asked for that a connection of the run does not hold. */
 export function parseScopeRequests(metadata: unknown): ScopeRequest[] {
-  if (metadata == null || typeof metadata !== "object") return [];
-  const raw = (metadata as Record<string, unknown>).scope_requests;
-  if (!Array.isArray(raw)) return [];
+  const raw = metadataArray(metadata, "scope_requests");
   return raw.flatMap((item) => {
     if (item == null || typeof item !== "object") return [];
     const { integration_id, connection_id, scopes } = item as Record<string, unknown>;

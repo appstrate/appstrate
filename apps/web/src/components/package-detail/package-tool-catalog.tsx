@@ -15,8 +15,7 @@ import { rowActionsColumn } from "../row-actions-column";
 import { useLocalListParams } from "../../lib/list-params";
 import { matchesSearch } from "../../lib/strings";
 import { formatDateField } from "../../lib/format-date";
-import type { ToolCatalogEntry } from "../../lib/integration-tool-policy";
-import { isUsableToolStatus } from "../agent-editor/tool-selection";
+import { isUsableToolStatus, type ToolCatalogEntry } from "../../lib/integration-tool-policy";
 
 /** What the table shows of a tool; a catalog without a space verdict leaves `status`, `origin`, `modified` out. */
 export type PackageTool = Pick<ToolCatalogEntry, "name" | "description"> &

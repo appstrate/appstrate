@@ -5,7 +5,6 @@ import { useTranslation } from "react-i18next";
 import type { Versioned } from "../hooks/use-packages";
 import type { AgentDetail, OrgPackageItemDetail } from "@appstrate/shared-types";
 import { dropRetiredDependencyKeys } from "@appstrate/core/dependencies";
-import { asRecord } from "@appstrate/core/safe-json";
 import type { AgentDefinitionSection } from "../lib/settings-section-href";
 import { EditorDirtyReportContext, type EditorState } from "../hooks/use-editor-state";
 import { FormField } from "../components/form-field";
@@ -27,11 +26,8 @@ import { IntegrationIconField } from "../components/integration-editor/integrati
 import { AuthsSection } from "../components/integration-editor/auths-section";
 import { IntegrationToolsSection } from "../components/integration-editor/integration-tools-section";
 import { ServerIdentityFill } from "../components/integration-editor/server-identity-fill";
-import type { serverReadAvailability } from "../lib/integration-server-sync";
-import type {
-  ToolDeclaration,
-  ToolPolicyAccess,
-} from "../components/integration-editor/integration-tool-policy-section";
+import type { ServerReadAvailability } from "../lib/integration-server-sync";
+import type { ToolPolicyAccess } from "../components/integration-editor/integration-tool-policy-section";
 
 import {
   manifestToSchemaFields,
@@ -41,7 +37,7 @@ import {
   fieldsToSchema,
 } from "../components/agent-editor/utils";
 import type { ResourceEntry, SchemaField } from "../components/agent-editor/types";
-import { declareTools, type ToolCatalogEntry } from "../lib/integration-tool-policy";
+import type { ToolCatalogEntry } from "../lib/integration-tool-policy";
 import type { ToolSnapshot } from "../lib/integration-tool-snapshot";
 
 const asNumber = (value: unknown) => (typeof value === "number" ? value : undefined);
@@ -319,9 +315,9 @@ function IntegrationEditorInner({
   /** The server's last listing, summarised above the table. */
   snapshot?: ToolSnapshot;
   /** Whether the draft's server can be read for its identity; `null`: not a remote source. */
-  serverRead: ReturnType<typeof serverReadAvailability>;
+  serverRead: ServerReadAvailability;
   /** What the Tools section offers about the space's review and blocks, given the draft's declaration. */
-  toolPolicy?: (declaration: ToolDeclaration) => ToolPolicyAccess;
+  toolPolicy?: ToolPolicyAccess;
 }) {
   const { t } = useTranslation(["agents", "common"]);
   // Set by `validate` when it refuses the local server: the Source tab flags its empty fields.
@@ -350,12 +346,6 @@ function IntegrationEditorInner({
   const isLocal = getSource(state.manifest).kind === "local";
   const fileIndex = usePackageFileIndex(isLocal ? packageId : undefined);
   const serverFiles = fileIndex.data?.data.map((file) => file.path);
-  // Declaring a listed tool edits the draft; saving and publishing stay the author's.
-  const declaration: ToolDeclaration = {
-    declared: new Set(Object.keys(asRecord(state.manifest.tools_policy))),
-    declare: (names) =>
-      editor.setState((s) => ({ ...s, manifest: declareTools(s.manifest, names) })),
-  };
 
   return (
     <PackageEditorFrame
@@ -390,6 +380,10 @@ function IntegrationEditorInner({
                   blockedBy={serverRead === "available" ? null : serverRead}
                   manifest={state.manifest}
                   onChange={onManifestChange}
+                  operations={state.operations}
+                  onOperationsChange={(operations) =>
+                    editor.setState((s) => ({ ...s, operations }))
+                  }
                 />
               )}
             </>
@@ -416,7 +410,7 @@ function IntegrationEditorInner({
           packageId={packageId}
           tools={toolCatalog}
           snapshot={snapshot}
-          spacePolicy={toolPolicy?.(declaration)}
+          spacePolicy={toolPolicy}
           edit={{ manifest: state.manifest, onChange: onManifestChange }}
         />
       )}
@@ -440,9 +434,9 @@ export function IntegrationDefinitionEditor({
   toolCatalog: ToolCatalogEntry[];
   snapshot?: ToolSnapshot;
   /** Whether the draft's remote server can be read for its identity; `null`: not remote. */
-  serverRead: ReturnType<typeof serverReadAvailability>;
+  serverRead: ServerReadAvailability;
   /** What the Tools section offers about the space's review and blocks. */
-  toolPolicy?: (declaration: ToolDeclaration) => ToolPolicyAccess;
+  toolPolicy?: ToolPolicyAccess;
 }) {
   return (
     <DraftEditorMount id={detail.id} etag={detail.etag}>

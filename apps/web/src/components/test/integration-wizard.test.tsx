@@ -169,6 +169,9 @@ describe("the tools step", () => {
       <ToolsChoice
         trustAll={trustAll}
         onTrustAllChange={noop}
+        proposal={null}
+        includeDocs
+        onIncludeDocsChange={noop}
         otherDraftChanges={over.otherDraftChanges ?? false}
         detailPath="/integrations/@org/acme"
         version="1.1.0"
@@ -217,6 +220,8 @@ describe("the tools step", () => {
           instructions: "# Acme\nCall search first.",
           warnings: [{ code: "instructions_truncated", message: "cut" }],
         }}
+        includeDocs
+        onIncludeDocsChange={noop}
         version="1.1.0"
         onSubmit={noop}
         pending={false}
@@ -233,8 +238,9 @@ describe("the tools step", () => {
   });
 
   it("freezes the choice while saving", () => {
-    expect(radio(choice(false), "trust")).not.toContain(" disabled=");
-    expect(radio(choice(false, { pending: true }), "trust")).toContain(" disabled=");
+    // The fieldset disables every control it holds.
+    expect(choice(false)).not.toMatch(/<fieldset[^>]*disabled/);
+    expect(choice(false, { pending: true })).toMatch(/<fieldset[^>]*disabled/);
   });
 });
 

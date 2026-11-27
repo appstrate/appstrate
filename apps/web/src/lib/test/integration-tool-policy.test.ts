@@ -2,9 +2,11 @@
 
 import { describe, expect, it } from "bun:test";
 import {
-  canonicalDefinitionJson,
   declarableTools,
   declareTools,
+  hasOAuthAuth,
+  isToolWithoutPermission,
+  isUsableToolStatus,
   latestApprovals,
   reviewItems,
   toolHints,
@@ -105,17 +107,6 @@ describe("latestApprovals / newest approval", () => {
   });
 });
 
-describe("canonicalDefinitionJson", () => {
-  it("sorts keys at every depth", () => {
-    expect(canonicalDefinitionJson({ b: 1, a: { d: [{ y: 1, x: 2 }], c: null } })).toBe(
-      canonicalDefinitionJson({ a: { c: null, d: [{ x: 2, y: 1 }] }, b: 1 }),
-    );
-    expect(canonicalDefinitionJson({ b: 1, a: 2 }).indexOf('"a"')).toBeLessThan(
-      canonicalDefinitionJson({ b: 1, a: 2 }).indexOf('"b"'),
-    );
-  });
-});
-
 describe("declarableTools", () => {
   it("keeps the tools the integration does not declare, minus those the server no longer lists", () => {
     expect(
@@ -152,5 +143,36 @@ describe("declareTools", () => {
     expect(declareTools({ name: "x" }, ["b"])).toEqual({ name: "x", tools_policy: { b: {} } });
     const manifest = { tools_policy: { a: {} } };
     expect(declareTools(manifest, ["a"])).toBe(manifest);
+  });
+});
+
+describe("isToolWithoutPermission", () => {
+  it("holds for an available tool whatever its origin, with no scope listed", () => {
+    expect(isToolWithoutPermission({})).toBe(true);
+    expect(isToolWithoutPermission({ status: "available", permissions: {} })).toBe(true);
+    expect(isToolWithoutPermission({ status: "available", permissions: { a: [] } })).toBe(true);
+  });
+
+  it("fails for a tool with a scope or one an agent cannot call", () => {
+    expect(isToolWithoutPermission({ permissions: { a: ["read"] } })).toBe(false);
+    expect(isToolWithoutPermission({ status: "pending" })).toBe(false);
+  });
+});
+
+describe("hasOAuthAuth", () => {
+  it("is true only for an OAuth auth", () => {
+    expect(hasOAuthAuth([{ type: "api_key" }, { type: "oauth2" }])).toBe(true);
+    expect(hasOAuthAuth([{ type: "api_key" }, { type: "basic" }])).toBe(false);
+    expect(hasOAuthAuth([])).toBe(false);
+  });
+});
+
+describe("isUsableToolStatus", () => {
+  it("is true without a verdict or when available, false for the other statuses", () => {
+    expect(isUsableToolStatus(undefined)).toBe(true);
+    expect(isUsableToolStatus("available")).toBe(true);
+    for (const status of ["missing", "pending", "blocked"] as const) {
+      expect(isUsableToolStatus(status)).toBe(false);
+    }
   });
 });

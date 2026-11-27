@@ -18,7 +18,7 @@ import { isOauthAuthConnectable } from "../integration-connect/connectable-auth-
 import { DetailSectionCard } from "../detail-section-card";
 import { SkeletonLine } from "../skeleton-line";
 import { OperationalStat } from "../operational-stat";
-import { isUsableToolStatus } from "../agent-editor/tool-selection";
+import { isUsableToolStatus } from "../../lib/integration-tool-policy";
 import { AvailabilityCard, AvailabilityCardSkeleton } from "./availability-card";
 
 export function IntegrationOverview({

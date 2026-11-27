@@ -3,12 +3,7 @@
 /** Pure tool-selection transforms for the integration picker, kept DOM-free for unit tests. */
 
 import { apiUploadToolNameFor } from "@appstrate/core/integration";
-import type { ToolCatalogEntry } from "../../lib/integration-tool-policy";
-
-/** A tool an agent can call: no verdict (a catalog without one) or `available`. */
-export function isUsableToolStatus(status: ToolCatalogEntry["status"] | undefined): boolean {
-  return status === undefined || status === "available";
-}
+import { isUsableToolStatus, type ToolCatalogEntry } from "../../lib/integration-tool-policy";
 
 /**
  * What « Tout sélectionner » may add: the usable tools, plus the ones already selected, which stay

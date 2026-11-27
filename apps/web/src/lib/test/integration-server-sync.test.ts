@@ -6,7 +6,8 @@ import {
   mergeServerIdentity,
   serverReadAvailability,
   connectionChoiceBody,
-  syncConnectionCandidates,
+  stageServerDoc,
+  connectionChoiceCandidates,
 } from "../integration-server-sync.ts";
 
 describe("connectionChoiceBody", () => {
@@ -19,7 +20,7 @@ describe("connectionChoiceBody", () => {
   });
 });
 
-describe("sync connection choice", () => {
+describe("connection choice", () => {
   const candidate = {
     id: "conn_b",
     label: "Notion",
@@ -35,9 +36,9 @@ describe("sync connection choice", () => {
     ]);
 
   it("reads the candidates of a must_choose_connection refusal", () => {
-    expect(syncConnectionCandidates(refusal("must_choose_connection"))).toEqual([candidate]);
-    expect(syncConnectionCandidates(refusal("needs_reconnection"))).toBeNull();
-    expect(syncConnectionCandidates(new Error("x"))).toBeNull();
+    expect(connectionChoiceCandidates(refusal("must_choose_connection"))).toEqual([candidate]);
+    expect(connectionChoiceCandidates(refusal("needs_reconnection"))).toBeNull();
+    expect(connectionChoiceCandidates(new Error("x"))).toBeNull();
   });
 });
 
@@ -105,5 +106,27 @@ describe("serverReadAvailability", () => {
     expect(serverReadAvailability(remote, { ...ok, mayProxy: false })).toBe("no_permission");
     expect(serverReadAvailability(remote, { ...ok, hasConnection: false })).toBe("no_connection");
     expect(serverReadAvailability(remote, ok)).toBe("available");
+  });
+});
+
+describe("stageServerDoc", () => {
+  const write = { op: "write" as const, path: "INTEGRATION.md", text: "mine" };
+
+  it("stages the server's instructions as INTEGRATION.md", () => {
+    expect(stageServerDoc(undefined, "Be kind")).toEqual([
+      { op: "write", path: "INTEGRATION.md", text: "Be kind" },
+    ]);
+    const other = { op: "delete" as const, path: "a.md" };
+    expect(stageServerDoc([other], "Be kind")).toEqual([
+      other,
+      { op: "write", path: "INTEGRATION.md", text: "Be kind" },
+    ]);
+  });
+
+  it("leaves the staged operations alone without instructions or over a staged write", () => {
+    const ops = [write];
+    expect(stageServerDoc(ops, null)).toBe(ops);
+    expect(stageServerDoc(ops, "Be kind")).toBe(ops);
+    expect(stageServerDoc(undefined, "")).toBeUndefined();
   });
 });

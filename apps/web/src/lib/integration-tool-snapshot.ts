@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import type { paths } from "../api/client";
-import { hasOAuthAuth } from "./integration-tool-scopes";
-import type { ServerReadBlock, serverReadAvailability } from "./integration-server-sync";
+import { hasOAuthAuth } from "./integration-tool-policy";
+import type { ServerReadAvailability, ServerReadBlock } from "./integration-server-sync";
 
 type IntegrationDetail =
   paths["/api/integrations/{packageId}"]["get"]["responses"]["200"]["content"]["application/json"];
@@ -32,7 +32,7 @@ export function toolSnapshot(
   detail: Pick<IntegrationDetail, "active" | "tool_snapshot"> & {
     auths: readonly { type: string; connections: readonly { id: string; label: string }[] }[];
   },
-  availability: ReturnType<typeof serverReadAvailability>,
+  availability: ServerReadAvailability,
   published: boolean,
 ): ToolSnapshot | undefined {
   if (availability === null || availability === "sse") return undefined;
