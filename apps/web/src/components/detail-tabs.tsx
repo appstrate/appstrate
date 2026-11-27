@@ -49,12 +49,12 @@ export function UnderlineTabList<T extends string>({
       {/* The dashboard's recent agents row fades the same way: shadcn's
           scroll-driven `scroll-fade-x`, on the edge that hides tabs only. */}
       <div className="no-scrollbar scroll-fade-x min-w-0 overflow-x-auto">
-        <TabsList className="h-11 w-max justify-start gap-1 rounded-none bg-transparent p-0 md:gap-2">
+        <TabsList variant="line" className="h-11 w-max justify-start gap-1 md:gap-2">
           {tabs.map(({ value, label, icon: Icon }) => (
             <TabsTrigger
               key={value}
               value={value}
-              className="text-muted-foreground hover:text-foreground data-[state=active]:border-primary data-[state=active]:text-foreground h-full gap-2 rounded-none border-b-2 border-transparent px-2.5 py-0 data-[state=active]:bg-transparent data-[state=active]:shadow-none max-sm:px-2 md:px-3"
+              className="hover:text-foreground h-full gap-2 rounded-none border-b-2 border-transparent px-2.5 py-0 max-sm:px-2 md:px-3"
             >
               {Icon && <Icon className="size-4 shrink-0" aria-hidden />}
               {label}
@@ -150,10 +150,13 @@ export function CollectionTabs<T extends string>({
           <TabsTrigger
             key={option.value}
             value={option.value}
-            asChild={hrefOf !== undefined}
+            {...(hrefOf && {
+              render: <Link to={hrefOf(option.value)} />,
+              nativeButton: false,
+            })}
             className="h-7 px-2.5 text-sm"
           >
-            {hrefOf ? <Link to={hrefOf(option.value)}>{option.label}</Link> : option.label}
+            {option.label}
           </TabsTrigger>
         ))}
       </TabsList>

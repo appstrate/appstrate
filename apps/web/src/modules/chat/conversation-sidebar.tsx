@@ -261,7 +261,7 @@ export function ConversationFiles({
 
 /**
  * The panel's content, in the desktop column or in the phone's sheet: one block, the tabs in its
- * header band (Radix wires the tab/tabpanel ARIA) over the selected tab's content. The block is as
+ * header band (Base UI wires the tab/tabpanel ARIA) over the selected tab's content. The block is as
  * tall as that content, up to the room it has; past it, the content scrolls inside. A shown file
  * replaces the block with the file's own, in the same frame, the whole height.
  */
