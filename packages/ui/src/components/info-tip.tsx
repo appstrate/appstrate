@@ -59,7 +59,9 @@ export function InfoTip({ children, testId }: { children: React.ReactNode; testI
           side="top"
           sideOffset={6}
           collisionPadding={8}
-          // A sentence to read, nothing to operate: the focus stays on the button.
+          // A sentence to read, nothing to operate: a tooltip, not a dialog, and the focus stays
+          // on the button.
+          role="tooltip"
           onOpenAutoFocus={(event) => event.preventDefault()}
           className="bg-popover text-popover-foreground data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95 z-50 max-w-72 origin-(--radix-popover-content-transform-origin) rounded-md border px-3 py-2 text-sm shadow-md outline-none"
         >
