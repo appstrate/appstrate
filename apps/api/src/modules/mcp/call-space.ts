@@ -132,16 +132,25 @@ export function resolveCallSpace(
       return explicit === undefined ? { kind: "row", id: undefined } : direct();
     }
     case "describe": {
+      // `id` or `ids`: one call is one space, so a batch resolves as its items all would.
+      const named = (Array.isArray(args.ids) ? args.ids : [args.id]).filter(
+        (id): id is string => typeof id === "string",
+      );
       if (args.kind === "operation") {
-        const op = typeof args.id === "string" ? getCatalog().operations.get(args.id) : undefined;
-        return explicit === undefined ||
-          (op && effectiveOperationScope(op, policy.orgPermissions).kind === "organization")
-          ? { kind: "none" }
-          : direct();
+        const orgLevel =
+          named.length > 0 &&
+          named.every((id) => {
+            const op = getCatalog().operations.get(id);
+            return op && effectiveOperationScope(op, policy.orgPermissions).kind === "organization";
+          });
+        return explicit === undefined || orgLevel ? { kind: "none" } : direct();
       }
-      const skill =
-        args.kind === "skill" && typeof args.id === "string" ? parseSkillUri(args.id) : null;
-      return skill ? target(skill.spaceId) : direct();
+      if (args.kind !== "skill") return direct();
+      const homes = new Set(named.map((id) => parseSkillUri(id)?.spaceId));
+      const [home] = homes;
+      // Skills of several spaces: the call's space is chosen, and each skill of another one is
+      // refused on its own.
+      return homes.size === 1 && home !== undefined ? target(home) : direct();
     }
     case "operation":
       break;

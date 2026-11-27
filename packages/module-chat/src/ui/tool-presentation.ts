@@ -48,6 +48,13 @@ function integrationToolName(input: unknown): string | undefined {
   return id && cut > 0 ? id.slice(cut + 2) : id;
 }
 
+/** A `describe` given `ids`: every id it names, in order. */
+function describedIds(input: unknown): string | undefined {
+  const ids = asRecordOrNull(input)?.ids;
+  const named = Array.isArray(ids) ? ids.filter((id) => typeof id === "string" && id) : [];
+  return named.length > 0 ? named.join(", ") : undefined;
+}
+
 function ownTarget(toolName: string, input: unknown): { Icon: LucideIcon; target?: string } {
   switch (toolName) {
     case "invoke_operation":
@@ -64,7 +71,7 @@ function ownTarget(toolName: string, input: unknown): { Icon: LucideIcon; target
     case "search":
       return { Icon: SearchIcon, target: stringField(input, "query") };
     case "describe":
-      return { Icon: BookOpenIcon, target: stringField(input, "id") };
+      return { Icon: BookOpenIcon, target: stringField(input, "id") ?? describedIds(input) };
     case "read":
     case "read_resource":
       return { Icon: FileTextIcon, target: stringField(input, "uri") };

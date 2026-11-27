@@ -936,6 +936,64 @@ async function searchIntegrationKind({
   return found;
 }
 
+/**
+ * Items one `describe` call details through `ids`. Each still reads what a lone `describe` reads
+ * (the tool listing, the catalog, an agent's definition), concurrently: the bound keeps a call's
+ * answer within what that many describes would return one by one.
+ */
+export const MAX_DESCRIBE_IDS = 10;
+
+/** `ids` read: absent, its distinct ids in order, or why it is refused. */
+function describeIds(raw: unknown): { list?: string[] } | { refusal: Refusal } {
+  if (raw === undefined) return {};
+  const refuse = (error: string) => ({
+    refusal: { code: "invalid_argument", error, arguments: ["ids"] } satisfies Refusal,
+  });
+  if (!Array.isArray(raw) || raw.some((entry) => typeof entry !== "string" || entry === "")) {
+    return refuse("`ids` must be an array of non-empty ids.");
+  }
+  const list = [...new Set(raw as string[])];
+  if (list.length === 0) return refuse("`ids` must list at least one id.");
+  if (list.length > MAX_DESCRIBE_IDS) {
+    return refuse(
+      `\`ids\` lists ${list.length} ids, at most ${MAX_DESCRIBE_IDS} are described per call.`,
+    );
+  }
+  return { list };
+}
+
+/**
+ * The answer of a `describe` given `ids`: one item per id, in order, each with its `id` and what
+ * a lone describe of it returns (every describe answer is a `jsonResult`, so its
+ * `structuredContent`), a refused one marked `isError: true`. A `usage` shared by every described
+ * item (the integration tools': long, the same for every tool of one kind) is given once, at the
+ * top. The call is an error only when no item could be described.
+ */
+function batchDescribeResult(
+  kind: DiscoveryKind,
+  ids: readonly string[],
+  results: readonly CallToolResult[],
+): CallToolResult {
+  const items: Record<string, unknown>[] = results.map((result, index) => ({
+    id: ids[index],
+    ...asRecord(result.structuredContent),
+    ...(result.isError ? { isError: true } : {}),
+  }));
+  const described = items.filter((item) => item.isError !== true);
+  const [first] = described;
+  const usage =
+    described.length > 1 &&
+    typeof first?.usage === "string" &&
+    described.every((item) => item.usage === first.usage)
+      ? first.usage
+      : undefined;
+  if (usage !== undefined) for (const item of described) delete item.usage;
+  return jsonResult(
+    { kind, ...(usage !== undefined ? { usage } : {}), items },
+    described.length === 0,
+  );
+}
+
 function buildDescribeTool(
   ctx: McpToolContext,
   surface: McpSurface,
@@ -946,7 +1004,9 @@ function buildDescribeTool(
   const descriptor: Tool = {
     name: "describe",
     description:
-      "Return everything needed to act on one item search returned, by its `kind` and `id`. " +
+      "Return everything needed to act on an item search returned, by its `kind` and `id`; pass " +
+      `\`ids\` instead to describe up to ${MAX_DESCRIBE_IDS} items of one kind in one call: the ` +
+      "tools you are about to call, all at once, rather than one describe per tool. " +
       "An `operation`: its full OpenAPI definition (parameters, request body, responses) with " +
       "every referenced component schema inlined and its space_rule for invocation. An operation can be described before choosing a space" +
       (invokes ? ", to build a valid invoke_operation call (its `id` is the `operation_id`)" : "") +
@@ -984,10 +1044,23 @@ function buildDescribeTool(
           type: "string",
           description:
             "The item's `id`, as search returned it (or already known: an operationId, an agent's " +
-            "`@scope/name`, a skill's `skill://` URI, an integration tool's name).",
+            "`@scope/name`, a skill's `skill://` URI, an integration tool's name). Pass `id` or " +
+            "`ids`, not both.",
+        },
+        ids: {
+          type: "array",
+          items: { type: "string", minLength: 1 },
+          minItems: 1,
+          maxItems: MAX_DESCRIBE_IDS,
+          uniqueItems: true,
+          description:
+            `Several items of the same \`kind\`, at most ${MAX_DESCRIBE_IDS}: the answer lists ` +
+            "each under `items`, in this order, each with its `id`; an item that cannot be " +
+            "described carries `isError: true` and its refusal, and does not fail the others. " +
+            "A `usage` every described integration tool shares is given once, at the top.",
         },
       },
-      required: ["kind", "id"],
+      required: ["kind"],
     },
   };
 
@@ -995,12 +1068,20 @@ function buildDescribeTool(
     args: Record<string, unknown>,
     extra: AppstrateRequestExtra,
   ): Promise<CallToolResult> => {
-    const start = performance.now();
     const kind = asString(args.kind) as DiscoveryKind | undefined;
     const id = asString(args.id);
+    const ids = describeIds(args.ids);
     // A malformed call is a refusal result, not a failed execution: the model
     // sees what is missing and can self-correct.
-    const missing = [...(kind ? [] : ["kind"]), ...(id ? [] : ["id"])];
+    if (id !== undefined && args.ids !== undefined) {
+      return refusalResult({
+        code: "invalid_argument",
+        error: "Pass `id` or `ids`, not both.",
+        arguments: ["id", "ids"],
+      });
+    }
+    if ("refusal" in ids) return refusalResult(ids.refusal);
+    const missing = [...(kind ? [] : ["kind"]), ...(id || ids.list ? [] : ["id"])];
     if (missing.length > 0) {
       return refusalResult({
         code: "missing_argument",
@@ -1018,11 +1099,24 @@ function buildDescribeTool(
     }
     if (kind === "integration_tool") {
       const refusal = integrationKindRefusal(ctx);
-      return refusal
-        ? refusalResult(refusal)
-        : describeIntegrationTool(integrations, id!, extra.signal);
+      if (refusal) return refusalResult(refusal);
     }
-    const result = await describeItem(kind!, id!, args.space_id);
+    if (!ids.list) return describeOne(kind!, id!, args.space_id, extra);
+    const results = await Promise.all(
+      ids.list.map((one) => describeOne(kind!, one, args.space_id, extra)),
+    );
+    return batchDescribeResult(kind!, ids.list, results);
+  };
+
+  const describeOne = async (
+    kind: DiscoveryKind,
+    id: string,
+    namedSpace: unknown,
+    extra: AppstrateRequestExtra,
+  ): Promise<CallToolResult> => {
+    if (kind === "integration_tool") return describeIntegrationTool(integrations, id, extra.signal);
+    const start = performance.now();
+    const result = await describeItem(kind, id, namedSpace);
     // An unknown operationId is not an event.
     if (kind !== "operation" || !result.isError) {
       emit(ctx, {

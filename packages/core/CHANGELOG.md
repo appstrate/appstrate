@@ -131,6 +131,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **`CHAT_MAX_STEPS` is 30** (was 16), so `CHAT_TOOL_STEP_BUDGET` is 29. A chat turn that chains
+  integration tools spent most of 15 tool steps reading schemas; the cap still stops loops and
+  keeps one closing step, and `CHAT_TURN_DEADLINE_MS` is unchanged.
+
 - Upgrading the platform requires modules to declare `x-appstrate-space` on OpenAPI operations
   whose scope the mounted guards do not supply. Registration fails at startup on a missing or
   contradictory contract. Modules with row-scoped operations must use `withAuthorizedRow` from

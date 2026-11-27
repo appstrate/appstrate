@@ -7,7 +7,7 @@
  */
 
 import { describe, it, expect } from "bun:test";
-import { EyeIcon, FileTextIcon, PlugIcon, Trash2Icon, ZapIcon } from "lucide-react";
+import { BookOpenIcon, EyeIcon, FileTextIcon, PlugIcon, Trash2Icon, ZapIcon } from "lucide-react";
 import type { ToolPresentation } from "@appstrate/core/mcp-presentation";
 import { callPresentation, showCall } from "../src/ui/tool-presentation.ts";
 import { activityGroupOf, endsFolded, isLookupCall } from "../src/ui/conversation-tools.ts";
@@ -221,6 +221,13 @@ describe("showCall — any other tool", () => {
         t,
       ),
     ).toMatchObject({ label: "Outil d’intégration", idText: "find__by_email", Icon: PlugIcon });
+    // A describe of several items names each of them.
+    expect(
+      showCall(
+        { toolName: "describe", args: { kind: "operation", ids: ["listRuns", "getRun"] } },
+        t,
+      ),
+    ).toMatchObject({ idText: "listRuns, getRun", Icon: BookOpenIcon });
   });
 
   it("names a resource read by its own tool, identified by its uri", () => {
