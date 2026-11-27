@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 /**
  * The model's reasoning, shown. The engine already streams it
  * (`reasoning-delta`, `pi-chat/ui-stream-mapper.ts`); assistant-ui's default
