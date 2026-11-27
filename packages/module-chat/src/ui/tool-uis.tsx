@@ -22,11 +22,6 @@ import type { ToolCallMessagePartProps } from "@assistant-ui/react";
 import { ArrowUpRightIcon, BracesIcon, PlayIcon } from "lucide-react";
 import { formatDuration } from "@appstrate/core/format";
 import { Button } from "@appstrate/ui/components/button";
-import {
-  Collapsible,
-  CollapsibleContent,
-  CollapsibleTrigger,
-} from "@appstrate/ui/components/collapsible";
 import { StructuredOutput } from "@appstrate/ui/components/structured-output";
 import { useChatHost } from "./runtime-context.ts";
 import { ToolCallDetail } from "./tool-call-detail.tsx";
@@ -34,16 +29,8 @@ import { REVEAL_RING_CLASS, useRevealAnchor } from "./reveal-tool-call.ts";
 import { OAuthConnectCard } from "./oauth-connect-card.tsx";
 import { ChatRunProgressCard } from "./chat-run-progress-card.tsx";
 import { CallSpace } from "./call-space.tsx";
-import {
-  ACTIVITY_CONTENT_CLASS,
-  ACTIVITY_DETAIL_CLASS,
-  ActivityChevron,
-  ActivityId,
-  ActivityLabel,
-  ActivityLine,
-  ActivityTrigger,
-  FailedGlyph,
-} from "./activity-line.tsx";
+import { ActivityId, ActivityLine } from "./activity-line.tsx";
+import { CallStep } from "./call-step.tsx";
 import { useActivityMode } from "./activity-mode.ts";
 import {
   extractAgentLabel,
@@ -217,59 +204,50 @@ export function ToolStep(props: ToolCardProps) {
   const errorMsg = phase === "error" ? extractErrorMessage(unwrapped) : undefined;
 
   return (
-    <Collapsible
+    <CallStep
       {...anchor}
       open={readerOpen ?? solo}
       onOpenChange={setReaderOpen}
       className={`rounded-sm ${REVEAL_RING_CLASS}`}
+      lead={subject ? <SubjectGlyph subject={subject} /> : <Icon aria-hidden />}
+      label={label}
+      idText={idText}
+      running={phase === "running"}
+      trailing={
+        <>
+          {presentation?.count !== undefined ? (
+            <span className="flex shrink-0 items-center gap-1.5 text-xs">
+              <SubjectStack subjects={presentation.items ?? []} />
+              {t("tool.search.count", { count: presentation.count })}
+            </span>
+          ) : null}
+          <CallSpace spaceId={cardSpaceOf(props)} />
+          {durationMs !== undefined ? (
+            <span className="shrink-0 text-xs tabular-nums">
+              {formatDuration(durationMs, lang)}
+            </span>
+          ) : null}
+        </>
+      }
+      failure={
+        phase === "error"
+          ? { label: status === undefined ? t("tool.failed") : t("tool.failedHttp", { status }) }
+          : undefined
+      }
+      errorText={errorMsg}
     >
-      {/* What lands with the result (duration, cross) follows the trigger on a line of fixed
-          height: its arrival moves nothing. */}
-      <ActivityLine lead={subject ? <SubjectGlyph subject={subject} /> : <Icon aria-hidden />}>
-        <CollapsibleTrigger asChild>
-          <ActivityTrigger>
-            <ActivityLabel active={phase === "running"}>{label}</ActivityLabel>
-            {idText ? <ActivityId>{idText}</ActivityId> : null}
-            <ActivityChevron />
-          </ActivityTrigger>
-        </CollapsibleTrigger>
-        {presentation?.count !== undefined ? (
-          <span className="flex shrink-0 items-center gap-1.5 text-xs">
-            <SubjectStack subjects={presentation.items ?? []} />
-            {t("tool.search.count", { count: presentation.count })}
-          </span>
-        ) : null}
-        <CallSpace spaceId={cardSpaceOf(props)} />
-        {durationMs !== undefined ? (
-          <span className="shrink-0 text-xs tabular-nums">{formatDuration(durationMs, lang)}</span>
-        ) : null}
-        {phase === "error" ? (
-          <FailedGlyph
-            label={status === undefined ? t("tool.failed") : t("tool.failedHttp", { status })}
-          />
-        ) : null}
-      </ActivityLine>
-      {errorMsg ? (
-        <p className="text-muted-foreground pb-1.5 pl-6 text-xs break-words">{errorMsg}</p>
-      ) : null}
-      <CollapsibleContent className={ACTIVITY_CONTENT_CLASS}>
-        <div className={ACTIVITY_DETAIL_CLASS}>
-          <div className="bg-card rounded-lg border p-3">
-            <ToolCallDetail
-              t={t}
-              input={props.args}
-              output={unwrapped}
-              metadata={definedEntries({
-                tool_call_id: props.toolCallId,
-                is_error: props.isError,
-                http_status: status,
-                duration_ms: durationMs,
-              })}
-            />
-          </div>
-        </div>
-      </CollapsibleContent>
-    </Collapsible>
+      <ToolCallDetail
+        t={t}
+        input={props.args}
+        output={unwrapped}
+        metadata={definedEntries({
+          tool_call_id: props.toolCallId,
+          is_error: props.isError,
+          http_status: status,
+          duration_ms: durationMs,
+        })}
+      />
+    </CallStep>
   );
 }
 

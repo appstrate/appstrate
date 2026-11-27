@@ -936,10 +936,15 @@ Summary stands on its own read (waiting in its shape, or saying its failure in i
 the calls, held by the conversation, show at once. Tools lists the
 calls as the open chat holds them, the turn in flight included, else as stored
 (`@appstrate/module-chat/conversation-tools`, `live-conversation`), named as their cards
-name them (`tool-presentation.ts`), lookups behind a switch the panel keeps; a call's
-detail is the card's (`tool-call-detail`). A file or a call opened from the Summary leads
-back to it. Its width follows what it shows (a list, the details or a call, a file), each
-remembered per browser.
+name them (`tool-presentation.ts`), lookups behind a switch the panel keeps. Each call is
+drawn with the thread's own step line (`CallStep`, `@appstrate/module-chat/call-step`, the
+component `ToolStep` adapts): the bare 16px icon in the line's muted tone, label, id, chevron,
+a failure said by the small red cross and a muted word, and the call's detail
+(`tool-call-detail`) opening inline under it, led by « Voir dans le fil ». Each turn's
+heading counts its calls with the group line's own words (`activityCounts`); a call opened
+from the Summary opens on its line of Tools, in view. A file opened from the Summary leads
+back to it. Its width follows what it shows (a list, the Summary, a file), each remembered
+per browser.
 
 ## 14. Modules and feature gating
 

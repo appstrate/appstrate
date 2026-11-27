@@ -111,9 +111,12 @@ export function ActivityLabel({
   );
 }
 
-/** What a line names precisely (an operation, a path, an id), in monospace after its label. */
+/**
+ * What a line names precisely (an operation, a path, an id), in monospace after its label. In a
+ * narrow line it gives way first (`shrink-100`): it truncates before its label does.
+ */
 export function ActivityId({ children }: { children: React.ReactNode }) {
-  return <code className="min-w-0 truncate text-xs">{children}</code>;
+  return <code className="min-w-0 shrink-100 truncate text-xs">{children}</code>;
 }
 
 /** The steps under a header: a rule under its lead slot, their own slots under its label. */

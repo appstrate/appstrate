@@ -27,7 +27,12 @@ import {
 } from "@appstrate/ui/components/collapsible";
 import { useChatHost, type ChatTranslate } from "./runtime-context.ts";
 import { SubjectGlyph, SubjectStack } from "./subject-glyph.tsx";
-import { callsAt, isStampedLookup, type GroupablePart } from "./conversation-tools.ts";
+import {
+  activityCounts,
+  callsAt,
+  isStampedLookup,
+  type GroupablePart,
+} from "./conversation-tools.ts";
 import { ThinkingStatus } from "./reasoning.tsx";
 import { useTurnClock } from "./use-turn-clock.ts";
 import { reasoningTitle, showStep } from "./turn-status.ts";
@@ -167,10 +172,6 @@ export function ActivityGroup({
   const solo = calls + reasoningRuns === 1;
   const stepMode = React.useMemo((): ActivityMode => ({ mode: "step", solo }), [solo]);
   const actions = calls - lookups;
-  const counts = [
-    lookups > 0 ? t("tool.reads.done", { count: lookups }) : null,
-    actions > 0 ? t("tool.actions.done", { count: actions }) : null,
-  ].filter((part): part is string => part !== null);
 
   const lead = running ? (
     <ThinkingStatus />
@@ -211,7 +212,7 @@ export function ActivityGroup({
             ) : calls === 0 ? (
               <ActivityLabel>{title || t("reasoning.done")}</ActivityLabel>
             ) : (
-              <span className="shrink-0">{counts.join(" · ")}</span>
+              <span className="shrink-0">{activityCounts(t, { lookups, actions })}</span>
             )}
             {failed > 0 ? (
               <>

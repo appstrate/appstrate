@@ -361,7 +361,7 @@ function RunLine({
   );
 }
 
-/** A call on one line, opening its detail in the Tools tab; its outcome when it is not a success. */
+/** A call on one line, opening it on its line of the Tools tab; its outcome when it is not a success. */
 function CallLine({
   call,
   dispatch,
@@ -375,12 +375,10 @@ function CallLine({
     <button
       type="button"
       className={BUTTON_LINE_CLASS}
-      onClick={() =>
-        dispatch({ type: "show-tool-call", toolCallId: call.toolCallId, from: "summary" })
-      }
+      onClick={() => dispatch({ type: "show-tool-call", toolCallId: call.toolCallId })}
     >
       <SummaryLine
-        icon={<ToolCallIcon call={call} shown={shown} />}
+        icon={<ToolCallIcon shown={shown} />}
         label={shown.label}
         detail={shown.idText ? <ActivityId>{shown.idText}</ActivityId> : undefined}
         trailing={

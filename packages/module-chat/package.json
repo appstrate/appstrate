@@ -16,6 +16,7 @@
     "./conversation-tools": "./src/ui/conversation-tools.ts",
     "./live-conversation": "./src/ui/live-conversation.ts",
     "./activity-line": "./src/ui/activity-line.tsx",
+    "./call-step": "./src/ui/call-step.tsx",
     "./tool-call-detail": "./src/ui/tool-call-detail.tsx",
     "./tool-presentation": "./src/ui/tool-presentation.ts",
     "./reveal-tool-call": "./src/ui/reveal-tool-call.ts",
