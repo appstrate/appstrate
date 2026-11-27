@@ -40,9 +40,9 @@ export interface SidebarTipFacts {
   connections: number | undefined;
   /** The person's chat conversations, a page of at most one: whether there is any. */
   conversations: number | undefined;
-  /** The agents of the working space; `undefined` too in « Tous les espaces ». */
+  /** The agents of the working space. */
   agents: number | undefined;
-  /** The schedules of the working space; `undefined` too in « Tous les espaces ». */
+  /** The schedules of the working space. */
   schedules: number | undefined;
   /** The organization's members and its pending invitations, together. */
   people: number | undefined;

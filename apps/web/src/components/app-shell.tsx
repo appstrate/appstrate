@@ -156,9 +156,7 @@ export function AppSidebar({ product }: { product: "studio" | "chat" }) {
         )}
       </SidebarContent>
       <SidebarFooter className="gap-0 p-0">
-        {/* Getting-started cards, a desktop's: the phone's drawer keeps its whole height for the
-            navigation. Here, in the foot, they stand at the same place in Studio and in the chat,
-            whose list fills the content above. */}
+        {/* Desktop only: a phone's drawer keeps its whole height for the navigation. */}
         {!isMobile && <SidebarTips />}
         <SidebarMenu className="px-2 pb-2" hidden={!catalogueReachable}>
           <OverlayEntry

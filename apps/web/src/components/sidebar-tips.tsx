@@ -115,7 +115,7 @@ function useSidebarTipFacts(dismissed: readonly string[]): SidebarTipFacts {
     { enabled: !!orgId && open("chat", canCreateWithChat) },
   );
   const agents = useAgents({ enabled: open("schedule", canSchedule) });
-  const schedules = useAllSchedules(false, open("schedule", canSchedule));
+  const schedules = useAllSchedules({ enabled: open("schedule", canSchedule) });
   const org = useOrgDetail({ enabled: open("invite", canInvite) });
 
   return {
@@ -124,8 +124,8 @@ function useSidebarTipFacts(dismissed: readonly string[]): SidebarTipFacts {
       0,
     ),
     conversations: conversations.data?.data.length,
-    agents: open("schedule", canSchedule) ? agents.data?.length : undefined,
-    schedules: open("schedule", canSchedule) ? schedules.data?.length : undefined,
+    agents: agents.data?.length,
+    schedules: schedules.data?.length,
     people: org.data?.members
       ? org.data.members.length + (org.data.invitations?.length ?? 0)
       : undefined,

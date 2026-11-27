@@ -29,7 +29,7 @@ function useCanReadSchedules(): boolean {
 }
 
 /** The current space's schedules, or, `spanning`, every space's the reader reaches (`GET /api/orgs/{orgId}/schedules`). */
-export function useAllSchedules(spanning = false, enabled = true) {
+export function useAllSchedules({ spanning = false, enabled = true } = {}) {
   const scope = useListScope(spanning, useCanReadSchedules());
   return useQuery({
     // Key pinned: use-global-run-sync invalidates by this prefix on SSE events.
