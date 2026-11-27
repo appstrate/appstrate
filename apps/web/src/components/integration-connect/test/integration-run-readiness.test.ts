@@ -47,6 +47,7 @@ function candidate(): IntegrationAgentResolution["candidates"][number] {
     missing_scopes: [],
     scope_fit: "unjudged",
     is_own: true,
+    allowed_actions: [],
   };
 }
 

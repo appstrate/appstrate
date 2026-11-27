@@ -325,10 +325,22 @@ describe.skipIf(!RUN)("runtime-pi + sidecar images carry one inference turn verb
         expect(body.model).toBe(MODEL_ID);
         expect(body.store).toBe(false);
         expect(body.stream).toBe(true);
-        expect(typeof body.instructions).toBe("string");
-        expect(body.instructions.length).toBeGreaterThan(0);
+        // Pi ≥ 1.6 sends the system prompt as a `developer` text item of
+        // `input`, not as top-level `instructions` (Codex's own shape — the
+        // backend appends `instructions` after `input`, which defeated the
+        // prompt cache). The item can follow an `additional_tools` developer
+        // item declaring the tools, but it precedes every user turn. Pinned so
+        // a further move is re-examined, not missed.
+        expect(body.instructions).toBeUndefined();
         expect(Array.isArray(body.input)).toBe(true);
-        expect(body.input.length).toBeGreaterThan(0);
+        const input = body.input as { role?: string; content?: unknown }[];
+        const systemAt = input.findIndex(
+          (item) => item.role === "developer" && typeof item.content === "string",
+        );
+        const firstUserAt = input.findIndex((item) => item.role === "user");
+        expect(systemAt).toBeGreaterThanOrEqual(0);
+        expect(firstUserAt).toBeGreaterThan(systemAt);
+        expect((input[systemAt]!.content as string).length).toBeGreaterThan(0);
 
         // The turn actually completed — the canned SSE frame was parsed by the
         // real runner, not just accepted at the socket.

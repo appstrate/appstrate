@@ -208,7 +208,6 @@
   "detail.integrationMemberPicker.connectedFrom": "Connectée depuis {{space}}",
   "detail.integrationMemberPicker.sharedBadge": "Partagée",
   "detail.integrationMemberPicker.needsReconnection": "Reconnexion requise",
-  "detail.integrationMemberPicker.renew": "Renouveler",
   "detail.integrationMemberPicker.lockedByAdminPin_one": "Épinglée par un admin",
   "detail.integrationMemberPicker.lockedByAdminPin_other": "Épinglées par un admin",
   "detail.integrationMemberPicker.lockedByEnforcedDefault": "Défaut de l'espace imposé",

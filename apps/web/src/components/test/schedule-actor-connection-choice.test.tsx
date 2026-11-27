@@ -283,6 +283,7 @@ function cand(id: string, over: Partial<Cand> = {}): Cand {
     missing_scopes: [],
     scope_fit: "unjudged",
     is_own: false,
+    allowed_actions: [],
     ...over,
   };
 }

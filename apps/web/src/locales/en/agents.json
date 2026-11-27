@@ -208,7 +208,6 @@
   "detail.integrationMemberPicker.connectedFrom": "Connected from {{space}}",
   "detail.integrationMemberPicker.sharedBadge": "Shared",
   "detail.integrationMemberPicker.needsReconnection": "Reconnection required",
-  "detail.integrationMemberPicker.renew": "Renew",
   "detail.integrationMemberPicker.lockedByAdminPin_one": "Pinned by an admin",
   "detail.integrationMemberPicker.lockedByAdminPin_other": "Pinned by an admin",
   "detail.integrationMemberPicker.lockedByEnforcedDefault": "Enforced space default",

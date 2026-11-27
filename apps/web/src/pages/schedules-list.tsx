@@ -35,7 +35,7 @@ export function SchedulesListPage() {
   const { t } = useTranslation(["settings", "agents", "common"]);
   const [newScheduleOpen, setNewScheduleOpen] = useState(false);
   const { on: spanning } = useOverviewMode();
-  const { data: schedules, isLoading, isError, error } = useAllSchedules(spanning);
+  const { data: schedules, isLoading, isError, error } = useAllSchedules({ spanning });
   const placeholder = useSearchPlaceholder(t("common:nav.schedules"));
   // A schedule is created in one space: in « Tous les espaces », the one the reader picks in the entry's menu.
   const create = useSpaceAction({ permission: "schedules:write" });

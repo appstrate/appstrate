@@ -49,9 +49,8 @@ test("a configurer releases the default connection after the last auth has been 
   expect(locked.status()).toBe(409);
   expect((await locked.json()).code).toBe("connection_pinned");
 
-  await page.goto(`${integration}?integrationSettings=default-connection#settings`);
-  const section = page.getByTestId("default-connection-settings");
-  await expect(section.getByText("Cette intégration fonctionne sans compte.")).toBeVisible();
+  await page.goto(`${integration}?integrationSettings=access#settings`);
+  const section = page.getByTestId("access-rules-section");
   await section.getByRole("combobox", { name: "Utilisation des connexions" }).click();
   await page.getByRole("option", { name: "Connexion choisie par l’utilisateur" }).click();
   const saved = page.waitForResponse(

@@ -2113,7 +2113,7 @@ export function connectionCaller(c: Context<AppEnv>, spaceId: string | null): Co
 }
 
 /** A space list's caller and its real org role there (`null`: none, an end-user token). */
-function spaceListCaller(c: Context<AppEnv>): [ConnectionCaller, OrgRole | null] {
+export function spaceListCaller(c: Context<AppEnv>): [ConnectionCaller, OrgRole | null] {
   return [connectionCaller(c, getSpaceScope(c).spaceId), c.get("orgRole") ?? null];
 }
 

@@ -62,6 +62,7 @@ function candidate(isOwn: boolean): Candidate {
     missing_scopes: [],
     scope_fit: "unjudged",
     is_own: isOwn,
+    allowed_actions: [],
   };
 }
 

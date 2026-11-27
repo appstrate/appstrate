@@ -34,7 +34,6 @@ import {
   LayoutGrid,
   Server,
   Settings2,
-  Star,
 } from "lucide-react";
 import { authMethodLabel } from "../lib/integration-presentation";
 import { AvailabilityBadge } from "../components/package-detail/availability-card";
@@ -64,7 +63,7 @@ import { PackageOwnershipNotice } from "../components/package-detail/package-own
 import { ConfigAuthBlock } from "../components/integration-detail/config-auth-block";
 import { AccessRulesSection } from "../components/integration-detail/access-rules-section";
 import { ConnectionsTable } from "../components/integration-detail/connections-table";
-import { DefaultConnectionSettings } from "../components/integration-detail/default-connection-section";
+import { DefaultConnectionLine } from "../components/integration-detail/default-connection-section";
 import { IntegrationActivateButton } from "../components/integration-detail/integration-activate-button";
 import { ConfigurationSpace } from "../components/configuration-space";
 import { RoleLimitNotice } from "../components/role-limit-notice";
@@ -110,10 +109,6 @@ const SPACE_SECTION_HEADINGS = {
   access: {
     title: "integration.admin.access.title",
     description: "integration.config.accessDescription",
-  },
-  "default-connection": {
-    title: "integration.defaultConnection.title",
-    description: "integration.defaultConnection.description",
   },
 } as const;
 
@@ -258,7 +253,6 @@ export function IntegrationSettings({
             items: [
               item("authentication", KeyRound, t("integration.presentation.authentication")),
               item("access", ShieldCheck, t("integration.admin.access.title")),
-              item("default-connection", Star, t("integration.defaultConnection.title")),
             ],
           },
         ]
@@ -392,10 +386,8 @@ export function IntegrationSettings({
                   <AccessRulesSection
                     packageId={packageId}
                     blockUserConnections={blockUserConnections}
+                    existingOnly={detail.auths.length === 0}
                   />
-                )}
-                {active === "default-connection" && (
-                  <DefaultConnectionSettings packageId={packageId} detail={detail} />
                 )}
               </>
             )}
@@ -624,6 +616,16 @@ export function IntegrationDetailPage() {
             spanning={overview}
             addIn={connectionsFromWorkingSpace && active ? { detail, canConfigure } : undefined}
             onConfigure={openAuthentication}
+          />
+        )}
+        {/* With one space selected, the account a call naming none uses there; its default and
+            exceptions are set in Paramètres › Gestion des connexions. */}
+        {!overview && active && detail.auths.length > 0 && (
+          <DefaultConnectionLine
+            detail={detail}
+            editHref={
+              canConfigure ? integrationSettingsHref(location.pathname, "access") : undefined
+            }
           />
         )}
       </DetailTabPanel>

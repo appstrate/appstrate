@@ -209,6 +209,8 @@ export interface AccessibleIntegrationConnection extends ConnectionReach {
   /** OAuth scopes granted to this connection (empty for api_key/basic). */
   scopes_granted: string[];
   needs_reconnection: boolean;
+  /** What the caller may do with this connection, as on the integration's connection list. */
+  allowed_actions: ConnectionAction[];
 }
 
 /**

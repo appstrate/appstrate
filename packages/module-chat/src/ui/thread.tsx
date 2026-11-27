@@ -39,7 +39,7 @@ import { Alert, AlertDescription } from "@appstrate/ui/components/alert";
 import { Button } from "@appstrate/ui/components/button";
 import { cn } from "@appstrate/ui/cn";
 import { MarkdownText, ReasoningText } from "./markdown-text.tsx";
-import { ReasoningGroup, ThinkingStatus } from "./reasoning.tsx";
+import { LoadingLine, ReasoningGroup } from "./reasoning.tsx";
 import { ToolFallback } from "./tool-fallback.tsx";
 import { ActivityGroup } from "./activity-group.tsx";
 import { activityGroupOf } from "./conversation-tools.ts";
@@ -980,11 +980,7 @@ function AssistantParts() {
         switch (part.type) {
           case "group-activity":
             return (
-              <ActivityGroup
-                indices={part.indices}
-                running={part.status.type === "running"}
-                stored={stored}
-              >
+              <ActivityGroup indices={part.indices} stored={stored}>
                 {children}
               </ActivityGroup>
             );
@@ -1005,9 +1001,9 @@ function AssistantParts() {
             const Card = TOOL_CARDS[part.toolName] ?? ToolFallbackCard;
             return <Card {...part} stored={stored.get(part.toolCallId)} />;
           }
-          // GroupedParts draws the indicator only while the message runs.
+          // While the message runs and its last part is neither text nor reasoning.
           case "indicator":
-            return <ThinkingStatus />;
+            return <LoadingLine />;
           default:
             return null;
         }
