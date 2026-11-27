@@ -87,14 +87,26 @@ describe("bundle export: space-approved tools header", () => {
     });
   });
 
-  it("names the selected tools that run here only by the space's approval", async () => {
-    await insertToolApprovals({ ...ctx, spaceId: ctx.defaultSpaceId, packageId: INTEG }, [
-      { toolName: "write_file", fingerprint: toolFingerprint("write_file") },
-    ]);
-    const res = await exportBundle(["read_file", "write_file"])();
-    expect(res.status, await res.clone().text()).toBe(200);
-    expect(res.headers.get(HEADER)).toBe(encodeURIComponent(`${INTEG}:write_file`));
-  });
+  const selections: { title: string; selected: string[] | "*" }[] = [
+    {
+      title: "names the selected tools that run here only by the space's approval",
+      selected: ["read_file", "write_file"],
+    },
+    {
+      title: "names every approved tool when the agent selects the wildcard of a closed catalog",
+      selected: "*",
+    },
+  ];
+  for (const c of selections) {
+    it(c.title, async () => {
+      await insertToolApprovals({ ...ctx, spaceId: ctx.defaultSpaceId, packageId: INTEG }, [
+        { toolName: "write_file", fingerprint: toolFingerprint("write_file") },
+      ]);
+      const res = await exportBundle(c.selected)();
+      expect(res.status, await res.clone().text()).toBe(200);
+      expect(res.headers.get(HEADER)).toBe(encodeURIComponent(`${INTEG}:write_file`));
+    });
+  }
 
   it("percent-encodes each element, so a tool name with a comma or a non-ASCII character survives", async () => {
     const odd = "écrire,fichier";
@@ -109,15 +121,6 @@ describe("bundle export: space-approved tools header", () => {
       [`${INTEG}:write_file`, `${INTEG}:${odd}`].sort(),
     );
     expect(elements).toHaveLength(2);
-  });
-
-  it("names every approved tool when the agent selects the wildcard of a closed catalog", async () => {
-    await insertToolApprovals({ ...ctx, spaceId: ctx.defaultSpaceId, packageId: INTEG }, [
-      { toolName: "write_file", fingerprint: toolFingerprint("write_file") },
-    ]);
-    const res = await exportBundle("*")();
-    expect(res.status, await res.clone().text()).toBe(200);
-    expect(res.headers.get(HEADER)).toBe(encodeURIComponent(`${INTEG}:write_file`));
   });
 
   it("sets no header when nothing selected depends on an approval", async () => {

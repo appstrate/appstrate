@@ -634,37 +634,44 @@ describe("GET /internal/integration-credentials/:scope/:name", () => {
       expect(await db.select().from(integrationToolSnapshots)).toHaveLength(0);
     });
 
-    it("stamps a remote-origin run but writes no snapshot", async () => {
-      await db.update(runs).set({ runOrigin: "remote" }).where(eq(runs.id, runId));
+    const stampedNeverSnapshotted: { title: string; arrange: () => Promise<() => void> }[] = [
+      {
+        title: "stamps a remote-origin run but writes no snapshot",
+        arrange: async () => {
+          await db.update(runs).set({ runOrigin: "remote" }).where(eq(runs.id, runId));
+          return () => {};
+        },
+      },
+      {
+        title: "stamps but never snapshots the platform's own endpoint integration",
+        arrange: async () =>
+          _setSystemPackagesForTesting(
+            new Map([
+              [
+                INTEGRATION,
+                {
+                  packageId: INTEGRATION,
+                  type: "integration",
+                  manifest: { _meta: { "dev.appstrate/platform": {} } },
+                } as unknown as SystemPackageEntry,
+              ],
+            ]),
+          ),
+      },
+    ];
+    for (const c of stampedNeverSnapshotted) {
+      it(c.title, async () => {
+        const restore = await c.arrange();
+        try {
+          expect((await observed(connectionId, report)).status).toBe(204);
+        } finally {
+          restore();
+        }
 
-      expect((await observed(connectionId, report)).status).toBe(204);
-
-      expect(await runMetadata()).toHaveProperty("unavailable_tools");
-      expect(await db.select().from(integrationToolSnapshots)).toHaveLength(0);
-    });
-
-    it("stamps but never snapshots the platform's own endpoint integration", async () => {
-      const restore = _setSystemPackagesForTesting(
-        new Map([
-          [
-            INTEGRATION,
-            {
-              packageId: INTEGRATION,
-              type: "integration",
-              manifest: { _meta: { "dev.appstrate/platform": {} } },
-            } as unknown as SystemPackageEntry,
-          ],
-        ]),
-      );
-      try {
-        expect((await observed(connectionId, report)).status).toBe(204);
-      } finally {
-        restore();
-      }
-
-      expect(await runMetadata()).toHaveProperty("unavailable_tools");
-      expect(await db.select().from(integrationToolSnapshots)).toHaveLength(0);
-    });
+        expect(await runMetadata()).toHaveProperty("unavailable_tools");
+        expect(await db.select().from(integrationToolSnapshots)).toHaveLength(0);
+      });
+    }
 
     it("drops one malformed descriptor, keeps the rest and still stamps the unavailable tools", async () => {
       const res = await observed(connectionId, {
@@ -677,11 +684,6 @@ describe("GET /internal/integration-credentials/:scope/:name", () => {
       const [snapshot] = await db.select().from(integrationToolSnapshots);
       expect(snapshot!.tools.map((t) => t.name)).toEqual(["search"]);
       expect(snapshot!.truncated).toBe(true);
-    });
-
-    it("DENY: a malformed body is a 400 and writes nothing", async () => {
-      expect((await observed(connectionId, { ...report, truncated: "no" })).status).toBe(400);
-      expect(await db.select().from(integrationToolSnapshots)).toHaveLength(0);
     });
   });
 

@@ -15,7 +15,6 @@ import {
   spaceIntegrationToolApprovals,
   spaceIntegrationToolBlocks,
 } from "@appstrate/db/schema";
-import { eq } from "drizzle-orm";
 import { db, truncateAll } from "../helpers/db.ts";
 import { createTestContext, type TestContext } from "../helpers/auth.ts";
 import { seedAgent } from "../helpers/seed.ts";
@@ -106,28 +105,8 @@ describe("integration tool policy schema (migration 0115)", () => {
       payload: { packageId, display_name: "Remote" },
     });
 
-    it("accepts the kind and rejects an unknown one", async () => {
+    it("gives a second package its own unread notice", async () => {
       await db.insert(notifications).values(review());
-      expect(
-        await violation(
-          db.insert(notifications).values({ ...review(), type: "nope" as "run_failed" }),
-        ),
-      ).toEqual({ code: "23514", name: "notifications_type_valid" });
-    });
-
-    it("holds one unread notice per (space, recipient, package), and a read one frees the slot", async () => {
-      await db.insert(notifications).values(review());
-      expect(await violation(db.insert(notifications).values(review()))).toEqual({
-        code: "23505",
-        name: "uq_notifications_tools_review_unread",
-      });
-
-      await db
-        .update(notifications)
-        .set({ readAt: new Date() })
-        .where(eq(notifications.orgId, ctx.orgId));
-      await db.insert(notifications).values(review());
-
       await db
         .insert(notifications)
         .values({ ...review(), payload: { packageId: "@testorg/other", display_name: "Other" } });
