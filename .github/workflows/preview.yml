@@ -220,15 +220,58 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     environment: staging
-    permissions: {}
+    permissions:
+      contents: read
     env:
-      # The two origins are secrets so that Actions masks them: this
-      # repository's logs are public, and a curl error names its host.
-      DEPLOY_HOOK_URL: ${{ secrets.DEPLOY_HOOK_URL }}
-      DEPLOY_HOOK_TOKEN: ${{ secrets.DEPLOY_HOOK_TOKEN }}
+      # A secret so that Actions masks it: this repository's logs are public,
+      # and a curl error names its host. The hook's URL and token are given to
+      # the one step that calls it, not to the job.
       STAGING_URL: ${{ secrets.STAGING_URL }}
+      GUARD: apps/api/src/lib/boot-guards/pending-data-scripts.ts
     steps:
+      - name: Read the commit staging runs now
+        id: before
+        run: |
+          set -euo pipefail
+          : "${STAGING_URL:?}"
+          RUNNING="$(curl --silent --max-time 10 "$STAGING_URL/health" | jq -r '.version.commit // empty' 2>/dev/null || true)"
+          echo "Staging runs '${RUNNING:-nothing}' before the deploy"
+          echo "commit=$RUNNING" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # History without blobs: the next step reads one file at two commits.
+          fetch-depth: 0
+          filter: blob:none
+          sparse-checkout: ${{ env.GUARD }}
+          sparse-checkout-cone-mode: false
+          persist-credentials: false
+
+      # Data scripts never run on staging (docs/deployment/STAGING.md): a build
+      # that adds an entry to PENDING_DATA_SCRIPTS refuses to boot on any row the
+      # script would fix. Named now, before the wait, rather than read off a
+      # timeout.
+      - name: Name the data scripts this deploy adds
+        id: scripts
+        env:
+          BEFORE: ${{ steps.before.outputs.commit }}
+        run: |
+          set -euo pipefail
+          scripts_at() { git show "$1:$GUARD" 2>/dev/null | grep -oE 'scripts/migration/[A-Za-z0-9._-]+' | sort -u || true; }
+          if [ -z "$BEFORE" ] || ! git cat-file -e "$BEFORE^{commit}" 2>/dev/null; then
+            echo "Previous commit unknown: no comparison"
+            exit 0
+          fi
+          ADDED="$(comm -13 <(scripts_at "$BEFORE") <(scripts_at "$GITHUB_SHA") | paste -sd ' ' -)"
+          echo "added=$ADDED" >> "$GITHUB_OUTPUT"
+          if [ -n "$ADDED" ]; then
+            echo "::warning title=Data script added::This deploy adds $ADDED to PENDING_DATA_SCRIPTS. Staging refuses to boot if it holds rows the script fixes: reset it or run the script by hand (docs/deployment/STAGING.md)."
+          fi
+
       - name: Call the deploy hook
+        env:
+          DEPLOY_HOOK_URL: ${{ secrets.DEPLOY_HOOK_URL }}
+          DEPLOY_HOOK_TOKEN: ${{ secrets.DEPLOY_HOOK_TOKEN }}
         run: |
           set -euo pipefail
           : "${DEPLOY_HOOK_URL:?}" "${DEPLOY_HOOK_TOKEN:?}"
@@ -237,25 +280,51 @@ jobs:
             --output /dev/null
 
       # The hook answering is the platform accepting a deployment, not the
-      # deployment succeeding. A stack whose migrations fail never starts the
-      # new build, so the commit never shows up here and the job fails.
+      # deployment succeeding. The previous build keeps answering while the new
+      # images are pulled; once it has stopped, a platform that answers nothing
+      # for DOWN_LIMIT seconds failed to boot (a pending migration or data
+      # script, a crash), and the job says so then instead of at the deadline.
       - name: Verify the running commit
         env:
           EXPECTED: ${{ github.sha }}
+          BEFORE: ${{ steps.before.outputs.commit }}
+          ADDED: ${{ steps.scripts.outputs.added }}
+          DOWN_LIMIT: "300"
         run: |
           set -euo pipefail
-          : "${STAGING_URL:?}"
+          cause() {
+            if [ -n "$ADDED" ]; then
+              echo "Likely cause: this deploy adds $ADDED to PENDING_DATA_SCRIPTS and staging holds rows it fixes. Reset staging or run the script by hand (docs/deployment/STAGING.md)."
+            else
+              echo "Read the platform's boot log on the staging host."
+            fi
+          }
+          down_since=""
           for _ in $(seq 1 120); do
-            # --fail: a 503 body carries the version too, while the platform is
-            # still starting or unhealthy.
-            RUNNING="$(curl --fail --silent --max-time 10 "$STAGING_URL/health" | jq -r '.version.commit // empty' || true)"
-            if [ -n "$RUNNING" ] && [ "${EXPECTED#"$RUNNING"}" != "$EXPECTED" ]; then
+            # No --fail: a 503 body carries the version too, so an unhealthy
+            # platform still counts as one that booted.
+            BODY="$(curl --silent --max-time 10 --write-out '\n%{http_code}' "$STAGING_URL/health" || true)"
+            CODE="$(tail -n1 <<<"$BODY")"
+            RUNNING="$(sed '$d' <<<"$BODY" | jq -r '.version.commit // empty' 2>/dev/null || true)"
+            if [ "$CODE" = "200" ] && [ -n "$RUNNING" ] && [ "${EXPECTED#"$RUNNING"}" != "$EXPECTED" ]; then
               echo "Staging runs $RUNNING"
               exit 0
             fi
+            if [ -n "$RUNNING" ] || [ -z "$BEFORE" ]; then
+              # Something answers (the previous build, or the new one starting),
+              # or staging was already down before the deploy: only the
+              # deadline below applies.
+              down_since=""
+            else
+              down_since="${down_since:-$(date +%s)}"
+              if [ $(( $(date +%s) - down_since )) -ge "$DOWN_LIMIT" ]; then
+                echo "::error title=Staging does not boot::The previous build stopped and nothing has answered /health for ${DOWN_LIMIT}s (last HTTP status ${CODE:-none}). $(cause)"
+                exit 1
+              fi
+            fi
             sleep 10
           done
-          echo "::error::Staging reports commit '${RUNNING:-none}' after 20 minutes, expected ${EXPECTED}"
+          echo "::error::Staging reports commit '${RUNNING:-none}' after 20 minutes, expected ${EXPECTED}. $(cause)"
           exit 1
 
   # Sticky PR comment with the tag + the one-liner to deploy on Coolify. Runs
