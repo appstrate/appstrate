@@ -24,7 +24,7 @@ import { isSpaceEnterable } from "../lib/space-lists";
 import { SpaceNameOf } from "./space-name";
 
 /**
- * The bell's list, exported for the rendering tests: a Radix popover mounts
+ * The bell's list, exported for the rendering tests: a closed popover mounts
  * nothing under `renderToStaticMarkup`, so the trigger's chrome is not what a
  * test can look at.
  */

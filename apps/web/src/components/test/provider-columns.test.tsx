@@ -2,7 +2,7 @@
 
 /**
  * The instance's row menu in the providers table: what it offers per model, read off the element
- * tree through `children` alone (a Radix menu draws its items in a portal a static render drops,
+ * tree through `children` alone (a menu draws its items in a portal a static render drops,
  * and its sub-menus need the open menu's context to render).
  */
 

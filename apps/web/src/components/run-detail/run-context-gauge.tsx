@@ -87,7 +87,7 @@ export function ContextGaugeReadout({
   );
 }
 
-/** Exported for tests: Radix keeps tooltip content unmounted until opened. */
+/** Exported for tests: a tooltip keeps its content unmounted until opened. */
 export function ContextGaugePeakHint() {
   const { t } = useTranslation("agents");
   return <span className="block text-xs">{t("run.contextGaugePeakHint")}</span>;

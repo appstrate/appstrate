@@ -32,7 +32,7 @@ function actionCell<T>(columns: DataColumn<T>[], row: T): string {
 }
 
 /**
- * The entries of the row's « … » menu, in order (« — » for a separator). A Radix menu draws
+ * The entries of the row's « … » menu, in order (« — » for a separator). A menu draws
  * its items in a portal a static render drops, so the menu's children are read from the
  * element the row's actions component returns.
  */

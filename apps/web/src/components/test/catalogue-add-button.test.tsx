@@ -5,7 +5,7 @@
  * in « Tous les espaces » it names the space, opens the menu of spaces (still reachable once it
  * runs everywhere, so a tick can be undone), and counts where the package already runs.
  *
- * Static markup: a click cannot be dispatched and a closed Radix menu renders no entries, so what
+ * Static markup: a click cannot be dispatched and a closed menu renders no entries, so what
  * a click adds or removes, and which spaces the menu offers or ticks, is driven in the browser
  * (`e2e/tests/spaces/catalogue-add.ui.spec.ts`). Here: which control the slot draws.
  */

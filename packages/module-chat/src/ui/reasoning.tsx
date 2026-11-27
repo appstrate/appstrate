@@ -31,7 +31,7 @@ import {
   CollapsibleTrigger,
 } from "@appstrate/ui/components/collapsible";
 import { useChatHost } from "./runtime-context.ts";
-import { DISCLOSURE_TRIGGER_CLASS } from "./touch-targets.ts";
+import { DISCLOSURE_PANEL_CLASS, DISCLOSURE_TRIGGER_CLASS } from "./touch-targets.ts";
 import { endsFolded, type GroupablePart } from "./conversation-tools.ts";
 import { reasoningTitle } from "./turn-status.ts";
 import { useTurnClock } from "./use-turn-clock.ts";
@@ -135,7 +135,7 @@ export const ReasoningGroup: ReasoningGroupComponent = ({ startIndex, endIndex, 
             something moving between the end of the reasoning and the next part. */}
         {ownsStatus ? <ThinkingStatus /> : null}
       </div>
-      <CollapsibleContent className="duration-base ease-surface h-(--collapsible-panel-height) overflow-hidden data-ending-style:h-0 data-starting-style:h-0 motion-safe:transition-[height]">
+      <CollapsibleContent className={DISCLOSURE_PANEL_CLASS}>
         <div className="border-border ml-2 border-l pl-4">{children}</div>
       </CollapsibleContent>
     </Collapsible>

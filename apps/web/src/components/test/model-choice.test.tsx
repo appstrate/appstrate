@@ -3,7 +3,7 @@
 /**
  * « Choose the models » as the personal keys' list of a service draws it: the models left to each
  * member are starred like any other, so one of them can be the organization's default, and a
- * saved one opens its finer settings. The dialog around it is a Radix portal: the list is
+ * saved one opens its finer settings. The dialog around it is a portal: the list is
  * rendered with the state hook it reads.
  */
 

@@ -298,8 +298,8 @@ export function OrgSwitcher() {
       }}
     >
       {/* It replaces the whole context, which the coloured avatar and the up/down chevron
-            (never a right chevron) say. The workspace stays visible even when there is only
-            one: a level nobody ever sees is a level nobody learns. */}
+          (never a right chevron) say. The workspace stays visible even when there is only
+          one: a level nobody ever sees is a level nobody learns. */}
       <PopoverTrigger
         render={
           <button

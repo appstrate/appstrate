@@ -33,15 +33,13 @@ export function AdvancedSection({
         render={
           <button
             type="button"
-            className="text-foreground hover:bg-muted/50 border-border flex w-full items-center justify-between rounded-md border border-dashed px-3 py-2 text-sm font-medium transition-colors"
+            className="group text-foreground hover:bg-muted/50 border-border flex w-full items-center justify-between rounded-md border border-dashed px-3 py-2 text-sm font-medium transition-colors"
             data-testid={triggerTestId}
           />
         }
       >
         <span>{title}</span>
-        <ChevronDown
-          className={cn("text-muted-foreground size-4 transition-transform", open && "rotate-180")}
-        />
+        <ChevronDown className="text-muted-foreground size-4 transition-transform group-data-panel-open:rotate-180" />
       </CollapsibleTrigger>
       <CollapsibleContent className={cn("pt-3", contentClassName)} data-testid={contentTestId}>
         {children}

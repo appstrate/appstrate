@@ -31,13 +31,7 @@ import {
 } from "./tool-selection.ts";
 import { cn } from "@appstrate/ui/cn";
 import { Checkbox } from "@appstrate/ui/components/checkbox";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@appstrate/ui/components/select";
+import { OptionSelect } from "../app-ui/option-select";
 import {
   Collapsible,
   CollapsibleContent,
@@ -160,10 +154,6 @@ function IntegrationToolPanel({ packageId, spaceId, entry, onChange }: Integrati
     const type = typeof a.type === "string" ? a.type : undefined;
     const label = title ?? display ?? key;
     return type && type !== label ? `${label} (${type})` : label;
-  };
-  const onAuthKeyChange = (value: string) => {
-    const next = value === "" ? undefined : value;
-    onChange({ ...entry, auth_key: next });
   };
 
   const isApiCall = apiCallToolNames.length > 0;
@@ -314,30 +304,20 @@ function IntegrationToolPanel({ packageId, spaceId, entry, onChange }: Integrati
             <span className="text-xs font-semibold">
               {t("agentEditor.integrations.authKey.label")}
             </span>
-            <Select
+            <OptionSelect
+              className="h-8 text-xs"
               value={entry.auth_key ?? DEFAULT_AUTH_KEY}
-              onValueChange={(key) => onAuthKeyChange(key === DEFAULT_AUTH_KEY ? "" : key)}
-              items={{
-                [DEFAULT_AUTH_KEY]: t("agentEditor.integrations.authKey.default"),
-                ...Object.fromEntries(
-                  authEntries.map(([key, auth]) => [key, authMethodLabel(key, auth)]),
-                ),
-              }}
-            >
-              <SelectTrigger className="h-8 text-xs" data-testid={`integ-auth-key-${packageId}`}>
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value={DEFAULT_AUTH_KEY}>
-                  {t("agentEditor.integrations.authKey.default")}
-                </SelectItem>
-                {authEntries.map(([key, auth]) => (
-                  <SelectItem key={key} value={key}>
-                    {authMethodLabel(key, auth)}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+              onValueChange={(key) =>
+                onChange({ ...entry, auth_key: key === DEFAULT_AUTH_KEY ? undefined : key })
+              }
+              leading={[
+                { value: DEFAULT_AUTH_KEY, label: t("agentEditor.integrations.authKey.default") },
+              ]}
+              options={authEntries.map(([key, auth]) => ({
+                value: key,
+                label: authMethodLabel(key, auth),
+              }))}
+            />
           </label>
         </div>
       )}

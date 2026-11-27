@@ -23,3 +23,7 @@ export const CHIP_REMOVE_CLASS = "flex size-10 shrink-0 items-center justify-cen
 /** A thread disclosure's `size="sm"` ghost trigger: 40 px on touch, 36 px under a mouse. */
 export const DISCLOSURE_TRIGGER_CLASS =
   "text-muted-foreground hover:text-foreground group -ml-2 h-10 gap-1.5 px-2 desktop-pointer:h-9";
+
+/** A thread disclosure's panel: its height eases open and shut (Base UI's measured height). */
+export const DISCLOSURE_PANEL_CLASS =
+  "duration-base ease-surface h-(--collapsible-panel-height) overflow-hidden data-ending-style:h-0 data-starting-style:h-0 motion-safe:transition-[height]";

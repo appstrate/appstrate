@@ -70,7 +70,7 @@ function SpaceChoiceItems({ choice, states }: { choice: SpaceChoiceMenu; states?
 }
 
 /**
- * `children` (a button, a link) as the trigger of the menu of spaces when there is a choice;
+ * `children` (a button) as the trigger of the menu of spaces when there is a choice;
  * as they are otherwise. The trigger's own click does nothing then (`useSpaceAction`'s `run`).
  */
 export function SpaceChoiceDropdown({

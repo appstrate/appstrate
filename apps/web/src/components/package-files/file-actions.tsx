@@ -8,6 +8,7 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuLinkItem,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@appstrate/ui/components/dropdown-menu";
@@ -57,10 +58,10 @@ export function FileActionsMenu({
           </DropdownMenuItem>
         ) : (
           editHref && (
-            <DropdownMenuItem render={<Link to={editHref} />}>
+            <DropdownMenuLinkItem render={<Link to={editHref} />}>
               <Pencil />
               {t("btn.edit", { ns: "common" })}
-            </DropdownMenuItem>
+            </DropdownMenuLinkItem>
           )
         )}
         {gestures?.onReplace && (

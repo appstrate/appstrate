@@ -88,7 +88,7 @@ export function ProviderPicker({
 
   return (
     <Select
-      value={overridable ? CUSTOM_ENDPOINT_ID : providerId || null}
+      value={overridable ? CUSTOM_ENDPOINT_ID : providerId}
       items={Object.fromEntries(rows.map((row) => [rowValue(row), rowLabel(row)]))}
       disabled={disabled}
       onValueChange={(picked) => onChange(pickedProviderId(picked, registry))}

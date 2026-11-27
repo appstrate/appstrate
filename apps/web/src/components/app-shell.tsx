@@ -61,26 +61,15 @@ function OverlayEntry({
   icon: LucideIcon;
   label: string;
 }) {
-  const content = (
-    <>
-      <Icon />
-      <span>{label}</span>
-    </>
-  );
   return (
     <SidebarMenuItem>
       <SidebarMenuButton
         isActive={active}
-        render={
-          active ? (
-            <span aria-current="page">{content}</span>
-          ) : (
-            <Link to={to} {...overlayIntent(to)}>
-              {content}
-            </Link>
-          )
-        }
-      />
+        render={active ? <span aria-current="page" /> : <Link to={to} {...overlayIntent(to)} />}
+      >
+        <Icon />
+        <span>{label}</span>
+      </SidebarMenuButton>
     </SidebarMenuItem>
   );
 }

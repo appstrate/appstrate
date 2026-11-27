@@ -408,7 +408,7 @@ test("a draft-only agent is published from the share dialog itself, then shared"
   const dropped = await apiClient.delete(`/packages/agents/${scope}/${name}/versions/0.1.0`);
   expect(dropped.status(), await dropped.text()).toBe(204);
 
-  // Named on its own first word: the picker is a Radix listbox driven by typeahead.
+  // Named on its own first word: the picker is a listbox driven by typeahead.
   const destinationName = `Recipient${Date.now().toString(36)}`;
   const destination = await createSpace(orgOnlyClient, destinationName);
 

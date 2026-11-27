@@ -165,7 +165,7 @@ export function SharePackageDialog({
         </Label>
         <div className="flex gap-2">
           <Select
-            value={target || null}
+            value={target}
             onValueChange={setTarget}
             items={Object.fromEntries(
               destinations.map((candidate) => [candidate.id, candidate.name]),

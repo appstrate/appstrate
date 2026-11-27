@@ -37,7 +37,7 @@ import { showStep } from "./turn-status.ts";
 import { deriveToolPhase } from "./tool-result.ts";
 import type { StoredResults } from "./use-call-presentation.ts";
 import { forgetRevealedToolCalls, useRevealedToolCalls } from "./reveal-tool-call.ts";
-import { DISCLOSURE_TRIGGER_CLASS } from "./touch-targets.ts";
+import { DISCLOSURE_PANEL_CLASS, DISCLOSURE_TRIGGER_CLASS } from "./touch-targets.ts";
 
 /** A thread part as the header reads it: a call's name and arguments for {@link showStep}. */
 type StepPart = GroupablePart & { readonly toolName?: string; readonly args?: unknown };
@@ -135,13 +135,7 @@ export function ActivityGroup({
           </CollapsibleTrigger>
         </div>
       ) : null}
-      <CollapsibleContent
-        className={
-          folded
-            ? "duration-base ease-surface h-(--collapsible-panel-height) overflow-hidden data-ending-style:h-0 data-starting-style:h-0 motion-safe:transition-[height]"
-            : undefined
-        }
-      >
+      <CollapsibleContent className={folded ? DISCLOSURE_PANEL_CLASS : undefined}>
         <div className={folded ? "border-border ml-2 border-l pl-4" : undefined}>{children}</div>
       </CollapsibleContent>
     </Collapsible>

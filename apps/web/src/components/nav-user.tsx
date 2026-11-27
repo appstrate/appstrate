@@ -15,6 +15,7 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuLinkItem,
   DropdownMenuLabel,
   DropdownMenuSeparator,
   DropdownMenuSub,
@@ -102,10 +103,10 @@ export function NavUser({ variant }: NavUserProps) {
         </DropdownMenuLabel>
         <DropdownMenuSeparator />
         {!minimal && (
-          <DropdownMenuItem render={<Link to="/preferences" />}>
+          <DropdownMenuLinkItem render={<Link to="/preferences" />}>
             <Settings />
             {t("userMenu.preferences")}
-          </DropdownMenuItem>
+          </DropdownMenuLinkItem>
         )}
         <DropdownMenuSub>
           <DropdownMenuSubTrigger>
@@ -125,13 +126,13 @@ export function NavUser({ variant }: NavUserProps) {
           </DropdownMenuSubContent>
         </DropdownMenuSub>
         {links.map(({ href, icon: Icon, label }) => (
-          <DropdownMenuItem
+          <DropdownMenuLinkItem
             key={href}
             render={<a href={href} target="_blank" rel="noopener noreferrer" />}
           >
             <Icon />
             {label}
-          </DropdownMenuItem>
+          </DropdownMenuLinkItem>
         ))}
         <DropdownMenuSeparator />
         <DropdownMenuItem onClick={() => void logout()}>

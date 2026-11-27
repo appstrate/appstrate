@@ -60,7 +60,7 @@ describe("AgentInputForm display states", () => {
     expect(html).toContain('data-testid="advanced-input-toggle"');
     expect(html).toContain(agentsFr["input.advancedTitle"]);
     expect(html).toContain('aria-expanded="false"');
-    // Radix leaves an empty hidden shell behind; the fields themselves are not
+    // A closed panel is not mounted; the fields themselves are not
     // rendered until the user opens the fold.
     expect(html).not.toContain(agentsFr["input.advancedHint"]);
   });

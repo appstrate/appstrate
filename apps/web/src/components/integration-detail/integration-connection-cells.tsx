@@ -15,7 +15,7 @@ import { useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Link } from "react-router-dom";
 import { Bot, Pencil, Plus, RefreshCw, Trash2 } from "lucide-react";
-import { DropdownMenuItem, DropdownMenuLabel } from "@appstrate/ui/components/dropdown-menu";
+import { DropdownMenuLinkItem, DropdownMenuLabel } from "@appstrate/ui/components/dropdown-menu";
 import { InlineEditableLabel } from "../inline-editable-label";
 import { ConnectionStatusBadge } from "../integration-connect/connection-status-badge";
 import { ConnectionShareEditor } from "../integration-connect/connection-share-editor";
@@ -322,13 +322,13 @@ export function ConnectionActionsCell({
         {(isOwn ? pinningAgents : [])
           .filter((agent) => canReach(packageDetailPath("agent", agent.id)))
           .map((agent) => (
-            <DropdownMenuItem
+            <DropdownMenuLinkItem
               key={agent.id}
               render={<Link to={packageDetailPath("agent", agent.id)} />}
             >
               <Bot />
               {agent.name}
-            </DropdownMenuItem>
+            </DropdownMenuLinkItem>
           ))}
       </TableRowActions>
       <ConnectionDeleteConfirm

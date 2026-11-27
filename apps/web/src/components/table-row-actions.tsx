@@ -12,7 +12,7 @@ import {
 } from "@appstrate/ui/components/dropdown-menu";
 import { Spinner } from "@appstrate/ui/components/spinner";
 import { DisabledReasonTooltip } from "./disabled-reason-tooltip";
-import { inlineEditingSelector } from "../lib/keep-open-while-renaming";
+import { inlineEditingSelector } from "../lib/inline-editing";
 import { MenuActionItem } from "./menu-action";
 import { splitMenuActions, type MenuAction } from "../lib/menu-action";
 

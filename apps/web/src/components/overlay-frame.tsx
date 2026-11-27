@@ -14,7 +14,6 @@ import { useRef } from "react";
 import { Outlet, useLocation } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { Dialog, DialogContent, DialogTitle } from "@appstrate/ui/components/dialog";
-import { isRenameEscape } from "../lib/keep-open-while-renaming";
 import { useCloseOverlay } from "../lib/modal-route";
 import { INTEGRATED_TABLE_SURFACE } from "../lib/table-surface";
 import { SETTINGS_SURFACES, settingsSurfaceFromPath } from "../lib/settings-surface";
@@ -30,7 +29,7 @@ export function OverlayFrame() {
   const title = surface ? t(SETTINGS_SURFACES[surface].titleKey) : t("common:nav.catalogue");
 
   return (
-    <Dialog open onOpenChange={(open, details) => !open && !isRenameEscape(details) && close()}>
+    <Dialog open onOpenChange={(open) => !open && close()}>
       <DialogContent
         ref={content}
         // While the panes are skeletons the close control is the only thing to
