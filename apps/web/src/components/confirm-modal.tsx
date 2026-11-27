@@ -13,9 +13,8 @@ import {
   AlertDialogTitle,
 } from "@appstrate/ui/components/alert-dialog";
 import { Button } from "@appstrate/ui/components/button";
-import { isRenameEscape } from "../lib/keep-open-while-renaming";
-import { createConfirmer } from "../lib/confirm-settle";
 import { useDialogFocus } from "../hooks/use-dialog-focus";
+import { createConfirmer } from "../lib/confirm-settle";
 
 interface ConfirmModalProps {
   /** Extra content under the description, for a decision that needs more than a sentence. */
@@ -47,7 +46,7 @@ export function ConfirmModal({
   keepOpenOnRefusal,
   children,
 }: ConfirmModalProps) {
-  const focus = useDialogFocus();
+  const focus = useDialogFocus(open);
   const { t } = useTranslation("common");
   const mutationCache = useQueryClient().getMutationCache();
   const [runConfirm] = useState(() => createConfirmer(mutationCache));
@@ -64,10 +63,7 @@ export function ConfirmModal({
     });
 
   return (
-    <AlertDialog
-      open={open}
-      onOpenChange={(v, details) => !v && !isPending && !isRenameEscape(details) && onClose()}
-    >
+    <AlertDialog open={open} onOpenChange={(v) => !v && !isPending && onClose()}>
       <AlertDialogContent {...focus}>
         <AlertDialogHeader>
           <AlertDialogTitle>{title}</AlertDialogTitle>
