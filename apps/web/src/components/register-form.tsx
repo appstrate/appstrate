@@ -107,7 +107,7 @@ export function RegisterForm({
   const resolvedHeader = header === undefined ? defaultHeader : header;
   const resolvedFooter = footer === undefined ? defaultFooter : footer;
 
-  const hasSocialAuth = features.googleAuth || features.githubAuth;
+  const hasSocialAuth = features.googleAuth || features.githubAuth || features.microsoftAuth;
 
   return (
     <div className={cn("flex flex-col gap-6", className)} {...props}>
@@ -163,6 +163,9 @@ export function RegisterForm({
               )}
               {features.githubAuth && (
                 <SocialSignInButton provider="github" callbackURL={socialCallbackURL} />
+              )}
+              {features.microsoftAuth && (
+                <SocialSignInButton provider="microsoft" callbackURL={socialCallbackURL} />
               )}
             </div>
           </>
