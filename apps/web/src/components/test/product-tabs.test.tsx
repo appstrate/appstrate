@@ -76,6 +76,9 @@ describe("the products toggle", () => {
       });
     const chatter = OTHER_ACTING;
     expect(tabs(false, chatter)).toContain('href="/chat"');
+    // The chat leads the row; the Studio follows, on its dashboard.
+    const row = tabs(false, chatter);
+    expect(row.indexOf('href="/chat"')).toBeLessThan(row.indexOf('href="/dashboard"'));
     // A thumb: the toggle is 40 px tall below md.
     expect(tabs(false, chatter)).toContain("desktop-pointer:h-7");
     expect(tabs(true, chatter)).toContain('href="/chat"');
